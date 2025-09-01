@@ -1,5 +1,6 @@
 #include "MainWindow.hpp"
 #include "openscp/SftpClient.hpp"
+#include "openscp/Libssh2SftpClient.hpp"  //nuevo 
 #include "ConnectionDialog.hpp"
 #include "RemoteModel.hpp"
 #include "openscp/MockSftpClient.hpp"
@@ -346,7 +347,7 @@ void MainWindow::connectSftp() {
     if (dlg.exec() != QDialog::Accepted) return;
 
     // Crea cliente (mock por ahora)
-    sftp_ = std::make_unique<openscp::MockSftpClient>();
+    sftp_ = std::make_unique<openscp::Libssh2SftpClient>();
     std::string err;
     const auto opt = dlg.options();
     if (!sftp_->connect(opt, err)) {
