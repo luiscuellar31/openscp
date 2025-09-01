@@ -24,11 +24,13 @@ private slots:
     void copyLeftToRight(); // F5
     void moveLeftToRight(); // F6
     void deleteFromLeft();  // Supr
+    void goUpRight(); // Volver atras
+    void goUpLeft(); //
 
-    // Remoto (mock por ahora)
     void connectSftp();
     void disconnectSftp();
     void rightItemActivated(const QModelIndex& idx); // doble click en remoto
+    void downloadRightToLeft(); // remoto -> local
 
 private:
     // Estado remoto
@@ -59,4 +61,18 @@ private:
     QAction* actDelete_      = nullptr;
     QAction* actConnect_     = nullptr;
     QAction* actDisconnect_  = nullptr;
+    QAction* actDownloadF7_ = nullptr;
+
+    // acciones sub-toolbars
+    QAction* actUpLeft_  = nullptr; // atras izquierda
+    QAction* actUpRight_ = nullptr; // atras derecha
+
+    // sub-toolbars
+    QToolBar* leftPaneBar_  = nullptr;
+    QToolBar* rightPaneBar_ = nullptr;
+
+    // descargas
+    QString downloadDir_; // última carpeta local elegida para descargas
+
+
 };

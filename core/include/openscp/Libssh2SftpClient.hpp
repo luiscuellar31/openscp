@@ -23,6 +23,17 @@ public:
             std::vector<FileInfo>& out,
             std::string& err) override;
 
+  bool get(const std::string& remote,
+         const std::string& local,
+         std::string& err,
+         std::function<void(std::size_t,std::size_t)> progress) override;
+
+  bool put(const std::string& local,
+         const std::string& remote,
+         std::string& err,
+         std::function<void(std::size_t,std::size_t)> progress) override;
+
+
 private:
   bool connected_ = false;
   int  sock_ = -1;

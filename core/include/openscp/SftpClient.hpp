@@ -28,6 +28,21 @@ public:
                    const std::string& remote_dir,
                    ProgressCB /*progress*/,
                    std::string& err) { err = "Not implemented"; return false; }
+
+  // Al final de la clase SftpClient (interfaz)
+  virtual bool get(const std::string& remote,
+                 const std::string& local,
+                 std::string& err,
+                 std::function<void(std::size_t /*done*/, std::size_t /*total*/)> progress = {}) = 0;
+
+  virtual bool put(const std::string& local,
+                 const std::string& remote,
+                 std::string& err,
+                 std::function<void(std::size_t /*done*/, std::size_t /*total*/)> progress = {}) = 0;
+
+
+
+
 };
 
 } // namespace openscp
