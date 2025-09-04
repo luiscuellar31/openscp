@@ -42,6 +42,12 @@ El objetivo del proyecto es ofrecer una alternativa ligera y multiplataforma a h
 
 ---
 
+## Novedades respecto a v0.4.0
+
+Desde la 0.4.0 el proyecto incorporó un gestor de transferencias con cola visible (pausar, reanudar, cancelar y reintentar desde UI), soporte de reanudación por archivo y límites de velocidad globales/por tarea, además de una UX más pulida con arrastrar‑y‑soltar entre paneles, un menú contextual remoto más completo (incluye Descargar, Subir, Renombrar, Borrar, Nueva carpeta y Cambiar permisos) y doble clic para previsualizar archivos remotos descargándolos temporalmente. En SFTP se añadió compatibilidad con keyboard‑interactive (OTP/2FA) y ssh‑agent, junto con validación de huella y política de known_hosts seleccionable (Estricto/TOFU/Off) desde el diálogo de conexión, guardando automáticamente nuevos hosts cuando procede. También se sumó un gestor de sitios con almacenamiento de credenciales en el llavero del sistema en macOS (Keychain) y migración desde configuraciones antiguas; se implementó edición de permisos (chmod) con opción recursiva y una comprobación de escribibilidad del directorio remoto para habilitar o bloquear acciones según permisos. Además, se mejoró el feedback en barra de estado, el ordenado y el ancho de columnas en la vista remota, y se añadió reconexión con backoff durante transferencias para mayor robustez.
+
+---
+
 ## Requisitos
 
 - [Qt 6.x](https://www.qt.io/download) (módulos **Core**, **Widgets**, **Gui**)  

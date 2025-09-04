@@ -1,3 +1,4 @@
+// Punto de entrada de la aplicación: inicializa Qt y muestra MainWindow.
 #include <QApplication>
 #include "MainWindow.hpp"
 
