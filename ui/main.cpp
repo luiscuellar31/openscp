@@ -7,11 +7,13 @@
 #include <QDir>
 #include <QFile>
 #include "MainWindow.hpp"
+#include "AppVersion.hpp"
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     QCoreApplication::setApplicationName("OpenSCP");
     QCoreApplication::setOrganizationName("OpenSCP");
+    QCoreApplication::setApplicationVersion(QStringLiteral(OPEN_SCP_APP_VERSION));
 
     // Theme: use system default (no overrides)
 

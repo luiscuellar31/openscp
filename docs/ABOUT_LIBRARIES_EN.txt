@@ -1,0 +1,32 @@
+Third‑party libraries used by OpenSCP
+(Operating system frameworks such as Security, AppKit, etc., are excluded.)
+
+- Qt 6 (Qt Widgets, Qt Gui, Qt Core)
+  Description: cross‑platform framework for GUI and utilities.
+  License: LGPL‑3.0 / GPL‑3.0 / Commercial (multi‑licensing)
+  Site: https://www.qt.io/
+  Copyright: The Qt Company Ltd.
+
+- libssh2
+  Description: SSH2 implementation with SFTP client support.
+  License: BSD‑3‑Clause
+  Site: https://www.libssh2.org/
+  Copyright: The libssh2 Project
+
+- OpenSSL 3 (libssl, libcrypto)
+  Description: cryptography and TLS/SSL toolkit used by libssh2.
+  License: Apache‑2.0
+  Site: https://www.openssl.org/
+  Copyright: The OpenSSL Project Authors
+
+- zlib
+  Description: DEFLATE compression; transitive dependency of libssh2/OpenSSL on some systems.
+  License: zlib License
+  Site: https://zlib.net/
+  Copyright: Jean‑loup Gailly and Mark Adler
+
+Notes:
+- Specific versions may vary depending on platform/distribution.
+- Thanks to the authors and communities of each project for their work.
+
+Icons: Tango Icon Theme (Public Domain)

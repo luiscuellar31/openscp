@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(OpenSCP_hello LANGUAGES CXX)
+project(OpenSCP_hello LANGUAGES CXX VERSION 0.5.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,8 +39,12 @@ add_executable(openscp_hello
   ui/AboutDialog.cpp
 )
 
+# Generate a header with the application version from CMake project version
+configure_file(ui/AppVersion.hpp.in ${CMAKE_CURRENT_BINARY_DIR}/AppVersion.hpp @ONLY)
+
 target_include_directories(openscp_hello PRIVATE
   ${CMAKE_SOURCE_DIR}/core/include
+  ${CMAKE_CURRENT_BINARY_DIR}
 )
 
 target_link_libraries(openscp_hello PRIVATE

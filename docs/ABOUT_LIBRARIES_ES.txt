@@ -1,0 +1,32 @@
+Librerías de terceros utilizadas por OpenSCP
+(Se excluyen los frameworks del sistema operativo como Security, AppKit, etc.)
+
+- Qt 6 (Qt Widgets, Qt Gui, Qt Core)
+  Descripción: framework multiplataforma para interfaces gráficas y utilidades.
+  Licencia: LGPL-3.0 / GPL-3.0 / Comercial (multi-licenciamiento)
+  Sitio: https://www.qt.io/
+  Copyright: The Qt Company Ltd.
+
+- libssh2
+  Descripción: implementación del protocolo SSH2 con soporte SFTP (cliente).
+  Licencia: BSD-3-Clause
+  Sitio: https://www.libssh2.org/
+  Copyright: The libssh2 Project
+
+- OpenSSL 3 (libssl, libcrypto)
+  Descripción: toolkit criptográfico y de TLS/SSL utilizado por libssh2.
+  Licencia: Apache-2.0
+  Sitio: https://www.openssl.org/
+  Copyright: The OpenSSL Project Authors
+
+- zlib
+  Descripción: compresión DEFLATE; dependencia transitiva de libssh2/OpenSSL en algunos sistemas.
+  Licencia: zlib License
+  Sitio: https://zlib.net/
+  Copyright: Jean-loup Gailly y Mark Adler
+
+Notas:
+- Las versiones concretas pueden variar según la plataforma/paquete de distribución.
+- Se agradece a los autores y comunidades de cada proyecto por su trabajo.
+
+Iconos: Tango Icon Theme (Dominio público)

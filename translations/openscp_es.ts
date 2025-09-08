@@ -23,6 +23,10 @@
       <source>Informar de un error</source>
       <translation>Informar de un error</translation>
     </message>
+    <message>
+      <source>No se encontró el archivo de créditos en docs/%1.\nCrea ese archivo y añade las librerías/licencias a listar.</source>
+      <translation>No se encontró el archivo de créditos en docs/%1.\nCrea ese archivo y añade las librerías/licencias a listar.</translation>
+    </message>
   </context>
   <context>
     <name>ConnectionDialog</name>
