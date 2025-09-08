@@ -1,3 +1,5 @@
+// Abstracción de almacenamiento de secretos para la UI.
+// En macOS usa Keychain; en otros SO puede habilitarse un fallback inseguro con env var.
 #pragma once
 #include <QString>
 #include <optional>

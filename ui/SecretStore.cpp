@@ -1,3 +1,4 @@
+// Implementación de SecretStore: Keychain (macOS) o fallback opcional con QSettings.
 #include "SecretStore.hpp"
 #include <QSettings>
 #include <QByteArray>

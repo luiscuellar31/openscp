@@ -49,6 +49,8 @@
 #include <QScreen>
 #include <QGuiApplication>
 #include <QStyle>
+#include <QIcon>
+#include <QTemporaryFile>
 #include <QSettings>
 #include <atomic>
 #include <thread>
@@ -116,6 +118,19 @@ static QString tempDownloadPathFor(const QString& remoteName) {
     if (base.isEmpty()) base = QDir::homePath() + "/Downloads";
     QDir().mkpath(base);
     return QDir(base).filePath(remoteName);
+}
+
+// Valida nombres simples de archivo/carpeta (sin rutas)
+static bool isValidEntryName(const QString& name, QString* why = nullptr) {
+    if (name == "." || name == "..") {
+        if (why) *why = QCoreApplication::translate("MainWindow", "Nombre inválido: no puede ser '.' ni '..'.");
+        return false;
+    }
+    if (name.contains('/') || name.contains('\\')) {
+        if (why) *why = QCoreApplication::translate("MainWindow", "Nombre inválido: no puede contener separadores ('/' o '\\').");
+        return false;
+    }
+    return true;
 }
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
@@ -189,28 +204,56 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     // Sub-toolbar del panel izquierdo
     leftPaneBar_ = new QToolBar("LeftBar", leftPane);
-    leftPaneBar_->setIconSize(QSize(16, 16));
+    leftPaneBar_->setIconSize(QSize(18, 18));
+    leftPaneBar_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    // Helper de iconos desde recursos locales
+    auto resIcon = [](const char* fname) -> QIcon {
+        return QIcon(QStringLiteral(":/icons/using/") + QLatin1String(fname));
+    };
     // Sub-toolbar izquierda: Arriba, Copiar, Mover, Borrar, Renombrar, Nueva carpeta
     actUpLeft_ = leftPaneBar_->addAction(tr("Arriba"), this, &MainWindow::goUpLeft);
+    actUpLeft_->setIcon(resIcon("action-go-up.svg"));
+    actUpLeft_->setToolTip(actUpLeft_->text());
+    // Botón "Carpeta izquierda" junto a Arriba
+    actChooseLeft_ = leftPaneBar_->addAction(tr("Carpeta izquierda"), this, &MainWindow::chooseLeftDir);
+    actChooseLeft_->setIcon(resIcon("action-open-folder.svg"));
+    actChooseLeft_->setToolTip(actChooseLeft_->text());
     leftPaneBar_->addSeparator();
     actCopyF5_ = leftPaneBar_->addAction(tr("Copiar"), this, &MainWindow::copyLeftToRight);
+    actCopyF5_->setIcon(resIcon("action-copy.svg"));
+    actCopyF5_->setToolTip(actCopyF5_->text());
     actMoveF6_ = leftPaneBar_->addAction(tr("Mover"), this, &MainWindow::moveLeftToRight);
+    actMoveF6_->setIcon(resIcon("action-move-to-right.svg"));
+    actMoveF6_->setToolTip(actMoveF6_->text());
     actDelete_ = leftPaneBar_->addAction(tr("Borrar"), this, &MainWindow::deleteFromLeft);
+    actDelete_->setIcon(resIcon("action-delete.svg"));
+    actDelete_->setToolTip(actDelete_->text());
     actDelete_->setShortcut(QKeySequence(Qt::Key_Delete));
     actDelete_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
     if (leftView_) leftView_->addAction(actDelete_);
     // Acción de copiar desde panel derecho a izquierdo (remoto/local -> izquierdo)
     actCopyRight_ = new QAction(tr("Copiar al panel izquierdo"), this);
     connect(actCopyRight_, &QAction::triggered, this, &MainWindow::copyRightToLeft);
+    actCopyRight_->setIcon(QIcon(QLatin1String(":/icons/using/action-copy.svg")));
     // Acción de mover desde panel derecho al izquierdo
     actMoveRight_ = new QAction(tr("Mover al panel izquierdo"), this);
     connect(actMoveRight_, &QAction::triggered, this, &MainWindow::moveRightToLeft);
+    actMoveRight_->setIcon(QIcon(QLatin1String(":/icons/using/action-move-to-left.svg")));
     // Acciones locales adicionales (también en toolbar)
     actNewDirLeft_  = new QAction(tr("Nueva carpeta"), this);
     connect(actNewDirLeft_, &QAction::triggered, this, &MainWindow::newDirLeft);
     actRenameLeft_  = new QAction(tr("Renombrar"), this);
     connect(actRenameLeft_, &QAction::triggered, this, &MainWindow::renameLeftSelected);
+    actNewFileLeft_ = new QAction(tr("Nuevo archivo"), this);
+    connect(actNewFileLeft_, &QAction::triggered, this, &MainWindow::newFileLeft);
+    actRenameLeft_->setIcon(resIcon("action-rename.svg"));
+    actRenameLeft_->setToolTip(actRenameLeft_->text());
+    actNewDirLeft_->setIcon(resIcon("action-new-folder.svg"));
+    actNewDirLeft_->setToolTip(actNewDirLeft_->text());
+    actNewFileLeft_->setIcon(resIcon("action-new-file.svg"));
+    actNewFileLeft_->setToolTip(actNewFileLeft_->text());
     leftPaneBar_->addAction(actRenameLeft_);
+    leftPaneBar_->addAction(actNewFileLeft_);
     leftPaneBar_->addAction(actNewDirLeft_);
     leftLayout->addWidget(leftPaneBar_);
 
@@ -220,16 +263,27 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     // Sub-toolbar del panel derecho
     rightPaneBar_ = new QToolBar("RightBar", rightPane);
-    rightPaneBar_->setIconSize(QSize(16, 16));
+    rightPaneBar_->setIconSize(QSize(18, 18));
+    rightPaneBar_->setToolButtonStyle(Qt::ToolButtonIconOnly);
     actUpRight_ = rightPaneBar_->addAction(tr("Arriba"), this, &MainWindow::goUpRight);
+    actUpRight_->setIcon(resIcon("action-go-up.svg"));
+    actUpRight_->setToolTip(actUpRight_->text());
+    // Botón "Carpeta derecha" junto a Arriba
+    actChooseRight_  = rightPaneBar_->addAction(tr("Carpeta derecha"),    this, &MainWindow::chooseRightDir);
+    actChooseRight_->setIcon(resIcon("action-open-folder.svg"));
+    actChooseRight_->setToolTip(actChooseRight_->text());
 
     // Acciones del panel derecho (crear primero, agregar luego en orden solicitado)
     actDownloadF7_ = new QAction(tr("Descargar"), this);
     connect(actDownloadF7_, &QAction::triggered, this, &MainWindow::downloadRightToLeft);
     actDownloadF7_->setEnabled(false);   // empieza deshabilitado en local
+    actDownloadF7_->setIcon(resIcon("action-download.svg"));
+    actDownloadF7_->setToolTip(actDownloadF7_->text());
 
     actUploadRight_ = new QAction(tr("Subir…"), this);
     connect(actUploadRight_, &QAction::triggered, this, &MainWindow::uploadViaDialog);
+    actUploadRight_->setIcon(resIcon("action-upload.svg"));
+    actUploadRight_->setToolTip(actUploadRight_->text());
 
     actNewDirRight_  = new QAction(tr("Nueva carpeta"), this);
     connect(actNewDirRight_,  &QAction::triggered, this, &MainWindow::newDirRight);
@@ -237,6 +291,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(actRenameRight_,  &QAction::triggered, this, &MainWindow::renameRightSelected);
     actDeleteRight_  = new QAction(tr("Borrar"), this);
     connect(actDeleteRight_,  &QAction::triggered, this, &MainWindow::deleteRightSelected);
+    actNewFileRight_ = new QAction(tr("Nuevo archivo"), this);
+    connect(actNewFileRight_, &QAction::triggered, this, &MainWindow::newFileRight);
+    actNewDirRight_->setIcon(resIcon("action-new-folder.svg"));
+    actNewDirRight_->setToolTip(actNewDirRight_->text());
+    actRenameRight_->setIcon(resIcon("action-rename.svg"));
+    actRenameRight_->setToolTip(actRenameRight_->text());
+    actDeleteRight_->setIcon(resIcon("action-delete.svg"));
+    actDeleteRight_->setToolTip(actDeleteRight_->text());
+    actNewFileRight_->setIcon(resIcon("action-new-file.svg"));
+    actNewFileRight_->setToolTip(actNewFileRight_->text());
 
     // Orden: Copiar, Mover, Borrar, Renombrar, Nueva carpeta, luego Descargar/Subir
     rightPaneBar_->addSeparator();
@@ -245,10 +309,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(actCopyRightTb_, &QAction::triggered, this, &MainWindow::copyRightToLeft);
     actMoveRightTb_ = new QAction(tr("Mover"), this);
     connect(actMoveRightTb_, &QAction::triggered, this, &MainWindow::moveRightToLeft);
+    actCopyRightTb_->setIcon(resIcon("action-copy.svg"));
+    actCopyRightTb_->setToolTip(actCopyRightTb_->text());
+    actMoveRightTb_->setIcon(resIcon("action-move-to-left.svg"));
+    actMoveRightTb_->setToolTip(actMoveRightTb_->text());
     rightPaneBar_->addAction(actCopyRightTb_);
     rightPaneBar_->addAction(actMoveRightTb_);
     rightPaneBar_->addAction(actDeleteRight_);
     rightPaneBar_->addAction(actRenameRight_);
+    rightPaneBar_->addAction(actNewFileRight_);
     rightPaneBar_->addAction(actNewDirRight_);
     rightPaneBar_->addSeparator();
     rightPaneBar_->addAction(actDownloadF7_);
@@ -262,6 +331,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Deshabilitar solo acciones estrictamente remotas al inicio
     if (actDownloadF7_) actDownloadF7_->setEnabled(false);
     actUploadRight_->setEnabled(false);
+    if (actNewFileRight_) actNewFileRight_->setEnabled(false);
 
     // Panel derecho: toolbar -> path -> view
     rightLayout->addWidget(rightPaneBar_);
@@ -275,14 +345,21 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     // Toolbar principal (superior)
     auto* tb = addToolBar("Main");
-    actChooseLeft_   = tb->addAction(tr("Carpeta izquierda"),  this, &MainWindow::chooseLeftDir);
-    tb->addSeparator();
-    actChooseRight_  = tb->addAction(tr("Carpeta derecha"),    this, &MainWindow::chooseRightDir);
-    tb->addSeparator();
+    tb->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    tb->setMovable(false);
+    // Mantener tamaño predeterminado del sistema para la principal y ajustar sub‑toolbars un poco más pequeñas
+    const int mainIconPx = tb->style()->pixelMetric(QStyle::PM_ToolBarIconSize, nullptr, tb);
+    const int subIconPx  = qMax(16, mainIconPx - 4); // subtoolbars ligeramente menores
+    leftPaneBar_->setIconSize(QSize(subIconPx, subIconPx));
+    rightPaneBar_->setIconSize(QSize(subIconPx, subIconPx));
     // Acciones de copiar/mover/borrar ahora residen en la sub-toolbar izquierda
     actConnect_    = tb->addAction(tr("Conectar (SFTP)"), this, &MainWindow::connectSftp);
+    actConnect_->setIcon(resIcon("action-connect.svg"));
+    actConnect_->setToolTip(actConnect_->text());
     tb->addSeparator();
     actDisconnect_ = tb->addAction(tr("Desconectar"),     this, &MainWindow::disconnectSftp);
+    actDisconnect_->setIcon(resIcon("action-disconnect.svg"));
+    actDisconnect_->setToolTip(actDisconnect_->text());
     actDisconnect_->setEnabled(false);
     tb->addSeparator();
     actSites_ = tb->addAction(tr("Sitios"), [this] {
@@ -296,11 +373,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             }
         }
     });
+    actSites_->setIcon(resIcon("action-open-saved-sites.svg"));
+    actSites_->setToolTip(actSites_->text());
     tb->addSeparator();
     actShowQueue_ = tb->addAction(tr("Cola"), [this] {
         if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
         transferDlg_->show(); transferDlg_->raise(); transferDlg_->activateWindow();
     });
+    actShowQueue_->setIcon(resIcon("action-open-transfer-queue.svg"));
+    actShowQueue_->setToolTip(actShowQueue_->text());
     // Cola siempre habilitada por defecto; sin toggle
 
     // Atajos globales ya agregados a las acciones correspondientes
@@ -826,11 +907,13 @@ void MainWindow::disconnectSftp() {
     if (actUploadRight_) actUploadRight_->setEnabled(false);
     // Local: habilitar de nuevo acciones locales del panel derecho
     if (actNewDirRight_)   actNewDirRight_->setEnabled(true);
+    if (actNewFileRight_)  actNewFileRight_->setEnabled(true);
     if (actRenameRight_)   actRenameRight_->setEnabled(true);
     if (actDeleteRight_)   actDeleteRight_->setEnabled(true);
     if (actMoveRight_)     actMoveRight_->setEnabled(true);
     if (actMoveRightTb_)   actMoveRightTb_->setEnabled(true);
     if (actCopyRightTb_)   actCopyRightTb_->setEnabled(true);
+    if (actChooseRight_)   actChooseRight_->setIcon(QIcon(QLatin1String(":/icons/using/action-open-folder.svg")));
     statusBar()->showMessage(tr("Desconectado"), 3000);
     setWindowTitle(tr("OpenSCP (demo) — local/local"));
     updateDeleteShortcutEnables();
@@ -1211,6 +1294,7 @@ void MainWindow::newDirRight() {
     bool ok = false;
     const QString name = QInputDialog::getText(this, tr("Nueva carpeta"), tr("Nombre:"), QLineEdit::Normal, {}, &ok);
     if (!ok || name.isEmpty()) return;
+    QString why; if (!isValidEntryName(name, &why)) { QMessageBox::warning(this, tr("Nombre inválido"), why); return; }
     if (rightIsRemote_) {
         if (!sftp_ || !rightRemoteModel_) return;
         const QString path = joinRemotePath(rightRemoteModel_->rootPath(), name);
@@ -1223,6 +1307,50 @@ void MainWindow::newDirRight() {
         QDir base(rightPath_->text());
         if (!base.mkpath(base.filePath(name))) { QMessageBox::critical(this, tr("Local"), tr("No se pudo crear carpeta.")); return; }
         setRightRoot(base.absolutePath());
+    }
+}
+
+void MainWindow::newFileRight() {
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("Nuevo archivo"), tr("Nombre:"), QLineEdit::Normal, {}, &ok);
+    if (!ok || name.isEmpty()) return;
+    QString why; if (!isValidEntryName(name, &why)) { QMessageBox::warning(this, tr("Nombre inválido"), why); return; }
+    if (rightIsRemote_) {
+        if (!sftp_ || !rightRemoteModel_) return;
+        const QString remotePath = joinRemotePath(rightRemoteModel_->rootPath(), name);
+        bool isDir = false; std::string e;
+        bool exists = sftp_->exists(remotePath.toStdString(), isDir, e);
+        if (exists) {
+            if (QMessageBox::question(this, tr("Archivo existe"),
+                                      tr("«%1» ya existe.\n¿Sobrescribir?").arg(name),
+                                      QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) return;
+        } else if (!e.empty()) {
+            QMessageBox::critical(this, tr("SFTP"), QString::fromStdString(e));
+            return;
+        }
+
+        QTemporaryFile tmp;
+        if (!tmp.open()) { QMessageBox::critical(this, tr("Temporal"), tr("No se pudo crear un archivo temporal.")); return; }
+        tmp.close();
+        std::string err;
+        bool okPut = sftp_->put(tmp.fileName().toStdString(), remotePath.toStdString(), err);
+        if (!okPut) { QMessageBox::critical(this, tr("SFTP"), QString::fromStdString(err)); return; }
+        QString dummy; rightRemoteModel_->setRootPath(rightRemoteModel_->rootPath(), &dummy);
+        updateRemoteWriteability();
+        statusBar()->showMessage(tr("Archivo creado: ") + remotePath, 4000);
+    } else {
+        QDir base(rightPath_->text());
+        const QString path = base.filePath(name);
+        if (QFileInfo::exists(path)) {
+            if (QMessageBox::question(this, tr("Archivo existe"),
+                                      tr("«%1» ya existe.\n¿Sobrescribir?").arg(name),
+                                      QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) return;
+        }
+        QFile f(path);
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) { QMessageBox::critical(this, tr("Local"), tr("No se pudo crear archivo.")); return; }
+        f.close();
+        setRightRoot(base.absolutePath());
+        statusBar()->showMessage(tr("Archivo creado: ") + path, 4000);
     }
 }
 
@@ -1281,9 +1409,29 @@ void MainWindow::newDirLeft() {
     bool ok = false;
     const QString name = QInputDialog::getText(this, tr("Nueva carpeta"), tr("Nombre:"), QLineEdit::Normal, {}, &ok);
     if (!ok || name.isEmpty()) return;
+    QString why; if (!isValidEntryName(name, &why)) { QMessageBox::warning(this, tr("Nombre inválido"), why); return; }
     QDir base(leftPath_->text());
     if (!base.mkpath(base.filePath(name))) { QMessageBox::critical(this, tr("Local"), tr("No se pudo crear carpeta.")); return; }
     setLeftRoot(base.absolutePath());
+}
+
+void MainWindow::newFileLeft() {
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("Nuevo archivo"), tr("Nombre:"), QLineEdit::Normal, {}, &ok);
+    if (!ok || name.isEmpty()) return;
+    QString why; if (!isValidEntryName(name, &why)) { QMessageBox::warning(this, tr("Nombre inválido"), why); return; }
+    QDir base(leftPath_->text());
+    const QString path = base.filePath(name);
+    if (QFileInfo::exists(path)) {
+        if (QMessageBox::question(this, tr("Archivo existe"),
+                                  tr("«%1» ya existe.\n¿Sobrescribir?").arg(name),
+                                  QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) return;
+    }
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) { QMessageBox::critical(this, tr("Local"), tr("No se pudo crear archivo.")); return; }
+    f.close();
+    setLeftRoot(base.absolutePath());
+    statusBar()->showMessage(tr("Archivo creado: ") + path, 4000);
 }
 
 void MainWindow::deleteRightSelected() {
@@ -1370,15 +1518,19 @@ void MainWindow::showRightContextMenu(const QPoint& pos) {
         if (actDownloadF7_) rightContextMenu_->addAction(actDownloadF7_);
 
         if (!hasSel) {
-            // Sin selección: solo Arriba y (si escribible) Nueva carpeta
-            if (rightRemoteWritable_ && actNewDirRight_) rightContextMenu_->addAction(actNewDirRight_);
+            // Sin selección: creación y navegación
+            if (rightRemoteWritable_) {
+                if (actNewFileRight_) rightContextMenu_->addAction(actNewFileRight_);
+                if (actNewDirRight_)  rightContextMenu_->addAction(actNewDirRight_);
+            }
         } else {
             // Con selección en remoto
             if (actCopyRight_)   rightContextMenu_->addAction(actCopyRight_);
             if (rightRemoteWritable_) {
                 rightContextMenu_->addSeparator();
                 if (actUploadRight_) rightContextMenu_->addAction(actUploadRight_);
-                if (actNewDirRight_)   rightContextMenu_->addAction(actNewDirRight_);
+                if (actNewFileRight_) rightContextMenu_->addAction(actNewFileRight_);
+                if (actNewDirRight_)  rightContextMenu_->addAction(actNewDirRight_);
                 if (actRenameRight_)   rightContextMenu_->addAction(actRenameRight_);
                 if (actDeleteRight_)   rightContextMenu_->addAction(actDeleteRight_);
                 if (actMoveRight_)     rightContextMenu_->addAction(actMoveRight_);
@@ -1390,11 +1542,13 @@ void MainWindow::showRightContextMenu(const QPoint& pos) {
         // Local: Opción Arriba si aplica
         if (canGoUp && actUpRight_) rightContextMenu_->addAction(actUpRight_);
         if (!hasSel) {
-            // Sin selección: solo Arriba + Nueva carpeta
-            if (actNewDirRight_) rightContextMenu_->addAction(actNewDirRight_);
+            // Sin selección: creación
+            if (actNewFileRight_) rightContextMenu_->addAction(actNewFileRight_);
+            if (actNewDirRight_)  rightContextMenu_->addAction(actNewDirRight_);
         } else {
             // Con selección: operaciones locales + copiar/mover desde izquierda
-            if (actNewDirRight_)   rightContextMenu_->addAction(actNewDirRight_);
+            if (actNewFileRight_) rightContextMenu_->addAction(actNewFileRight_);
+            if (actNewDirRight_)  rightContextMenu_->addAction(actNewDirRight_);
             if (actRenameRight_)   rightContextMenu_->addAction(actRenameRight_);
             if (actDeleteRight_)   rightContextMenu_->addAction(actDeleteRight_);
             rightContextMenu_->addSeparator();
@@ -1420,9 +1574,11 @@ void MainWindow::showLeftContextMenu(const QPoint& pos) {
     // Acciones locales del panel izquierdo
     if (canGoUp && actUpLeft_)   leftContextMenu_->addAction(actUpLeft_);
     if (!hasSel) {
-        if (actNewDirLeft_) leftContextMenu_->addAction(actNewDirLeft_);
+        if (actNewFileLeft_) leftContextMenu_->addAction(actNewFileLeft_);
+        if (actNewDirLeft_)  leftContextMenu_->addAction(actNewDirLeft_);
     } else {
-        if (actNewDirLeft_) leftContextMenu_->addAction(actNewDirLeft_);
+        if (actNewFileLeft_) leftContextMenu_->addAction(actNewFileLeft_);
+        if (actNewDirLeft_)  leftContextMenu_->addAction(actNewDirLeft_);
         if (actRenameLeft_) leftContextMenu_->addAction(actRenameLeft_);
         leftContextMenu_->addSeparator();
         // Etiquetas direccionales en el menú, conectadas a las acciones existentes
@@ -1819,8 +1975,10 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions& opt) {
     if (actDownloadF7_) actDownloadF7_->setEnabled(true);
     if (actUploadRight_) actUploadRight_->setEnabled(true);
     if (actNewDirRight_)  actNewDirRight_->setEnabled(true);
+    if (actNewFileRight_) actNewFileRight_->setEnabled(true);
     if (actRenameRight_)  actRenameRight_->setEnabled(true);
     if (actDeleteRight_)  actDeleteRight_->setEnabled(true);
+    if (actChooseRight_)   actChooseRight_->setIcon(QIcon(QLatin1String(":/icons/using/action-open-folder-remote.svg")));
     statusBar()->showMessage(tr("Conectado (SFTP) a ") + QString::fromStdString(opt.host), 4000);
     setWindowTitle(tr("OpenSCP (demo) — local/remoto (SFTP)"));
     updateRemoteWriteability();
@@ -1885,6 +2043,7 @@ void MainWindow::updateRemoteWriteability() {
     // Reflejar en acciones que requieren escritura
     if (actUploadRight_) actUploadRight_->setEnabled(rightRemoteWritable_);
     if (actNewDirRight_)  actNewDirRight_->setEnabled(rightRemoteWritable_);
+    if (actNewFileRight_) actNewFileRight_->setEnabled(rightRemoteWritable_);
     if (actRenameRight_)  actRenameRight_->setEnabled(rightRemoteWritable_);
     if (actDeleteRight_)  actDeleteRight_->setEnabled(rightRemoteWritable_);
     if (actMoveRight_)    actMoveRight_->setEnabled(rightRemoteWritable_);
@@ -1893,7 +2052,7 @@ void MainWindow::updateRemoteWriteability() {
 }
 // Reglas de habilitación de botones/atajos en ambas sub‑toolbars.
 // - General: requieren selección.
-// - Excepciones: Arriba (si hay padre), Renombrar (siempre), Subir… (remoto RW), Descargar (remoto).
+// - Excepciones: Arriba (si hay padre), Subir… (remoto RW), Descargar (remoto).
 void MainWindow::updateDeleteShortcutEnables() {
     auto hasColSel = [&](QTreeView* v) -> bool {
         if (!v || !v->selectionModel()) return false;
@@ -1903,24 +2062,26 @@ void MainWindow::updateDeleteShortcutEnables() {
     const bool rightHasSel = hasColSel(rightView_);
     const bool rightWrite = (!rightIsRemote_) || (rightIsRemote_ && rightRemoteWritable_);
 
-    // Izquierda: habilitar según selección (excepciones: Arriba, Renombrar)
+    // Izquierda: habilitar según selección (excepción: Arriba)
     if (actCopyF5_)    actCopyF5_->setEnabled(leftHasSel);
     if (actMoveF6_)    actMoveF6_->setEnabled(leftHasSel);
     if (actDelete_)    actDelete_->setEnabled(leftHasSel);
-    if (actRenameLeft_) actRenameLeft_->setEnabled(true); // excepción: siempre habilitado
-    if (actNewDirLeft_) actNewDirLeft_->setEnabled(true); // siempre habilitado en local
+    if (actRenameLeft_)  actRenameLeft_->setEnabled(leftHasSel);
+    if (actNewDirLeft_)  actNewDirLeft_->setEnabled(true); // siempre habilitado en local
+    if (actNewFileLeft_) actNewFileLeft_->setEnabled(true); // siempre habilitado en local
     if (actUpLeft_) {
         QDir d(leftPath_ ? leftPath_->text() : QString());
         bool canUp = d.cdUp();
         actUpLeft_->setEnabled(canUp);
     }
 
-    // Derecha: habilitar según selección + permisos (excepciones: Arriba, Renombrar, Subir, Descargar)
+    // Derecha: habilitar según selección + permisos (excepciones: Arriba, Subir, Descargar)
     if (actCopyRightTb_) actCopyRightTb_->setEnabled(rightHasSel);
     if (actMoveRightTb_) actMoveRightTb_->setEnabled(rightHasSel && rightWrite);
     if (actDeleteRight_) actDeleteRight_->setEnabled(rightHasSel && rightWrite);
-    if (actRenameRight_) actRenameRight_->setEnabled(rightWrite); // excepción: no depende de selección
-    if (actNewDirRight_) actNewDirRight_->setEnabled(rightWrite); // habilitado si local o remoto con escritura
+    if (actRenameRight_)  actRenameRight_->setEnabled(rightHasSel && rightWrite);
+    if (actNewDirRight_)  actNewDirRight_->setEnabled(rightWrite); // habilitado si local o remoto con escritura
+    if (actNewFileRight_) actNewFileRight_->setEnabled(rightWrite);
     if (actUploadRight_) actUploadRight_->setEnabled(rightIsRemote_ && rightRemoteWritable_); // excepción
     if (actDownloadF7_) actDownloadF7_->setEnabled(rightIsRemote_); // excepción: habilitado sin selección
     if (actUpRight_) {

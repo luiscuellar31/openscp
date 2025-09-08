@@ -45,12 +45,14 @@ private slots:
     void downloadRightToLeft(); // remoto -> local
     void uploadViaDialog();     // local -> remoto (diálogo: archivos o carpeta)
     void newDirRight();
+    void newFileRight();
     void renameRightSelected();
     void deleteRightSelected();
     void showRightContextMenu(const QPoint& pos);
     void changeRemotePermissions();
     void showLeftContextMenu(const QPoint& pos);
     void newDirLeft();
+    void newFileLeft();
     void renameLeftSelected();
 
     // Menú de aplicación
@@ -93,9 +95,11 @@ private:
     QAction* actDownloadF7_ = nullptr;
     QAction* actUploadRight_ = nullptr;
     QAction* actNewDirRight_  = nullptr;
+    QAction* actNewFileRight_ = nullptr;
     QAction* actRenameRight_  = nullptr;
     QAction* actDeleteRight_  = nullptr; // remoto
     QAction* actNewDirLeft_   = nullptr; // local (izquierda)
+    QAction* actNewFileLeft_  = nullptr; // local (izquierda)
     QAction* actRenameLeft_   = nullptr; // local (izquierda)
     QAction* actCopyRightTb_  = nullptr; // toolbar derecha: Copiar (texto genérico)
     QAction* actMoveRightTb_  = nullptr; // toolbar derecha: Mover (texto genérico)
