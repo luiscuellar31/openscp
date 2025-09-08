@@ -52,9 +52,13 @@
 #include <QIcon>
 #include <QTemporaryFile>
 #include <QSettings>
+#include <QTimer>
+#include <QSet>
+#include <QHash>
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include <memory>
 
 static constexpr int NAME_COL = 0;
 
@@ -214,8 +218,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     actUpLeft_ = leftPaneBar_->addAction(tr("Arriba"), this, &MainWindow::goUpLeft);
     actUpLeft_->setIcon(resIcon("action-go-up.svg"));
     actUpLeft_->setToolTip(actUpLeft_->text());
-    // Botón "Carpeta izquierda" junto a Arriba
-    actChooseLeft_ = leftPaneBar_->addAction(tr("Carpeta izquierda"), this, &MainWindow::chooseLeftDir);
+    // Botón "Abrir carpeta izquierda" junto a Arriba
+    actChooseLeft_ = leftPaneBar_->addAction(tr("Abrir carpeta izquierda"), this, &MainWindow::chooseLeftDir);
     actChooseLeft_->setIcon(resIcon("action-open-folder.svg"));
     actChooseLeft_->setToolTip(actChooseLeft_->text());
     leftPaneBar_->addSeparator();
@@ -268,8 +272,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     actUpRight_ = rightPaneBar_->addAction(tr("Arriba"), this, &MainWindow::goUpRight);
     actUpRight_->setIcon(resIcon("action-go-up.svg"));
     actUpRight_->setToolTip(actUpRight_->text());
-    // Botón "Carpeta derecha" junto a Arriba
-    actChooseRight_  = rightPaneBar_->addAction(tr("Carpeta derecha"),    this, &MainWindow::chooseRightDir);
+    // Botón "Abrir carpeta derecha" junto a Arriba
+    actChooseRight_  = rightPaneBar_->addAction(tr("Abrir carpeta derecha"),    this, &MainWindow::chooseRightDir);
     actChooseRight_->setIcon(resIcon("action-open-folder.svg"));
     actChooseRight_->setToolTip(actChooseRight_->text());
 
@@ -382,7 +386,21 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     });
     actShowQueue_->setIcon(resIcon("action-open-transfer-queue.svg"));
     actShowQueue_->setToolTip(actShowQueue_->text());
+    // Separador a la derecha del botón de cola
+    tb->addSeparator();
     // Cola siempre habilitada por defecto; sin toggle
+
+    // Spacer para empujar siguiente acción al extremo derecho
+    {
+        QWidget* spacer = new QWidget(this);
+        spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        tb->addWidget(spacer);
+    }
+    // Separador visual antes del botón de ajustes (lado derecho)
+    tb->addSeparator();
+    // Botón de ajustes (extremo derecho)
+    actPrefsToolbar_ = tb->addAction(resIcon("action-open-settings.svg"), tr("Ajustes"), this, &MainWindow::showSettingsDialog);
+    actPrefsToolbar_->setToolTip(actPrefsToolbar_->text());
 
     // Atajos globales ya agregados a las acciones correspondientes
 
@@ -486,6 +504,25 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Aplicar preferencias de usuario (ocultos, modo de clic, etc.)
     applyPreferences();
     updateDeleteShortcutEnables();
+
+    // Mostrar Gestor de sitios al iniciar si la preferencia está activa
+    {
+        QSettings s("OpenSCP", "OpenSCP");
+        const bool showConn = s.value("UI/showConnOnStart", true).toBool();
+        if (showConn) {
+            QTimer::singleShot(0, this, [this]{
+                SiteManagerDialog dlg(this);
+                if (dlg.exec() == QDialog::Accepted) {
+                    openscp::SessionOptions opt{};
+                    if (dlg.selectedOptions(opt)) {
+                        std::string err;
+                        if (!establishSftpAsync(opt, err)) { QMessageBox::critical(this, tr("Error de conexión"), QString::fromStdString(err)); return; }
+                        applyRemoteConnectedUI(opt);
+                    }
+                }
+            });
+        }
+    }
 }
 
 void MainWindow::showAboutDialog() {
@@ -917,6 +954,23 @@ void MainWindow::disconnectSftp() {
     statusBar()->showMessage(tr("Desconectado"), 3000);
     setWindowTitle(tr("OpenSCP (demo) — local/local"));
     updateDeleteShortcutEnables();
+
+    // Mostrar Gestor de sitios al desconectar si la preferencia está activa
+    {
+        QSettings s("OpenSCP", "OpenSCP");
+        const bool showConn = s.value("UI/showConnOnStart", true).toBool();
+        if (showConn) {
+            SiteManagerDialog dlg(this);
+            if (dlg.exec() == QDialog::Accepted) {
+                openscp::SessionOptions opt{};
+                if (dlg.selectedOptions(opt)) {
+                    std::string err;
+                    if (!establishSftpAsync(opt, err)) { QMessageBox::critical(this, tr("Error de conexión"), QString::fromStdString(err)); return; }
+                    applyRemoteConnectedUI(opt);
+                }
+            }
+        }
+    }
 }
 
 void MainWindow::setRightRemoteRoot(const QString& path) {
@@ -956,24 +1010,55 @@ void MainWindow::rightItemActivated(const QModelIndex& idx) {
     if (!remotePath.endsWith('/')) remotePath += '/';
     remotePath += name;
     const QString localPath = tempDownloadPathFor(name);
-    if (!sftp_) { QMessageBox::warning(this, tr("Remoto"), tr("No hay sesión SFTP activa.")); return; }
-    QProgressDialog dlg(tr("Descargando ") + name, tr("Cancelar"), 0, 100, this);
-    dlg.setWindowModality(Qt::ApplicationModal);
-    dlg.setMinimumDuration(0);
-    std::string err;
-    bool ok = sftp_->get(
-        remotePath.toStdString(),
-        localPath.toStdString(),
-        err,
-        [&](std::size_t done, std::size_t total) { int pct = (total > 0) ? int((done * 100) / total) : 0; dlg.setValue(pct); qApp->processEvents(); },
-        [&]() { return dlg.wasCanceled(); },
-        false
-    );
-    dlg.setValue(100);
-    if (!ok) { QMessageBox::critical(this, tr("Descarga fallida"), QString::fromStdString(err)); return; }
-    QDesktopServices::openUrl(QUrl::fromLocalFile(localPath));
-    statusBar()->showMessage(tr("Descargado: ") + localPath, 5000);
-}
+    // Evitar duplicados: si ya hay una descarga activa con mismo src/dst, no volver a encolar
+    bool alreadyActive = false;
+    {
+        const auto& tasks = transferMgr_->tasks();
+        for (const auto& t : tasks) {
+            if (t.type == TransferTask::Type::Download && t.src == remotePath && t.dst == localPath) {
+                if (t.status == TransferTask::Status::Queued || t.status == TransferTask::Status::Running || t.status == TransferTask::Status::Paused) {
+                    alreadyActive = true; break;
+                }
+            }
+        }
+    }
+    if (!alreadyActive) {
+        // Encolar descarga para que aparezca en la cola (en vez de descarga directa)
+        transferMgr_->enqueueDownload(remotePath, localPath);
+        statusBar()->showMessage(QString(tr("Encolados: %1 descargas")).arg(1), 3000);
+        if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
+        transferDlg_->show(); transferDlg_->raise(); transferDlg_->activateWindow();
+    } else {
+        // Ya había una tarea igual en cola; opcionalmente, mostrar la cola
+        if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
+        transferDlg_->show(); transferDlg_->raise(); transferDlg_->activateWindow();
+        statusBar()->showMessage(tr("Descarga ya encolada"), 2000);
+    }
+    // Abrir archivo cuando termine la tarea correspondiente (evitar listeners duplicados)
+    static QSet<QString> sOpenListeners;
+    const QString key = remotePath + "->" + localPath;
+    if (!sOpenListeners.contains(key)) {
+        sOpenListeners.insert(key);
+        auto connPtr = std::make_shared<QMetaObject::Connection>();
+        *connPtr = connect(transferMgr_, &TransferManager::tasksChanged, this, [this, remotePath, localPath, key, connPtr]() {
+            const auto& tasks = transferMgr_->tasks();
+            for (const auto& t : tasks) {
+                if (t.type == TransferTask::Type::Download && t.src == remotePath && t.dst == localPath) {
+                    if (t.status == TransferTask::Status::Done) {
+                        QDesktopServices::openUrl(QUrl::fromLocalFile(localPath));
+                        statusBar()->showMessage(tr("Descargado: ") + localPath, 5000);
+                        QObject::disconnect(*connPtr);
+                        sOpenListeners.remove(key);
+                    } else if (t.status == TransferTask::Status::Error || t.status == TransferTask::Status::Canceled) {
+                        QObject::disconnect(*connPtr);
+                        sOpenListeners.remove(key);
+                    }
+                    break;
+                }
+            }
+        });
+    }
+    }
 
 // Doble clic en panel izquierdo: si es carpeta, entrar y reemplazar raíz
 void MainWindow::leftItemActivated(const QModelIndex& idx) {
@@ -1173,68 +1258,141 @@ void MainWindow::moveRightToLeft() {
         return;
     }
 
-    // Remoto -> Local: descargar con progreso y borrar remoto
+    // Remoto -> Local: encolar descargas y borrar remoto al completar
     if (!sftp_ || !rightRemoteModel_) { QMessageBox::warning(this, tr("SFTP"), tr("No hay sesión SFTP activa.")); return; }
     const auto rows = sel->selectedRows(NAME_COL);
-    int ok = 0, fail = 0;
-    QString lastErr;
     const QString remoteBase = rightRemoteModel_->rootPath();
+    QVector<QPair<QString, QString>> pairs; // (remote, local) files to download
+    struct TopSel { QString rpath; bool isDir; };
+    QVector<TopSel> top;
+    int enq = 0;
     for (const QModelIndex& idx : rows) {
         const QString name = rightRemoteModel_->nameAt(idx);
         QString rpath = remoteBase; if (!rpath.endsWith('/')) rpath += '/'; rpath += name;
         const QString lpath = dst.filePath(name);
-        if (rightRemoteModel_->isDir(idx)) {
-            QVector<QPair<QString, QString>> stack; stack.push_back({ rpath, lpath }); bool allOk = true;
+        const bool isDir = rightRemoteModel_->isDir(idx);
+        top.push_back({ rpath, isDir });
+        if (isDir) {
+            QVector<QPair<QString, QString>> stack; stack.push_back({ rpath, lpath });
             while (!stack.isEmpty()) {
                 auto pair = stack.back(); stack.pop_back();
                 const QString curR = pair.first; const QString curL = pair.second; QDir().mkpath(curL);
                 std::vector<openscp::FileInfo> out; std::string lerr;
-                if (!sftp_->list(curR.toStdString(), out, lerr)) { allOk = false; lastErr = QString::fromStdString(lerr); break; }
+                if (!sftp_->list(curR.toStdString(), out, lerr)) continue;
                 for (const auto& e : out) {
                     const QString childR = (curR.endsWith('/') ? curR + QString::fromStdString(e.name) : curR + "/" + QString::fromStdString(e.name));
                     const QString childL = QDir(curL).filePath(QString::fromStdString(e.name));
-                    if (e.is_dir) { stack.push_back({ childR, childL }); continue; }
-                    QProgressDialog dlg(QString(tr("Descargando %1")).arg(QString::fromStdString(e.name)), tr("Cancelar"), 0, 100, this);
-                    dlg.setWindowModality(Qt::ApplicationModal); dlg.setMinimumDuration(0);
-                    std::string gerr;
-                    bool ok1 = sftp_->get(childR.toStdString(), childL.toStdString(), gerr,
-                        [&](std::size_t done, std::size_t total) { int pct = (total>0)? int((done*100)/total):0; dlg.setValue(pct); qApp->processEvents(); },
-                        [&]() { return dlg.wasCanceled(); }, false);
-                    dlg.setValue(100);
-                    if (!ok1) { allOk = false; lastErr = QString::fromStdString(gerr); break; }
+                    if (e.is_dir) { stack.push_back({ childR, childL }); }
+                    else { QDir().mkpath(QFileInfo(childL).dir().absolutePath()); pairs.push_back({ childR, childL }); }
                 }
-                if (!allOk) break;
             }
-            if (allOk) {
-                std::function<bool(const QString&)> delRec = [&](const QString& p) {
-                    std::vector<openscp::FileInfo> out; std::string lerr;
-                    if (!sftp_->list(p.toStdString(), out, lerr)) { std::string ferr; return sftp_->removeFile(p.toStdString(), ferr); }
-                    for (const auto& e : out) {
-                        const QString child = joinRemotePath(p, QString::fromStdString(e.name));
-                        if (e.is_dir) { if (!delRec(child)) return false; }
-                        else { std::string ferr; if (!sftp_->removeFile(child.toStdString(), ferr)) return false; }
-                    }
-                    std::string derr; return sftp_->removeDir(p.toStdString(), derr);
-                };
-                if (delRec(rpath)) ++ok; else { ++fail; }
-            } else { ++fail; }
         } else {
-            QProgressDialog dlg(QString(tr("Descargando %1")).arg(name), tr("Cancelar"), 0, 100, this);
-            dlg.setWindowModality(Qt::ApplicationModal); dlg.setMinimumDuration(0);
-            std::string gerr;
-            bool ok1 = sftp_->get(rpath.toStdString(), lpath.toStdString(), gerr,
-                [&](std::size_t done, std::size_t total) { int pct = (total>0)? int((done*100)/total):0; dlg.setValue(pct); qApp->processEvents(); },
-                [&]() { return dlg.wasCanceled(); }, false);
-            dlg.setValue(100);
-            if (ok1) { std::string ferr; if (sftp_->removeFile(rpath.toStdString(), ferr)) ++ok; else { ++fail; lastErr = QString::fromStdString(ferr); } }
-            else { ++fail; lastErr = QString::fromStdString(gerr); }
+            QDir().mkpath(QFileInfo(lpath).dir().absolutePath());
+            pairs.push_back({ rpath, lpath });
         }
     }
-    QString m = QString(tr("Movidos OK: %1  |  Fallidos: %2")).arg(ok).arg(fail);
-    if (fail > 0 && !lastErr.isEmpty()) m += "\n" + tr("Último error: ") + lastErr;
-    statusBar()->showMessage(m, 5000);
-    QString dummy; rightRemoteModel_->setRootPath(remoteBase, &dummy);
-    updateRemoteWriteability();
+    for (const auto& p : pairs) { transferMgr_->enqueueDownload(p.first, p.second); ++enq; }
+    if (enq > 0) {
+        statusBar()->showMessage(QString(tr("Encolados: %1 descargas (mover)")).arg(enq), 4000);
+        if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
+        transferDlg_->show(); transferDlg_->raise(); transferDlg_->activateWindow();
+    }
+    // Borrado por elemento: a medida que cada descarga termina OK, borra ese remoto;
+    // cuando una carpeta queda sin archivos pendientes, borra la carpeta.
+    if (enq > 0) {
+        struct MoveState {
+            QSet<QString> filesPending;                 // remotos por borrar (archivos)
+            QSet<QString> filesProcessed;               // remotos ya procesados (evita repetir)
+            QHash<QString, QString> fileToTopDir;       // remoto de archivo -> top dir rpath
+            QHash<QString, int> remainingInTopDir;      // top dir -> # archivos pendientes exitosos
+            QSet<QString> topDirs;                      // rpaths de top que son directorios
+            QSet<QString> deletedDirs;                  // top dirs ya eliminados
+        };
+        auto state = std::make_shared<MoveState>();
+        // Inicializar mapeo top dir y contadores
+        for (const auto& tsel : top) if (tsel.isDir) { state->topDirs.insert(tsel.rpath); state->remainingInTopDir.insert(tsel.rpath, 0); }
+        for (const auto& pr : pairs) {
+            state->filesPending.insert(pr.first);
+            // localizar top dir contenedor
+            QString foundTop;
+            for (const auto& tsel : top) {
+                if (!tsel.isDir) continue;
+                const QString prefix = tsel.rpath.endsWith('/') ? tsel.rpath : (tsel.rpath + '/');
+                if (pr.first == tsel.rpath || pr.first.startsWith(prefix)) { foundTop = tsel.rpath; break; }
+            }
+            if (!foundTop.isEmpty()) {
+                state->fileToTopDir.insert(pr.first, foundTop);
+                state->remainingInTopDir[foundTop] = state->remainingInTopDir.value(foundTop) + 1;
+            }
+        }
+        // Si hay carpetas con 0 archivos, intentar borrarlas solo si están vacías
+        for (auto it = state->remainingInTopDir.begin(); it != state->remainingInTopDir.end(); ++it) {
+            if (it.value() == 0) {
+                std::vector<openscp::FileInfo> out; std::string lerr;
+                if (sftp_ && sftp_->list(it.key().toStdString(), out, lerr) && out.empty()) {
+                    std::string derr; if (sftp_->removeDir(it.key().toStdString(), derr)) {
+                        state->deletedDirs.insert(it.key());
+                    }
+                }
+            }
+        }
+        auto connPtr = std::make_shared<QMetaObject::Connection>();
+        *connPtr = connect(transferMgr_, &TransferManager::tasksChanged, this, [this, state, remoteBase, connPtr, pairs]() {
+            const auto& tasks = transferMgr_->tasks();
+            // 1) Por cada tarea terminada OK, borrar el archivo remoto correspondiente (una vez)
+            for (const auto& t : tasks) {
+                if (t.type != TransferTask::Type::Download) continue;
+                if (t.status != TransferTask::Status::Done) continue;
+                const QString r = t.src;
+                if (!state->filesPending.contains(r)) continue; // no pertenece a este movimiento o ya borrado
+                if (state->filesProcessed.contains(r)) continue;
+                // Intentar borrar remoto del archivo
+                std::string ferr; bool okDel = sftp_ && sftp_->removeFile(r.toStdString(), ferr);
+                state->filesProcessed.insert(r);
+                if (okDel) {
+                    state->filesPending.remove(r);
+                    // Decrementar contador del top dir al que pertenece
+                    const QString topDir = state->fileToTopDir.value(r);
+                    if (!topDir.isEmpty()) {
+                        int rem = state->remainingInTopDir.value(topDir) - 1;
+                        state->remainingInTopDir[topDir] = rem;
+                        if (rem == 0 && !state->deletedDirs.contains(topDir)) {
+                            // Todos los archivos de este top dir fueron movidos: borrar carpeta solo si está vacía
+                            std::vector<openscp::FileInfo> out; std::string lerr;
+                            if (sftp_ && sftp_->list(topDir.toStdString(), out, lerr) && out.empty()) {
+                                std::string derr; if (sftp_->removeDir(topDir.toStdString(), derr)) {
+                                    state->deletedDirs.insert(topDir);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // No borrado: mantenerlo fuera para no reintentar sin fin; podría reintentar si se desea
+                    state->filesPending.remove(r);
+                }
+            }
+
+            // 2) Desconectar cuando todas las tareas relacionadas hayan pasado a estado final
+            bool allFinal = true;
+            for (const auto& pr : pairs) {
+                bool found = false, final = false;
+                for (const auto& t : tasks) {
+                    if (t.type == TransferTask::Type::Download && t.src == pr.first && t.dst == pr.second) {
+                        found = true;
+                        if (t.status == TransferTask::Status::Done || t.status == TransferTask::Status::Error || t.status == TransferTask::Status::Canceled) final = true;
+                        break;
+                    }
+                }
+                if (!found || !final) { allFinal = false; break; }
+            }
+            if (allFinal) {
+                // Refrescar vista remota una vez al final
+                QString dummy; if (rightRemoteModel_) rightRemoteModel_->setRootPath(remoteBase, &dummy);
+                updateRemoteWriteability();
+                QObject::disconnect(*connPtr);
+            }
+        });
+    }
 }
 
 void MainWindow::uploadViaDialog() {

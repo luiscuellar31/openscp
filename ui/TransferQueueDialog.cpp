@@ -9,6 +9,7 @@
 #include <QTableWidgetItem>
 #include <QSpinBox>
 #include <QInputDialog>
+#include <QMenu>
 
 TransferQueueDialog::TransferQueueDialog(TransferManager* mgr, QWidget* parent)
   : QDialog(parent), mgr_(mgr) {
@@ -28,31 +29,18 @@ TransferQueueDialog::TransferQueueDialog(TransferManager* mgr, QWidget* parent)
   table_->setSelectionMode(QAbstractItemView::ExtendedSelection);
   table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
   table_->setAlternatingRowColors(true);
+  table_->setContextMenuPolicy(Qt::CustomContextMenu);
   lay->addWidget(table_);
 
-  // Fila de controles (botones en un solo renglón + velocidad)
+  // Fila 1: Controles (solo botones en un renglón)
   auto* controls = new QWidget(this);
   auto* hb = new QHBoxLayout(controls);
   hb->setContentsMargins(0,0,0,0);
 
-  // Límite de velocidad global (KB/s)
-  speedSpin_ = new QSpinBox(controls);
-  speedSpin_->setRange(0, 1'000'000);
-  speedSpin_->setValue(mgr_->globalSpeedLimitKBps());
-  speedSpin_->setSuffix(" KB/s");
-  applySpeedBtn_ = new QPushButton(tr("Aplicar vel."), controls);
-  hb->addWidget(new QLabel(tr("Velocidad:"), controls));
-  hb->addWidget(speedSpin_);
-  hb->addWidget(applySpeedBtn_);
-
-  hb->addStretch();
-
-  // Botones (todos en un renglón)
   pauseBtn_  = new QPushButton(tr("Pausar"), controls);
   resumeBtn_ = new QPushButton(tr("Reanudar"), controls);
   pauseSelBtn_  = new QPushButton(tr("Pausar sel."), controls);
   resumeSelBtn_ = new QPushButton(tr("Reanudar sel."), controls);
-  limitSelBtn_  = new QPushButton(tr("Limitar sel."), controls);
   stopSelBtn_   = new QPushButton(tr("Cancelar sel."), controls);
   stopAllBtn_   = new QPushButton(tr("Cancelar"), controls);
   retryBtn_  = new QPushButton(tr("Reintentar"), controls);
@@ -63,13 +51,31 @@ TransferQueueDialog::TransferQueueDialog(TransferManager* mgr, QWidget* parent)
   hb->addWidget(resumeBtn_);
   hb->addWidget(pauseSelBtn_);
   hb->addWidget(resumeSelBtn_);
-  hb->addWidget(limitSelBtn_);
-  hb->addWidget(stopSelBtn_);
   hb->addWidget(stopAllBtn_);
+  hb->addWidget(stopSelBtn_);
   hb->addWidget(retryBtn_);
   hb->addWidget(clearBtn_);
   hb->addWidget(closeBtn_);
+  hb->addStretch();
   lay->addWidget(controls);
+
+  // Fila 2: Ajuste de velocidad global (solo velocidad y aplicar)
+  auto* speedRow = new QWidget(this);
+  auto* hs2 = new QHBoxLayout(speedRow);
+  hs2->setContentsMargins(0,0,0,0);
+  speedSpin_ = new QSpinBox(speedRow);
+  speedSpin_->setRange(0, 1'000'000);
+  speedSpin_->setValue(mgr_->globalSpeedLimitKBps());
+  speedSpin_->setSuffix(" KB/s");
+  applySpeedBtn_ = new QPushButton(tr("Aplicar vel."), speedRow);
+  // Mover "Limitar sel." junto al control de velocidad
+  limitSelBtn_  = new QPushButton(tr("Limitar sel."), speedRow);
+  hs2->addWidget(new QLabel(tr("Velocidad:"), speedRow));
+  hs2->addWidget(speedSpin_);
+  hs2->addWidget(applySpeedBtn_);
+  hs2->addWidget(limitSelBtn_);
+  hs2->addStretch();
+  lay->addWidget(speedRow);
 
   // Fila de resumen (al pie)
   auto* summary = new QWidget(this);
@@ -96,17 +102,18 @@ TransferQueueDialog::TransferQueueDialog(TransferManager* mgr, QWidget* parent)
   connect(mgr_, &TransferManager::tasksChanged, this, &TransferQueueDialog::refresh);
   // Mantener habilitación de botones de selección actualizada
   connect(table_->selectionModel(), &QItemSelectionModel::selectionChanged, this, &TransferQueueDialog::updateSummary);
+  connect(table_, &QTableWidget::customContextMenuRequested, this, &TransferQueueDialog::showContextMenu);
   refresh();
 }
 
 static QString statusText(TransferTask::Status s) {
   switch (s) {
-    case TransferTask::Status::Queued: return QObject::tr("En cola");
-    case TransferTask::Status::Running: return QObject::tr("En progreso");
-    case TransferTask::Status::Paused: return QObject::tr("Pausado");
-    case TransferTask::Status::Done: return QObject::tr("Completado");
-    case TransferTask::Status::Error: return QObject::tr("Error");
-    case TransferTask::Status::Canceled: return QObject::tr("Cancelado");
+    case TransferTask::Status::Queued: return TransferQueueDialog::tr("En cola");
+    case TransferTask::Status::Running: return TransferQueueDialog::tr("En progreso");
+    case TransferTask::Status::Paused: return TransferQueueDialog::tr("Pausado");
+    case TransferTask::Status::Done: return TransferQueueDialog::tr("Completado");
+    case TransferTask::Status::Error: return TransferQueueDialog::tr("Error");
+    case TransferTask::Status::Canceled: return TransferQueueDialog::tr("Cancelado");
   }
   return {};
 }
@@ -116,7 +123,7 @@ void TransferQueueDialog::refresh() {
   table_->setRowCount(tasks.size());
   for (int i = 0; i < tasks.size(); ++i) {
     const auto& t = tasks[i];
-    table_->setItem(i, 0, new QTableWidgetItem(t.type == TransferTask::Type::Upload ? "Subida" : "Descarga"));
+    table_->setItem(i, 0, new QTableWidgetItem(t.type == TransferTask::Type::Upload ? tr("Subida") : tr("Descarga")));
     table_->setItem(i, 1, new QTableWidgetItem(t.src));
     table_->setItem(i, 2, new QTableWidgetItem(t.dst));
     table_->setItem(i, 3, new QTableWidgetItem(statusText(t.status)));
@@ -220,4 +227,36 @@ void TransferQueueDialog::updateSummary() {
   if (limitSelBtn_) limitSelBtn_->setEnabled(hasSel);
   if (stopSelBtn_)  stopSelBtn_->setEnabled(hasSel);
   if (stopAllBtn_)  stopAllBtn_->setEnabled(running > 0);
+}
+
+void TransferQueueDialog::showContextMenu(const QPoint& pos) {
+  QModelIndex idx = table_->indexAt(pos);
+  if (idx.isValid()) {
+    // Si la fila clicada no está seleccionada, seleccionar solo esa
+    if (!table_->selectionModel()->isSelected(idx)) {
+      table_->clearSelection();
+      table_->selectRow(idx.row());
+    }
+  } else {
+    // click en zona vacía: no mostrar menú
+    return;
+  }
+
+  const bool hasSel = table_->selectionModel() && table_->selectionModel()->hasSelection();
+  QMenu menu(this);
+  QAction* actPauseSel  = menu.addAction(tr("Pausar sel."));
+  QAction* actResumeSel = menu.addAction(tr("Reanudar sel."));
+  QAction* actLimitSel  = menu.addAction(tr("Limitar sel."));
+  QAction* actCancelSel = menu.addAction(tr("Cancelar sel."));
+  actPauseSel->setEnabled(hasSel);
+  actResumeSel->setEnabled(hasSel);
+  actLimitSel->setEnabled(hasSel);
+  actCancelSel->setEnabled(hasSel);
+
+  QAction* chosen = menu.exec(table_->viewport()->mapToGlobal(pos));
+  if (!chosen) return;
+  if (chosen == actPauseSel) onPauseSelected();
+  else if (chosen == actResumeSel) onResumeSelected();
+  else if (chosen == actLimitSel) onLimitSelected();
+  else if (chosen == actCancelSel) onStopSelected();
 }

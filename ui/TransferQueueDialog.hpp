@@ -26,6 +26,7 @@ private slots:
     void onLimitSelected();   // limita velocidad a seleccionadas
     void onStopSelected();    // cancela seleccionadas
     void onStopAll();         // cancela toda la cola en progreso
+    void showContextMenu(const QPoint& pos); // menú contextual sobre la tabla
 
 private:
     void updateSummary();

@@ -13,13 +13,21 @@
 
 SiteManagerDialog::SiteManagerDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle(tr("Gestor de sitios"));
+    resize(820, 520); // un poco más grande por defecto
     auto* lay = new QVBoxLayout(this);
     table_ = new QTableWidget(this);
     table_->setColumnCount(3);
     table_->setHorizontalHeaderLabels({ tr("Nombre"), tr("Host"), tr("Usuario") });
-    table_->horizontalHeader()->setStretchLastSection(true);
+    table_->verticalHeader()->setVisible(false);
+    // Priorizar mostrar el nombre: estirar la primera columna; host/usuario al tamaño de su contenido
+    table_->horizontalHeader()->setStretchLastSection(false);
+    table_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    table_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    table_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     table_->setSelectionBehavior(QAbstractItemView::SelectRows);
     table_->setSelectionMode(QAbstractItemView::SingleSelection);
+    table_->setSortingEnabled(true);
+    table_->sortByColumn(0, Qt::AscendingOrder);
     lay->addWidget(table_);
 
     auto* bb = new QDialogButtonBox(this);
@@ -86,12 +94,23 @@ void SiteManagerDialog::saveSites() {
 }
 
 void SiteManagerDialog::refresh() {
+    // Evitar reordenamiento durante el llenado
+    const bool wasSorting = table_->isSortingEnabled();
+    if (wasSorting) table_->setSortingEnabled(false);
     table_->setRowCount(sites_.size());
     for (int i = 0; i < sites_.size(); ++i) {
-        table_->setItem(i, 0, new QTableWidgetItem(sites_[i].name));
-        table_->setItem(i, 1, new QTableWidgetItem(QString::fromStdString(sites_[i].opt.host)));
-        table_->setItem(i, 2, new QTableWidgetItem(QString::fromStdString(sites_[i].opt.username)));
+        auto* itName = new QTableWidgetItem(sites_[i].name);
+        auto* itHost = new QTableWidgetItem(QString::fromStdString(sites_[i].opt.host));
+        auto* itUser = new QTableWidgetItem(QString::fromStdString(sites_[i].opt.username));
+        // Guardar índice original para que selección funcione aunque la vista esté ordenada
+        itName->setData(Qt::UserRole, i);
+        itHost->setData(Qt::UserRole, i);
+        itUser->setData(Qt::UserRole, i);
+        table_->setItem(i, 0, itName);
+        table_->setItem(i, 1, itHost);
+        table_->setItem(i, 2, itUser);
     }
+    if (wasSorting) table_->setSortingEnabled(true);
     updateButtons();
 }
 
@@ -122,8 +141,10 @@ void SiteManagerDialog::onAdd() {
 void SiteManagerDialog::onEdit() {
     auto sel = table_->selectionModel();
     if (!sel || !sel->hasSelection()) return;
-    int row = sel->selectedRows().first().row();
-    SiteEntry e = sites_[row];
+    int viewRow = sel->selectedRows().first().row();
+    int modelIndex = table_->item(viewRow, 0) ? table_->item(viewRow, 0)->data(Qt::UserRole).toInt() : viewRow;
+    if (modelIndex < 0 || modelIndex >= sites_.size()) return;
+    SiteEntry e = sites_[modelIndex];
     ConnectionDialog dlg(this);
     // Precargar opciones del sitio y secretos guardados
     {
@@ -139,7 +160,7 @@ void SiteManagerDialog::onEdit() {
     QString name = QInputDialog::getText(this, tr("Nombre del sitio"), tr("Nombre:"), QLineEdit::Normal, e.name, &ok);
     if (!ok || name.isEmpty()) return;
     e.name = name;
-    sites_[row] = e;
+    sites_[modelIndex] = e;
     saveSites();
     refresh();
     // Actualizar secretos
@@ -151,8 +172,10 @@ void SiteManagerDialog::onEdit() {
 void SiteManagerDialog::onRemove() {
     auto sel = table_->selectionModel();
     if (!sel || !sel->hasSelection()) return;
-    int row = sel->selectedRows().first().row();
-    sites_.remove(row);
+    int viewRow = sel->selectedRows().first().row();
+    int modelIndex = table_->item(viewRow, 0) ? table_->item(viewRow, 0)->data(Qt::UserRole).toInt() : viewRow;
+    if (modelIndex < 0 || modelIndex >= sites_.size()) return;
+    sites_.remove(modelIndex);
     saveSites();
     refresh();
 }
@@ -164,12 +187,13 @@ void SiteManagerDialog::onConnect() {
 bool SiteManagerDialog::selectedOptions(openscp::SessionOptions& out) const {
     auto sel = table_->selectionModel();
     if (!sel || !sel->hasSelection()) return false;
-    int row = sel->selectedRows().first().row();
-    if (row < 0 || row >= sites_.size()) return false;
-    out = sites_[row].opt;
+    int viewRow = sel->selectedRows().first().row();
+    int modelIndex = table_->item(viewRow, 0) ? table_->item(viewRow, 0)->data(Qt::UserRole).toInt() : viewRow;
+    if (modelIndex < 0 || modelIndex >= sites_.size()) return false;
+    out = sites_[modelIndex].opt;
     // Rellenar secretos en tiempo de conexión
     SecretStore store;
-    const QString name = sites_[row].name;
+    const QString name = sites_[modelIndex].name;
     bool haveSecret = false;
     if (auto pw = store.getSecret(QString("site:%1:password").arg(name))) {
         out.password = pw->toStdString();
@@ -183,8 +207,8 @@ bool SiteManagerDialog::selectedOptions(openscp::SessionOptions& out) const {
         // Compat: migrar antiguos valores desde QSettings si existen
         QSettings s("OpenSCP", "OpenSCP");
         int n = s.beginReadArray("sites");
-        if (row >= 0 && row < n) {
-            s.setArrayIndex(row);
+        if (modelIndex >= 0 && modelIndex < n) {
+            s.setArrayIndex(modelIndex);
             const QString oldPw = s.value("password").toString();
             const QString oldKp = s.value("keyPass").toString();
             if (!oldPw.isEmpty()) {

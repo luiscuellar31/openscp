@@ -18,4 +18,5 @@ private:
     QComboBox* langCombo_  = nullptr;   // es/en
     QCheckBox* showHidden_ = nullptr;   // mostrar archivos ocultos
     QComboBox* clickMode_  = nullptr;   // 1 clic vs 2 clics
+    QCheckBox* showConnOnStart_ = nullptr; // mostrar gestor de sitios al iniciar y al cerrar última sesión
 };

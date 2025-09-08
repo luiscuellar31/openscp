@@ -15,6 +15,10 @@
       <source>(Espacio reservado para créditos/licencias de dependencias.)</source>
       <translation>(Placeholder for dependency credits/licenses.)</translation>
     </message>
+    <message>
+      <source>Autor: &lt;a href="https://github.com/luiscuellar31"&gt;luiscuellar31&lt;/a&gt;</source>
+      <translation>Author: &lt;a href="https://github.com/luiscuellar31"&gt;luiscuellar31&lt;/a&gt;</translation>
+    </message>
   </context>
   <context>
     <name>ConnectionDialog</name>
@@ -125,6 +129,10 @@
       <source>Nombre:</source>
       <translation>Name:</translation>
     </message>
+    <message>
+      <source>Cerrar</source>
+      <translation>Close</translation>
+    </message>
   </context>
   <context>
     <name>TransferQueueDialog</name>
@@ -179,6 +187,78 @@
     <message>
       <source>Cancelado</source>
       <translation>Canceled</translation>
+    </message>
+    <message>
+      <source>Pausar</source>
+      <translation>Pause</translation>
+    </message>
+    <message>
+      <source>Reanudar</source>
+      <translation>Resume</translation>
+    </message>
+    <message>
+      <source>Pausar sel.</source>
+      <translation>Pause sel.</translation>
+    </message>
+    <message>
+      <source>Reanudar sel.</source>
+      <translation>Resume sel.</translation>
+    </message>
+    <message>
+      <source>Cancelar sel.</source>
+      <translation>Cancel sel.</translation>
+    </message>
+    <message>
+      <source>Cancelar</source>
+      <translation>Cancel</translation>
+    </message>
+    <message>
+      <source>Reintentar</source>
+      <translation>Retry</translation>
+    </message>
+    <message>
+      <source>Limpiar</source>
+      <translation>Clear</translation>
+    </message>
+    <message>
+      <source>Cerrar</source>
+      <translation>Close</translation>
+    </message>
+    <message>
+      <source>Velocidad:</source>
+      <translation>Speed:</translation>
+    </message>
+    <message>
+      <source>Aplicar vel.</source>
+      <translation>Apply limit</translation>
+    </message>
+    <message>
+      <source>Limitar sel.</source>
+      <translation>Limit sel.</translation>
+    </message>
+    <message>
+      <source>Límite para tarea(s)</source>
+      <translation>Limit for task(s)</translation>
+    </message>
+    <message>
+      <source>KB/s (0 = sin límite)</source>
+      <translation>KB/s (0 = no limit)</translation>
+    </message>
+    <message>
+      <source>Total: %1  |  En cola: %2  |  En progreso: %3  |  Pausado: %4  |  Error: %5  |  Completado: %6</source>
+      <translation>Total: %1  |  Queued: %2  |  Running: %3  |  Paused: %4  |  Error: %5  |  Completed: %6</translation>
+    </message>
+    <message>
+      <source>  |  Límite global: %1 KB/s</source>
+      <translation>  |  Global limit: %1 KB/s</translation>
+    </message>
+    <message>
+      <source>Subida</source>
+      <translation>Upload</translation>
+    </message>
+    <message>
+      <source>Descarga</source>
+      <translation>Download</translation>
     </message>
   </context>
   <context>
@@ -315,6 +395,34 @@
     <message>
       <source>Encolados: %1 descargas</source>
       <translation>Queued: %1 downloads</translation>
+    </message>
+    <message>
+      <source>Conectando…</source>
+      <translation>Connecting…</translation>
+    </message>
+    <message>
+      <source>Contraseña requerida</source>
+      <translation>Password required</translation>
+    </message>
+    <message>
+      <source>Código de verificación requerido</source>
+      <translation>Verification code required</translation>
+    </message>
+    <message>
+      <source>Información requerida</source>
+      <translation>Information required</translation>
+    </message>
+    <message>
+      <source>Descarga ya encolada</source>
+      <translation>Download already queued</translation>
+    </message>
+    <message>
+      <source>Encolados: %1 descargas (mover)</source>
+      <translation>Queued: %1 downloads (move)</translation>
+    </message>
+    <message>
+      <source>Movimiento completado. Borrados remotos OK: %1  |  Fallidos: %2</source>
+      <translation>Move completed. Remote deletes OK: %1  |  Failed: %2</translation>
     </message>
     <message>
       <source>Movidos OK: %1  |  Fallidos: %2  |  Omitidos: %3</source>
@@ -513,6 +621,50 @@ Continue?</translation>
       <source>Entrada de origen ni archivo ni carpeta.</source>
       <translation>Source entry is neither file nor folder.</translation>
     </message>
+    <message>
+      <source>Mover</source>
+      <translation>Move</translation>
+    </message>
+    <message>
+      <source>Copiar al panel izquierdo</source>
+      <translation>Copy to left panel</translation>
+    </message>
+    <message>
+      <source>Mover al panel izquierdo</source>
+      <translation>Move to left panel</translation>
+    </message>
+    <message>
+      <source>Copiar al panel derecho</source>
+      <translation>Copy to right panel</translation>
+    </message>
+    <message>
+      <source>Mover al panel derecho</source>
+      <translation>Move to right panel</translation>
+    </message>
+    <message>
+      <source>Descargar</source>
+      <translation>Download</translation>
+    </message>
+    <message>
+      <source>Subir…</source>
+      <translation>Upload…</translation>
+    </message>
+    <message>
+      <source>Nuevo archivo</source>
+      <translation>New file</translation>
+    </message>
+    <message>
+      <source>El panel derecho no es remoto.</source>
+      <translation>The right panel is not remote.</translation>
+    </message>
+    <message>
+      <source>No hay selección.</source>
+      <translation>No selection.</translation>
+    </message>
+    <message>
+      <source>Nada seleccionado.</source>
+      <translation>Nothing selected.</translation>
+    </message>
   </context>
   <context>
     <name>MainWindow</name>
@@ -553,8 +705,20 @@ Continue?</translation>
       <translation>Right folder</translation>
     </message>
     <message>
+      <source>Abrir carpeta izquierda</source>
+      <translation>Open left folder</translation>
+    </message>
+    <message>
+      <source>Abrir carpeta derecha</source>
+      <translation>Open right folder</translation>
+    </message>
+    <message>
       <source>Conectar (SFTP)</source>
       <translation>Connect (SFTP)</translation>
+    </message>
+    <message>
+      <source>Ajustes</source>
+      <translation>Settings</translation>
     </message>
     <message>
       <source>Desconectar</source>
@@ -664,6 +828,26 @@ Overwrite?</translation>
     <message>
       <source>El cambio de idioma se aplicará al reiniciar.</source>
       <translation>Language changes take effect after restart.</translation>
+    </message>
+    <message>
+      <source>Apertura con:</source>
+      <translation>Open with:</translation>
+    </message>
+    <message>
+      <source>Doble clic</source>
+      <translation>Double click</translation>
+    </message>
+    <message>
+      <source>Un clic</source>
+      <translation>Single click</translation>
+    </message>
+    <message>
+      <source>Mostrar archivos ocultos</source>
+      <translation>Show hidden files</translation>
+    </message>
+    <message>
+      <source>Mostrar ventana de conexión al inicio y cuando se cierre la última sesión.</source>
+      <translation>Show connection window on startup and when the last session closes.</translation>
     </message>
   </context>
 </TS>

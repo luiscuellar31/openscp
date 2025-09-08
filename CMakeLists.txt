@@ -101,6 +101,7 @@ set(ICON_FILES
   icons/using/action-open-folder-remote.svg
   icons/using/action-open-saved-sites.svg
   icons/using/action-open-transfer-queue.svg
+  icons/using/action-open-settings.svg
   icons/using/action-rename.svg
   icons/using/action-upload.svg
 )

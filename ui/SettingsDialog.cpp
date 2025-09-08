@@ -45,6 +45,15 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
         root->addLayout(row);
     }
 
+    // Mostrar ventana de conexión al inicio/cierre última sesión
+    {
+        auto* row = new QHBoxLayout();
+        showConnOnStart_ = new QCheckBox(tr("Mostrar ventana de conexión al inicio y cuando se cierre la última sesión."), this);
+        row->addWidget(showConnOnStart_);
+        row->addStretch();
+        root->addLayout(row);
+    }
+
     // Cargar desde QSettings
     QSettings s("OpenSCP", "OpenSCP");
     const QString lang  = s.value("UI/language", "es").toString();
@@ -52,6 +61,8 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     if (li >= 0) langCombo_->setCurrentIndex(li);
     const bool showHidden = s.value("UI/showHidden", false).toBool();
     showHidden_->setChecked(showHidden);
+    const bool showConnOnStart = s.value("UI/showConnOnStart", true).toBool();
+    if (showConnOnStart_) showConnOnStart_->setChecked(showConnOnStart);
     const bool singleClick = s.value("UI/singleClick", false).toBool();
     clickMode_->setCurrentIndex(singleClick ? 1 : 0);
 
@@ -69,6 +80,7 @@ void SettingsDialog::accept() {
     const QString prevLang = s.value("UI/language", "es").toString();
     s.setValue("UI/language", chosenLang);
     s.setValue("UI/showHidden", showHidden_ && showHidden_->isChecked());
+    s.setValue("UI/showConnOnStart", showConnOnStart_ && showConnOnStart_->isChecked());
     const bool singleClick = (clickMode_ && clickMode_->currentData().toInt() == 1);
     s.setValue("UI/singleClick", singleClick);
     s.sync();

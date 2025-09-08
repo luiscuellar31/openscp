@@ -119,6 +119,7 @@ private:
     class TransferQueueDialog* transferDlg_ = nullptr;
     QAction* actShowQueue_ = nullptr;
     QAction* actSites_     = nullptr; // gestor de sitios
+    QAction* actPrefsToolbar_ = nullptr; // botón de ajustes (toolbar derecha)
 
     // Menú superior
     QMenu* appMenu_    = nullptr; // OpenSCP

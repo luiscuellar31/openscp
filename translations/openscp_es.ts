@@ -15,6 +15,10 @@
       <source>(Espacio reservado para créditos/licencias de dependencias.)</source>
       <translation>(Espacio reservado para créditos/licencias de dependencias.)</translation>
     </message>
+    <message>
+      <source>Autor: &lt;a href="https://github.com/luiscuellar31"&gt;luiscuellar31&lt;/a&gt;</source>
+      <translation>Autor: &lt;a href="https://github.com/luiscuellar31"&gt;luiscuellar31&lt;/a&gt;</translation>
+    </message>
   </context>
   <context>
     <name>ConnectionDialog</name>
@@ -125,6 +129,10 @@
       <source>Nombre:</source>
       <translation>Nombre:</translation>
     </message>
+    <message>
+      <source>Cerrar</source>
+      <translation>Cerrar</translation>
+    </message>
   </context>
   <context>
     <name>TransferQueueDialog</name>
@@ -179,6 +187,78 @@
     <message>
       <source>Cancelado</source>
       <translation>Cancelado</translation>
+    </message>
+    <message>
+      <source>Pausar</source>
+      <translation>Pausar</translation>
+    </message>
+    <message>
+      <source>Reanudar</source>
+      <translation>Reanudar</translation>
+    </message>
+    <message>
+      <source>Pausar sel.</source>
+      <translation>Pausar sel.</translation>
+    </message>
+    <message>
+      <source>Reanudar sel.</source>
+      <translation>Reanudar sel.</translation>
+    </message>
+    <message>
+      <source>Cancelar sel.</source>
+      <translation>Cancelar sel.</translation>
+    </message>
+    <message>
+      <source>Cancelar</source>
+      <translation>Cancelar</translation>
+    </message>
+    <message>
+      <source>Reintentar</source>
+      <translation>Reintentar</translation>
+    </message>
+    <message>
+      <source>Limpiar</source>
+      <translation>Limpiar</translation>
+    </message>
+    <message>
+      <source>Cerrar</source>
+      <translation>Cerrar</translation>
+    </message>
+    <message>
+      <source>Velocidad:</source>
+      <translation>Velocidad:</translation>
+    </message>
+    <message>
+      <source>Aplicar vel.</source>
+      <translation>Aplicar vel.</translation>
+    </message>
+    <message>
+      <source>Limitar sel.</source>
+      <translation>Limitar sel.</translation>
+    </message>
+    <message>
+      <source>Límite para tarea(s)</source>
+      <translation>Límite para tarea(s)</translation>
+    </message>
+    <message>
+      <source>KB/s (0 = sin límite)</source>
+      <translation>KB/s (0 = sin límite)</translation>
+    </message>
+    <message>
+      <source>Total: %1  |  En cola: %2  |  En progreso: %3  |  Pausado: %4  |  Error: %5  |  Completado: %6</source>
+      <translation>Total: %1  |  En cola: %2  |  En progreso: %3  |  Pausado: %4  |  Error: %5  |  Completado: %6</translation>
+    </message>
+    <message>
+      <source>  |  Límite global: %1 KB/s</source>
+      <translation>  |  Límite global: %1 KB/s</translation>
+    </message>
+    <message>
+      <source>Subida</source>
+      <translation>Subida</translation>
+    </message>
+    <message>
+      <source>Descarga</source>
+      <translation>Descarga</translation>
     </message>
   </context>
   <context>
@@ -319,6 +399,34 @@
     <message>
       <source>Encolados: %1 descargas</source>
       <translation>Encolados: %1 descargas</translation>
+    </message>
+    <message>
+      <source>Conectando…</source>
+      <translation>Conectando…</translation>
+    </message>
+    <message>
+      <source>Contraseña requerida</source>
+      <translation>Contraseña requerida</translation>
+    </message>
+    <message>
+      <source>Código de verificación requerido</source>
+      <translation>Código de verificación requerido</translation>
+    </message>
+    <message>
+      <source>Información requerida</source>
+      <translation>Información requerida</translation>
+    </message>
+    <message>
+      <source>Descarga ya encolada</source>
+      <translation>Descarga ya encolada</translation>
+    </message>
+    <message>
+      <source>Encolados: %1 descargas (mover)</source>
+      <translation>Encolados: %1 descargas (mover)</translation>
+    </message>
+    <message>
+      <source>Movimiento completado. Borrados remotos OK: %1  |  Fallidos: %2</source>
+      <translation>Movimiento completado. Borrados remotos OK: %1  |  Fallidos: %2</translation>
     </message>
     <message>
       <source>Movidos OK: %1  |  Fallidos: %2  |  Omitidos: %3</source>
@@ -540,8 +648,20 @@ Huella: %4
       <translation>Carpeta derecha</translation>
     </message>
     <message>
+      <source>Abrir carpeta izquierda</source>
+      <translation>Abrir carpeta izquierda</translation>
+    </message>
+    <message>
+      <source>Abrir carpeta derecha</source>
+      <translation>Abrir carpeta derecha</translation>
+    </message>
+    <message>
       <source>Conectar (SFTP)</source>
       <translation>Conectar (SFTP)</translation>
+    </message>
+    <message>
+      <source>Ajustes</source>
+      <translation>Ajustes</translation>
     </message>
     <message>
       <source>Desconectar</source>
@@ -659,6 +779,26 @@ Huella: %4
     <message>
       <source>El cambio de idioma se aplicará al reiniciar.</source>
       <translation>El cambio de idioma se aplicará al reiniciar.</translation>
+    </message>
+    <message>
+      <source>Apertura con:</source>
+      <translation>Apertura con:</translation>
+    </message>
+    <message>
+      <source>Doble clic</source>
+      <translation>Doble clic</translation>
+    </message>
+    <message>
+      <source>Un clic</source>
+      <translation>Un clic</translation>
+    </message>
+    <message>
+      <source>Mostrar archivos ocultos</source>
+      <translation>Mostrar archivos ocultos</translation>
+    </message>
+    <message>
+      <source>Mostrar ventana de conexión al inicio y cuando se cierre la última sesión.</source>
+      <translation>Mostrar ventana de conexión al inicio y cuando se cierre la última sesión.</translation>
     </message>
   </context>
 </TS>
