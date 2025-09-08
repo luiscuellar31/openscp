@@ -10,6 +10,10 @@
 #include <QInputDialog>
 #include <QLineEdit>
 #include "SecretStore.hpp"
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QSaveFile>
 
 SiteManagerDialog::SiteManagerDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle(tr("Gestor de sitios"));
@@ -73,10 +77,13 @@ void SiteManagerDialog::loadSites() {
         sites_.push_back(e);
     }
     s.endArray();
+    s.sync();
 }
 
 void SiteManagerDialog::saveSites() {
     QSettings s("OpenSCP", "OpenSCP");
+    // Clear previous array to avoid stale entries after deletions
+    s.remove("sites");
     s.beginWriteArray("sites");
     for (int i = 0; i < sites_.size(); ++i) {
         s.setArrayIndex(i);
@@ -175,17 +182,59 @@ void SiteManagerDialog::onRemove() {
     int viewRow = sel->selectedRows().first().row();
     int modelIndex = table_->item(viewRow, 0) ? table_->item(viewRow, 0)->data(Qt::UserRole).toInt() : viewRow;
     if (modelIndex < 0 || modelIndex >= sites_.size()) return;
-    // Capture name before removing for optional secret cleanup
-    const QString name = sites_[modelIndex].name;
+    // Capture fields before removing for optional cleanup
+    const SiteEntry removed = sites_[modelIndex];
+    const QString name = removed.name;
+    const QString removedHost = QString::fromStdString(removed.opt.host);
+    const std::uint16_t removedPort = removed.opt.port;
+    const QString removedKh = removed.opt.known_hosts_path ? QString::fromStdString(*removed.opt.known_hosts_path) : QString();
     sites_.remove(modelIndex);
     saveSites();
-    // Optionally delete stored credentials for this site
+    // Optionally delete stored credentials and known_hosts entry for this site
     QSettings s("OpenSCP", "OpenSCP");
     const bool deleteSecrets = s.value("Sites/deleteSecretsOnRemove", false).toBool();
     if (deleteSecrets) {
         SecretStore store;
         store.removeSecret(QString("site:%1:password").arg(name));
         store.removeSecret(QString("site:%1:keypass").arg(name));
+        // Also remove known_hosts entry if we know the file and host
+        // Derive effective known_hosts path from the entry we just removed (if available),
+        // falling back to ~/.ssh/known_hosts.
+        QString khPath = removedKh;
+        if (khPath.isEmpty()) {
+            khPath = QDir::homePath() + "/.ssh/known_hosts";
+        }
+        QFileInfo khInfo(khPath);
+        if (khInfo.exists() && khInfo.isFile()) {
+            const QString host = removedHost;
+            const std::uint16_t port = removedPort;
+            // Format host key as written by our client
+            QString hostKey = host;
+            if (port != 22) hostKey = QString("[%1]:%2").arg(host).arg(port);
+            // Filter file lines: remove entries whose first field matches hostKey
+            QFile inFile(khPath);
+            if (inFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                QList<QByteArray> lines;
+                while (!inFile.atEnd()) {
+                    QByteArray line = inFile.readLine();
+                    QByteArray trimmed = line.trimmed();
+                    if (trimmed.isEmpty() || trimmed.startsWith('#')) { lines.push_back(line); continue; }
+                    int sep = trimmed.indexOf(' ');
+                    QByteArray first = sep >= 0 ? trimmed.left(sep) : trimmed;
+                    if (first == hostKey.toUtf8()) {
+                        // skip this line (removing host entry)
+                        continue;
+                    }
+                    lines.push_back(line);
+                }
+                inFile.close();
+                QSaveFile outFile(khPath);
+                if (outFile.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+                    for (const QByteArray& l : lines) outFile.write(l);
+                    outFile.commit();
+                }
+            }
+        }
     }
     refresh();
 }
