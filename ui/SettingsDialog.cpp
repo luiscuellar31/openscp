@@ -10,6 +10,9 @@
 #include <QMessageBox>
 #include <QCheckBox>
 #include <QToolButton>
+#include <QFileDialog>
+#include <QLineEdit>
+#include <QSpinBox>
 
 SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle(tr("Ajustes"));
@@ -145,6 +148,47 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     if (openInFolder_) openInFolder_->setChecked(openInFolder);
     const bool deleteSecrets = s.value("Sites/deleteSecretsOnRemove", false).toBool();
     if (deleteSecretsOnRemove_) deleteSecretsOnRemove_->setChecked(deleteSecrets);
+    // Staging path controls
+    {
+        auto* row = new QHBoxLayout();
+        row->setContentsMargins(0,0,0,0);
+        row->addWidget(new QLabel(tr("Carpeta de staging:"), advPanel));
+        stagingRootEdit_ = new QLineEdit(advPanel);
+        stagingBrowseBtn_ = new QPushButton(tr("Elegir…"), advPanel);
+        row->addWidget(stagingRootEdit_, 1);
+        row->addWidget(stagingBrowseBtn_);
+        adv->addLayout(row);
+        connect(stagingBrowseBtn_, &QPushButton::clicked, this, [this]{
+            const QString cur = stagingRootEdit_ ? stagingRootEdit_->text() : QString();
+            const QString pick = QFileDialog::getExistingDirectory(this, tr("Selecciona carpeta de staging"), cur.isEmpty() ? QDir::homePath() : cur);
+            if (!pick.isEmpty() && stagingRootEdit_) stagingRootEdit_->setText(pick);
+        });
+    }
+    // Auto clean
+    autoCleanStaging_ = new QCheckBox(tr("Eliminar automáticamente la carpeta staging tras completar el arrastre (recomendado)."), advPanel);
+    {
+        auto* row = new QHBoxLayout();
+        row->addWidget(autoCleanStaging_);
+        row->addStretch();
+        adv->addLayout(row);
+    }
+
+    // Maximum folder recursion depth (Advanced/maxFolderDepth)
+    {
+        auto* row = new QHBoxLayout();
+        row->setContentsMargins(0,0,0,0);
+        auto* lbl = new QLabel(tr("Profundidad máxima de recursión de carpetas (recomendado: 32)"), advPanel);
+        lbl->setToolTip(tr("Límite para arrastre recursivo y evitar árboles muy profundos y bucles."));
+        maxDepthSpin_ = new QSpinBox(advPanel);
+        maxDepthSpin_->setRange(4, 256);
+        maxDepthSpin_->setValue(32);
+        maxDepthSpin_->setToolTip(tr("Límite para arrastre recursivo y evitar árboles muy profundos y bucles."));
+        row->addWidget(lbl);
+        row->addWidget(maxDepthSpin_);
+        row->addStretch();
+        adv->addLayout(row);
+    }
+
     const bool knownHashed = s.value("Security/knownHostsHashed", true).toBool();
     if (knownHostsHashed_) knownHostsHashed_->setChecked(knownHashed);
     const bool fpHex = s.value("Security/fpHex", false).toBool();
@@ -153,6 +197,10 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     const bool insecureFb = s.value("Security/enableInsecureSecretFallback", false).toBool();
     if (insecureFallback_) insecureFallback_->setChecked(insecureFb);
 #endif
+    // Load staging settings
+    stagingRootEdit_->setText(s.value("Advanced/stagingRoot", QDir::homePath() + "/Downloads/OpenSCP-Dragged").toString());
+    autoCleanStaging_->setChecked(s.value("Advanced/autoCleanStaging", true).toBool());
+    if (maxDepthSpin_) maxDepthSpin_->setValue(s.value("Advanced/maxFolderDepth", 32).toInt());
 #if defined(Q_OS_MAC) || defined(Q_OS_MACOS) || defined(__APPLE__)
     const bool macRestrictiveLoad = s.value("Security/macKeychainRestrictive", false).toBool();
     if (macKeychainRestrictive_) macKeychainRestrictive_->setChecked(macRestrictiveLoad);
@@ -192,6 +240,9 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     if (deleteSecretsOnRemove_) connect(deleteSecretsOnRemove_, &QCheckBox::toggled, this, &SettingsDialog::updateApplyFromControls);
     if (knownHostsHashed_) connect(knownHostsHashed_, &QCheckBox::toggled, this, &SettingsDialog::updateApplyFromControls);
     if (fpHex_) connect(fpHex_, &QCheckBox::toggled, this, &SettingsDialog::updateApplyFromControls);
+    if (stagingRootEdit_) connect(stagingRootEdit_, &QLineEdit::textChanged, this, &SettingsDialog::updateApplyFromControls);
+    if (autoCleanStaging_) connect(autoCleanStaging_, &QCheckBox::toggled, this, &SettingsDialog::updateApplyFromControls);
+    if (maxDepthSpin_) connect(maxDepthSpin_, qOverload<int>(&QSpinBox::valueChanged), this, &SettingsDialog::updateApplyFromControls);
 #if defined(Q_OS_MAC) || defined(Q_OS_MACOS) || defined(__APPLE__)
     if (macKeychainRestrictive_) connect(macKeychainRestrictive_, &QCheckBox::toggled, this, &SettingsDialog::updateApplyFromControls);
 #endif
@@ -235,6 +286,9 @@ void SettingsDialog::onApply() {
     if (macKeychainRestrictive_) s.setValue("Security/macKeychainRestrictive", macKeychainRestrictive_->isChecked());
 #endif
     if (insecureFallback_) s.setValue("Security/enableInsecureSecretFallback", insecureFallback_->isChecked());
+    if (stagingRootEdit_) s.setValue("Advanced/stagingRoot", stagingRootEdit_->text());
+    if (autoCleanStaging_) s.setValue("Advanced/autoCleanStaging", autoCleanStaging_->isChecked());
+    if (maxDepthSpin_) s.setValue("Advanced/maxFolderDepth", maxDepthSpin_->value());
     s.sync();
 
     // Only notify if language actually changed
@@ -257,6 +311,9 @@ void SettingsDialog::updateApplyFromControls() {
 #ifndef __APPLE__
     const bool insecureFb = s.value("Security/enableInsecureSecretFallback", false).toBool();
 #endif
+    const QString stagingRoot = s.value("Advanced/stagingRoot", QDir::homePath() + "/Downloads/OpenSCP-Dragged").toString();
+    const bool autoCleanSt = s.value("Advanced/autoCleanStaging", true).toBool();
+    const int  maxDepthPrev = s.value("Advanced/maxFolderDepth", 32).toInt();
 
     const QString curLang = langCombo_ ? langCombo_->currentData().toString() : prevLang;
     const bool curShowHidden = showHidden_ && showHidden_->isChecked();
@@ -269,6 +326,9 @@ void SettingsDialog::updateApplyFromControls() {
 #ifndef __APPLE__
     const bool curInsecureFb = insecureFallback_ && insecureFallback_->isChecked();
 #endif
+    const QString curStagingRoot = stagingRootEdit_ ? stagingRootEdit_->text() : stagingRoot;
+    const bool curAutoCleanSt = autoCleanStaging_ && autoCleanStaging_->isChecked();
+    const int  curMaxDepth   = maxDepthSpin_ ? maxDepthSpin_->value() : maxDepthPrev;
 
     const bool modified = (curLang != prevLang) ||
                           (curShowHidden != showHidden) ||
@@ -281,6 +341,9 @@ void SettingsDialog::updateApplyFromControls() {
 #ifndef __APPLE__
                           || (curInsecureFb != insecureFb)
 #endif
+                          || (curStagingRoot != stagingRoot)
+                          || (curAutoCleanSt != autoCleanSt)
+                          || (curMaxDepth != maxDepthPrev)
                           ;
     if (applyBtn_) {
         applyBtn_->setEnabled(modified);

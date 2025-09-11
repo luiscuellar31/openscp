@@ -119,21 +119,21 @@ private:
     // Mini simulated "remote FS": path -> list of entries
     std::unordered_map<std::string, std::vector<FileInfo>> fs_ = {
         { "/", {
-            {"home", true, 0, 0},
-            {"var",  true, 0, 0},
-            {"readme.txt", false, 1280, 0},
+            {"home", true, 0, false, 0, 0, 0, 0},
+            {"var",  true, 0, false, 0, 0, 0, 0},
+            {"readme.txt", false, 1280, true, 0, 0, 0, 0},
         }},
         { "/home", {
-            {"luis", true, 0, 0},
-            {"guest", true, 0, 0},
-            {"notes.md", false, 2048, 0},
+            {"luis", true, 0, false, 0, 0, 0, 0},
+            {"guest", true, 0, false, 0, 0, 0, 0},
+            {"notes.md", false, 2048, true, 0, 0, 0, 0},
         }},
         { "/home/luis", {
-            {"proyectos", true, 0, 0},
-            {"foto.jpg", false, 34567, 0},
+            {"proyectos", true, 0, false, 0, 0, 0, 0},
+            {"foto.jpg", false, 34567, true, 0, 0, 0, 0},
         }},
         { "/var", {
-            {"log", true, 0, 0},
+            {"log", true, 0, false, 0, 0, 0, 0},
         }},
     };
 };

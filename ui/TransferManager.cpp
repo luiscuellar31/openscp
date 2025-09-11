@@ -9,10 +9,16 @@
 #include <QPushButton>
 #include <QLocale>
 #include <QFileInfo>
+#include <QFile>
+#include <QFileDevice>
+#include <QLoggingCategory>
 #include <QDateTime>
+#include "TimeUtils.hpp"
+#include <QTimeZone>
 #include <QDir>
 #include <chrono>
 #include <thread>
+Q_LOGGING_CATEGORY(ocXfer, "openscp.transfer")
 
 TransferManager::TransferManager(QObject* parent) : QObject(parent) {}
 
@@ -139,7 +145,8 @@ void TransferManager::schedule() {
     auto askOverwrite = [&](const QString& name, const QString& srcInfo, const QString& dstInfo) -> int {
         QMessageBox msg(nullptr);
         msg.setWindowTitle(tr("Conflicto"));
-        msg.setText(tr("«%1» ya existe.\nOrigen: %2\nDestino: %3").arg(name, srcInfo, dstInfo));
+        // Clarify which side is local vs remote for better UX
+        msg.setText(tr("«%1» ya existe.\nLocal: %2\nRemoto: %3").arg(name, srcInfo, dstInfo));
         QAbstractButton* btResume    = msg.addButton(tr("Reanudar"), QMessageBox::ActionRole);
         QAbstractButton* btOverwrite = msg.addButton(tr("Sobrescribir"), QMessageBox::AcceptRole);
         QAbstractButton* btSkip      = msg.addButton(tr("Omitir"), QMessageBox::RejectRole);
@@ -199,10 +206,10 @@ void TransferManager::schedule() {
                 }
                 QString srcInfo = QString("%1 bytes, %2")
                     .arg(QFileInfo(t.src).size())
-                    .arg(QLocale().toString(QFileInfo(t.src).lastModified(), QLocale::ShortFormat));
+                    .arg(openscpui::localShortTime(QFileInfo(t.src).lastModified()));
                 QString dstInfo = QString("%1 bytes, %2")
                     .arg(rinfo.size)
-                    .arg(rinfo.mtime ? QLocale().toString(QDateTime::fromSecsSinceEpoch((qint64)rinfo.mtime), QLocale::ShortFormat) : "?");
+                    .arg(rinfo.mtime ? openscpui::localShortTime((quint64)rinfo.mtime) : QStringLiteral("?"));
                 int choice = askOverwrite(QFileInfo(t.src).fileName(), srcInfo, dstInfo);
                 if (choice == 0) {
                     std::lock_guard<std::mutex> lk(mtx_);
@@ -249,10 +256,10 @@ void TransferManager::schedule() {
                 }
                 QString srcInfo = QString("%1 bytes, %2")
                     .arg(rinfo.size)
-                    .arg(rinfo.mtime ? QLocale().toString(QDateTime::fromSecsSinceEpoch((qint64)rinfo.mtime), QLocale::ShortFormat) : "?");
+                    .arg(rinfo.mtime ? openscpui::localShortTime((quint64)rinfo.mtime) : QStringLiteral("?"));
                 QString dstInfo = QString("%1 bytes, %2")
                     .arg(lfi.size())
-                    .arg(QLocale().toString(lfi.lastModified(), QLocale::ShortFormat));
+                    .arg(openscpui::localShortTime(lfi.lastModified()));
                 int choice = askOverwrite(lfi.fileName(), srcInfo, dstInfo);
                 if (choice == 0) {
                     std::lock_guard<std::mutex> lk(mtx_);
@@ -390,6 +397,23 @@ void TransferManager::schedule() {
                     int i = indexForId(taskId);
                     if (i >= 0) { tasks_[i].status = TransferTask::Status::Error; tasks_[i].error = QString::fromStdString(gerr); }
                 } else {
+                    // Try to preserve remote modification time if available
+                    openscp::FileInfo rinfo{};
+                    std::string stErr;
+                    {
+                        std::lock_guard<std::mutex> slk(sftpMutex_);
+                        client_->stat(t.src.toStdString(), rinfo, stErr);
+                    }
+                    if (rinfo.mtime > 0) {
+                        QFile f(t.dst);
+                        if (f.exists()) {
+                            const QDateTime tsUtc = QDateTime::fromSecsSinceEpoch((qint64)rinfo.mtime, QTimeZone::utc());
+                            if (!f.setFileTime(tsUtc, QFileDevice::FileModificationTime)) {
+                                qWarning(ocXfer) << "Failed to set mtime for" << t.dst << "to" << tsUtc;
+                            }
+                            // DEBUG note: when pre-download stat is available, compare pre/post here
+                        }
+                    }
                     std::lock_guard<std::mutex> lk(mtx_);
                     int i = indexForId(taskId);
                     if (i >= 0) { tasks_[i].progress = 100; tasks_[i].status = TransferTask::Status::Done; }

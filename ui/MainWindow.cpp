@@ -53,6 +53,7 @@
 #include <QIcon>
 #include <QTemporaryFile>
 #include <QSettings>
+#include <QRegularExpression>
 #include <QTimer>
 #include <QSet>
 #include <QHash>
@@ -60,6 +61,7 @@
 #include <QToolButton>
 #include <QProcess>
 #include <cstring>
+#include "DragAwareTreeView.hpp"
 #include <atomic>
 #include <thread>
 #include <chrono>
@@ -195,8 +197,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     rightLocalModel_->setRootPath(home);
 
     // Views
-    leftView_  = new QTreeView(this);
-    rightView_ = new QTreeView(this);
+    leftView_  = new DragAwareTreeView(this);
+    rightView_ = new DragAwareTreeView(this);
 
     leftView_->setModel(leftModel_);
     rightView_->setModel(rightLocalModel_);
@@ -638,6 +640,33 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     // Transfer queue
     transferMgr_ = new TransferManager(this);
+    // Provide transfer manager to views (for async remote drag-out staging)
+    if (auto* lv = qobject_cast<DragAwareTreeView*>(leftView_))  lv->setTransferManager(transferMgr_);
+    if (auto* rv = qobject_cast<DragAwareTreeView*>(rightView_)) rv->setTransferManager(transferMgr_);
+
+    // Startup cleanup (deferred): remove old staging batches if autoCleanStaging is enabled
+    QTimer::singleShot(0, this, [this]{
+        QSettings s("OpenSCP", "OpenSCP");
+        const bool autoClean = s.value("Advanced/autoCleanStaging", true).toBool();
+        if (!autoClean) return;
+        QString root = s.value("Advanced/stagingRoot").toString();
+        if (root.isEmpty()) root = QDir::homePath() + "/Downloads/OpenSCP-Dragged";
+        QDir r(root);
+        if (!r.exists()) return;
+        const QDateTime now = QDateTime::currentDateTimeUtc();
+        const qint64 maxAgeMs = qint64(7) * 24 * 60 * 60 * 1000; // 7 days
+        // Match timestamp batches: yyyyMMdd-HHmmss
+        QRegularExpression re("^\\d{8}-\\d{6}$");
+        const auto entries = r.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks);
+        for (const QFileInfo& fi : entries) {
+            if (fi.isSymLink()) continue; // do not follow symlinks
+            if (!re.match(fi.fileName()).hasMatch()) continue; // only batches
+            const QDateTime m = fi.lastModified().toUTC();
+            if (m.isValid() && m.msecsTo(now) > maxAgeMs) {
+                QDir(fi.absoluteFilePath()).removeRecursively();
+            }
+        }
+    });
 
     // Warn if insecure storage is active (non‑Apple only when explicitly enabled)
     if (SecretStore::insecureFallbackActive()) {

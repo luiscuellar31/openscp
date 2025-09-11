@@ -808,7 +808,7 @@ bool Libssh2SftpClient::list(const std::string& remote_path,
             fi.is_dir = (attrs.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS)
                             ? ((attrs.permissions & LIBSSH2_SFTP_S_IFMT) == LIBSSH2_SFTP_S_IFDIR)
                             : false;
-            if (attrs.flags & LIBSSH2_SFTP_ATTR_SIZE) fi.size = attrs.filesize;
+            if (attrs.flags & LIBSSH2_SFTP_ATTR_SIZE) { fi.size = attrs.filesize; fi.has_size = true; }
             if (attrs.flags & LIBSSH2_SFTP_ATTR_ACMODTIME) fi.mtime = attrs.mtime;
             if (attrs.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS) fi.mode = attrs.permissions;
             if (attrs.flags & LIBSSH2_SFTP_ATTR_UIDGID) {
@@ -1077,7 +1077,7 @@ bool Libssh2SftpClient::stat(const std::string& remote_path,
     info.is_dir = (st.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS)
                       ? ((st.permissions & LIBSSH2_SFTP_S_IFMT) == LIBSSH2_SFTP_S_IFDIR)
                       : false;
-    info.size = (st.flags & LIBSSH2_SFTP_ATTR_SIZE) ? (std::uint64_t)st.filesize : 0;
+    if (st.flags & LIBSSH2_SFTP_ATTR_SIZE) { info.size = (std::uint64_t)st.filesize; info.has_size = true; } else { info.size = 0; info.has_size = false; }
     info.mtime = (st.flags & LIBSSH2_SFTP_ATTR_ACMODTIME) ? (std::uint64_t)st.mtime : 0;
     info.mode = (st.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS) ? st.permissions : 0;
     if (st.flags & LIBSSH2_SFTP_ATTR_UIDGID) {

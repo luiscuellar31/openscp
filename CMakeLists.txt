@@ -19,6 +19,8 @@ add_executable(openscp_hello
   ui/main.cpp
   ui/MainWindow.hpp
   ui/MainWindow.cpp
+  ui/DragAwareTreeView.hpp
+  ui/DragAwareTreeView.cpp
   ui/ConnectionDialog.hpp
   ui/ConnectionDialog.cpp
   ui/RemoteModel.hpp

@@ -28,6 +28,10 @@ private:
     QCheckBox* knownHostsHashed_ = nullptr; // save hostnames hashed in known_hosts (recommended)
     QCheckBox* fpHex_ = nullptr; // show fingerprints in HEX colon format (visual only)
     QCheckBox* insecureFallback_ = nullptr; // allow insecure secret fallback (not recommended)
+    class QLineEdit* stagingRootEdit_ = nullptr; // staging folder path
+    class QPushButton* stagingBrowseBtn_ = nullptr;
+    QCheckBox* autoCleanStaging_ = nullptr; // Auto-clean staging after successful drag-out
+    class QSpinBox* maxDepthSpin_ = nullptr; // Advanced/maxFolderDepth
     QPushButton* applyBtn_ = nullptr;   // Apply button (enabled only when modified)
     QPushButton* closeBtn_ = nullptr;   // Close button (never primary/default)
 };

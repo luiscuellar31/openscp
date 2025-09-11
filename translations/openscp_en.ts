@@ -330,6 +330,10 @@
       <source>Permisos</source>
       <translation>Permissions</translation>
     </message>
+    <message>
+      <source>Tamaño: desconocido (no informado por el servidor)</source>
+      <translation>Size: unknown (not provided by the server)</translation>
+    </message>
   </context>
   <context>
     <name>TransferManager</name>
@@ -338,8 +342,8 @@
       <translation>Conflict</translation>
     </message>
     <message>
-      <source>«%1» ya existe.\nOrigen: %2\nDestino: %3</source>
-      <translation>“%1” already exists.\nSource: %2\nDestination: %3</translation>
+      <source>«%1» ya existe.\nLocal: %2\nRemoto: %3</source>
+      <translation>“%1” already exists.\nLocal: %2\nRemote: %3</translation>
     </message>
     <message>
       <source>Reanudar</source>
@@ -940,6 +944,80 @@ Overwrite?</translation>
     <message>
       <source>Esto almacenará credenciales sin cifrar en el disco usando QSettings.\nEn Linux, se recomienda instalar y usar libsecret/Secret Service para mayor seguridad.\n\n¿Deseas activar el fallback inseguro igualmente?</source>
       <translation>This will store credentials unencrypted on disk using QSettings.\nOn Linux, it is recommended to install and use libsecret/Secret Service for better security.\n\nDo you still want to enable the insecure fallback?</translation>
+    </message>
+    <message>
+      <source>Carpeta de staging:</source>
+      <translation>Staging folder:</translation>
+    </message>
+    <message>
+      <source>Elegir…</source>
+      <translation>Choose…</translation>
+    </message>
+    <message>
+      <source>Selecciona carpeta de staging</source>
+      <translation>Select staging folder</translation>
+    </message>
+    <message>
+      <source>Eliminar automáticamente la carpeta staging tras completar el arrastre (recomendado).</source>
+      <translation>Auto-clean staging after successful drag-out (recommended).</translation>
+    </message>
+  </context>
+  <context>
+    <name>SettingsDialog</name>
+    <message>
+      <source>Profundidad máxima de recursión de carpetas (recomendado: 32)</source>
+      <translation>Maximum folder recursion depth (recommended: 32)</translation>
+    </message>
+    <message>
+      <source>Límite para arrastre recursivo y evitar árboles muy profundos y bucles.</source>
+      <translation>Limit for recursive folder drag-out to avoid deep trees and loops.</translation>
+    </message>
+  </context>
+  <context>
+    <name>DragAwareTreeView</name>
+    <message>
+      <source>Preparación en curso; espera a que termine.</source>
+      <translation>Preparation in progress; please wait.</translation>
+    </message>
+    <message>
+      <source>Staging conservado en: &lt;a href="%1"&gt;%2&lt;/a&gt;</source>
+      <translation>Staging kept at: &lt;a href="%1"&gt;%2&lt;/a&gt;</translation>
+    </message>
+    <message>
+      <source>Preparando archivos…</source>
+      <translation>Preparing files…</translation>
+    </message>
+    <message>
+      <source>Aún preparando archivos para el arrastre. ¿Esperar o cancelar?</source>
+      <translation>Still preparing files for drag-out. Wait or cancel?</translation>
+    </message>
+    <message>
+      <source>Esperar</source>
+      <translation>Wait</translation>
+    </message>
+    <message>
+      <source>Cancelar</source>
+      <translation>Cancel</translation>
+    </message>
+    <message>
+      <source>%1 de %2 archivos fallaron. Staging en:</source>
+      <translation>%1 of %2 files failed. Staging at:</translation>
+    </message>
+    <message>
+      <source>Confirmar staging</source>
+      <translation>Confirm staging</translation>
+    </message>
+    <message>
+      <source>~%1 (algunos desconocidos)</source>
+      <translation>~%1 (some unknown)</translation>
+    </message>
+    <message>
+      <source>Vas a preparar %1 elementos%2. ¿Continuar?</source>
+      <translation>You are about to prepare %1 items%2. Continue?</translation>
+    </message>
+    <message>
+      <source>Continuar</source>
+      <translation>Continue</translation>
     </message>
   </context>
 </TS>

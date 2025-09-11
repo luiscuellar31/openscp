@@ -330,6 +330,10 @@
       <source>Permisos</source>
       <translation>Permisos</translation>
     </message>
+    <message>
+      <source>Tamaño: desconocido (no informado por el servidor)</source>
+      <translation>Tamaño: desconocido (no informado por el servidor)</translation>
+    </message>
   </context>
   <context>
     <name>TransferManager</name>
@@ -338,8 +342,8 @@
       <translation>Conflicto</translation>
     </message>
     <message>
-      <source>«%1» ya existe.\nOrigen: %2\nDestino: %3</source>
-      <translation>«%1» ya existe.\nOrigen: %2\nDestino: %3</translation>
+      <source>«%1» ya existe.\nLocal: %2\nRemoto: %3</source>
+      <translation>«%1» ya existe.\nLocal: %2\nRemoto: %3</translation>
     </message>
     <message>
       <source>Reanudar</source>
@@ -881,6 +885,22 @@ Huella: %4
       <translation>Mostrar huella en HEX colonado (solo visual).</translation>
     </message>
     <message>
+      <source>Carpeta de staging:</source>
+      <translation>Carpeta de staging:</translation>
+    </message>
+    <message>
+      <source>Elegir…</source>
+      <translation>Elegir…</translation>
+    </message>
+    <message>
+      <source>Selecciona carpeta de staging</source>
+      <translation>Selecciona carpeta de staging</translation>
+    </message>
+    <message>
+      <source>Eliminar automáticamente la carpeta staging tras completar el arrastre (recomendado).</source>
+      <translation>Eliminar automáticamente la carpeta staging tras completar el arrastre (recomendado).</translation>
+    </message>
+    <message>
       <source>Permitir fallback inseguro de credenciales (no recomendado).</source>
       <translation>Permitir fallback inseguro de credenciales (no recomendado).</translation>
     </message>
@@ -891,6 +911,64 @@ Huella: %4
     <message>
       <source>Esto almacenará credenciales sin cifrar en el disco usando QSettings.\nEn Linux, se recomienda instalar y usar libsecret/Secret Service para mayor seguridad.\n\n¿Deseas activar el fallback inseguro igualmente?</source>
       <translation>Esto almacenará credenciales sin cifrar en el disco usando QSettings.\nEn Linux, se recomienda instalar y usar libsecret/Secret Service para mayor seguridad.\n\n¿Deseas activar el fallback inseguro igualmente?</translation>
+    </message>
+  </context>
+  <context>
+    <name>SettingsDialog</name>
+    <message>
+      <source>Profundidad máxima de recursión de carpetas (recomendado: 32)</source>
+      <translation>Profundidad máxima de recursión de carpetas (recomendado: 32)</translation>
+    </message>
+    <message>
+      <source>Límite para arrastre recursivo y evitar árboles muy profundos y bucles.</source>
+      <translation>Límite para arrastre recursivo y evitar árboles muy profundos y bucles.</translation>
+    </message>
+  </context>
+  <context>
+    <name>DragAwareTreeView</name>
+    <message>
+      <source>Preparación en curso; espera a que termine.</source>
+      <translation>Preparación en curso; espera a que termine.</translation>
+    </message>
+    <message>
+      <source>Staging conservado en: &lt;a href="%1"&gt;%2&lt;/a&gt;</source>
+      <translation>Staging conservado en: &lt;a href="%1"&gt;%2&lt;/a&gt;</translation>
+    </message>
+    <message>
+      <source>Preparando archivos…</source>
+      <translation>Preparando archivos…</translation>
+    </message>
+    <message>
+      <source>Aún preparando archivos para el arrastre. ¿Esperar o cancelar?</source>
+      <translation>Aún preparando archivos para el arrastre. ¿Esperar o cancelar?</translation>
+    </message>
+    <message>
+      <source>Esperar</source>
+      <translation>Esperar</translation>
+    </message>
+    <message>
+      <source>Cancelar</source>
+      <translation>Cancelar</translation>
+    </message>
+    <message>
+      <source>%1 de %2 archivos fallaron. Staging en:</source>
+      <translation>%1 de %2 archivos fallaron. Staging en:</translation>
+    </message>
+    <message>
+      <source>Confirmar staging</source>
+      <translation>Confirmar staging</translation>
+    </message>
+    <message>
+      <source>~%1 (algunos desconocidos)</source>
+      <translation>~%1 (algunos desconocidos)</translation>
+    </message>
+    <message>
+      <source>Vas a preparar %1 elementos%2. ¿Continuar?</source>
+      <translation>Vas a preparar %1 elementos%2. ¿Continuar?</translation>
+    </message>
+    <message>
+      <source>Continuar</source>
+      <translation>Continuar</translation>
     </message>
   </context>
 </TS>

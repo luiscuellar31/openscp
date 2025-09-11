@@ -17,11 +17,12 @@ enum class KnownHostsPolicy {
 };
 
 struct FileInfo {
-    std::string   name;     // base name
+    std::string   name;         // base name
     bool          is_dir = false;
-    std::uint64_t size  = 0;  // bytes (if applicable)
-    std::uint64_t mtime = 0;  // epoch (seconds)
-    std::uint32_t mode  = 0;  // POSIX bits (permissions/type)
+    std::uint64_t size  = 0;    // bytes (0 valid if has_size == true)
+    bool          has_size = false; // true if size is known (ATTR_SIZE present)
+    std::uint64_t mtime = 0;    // epoch (seconds)
+    std::uint32_t mode  = 0;    // POSIX bits (permissions/type)
     std::uint32_t uid   = 0;
     std::uint32_t gid   = 0;
 };
