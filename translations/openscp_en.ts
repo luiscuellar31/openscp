@@ -882,6 +882,14 @@ Continue?</translation>
       <translation>“%1” already exists at destination.
 Overwrite?</translation>
     </message>
+    <message>
+      <source>Advertencia: almacenamiento de secretos sin cifrar activado (fallback)</source>
+      <translation>Warning: unencrypted secrets storage active (fallback)</translation>
+    </message>
+    <message>
+      <source>Estás usando un almacenamiento de credenciales sin cifrar activado por variable de entorno. Desactiva OPEN_SCP_ENABLE_INSECURE_FALLBACK para ocultar este aviso.</source>
+      <translation>You are using unencrypted credentials storage enabled via environment variable. Disable OPEN_SCP_ENABLE_INSECURE_FALLBACK to hide this warning.</translation>
+    </message>
   </context>
   <context>
     <name>SettingsDialog</name>

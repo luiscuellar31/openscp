@@ -533,7 +533,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
             }
             if (!confirmed) {
                 libssh2_knownhost_free(nh);
-                auditLogHostKey(opt.host, opt.port, algWithBits.str(), fpStr, "rechazado");
+                auditLogHostKey(opt.host, opt.port, algWithBits.str(), fpStr, "rejected");
                 err = "Host desconocido: huella no confirmada por el usuario";
                 return false;
             }
@@ -546,7 +546,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
                     std::string why = khPath.empty() ? "Ruta known_hosts no definida" : "Algoritmo de hostkey sin soporte de known_hosts en libssh2";
                     opt.hostkey_status_cb(std::string("No se podrá guardar la huella: ") + why);
                 }
-                auditLogHostKey(opt.host, opt.port, algWithBits.str(), fpStr, "omitido");
+                auditLogHostKey(opt.host, opt.port, algWithBits.str(), fpStr, "skipped");
                 // Continue without persisting
             } else {
                 bool saved = false;
@@ -666,16 +666,16 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
 
                 libssh2_knownhost_free(nh);
                 if (saved) {
-                    auditLogHostKey(opt.host, opt.port, algWithBits.str(), fpStr, "guardado");
+                    auditLogHostKey(opt.host, opt.port, algWithBits.str(), fpStr, "saved");
                 } else {
                     // Saving failed: require explicit confirmation to proceed without saving
                     bool proceed = (opt.hostkey_confirm_cb && opt.hostkey_confirm_cb(opt.host, opt.port, algWithBits.str(), fpStr, /*canSave*/false));
                     if (!proceed) {
-                        auditLogHostKey(opt.host, opt.port, algWithBits.str(), fpStr, "fallo-guardar");
+                        auditLogHostKey(opt.host, opt.port, algWithBits.str(), fpStr, "save_failed");
                         err = "No se pudo guardar la huella en known_hosts";
                         return false;
                     }
-                    auditLogHostKey(opt.host, opt.port, algWithBits.str(), fpStr, "omitido");
+                    auditLogHostKey(opt.host, opt.port, algWithBits.str(), fpStr, "skipped");
                 }
             }
         } else {

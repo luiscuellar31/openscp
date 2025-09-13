@@ -812,6 +812,54 @@ Huella: %4
       <translation>No hay selección disponible.</translation>
     </message>
     <message>
+      <source>No hay selección.</source>
+      <translation>No hay selección.</translation>
+    </message>
+    <message>
+      <source>Nada seleccionado.</source>
+      <translation>Nada seleccionado.</translation>
+    </message>
+    <message>
+      <source>Copiar al panel derecho</source>
+      <translation>Copiar al panel derecho</translation>
+    </message>
+    <message>
+      <source>Copiar al panel izquierdo</source>
+      <translation>Copiar al panel izquierdo</translation>
+    </message>
+    <message>
+      <source>Mover al panel derecho</source>
+      <translation>Mover al panel derecho</translation>
+    </message>
+    <message>
+      <source>Mover al panel izquierdo</source>
+      <translation>Mover al panel izquierdo</translation>
+    </message>
+    <message>
+      <source>El panel derecho no es remoto.</source>
+      <translation>El panel derecho no es remoto.</translation>
+    </message>
+    <message>
+      <source>Borrar</source>
+      <translation>Borrar</translation>
+    </message>
+    <message>
+      <source>Mover</source>
+      <translation>Mover</translation>
+    </message>
+    <message>
+      <source>Descargar</source>
+      <translation>Descargar</translation>
+    </message>
+    <message>
+      <source>Subir…</source>
+      <translation>Subir…</translation>
+    </message>
+    <message>
+      <source>Nuevo archivo</source>
+      <translation>Nuevo archivo</translation>
+    </message>
+    <message>
       <source>No hay entradas seleccionadas en el panel izquierdo.</source>
       <translation>No hay entradas seleccionadas en el panel izquierdo.</translation>
     </message>
@@ -832,6 +880,14 @@ Huella: %4
 ¿Sobrescribir?</source>
       <translation>«%1» ya existe en destino.
 ¿Sobrescribir?</translation>
+    </message>
+    <message>
+      <source>Advertencia: almacenamiento de secretos sin cifrar activado (fallback)</source>
+      <translation>Advertencia: almacenamiento de secretos sin cifrar activado (fallback)</translation>
+    </message>
+    <message>
+      <source>Estás usando un almacenamiento de credenciales sin cifrar activado por variable de entorno. Desactiva OPEN_SCP_ENABLE_INSECURE_FALLBACK para ocultar este aviso.</source>
+      <translation>Estás usando un almacenamiento de credenciales sin cifrar activado por variable de entorno. Desactiva OPEN_SCP_ENABLE_INSECURE_FALLBACK para ocultar este aviso.</translation>
     </message>
   </context>
   <context>

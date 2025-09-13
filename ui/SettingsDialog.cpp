@@ -123,7 +123,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     }
 #endif
     // Insecure fallback (not recommended): allow QSettings storage
-#ifndef __APPLE__
+#if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) && !defined(HAVE_LIBSECRET) && !defined(OPEN_SCP_BUILD_SECURE_ONLY)
     insecureFallback_ = new QCheckBox(tr("Permitir fallback inseguro de credenciales (no recomendado)."), advPanel);
     {
         auto* row = new QHBoxLayout();
@@ -204,7 +204,8 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     if (knownHostsHashed_) knownHostsHashed_->setChecked(knownHashed);
     const bool fpHex = s.value("Security/fpHex", false).toBool();
     if (fpHex_) fpHex_->setChecked(fpHex);
-#ifndef __APPLE__
+// Only load/show insecure fallback setting on platforms/builds where it applies
+#if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) && !defined(HAVE_LIBSECRET) && !defined(OPEN_SCP_BUILD_SECURE_ONLY)
     const bool insecureFb = s.value("Security/enableInsecureSecretFallback", false).toBool();
     if (insecureFallback_) insecureFallback_->setChecked(insecureFb);
 #endif
@@ -335,7 +336,8 @@ void SettingsDialog::updateApplyFromControls() {
     const bool deleteSecrets = s.value("Sites/deleteSecretsOnRemove", false).toBool();
     const bool knownHashed = s.value("Security/knownHostsHashed", true).toBool();
     const bool fpHex = s.value("Security/fpHex", false).toBool();
-#ifndef __APPLE__
+// Only compare insecure fallback when available in this build/platform
+#if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) && !defined(HAVE_LIBSECRET) && !defined(OPEN_SCP_BUILD_SECURE_ONLY)
     const bool insecureFb = s.value("Security/enableInsecureSecretFallback", false).toBool();
 #endif
     const QString stagingRoot = s.value("Advanced/stagingRoot", QDir::homePath() + "/Downloads/OpenSCP-Dragged").toString();
@@ -351,7 +353,8 @@ void SettingsDialog::updateApplyFromControls() {
     const bool curDeleteSecrets = deleteSecretsOnRemove_ && deleteSecretsOnRemove_->isChecked();
     const bool curKnownHashed = knownHostsHashed_ && knownHostsHashed_->isChecked();
     const bool curFpHex = fpHex_ && fpHex_->isChecked();
-#ifndef __APPLE__
+// Current value only when applicable
+#if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) && !defined(HAVE_LIBSECRET) && !defined(OPEN_SCP_BUILD_SECURE_ONLY)
     const bool curInsecureFb = insecureFallback_ && insecureFallback_->isChecked();
 #endif
     const QString curStagingRoot = stagingRootEdit_ ? stagingRootEdit_->text() : stagingRoot;
@@ -366,7 +369,7 @@ void SettingsDialog::updateApplyFromControls() {
                           (curDeleteSecrets != deleteSecrets) ||
                           (curKnownHashed != knownHashed) ||
                           (curFpHex != fpHex)
-#ifndef __APPLE__
+#if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) && !defined(HAVE_LIBSECRET) && !defined(OPEN_SCP_BUILD_SECURE_ONLY)
                           || (curInsecureFb != insecureFb)
 #endif
                           || (curStagingRoot != stagingRoot)
