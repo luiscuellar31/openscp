@@ -1,26 +1,24 @@
 <div align="center">
-  <img src="icons/program/icon-openscp-2048.png" alt="OpenSCP icon" width="96">
-  <h1 align="center">OpenSCP (Pre‑alpha)</h1>
+	<img src="assets/program/icon-openscp-2048.png" alt="OpenSCP icon" width="128">
+	<h1 align="center">OpenSCP</h1>
 
-  <p><strong>Two‑panel SFTP client focused on simplicity and security</strong></p>
+<p>
+	<strong>Two‑panel SFTP client focused on simplicity and security</strong>
+</p>
 
-  <p>
-    <a href="README_ES.md"><strong>Leer en Español</strong></a>
-  </p>
+<p>
+	<a href="README_ES.md"><strong>Leer en Español</strong></a>
+</p>
+
+<p>
+	<strong>OpenSCP</strong> is a <em>two-panel commander</em>-style file explorer written in <strong>C++/Qt</strong>, with <strong>SFTP</strong> support (libssh2 + OpenSSL). It aims to be a lightweight, cross-platform alternative to tools like WinSCP, focused on <strong>simplicity</strong>, <strong>security</strong>, and <strong>extensibility</strong>.
+</p>
 
   <br>
 
-  <p align="center">
-    <b>OpenSCP</b> is a two‑panel commander‑style file explorer written in C++/Qt with SFTP support (libssh2 + OpenSSL). It aims to be a lightweight, cross‑platform alternative to tools like WinSCP.
-  </p>
-
-  <br>
-
-  <img src="icons/screenshots/screenshot-main-window.png" alt="OpenSCP main window showing dual panels and transfer queue" width="900">
+  <img src="assets/screenshots/screenshot-main-window.png" alt="OpenSCP main window showing dual panels and transfer queue" width="900">
 
 </div>
-
----
 
 ## Current Features (v0.6.0)
 
@@ -145,9 +143,9 @@ cmake --build build -j
 ## Screenshots
 
 <p align="center">
-  <img src="icons/screenshots/screenshot-site-manager.png" alt="Site Manager with saved servers" width="32%">
-  <img src="icons/screenshots/screenshot-connect.png" alt="Connect dialog with authentication options" width="32%">
-  <img src="icons/screenshots/screenshot-transfer-queue.png" alt="Transfer queue with pause/resume and progress" width="32%">
+  <img src="assets/screenshots/screenshot-site-manager.png" alt="Site Manager with saved servers" width="32%">
+  <img src="assets/screenshots/screenshot-connect.png" alt="Connect dialog with authentication options" width="32%">
+  <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Transfer queue with pause/resume and progress" width="32%">
 </p>
 
 ---

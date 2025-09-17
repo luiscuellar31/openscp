@@ -1,29 +1,21 @@
 <div align="center">
-  <img src="icons/program/icon-openscp-2048.png" alt="Icono de OpenSCP" width="96">
-  <h1 align="center">OpenSCP (Pre‑alpha)</h1>
+  <img src="assets/program/icon-openscp-2048.png" alt="Icono de OpenSCP" width="128">
+  <h1 align="center">OpenSCP</h1>
 
-  <p><strong>Cliente SFTP de doble panel: simple y seguro</strong></p>
+  <p><strong>Cliente SFTP de doble panel enfocado en la simplicidad y la seguridad</strong></p>
+
+<p align="center">
+<strong>OpenSCP</strong> es un explorador de archivos estilo <em>two-panel commander</em> escrito en <strong>C++/Qt</strong>, con soporte <strong>SFTP</strong> (libssh2 + OpenSSL). Busca ser una alternativa ligera y multiplataforma a herramientas como WinSCP, enfocado en <strong>simplicidad</strong>, <strong>seguridad</strong> y <strong>extensibilidad</strong>.
+</p>
+
 
   <br>
 
-  <p align="center">
-    <b>OpenSCP</b> es un explorador de archivos estilo two‑panel commander escrito en C++/Qt, con soporte SFTP (libssh2 + OpenSSL). Busca ser una alternativa ligera y multiplataforma a herramientas como WinSCP.
-  </p>
-
-  <br>
-
-  <img src="icons/screenshots/screenshot-main-window.png" alt="Ventana principal de OpenSCP con doble panel y cola de transferencias" width="900">
+  <img src="assets/screenshots/screenshot-main-window.png" alt="Ventana principal de OpenSCP con doble panel y cola de transferencias" width="900">
 
 </div>
 
----
-
-## Descripción
-
-**OpenSCP** es un explorador de archivos estilo *two-panel commander* escrito en **C++/Qt**, con soporte **SFTP** (libssh2 + OpenSSL).
-Busca ser una alternativa ligera y multiplataforma a herramientas como WinSCP, enfocado en **simplicidad**, **seguridad** y **extensibilidad**.
-
-## Características actuales
+## Características actuales (v0.6.0)
 
 ### Doble panel (local ↔ remoto)
 
@@ -145,9 +137,9 @@ cmake --build build -j
 ## Capturas de pantalla
 
 <p align="center">
-  <img src="icons/screenshots/screenshot-site-manager.png" alt="Gestor de sitios con servidores guardados" width="32%">
-  <img src="icons/screenshots/screenshot-connect.png" alt="Diálogo de conexión con opciones de autenticación" width="32%">
-  <img src="icons/screenshots/screenshot-transfer-queue.png" alt="Cola de transferencias con pausar/reanudar y progreso" width="32%">
+  <img src="assets/screenshots/screenshot-site-manager.png" alt="Gestor de sitios con servidores guardados" width="32%">
+  <img src="assets/screenshots/screenshot-connect.png" alt="Diálogo de conexión con opciones de autenticación" width="32%">
+  <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Cola de transferencias con pausar/reanudar y progreso" width="32%">
 </p>
 
 ---

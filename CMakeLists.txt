@@ -104,33 +104,44 @@ qt_add_resources(openscp_hello i18n
 
 # Application icons (SVG). Packaged as Qt resources.
 set(ICON_FILES
-  icons/using/action-connect.svg
-  icons/using/action-copy.svg
-  icons/using/action-delete.svg
-  icons/using/action-disconnect.svg
-  icons/using/action-download.svg
-  icons/using/action-go-up.svg
-  icons/using/action-open-about-us.svg
-  icons/using/action-move-to-left.svg
-  icons/using/action-move-to-right.svg
-  icons/using/action-new-file.svg
-  icons/using/action-new-folder.svg
-  icons/using/action-open-folder.svg
-  icons/using/action-open-folder-remote.svg
-  icons/using/action-open-saved-sites.svg
-  icons/using/action-open-transfer-queue.svg
-  icons/using/action-open-settings.svg
-  icons/using/action-rename.svg
-  icons/using/action-upload.svg
+  assets/icons/action-connect.svg
+  assets/icons/action-copy.svg
+  assets/icons/action-delete.svg
+  assets/icons/action-disconnect.svg
+  assets/icons/action-download.svg
+  assets/icons/action-go-up.svg
+  assets/icons/action-open-about-us.svg
+  assets/icons/action-move-to-left.svg
+  assets/icons/action-move-to-right.svg
+  assets/icons/action-new-file.svg
+  assets/icons/action-new-folder.svg
+  assets/icons/action-open-folder.svg
+  assets/icons/action-open-folder-remote.svg
+  assets/icons/action-open-saved-sites.svg
+  assets/icons/action-open-transfer-queue.svg
+  assets/icons/action-open-settings.svg
+  assets/icons/action-rename.svg
+  assets/icons/action-upload.svg
 )
 
-# Aliases for stable paths: /icons/using/<name>.svg
+# Aliases for stable paths: /assets/icons/<name>.svg
 foreach(icon ${ICON_FILES})
   get_filename_component(_name ${icon} NAME)
-  set_source_files_properties(${icon} PROPERTIES QT_RESOURCE_ALIAS using/${_name})
+  set_source_files_properties(${icon} PROPERTIES QT_RESOURCE_ALIAS icons/${_name})
 endforeach()
 
 qt_add_resources(openscp_hello app_icons
-  PREFIX "/icons"
+  PREFIX "/assets"
   FILES ${ICON_FILES}
 )
+
+# Program assets (PNG icon for About dialog)
+qt_add_resources(openscp_hello app_images
+  PREFIX "/assets/program"
+  FILES
+    assets/program/icon-openscp-2048.png
+)
+
+# Ensure predictable in-resource path for the program icon
+set_source_files_properties(assets/program/icon-openscp-2048.png
+  PROPERTIES QT_RESOURCE_ALIAS "icon-openscp-2048.png")

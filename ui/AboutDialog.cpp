@@ -16,23 +16,58 @@
 #include <QDesktopServices>
 #include <QUrl>
 #include <QMessageBox>
+#include <QHBoxLayout>
+#include <QPixmap>
 
 AboutDialog::AboutDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle(tr("Acerca de OpenSCP"));
-    // Make the About dialog a bit larger (wider especially)
-    this->setMinimumSize(700, 440);
-    this->resize(820, 520);
+    // Layout-driven sizing: we'll compute the minimum size after creating widgets
 
     auto* lay = new QVBoxLayout(this);
 
+    // Top row: title/author on the left, app icon on the right
+    auto* topRow = new QHBoxLayout();
+    auto* leftCol = new QVBoxLayout();
+
     auto* title = new QLabel(QString("<b>OpenSCP v%1</b>").arg(QCoreApplication::applicationVersion()), this);
     title->setTextFormat(Qt::RichText);
-    lay->addWidget(title);
+    leftCol->addWidget(title);
 
     auto* author = new QLabel(tr("Autor: <a href=\"https://github.com/luiscuellar31\">luiscuellar31</a>"), this);
     author->setTextFormat(Qt::RichText);
     author->setOpenExternalLinks(true);
-    lay->addWidget(author);
+    leftCol->addWidget(author);
+
+    leftCol->addStretch(1);
+    topRow->addLayout(leftCol, 1);
+
+    auto* iconLabel = new QLabel(this);
+    QPixmap iconPix(QStringLiteral(":/assets/program/icon-openscp-2048.png"));
+    if (iconPix.isNull()) {
+        // Fallback: try to find the PNG on disk in dev environments
+        const QStringList bases = {
+            QDir::currentPath(),
+            QCoreApplication::applicationDirPath(),
+            QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(".."),
+            QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../Resources")
+        };
+        for (const QString& base : bases) {
+            QDir dir(base);
+            for (int i = 0; i < 5; ++i) {
+                const QString candidate = dir.filePath(QStringLiteral("assets/program/icon-openscp-2048.png"));
+                if (QFileInfo::exists(candidate)) { iconPix.load(candidate); break; }
+                if (!dir.cdUp()) break;
+            }
+            if (!iconPix.isNull()) break;
+        }
+    }
+    if (!iconPix.isNull()) {
+        iconLabel->setPixmap(iconPix.scaled(96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
+    iconLabel->setAlignment(Qt::AlignRight | Qt::AlignTop);
+    topRow->addWidget(iconLabel, 0);
+
+    lay->addLayout(topRow);
 
     auto* libsTitle = new QLabel(tr("Librerías utilizadas:"), this);
     lay->addWidget(libsTitle);
@@ -149,4 +184,13 @@ AboutDialog::AboutDialog(QWidget* parent) : QDialog(parent) {
     connect(btns, &QDialogButtonBox::rejected, this, &AboutDialog::reject);
     connect(btns, &QDialogButtonBox::accepted, this, &AboutDialog::accept);
     lay->addWidget(btns);
+
+    // Enforce a dynamic minimum size so controls never overlap when shrinking
+    lay->setSizeConstraint(QLayout::SetMinimumSize);
+    const QSize layMin = lay->minimumSize();
+    const int minW = qMax(700, layMin.width());
+    const int minH = qMax(440, layMin.height());
+    this->setMinimumSize(minW, minH);
+    // Start at a comfortable size, but never below min
+    this->resize(qMax(680, minW), qMax(520, minH));
 }

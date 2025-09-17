@@ -257,7 +257,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     leftPaneBar_->setToolButtonStyle(Qt::ToolButtonIconOnly);
     // Helper for icons from local resources
     auto resIcon = [](const char* fname) -> QIcon {
-        return QIcon(QStringLiteral(":/icons/using/") + QLatin1String(fname));
+        return QIcon(QStringLiteral(":/assets/icons/") + QLatin1String(fname));
     };
     // Left sub‑toolbar: Up, Copy, Move, Delete, Rename, New folder
     actUpLeft_ = leftPaneBar_->addAction(tr("Arriba"), this, &MainWindow::goUpLeft);
@@ -291,11 +291,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Action: copy from right panel to left (remote/local -> left)
     actCopyRight_ = new QAction(tr("Copiar al panel izquierdo"), this);
     connect(actCopyRight_, &QAction::triggered, this, &MainWindow::copyRightToLeft);
-    actCopyRight_->setIcon(QIcon(QLatin1String(":/icons/using/action-copy.svg")));
+    actCopyRight_->setIcon(QIcon(QLatin1String(":/assets/icons/action-copy.svg")));
     // Action: move from right panel to left
     actMoveRight_ = new QAction(tr("Mover al panel izquierdo"), this);
     connect(actMoveRight_, &QAction::triggered, this, &MainWindow::moveRightToLeft);
-    actMoveRight_->setIcon(QIcon(QLatin1String(":/icons/using/action-move-to-left.svg")));
+    actMoveRight_->setIcon(QIcon(QLatin1String(":/assets/icons/action-move-to-left.svg")));
     // Additional local actions (also in toolbar)
     actNewDirLeft_  = new QAction(tr("Nueva carpeta"), this);
     connect(actNewDirLeft_, &QAction::triggered, this, &MainWindow::newDirLeft);
@@ -636,7 +636,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     QDir().mkpath(downloadDir_);
 
     statusBar()->showMessage(tr("Listo"));
-    setWindowTitle(tr("OpenSCP (demo) — local/local (clic en Conectar para remoto)"));
+    setWindowTitle(tr("OpenSCP — local/local (clic en Conectar para remoto)"));
     resize(1100, 650);
 
     // Transfer queue
@@ -1143,12 +1143,12 @@ void MainWindow::disconnectSftp() {
     if (actMoveRightTb_)   actMoveRightTb_->setEnabled(true);
     if (actCopyRightTb_)   actCopyRightTb_->setEnabled(true);
     if (actChooseRight_) {
-        actChooseRight_->setIcon(QIcon(QLatin1String(":/icons/using/action-open-folder.svg")));
+        actChooseRight_->setIcon(QIcon(QLatin1String(":/assets/icons/action-open-folder.svg")));
         actChooseRight_->setEnabled(true);
         actChooseRight_->setToolTip(actChooseRight_->text());
     }
     statusBar()->showMessage(tr("Desconectado"), 3000);
-    setWindowTitle(tr("OpenSCP (demo) — local/local"));
+    setWindowTitle(tr("OpenSCP — local/local"));
     updateDeleteShortcutEnables();
 
     // Per spec: non‑modal Site Manager after disconnect (if enabled), without blocking UI
@@ -2674,14 +2674,14 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions& opt) {
     if (actRenameRight_)  actRenameRight_->setEnabled(true);
     if (actDeleteRight_)  actDeleteRight_->setEnabled(true);
     if (actChooseRight_) {
-        actChooseRight_->setIcon(QIcon(QLatin1String(":/icons/using/action-open-folder-remote.svg")));
+        actChooseRight_->setIcon(QIcon(QLatin1String(":/assets/icons/action-open-folder-remote.svg")));
         // Opening the system file explorer on a remote host is not supported cross‑platform.
         // Disable this action in remote mode to avoid confusion.
         actChooseRight_->setEnabled(false);
         actChooseRight_->setToolTip(tr("No disponible en remoto"));
     }
     statusBar()->showMessage(tr("Conectado (SFTP) a ") + QString::fromStdString(opt.host), 4000);
-    setWindowTitle(tr("OpenSCP (demo) — local/remoto (SFTP)"));
+    setWindowTitle(tr("OpenSCP — local/remoto (SFTP)"));
     updateRemoteWriteability();
     updateDeleteShortcutEnables();
 }

@@ -377,12 +377,12 @@
       <translation>Acerca de OpenSCP</translation>
     </message>
     <message>
-      <source>OpenSCP (demo) — local/local</source>
-      <translation>OpenSCP (demo) — local/local</translation>
+      <source>OpenSCP — local/local</source>
+      <translation>OpenSCP — local/local</translation>
     </message>
     <message>
-      <source>OpenSCP (demo) — local/remoto (SFTP)</source>
-      <translation>OpenSCP (demo) — local/remoto (SFTP)</translation>
+      <source>OpenSCP — local/remoto (SFTP)</source>
+      <translation>OpenSCP — local/remoto (SFTP)</translation>
     </message>
     <message>
       <source>Desconectado</source>
@@ -780,8 +780,8 @@ Huella: %4
       <translation>Listo</translation>
     </message>
     <message>
-      <source>OpenSCP (demo) — local/local (clic en Conectar para remoto)</source>
-      <translation>OpenSCP (demo) — local/local (clic en Conectar para remoto)</translation>
+      <source>OpenSCP — local/local (clic en Conectar para remoto)</source>
+      <translation>OpenSCP — local/local (clic en Conectar para remoto)</translation>
     </message>
     <message>
       <source>Selecciona carpeta izquierda</source>
