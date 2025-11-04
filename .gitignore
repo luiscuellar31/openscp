@@ -1,5 +1,25 @@
 # CMake / Build
 /build/
+/dist/
+cmake-build-*/
+
+# IDEs
+.idea/
+
+# Release artifacts (if created outside dist/)
+*.AppImage
+*.dmg
+*.sha256
+
+# Secrets / env files
+AuthKey_*.p8
+.env
+.env.*
+
+# Editor/backup/log files (optional)
+*.swp
+*~
+*.log
 /CMakeFiles/
 /CMakeCache.txt
 /compile_commands.json
@@ -19,4 +39,3 @@
 
 # macOS
 .DS_Store
-

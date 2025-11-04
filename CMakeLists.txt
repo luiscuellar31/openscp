@@ -71,6 +71,52 @@ if (APPLE)
   )
 endif()
 
+###############################################################################
+# macOS bundle (OpenSCP.app)
+# - Produce a proper .app bundle directly from CMake
+# - Inject Info.plist from assets/macos/Info.plist.in
+# - Set RPATH so dylibs are resolved from @executable_path/../Frameworks
+###############################################################################
+if(APPLE)
+  # Reproducible defaults (override via -D on the CMake command line if needed)
+  if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version" FORCE)
+  endif()
+  if(NOT DEFINED CMAKE_OSX_ARCHITECTURES)
+    set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Target architectures" FORCE)
+  endif()
+
+  # Bundle identifier propagated into Info.plist
+  set(BUNDLE_ID "com.luiscuellar.openscp" CACHE STRING "macOS bundle identifier")
+
+  # Configure Info.plist from template
+  set(_INFO_PLIST_IN  "${CMAKE_SOURCE_DIR}/assets/macos/Info.plist.in")
+  set(_INFO_PLIST_OUT "${CMAKE_CURRENT_BINARY_DIR}/OpenSCP-Info.plist")
+
+  # Variables used by Info.plist.in (@VAR@)
+  set(BUNDLE_IDENTIFIER       "${BUNDLE_ID}")
+  set(PRODUCT_NAME            "OpenSCP")
+  set(EXECUTABLE_NAME         "OpenSCP")
+  set(ICON_FILE               "OpenSCP")                    # without .icns extension
+  set(MINIMUM_SYSTEM_VERSION  "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+  set(VERSION_SHORT           "${PROJECT_VERSION}")
+  set(VERSION                 "${PROJECT_VERSION}")
+  string(TIMESTAMP CURRENT_YEAR "%Y")
+
+  configure_file("${_INFO_PLIST_IN}" "${_INFO_PLIST_OUT}" @ONLY)
+
+  # Convert target into a macOS bundle and set output name to OpenSCP
+  set_target_properties(openscp_hello PROPERTIES
+    MACOSX_BUNDLE TRUE
+    OUTPUT_NAME "OpenSCP"                                 # OpenSCP.app and inner binary 'OpenSCP'
+    MACOSX_BUNDLE_INFO_PLIST "${_INFO_PLIST_OUT}"
+
+    # Ensure runtime search path resolves to bundled Frameworks directory
+    INSTALL_RPATH "@executable_path/../Frameworks"
+    BUILD_WITH_INSTALL_RPATH TRUE
+  )
+endif()
+
 if (OPEN_SCP_BUILD_SECURE_ONLY)
   target_compile_definitions(openscp_hello PRIVATE OPEN_SCP_BUILD_SECURE_ONLY=1)
 endif()

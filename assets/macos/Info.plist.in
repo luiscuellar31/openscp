@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Info.plist skeleton for OpenSCP (macOS bundle)
+
+  How to use with CMake:
+    - Place this file at assets/macos/Info.plist.in
+    - In CMake for the app target, set:
+        set_target_properties(OpenSCP PROPERTIES
+          MACOSX_BUNDLE TRUE
+          MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/assets/macos/Info.plist.in")
+    - Provide values via configure_file() variables or rely on defaults in your build scripts.
+
+  Variables expected (CMake style):
+    @BUNDLE_IDENTIFIER@       e.g. com.example.openscp
+    @PRODUCT_NAME@            e.g. OpenSCP
+    @EXECUTABLE_NAME@         e.g. OpenSCP
+    @ICON_FILE@               e.g. OpenSCP (no .icns extension)
+    @MINIMUM_SYSTEM_VERSION@  e.g. 12.0
+    @VERSION_SHORT@           e.g. 0.6.0
+    @VERSION@                 e.g. 0.6.0 (or build number)
+    @CURRENT_YEAR@            e.g. 2025
+-->
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>@BUNDLE_IDENTIFIER@</string>
+
+  <key>CFBundleName</key>
+  <string>@PRODUCT_NAME@</string>
+
+  <key>CFBundleDisplayName</key>
+  <string>@PRODUCT_NAME@</string>
+
+  <key>CFBundleExecutable</key>
+  <string>@EXECUTABLE_NAME@</string>
+
+  <!-- Name without extension; the bundle looks for OpenSCP.icns inside Resources -->
+  <key>CFBundleIconFile</key>
+  <string>@ICON_FILE@</string>
+
+  <key>CFBundleShortVersionString</key>
+  <string>@VERSION_SHORT@</string>
+
+  <key>CFBundleVersion</key>
+  <string>@VERSION@</string>
+
+  <key>LSMinimumSystemVersion</key>
+  <string>@MINIMUM_SYSTEM_VERSION@</string>
+
+  <!-- Recommended common fields -->
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>NSPrincipalClass</key>
+  <string>NSApplication</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>LSRequiresNativeExecution</key>
+  <true/>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.developer-tools</string>
+
+  <key>NSHumanReadableCopyright</key>
+  <string>© @CURRENT_YEAR@ OpenSCP contributors</string>
+
+  <!-- Network/ATS: not required for SFTP; add exceptions only if you need insecure HTTP. -->
+  <!--
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsArbitraryLoads</key>
+    <false/>
+  </dict>
+  -->
+</dict>
+</plist>
+

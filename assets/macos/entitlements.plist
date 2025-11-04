@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Entitlements for signing with Hardened Runtime (non‑sandboxed).
+  Notes:
+    - Hardened Runtime is enabled via `codesign --options runtime` (see scripts/package_mac.sh).
+    - `com.apple.security.network.client` is a sandbox entitlement; outside of the sandbox it has no effect,
+      but keeping it here is harmless and documents intended capabilities if you later enable the sandbox.
+    - Do NOT enable `com.apple.security.get-task-allow` for release builds (kept false below).
+-->
+<dict>
+  <!-- Do not enable the App Sandbox for outside-App-Store distribution. -->
+  <key>com.apple.security.app-sandbox</key>
+  <false/>
+
+  <!-- Outgoing network connections (only meaningful when sandbox=true). -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+
+  <!-- Disallow attaching a debugger in release builds. -->
+  <key>com.apple.security.get-task-allow</key>
+  <false/>
+
+  <!-- No other hardened runtime exceptions requested. Add only if strictly necessary. -->
+</dict>
+</plist>
+
