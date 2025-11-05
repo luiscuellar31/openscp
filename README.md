@@ -145,40 +145,9 @@ open build/OpenSCP.app
 
 - See `assets/macos/README.md` for producing `OpenSCP.app` and an unsigned `.dmg` locally via `scripts/package_mac.sh`.
 
-### Linux AppImage (unsigned)
+### Linux (build + AppImage)
 
-- Produces a portable `.AppImage` for multi‑distro use via `scripts/package_appimage.sh`.
-- Requirements (tools in PATH): `linuxdeploy`, `linuxdeploy-plugin-qt`, `appimagetool`.
-
-Quick start:
-
-```bash
-# From repo root
-./scripts/package_appimage.sh
-
-# If Qt is not auto‑detected, point to your Qt 6 root
-CMAKE_PREFIX_PATH=/path/to/Qt/6.8.3/gcc_64 ./scripts/package_appimage.sh
-# or
-Qt6_DIR=/path/to/Qt/6.8.3/gcc_64/lib/cmake/Qt6 ./scripts/package_appimage.sh
-```
-
-Output:
-
-- `dist/OpenSCP-<version>-<arch>.AppImage` and `… .sha256` (where `<arch>` is typically `x86_64` or `aarch64`).
-
-Troubleshooting (Qt paths / libraries):
-
-- If CMake can’t find Qt 6, pass one of:
-  - `-DCMAKE_PREFIX_PATH=/path/to/Qt/6.8.3/gcc_64`
-  - `-DQt6_DIR=/path/to/Qt/6.8.3/gcc_64/lib/cmake/Qt6`
-- Ensure the Qt plugin for linuxdeploy is available as `linuxdeploy-plugin-qt` in your PATH.
-- Verify linkage of your non‑packaged binary:
-
-```bash
-ldd ./build/openscp_hello | grep -E 'Qt6|libssh2|ssl|crypto' || true
-```
-
-The AppImage bundling step uses linuxdeploy (+Qt plugin) to copy Qt and other runtime libs into the AppDir.
+- See `assets/linux/README.md` for building on Linux and producing an unsigned `.AppImage` via `scripts/package_appimage.sh`.
 
 ---
 
@@ -208,6 +177,15 @@ The AppImage bundling step uses linuxdeploy (+Qt plugin) to copy Qt and other ru
 * libssh2, OpenSSL, zlib, and Qt are owned by their respective authors.
 * License texts: [docs/credits/LICENSES/](docs/credits/LICENSES/) — license files for third‑party components (Qt, libssh2, OpenSSL, zlib, etc.).
 * Qt (LGPL) materials: [docs/credits](docs/credits) — see Qt LGPLv3 compliance and licensing notes.
+
+---
+
+## Contributing
+
+We welcome contributions from the community. Please read `CONTRIBUTING.md` for the workflow, branch strategy, and standards.
+
+> Note for contributors: Please open pull requests against the `development` branch.  
+> The `main` branch is reserved for stable releases.
 
 ---
 
