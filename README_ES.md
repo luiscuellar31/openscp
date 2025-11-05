@@ -140,40 +140,9 @@ open build/OpenSCP.app
 
 - Consulta `assets/macos/README.md` para generar `OpenSCP.app` y un `.dmg` sin firmar de forma local usando `scripts/package_mac.sh`.
 
-### AppImage en Linux (sin firmar)
+### Linux (compilación + AppImage)
 
-- Genera un `.AppImage` portable para múltiples distribuciones con `scripts/package_appimage.sh`.
-- Requisitos (herramientas en el PATH): `linuxdeploy`, `linuxdeploy-plugin-qt`, `appimagetool`.
-
-Inicio rápido:
-
-```bash
-# Desde la raíz del repositorio
-./scripts/package_appimage.sh
-
-# Si Qt no se detecta automáticamente, apunta a tu Qt 6
-CMAKE_PREFIX_PATH=/ruta/a/Qt/6.8.3/gcc_64 ./scripts/package_appimage.sh
-# o
-Qt6_DIR=/ruta/a/Qt/6.8.3/gcc_64/lib/cmake/Qt6 ./scripts/package_appimage.sh
-```
-
-Salida:
-
-- `dist/OpenSCP-<version>-<arch>.AppImage` y `… .sha256` (donde `<arch>` suele ser `x86_64` o `aarch64`).
-
-Solución de problemas (rutas de Qt / librerías):
-
-- Si CMake no encuentra Qt 6, pasa uno de:
-  - `-DCMAKE_PREFIX_PATH=/ruta/a/Qt/6.8.3/gcc_64`
-  - `-DQt6_DIR=/ruta/a/Qt/6.8.3/gcc_64/lib/cmake/Qt6`
-- Asegúrate de tener disponible el plugin Qt de linuxdeploy como `linuxdeploy-plugin-qt` en el PATH.
-- Verifica el enlace dinámico de tu binario (no empaquetado):
-
-```bash
-ldd ./build/openscp_hello | grep -E 'Qt6|libssh2|ssl|crypto' || true
-```
-
-El empaquetado AppImage usa linuxdeploy (+plugin Qt) para copiar Qt y otras librerías de runtime dentro del AppDir.
+- Consulta `assets/linux/README.md` para compilar en Linux y generar un `.AppImage` sin firmar con `scripts/package_appimage.sh`.
 ---
 
 ## Capturas de pantalla
