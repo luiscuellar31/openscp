@@ -12,9 +12,9 @@ Please take a moment to read these guidelines before opening issues or pull requ
   Contains only tested and released versions of OpenSCP.
   Do not submit pull requests directly to this branch.
 
-- `development` → Active development branch.
-  All new features, fixes, and improvements should be based on `development`.
-  Once ready, changes from `development` are merged into `main` for official releases.
+- `dev` → Active integration branch.
+  All new features, fixes, and improvements should be based on `dev`.
+  Once ready, changes from `dev` are merged into `main` for official releases.
 
 Note: Merges to `main` are performed by the maintainer only.
 
@@ -30,11 +30,11 @@ Note: Merges to `main` are performed by the maintainer only.
    cd openscp
    ```
 
-3. Create a new branch from `development` for your change:
+3. Create a new branch from `dev` for your change:
 
    ```bash
-   git checkout development
-   git pull origin development
+   git checkout dev
+   git pull origin dev
    git checkout -b feature/your-feature-name
    ```
 
@@ -53,7 +53,7 @@ Note: Merges to `main` are performed by the maintainer only.
 
 6. On GitHub, open a Pull Request (PR):
 
-   - Base branch: `development`
+   - Base branch: `dev`
    - Compare branch: `feature/your-feature-name`
 
 ---
@@ -69,7 +69,7 @@ Note: Merges to `main` are performed by the maintainer only.
 
 ## Pull Request Guidelines
 
-- Make sure your PR targets `development`, not `main`.
+- Make sure your PR targets `dev`, not `main`.
 - Keep PRs focused, one feature or fix per PR.
 - Include a clear description of what was changed and why.
 - If your PR addresses an issue, link it in the description (e.g., `Closes #42`).
@@ -84,4 +84,3 @@ By contributing, you agree that your contributions will be licensed under the sa
 
 Thank you for helping make OpenSCP better!
 Every contribution, big or small, is deeply appreciated.
-

@@ -174,6 +174,15 @@ open build/OpenSCP.app
 
 ---
 
+## Contribuir
+
+Se agradecen contribuciones de la comunidad. Por favor revisa `CONTRIBUTING.md` para conocer el flujo de trabajo, la estrategia de ramas y los estándares.
+
+> Nota para contribuidores: abre tus pull requests contra la rama `dev`.  
+> La rama `main` se reserva para versiones estables.
+
+---
+
 ## Estado del proyecto
 
 OpenSCP actualmente es utilizable en la mayoría de los casos.

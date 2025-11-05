@@ -184,7 +184,7 @@ open build/OpenSCP.app
 
 We welcome contributions from the community. Please read `CONTRIBUTING.md` for the workflow, branch strategy, and standards.
 
-> Note for contributors: Please open pull requests against the `development` branch.  
+> Note for contributors: Please open pull requests against the `dev` branch.  
 > The `main` branch is reserved for stable releases.
 
 ---
