@@ -9,22 +9,14 @@ Please take a moment to read these guidelines before opening issues or pull requ
 ## Branch Structure
 
 - `main` → Stable branch.
-  Contains only tested, working versions of OpenSCP.
-  Do not submit pull requests directly to this branch (PRs to `main` will be retargeted or closed).
+  Contains only tested and released versions of OpenSCP.
+  Do not submit pull requests directly to this branch.
 
-- `dev` → Active integration branch.
-  All new features, fixes, and improvements should be based on `dev`.
-  Once ready, changes from `dev` are merged into `main` for official releases.
+- `development` → Active development branch.
+  All new features, fixes, and improvements should be based on `development`.
+  Once ready, changes from `development` are merged into `main` for official releases.
 
 Note: Merges to `main` are performed by the maintainer only.
-
-### Stable Releases
-
-If you need a fixed/stable version, please use the Releases page:
-
-- Latest tagged builds: https://github.com/luiscuellar31/openscp/releases
-
-Tags are immutable and represent tested snapshots you can depend on. The `main` branch remains stable but may move forward between releases.
 
 ---
 
@@ -38,11 +30,11 @@ Tags are immutable and represent tested snapshots you can depend on. The `main` 
    cd openscp
    ```
 
-3. Create a new branch from `dev` for your change:
+3. Create a new branch from `development` for your change:
 
    ```bash
-   git checkout dev
-   git pull origin dev
+   git checkout development
+   git pull origin development
    git checkout -b feature/your-feature-name
    ```
 
@@ -61,7 +53,7 @@ Tags are immutable and represent tested snapshots you can depend on. The `main` 
 
 6. On GitHub, open a Pull Request (PR):
 
-   - Base branch: `dev` (all PRs must target `dev`)
+   - Base branch: `development`
    - Compare branch: `feature/your-feature-name`
 
 ---
@@ -77,7 +69,7 @@ Tags are immutable and represent tested snapshots you can depend on. The `main` 
 
 ## Pull Request Guidelines
 
-- Make sure your PR targets `dev`, not `main`.
+- Make sure your PR targets `development`, not `main`.
 - Keep PRs focused, one feature or fix per PR.
 - Include a clear description of what was changed and why.
 - If your PR addresses an issue, link it in the description (e.g., `Closes #42`).
@@ -92,3 +84,4 @@ By contributing, you agree that your contributions will be licensed under the sa
 
 Thank you for helping make OpenSCP better!
 Every contribution, big or small, is deeply appreciated.
+
