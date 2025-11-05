@@ -15,14 +15,6 @@
 
 </div>
 
-## Lanzamientos
-
-¿Buscas una versión fija/estable? Descarga las versiones etiquetadas:
-https://github.com/luiscuellar31/openscp/releases
-
-- `main`: código probado y estable (avanza entre lanzamientos)
-- `dev`: desarrollo activo (los PRs deben apuntar a dev)
-
 ## Características actuales (v0.6.0)
 
 ### Doble panel (local ↔ remoto)
@@ -185,6 +177,9 @@ open build/OpenSCP.app
 ## Contribuir
 
 Se agradecen contribuciones de la comunidad. Por favor revisa `CONTRIBUTING.md` para conocer el flujo de trabajo, la estrategia de ramas y los estándares.
+
+> Nota para contribuidores: abre tus pull requests contra la rama `dev`.  
+> La rama `main` se reserva para versiones estables.
 
 ---
 
