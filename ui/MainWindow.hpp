@@ -8,6 +8,7 @@
 #include <string>
 #include <QPointer>
 #include <memory>
+#include <condition_variable>
 
 class RemoteModel;              // fwd
 class QModelIndex;              // fwd for slot signatures
