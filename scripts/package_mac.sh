@@ -442,6 +442,14 @@ main() {
     [[ -f "${REPO_DIR}/docs/credits/CREDITS.md" ]] && cp "${REPO_DIR}/docs/credits/CREDITS.md" "$RESOURCES_DIR/licenses/"
   fi
 
+  # Copy full docs directory so About dialog can load ABOUT_LIBRARIES_* from docs/
+  # Place it under Resources/docs to match the runtime search paths in AboutDialog.cpp
+  if [[ -d "${REPO_DIR}/docs" ]]; then
+    mkdir -p "$RESOURCES_DIR/docs"
+    # Copy contents (including nested credits/LICENSES) to ensure internal references resolve
+    cp -R "${REPO_DIR}/docs/." "$RESOURCES_DIR/docs/"
+  fi
+
   # Clean env to avoid picking up conda/Homebrew plugin paths
   unset QT_PLUGIN_PATH QML2_IMPORT_PATH QML_IMPORT_PATH DYLD_FRAMEWORK_PATH DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH
 
