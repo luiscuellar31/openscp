@@ -184,11 +184,5 @@ open build/OpenSCP.app
 
 ## Contribuir
 
-Se agradecen contribuciones de la comunidad. Por favor revisa `CONTRIBUTING.md` para conocer el flujo de trabajo, la estrategia de ramas y los estándares.
-
----
-
-## Estado del proyecto
-
-OpenSCP actualmente es utilizable en la mayoría de los casos.
-Se agradecen *issues* y *pull requests*, especialmente sobre estabilidad en macOS y Linux, i18n y flujo de arrastrar-y-soltar.
+- Se agradecen contribuciones de la comunidad. Por favor revisa `CONTRIBUTING.md` para conocer el flujo de trabajo, la estrategia de ramas y los estándares.
+- Se agradecen *issues* y *pull requests*, especialmente sobre estabilidad en macOS y Linux, i18n y flujo de arrastrar-y-soltar.

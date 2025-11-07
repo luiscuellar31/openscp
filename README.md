@@ -190,11 +190,5 @@ open build/OpenSCP.app
 
 ## Contributing
 
-We welcome contributions from the community. Please read `CONTRIBUTING.md` for the workflow, branch strategy, and standards.
-
----
-
-## Project Status
-
-OpenSCP is currently usable in most cases.
-Issues and pull requests are welcome, especially around macOS/Linux stability, i18n, and the drag-and-drop flow.
+- We welcome contributions from the community. Please read `CONTRIBUTING.md` for the workflow, branch strategy, and standards.
+- Issues and pull requests are welcome, especially around macOS/Linux stability, i18n, and the drag-and-drop flow.
