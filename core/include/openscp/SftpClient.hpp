@@ -3,6 +3,7 @@
 #pragma once
 #include "SftpTypes.hpp"
 #include <functional>
+#include <memory>
 
 namespace openscp {
 
