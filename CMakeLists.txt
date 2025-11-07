@@ -10,6 +10,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets LinguistTools)
+include(GNUInstallDirs)
 
 option(OPEN_SCP_BUILD_SECURE_ONLY "Disable insecure fallback for secrets storage" ON)
 
@@ -191,3 +192,27 @@ qt_add_resources(openscp_hello app_images
 # Ensure predictable in-resource path for the program icon
 set_source_files_properties(assets/program/icon-openscp-2048.png
   PROPERTIES QT_RESOURCE_ALIAS "icon-openscp-2048.png")
+
+if(UNIX AND NOT APPLE)
+  # Desktop entry and app icon installation for Linux (XDG paths)
+  set(APP_DESKTOP_FILE assets/linux/openscp.desktop)
+  set(APP_ICON_PNG     assets/program/icon-openscp-2048.png)
+  set(APP_ICON_NAME    openscp) # must match Icon= in the .desktop
+
+  # Install binary
+  install(TARGETS openscp_hello RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+  # Install .desktop file
+  install(FILES ${APP_DESKTOP_FILE}
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
+
+  # Install app icon where desktops expect it
+  # Prefer hicolor 256x256; fall back to pixmaps for broad compatibility
+  install(FILES ${APP_ICON_PNG}
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps
+          RENAME ${APP_ICON_NAME}.png)
+
+  install(FILES ${APP_ICON_PNG}
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pixmaps
+          RENAME ${APP_ICON_NAME}.png)
+endif()
