@@ -191,3 +191,21 @@ qt_add_resources(openscp_hello app_images
 # Ensure predictable in-resource path for the program icon
 set_source_files_properties(assets/program/icon-openscp-2048.png
   PROPERTIES QT_RESOURCE_ALIAS "icon-openscp-2048.png")
+
+if(UNIX) #only linux
+
+set(FILE_DESKTOP
+  assets/linux/openscp.desktop)
+
+set(ICON_DESKTOP_APP
+  assets/program/icon-openscp-2048.png)
+#dont rule install
+install(TARGETS openscp_hello DESTINATION bin)
+#.svg are scalable
+#new folder openscp in share/icons/openscp/scalable/apps  
+install(FILES ${ICON_FILES} DESTINATION share/icons/openscp/scalable/apps)
+#dont good. .png only .svg no mapping .desktop no show. 
+#Change Icon Format SVG
+#install(FILES ${ICON_DESKTOP_APP} DESTINATION share/icons/openscp/hicolor/2048x2048/apps)
+install(FILES ${FILE_DESKTOP} DESTINATION share/applications)
+endif()
