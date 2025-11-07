@@ -336,6 +336,41 @@ copy_qt_framework() {
   fi
 }
 
+# Ensure Qt image format plugins (e.g., qpng) are present so QPixmap can
+# load PNGs from Qt resources in the About dialog.
+ensure_qt_imageformats() {
+  local dest_dir="$PLUGINS_DIR/imageformats"
+  # If qpng already present, nothing to do
+  if [[ -f "$dest_dir/libqpng.dylib" || -f "$dest_dir/qpng.dylib" ]]; then
+    return
+  fi
+  local src=""
+  # Prefer the prefix discovered from macdeployqt
+  if [[ -n "$QTPREFIX" && -d "$QTPREFIX/plugins/imageformats" ]]; then
+    src="$QTPREFIX/plugins/imageformats"
+  fi
+  # Fallback: try Homebrew Qt prefix
+  if [[ -z "$src" && $(command -v brew >/dev/null 2>&1; echo $?) -eq 0 ]]; then
+    local hbqt
+    hbqt=$(brew --prefix qt 2>/dev/null || brew --prefix qt@6 2>/dev/null || true)
+    if [[ -n "$hbqt" && -d "$hbqt/plugins/imageformats" ]]; then
+      src="$hbqt/plugins/imageformats"
+    fi
+  fi
+  if [[ -n "$src" && -d "$src" ]]; then
+    log "Ensuring Qt imageformats plugins from: $src"
+    mkdir -p "$dest_dir"
+    # Copy all imageformats to be safe (qpng, qjpeg, etc.)
+    if command -v ditto >/dev/null 2>&1; then
+      ditto "$src" "$dest_dir"
+    else
+      cp -R "$src/." "$dest_dir/"
+    fi
+  else
+    warn "Could not locate Qt imageformats plugins; PNG resources may fail to load"
+  fi
+}
+
 create_dmg() {
   local dmg_path="$1"; local volname="$2"; local src_app="$3"
   local staging
@@ -435,6 +470,13 @@ main() {
     fi
   fi
 
+  # Also copy the original PNG into Resources/assets/program so AboutDialog's
+  # filesystem fallback can find it if needed.
+  if [[ -f "${REPO_DIR}/assets/program/icon-openscp-2048.png" ]]; then
+    mkdir -p "$RESOURCES_DIR/assets/program"
+    cp "${REPO_DIR}/assets/program/icon-openscp-2048.png" "$RESOURCES_DIR/assets/program/"
+  fi
+
   # Copy licenses inside the bundle for user visibility
   if [[ -d "${REPO_DIR}/docs/credits/LICENSES" ]]; then
     mkdir -p "$RESOURCES_DIR/licenses"
@@ -488,6 +530,9 @@ main() {
       fi
     fi
   fi
+
+  # Ensure image format plugins (particularly qpng) are present for QPixmap PNGs
+  ensure_qt_imageformats
 
   # Bundle non-Qt dependencies: libssh2 + OpenSSL (libcrypto)
   log "Bundling non-Qt dependencies"
