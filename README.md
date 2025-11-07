@@ -20,6 +20,14 @@
 
 </div>
 
+## Releases
+
+Looking for a fixed/stable build? Download tagged releases:
+https://github.com/luiscuellar31/openscp/releases
+
+- `main`: tested, stable code (moves between releases)
+- `dev`: active development (PRs should target dev)
+
 ## Current Features (v0.6.0)
 
 ### Dual panels (local ↔ remote)
@@ -183,9 +191,6 @@ open build/OpenSCP.app
 ## Contributing
 
 We welcome contributions from the community. Please read `CONTRIBUTING.md` for the workflow, branch strategy, and standards.
-
-> Note for contributors: Please open pull requests against the `dev` branch.  
-> The `main` branch is reserved for stable releases.
 
 ---
 

@@ -9,14 +9,22 @@ Please take a moment to read these guidelines before opening issues or pull requ
 ## Branch Structure
 
 - `main` → Stable branch.
-  Contains only tested and released versions of OpenSCP.
-  Do not submit pull requests directly to this branch.
+  Contains only tested, working versions of OpenSCP.
+  Do not submit pull requests directly to this branch (PRs to `main` will be retargeted or closed).
 
 - `dev` → Active integration branch.
   All new features, fixes, and improvements should be based on `dev`.
   Once ready, changes from `dev` are merged into `main` for official releases.
 
 Note: Merges to `main` are performed by the maintainer only.
+
+### Stable Releases
+
+If you need a fixed/stable version, please use the Releases page:
+
+- Latest tagged builds: https://github.com/luiscuellar31/openscp/releases
+
+Tags are immutable and represent tested snapshots you can depend on. The `main` branch remains stable but may move forward between releases.
 
 ---
 
@@ -53,7 +61,7 @@ Note: Merges to `main` are performed by the maintainer only.
 
 6. On GitHub, open a Pull Request (PR):
 
-   - Base branch: `dev`
+   - Base branch: `dev` (all PRs must target `dev`)
    - Compare branch: `feature/your-feature-name`
 
 ---
