@@ -104,6 +104,15 @@ copy_licenses() {
   fi
 }
 
+# Copy full docs directory to the AppDir root so the About dialog can find
+# docs/ABOUT_LIBRARIES_*.txt by walking up from applicationDirPath.
+copy_docs() {
+  if [[ -d "${REPO_DIR}/docs" ]]; then
+    mkdir -p "$APPDIR/docs"
+    cp -R "${REPO_DIR}/docs/." "$APPDIR/docs/"
+  fi
+}
+
 main() {
   mkdir -p "$BUILD_DIR" "$DIST_DIR"
 
@@ -128,6 +137,7 @@ main() {
   prepare_desktop "$APPDIR/usr/share/applications/openscp.desktop"
   prepare_icon "$APPDIR/usr/share/icons/hicolor/256x256/apps/openscp.png"
   copy_licenses
+  copy_docs
 
   # Ensure tools
   ensure_cmd "$LINUXDEPLOY"
@@ -176,4 +186,3 @@ main() {
 }
 
 main "$@"
-
