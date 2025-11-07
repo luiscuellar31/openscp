@@ -10,6 +10,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets LinguistTools)
+include(GNUInstallDirs)
 
 option(OPEN_SCP_BUILD_SECURE_ONLY "Disable insecure fallback for secrets storage" ON)
 
@@ -192,20 +193,26 @@ qt_add_resources(openscp_hello app_images
 set_source_files_properties(assets/program/icon-openscp-2048.png
   PROPERTIES QT_RESOURCE_ALIAS "icon-openscp-2048.png")
 
-if(UNIX) #only linux
+if(UNIX AND NOT APPLE)
+  # Desktop entry and app icon installation for Linux (XDG paths)
+  set(APP_DESKTOP_FILE assets/linux/openscp.desktop)
+  set(APP_ICON_PNG     assets/program/icon-openscp-2048.png)
+  set(APP_ICON_NAME    openscp) # must match Icon= in the .desktop
 
-set(FILE_DESKTOP
-  assets/linux/openscp.desktop)
+  # Install binary
+  install(TARGETS openscp_hello RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-set(ICON_DESKTOP_APP
-  assets/program/icon-openscp-2048.png)
-#dont rule install
-install(TARGETS openscp_hello DESTINATION bin)
-#.svg are scalable
-#new folder openscp in share/icons/openscp/scalable/apps  
-install(FILES ${ICON_FILES} DESTINATION share/icons/openscp/scalable/apps)
-#dont good. .png only .svg no mapping .desktop no show. 
-#Change Icon Format SVG
-#install(FILES ${ICON_DESKTOP_APP} DESTINATION share/icons/openscp/hicolor/2048x2048/apps)
-install(FILES ${FILE_DESKTOP} DESTINATION share/applications)
+  # Install .desktop file
+  install(FILES ${APP_DESKTOP_FILE}
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
+
+  # Install app icon where desktops expect it
+  # Prefer hicolor 256x256; fall back to pixmaps for broad compatibility
+  install(FILES ${APP_ICON_PNG}
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps
+          RENAME ${APP_ICON_NAME}.png)
+
+  install(FILES ${APP_ICON_PNG}
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pixmaps
+          RENAME ${APP_ICON_NAME}.png)
 endif()
