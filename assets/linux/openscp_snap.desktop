@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=OpenSCP
+GenericName=SFTP Client
+Comment=Two‑panel SFTP client focused on simplicity and security
+Exec=openscp_hello
+Icon=${SNAP}/usr/share/icons/hicolor/256x256/apps/openscp.png
+Terminal=false
+Categories=Network;FileTransfer;Utility;
+Keywords=SFTP;SSH;File;Transfer;Client;
+StartupWMClass=OpenSCP

@@ -39,3 +39,7 @@ AuthKey_*.p8
 
 # macOS
 .DS_Store
+
+#linux
+*.snap
+*.flatpak

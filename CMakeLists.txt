@@ -199,6 +199,14 @@ if(UNIX AND NOT APPLE)
   set(APP_ICON_PNG     assets/program/icon-openscp-2048.png)
   set(APP_ICON_NAME    openscp) # must match Icon= in the .desktop
 
+  #folder docs
+  set(DOCS_PATH ${CMAKE_SOURCE_DIR}/docs)
+  file(GLOB_RECURSE DOCS_PATH_FILES "${DOCS_PATH}/*")
+
+  #install files docs
+  install(FILES ${DOCS_PATH_FILES}
+        DESTINATION share/openscp/docs)
+
   # Install binary
   install(TARGETS openscp_hello RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
