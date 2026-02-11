@@ -138,15 +138,32 @@ cd openscp
 rm -rf build
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-# Linux/Windows (ejecutable):
+# Linux/Windows:
 ./build/openscp_hello
-# macOS (bundle):
-open build/OpenSCP.app
 ```
 
-### DMG (local, sin firmar) en macOS
+Para macOS, usa el flujo de abajo (`./scripts/macos.sh ...`) en lugar de abrir `build/OpenSCP.app` directamente.
 
-- Consulta `assets/macos/README.md` para generar `OpenSCP.app` y un `.dmg` sin firmar de forma local usando `scripts/package_mac.sh`.
+### Flujo rápido macOS (recomendado)
+
+```bash
+# Desarrollo diario
+./scripts/macos.sh dev      # configure + build + run
+# o explícito:
+./scripts/macos.sh configure
+./scripts/macos.sh build
+./scripts/macos.sh run
+
+# Empaquetado local (sin firmar)
+./scripts/macos.sh app      # dist/*.zip (OpenSCP.app comprimida)
+./scripts/macos.sh pkg      # dist/*.pkg
+./scripts/macos.sh dmg      # dist/*.dmg
+# todos:
+./scripts/macos.sh dist
+```
+
+- `scripts/macos.sh` es el punto de entrada fijo para desarrollo y empaquetado en macOS.
+- Consulta `assets/macos/README.md` para detalles de distribución sin firma y notarización.
 
 ### Linux (compilación + AppImage)
 

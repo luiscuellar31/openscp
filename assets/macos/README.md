@@ -1,10 +1,13 @@
-# Local macOS Packaging (Unsigned DMG)
+# Local macOS Packaging (Unsigned app/pkg/dmg)
 
-This guide explains how to build the `.app` and create an unsigned `.dmg` locally for testing or for sharing with users who can open it manually on macOS.
+This guide explains how to build the `.app` and create unsigned macOS artifacts (`.zip` app, `.pkg`, `.dmg`) for local testing/distribution.
 
 - Target app bundle: `build/OpenSCP.app`
-- Output artifact: `dist/OpenSCP-<version>-<arch>-UNSIGNED.dmg` (where `<arch>` is `arm64`, `x86_64`, or `arm64+x86_64`)
-- Script: `scripts/package_mac.sh`
+- Output artifacts:
+  - `dist/OpenSCP-<version>-<arch>-UNSIGNED.zip` (app bundle zipped)
+  - `dist/OpenSCP-<version>-<arch>-UNSIGNED.pkg`
+  - `dist/OpenSCP-<version>-<arch>-UNSIGNED.dmg`
+- Scripts: `scripts/macos.sh` (simple entrypoint) and `scripts/package_mac.sh` (advanced)
 
 ## Prerequisites
 
@@ -21,22 +24,26 @@ Tip: The script clears env vars like `QT_PLUGIN_PATH` and `DYLD_*` to avoid pull
 
 ```bash
 # From the repository root
-export SKIP_CODESIGN=1
-export SKIP_NOTARIZATION=1
-./scripts/package_mac.sh
+./scripts/macos.sh app   # ZIP containing OpenSCP.app
+./scripts/macos.sh pkg   # PKG installer
+./scripts/macos.sh dmg   # DMG
+# all:
+./scripts/macos.sh dist
 ```
 
 What it does:
 - Builds Release with CMake and produces `build/OpenSCP.app`.
 - Runs `macdeployqt` to bundle Qt frameworks/plugins.
 - Bundles non‑Qt deps (`libssh2`, `libcrypto`) into `Contents/Frameworks` and fixes `install_name_tool` + `@rpath`.
-- Creates `dist/OpenSCP-<version>-<arch>-UNSIGNED.dmg` and `… .sha256`.
-- Prints a “GitHub Release Notes” block with usage instructions and SHA256.
+- Creates the selected artifact(s) under `dist/` plus `*.sha256`.
+- Prints release notes snippet when DMG is generated.
 
-## DMG and SHA256
+## Artifacts and SHA256
 
-- Artifact: `dist/OpenSCP-<version>-<arch>-UNSIGNED.dmg`
-- Checksum: `dist/OpenSCP-<version>-<arch>-UNSIGNED.dmg.sha256`
+- App ZIP: `dist/OpenSCP-<version>-<arch>-UNSIGNED.zip`
+- PKG: `dist/OpenSCP-<version>-<arch>-UNSIGNED.pkg`
+- DMG: `dist/OpenSCP-<version>-<arch>-UNSIGNED.dmg`
+- Checksum: same file with `.sha256` suffix.
 
 ## Architectures (Intel vs Apple Silicon)
 
@@ -52,9 +59,7 @@ export CMAKE_OSX_ARCHITECTURES='arm64;x86_64'
 # Make sure Qt matches your target arch; e.g. for Intel:
 export Qt6_DIR=/path/to/Qt/6.8.3/macos/lib/cmake/Qt6
 
-export SKIP_CODESIGN=1
-export SKIP_NOTARIZATION=1
-./scripts/package_mac.sh
+./scripts/macos.sh dist
 ```
 
 Tip: When switching architectures, clean the build directory (`rm -rf build`) to avoid cache mismatches.
@@ -92,7 +97,7 @@ Expect library references to be `@executable_path/../Frameworks/...`.
 
 ## Later: Signing/Notarization
 
-This flow intentionally skips signing/notarization. If you later obtain a Developer ID certificate and an Apple API key, you can remove the `SKIP_*` flags and configure:
+This flow intentionally skips signing/notarization. If you later obtain a Developer ID certificate and an Apple API key, run `scripts/package_mac.sh` directly and configure:
 - `APPLE_IDENTITY`, `APPLE_TEAM_ID`
 - `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, `APPLE_API_KEY_P8`
 

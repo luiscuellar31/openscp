@@ -12,6 +12,24 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(Qt6 REQUIRED COMPONENTS Widgets LinguistTools)
 include(GNUInstallDirs)
 
+# Qt 6.8.x on recent macOS SDKs may expose legacy AGL through WrapOpenGL.
+# AGL no longer ships a linkable binary, so strip it to avoid link errors.
+if (APPLE AND TARGET WrapOpenGL::WrapOpenGL)
+  get_target_property(_wrapogl_libs WrapOpenGL::WrapOpenGL INTERFACE_LINK_LIBRARIES)
+  if (_wrapogl_libs)
+    set(_wrapogl_filtered "")
+    foreach(_lib IN LISTS _wrapogl_libs)
+      if (_lib STREQUAL "-framework AGL" OR _lib MATCHES "(^|/)AGL(\\.framework)?$")
+        message(STATUS "OpenSCP: removing legacy OpenGL dependency '${_lib}'")
+        continue()
+      endif()
+      list(APPEND _wrapogl_filtered "${_lib}")
+    endforeach()
+    set_target_properties(WrapOpenGL::WrapOpenGL PROPERTIES
+      INTERFACE_LINK_LIBRARIES "${_wrapogl_filtered}")
+  endif()
+endif()
+
 option(OPEN_SCP_BUILD_SECURE_ONLY "Disable insecure fallback for secrets storage" ON)
 
 add_subdirectory(core)
@@ -116,6 +134,21 @@ if(APPLE)
     INSTALL_RPATH "@executable_path/../Frameworks"
     BUILD_WITH_INSTALL_RPATH TRUE
   )
+
+  # Bundle icon (.icns) for Finder/Dock.
+  set(_APP_ICON_FILE "${CMAKE_SOURCE_DIR}/assets/macos/${ICON_FILE}.icns")
+  if (EXISTS "${_APP_ICON_FILE}")
+    set_source_files_properties("${_APP_ICON_FILE}" PROPERTIES
+      MACOSX_PACKAGE_LOCATION "Resources")
+    target_sources(openscp_hello PRIVATE "${_APP_ICON_FILE}")
+    set_target_properties(openscp_hello PROPERTIES MACOSX_BUNDLE_ICON_FILE "${ICON_FILE}.icns")
+  else()
+    message(WARNING "Bundle icon missing: expected ${_APP_ICON_FILE}")
+  endif()
+
+  # Keep regular build fast/simple. Packaging/deployment is handled by:
+  #   ./scripts/macos.sh app|pkg|dmg|dist
+  # which runs scripts/package_mac.sh (macdeployqt + signing/notarization flow).
 endif()
 
 if (OPEN_SCP_BUILD_SECURE_ONLY)

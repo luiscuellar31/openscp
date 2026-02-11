@@ -17,6 +17,7 @@ set -euo pipefail
 #   CMAKE_OSX_ARCHITECTURES Default: "arm64" (or "arm64;x86_64" for universal naming)
 #   CMAKE_PREFIX_PATH      Path to your Qt 6 install root (if not in default search path)
 #   Qt6_DIR                Path to Qt6 CMake config dir (…/lib/cmake/Qt6); used to derive Qt bin for macdeployqt
+#   PACKAGE_FORMATS        Comma-separated outputs: app,pkg,dmg (default: dmg)
 #
 # Signing / notarization env vars:
 #   APPLE_IDENTITY         Required for signing, e.g. "Developer ID Application: Your Name (TEAMID)"
@@ -32,8 +33,11 @@ set -euo pipefail
 #   APPLE_API_KEY_P8       Contents of AuthKey_<KEYID>.p8 (as a secret)
 #   SKIP_NOTARIZATION      Set to 1 to skip notarization
 #
-# Output:
-#   dist/<APP_NAME>-<VERSION>-<ARCH>-UNSIGNED.dmg (hash .sha256 alongside)
+# Output (based on PACKAGE_FORMATS):
+#   app -> dist/<APP_NAME>-<VERSION>-<ARCH>-UNSIGNED.zip
+#   pkg -> dist/<APP_NAME>-<VERSION>-<ARCH>-UNSIGNED.pkg
+#   dmg -> dist/<APP_NAME>-<VERSION>-<ARCH>-UNSIGNED.dmg
+#   (hash .sha256 alongside each artifact)
 #     where <ARCH> is arm64, x86_64, or arm64+x86_64
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -44,6 +48,7 @@ APP_NAME="${APP_NAME:-OpenSCP}"
 BUNDLE_ID="${BUNDLE_ID:-com.example.openscp}"
 MINIMUM_SYSTEM_VERSION="${MINIMUM_SYSTEM_VERSION:-12.0}"
 ARCHS="${CMAKE_OSX_ARCHITECTURES:-arm64}"
+PACKAGE_FORMATS="${PACKAGE_FORMATS:-dmg}"
 ENTITLEMENTS_FILE="${ENTITLEMENTS_FILE:-${REPO_DIR}/assets/macos/entitlements.plist}"
 
 APP_DIR="${BUILD_DIR}/${APP_NAME}.app"
@@ -119,6 +124,31 @@ detect_version() {
 
 join_archs() {
   local s="$1"; echo "${s//;/+}"
+}
+
+normalize_formats() {
+  # "app,pkg dmg" -> "app,pkg,dmg"
+  local s="${1// /,}"
+  while [[ "$s" == *",,"* ]]; do s="${s//,,/,}"; done
+  s="${s#,}"
+  s="${s%,}"
+  echo "$s"
+}
+
+has_format() {
+  local needle="$1"
+  local haystack
+  haystack="$(normalize_formats "${PACKAGE_FORMATS}")"
+  [[ ",${haystack}," == *",${needle},"* ]]
+}
+
+write_sha256() {
+  local artifact="$1"
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$artifact" | awk '{print $1}' > "${artifact}.sha256"
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 -r "$artifact" | awk '{print $1}' > "${artifact}.sha256"
+  fi
 }
 
 generate_icns_from_png() {
@@ -375,11 +405,27 @@ create_dmg() {
   local dmg_path="$1"; local volname="$2"; local src_app="$3"
   local staging
   staging="$(mktemp -d)"
+  rm -f "$dmg_path"
   mkdir -p "$staging"
   cp -R "$src_app" "$staging/"
   ln -s /Applications "$staging/Applications"
   hdiutil create -quiet -fs HFS+ -volname "$volname" -srcfolder "$staging" -format UDZO -imagekey zlib-level=9 "$dmg_path"
   rm -rf "$staging"
+}
+
+create_app_zip() {
+  local zip_path="$1"; local src_app="$2"
+  rm -f "$zip_path"
+  # keepParent preserves "OpenSCP.app" as top-level entry in zip
+  ditto -c -k --sequesterRsrc --keepParent "$src_app" "$zip_path"
+}
+
+create_pkg() {
+  local pkg_path="$1"; local src_app="$2"
+  ensure_cmd productbuild
+  rm -f "$pkg_path"
+  # Unsigned component package for local distribution/testing.
+  productbuild --component "$src_app" /Applications "$pkg_path"
 }
 
 notarize_and_staple() {
@@ -425,11 +471,20 @@ main() {
     unset missing_notar
   fi
 
-  # Determine app version (from CMake) and architecture suffix
-  local version arch_suffix
+  # Determine app version (from CMake), architecture suffix and requested outputs.
+  local version arch_suffix selected_formats
   version="${APP_VERSION:-$(detect_version)}"
   # Artifact suffix reflects requested architectures (e.g., arm64, x86_64, or arm64+x86_64)
   arch_suffix="$(join_archs "$ARCHS")"
+  selected_formats="$(normalize_formats "$PACKAGE_FORMATS")"
+  PACKAGE_FORMATS="$selected_formats"
+  [[ -n "$PACKAGE_FORMATS" ]] || die "PACKAGE_FORMATS is empty. Use one or more of: app,pkg,dmg"
+  for fmt in ${PACKAGE_FORMATS//,/ }; do
+    case "$fmt" in
+      app|pkg|dmg) ;;
+      *) die "Unsupported PACKAGE_FORMATS entry: '$fmt' (allowed: app,pkg,dmg)" ;;
+    esac
+  done
 
   # Build the app (Release) — ensures OpenSCP.app exists
   log "Configuring and building (Release)"
@@ -504,11 +559,20 @@ main() {
   if [[ -n "$QTPREFIX" && -d "$QTPREFIX/lib" ]]; then
     libarg=( -libpath "$QTPREFIX/lib" )
   fi
-  local cmd=("$mqt" "$APP_DIR" -always-overwrite -verbose=3)
+  local cmd=("$mqt" "$APP_DIR" -always-overwrite -verbose=1)
   if ((${#libarg[@]:-0})); then
     cmd+=("${libarg[@]}")
   fi
-  "${cmd[@]}" || die "macdeployqt failed"
+  if ! "${cmd[@]}"; then
+    # Some local Qt installs on Apple Silicon can require running Qt host tools
+    # through Rosetta (seen as "Incompatible processor ... neon").
+    warn "macdeployqt failed natively; retrying through Rosetta (x86_64)"
+    local cmd_x86=(/usr/bin/arch -x86_64 "$mqt" "$APP_DIR" -always-overwrite -verbose=1)
+    if ((${#libarg[@]:-0})); then
+      cmd_x86+=("${libarg[@]}")
+    fi
+    "${cmd_x86[@]}" || die "macdeployqt failed (native and Rosetta fallback)"
+  fi
 
   # Force-copy essential Qt frameworks into the bundle from known prefixes
   if [[ -n "$QTPREFIX" && -d "$QTPREFIX/lib" ]]; then
@@ -563,33 +627,48 @@ main() {
     fi
   fi
 
-  # Create DMG
-  local dmg_path
-  dmg_path="${DIST_DIR}/${APP_NAME}-${version}-${arch_suffix}-UNSIGNED.dmg"
-  log "Creating DMG: $dmg_path"
-  rm -f "$dmg_path"
-  create_dmg "$dmg_path" "$APP_NAME" "$APP_DIR"
+  local produced=()
 
-  # Generate SHA256 checksum file
-  if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$dmg_path" | awk '{print $1}' > "${dmg_path}.sha256"
-  elif command -v openssl >/dev/null 2>&1; then
-    openssl dgst -sha256 -r "$dmg_path" | awk '{print $1}' > "${dmg_path}.sha256"
+  if has_format app; then
+    local app_zip_path
+    app_zip_path="${DIST_DIR}/${APP_NAME}-${version}-${arch_suffix}-UNSIGNED.zip"
+    log "Creating app ZIP: $app_zip_path"
+    create_app_zip "$app_zip_path" "$APP_DIR"
+    write_sha256 "$app_zip_path"
+    produced+=("$app_zip_path")
   fi
 
-  # Notarize and staple — completely skipped when SKIP_NOTARIZATION=1
-  if [[ "${SKIP_CODESIGN:-0}" != "1" && "${SKIP_NOTARIZATION:-0}" != "1" ]]; then
-    notarize_and_staple "$dmg_path"
-  else
-    warn "Skipping notarization (SKIP_CODESIGN or SKIP_NOTARIZATION enabled)"
+  if has_format pkg; then
+    local pkg_path
+    pkg_path="${DIST_DIR}/${APP_NAME}-${version}-${arch_suffix}-UNSIGNED.pkg"
+    log "Creating PKG: $pkg_path"
+    create_pkg "$pkg_path" "$APP_DIR"
+    write_sha256 "$pkg_path"
+    produced+=("$pkg_path")
+    if [[ "${SKIP_CODESIGN:-0}" != "1" && "${SKIP_NOTARIZATION:-0}" != "1" ]]; then
+      warn "Notarization flow is currently DMG-only; PKG was generated without notarization"
+    fi
   fi
 
-  log "Done: $dmg_path"
+  if has_format dmg; then
+    local dmg_path
+    dmg_path="${DIST_DIR}/${APP_NAME}-${version}-${arch_suffix}-UNSIGNED.dmg"
+    log "Creating DMG: $dmg_path"
+    create_dmg "$dmg_path" "$APP_NAME" "$APP_DIR"
+    write_sha256 "$dmg_path"
+    produced+=("$dmg_path")
 
-  # Print release notes snippet for GitHub Releases (unsigned app instructions)
-  local sha
-  if [[ -f "${dmg_path}.sha256" ]]; then sha="$(cat "${dmg_path}.sha256")"; else sha="(sha256 not generated)"; fi
-  cat << 'EOF'
+    # Notarize and staple — completely skipped when SKIP_NOTARIZATION=1
+    if [[ "${SKIP_CODESIGN:-0}" != "1" && "${SKIP_NOTARIZATION:-0}" != "1" ]]; then
+      notarize_and_staple "$dmg_path"
+    else
+      warn "Skipping notarization (SKIP_CODESIGN or SKIP_NOTARIZATION enabled)"
+    fi
+
+    # Print release notes snippet for GitHub Releases (unsigned app instructions)
+    local sha
+    if [[ -f "${dmg_path}.sha256" ]]; then sha="$(cat "${dmg_path}.sha256")"; else sha="(sha256 not generated)"; fi
+    cat << 'EOF'
 
 ====================
 GitHub Release Notes
@@ -608,7 +687,17 @@ To open it anyway:
 
 SHA256 (DMG):
 EOF
-  echo "${sha}  $(basename "$dmg_path")"
+    echo "${sha}  $(basename "$dmg_path")"
+  fi
+
+  log "Done. Produced artifacts:"
+  if ((${#produced[@]:-0})); then
+    for out in "${produced[@]}"; do
+      log "  - $out"
+    done
+  else
+    warn "No artifact generated (PACKAGE_FORMATS=${PACKAGE_FORMATS})"
+  fi
 }
 
 main "$@"
