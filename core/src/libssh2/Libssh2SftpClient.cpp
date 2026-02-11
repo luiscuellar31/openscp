@@ -10,6 +10,7 @@
 #include <chrono>
 #include <thread>
 #include <cstdlib>
+#include <cerrno>
 #ifndef _WIN32
 #include <sys/stat.h>
 #include <unistd.h>
@@ -80,6 +81,232 @@ static void auditLogHostKey(const std::string& host,
     (void)host; (void)port; (void)algorithm; (void)fingerprint; (void)status;
 #endif
 }
+
+#ifndef _WIN32
+static std::string posix_err(const char* where) {
+    return std::string(where) + ": " + std::strerror(errno);
+}
+
+static bool ensure_parent_dir_0700(const std::string& path, std::string* why) {
+    std::string dir = path;
+    std::size_t p = dir.find_last_of('/');
+    if (p == std::string::npos) dir = ".";
+    else dir.resize(p);
+    struct ::stat st{};
+    if (::stat(dir.c_str(), &st) != 0) {
+        if (::mkdir(dir.c_str(), 0700) != 0) {
+            if (why) *why = posix_err("mkdir");
+            return false;
+        }
+    } else if (::chmod(dir.c_str(), 0700) != 0) {
+        if (why) *why = posix_err("chmod(dir)");
+        return false;
+    }
+    return true;
+}
+
+static bool fsync_parent_dir(const std::string& path, std::string* why) {
+    std::string dir = path;
+    std::size_t p = dir.find_last_of('/');
+    if (p == std::string::npos) dir = ".";
+    else dir.resize(p);
+    int dfd = ::open(dir.c_str(), O_RDONLY);
+    if (dfd < 0) {
+        if (why) *why = posix_err("open(parent)");
+        return false;
+    }
+    if (::fsync(dfd) != 0) {
+        if (why) *why = posix_err("fsync(parent)");
+        ::close(dfd);
+        return false;
+    }
+    if (::close(dfd) != 0) {
+        if (why) *why = posix_err("close(parent)");
+        return false;
+    }
+    return true;
+}
+
+static bool write_all(int fd, const char* data, std::size_t len, std::string* why) {
+    std::size_t off = 0;
+    while (off < len) {
+        ssize_t w = ::write(fd, data + off, len - off);
+        if (w < 0) {
+            if (why) *why = posix_err("write");
+            return false;
+        }
+        off += (std::size_t)w;
+    }
+    return true;
+}
+#else
+static std::string win_err(const char* where, DWORD code) {
+    std::ostringstream oss;
+    oss << where << " (GetLastError=" << (unsigned long)code << ")";
+    return oss.str();
+}
+#endif
+
+static bool persist_known_hosts_atomic(LIBSSH2_KNOWNHOSTS* nh,
+                                       const std::string& khPath,
+                                       std::string* why) {
+    if (!nh) {
+        if (why) *why = "known_hosts no inicializado";
+        return false;
+    }
+    if (khPath.empty()) {
+        if (why) *why = "ruta known_hosts vacía";
+        return false;
+    }
+
+#ifndef _WIN32
+    if (!ensure_parent_dir_0700(khPath, why)) return false;
+    std::string tmp = khPath + ".tmpXXXXXX";
+    std::vector<char> tmpl(tmp.begin(), tmp.end());
+    tmpl.push_back('\0');
+    int fd = ::mkstemp(tmpl.data());
+    if (fd < 0) {
+        if (why) *why = posix_err("mkstemp");
+        return false;
+    }
+    const std::string tmpPath(tmpl.data());
+    if (::close(fd) != 0) {
+        if (why) *why = posix_err("close(tmp)");
+        (void)::unlink(tmpPath.c_str());
+        return false;
+    }
+
+    if (libssh2_knownhost_writefile(nh, tmpPath.c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH) != 0) {
+        if (why) *why = "libssh2_knownhost_writefile falló";
+        (void)::unlink(tmpPath.c_str());
+        return false;
+    }
+
+    if (::chmod(tmpPath.c_str(), 0600) != 0) {
+        if (why) *why = posix_err("chmod(tmp)");
+        (void)::unlink(tmpPath.c_str());
+        return false;
+    }
+
+    int fdw = ::open(tmpPath.c_str(), O_WRONLY);
+    if (fdw < 0) {
+        if (why) *why = posix_err("open(tmp)");
+        (void)::unlink(tmpPath.c_str());
+        return false;
+    }
+    if (::fchmod(fdw, 0600) != 0) {
+        if (why) *why = posix_err("fchmod(tmp)");
+        ::close(fdw);
+        (void)::unlink(tmpPath.c_str());
+        return false;
+    }
+    if (::fsync(fdw) != 0) {
+        if (why) *why = posix_err("fsync(tmp)");
+        ::close(fdw);
+        (void)::unlink(tmpPath.c_str());
+        return false;
+    }
+    if (::close(fdw) != 0) {
+        if (why) *why = posix_err("close(tmp)");
+        (void)::unlink(tmpPath.c_str());
+        return false;
+    }
+
+    if (::rename(tmpPath.c_str(), khPath.c_str()) != 0) {
+        if (why) *why = posix_err("rename(tmp->known_hosts)");
+        (void)::unlink(tmpPath.c_str());
+        return false;
+    }
+    if (!fsync_parent_dir(khPath, why)) return false;
+    return true;
+#else
+    std::string tmpPath = khPath + ".tmp";
+    if (libssh2_knownhost_writefile(nh, tmpPath.c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH) != 0) {
+        if (why) *why = "libssh2_knownhost_writefile falló";
+        return false;
+    }
+    HANDLE h = CreateFileA(tmpPath.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ,
+                           NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) {
+        DWORD ec = GetLastError();
+        (void)DeleteFileA(tmpPath.c_str());
+        if (why) *why = win_err("CreateFile(tmp)", ec);
+        return false;
+    }
+    if (!FlushFileBuffers(h)) {
+        DWORD ec = GetLastError();
+        CloseHandle(h);
+        (void)DeleteFileA(tmpPath.c_str());
+        if (why) *why = win_err("FlushFileBuffers(tmp)", ec);
+        return false;
+    }
+    if (!CloseHandle(h)) {
+        DWORD ec = GetLastError();
+        (void)DeleteFileA(tmpPath.c_str());
+        if (why) *why = win_err("CloseHandle(tmp)", ec);
+        return false;
+    }
+    if (!MoveFileExA(tmpPath.c_str(), khPath.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) {
+        DWORD ec = GetLastError();
+        (void)DeleteFileA(tmpPath.c_str());
+        if (why) *why = win_err("MoveFileEx(tmp->known_hosts)", ec);
+        return false;
+    }
+    return true;
+#endif
+}
+
+#ifndef _WIN32
+static bool persist_text_atomic(const std::string& path,
+                                const std::string& content,
+                                std::string* why) {
+    if (path.empty()) {
+        if (why) *why = "ruta destino vacía";
+        return false;
+    }
+    if (!ensure_parent_dir_0700(path, why)) return false;
+
+    std::string tmp = path + ".tmpXXXXXX";
+    std::vector<char> tmpl(tmp.begin(), tmp.end());
+    tmpl.push_back('\0');
+    int fd = ::mkstemp(tmpl.data());
+    if (fd < 0) {
+        if (why) *why = posix_err("mkstemp");
+        return false;
+    }
+    const std::string tmpPath(tmpl.data());
+
+    if (!write_all(fd, content.data(), content.size(), why)) {
+        ::close(fd);
+        (void)::unlink(tmpPath.c_str());
+        return false;
+    }
+    if (::fchmod(fd, 0600) != 0) {
+        if (why) *why = posix_err("fchmod(tmp)");
+        ::close(fd);
+        (void)::unlink(tmpPath.c_str());
+        return false;
+    }
+    if (::fsync(fd) != 0) {
+        if (why) *why = posix_err("fsync(tmp)");
+        ::close(fd);
+        (void)::unlink(tmpPath.c_str());
+        return false;
+    }
+    if (::close(fd) != 0) {
+        if (why) *why = posix_err("close(tmp)");
+        (void)::unlink(tmpPath.c_str());
+        return false;
+    }
+    if (::rename(tmpPath.c_str(), path.c_str()) != 0) {
+        if (why) *why = posix_err("rename(tmp->known_hosts)");
+        (void)::unlink(tmpPath.c_str());
+        return false;
+    }
+    if (!fsync_parent_dir(path, why)) return false;
+    return true;
+}
+#endif
 
 // Simple Base64 encoder (standard, with '=' padding)
 static std::string b64encode(const unsigned char* data, std::size_t len) {
@@ -566,51 +793,15 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
                 if (alg != 0 && libssh2_knownhost_addc(nh, hostForKnown.c_str(), nullptr,
                                            hostkey, (size_t)keylen,
                                            nullptr, 0, addMask, nullptr) == 0) {
-#ifndef _WIN32
-                    // Ensure parent dir exists with 0700
-                    auto ensure_parent_dir_0700 = [](const std::string& path){
-                        std::string dir = path;
-                        std::size_t p = dir.find_last_of('/');
-                        if (p != std::string::npos) dir.resize(p);
-                        struct ::stat st{};
-                        if (::stat(dir.c_str(), &st) != 0) { (void)::mkdir(dir.c_str(), 0700); }
-                        else { (void)::chmod(dir.c_str(), 0700); }
-                    };
-                    ensure_parent_dir_0700(khPath);
-                    // Atomic write using mkstemp + rename; if mkstemp fails, treat as save failure (no insecure fallback)
-                    std::string tmp = khPath + ".tmpXXXXXX";
-                    std::vector<char> tmpl(tmp.begin(), tmp.end());
-                    tmpl.push_back('\0');
-                    int fd = mkstemp(tmpl.data());
-                    if (fd >= 0) close(fd);
-                    if (fd >= 0 && libssh2_knownhost_writefile(nh, tmpl.data(), LIBSSH2_KNOWNHOST_FILE_OPENSSH) == 0) {
-                        (void)::chmod(tmpl.data(), 0600);
-                        int fdw = ::open(tmpl.data(), O_WRONLY); if (fdw >= 0) { ::fchmod(fdw, 0600); ::fsync(fdw); ::close(fdw); }
-                        if (::rename(tmpl.data(), khPath.c_str()) != 0) {
-                            if (opt.hostkey_status_cb) opt.hostkey_status_cb("No se pudo guardar known_hosts: fallo al renombrar");
-                        }
-                        // fsync parent dir
-                        std::string dir = khPath;
-                        std::size_t p = dir.find_last_of('/'); if (p != std::string::npos) dir.resize(p);
-                        int dfd = ::open(dir.c_str(), O_RDONLY); if (dfd >= 0) { ::fsync(dfd); ::close(dfd); }
-                        saved = true;
+                    std::string persistErr;
+                    saved = persist_known_hosts_atomic(nh, khPath, &persistErr);
+                    if (!saved && opt.hostkey_status_cb) {
+                        opt.hostkey_status_cb(std::string("No se pudo guardar known_hosts: ") + persistErr);
                     }
-#else
-                    // Windows: write to tmp then replace atomically
-                    std::string tmpPath = khPath + ".tmp"; // On Windows this is acceptable with MoveFileExA
-                    if (libssh2_knownhost_writefile(nh, tmpPath.c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH) == 0) {
-                        HANDLE h = CreateFileA(tmpPath.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ,
-                                               NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-                        if (h != INVALID_HANDLE_VALUE) { FlushFileBuffers(h); CloseHandle(h); }
-                        MoveFileExA(tmpPath.c_str(), khPath.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED);
-                        saved = true;
-                    }
-#endif
                 }
                 // Manual ED25519 fallback when libssh2 lacks knownhosts alg mask
 #ifdef LIBSSH2_HOSTKEY_TYPE_ED25519
                 if (!saved && keytype == LIBSSH2_HOSTKEY_TYPE_ED25519) {
-                    std::string werr;
                     std::fprintf(stderr, "[OpenSCP] Manual known_hosts write for ssh-ed25519 (libssh2 KH mask unavailable). keylen=%zu\n", (size_t)keylen);
                     std::fprintf(stderr, "[OpenSCP] key head: %02X %02X %02X %02X %02X %02X %02X %02X (base64 len=%zu)\n",
                                   (unsigned)((const unsigned char*)hostkey)[0], (unsigned)((const unsigned char*)hostkey)[1],
@@ -620,16 +811,6 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
                                   b64encode((const unsigned char*)hostkey, (size_t)keylen).size());
                     // Fallback: write OpenSSH line atomically (hashed or plain)
 #ifndef _WIN32
-                    // Ensure parent dir exists
-                    auto ensure_parent_dir_0700 = [](const std::string& path){
-                        std::string dir = path;
-                        std::size_t p = dir.find_last_of('/');
-                        if (p != std::string::npos) dir.resize(p);
-                        struct ::stat st{};
-                        if (::stat(dir.c_str(), &st) != 0) { (void)::mkdir(dir.c_str(), 0700); }
-                        else { (void)::chmod(dir.c_str(), 0700); }
-                    };
-                    ensure_parent_dir_0700(khPath);
                     // Read existing
                     std::string existing;
                     int rfd = ::open(khPath.c_str(), O_RDONLY);
@@ -648,17 +829,16 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
                         bool replaced=false; for(std::string& ln:lines){ if(ln.rfind(prefix,0)==0){ ln=prefix+b64; replaced=true; break; } }
                         if(!replaced) lines.push_back(prefix+b64);
                     }
-                    std::string tmpf = khPath + ".tmpXXXXXX"; std::vector<char> tmpl(tmpf.begin(), tmpf.end()); tmpl.push_back('\0');
-                    int tfd = ::mkstemp(tmpl.data());
-                    if (tfd >= 0) {
-                        for(size_t i=0;i<lines.size();++i){ if(!lines[i].empty()) (void)::write(tfd, lines[i].data(), (unsigned)lines[i].size()); const char nl='\n'; (void)::write(tfd, &nl, 1);}                        
-                        ::fchmod(tfd, 0600); ::fsync(tfd); ::close(tfd);
-                        if (::rename(tmpl.data(), khPath.c_str()) != 0) {
-                            if (opt.hostkey_status_cb) opt.hostkey_status_cb("No se pudo guardar known_hosts: fallo al renombrar (manual)");
-                        }
-                        std::string dir = khPath; std::size_t p = dir.find_last_of('/'); if (p!=std::string::npos) dir.resize(p);
-                        int dfd = ::open(dir.c_str(), O_RDONLY); if (dfd>=0){ ::fsync(dfd); ::close(dfd);}                        
-                        saved=true;
+                    std::string content;
+                    content.reserve(lines.size() * 64);
+                    for (const std::string& ln : lines) {
+                        if (!ln.empty()) content.append(ln);
+                        content.push_back('\n');
+                    }
+                    std::string persistErr;
+                    saved = persist_text_atomic(khPath, content, &persistErr);
+                    if (!saved && opt.hostkey_status_cb) {
+                        opt.hostkey_status_cb(std::string("No se pudo guardar known_hosts: ") + persistErr);
                     }
 #endif
                 }
@@ -1389,32 +1569,13 @@ bool RemoveKnownHostEntry(const std::string& khPath, const std::string& host, st
         }
         break;
     }
-#ifndef _WIN32
-    // Atomic write to temp file then rename
-    std::string tmp = khPath + ".tmpXXXXXX";
-    std::vector<char> tmpl(tmp.begin(), tmp.end()); tmpl.push_back('\0');
-    int fd = mkstemp(tmpl.data()); if (fd >= 0) close(fd);
-    std::string tmpPath(tmpl.data());
-    if (libssh2_knownhost_writefile(nh, tmpPath.c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH) != 0) {
-        libssh2_knownhost_free(nh); libssh2_session_free(s); err = "No se pudo escribir known_hosts"; return false;
+    std::string persistErr;
+    if (!persist_known_hosts_atomic(nh, khPath, &persistErr)) {
+        libssh2_knownhost_free(nh);
+        libssh2_session_free(s);
+        err = std::string("No se pudo escribir known_hosts: ") + persistErr;
+        return false;
     }
-    (void)::chmod(tmpPath.c_str(), 0600);
-    int fdw = ::open(tmpPath.c_str(), O_WRONLY);
-    if (fdw >= 0) { ::fchmod(fdw, 0600); ::fsync(fdw); ::close(fdw); }
-    ::rename(tmpPath.c_str(), khPath.c_str());
-    // fsync parent directory to persist rename
-    {
-        std::string dir = khPath;
-        std::size_t p = dir.find_last_of('/');
-        if (p != std::string::npos) dir.resize(p);
-        int dfd = ::open(dir.c_str(), O_RDONLY);
-        if (dfd >= 0) { ::fsync(dfd); ::close(dfd); }
-    }
-#else
-    if (libssh2_knownhost_writefile(nh, khPath.c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH) != 0) {
-        libssh2_knownhost_free(nh); libssh2_session_free(s); err = "No se pudo escribir known_hosts"; return false;
-    }
-#endif
     libssh2_knownhost_free(nh);
     libssh2_session_free(s);
     return true;
