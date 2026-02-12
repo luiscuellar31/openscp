@@ -19,12 +19,12 @@
 
 static QString persistStatusText(SecretStore::PersistStatus st) {
     switch (st) {
-        case SecretStore::PersistStatus::Stored: return QObject::tr("guardado");
-        case SecretStore::PersistStatus::Unavailable: return QObject::tr("no disponible");
-        case SecretStore::PersistStatus::PermissionDenied: return QObject::tr("permiso denegado");
-        case SecretStore::PersistStatus::BackendError: return QObject::tr("error del backend");
+        case SecretStore::PersistStatus::Stored: return QObject::tr("stored");
+        case SecretStore::PersistStatus::Unavailable: return QObject::tr("unavailable");
+        case SecretStore::PersistStatus::PermissionDenied: return QObject::tr("permission denied");
+        case SecretStore::PersistStatus::BackendError: return QObject::tr("backend error");
     }
-    return QObject::tr("desconocido");
+    return QObject::tr("unknown");
 }
 
 static QString persistIssueLine(const QString& label, const SecretStore::PersistResult& r) {
@@ -37,8 +37,8 @@ static void showPersistIssues(QWidget* parent, const QStringList& issues) {
     if (issues.isEmpty()) return;
     QMessageBox::warning(
         parent,
-        QObject::tr("Credenciales no guardadas"),
-        QObject::tr("No se pudieron guardar una o más credenciales en el backend seguro:\n%1")
+        QObject::tr("Credentials not saved"),
+        QObject::tr("Could not save one or more credentials in the secure backend:\\n%1")
             .arg(issues.join("\n"))
     );
 }
@@ -62,16 +62,16 @@ static bool hasDuplicateSiteName(const QVector<SiteEntry>& sites, const QString&
 static void showDuplicateNameIssue(QWidget* parent, const QString& name) {
     QMessageBox::warning(
         parent,
-        QObject::tr("Nombre duplicado"),
-        QObject::tr("Ya existe un sitio con el nombre \"%1\". Usa un nombre distinto.").arg(name)
+        QObject::tr("Duplicate name"),
+        QObject::tr("A site named \"%1\" already exists. Use a different name.").arg(name)
     );
 }
 
 static void showMissingNameIssue(QWidget* parent) {
     QMessageBox::warning(
         parent,
-        QObject::tr("Nombre requerido"),
-        QObject::tr("Escribe un nombre de sitio para guardar esta conexión.")
+        QObject::tr("Name required"),
+        QObject::tr("Enter a site name to save this connection.")
     );
 }
 
@@ -99,12 +99,12 @@ static void removeLegacyNameSecrets(SecretStore& store, const QString& siteName)
 }
 
 SiteManagerDialog::SiteManagerDialog(QWidget* parent) : QDialog(parent) {
-    setWindowTitle(tr("Gestor de sitios"));
+    setWindowTitle(tr("Site Manager"));
     resize(720, 480); // compact default; view will elide/scroll as needed
     auto* lay = new QVBoxLayout(this);
     table_ = new QTableWidget(this);
     table_->setColumnCount(3);
-    table_->setHorizontalHeaderLabels({ tr("Nombre"), tr("Host"), tr("Usuario") });
+    table_->setHorizontalHeaderLabels({ tr("Name"), tr("Host"), tr("User") });
     table_->verticalHeader()->setVisible(false);
     // Column sizing: stretch to fill and adapt on resize
     table_->horizontalHeader()->setStretchLastSection(true);
@@ -123,12 +123,12 @@ SiteManagerDialog::SiteManagerDialog(QWidget* parent) : QDialog(parent) {
     lay->addWidget(table_);
 
     auto* bb = new QDialogButtonBox(this);
-    btAdd_  = bb->addButton(tr("Añadir"),   QDialogButtonBox::ActionRole);
-    btEdit_ = bb->addButton(tr("Editar"),   QDialogButtonBox::ActionRole);
-    btDel_  = bb->addButton(tr("Eliminar"), QDialogButtonBox::ActionRole);
-    btConn_ = bb->addButton(tr("Conectar"), QDialogButtonBox::AcceptRole);
+    btAdd_  = bb->addButton(tr("Add"),   QDialogButtonBox::ActionRole);
+    btEdit_ = bb->addButton(tr("Edit"),   QDialogButtonBox::ActionRole);
+    btDel_  = bb->addButton(tr("Delete"), QDialogButtonBox::ActionRole);
+    btConn_ = bb->addButton(tr("Connect"), QDialogButtonBox::AcceptRole);
     btClose_= bb->addButton(QDialogButtonBox::Close);
-    if (btClose_) btClose_->setText(tr("Cerrar"));
+    if (btClose_) btClose_->setText(tr("Close"));
     lay->addWidget(bb);
     connect(btAdd_,  &QPushButton::clicked, this, &SiteManagerDialog::onAdd);
     connect(btEdit_, &QPushButton::clicked, this, &SiteManagerDialog::onEdit);
@@ -241,7 +241,7 @@ void SiteManagerDialog::refresh() {
 
 void SiteManagerDialog::onAdd() {
     ConnectionDialog dlg(this);
-    dlg.setWindowTitle(tr("Añadir sitio"));
+    dlg.setWindowTitle(tr("Add site"));
     dlg.setSiteNameVisible(true);
     if (dlg.exec() != QDialog::Accepted) return;
     auto opt = dlg.options();
@@ -271,11 +271,11 @@ void SiteManagerDialog::onAdd() {
     QStringList persistIssues;
     if (opt.password) {
         auto r = store.setSecret(siteSecretKey(e, QStringLiteral("password")), QString::fromStdString(*opt.password));
-        if (!r.ok()) persistIssues << persistIssueLine(tr("Contraseña"), r);
+        if (!r.ok()) persistIssues << persistIssueLine(tr("Password"), r);
     }
     if (opt.private_key_passphrase) {
         auto r = store.setSecret(siteSecretKey(e, QStringLiteral("keypass")), QString::fromStdString(*opt.private_key_passphrase));
-        if (!r.ok()) persistIssues << persistIssueLine(tr("Passphrase de clave"), r);
+        if (!r.ok()) persistIssues << persistIssueLine(tr("Key passphrase"), r);
     }
     showPersistIssues(this, persistIssues);
 }
@@ -288,7 +288,7 @@ void SiteManagerDialog::onEdit() {
     if (modelIndex < 0 || modelIndex >= sites_.size()) return;
     SiteEntry e = sites_[modelIndex];
     ConnectionDialog dlg(this);
-    dlg.setWindowTitle(tr("Editar sitio"));
+    dlg.setWindowTitle(tr("Edit site"));
     dlg.setSiteNameVisible(true);
     dlg.setSiteName(e.name);
     // Preload site options and stored secrets
@@ -340,11 +340,11 @@ void SiteManagerDialog::onEdit() {
     QStringList persistIssues;
     if (e.opt.password) {
         auto r = store.setSecret(siteSecretKey(e, QStringLiteral("password")), QString::fromStdString(*e.opt.password));
-        if (!r.ok()) persistIssues << persistIssueLine(tr("Contraseña"), r);
+        if (!r.ok()) persistIssues << persistIssueLine(tr("Password"), r);
     }
     if (e.opt.private_key_passphrase) {
         auto r = store.setSecret(siteSecretKey(e, QStringLiteral("keypass")), QString::fromStdString(*e.opt.private_key_passphrase));
-        if (!r.ok()) persistIssues << persistIssueLine(tr("Passphrase de clave"), r);
+        if (!r.ok()) persistIssues << persistIssueLine(tr("Key passphrase"), r);
     }
     if (!oldName.isEmpty() && oldName != name) {
         removeLegacyNameSecrets(store, oldName);
@@ -424,7 +424,7 @@ bool SiteManagerDialog::selectedOptions(openscp::SessionOptions& out) const {
         haveSecret = true;
         auto r = store.setSecret(siteSecretKey(selected, QStringLiteral("password")), *legacyPw);
         if (r.ok()) migratedNamePw = true;
-        else persistIssues << persistIssueLine(QObject::tr("Contraseña"), r);
+        else persistIssues << persistIssueLine(QObject::tr("Password"), r);
     }
     if (auto kp = store.getSecret(siteSecretKey(selected, QStringLiteral("keypass")))) {
         out.private_key_passphrase = kp->toStdString();
@@ -434,7 +434,7 @@ bool SiteManagerDialog::selectedOptions(openscp::SessionOptions& out) const {
         haveSecret = true;
         auto r = store.setSecret(siteSecretKey(selected, QStringLiteral("keypass")), *legacyKp);
         if (r.ok()) migratedNameKp = true;
-        else persistIssues << persistIssueLine(QObject::tr("Passphrase de clave"), r);
+        else persistIssues << persistIssueLine(QObject::tr("Key passphrase"), r);
     }
     if (hasStableId && migratedNamePw) store.removeSecret(legacyNameSecretKey(name, QStringLiteral("password")));
     if (hasStableId && migratedNameKp) store.removeSecret(legacyNameSecretKey(name, QStringLiteral("keypass")));
@@ -451,13 +451,13 @@ bool SiteManagerDialog::selectedOptions(openscp::SessionOptions& out) const {
                 out.password = oldPw.toStdString();
                 auto r = store.setSecret(siteSecretKey(selected, QStringLiteral("password")), oldPw);
                 if (r.ok()) migratedPw = true;
-                else persistIssues << persistIssueLine(QObject::tr("Contraseña"), r);
+                else persistIssues << persistIssueLine(QObject::tr("Password"), r);
             }
             if (!oldKp.isEmpty()) {
                 out.private_key_passphrase = oldKp.toStdString();
                 auto r = store.setSecret(siteSecretKey(selected, QStringLiteral("keypass")), oldKp);
                 if (r.ok()) migratedKp = true;
-                else persistIssues << persistIssueLine(QObject::tr("Passphrase de clave"), r);
+                else persistIssues << persistIssueLine(QObject::tr("Key passphrase"), r);
             }
         }
         s.endArray();

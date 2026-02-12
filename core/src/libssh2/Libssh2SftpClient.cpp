@@ -208,7 +208,7 @@ static TransferIntegrityPolicy integrity_policy_from_env(TransferIntegrityPolicy
 static bool seek_local_file(FILE* f, std::uint64_t off, std::string* why) {
 #ifdef _WIN32
     if (_fseeki64(f, (__int64)off, SEEK_SET) != 0) {
-        if (why) *why = "seek local falló";
+        if (why) *why = "local seek failed";
         return false;
     }
 #else
@@ -249,13 +249,13 @@ static bool get_local_file_size(const std::string& path, std::uint64_t& out, std
 
 static bool flush_local_file(FILE* f, std::string* why) {
     if (std::fflush(f) != 0) {
-        if (why) *why = "fflush(local) falló";
+        if (why) *why = "fflush(local) failed";
         return false;
     }
 #ifdef _WIN32
     const int fd = _fileno(f);
     if (fd >= 0 && _commit(fd) != 0) {
-        if (why) *why = "commit(local) falló";
+        if (why) *why = "commit(local) failed";
         return false;
     }
 #else
@@ -294,7 +294,7 @@ static bool hash_local_range(const std::string& path,
                              std::string* why) {
     FILE* f = ::fopen(path.c_str(), "rb");
     if (!f) {
-        if (why) *why = "No se pudo abrir archivo local para hash";
+        if (why) *why = "Could not open local file for hashing";
         return false;
     }
     if (!seek_local_file(f, offset, why)) {
@@ -303,12 +303,12 @@ static bool hash_local_range(const std::string& path,
     }
     EVP_MD_CTX* ctx = EVP_MD_CTX_new();
     if (!ctx) {
-        if (why) *why = "No se pudo inicializar contexto hash local";
+        if (why) *why = "Could not initialize local hash context";
         std::fclose(f);
         return false;
     }
     if (EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr) != 1) {
-        if (why) *why = "EVP_DigestInit_ex(local) falló";
+        if (why) *why = "EVP_DigestInit_ex(local) failed";
         EVP_MD_CTX_free(ctx);
         std::fclose(f);
         return false;
@@ -325,7 +325,7 @@ static bool hash_local_range(const std::string& path,
             return false;
         }
         if (EVP_DigestUpdate(ctx, buf.data(), n) != 1) {
-            if (why) *why = "EVP_DigestUpdate(local) falló";
+            if (why) *why = "EVP_DigestUpdate(local) failed";
             EVP_MD_CTX_free(ctx);
             std::fclose(f);
             return false;
@@ -334,7 +334,7 @@ static bool hash_local_range(const std::string& path,
     }
     unsigned int outLen = 0;
     if (EVP_DigestFinal_ex(ctx, out.data(), &outLen) != 1 || outLen != SHA256_DIGEST_LENGTH) {
-        if (why) *why = "EVP_DigestFinal_ex(local) falló";
+        if (why) *why = "EVP_DigestFinal_ex(local) failed";
         EVP_MD_CTX_free(ctx);
         std::fclose(f);
         return false;
@@ -362,18 +362,18 @@ static bool hash_remote_range(LIBSSH2_SFTP* sftp,
         sftp, remote.c_str(), (unsigned)remote.size(),
         LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
     if (!rh) {
-        if (why) *why = "No se pudo abrir remoto para hash";
+        if (why) *why = "Could not open remote file for hashing";
         return false;
     }
     libssh2_sftp_seek64(rh, (libssh2_uint64_t)offset);
     EVP_MD_CTX* ctx = EVP_MD_CTX_new();
     if (!ctx) {
-        if (why) *why = "No se pudo inicializar contexto hash remoto";
+        if (why) *why = "Could not initialize remote hash context";
         libssh2_sftp_close(rh);
         return false;
     }
     if (EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr) != 1) {
-        if (why) *why = "EVP_DigestInit_ex(remoto) falló";
+        if (why) *why = "EVP_DigestInit_ex(remote) failed";
         EVP_MD_CTX_free(ctx);
         libssh2_sftp_close(rh);
         return false;
@@ -390,7 +390,7 @@ static bool hash_remote_range(LIBSSH2_SFTP* sftp,
             return false;
         }
         if (EVP_DigestUpdate(ctx, buf.data(), (std::size_t)n) != 1) {
-            if (why) *why = "EVP_DigestUpdate(remoto) falló";
+            if (why) *why = "EVP_DigestUpdate(remote) failed";
             EVP_MD_CTX_free(ctx);
             libssh2_sftp_close(rh);
             return false;
@@ -399,7 +399,7 @@ static bool hash_remote_range(LIBSSH2_SFTP* sftp,
     }
     unsigned int outLen = 0;
     if (EVP_DigestFinal_ex(ctx, out.data(), &outLen) != 1 || outLen != SHA256_DIGEST_LENGTH) {
-        if (why) *why = "EVP_DigestFinal_ex(remoto) falló";
+        if (why) *why = "EVP_DigestFinal_ex(remote) failed";
         EVP_MD_CTX_free(ctx);
         libssh2_sftp_close(rh);
         return false;
@@ -417,17 +417,17 @@ static bool hash_remote_full(LIBSSH2_SFTP* sftp,
         sftp, remote.c_str(), (unsigned)remote.size(),
         LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
     if (!rh) {
-        if (why) *why = "No se pudo abrir remoto para hash completo";
+        if (why) *why = "Could not open remote file for full hashing";
         return false;
     }
     EVP_MD_CTX* ctx = EVP_MD_CTX_new();
     if (!ctx) {
-        if (why) *why = "No se pudo inicializar contexto hash remoto completo";
+        if (why) *why = "Could not initialize full remote hash context";
         libssh2_sftp_close(rh);
         return false;
     }
     if (EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr) != 1) {
-        if (why) *why = "EVP_DigestInit_ex(remoto-full) falló";
+        if (why) *why = "EVP_DigestInit_ex(remote-full) failed";
         EVP_MD_CTX_free(ctx);
         libssh2_sftp_close(rh);
         return false;
@@ -437,7 +437,7 @@ static bool hash_remote_full(LIBSSH2_SFTP* sftp,
         ssize_t n = libssh2_sftp_read(rh, (char*)buf.data(), buf.size());
         if (n > 0) {
             if (EVP_DigestUpdate(ctx, buf.data(), (std::size_t)n) != 1) {
-                if (why) *why = "EVP_DigestUpdate(remoto-full) falló";
+                if (why) *why = "EVP_DigestUpdate(remote-full) failed";
                 EVP_MD_CTX_free(ctx);
                 libssh2_sftp_close(rh);
                 return false;
@@ -445,14 +445,14 @@ static bool hash_remote_full(LIBSSH2_SFTP* sftp,
             continue;
         }
         if (n == 0) break;
-        if (why) *why = "Lectura remota falló durante hash completo";
+        if (why) *why = "Remote read failed during full hash";
         EVP_MD_CTX_free(ctx);
         libssh2_sftp_close(rh);
         return false;
     }
     unsigned int outLen = 0;
     if (EVP_DigestFinal_ex(ctx, out.data(), &outLen) != 1 || outLen != SHA256_DIGEST_LENGTH) {
-        if (why) *why = "EVP_DigestFinal_ex(remoto-full) falló";
+        if (why) *why = "EVP_DigestFinal_ex(remote-full) failed";
         EVP_MD_CTX_free(ctx);
         libssh2_sftp_close(rh);
         return false;
@@ -466,11 +466,11 @@ static bool persist_known_hosts_atomic(LIBSSH2_KNOWNHOSTS* nh,
                                        const std::string& khPath,
                                        std::string* why) {
     if (!nh) {
-        if (why) *why = "known_hosts no inicializado";
+        if (why) *why = "known_hosts not initialized";
         return false;
     }
     if (khPath.empty()) {
-        if (why) *why = "ruta known_hosts vacía";
+        if (why) *why = "empty known_hosts path";
         return false;
     }
 
@@ -492,7 +492,7 @@ static bool persist_known_hosts_atomic(LIBSSH2_KNOWNHOSTS* nh,
     }
 
     if (libssh2_knownhost_writefile(nh, tmpPath.c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH) != 0) {
-        if (why) *why = "libssh2_knownhost_writefile falló";
+        if (why) *why = "libssh2_knownhost_writefile failed";
         (void)::unlink(tmpPath.c_str());
         return false;
     }
@@ -537,7 +537,7 @@ static bool persist_known_hosts_atomic(LIBSSH2_KNOWNHOSTS* nh,
 #else
     std::string tmpPath = khPath + ".tmp";
     if (libssh2_knownhost_writefile(nh, tmpPath.c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH) != 0) {
-        if (why) *why = "libssh2_knownhost_writefile falló";
+        if (why) *why = "libssh2_knownhost_writefile failed";
         return false;
     }
     HANDLE h = CreateFileA(tmpPath.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ,
@@ -576,7 +576,7 @@ static bool persist_text_atomic(const std::string& path,
                                 const std::string& content,
                                 std::string* why) {
     if (path.empty()) {
-        if (why) *why = "ruta destino vacía";
+        if (why) *why = "empty destination path";
         return false;
     }
     if (!ensure_parent_dir_0700(path, why)) return false;
@@ -850,14 +850,14 @@ bool Libssh2SftpClient::tcpConnect(const std::string& host, uint16_t port, std::
         s = -1;
     }
     freeaddrinfo(res);
-    err = "No se pudo conectar al host/puerto.";
+    err = "Could not connect to host/port.";
     return false;
 }
 
 bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string& err) {
     session_ = libssh2_session_init();
     if (!session_) {
-        err = "libssh2_session_init falló";
+        err = "libssh2_session_init failed";
         return false;
     }
 
@@ -890,7 +890,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
 
     // Handshake
     if (libssh2_session_handshake(session_, sock_) != 0) {
-        err = "SSH handshake falló";
+        err = "SSH handshake failed";
         return false;
     }
 
@@ -909,7 +909,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
     } else {
         LIBSSH2_KNOWNHOSTS* nh = libssh2_knownhost_init(session_);
         if (!nh) {
-            err = "No se pudo inicializar known_hosts";
+            err = "Could not initialize known_hosts";
             return false;
         }
 
@@ -930,7 +930,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
         }
         if (!khLoaded && opt.known_hosts_policy == openscp::KnownHostsPolicy::Strict) {
             libssh2_knownhost_free(nh);
-            err = "known_hosts no disponible o ilegible (política estricta)";
+            err = "known_hosts unavailable or unreadable (strict policy)";
             return false;
         }
 
@@ -939,7 +939,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
         const char* hostkey = (const char*)libssh2_session_hostkey(session_, &keylen, &keytype);
         if (!hostkey || keylen == 0) {
             libssh2_knownhost_free(nh);
-            err = "No se pudo obtener host key";
+            err = "Could not get host key";
             return false;
         }
 
@@ -1085,7 +1085,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
             if (!confirmed) {
                 libssh2_knownhost_free(nh);
                 auditLogHostKey(opt.host, opt.port, algWithBits.str(), fpStr, "rejected");
-                err = "Host desconocido: huella no confirmada por el usuario";
+                err = "Unknown host: fingerprint not confirmed by user";
                 return false;
             }
 
@@ -1094,8 +1094,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
                 libssh2_knownhost_free(nh);
                 core_logf(CoreLogLevel::Info, "Saving hostkey skipped: no khPath or unsupported algorithm");
                 if (opt.hostkey_status_cb) {
-                    std::string why = khPath.empty() ? "Ruta known_hosts no definida" : "Algoritmo de hostkey sin soporte de known_hosts en libssh2";
-                    opt.hostkey_status_cb(std::string("No se podrá guardar la huella: ") + why);
+                    std::string why = khPath.empty() ? "known_hosts path is not set" : "Host key algorithm lacks known_hosts support in libssh2";
+                    opt.hostkey_status_cb(std::string("Fingerprint cannot be saved: ") + why);
                 }
                 auditLogHostKey(opt.host, opt.port, algWithBits.str(), fpStr, "skipped");
                 // Continue without persisting
@@ -1120,7 +1120,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
                     std::string persistErr;
                     saved = persist_known_hosts_atomic(nh, khPath, &persistErr);
                     if (!saved && opt.hostkey_status_cb) {
-                        opt.hostkey_status_cb(std::string("No se pudo guardar known_hosts: ") + persistErr);
+                        opt.hostkey_status_cb(std::string("Could not save known_hosts: ") + persistErr);
                     }
                 }
                 // Manual ED25519 fallback when libssh2 lacks knownhosts alg mask
@@ -1171,7 +1171,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
                     std::string persistErr;
                     saved = persist_text_atomic(khPath, content, &persistErr);
                     if (!saved && opt.hostkey_status_cb) {
-                        opt.hostkey_status_cb(std::string("No se pudo guardar known_hosts: ") + persistErr);
+                        opt.hostkey_status_cb(std::string("Could not save known_hosts: ") + persistErr);
                     }
 #endif
                 }
@@ -1185,7 +1185,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
                     bool proceed = (opt.hostkey_confirm_cb && opt.hostkey_confirm_cb(opt.host, opt.port, algWithBits.str(), fpStr, /*canSave*/false));
                     if (!proceed) {
                         auditLogHostKey(opt.host, opt.port, algWithBits.str(), fpStr, "save_failed");
-                        err = "No se pudo guardar la huella en known_hosts";
+                        err = "Could not save fingerprint in known_hosts";
                         return false;
                     }
                     auditLogHostKey(opt.host, opt.port, algWithBits.str(), fpStr, "skipped");
@@ -1198,8 +1198,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
             // - AcceptNew (TOFU): already handled NOTFOUND/MISMATCH above with user confirmation
             if (opt.known_hosts_policy == openscp::KnownHostsPolicy::Strict) {
                 err = (check == LIBSSH2_KNOWNHOST_CHECK_MISMATCH)
-                          ? "Host key no coincide con known_hosts"
-                          : "Host desconocido en known_hosts";
+                          ? "Host key does not match known_hosts"
+                          : "Unknown host in known_hosts";
                 return false;
             }
         }
@@ -1217,7 +1217,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
                                                      opt.private_key_path->c_str(),
                                                      passphrase);
         if (rc != 0) {
-            err = "Auth por clave falló";
+            err = "Key authentication failed";
             return false;
         }
     } else {
@@ -1258,7 +1258,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
                 }
                 if (abs) *abs = nullptr;
                 if (kbdCancelled) {
-                    err = "Autenticación keyboard-interactive cancelada por el usuario";
+                    err = "Keyboard-interactive authentication canceled by user";
                     rc_kbd = -1;
                     return false;
                 }
@@ -1277,7 +1277,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
             if (rc_pw == LIBSSH2_ERROR_SOCKET_DISCONNECT ||
                 rc_pw == LIBSSH2_ERROR_SOCKET_SEND ||
                 rc_pw == LIBSSH2_ERROR_SOCKET_RECV) {
-                err = "El servidor cerró la conexión tras el intento de password";
+                err = "Server closed the connection after password attempt";
                 return false;
             }
 
@@ -1337,8 +1337,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
                     std::string lastErr = (emsgPtr && emlen > 0) ? std::string(emsgPtr, (size_t)emlen) : std::string();
                     long lastErrno = libssh2_session_last_errno(session_);
                     // Include return codes for diagnostics
-                    err = std::string("Auth por password/kbdint falló") +
-                          (authlist.empty() ? std::string() : (std::string(" (métodos: ") + authlist + ")")) +
+                    err = std::string("Password/kbdint authentication failed") +
+                          (authlist.empty() ? std::string() : (std::string(" (methods: ") + authlist + ")")) +
                           (lastErr.empty() ? std::string() : (std::string(" — ") + lastErr)) +
                           (std::string(" [rc_pw=") + std::to_string(rc_pw) + ", rc_kbd=" + std::to_string(rc_kbd) + ", errno=" + std::to_string(lastErrno) + "]") +
                           (pwLastErr.empty() ? std::string() : (std::string(" {pw='") + pwLastErr + "' errno=" + std::to_string(pwErrno) + "}")) +
@@ -1392,7 +1392,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
     // Inicializar SFTP
     sftp_ = libssh2_sftp_init(session_);
     if (!sftp_) {
-        err = "No se pudo inicializar SFTP";
+        err = "Could not initialize SFTP";
         return false;
     }
 
@@ -1401,7 +1401,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
 
 bool Libssh2SftpClient::connect(const SessionOptions& opt, std::string& err) {
     if (connected_) {
-        err = "Ya conectado";
+        err = "Already connected";
         return false;
     }
 
@@ -1450,7 +1450,7 @@ bool Libssh2SftpClient::list(const std::string& remote_path,
                              std::vector<FileInfo>& out,
                              std::string& err) {
     if (!connected_ || !sftp_) {
-        err = "No conectado";
+        err = "Not connected";
         return false;
     }
 
@@ -1458,7 +1458,7 @@ bool Libssh2SftpClient::list(const std::string& remote_path,
 
     LIBSSH2_SFTP_HANDLE* dir = libssh2_sftp_opendir(sftp_, path.c_str());
     if (!dir) {
-        err = "sftp_opendir falló para: " + path;
+        err = "sftp_opendir failed for: " + path;
         return false;
     }
 
@@ -1495,7 +1495,7 @@ bool Libssh2SftpClient::list(const std::string& remote_path,
             // end of directory
             break;
         } else {
-            err = "sftp_readdir_ex falló";
+            err = "sftp_readdir_ex failed";
             libssh2_sftp_closedir(dir);
             return false;
         }
@@ -1513,7 +1513,7 @@ bool Libssh2SftpClient::get(const std::string& remote,
                             std::function<bool()> shouldCancel,
                             bool resume) {
     if (!connected_ || !sftp_) {
-        err = "No conectado";
+        err = "Not connected";
         return false;
     }
 
@@ -1524,7 +1524,7 @@ bool Libssh2SftpClient::get(const std::string& remote,
     LIBSSH2_SFTP_ATTRIBUTES st{};
     if (libssh2_sftp_stat_ex(sftp_, remote.c_str(), (unsigned)remote.size(),
                              LIBSSH2_SFTP_STAT, &st) != 0) {
-        err = "No se pudo obtener stat remoto";
+        err = "Could not stat remote path";
         return false;
     }
     const bool hasTotal = (st.flags & LIBSSH2_SFTP_ATTR_SIZE) != 0;
@@ -1535,7 +1535,7 @@ bool Libssh2SftpClient::get(const std::string& remote,
         sftp_, remote.c_str(), (unsigned)remote.size(),
         LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
     if (!rh) {
-        err = "No se pudo abrir remoto para lectura";
+        err = "Could not open remote file for reading";
         return false;
     }
 
@@ -1549,7 +1549,7 @@ bool Libssh2SftpClient::get(const std::string& remote,
         if (offset > 0 && hasTotal && offset > total) {
             if (policy == TransferIntegrityPolicy::Required) {
                 libssh2_sftp_close(rh);
-                err = "Resume inválido: .part local mayor que archivo remoto";
+                err = "Invalid resume: local .part is larger than remote file";
                 return false;
             }
             offset = 0; // fallback: restart from scratch
@@ -1564,14 +1564,14 @@ bool Libssh2SftpClient::get(const std::string& remote,
             if (!okLocal || !okRemote) {
                 if (policy == TransferIntegrityPolicy::Required) {
                     libssh2_sftp_close(rh);
-                    err = std::string("No se pudo validar integridad en resume (download): ") + hErr;
+                    err = std::string("Could not validate resume integrity (download): ") + hErr;
                     return false;
                 }
                 offset = 0; // optional: restart
             } else if (lh != rhh) {
                 if (policy == TransferIntegrityPolicy::Required) {
                     libssh2_sftp_close(rh);
-                    err = "Integridad falló en resume (download): prefijo local no coincide con remoto";
+                    err = "Integrity check failed in resume (download): local prefix does not match remote";
                     return false;
                 }
                 offset = 0; // optional: restart
@@ -1587,7 +1587,7 @@ bool Libssh2SftpClient::get(const std::string& remote,
     FILE* lf = ::fopen(localPart.c_str(), offset > 0 ? "ab" : "wb");
     if (!lf) {
         libssh2_sftp_close(rh);
-        err = "No se pudo abrir archivo local (.part) para escribir";
+        err = "Could not open local file (.part) for writing";
         return false;
     }
 
@@ -1597,7 +1597,7 @@ bool Libssh2SftpClient::get(const std::string& remote,
 
     while (true) {
         if (shouldCancel && shouldCancel()) {
-            err = "Cancelado por usuario";
+            err = "Canceled by user";
             std::fclose(lf);
             libssh2_sftp_close(rh);
             return false;
@@ -1605,7 +1605,7 @@ bool Libssh2SftpClient::get(const std::string& remote,
         ssize_t n = libssh2_sftp_read(rh, buf.data(), (size_t)buf.size());
         if (n > 0) {
             if (std::fwrite(buf.data(), 1, (size_t)n, lf) != (size_t)n) {
-                err = "Escritura local falló";
+                err = "Local write failed";
                 std::fclose(lf);
                 libssh2_sftp_close(rh);
                 return false;
@@ -1615,7 +1615,7 @@ bool Libssh2SftpClient::get(const std::string& remote,
         } else if (n == 0) {
             break; // EOF
         } else {
-            err = "Lectura remota falló";
+            err = "Remote read failed";
             std::fclose(lf);
             libssh2_sftp_close(rh);
             return false;
@@ -1626,7 +1626,7 @@ bool Libssh2SftpClient::get(const std::string& remote,
     if (!flush_local_file(lf, &syncErr)) {
         std::fclose(lf);
         libssh2_sftp_close(rh);
-        err = std::string("No se pudo sincronizar archivo local (.part): ") + syncErr;
+        err = std::string("Could not sync local file (.part): ") + syncErr;
         return false;
     }
     std::fclose(lf);
@@ -1639,18 +1639,18 @@ bool Libssh2SftpClient::get(const std::string& remote,
         const bool rok = lok && hash_remote_full(sftp_, remote, rsum, &herr);
         if (!lok || !rok) {
             if (policy == TransferIntegrityPolicy::Required) {
-                err = std::string("No se pudo verificar integridad final (download): ") + herr;
+                err = std::string("Could not verify final integrity (download): ") + herr;
                 return false;
             }
         } else if (lsum != rsum) {
-            err = "Integridad final falló (download): checksum local/remoto no coincide";
+            err = "Final integrity check failed (download): local/remote checksum mismatch";
             return false;
         }
     }
 
     std::string replaceErr;
     if (!replace_local_file_atomic(localPart, local, &replaceErr)) {
-        err = std::string("No se pudo finalizar descarga atómica: ") + replaceErr;
+        err = std::string("Could not finalize atomic download: ") + replaceErr;
         return false;
     }
     return true;
@@ -1664,7 +1664,7 @@ bool Libssh2SftpClient::put(const std::string& local,
                             std::function<bool()> shouldCancel,
                             bool resume) {
     if (!connected_ || !sftp_) {
-        err = "No conectado";
+        err = "Not connected";
         return false;
     }
 
@@ -1674,7 +1674,7 @@ bool Libssh2SftpClient::put(const std::string& local,
     // Open local for reading
     FILE* lf = ::fopen(local.c_str(), "rb");
     if (!lf) {
-        err = "No se pudo abrir archivo local para lectura";
+        err = "Could not open local file for reading";
         return false;
     }
 
@@ -1696,7 +1696,7 @@ bool Libssh2SftpClient::put(const std::string& local,
     if (startOffset > 0 && (std::size_t)startOffset > total) {
         if (policy == TransferIntegrityPolicy::Required) {
             std::fclose(lf);
-            err = "Resume inválido: .part remoto mayor que archivo local";
+            err = "Invalid resume: remote .part is larger than local file";
             return false;
         }
         startOffset = 0;
@@ -1712,14 +1712,14 @@ bool Libssh2SftpClient::put(const std::string& local,
         if (!lok || !rok) {
             if (policy == TransferIntegrityPolicy::Required) {
                 std::fclose(lf);
-                err = std::string("No se pudo validar integridad en resume (upload): ") + herr;
+                err = std::string("Could not validate resume integrity (upload): ") + herr;
                 return false;
             }
             startOffset = 0;
         } else if (lsum != rsum) {
             if (policy == TransferIntegrityPolicy::Required) {
                 std::fclose(lf);
-                err = "Integridad falló en resume (upload): prefijo local/remoto no coincide";
+                err = "Integrity check failed in resume (upload): local/remote prefix does not match";
                 return false;
             }
             startOffset = 0;
@@ -1733,7 +1733,7 @@ bool Libssh2SftpClient::put(const std::string& local,
         0644, LIBSSH2_SFTP_OPENFILE);
     if (!wh) {
         std::fclose(lf);
-        err = "No se pudo abrir remoto (.part) para escritura";
+        err = "Could not open remote (.part) for writing";
         return false;
     }
 
@@ -1745,7 +1745,7 @@ bool Libssh2SftpClient::put(const std::string& local,
     if (resume && startOffset > 0 && (std::size_t)startOffset < total) {
         libssh2_sftp_seek64(wh, (libssh2_uint64_t)startOffset);
         if (std::fseek(lf, startOffset, SEEK_SET) != 0) {
-            err = "No se pudo posicionar archivo local";
+            err = "Could not seek local file";
             libssh2_sftp_close(wh);
             std::fclose(lf);
             return false;
@@ -1760,14 +1760,14 @@ bool Libssh2SftpClient::put(const std::string& local,
             size_t remain = n;
             while (remain > 0) {
                 if (shouldCancel && shouldCancel()) {
-                    err = "Cancelado por usuario";
+                    err = "Canceled by user";
                     libssh2_sftp_close(wh);
                     std::fclose(lf);
                     return false;
                 }
                 ssize_t w = libssh2_sftp_write(wh, p, remain);
                 if (w < 0) {
-                    err = "Escritura remota falló";
+                    err = "Remote write failed";
                     libssh2_sftp_close(wh);
                     std::fclose(lf);
                     return false;
@@ -1779,7 +1779,7 @@ bool Libssh2SftpClient::put(const std::string& local,
             }
         } else {
             if (std::ferror(lf)) {
-                err = "Lectura local falló";
+                err = "Local read failed";
                 libssh2_sftp_close(wh);
                 std::fclose(lf);
                 return false;
@@ -1798,11 +1798,11 @@ bool Libssh2SftpClient::put(const std::string& local,
         const bool rok = lok && hash_remote_full(sftp_, remotePart, rsum, &herr);
         if (!lok || !rok) {
             if (policy == TransferIntegrityPolicy::Required) {
-                err = std::string("No se pudo verificar integridad final (upload): ") + herr;
+                err = std::string("Could not verify final integrity (upload): ") + herr;
                 return false;
             }
         } else if (lsum != rsum) {
-            err = "Integridad final falló (upload): checksum local/remoto no coincide";
+            err = "Final integrity check failed (upload): local/remote checksum mismatch";
             return false;
         }
     }
@@ -1814,7 +1814,7 @@ bool Libssh2SftpClient::put(const std::string& local,
         remote.c_str(), (unsigned)remote.size(),
         rnFlags);
     if (rn != 0) {
-        err = "No se pudo finalizar subida atómica (.part -> destino)";
+        err = "Could not finalize atomic upload (.part -> destination)";
         return false;
     }
 
@@ -1827,7 +1827,7 @@ bool Libssh2SftpClient::exists(const std::string& remote_path,
                                std::string& err) {
     isDir = false;
     if (!connected_ || !sftp_) {
-        err = "No conectado";
+        err = "Not connected";
         return false;
     }
 
@@ -1849,7 +1849,7 @@ bool Libssh2SftpClient::exists(const std::string& remote_path,
         return false; // does not exist
     }
 
-    err = "stat remoto falló";
+    err = "remote stat failed";
     return false;
 }
 
@@ -1858,7 +1858,7 @@ bool Libssh2SftpClient::stat(const std::string& remote_path,
                              FileInfo& info,
                              std::string& err) {
     if (!connected_ || !sftp_) {
-        err = "No conectado";
+        err = "Not connected";
         return false;
     }
 
@@ -1872,7 +1872,7 @@ bool Libssh2SftpClient::stat(const std::string& remote_path,
             err.clear();
             return false; // no existe
         }
-        err = "stat remoto falló";
+        err = "remote stat failed";
         return false;
     }
     info.name.clear();
@@ -1893,7 +1893,7 @@ bool Libssh2SftpClient::chmod(const std::string& remote_path,
                               std::uint32_t mode,
                               std::string& err) {
     if (!connected_ || !sftp_) {
-        err = "No conectado";
+        err = "Not connected";
         return false;
     }
 #ifdef LIBSSH2_SFTP
@@ -1903,7 +1903,7 @@ bool Libssh2SftpClient::chmod(const std::string& remote_path,
     a.permissions = mode;
     int rc = libssh2_sftp_stat_ex(sftp_, remote_path.c_str(), (unsigned)remote_path.size(), LIBSSH2_SFTP_SETSTAT, &a);
     if (rc != 0) {
-        err = "chmod remoto falló";
+        err = "Remote chmod failed";
         return false;
     }
     return true;
@@ -1920,7 +1920,7 @@ bool Libssh2SftpClient::setTimes(const std::string& remote_path,
                                  std::uint64_t mtime,
                                  std::string& err) {
     if (!connected_ || !sftp_) {
-        err = "No conectado";
+        err = "Not connected";
         return false;
     }
     LIBSSH2_SFTP_ATTRIBUTES a{};
@@ -1929,7 +1929,7 @@ bool Libssh2SftpClient::setTimes(const std::string& remote_path,
     a.mtime = (unsigned long)mtime;
     int rc = libssh2_sftp_stat_ex(sftp_, remote_path.c_str(), (unsigned)remote_path.size(), LIBSSH2_SFTP_SETSTAT, &a);
     if (rc != 0) {
-        err = "setTimes remoto falló";
+        err = "Remote setTimes failed";
         return false;
     }
     return true;
@@ -1940,7 +1940,7 @@ bool Libssh2SftpClient::chown(const std::string& remote_path,
                               std::uint32_t gid,
                               std::string& err) {
     if (!connected_ || !sftp_) {
-        err = "No conectado";
+        err = "Not connected";
         return false;
     }
     LIBSSH2_SFTP_ATTRIBUTES a{};
@@ -1959,7 +1959,7 @@ bool Libssh2SftpClient::chown(const std::string& remote_path,
     }
     int rc = libssh2_sftp_stat_ex(sftp_, remote_path.c_str(), (unsigned)remote_path.size(), LIBSSH2_SFTP_SETSTAT, &a);
     if (rc != 0) {
-        err = "chown remoto falló";
+        err = "Remote chown failed";
         return false;
     }
     return true;
@@ -1969,12 +1969,12 @@ bool Libssh2SftpClient::mkdir(const std::string& remote_dir,
                               std::string& err,
                               unsigned int mode) {
     if (!connected_ || !sftp_) {
-        err = "No conectado";
+        err = "Not connected";
         return false;
     }
     int rc = libssh2_sftp_mkdir(sftp_, remote_dir.c_str(), mode);
     if (rc != 0) {
-        err = "sftp_mkdir falló";
+        err = "sftp_mkdir failed";
         return false;
     }
     return true;
@@ -1983,12 +1983,12 @@ bool Libssh2SftpClient::mkdir(const std::string& remote_dir,
 bool Libssh2SftpClient::removeFile(const std::string& remote_path,
                                    std::string& err) {
     if (!connected_ || !sftp_) {
-        err = "No conectado";
+        err = "Not connected";
         return false;
     }
     int rc = libssh2_sftp_unlink(sftp_, remote_path.c_str());
     if (rc != 0) {
-        err = "sftp_unlink falló";
+        err = "sftp_unlink failed";
         return false;
     }
     return true;
@@ -1997,12 +1997,12 @@ bool Libssh2SftpClient::removeFile(const std::string& remote_path,
 bool Libssh2SftpClient::removeDir(const std::string& remote_dir,
                                   std::string& err) {
     if (!connected_ || !sftp_) {
-        err = "No conectado";
+        err = "Not connected";
         return false;
     }
     int rc = libssh2_sftp_rmdir(sftp_, remote_dir.c_str());
     if (rc != 0) {
-        err = "sftp_rmdir falló (¿directorio no vacío?)";
+        err = "sftp_rmdir failed (directory not empty?)";
         return false;
     }
     return true;
@@ -2013,7 +2013,7 @@ bool Libssh2SftpClient::rename(const std::string& from,
                                std::string& err,
                                bool overwrite) {
     if (!connected_ || !sftp_) {
-        err = "No conectado";
+        err = "Not connected";
         return false;
     }
     long flags = LIBSSH2_SFTP_RENAME_ATOMIC | LIBSSH2_SFTP_RENAME_NATIVE;
@@ -2024,7 +2024,7 @@ bool Libssh2SftpClient::rename(const std::string& from,
         to.c_str(), (unsigned)to.size(),
         flags);
     if (rc != 0) {
-        err = "sftp_rename_ex falló";
+        err = "sftp_rename_ex failed";
         return false;
     }
     return true;
@@ -2033,9 +2033,9 @@ bool Libssh2SftpClient::rename(const std::string& from,
 bool RemoveKnownHostEntry(const std::string& khPath, const std::string& host, std::uint16_t port, std::string& err) {
     err.clear();
     LIBSSH2_SESSION* s = libssh2_session_init();
-    if (!s) { err = "No se pudo inicializar libssh2"; return false; }
+    if (!s) { err = "Could not initialize libssh2"; return false; }
     LIBSSH2_KNOWNHOSTS* nh = libssh2_knownhost_init(s);
-    if (!nh) { libssh2_session_free(s); err = "No se pudo inicializar known_hosts"; return false; }
+    if (!nh) { libssh2_session_free(s); err = "Could not initialize known_hosts"; return false; }
     // load existing file if present
     (void)libssh2_knownhost_readfile(nh, khPath.c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH);
     struct libssh2_knownhost* kh = nullptr;
@@ -2059,7 +2059,7 @@ bool RemoveKnownHostEntry(const std::string& khPath, const std::string& host, st
     if (!persist_known_hosts_atomic(nh, khPath, &persistErr)) {
         libssh2_knownhost_free(nh);
         libssh2_session_free(s);
-        err = std::string("No se pudo escribir known_hosts: ") + persistErr;
+        err = std::string("Could not write known_hosts: ") + persistErr;
         return false;
     }
     libssh2_knownhost_free(nh);

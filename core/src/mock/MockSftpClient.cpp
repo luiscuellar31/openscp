@@ -6,8 +6,7 @@ namespace openscp {
 
 bool MockSftpClient::connect(const SessionOptions& opt, std::string& err) {
     if (opt.host.empty() || opt.username.empty()) {
-        // Keep message text as-is (UI/localization). Only comments translated.
-        err = "Host y usuario son obligatorios";
+        err = "Host and username are required";
         return false;
     }
     connected_ = true;
@@ -37,7 +36,7 @@ bool MockSftpClient::list(const std::string& remote_path,
                           std::vector<FileInfo>& out,
                           std::string& err) {
     if (!connected_) {
-        err = "No conectado";
+        err = "Not connected";
         return false;
     }
     std::string path = remote_path;
@@ -45,7 +44,7 @@ bool MockSftpClient::list(const std::string& remote_path,
 
     auto it = fs_.find(path);
     if (it == fs_.end()) {
-        err = "Ruta remota no encontrada en mock: " + path;
+        err = "Mock remote path not found: " + path;
         return false;
     }
     out = it->second;

@@ -73,7 +73,7 @@ std::unique_ptr<openscp::SftpClient> TransferManager::createWorkerClient(std::st
         return nullptr;
     }
     if (!opt.has_value()) {
-        err = "Sin opciones de sesión";
+        err = "Missing session options";
         return nullptr;
     }
 
@@ -90,7 +90,7 @@ std::unique_ptr<openscp::SftpClient> TransferManager::createWorkerClient(std::st
         if (conn) return conn;
         if (i < 2) std::this_thread::sleep_for((1 << i) * 500ms);
     }
-    err = lastErr.empty() ? "No se pudo crear conexión de transferencia" : lastErr;
+    err = lastErr.empty() ? "Could not create transfer connection" : lastErr;
     return nullptr;
 }
 
@@ -201,12 +201,12 @@ void TransferManager::schedule() {
     // Pre-resolve collisions on the manager (GUI) thread.
     auto askOverwrite = [&](const QString& name, const QString& srcInfo, const QString& dstInfo) -> int {
         QMessageBox msg(nullptr);
-        msg.setWindowTitle(tr("Conflicto"));
+        msg.setWindowTitle(tr("Conflict"));
         // Clarify which side is local vs remote for better UX
-        msg.setText(tr("«%1» ya existe.\nLocal: %2\nRemoto: %3").arg(name, srcInfo, dstInfo));
-        QAbstractButton* btResume    = msg.addButton(tr("Reanudar"), QMessageBox::ActionRole);
-        QAbstractButton* btOverwrite = msg.addButton(tr("Sobrescribir"), QMessageBox::AcceptRole);
-        QAbstractButton* btSkip      = msg.addButton(tr("Omitir"), QMessageBox::RejectRole);
+        msg.setText(tr("«%1» already exists.\\nLocal: %2\\nRemote: %3").arg(name, srcInfo, dstInfo));
+        QAbstractButton* btResume    = msg.addButton(tr("Resume"), QMessageBox::ActionRole);
+        QAbstractButton* btOverwrite = msg.addButton(tr("Overwrite"), QMessageBox::AcceptRole);
+        QAbstractButton* btSkip      = msg.addButton(tr("Skip"), QMessageBox::RejectRole);
         msg.exec();
         if (msg.clickedButton() == btResume) return 2;
         if (msg.clickedButton() == btOverwrite) return 1;

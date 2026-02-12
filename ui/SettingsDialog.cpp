@@ -26,7 +26,7 @@ static QString defaultDownloadDirPath() {
 }
 
 SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
-    setWindowTitle(tr("Ajustes"));
+    setWindowTitle(tr("Settings"));
     resize(780, 520);
     setMinimumSize(560, 420);
 
@@ -93,21 +93,21 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     QWidget* generalPage = createFormPage(tr("General"), generalForm);
 
     // General settings
-    langCombo_ = addComboRow(generalForm, generalPage, tr("Idioma:"));
-    langCombo_->addItem("Español", "es");
-    langCombo_->addItem("English", "en");
-    clickMode_ = addComboRow(generalForm, generalPage, tr("Apertura con:"));
-    clickMode_->addItem(tr("Doble clic"), 2);
-    clickMode_->addItem(tr("Un clic"), 1);
-    openBehaviorMode_ = addComboRow(generalForm, generalPage, tr("Al abrir archivos:"));
-    openBehaviorMode_->addItem(tr("Preguntar siempre"), QStringLiteral("ask"));
-    openBehaviorMode_->addItem(tr("Mostrar carpeta"), QStringLiteral("reveal"));
-    openBehaviorMode_->addItem(tr("Abrir archivo"), QStringLiteral("open"));
+    langCombo_ = addComboRow(generalForm, generalPage, tr("Language:"));
+    langCombo_->addItem(tr("Spanish"), "es");
+    langCombo_->addItem(tr("English"), "en");
+    clickMode_ = addComboRow(generalForm, generalPage, tr("Open with:"));
+    clickMode_->addItem(tr("Double click"), 2);
+    clickMode_->addItem(tr("Single click"), 1);
+    openBehaviorMode_ = addComboRow(generalForm, generalPage, tr("On file open:"));
+    openBehaviorMode_->addItem(tr("Always ask"), QStringLiteral("ask"));
+    openBehaviorMode_->addItem(tr("Show folder"), QStringLiteral("reveal"));
+    openBehaviorMode_->addItem(tr("Open file"), QStringLiteral("open"));
 
-    showHidden_ = addCheckRow(generalForm, generalPage, tr("Mostrar archivos ocultos"));
-    showConnOnStart_ = addCheckRow(generalForm, generalPage, tr("Abrir Gestor de Sitios al iniciar"));
-    showConnOnDisconnect_ = addCheckRow(generalForm, generalPage, tr("Abrir Gestor de Sitios al desconectar"));
-    showQueueOnEnqueue_ = addCheckRow(generalForm, generalPage, tr("Abrir cola al encolar transferencias"));
+    showHidden_ = addCheckRow(generalForm, generalPage, tr("Show hidden files"));
+    showConnOnStart_ = addCheckRow(generalForm, generalPage, tr("Open Site Manager on startup"));
+    showConnOnDisconnect_ = addCheckRow(generalForm, generalPage, tr("Open Site Manager on disconnect"));
+    showQueueOnEnqueue_ = addCheckRow(generalForm, generalPage, tr("Open queue when enqueuing transfers"));
     {
         auto* rowWidget = new QWidget(generalPage);
         auto* row = new QHBoxLayout(rowWidget);
@@ -116,14 +116,14 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
         defaultDownloadDirEdit_ = new QLineEdit(generalPage);
         defaultDownloadDirEdit_->setMinimumWidth(kFieldMinWidth);
         defaultDownloadDirEdit_->setMaximumWidth(kFieldMaxWidth);
-        defaultDownloadBrowseBtn_ = new QPushButton(tr("Elegir…"), generalPage);
+        defaultDownloadBrowseBtn_ = new QPushButton(tr("Choose…"), generalPage);
         row->addWidget(defaultDownloadDirEdit_, 1);
         row->addWidget(defaultDownloadBrowseBtn_);
-        generalForm->addRow(tr("Carpeta descargas:"), rowWidget);
+        generalForm->addRow(tr("Download folder:"), rowWidget);
         connect(defaultDownloadBrowseBtn_, &QPushButton::clicked, this, [this] {
             const QString cur = defaultDownloadDirEdit_ ? defaultDownloadDirEdit_->text() : QString();
             const QString pick = QFileDialog::getExistingDirectory(
-                this, tr("Selecciona carpeta de descargas"),
+                this, tr("Select download folder"),
                 cur.isEmpty() ? QDir::homePath() : cur
             );
             if (!pick.isEmpty() && defaultDownloadDirEdit_) defaultDownloadDirEdit_->setText(pick);
@@ -131,11 +131,11 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     }
 
     QFormLayout* advancedForm = nullptr;
-    QWidget* advancedPage = createFormPage(tr("Avanzado"), advancedForm);
+    QWidget* advancedPage = createFormPage(tr("Advanced"), advancedForm);
     advancedForm->setVerticalSpacing(10);
 
     // Advanced/Transfers
-    auto* transferGroup = new QGroupBox(tr("Transferencias"), advancedPage);
+    auto* transferGroup = new QGroupBox(tr("Transfers"), advancedPage);
     auto* transferForm = new QFormLayout(transferGroup);
     transferForm->setContentsMargins(12, 10, 12, 10);
     transferForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
@@ -145,41 +145,41 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     maxConcurrentSpin_->setRange(1, 8);
     maxConcurrentSpin_->setValue(2);
     maxConcurrentSpin_->setMinimumWidth(90);
-    maxConcurrentSpin_->setToolTip(tr("Cantidad máxima de transferencias simultáneas."));
-    transferForm->addRow(tr("Simultáneas:"), maxConcurrentSpin_);
+    maxConcurrentSpin_->setToolTip(tr("Maximum number of concurrent transfers."));
+    transferForm->addRow(tr("Parallel tasks:"), maxConcurrentSpin_);
     globalSpeedDefaultSpin_ = new QSpinBox(transferGroup);
     globalSpeedDefaultSpin_->setRange(0, 1'000'000);
     globalSpeedDefaultSpin_->setValue(0);
     globalSpeedDefaultSpin_->setSuffix(" KB/s");
     globalSpeedDefaultSpin_->setMinimumWidth(120);
-    globalSpeedDefaultSpin_->setToolTip(tr("0 = sin límite global de velocidad."));
-    transferForm->addRow(tr("Límite global por defecto:"), globalSpeedDefaultSpin_);
+    globalSpeedDefaultSpin_->setToolTip(tr("0 = no global speed limit."));
+    transferForm->addRow(tr("Default global limit:"), globalSpeedDefaultSpin_);
     advancedForm->addRow(QString(), transferGroup);
 
     // Advanced/Sites
-    auto* sitesGroup = new QGroupBox(tr("Sitios"), advancedPage);
+    auto* sitesGroup = new QGroupBox(tr("Sites"), advancedPage);
     auto* sitesLay = new QVBoxLayout(sitesGroup);
     sitesLay->setContentsMargins(12, 10, 12, 10);
     sitesLay->setSpacing(6);
-    deleteSecretsOnRemove_ = new QCheckBox(tr("Al eliminar un sitio, borrar también sus credenciales guardadas."), sitesGroup);
+    deleteSecretsOnRemove_ = new QCheckBox(tr("When deleting a site, also remove its stored credentials."), sitesGroup);
     sitesLay->addWidget(deleteSecretsOnRemove_);
     advancedForm->addRow(QString(), sitesGroup);
 
     // Advanced/Security
-    auto* securityGroup = new QGroupBox(tr("Seguridad"), advancedPage);
+    auto* securityGroup = new QGroupBox(tr("Security"), advancedPage);
     auto* securityLay = new QVBoxLayout(securityGroup);
     securityLay->setContentsMargins(12, 10, 12, 10);
     securityLay->setSpacing(6);
-    knownHostsHashed_ = new QCheckBox(tr("Guardar hostnames en known_hosts como hash (recomendado)."), securityGroup);
-    fpHex_ = new QCheckBox(tr("Mostrar huella en HEX colonado (solo visual)."), securityGroup);
+    knownHostsHashed_ = new QCheckBox(tr("Hash hostnames in known_hosts (recommended)."), securityGroup);
+    fpHex_ = new QCheckBox(tr("Show fingerprint in HEX (colon) format (visual only)."), securityGroup);
     securityLay->addWidget(knownHostsHashed_);
     securityLay->addWidget(fpHex_);
 #if defined(Q_OS_MAC) || defined(Q_OS_MACOS) || defined(__APPLE__)
-    macKeychainRestrictive_ = new QCheckBox(tr("Usar accesibilidad de llavero más restrictiva (solo en este dispositivo)."), securityGroup);
+    macKeychainRestrictive_ = new QCheckBox(tr("Use stricter Keychain accessibility (this device only)."), securityGroup);
     securityLay->addWidget(macKeychainRestrictive_);
 #endif
 #if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) && !defined(HAVE_LIBSECRET) && !defined(OPEN_SCP_BUILD_SECURE_ONLY)
-    insecureFallback_ = new QCheckBox(tr("Permitir fallback inseguro de credenciales (no recomendado)."), securityGroup);
+    insecureFallback_ = new QCheckBox(tr("Allow insecure credentials fallback (not recommended)."), securityGroup);
     securityLay->addWidget(insecureFallback_);
 #endif
     {
@@ -192,18 +192,18 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
         noHostVerifyTtlMinSpin_->setValue(15);
         noHostVerifyTtlMinSpin_->setSuffix(tr(" min"));
         noHostVerifyTtlMinSpin_->setMinimumWidth(100);
-        noHostVerifyTtlMinSpin_->setToolTip(tr("Duración de la excepción temporal para la política sin verificación de host key."));
+        noHostVerifyTtlMinSpin_->setToolTip(tr("Duration of the temporary exception for no host-key verification policy."));
         ttlLay->addWidget(noHostVerifyTtlMinSpin_);
         ttlLay->addStretch(1);
         auto* ttlForm = new QFormLayout();
         ttlForm->setContentsMargins(0, 0, 0, 0);
-        ttlForm->addRow(tr("TTL sin verificación:"), ttlRow);
+        ttlForm->addRow(tr("No-verification TTL:"), ttlRow);
         securityLay->addLayout(ttlForm);
     }
     advancedForm->addRow(QString(), securityGroup);
 
     // Advanced/Staging and drag-out
-    auto* stagingGroup = new QGroupBox(tr("Staging y arrastre"), advancedPage);
+    auto* stagingGroup = new QGroupBox(tr("Staging and drag-out"), advancedPage);
     auto* stagingForm = new QFormLayout(stagingGroup);
     stagingForm->setContentsMargins(12, 10, 12, 10);
     stagingForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
@@ -217,20 +217,20 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
         stagingRootEdit_ = new QLineEdit(stagingGroup);
         stagingRootEdit_->setMinimumWidth(kFieldMinWidth);
         stagingRootEdit_->setMaximumWidth(kFieldMaxWidth);
-        stagingBrowseBtn_ = new QPushButton(tr("Elegir…"), stagingGroup);
+        stagingBrowseBtn_ = new QPushButton(tr("Choose…"), stagingGroup);
         row->addWidget(stagingRootEdit_, 1);
         row->addWidget(stagingBrowseBtn_);
-        stagingForm->addRow(tr("Carpeta staging:"), rowWidget);
+        stagingForm->addRow(tr("Staging folder:"), rowWidget);
         connect(stagingBrowseBtn_, &QPushButton::clicked, this, [this] {
             const QString cur = stagingRootEdit_ ? stagingRootEdit_->text() : QString();
             const QString pick = QFileDialog::getExistingDirectory(
-                this, tr("Selecciona carpeta de staging"),
+                this, tr("Select staging folder"),
                 cur.isEmpty() ? QDir::homePath() : cur
             );
             if (!pick.isEmpty() && stagingRootEdit_) stagingRootEdit_->setText(pick);
         });
     }
-    autoCleanStaging_ = new QCheckBox(tr("Eliminar automáticamente la carpeta staging tras completar el arrastre (recomendado)."), stagingGroup);
+    autoCleanStaging_ = new QCheckBox(tr("Auto-clean staging after successful drag-out (recommended)."), stagingGroup);
     stagingForm->addRow(QString(), autoCleanStaging_);
     stagingPrepTimeoutMsSpin_ = new QSpinBox(stagingGroup);
     stagingPrepTimeoutMsSpin_->setRange(250, 60000);
@@ -238,21 +238,21 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     stagingPrepTimeoutMsSpin_->setValue(2000);
     stagingPrepTimeoutMsSpin_->setSuffix(tr(" ms"));
     stagingPrepTimeoutMsSpin_->setMinimumWidth(110);
-    stagingPrepTimeoutMsSpin_->setToolTip(tr("Tiempo antes de mostrar el diálogo Esperar/Cancelar."));
-    stagingForm->addRow(tr("Timeout preparación:"), stagingPrepTimeoutMsSpin_);
+    stagingPrepTimeoutMsSpin_->setToolTip(tr("Time before showing the Wait/Cancel dialog."));
+    stagingForm->addRow(tr("Preparation timeout:"), stagingPrepTimeoutMsSpin_);
     stagingConfirmItemsSpin_ = new QSpinBox(stagingGroup);
     stagingConfirmItemsSpin_->setRange(50, 100000);
     stagingConfirmItemsSpin_->setValue(500);
     stagingConfirmItemsSpin_->setMinimumWidth(110);
-    stagingConfirmItemsSpin_->setToolTip(tr("Cantidad de elementos para pedir confirmación en lotes grandes."));
-    stagingForm->addRow(tr("Confirmar desde elementos:"), stagingConfirmItemsSpin_);
+    stagingConfirmItemsSpin_->setToolTip(tr("Item count threshold to request confirmation for large batches."));
+    stagingForm->addRow(tr("Confirm from items:"), stagingConfirmItemsSpin_);
     stagingConfirmMiBSpin_ = new QSpinBox(stagingGroup);
     stagingConfirmMiBSpin_->setRange(128, 65536);
     stagingConfirmMiBSpin_->setValue(1024);
     stagingConfirmMiBSpin_->setSuffix(tr(" MiB"));
     stagingConfirmMiBSpin_->setMinimumWidth(120);
-    stagingConfirmMiBSpin_->setToolTip(tr("Tamaño estimado para pedir confirmación en lotes grandes."));
-    stagingForm->addRow(tr("Confirmar desde tamaño:"), stagingConfirmMiBSpin_);
+    stagingConfirmMiBSpin_->setToolTip(tr("Estimated size threshold to request confirmation for large batches."));
+    stagingForm->addRow(tr("Confirm from size:"), stagingConfirmMiBSpin_);
 
     // Maximum folder recursion depth
     {
@@ -264,13 +264,13 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
         maxDepthSpin_->setRange(4, 256);
         maxDepthSpin_->setValue(32);
         maxDepthSpin_->setMinimumWidth(90);
-        maxDepthSpin_->setToolTip(tr("Límite para arrastre recursivo y evitar árboles muy profundos y bucles."));
-        auto* hint = new QLabel(tr("Recomendado: 32"), stagingGroup);
+        maxDepthSpin_->setToolTip(tr("Limit for recursive folder drag-out to avoid deep trees and loops."));
+        auto* hint = new QLabel(tr("Recommended: 32"), stagingGroup);
         hint->setStyleSheet("color: palette(mid);");
         row->addWidget(maxDepthSpin_);
         row->addWidget(hint);
         row->addStretch(1);
-        stagingForm->addRow(tr("Profundidad máxima:"), rowWidget);
+        stagingForm->addRow(tr("Maximum depth:"), rowWidget);
     }
     advancedForm->addRow(QString(), stagingGroup);
     connect(sectionList, &QListWidget::currentRowChanged, pages, &QStackedWidget::setCurrentIndex);
@@ -281,8 +281,8 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     auto* hb = new QHBoxLayout(btnRow);
     hb->setContentsMargins(0, 0, 0, 0);
     hb->addStretch();
-    closeBtn_ = new QPushButton(tr("Cerrar"), btnRow);
-    applyBtn_ = new QPushButton(tr("Aplicar"), btnRow);
+    closeBtn_ = new QPushButton(tr("Close"), btnRow);
+    applyBtn_ = new QPushButton(tr("Apply"), btnRow);
     hb->addWidget(closeBtn_);
     hb->addWidget(applyBtn_);
     root->addWidget(btnRow);
@@ -298,7 +298,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
 
     // Load from QSettings
     QSettings s("OpenSCP", "OpenSCP");
-    const QString lang = s.value("UI/language", "es").toString();
+    const QString lang = s.value("UI/language", "en").toString();
     const int li = langCombo_->findData(lang);
     if (li >= 0) langCombo_->setCurrentIndex(li);
     if (showHidden_) showHidden_->setChecked(s.value("UI/showHidden", false).toBool());
@@ -374,10 +374,10 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
                 }
                 const auto ret = QMessageBox::warning(
                     this,
-                    tr("Activar fallback inseguro"),
-                    tr("Esto almacenará credenciales sin cifrar en el disco usando QSettings.\n"
-                       "En Linux, se recomienda instalar y usar libsecret/Secret Service para mayor seguridad.\n\n"
-                       "¿Deseas activar el fallback inseguro igualmente?"),
+                    tr("Enable insecure fallback"),
+                    tr("This stores credentials unencrypted on disk using QSettings.\n"
+                       "On Linux, it is recommended to install and use libsecret/Secret Service for better security.\n\n"
+                       "Do you still want to enable insecure fallback?"),
                     QMessageBox::Yes | QMessageBox::No,
                     QMessageBox::No
                 );
@@ -402,7 +402,7 @@ void SettingsDialog::onApply() {
     const QString chosenLang  = langCombo_->currentData().toString();
 
     QSettings s("OpenSCP", "OpenSCP");
-    const QString prevLang = s.value("UI/language", "es").toString();
+    const QString prevLang = s.value("UI/language", "en").toString();
     s.setValue("UI/language", chosenLang);
     s.setValue("UI/showHidden", showHidden_ && showHidden_->isChecked());
     s.setValue("UI/showConnOnStart", showConnOnStart_ && showConnOnStart_->isChecked());
@@ -446,14 +446,14 @@ void SettingsDialog::onApply() {
 
     // Only notify if language actually changed
     if (prevLang != chosenLang) {
-        QMessageBox::information(this, tr("Idioma"), tr("El cambio de idioma se aplicará al reiniciar."));
+        QMessageBox::information(this, tr("Language"), tr("Language changes take effect after restart."));
     }
     if (applyBtn_) { applyBtn_->setEnabled(false); applyBtn_->setDefault(false); }
 }
 
 void SettingsDialog::updateApplyFromControls() {
     QSettings s("OpenSCP", "OpenSCP");
-    const QString prevLang = s.value("UI/language", "es").toString();
+    const QString prevLang = s.value("UI/language", "en").toString();
     const bool showHidden = s.value("UI/showHidden", false).toBool();
     const bool showConnOnStart = s.value("UI/showConnOnStart", true).toBool();
     const bool onDisc = s.value("UI/openSiteManagerOnDisconnect", true).toBool();

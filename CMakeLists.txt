@@ -168,27 +168,20 @@ if (OPEN_SCP_BUILD_SECURE_ONLY)
   target_compile_definitions(openscp_hello PRIVATE OPEN_SCP_BUILD_SECURE_ONLY=1)
 endif()
 
-# Translations (es/en): compile TS to QM and embed as a resource.
+# Translations: compile Spanish TS to QM and embed as a resource.
 # .ts files live in the top-level 'translations/' folder.
 qt_add_translation(QM_FILES
   translations/openscp_es.ts
-  translations/openscp_en.ts
 )
 # Set relative aliases for resources to avoid absolute paths in the qrc
 set(QM_ES "")
-set(QM_EN "")
 foreach(qm ${QM_FILES})
   if(qm MATCHES "openscp_es\\.qm$")
     set(QM_ES "${qm}")
-  elseif(qm MATCHES "openscp_en\\.qm$")
-    set(QM_EN "${qm}")
   endif()
 endforeach()
 if(QM_ES)
   set_source_files_properties(${QM_ES} PROPERTIES QT_RESOURCE_ALIAS "openscp_es.qm")
-endif()
-if(QM_EN)
-  set_source_files_properties(${QM_EN} PROPERTIES QT_RESOURCE_ALIAS "openscp_en.qm")
 endif()
 qt_add_resources(openscp_hello i18n
   PREFIX "/i18n"

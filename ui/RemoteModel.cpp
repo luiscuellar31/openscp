@@ -62,11 +62,11 @@ QVariant RemoteModel::data(const QModelIndex& index, int role) const {
     }
     if (role == Qt::ToolTipRole) {
         const auto& it = items_[index.row()];
-        if (it.isDir) return tr("Carpeta");
+        if (it.isDir) return tr("Folder");
         if (!it.hasSize) {
-            return tr("Tamaño: desconocido (no informado por el servidor)");
+            return tr("Size: unknown (not provided by the server)");
         }
-        QString tip = tr("Archivo");
+        QString tip = tr("File");
         const QString human = QLocale().formattedDataSize((qint64)it.size, 1, QLocale::DataSizeIecFormat);
         const QString bytes = QLocale().toString((qulonglong)it.size);
         tip += QString(" • %1 (%2 bytes)").arg(human, bytes);
@@ -129,10 +129,10 @@ quint64 RemoteModel::sizeAt(const QModelIndex& idx) const {
 QVariant RemoteModel::headerData(int section, Qt::Orientation orientation, int role) const {
     if (orientation != Qt::Horizontal || role != Qt::DisplayRole) return {};
     switch (section) {
-        case 0: return tr("Nombre");
-        case 1: return tr("Tamaño");
-        case 2: return tr("Fecha");
-        case 3: return tr("Permisos");
+        case 0: return tr("Name");
+        case 1: return tr("Size");
+        case 2: return tr("Date");
+        case 3: return tr("Permissions");
     }
     return {};
 }
@@ -259,8 +259,8 @@ bool RemoteModel::enumerateFilesUnder(const QString& baseRemote, std::vector<Enu
     bool partial = false, unk = false;
     EnumOptions opt; // defaults
     bool ok = enumerateFilesUnderEx(baseRemote, out, opt, &partial, &unk);
-    if (!ok && errorOut) *errorOut = tr("Error de enumeración");
-    if (partial && errorOut) *errorOut = tr("Enumeración parcial con errores");
+    if (!ok && errorOut) *errorOut = tr("Enumeration error");
+    if (partial && errorOut) *errorOut = tr("Partial enumeration with errors");
     return ok && !partial;
 }
 

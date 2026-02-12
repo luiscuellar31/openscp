@@ -42,7 +42,7 @@ static SecretStore::PersistResult mapApplePersistStatus(OSStatus st) {
 
 SecretStore::PersistResult SecretStore::setSecret(const QString& key, const QString& value) {
     if (key.isEmpty()) {
-        return { PersistStatus::BackendError, QStringLiteral("Secret key vacío") };
+        return { PersistStatus::BackendError, QStringLiteral("Secret key is empty") };
     }
     CFStringRef account = cfAccount(key);
     QByteArray dataBytes = value.toUtf8();
@@ -54,7 +54,7 @@ SecretStore::PersistResult SecretStore::setSecret(const QString& key, const QStr
     if (!account || !data) {
         if (data) CFRelease(data);
         if (account) CFRelease(account);
-        return { PersistStatus::BackendError, QStringLiteral("No se pudo construir entrada para Keychain") };
+        return { PersistStatus::BackendError, QStringLiteral("Could not build Keychain entry") };
     }
 
     // Accessibility policy based on user preference (default: less restrictive OFF)
@@ -162,7 +162,7 @@ static const SecretSchema* openscp_schema() {
 
 SecretStore::PersistResult SecretStore::setSecret(const QString& key, const QString& value) {
     if (key.isEmpty()) {
-        return { PersistStatus::BackendError, QStringLiteral("Secret key vacío") };
+        return { PersistStatus::BackendError, QStringLiteral("Secret key is empty") };
     }
     QByteArray k = key.toUtf8();
     QByteArray v = value.toUtf8();
@@ -218,15 +218,15 @@ SecretStore::PersistResult SecretStore::setSecret(const QString& key, const QStr
     Q_UNUSED(key); Q_UNUSED(value);
     return { PersistStatus::Unavailable, QStringLiteral("Secure-only build: no secure backend available in this platform") };
 #else
-    if (key.isEmpty()) return { PersistStatus::BackendError, QStringLiteral("Secret key vacío") };
+    if (key.isEmpty()) return { PersistStatus::BackendError, QStringLiteral("Secret key is empty") };
     if (!fallbackEnabled()) {
-        return { PersistStatus::Unavailable, QStringLiteral("Fallback inseguro desactivado por configuración") };
+        return { PersistStatus::Unavailable, QStringLiteral("Insecure fallback disabled by configuration") };
     }
     QSettings s("OpenSCP", "Secrets");
     s.setValue(key, value);
     s.sync();
     if (s.status() != QSettings::NoError) {
-        return { PersistStatus::BackendError, QStringLiteral("QSettings no pudo persistir el secreto") };
+        return { PersistStatus::BackendError, QStringLiteral("QSettings could not persist the secret") };
     }
     return { PersistStatus::Stored, QString() };
 #endif

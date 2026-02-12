@@ -20,7 +20,7 @@
 #include <QPixmap>
 
 AboutDialog::AboutDialog(QWidget* parent) : QDialog(parent) {
-    setWindowTitle(tr("Acerca de OpenSCP"));
+    setWindowTitle(tr("About OpenSCP"));
     // Layout-driven sizing: we'll compute the minimum size after creating widgets
 
     auto* lay = new QVBoxLayout(this);
@@ -33,7 +33,7 @@ AboutDialog::AboutDialog(QWidget* parent) : QDialog(parent) {
     title->setTextFormat(Qt::RichText);
     leftCol->addWidget(title);
 
-    auto* author = new QLabel(tr("Autor: <a href=\"https://github.com/luiscuellar31\">luiscuellar31</a>"), this);
+    auto* author = new QLabel(tr("Author: <a href=\"https://github.com/luiscuellar31\">luiscuellar31</a>"), this);
     author->setTextFormat(Qt::RichText);
     author->setOpenExternalLinks(true);
     leftCol->addWidget(author);
@@ -69,7 +69,7 @@ AboutDialog::AboutDialog(QWidget* parent) : QDialog(parent) {
 
     lay->addLayout(topRow);
 
-    auto* libsTitle = new QLabel(tr("Librerías utilizadas:"), this);
+    auto* libsTitle = new QLabel(tr("Used libraries:"), this);
     lay->addWidget(libsTitle);
 
     // Scrollable text area to show long credits/licenses text loaded from docs/*.txt
@@ -101,7 +101,7 @@ AboutDialog::AboutDialog(QWidget* parent) : QDialog(parent) {
 
     // Decide which file to load based on UI language (settings: UI/language)
     QSettings s("OpenSCP", "OpenSCP");
-    const QString lang = s.value("UI/language", "es").toString().toLower();
+    const QString lang = s.value("UI/language", "en").toString().toLower();
     const QString suffix = lang.startsWith("en") ? QStringLiteral("EN") : QStringLiteral("ES");
 
     const QStringList candidates = {
@@ -123,15 +123,15 @@ AboutDialog::AboutDialog(QWidget* parent) : QDialog(parent) {
     if (content.isEmpty()) {
         const QString expected = QStringLiteral("ABOUT_LIBRARIES_%1(.txt)").arg(suffix);
         content = tr(
-            "No se encontró el archivo de créditos en docs/%1.\n"
-            "Crea ese archivo y añade las librerías/licencias a listar."
+            "Could not find the credits file in docs/%1.\n"
+            "Create that file and list the libraries/licenses there."
         ).arg(expected);
     }
     libsText->setPlainText(content);
     lay->addWidget(libsText);
 
     // Button: open licenses folder (packaged alongside the app)
-    auto* openLicensesBtn = new QPushButton(tr("Abrir carpeta de licencias"), this);
+    auto* openLicensesBtn = new QPushButton(tr("Open Licenses Folder"), this);
     lay->addWidget(openLicensesBtn);
     connect(openLicensesBtn, &QPushButton::clicked, this, [this]{
         auto findLicensesDir = []() -> QString {
@@ -165,14 +165,14 @@ AboutDialog::AboutDialog(QWidget* parent) : QDialog(parent) {
             QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
         } else {
             QMessageBox::information(this,
-                                    tr("Carpeta de licencias no encontrada"),
-                                    tr("No se encontró la carpeta de licencias. Asegúrate de que el paquete incluya los textos de licencia (p.ej., dentro de la app o junto al AppImage)."));
+                                    tr("Licenses folder not found"),
+                                    tr("Could not find the licenses folder. Ensure the package includes the license texts (e.g., inside the app or next to the AppImage)."));
         }
     });
 
     // Report an issue link at the bottom (opens Issues page)
     {
-        const QString linkText = tr("Informar de un error");
+        const QString linkText = tr("Report an issue");
         auto* report = new QLabel(QString("<a href=\"https://github.com/luiscuellar31/openscp/issues\">%1</a>").arg(linkText), this);
         report->setTextFormat(Qt::RichText);
         report->setOpenExternalLinks(true);

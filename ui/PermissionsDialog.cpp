@@ -10,39 +10,39 @@
 PermissionsDialog::PermissionsDialog(QWidget* parent)
     : QDialog(parent), ur_(nullptr), uw_(nullptr), ux_(nullptr),
       gr_(nullptr), gw_(nullptr), gx_(nullptr), or_(nullptr), ow_(nullptr), ox_(nullptr), recursive_(nullptr) {
-    setWindowTitle(tr("Cambiar permisos"));
+    setWindowTitle(tr("Change permissions"));
     auto* lay = new QGridLayout(this);
-    lay->addWidget(new QLabel(tr("Usuario")), 0, 1);
-    lay->addWidget(new QLabel(tr("Grupo")), 0, 2);
-    lay->addWidget(new QLabel(tr("Otros")), 0, 3);
+    lay->addWidget(new QLabel(tr("User")), 0, 1);
+    lay->addWidget(new QLabel(tr("Group")), 0, 2);
+    lay->addWidget(new QLabel(tr("Others")), 0, 3);
 
-    lay->addWidget(new QLabel(tr("Leer")), 1, 0);
+    lay->addWidget(new QLabel(tr("Read")), 1, 0);
     ur_ = new QCheckBox(this); gr_ = new QCheckBox(this); or_ = new QCheckBox(this);
     lay->addWidget(ur_, 1, 1); lay->addWidget(gr_, 1, 2); lay->addWidget(or_, 1, 3);
 
-    lay->addWidget(new QLabel(tr("Escribir")), 2, 0);
+    lay->addWidget(new QLabel(tr("Write")), 2, 0);
     uw_ = new QCheckBox(this); gw_ = new QCheckBox(this); ow_ = new QCheckBox(this);
     lay->addWidget(uw_, 2, 1); lay->addWidget(gw_, 2, 2); lay->addWidget(ow_, 2, 3);
 
-    lay->addWidget(new QLabel(tr("Ejecutar")), 3, 0);
+    lay->addWidget(new QLabel(tr("Execute")), 3, 0);
     ux_ = new QCheckBox(this); gx_ = new QCheckBox(this); ox_ = new QCheckBox(this);
     lay->addWidget(ux_, 3, 1); lay->addWidget(gx_, 3, 2); lay->addWidget(ox_, 3, 3);
 
     lay->addWidget(new QLabel(tr("Preset")), 4, 0);
     presets_ = new QComboBox(this);
-    presets_->addItem(tr("Personalizado"), -1);
-    presets_->addItem(tr("Archivo (644)"), 0644);
-    presets_->addItem(tr("Archivo ejecutable (755)"), 0755);
-    presets_->addItem(tr("Privado (600)"), 0600);
-    presets_->addItem(tr("Directorio privado (700)"), 0700);
-    presets_->addItem(tr("Compartido (664)"), 0664);
-    presets_->addItem(tr("Directorio compartido (775)"), 0775);
+    presets_->addItem(tr("Custom"), -1);
+    presets_->addItem(tr("File (644)"), 0644);
+    presets_->addItem(tr("Executable file (755)"), 0755);
+    presets_->addItem(tr("Private (600)"), 0600);
+    presets_->addItem(tr("Private directory (700)"), 0700);
+    presets_->addItem(tr("Shared (664)"), 0664);
+    presets_->addItem(tr("Shared directory (775)"), 0775);
     lay->addWidget(presets_, 4, 1, 1, 3);
 
     octalPreview_ = new QLabel(this);
     lay->addWidget(octalPreview_, 5, 0, 1, 4);
 
-    recursive_ = new QCheckBox(tr("Aplicar recursivo a subcarpetas"), this);
+    recursive_ = new QCheckBox(tr("Apply recursively to subfolders"), this);
     lay->addWidget(recursive_, 6, 0, 1, 4);
 
     auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
@@ -95,7 +95,7 @@ bool PermissionsDialog::recursive() const {
 void PermissionsDialog::updateOctalPreviewAndPreset() {
     const unsigned int m = mode() & 0777;
     if (octalPreview_) {
-        octalPreview_->setText(tr("Modo octal: %1").arg(QString("%1").arg(m, 3, 8, QLatin1Char('0'))));
+        octalPreview_->setText(tr("Octal mode: %1").arg(QString("%1").arg(m, 3, 8, QLatin1Char('0'))));
     }
     if (presets_) {
         const int idx = presets_->findData(static_cast<int>(m));

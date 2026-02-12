@@ -57,7 +57,7 @@ void DragAwareTreeView::resizeEvent(QResizeEvent* e) {
 void DragAwareTreeView::startDrag(Qt::DropActions supportedActions) {
     if (dragInProgress_) {
         if (auto* mw = qobject_cast<QMainWindow*>(window())) {
-            mw->statusBar()->showMessage(tr("Preparación en curso; espera a que termine."), 3000);
+            mw->statusBar()->showMessage(tr("Preparation in progress; please wait."), 3000);
         }
         return;
     }
@@ -106,7 +106,7 @@ void DragAwareTreeView::showKeepMessage(const QString& batchDir) {
     auto* lbl = new QLabel(mw);
     lbl->setTextFormat(Qt::RichText);
     const QString url = QUrl::fromLocalFile(batchDir).toString();
-    lbl->setText(tr("Staging conservado en: <a href=\"%1\">%2</a>").arg(url, batchDir));
+    lbl->setText(tr("Staging kept at: <a href=\"%1\">%2</a>").arg(url, batchDir));
     lbl->setOpenExternalLinks(true);
     lbl->setCursor(Qt::PointingHandCursor);
     mw->statusBar()->addPermanentWidget(lbl, 0);
@@ -175,7 +175,7 @@ void DragAwareTreeView::showPrepOverlay(const QString& text) {
         overlayLabel_->setStyleSheet("color: white; font-weight: 600;");
         overlayProgress_ = new QProgressBar(overlay_);
         overlayProgress_->setRange(0, 100);
-        overlayCancel_ = new QPushButton(tr("Cancelar"), overlay_);
+        overlayCancel_ = new QPushButton(tr("Cancel"), overlay_);
         overlayCancel_->setCursor(Qt::PointingHandCursor);
         // ESC shortcut to cancel staging
         overlayEsc_ = new QShortcut(QKeySequence(Qt::Key_Escape), overlay_);
@@ -269,7 +269,7 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel* rm) {
     };
 
     // Show overlay early to cover potentially heavy folder enumeration
-    showPrepOverlay(tr("Preparando archivos…"));
+    showPrepOverlay(tr("Preparing files…"));
 
     // Prepare list of downloads (support files and directories)
     struct Pair { QString remote; QString local; quint64 size = 0; };
@@ -362,19 +362,19 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel* rm) {
         QWidget* parent = mw ? static_cast<QWidget*>(mw) : static_cast<QWidget*>(this);
         QMessageBox box(parent);
         box.setIcon(QMessageBox::Question);
-        box.setWindowTitle(tr("Confirmar staging"));
+        box.setWindowTitle(tr("Confirm staging"));
         QString sizePart;
         if (tooBig) {
             sizePart = anySizeUnknown
-                ? QString(" (%1)").arg(tr("~%1 (algunos desconocidos)").arg(QLocale().formattedDataSize((qint64)totalBytes, 1, QLocale::DataSizeIecFormat)))
+                ? QString(" (%1)").arg(tr("~%1 (some unknown)").arg(QLocale().formattedDataSize((qint64)totalBytes, 1, QLocale::DataSizeIecFormat)))
                 : QString(" (%1)").arg(QLocale().formattedDataSize((qint64)totalBytes, 1, QLocale::DataSizeIecFormat));
         }
-        QString detail = tr("Vas a preparar %1 elementos%2. ¿Continuar?")
+        QString detail = tr("You are about to prepare %1 items%2. Continue?")
             .arg(QLocale().toString((qulonglong)totalItems))
             .arg(sizePart);
         box.setText(detail);
-        auto* yesBtn = box.addButton(tr("Continuar"), QMessageBox::AcceptRole);
-        auto* cancelBtn = box.addButton(tr("Cancelar"), QMessageBox::RejectRole);
+        auto* yesBtn = box.addButton(tr("Continue"), QMessageBox::AcceptRole);
+        auto* cancelBtn = box.addButton(tr("Cancel"), QMessageBox::RejectRole);
         box.exec();
         if (box.clickedButton() != yesBtn) {
             cancelCurrentBatch(QStringLiteral("threshold"));
@@ -470,10 +470,10 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel* rm) {
         if (!mw) return;
         QMessageBox box(mw);
         box.setIcon(QMessageBox::Information);
-        box.setWindowTitle(tr("Preparando archivos…"));
-        box.setText(tr("Aún preparando archivos para el arrastre. ¿Esperar o cancelar?"));
-        auto* waitBtn = box.addButton(tr("Esperar"), QMessageBox::AcceptRole);
-        auto* cancelBtn = box.addButton(tr("Cancelar"), QMessageBox::RejectRole);
+        box.setWindowTitle(tr("Preparing files…"));
+        box.setText(tr("Still preparing files for drag-out. Wait or cancel?"));
+        auto* waitBtn = box.addButton(tr("Wait"), QMessageBox::AcceptRole);
+        auto* cancelBtn = box.addButton(tr("Cancel"), QMessageBox::RejectRole);
         box.exec();
         if (box.clickedButton() == cancelBtn) {
             cancelCurrentBatch(QStringLiteral("dialog"));
@@ -513,7 +513,7 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel* rm) {
 
             if (failed > 0) {
                 // Keep staging and show clickable status-bar message with counts
-                QString prefix = tr("%1 de %2 archivos fallaron. Staging en:").arg(failed).arg(total);
+                QString prefix = tr("%1 of %2 files failed. Staging at:").arg(failed).arg(total);
                 showKeepMessageWithPrefix(prefix, currentBatchDir_);
                 const qint64 stagingMs = stagingTimer_.isValid() ? stagingTimer_.elapsed() : -1;
                 logBatchResult(currentBatchId_, total, failed,

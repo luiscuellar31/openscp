@@ -15,7 +15,7 @@
 #include <QTimer>
 
 ConnectionDialog::ConnectionDialog(QWidget* parent) : QDialog(parent) {
-    setWindowTitle(tr("Conectar (SFTP)"));
+    setWindowTitle(tr("Connect (SFTP)"));
     auto* lay = new QFormLayout(this);
     lay->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
@@ -30,16 +30,16 @@ ConnectionDialog::ConnectionDialog(QWidget* parent) : QDialog(parent) {
     keyPass_ = new QLineEdit(this);
 
     // Safer defaults: no implicit host/user values to avoid accidental connections.
-    siteName_->setPlaceholderText(tr("Mi servidor"));
-    host_->setPlaceholderText(tr("sftp.ejemplo.com"));
+    siteName_->setPlaceholderText(tr("My server"));
+    host_->setPlaceholderText(tr("sftp.example.com"));
     port_->setRange(1, 65535);
     port_->setValue(22);
     port_->setFixedWidth(110);
-    port_->setToolTip(tr("Puerto SSH/SFTP"));
-    user_->setPlaceholderText(tr("usuario"));
-    pass_->setPlaceholderText(tr("opcional"));
+    port_->setToolTip(tr("SSH/SFTP port"));
+    user_->setPlaceholderText(tr("user"));
+    pass_->setPlaceholderText(tr("optional"));
     keyPath_->setPlaceholderText(tr("~/.ssh/id_ed25519"));
-    keyPass_->setPlaceholderText(tr("opcional"));
+    keyPass_->setPlaceholderText(tr("optional"));
 
     // Make text inputs a bit wider by default for better readability.
     const int kInputMinWidth = 360;
@@ -54,19 +54,19 @@ ConnectionDialog::ConnectionDialog(QWidget* parent) : QDialog(parent) {
     keyPass_->setEchoMode(QLineEdit::Password);
 
     auto* passToggle = new QToolButton(this);
-    passToggle->setText(tr("Mostrar"));
+    passToggle->setText(tr("Show"));
     passToggle->setCheckable(true);
     connect(passToggle, &QToolButton::toggled, this, [this, passToggle](bool checked) {
         pass_->setEchoMode(checked ? QLineEdit::Normal : QLineEdit::Password);
-        passToggle->setText(checked ? tr("Ocultar") : tr("Mostrar"));
+        passToggle->setText(checked ? tr("Hide") : tr("Show"));
     });
 
     auto* keyPassToggle = new QToolButton(this);
-    keyPassToggle->setText(tr("Mostrar"));
+    keyPassToggle->setText(tr("Show"));
     keyPassToggle->setCheckable(true);
     connect(keyPassToggle, &QToolButton::toggled, this, [this, keyPassToggle](bool checked) {
         keyPass_->setEchoMode(checked ? QLineEdit::Normal : QLineEdit::Password);
-        keyPassToggle->setText(checked ? tr("Ocultar") : tr("Mostrar"));
+        keyPassToggle->setText(checked ? tr("Hide") : tr("Show"));
     });
 
     auto* passRow = new QWidget(this);
@@ -84,7 +84,7 @@ ConnectionDialog::ConnectionDialog(QWidget* parent) : QDialog(parent) {
     keyPassRowLayout->addWidget(keyPassToggle);
 
     auto* keyBrowseBtn = new QToolButton(this);
-    keyBrowseBtn->setText(tr("Elegir…"));
+    keyBrowseBtn->setText(tr("Choose…"));
 
     auto* hostPortRow = new QWidget(this);
     auto* hostPortRowLayout = new QHBoxLayout(hostPortRow);
@@ -101,12 +101,12 @@ ConnectionDialog::ConnectionDialog(QWidget* parent) : QDialog(parent) {
     keyPathRowLayout->addWidget(keyBrowseBtn);
 
     // Layout
-    lay->addRow(tr("Nombre del sitio:"), siteName_);
+    lay->addRow(tr("Site name:"), siteName_);
     siteNameLabel_ = lay->labelForField(siteName_);
     setSiteNameVisible(false);
-    saveSite_ = new QCheckBox(tr("Guardar en sitios guardados"), this);
+    saveSite_ = new QCheckBox(tr("Save to saved sites"), this);
     saveSite_->setChecked(true);
-    saveCredentials_ = new QCheckBox(tr("Guardar contraseña/passphrase"), this);
+    saveCredentials_ = new QCheckBox(tr("Save password/passphrase"), this);
     saveCredentials_->setChecked(false);
     lay->addRow(QString(), saveSite_);
     lay->addRow(QString(), saveCredentials_);
@@ -120,20 +120,20 @@ ConnectionDialog::ConnectionDialog(QWidget* parent) : QDialog(parent) {
             setSiteNameVisible(checked);
         }
     });
-    lay->addRow(tr("Host / Puerto:"), hostPortRow);
-    lay->addRow(tr("Usuario:"), user_);
-    lay->addRow(tr("Contraseña:"), passRow);
-    lay->addRow(tr("Ruta clave privada:"), keyPathRow);
-    lay->addRow(tr("Passphrase clave:"), keyPassRow);
+    lay->addRow(tr("Host / Port:"), hostPortRow);
+    lay->addRow(tr("User:"), user_);
+    lay->addRow(tr("Password:"), passRow);
+    lay->addRow(tr("Private key path:"), keyPathRow);
+    lay->addRow(tr("Key passphrase:"), keyPassRow);
 
     // known_hosts
     khPath_ = new QLineEdit(this);
     khPath_->setPlaceholderText(tr("~/.ssh/known_hosts"));
     khPath_->setMinimumWidth(kInputMinWidth);
     khPolicy_ = new QComboBox(this);
-    khPolicy_->addItem(tr("Estricto"), static_cast<int>(openscp::KnownHostsPolicy::Strict));
-    khPolicy_->addItem(tr("Aceptar nuevo (TOFU)"), static_cast<int>(openscp::KnownHostsPolicy::AcceptNew));
-    khPolicy_->addItem(tr("Sin verificación (doble confirmación, expira en 15 min)"),
+    khPolicy_->addItem(tr("Strict"), static_cast<int>(openscp::KnownHostsPolicy::Strict));
+    khPolicy_->addItem(tr("Accept new (TOFU)"), static_cast<int>(openscp::KnownHostsPolicy::AcceptNew));
+    khPolicy_->addItem(tr("No verification (double confirmation, expires in 15 min)"),
                        static_cast<int>(openscp::KnownHostsPolicy::Off));
     auto* khPathRow = new QWidget(this);
     auto* khPathRowLayout = new QHBoxLayout(khPathRow);
@@ -143,19 +143,19 @@ ConnectionDialog::ConnectionDialog(QWidget* parent) : QDialog(parent) {
 
     // Button to choose known_hosts
     khBrowse_ = new QToolButton(this);
-    khBrowse_->setText(tr("Elegir…"));
+    khBrowse_->setText(tr("Choose…"));
     khPathRowLayout->addWidget(khBrowse_);
 
     lay->addRow(tr("known_hosts:"), khPathRow);
-    lay->addRow(tr("Política:"), khPolicy_);
+    lay->addRow(tr("Policy:"), khPolicy_);
 
     connect(khBrowse_, &QToolButton::clicked, this, [this] {
-        const QString f = QFileDialog::getOpenFileName(this, tr("Selecciona known_hosts"), QDir::homePath() + "/.ssh");
+        const QString f = QFileDialog::getOpenFileName(this, tr("Select known_hosts"), QDir::homePath() + "/.ssh");
         if (!f.isEmpty()) khPath_->setText(f);
     });
 
     connect(keyBrowseBtn, &QToolButton::clicked, this, [this] {
-        const QString f = QFileDialog::getOpenFileName(this, tr("Selecciona clave privada"), QDir::homePath() + "/.ssh");
+        const QString f = QFileDialog::getOpenFileName(this, tr("Select private key"), QDir::homePath() + "/.ssh");
         if (!f.isEmpty()) keyPath_->setText(f);
     });
 

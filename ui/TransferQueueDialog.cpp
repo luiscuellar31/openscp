@@ -14,12 +14,12 @@
 
 static QString statusText(TransferTask::Status s) {
   switch (s) {
-    case TransferTask::Status::Queued: return TransferQueueDialog::tr("En cola");
-    case TransferTask::Status::Running: return TransferQueueDialog::tr("En progreso");
-    case TransferTask::Status::Paused: return TransferQueueDialog::tr("Pausado");
-    case TransferTask::Status::Done: return TransferQueueDialog::tr("Completado");
+    case TransferTask::Status::Queued: return TransferQueueDialog::tr("Queued");
+    case TransferTask::Status::Running: return TransferQueueDialog::tr("Running");
+    case TransferTask::Status::Paused: return TransferQueueDialog::tr("Paused");
+    case TransferTask::Status::Done: return TransferQueueDialog::tr("Completed");
     case TransferTask::Status::Error: return TransferQueueDialog::tr("Error");
-    case TransferTask::Status::Canceled: return TransferQueueDialog::tr("Cancelado");
+    case TransferTask::Status::Canceled: return TransferQueueDialog::tr("Canceled");
   }
   return {};
 }
@@ -42,12 +42,12 @@ public:
     if (role != Qt::DisplayRole) return {};
     if (orientation == Qt::Horizontal) {
       switch (section) {
-        case 0: return TransferQueueDialog::tr("Tipo");
-        case 1: return TransferQueueDialog::tr("Origen");
-        case 2: return TransferQueueDialog::tr("Destino");
-        case 3: return TransferQueueDialog::tr("Estado");
-        case 4: return TransferQueueDialog::tr("Progreso");
-        case 5: return TransferQueueDialog::tr("Intentos");
+        case 0: return TransferQueueDialog::tr("Type");
+        case 1: return TransferQueueDialog::tr("Source");
+        case 2: return TransferQueueDialog::tr("Destination");
+        case 3: return TransferQueueDialog::tr("Status");
+        case 4: return TransferQueueDialog::tr("Progress");
+        case 5: return TransferQueueDialog::tr("Attempts");
         default: return {};
       }
     }
@@ -59,7 +59,7 @@ public:
     if (index.row() < 0 || index.row() >= tasks_.size()) return {};
     const auto& t = tasks_[index.row()];
     switch (index.column()) {
-      case 0: return t.type == TransferTask::Type::Upload ? TransferQueueDialog::tr("Subida") : TransferQueueDialog::tr("Descarga");
+      case 0: return t.type == TransferTask::Type::Upload ? TransferQueueDialog::tr("Upload") : TransferQueueDialog::tr("Download");
       case 1: return t.src;
       case 2: return t.dst;
       case 3: return statusText(t.status);
@@ -124,7 +124,7 @@ private:
 
 TransferQueueDialog::TransferQueueDialog(TransferManager* mgr, QWidget* parent)
   : QDialog(parent), mgr_(mgr) {
-  setWindowTitle(tr("Cola de transferencias"));
+  setWindowTitle(tr("Transfer queue"));
   resize(760, 380);
   setSizeGripEnabled(true);
 
@@ -148,15 +148,15 @@ TransferQueueDialog::TransferQueueDialog(TransferManager* mgr, QWidget* parent)
   auto* hb = new QHBoxLayout(controls);
   hb->setContentsMargins(0,0,0,0);
 
-  pauseBtn_  = new QPushButton(tr("Pausar"), controls);
-  resumeBtn_ = new QPushButton(tr("Reanudar"), controls);
-  pauseSelBtn_  = new QPushButton(tr("Pausar sel."), controls);
-  resumeSelBtn_ = new QPushButton(tr("Reanudar sel."), controls);
-  stopSelBtn_   = new QPushButton(tr("Cancelar sel."), controls);
-  stopAllBtn_   = new QPushButton(tr("Cancelar"), controls);
-  retryBtn_  = new QPushButton(tr("Reintentar"), controls);
-  clearBtn_  = new QPushButton(tr("Limpiar"), controls);
-  closeBtn_  = new QPushButton(tr("Cerrar"), controls);
+  pauseBtn_  = new QPushButton(tr("Pause"), controls);
+  resumeBtn_ = new QPushButton(tr("Resume"), controls);
+  pauseSelBtn_  = new QPushButton(tr("Pause sel."), controls);
+  resumeSelBtn_ = new QPushButton(tr("Resume sel."), controls);
+  stopSelBtn_   = new QPushButton(tr("Cancel sel."), controls);
+  stopAllBtn_   = new QPushButton(tr("Cancel"), controls);
+  retryBtn_  = new QPushButton(tr("Retry"), controls);
+  clearBtn_  = new QPushButton(tr("Clear"), controls);
+  closeBtn_  = new QPushButton(tr("Close"), controls);
 
   hb->addWidget(pauseBtn_);
   hb->addWidget(resumeBtn_);
@@ -178,10 +178,10 @@ TransferQueueDialog::TransferQueueDialog(TransferManager* mgr, QWidget* parent)
   speedSpin_->setRange(0, 1'000'000);
   speedSpin_->setValue(mgr_->globalSpeedLimitKBps());
   speedSpin_->setSuffix(" KB/s");
-  applySpeedBtn_ = new QPushButton(tr("Aplicar vel."), speedRow);
+  applySpeedBtn_ = new QPushButton(tr("Apply limit"), speedRow);
   // Move "Limit selected" next to the speed control
-  limitSelBtn_  = new QPushButton(tr("Limitar sel."), speedRow);
-  hs2->addWidget(new QLabel(tr("Velocidad:"), speedRow));
+  limitSelBtn_  = new QPushButton(tr("Limit sel."), speedRow);
+  hs2->addWidget(new QLabel(tr("Speed:"), speedRow));
   hs2->addWidget(speedSpin_);
   hs2->addWidget(applySpeedBtn_);
   hs2->addWidget(limitSelBtn_);
@@ -249,7 +249,7 @@ void TransferQueueDialog::onApplyGlobalSpeed() {
 void TransferQueueDialog::onLimitSelected() {
   auto sel = table_->selectionModel(); if (!sel || !sel->hasSelection()) return;
   const auto rows = sel->selectedRows();
-  bool ok=false; int v = QInputDialog::getInt(this, tr("Límite para tarea(s)"), tr("KB/s (0 = sin límite)"), 0, 0, 1'000'000, 1, &ok);
+  bool ok=false; int v = QInputDialog::getInt(this, tr("Limit for task(s)"), tr("KB/s (0 = no limit)"), 0, 0, 1'000'000, 1, &ok);
   if (!ok) return;
   for (const QModelIndex& r : rows) {
     if (auto id = model_->taskIdAtRow(r.row()); id.has_value()) mgr_->setTaskSpeedLimit(*id, v);
@@ -282,7 +282,7 @@ void TransferQueueDialog::updateSummary() {
       case TransferTask::Status::Canceled: canceled++; break;
     }
   }
-  QString summary = tr("Total: %1  |  En cola: %2  |  En progreso: %3  |  Pausado: %4  |  Error: %5  |  Completado: %6  |  Cancelado: %7")
+  QString summary = tr("Total: %1  |  Queued: %2  |  Running: %3  |  Paused: %4  |  Error: %5  |  Done: %6  |  Canceled: %7")
                     .arg(tasks.size())
                     .arg(queued)
                     .arg(running)
@@ -292,7 +292,7 @@ void TransferQueueDialog::updateSummary() {
                     .arg(canceled);
   const int gkb = mgr_->globalSpeedLimitKBps();
   if (gkb > 0) {
-    summary += tr("  |  Límite global: %1 KB/s").arg(gkb);
+    summary += tr("  |  Global limit: %1 KB/s").arg(gkb);
   }
   summaryLabel_->setText(summary);
 
@@ -330,10 +330,10 @@ void TransferQueueDialog::showContextMenu(const QPoint& pos) {
 
   const bool hasSel = table_->selectionModel() && table_->selectionModel()->hasSelection();
   QMenu menu(this);
-  QAction* actPauseSel  = menu.addAction(tr("Pausar sel."));
-  QAction* actResumeSel = menu.addAction(tr("Reanudar sel."));
-  QAction* actLimitSel  = menu.addAction(tr("Limitar sel."));
-  QAction* actCancelSel = menu.addAction(tr("Cancelar sel."));
+  QAction* actPauseSel  = menu.addAction(tr("Pause sel."));
+  QAction* actResumeSel = menu.addAction(tr("Resume sel."));
+  QAction* actLimitSel  = menu.addAction(tr("Limit sel."));
+  QAction* actCancelSel = menu.addAction(tr("Cancel sel."));
   actPauseSel->setEnabled(hasSel);
   actResumeSel->setEnabled(hasSel);
   actLimitSel->setEnabled(hasSel);
