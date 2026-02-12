@@ -180,6 +180,25 @@ static bool isValidEntryName(const QString& name, QString* why = nullptr) {
     return true;
 }
 
+static QString shortRemotePermissionError(const std::string& raw, const QString& fallback) {
+    QString msg = QString::fromStdString(raw).trimmed();
+    if (msg.isEmpty()) return fallback;
+
+    const QString lower = msg.toLower();
+    if (lower.contains("permission denied") || lower.contains("permiso denegado")) {
+        return QCoreApplication::translate("MainWindow", "Permiso denegado.");
+    }
+    if (lower.contains("read-only") || lower.contains("solo lectura")) {
+        return QCoreApplication::translate("MainWindow", "Ubicación en modo solo lectura.");
+    }
+
+    const int nl = msg.indexOf('\n');
+    if (nl > 0) msg = msg.left(nl);
+    msg = msg.simplified();
+    if (msg.size() > 96) msg = msg.left(93) + "...";
+    return msg;
+}
+
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Globally center dialogs relative to the main window
     qApp->installEventFilter(this);
@@ -2256,21 +2275,38 @@ void MainWindow::changeRemotePermissions() {
     auto sel = rightView_->selectionModel();
     if (!sel) return;
     const auto rows = sel->selectedRows();
-    if (rows.size() != 1) { QMessageBox::information(this, tr("Permisos"), tr("Selecciona un solo elemento.")); return; }
+    if (rows.size() != 1) { QMessageBox::information(this, tr("Permisos"), tr("Selecciona solo un elemento.")); return; }
     const QModelIndex idx = rows.first();
     const QString name = rightRemoteModel_->nameAt(idx);
     const QString base = rightRemoteModel_->rootPath();
     const QString path = joinRemotePath(base, name);
     openscp::FileInfo st{};
     std::string err;
-    if (!sftp_->stat(path.toStdString(), st, err)) { QMessageBox::warning(this, tr("Permisos"), QString::fromStdString(err)); return; }
+    if (!sftp_->stat(path.toStdString(), st, err)) {
+        QMessageBox::warning(
+            this,
+            tr("Permisos"),
+            tr("No se pudieron leer los permisos.\n%1")
+                .arg(shortRemotePermissionError(err, tr("Error al leer información remota.")))
+        );
+        return;
+    }
     PermissionsDialog dlg(this);
     dlg.setMode(st.mode & 0777);
     if (dlg.exec() != QDialog::Accepted) return;
     unsigned int newMode = (st.mode & ~0777u) | (dlg.mode() & 0777u);
     auto applyOne = [&](const QString& p) -> bool {
         std::string cerrs;
-        if (!sftp_->chmod(p.toStdString(), newMode, cerrs)) { QMessageBox::critical(this, tr("Permisos"), QString::fromStdString(cerrs)); return false; }
+        if (!sftp_->chmod(p.toStdString(), newMode, cerrs)) {
+            const QString item = QFileInfo(p).fileName().isEmpty() ? p : QFileInfo(p).fileName();
+            QMessageBox::critical(
+                this,
+                tr("Permisos"),
+                tr("No se pudieron aplicar permisos en \"%1\".\n%2")
+                    .arg(item, shortRemotePermissionError(cerrs, tr("Error al aplicar cambios.")))
+            );
+            return false;
+        }
         return true;
     };
     bool ok = true;

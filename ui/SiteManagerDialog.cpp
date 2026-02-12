@@ -7,8 +7,6 @@
 #include <QTableWidget>
 #include <QHeaderView>
 #include <QSettings>
-#include <QInputDialog>
-#include <QLineEdit>
 #include <QMessageBox>
 #include "SecretStore.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
@@ -16,8 +14,6 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
-#include <QToolTip>
-#include <QCursor>
 #include <QSet>
 #include <QUuid>
 
@@ -68,6 +64,14 @@ static void showDuplicateNameIssue(QWidget* parent, const QString& name) {
         parent,
         QObject::tr("Nombre duplicado"),
         QObject::tr("Ya existe un sitio con el nombre \"%1\". Usa un nombre distinto.").arg(name)
+    );
+}
+
+static void showMissingNameIssue(QWidget* parent) {
+    QMessageBox::warning(
+        parent,
+        QObject::tr("Nombre requerido"),
+        QObject::tr("Escribe un nombre de sitio para guardar esta conexión.")
     );
 }
 
@@ -138,13 +142,10 @@ SiteManagerDialog::SiteManagerDialog(QWidget* parent) : QDialog(parent) {
     // Initial state: disable Edit/Delete/Connect if there is no selection
     updateButtons();
     connect(table_->selectionModel(), &QItemSelectionModel::selectionChanged, this, &SiteManagerDialog::updateButtons);
-    // Double-click: show full cell content as a tooltip at cursor position
+    // Double-click: primary action (connect) for faster workflow.
     connect(table_, &QTableWidget::itemDoubleClicked, this, [this](QTableWidgetItem* it){
         if (!it) return;
-        // Prefer full text stored in UserRole+1, then tooltip, then cell text
-        QVariant fullVar = it->data(Qt::UserRole + 1);
-        const QString full = fullVar.isValid() ? fullVar.toString() : (it->toolTip().isEmpty() ? it->text() : it->toolTip());
-        if (!full.isEmpty()) QToolTip::showText(QCursor::pos(), full, table_);
+        onConnect();
     });
 }
 
@@ -235,17 +236,20 @@ void SiteManagerDialog::refresh() {
 
 void SiteManagerDialog::onAdd() {
     ConnectionDialog dlg(this);
+    dlg.setWindowTitle(tr("Añadir sitio"));
+    dlg.setSiteNameVisible(true);
     if (dlg.exec() != QDialog::Accepted) return;
     auto opt = dlg.options();
-    bool ok = false;
-    QString name = QInputDialog::getText(
-        this, tr("Nombre del sitio"), tr("Nombre:"),
-        QLineEdit::Normal,
-        QString("%1@%2").arg(QString::fromStdString(opt.username), QString::fromStdString(opt.host)),
-        &ok
-    );
-    name = normalizedSiteName(name);
-    if (!ok || name.isEmpty()) return;
+    QString name = normalizedSiteName(dlg.siteName());
+    if (name.isEmpty()) {
+        name = normalizedSiteName(
+            QString("%1@%2").arg(QString::fromStdString(opt.username), QString::fromStdString(opt.host))
+        );
+    }
+    if (name.isEmpty()) {
+        showMissingNameIssue(this);
+        return;
+    }
     if (hasDuplicateSiteName(sites_, name)) {
         showDuplicateNameIssue(this, name);
         return;
@@ -279,6 +283,9 @@ void SiteManagerDialog::onEdit() {
     if (modelIndex < 0 || modelIndex >= sites_.size()) return;
     SiteEntry e = sites_[modelIndex];
     ConnectionDialog dlg(this);
+    dlg.setWindowTitle(tr("Editar sitio"));
+    dlg.setSiteNameVisible(true);
+    dlg.setSiteName(e.name);
     // Preload site options and stored secrets
     {
         SecretStore store;
@@ -297,10 +304,11 @@ void SiteManagerDialog::onEdit() {
     }
     if (dlg.exec() != QDialog::Accepted) return;
     e.opt = dlg.options();
-    bool ok = false;
-    QString name = QInputDialog::getText(this, tr("Nombre del sitio"), tr("Nombre:"), QLineEdit::Normal, e.name, &ok);
-    name = normalizedSiteName(name);
-    if (!ok || name.isEmpty()) return;
+    QString name = normalizedSiteName(dlg.siteName());
+    if (name.isEmpty()) {
+        showMissingNameIssue(this);
+        return;
+    }
     if (hasDuplicateSiteName(sites_, name, modelIndex)) {
         showDuplicateNameIssue(this, name);
         return;

@@ -197,13 +197,14 @@ void TransferQueueDialog::updateSummary() {
       case TransferTask::Status::Canceled: canceled++; break;
     }
   }
-  QString summary = tr("Total: %1  |  En cola: %2  |  En progreso: %3  |  Pausado: %4  |  Error: %5  |  Completado: %6")
+  QString summary = tr("Total: %1  |  En cola: %2  |  En progreso: %3  |  Pausado: %4  |  Error: %5  |  Completado: %6  |  Cancelado: %7")
                     .arg(tasks.size())
                     .arg(queued)
                     .arg(running)
                     .arg(paused)
                     .arg(error)
-                    .arg(done);
+                    .arg(done)
+                    .arg(canceled);
   const int gkb = mgr_->globalSpeedLimitKBps();
   if (gkb > 0) {
     summary += tr("  |  Límite global: %1 KB/s").arg(gkb);
