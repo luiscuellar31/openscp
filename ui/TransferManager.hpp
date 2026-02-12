@@ -1,4 +1,4 @@
-// Transfer queue manager (sequential) with pause/retry/resume.
+// Transfer queue manager with concurrent worker execution.
 #pragma once
 #include <QObject>
 #include <QString>
@@ -7,6 +7,7 @@
 #include <thread>
 #include <optional>
 #include <mutex>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include "openscp/SftpTypes.hpp"
@@ -43,10 +44,10 @@ public:
     ~TransferManager();
 
     // Inject the SFTP client to use (not owned by the manager)
-    void setClient(openscp::SftpClient* c) { client_ = c; }
+    void setClient(openscp::SftpClient* c);
     void clearClient();
-    // Session options for auto-reconnect
-    void setSessionOptions(const openscp::SessionOptions& opt) { sessionOpt_ = opt; }
+    // Session options used to create independent worker connections.
+    void setSessionOptions(const openscp::SessionOptions& opt);
     // Concurrency: maximum number of simultaneous tasks
     void setMaxConcurrent(int n) { if (n < 1) n = 1; maxConcurrent_ = n; }
     int maxConcurrent() const { return maxConcurrent_; }
@@ -98,12 +99,12 @@ private:
     std::unordered_set<quint64> pausedTasks_;
     std::unordered_set<quint64> canceledTasks_;
     // Synchronization
-    mutable std::mutex mtx_;   // protects tasks_ and auxiliary sets
-    std::mutex sftpMutex_;     // serializes calls to libssh2 (not thread-safe)
+    mutable std::mutex mtx_;   // protects tasks_, client_, options and auxiliary sets
+    std::mutex connFactoryMutex_; // serializes creation of worker SFTP clients
     quint64 nextId_ = 1;
 
     int indexForId(quint64 id) const;
-    // Reconnect the client if disconnected (with backoff). Returns true on success.
-    bool ensureConnected(std::string& err);
+    // Build an isolated SFTP client for one worker task.
+    std::unique_ptr<openscp::SftpClient> createWorkerClient(std::string& err);
     std::optional<openscp::SessionOptions> sessionOpt_;
 };
