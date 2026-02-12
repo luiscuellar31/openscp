@@ -9,6 +9,7 @@
 #include <QSettings>
 #include <QInputDialog>
 #include <QLineEdit>
+#include <QMessageBox>
 #include "SecretStore.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
 #include <QDir>
@@ -17,6 +18,32 @@
 #include <QSaveFile>
 #include <QToolTip>
 #include <QCursor>
+
+static QString persistStatusText(SecretStore::PersistStatus st) {
+    switch (st) {
+        case SecretStore::PersistStatus::Stored: return QObject::tr("guardado");
+        case SecretStore::PersistStatus::Unavailable: return QObject::tr("no disponible");
+        case SecretStore::PersistStatus::PermissionDenied: return QObject::tr("permiso denegado");
+        case SecretStore::PersistStatus::BackendError: return QObject::tr("error del backend");
+    }
+    return QObject::tr("desconocido");
+}
+
+static QString persistIssueLine(const QString& label, const SecretStore::PersistResult& r) {
+    QString line = QString("%1: %2").arg(label, persistStatusText(r.status));
+    if (!r.detail.isEmpty()) line += QString(" (%1)").arg(r.detail);
+    return line;
+}
+
+static void showPersistIssues(QWidget* parent, const QStringList& issues) {
+    if (issues.isEmpty()) return;
+    QMessageBox::warning(
+        parent,
+        QObject::tr("Credenciales no guardadas"),
+        QObject::tr("No se pudieron guardar una o más credenciales en el backend seguro:\n%1")
+            .arg(issues.join("\n"))
+    );
+}
 
 SiteManagerDialog::SiteManagerDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle(tr("Gestor de sitios"));
@@ -167,8 +194,16 @@ void SiteManagerDialog::onAdd() {
     refresh();
     // Save secrets
     SecretStore store;
-    if (opt.password) store.setSecret(QString("site:%1:password").arg(name), QString::fromStdString(*opt.password));
-    if (opt.private_key_passphrase) store.setSecret(QString("site:%1:keypass").arg(name), QString::fromStdString(*opt.private_key_passphrase));
+    QStringList persistIssues;
+    if (opt.password) {
+        auto r = store.setSecret(QString("site:%1:password").arg(name), QString::fromStdString(*opt.password));
+        if (!r.ok()) persistIssues << persistIssueLine(tr("Contraseña"), r);
+    }
+    if (opt.private_key_passphrase) {
+        auto r = store.setSecret(QString("site:%1:keypass").arg(name), QString::fromStdString(*opt.private_key_passphrase));
+        if (!r.ok()) persistIssues << persistIssueLine(tr("Passphrase de clave"), r);
+    }
+    showPersistIssues(this, persistIssues);
 }
 
 void SiteManagerDialog::onEdit() {
@@ -210,8 +245,16 @@ void SiteManagerDialog::onEdit() {
     }
     // Update secrets
     SecretStore store;
-    if (e.opt.password) store.setSecret(QString("site:%1:password").arg(name), QString::fromStdString(*e.opt.password));
-    if (e.opt.private_key_passphrase) store.setSecret(QString("site:%1:keypass").arg(name), QString::fromStdString(*e.opt.private_key_passphrase));
+    QStringList persistIssues;
+    if (e.opt.password) {
+        auto r = store.setSecret(QString("site:%1:password").arg(name), QString::fromStdString(*e.opt.password));
+        if (!r.ok()) persistIssues << persistIssueLine(tr("Contraseña"), r);
+    }
+    if (e.opt.private_key_passphrase) {
+        auto r = store.setSecret(QString("site:%1:keypass").arg(name), QString::fromStdString(*e.opt.private_key_passphrase));
+        if (!r.ok()) persistIssues << persistIssueLine(tr("Passphrase de clave"), r);
+    }
+    showPersistIssues(this, persistIssues);
 }
 
 void SiteManagerDialog::onRemove() {
@@ -285,22 +328,28 @@ bool SiteManagerDialog::selectedOptions(openscp::SessionOptions& out) const {
         QSettings s("OpenSCP", "OpenSCP");
         int n = s.beginReadArray("sites");
         bool migratedPw = false, migratedKp = false;
+        QStringList persistIssues;
         if (modelIndex >= 0 && modelIndex < n) {
             s.setArrayIndex(modelIndex);
             const QString oldPw = s.value("password").toString();
             const QString oldKp = s.value("keyPass").toString();
             if (!oldPw.isEmpty()) {
                 out.password = oldPw.toStdString();
-                store.setSecret(QString("site:%1:password").arg(name), oldPw);
-                migratedPw = true;
+                auto r = store.setSecret(QString("site:%1:password").arg(name), oldPw);
+                if (r.ok()) migratedPw = true;
+                else persistIssues << persistIssueLine(QObject::tr("Contraseña"), r);
             }
             if (!oldKp.isEmpty()) {
                 out.private_key_passphrase = oldKp.toStdString();
-                store.setSecret(QString("site:%1:keypass").arg(name), oldKp);
-                migratedKp = true;
+                auto r = store.setSecret(QString("site:%1:keypass").arg(name), oldKp);
+                if (r.ok()) migratedKp = true;
+                else persistIssues << persistIssueLine(QObject::tr("Passphrase de clave"), r);
             }
         }
         s.endArray();
+        if (!persistIssues.isEmpty()) {
+            showPersistIssues(const_cast<SiteManagerDialog*>(this), persistIssues);
+        }
         // After migrating, remove legacy keys from QSettings to avoid storing secrets in plaintext
         if ((migratedPw || migratedKp) && modelIndex >= 0) {
             s.beginWriteArray("sites");

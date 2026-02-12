@@ -9,8 +9,21 @@
 // designed to be replaceable by Keychain (macOS) / Secret Service (Linux).
 class SecretStore {
 public:
+    enum class PersistStatus {
+        Stored,
+        Unavailable,
+        PermissionDenied,
+        BackendError
+    };
+
+    struct PersistResult {
+        PersistStatus status = PersistStatus::Stored;
+        QString detail;
+        bool ok() const { return status == PersistStatus::Stored; }
+    };
+
     // Store a secret under a logical key (e.g. "site:Name:password").
-    void setSecret(const QString& key, const QString& value);
+    PersistResult setSecret(const QString& key, const QString& value);
 
     // Retrieve a secret if present.
     std::optional<QString> getSecret(const QString& key) const;
