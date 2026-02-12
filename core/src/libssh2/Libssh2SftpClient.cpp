@@ -7,6 +7,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <algorithm>
 #include <chrono>
 #include <thread>
 #include <cstdlib>
@@ -27,6 +28,7 @@
 #endif
 #include <openssl/sha.h>
 #include <cstdio>
+#include <cstdarg>
 #include <sstream>
 #include <array>
 #include <ctime>
@@ -40,6 +42,47 @@
 #include <netinet/tcp.h>
 
 namespace openscp {
+
+enum class CoreLogLevel : int {
+    Off = 0,
+    Info = 1,
+    Debug = 2
+};
+
+static CoreLogLevel core_log_level() {
+    static const CoreLogLevel level = []() {
+        const char* raw = std::getenv("OPEN_SCP_LOG_LEVEL");
+        if (!raw || !*raw) return CoreLogLevel::Off;
+        std::string v(raw);
+        for (char& c : v) c = (char)std::tolower((unsigned char)c);
+        if (v == "debug" || v == "2") return CoreLogLevel::Debug;
+        if (v == "info" || v == "1") return CoreLogLevel::Info;
+        return CoreLogLevel::Off;
+    }();
+    return level;
+}
+
+static bool core_sensitive_debug_enabled() {
+    static const bool enabled = []() {
+        const char* raw = std::getenv("OPEN_SCP_LOG_SENSITIVE");
+        return raw && *raw == '1';
+    }();
+    return enabled;
+}
+
+static bool core_log_enabled(CoreLogLevel level) {
+    return (int)core_log_level() >= (int)level;
+}
+
+static void core_logf(CoreLogLevel level, const char* fmt, ...) {
+    if (!core_log_enabled(level) || !fmt) return;
+    std::fprintf(stderr, "[OpenSCP] ");
+    va_list ap;
+    va_start(ap, fmt);
+    std::vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    std::fprintf(stderr, "\n");
+}
 
 // Resolve POSIX home directory robustly (prefer $HOME, fallback to getpwuid)
 #ifndef _WIN32
@@ -955,7 +998,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
 
         int typemask_plain = LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW | alg;
         int typemask_hash = LIBSSH2_KNOWNHOST_TYPE_SHA1 | LIBSSH2_KNOWNHOST_KEYENC_RAW | alg;
-        std::fprintf(stderr, "[OpenSCP] HostKey map: keytype=%d algMask=%d display=%s\n", keytype, alg, algDisplay.c_str());
+        core_logf(CoreLogLevel::Debug, "HostKey map: keytype=%d algMask=%d display=%s", keytype, alg, algDisplay.c_str());
 
         struct libssh2_knownhost* host = nullptr;
         int check = libssh2_knownhost_checkp(nh, opt.host.c_str(), opt.port,
@@ -1049,7 +1092,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
             // If saving is not possible (unsupported alg or no kh path): allow only if user explicitly accepted
             if (!canSaveInitial) {
                 libssh2_knownhost_free(nh);
-                std::fprintf(stderr, "[OpenSCP] Saving hostkey skipped: no khPath or unsupported alg.\n");
+                core_logf(CoreLogLevel::Info, "Saving hostkey skipped: no khPath or unsupported algorithm");
                 if (opt.hostkey_status_cb) {
                     std::string why = khPath.empty() ? "Ruta known_hosts no definida" : "Algoritmo de hostkey sin soporte de known_hosts en libssh2";
                     opt.hostkey_status_cb(std::string("No se podrá guardar la huella: ") + why);
@@ -1083,13 +1126,22 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
                 // Manual ED25519 fallback when libssh2 lacks knownhosts alg mask
 #ifdef LIBSSH2_HOSTKEY_TYPE_ED25519
                 if (!saved && keytype == LIBSSH2_HOSTKEY_TYPE_ED25519) {
-                    std::fprintf(stderr, "[OpenSCP] Manual known_hosts write for ssh-ed25519 (libssh2 KH mask unavailable). keylen=%zu\n", (size_t)keylen);
-                    std::fprintf(stderr, "[OpenSCP] key head: %02X %02X %02X %02X %02X %02X %02X %02X (base64 len=%zu)\n",
-                                  (unsigned)((const unsigned char*)hostkey)[0], (unsigned)((const unsigned char*)hostkey)[1],
-                                  (unsigned)((const unsigned char*)hostkey)[2], (unsigned)((const unsigned char*)hostkey)[3],
-                                  (unsigned)((const unsigned char*)hostkey)[4], (unsigned)((const unsigned char*)hostkey)[5],
-                                  (unsigned)((const unsigned char*)hostkey)[6], (unsigned)((const unsigned char*)hostkey)[7],
-                                  b64encode((const unsigned char*)hostkey, (size_t)keylen).size());
+                    if (core_sensitive_debug_enabled()) {
+                        std::ostringstream preview;
+                        const std::size_t n = std::min<std::size_t>((std::size_t)keylen, (std::size_t)8);
+                        for (std::size_t i = 0; i < n; ++i) {
+                            if (i) preview << ' ';
+                            char b[4];
+                            std::snprintf(b, sizeof(b), "%02X", (unsigned)((const unsigned char*)hostkey)[i]);
+                            preview << b;
+                        }
+                        core_logf(CoreLogLevel::Debug,
+                                  "Manual known_hosts write for ssh-ed25519 fallback; keylen=%zu key_head=%s",
+                                  (size_t)keylen, preview.str().c_str());
+                    } else {
+                        core_logf(CoreLogLevel::Debug,
+                                  "Manual known_hosts write for ssh-ed25519 fallback; key material redacted (set OPEN_SCP_LOG_SENSITIVE=1 to include)");
+                    }
                     // Fallback: write OpenSSH line atomically (hashed or plain)
 #ifndef _WIN32
                     // Read existing
