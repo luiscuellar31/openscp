@@ -47,24 +47,24 @@ You are entitled to replace the Qt libraries and relink OpenSCP against them.
 
 ### 4.1 Linux
 
-Build or install your Qt (example: 6.8.3) and rebuild OpenSCP against it:
+Build or install your Qt (Qt 6.x) and rebuild OpenSCP against it:
 
 ```bash
 # Example: building Qt from source
-tar xf qt-everywhere-src-6.8.3.tar.xz
-cd qt-everywhere-src-6.8.3
-./configure -prefix "$HOME/qt-6.8.3" -release
+tar xf qt-everywhere-src-<version>.tar.xz
+cd qt-everywhere-src-<version>
+./configure -prefix "$HOME/qt-<version>" -release
 cmake --build . --parallel
 cmake --install .
 
 # Rebuild OpenSCP against your Qt
 git clone https://github.com/tuusuario/openscp.git
 cd openscp
-cmake -S . -B build -DCMAKE_PREFIX_PATH="$HOME/qt-6.8.3"
+cmake -S . -B build -DCMAKE_PREFIX_PATH="$HOME/qt-<version>"
 cmake --build build --parallel
 
 # Run with your Qt (if installed in a non-standard location)
-LD_LIBRARY_PATH="$HOME/qt-6.8.3/lib:$LD_LIBRARY_PATH" ./build/openscp_hello
+LD_LIBRARY_PATH="$HOME/qt-<version>/lib:$LD_LIBRARY_PATH" ./build/openscp_hello
 ```
 
 If you use AppImage, you can extract, replace the `libQt6*.so.*` inside `squashfs-root/usr/lib/`, and repack with `appimagetool`. Alternatively, run from the extracted tree with an updated `LD_LIBRARY_PATH`.
@@ -73,10 +73,10 @@ We do not encrypt or lock the shipped libraries; replacement is not technically 
 
 ### 4.2 macOS (.app bundle)
 
-Install Qt (e.g., 6.8.3 via Homebrew, the official installer, or build from source) and rebuild OpenSCP:
+Install Qt (Qt 6.x, e.g., 6.8.3, via Homebrew, the official installer, or build from source) and rebuild OpenSCP:
 
 ```bash
-cmake -S . -B build -DCMAKE_PREFIX_PATH="/path/to/Qt/6.8.3/macos"
+cmake -S . -B build -DCMAKE_PREFIX_PATH="/path/to/Qt/<version>/macos"
 cmake --build build --parallel
 ```
 

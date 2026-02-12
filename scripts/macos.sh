@@ -5,24 +5,65 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${REPO_DIR}/build"
 APP_PATH="${BUILD_DIR}/OpenSCP.app"
-DEFAULT_QT_PREFIX="/Users/luiscuellar/Qt/6.8.3/macos"
-
-if [[ -n "${Qt6_DIR:-}" ]]; then
-  EFFECTIVE_QT6_DIR="${Qt6_DIR}"
-elif [[ -n "${QT6_DIR:-}" ]]; then
-  EFFECTIVE_QT6_DIR="${QT6_DIR}"
-else
-  EFFECTIVE_QT6_DIR="${DEFAULT_QT_PREFIX}/lib/cmake/Qt6"
-fi
-
-if [[ -n "${QT_PREFIX:-}" ]]; then
-  EFFECTIVE_QT_PREFIX="${QT_PREFIX}"
-else
-  EFFECTIVE_QT_PREFIX="${DEFAULT_QT_PREFIX}"
-fi
+EFFECTIVE_QT6_DIR=""
+EFFECTIVE_QT_PREFIX=""
 
 log() { printf "\033[1;34m[macos]\033[0m %s\n" "$*"; }
 die() { printf "\033[1;31m[err ]\033[0m %s\n" "$*"; exit 1; }
+
+version_key() {
+  local v="${1:-0}"
+  local a=0 b=0 c=0 d=0
+  IFS='.' read -r a b c d <<<"$v"
+  printf "%04d%04d%04d%04d" "${a:-0}" "${b:-0}" "${c:-0}" "${d:-0}"
+}
+
+detect_qt6_dir_from_home() {
+  local best_dir=""
+  local best_key=""
+  local cand ver key
+  shopt -s nullglob
+  for cand in "${HOME}"/Qt/*/macos/lib/cmake/Qt6; do
+    [[ -f "${cand}/Qt6Config.cmake" ]] || continue
+    ver="$(sed -E 's#^.*/Qt/([^/]+)/macos/lib/cmake/Qt6$#\1#' <<<"$cand")"
+    [[ "$ver" =~ ^[0-9]+(\.[0-9]+)*$ ]] || continue
+    key="$(version_key "$ver")"
+    if [[ -z "$best_key" || "$key" > "$best_key" ]]; then
+      best_key="$key"
+      best_dir="$cand"
+    fi
+  done
+  shopt -u nullglob
+  [[ -n "$best_dir" ]] && printf "%s\n" "$best_dir"
+}
+
+resolve_qt_paths() {
+  local qt6_dir=""
+
+  if [[ -n "${Qt6_DIR:-}" ]]; then
+    qt6_dir="${Qt6_DIR}"
+  elif [[ -n "${QT6_DIR:-}" ]]; then
+    qt6_dir="${QT6_DIR}"
+  elif [[ -n "${QT_PREFIX:-}" ]]; then
+    qt6_dir="${QT_PREFIX}/lib/cmake/Qt6"
+  else
+    qt6_dir="$(detect_qt6_dir_from_home || true)"
+  fi
+
+  if [[ -n "${QT_PREFIX:-}" ]]; then
+    EFFECTIVE_QT_PREFIX="${QT_PREFIX}"
+  elif [[ -n "$qt6_dir" && -d "$qt6_dir" ]]; then
+    EFFECTIVE_QT_PREFIX="$(cd "$qt6_dir/../.." && pwd)"
+  else
+    EFFECTIVE_QT_PREFIX=""
+  fi
+
+  if [[ -n "$qt6_dir" ]]; then
+    EFFECTIVE_QT6_DIR="$qt6_dir"
+  else
+    EFFECTIVE_QT6_DIR=""
+  fi
+}
 
 usage() {
   cat <<'EOF'
@@ -42,11 +83,17 @@ Commands:
 Optional env vars:
   QT_PREFIX=/path/to/Qt/<ver>/macos
   Qt6_DIR=/path/to/Qt/<ver>/macos/lib/cmake/Qt6
+  QT6_DIR=/path/to/Qt/<ver>/macos/lib/cmake/Qt6
   CMAKE_OSX_ARCHITECTURES=arm64|x86_64|arm64;x86_64
   SKIP_CODESIGN=1|0
   SKIP_NOTARIZATION=1|0
+
+If no Qt path is provided, the script auto-detects the newest Qt under:
+  $HOME/Qt/<version>/macos
 EOF
 }
+
+resolve_qt_paths
 
 configure_release() {
   local args=(

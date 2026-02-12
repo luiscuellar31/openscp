@@ -11,9 +11,12 @@ This guide explains how to build the `.app` and create unsigned macOS artifacts 
 
 ## Prerequisites
 
-- Qt 6.8.3 (official installer), not Conda. The script prioritizes:
-  - `/Users/luiscuellar/Qt/6.8.3/macos/bin/macdeployqt`
-  - or `Qt6_DIR=/Users/luiscuellar/Qt/6.8.3/macos/lib/cmake/Qt6`
+- Qt 6.x (official installer), not Conda. The script prioritizes:
+  - `QT_PREFIX` / `Qt6_DIR` if provided
+  - or auto-detection under `$HOME/Qt/<version>/macos`
+- If your Qt is in another location, set:
+  - `QT_PREFIX=/path/to/Qt/<version>/macos`
+  - or `Qt6_DIR=/path/to/Qt/<version>/macos/lib/cmake/Qt6`
 - Homebrew libraries for build/runtime (copied into the bundle and rewritten):
   - `brew install libssh2 openssl@3`
 - CMake 3.22+, a C++20 compiler.
@@ -57,7 +60,7 @@ export CMAKE_OSX_ARCHITECTURES=x86_64
 export CMAKE_OSX_ARCHITECTURES='arm64;x86_64'
 
 # Make sure Qt matches your target arch; e.g. for Intel:
-export Qt6_DIR=/path/to/Qt/6.8.3/macos/lib/cmake/Qt6
+export Qt6_DIR=/path/to/Qt/<version>/macos/lib/cmake/Qt6
 
 ./scripts/macos.sh dist
 ```
@@ -89,7 +92,7 @@ Expect library references to be `@executable_path/../Frameworks/...`.
 ## Troubleshooting
 
 - Script refuses `macdeployqt` from Conda:
-  - Set `Qt6_DIR=/Users/luiscuellar/Qt/6.8.3/macos/lib/cmake/Qt6` or ensure the official Qt path exists at `/Users/luiscuellar/Qt/6.8.3/macos/bin/macdeployqt`.
+  - Set `Qt6_DIR=$HOME/Qt/<version>/macos/lib/cmake/Qt6` or set `QT_PREFIX=$HOME/Qt/<version>/macos`.
 - Missing `libssh2`/`openssl@3`:
   - `brew install libssh2 openssl@3`
 - Still seeing Homebrew/Conda absolute paths in the binary:

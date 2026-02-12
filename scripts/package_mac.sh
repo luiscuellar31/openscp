@@ -16,6 +16,7 @@ set -euo pipefail
 #   MINIMUM_SYSTEM_VERSION Default: "12.0" (used only for Info.plist checks)
 #   CMAKE_OSX_ARCHITECTURES Default: "arm64" (or "arm64;x86_64" for universal naming)
 #   CMAKE_PREFIX_PATH      Path to your Qt 6 install root (if not in default search path)
+#   QT_PREFIX              Path to Qt install root (…/Qt/<version>/macos)
 #   Qt6_DIR                Path to Qt6 CMake config dir (…/lib/cmake/Qt6); used to derive Qt bin for macdeployqt
 #   PACKAGE_FORMATS        Comma-separated outputs: app,pkg,dmg (default: dmg)
 #
@@ -77,11 +78,13 @@ ensure_cmd() {
 }
 
 discover_macdeployqt() {
-  # 1) Force official Qt first
-  local forced="/Users/luiscuellar/Qt/6.8.3/macos/bin/macdeployqt"
-  if [[ -x "$forced" ]]; then
-    QTPREFIX="$(cd "$(dirname "$forced")/.." && pwd)"
-    echo "$forced"; return
+  # 1) QT_PREFIX (explicit) lookup
+  if [[ -n "${QT_PREFIX:-}" ]]; then
+    local from_prefix="${QT_PREFIX}/bin/macdeployqt"
+    if [[ -x "$from_prefix" ]]; then
+      QTPREFIX="$(cd "$(dirname "$from_prefix")/.." && pwd)"
+      echo "$from_prefix"; return
+    fi
   fi
   # 2) Qt6_DIR based lookup
   if [[ -n "${Qt6_DIR:-}" ]]; then
@@ -91,13 +94,20 @@ discover_macdeployqt() {
       local real
       real="$(/usr/bin/realpath "$cand" 2>/dev/null || echo "$cand")"
       if [[ "$real" == *miniconda* ]]; then
-        die "Refusing to use conda macdeployqt at: $real. Point Qt6_DIR to your official Qt (e.g., /Users/luiscuellar/Qt/6.8.3/macos/lib/cmake/Qt6)."
+        die "Refusing to use conda macdeployqt at: $real. Point Qt6_DIR to your official Qt (e.g., \$HOME/Qt/<version>/macos/lib/cmake/Qt6)."
       fi
       QTPREFIX="$(cd "$(dirname "$cand")/.." && pwd)"
       echo "$cand"; return
     fi
   fi
-  # 3) PATH fallback (reject miniconda)
+  # 3) Auto-detect from $HOME/Qt/<version>/macos
+  local home_prefix
+  home_prefix="$(detect_qt_prefix_from_home || true)"
+  if [[ -n "$home_prefix" && -x "${home_prefix}/bin/macdeployqt" ]]; then
+    QTPREFIX="$home_prefix"
+    echo "${home_prefix}/bin/macdeployqt"; return
+  fi
+  # 4) PATH fallback (reject miniconda)
   if command -v macdeployqt >/dev/null 2>&1; then
     local pathbin
     pathbin="$(command -v macdeployqt)"
@@ -109,10 +119,44 @@ discover_macdeployqt() {
     QTPREFIX="$(cd "$(dirname "$pathbin")/.." && pwd)"
     echo "$pathbin"; return
   fi
-  die "macdeployqt not found. Install Qt 6.8.3 and ensure macdeployqt is available."
+  die "macdeployqt not found. Install Qt 6 and ensure macdeployqt is available (or set QT_PREFIX/Qt6_DIR)."
 }
 
 year() { date +%Y; }
+
+version_key() {
+  local v="${1:-0}"
+  local a=0 b=0 c=0 d=0
+  IFS='.' read -r a b c d <<<"$v"
+  printf "%04d%04d%04d%04d" "${a:-0}" "${b:-0}" "${c:-0}" "${d:-0}"
+}
+
+detect_qt6_dir_from_home() {
+  local best_dir=""
+  local best_key=""
+  local cand ver key
+  shopt -s nullglob
+  for cand in "${HOME}"/Qt/*/macos/lib/cmake/Qt6; do
+    [[ -f "${cand}/Qt6Config.cmake" ]] || continue
+    ver="$(sed -E 's#^.*/Qt/([^/]+)/macos/lib/cmake/Qt6$#\1#' <<<"$cand")"
+    [[ "$ver" =~ ^[0-9]+(\.[0-9]+)*$ ]] || continue
+    key="$(version_key "$ver")"
+    if [[ -z "$best_key" || "$key" > "$best_key" ]]; then
+      best_key="$key"
+      best_dir="$cand"
+    fi
+  done
+  shopt -u nullglob
+  [[ -n "$best_dir" ]] && printf "%s\n" "$best_dir"
+}
+
+detect_qt_prefix_from_home() {
+  local qt6_dir
+  qt6_dir="$(detect_qt6_dir_from_home || true)"
+  if [[ -n "$qt6_dir" ]]; then
+    (cd "$qt6_dir/../.." && pwd)
+  fi
+}
 
 detect_version() {
   # Try to extract from top-level CMakeLists.txt: project(... VERSION x.y.z)
@@ -342,7 +386,7 @@ maybe_copy() {
 
 # Copy a Qt *.framework from a source lib dir into the app bundle Frameworks
 copy_qt_framework() {
-  local src_root="$1"   # e.g., /Users/.../Qt/6.8.3/macos/lib
+  local src_root="$1"   # e.g., /Users/.../Qt/<version>/macos/lib
   local fw_name="$2"    # e.g., QtWidgets
   local src="$src_root/${fw_name}.framework"
   local dst="$FRAMEWORKS_DIR/${fw_name}.framework"
@@ -488,8 +532,14 @@ main() {
 
   # Build the app (Release) — ensures OpenSCP.app exists
   log "Configuring and building (Release)"
-  # Prefer official Qt prefix if available
-  local qt_cfg_dir="${Qt6_DIR:-/Users/luiscuellar/Qt/6.8.3/macos/lib/cmake/Qt6}"
+  # Prefer explicit Qt env vars, then auto-detect under $HOME/Qt/<version>/macos
+  local qt_cfg_dir="${Qt6_DIR:-${QT6_DIR:-}}"
+  if [[ -z "$qt_cfg_dir" && -n "${QT_PREFIX:-}" ]]; then
+    qt_cfg_dir="${QT_PREFIX}/lib/cmake/Qt6"
+  fi
+  if [[ -z "$qt_cfg_dir" ]]; then
+    qt_cfg_dir="$(detect_qt6_dir_from_home || true)"
+  fi
   local qt_prefix
   if [[ -d "$qt_cfg_dir" ]]; then
     qt_prefix="$(cd "$qt_cfg_dir/../.." && pwd)"
@@ -498,7 +548,11 @@ main() {
       -DCMAKE_PREFIX_PATH="$qt_prefix" -DQt6_DIR="$qt_cfg_dir" \
       -DCMAKE_OSX_ARCHITECTURES="$ARCHS"
   else
-    warn "Official Qt not found at $qt_cfg_dir; relying on system CMake find_package()"
+    if [[ -n "$qt_cfg_dir" ]]; then
+      warn "Qt not found at $qt_cfg_dir; relying on system CMake find_package()"
+    else
+      warn "No Qt6_DIR/QT_PREFIX provided and no Qt found in \$HOME/Qt; relying on system CMake find_package()"
+    fi
     cmake -S "$REPO_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_OSX_ARCHITECTURES="$ARCHS"
   fi

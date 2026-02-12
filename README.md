@@ -123,7 +123,7 @@ https://github.com/luiscuellar31/openscp/releases
 
 ## Requirements
 
-* Qt **6.8.3**
+* Qt **6.x** (tested with **6.8.3**)
 * libssh2 (**OpenSSL 3** recommended)
 * CMake **3.22+**
 * **C++20** compiler
@@ -165,6 +165,14 @@ For macOS, use the workflow below (`./scripts/macos.sh ...`) instead of opening 
 ./scripts/macos.sh dmg      # dist/*.dmg
 # all of them:
 ./scripts/macos.sh dist
+```
+
+If Qt is not installed in the default path (`$HOME/Qt/<version>/macos`), set one of:
+
+```bash
+export QT_PREFIX="/path/to/Qt/<version>/macos"
+# or
+export Qt6_DIR="/path/to/Qt/<version>/macos/lib/cmake/Qt6"
 ```
 
 - `scripts/macos.sh` is the fixed entrypoint for macOS development and packaging.
