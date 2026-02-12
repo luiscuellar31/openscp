@@ -121,11 +121,10 @@ AboutDialog::AboutDialog(QWidget* parent) : QDialog(parent) {
         }
     }
     if (content.isEmpty()) {
-        const QString expected = QStringLiteral("ABOUT_LIBRARIES_%1(.txt)").arg(suffix);
         content = tr(
-            "Could not find the credits file in docs/%1.\n"
-            "Create that file and list the libraries/licenses there."
-        ).arg(expected);
+            "Third-party licenses and credits are not available in this build.\n"
+            "Please use an official package or contact the distributor."
+        );
     }
     libsText->setPlainText(content);
     lay->addWidget(libsText);

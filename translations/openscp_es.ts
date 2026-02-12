@@ -15,10 +15,10 @@
       <translation>Librerías utilizadas:</translation>
     </message>
     <message>
-      <source>Could not find the credits file in docs/%1.
-Create that file and list the libraries/licenses there.</source>
-      <translation>No se encontró el archivo de créditos en docs/%1.
-Crea ese archivo y añade las librerías/licencias a listar.</translation>
+      <source>Third-party licenses and credits are not available in this build.
+Please use an official package or contact the distributor.</source>
+      <translation>Las licencias y créditos de terceros no están disponibles en esta compilación.
+Usa un paquete oficial o contacta al distribuidor.</translation>
     </message>
     <message>
       <source>Open Licenses Folder</source>
