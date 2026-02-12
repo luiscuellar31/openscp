@@ -44,7 +44,8 @@ ConnectionDialog::ConnectionDialog(QWidget* parent) : QDialog(parent) {
     khPolicy_ = new QComboBox(this);
     khPolicy_->addItem(tr("Estricto"), static_cast<int>(openscp::KnownHostsPolicy::Strict));
     khPolicy_->addItem(tr("Aceptar nuevo (TOFU)"), static_cast<int>(openscp::KnownHostsPolicy::AcceptNew));
-    khPolicy_->addItem(tr("Sin verificación (no recomendado)"), static_cast<int>(openscp::KnownHostsPolicy::Off));
+    khPolicy_->addItem(tr("Sin verificación (doble confirmación, expira en 15 min)"),
+                       static_cast<int>(openscp::KnownHostsPolicy::Off));
     lay->addRow(tr("known_hosts:"), khPath_);
     lay->addRow(tr("Política:"), khPolicy_);
 

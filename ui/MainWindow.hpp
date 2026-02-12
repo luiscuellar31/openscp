@@ -16,6 +16,7 @@ class QToolBar;                 // fwd
 class QMenu;                    // fwd
 class QEvent;                   // fwd for eventFilter
 class QDialog;                  // fwd
+class QLabel;                   // fwd
 namespace openscp { class SftpClient; struct SessionOptions; } // fwd
 
 class MainWindow : public QMainWindow {
@@ -155,6 +156,8 @@ private:
     void onOneTimeFinished(int r);
     void showSiteManagerNonModal();
     void maybeOpenSiteManagerAfterModal();
+    bool confirmInsecureHostPolicyForSession(const openscp::SessionOptions& opt);
+    void updateHostPolicyRiskBanner();
 
     // Helpers for connecting and wiring up the remote UI
     void startSftpConnect(openscp::SessionOptions opt);
@@ -186,6 +189,8 @@ private:
     bool m_openSiteManagerOnDisconnect = true;
     bool m_openSiteManagerOnStartup = true;
     bool m_pendingOpenSiteManager = false;
+    bool m_sessionNoHostVerification_ = false;
+    QLabel* m_hostPolicyRiskLabel_ = nullptr;
     // Connection progress dialog (non-modal), to avoid blocking TOFU
     QPointer<class QProgressDialog> m_connectProgress_;
     bool m_connectProgressDimmed_ = false;

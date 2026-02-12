@@ -1199,6 +1199,8 @@ void MainWindow::disconnectSftp() {
     }
     rightIsRemote_ = false;
     rightRemoteWritable_ = false;
+    m_sessionNoHostVerification_ = false;
+    updateHostPolicyRiskBanner();
     if (actConnect_) actConnect_->setEnabled(true);
     if (actDisconnect_) actDisconnect_->setEnabled(false);
     if (actDownloadF7_) actDownloadF7_->setEnabled(false);
@@ -1276,6 +1278,74 @@ void MainWindow::maybeOpenSiteManagerAfterModal() {
         m_pendingOpenSiteManager = false;
         QTimer::singleShot(0, this, [this]{ showSiteManagerNonModal(); });
     }
+}
+
+bool MainWindow::confirmInsecureHostPolicyForSession(const openscp::SessionOptions& opt) {
+    if (opt.known_hosts_policy != openscp::KnownHostsPolicy::Off) return true;
+
+    const QString hostKey = QString::fromStdString(opt.host).trimmed().toLower();
+    const QString allowKey = QString("Security/noHostVerificationConfirmedUntilUtc/%1:%2")
+                                 .arg(hostKey)
+                                 .arg((int)opt.port);
+    const qint64 now = QDateTime::currentSecsSinceEpoch();
+    QSettings s("OpenSCP", "OpenSCP");
+    const qint64 allowedUntil = s.value(allowKey, 0).toLongLong();
+    if (allowedUntil > now) return true;
+
+    const auto first = QMessageBox::warning(
+        this,
+        tr("Riesgo crítico de seguridad"),
+        tr("Estás a punto de conectar con la política \"Sin verificación\".\n"
+           "Esto permite ataques MITM y suplantación del servidor.\n\n"
+           "¿Deseas continuar bajo tu responsabilidad?"),
+        QMessageBox::Yes | QMessageBox::Cancel,
+        QMessageBox::Cancel
+    );
+    if (first != QMessageBox::Yes) return false;
+
+    const QString token = QStringLiteral("UNSAFE");
+    bool ok = false;
+    const QString entered = QInputDialog::getText(
+        this,
+        tr("Confirmación adicional requerida"),
+        tr("Para confirmar, escribe exactamente %1").arg(token),
+        QLineEdit::Normal,
+        QString(),
+        &ok
+    ).trimmed();
+    if (!ok || entered != token) {
+        QMessageBox::information(this, tr("Conexión cancelada"), tr("No se confirmó el riesgo de forma válida."));
+        return false;
+    }
+
+    // Temporary exception per host:port to avoid persistent bypasses.
+    static constexpr qint64 kNoVerifyTtlSec = 15 * 60;
+    const qint64 newUntil = now + kNoVerifyTtlSec;
+    s.setValue(allowKey, newUntil);
+    s.sync();
+    const QDateTime expLocal = QDateTime::fromSecsSinceEpoch(newUntil).toLocalTime();
+    statusBar()->showMessage(
+        tr("Excepción temporal de \"sin verificación\" activa hasta %1")
+            .arg(QLocale().toString(expLocal, QLocale::ShortFormat)),
+        8000
+    );
+    return true;
+}
+
+void MainWindow::updateHostPolicyRiskBanner() {
+    const bool show = rightIsRemote_ && m_sessionNoHostVerification_;
+    if (!show) {
+        if (m_hostPolicyRiskLabel_) m_hostPolicyRiskLabel_->hide();
+        return;
+    }
+    if (!m_hostPolicyRiskLabel_) {
+        m_hostPolicyRiskLabel_ = new QLabel(this);
+        m_hostPolicyRiskLabel_->setStyleSheet("QLabel { color: #B00020; font-weight: 600; }");
+        statusBar()->addPermanentWidget(m_hostPolicyRiskLabel_);
+    }
+    m_hostPolicyRiskLabel_->setText(tr("Riesgo: host key sin verificación en esta sesión"));
+    m_hostPolicyRiskLabel_->setToolTip(tr("La sesión actual no valida host key; existe riesgo de MITM."));
+    m_hostPolicyRiskLabel_->show();
 }
 
 // Navigate remote pane to a new remote directory.
@@ -2587,6 +2657,10 @@ void MainWindow::startSftpConnect(openscp::SessionOptions opt) {
         statusBar()->showMessage(tr("Ya existe una sesión SFTP activa"), 3000);
         return;
     }
+    if (!confirmInsecureHostPolicyForSession(opt)) {
+        statusBar()->showMessage(tr("Conexión cancelada: política sin verificación no confirmada"), 5000);
+        return;
+    }
 
     const openscp::SessionOptions uiOpt = opt;
     QPointer<MainWindow> self(this);
@@ -2781,6 +2855,7 @@ void MainWindow::finalizeSftpConnect(bool okConn,
         return;
     }
 
+    m_sessionNoHostVerification_ = (uiOpt.known_hosts_policy == openscp::KnownHostsPolicy::Off);
     sftp_ = std::move(guard);
     applyRemoteConnectedUI(uiOpt);
 }
@@ -2794,6 +2869,8 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions& opt) {
     if (!rightRemoteModel_->setRootPath("/", &e)) {
         QMessageBox::critical(this, "Error listando remoto", e);
         sftp_.reset();
+        m_sessionNoHostVerification_ = false;
+        updateHostPolicyRiskBanner();
         delete rightRemoteModel_;
         rightRemoteModel_ = nullptr;
         return;
@@ -2829,6 +2906,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions& opt) {
     }
     statusBar()->showMessage(tr("Conectado (SFTP) a ") + QString::fromStdString(opt.host), 4000);
     setWindowTitle(tr("OpenSCP — local/remoto (SFTP)"));
+    updateHostPolicyRiskBanner();
     updateRemoteWriteability();
     updateDeleteShortcutEnables();
 }
