@@ -1080,10 +1080,23 @@ bool Libssh2SftpClient::connect(const SessionOptions& opt, std::string& err) {
         err = "Ya conectado";
         return false;
     }
+
+    // Defensive: ensure no leftover state from any previous partial attempt.
+    disconnect();
+
+    struct ConnectCleanupGuard {
+        Libssh2SftpClient* self;
+        bool committed = false;
+        ~ConnectCleanupGuard() {
+            if (!committed) self->disconnect();
+        }
+    } cleanup{this, false};
+
     if (!tcpConnect(opt.host, opt.port, err)) return false;
     if (!sshHandshakeAuth(opt, err)) return false;
 
     connected_ = true;
+    cleanup.committed = true;
     return true;
 }
 
@@ -1093,7 +1106,10 @@ void Libssh2SftpClient::disconnect() {
         sftp_ = nullptr;
     }
     if (session_) {
-        libssh2_session_disconnect(session_, "bye");
+        // Only send SSH disconnect message for fully established sessions.
+        if (connected_) {
+            (void)libssh2_session_disconnect(session_, "bye");
+        }
         libssh2_session_free(session_);
         session_ = nullptr;
     }
