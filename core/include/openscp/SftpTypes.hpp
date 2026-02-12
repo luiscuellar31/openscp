@@ -16,6 +16,16 @@ enum class KnownHostsPolicy {
     Off         // No verification (not recommended).
 };
 
+// Transfer integrity policy.
+// - Off: no hash verification.
+// - Optional: verify when possible; fail on detected mismatch.
+// - Required: verification is mandatory; fail if verification cannot be completed.
+enum class TransferIntegrityPolicy {
+    Off,
+    Optional,
+    Required
+};
+
 struct FileInfo {
     std::string   name;         // base name
     bool          is_dir = false;
@@ -59,6 +69,8 @@ struct SessionOptions {
     bool known_hosts_hash_names = true;
     // Visual preference: show fingerprint in HEX colon format (UI only)
     bool show_fp_hex = false;
+    // Transfer integrity checks for resume and final content verification.
+    TransferIntegrityPolicy transfer_integrity_policy = TransferIntegrityPolicy::Optional;
 
     // Host key confirmation (TOFU) when known_hosts lacks an entry.
     // Return true to accept and save, false to reject.

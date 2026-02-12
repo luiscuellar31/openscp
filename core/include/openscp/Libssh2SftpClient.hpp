@@ -84,6 +84,7 @@ private:
     int  sock_ = -1;
     _LIBSSH2_SESSION* session_ = nullptr; // <- uses internal libssh2 types
     _LIBSSH2_SFTP*    sftp_    = nullptr; // <- same
+    TransferIntegrityPolicy transferIntegrityPolicy_ = TransferIntegrityPolicy::Optional;
 
     // TCP connection + SSH handshake and authentication.
     bool tcpConnect(const std::string& host, uint16_t port, std::string& err);

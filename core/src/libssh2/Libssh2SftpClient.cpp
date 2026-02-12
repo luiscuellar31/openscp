@@ -11,6 +11,7 @@
 #include <thread>
 #include <cstdlib>
 #include <cerrno>
+#include <cctype>
 #ifndef _WIN32
 #include <sys/stat.h>
 #include <unistd.h>
@@ -24,6 +25,7 @@
 #else
 #include <windows.h>
 #endif
+#include <openssl/sha.h>
 #include <cstdio>
 #include <sstream>
 #include <array>
@@ -146,6 +148,276 @@ static std::string win_err(const char* where, DWORD code) {
     return oss.str();
 }
 #endif
+
+using Sha256Digest = std::array<unsigned char, SHA256_DIGEST_LENGTH>;
+
+static TransferIntegrityPolicy integrity_policy_from_env(TransferIntegrityPolicy fallback) {
+    const char* raw = std::getenv("OPEN_SCP_TRANSFER_INTEGRITY");
+    if (!raw || !*raw) return fallback;
+    std::string v(raw);
+    for (char& c : v) c = (char)std::tolower((unsigned char)c);
+    if (v == "off" || v == "0" || v == "false") return TransferIntegrityPolicy::Off;
+    if (v == "required" || v == "strict") return TransferIntegrityPolicy::Required;
+    if (v == "optional" || v == "1" || v == "true") return TransferIntegrityPolicy::Optional;
+    return fallback;
+}
+
+static bool seek_local_file(FILE* f, std::uint64_t off, std::string* why) {
+#ifdef _WIN32
+    if (_fseeki64(f, (__int64)off, SEEK_SET) != 0) {
+        if (why) *why = "seek local falló";
+        return false;
+    }
+#else
+    if (fseeko(f, (off_t)off, SEEK_SET) != 0) {
+        if (why) *why = posix_err("fseeko(local)");
+        return false;
+    }
+#endif
+    return true;
+}
+
+static bool get_local_file_size(const std::string& path, std::uint64_t& out, std::string* why) {
+#ifndef _WIN32
+    struct ::stat st{};
+    if (::stat(path.c_str(), &st) != 0) {
+        if (why) *why = posix_err("stat(local)");
+        return false;
+    }
+    out = (std::uint64_t)st.st_size;
+    return true;
+#else
+    HANDLE h = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) {
+        if (why) *why = win_err("CreateFile(local-size)", GetLastError());
+        return false;
+    }
+    LARGE_INTEGER sz{};
+    if (!GetFileSizeEx(h, &sz)) {
+        if (why) *why = win_err("GetFileSizeEx(local)", GetLastError());
+        CloseHandle(h);
+        return false;
+    }
+    CloseHandle(h);
+    out = (std::uint64_t)sz.QuadPart;
+    return true;
+#endif
+}
+
+static bool flush_local_file(FILE* f, std::string* why) {
+    if (std::fflush(f) != 0) {
+        if (why) *why = "fflush(local) falló";
+        return false;
+    }
+#ifdef _WIN32
+    const int fd = _fileno(f);
+    if (fd >= 0 && _commit(fd) != 0) {
+        if (why) *why = "commit(local) falló";
+        return false;
+    }
+#else
+    const int fd = fileno(f);
+    if (fd >= 0 && ::fsync(fd) != 0) {
+        if (why) *why = posix_err("fsync(local)");
+        return false;
+    }
+#endif
+    return true;
+}
+
+static bool replace_local_file_atomic(const std::string& from,
+                                      const std::string& to,
+                                      std::string* why) {
+#ifndef _WIN32
+    if (::rename(from.c_str(), to.c_str()) != 0) {
+        if (why) *why = posix_err("rename(.part->dest)");
+        return false;
+    }
+    if (!fsync_parent_dir(to, why)) return false;
+    return true;
+#else
+    if (!MoveFileExA(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) {
+        if (why) *why = win_err("MoveFileEx(.part->dest)", GetLastError());
+        return false;
+    }
+    return true;
+#endif
+}
+
+static bool hash_local_range(const std::string& path,
+                             std::uint64_t offset,
+                             std::uint64_t length,
+                             Sha256Digest& out,
+                             std::string* why) {
+    FILE* f = ::fopen(path.c_str(), "rb");
+    if (!f) {
+        if (why) *why = "No se pudo abrir archivo local para hash";
+        return false;
+    }
+    if (!seek_local_file(f, offset, why)) {
+        std::fclose(f);
+        return false;
+    }
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    if (!ctx) {
+        if (why) *why = "No se pudo inicializar contexto hash local";
+        std::fclose(f);
+        return false;
+    }
+    if (EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr) != 1) {
+        if (why) *why = "EVP_DigestInit_ex(local) falló";
+        EVP_MD_CTX_free(ctx);
+        std::fclose(f);
+        return false;
+    }
+    std::array<unsigned char, 64 * 1024> buf{};
+    std::uint64_t remain = length;
+    while (remain > 0) {
+        const std::size_t want = (std::size_t)std::min<std::uint64_t>(remain, buf.size());
+        const std::size_t n = std::fread(buf.data(), 1, want, f);
+        if (n == 0) {
+            if (why) *why = "Lectura local insuficiente durante hash";
+            EVP_MD_CTX_free(ctx);
+            std::fclose(f);
+            return false;
+        }
+        if (EVP_DigestUpdate(ctx, buf.data(), n) != 1) {
+            if (why) *why = "EVP_DigestUpdate(local) falló";
+            EVP_MD_CTX_free(ctx);
+            std::fclose(f);
+            return false;
+        }
+        remain -= (std::uint64_t)n;
+    }
+    unsigned int outLen = 0;
+    if (EVP_DigestFinal_ex(ctx, out.data(), &outLen) != 1 || outLen != SHA256_DIGEST_LENGTH) {
+        if (why) *why = "EVP_DigestFinal_ex(local) falló";
+        EVP_MD_CTX_free(ctx);
+        std::fclose(f);
+        return false;
+    }
+    EVP_MD_CTX_free(ctx);
+    std::fclose(f);
+    return true;
+}
+
+static bool hash_local_full(const std::string& path,
+                            Sha256Digest& out,
+                            std::string* why) {
+    std::uint64_t sz = 0;
+    if (!get_local_file_size(path, sz, why)) return false;
+    return hash_local_range(path, 0, sz, out, why);
+}
+
+static bool hash_remote_range(LIBSSH2_SFTP* sftp,
+                              const std::string& remote,
+                              std::uint64_t offset,
+                              std::uint64_t length,
+                              Sha256Digest& out,
+                              std::string* why) {
+    LIBSSH2_SFTP_HANDLE* rh = libssh2_sftp_open_ex(
+        sftp, remote.c_str(), (unsigned)remote.size(),
+        LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
+    if (!rh) {
+        if (why) *why = "No se pudo abrir remoto para hash";
+        return false;
+    }
+    libssh2_sftp_seek64(rh, (libssh2_uint64_t)offset);
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    if (!ctx) {
+        if (why) *why = "No se pudo inicializar contexto hash remoto";
+        libssh2_sftp_close(rh);
+        return false;
+    }
+    if (EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr) != 1) {
+        if (why) *why = "EVP_DigestInit_ex(remoto) falló";
+        EVP_MD_CTX_free(ctx);
+        libssh2_sftp_close(rh);
+        return false;
+    }
+    std::array<unsigned char, 64 * 1024> buf{};
+    std::uint64_t remain = length;
+    while (remain > 0) {
+        const std::size_t want = (std::size_t)std::min<std::uint64_t>(remain, buf.size());
+        ssize_t n = libssh2_sftp_read(rh, (char*)buf.data(), want);
+        if (n <= 0) {
+            if (why) *why = "Lectura remota insuficiente durante hash";
+            EVP_MD_CTX_free(ctx);
+            libssh2_sftp_close(rh);
+            return false;
+        }
+        if (EVP_DigestUpdate(ctx, buf.data(), (std::size_t)n) != 1) {
+            if (why) *why = "EVP_DigestUpdate(remoto) falló";
+            EVP_MD_CTX_free(ctx);
+            libssh2_sftp_close(rh);
+            return false;
+        }
+        remain -= (std::uint64_t)n;
+    }
+    unsigned int outLen = 0;
+    if (EVP_DigestFinal_ex(ctx, out.data(), &outLen) != 1 || outLen != SHA256_DIGEST_LENGTH) {
+        if (why) *why = "EVP_DigestFinal_ex(remoto) falló";
+        EVP_MD_CTX_free(ctx);
+        libssh2_sftp_close(rh);
+        return false;
+    }
+    EVP_MD_CTX_free(ctx);
+    libssh2_sftp_close(rh);
+    return true;
+}
+
+static bool hash_remote_full(LIBSSH2_SFTP* sftp,
+                             const std::string& remote,
+                             Sha256Digest& out,
+                             std::string* why) {
+    LIBSSH2_SFTP_HANDLE* rh = libssh2_sftp_open_ex(
+        sftp, remote.c_str(), (unsigned)remote.size(),
+        LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
+    if (!rh) {
+        if (why) *why = "No se pudo abrir remoto para hash completo";
+        return false;
+    }
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    if (!ctx) {
+        if (why) *why = "No se pudo inicializar contexto hash remoto completo";
+        libssh2_sftp_close(rh);
+        return false;
+    }
+    if (EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr) != 1) {
+        if (why) *why = "EVP_DigestInit_ex(remoto-full) falló";
+        EVP_MD_CTX_free(ctx);
+        libssh2_sftp_close(rh);
+        return false;
+    }
+    std::array<unsigned char, 64 * 1024> buf{};
+    while (true) {
+        ssize_t n = libssh2_sftp_read(rh, (char*)buf.data(), buf.size());
+        if (n > 0) {
+            if (EVP_DigestUpdate(ctx, buf.data(), (std::size_t)n) != 1) {
+                if (why) *why = "EVP_DigestUpdate(remoto-full) falló";
+                EVP_MD_CTX_free(ctx);
+                libssh2_sftp_close(rh);
+                return false;
+            }
+            continue;
+        }
+        if (n == 0) break;
+        if (why) *why = "Lectura remota falló durante hash completo";
+        EVP_MD_CTX_free(ctx);
+        libssh2_sftp_close(rh);
+        return false;
+    }
+    unsigned int outLen = 0;
+    if (EVP_DigestFinal_ex(ctx, out.data(), &outLen) != 1 || outLen != SHA256_DIGEST_LENGTH) {
+        if (why) *why = "EVP_DigestFinal_ex(remoto-full) falló";
+        EVP_MD_CTX_free(ctx);
+        libssh2_sftp_close(rh);
+        return false;
+    }
+    EVP_MD_CTX_free(ctx);
+    libssh2_sftp_close(rh);
+    return true;
+}
 
 static bool persist_known_hosts_atomic(LIBSSH2_KNOWNHOSTS* nh,
                                        const std::string& khPath,
@@ -1081,6 +1353,8 @@ bool Libssh2SftpClient::connect(const SessionOptions& opt, std::string& err) {
         return false;
     }
 
+    transferIntegrityPolicy_ = integrity_policy_from_env(opt.transfer_integrity_policy);
+
     // Defensive: ensure no leftover state from any previous partial attempt.
     disconnect();
 
@@ -1191,14 +1465,18 @@ bool Libssh2SftpClient::get(const std::string& remote,
         return false;
     }
 
-    // Remote size (for progress)
+    const TransferIntegrityPolicy policy = transferIntegrityPolicy_;
+    const std::string localPart = local + ".part";
+
+    // Remote size (for progress and sanity checks)
     LIBSSH2_SFTP_ATTRIBUTES st{};
     if (libssh2_sftp_stat_ex(sftp_, remote.c_str(), (unsigned)remote.size(),
                              LIBSSH2_SFTP_STAT, &st) != 0) {
         err = "No se pudo obtener stat remoto";
         return false;
     }
-    std::size_t total = (st.flags & LIBSSH2_SFTP_ATTR_SIZE) ? (std::size_t)st.filesize : 0;
+    const bool hasTotal = (st.flags & LIBSSH2_SFTP_ATTR_SIZE) != 0;
+    std::size_t total = hasTotal ? (std::size_t)st.filesize : 0;
 
     // Open remote for reading
     LIBSSH2_SFTP_HANDLE* rh = libssh2_sftp_open_ex(
@@ -1209,24 +1487,55 @@ bool Libssh2SftpClient::get(const std::string& remote,
         return false;
     }
 
-    // Open local for writing, with optional resume
-    FILE* lf = nullptr;
     std::size_t offset = 0;
     if (resume) {
-        lf = ::fopen(local.c_str(), "ab");
-        if (lf) {
-            long cur = std::ftell(lf);
-            if (cur > 0) offset = (std::size_t)cur;
-            if (offset > 0 && offset < total) {
-                // position remote at the existing offset
-                libssh2_sftp_seek64(rh, (libssh2_uint64_t)offset);
+        std::uint64_t partSize = 0;
+        std::string sizeErr;
+        if (get_local_file_size(localPart, partSize, &sizeErr)) {
+            offset = (std::size_t)partSize;
+        }
+        if (offset > 0 && hasTotal && offset > total) {
+            if (policy == TransferIntegrityPolicy::Required) {
+                libssh2_sftp_close(rh);
+                err = "Resume inválido: .part local mayor que archivo remoto";
+                return false;
+            }
+            offset = 0; // fallback: restart from scratch
+        }
+        if (offset > 0 && hasTotal && offset < total && policy != TransferIntegrityPolicy::Off) {
+            const std::uint64_t window = std::min<std::uint64_t>(offset, 64 * 1024);
+            const std::uint64_t start = (std::uint64_t)offset - window;
+            Sha256Digest lh{}, rhh{};
+            std::string hErr;
+            const bool okLocal = hash_local_range(localPart, start, window, lh, &hErr);
+            const bool okRemote = okLocal && hash_remote_range(sftp_, remote, start, window, rhh, &hErr);
+            if (!okLocal || !okRemote) {
+                if (policy == TransferIntegrityPolicy::Required) {
+                    libssh2_sftp_close(rh);
+                    err = std::string("No se pudo validar integridad en resume (download): ") + hErr;
+                    return false;
+                }
+                offset = 0; // optional: restart
+            } else if (lh != rhh) {
+                if (policy == TransferIntegrityPolicy::Required) {
+                    libssh2_sftp_close(rh);
+                    err = "Integridad falló en resume (download): prefijo local no coincide con remoto";
+                    return false;
+                }
+                offset = 0; // optional: restart
             }
         }
     }
-    if (!lf) lf = ::fopen(local.c_str(), "wb");
+
+    if (offset > 0) {
+        libssh2_sftp_seek64(rh, (libssh2_uint64_t)offset);
+    }
+
+    // Open local .part for writing
+    FILE* lf = ::fopen(localPart.c_str(), offset > 0 ? "ab" : "wb");
     if (!lf) {
         libssh2_sftp_close(rh);
-        err = "No se pudo abrir archivo local para escribir";
+        err = "No se pudo abrir archivo local (.part) para escribir";
         return false;
     }
 
@@ -1261,8 +1570,37 @@ bool Libssh2SftpClient::get(const std::string& remote,
         }
     }
 
+    std::string syncErr;
+    if (!flush_local_file(lf, &syncErr)) {
+        std::fclose(lf);
+        libssh2_sftp_close(rh);
+        err = std::string("No se pudo sincronizar archivo local (.part): ") + syncErr;
+        return false;
+    }
     std::fclose(lf);
     libssh2_sftp_close(rh);
+
+    if (policy != TransferIntegrityPolicy::Off) {
+        Sha256Digest lsum{}, rsum{};
+        std::string herr;
+        const bool lok = hash_local_full(localPart, lsum, &herr);
+        const bool rok = lok && hash_remote_full(sftp_, remote, rsum, &herr);
+        if (!lok || !rok) {
+            if (policy == TransferIntegrityPolicy::Required) {
+                err = std::string("No se pudo verificar integridad final (download): ") + herr;
+                return false;
+            }
+        } else if (lsum != rsum) {
+            err = "Integridad final falló (download): checksum local/remoto no coincide";
+            return false;
+        }
+    }
+
+    std::string replaceErr;
+    if (!replace_local_file_atomic(localPart, local, &replaceErr)) {
+        err = std::string("No se pudo finalizar descarga atómica: ") + replaceErr;
+        return false;
+    }
     return true;
 }
 
@@ -1278,6 +1616,9 @@ bool Libssh2SftpClient::put(const std::string& local,
         return false;
     }
 
+    const TransferIntegrityPolicy policy = transferIntegrityPolicy_;
+    const std::string remotePart = remote + ".part";
+
     // Open local for reading
     FILE* lf = ::fopen(local.c_str(), "rb");
     if (!lf) {
@@ -1291,23 +1632,56 @@ bool Libssh2SftpClient::put(const std::string& local,
     std::fseek(lf, 0, SEEK_SET);
     std::size_t total = fsz > 0 ? (std::size_t)fsz : 0;
 
-    // Open remote for writing (create, optionally resume without truncation)
+    // Resume against remote .part (final destination is set via atomic rename).
     long startOffset = 0;
     if (resume) {
-        // Query remote size if it exists
         LIBSSH2_SFTP_ATTRIBUTES stR{};
-        if (libssh2_sftp_stat_ex(sftp_, remote.c_str(), (unsigned)remote.size(), LIBSSH2_SFTP_STAT, &stR) == 0) {
+        if (libssh2_sftp_stat_ex(sftp_, remotePart.c_str(), (unsigned)remotePart.size(), LIBSSH2_SFTP_STAT, &stR) == 0) {
             if (stR.flags & LIBSSH2_SFTP_ATTR_SIZE) startOffset = (long)stR.filesize;
         }
     }
-    unsigned long flags = LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | (resume ? 0 : LIBSSH2_FXF_TRUNC);
+
+    if (startOffset > 0 && (std::size_t)startOffset > total) {
+        if (policy == TransferIntegrityPolicy::Required) {
+            std::fclose(lf);
+            err = "Resume inválido: .part remoto mayor que archivo local";
+            return false;
+        }
+        startOffset = 0;
+    }
+
+    if (startOffset > 0 && (std::size_t)startOffset < total && policy != TransferIntegrityPolicy::Off) {
+        const std::uint64_t window = std::min<std::uint64_t>((std::uint64_t)startOffset, 64 * 1024);
+        const std::uint64_t start = (std::uint64_t)startOffset - window;
+        Sha256Digest lsum{}, rsum{};
+        std::string herr;
+        const bool lok = hash_local_range(local, start, window, lsum, &herr);
+        const bool rok = lok && hash_remote_range(sftp_, remotePart, start, window, rsum, &herr);
+        if (!lok || !rok) {
+            if (policy == TransferIntegrityPolicy::Required) {
+                std::fclose(lf);
+                err = std::string("No se pudo validar integridad en resume (upload): ") + herr;
+                return false;
+            }
+            startOffset = 0;
+        } else if (lsum != rsum) {
+            if (policy == TransferIntegrityPolicy::Required) {
+                std::fclose(lf);
+                err = "Integridad falló en resume (upload): prefijo local/remoto no coincide";
+                return false;
+            }
+            startOffset = 0;
+        }
+    }
+
+    unsigned long flags = LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | ((startOffset > 0) ? 0 : LIBSSH2_FXF_TRUNC);
     LIBSSH2_SFTP_HANDLE* wh = libssh2_sftp_open_ex(
-        sftp_, remote.c_str(), (unsigned)remote.size(),
+        sftp_, remotePart.c_str(), (unsigned)remotePart.size(),
         flags,
         0644, LIBSSH2_SFTP_OPENFILE);
     if (!wh) {
         std::fclose(lf);
-        err = "No se pudo abrir remoto para escritura";
+        err = "No se pudo abrir remoto (.part) para escritura";
         return false;
     }
 
@@ -1364,6 +1738,34 @@ bool Libssh2SftpClient::put(const std::string& local,
 
     libssh2_sftp_close(wh);
     std::fclose(lf);
+
+    if (policy != TransferIntegrityPolicy::Off) {
+        Sha256Digest lsum{}, rsum{};
+        std::string herr;
+        const bool lok = hash_local_full(local, lsum, &herr);
+        const bool rok = lok && hash_remote_full(sftp_, remotePart, rsum, &herr);
+        if (!lok || !rok) {
+            if (policy == TransferIntegrityPolicy::Required) {
+                err = std::string("No se pudo verificar integridad final (upload): ") + herr;
+                return false;
+            }
+        } else if (lsum != rsum) {
+            err = "Integridad final falló (upload): checksum local/remoto no coincide";
+            return false;
+        }
+    }
+
+    long rnFlags = LIBSSH2_SFTP_RENAME_ATOMIC | LIBSSH2_SFTP_RENAME_NATIVE | LIBSSH2_SFTP_RENAME_OVERWRITE;
+    int rn = libssh2_sftp_rename_ex(
+        sftp_,
+        remotePart.c_str(), (unsigned)remotePart.size(),
+        remote.c_str(), (unsigned)remote.size(),
+        rnFlags);
+    if (rn != 0) {
+        err = "No se pudo finalizar subida atómica (.part -> destino)";
+        return false;
+    }
+
     return true;
 }
 
