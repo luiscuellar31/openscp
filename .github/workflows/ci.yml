@@ -39,6 +39,102 @@ jobs:
           echo "CMAKE_PREFIX_PATH=$(brew --prefix qt)" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$(brew --prefix libssh2)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig:${PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
 
+      - name: Setup Linux SFTP integration server
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server
+
+          sudo useradd --create-home --shell /bin/bash openscp_it || true
+          echo "openscp_it:openscp_it_pass" | sudo chpasswd
+          sudo install -d -o openscp_it -g openscp_it -m 700 /home/openscp_it/upload
+
+          cat > /tmp/openscp_sshd_config <<'EOF'
+          Port 2222
+          ListenAddress 127.0.0.1
+          Protocol 2
+          HostKey /etc/ssh/ssh_host_ed25519_key
+          HostKey /etc/ssh/ssh_host_rsa_key
+          PasswordAuthentication yes
+          KbdInteractiveAuthentication no
+          ChallengeResponseAuthentication no
+          UsePAM no
+          PermitRootLogin no
+          AllowUsers openscp_it
+          Subsystem sftp internal-sftp
+          PidFile /tmp/openscp_sshd.pid
+          LogLevel VERBOSE
+          PrintMotd no
+          UseDNS no
+          EOF
+
+          sudo /usr/sbin/sshd -f /tmp/openscp_sshd_config -E /tmp/openscp_sshd.log
+
+          for i in {1..20}; do
+            if (echo > /dev/tcp/127.0.0.1/2222) >/dev/null 2>&1; then
+              echo "SFTP integration server is ready"
+              break
+            fi
+            sleep 1
+          done
+
+          if ! (echo > /dev/tcp/127.0.0.1/2222) >/dev/null 2>&1; then
+            echo "SFTP integration server did not start"
+            sudo cat /tmp/openscp_sshd.log || true
+            exit 1
+          fi
+
+      - name: Setup macOS SFTP integration server
+        if: runner.os == 'macOS'
+        run: |
+          RUNNER_USER="$(whoami)"
+          sudo ssh-keygen -A
+
+          ssh-keygen -t ed25519 -N "" -f /tmp/openscp_it_ed25519 -q
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          cat /tmp/openscp_it_ed25519.pub > "$HOME/.ssh/openscp_it_authorized_keys"
+          chmod 600 "$HOME/.ssh/openscp_it_authorized_keys"
+
+          mkdir -p /tmp/openscp-it-upload
+          chmod 700 /tmp/openscp-it-upload
+
+          cat > /tmp/openscp_sshd_mac_config <<EOF
+          Port 2222
+          ListenAddress 127.0.0.1
+          Protocol 2
+          HostKey /etc/ssh/ssh_host_ed25519_key
+          HostKey /etc/ssh/ssh_host_rsa_key
+          PubkeyAuthentication yes
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          ChallengeResponseAuthentication no
+          UsePAM no
+          PermitRootLogin no
+          AllowUsers ${RUNNER_USER}
+          AuthorizedKeysFile .ssh/openscp_it_authorized_keys
+          Subsystem sftp internal-sftp
+          PidFile /tmp/openscp_sshd_mac.pid
+          LogLevel VERBOSE
+          UseDNS no
+          EOF
+
+          sudo /usr/sbin/sshd -f /tmp/openscp_sshd_mac_config -E /tmp/openscp_sshd_mac.log
+
+          for i in {1..20}; do
+            if nc -z 127.0.0.1 2222 >/dev/null 2>&1; then
+              echo "SFTP integration server is ready"
+              break
+            fi
+            sleep 1
+          done
+
+          if ! nc -z 127.0.0.1 2222 >/dev/null 2>&1; then
+            echo "SFTP integration server did not start"
+            sudo cat /tmp/openscp_sshd_mac.log || true
+            exit 1
+          fi
+
       - name: Configure
         run: |
           cmake -S . -B build -G Ninja \
@@ -48,5 +144,23 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
-      - name: Test
+      - name: Test (Linux, with SFTP integration)
+        if: runner.os == 'Linux'
+        env:
+          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
+          OPEN_SCP_IT_SFTP_PORT: "2222"
+          OPEN_SCP_IT_SFTP_USER: openscp_it
+          OPEN_SCP_IT_SFTP_PASS: openscp_it_pass
+          OPEN_SCP_IT_REMOTE_BASE: /home/openscp_it/upload
         run: ctest --test-dir build --output-on-failure
+
+      - name: Test (macOS, with SFTP integration)
+        if: runner.os == 'macOS'
+        env:
+          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
+          OPEN_SCP_IT_SFTP_PORT: "2222"
+          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_ed25519
+          OPEN_SCP_IT_REMOTE_BASE: /tmp/openscp-it-upload
+        run: |
+          OPEN_SCP_IT_SFTP_USER="$(whoami)" \
+          ctest --test-dir build --output-on-failure

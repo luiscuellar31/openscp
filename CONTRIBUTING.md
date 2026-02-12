@@ -96,6 +96,23 @@ ctest --test-dir build --output-on-failure
 
 If your change is platform-specific (e.g., macOS packaging), validate on that platform too.
 
+### SFTP Integration Test (Optional Locally, Required in Linux/macOS CI)
+
+`openscp_sftp_integration_tests` runs against a real SFTP server and is enabled in Linux/macOS CI.
+Locally, it is skipped unless these variables are set.
+You can authenticate with password (`OPEN_SCP_IT_SFTP_PASS`) or private key (`OPEN_SCP_IT_SFTP_KEY`):
+
+```bash
+export OPEN_SCP_IT_SFTP_HOST=127.0.0.1
+export OPEN_SCP_IT_SFTP_PORT=2222
+export OPEN_SCP_IT_SFTP_USER=openscp_it
+export OPEN_SCP_IT_SFTP_PASS=openscp_it_pass
+# or: export OPEN_SCP_IT_SFTP_KEY=/path/to/private_key
+# optional: export OPEN_SCP_IT_SFTP_KEY_PASSPHRASE=...
+export OPEN_SCP_IT_REMOTE_BASE=/home/openscp_it/upload
+ctest --test-dir build --output-on-failure
+```
+
 ---
 
 ## Licensing
