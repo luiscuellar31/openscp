@@ -453,6 +453,10 @@
       <translation>¿Cómo deseas abrir los archivos por defecto?\nPuedes cambiarlo luego en Ajustes.</translation>
     </message>
     <message>
+      <source>¿Cómo deseas abrir este archivo?</source>
+      <translation>¿Cómo deseas abrir este archivo?</translation>
+    </message>
+    <message>
       <source>Abrir archivo</source>
       <translation>Abrir archivo</translation>
     </message>
@@ -905,6 +909,22 @@ Huella: %4
   <context>
     <name>SettingsDialog</name>
     <message>
+      <source>General</source>
+      <translation>General</translation>
+    </message>
+    <message>
+      <source>Sitios</source>
+      <translation>Sitios</translation>
+    </message>
+    <message>
+      <source>Seguridad</source>
+      <translation>Seguridad</translation>
+    </message>
+    <message>
+      <source>Staging y arrastre</source>
+      <translation>Staging y arrastre</translation>
+    </message>
+    <message>
       <source>Avanzado</source>
       <translation>Avanzado</translation>
     </message>
@@ -949,6 +969,22 @@ Huella: %4
       <translation>Apertura con:</translation>
     </message>
     <message>
+      <source>Al abrir archivos:</source>
+      <translation>Al abrir archivos:</translation>
+    </message>
+    <message>
+      <source>Preguntar siempre</source>
+      <translation>Preguntar siempre</translation>
+    </message>
+    <message>
+      <source>Abrir archivo</source>
+      <translation>Abrir archivo</translation>
+    </message>
+    <message>
+      <source>Mostrar carpeta</source>
+      <translation>Mostrar carpeta</translation>
+    </message>
+    <message>
       <source>Doble clic</source>
       <translation>Doble clic</translation>
     </message>
@@ -973,8 +1009,84 @@ Huella: %4
       <translation>Abrir Gestor de Sitios al desconectar</translation>
     </message>
     <message>
+      <source>Abrir cola al encolar transferencias</source>
+      <translation>Abrir cola al encolar transferencias</translation>
+    </message>
+    <message>
+      <source>Carpeta descargas:</source>
+      <translation>Carpeta descargas:</translation>
+    </message>
+    <message>
+      <source>Selecciona carpeta de descargas</source>
+      <translation>Selecciona carpeta de descargas</translation>
+    </message>
+    <message>
       <source>Abrir archivos mostrando su carpeta en el sistema (recomendado).</source>
       <translation>Abrir archivos mostrando su carpeta en el sistema (recomendado).</translation>
+    </message>
+    <message>
+      <source>Transferencias</source>
+      <translation>Transferencias</translation>
+    </message>
+    <message>
+      <source>Simultáneas:</source>
+      <translation>Simultáneas:</translation>
+    </message>
+    <message>
+      <source>Límite global por defecto:</source>
+      <translation>Límite global por defecto:</translation>
+    </message>
+    <message>
+      <source>Cantidad máxima de transferencias simultáneas.</source>
+      <translation>Cantidad máxima de transferencias simultáneas.</translation>
+    </message>
+    <message>
+      <source>0 = sin límite global de velocidad.</source>
+      <translation>0 = sin límite global de velocidad.</translation>
+    </message>
+    <message>
+      <source>TTL sin verificación:</source>
+      <translation>TTL sin verificación:</translation>
+    </message>
+    <message>
+      <source>Duración de la excepción temporal para la política sin verificación de host key.</source>
+      <translation>Duración de la excepción temporal para la política sin verificación de host key.</translation>
+    </message>
+    <message>
+      <source> min</source>
+      <translation> min</translation>
+    </message>
+    <message>
+      <source>Timeout preparación:</source>
+      <translation>Timeout preparación:</translation>
+    </message>
+    <message>
+      <source>Tiempo antes de mostrar el diálogo Esperar/Cancelar.</source>
+      <translation>Tiempo antes de mostrar el diálogo Esperar/Cancelar.</translation>
+    </message>
+    <message>
+      <source> ms</source>
+      <translation> ms</translation>
+    </message>
+    <message>
+      <source>Confirmar desde elementos:</source>
+      <translation>Confirmar desde elementos:</translation>
+    </message>
+    <message>
+      <source>Cantidad de elementos para pedir confirmación en lotes grandes.</source>
+      <translation>Cantidad de elementos para pedir confirmación en lotes grandes.</translation>
+    </message>
+    <message>
+      <source>Confirmar desde tamaño:</source>
+      <translation>Confirmar desde tamaño:</translation>
+    </message>
+    <message>
+      <source>Tamaño estimado para pedir confirmación en lotes grandes.</source>
+      <translation>Tamaño estimado para pedir confirmación en lotes grandes.</translation>
+    </message>
+    <message>
+      <source> MiB</source>
+      <translation> MiB</translation>
     </message>
     <message>
       <source>Al eliminar un sitio, borrar también sus credenciales guardadas.</source>
@@ -1005,6 +1117,10 @@ Huella: %4
       <translation>Carpeta de staging:</translation>
     </message>
     <message>
+      <source>Carpeta staging:</source>
+      <translation>Carpeta staging:</translation>
+    </message>
+    <message>
       <source>Elegir…</source>
       <translation>Elegir…</translation>
     </message>
@@ -1015,6 +1131,14 @@ Huella: %4
     <message>
       <source>Eliminar automáticamente la carpeta staging tras completar el arrastre (recomendado).</source>
       <translation>Eliminar automáticamente la carpeta staging tras completar el arrastre (recomendado).</translation>
+    </message>
+    <message>
+      <source>Profundidad máxima:</source>
+      <translation>Profundidad máxima:</translation>
+    </message>
+    <message>
+      <source>Recomendado: 32</source>
+      <translation>Recomendado: 32</translation>
     </message>
     <message>
       <source>Permitir fallback inseguro de credenciales (no recomendado).</source>

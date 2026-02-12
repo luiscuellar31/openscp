@@ -461,6 +461,10 @@
       <translation>How do you want to open files by default?\nYou can change this later in Settings.</translation>
     </message>
     <message>
+      <source>¿Cómo deseas abrir este archivo?</source>
+      <translation>How do you want to open this file?</translation>
+    </message>
+    <message>
       <source>Abrir archivo</source>
       <translation>Open file</translation>
     </message>
@@ -906,6 +910,22 @@ Overwrite?</translation>
   <context>
     <name>SettingsDialog</name>
     <message>
+      <source>General</source>
+      <translation>General</translation>
+    </message>
+    <message>
+      <source>Sitios</source>
+      <translation>Sites</translation>
+    </message>
+    <message>
+      <source>Seguridad</source>
+      <translation>Security</translation>
+    </message>
+    <message>
+      <source>Staging y arrastre</source>
+      <translation>Staging and drag-out</translation>
+    </message>
+    <message>
       <source>Avanzado</source>
       <translation>Advanced</translation>
     </message>
@@ -950,6 +970,22 @@ Overwrite?</translation>
       <translation>Open with:</translation>
     </message>
     <message>
+      <source>Al abrir archivos:</source>
+      <translation>On file open:</translation>
+    </message>
+    <message>
+      <source>Preguntar siempre</source>
+      <translation>Always ask</translation>
+    </message>
+    <message>
+      <source>Abrir archivo</source>
+      <translation>Open file</translation>
+    </message>
+    <message>
+      <source>Mostrar carpeta</source>
+      <translation>Show folder</translation>
+    </message>
+    <message>
       <source>Doble clic</source>
       <translation>Double click</translation>
     </message>
@@ -974,8 +1010,84 @@ Overwrite?</translation>
       <translation>Open Site Manager on disconnect</translation>
     </message>
     <message>
+      <source>Abrir cola al encolar transferencias</source>
+      <translation>Open queue when enqueuing transfers</translation>
+    </message>
+    <message>
+      <source>Carpeta descargas:</source>
+      <translation>Download folder:</translation>
+    </message>
+    <message>
+      <source>Selecciona carpeta de descargas</source>
+      <translation>Select download folder</translation>
+    </message>
+    <message>
       <source>Abrir archivos mostrando su carpeta en el sistema (recomendado).</source>
       <translation>Open files by revealing their folder in the system (recommended).</translation>
+    </message>
+    <message>
+      <source>Transferencias</source>
+      <translation>Transfers</translation>
+    </message>
+    <message>
+      <source>Simultáneas:</source>
+      <translation>Parallel tasks:</translation>
+    </message>
+    <message>
+      <source>Límite global por defecto:</source>
+      <translation>Default global limit:</translation>
+    </message>
+    <message>
+      <source>Cantidad máxima de transferencias simultáneas.</source>
+      <translation>Maximum number of concurrent transfers.</translation>
+    </message>
+    <message>
+      <source>0 = sin límite global de velocidad.</source>
+      <translation>0 = no global speed limit.</translation>
+    </message>
+    <message>
+      <source>TTL sin verificación:</source>
+      <translation>No-verification TTL:</translation>
+    </message>
+    <message>
+      <source>Duración de la excepción temporal para la política sin verificación de host key.</source>
+      <translation>Duration of the temporary exception for no host-key verification policy.</translation>
+    </message>
+    <message>
+      <source> min</source>
+      <translation> min</translation>
+    </message>
+    <message>
+      <source>Timeout preparación:</source>
+      <translation>Preparation timeout:</translation>
+    </message>
+    <message>
+      <source>Tiempo antes de mostrar el diálogo Esperar/Cancelar.</source>
+      <translation>Time before showing the Wait/Cancel dialog.</translation>
+    </message>
+    <message>
+      <source> ms</source>
+      <translation> ms</translation>
+    </message>
+    <message>
+      <source>Confirmar desde elementos:</source>
+      <translation>Confirm from items:</translation>
+    </message>
+    <message>
+      <source>Cantidad de elementos para pedir confirmación en lotes grandes.</source>
+      <translation>Item count threshold to request confirmation for large batches.</translation>
+    </message>
+    <message>
+      <source>Confirmar desde tamaño:</source>
+      <translation>Confirm from size:</translation>
+    </message>
+    <message>
+      <source>Tamaño estimado para pedir confirmación en lotes grandes.</source>
+      <translation>Estimated size threshold to request confirmation for large batches.</translation>
+    </message>
+    <message>
+      <source> MiB</source>
+      <translation> MiB</translation>
     </message>
     <message>
       <source>Al eliminar un sitio, borrar también sus credenciales guardadas.</source>
@@ -1018,6 +1130,10 @@ Overwrite?</translation>
       <translation>Staging folder:</translation>
     </message>
     <message>
+      <source>Carpeta staging:</source>
+      <translation>Staging folder:</translation>
+    </message>
+    <message>
       <source>Elegir…</source>
       <translation>Choose…</translation>
     </message>
@@ -1028,6 +1144,14 @@ Overwrite?</translation>
     <message>
       <source>Eliminar automáticamente la carpeta staging tras completar el arrastre (recomendado).</source>
       <translation>Auto-clean staging after successful drag-out (recommended).</translation>
+    </message>
+    <message>
+      <source>Profundidad máxima:</source>
+      <translation>Maximum depth:</translation>
+    </message>
+    <message>
+      <source>Recomendado: 32</source>
+      <translation>Recommended: 32</translation>
     </message>
   </context>
   <context>

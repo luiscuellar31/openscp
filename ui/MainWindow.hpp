@@ -164,6 +164,11 @@ private:
     void maybeOpenSiteManagerAfterModal();
     bool confirmInsecureHostPolicyForSession(const openscp::SessionOptions& opt);
     void updateHostPolicyRiskBanner();
+    void showTransferQueue();
+    void maybeShowTransferQueue();
+    void openLocalPathWithPreference(const QString& localPath);
+    void applyTransferPreferences();
+    static QString defaultDownloadDirFromSettings(const class QSettings& s);
 
     // Helpers for connecting and wiring up the remote UI
     void startSftpConnect(openscp::SessionOptions opt,
@@ -189,7 +194,9 @@ private:
     // User preferences
     bool prefShowHidden_ = false;
     bool prefSingleClick_ = false;
-    bool prefOpenRevealInFolder_ = false; // if true, reveal downloaded/opened files in folder instead of opening directly
+    QString prefOpenBehaviorMode_ = QStringLiteral("ask"); // ask|reveal|open
+    bool prefShowQueueOnEnqueue_ = true;
+    int prefNoHostVerificationTtlMin_ = 15;
     QMetaObject::Connection leftClickConn_;
     QMetaObject::Connection rightClickConn_;
 

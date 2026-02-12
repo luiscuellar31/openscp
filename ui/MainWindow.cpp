@@ -637,8 +637,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     actSites_->setToolTip(actSites_->text());
     tb->addSeparator();
     actShowQueue_ = tb->addAction(tr("Transferencias"), [this] {
-        if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
-        transferDlg_->show(); transferDlg_->raise(); transferDlg_->activateWindow();
+        showTransferQueue();
     });
     actShowQueue_->setIcon(resIcon("action-open-transfer-queue.svg"));
     actShowQueue_->setToolTip(actShowQueue_->text());
@@ -774,9 +773,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         connect(leftView_->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]{ updateDeleteShortcutEnables(); });
     }
 
-    downloadDir_ = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
-    if (downloadDir_.isEmpty())
-        downloadDir_ = QDir::homePath() + "/Downloads";
+    {
+        QSettings s("OpenSCP", "OpenSCP");
+        downloadDir_ = defaultDownloadDirFromSettings(s);
+    }
     QDir().mkpath(downloadDir_);
 
     statusBar()->showMessage(tr("Listo"));
@@ -970,8 +970,7 @@ void MainWindow::copyLeftToRight() {
         }
         if (enq > 0) {
             statusBar()->showMessage(QString(tr("Encolados: %1 subidas")).arg(enq), 4000);
-            if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
-            transferDlg_->show(); transferDlg_->raise(); transferDlg_->activateWindow();
+            maybeShowTransferQueue();
         }
         return;
     }
@@ -1127,8 +1126,7 @@ void MainWindow::moveLeftToRight() {
         for (const auto& p : pairs) transferMgr_->enqueueUpload(p.localPath, p.remotePath);
         if (!pairs.isEmpty()) {
             statusBar()->showMessage(QString(tr("Encolados: %1 subidas (mover)")).arg(pairs.size()), 4000);
-            if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
-            transferDlg_->show(); transferDlg_->raise(); transferDlg_->activateWindow();
+            maybeShowTransferQueue();
         } else if (movedEmptyDirs > 0) {
             statusBar()->showMessage(QString(tr("Movidos OK: %1 (carpetas vacías)")).arg(movedEmptyDirs), 4000);
         } else if (skippedPrep > 0) {
@@ -1480,8 +1478,8 @@ bool MainWindow::confirmInsecureHostPolicyForSession(const openscp::SessionOptio
     }
 
     // Temporary exception per host:port to avoid persistent bypasses.
-    static constexpr qint64 kNoVerifyTtlSec = 15 * 60;
-    const qint64 newUntil = now + kNoVerifyTtlSec;
+    const int ttlMin = qBound(1, prefNoHostVerificationTtlMin_, 120);
+    const qint64 newUntil = now + qint64(ttlMin) * 60;
     s.setValue(allowKey, newUntil);
     s.sync();
     const QDateTime expLocal = QDateTime::fromSecsSinceEpoch(newUntil).toLocalTime();
@@ -1509,6 +1507,48 @@ void MainWindow::updateHostPolicyRiskBanner() {
     m_hostPolicyRiskLabel_->show();
 }
 
+QString MainWindow::defaultDownloadDirFromSettings(const QSettings& s) {
+    QString fallback = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    if (fallback.isEmpty()) fallback = QDir::homePath() + "/Downloads";
+    QString configured = QDir::cleanPath(s.value("UI/defaultDownloadDir", fallback).toString().trimmed());
+    if (configured.isEmpty()) configured = fallback;
+    return configured;
+}
+
+void MainWindow::showTransferQueue() {
+    if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
+    transferDlg_->show();
+    transferDlg_->raise();
+    transferDlg_->activateWindow();
+}
+
+void MainWindow::maybeShowTransferQueue() {
+    if (prefShowQueueOnEnqueue_) showTransferQueue();
+}
+
+void MainWindow::openLocalPathWithPreference(const QString& localPath) {
+    const QString mode = prefOpenBehaviorMode_.trimmed().toLower();
+    if (mode == QStringLiteral("reveal")) {
+        revealInFolder(localPath);
+        return;
+    }
+    if (mode == QStringLiteral("open")) {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(localPath));
+        return;
+    }
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle(tr("Preferencia de apertura"));
+    box.setText(tr("¿Cómo deseas abrir este archivo?"));
+    QPushButton* btnOpen = box.addButton(tr("Abrir archivo"), QMessageBox::NoRole);
+    QPushButton* btnReveal = box.addButton(tr("Mostrar carpeta"), QMessageBox::AcceptRole);
+    box.setDefaultButton(btnReveal);
+    box.exec();
+    if (box.clickedButton() == btnOpen) QDesktopServices::openUrl(QUrl::fromLocalFile(localPath));
+    else revealInFolder(localPath);
+}
+
 // Navigate remote pane to a new remote directory.
 void MainWindow::setRightRemoteRoot(const QString& path) {
     if (!rightIsRemote_ || !rightRemoteModel_) return;
@@ -1531,31 +1571,7 @@ void MainWindow::rightItemActivated(const QModelIndex& idx) {
         if (fi.isDir()) {
             setRightRoot(fi.absoluteFilePath());
         } else if (fi.isFile()) {
-            // Decide open behavior (first-run prompt) for local files
-            const QString localPath = fi.absoluteFilePath();
-            QSettings s("OpenSCP", "OpenSCP");
-            bool chosen = s.value("UI/openBehaviorChosen", false).toBool();
-            bool reveal = s.value("UI/openRevealInFolder", false).toBool();
-            if (!chosen) {
-                QMessageBox box(this);
-                box.setIcon(QMessageBox::Question);
-                box.setWindowTitle(tr("Preferencia de apertura"));
-                box.setText(tr("¿Cómo deseas abrir los archivos por defecto?\nPuedes cambiarlo luego en Ajustes."));
-                // Normal grey: Open file (NoRole). Blue/default: Show folder (AcceptRole).
-                QPushButton* btnOpen = box.addButton(tr("Abrir archivo"), QMessageBox::NoRole);
-                QPushButton* btnReveal = box.addButton(tr("Mostrar carpeta"), QMessageBox::AcceptRole);
-                box.setDefaultButton(btnReveal);
-                box.exec();
-                reveal = (box.clickedButton() == btnReveal);
-                s.setValue("UI/openRevealInFolder", reveal);
-                s.setValue("UI/openBehaviorChosen", true);
-                s.sync();
-                prefOpenRevealInFolder_ = reveal;
-            } else {
-                reveal = prefOpenRevealInFolder_;
-            }
-            if (reveal) revealInFolder(localPath);
-            else QDesktopServices::openUrl(QUrl::fromLocalFile(localPath));
+            openLocalPathWithPreference(fi.absoluteFilePath());
         }
         return;
     }
@@ -1593,12 +1609,10 @@ void MainWindow::rightItemActivated(const QModelIndex& idx) {
         // Enqueue download so it appears in the queue (instead of direct download)
         transferMgr_->enqueueDownload(remotePath, localPath);
         statusBar()->showMessage(QString(tr("Encolados: %1 descargas")).arg(1), 3000);
-        if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
-        transferDlg_->show(); transferDlg_->raise(); transferDlg_->activateWindow();
+        maybeShowTransferQueue();
     } else {
         // There was already an identical task in the queue; optionally show it
-        if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
-        transferDlg_->show(); transferDlg_->raise(); transferDlg_->activateWindow();
+        maybeShowTransferQueue();
         statusBar()->showMessage(tr("Descarga ya encolada"), 2000);
     }
     // Open the file when the corresponding task finishes (avoid duplicate listeners)
@@ -1612,37 +1626,7 @@ void MainWindow::rightItemActivated(const QModelIndex& idx) {
             for (const auto& t : tasks) {
                 if (t.type == TransferTask::Type::Download && t.src == remotePath && t.dst == localPath) {
                     if (t.status == TransferTask::Status::Done) {
-                        // Decide how to open: reveal in folder (security) vs open directly
-                        QSettings s("OpenSCP", "OpenSCP");
-                        bool chosen = s.value("UI/openBehaviorChosen", false).toBool();
-                        bool reveal = s.value("UI/openRevealInFolder", false).toBool();
-                        if (!chosen) {
-                            // Ask the user the first time a file is opened
-                            QMessageBox box(this);
-                            box.setIcon(QMessageBox::Question);
-                            box.setWindowTitle(tr("Preferencia de apertura"));
-                            box.setText(tr("¿Cómo deseas abrir los archivos por defecto?\nPuedes cambiarlo luego en Ajustes."));
-                            // Normal grey: Open file (NoRole). Blue/default: Show folder (AcceptRole).
-                            QPushButton* btnOpen = box.addButton(tr("Abrir archivo"), QMessageBox::NoRole);
-                            QPushButton* btnReveal = box.addButton(tr("Mostrar carpeta"), QMessageBox::AcceptRole);
-                            box.setDefaultButton(btnReveal);
-                            box.exec();
-                            if (box.clickedButton() == btnReveal) {
-                                reveal = true;
-                            } else {
-                                reveal = false;
-                            }
-                            s.setValue("UI/openRevealInFolder", reveal);
-                            s.setValue("UI/openBehaviorChosen", true);
-                            s.sync();
-                            // Keep the in-memory cache aligned
-                            prefOpenRevealInFolder_ = reveal;
-                        } else {
-                            reveal = prefOpenRevealInFolder_;
-                        }
-
-                        if (reveal) revealInFolder(localPath);
-                        else QDesktopServices::openUrl(QUrl::fromLocalFile(localPath));
+                        openLocalPathWithPreference(localPath);
                         statusBar()->showMessage(tr("Descargado: ") + localPath, 5000);
                         QObject::disconnect(*connPtr);
                         sOpenListeners.remove(key);
@@ -1664,31 +1648,7 @@ void MainWindow::leftItemActivated(const QModelIndex& idx) {
     if (fi.isDir()) {
         setLeftRoot(fi.absoluteFilePath());
     } else if (fi.isFile()) {
-        // Decide open behavior (first-run prompt) for local files
-        const QString localPath = fi.absoluteFilePath();
-        QSettings s("OpenSCP", "OpenSCP");
-        bool chosen = s.value("UI/openBehaviorChosen", false).toBool();
-        bool reveal = s.value("UI/openRevealInFolder", false).toBool();
-        if (!chosen) {
-            QMessageBox box(this);
-            box.setIcon(QMessageBox::Question);
-            box.setWindowTitle(tr("Preferencia de apertura"));
-            box.setText(tr("¿Cómo deseas abrir los archivos por defecto?\nPuedes cambiarlo luego en Ajustes."));
-            // Normal grey: Open file (NoRole). Blue/default: Show folder (AcceptRole).
-            QPushButton* btnOpen = box.addButton(tr("Abrir archivo"), QMessageBox::NoRole);
-            QPushButton* btnReveal = box.addButton(tr("Mostrar carpeta"), QMessageBox::AcceptRole);
-            box.setDefaultButton(btnReveal);
-            box.exec();
-            reveal = (box.clickedButton() == btnReveal);
-            s.setValue("UI/openRevealInFolder", reveal);
-            s.setValue("UI/openBehaviorChosen", true);
-            s.sync();
-            prefOpenRevealInFolder_ = reveal;
-        } else {
-            reveal = prefOpenRevealInFolder_;
-        }
-        if (reveal) revealInFolder(localPath);
-        else QDesktopServices::openUrl(QUrl::fromLocalFile(localPath));
+        openLocalPathWithPreference(fi.absoluteFilePath());
     }
 }
 
@@ -1752,8 +1712,7 @@ void MainWindow::downloadRightToLeft() {
         QString msg = QString(tr("Encolados: %1 descargas")).arg(enq);
         if (bad > 0) msg += QString("  |  ") + tr("Omitidos inválidos: %1").arg(bad);
         statusBar()->showMessage(msg, 4000);
-        if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
-        transferDlg_->show(); transferDlg_->raise(); transferDlg_->activateWindow();
+        maybeShowTransferQueue();
     }
 }
 
@@ -1846,8 +1805,7 @@ void MainWindow::copyRightToLeft() {
         QString msg = QString(tr("Encolados: %1 descargas")).arg(enq);
         if (bad > 0) msg += QString("  |  ") + tr("Omitidos inválidos: %1").arg(bad);
         statusBar()->showMessage(msg, 4000);
-        if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
-        transferDlg_->show(); transferDlg_->raise(); transferDlg_->activateWindow();
+        maybeShowTransferQueue();
     }
 }
 
@@ -1940,8 +1898,7 @@ void MainWindow::moveRightToLeft() {
         QString msg = QString(tr("Encolados: %1 descargas (mover)")).arg(enq);
         if (bad > 0) msg += QString("  |  ") + tr("Omitidos inválidos: %1").arg(bad);
         statusBar()->showMessage(msg, 4000);
-        if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
-        transferDlg_->show(); transferDlg_->raise(); transferDlg_->activateWindow();
+        maybeShowTransferQueue();
     }
     // Per-item deletion: as each download finishes OK, delete that remote file;
     // when a folder has no pending files left, delete the folder.
@@ -2087,8 +2044,7 @@ void MainWindow::uploadViaDialog() {
     }
     if (enq > 0) {
         statusBar()->showMessage(QString(tr("Encolados: %1 subidas")).arg(enq), 4000);
-        if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
-        transferDlg_->show(); transferDlg_->raise(); transferDlg_->activateWindow();
+        maybeShowTransferQueue();
     }
 }
 
@@ -2695,8 +2651,7 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
                 }
     if (enq > 0) {
         statusBar()->showMessage(QString(tr("Encolados: %1 subidas (DND)")).arg(enq), 4000);
-        if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
-        transferDlg_->show(); transferDlg_->raise(); transferDlg_->activateWindow();
+        maybeShowTransferQueue();
     }
                 dd->acceptProposedAction();
                 return true;
@@ -2813,8 +2768,7 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
                     QString msg = QString(tr("Encolados: %1 descargas (DND)")).arg(enq);
                     if (bad > 0) msg += QString("  |  ") + tr("Omitidos inválidos: %1").arg(bad);
                     statusBar()->showMessage(msg, 4000);
-                    if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
-                    transferDlg_->show(); transferDlg_->raise(); transferDlg_->activateWindow();
+                    maybeShowTransferQueue();
                 }
                 dd->acceptProposedAction();
                 updateDeleteShortcutEnables();
@@ -3185,9 +3139,24 @@ void MainWindow::applyPreferences() {
     QSettings s("OpenSCP", "OpenSCP");
     const bool showHidden = s.value("UI/showHidden", false).toBool();
     const bool singleClick = s.value("UI/singleClick", false).toBool();
-    prefOpenRevealInFolder_ = s.value("UI/openRevealInFolder", false).toBool();
+    QString openBehaviorMode = s.value("UI/openBehaviorMode").toString().trimmed().toLower();
+    if (openBehaviorMode.isEmpty()) {
+        const bool revealLegacy = s.value("UI/openRevealInFolder", false).toBool();
+        openBehaviorMode = revealLegacy ? QStringLiteral("reveal") : QStringLiteral("ask");
+    }
+    if (openBehaviorMode != QStringLiteral("ask") &&
+        openBehaviorMode != QStringLiteral("reveal") &&
+        openBehaviorMode != QStringLiteral("open")) {
+        openBehaviorMode = QStringLiteral("ask");
+    }
+    prefOpenBehaviorMode_ = openBehaviorMode;
+    prefShowQueueOnEnqueue_ = s.value("UI/showQueueOnEnqueue", true).toBool();
+    prefNoHostVerificationTtlMin_ = qBound(1, s.value("Security/noHostVerificationTtlMin", 15).toInt(), 120);
+    downloadDir_ = defaultDownloadDirFromSettings(s);
+    QDir().mkpath(downloadDir_);
     // Keep Site Manager auto-open preference up to date
     m_openSiteManagerOnDisconnect = s.value("UI/openSiteManagerOnDisconnect", true).toBool();
+    applyTransferPreferences();
 
     // Local: model filters (hidden on/off)
     auto applyLocalFilters = [&](QFileSystemModel* m) {
@@ -3218,6 +3187,16 @@ void MainWindow::applyPreferences() {
         }
         prefSingleClick_ = singleClick;
     }
+}
+
+void MainWindow::applyTransferPreferences() {
+    if (!transferMgr_) return;
+    QSettings s("OpenSCP", "OpenSCP");
+    const int maxConcurrent = qBound(1, s.value("Transfer/maxConcurrent", 2).toInt(), 8);
+    const int globalSpeed = qMax(0, s.value("Transfer/globalSpeedKBps", 0).toInt());
+    transferMgr_->setMaxConcurrent(maxConcurrent);
+    transferMgr_->setGlobalSpeedLimitKBps(globalSpeed);
+    if (transferDlg_) QMetaObject::invokeMethod(transferDlg_, "refresh", Qt::QueuedConnection);
 }
 
 // Check if the current remote directory is writable and update enables.

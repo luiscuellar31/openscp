@@ -336,8 +336,14 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel* rm) {
     currentBatchTotal_ = targets.size();
 
     // Confirmation for very large batches
-    const bool tooMany = totalItems > 500;
-    const bool tooBig  = totalBytes > (quint64(1) << 30); // > 1 GiB
+    QSettings dragSettings("OpenSCP", "OpenSCP");
+    int confirmItemsThreshold = dragSettings.value("Advanced/stagingConfirmItems", 500).toInt();
+    if (confirmItemsThreshold < 1) confirmItemsThreshold = 500;
+    int confirmMiBThreshold = dragSettings.value("Advanced/stagingConfirmMiB", 1024).toInt();
+    if (confirmMiBThreshold < 1) confirmMiBThreshold = 1024;
+    const quint64 confirmBytesThreshold = quint64(confirmMiBThreshold) * 1024ull * 1024ull;
+    const bool tooMany = totalItems > confirmItemsThreshold;
+    const bool tooBig  = totalBytes > confirmBytesThreshold;
     const qint64 enumMs = prepTimer_.elapsed();
     enumMs_ = enumMs;
     // Log enumeration summary (openscp.enum)
@@ -457,7 +463,7 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel* rm) {
     waitTimer_->setSingleShot(true);
     QSettings s("OpenSCP", "OpenSCP");
     int timeoutMs = s.value("Advanced/stagingPrepTimeoutMs", 2000).toInt();
-    if (timeoutMs < 0) timeoutMs = 2000;
+    timeoutMs = qBound(250, timeoutMs, 60000);
     waitTimer_->setInterval(timeoutMs);
     QObject::connect(waitTimer_, &QTimer::timeout, this, [this]() {
         auto* mw = qobject_cast<QMainWindow*>(window());
