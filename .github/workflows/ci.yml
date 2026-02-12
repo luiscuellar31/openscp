@@ -44,6 +44,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y openssh-server
+          sudo mkdir -p /run/sshd
+          sudo chmod 755 /run/sshd
+          sudo ssh-keygen -A
 
           sudo useradd --create-home --shell /bin/bash openscp_it || true
           echo "openscp_it:openscp_it_pass" | sudo chpasswd
@@ -68,7 +71,17 @@ jobs:
           UseDNS no
           EOF
 
-          sudo /usr/sbin/sshd -f /tmp/openscp_sshd_config -E /tmp/openscp_sshd.log
+          if ! sudo /usr/sbin/sshd -t -f /tmp/openscp_sshd_config; then
+            echo "Invalid sshd config"
+            sudo cat /tmp/openscp_sshd.log || true
+            exit 1
+          fi
+
+          if ! sudo /usr/sbin/sshd -f /tmp/openscp_sshd_config -E /tmp/openscp_sshd.log; then
+            echo "Failed to start sshd"
+            sudo cat /tmp/openscp_sshd.log || true
+            exit 1
+          fi
 
           for i in {1..20}; do
             if (echo > /dev/tcp/127.0.0.1/2222) >/dev/null 2>&1; then
