@@ -22,7 +22,7 @@ public:
         bool ok() const { return status == PersistStatus::Stored; }
     };
 
-    // Store a secret under a logical key (e.g. "site:Name:password").
+    // Store a secret under a logical key (e.g. "site-id:<uuid>:password").
     PersistResult setSecret(const QString& key, const QString& value);
 
     // Retrieve a secret if present.

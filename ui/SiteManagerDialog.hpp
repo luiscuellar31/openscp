@@ -9,6 +9,7 @@ class QTableWidget;
 class QPushButton;
 
 struct SiteEntry {
+    QString id;
     QString name;
     openscp::SessionOptions opt;
 };
