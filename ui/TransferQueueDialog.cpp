@@ -6,10 +6,121 @@
 #include <QPushButton>
 #include <QHeaderView>
 #include <QAbstractItemView>
-#include <QTableWidgetItem>
+#include <QTableView>
+#include <QAbstractTableModel>
 #include <QSpinBox>
 #include <QInputDialog>
 #include <QMenu>
+
+static QString statusText(TransferTask::Status s) {
+  switch (s) {
+    case TransferTask::Status::Queued: return TransferQueueDialog::tr("En cola");
+    case TransferTask::Status::Running: return TransferQueueDialog::tr("En progreso");
+    case TransferTask::Status::Paused: return TransferQueueDialog::tr("Pausado");
+    case TransferTask::Status::Done: return TransferQueueDialog::tr("Completado");
+    case TransferTask::Status::Error: return TransferQueueDialog::tr("Error");
+    case TransferTask::Status::Canceled: return TransferQueueDialog::tr("Cancelado");
+  }
+  return {};
+}
+
+class TransferTaskTableModel final : public QAbstractTableModel {
+public:
+  explicit TransferTaskTableModel(QObject* parent = nullptr) : QAbstractTableModel(parent) {}
+
+  int rowCount(const QModelIndex& parent = QModelIndex()) const override {
+    if (parent.isValid()) return 0;
+    return tasks_.size();
+  }
+
+  int columnCount(const QModelIndex& parent = QModelIndex()) const override {
+    if (parent.isValid()) return 0;
+    return 6;
+  }
+
+  QVariant headerData(int section, Qt::Orientation orientation, int role) const override {
+    if (role != Qt::DisplayRole) return {};
+    if (orientation == Qt::Horizontal) {
+      switch (section) {
+        case 0: return TransferQueueDialog::tr("Tipo");
+        case 1: return TransferQueueDialog::tr("Origen");
+        case 2: return TransferQueueDialog::tr("Destino");
+        case 3: return TransferQueueDialog::tr("Estado");
+        case 4: return TransferQueueDialog::tr("Progreso");
+        case 5: return TransferQueueDialog::tr("Intentos");
+        default: return {};
+      }
+    }
+    return section + 1;
+  }
+
+  QVariant data(const QModelIndex& index, int role) const override {
+    if (!index.isValid() || role != Qt::DisplayRole) return {};
+    if (index.row() < 0 || index.row() >= tasks_.size()) return {};
+    const auto& t = tasks_[index.row()];
+    switch (index.column()) {
+      case 0: return t.type == TransferTask::Type::Upload ? TransferQueueDialog::tr("Subida") : TransferQueueDialog::tr("Descarga");
+      case 1: return t.src;
+      case 2: return t.dst;
+      case 3: return statusText(t.status);
+      case 4: return QString::number(t.progress) + "%";
+      case 5: return QString("%1/%2").arg(t.attempts).arg(t.maxAttempts);
+      default: return {};
+    }
+  }
+
+  void sync(const QVector<TransferTask>& incoming) {
+    // Structural changes are uncommon; reset only when row count/order changed.
+    if (tasks_.size() != incoming.size()) {
+      beginResetModel();
+      tasks_ = incoming;
+      endResetModel();
+      return;
+    }
+    bool orderChanged = false;
+    for (int i = 0; i < tasks_.size(); ++i) {
+      if (tasks_[i].id != incoming[i].id) {
+        orderChanged = true;
+        break;
+      }
+    }
+    if (orderChanged) {
+      beginResetModel();
+      tasks_ = incoming;
+      endResetModel();
+      return;
+    }
+
+    for (int row = 0; row < tasks_.size(); ++row) {
+      const auto& prev = tasks_[row];
+      const auto& next = incoming[row];
+      const bool changed = prev.type != next.type ||
+                           prev.src != next.src ||
+                           prev.dst != next.dst ||
+                           prev.status != next.status ||
+                           prev.progress != next.progress ||
+                           prev.attempts != next.attempts ||
+                           prev.maxAttempts != next.maxAttempts;
+      if (changed) {
+        tasks_[row] = next;
+        emit dataChanged(index(row, 0), index(row, 5), {Qt::DisplayRole});
+      } else {
+        // Keep non-rendered fields in sync for action helpers.
+        tasks_[row] = next;
+      }
+    }
+  }
+
+  const QVector<TransferTask>& tasks() const { return tasks_; }
+
+  std::optional<quint64> taskIdAtRow(int row) const {
+    if (row < 0 || row >= tasks_.size()) return std::nullopt;
+    return tasks_[row].id;
+  }
+
+private:
+  QVector<TransferTask> tasks_;
+};
 
 TransferQueueDialog::TransferQueueDialog(TransferManager* mgr, QWidget* parent)
   : QDialog(parent), mgr_(mgr) {
@@ -20,9 +131,9 @@ TransferQueueDialog::TransferQueueDialog(TransferManager* mgr, QWidget* parent)
   auto* lay = new QVBoxLayout(this);
 
   // Tasks table
-  table_ = new QTableWidget(this);
-  table_->setColumnCount(6);
-  table_->setHorizontalHeaderLabels({ tr("Tipo"), tr("Origen"), tr("Destino"), tr("Estado"), tr("Progreso"), tr("Intentos") });
+  model_ = new TransferTaskTableModel(this);
+  table_ = new QTableView(this);
+  table_->setModel(model_);
   table_->horizontalHeader()->setStretchLastSection(true);
   table_->verticalHeader()->setVisible(false);
   table_->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -102,34 +213,13 @@ TransferQueueDialog::TransferQueueDialog(TransferManager* mgr, QWidget* parent)
   connect(mgr_, &TransferManager::tasksChanged, this, &TransferQueueDialog::refresh);
   // Keep selection-dependent button enablement up to date
   connect(table_->selectionModel(), &QItemSelectionModel::selectionChanged, this, &TransferQueueDialog::updateSummary);
-  connect(table_, &QTableWidget::customContextMenuRequested, this, &TransferQueueDialog::showContextMenu);
+  connect(table_, &QTableView::customContextMenuRequested, this, &TransferQueueDialog::showContextMenu);
   refresh();
 }
 
-static QString statusText(TransferTask::Status s) {
-  switch (s) {
-    case TransferTask::Status::Queued: return TransferQueueDialog::tr("En cola");
-    case TransferTask::Status::Running: return TransferQueueDialog::tr("En progreso");
-    case TransferTask::Status::Paused: return TransferQueueDialog::tr("Pausado");
-    case TransferTask::Status::Done: return TransferQueueDialog::tr("Completado");
-    case TransferTask::Status::Error: return TransferQueueDialog::tr("Error");
-    case TransferTask::Status::Canceled: return TransferQueueDialog::tr("Cancelado");
-  }
-  return {};
-}
-
 void TransferQueueDialog::refresh() {
-  const auto tasks = mgr_->tasksSnapshot();
-  table_->setRowCount(tasks.size());
-  for (int i = 0; i < tasks.size(); ++i) {
-    const auto& t = tasks[i];
-    table_->setItem(i, 0, new QTableWidgetItem(t.type == TransferTask::Type::Upload ? tr("Subida") : tr("Descarga")));
-    table_->setItem(i, 1, new QTableWidgetItem(t.src));
-    table_->setItem(i, 2, new QTableWidgetItem(t.dst));
-    table_->setItem(i, 3, new QTableWidgetItem(statusText(t.status)));
-    table_->setItem(i, 4, new QTableWidgetItem(QString::number(t.progress) + "%"));
-    table_->setItem(i, 5, new QTableWidgetItem(QString("%1/%2").arg(t.attempts).arg(t.maxAttempts)));
-  }
+  if (!model_) return;
+  model_->sync(mgr_->tasksSnapshot());
   updateSummary();
 }
 
@@ -141,19 +231,15 @@ void TransferQueueDialog::onClearDone() { mgr_->clearCompleted(); }
 void TransferQueueDialog::onPauseSelected() {
   auto sel = table_->selectionModel(); if (!sel || !sel->hasSelection()) return;
   const auto rows = sel->selectedRows();
-  const auto tasks = mgr_->tasksSnapshot();
   for (const QModelIndex& r : rows) {
-    int row = r.row(); if (row < 0 || row >= tasks.size()) continue;
-    mgr_->pauseTask(tasks[row].id);
+    if (auto id = model_->taskIdAtRow(r.row()); id.has_value()) mgr_->pauseTask(*id);
   }
 }
 void TransferQueueDialog::onResumeSelected() {
   auto sel = table_->selectionModel(); if (!sel || !sel->hasSelection()) return;
   const auto rows = sel->selectedRows();
-  const auto tasks = mgr_->tasksSnapshot();
   for (const QModelIndex& r : rows) {
-    int row = r.row(); if (row < 0 || row >= tasks.size()) continue;
-    mgr_->resumeTask(tasks[row].id);
+    if (auto id = model_->taskIdAtRow(r.row()); id.has_value()) mgr_->resumeTask(*id);
   }
 }
 void TransferQueueDialog::onApplyGlobalSpeed() {
@@ -162,21 +248,19 @@ void TransferQueueDialog::onApplyGlobalSpeed() {
 }
 void TransferQueueDialog::onLimitSelected() {
   auto sel = table_->selectionModel(); if (!sel || !sel->hasSelection()) return;
-  const auto rows = sel->selectedRows(); const auto tasks = mgr_->tasksSnapshot();
+  const auto rows = sel->selectedRows();
   bool ok=false; int v = QInputDialog::getInt(this, tr("Límite para tarea(s)"), tr("KB/s (0 = sin límite)"), 0, 0, 1'000'000, 1, &ok);
   if (!ok) return;
   for (const QModelIndex& r : rows) {
-    int row = r.row(); if (row < 0 || row >= tasks.size()) continue;
-    mgr_->setTaskSpeedLimit(tasks[row].id, v);
+    if (auto id = model_->taskIdAtRow(r.row()); id.has_value()) mgr_->setTaskSpeedLimit(*id, v);
   }
 }
 
 void TransferQueueDialog::onStopSelected() {
   auto sel = table_->selectionModel(); if (!sel || !sel->hasSelection()) return;
-  const auto rows = sel->selectedRows(); const auto tasks = mgr_->tasksSnapshot();
+  const auto rows = sel->selectedRows();
   for (const QModelIndex& r : rows) {
-    int row = r.row(); if (row < 0 || row >= tasks.size()) continue;
-    mgr_->cancelTask(tasks[row].id);
+    if (auto id = model_->taskIdAtRow(r.row()); id.has_value()) mgr_->cancelTask(*id);
   }
 }
 
@@ -185,7 +269,8 @@ void TransferQueueDialog::onStopAll() {
 }
 
 void TransferQueueDialog::updateSummary() {
-  const auto tasks = mgr_->tasksSnapshot();
+  if (!model_) return;
+  const auto& tasks = model_->tasks();
   int queued = 0, running = 0, paused = 0, done = 0, error = 0, canceled = 0;
   for (const auto& t : tasks) {
     switch (t.status) {

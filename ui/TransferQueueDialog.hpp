@@ -1,11 +1,12 @@
 // Dialog to visualize and manage the transfer queue.
 #pragma once
 #include <QDialog>
-#include <QTableWidget>
 #include "TransferManager.hpp"
 
 class QLabel;
 class QPushButton;
+class QTableView;
+class TransferTaskTableModel;
 
 // Dialog to monitor and control the transfer queue.
 // Allows pausing/resuming, canceling, and limiting per-task speed.
@@ -32,7 +33,8 @@ private:
     void updateSummary();
 
     TransferManager* mgr_;             // source of truth for the queue
-    QTableWidget* table_;              // table of tasks
+    QTableView* table_ = nullptr;      // view of tasks
+    TransferTaskTableModel* model_ = nullptr; // task model (id-based updates)
     QLabel* summaryLabel_ = nullptr;   // summary at the bottom
     QPushButton* pauseBtn_ = nullptr;  // global pause
     QPushButton* resumeBtn_ = nullptr; // global resume
