@@ -49,10 +49,10 @@ https://github.com/luiscuellar31/openscp/releases
   * **Estricto**
   * **Aceptar nuevo (TOFU)**
   * **Desactivado**
-* **TOFU no modal** (macOS/Linux/Windows): sin `exec()`, sin bloqueos; la ventana “Conectando…” no roba el foco.
+* **TOFU no modal** (macOS/Linux): sin `exec()`, sin bloqueos; la ventana “Conectando…” no roba el foco.
 * `known_hosts` robusto:
 
-  * Escrituras **atómicas** (POSIX: `mkstemp → fsync → rename`; Windows: `FlushFileBuffers + MoveFileEx`).
+  * Escrituras **atómicas** (POSIX: `mkstemp → fsync → rename`).
   * Permisos estrictos (`~/.ssh` **0700**, archivo **0600**).
   * **Hostnames hasheados** por defecto (OpenSSH/TYPE\_SHA1); opción para texto plano.
   * Huellas por defecto `SHA256:<base64>` (estilo OpenSSH); vista alternativa **HEX con dos puntos**.
@@ -89,7 +89,7 @@ https://github.com/luiscuellar31/openscp/releases
 * Edición cómoda: elipsis solo al pintar; al editar ves el **nombre completo**.
 * Keychain (macOS) y Libsecret (Linux) para credenciales; fallback **inseguro** solo con confirmación (banner **rojo** permanente cuando está activo).
   - macOS: la opción de fallback inseguro no se muestra (siempre se usa Llavero).
-  - Linux/Windows: el fallback está disponible solo cuando el build no enlaza Libsecret y no se compila con `OPEN_SCP_BUILD_SECURE_ONLY`.
+  - Linux: el fallback está disponible solo cuando el build no enlaza Libsecret y no se compila con `OPEN_SCP_BUILD_SECURE_ONLY`.
 
 ### UX / UI (Qt)
 
@@ -138,7 +138,7 @@ cd openscp
 rm -rf build
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-# Linux/Windows:
+# Linux:
 ./build/openscp_hello
 ```
 
@@ -190,6 +190,7 @@ export Qt6_DIR="/ruta/a/Qt/<version>/macos/lib/cmake/Qt6"
 
 ## Roadmap (corto / medio plazo)
 
+* El soporte para Windows está planeado para futuras versiones.
 * Protocolos: **SCP**; plan para **FTP/FTPS/WebDAV**.
 * Concurrencia real en la cola (múltiples conexiones en paralelo sin bloqueo global).
 * Proxy / Jump host: **SOCKS5**, **HTTP CONNECT**, **ProxyJump**.

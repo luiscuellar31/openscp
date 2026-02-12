@@ -54,10 +54,10 @@ https://github.com/luiscuellar31/openscp/releases
   * **Strict**
   * **Accept new (TOFU)**
   * **Disabled**
-* **Non-modal TOFU** (macOS/Linux/Windows): no `exec()`, no blocking; the “Connecting…” window never steals focus.
+* **Non-modal TOFU** (macOS/Linux): no `exec()`, no blocking; the “Connecting…” window never steals focus.
 * Robust `known_hosts`:
 
-  * **Atomic writes** (POSIX: `mkstemp → fsync → rename`; Windows: `FlushFileBuffers + MoveFileEx`).
+  * **Atomic writes** (POSIX: `mkstemp → fsync → rename`).
   * Strict permissions (`~/.ssh` **0700**, file **0600**).
   * **Hashed hostnames** by default (`OpenSSH/TYPE_SHA1`); option for plain text.
   * Default fingerprints `SHA256:<base64>` (OpenSSH style); alternative **HEX with colons** view.
@@ -94,7 +94,7 @@ https://github.com/luiscuellar31/openscp/releases
 * Comfortable editing: ellipsis only while painting; the editor shows the **full name**.
 * Keychain (macOS) and Libsecret (Linux) for credentials; **insecure** fallback only with confirmation (persistent **red** banner when active).
   - macOS: the insecure fallback option is not shown (Keychain is always used).
-  - Linux/Windows: the fallback is available only when the build does not link Libsecret and is not compiled with `OPEN_SCP_BUILD_SECURE_ONLY`.
+  - Linux: the fallback is available only when the build does not link Libsecret and is not compiled with `OPEN_SCP_BUILD_SECURE_ONLY`.
 
 ### UX / UI (Qt)
 
@@ -143,7 +143,7 @@ cd openscp
 rm -rf build
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-# Linux/Windows:
+# Linux:
 ./build/openscp_hello
 ```
 
@@ -196,6 +196,7 @@ export Qt6_DIR="/path/to/Qt/<version>/macos/lib/cmake/Qt6"
 
 ## Roadmap (short / mid-term)
 
+* Windows support is planned for future releases.
 * Protocols: **SCP**; plan for **FTP/FTPS/WebDAV**.
 * Real queue concurrency (multiple parallel connections without global locking).
 * Proxy / Jump host: **SOCKS5**, **HTTP CONNECT**, **ProxyJump**.
