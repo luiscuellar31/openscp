@@ -482,7 +482,7 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel* rm) {
         int total = targets.size();
         int done = 0;
         int failed = 0;
-        const auto tasks = transferMgr_->tasks();
+        const auto tasks = transferMgr_->tasksSnapshot();
         for (const auto& p : targets) {
             bool matched = false;
             for (const auto& t : tasks) {
@@ -601,7 +601,7 @@ void DragAwareTreeView::cancelCurrentBatch(const QString& reason) {
     if (enumCancelFlag_) enumCancelFlag_->store(true, std::memory_order_relaxed);
     hidePrepOverlay();
     if (transferMgr_) {
-        const auto tasks = transferMgr_->tasks();
+        const auto tasks = transferMgr_->tasksSnapshot();
         for (const auto& t : tasks) {
             if (t.type == TransferTask::Type::Download && t.dst.startsWith(currentBatchDir_)) {
                 transferMgr_->cancelTask(t.id);

@@ -119,7 +119,7 @@ static QString statusText(TransferTask::Status s) {
 }
 
 void TransferQueueDialog::refresh() {
-  const auto& tasks = mgr_->tasks();
+  const auto tasks = mgr_->tasksSnapshot();
   table_->setRowCount(tasks.size());
   for (int i = 0; i < tasks.size(); ++i) {
     const auto& t = tasks[i];
@@ -141,7 +141,7 @@ void TransferQueueDialog::onClearDone() { mgr_->clearCompleted(); }
 void TransferQueueDialog::onPauseSelected() {
   auto sel = table_->selectionModel(); if (!sel || !sel->hasSelection()) return;
   const auto rows = sel->selectedRows();
-  const auto& tasks = mgr_->tasks();
+  const auto tasks = mgr_->tasksSnapshot();
   for (const QModelIndex& r : rows) {
     int row = r.row(); if (row < 0 || row >= tasks.size()) continue;
     mgr_->pauseTask(tasks[row].id);
@@ -150,7 +150,7 @@ void TransferQueueDialog::onPauseSelected() {
 void TransferQueueDialog::onResumeSelected() {
   auto sel = table_->selectionModel(); if (!sel || !sel->hasSelection()) return;
   const auto rows = sel->selectedRows();
-  const auto& tasks = mgr_->tasks();
+  const auto tasks = mgr_->tasksSnapshot();
   for (const QModelIndex& r : rows) {
     int row = r.row(); if (row < 0 || row >= tasks.size()) continue;
     mgr_->resumeTask(tasks[row].id);
@@ -162,7 +162,7 @@ void TransferQueueDialog::onApplyGlobalSpeed() {
 }
 void TransferQueueDialog::onLimitSelected() {
   auto sel = table_->selectionModel(); if (!sel || !sel->hasSelection()) return;
-  const auto rows = sel->selectedRows(); const auto& tasks = mgr_->tasks();
+  const auto rows = sel->selectedRows(); const auto tasks = mgr_->tasksSnapshot();
   bool ok=false; int v = QInputDialog::getInt(this, tr("Límite para tarea(s)"), tr("KB/s (0 = sin límite)"), 0, 0, 1'000'000, 1, &ok);
   if (!ok) return;
   for (const QModelIndex& r : rows) {
@@ -173,7 +173,7 @@ void TransferQueueDialog::onLimitSelected() {
 
 void TransferQueueDialog::onStopSelected() {
   auto sel = table_->selectionModel(); if (!sel || !sel->hasSelection()) return;
-  const auto rows = sel->selectedRows(); const auto& tasks = mgr_->tasks();
+  const auto rows = sel->selectedRows(); const auto tasks = mgr_->tasksSnapshot();
   for (const QModelIndex& r : rows) {
     int row = r.row(); if (row < 0 || row >= tasks.size()) continue;
     mgr_->cancelTask(tasks[row].id);
@@ -185,7 +185,7 @@ void TransferQueueDialog::onStopAll() {
 }
 
 void TransferQueueDialog::updateSummary() {
-  const auto& tasks = mgr_->tasks();
+  const auto tasks = mgr_->tasksSnapshot();
   int queued = 0, running = 0, paused = 0, done = 0, error = 0, canceled = 0;
   for (const auto& t : tasks) {
     switch (t.status) {

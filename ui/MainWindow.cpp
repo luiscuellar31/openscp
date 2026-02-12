@@ -1285,7 +1285,7 @@ void MainWindow::rightItemActivated(const QModelIndex& idx) {
     // Avoid duplicates: if there is already an active download with same src/dst, do not enqueue again
     bool alreadyActive = false;
     {
-        const auto& tasks = transferMgr_->tasks();
+        const auto tasks = transferMgr_->tasksSnapshot();
         for (const auto& t : tasks) {
             if (t.type == TransferTask::Type::Download && t.src == remotePath && t.dst == localPath) {
                 if (t.status == TransferTask::Status::Queued || t.status == TransferTask::Status::Running || t.status == TransferTask::Status::Paused) {
@@ -1313,7 +1313,7 @@ void MainWindow::rightItemActivated(const QModelIndex& idx) {
         sOpenListeners.insert(key);
         auto connPtr = std::make_shared<QMetaObject::Connection>();
         *connPtr = connect(transferMgr_, &TransferManager::tasksChanged, this, [this, remotePath, localPath, key, connPtr]() {
-            const auto& tasks = transferMgr_->tasks();
+            const auto tasks = transferMgr_->tasksSnapshot();
             for (const auto& t : tasks) {
                 if (t.type == TransferTask::Type::Download && t.src == remotePath && t.dst == localPath) {
                     if (t.status == TransferTask::Status::Done) {
@@ -1689,7 +1689,7 @@ void MainWindow::moveRightToLeft() {
         }
         auto connPtr = std::make_shared<QMetaObject::Connection>();
         *connPtr = connect(transferMgr_, &TransferManager::tasksChanged, this, [this, state, remoteBase, connPtr, pairs]() {
-            const auto& tasks = transferMgr_->tasks();
+            const auto tasks = transferMgr_->tasksSnapshot();
             // 1) For each successfully completed task, delete the corresponding remote file (once)
             for (const auto& t : tasks) {
                 if (t.type != TransferTask::Type::Download) continue;

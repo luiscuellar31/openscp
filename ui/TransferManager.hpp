@@ -67,7 +67,8 @@ public:
     void enqueueUpload(const QString& local, const QString& remote);
     void enqueueDownload(const QString& remote, const QString& local);
 
-    const QVector<TransferTask>& tasks() const { return tasks_; }
+    // Thread-safe copy of the current task list.
+    QVector<TransferTask> tasksSnapshot() const;
 
     // Pause/Resume the whole queue
     void pauseAll();

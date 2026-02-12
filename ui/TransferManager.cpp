@@ -41,6 +41,11 @@ void TransferManager::clearClient() {
     running_ = 0;
 }
 
+QVector<TransferTask> TransferManager::tasksSnapshot() const {
+    std::lock_guard<std::mutex> lk(mtx_);
+    return tasks_;
+}
+
 void TransferManager::enqueueUpload(const QString& local, const QString& remote) {
     TransferTask t{ TransferTask::Type::Upload };
     t.id = nextId_++;
@@ -108,14 +113,16 @@ void TransferManager::cancelAll() {
 }
 
 void TransferManager::retryFailed() {
-    std::lock_guard<std::mutex> lk(mtx_);
-    for (auto& t : tasks_) {
-        if (t.status == TransferTask::Status::Error || t.status == TransferTask::Status::Canceled) {
-            t.status = TransferTask::Status::Queued;
-            t.attempts = 0;
-            t.progress = 0;
-            t.error.clear();
-            canceledTasks_.erase(t.id);
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        for (auto& t : tasks_) {
+            if (t.status == TransferTask::Status::Error || t.status == TransferTask::Status::Canceled) {
+                t.status = TransferTask::Status::Queued;
+                t.attempts = 0;
+                t.progress = 0;
+                t.error.clear();
+                canceledTasks_.erase(t.id);
+            }
         }
     }
     emit tasksChanged();
@@ -123,13 +130,15 @@ void TransferManager::retryFailed() {
 }
 
 void TransferManager::clearCompleted() {
-    std::lock_guard<std::mutex> lk(mtx_);
-    QVector<TransferTask> next;
-    next.reserve(tasks_.size());
-    for (const auto& t : tasks_) {
-        if (t.status != TransferTask::Status::Done) next.push_back(t);
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        QVector<TransferTask> next;
+        next.reserve(tasks_.size());
+        for (const auto& t : tasks_) {
+            if (t.status != TransferTask::Status::Done) next.push_back(t);
+        }
+        tasks_.swap(next);
     }
-    tasks_.swap(next);
     emit tasksChanged();
 }
 
@@ -191,9 +200,11 @@ void TransferManager::schedule() {
                 ex = client_->exists(t.dst.toStdString(), isDir, sErr);
             }
             if (!sErr.empty()) {
-                std::lock_guard<std::mutex> lk(mtx_);
-                tasks_[idx].status = TransferTask::Status::Error;
-                tasks_[idx].error = QString::fromStdString(sErr);
+                {
+                    std::lock_guard<std::mutex> lk(mtx_);
+                    tasks_[idx].status = TransferTask::Status::Error;
+                    tasks_[idx].error = QString::fromStdString(sErr);
+                }
                 emit tasksChanged();
                 continue;
             }
@@ -212,8 +223,10 @@ void TransferManager::schedule() {
                     .arg(rinfo.mtime ? openscpui::localShortTime((quint64)rinfo.mtime) : QStringLiteral("?"));
                 int choice = askOverwrite(QFileInfo(t.src).fileName(), srcInfo, dstInfo);
                 if (choice == 0) {
-                    std::lock_guard<std::mutex> lk(mtx_);
-                    tasks_[idx].status = TransferTask::Status::Done;
+                    {
+                        std::lock_guard<std::mutex> lk(mtx_);
+                        tasks_[idx].status = TransferTask::Status::Done;
+                    }
                     emit tasksChanged();
                     continue;
                 }
@@ -262,8 +275,10 @@ void TransferManager::schedule() {
                     .arg(openscpui::localShortTime(lfi.lastModified()));
                 int choice = askOverwrite(lfi.fileName(), srcInfo, dstInfo);
                 if (choice == 0) {
-                    std::lock_guard<std::mutex> lk(mtx_);
-                    tasks_[idx].status = TransferTask::Status::Done;
+                    {
+                        std::lock_guard<std::mutex> lk(mtx_);
+                        tasks_[idx].status = TransferTask::Status::Done;
+                    }
                     emit tasksChanged();
                     continue;
                 }
@@ -453,10 +468,12 @@ bool TransferManager::ensureConnected(std::string& err) {
 }
 
 void TransferManager::pauseTask(quint64 id) {
-    std::lock_guard<std::mutex> lk(mtx_);
-    pausedTasks_.insert(id);
-    int i = indexForId(id);
-    if (i >= 0) tasks_[i].status = TransferTask::Status::Paused;
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        pausedTasks_.insert(id);
+        int i = indexForId(id);
+        if (i >= 0) tasks_[i].status = TransferTask::Status::Paused;
+    }
     emit tasksChanged();
 }
 
@@ -475,9 +492,11 @@ void TransferManager::resumeTask(quint64 id) {
 }
 
 void TransferManager::setTaskSpeedLimit(quint64 id, int kbps) {
-    std::lock_guard<std::mutex> lk(mtx_);
-    int i = indexForId(id);
-    if (i >= 0) tasks_[i].speedLimitKBps = kbps;
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        int i = indexForId(id);
+        if (i >= 0) tasks_[i].speedLimitKBps = kbps;
+    }
     emit tasksChanged();
 }
 
