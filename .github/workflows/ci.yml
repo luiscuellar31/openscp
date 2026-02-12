@@ -1,4 +1,4 @@
-name: CI
+name: CI (Dev Quick + Main Integration)
 
 on:
   push:
@@ -20,7 +20,7 @@ concurrency:
 jobs:
   quick-dev:
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-    name: Quick Test (dev push)
+    name: Quick Checks (push to dev)
     runs-on: ubuntu-latest
 
     steps:
@@ -50,7 +50,7 @@ jobs:
 
   pr-main-integration:
     if: github.event_name == 'pull_request' && github.base_ref == 'main'
-    name: Integration Gate (${{ matrix.os }})
+    name: Integration Gate (PR to main only)
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
