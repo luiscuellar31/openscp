@@ -44,7 +44,6 @@
 #include "SecretStore.hpp"
 #include "AboutDialog.hpp"
 #include "SettingsDialog.hpp"
-#include <QEventLoop>
 #include <QCoreApplication>
 #include <QShowEvent>
 #include <QDialog>
@@ -65,7 +64,6 @@
 #include "DragAwareTreeView.hpp"
 #include <atomic>
 #include <thread>
-#include <chrono>
 #include <memory>
 
 static constexpr int NAME_COL = 0;
@@ -483,9 +481,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         if (dlg.exec() == QDialog::Accepted) {
             openscp::SessionOptions opt{};
             if (dlg.selectedOptions(opt)) {
-                std::string err;
-                if (!establishSftpAsync(opt, err)) { QMessageBox::critical(this, tr("Error de conexión"), QString::fromStdString(err)); return; }
-                applyRemoteConnectedUI(opt);
+                startSftpConnect(opt);
             }
         }
     });
@@ -906,21 +902,38 @@ void MainWindow::moveLeftToRight() {
         if (rows.isEmpty()) { QMessageBox::information(this, tr("Mover"), tr("No hay entradas seleccionadas en el panel izquierdo.")); return; }
         if (QMessageBox::question(this, tr("Confirmar mover"),
                                   tr("Esto subirá al servidor y eliminará el origen local.\n¿Deseas continuar?")) != QMessageBox::Yes) return;
-
-        enum class OverwritePolicy { Ask, OverwriteAll, SkipAll };
-        OverwritePolicy policy = OverwritePolicy::Ask;
-        int ok = 0, fail = 0, skipped = 0;
-        QString lastError;
         const QString remoteBase = rightRemoteModel_->rootPath();
+        struct UploadPair {
+            QString localPath;
+            QString remotePath;
+            QString topLocalDir; // non-empty only for files that belong to a moved directory
+        };
+        QVector<UploadPair> pairs;
+        int skippedPrep = 0;
+        int movedEmptyDirs = 0;
+        QString prepError;
 
-        auto ensureRemoteDir = [&](const QString& dir) {
-            bool isD = false;
-            std::string e;
-            bool ex = sftp_->exists(dir.toStdString(), isD, e);
-            if (!e.empty()) return false;
-            if (!ex) {
-                std::string me;
-                if (!sftp_->mkdir(dir.toStdString(), me, 0755)) return false;
+        auto ensureRemoteDir = [&](const QString& dir) -> bool {
+            if (dir.isEmpty()) return true;
+            QString cur = "/";
+            const QStringList parts = dir.split('/', Qt::SkipEmptyParts);
+            for (const QString& part : parts) {
+                const QString next = (cur == "/") ? ("/" + part) : (cur + "/" + part);
+                bool isD = false;
+                std::string e;
+                const bool ex = sftp_->exists(next.toStdString(), isD, e);
+                if (!e.empty()) {
+                    prepError = QString::fromStdString(e);
+                    return false;
+                }
+                if (!ex) {
+                    std::string me;
+                    if (!sftp_->mkdir(next.toStdString(), me, 0755)) {
+                        prepError = QString::fromStdString(me);
+                        return false;
+                    }
+                }
+                cur = next;
             }
             return true;
         };
@@ -928,99 +941,160 @@ void MainWindow::moveLeftToRight() {
         for (const QModelIndex& idx : rows) {
             const QFileInfo fi = leftModel_->fileInfo(idx);
             if (fi.isDir()) {
+                const QString topLocalDir = fi.absoluteFilePath();
                 const QString baseRemoteDir = joinRemotePath(remoteBase, fi.fileName());
-                if (!ensureRemoteDir(baseRemoteDir)) { ++fail; continue; }
-                bool allOk = true;
-                QDirIterator it(fi.absoluteFilePath(), QDir::NoDotAndDotDot | QDir::AllEntries, QDirIterator::Subdirectories);
+                if (!ensureRemoteDir(baseRemoteDir)) { ++skippedPrep; continue; }
+                const int pairStart = pairs.size();
+                bool dirPrepFailed = false;
+                int filesInDir = 0;
+                QDirIterator it(topLocalDir, QDir::NoDotAndDotDot | QDir::AllEntries, QDirIterator::Subdirectories);
                 while (it.hasNext()) {
                     it.next();
                     const QFileInfo sfi = it.fileInfo();
-                    const QString rel = QDir(fi.absoluteFilePath()).relativeFilePath(sfi.absoluteFilePath());
+                    const QString rel = QDir(topLocalDir).relativeFilePath(sfi.absoluteFilePath());
                     const QString rTarget = joinRemotePath(baseRemoteDir, rel);
                     if (sfi.isDir()) {
-                        if (!ensureRemoteDir(rTarget)) { allOk = false; break; }
+                        if (!ensureRemoteDir(rTarget)) { dirPrepFailed = true; break; }
                         continue;
                     }
-                    bool isD = false;
-                    std::string sErr;
-                    bool exists = sftp_->exists(rTarget.toStdString(), isD, sErr);
-                    if (!sErr.empty()) { lastError = QString::fromStdString(sErr); allOk = false; break; }
-                    if (exists) {
-                        if (policy == OverwritePolicy::Ask) {
-                            auto ret = QMessageBox::question(
-                                this,
-                                tr("Conflicto remoto"),
-                                QString(tr("«%1» ya existe.\n¿Sobrescribir?")) .arg(rel),
-                                QMessageBox::Yes | QMessageBox::No | QMessageBox::YesToAll | QMessageBox::NoToAll
-                            );
-                            if (ret == QMessageBox::YesToAll) policy = OverwritePolicy::OverwriteAll;
-                            else if (ret == QMessageBox::NoToAll) policy = OverwritePolicy::SkipAll;
-                            if (ret == QMessageBox::No || policy == OverwritePolicy::SkipAll) { ++skipped; continue; }
-                        } else if (policy == OverwritePolicy::SkipAll) { ++skipped; continue; }
-                    }
-                    QProgressDialog dlg(QString(tr("Subiendo %1")).arg(rel), tr("Cancelar"), 0, 100, this);
-                    dlg.setWindowModality(Qt::ApplicationModal);
-                    dlg.setMinimumDuration(0);
-                    std::string err;
-                    bool res = sftp_->put(
-                        sfi.absoluteFilePath().toStdString(), rTarget.toStdString(), err,
-                        [&](std::size_t done, std::size_t total) { int pct = (total > 0) ? int((done * 100) / total) : 0; dlg.setValue(pct); qApp->processEvents(); },
-                        [&]() { return dlg.wasCanceled(); },
-                        false
-                    );
-                    dlg.setValue(100);
-                    if (!res) { lastError = QString::fromStdString(err); allOk = false; break; }
+                    if (!sfi.isFile()) continue;
+                    pairs.push_back({ sfi.absoluteFilePath(), rTarget, topLocalDir });
+                    ++filesInDir;
                 }
-                if (allOk) {
-                    if (QDir(fi.absoluteFilePath()).removeRecursively()) ++ok;
-                    else { ++fail; lastError = tr("No se pudo borrar origen: ") + fi.absoluteFilePath(); }
-                } else {
-                    ++fail;
+                if (dirPrepFailed) {
+                    pairs.resize(pairStart);
+                    ++skippedPrep;
+                    continue;
                 }
-            } else {
+                if (filesInDir == 0) {
+                    if (QDir(topLocalDir).removeRecursively()) ++movedEmptyDirs;
+                    else { ++skippedPrep; prepError = tr("No se pudo borrar origen: ") + topLocalDir; }
+                }
+            } else if (fi.isFile()) {
                 const QString rTarget = joinRemotePath(remoteBase, fi.fileName());
-                bool isD = false;
-                std::string sErr;
-                bool exists = sftp_->exists(rTarget.toStdString(), isD, sErr);
-                if (!sErr.empty()) { lastError = QString::fromStdString(sErr); ++fail; continue; }
-                if (exists) {
-                    if (policy == OverwritePolicy::Ask) {
-                        auto ret = QMessageBox::question(
-                            this,
-                            tr("Conflicto remoto"),
-                            QString(tr("«%1» ya existe.\n¿Sobrescribir?")) .arg(fi.fileName()),
-                            QMessageBox::Yes | QMessageBox::No | QMessageBox::YesToAll | QMessageBox::NoToAll
-                        );
-                        if (ret == QMessageBox::YesToAll) policy = OverwritePolicy::OverwriteAll;
-                        else if (ret == QMessageBox::NoToAll) policy = OverwritePolicy::SkipAll;
-                        if (ret == QMessageBox::No || policy == OverwritePolicy::SkipAll) { ++skipped; continue; }
-                    } else if (policy == OverwritePolicy::SkipAll) { ++skipped; continue; }
-                }
-                QProgressDialog dlg(QString(tr("Subiendo %1")).arg(fi.fileName()), tr("Cancelar"), 0, 100, this);
-                dlg.setWindowModality(Qt::ApplicationModal);
-                dlg.setMinimumDuration(0);
-                std::string err;
-                bool res = sftp_->put(
-                    fi.absoluteFilePath().toStdString(), rTarget.toStdString(), err,
-                    [&](std::size_t done, std::size_t total) { int pct = (total > 0) ? int((done * 100) / total) : 0; dlg.setValue(pct); qApp->processEvents(); },
-                    [&]() { return dlg.wasCanceled(); },
-                    false
-                );
-                dlg.setValue(100);
-                if (res) {
-                    if (QFile::remove(fi.absoluteFilePath())) ++ok;
-                    else { ++fail; lastError = tr("No se pudo borrar origen: ") + fi.absoluteFilePath(); }
-                } else {
-                    ++fail;
-                    lastError = QString::fromStdString(err);
-                }
+                pairs.push_back({ fi.absoluteFilePath(), rTarget, QString() });
             }
         }
-        QString m = QString(tr("Movidos OK: %1  |  Fallidos: %2  |  Omitidos: %3")).arg(ok).arg(fail).arg(skipped);
-        if (fail > 0 && !lastError.isEmpty()) m += "\n" + tr("Último error: ") + lastError;
-        statusBar()->showMessage(m, 5000);
-        QString dummy;
-        rightRemoteModel_->setRootPath(remoteBase, &dummy);
+
+        for (const auto& p : pairs) transferMgr_->enqueueUpload(p.localPath, p.remotePath);
+        if (!pairs.isEmpty()) {
+            statusBar()->showMessage(QString(tr("Encolados: %1 subidas (mover)")).arg(pairs.size()), 4000);
+            if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
+            transferDlg_->show(); transferDlg_->raise(); transferDlg_->activateWindow();
+        } else if (movedEmptyDirs > 0) {
+            statusBar()->showMessage(QString(tr("Movidos OK: %1 (carpetas vacías)")).arg(movedEmptyDirs), 4000);
+        } else if (skippedPrep > 0) {
+            QString msg = QString(tr("No se pudieron preparar elementos para mover: %1")).arg(skippedPrep);
+            if (!prepError.isEmpty()) msg += "\n" + tr("Último error: ") + prepError;
+            statusBar()->showMessage(msg, 5000);
+        }
+
+        // Local cleanup on successful upload, without blocking UI.
+        if (!pairs.isEmpty()) {
+            struct MoveUploadState {
+                QSet<QString> pendingLocalFiles;
+                QSet<QString> processedLocalFiles;
+                QHash<QString, QString> fileToTopDir;
+                QHash<QString, int> remainingInTopDir;
+                QSet<QString> failedTopDirs;
+                int movedOk = 0;
+                int failed = 0;
+                int skipped = 0;
+                QString lastError;
+            };
+            auto state = std::make_shared<MoveUploadState>();
+            state->movedOk = movedEmptyDirs;
+            state->skipped = skippedPrep;
+            state->lastError = prepError;
+
+            for (const auto& p : pairs) {
+                state->pendingLocalFiles.insert(p.localPath);
+                if (!p.topLocalDir.isEmpty()) {
+                    state->fileToTopDir.insert(p.localPath, p.topLocalDir);
+                    state->remainingInTopDir[p.topLocalDir] = state->remainingInTopDir.value(p.topLocalDir) + 1;
+                }
+            }
+
+            auto connPtr = std::make_shared<QMetaObject::Connection>();
+            *connPtr = connect(transferMgr_, &TransferManager::tasksChanged, this, [this, state, remoteBase, connPtr, pairs]() {
+                const auto tasks = transferMgr_->tasksSnapshot();
+
+                for (const auto& t : tasks) {
+                    if (t.type != TransferTask::Type::Upload) continue;
+                    const QString local = t.src;
+                    if (!state->pendingLocalFiles.contains(local)) continue;
+                    if (state->processedLocalFiles.contains(local)) continue;
+                    if (t.status != TransferTask::Status::Done &&
+                        t.status != TransferTask::Status::Error &&
+                        t.status != TransferTask::Status::Canceled) {
+                        continue;
+                    }
+
+                    state->processedLocalFiles.insert(local);
+                    const QString topDir = state->fileToTopDir.value(local);
+                    const bool uploadDone = (t.status == TransferTask::Status::Done);
+                    if (uploadDone) {
+                        const bool removed = !QFileInfo::exists(local) || QFile::remove(local);
+                        if (removed) {
+                            ++state->movedOk;
+                        } else {
+                            ++state->failed;
+                            state->lastError = tr("No se pudo borrar origen: ") + local;
+                            if (!topDir.isEmpty()) state->failedTopDirs.insert(topDir);
+                        }
+                    } else {
+                        ++state->failed;
+                        if (!t.error.isEmpty()) state->lastError = t.error;
+                        if (!topDir.isEmpty()) state->failedTopDirs.insert(topDir);
+                    }
+
+                    if (!topDir.isEmpty()) {
+                        const int rem = qMax(0, state->remainingInTopDir.value(topDir) - 1);
+                        state->remainingInTopDir[topDir] = rem;
+                        if (rem == 0 && !state->failedTopDirs.contains(topDir) && QDir(topDir).exists()) {
+                            if (!QDir(topDir).removeRecursively()) {
+                                ++state->failed;
+                                state->lastError = tr("No se pudo borrar origen: ") + topDir;
+                            }
+                        }
+                    }
+                }
+
+                bool allFinal = true;
+                for (const auto& p : pairs) {
+                    bool found = false;
+                    bool final = false;
+                    for (const auto& t : tasks) {
+                        if (t.type == TransferTask::Type::Upload && t.src == p.localPath && t.dst == p.remotePath) {
+                            found = true;
+                            if (t.status == TransferTask::Status::Done ||
+                                t.status == TransferTask::Status::Error ||
+                                t.status == TransferTask::Status::Canceled) {
+                                final = true;
+                            }
+                            break;
+                        }
+                    }
+                    if (!found || !final) { allFinal = false; break; }
+                }
+
+                if (allFinal) {
+                    QString msg = QString(tr("Movidos OK: %1  |  Fallidos: %2  |  Omitidos: %3"))
+                                      .arg(state->movedOk)
+                                      .arg(state->failed)
+                                      .arg(state->skipped);
+                    if (state->failed > 0 && !state->lastError.isEmpty()) {
+                        msg += "\n" + tr("Último error: ") + state->lastError;
+                    }
+                    statusBar()->showMessage(msg, 6000);
+                    setLeftRoot(leftPath_->text());
+                    QString dummy;
+                    if (rightRemoteModel_) rightRemoteModel_->setRootPath(remoteBase, &dummy);
+                    updateRemoteWriteability();
+                    QObject::disconnect(*connPtr);
+                }
+            });
+        }
         return;
     }
 
@@ -1097,7 +1171,6 @@ void MainWindow::goUpRight() {
 void MainWindow::connectSftp() {
     ConnectionDialog dlg(this);
     if (dlg.exec() != QDialog::Accepted) return;
-    std::string err;
     auto opt = dlg.options();
     // Apply global security preferences also for ad‑hoc connections (Advanced settings)
     {
@@ -1105,11 +1178,7 @@ void MainWindow::connectSftp() {
         opt.known_hosts_hash_names = s.value("Security/knownHostsHashed", true).toBool();
         opt.show_fp_hex = s.value("Security/fpHex", false).toBool();
     }
-    if (!establishSftpAsync(opt, err)) {
-        QMessageBox::critical(this, tr("Error de conexión"), QString::fromStdString(err));
-        return;
-    }
-    applyRemoteConnectedUI(opt);
+    startSftpConnect(opt);
 }
 
 // Tear down the current SFTP session and restore local mode.
@@ -1187,12 +1256,7 @@ void MainWindow::showSiteManagerNonModal() {
         if (res == QDialog::Accepted && dlg) {
             openscp::SessionOptions opt{};
             if (dlg->selectedOptions(opt)) {
-                std::string err;
-                if (!establishSftpAsync(opt, err)) {
-                    QMessageBox::critical(this, tr("Error de conexión"), QString::fromStdString(err));
-                } else {
-                    applyRemoteConnectedUI(opt);
-                }
+                startSftpConnect(opt);
             }
         }
     });
@@ -2513,27 +2577,66 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
     return QMainWindow::eventFilter(obj, ev);
 }
 
-// Establish an SFTP connection asynchronously and wire UI callbacks.
-bool MainWindow::establishSftpAsync(openscp::SessionOptions opt, std::string& err) {
+// Start an SFTP connection in a background thread and finalize in the UI thread.
+void MainWindow::startSftpConnect(openscp::SessionOptions opt) {
+    if (m_connectInProgress_) {
+        statusBar()->showMessage(tr("Ya hay una conexión en progreso"), 3000);
+        return;
+    }
+    if (rightIsRemote_ || sftp_) {
+        statusBar()->showMessage(tr("Ya existe una sesión SFTP activa"), 3000);
+        return;
+    }
+
+    const openscp::SessionOptions uiOpt = opt;
+    QPointer<MainWindow> self(this);
+    auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
+    m_connectCancelRequested_ = cancelFlag;
+    m_connectInProgress_ = true;
+
+    if (actConnect_) actConnect_->setEnabled(false);
+    if (actSites_) actSites_->setEnabled(false);
+
+    auto* progress = new QProgressDialog(tr("Conectando…"), tr("Cancelar"), 0, 0, this);
+    progress->setWindowModality(Qt::NonModal);
+    progress->setMinimumDuration(0);
+    progress->setAutoClose(false);
+    progress->setAutoReset(false);
+    connect(progress, &QProgressDialog::canceled, this, [this] {
+        if (m_connectCancelRequested_) {
+            m_connectCancelRequested_->store(true);
+            statusBar()->showMessage(tr("Cancelando conexión…"), 3000);
+        }
+    });
+    progress->show();
+    progress->raise();
+    m_connectProgress_ = progress;
+    m_connectProgressDimmed_ = false;
+
     // Inject host key confirmation (TOFU) via UI
-    opt.hostkey_confirm_cb = [this](const std::string& h, std::uint16_t p, const std::string& alg, const std::string& fp, bool canSave) {
-        return confirmHostKeyUI(QString::fromStdString(h), (quint16)p,
-                                QString::fromStdString(alg), QString::fromStdString(fp),
-                                canSave);
+    opt.hostkey_confirm_cb = [self](const std::string& h, std::uint16_t p, const std::string& alg, const std::string& fp, bool canSave) {
+        if (!self) return false;
+        return self->confirmHostKeyUI(QString::fromStdString(h), (quint16)p,
+                                      QString::fromStdString(alg), QString::fromStdString(fp),
+                                      canSave);
     };
-    opt.hostkey_status_cb = [this](const std::string& msg){
+    opt.hostkey_status_cb = [self](const std::string& msg){
+        if (!self) return;
         const QString q = QString::fromStdString(msg);
-        QMetaObject::invokeMethod(this, [this, q]{ statusBar()->showMessage(q, 5000); }, Qt::QueuedConnection);
+        QMetaObject::invokeMethod(self, [self, q]{
+            if (self) self->statusBar()->showMessage(q, 5000);
+        }, Qt::QueuedConnection);
     };
 
     // Keyboard-interactive callback (OTP/2FA). Prefer auto-filling password/username; request OTP if needed.
     const std::string savedUser = opt.username;
     const std::string savedPass = opt.password ? *opt.password : std::string();
-    opt.keyboard_interactive_cb = [this, savedUser, savedPass](const std::string& name,
+    opt.keyboard_interactive_cb = [self, savedUser, savedPass](const std::string& name,
                                                                const std::string& instruction,
                                                                const std::vector<std::string>& prompts,
                                                                std::vector<std::string>& responses) -> openscp::KbdIntPromptResult {
         (void)name;
+        if (!self) return openscp::KbdIntPromptResult::Cancelled;
         responses.clear();
         responses.reserve(prompts.size());
         // Resolve each prompt: auto-fill user/pass and ask for OTP/codes if present
@@ -2551,8 +2654,9 @@ bool MainWindow::establishSftpAsync(openscp::SessionOptions opt, std::string& er
                 // Ask for password if we did not have it
                 QString ans;
                 bool ok = false;
-                QMetaObject::invokeMethod(this, [&] {
-                    ans = QInputDialog::getText(this, tr("Contraseña requerida"), qprompt,
+                QMetaObject::invokeMethod(self, [&] {
+                    if (!self) return;
+                    ans = QInputDialog::getText(self, tr("Contraseña requerida"), qprompt,
                                                 QLineEdit::Password, QString(), &ok);
                 }, Qt::BlockingQueuedConnection);
                 if (!ok) return openscp::KbdIntPromptResult::Cancelled;
@@ -2570,8 +2674,9 @@ bool MainWindow::establishSftpAsync(openscp::SessionOptions opt, std::string& er
                 if (!instruction.empty()) title += " — " + QString::fromStdString(instruction);
                 QString ans;
                 bool ok = false;
-                QMetaObject::invokeMethod(this, [&] {
-                    ans = QInputDialog::getText(this, title, qprompt, QLineEdit::Password, QString(), &ok);
+                QMetaObject::invokeMethod(self, [&] {
+                    if (!self) return;
+                    ans = QInputDialog::getText(self, title, qprompt, QLineEdit::Password, QString(), &ok);
                 }, Qt::BlockingQueuedConnection);
                 if (!ok) return openscp::KbdIntPromptResult::Cancelled;
                 {
@@ -2587,8 +2692,9 @@ bool MainWindow::establishSftpAsync(openscp::SessionOptions opt, std::string& er
             if (!instruction.empty()) title += " — " + QString::fromStdString(instruction);
             QString ans;
             bool ok = false;
-            QMetaObject::invokeMethod(this, [&] {
-                ans = QInputDialog::getText(this, title, qprompt, QLineEdit::Normal, QString(), &ok);
+            QMetaObject::invokeMethod(self, [&] {
+                if (!self) return;
+                ans = QInputDialog::getText(self, title, qprompt, QLineEdit::Normal, QString(), &ok);
             }, Qt::BlockingQueuedConnection);
             if (!ok) return openscp::KbdIntPromptResult::Cancelled;
             {
@@ -2603,26 +2709,25 @@ bool MainWindow::establishSftpAsync(openscp::SessionOptions opt, std::string& er
             : openscp::KbdIntPromptResult::Unhandled;
     };
 
-    QProgressDialog progress(tr("Conectando…"), QString(), 0, 0, this);
-    // Make progress non-modal to avoid blocking TOFU confirmation
-    progress.setWindowModality(Qt::NonModal);
-    progress.setCancelButton(nullptr);
-    progress.setMinimumDuration(0);
-    progress.setAutoClose(false);
-    progress.setAutoReset(false);
-    progress.show();
-    progress.raise();
-    m_connectProgress_ = &progress;
-    m_connectProgressDimmed_ = false;
-
-    std::atomic<bool> done{ false };
-    bool okConn = false;
-    std::thread th([&] {
+    std::thread([self, opt = std::move(opt), uiOpt, cancelFlag]() mutable {
+        bool okConn = false;
+        bool canceledByUser = false;
+        std::string err;
+        openscp::SftpClient* connectedClient = nullptr;
         try {
-            auto tmp = std::make_unique<openscp::Libssh2SftpClient>();
-            okConn = tmp->connect(opt, err);
-            if (okConn) {
-                QMetaObject::invokeMethod(this, [this, t = tmp.release()] { sftp_.reset(t); }, Qt::BlockingQueuedConnection);
+            if (cancelFlag && cancelFlag->load()) {
+                canceledByUser = true;
+                err = "Conexión cancelada por el usuario";
+            } else {
+                auto tmp = std::make_unique<openscp::Libssh2SftpClient>();
+                okConn = tmp->connect(opt, err);
+                if (cancelFlag && cancelFlag->load()) {
+                    canceledByUser = true;
+                    if (okConn) tmp->disconnect();
+                    okConn = false;
+                    if (err.empty()) err = "Conexión cancelada por el usuario";
+                }
+                if (okConn) connectedClient = tmp.release();
             }
         } catch (const std::exception& ex) {
             err = std::string("Excepción en conexión: ") + ex.what();
@@ -2631,13 +2736,53 @@ bool MainWindow::establishSftpAsync(openscp::SessionOptions opt, std::string& er
             err = "Excepción desconocida en conexión";
             okConn = false;
         }
-        done = true;
-    });
-    while (!done) { qApp->processEvents(QEventLoop::AllEvents, 50); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
-    th.join();
-    progress.close();
-    m_connectProgress_.clear();
-    return okConn;
+
+        const QString qerr = QString::fromStdString(err);
+        const bool queued = QMetaObject::invokeMethod(
+            qApp,
+            [self, okConn, qerr, connectedClient, uiOpt, canceledByUser]() {
+                if (!self) {
+                    if (connectedClient) {
+                        connectedClient->disconnect();
+                        delete connectedClient;
+                    }
+                    return;
+                }
+                self->finalizeSftpConnect(okConn, qerr, connectedClient, uiOpt, canceledByUser);
+            },
+            Qt::QueuedConnection
+        );
+        if (!queued && connectedClient) {
+            connectedClient->disconnect();
+            delete connectedClient;
+        }
+    }).detach();
+}
+
+void MainWindow::finalizeSftpConnect(bool okConn,
+                                     const QString& err,
+                                     openscp::SftpClient* connectedClient,
+                                     const openscp::SessionOptions& uiOpt,
+                                     bool canceledByUser) {
+    std::unique_ptr<openscp::SftpClient> guard(connectedClient);
+    if (m_connectProgress_) {
+        m_connectProgress_->close();
+        m_connectProgress_.clear();
+    }
+    m_connectProgressDimmed_ = false;
+    m_connectCancelRequested_.reset();
+    m_connectInProgress_ = false;
+    if (actSites_) actSites_->setEnabled(true);
+
+    if (!okConn) {
+        if (actConnect_ && !rightIsRemote_) actConnect_->setEnabled(true);
+        if (canceledByUser) statusBar()->showMessage(tr("Conexión cancelada"), 4000);
+        else QMessageBox::critical(this, tr("Error de conexión"), err);
+        return;
+    }
+
+    sftp_ = std::move(guard);
+    applyRemoteConnectedUI(uiOpt);
 }
 
 // Switch UI into remote mode and wire models/actions for the right pane.

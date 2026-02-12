@@ -157,7 +157,12 @@ private:
     void maybeOpenSiteManagerAfterModal();
 
     // Helpers for connecting and wiring up the remote UI
-    bool establishSftpAsync(openscp::SessionOptions opt, std::string& err);
+    void startSftpConnect(openscp::SessionOptions opt);
+    void finalizeSftpConnect(bool okConn,
+                             const QString& err,
+                             openscp::SftpClient* connectedClient,
+                             const openscp::SessionOptions& uiOpt,
+                             bool canceledByUser);
     void applyRemoteConnectedUI(const openscp::SessionOptions& opt);
 
     // Writable state of the current remote directory
@@ -184,6 +189,8 @@ private:
     // Connection progress dialog (non-modal), to avoid blocking TOFU
     QPointer<class QProgressDialog> m_connectProgress_;
     bool m_connectProgressDimmed_ = false;
+    bool m_connectInProgress_ = false;
+    std::shared_ptr<std::atomic<bool>> m_connectCancelRequested_;
     // TOFU wait state
     std::mutex m_tofuMutex_;
     std::condition_variable m_tofuCv_;
