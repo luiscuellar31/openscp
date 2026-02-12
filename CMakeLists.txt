@@ -9,6 +9,8 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(OPEN_SCP_BUILD_TESTS "Build and run automated tests (CTest)" OFF)
+
 find_package(Qt6 REQUIRED COMPONENTS Widgets LinguistTools)
 include(GNUInstallDirs)
 
@@ -31,6 +33,11 @@ if (APPLE AND TARGET WrapOpenGL::WrapOpenGL)
 endif()
 
 option(OPEN_SCP_BUILD_SECURE_ONLY "Disable insecure fallback for secrets storage" ON)
+
+if (OPEN_SCP_BUILD_TESTS)
+  # Tests exercise MockSftpClient and require mock sources in openscp_core.
+  set(OPEN_SCP_ENABLE_MOCK ON CACHE BOOL "Build mock SFTP client" FORCE)
+endif()
 
 add_subdirectory(core)
 
@@ -69,6 +76,12 @@ if (PkgConfig_FOUND)
     target_link_libraries(openscp_hello PRIVATE ${LIBSECRET_LIBRARIES})
     target_compile_definitions(openscp_hello PRIVATE HAVE_LIBSECRET=1)
   endif()
+endif()
+
+if (OPEN_SCP_BUILD_TESTS)
+  include(CTest)
+  enable_testing()
+  add_subdirectory(tests)
 endif()
 
 # Generate a header with the application version from CMake project version

@@ -84,6 +84,20 @@ Tags are immutable and represent tested snapshots you can depend on. The `main` 
 
 ---
 
+## Local Validation (Required)
+
+Before opening a PR, run at least the same baseline checks executed in CI:
+
+```bash
+cmake -S . -B build -DOPEN_SCP_BUILD_TESTS=ON
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+If your change is platform-specific (e.g., macOS packaging), validate on that platform too.
+
+---
+
 ## Licensing
 
 By contributing, you agree that your contributions will be licensed under the same license as OpenSCP (GPLv3).
