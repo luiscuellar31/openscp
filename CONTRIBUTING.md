@@ -106,7 +106,7 @@ You can authenticate with password (`OPEN_SCP_IT_SFTP_PASS`) or private key (`OP
 export OPEN_SCP_IT_SFTP_HOST=127.0.0.1
 export OPEN_SCP_IT_SFTP_PORT=2222
 export OPEN_SCP_IT_SFTP_USER=openscp_it
-export OPEN_SCP_IT_SFTP_PASS=openscp_it_pass
+export OPEN_SCP_IT_SFTP_PASS=<test-password>
 # or: export OPEN_SCP_IT_SFTP_KEY=/path/to/private_key
 # optional: export OPEN_SCP_IT_SFTP_KEY_PASSPHRASE=...
 export OPEN_SCP_IT_REMOTE_BASE=/home/openscp_it/upload

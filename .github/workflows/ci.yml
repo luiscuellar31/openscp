@@ -1,15 +1,56 @@
 name: CI
 
 on:
-  pull_request:
   push:
     branches:
-      - main
       - dev
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build-and-test:
-    name: Build & Test (${{ matrix.os }})
+  quick-dev:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    name: Quick Test (dev push)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake ninja-build pkg-config \
+            libssh2-1-dev libssl-dev \
+            qt6-base-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools \
+            libgl1-mesa-dev
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOPEN_SCP_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test (quick, no integration)
+        run: ctest --test-dir build --output-on-failure -LE integration
+
+  pr-main-integration:
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    name: Integration Gate (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -49,7 +90,9 @@ jobs:
           sudo ssh-keygen -A
 
           sudo useradd --create-home --shell /bin/bash openscp_it || true
-          echo "openscp_it:openscp_it_pass" | sudo chpasswd
+          ssh-keygen -t ed25519 -N "" -f /tmp/openscp_it_linux_ed25519 -q
+          sudo install -d -o openscp_it -g openscp_it -m 700 /home/openscp_it/.ssh
+          sudo install -o openscp_it -g openscp_it -m 600 /tmp/openscp_it_linux_ed25519.pub /home/openscp_it/.ssh/authorized_keys
           sudo install -d -o openscp_it -g openscp_it -m 700 /home/openscp_it/upload
 
           cat > /tmp/openscp_sshd_config <<'EOF'
@@ -58,12 +101,14 @@ jobs:
           Protocol 2
           HostKey /etc/ssh/ssh_host_ed25519_key
           HostKey /etc/ssh/ssh_host_rsa_key
-          PasswordAuthentication yes
+          PubkeyAuthentication yes
+          PasswordAuthentication no
           KbdInteractiveAuthentication no
           ChallengeResponseAuthentication no
           UsePAM no
           PermitRootLogin no
           AllowUsers openscp_it
+          AuthorizedKeysFile .ssh/authorized_keys
           Subsystem sftp internal-sftp
           PidFile /tmp/openscp_sshd.pid
           LogLevel VERBOSE
@@ -163,7 +208,7 @@ jobs:
           OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
           OPEN_SCP_IT_SFTP_PORT: "2222"
           OPEN_SCP_IT_SFTP_USER: openscp_it
-          OPEN_SCP_IT_SFTP_PASS: openscp_it_pass
+          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
           OPEN_SCP_IT_REMOTE_BASE: /home/openscp_it/upload
         run: ctest --test-dir build --output-on-failure
 
