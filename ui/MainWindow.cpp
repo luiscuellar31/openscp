@@ -2532,7 +2532,7 @@ bool MainWindow::establishSftpAsync(openscp::SessionOptions opt, std::string& er
     opt.keyboard_interactive_cb = [this, savedUser, savedPass](const std::string& name,
                                                                const std::string& instruction,
                                                                const std::vector<std::string>& prompts,
-                                                               std::vector<std::string>& responses) -> bool {
+                                                               std::vector<std::string>& responses) -> openscp::KbdIntPromptResult {
         (void)name;
         responses.clear();
         responses.reserve(prompts.size());
@@ -2555,7 +2555,7 @@ bool MainWindow::establishSftpAsync(openscp::SessionOptions opt, std::string& er
                     ans = QInputDialog::getText(this, tr("Contraseña requerida"), qprompt,
                                                 QLineEdit::Password, QString(), &ok);
                 }, Qt::BlockingQueuedConnection);
-                if (!ok) return false;
+                if (!ok) return openscp::KbdIntPromptResult::Cancelled;
                 {
                     QByteArray bytes = ans.toUtf8();
                     responses.emplace_back(bytes.constData(), (size_t)bytes.size());
@@ -2573,7 +2573,7 @@ bool MainWindow::establishSftpAsync(openscp::SessionOptions opt, std::string& er
                 QMetaObject::invokeMethod(this, [&] {
                     ans = QInputDialog::getText(this, title, qprompt, QLineEdit::Password, QString(), &ok);
                 }, Qt::BlockingQueuedConnection);
-                if (!ok) return false;
+                if (!ok) return openscp::KbdIntPromptResult::Cancelled;
                 {
                     QByteArray bytes = ans.toUtf8();
                     responses.emplace_back(bytes.constData(), (size_t)bytes.size());
@@ -2590,7 +2590,7 @@ bool MainWindow::establishSftpAsync(openscp::SessionOptions opt, std::string& er
             QMetaObject::invokeMethod(this, [&] {
                 ans = QInputDialog::getText(this, title, qprompt, QLineEdit::Normal, QString(), &ok);
             }, Qt::BlockingQueuedConnection);
-            if (!ok) return false;
+            if (!ok) return openscp::KbdIntPromptResult::Cancelled;
             {
                 QByteArray bytes = ans.toUtf8();
                 responses.emplace_back(bytes.constData(), (size_t)bytes.size());
@@ -2598,7 +2598,9 @@ bool MainWindow::establishSftpAsync(openscp::SessionOptions opt, std::string& er
             }
             secureClear(ans);
         }
-        return responses.size() == prompts.size();
+        return (responses.size() == prompts.size())
+            ? openscp::KbdIntPromptResult::Handled
+            : openscp::KbdIntPromptResult::Unhandled;
     };
 
     QProgressDialog progress(tr("Conectando…"), QString(), 0, 0, this);

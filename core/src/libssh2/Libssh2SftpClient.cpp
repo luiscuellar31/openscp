@@ -372,6 +372,7 @@ struct KbdIntCtx {
     const char* user;
     const char* pass;
     const KbdIntPromptsCB* cb; // optional: UI callback for prompts
+    bool* cancelled;           // explicit user cancellation in UI callback
 };
 
 // Keyboard-interactive callback: respond to prompts with username/password based on the text
@@ -399,8 +400,8 @@ static void kbint_password_callback(const char* name, int name_len,
         std::vector<std::string> answers;
         std::string nm = (name && name_len > 0) ? std::string(name, (size_t)name_len) : std::string();
         std::string ins = (instruction && instruction_len > 0) ? std::string(instruction, (size_t)instruction_len) : std::string();
-        bool ok = (*(ctx->cb))(nm, ins, ptxts, answers);
-        if (ok && (int)answers.size() >= num_prompts) {
+        const KbdIntPromptResult result = (*(ctx->cb))(nm, ins, ptxts, answers);
+        if (result == KbdIntPromptResult::Handled && (int)answers.size() >= num_prompts) {
             for (int i = 0; i < num_prompts; ++i) {
                 const std::string& a = answers[(size_t)i];
                 if (a.empty()) {
@@ -427,6 +428,14 @@ static void kbint_password_callback(const char* name, int name_len,
                     a.clear();
                     a.shrink_to_fit();
                 }
+            }
+            return;
+        }
+        if (result == KbdIntPromptResult::Cancelled) {
+            if (ctx->cancelled) *ctx->cancelled = true;
+            for (int i = 0; i < num_prompts; ++i) {
+                responses[i].text = nullptr;
+                responses[i].length = 0;
             }
             return;
         }
@@ -914,7 +923,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
                 pwErrno = libssh2_session_last_errno(session_);
             };
             auto do_kbdint = [&]() {
-                KbdIntCtx ctx{opt.username.c_str(), opt.password->c_str(), &opt.keyboard_interactive_cb};
+                bool kbdCancelled = false;
+                KbdIntCtx ctx{opt.username.c_str(), opt.password->c_str(), &opt.keyboard_interactive_cb, &kbdCancelled};
                 void** abs = libssh2_session_abstract(session_);
                 if (abs) *abs = &ctx;
                 for (;;) {
@@ -923,11 +933,17 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
                     std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 }
                 if (abs) *abs = nullptr;
+                if (kbdCancelled) {
+                    err = "Autenticación keyboard-interactive cancelada por el usuario";
+                    rc_kbd = -1;
+                    return false;
+                }
                 char* emsgPtr = nullptr;
                 int emlen = 0;
                 (void)libssh2_session_last_error(session_, &emsgPtr, &emlen, 0);
                 if (emsgPtr && emlen > 0) kbLastErr.assign(emsgPtr, (size_t)emlen);
                 kbErrno = libssh2_session_last_errno(session_);
+                return true;
             };
 
             // Attempt password directly (without prior userauth_list).
@@ -946,7 +962,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions& opt, std::string&
                 char* methods = libssh2_userauth_list(session_, opt.username.c_str(), (unsigned)opt.username.size());
                 authlist = methods ? std::string(methods) : std::string();
                 if (hasMethod("keyboard-interactive")) {
-                    do_kbdint();
+                    if (!do_kbdint()) return false;
                 }
             }
 

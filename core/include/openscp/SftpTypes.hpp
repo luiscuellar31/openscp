@@ -27,13 +27,21 @@ struct FileInfo {
     std::uint32_t gid   = 0;
 };
 
+// Result for keyboard-interactive prompt handling.
+// - Handled: callback provided answers in "responses".
+// - Unhandled: callback could not answer; backend may use heuristic fallback.
+// - Cancelled: user explicitly cancelled; backend must not use fallback.
+enum class KbdIntPromptResult {
+    Handled,
+    Unhandled,
+    Cancelled
+};
+
 // Callback to answer keyboard-interactive prompts.
-// Must return true and fill "responses" with one entry per prompt if the user provided input.
-// If it returns false, the backend uses a heuristic (username/password) as a fallback.
-using KbdIntPromptsCB = std::function<bool(const std::string& name,
-                                           const std::string& instruction,
-                                           const std::vector<std::string>& prompts,
-                                           std::vector<std::string>& responses)>;
+using KbdIntPromptsCB = std::function<KbdIntPromptResult(const std::string& name,
+                                                         const std::string& instruction,
+                                                         const std::vector<std::string>& prompts,
+                                                         std::vector<std::string>& responses)>;
 
 struct SessionOptions {
     std::string host;
