@@ -149,6 +149,11 @@ SiteManagerDialog::SiteManagerDialog(QWidget* parent) : QDialog(parent) {
     });
 }
 
+void SiteManagerDialog::reloadFromSettings() {
+    loadSites();
+    refresh();
+}
+
 void SiteManagerDialog::loadSites() {
     sites_.clear();
     QSettings s("OpenSCP", "OpenSCP");

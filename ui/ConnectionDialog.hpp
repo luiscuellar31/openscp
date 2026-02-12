@@ -8,6 +8,7 @@ class QLineEdit;
 class QSpinBox;
 class QComboBox;
 class QToolButton;
+class QCheckBox;
 
 class ConnectionDialog : public QDialog {
     Q_OBJECT
@@ -18,10 +19,16 @@ public:
     void setSiteNameVisible(bool visible);
     void setSiteName(const QString& name);
     QString siteName() const;
+    void setQuickConnectSaveOptionsVisible(bool visible);
+    bool saveSiteRequested() const;
+    bool saveCredentialsRequested() const;
 
 private:
+    bool quickConnectSaveOptionsVisible_ = false;
     QLineEdit* siteName_ = nullptr;
     QWidget* siteNameLabel_ = nullptr;
+    QCheckBox* saveSite_ = nullptr;
+    QCheckBox* saveCredentials_ = nullptr;
     QLineEdit* host_ = nullptr;
     QSpinBox* port_ = nullptr;
     QLineEdit* user_ = nullptr;

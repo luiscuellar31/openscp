@@ -19,6 +19,7 @@ class SiteManagerDialog : public QDialog {
 public:
     explicit SiteManagerDialog(QWidget* parent = nullptr);
     bool selectedOptions(openscp::SessionOptions& out) const;
+    void reloadFromSettings();
 
 private slots:
     void onAdd();

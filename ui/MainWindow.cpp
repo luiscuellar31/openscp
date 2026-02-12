@@ -57,6 +57,7 @@
 #include <QTimer>
 #include <QSet>
 #include <QHash>
+#include <QUuid>
 #include <QShortcut>
 #include <QToolButton>
 #include <QProcess>
@@ -197,6 +198,134 @@ static QString shortRemotePermissionError(const std::string& raw, const QString&
     msg = msg.simplified();
     if (msg.size() > 96) msg = msg.left(93) + "...";
     return msg;
+}
+
+static QString newQuickSiteId() {
+    return QUuid::createUuid().toString(QUuid::WithoutBraces);
+}
+
+static QString normalizedIdentityHost(const std::string& host) {
+    return QString::fromStdString(host).trimmed().toLower();
+}
+
+static QString normalizedIdentityUser(const std::string& user) {
+    return QString::fromStdString(user).trimmed();
+}
+
+static QString normalizedIdentityKeyPath(const std::optional<std::string>& keyPath) {
+    if (!keyPath || keyPath->empty()) return {};
+    return QDir::cleanPath(QDir::fromNativeSeparators(QString::fromStdString(*keyPath).trimmed()));
+}
+
+static bool sameSavedSiteIdentity(const openscp::SessionOptions& a, const openscp::SessionOptions& b) {
+    return normalizedIdentityHost(a.host) == normalizedIdentityHost(b.host) &&
+           a.port == b.port &&
+           normalizedIdentityUser(a.username) == normalizedIdentityUser(b.username) &&
+           normalizedIdentityKeyPath(a.private_key_path) == normalizedIdentityKeyPath(b.private_key_path);
+}
+
+static QString quickSiteSecretKey(const SiteEntry& e, const QString& item) {
+    if (!e.id.isEmpty()) return QString("site-id:%1:%2").arg(e.id, item);
+    return QString("site:%1:%2").arg(e.name, item);
+}
+
+static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool* needsSave) {
+    QVector<SiteEntry> sites;
+    bool shouldSave = false;
+    QSettings s("OpenSCP", "OpenSCP");
+    const int n = s.beginReadArray("sites");
+    QSet<QString> usedIds;
+    for (int i = 0; i < n; ++i) {
+        s.setArrayIndex(i);
+        SiteEntry e;
+        e.id = s.value("id").toString().trimmed();
+        if (e.id.isEmpty() || usedIds.contains(e.id)) {
+            e.id = newQuickSiteId();
+            shouldSave = true;
+        }
+        usedIds.insert(e.id);
+        e.name = s.value("name").toString().trimmed();
+        e.opt.host = s.value("host").toString().toStdString();
+        e.opt.port = static_cast<std::uint16_t>(s.value("port", 22).toUInt());
+        e.opt.username = s.value("user").toString().toStdString();
+        const QString kp = s.value("keyPath").toString();
+        if (!kp.isEmpty()) e.opt.private_key_path = kp.toStdString();
+        const QString kh = s.value("knownHosts").toString();
+        if (!kh.isEmpty()) e.opt.known_hosts_path = kh.toStdString();
+        e.opt.known_hosts_policy = static_cast<openscp::KnownHostsPolicy>(
+            s.value("khPolicy", static_cast<int>(openscp::KnownHostsPolicy::Strict)).toInt()
+        );
+        sites.push_back(e);
+    }
+    s.endArray();
+    if (needsSave) *needsSave = shouldSave;
+    return sites;
+}
+
+static void saveSavedSitesForQuickConnect(const QVector<SiteEntry>& sites) {
+    QSettings s("OpenSCP", "OpenSCP");
+    s.remove("sites");
+    s.beginWriteArray("sites");
+    for (int i = 0; i < sites.size(); ++i) {
+        s.setArrayIndex(i);
+        const SiteEntry& e = sites[i];
+        s.setValue("id", e.id);
+        s.setValue("name", e.name);
+        s.setValue("host", QString::fromStdString(e.opt.host));
+        s.setValue("port", static_cast<int>(e.opt.port));
+        s.setValue("user", QString::fromStdString(e.opt.username));
+        s.setValue("keyPath", e.opt.private_key_path ? QString::fromStdString(*e.opt.private_key_path) : QString());
+        s.setValue("knownHosts", e.opt.known_hosts_path ? QString::fromStdString(*e.opt.known_hosts_path) : QString());
+        s.setValue("khPolicy", static_cast<int>(e.opt.known_hosts_policy));
+    }
+    s.endArray();
+    s.sync();
+}
+
+static QString defaultQuickSiteName(const openscp::SessionOptions& opt) {
+    const QString user = normalizedIdentityUser(opt.username);
+    const QString host = normalizedIdentityHost(opt.host);
+    QString out;
+    if (!user.isEmpty() && !host.isEmpty()) out = QString("%1@%2").arg(user, host);
+    else if (!host.isEmpty()) out = host;
+    else if (!user.isEmpty()) out = user;
+    else out = QObject::tr("Nuevo sitio");
+    if (!host.isEmpty() && opt.port != 22) out += QString(":%1").arg(opt.port);
+    return out;
+}
+
+static QString ensureUniqueQuickSiteName(const QVector<SiteEntry>& sites, const QString& preferred) {
+    QString base = preferred.trimmed();
+    if (base.isEmpty()) base = QObject::tr("Nuevo sitio");
+    auto exists = [&](const QString& candidate) {
+        for (const auto& s : sites) {
+            if (s.name.compare(candidate, Qt::CaseInsensitive) == 0) return true;
+        }
+        return false;
+    };
+    if (!exists(base)) return base;
+    for (int i = 2; i < 10000; ++i) {
+        const QString candidate = QString("%1 (%2)").arg(base).arg(i);
+        if (!exists(candidate)) return candidate;
+    }
+    return base + QString(" (%1)").arg(QUuid::createUuid().toString(QUuid::WithoutBraces).left(6));
+}
+
+static QString quickPersistStatusShort(SecretStore::PersistStatus st) {
+    switch (st) {
+        case SecretStore::PersistStatus::Stored: return QObject::tr("guardado");
+        case SecretStore::PersistStatus::Unavailable: return QObject::tr("no disponible");
+        case SecretStore::PersistStatus::PermissionDenied: return QObject::tr("permiso denegado");
+        case SecretStore::PersistStatus::BackendError: return QObject::tr("error del backend");
+    }
+    return QObject::tr("error");
+}
+
+static void refreshOpenSiteManagerWidget(QPointer<QWidget> siteManager) {
+    if (!siteManager) return;
+    auto* dlg = qobject_cast<SiteManagerDialog*>(siteManager.data());
+    if (!dlg) return;
+    dlg->reloadFromSettings();
 }
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
@@ -1189,15 +1318,28 @@ void MainWindow::goUpRight() {
 // Open the connection dialog and establish an SFTP session.
 void MainWindow::connectSftp() {
     ConnectionDialog dlg(this);
+    dlg.setQuickConnectSaveOptionsVisible(true);
     if (dlg.exec() != QDialog::Accepted) return;
     auto opt = dlg.options();
+    std::optional<PendingSiteSaveRequest> saveRequest = std::nullopt;
+    if (dlg.saveSiteRequested()) {
+        PendingSiteSaveRequest req;
+        req.siteName = dlg.siteName();
+        req.saveCredentials = dlg.saveCredentialsRequested();
+        saveRequest = req;
+    }
     // Apply global security preferences also for ad‑hoc connections (Advanced settings)
     {
         QSettings s("OpenSCP", "OpenSCP");
         opt.known_hosts_hash_names = s.value("Security/knownHostsHashed", true).toBool();
         opt.show_fp_hex = s.value("Security/fpHex", false).toBool();
     }
-    startSftpConnect(opt);
+    if (saveRequest.has_value()) {
+        maybePersistQuickConnectSite(opt, *saveRequest, false);
+        // Already persisted on request; connection lifecycle no longer needs to do it.
+        saveRequest.reset();
+    }
+    startSftpConnect(opt, saveRequest);
 }
 
 // Tear down the current SFTP session and restore local mode.
@@ -2684,7 +2826,8 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
 }
 
 // Start an SFTP connection in a background thread and finalize in the UI thread.
-void MainWindow::startSftpConnect(openscp::SessionOptions opt) {
+void MainWindow::startSftpConnect(openscp::SessionOptions opt,
+                                  std::optional<PendingSiteSaveRequest> saveRequest) {
     if (m_connectInProgress_) {
         statusBar()->showMessage(tr("Ya hay una conexión en progreso"), 3000);
         return;
@@ -2819,7 +2962,7 @@ void MainWindow::startSftpConnect(openscp::SessionOptions opt) {
             : openscp::KbdIntPromptResult::Unhandled;
     };
 
-    std::thread([self, opt = std::move(opt), uiOpt, cancelFlag]() mutable {
+    std::thread([self, opt = std::move(opt), uiOpt, saveRequest, cancelFlag]() mutable {
         bool okConn = false;
         bool canceledByUser = false;
         std::string err;
@@ -2850,7 +2993,7 @@ void MainWindow::startSftpConnect(openscp::SessionOptions opt) {
         const QString qerr = QString::fromStdString(err);
         const bool queued = QMetaObject::invokeMethod(
             qApp,
-            [self, okConn, qerr, connectedClient, uiOpt, canceledByUser]() {
+            [self, okConn, qerr, connectedClient, uiOpt, saveRequest, canceledByUser]() {
                 if (!self) {
                     if (connectedClient) {
                         connectedClient->disconnect();
@@ -2858,7 +3001,7 @@ void MainWindow::startSftpConnect(openscp::SessionOptions opt) {
                     }
                     return;
                 }
-                self->finalizeSftpConnect(okConn, qerr, connectedClient, uiOpt, canceledByUser);
+                self->finalizeSftpConnect(okConn, qerr, connectedClient, uiOpt, saveRequest, canceledByUser);
             },
             Qt::QueuedConnection
         );
@@ -2873,6 +3016,7 @@ void MainWindow::finalizeSftpConnect(bool okConn,
                                      const QString& err,
                                      openscp::SftpClient* connectedClient,
                                      const openscp::SessionOptions& uiOpt,
+                                     std::optional<PendingSiteSaveRequest> saveRequest,
                                      bool canceledByUser) {
     std::unique_ptr<openscp::SftpClient> guard(connectedClient);
     if (m_connectProgress_) {
@@ -2894,6 +3038,95 @@ void MainWindow::finalizeSftpConnect(bool okConn,
     m_sessionNoHostVerification_ = (uiOpt.known_hosts_policy == openscp::KnownHostsPolicy::Off);
     sftp_ = std::move(guard);
     applyRemoteConnectedUI(uiOpt);
+    if (rightIsRemote_ && saveRequest.has_value()) {
+        maybePersistQuickConnectSite(uiOpt, *saveRequest, true);
+    }
+}
+
+void MainWindow::maybePersistQuickConnectSite(const openscp::SessionOptions& opt,
+                                              const PendingSiteSaveRequest& req,
+                                              bool connectionEstablished) {
+    bool regeneratedIds = false;
+    QVector<SiteEntry> sites = loadSavedSitesForQuickConnect(&regeneratedIds);
+
+    int matchIndex = -1;
+    for (int i = 0; i < sites.size(); ++i) {
+        if (sameSavedSiteIdentity(sites[i].opt, opt)) {
+            matchIndex = i;
+            break;
+        }
+    }
+
+    bool created = false;
+    if (matchIndex < 0) {
+        SiteEntry e;
+        e.id = newQuickSiteId();
+        e.name = ensureUniqueQuickSiteName(
+            sites,
+            req.siteName.trimmed().isEmpty() ? defaultQuickSiteName(opt) : req.siteName.trimmed()
+        );
+        e.opt = opt;
+        e.opt.password.reset();
+        e.opt.private_key_passphrase.reset();
+        sites.push_back(e);
+        matchIndex = sites.size() - 1;
+        created = true;
+    }
+
+    if (created || regeneratedIds) {
+        saveSavedSitesForQuickConnect(sites);
+        refreshOpenSiteManagerWidget(m_siteManager);
+    }
+
+    if (!req.saveCredentials) {
+        if (connectionEstablished) {
+            if (created) statusBar()->showMessage(tr("Conectado. Sitio guardado."), 5000);
+            else statusBar()->showMessage(tr("Conectado. Sitio ya existente."), 5000);
+        } else {
+            if (created) statusBar()->showMessage(tr("Sitio guardado."), 5000);
+            else statusBar()->showMessage(tr("Sitio ya existente."), 5000);
+        }
+        return;
+    }
+
+    SecretStore store;
+    QStringList issues;
+    bool anyCredentialStored = false;
+    const SiteEntry& target = sites[matchIndex];
+
+    if (opt.password && !opt.password->empty()) {
+        const auto r = store.setSecret(quickSiteSecretKey(target, QStringLiteral("password")),
+                                       QString::fromStdString(*opt.password));
+        if (r.ok()) anyCredentialStored = true;
+        else issues << tr("Contraseña: %1").arg(quickPersistStatusShort(r.status));
+    }
+    if (opt.private_key_passphrase && !opt.private_key_passphrase->empty()) {
+        const auto r = store.setSecret(quickSiteSecretKey(target, QStringLiteral("keypass")),
+                                       QString::fromStdString(*opt.private_key_passphrase));
+        if (r.ok()) anyCredentialStored = true;
+        else issues << tr("Passphrase: %1").arg(quickPersistStatusShort(r.status));
+    }
+
+    if (!issues.isEmpty()) {
+        QMessageBox::warning(
+            this,
+            tr("Sitios guardados"),
+            tr("El sitio se guardó, pero no fue posible guardar algunas credenciales:\n%1")
+                .arg(issues.join("\n"))
+        );
+    }
+
+    if (connectionEstablished) {
+        if (created && anyCredentialStored) statusBar()->showMessage(tr("Conectado. Sitio y credenciales guardados."), 5000);
+        else if (created) statusBar()->showMessage(tr("Conectado. Sitio guardado."), 5000);
+        else if (anyCredentialStored) statusBar()->showMessage(tr("Conectado. Credenciales actualizadas."), 5000);
+        else statusBar()->showMessage(tr("Conectado. Sitio ya existente."), 5000);
+    } else {
+        if (created && anyCredentialStored) statusBar()->showMessage(tr("Sitio y credenciales guardados."), 5000);
+        else if (created) statusBar()->showMessage(tr("Sitio guardado."), 5000);
+        else if (anyCredentialStored) statusBar()->showMessage(tr("Credenciales actualizadas."), 5000);
+        else statusBar()->showMessage(tr("Sitio ya existente."), 5000);
+    }
 }
 
 // Switch UI into remote mode and wire models/actions for the right pane.

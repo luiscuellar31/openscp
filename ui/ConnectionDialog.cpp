@@ -3,6 +3,7 @@
 #include <QFormLayout>
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
+#include <QCheckBox>
 #include <QLineEdit>
 #include <QSpinBox>
 #include <QFileDialog>
@@ -103,6 +104,22 @@ ConnectionDialog::ConnectionDialog(QWidget* parent) : QDialog(parent) {
     lay->addRow(tr("Nombre del sitio:"), siteName_);
     siteNameLabel_ = lay->labelForField(siteName_);
     setSiteNameVisible(false);
+    saveSite_ = new QCheckBox(tr("Guardar en sitios guardados"), this);
+    saveSite_->setChecked(true);
+    saveCredentials_ = new QCheckBox(tr("Guardar contraseña/passphrase"), this);
+    saveCredentials_->setChecked(false);
+    lay->addRow(QString(), saveSite_);
+    lay->addRow(QString(), saveCredentials_);
+    setQuickConnectSaveOptionsVisible(false);
+    connect(saveSite_, &QCheckBox::toggled, this, [this](bool checked) {
+        if (saveCredentials_) {
+            saveCredentials_->setEnabled(checked);
+            if (!checked) saveCredentials_->setChecked(false);
+        }
+        if (quickConnectSaveOptionsVisible_) {
+            setSiteNameVisible(checked);
+        }
+    });
     lay->addRow(tr("Host / Puerto:"), hostPortRow);
     lay->addRow(tr("Usuario:"), user_);
     lay->addRow(tr("Contraseña:"), passRow);
@@ -148,13 +165,7 @@ ConnectionDialog::ConnectionDialog(QWidget* parent) : QDialog(parent) {
     connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
     // Initial focus to guide users to provide an explicit target host.
-    QTimer::singleShot(0, this, [this] {
-        if (siteName_ && siteName_->isVisible()) {
-            siteName_->setFocus(Qt::OtherFocusReason);
-            return;
-        }
-        if (host_) host_->setFocus(Qt::OtherFocusReason);
-    });
+    QTimer::singleShot(0, host_, [this] { if (host_) host_->setFocus(Qt::OtherFocusReason); });
 }
 
 void ConnectionDialog::setSiteNameVisible(bool visible) {
@@ -168,6 +179,26 @@ void ConnectionDialog::setSiteName(const QString& name) {
 
 QString ConnectionDialog::siteName() const {
     return siteName_ ? siteName_->text() : QString();
+}
+
+void ConnectionDialog::setQuickConnectSaveOptionsVisible(bool visible) {
+    quickConnectSaveOptionsVisible_ = visible;
+    if (saveSite_) saveSite_->setVisible(visible);
+    if (saveCredentials_) {
+        saveCredentials_->setVisible(visible);
+        saveCredentials_->setEnabled(saveSite_ && saveSite_->isChecked());
+    }
+    if (visible) {
+        setSiteNameVisible(saveSite_ && saveSite_->isChecked());
+    }
+}
+
+bool ConnectionDialog::saveSiteRequested() const {
+    return quickConnectSaveOptionsVisible_ && saveSite_ && saveSite_->isChecked();
+}
+
+bool ConnectionDialog::saveCredentialsRequested() const {
+    return quickConnectSaveOptionsVisible_ && saveCredentials_ && saveCredentials_->isChecked();
 }
 
 openscp::SessionOptions ConnectionDialog::options() const {

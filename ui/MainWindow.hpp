@@ -8,6 +8,7 @@
 #include <string>
 #include <QPointer>
 #include <memory>
+#include <optional>
 #include <condition_variable>
 
 class RemoteModel;              // fwd
@@ -69,6 +70,11 @@ private slots:
     void showSettingsDialog();
 
 private:
+    struct PendingSiteSaveRequest {
+        QString siteName;
+        bool saveCredentials = false;
+    };
+
     void updateDeleteShortcutEnables();
     void applyPreferences();
     // Remote state (a single active session)
@@ -160,13 +166,18 @@ private:
     void updateHostPolicyRiskBanner();
 
     // Helpers for connecting and wiring up the remote UI
-    void startSftpConnect(openscp::SessionOptions opt);
+    void startSftpConnect(openscp::SessionOptions opt,
+                          std::optional<PendingSiteSaveRequest> saveRequest = std::nullopt);
     void finalizeSftpConnect(bool okConn,
                              const QString& err,
                              openscp::SftpClient* connectedClient,
                              const openscp::SessionOptions& uiOpt,
+                             std::optional<PendingSiteSaveRequest> saveRequest,
                              bool canceledByUser);
     void applyRemoteConnectedUI(const openscp::SessionOptions& opt);
+    void maybePersistQuickConnectSite(const openscp::SessionOptions& opt,
+                                      const PendingSiteSaveRequest& req,
+                                      bool connectionEstablished);
 
     // Writable state of the current remote directory
     bool rightRemoteWritable_ = false;
