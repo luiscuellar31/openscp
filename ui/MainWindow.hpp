@@ -20,8 +20,10 @@ class QModelIndex; // fwd for slot signatures
 class QToolBar;    // fwd
 class QMenu;       // fwd
 class QEvent;      // fwd for eventFilter
+class QCloseEvent; // fwd for closeEvent
 class QDialog;     // fwd
 class QLabel;      // fwd
+class QSplitter;   // fwd
 namespace openscp {
 class SftpClient;
 struct SessionOptions;
@@ -32,6 +34,7 @@ class MainWindow : public QMainWindow {
     public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
+    Q_INVOKABLE void resetMainWindowLayoutToDefaults();
     // Preference: open Site Manager automatically on disconnect (non‑modal)
     void setOpenSiteManagerOnDisconnect(bool on);
     bool openSiteManagerOnDisconnect() const {
@@ -44,6 +47,7 @@ class MainWindow : public QMainWindow {
     protected:
     bool eventFilter(QObject *obj, QEvent *ev) override;
     void showEvent(QShowEvent *e) override;
+    void closeEvent(QCloseEvent *e) override;
 
     private slots:
     void chooseLeftDir();
@@ -107,6 +111,11 @@ class MainWindow : public QMainWindow {
 
     QLineEdit *leftPath_ = nullptr;
     QLineEdit *rightPath_ = nullptr;
+    QLineEdit *leftSearch_ = nullptr;
+    QLineEdit *rightSearch_ = nullptr;
+    QToolBar *leftBreadcrumbsBar_ = nullptr;
+    QToolBar *rightBreadcrumbsBar_ = nullptr;
+    QSplitter *mainSplitter_ = nullptr;
 
     // Actions
     QAction *actChooseLeft_ = nullptr;
@@ -208,6 +217,16 @@ class MainWindow : public QMainWindow {
     };
     void runRemoteDownloadPrescan(const QVector<RemoteDownloadSeed> &seeds,
                                   int initialSkipped, bool dragAndDrop);
+    void refreshLeftBreadcrumbs();
+    void refreshRightBreadcrumbs();
+    void rebuildLocalBreadcrumbs(QToolBar *bar, const QString &path,
+                                 bool rightPane);
+    void rebuildRemoteBreadcrumbs(const QString &path);
+    void applyQuickSearch(QTreeView *view, const QString &query);
+    void restoreMainWindowUiState();
+    void saveMainWindowUiState() const;
+    void saveRightHeaderState(bool remoteMode) const;
+    bool restoreRightHeaderState(bool remoteMode);
 
     // Writable state of the current remote directory
     bool rightRemoteWritable_ = false;
@@ -225,6 +244,7 @@ class MainWindow : public QMainWindow {
     int m_remoteWriteabilityTtlMs_ = 15000;
 
     bool firstShow_ = true;
+    bool m_restoredWindowGeometry_ = false;
 
     // User preferences
     bool prefShowHidden_ = false;

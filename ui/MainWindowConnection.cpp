@@ -12,6 +12,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDir>
 #include <QHeaderView>
 #include <QInputDialog>
 #include <QLabel>
@@ -300,6 +301,7 @@ void MainWindow::disconnectSftp() {
     if (m_isDisconnecting)
         return;
     m_isDisconnecting = true;
+    saveRightHeaderState(true);
     if (m_remoteScanCancelRequested_)
         m_remoteScanCancelRequested_->store(true);
     if (m_remoteScanProgress_) {
@@ -325,6 +327,12 @@ void MainWindow::disconnectSftp() {
         rightRemoteModel_ = nullptr;
     }
     rightIsRemote_ = false;
+    restoreRightHeaderState(false);
+    if (QDir(rightPath_->text()).exists()) {
+        setRightRoot(rightPath_->text());
+    } else {
+        setRightRoot(QDir::homePath());
+    }
     rightRemoteWritable_ = false;
     m_remoteWriteabilityCache_.clear();
     m_activeSessionOptions_.reset();
@@ -1066,6 +1074,7 @@ void MainWindow::maybePersistQuickConnectSite(
 
 // Switch UI into remote mode and wire models/actions for the right pane.
 void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
+    saveRightHeaderState(false);
     delete rightRemoteModel_;
     rightRemoteModel_ = new RemoteModel(sftp_.get(), this);
     rightRemoteModel_->setSessionOptions(opt);
@@ -1083,6 +1092,9 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
                     return;
                 }
                 rightPath_->setText(path);
+                refreshRightBreadcrumbs();
+                if (rightSearch_ && !rightSearch_->text().trimmed().isEmpty())
+                    applyQuickSearch(rightView_, rightSearch_->text());
                 if (rightIsRemote_) {
                     updateRemoteWriteability();
                     updateDeleteShortcutEnables();
@@ -1111,14 +1123,17 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
                 [this] { updateDeleteShortcutEnables(); });
     }
     rightView_->header()->setStretchLastSection(false);
-    rightView_->setColumnWidth(0, 300);
-    rightView_->setColumnWidth(1, 120);
-    rightView_->setColumnWidth(2, 180);
-    rightView_->setColumnWidth(3, 120);
+    if (!restoreRightHeaderState(true)) {
+        rightView_->setColumnWidth(0, 300);
+        rightView_->setColumnWidth(1, 120);
+        rightView_->setColumnWidth(2, 180);
+        rightView_->setColumnWidth(3, 120);
+    }
     rightView_->setSortingEnabled(true);
     rightView_->sortByColumn(0, Qt::AscendingOrder);
     rightPath_->setText(rightRemoteModel_->rootPath());
     rightIsRemote_ = true;
+    refreshRightBreadcrumbs();
     m_activeSessionOptions_ = opt;
     m_remoteWriteabilityCache_.clear();
     if (transferMgr_) {

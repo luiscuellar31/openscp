@@ -174,9 +174,13 @@ void MainWindow::rightPathEntered() {
 // Set the left pane root, validating the path and updating view/status.
 void MainWindow::setLeftRoot(const QString &path) {
     if (QDir(path).exists()) {
-        leftPath_->setText(path);
-        leftView_->setRootIndex(leftModel_->index(path));
-        statusBar()->showMessage(tr("Left: ") + path, 3000);
+        const QString normalized = QDir(path).absolutePath();
+        leftPath_->setText(normalized);
+        leftView_->setRootIndex(leftModel_->index(normalized));
+        refreshLeftBreadcrumbs();
+        if (leftSearch_ && !leftSearch_->text().trimmed().isEmpty())
+            applyQuickSearch(leftView_, leftSearch_->text());
+        statusBar()->showMessage(tr("Left: ") + normalized, 3000);
         updateDeleteShortcutEnables();
     } else {
         UiAlerts::warning(this, tr("Invalid path"),
@@ -187,9 +191,14 @@ void MainWindow::setLeftRoot(const QString &path) {
 // Set the right (local) pane root and update view/status.
 void MainWindow::setRightRoot(const QString &path) {
     if (QDir(path).exists()) {
-        rightPath_->setText(path);
-        rightView_->setRootIndex(rightLocalModel_->index(path)); // <-- here
-        statusBar()->showMessage(tr("Right: ") + path, 3000);
+        const QString normalized = QDir(path).absolutePath();
+        rightPath_->setText(normalized);
+        rightView_->setRootIndex(
+            rightLocalModel_->index(normalized)); // <-- here
+        refreshRightBreadcrumbs();
+        if (rightSearch_ && !rightSearch_->text().trimmed().isEmpty())
+            applyQuickSearch(rightView_, rightSearch_->text());
+        statusBar()->showMessage(tr("Right: ") + normalized, 3000);
         updateDeleteShortcutEnables();
     } else {
         UiAlerts::warning(this, tr("Invalid path"),

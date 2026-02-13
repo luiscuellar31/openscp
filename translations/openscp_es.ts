@@ -334,6 +334,14 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
             <translation>Abrir carpeta derecha</translation>
         </message>
         <message>
+            <source>Search in left panel</source>
+            <translation>Buscar en panel izquierdo</translation>
+        </message>
+        <message>
+            <source>Search in right panel</source>
+            <translation>Buscar en panel derecho</translation>
+        </message>
+        <message>
             <source>Download</source>
             <translation>Descarga</translation>
         </message>
@@ -1041,6 +1049,10 @@ Continue?</source>
             <source>Folders not listed: %1</source>
             <translation>Carpetas no listadas: %1</translation>
         </message>
+        <message>
+            <source>Window layout restored to defaults</source>
+            <translation>Diseño de ventana restaurado a valores predeterminados</translation>
+        </message>
     </context>
     <context>
         <name>PermissionsDialog</name>
@@ -1304,6 +1316,30 @@ Continue?</source>
         <message>
             <source>Select download folder</source>
             <translation>Selecciona carpeta de descargas</translation>
+        </message>
+        <message>
+            <source>Restore default sizes</source>
+            <translation>Restaurar tamaños predeterminados</translation>
+        </message>
+        <message>
+            <source>Window layout:</source>
+            <translation>Diseño de ventana:</translation>
+        </message>
+        <message>
+            <source>Restore layout</source>
+            <translation>Restaurar diseño</translation>
+        </message>
+        <message>
+            <source>Restore the main window layout and column sizes to their defaults?</source>
+            <translation>¿Restaurar el diseño de la ventana principal y los tamaños de columna a sus valores predeterminados?</translation>
+        </message>
+        <message>
+            <source>Default layout restored.</source>
+            <translation>Diseño predeterminado restaurado.</translation>
+        </message>
+        <message>
+            <source>Default layout will be used the next time the app starts.</source>
+            <translation>El diseño predeterminado se usará la próxima vez que se inicie la app.</translation>
         </message>
         <message>
             <source>Advanced</source>

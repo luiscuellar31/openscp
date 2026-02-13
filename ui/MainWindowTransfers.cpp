@@ -6,7 +6,6 @@
 
 #include <QAbstractAnimation>
 #include <QCoreApplication>
-#include <QDialog>
 #include <QDir>
 #include <QDirIterator>
 #include <QDragEnterEvent>
@@ -14,16 +13,11 @@
 #include <QDropEvent>
 #include <QEasingCurve>
 #include <QFileInfo>
-#include <QGuiApplication>
-#include <QInputDialog>
-#include <QMessageBox>
 #include <QMimeData>
 #include <QParallelAnimationGroup>
 #include <QProgressDialog>
 #include <QPropertyAnimation>
-#include <QScreen>
 #include <QStatusBar>
-#include <QStyle>
 
 #include <atomic>
 #include <memory>
@@ -315,51 +309,13 @@ void MainWindow::maybeShowTransferQueue() {
 }
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
-    // Center QDialog/QMessageBox on show relative to the main window
-    if (ev->type() == QEvent::Show) {
-        if (auto *dlg = qobject_cast<QDialog *>(obj)) {
-            // Avoid interfering with native-backed dialogs on macOS
-            // (QMessageBox/NSAlert, QProgressDialog, QInputDialog), which can
-            // crash if sized/moved during Show handling.
-            if (qobject_cast<QMessageBox *>(dlg) ||
-                qobject_cast<QProgressDialog *>(dlg) ||
-                qobject_cast<QInputDialog *>(dlg)) {
-                // Let Qt/macOS handle their own placement
-            } else {
-                // Only center dialogs that belong (directly or indirectly) to
-                // this window
-                QWidget *p = dlg->parentWidget();
-                bool belongsToThis = false;
-                while (p) {
-                    if (p == this) {
-                        belongsToThis = true;
-                        break;
-                    }
-                    p = p->parentWidget();
-                }
-                if (belongsToThis) {
-                    // Expand to sizeHint without shrinking an explicit size
-                    dlg->resize(dlg->size().expandedTo(dlg->sizeHint()));
-                    QRect base = this->geometry();
-                    if (!base.isValid()) {
-                        if (this->screen())
-                            base = this->screen()->availableGeometry();
-                        else if (auto ps = QGuiApplication::primaryScreen())
-                            base = ps->availableGeometry();
-                    }
-                    if (base.isValid()) {
-                        const QRect aligned = QStyle::alignedRect(
-                            Qt::LeftToRight, Qt::AlignCenter, dlg->size(),
-                            base);
-                        dlg->move(aligned.topLeft());
-                    }
-                }
-            }
-        }
-    }
+    QObject *const rightViewport = rightView_ ? rightView_->viewport() : nullptr;
+    QObject *const leftViewport = leftView_ ? leftView_->viewport() : nullptr;
+    if (obj != rightViewport && obj != leftViewport)
+        return QMainWindow::eventFilter(obj, ev);
 
     // Drag-and-drop over the right panel (local or remote)
-    if (rightView_ && obj == rightView_->viewport()) {
+    if (obj == rightViewport) {
         if (ev->type() == QEvent::DragEnter) {
             auto *de = static_cast<QDragEnterEvent *>(ev);
             if (rightIsRemote_ && !rightRemoteWritable_) {
@@ -464,7 +420,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
     // Drag-and-drop over the left panel (local): copy/download
     // Update delete shortcut enablement if selection changes due to DnD or
     // click
-    if (leftView_ && obj == leftView_->viewport()) {
+    if (obj == leftViewport) {
         if (ev->type() == QEvent::DragEnter) {
             auto *de = static_cast<QDragEnterEvent *>(ev);
             de->acceptProposedAction();

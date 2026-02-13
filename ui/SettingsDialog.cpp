@@ -149,6 +149,43 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                 defaultDownloadDirEdit_->setText(pick);
         });
     }
+    {
+        resetMainLayoutBtn_ =
+            new QPushButton(tr("Restore default sizes"), generalPage);
+        generalForm->addRow(tr("Window layout:"), resetMainLayoutBtn_);
+        connect(resetMainLayoutBtn_, &QPushButton::clicked, this, [this] {
+            const auto ret = UiAlerts::question(
+                this, tr("Restore layout"),
+                tr("Restore the main window layout and column sizes to "
+                   "their defaults?"),
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+            if (ret != QMessageBox::Yes)
+                return;
+
+            QSettings s("OpenSCP", "OpenSCP");
+            s.remove("UI/mainWindow/geometry");
+            s.remove("UI/mainWindow/windowState");
+            s.remove("UI/mainWindow/splitterState");
+            s.remove("UI/mainWindow/leftHeaderState");
+            s.remove("UI/mainWindow/rightHeaderLocal");
+            s.remove("UI/mainWindow/rightHeaderRemote");
+            s.sync();
+
+            bool appliedNow = false;
+            if (QWidget *w = parentWidget()) {
+                appliedNow = QMetaObject::invokeMethod(
+                    w, "resetMainWindowLayoutToDefaults",
+                    Qt::DirectConnection);
+            }
+
+            UiAlerts::information(
+                this, tr("Restore layout"),
+                appliedNow
+                    ? tr("Default layout restored.")
+                    : tr("Default layout will be used the next time the app "
+                         "starts."));
+        });
+    }
 
     QFormLayout *advancedForm = nullptr;
     QWidget *advancedPage = createFormPage(tr("Advanced"), advancedForm);

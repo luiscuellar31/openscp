@@ -26,6 +26,7 @@ class SettingsDialog : public QDialog {
     class QLineEdit *defaultDownloadDirEdit_ =
         nullptr; // default local download directory
     class QPushButton *defaultDownloadBrowseBtn_ = nullptr;
+    class QPushButton *resetMainLayoutBtn_ = nullptr;
     QCheckBox *showConnOnStart_ = nullptr; // open Site Manager at startup
     QCheckBox *showConnOnDisconnect_ =
         nullptr; // open Site Manager on disconnect

@@ -15,6 +15,7 @@
 #include <QAbstractButton>
 #include <QApplication>
 #include <QCheckBox>
+#include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDesktopServices>
@@ -33,6 +34,7 @@
 #include <QHeaderView>
 #include <QIcon>
 #include <QInputDialog>
+#include <QItemSelectionModel>
 #include <QKeySequence>
 #include <QLabel>
 #include <QListView>
@@ -53,6 +55,7 @@
 #include <QShortcut>
 #include <QShowEvent>
 #include <QSize>
+#include <QSizePolicy>
 #include <QSplitter>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -74,8 +77,6 @@ static constexpr int NAME_COL = 0;
 MainWindow::~MainWindow() = default; // define the destructor here
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
-    // Globally center dialogs relative to the main window
-    qApp->installEventFilter(this);
     // Models
     leftModel_ = new QFileSystemModel(this);
     rightLocalModel_ = new QFileSystemModel(this);
@@ -131,13 +132,27 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     // Path entries (top)
     leftPath_ = new QLineEdit(home, this);
     rightPath_ = new QLineEdit(home, this);
+    leftPath_->setClearButtonEnabled(true);
+    rightPath_->setClearButtonEnabled(true);
     connect(leftPath_, &QLineEdit::returnPressed, this,
             &MainWindow::leftPathEntered);
     connect(rightPath_, &QLineEdit::returnPressed, this,
             &MainWindow::rightPathEntered);
 
+    // Per-pane quick search (incremental selection inside the current folder)
+    leftSearch_ = new QLineEdit(this);
+    rightSearch_ = new QLineEdit(this);
+    leftSearch_->setPlaceholderText(tr("Search in left panel"));
+    rightSearch_->setPlaceholderText(tr("Search in right panel"));
+    leftSearch_->setClearButtonEnabled(true);
+    rightSearch_->setClearButtonEnabled(true);
+    connect(leftSearch_, &QLineEdit::textChanged, this,
+            [this](const QString &text) { applyQuickSearch(leftView_, text); });
+    connect(rightSearch_, &QLineEdit::textChanged, this,
+            [this](const QString &text) { applyQuickSearch(rightView_, text); });
+
     // Central splitter with two panes
-    auto *splitter = new QSplitter(this);
+    mainSplitter_ = new QSplitter(this);
     auto *leftPane = new QWidget(this);
     auto *rightPane = new QWidget(this);
 
@@ -150,6 +165,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     leftPaneBar_ = new QToolBar("LeftBar", leftPane);
     leftPaneBar_->setIconSize(QSize(18, 18));
     leftPaneBar_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    leftBreadcrumbsBar_ = new QToolBar("LeftBreadcrumbs", leftPane);
+    leftBreadcrumbsBar_->setMovable(false);
+    leftBreadcrumbsBar_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    leftBreadcrumbsBar_->setIconSize(QSize(14, 14));
+    leftBreadcrumbsBar_->setSizePolicy(QSizePolicy::Expanding,
+                                       QSizePolicy::Fixed);
     // Helper for icons from local resources
     auto resIcon = [](const char *fname) -> QIcon {
         return QIcon(QStringLiteral(":/assets/icons/") + QLatin1String(fname));
@@ -235,14 +256,22 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     leftPaneBar_->addAction(actNewDirLeft_);
     leftLayout->addWidget(leftPaneBar_);
 
-    // Left panel: toolbar -> path -> view
+    // Left panel: toolbar -> breadcrumbs -> path -> search -> view
+    leftLayout->addWidget(leftBreadcrumbsBar_);
     leftLayout->addWidget(leftPath_);
+    leftLayout->addWidget(leftSearch_);
     leftLayout->addWidget(leftView_);
 
     // Right pane sub‑toolbar
     rightPaneBar_ = new QToolBar("RightBar", rightPane);
     rightPaneBar_->setIconSize(QSize(18, 18));
     rightPaneBar_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    rightBreadcrumbsBar_ = new QToolBar("RightBreadcrumbs", rightPane);
+    rightBreadcrumbsBar_->setMovable(false);
+    rightBreadcrumbsBar_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    rightBreadcrumbsBar_->setIconSize(QSize(14, 14));
+    rightBreadcrumbsBar_->setSizePolicy(QSizePolicy::Expanding,
+                                        QSizePolicy::Fixed);
     actUpRight_ =
         rightPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpRight);
     actUpRight_->setIcon(resIcon("action-go-up.svg"));
@@ -367,15 +396,17 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     if (actNewFileRight_)
         actNewFileRight_->setEnabled(false);
 
-    // Right panel: toolbar -> path -> view
+    // Right panel: toolbar -> breadcrumbs -> path -> search -> view
     rightLayout->addWidget(rightPaneBar_);
+    rightLayout->addWidget(rightBreadcrumbsBar_);
     rightLayout->addWidget(rightPath_);
+    rightLayout->addWidget(rightSearch_);
     rightLayout->addWidget(rightView_);
 
     // Mount panes into the splitter
-    splitter->addWidget(leftPane);
-    splitter->addWidget(rightPane);
-    setCentralWidget(splitter);
+    mainSplitter_->addWidget(leftPane);
+    mainSplitter_->addWidget(rightPane);
+    setCentralWidget(mainSplitter_);
 
     // Main toolbar (top)
     auto *tb = addToolBar("Main");
@@ -595,6 +626,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     statusBar()->showMessage(tr("Ready"));
     setWindowTitle(tr("OpenSCP — local/local (click Connect for remote)"));
     resize(1100, 650);
+    refreshLeftBreadcrumbs();
+    refreshRightBreadcrumbs();
+    restoreMainWindowUiState();
 
     // Transfer queue
     transferMgr_ = new TransferManager(this);
@@ -694,6 +728,8 @@ void MainWindow::showEvent(QShowEvent *e) {
     QMainWindow::showEvent(e);
     if (firstShow_) {
         firstShow_ = false;
+        if (m_restoredWindowGeometry_)
+            return;
         QRect avail;
         if (this->screen())
             avail = this->screen()->availableGeometry();
@@ -705,6 +741,243 @@ void MainWindow::showEvent(QShowEvent *e) {
             const int y = avail.center().y() - sz.height() / 2;
             move(x, y);
         }
+    }
+}
+
+void MainWindow::closeEvent(QCloseEvent *e) {
+    saveMainWindowUiState();
+    QMainWindow::closeEvent(e);
+}
+
+void MainWindow::resetMainWindowLayoutToDefaults() {
+    {
+        QSettings s("OpenSCP", "OpenSCP");
+        s.remove("UI/mainWindow/geometry");
+        s.remove("UI/mainWindow/windowState");
+        s.remove("UI/mainWindow/splitterState");
+        s.remove("UI/mainWindow/leftHeaderState");
+        s.remove("UI/mainWindow/rightHeaderLocal");
+        s.remove("UI/mainWindow/rightHeaderRemote");
+        s.sync();
+    }
+
+    m_restoredWindowGeometry_ = false;
+
+    resize(1100, 650);
+    if (mainSplitter_) {
+        const int half = qMax(220, width() / 2);
+        mainSplitter_->setSizes({half, half});
+    }
+
+    if (leftView_) {
+        if (leftView_->header())
+            leftView_->header()->setStretchLastSection(true);
+        leftView_->setColumnWidth(0, 280);
+    }
+    if (rightView_) {
+        if (rightIsRemote_) {
+            if (rightView_->header())
+                rightView_->header()->setStretchLastSection(false);
+            rightView_->setColumnWidth(0, 300);
+            rightView_->setColumnWidth(1, 120);
+            rightView_->setColumnWidth(2, 180);
+            rightView_->setColumnWidth(3, 120);
+        } else {
+            if (rightView_->header())
+                rightView_->header()->setStretchLastSection(true);
+            rightView_->setColumnWidth(0, 280);
+        }
+    }
+
+    statusBar()->showMessage(tr("Window layout restored to defaults"), 3500);
+}
+
+void MainWindow::saveRightHeaderState(bool remoteMode) const {
+    if (!rightView_ || !rightView_->header())
+        return;
+    QSettings s("OpenSCP", "OpenSCP");
+    const QString key = remoteMode ? QStringLiteral("UI/mainWindow/rightHeaderRemote")
+                                   : QStringLiteral("UI/mainWindow/rightHeaderLocal");
+    s.setValue(key, rightView_->header()->saveState());
+}
+
+bool MainWindow::restoreRightHeaderState(bool remoteMode) {
+    if (!rightView_ || !rightView_->header())
+        return false;
+    QSettings s("OpenSCP", "OpenSCP");
+    const QString key = remoteMode ? QStringLiteral("UI/mainWindow/rightHeaderRemote")
+                                   : QStringLiteral("UI/mainWindow/rightHeaderLocal");
+    const QByteArray state = s.value(key).toByteArray();
+    if (state.isEmpty())
+        return false;
+    return rightView_->header()->restoreState(state);
+}
+
+void MainWindow::saveMainWindowUiState() const {
+    QSettings s("OpenSCP", "OpenSCP");
+    s.setValue("UI/mainWindow/geometry", saveGeometry());
+    s.setValue("UI/mainWindow/windowState", saveState());
+    if (mainSplitter_)
+        s.setValue("UI/mainWindow/splitterState", mainSplitter_->saveState());
+    if (leftView_ && leftView_->header())
+        s.setValue("UI/mainWindow/leftHeaderState",
+                   leftView_->header()->saveState());
+    saveRightHeaderState(rightIsRemote_);
+    s.sync();
+}
+
+void MainWindow::restoreMainWindowUiState() {
+    QSettings s("OpenSCP", "OpenSCP");
+    const QByteArray geometry = s.value("UI/mainWindow/geometry").toByteArray();
+    if (!geometry.isEmpty()) {
+        restoreGeometry(geometry);
+        m_restoredWindowGeometry_ = true;
+    }
+    const QByteArray winState =
+        s.value("UI/mainWindow/windowState").toByteArray();
+    if (!winState.isEmpty())
+        restoreState(winState);
+    if (mainSplitter_) {
+        const QByteArray splitterState =
+            s.value("UI/mainWindow/splitterState").toByteArray();
+        if (!splitterState.isEmpty())
+            mainSplitter_->restoreState(splitterState);
+    }
+    if (leftView_ && leftView_->header()) {
+        const QByteArray leftHeader =
+            s.value("UI/mainWindow/leftHeaderState").toByteArray();
+        if (!leftHeader.isEmpty())
+            leftView_->header()->restoreState(leftHeader);
+    }
+    restoreRightHeaderState(false);
+}
+
+void MainWindow::rebuildLocalBreadcrumbs(QToolBar *bar, const QString &path,
+                                         bool rightPane) {
+    if (!bar)
+        return;
+    bar->clear();
+
+    QString normalized = QDir::fromNativeSeparators(path.trimmed());
+    if (normalized.isEmpty())
+        normalized = QDir::homePath();
+    if (!QFileInfo(normalized).isAbsolute()) {
+        normalized = QDir::current().absoluteFilePath(normalized);
+    }
+    normalized = QDir::cleanPath(normalized);
+
+    QVector<QPair<QString, QString>> crumbs;
+#ifdef Q_OS_WIN
+    if (normalized.size() >= 2 && normalized[1] == QLatin1Char(':')) {
+        const QString drive = normalized.left(2);
+        QString acc = drive + QLatin1Char('/');
+        crumbs.push_back({drive, acc});
+        const QStringList parts =
+            normalized.mid(2).split('/', Qt::SkipEmptyParts);
+        for (const QString &part : parts) {
+            if (!acc.endsWith('/'))
+                acc += QLatin1Char('/');
+            acc += part;
+            crumbs.push_back({part, acc});
+        }
+    } else
+#endif
+    {
+        QString acc = QStringLiteral("/");
+        crumbs.push_back({QStringLiteral("/"), acc});
+        const QStringList parts = normalized.split('/', Qt::SkipEmptyParts);
+        for (const QString &part : parts) {
+            if (!acc.endsWith('/'))
+                acc += QLatin1Char('/');
+            acc += part;
+            crumbs.push_back({part, acc});
+        }
+    }
+
+    for (int i = 0; i < crumbs.size(); ++i) {
+        const QString label = crumbs[i].first;
+        const QString target = crumbs[i].second;
+        QAction *act = bar->addAction(label);
+        act->setToolTip(target);
+        connect(act, &QAction::triggered, this, [this, rightPane, target] {
+            if (rightPane)
+                setRightRoot(target);
+            else
+                setLeftRoot(target);
+        });
+        if (i + 1 < crumbs.size())
+            bar->addSeparator();
+    }
+}
+
+void MainWindow::rebuildRemoteBreadcrumbs(const QString &path) {
+    if (!rightBreadcrumbsBar_)
+        return;
+    rightBreadcrumbsBar_->clear();
+
+    QString normalized = path.trimmed();
+    if (normalized.isEmpty())
+        normalized = QStringLiteral("/");
+    if (!normalized.startsWith('/'))
+        normalized.prepend('/');
+    if (normalized.size() > 1 && normalized.endsWith('/'))
+        normalized.chop(1);
+
+    QVector<QPair<QString, QString>> crumbs;
+    QString acc = QStringLiteral("/");
+    crumbs.push_back({QStringLiteral("/"), acc});
+    const QStringList parts = normalized.split('/', Qt::SkipEmptyParts);
+    for (const QString &part : parts) {
+        if (!acc.endsWith('/'))
+            acc += QLatin1Char('/');
+        acc += part;
+        crumbs.push_back({part, acc});
+    }
+
+    for (int i = 0; i < crumbs.size(); ++i) {
+        const QString label = crumbs[i].first;
+        const QString target = crumbs[i].second;
+        QAction *act = rightBreadcrumbsBar_->addAction(label);
+        act->setToolTip(target);
+        connect(act, &QAction::triggered, this,
+                [this, target] { setRightRemoteRoot(target); });
+        if (i + 1 < crumbs.size())
+            rightBreadcrumbsBar_->addSeparator();
+    }
+}
+
+void MainWindow::refreshLeftBreadcrumbs() {
+    rebuildLocalBreadcrumbs(leftBreadcrumbsBar_,
+                            leftPath_ ? leftPath_->text() : QString(), false);
+}
+
+void MainWindow::refreshRightBreadcrumbs() {
+    const QString path = rightPath_ ? rightPath_->text() : QString();
+    if (rightIsRemote_)
+        rebuildRemoteBreadcrumbs(path);
+    else
+        rebuildLocalBreadcrumbs(rightBreadcrumbsBar_, path, true);
+}
+
+void MainWindow::applyQuickSearch(QTreeView *view, const QString &query) {
+    if (!view || !view->model() || !view->selectionModel())
+        return;
+    const QString needle = query.trimmed();
+    if (needle.isEmpty())
+        return;
+
+    QAbstractItemModel *model = view->model();
+    const QModelIndex root = view->rootIndex();
+    const int rows = model->rowCount(root);
+    for (int row = 0; row < rows; ++row) {
+        const QModelIndex idx = model->index(row, NAME_COL, root);
+        const QString itemName = model->data(idx, Qt::DisplayRole).toString();
+        if (!itemName.contains(needle, Qt::CaseInsensitive))
+            continue;
+        view->selectionModel()->setCurrentIndex(
+            idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        view->scrollTo(idx, QAbstractItemView::PositionAtCenter);
+        return;
     }
 }
 
