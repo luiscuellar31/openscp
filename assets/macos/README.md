@@ -23,6 +23,22 @@ This guide explains how to build the `.app` and create unsigned macOS artifacts 
 
 Tip: The script clears env vars like `QT_PLUGIN_PATH` and `DYLD_*` to avoid pulling plugins from Conda/Homebrew.
 
+## Daily Development Workflow
+
+Use `scripts/macos.sh` for a consistent local loop:
+
+```bash
+# configure + build + open app bundle
+./scripts/macos.sh dev
+
+# step-by-step
+./scripts/macos.sh configure
+./scripts/macos.sh build
+./scripts/macos.sh run
+```
+
+`run` opens `build/OpenSCP.app`. If LaunchServices fails, the script falls back to running the app binary directly with Qt env hints.
+
 ## Build & Package (Unsigned)
 
 ```bash

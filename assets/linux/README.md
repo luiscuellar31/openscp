@@ -31,6 +31,22 @@ cmake --build build -j
 ./build/openscp_hello
 ```
 
+## Run Tests Locally (Optional)
+
+```bash
+cmake -S . -B build -DOPEN_SCP_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+`openscp_sftp_integration_tests` is skipped unless integration env vars are set:
+- `OPEN_SCP_IT_SFTP_HOST`
+- `OPEN_SCP_IT_SFTP_PORT`
+- `OPEN_SCP_IT_SFTP_USER`
+- `OPEN_SCP_IT_SFTP_PASS` or `OPEN_SCP_IT_SFTP_KEY`
+- `OPEN_SCP_IT_SFTP_KEY_PASSPHRASE` (if needed)
+- `OPEN_SCP_IT_REMOTE_BASE`
+
 If Qt 6 is not auto‑detected, set one of:
 
 ```bash
