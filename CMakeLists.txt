@@ -73,6 +73,10 @@ add_executable(openscp_hello
     ui/main.cpp
     ui/MainWindow.hpp
     ui/MainWindow.cpp
+    ui/MainWindowConnection.cpp
+    ui/MainWindowLocalOps.cpp
+    ui/MainWindowRemoteOps.cpp
+    ui/MainWindowTransfers.cpp
     ui/DragAwareTreeView.hpp
     ui/DragAwareTreeView.cpp
     ui/ConnectionDialog.hpp
