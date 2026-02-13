@@ -7,18 +7,18 @@
             <translation>Acerca de OpenSCP</translation>
         </message>
         <message>
-            <source>Author: &lt;a href="https://github.com/luiscuellar31"&gt;luiscuellar31&lt;/a&gt;</source>
-            <translation>Autor: &lt;a href="https://github.com/luiscuellar31"&gt;luiscuellar31&lt;/a&gt;</translation>
+            <source>Author: &lt;a href="%1"&gt;%2&lt;/a&gt;</source>
+            <translation>Autor: &lt;a href="%1"&gt;%2&lt;/a&gt;</translation>
         </message>
         <message>
             <source>Used libraries:</source>
             <translation>Librerías utilizadas:</translation>
         </message>
         <message>
-            <source>Third-party licenses and credits are not available in this build.
-Please use an official package or contact the distributor.</source>
-            <translation>Las licencias y créditos de terceros no están disponibles en esta compilación.
-Usa un paquete oficial o contacta al distribuidor.</translation>
+            <source>No third-party license details were found in this installation.
+Use an official package for full license information.</source>
+            <translation>No se encontraron detalles de licencias de terceros en esta instalación.
+Usa un paquete oficial para ver la información completa de licencias.</translation>
         </message>
         <message>
             <source>Open Licenses Folder</source>
@@ -29,12 +29,44 @@ Usa un paquete oficial o contacta al distribuidor.</translation>
             <translation>Carpeta de licencias no encontrada</translation>
         </message>
         <message>
-            <source>Could not find the licenses folder. Ensure the package includes the license texts (e.g., inside the app or next to the AppImage).</source>
-            <translation>No se encontró la carpeta de licencias. Asegúrate de que el paquete incluya los textos de licencia (p.ej., dentro de la app o junto al AppImage).</translation>
+            <source>No license files were found in this installation.</source>
+            <translation>No se encontraron archivos de licencia en esta instalación.</translation>
         </message>
         <message>
             <source>Report an issue</source>
             <translation>Informar de un error</translation>
+        </message>
+        <message>
+            <source>License files are not available in this installation.</source>
+            <translation>Los archivos de licencia no están disponibles en esta instalación.</translation>
+        </message>
+        <message>
+            <source>Open the folder that contains third-party licenses.</source>
+            <translation>Abrir la carpeta que contiene las licencias de terceros.</translation>
+        </message>
+        <message>
+            <source>Copy diagnostics</source>
+            <translation>Copiar diagnóstico</translation>
+        </message>
+        <message>
+            <source>Copy version and environment details for support.</source>
+            <translation>Copiar versión y detalles del entorno para soporte.</translation>
+        </message>
+        <message>
+            <source>Diagnostics unavailable</source>
+            <translation>Diagnóstico no disponible</translation>
+        </message>
+        <message>
+            <source>Could not access the system clipboard.</source>
+            <translation>No se pudo acceder al portapapeles del sistema.</translation>
+        </message>
+        <message>
+            <source>Diagnostics copied</source>
+            <translation>Diagnóstico copiado</translation>
+        </message>
+        <message>
+            <source>Diagnostic information was copied to your clipboard.</source>
+            <translation>La información de diagnóstico se copió al portapapeles.</translation>
         </message>
     </context>
     <context>

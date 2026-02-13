@@ -4,6 +4,34 @@ project(OpenSCP_hello LANGUAGES CXX VERSION 0.6.0)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(OPEN_SCP_AUTHOR_NAME "luiscuellar31" CACHE STRING "Author display name")
+set(OPEN_SCP_AUTHOR_URL "https://github.com/luiscuellar31" CACHE STRING
+    "Author profile URL")
+set(OPEN_SCP_REPOSITORY_URL "https://github.com/luiscuellar31/openscp" CACHE STRING
+    "Project repository URL")
+set(OPEN_SCP_ISSUES_URL "${OPEN_SCP_REPOSITORY_URL}/issues" CACHE STRING
+    "Project issues URL")
+
+if(CMAKE_BUILD_TYPE)
+    set(OPEN_SCP_BUILD_TYPE_STR "${CMAKE_BUILD_TYPE}")
+else()
+    set(OPEN_SCP_BUILD_TYPE_STR "Multi-config")
+endif()
+
+set(OPEN_SCP_GIT_COMMIT "unknown")
+find_package(Git QUIET)
+if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}" rev-parse --short=12 HEAD
+        OUTPUT_VARIABLE _git_commit
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(_git_commit)
+        set(OPEN_SCP_GIT_COMMIT "${_git_commit}")
+    endif()
+endif()
+
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)

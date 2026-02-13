@@ -1,23 +1,104 @@
 // Implementation of the "About" dialog for OpenSCP.
 #include "AboutDialog.hpp"
+#include "AppVersion.hpp"
+#include <QClipboard>
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPixmap>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
 #include <QStringConverter>
 #include <QStringList>
-#include <QTextEdit>
+#include <QSysInfo>
 #include <QTextStream>
 #include <QUrl>
 #include <QVBoxLayout>
+
+namespace {
+
+QStringList aboutSearchBases() {
+    return {
+        QDir::currentPath(), QCoreApplication::applicationDirPath(),
+        QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(".."),
+        QDir(QCoreApplication::applicationDirPath())
+            .absoluteFilePath("../Resources") // macOS bundle Resources
+    };
+}
+
+QString findFromCandidates(const QStringList &relativeCandidates,
+                           bool wantDirectory) {
+    for (const QString &base : aboutSearchBases()) {
+        QDir dir(base);
+        for (int i = 0; i < 5; ++i) { // search up to 5 levels up
+            for (const QString &rel : relativeCandidates) {
+                const QString candidate = dir.filePath(rel);
+                const QFileInfo info(candidate);
+                if (!info.exists()) {
+                    continue;
+                }
+                if (wantDirectory && !info.isDir()) {
+                    continue;
+                }
+                if (!wantDirectory && !info.isFile()) {
+                    continue;
+                }
+                return wantDirectory ? QDir(candidate).absolutePath()
+                                     : info.absoluteFilePath();
+            }
+            if (!dir.cdUp()) {
+                break;
+            }
+        }
+    }
+    return {};
+}
+
+QString findDocsFile(const QStringList &fileNames) {
+    QStringList docsCandidates;
+    docsCandidates.reserve(fileNames.size());
+    for (const QString &fileName : fileNames) {
+        docsCandidates << QStringLiteral("docs/%1").arg(fileName);
+    }
+    return findFromCandidates(docsCandidates, false);
+}
+
+QString findLicensesDir() {
+    return findFromCandidates(
+        {QStringLiteral("docs/credits/LICENSES"),
+         QStringLiteral("docs/licenses"), QStringLiteral("usr/share/licenses"),
+         QStringLiteral("share/licenses"), QStringLiteral("LICENSES"),
+         QStringLiteral("licenses"), QStringLiteral("Licenses"),
+         QStringLiteral("Resources/licenses"),
+         QStringLiteral("Resources/LICENSES")},
+        true);
+}
+
+QString buildDiagnosticsText() {
+    return QStringLiteral("OpenSCP version: %1\n"
+                          "Qt version: %2\n"
+                          "OS: %3\n"
+                          "CPU architecture: %4\n"
+                          "Build type: %5\n"
+                          "Git commit: %6\n"
+                          "Repository: %7")
+        .arg(QString::fromUtf8(OPEN_SCP_APP_VERSION),
+             QString::fromUtf8(qVersion()), QSysInfo::prettyProductName(),
+             QSysInfo::currentCpuArchitecture(),
+             QString::fromUtf8(OPEN_SCP_BUILD_TYPE),
+             QString::fromUtf8(OPEN_SCP_GIT_COMMIT),
+             QString::fromUtf8(OPEN_SCP_REPOSITORY_URL));
+}
+
+} // namespace
 
 AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle(tr("About OpenSCP"));
@@ -36,9 +117,13 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     title->setTextFormat(Qt::RichText);
     leftCol->addWidget(title);
 
+    const QString authorName = QString::fromUtf8(OPEN_SCP_AUTHOR_NAME);
+    const QString authorUrl = QString::fromUtf8(OPEN_SCP_AUTHOR_URL);
+    const QString issuesUrl = QString::fromUtf8(OPEN_SCP_ISSUES_URL);
+
     auto *author = new QLabel(
-        tr("Author: <a "
-           "href=\"https://github.com/luiscuellar31\">luiscuellar31</a>"),
+        tr("Author: <a href=\"%1\">%2</a>")
+            .arg(authorUrl.toHtmlEscaped(), authorName.toHtmlEscaped()),
         this);
     author->setTextFormat(Qt::RichText);
     author->setOpenExternalLinks(true);
@@ -50,26 +135,11 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     auto *iconLabel = new QLabel(this);
     QPixmap iconPix(QStringLiteral(":/assets/program/icon-openscp-2048.png"));
     if (iconPix.isNull()) {
-        // Fallback: try to find the PNG on disk in dev environments
-        const QStringList bases = {
-            QDir::currentPath(), QCoreApplication::applicationDirPath(),
-            QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(".."),
-            QDir(QCoreApplication::applicationDirPath())
-                .absoluteFilePath("../Resources")};
-        for (const QString &base : bases) {
-            QDir dir(base);
-            for (int i = 0; i < 5; ++i) {
-                const QString candidate = dir.filePath(
-                    QStringLiteral("assets/program/icon-openscp-2048.png"));
-                if (QFileInfo::exists(candidate)) {
-                    iconPix.load(candidate);
-                    break;
-                }
-                if (!dir.cdUp())
-                    break;
-            }
-            if (!iconPix.isNull())
-                break;
+        // Fallback for dev environments: search alongside source/build folders.
+        const QString iconPath = findFromCandidates(
+            {QStringLiteral("assets/program/icon-openscp-2048.png")}, false);
+        if (!iconPath.isEmpty()) {
+            iconPix.load(iconPath);
         }
     }
     if (!iconPix.isNull()) {
@@ -86,35 +156,10 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
 
     // Scrollable text area to show long credits/licenses text loaded from
     // docs/*.txt
-    auto *libsText = new QTextEdit(this);
+    auto *libsText = new QPlainTextEdit(this);
     libsText->setReadOnly(true);
-    libsText->setLineWrapMode(QTextEdit::WidgetWidth);
-    libsText->setMinimumHeight(220);
-
-    // Try to locate the text file under a 'docs' directory near the app/build
-    // tree
-    auto findDocsFile = [](const QStringList &fileNames) -> QString {
-        const QStringList bases = {
-            QDir::currentPath(), QCoreApplication::applicationDirPath(),
-            QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(".."),
-            QDir(QCoreApplication::applicationDirPath())
-                .absoluteFilePath("../Resources") // macOS bundle Resources
-        };
-        for (const QString &base : bases) {
-            QDir dir(base);
-            for (int i = 0; i < 5; ++i) { // search up to 5 levels up
-                for (const QString &fn : fileNames) {
-                    const QString candidate =
-                        dir.filePath(QStringLiteral("docs/%1").arg(fn));
-                    if (QFileInfo::exists(candidate))
-                        return candidate;
-                }
-                if (!dir.cdUp())
-                    break;
-            }
-        }
-        return {};
-    };
+    libsText->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    libsText->setMinimumHeight(180);
 
     // Decide which file to load based on UI language (settings: UI/language)
     QSettings s("OpenSCP", "OpenSCP");
@@ -138,66 +183,60 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
         }
     }
     if (content.isEmpty()) {
-        content =
-            tr("Third-party licenses and credits are not available in this "
-               "build.\n"
-               "Please use an official package or contact the distributor.");
+        content = tr("No third-party license details were found in this "
+                     "installation.\n"
+                     "Use an official package for full license information.");
     }
     libsText->setPlainText(content);
     lay->addWidget(libsText);
 
-    // Button: open licenses folder (packaged alongside the app)
+    const QString licensesDir = findLicensesDir();
+
+    auto *actionsRow = new QHBoxLayout();
+
     auto *openLicensesBtn = new QPushButton(tr("Open Licenses Folder"), this);
-    lay->addWidget(openLicensesBtn);
-    connect(openLicensesBtn, &QPushButton::clicked, this, [this] {
-        auto findLicensesDir = []() -> QString {
-            const QStringList bases = {
-                QDir::currentPath(), QCoreApplication::applicationDirPath(),
-                QDir(QCoreApplication::applicationDirPath())
-                    .absoluteFilePath(".."),
-                QDir(QCoreApplication::applicationDirPath())
-                    .absoluteFilePath("../Resources") // macOS bundle Resources
-            };
-            const QStringList candidates = {
-                QStringLiteral("docs/credits/LICENSES"),
-                QStringLiteral("docs/licenses"),
-                QStringLiteral("usr/share/licenses"),
-                QStringLiteral("share/licenses"),
-                QStringLiteral("LICENSES"),
-                QStringLiteral("licenses"),
-                QStringLiteral("Licenses"),
-                QStringLiteral("Resources/licenses"),
-                QStringLiteral("Resources/LICENSES")};
-            for (const QString &base : bases) {
-                for (const QString &rel : candidates) {
-                    const QString p = QDir(base).filePath(rel);
-                    if (QFileInfo::exists(p) && QFileInfo(p).isDir())
-                        return QDir(p).absolutePath();
-                }
-            }
-            return {};
-        };
-        const QString dir = findLicensesDir();
-        if (!dir.isEmpty()) {
-            QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
-        } else {
-            QMessageBox::information(
-                this, tr("Licenses folder not found"),
-                tr("Could not find the licenses folder. Ensure the package "
-                   "includes the license texts (e.g., inside the app or next "
-                   "to the AppImage)."));
+    openLicensesBtn->setEnabled(!licensesDir.isEmpty());
+    openLicensesBtn->setToolTip(
+        licensesDir.isEmpty()
+            ? tr("License files are not available in this installation.")
+            : tr("Open the folder that contains third-party licenses."));
+    connect(openLicensesBtn, &QPushButton::clicked, this, [this, licensesDir] {
+        if (!licensesDir.isEmpty() && QFileInfo(licensesDir).isDir()) {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(licensesDir));
+            return;
         }
+        QMessageBox::information(this, tr("Licenses folder not found"),
+                                 tr("No license files were found in this "
+                                    "installation."));
     });
+    actionsRow->addWidget(openLicensesBtn);
+
+    auto *copyDiagnosticsBtn = new QPushButton(tr("Copy diagnostics"), this);
+    copyDiagnosticsBtn->setToolTip(
+        tr("Copy version and environment details for support."));
+    connect(copyDiagnosticsBtn, &QPushButton::clicked, this, [this] {
+        if (QGuiApplication::clipboard() == nullptr) {
+            QMessageBox::information(
+                this, tr("Diagnostics unavailable"),
+                tr("Could not access the system clipboard."));
+            return;
+        }
+        QGuiApplication::clipboard()->setText(buildDiagnosticsText());
+        QMessageBox::information(
+            this, tr("Diagnostics copied"),
+            tr("Diagnostic information was copied to your clipboard."));
+    });
+    actionsRow->addWidget(copyDiagnosticsBtn);
+    actionsRow->addStretch(1);
+    lay->addLayout(actionsRow);
 
     // Report an issue link at the bottom (opens Issues page)
     {
         const QString linkText = tr("Report an issue");
-        auto *report =
-            new QLabel(QString("<a "
-                               "href=\"https://github.com/luiscuellar31/"
-                               "openscp/issues\">%1</a>")
-                           .arg(linkText),
-                       this);
+        auto *report = new QLabel(
+            QString("<a href=\"%1\">%2</a>")
+                .arg(issuesUrl.toHtmlEscaped(), linkText.toHtmlEscaped()),
+            this);
         report->setTextFormat(Qt::RichText);
         report->setOpenExternalLinks(true);
         report->setWordWrap(true);
@@ -212,9 +251,8 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     // Enforce a dynamic minimum size so controls never overlap when shrinking
     lay->setSizeConstraint(QLayout::SetMinimumSize);
     const QSize layMin = lay->minimumSize();
-    const int minW = qMax(700, layMin.width());
-    const int minH = qMax(440, layMin.height());
+    const int minW = qMax(560, layMin.width());
+    const int minH = qMax(360, layMin.height());
     this->setMinimumSize(minW, minH);
-    // Start at a comfortable size, but never below min
-    this->resize(qMax(680, minW), qMax(520, minH));
+    this->resize(qMax(620, minW), qMax(460, minH));
 }
