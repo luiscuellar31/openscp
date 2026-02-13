@@ -1,148 +1,183 @@
 // Remote model implementation (table: Name, Size, Date, Permissions).
 #include "RemoteModel.hpp"
-#include <QVariant>
-#include <QDateTime>
 #include "TimeUtils.hpp"
-#include <functional>
-#include <QSet>
+#include <QDateTime>
 #include <QLoggingCategory>
+#include <QSet>
+#include <QVariant>
+#include <functional>
 
 Q_LOGGING_CATEGORY(ocEnum, "openscp.enum")
+#include <QDateTime>
+#include <QDir>
 #include <QLocale>
 #include <QMimeData>
 #include <QSettings>
 #include <QStandardPaths>
-#include <QDir>
 #include <QUrl>
-#include <QDateTime>
 
-RemoteModel::RemoteModel(openscp::SftpClient* client, QObject* parent)
+RemoteModel::RemoteModel(openscp::SftpClient *client, QObject *parent)
     : QAbstractTableModel(parent), client_(client) {}
 
-int RemoteModel::rowCount(const QModelIndex& parent) const {
-    if (parent.isValid()) return 0;
+int RemoteModel::rowCount(const QModelIndex &parent) const {
+    if (parent.isValid())
+        return 0;
     return static_cast<int>(items_.size());
 }
 
-QVariant RemoteModel::data(const QModelIndex& index, int role) const {
-    if (!index.isValid() || index.row() < 0 || index.row() >= (int)items_.size())
+QVariant RemoteModel::data(const QModelIndex &index, int role) const {
+    if (!index.isValid() || index.row() < 0 ||
+        index.row() >= (int)items_.size())
         return {};
-    const auto& it = items_[index.row()];
+    const auto &it = items_[index.row()];
     if (role == Qt::DisplayRole) {
         switch (index.column()) {
-            case 0: {
-                bool isLnk = (it.mode & 0120000u) == 0120000u; // S_IFLNK
-                QString suffix;
-                if (isLnk) suffix = "@"; else if (it.isDir) suffix = "/";
-                return it.name + suffix;
-            }
-            case 1:
-                if (it.isDir) return QVariant();
-                if (!it.hasSize) return QStringLiteral("—");
-                return QLocale().formattedDataSize((qint64)it.size, 1, QLocale::DataSizeIecFormat);
-            case 2:
-                if (it.mtime > 0)
-                    return openscpui::localShortTime(it.mtime);
-                else
-                    return QVariant();
-            case 3: {
-                // Permissions in rwxr-xr-x style
-                QString s(10, '-');
-                const quint32 m = it.mode;
-                // file type
-                bool isLnk = (m & 0120000u) == 0120000u;
-                s[0] = isLnk ? 'l' : (it.isDir ? 'd' : '-');
-                auto bit = [&](int pos, quint32 mask, QChar ch) { if (m & mask) s[pos] = ch; };
-                bit(1, 0400, 'r'); bit(2, 0200, 'w'); bit(3, 0100, 'x');
-                bit(4, 0040, 'r'); bit(5, 0020, 'w'); bit(6, 0010, 'x');
-                bit(7, 0004, 'r'); bit(8, 0002, 'w'); bit(9, 0001, 'x');
-                return s;
-            }
+        case 0: {
+            bool isLnk = (it.mode & 0120000u) == 0120000u; // S_IFLNK
+            QString suffix;
+            if (isLnk)
+                suffix = "@";
+            else if (it.isDir)
+                suffix = "/";
+            return it.name + suffix;
+        }
+        case 1:
+            if (it.isDir)
+                return QVariant();
+            if (!it.hasSize)
+                return QStringLiteral("—");
+            return QLocale().formattedDataSize((qint64)it.size, 1,
+                                               QLocale::DataSizeIecFormat);
+        case 2:
+            if (it.mtime > 0)
+                return openscpui::localShortTime(it.mtime);
+            else
+                return QVariant();
+        case 3: {
+            // Permissions in rwxr-xr-x style
+            QString s(10, '-');
+            const quint32 m = it.mode;
+            // file type
+            bool isLnk = (m & 0120000u) == 0120000u;
+            s[0] = isLnk ? 'l' : (it.isDir ? 'd' : '-');
+            auto bit = [&](int pos, quint32 mask, QChar ch) {
+                if (m & mask)
+                    s[pos] = ch;
+            };
+            bit(1, 0400, 'r');
+            bit(2, 0200, 'w');
+            bit(3, 0100, 'x');
+            bit(4, 0040, 'r');
+            bit(5, 0020, 'w');
+            bit(6, 0010, 'x');
+            bit(7, 0004, 'r');
+            bit(8, 0002, 'w');
+            bit(9, 0001, 'x');
+            return s;
+        }
         }
     }
     if (role == Qt::ToolTipRole) {
-        const auto& it = items_[index.row()];
-        if (it.isDir) return tr("Folder");
+        const auto &it = items_[index.row()];
+        if (it.isDir)
+            return tr("Folder");
         if (!it.hasSize) {
             return tr("Size: unknown (not provided by the server)");
         }
         QString tip = tr("File");
-        const QString human = QLocale().formattedDataSize((qint64)it.size, 1, QLocale::DataSizeIecFormat);
+        const QString human = QLocale().formattedDataSize(
+            (qint64)it.size, 1, QLocale::DataSizeIecFormat);
         const QString bytes = QLocale().toString((qulonglong)it.size);
         tip += QString(" • %1 (%2 bytes)").arg(human, bytes);
-        if (it.mtime > 0) tip += " • " + openscpui::localShortTime(it.mtime);
+        if (it.mtime > 0)
+            tip += " • " + openscpui::localShortTime(it.mtime);
         return tip;
     }
     return {};
 }
 
-Qt::ItemFlags RemoteModel::flags(const QModelIndex& index) const {
-    if (!index.isValid()) return Qt::NoItemFlags;
+Qt::ItemFlags RemoteModel::flags(const QModelIndex &index) const {
+    if (!index.isValid())
+        return Qt::NoItemFlags;
     return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled;
 }
 
-bool RemoteModel::setRootPath(const QString& path, QString* errorOut) {
+bool RemoteModel::setRootPath(const QString &path, QString *errorOut) {
     if (!client_) {
-        if (errorOut) *errorOut = "Sin cliente SFTP";
+        if (errorOut)
+            *errorOut = "Sin cliente SFTP";
         return false;
     }
     std::vector<openscp::FileInfo> out;
     std::string err;
     if (!client_->list(path.toStdString(), out, err)) {
-        if (errorOut) *errorOut = QString::fromStdString(err);
+        if (errorOut)
+            *errorOut = QString::fromStdString(err);
         return false;
     }
 
     beginResetModel();
     items_.clear();
     items_.reserve(out.size());
-    for (const auto& f : out) {
+    for (const auto &f : out) {
         const QString name = QString::fromStdString(f.name);
-        if (!showHidden_ && name.startsWith('.')) continue;
-        items_.push_back({ name, f.is_dir, f.size, f.has_size, f.mtime, f.mode, f.uid, f.gid });
+        if (!showHidden_ && name.startsWith('.'))
+            continue;
+        items_.push_back({name, f.is_dir, f.size, f.has_size, f.mtime, f.mode,
+                          f.uid, f.gid});
     }
     currentPath_ = path;
     endResetModel();
     return true;
 }
 
-bool RemoteModel::isDir(const QModelIndex& idx) const {
-    if (!idx.isValid()) return false;
+bool RemoteModel::isDir(const QModelIndex &idx) const {
+    if (!idx.isValid())
+        return false;
     return items_[idx.row()].isDir;
 }
 
-QString RemoteModel::nameAt(const QModelIndex& idx) const {
-    if (!idx.isValid()) return {};
+QString RemoteModel::nameAt(const QModelIndex &idx) const {
+    if (!idx.isValid())
+        return {};
     return items_[idx.row()].name;
 }
 
-bool RemoteModel::hasSize(const QModelIndex& idx) const {
-    if (!idx.isValid()) return false;
+bool RemoteModel::hasSize(const QModelIndex &idx) const {
+    if (!idx.isValid())
+        return false;
     return items_[idx.row()].hasSize;
 }
 
-quint64 RemoteModel::sizeAt(const QModelIndex& idx) const {
-    if (!idx.isValid()) return 0;
+quint64 RemoteModel::sizeAt(const QModelIndex &idx) const {
+    if (!idx.isValid())
+        return 0;
     return items_[idx.row()].size;
 }
 
-QVariant RemoteModel::headerData(int section, Qt::Orientation orientation, int role) const {
-    if (orientation != Qt::Horizontal || role != Qt::DisplayRole) return {};
+QVariant RemoteModel::headerData(int section, Qt::Orientation orientation,
+                                 int role) const {
+    if (orientation != Qt::Horizontal || role != Qt::DisplayRole)
+        return {};
     switch (section) {
-        case 0: return tr("Name");
-        case 1: return tr("Size");
-        case 2: return tr("Date");
-        case 3: return tr("Permissions");
+    case 0:
+        return tr("Name");
+    case 1:
+        return tr("Size");
+    case 2:
+        return tr("Date");
+    case 3:
+        return tr("Permissions");
     }
     return {};
 }
 
 QStringList RemoteModel::mimeTypes() const {
     // Prefer native file URLs so Finder/Explorer can accept external drags
-    return { QStringLiteral("text/uri-list") };
+    return {QStringLiteral("text/uri-list")};
 }
 
-QMimeData* RemoteModel::mimeData(const QModelIndexList& indexes) const {
+QMimeData *RemoteModel::mimeData(const QModelIndexList &indexes) const {
     Q_UNUSED(indexes);
     // Do not perform synchronous downloads here. DragAwareTreeView handles
     // asynchronous staging and will create the final QMimeData when ready.
@@ -151,53 +186,62 @@ QMimeData* RemoteModel::mimeData(const QModelIndexList& indexes) const {
     return new QMimeData();
 }
 
-static QString normalizeRemotePath(const QString& p) {
-    if (p.isEmpty()) return QStringLiteral("/");
+static QString normalizeRemotePath(const QString &p) {
+    if (p.isEmpty())
+        return QStringLiteral("/");
     QString q = p;
-    if (!q.startsWith('/')) q.prepend('/');
+    if (!q.startsWith('/'))
+        q.prepend('/');
     // remove trailing slash except root
-    if (q.size() > 1 && q.endsWith('/')) q.chop(1);
+    if (q.size() > 1 && q.endsWith('/'))
+        q.chop(1);
     return q;
 }
 
-static QString sanitizeRelative(const QString& rel) {
+static QString sanitizeRelative(const QString &rel) {
     // Remove control chars and forbid ".." segments
     QString out;
     out.reserve(rel.size());
     for (QChar ch : rel) {
-        if (ch.unicode() < 0x20) continue; // skip control chars
+        if (ch.unicode() < 0x20)
+            continue; // skip control chars
 #ifdef Q_OS_WIN
-        if (ch == ':') continue; // avoid colon on Windows
+        if (ch == ':')
+            continue; // avoid colon on Windows
 #endif
         QChar c = ch;
-        if (c == '\\') c = '/';
+        if (c == '\\')
+            c = '/';
         out.append(c);
     }
     QStringList parts = out.split('/', Qt::SkipEmptyParts);
     QStringList safe;
-    for (const QString& part : parts) {
-        if (part == ".") continue;
-        if (part == "..") return QString(); // invalid
+    for (const QString &part : parts) {
+        if (part == ".")
+            continue;
+        if (part == "..")
+            return QString(); // invalid
         safe.append(part);
     }
     return safe.join('/');
 }
 
-bool RemoteModel::enumerateFilesUnderEx(const QString& baseRemote,
-                                        std::vector<EnumeratedFile>& out,
-                                        const EnumOptions& opt,
-                                        bool* partialErrorOut,
-                                        bool* someSizeUnknownOut,
-                                        quint64* dirCountOut,
-                                        quint64* symlinkSkippedOut,
-                                        quint64* deniedCountOut,
-                                        quint64* unknownSizeCountOut) const {
-    if (partialErrorOut) *partialErrorOut = false;
-    if (someSizeUnknownOut) *someSizeUnknownOut = false;
-    if (!client_) { return false; }
+bool RemoteModel::enumerateFilesUnderEx(
+    const QString &baseRemote, std::vector<EnumeratedFile> &out,
+    const EnumOptions &opt, bool *partialErrorOut, bool *someSizeUnknownOut,
+    quint64 *dirCountOut, quint64 *symlinkSkippedOut, quint64 *deniedCountOut,
+    quint64 *unknownSizeCountOut) const {
+    if (partialErrorOut)
+        *partialErrorOut = false;
+    if (someSizeUnknownOut)
+        *someSizeUnknownOut = false;
+    if (!client_) {
+        return false;
+    }
 
-    auto joinRemote = [](const QString& base, const QString& name) {
-        if (base == "/") return QStringLiteral("/") + name;
+    auto joinRemote = [](const QString &base, const QString &name) {
+        if (base == "/")
+            return QStringLiteral("/") + name;
         return base.endsWith('/') ? base + name : base + "/" + name;
     };
     const QString base = normalizeRemotePath(baseRemote);
@@ -207,47 +251,67 @@ bool RemoteModel::enumerateFilesUnderEx(const QString& baseRemote,
     if (configuredMaxDepth <= 0) {
         QSettings s("OpenSCP", "OpenSCP");
         configuredMaxDepth = s.value("Advanced/maxFolderDepth", 32).toInt();
-        if (configuredMaxDepth < 1) configuredMaxDepth = 32;
+        if (configuredMaxDepth < 1)
+            configuredMaxDepth = 32;
     }
 
-    std::function<void(const QString&, const QString&, int)> walk;
-    walk = [&](const QString& cur, const QString& rel, int depth) {
-        if (opt.cancel && opt.cancel->load(std::memory_order_relaxed)) return;
-        if (depth > configuredMaxDepth) { qWarning(ocEnum) << "max depth reached at" << cur; return; }
+    std::function<void(const QString &, const QString &, int)> walk;
+    walk = [&](const QString &cur, const QString &rel, int depth) {
+        if (opt.cancel && opt.cancel->load(std::memory_order_relaxed))
+            return;
+        if (depth > configuredMaxDepth) {
+            qWarning(ocEnum) << "max depth reached at" << cur;
+            return;
+        }
         const QString normCur = normalizeRemotePath(cur);
-        if (visited.contains(normCur)) return; // prevent cycles
+        if (visited.contains(normCur))
+            return; // prevent cycles
         visited.insert(normCur);
-        if (dirCountOut) (*dirCountOut)++;
+        if (dirCountOut)
+            (*dirCountOut)++;
 
         std::vector<openscp::FileInfo> children;
         std::string err;
         if (!client_->list(normCur.toStdString(), children, err)) {
-            qWarning(ocEnum) << "enumeration error at" << normCur << ":" << QString::fromStdString(err);
-            if (partialErrorOut) *partialErrorOut = true;
-            if (deniedCountOut) (*deniedCountOut)++;
+            qWarning(ocEnum) << "enumeration error at" << normCur << ":"
+                             << QString::fromStdString(err);
+            if (partialErrorOut)
+                *partialErrorOut = true;
+            if (deniedCountOut)
+                (*deniedCountOut)++;
             return;
         }
-        for (const auto& e : children) {
-            if (opt.cancel && opt.cancel->load(std::memory_order_relaxed)) return;
+        for (const auto &e : children) {
+            if (opt.cancel && opt.cancel->load(std::memory_order_relaxed))
+                return;
             const QString name = QString::fromStdString(e.name);
-            if (!showHidden_ && name.startsWith('.')) continue;
+            if (!showHidden_ && name.startsWith('.'))
+                continue;
             bool isSymlink = (e.mode & 0120000u) == 0120000u;
-            if (isSymlink && opt.skipSymlinks) { if (symlinkSkippedOut) (*symlinkSkippedOut)++; continue; }
+            if (isSymlink && opt.skipSymlinks) {
+                if (symlinkSkippedOut)
+                    (*symlinkSkippedOut)++;
+                continue;
+            }
             const QString childRemote = joinRemote(normCur, name);
             const QString childRel0 = rel.isEmpty() ? name : (rel + "/" + name);
             const QString childRel = sanitizeRelative(childRel0);
-            if (childRel.isEmpty()) continue;
+            if (childRel.isEmpty())
+                continue;
             if (e.is_dir) {
                 walk(childRemote, childRel, depth + 1);
-                if (opt.cancel && opt.cancel->load(std::memory_order_relaxed)) return;
+                if (opt.cancel && opt.cancel->load(std::memory_order_relaxed))
+                    return;
             } else {
                 quint64 sz = (quint64)e.size;
                 const bool hsz = e.has_size;
                 if (!hsz) {
-                    if (someSizeUnknownOut) *someSizeUnknownOut = true;
-                    if (unknownSizeCountOut) (*unknownSizeCountOut)++;
+                    if (someSizeUnknownOut)
+                        *someSizeUnknownOut = true;
+                    if (unknownSizeCountOut)
+                        (*unknownSizeCountOut)++;
                 }
-                out.push_back(EnumeratedFile{ childRemote, childRel, sz, hsz });
+                out.push_back(EnumeratedFile{childRemote, childRel, sz, hsz});
             }
         }
     };
@@ -255,31 +319,41 @@ bool RemoteModel::enumerateFilesUnderEx(const QString& baseRemote,
     return true;
 }
 
-bool RemoteModel::enumerateFilesUnder(const QString& baseRemote, std::vector<EnumeratedFile>& out, QString* errorOut) const {
+bool RemoteModel::enumerateFilesUnder(const QString &baseRemote,
+                                      std::vector<EnumeratedFile> &out,
+                                      QString *errorOut) const {
     bool partial = false, unk = false;
     EnumOptions opt; // defaults
     bool ok = enumerateFilesUnderEx(baseRemote, out, opt, &partial, &unk);
-    if (!ok && errorOut) *errorOut = tr("Enumeration error");
-    if (partial && errorOut) *errorOut = tr("Partial enumeration with errors");
+    if (!ok && errorOut)
+        *errorOut = tr("Enumeration error");
+    if (partial && errorOut)
+        *errorOut = tr("Partial enumeration with errors");
     return ok && !partial;
 }
 
 void RemoteModel::sort(int column, Qt::SortOrder order) {
-    if (items_.empty()) return;
+    if (items_.empty())
+        return;
     beginResetModel();
     const bool asc = (order == Qt::AscendingOrder);
-    auto lessStr = [&](const QString& a, const QString& b) {
+    auto lessStr = [&](const QString &a, const QString &b) {
         int cmp = QString::compare(a, b, Qt::CaseInsensitive);
         return asc ? (cmp < 0) : (cmp > 0);
     };
-    auto less = [&](const Item& a, const Item& b) {
+    auto less = [&](const Item &a, const Item &b) {
         // Directories first, then criterion
-        if (a.isDir != b.isDir) return a.isDir && !b.isDir;
+        if (a.isDir != b.isDir)
+            return a.isDir && !b.isDir;
         switch (column) {
-            case 0: return lessStr(a.name, b.name);
-            case 1: return asc ? (a.size < b.size) : (a.size > b.size);
-            case 2: return asc ? (a.mtime < b.mtime) : (a.mtime > b.mtime);
-            case 3: return asc ? (a.mode < b.mode) : (a.mode > b.mode);
+        case 0:
+            return lessStr(a.name, b.name);
+        case 1:
+            return asc ? (a.size < b.size) : (a.size > b.size);
+        case 2:
+            return asc ? (a.mtime < b.mtime) : (a.mtime > b.mtime);
+        case 3:
+            return asc ? (a.mode < b.mode) : (a.mode > b.mode);
         }
         return lessStr(a.name, b.name);
     };

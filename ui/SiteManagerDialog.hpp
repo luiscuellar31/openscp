@@ -1,9 +1,9 @@
 // Site manager: list, add/edit/remove, and select to connect.
 #pragma once
-#include <QDialog>
-#include <QVector>
-#include <QString>
 #include "openscp/SftpTypes.hpp"
+#include <QDialog>
+#include <QString>
+#include <QVector>
 
 class QTableWidget;
 class QPushButton;
@@ -16,29 +16,29 @@ struct SiteEntry {
 
 class SiteManagerDialog : public QDialog {
     Q_OBJECT
-public:
-    explicit SiteManagerDialog(QWidget* parent = nullptr);
-    bool selectedOptions(openscp::SessionOptions& out) const;
+    public:
+    explicit SiteManagerDialog(QWidget *parent = nullptr);
+    bool selectedOptions(openscp::SessionOptions &out) const;
     void reloadFromSettings();
 
-private slots:
+    private slots:
     void onAdd();
     void onEdit();
     void onRemove();
     void onConnect();
     void updateButtons();
 
-private:
+    private:
     void loadSites();
     void saveSites();
     void refresh();
 
     QVector<SiteEntry> sites_;
-    QTableWidget* table_ = nullptr;
+    QTableWidget *table_ = nullptr;
     int selectedRow_ = -1;
-    QPushButton* btAdd_ = nullptr;
-    QPushButton* btEdit_ = nullptr;
-    QPushButton* btDel_  = nullptr;
-    QPushButton* btConn_ = nullptr;
-    QPushButton* btClose_= nullptr;
+    QPushButton *btAdd_ = nullptr;
+    QPushButton *btEdit_ = nullptr;
+    QPushButton *btDel_ = nullptr;
+    QPushButton *btConn_ = nullptr;
+    QPushButton *btClose_ = nullptr;
 };

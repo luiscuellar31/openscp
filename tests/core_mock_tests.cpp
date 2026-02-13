@@ -12,14 +12,15 @@ namespace {
 struct TestContext {
     int failures = 0;
 
-    void check(bool cond, const std::string& msg) {
+    void check(bool cond, const std::string &msg) {
         if (!cond) {
             ++failures;
             std::cerr << "[FAIL] " << msg << "\n";
         }
     }
 
-    void checkContains(const std::string& haystack, const std::string& needle, const std::string& msg) {
+    void checkContains(const std::string &haystack, const std::string &needle,
+                       const std::string &msg) {
         check(haystack.find(needle) != std::string::npos, msg);
     }
 };
@@ -31,20 +32,23 @@ openscp::SessionOptions validOptions() {
     return opt;
 }
 
-void test_session_defaults(TestContext& t) {
+void test_session_defaults(TestContext &t) {
     openscp::SessionOptions o;
     t.check(o.port == 22, "default port should be 22");
     t.check(o.known_hosts_policy == openscp::KnownHostsPolicy::Strict,
             "default known_hosts_policy should be Strict");
-    t.check(o.known_hosts_hash_names, "known_hosts_hash_names should default to true");
+    t.check(o.known_hosts_hash_names,
+            "known_hosts_hash_names should default to true");
     t.check(!o.show_fp_hex, "show_fp_hex should default to false");
-    t.check(o.transfer_integrity_policy == openscp::TransferIntegrityPolicy::Optional,
+    t.check(o.transfer_integrity_policy ==
+                openscp::TransferIntegrityPolicy::Optional,
             "transfer_integrity_policy should default to Optional");
     t.check(!o.password.has_value(), "password should be empty by default");
-    t.check(!o.private_key_path.has_value(), "private_key_path should be empty by default");
+    t.check(!o.private_key_path.has_value(),
+            "private_key_path should be empty by default");
 }
 
-void test_connect_validation(TestContext& t) {
+void test_connect_validation(TestContext &t) {
     openscp::MockSftpClient c;
     std::string err;
     openscp::SessionOptions opt;
@@ -60,14 +64,16 @@ void test_connect_validation(TestContext& t) {
     err.clear();
     opt.username = "alice";
     t.check(c.connect(opt, err), "connect should succeed with host+username");
-    t.check(c.isConnected(), "client should report connected after successful connect");
+    t.check(c.isConnected(),
+            "client should report connected after successful connect");
 }
 
-void test_disconnect_changes_state(TestContext& t) {
+void test_disconnect_changes_state(TestContext &t) {
     openscp::MockSftpClient c;
     std::string err;
     auto opt = validOptions();
-    t.check(c.connect(opt, err), "connect should succeed before disconnect test");
+    t.check(c.connect(opt, err),
+            "connect should succeed before disconnect test");
     c.disconnect();
     t.check(!c.isConnected(), "disconnect should flip isConnected to false");
 
@@ -76,7 +82,7 @@ void test_disconnect_changes_state(TestContext& t) {
     t.check(!c.list("/", out, err), "list should fail after disconnect");
 }
 
-void test_list_requires_connection(TestContext& t) {
+void test_list_requires_connection(TestContext &t) {
     openscp::MockSftpClient c;
     std::vector<openscp::FileInfo> out;
     std::string err;
@@ -84,56 +90,67 @@ void test_list_requires_connection(TestContext& t) {
     t.check(!err.empty(), "list should provide error when disconnected");
 }
 
-void test_list_sorting_and_known_path(TestContext& t) {
+void test_list_sorting_and_known_path(TestContext &t) {
     openscp::MockSftpClient c;
     std::string err;
     auto opt = validOptions();
     t.check(c.connect(opt, err), "connect should succeed before list test");
 
     std::vector<openscp::FileInfo> out;
-    t.check(c.list("/home", out, err), "list('/home') should succeed in mock FS");
+    t.check(c.list("/home", out, err),
+            "list('/home') should succeed in mock FS");
     t.check(out.size() == 3, "list('/home') should return 3 entries");
     if (out.size() == 3) {
-        t.check(out[0].is_dir && out[0].name == "guest", "first entry should be dir 'guest'");
-        t.check(out[1].is_dir && out[1].name == "luis", "second entry should be dir 'luis'");
-        t.check(!out[2].is_dir && out[2].name == "notes.md", "third entry should be file 'notes.md'");
+        t.check(out[0].is_dir && out[0].name == "guest",
+                "first entry should be dir 'guest'");
+        t.check(out[1].is_dir && out[1].name == "luis",
+                "second entry should be dir 'luis'");
+        t.check(!out[2].is_dir && out[2].name == "notes.md",
+                "third entry should be file 'notes.md'");
     }
 }
 
-void test_list_root_and_empty_path(TestContext& t) {
+void test_list_root_and_empty_path(TestContext &t) {
     openscp::MockSftpClient c;
     std::string err;
     auto opt = validOptions();
-    t.check(c.connect(opt, err), "connect should succeed before root listing test");
+    t.check(c.connect(opt, err),
+            "connect should succeed before root listing test");
 
     std::vector<openscp::FileInfo> root;
     t.check(c.list("/", root, err), "list('/') should succeed");
     t.check(root.size() == 3, "list('/') should return expected mock entries");
     if (root.size() == 3) {
-        t.check(root[0].is_dir && root[0].name == "home", "root[0] should be 'home' directory");
-        t.check(root[1].is_dir && root[1].name == "var", "root[1] should be 'var' directory");
-        t.check(!root[2].is_dir && root[2].name == "readme.txt", "root[2] should be 'readme.txt' file");
+        t.check(root[0].is_dir && root[0].name == "home",
+                "root[0] should be 'home' directory");
+        t.check(root[1].is_dir && root[1].name == "var",
+                "root[1] should be 'var' directory");
+        t.check(!root[2].is_dir && root[2].name == "readme.txt",
+                "root[2] should be 'readme.txt' file");
     }
 
     std::vector<openscp::FileInfo> emptyPath;
     err.clear();
     t.check(c.list("", emptyPath, err), "list('') should be treated as '/'");
-    t.check(emptyPath.size() == root.size(), "list('') should match root entry count");
+    t.check(emptyPath.size() == root.size(),
+            "list('') should match root entry count");
 }
 
-void test_missing_path_error(TestContext& t) {
+void test_missing_path_error(TestContext &t) {
     openscp::MockSftpClient c;
     std::string err;
     auto opt = validOptions();
-    t.check(c.connect(opt, err), "connect should succeed before missing path test");
+    t.check(c.connect(opt, err),
+            "connect should succeed before missing path test");
 
     std::vector<openscp::FileInfo> out;
     err.clear();
-    t.check(!c.list("/does-not-exist", out, err), "list on missing path should fail");
+    t.check(!c.list("/does-not-exist", out, err),
+            "list on missing path should fail");
     t.check(!err.empty(), "missing path should report non-empty error");
 }
 
-void test_unsupported_methods_report_error(TestContext& t) {
+void test_unsupported_methods_report_error(TestContext &t) {
     openscp::MockSftpClient c;
     std::string err;
     bool isDir = true;
@@ -141,56 +158,73 @@ void test_unsupported_methods_report_error(TestContext& t) {
 
     const bool ex = c.exists("/x", isDir, err);
     t.check(!ex, "exists should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta", "exists should expose unsupported message");
+    t.checkContains(err, "Mock no soporta",
+                    "exists should expose unsupported message");
     t.check(!isDir, "exists should reset isDir to false in mock");
 
     err.clear();
     t.check(!c.stat("/x", info, err), "stat should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta", "stat should expose unsupported message");
+    t.checkContains(err, "Mock no soporta",
+                    "stat should expose unsupported message");
 
     err.clear();
     t.check(!c.mkdir("/x", err), "mkdir should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta", "mkdir should expose unsupported message");
+    t.checkContains(err, "Mock no soporta",
+                    "mkdir should expose unsupported message");
 
     err.clear();
-    t.check(!c.removeFile("/x", err), "removeFile should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta", "removeFile should expose unsupported message");
+    t.check(!c.removeFile("/x", err),
+            "removeFile should be unsupported in mock");
+    t.checkContains(err, "Mock no soporta",
+                    "removeFile should expose unsupported message");
 
     err.clear();
     t.check(!c.removeDir("/x", err), "removeDir should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta", "removeDir should expose unsupported message");
+    t.checkContains(err, "Mock no soporta",
+                    "removeDir should expose unsupported message");
 
     err.clear();
-    t.check(!c.rename("/a", "/b", err, true), "rename should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta", "rename should expose unsupported message");
+    t.check(!c.rename("/a", "/b", err, true),
+            "rename should be unsupported in mock");
+    t.checkContains(err, "Mock no soporta",
+                    "rename should expose unsupported message");
 
     err.clear();
     t.check(!c.chmod("/x", 0644, err), "chmod should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta", "chmod should expose unsupported message");
+    t.checkContains(err, "Mock no soporta",
+                    "chmod should expose unsupported message");
 
     err.clear();
-    t.check(!c.chown("/x", 1000, 1000, err), "chown should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta", "chown should expose unsupported message");
+    t.check(!c.chown("/x", 1000, 1000, err),
+            "chown should be unsupported in mock");
+    t.checkContains(err, "Mock no soporta",
+                    "chown should expose unsupported message");
 
     err.clear();
-    t.check(!c.get("/remote", "/local", err, {}, {}, false), "get should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta", "get should expose unsupported message");
+    t.check(!c.get("/remote", "/local", err, {}, {}, false),
+            "get should be unsupported in mock");
+    t.checkContains(err, "Mock no soporta",
+                    "get should expose unsupported message");
 
     err.clear();
-    t.check(!c.put("/local", "/remote", err, {}, {}, false), "put should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta", "put should expose unsupported message");
+    t.check(!c.put("/local", "/remote", err, {}, {}, false),
+            "put should be unsupported in mock");
+    t.checkContains(err, "Mock no soporta",
+                    "put should expose unsupported message");
 }
 
-void test_new_connection_like(TestContext& t) {
+void test_new_connection_like(TestContext &t) {
     openscp::MockSftpClient c;
     auto opt = validOptions();
     std::string err;
     auto conn = c.newConnectionLike(opt, err);
-    t.check(static_cast<bool>(conn), "newConnectionLike should return a client");
-    t.check(conn && conn->isConnected(), "newConnectionLike client should be connected");
+    t.check(static_cast<bool>(conn),
+            "newConnectionLike should return a client");
+    t.check(conn && conn->isConnected(),
+            "newConnectionLike client should be connected");
 }
 
-void test_new_connection_like_validation(TestContext& t) {
+void test_new_connection_like_validation(TestContext &t) {
     openscp::MockSftpClient c;
     openscp::SessionOptions bad;
     bad.host = "";
@@ -201,7 +235,7 @@ void test_new_connection_like_validation(TestContext& t) {
     t.check(!err.empty(), "newConnectionLike should report validation errors");
 }
 
-void test_set_times(TestContext& t) {
+void test_set_times(TestContext &t) {
     openscp::MockSftpClient c;
     std::string err;
     const bool ok = c.setTimes("/home/luis/foto.jpg", 10, 20, err);

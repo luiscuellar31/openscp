@@ -1,86 +1,90 @@
 // OpenSCP main window: dual‑pane file manager with SFTP support.
-// Provides local operations (copy/move/delete) and remote ones (browse, upload, download,
-// create/rename/delete), a transfer queue with resume, and known_hosts validation.
+// Provides local operations (copy/move/delete) and remote ones (browse, upload,
+// download, create/rename/delete), a transfer queue with resume, and
+// known_hosts validation.
 #include "MainWindow.hpp"
-#include "openscp/Libssh2SftpClient.hpp"
+#include "AboutDialog.hpp"
 #include "ConnectionDialog.hpp"
-#include "RemoteModel.hpp"
-#include <QApplication>
-#include <QVBoxLayout>
-#include <QSplitter>
-#include <QToolBar>
-#include <QSize>
-#include <QFileDialog>
-#include <QStatusBar>
-#include <QLabel>
-#include <QHeaderView>
-#include <QMessageBox>
-#include <QFileInfo>
-#include <QDir>
-#include <QFile>
-#include <QKeySequence>
-#include <QDirIterator>
-#include <QInputDialog>
-#include <QAbstractButton>
-#include <QDesktopServices>
-#include <QStandardPaths>
-#include <QUrl>
-#include <QProgressDialog>
-#include <QLocale>
-#include <QPushButton>
-#include <QListView>
-#include <QMenu>
-#include <QMenuBar>
-#include <QDateTime>
-#include <QCheckBox>
+#include "DragAwareTreeView.hpp"
 #include "PermissionsDialog.hpp"
+#include "RemoteModel.hpp"
+#include "SecretStore.hpp"
+#include "SettingsDialog.hpp"
 #include "SiteManagerDialog.hpp"
-#include <QMimeData>
-#include <QDropEvent>
-#include <QDragEnterEvent>
-#include <QDragMoveEvent>
 #include "TransferManager.hpp"
 #include "TransferQueueDialog.hpp"
-#include "SecretStore.hpp"
-#include "AboutDialog.hpp"
-#include "SettingsDialog.hpp"
+#include "openscp/Libssh2SftpClient.hpp"
+#include <QAbstractButton>
+#include <QApplication>
+#include <QCheckBox>
 #include <QCoreApplication>
-#include <QShowEvent>
+#include <QDateTime>
+#include <QDesktopServices>
 #include <QDialog>
-#include <QScreen>
-#include <QGuiApplication>
-#include <QStyle>
-#include <QIcon>
-#include <QTemporaryFile>
-#include <QSettings>
-#include <QRegularExpression>
-#include <QTimer>
-#include <QSet>
-#include <QHash>
-#include <QUuid>
-#include <QShortcut>
-#include <QToolButton>
-#include <QProcess>
-#include <QPropertyAnimation>
-#include <QParallelAnimationGroup>
+#include <QDir>
+#include <QDirIterator>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QEasingCurve>
-#include <cstring>
-#include "DragAwareTreeView.hpp"
+#include <QFile>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QGuiApplication>
+#include <QHash>
+#include <QHeaderView>
+#include <QIcon>
+#include <QInputDialog>
+#include <QKeySequence>
+#include <QLabel>
+#include <QListView>
+#include <QLocale>
+#include <QMenu>
+#include <QMenuBar>
+#include <QMessageBox>
+#include <QMimeData>
+#include <QParallelAnimationGroup>
+#include <QProcess>
+#include <QProgressDialog>
+#include <QPropertyAnimation>
+#include <QPushButton>
+#include <QRegularExpression>
+#include <QScreen>
+#include <QSet>
+#include <QSettings>
+#include <QShortcut>
+#include <QShowEvent>
+#include <QSize>
+#include <QSplitter>
+#include <QStandardPaths>
+#include <QStatusBar>
+#include <QStyle>
+#include <QTemporaryFile>
+#include <QTimer>
+#include <QToolBar>
+#include <QToolButton>
+#include <QUrl>
+#include <QUuid>
+#include <QVBoxLayout>
 #include <atomic>
-#include <thread>
+#include <cstring>
 #include <memory>
+#include <thread>
 
 static constexpr int NAME_COL = 0;
 
 // Best-effort memory scrubbing helpers for sensitive data
-static inline void secureClear(QString& s) {
-    for (int i = 0, n = s.size(); i < n; ++i) s[i] = QChar(u'\0');
+static inline void secureClear(QString &s) {
+    for (int i = 0, n = s.size(); i < n; ++i)
+        s[i] = QChar(u'\0');
     s.clear();
 }
-static inline void secureClear(QByteArray& b) {
-    if (b.isEmpty()) return;
-    volatile char* p = reinterpret_cast<volatile char*>(b.data());
-    for (int i = 0; i < b.size(); ++i) p[i] = 0;
+static inline void secureClear(QByteArray &b) {
+    if (b.isEmpty())
+        return;
+    volatile char *p = reinterpret_cast<volatile char *>(b.data());
+    for (int i = 0; i < b.size(); ++i)
+        p[i] = 0;
     b.clear();
     b.squeeze();
 }
@@ -89,15 +93,19 @@ MainWindow::~MainWindow() = default; // define the destructor here
 
 // Recursively copy a file or directory.
 // Returns true on success; otherwise false and writes an error message.
-static bool copyEntryRecursively(const QString& srcPath, const QString& dstPath, QString& error) {
+static bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
+                                 QString &error) {
     QFileInfo srcInfo(srcPath);
 
     if (srcInfo.isFile()) {
         // Ensure destination directory
         QDir().mkpath(QFileInfo(dstPath).dir().absolutePath());
-        if (QFile::exists(dstPath)) QFile::remove(dstPath);
+        if (QFile::exists(dstPath))
+            QFile::remove(dstPath);
         if (!QFile::copy(srcPath, dstPath)) {
-            error = QString(QCoreApplication::translate("MainWindow", "Could not copy file: %1")).arg(srcPath);
+            error = QString(QCoreApplication::translate(
+                                "MainWindow", "Could not copy file: %1"))
+                        .arg(srcPath);
             return false;
         }
         return true;
@@ -106,28 +114,41 @@ static bool copyEntryRecursively(const QString& srcPath, const QString& dstPath,
     if (srcInfo.isDir()) {
         // Create destination directory
         if (!QDir().mkpath(dstPath)) {
-            error = QString(QCoreApplication::translate("MainWindow", "Could not create destination folder: %1")).arg(dstPath);
+            error = QString(QCoreApplication::translate(
+                                "MainWindow",
+                                "Could not create destination folder: %1"))
+                        .arg(dstPath);
             return false;
         }
         // Iterate recursively
-        QDirIterator it(srcPath, QDir::NoDotAndDotDot | QDir::AllEntries, QDirIterator::Subdirectories);
+        QDirIterator it(srcPath, QDir::NoDotAndDotDot | QDir::AllEntries,
+                        QDirIterator::Subdirectories);
         while (it.hasNext()) {
             it.next();
             const QFileInfo fi = it.fileInfo();
-            const QString rel = QDir(srcPath).relativeFilePath(fi.absoluteFilePath());
+            const QString rel =
+                QDir(srcPath).relativeFilePath(fi.absoluteFilePath());
             const QString target = QDir(dstPath).filePath(rel);
 
             if (fi.isDir()) {
                 if (!QDir().mkpath(target)) {
-                    error = QString(QCoreApplication::translate("MainWindow", "Could not create destination subfolder: %1")).arg(target);
+                    error =
+                        QString(
+                            QCoreApplication::translate(
+                                "MainWindow",
+                                "Could not create destination subfolder: %1"))
+                            .arg(target);
                     return false;
                 }
             } else {
                 // Ensure parent directory exists
                 QDir().mkpath(QFileInfo(target).dir().absolutePath());
-                if (QFile::exists(target)) QFile::remove(target);
+                if (QFile::exists(target))
+                    QFile::remove(target);
                 if (!QFile::copy(fi.absoluteFilePath(), target)) {
-                    error = QString(QCoreApplication::translate("MainWindow", "Failed to copy: %1")).arg(fi.absoluteFilePath());
+                    error = QString(QCoreApplication::translate(
+                                        "MainWindow", "Failed to copy: %1"))
+                                .arg(fi.absoluteFilePath());
                     return false;
                 }
             }
@@ -135,28 +156,31 @@ static bool copyEntryRecursively(const QString& srcPath, const QString& dstPath,
         return true;
     }
 
-    error = QCoreApplication::translate("MainWindow", "Source entry is neither file nor folder.");
+    error = QCoreApplication::translate(
+        "MainWindow", "Source entry is neither file nor folder.");
     return false;
 }
 
 // Compute a temporary local path to preview/open ad‑hoc downloads.
-static QString tempDownloadPathFor(const QString& remoteName) {
-    QString base = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
-    if (base.isEmpty()) base = QDir::homePath() + "/Downloads";
+static QString tempDownloadPathFor(const QString &remoteName) {
+    QString base =
+        QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    if (base.isEmpty())
+        base = QDir::homePath() + "/Downloads";
     QDir().mkpath(base);
     return QDir(base).filePath(remoteName);
 }
 
 // Reveal a file in the system file manager (select/highlight when possible),
 // falling back to opening the containing folder.
-static void revealInFolder(const QString& filePath) {
+static void revealInFolder(const QString &filePath) {
 #if defined(Q_OS_MAC)
     // macOS: use 'open -R' to reveal in Finder
-    QProcess::startDetached("open", { "-R", filePath });
+    QProcess::startDetached("open", {"-R", filePath});
 #elif defined(Q_OS_WIN)
     // Windows: explorer /select,<path>
     QString arg = "/select," + QDir::toNativeSeparators(filePath);
-    QProcess::startDetached("explorer", { arg });
+    QProcess::startDetached("explorer", {arg});
 #else
     // Linux/others: try to open the containing directory
     const QString dir = QFileInfo(filePath).dir().absolutePath();
@@ -165,65 +189,87 @@ static void revealInFolder(const QString& filePath) {
 }
 
 // Validate simple file/folder names (no paths)
-static bool isValidEntryName(const QString& name, QString* why = nullptr) {
+static bool isValidEntryName(const QString &name, QString *why = nullptr) {
     if (name == "." || name == "..") {
-        if (why) *why = QCoreApplication::translate("MainWindow", "Invalid name: cannot be '.' or '..'.");
+        if (why)
+            *why = QCoreApplication::translate(
+                "MainWindow", "Invalid name: cannot be '.' or '..'.");
         return false;
     }
     if (name.contains('/') || name.contains('\\')) {
-        if (why) *why = QCoreApplication::translate("MainWindow", "Invalid name: cannot contain separators ('/' or '\\\\').");
+        if (why)
+            *why = QCoreApplication::translate(
+                "MainWindow",
+                "Invalid name: cannot contain separators ('/' or '\\\\').");
         return false;
     }
-    for (const QChar& ch : name) {
+    for (const QChar &ch : name) {
         ushort u = ch.unicode();
         if (u < 0x20u || u == 0x7Fu) { // ASCII control characters
-            if (why) *why = QCoreApplication::translate("MainWindow", "Invalid name: cannot contain control characters.");
+            if (why)
+                *why = QCoreApplication::translate(
+                    "MainWindow",
+                    "Invalid name: cannot contain control characters.");
             return false;
         }
     }
     return true;
 }
 
-static QString shortRemoteError(const QString& raw, const QString& fallback) {
+static QString shortRemoteError(const QString &raw, const QString &fallback) {
     QString msg = raw.trimmed();
-    if (msg.isEmpty()) return fallback;
+    if (msg.isEmpty())
+        return fallback;
 
     const QString lower = msg.toLower();
-    if (lower.contains("permission denied") || lower.contains("permiso denegado")) {
+    if (lower.contains("permission denied") ||
+        lower.contains("permiso denegado")) {
         return QCoreApplication::translate("MainWindow", "Permission denied.");
     }
     if (lower.contains("read-only") || lower.contains("solo lectura")) {
-        return QCoreApplication::translate("MainWindow", "Location is read-only.");
+        return QCoreApplication::translate("MainWindow",
+                                           "Location is read-only.");
     }
     if (lower.contains("no such file") || lower.contains("not found")) {
-        return QCoreApplication::translate("MainWindow", "File or folder does not exist.");
+        return QCoreApplication::translate("MainWindow",
+                                           "File or folder does not exist.");
     }
     if (lower.contains("timed out") || lower.contains("timeout")) {
-        return QCoreApplication::translate("MainWindow", "Connection timed out.");
+        return QCoreApplication::translate("MainWindow",
+                                           "Connection timed out.");
     }
     if (lower.contains("could not resolve") ||
         lower.contains("name or service not known") ||
         lower.contains("nodename nor servname")) {
-        return QCoreApplication::translate("MainWindow", "Could not resolve the server hostname.");
+        return QCoreApplication::translate(
+            "MainWindow", "Could not resolve the server hostname.");
     }
     if (lower.contains("connection refused")) {
-        return QCoreApplication::translate("MainWindow", "Connection refused by the server.");
+        return QCoreApplication::translate("MainWindow",
+                                           "Connection refused by the server.");
     }
-    if (lower.contains("network is unreachable") || lower.contains("host is unreachable")) {
-        return QCoreApplication::translate("MainWindow", "Network unavailable or host unreachable.");
+    if (lower.contains("network is unreachable") ||
+        lower.contains("host is unreachable")) {
+        return QCoreApplication::translate(
+            "MainWindow", "Network unavailable or host unreachable.");
     }
-    if (lower.contains("authentication failed") || lower.contains("auth fail")) {
-        return QCoreApplication::translate("MainWindow", "Authentication failed.");
+    if (lower.contains("authentication failed") ||
+        lower.contains("auth fail")) {
+        return QCoreApplication::translate("MainWindow",
+                                           "Authentication failed.");
     }
 
     const int nl = msg.indexOf('\n');
-    if (nl > 0) msg = msg.left(nl);
+    if (nl > 0)
+        msg = msg.left(nl);
     msg = msg.simplified();
-    if (msg.size() > 96) msg = msg.left(93) + "...";
+    if (msg.size() > 96)
+        msg = msg.left(93) + "...";
     return msg;
 }
 
-static QString shortRemoteError(const std::string& raw, const QString& fallback) {
+static QString shortRemoteError(const std::string &raw,
+                                const QString &fallback) {
     return shortRemoteError(QString::fromStdString(raw), fallback);
 }
 
@@ -231,32 +277,39 @@ static QString newQuickSiteId() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
 
-static QString normalizedIdentityHost(const std::string& host) {
+static QString normalizedIdentityHost(const std::string &host) {
     return QString::fromStdString(host).trimmed().toLower();
 }
 
-static QString normalizedIdentityUser(const std::string& user) {
+static QString normalizedIdentityUser(const std::string &user) {
     return QString::fromStdString(user).trimmed();
 }
 
-static QString normalizedIdentityKeyPath(const std::optional<std::string>& keyPath) {
-    if (!keyPath || keyPath->empty()) return {};
-    return QDir::cleanPath(QDir::fromNativeSeparators(QString::fromStdString(*keyPath).trimmed()));
+static QString
+normalizedIdentityKeyPath(const std::optional<std::string> &keyPath) {
+    if (!keyPath || keyPath->empty())
+        return {};
+    return QDir::cleanPath(
+        QDir::fromNativeSeparators(QString::fromStdString(*keyPath).trimmed()));
 }
 
-static bool sameSavedSiteIdentity(const openscp::SessionOptions& a, const openscp::SessionOptions& b) {
+static bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
+                                  const openscp::SessionOptions &b) {
     return normalizedIdentityHost(a.host) == normalizedIdentityHost(b.host) &&
            a.port == b.port &&
-           normalizedIdentityUser(a.username) == normalizedIdentityUser(b.username) &&
-           normalizedIdentityKeyPath(a.private_key_path) == normalizedIdentityKeyPath(b.private_key_path);
+           normalizedIdentityUser(a.username) ==
+               normalizedIdentityUser(b.username) &&
+           normalizedIdentityKeyPath(a.private_key_path) ==
+               normalizedIdentityKeyPath(b.private_key_path);
 }
 
-static QString quickSiteSecretKey(const SiteEntry& e, const QString& item) {
-    if (!e.id.isEmpty()) return QString("site-id:%1:%2").arg(e.id, item);
+static QString quickSiteSecretKey(const SiteEntry &e, const QString &item) {
+    if (!e.id.isEmpty())
+        return QString("site-id:%1:%2").arg(e.id, item);
     return QString("site:%1:%2").arg(e.name, item);
 }
 
-static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool* needsSave) {
+static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool *needsSave) {
     QVector<SiteEntry> sites;
     bool shouldSave = false;
     QSettings s("OpenSCP", "OpenSCP");
@@ -276,94 +329,124 @@ static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool* needsSave) {
         e.opt.port = static_cast<std::uint16_t>(s.value("port", 22).toUInt());
         e.opt.username = s.value("user").toString().toStdString();
         const QString kp = s.value("keyPath").toString();
-        if (!kp.isEmpty()) e.opt.private_key_path = kp.toStdString();
+        if (!kp.isEmpty())
+            e.opt.private_key_path = kp.toStdString();
         const QString kh = s.value("knownHosts").toString();
-        if (!kh.isEmpty()) e.opt.known_hosts_path = kh.toStdString();
+        if (!kh.isEmpty())
+            e.opt.known_hosts_path = kh.toStdString();
         e.opt.known_hosts_policy = static_cast<openscp::KnownHostsPolicy>(
-            s.value("khPolicy", static_cast<int>(openscp::KnownHostsPolicy::Strict)).toInt()
-        );
+            s.value("khPolicy",
+                    static_cast<int>(openscp::KnownHostsPolicy::Strict))
+                .toInt());
         sites.push_back(e);
     }
     s.endArray();
-    if (needsSave) *needsSave = shouldSave;
+    if (needsSave)
+        *needsSave = shouldSave;
     return sites;
 }
 
-static void saveSavedSitesForQuickConnect(const QVector<SiteEntry>& sites) {
+static void saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
     QSettings s("OpenSCP", "OpenSCP");
     s.remove("sites");
     s.beginWriteArray("sites");
     for (int i = 0; i < sites.size(); ++i) {
         s.setArrayIndex(i);
-        const SiteEntry& e = sites[i];
+        const SiteEntry &e = sites[i];
         s.setValue("id", e.id);
         s.setValue("name", e.name);
         s.setValue("host", QString::fromStdString(e.opt.host));
         s.setValue("port", static_cast<int>(e.opt.port));
         s.setValue("user", QString::fromStdString(e.opt.username));
-        s.setValue("keyPath", e.opt.private_key_path ? QString::fromStdString(*e.opt.private_key_path) : QString());
-        s.setValue("knownHosts", e.opt.known_hosts_path ? QString::fromStdString(*e.opt.known_hosts_path) : QString());
+        s.setValue("keyPath",
+                   e.opt.private_key_path
+                       ? QString::fromStdString(*e.opt.private_key_path)
+                       : QString());
+        s.setValue("knownHosts",
+                   e.opt.known_hosts_path
+                       ? QString::fromStdString(*e.opt.known_hosts_path)
+                       : QString());
         s.setValue("khPolicy", static_cast<int>(e.opt.known_hosts_policy));
     }
     s.endArray();
     s.sync();
 }
 
-static QString defaultQuickSiteName(const openscp::SessionOptions& opt) {
+static QString defaultQuickSiteName(const openscp::SessionOptions &opt) {
     const QString user = normalizedIdentityUser(opt.username);
     const QString host = normalizedIdentityHost(opt.host);
     QString out;
-    if (!user.isEmpty() && !host.isEmpty()) out = QString("%1@%2").arg(user, host);
-    else if (!host.isEmpty()) out = host;
-    else if (!user.isEmpty()) out = user;
-    else out = QObject::tr("New site");
-    if (!host.isEmpty() && opt.port != 22) out += QString(":%1").arg(opt.port);
+    if (!user.isEmpty() && !host.isEmpty())
+        out = QString("%1@%2").arg(user, host);
+    else if (!host.isEmpty())
+        out = host;
+    else if (!user.isEmpty())
+        out = user;
+    else
+        out = QObject::tr("New site");
+    if (!host.isEmpty() && opt.port != 22)
+        out += QString(":%1").arg(opt.port);
     return out;
 }
 
-static QString ensureUniqueQuickSiteName(const QVector<SiteEntry>& sites, const QString& preferred) {
+static QString ensureUniqueQuickSiteName(const QVector<SiteEntry> &sites,
+                                         const QString &preferred) {
     QString base = preferred.trimmed();
-    if (base.isEmpty()) base = QObject::tr("New site");
-    auto exists = [&](const QString& candidate) {
-        for (const auto& s : sites) {
-            if (s.name.compare(candidate, Qt::CaseInsensitive) == 0) return true;
+    if (base.isEmpty())
+        base = QObject::tr("New site");
+    auto exists = [&](const QString &candidate) {
+        for (const auto &s : sites) {
+            if (s.name.compare(candidate, Qt::CaseInsensitive) == 0)
+                return true;
         }
         return false;
     };
-    if (!exists(base)) return base;
+    if (!exists(base))
+        return base;
     for (int i = 2; i < 10000; ++i) {
         const QString candidate = QString("%1 (%2)").arg(base).arg(i);
-        if (!exists(candidate)) return candidate;
+        if (!exists(candidate))
+            return candidate;
     }
-    return base + QString(" (%1)").arg(QUuid::createUuid().toString(QUuid::WithoutBraces).left(6));
+    return base +
+           QString(" (%1)").arg(
+               QUuid::createUuid().toString(QUuid::WithoutBraces).left(6));
 }
 
 static QString quickPersistStatusShort(SecretStore::PersistStatus st) {
     switch (st) {
-        case SecretStore::PersistStatus::Stored: return QObject::tr("stored");
-        case SecretStore::PersistStatus::Unavailable: return QObject::tr("unavailable");
-        case SecretStore::PersistStatus::PermissionDenied: return QObject::tr("permission denied");
-        case SecretStore::PersistStatus::BackendError: return QObject::tr("backend error");
+    case SecretStore::PersistStatus::Stored:
+        return QObject::tr("stored");
+    case SecretStore::PersistStatus::Unavailable:
+        return QObject::tr("unavailable");
+    case SecretStore::PersistStatus::PermissionDenied:
+        return QObject::tr("permission denied");
+    case SecretStore::PersistStatus::BackendError:
+        return QObject::tr("backend error");
     }
     return QObject::tr("error");
 }
 
 static void refreshOpenSiteManagerWidget(QPointer<QWidget> siteManager) {
-    if (!siteManager) return;
-    auto* dlg = qobject_cast<SiteManagerDialog*>(siteManager.data());
-    if (!dlg) return;
+    if (!siteManager)
+        return;
+    auto *dlg = qobject_cast<SiteManagerDialog *>(siteManager.data());
+    if (!dlg)
+        return;
     dlg->reloadFromSettings();
 }
 
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     // Globally center dialogs relative to the main window
     qApp->installEventFilter(this);
     // Models
-    leftModel_       = new QFileSystemModel(this);
+    leftModel_ = new QFileSystemModel(this);
     rightLocalModel_ = new QFileSystemModel(this);
 
-    leftModel_->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::AllDirs);
-    rightLocalModel_->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::AllDirs);
+    leftModel_->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot |
+                          QDir::AllDirs);
+    rightLocalModel_->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot |
+                                QDir::AllDirs);
 
     // Initial paths: HOME
     const QString home = QDir::homePath();
@@ -371,7 +454,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     rightLocalModel_->setRootPath(home);
 
     // Views
-    leftView_  = new DragAwareTreeView(this);
+    leftView_ = new DragAwareTreeView(this);
     rightView_ = new DragAwareTreeView(this);
 
     leftView_->setModel(leftModel_);
@@ -383,7 +466,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     rightView_->setRootIndex(rightLocalModel_->index(home));
 
     // Basic view tuning
-    auto tuneView = [](QTreeView* v) {
+    auto tuneView = [](QTreeView *v) {
         v->setSelectionMode(QAbstractItemView::ExtendedSelection);
         v->setSortingEnabled(true);
         v->sortByColumn(0, Qt::AscendingOrder);
@@ -409,18 +492,20 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     leftView_->viewport()->installEventFilter(this);
 
     // Path entries (top)
-    leftPath_  = new QLineEdit(home, this);
+    leftPath_ = new QLineEdit(home, this);
     rightPath_ = new QLineEdit(home, this);
-    connect(leftPath_,  &QLineEdit::returnPressed, this, &MainWindow::leftPathEntered);
-    connect(rightPath_, &QLineEdit::returnPressed, this, &MainWindow::rightPathEntered);
+    connect(leftPath_, &QLineEdit::returnPressed, this,
+            &MainWindow::leftPathEntered);
+    connect(rightPath_, &QLineEdit::returnPressed, this,
+            &MainWindow::rightPathEntered);
 
     // Central splitter with two panes
-    auto* splitter = new QSplitter(this);
-    auto* leftPane  = new QWidget(this);
-    auto* rightPane = new QWidget(this);
+    auto *splitter = new QSplitter(this);
+    auto *leftPane = new QWidget(this);
+    auto *rightPane = new QWidget(this);
 
-    auto* leftLayout  = new QVBoxLayout(leftPane);
-    auto* rightLayout = new QVBoxLayout(rightPane);
+    auto *leftLayout = new QVBoxLayout(leftPane);
+    auto *rightLayout = new QVBoxLayout(rightPane);
     leftLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->setContentsMargins(0, 0, 0, 0);
 
@@ -429,7 +514,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     leftPaneBar_->setIconSize(QSize(18, 18));
     leftPaneBar_->setToolButtonStyle(Qt::ToolButtonIconOnly);
     // Helper for icons from local resources
-    auto resIcon = [](const char* fname) -> QIcon {
+    auto resIcon = [](const char *fname) -> QIcon {
         return QIcon(QStringLiteral(":/assets/icons/") + QLatin1String(fname));
     };
     // Left sub‑toolbar: Up, Copy, Move, Delete, Rename, New folder
@@ -437,45 +522,58 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     actUpLeft_->setIcon(resIcon("action-go-up.svg"));
     actUpLeft_->setToolTip(actUpLeft_->text());
     // Button "Open left folder" next to Up
-    actChooseLeft_ = leftPaneBar_->addAction(tr("Open left folder"), this, &MainWindow::chooseLeftDir);
+    actChooseLeft_ = leftPaneBar_->addAction(tr("Open left folder"), this,
+                                             &MainWindow::chooseLeftDir);
     actChooseLeft_->setIcon(resIcon("action-open-folder.svg"));
     actChooseLeft_->setToolTip(actChooseLeft_->text());
     leftPaneBar_->addSeparator();
-    actCopyF5_ = leftPaneBar_->addAction(tr("Copy"), this, &MainWindow::copyLeftToRight);
+    actCopyF5_ =
+        leftPaneBar_->addAction(tr("Copy"), this, &MainWindow::copyLeftToRight);
     actCopyF5_->setIcon(resIcon("action-copy.svg"));
     actCopyF5_->setToolTip(actCopyF5_->text());
     // Shortcut F5 on left panel (scope: left view and its children)
     actCopyF5_->setShortcut(QKeySequence(Qt::Key_F5));
     actCopyF5_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (leftView_) leftView_->addAction(actCopyF5_);
-    actMoveF6_ = leftPaneBar_->addAction(tr("Move"), this, &MainWindow::moveLeftToRight);
+    if (leftView_)
+        leftView_->addAction(actCopyF5_);
+    actMoveF6_ =
+        leftPaneBar_->addAction(tr("Move"), this, &MainWindow::moveLeftToRight);
     actMoveF6_->setIcon(resIcon("action-move-to-right.svg"));
     actMoveF6_->setToolTip(actMoveF6_->text());
     // Shortcut F6 on left panel
     actMoveF6_->setShortcut(QKeySequence(Qt::Key_F6));
     actMoveF6_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (leftView_) leftView_->addAction(actMoveF6_);
-    actDelete_ = leftPaneBar_->addAction(tr("Delete"), this, &MainWindow::deleteFromLeft);
+    if (leftView_)
+        leftView_->addAction(actMoveF6_);
+    actDelete_ = leftPaneBar_->addAction(tr("Delete"), this,
+                                         &MainWindow::deleteFromLeft);
     actDelete_->setIcon(resIcon("action-delete.svg"));
     actDelete_->setToolTip(actDelete_->text());
     actDelete_->setShortcut(QKeySequence(Qt::Key_Delete));
     actDelete_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (leftView_) leftView_->addAction(actDelete_);
+    if (leftView_)
+        leftView_->addAction(actDelete_);
     // Action: copy from right panel to left (remote/local -> left)
     actCopyRight_ = new QAction(tr("Copy to left panel"), this);
-    connect(actCopyRight_, &QAction::triggered, this, &MainWindow::copyRightToLeft);
-    actCopyRight_->setIcon(QIcon(QLatin1String(":/assets/icons/action-copy.svg")));
+    connect(actCopyRight_, &QAction::triggered, this,
+            &MainWindow::copyRightToLeft);
+    actCopyRight_->setIcon(
+        QIcon(QLatin1String(":/assets/icons/action-copy.svg")));
     // Action: move from right panel to left
     actMoveRight_ = new QAction(tr("Move to left panel"), this);
-    connect(actMoveRight_, &QAction::triggered, this, &MainWindow::moveRightToLeft);
-    actMoveRight_->setIcon(QIcon(QLatin1String(":/assets/icons/action-move-to-left.svg")));
+    connect(actMoveRight_, &QAction::triggered, this,
+            &MainWindow::moveRightToLeft);
+    actMoveRight_->setIcon(
+        QIcon(QLatin1String(":/assets/icons/action-move-to-left.svg")));
     // Additional local actions (also in toolbar)
-    actNewDirLeft_  = new QAction(tr("New folder"), this);
+    actNewDirLeft_ = new QAction(tr("New folder"), this);
     connect(actNewDirLeft_, &QAction::triggered, this, &MainWindow::newDirLeft);
-    actRenameLeft_  = new QAction(tr("Rename"), this);
-    connect(actRenameLeft_, &QAction::triggered, this, &MainWindow::renameLeftSelected);
+    actRenameLeft_ = new QAction(tr("Rename"), this);
+    connect(actRenameLeft_, &QAction::triggered, this,
+            &MainWindow::renameLeftSelected);
     actNewFileLeft_ = new QAction(tr("New file"), this);
-    connect(actNewFileLeft_, &QAction::triggered, this, &MainWindow::newFileLeft);
+    connect(actNewFileLeft_, &QAction::triggered, this,
+            &MainWindow::newFileLeft);
     actRenameLeft_->setIcon(resIcon("action-rename.svg"));
     actRenameLeft_->setToolTip(actRenameLeft_->text());
     actNewDirLeft_->setIcon(resIcon("action-new-folder.svg"));
@@ -485,13 +583,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Shortcuts (left panel scope)
     actRenameLeft_->setShortcut(QKeySequence(Qt::Key_F2));
     actRenameLeft_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (leftView_) leftView_->addAction(actRenameLeft_);
+    if (leftView_)
+        leftView_->addAction(actRenameLeft_);
     actNewDirLeft_->setShortcut(QKeySequence(Qt::Key_F9));
     actNewDirLeft_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (leftView_) leftView_->addAction(actNewDirLeft_);
+    if (leftView_)
+        leftView_->addAction(actNewDirLeft_);
     actNewFileLeft_->setShortcut(QKeySequence(Qt::Key_F10));
     actNewFileLeft_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (leftView_) leftView_->addAction(actNewFileLeft_);
+    if (leftView_)
+        leftView_->addAction(actNewFileLeft_);
     leftPaneBar_->addAction(actRenameLeft_);
     leftPaneBar_->addAction(actNewFileLeft_);
     leftPaneBar_->addAction(actNewDirLeft_);
@@ -505,38 +606,47 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     rightPaneBar_ = new QToolBar("RightBar", rightPane);
     rightPaneBar_->setIconSize(QSize(18, 18));
     rightPaneBar_->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    actUpRight_ = rightPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpRight);
+    actUpRight_ =
+        rightPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpRight);
     actUpRight_->setIcon(resIcon("action-go-up.svg"));
     actUpRight_->setToolTip(actUpRight_->text());
     // Button "Open right folder" next to Up
-    actChooseRight_  = rightPaneBar_->addAction(tr("Open right folder"),    this, &MainWindow::chooseRightDir);
+    actChooseRight_ = rightPaneBar_->addAction(tr("Open right folder"), this,
+                                               &MainWindow::chooseRightDir);
     actChooseRight_->setIcon(resIcon("action-open-folder.svg"));
     actChooseRight_->setToolTip(actChooseRight_->text());
 
     // Right panel actions (create first, then add in requested order)
     actDownloadF7_ = new QAction(tr("Download"), this);
-    connect(actDownloadF7_, &QAction::triggered, this, &MainWindow::downloadRightToLeft);
-    actDownloadF7_->setEnabled(false);   // starts disabled on local
+    connect(actDownloadF7_, &QAction::triggered, this,
+            &MainWindow::downloadRightToLeft);
+    actDownloadF7_->setEnabled(false); // starts disabled on local
     actDownloadF7_->setIcon(resIcon("action-download.svg"));
     actDownloadF7_->setToolTip(actDownloadF7_->text());
 
     actUploadRight_ = new QAction(tr("Upload…"), this);
-    connect(actUploadRight_, &QAction::triggered, this, &MainWindow::uploadViaDialog);
+    connect(actUploadRight_, &QAction::triggered, this,
+            &MainWindow::uploadViaDialog);
     actUploadRight_->setIcon(resIcon("action-upload.svg"));
     actUploadRight_->setToolTip(actUploadRight_->text());
     // Shortcut F8 on right panel to upload via dialog (remote only)
     actUploadRight_->setShortcut(QKeySequence(Qt::Key_F8));
     actUploadRight_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (rightView_) rightView_->addAction(actUploadRight_);
+    if (rightView_)
+        rightView_->addAction(actUploadRight_);
 
-    actNewDirRight_  = new QAction(tr("New folder"), this);
-    connect(actNewDirRight_,  &QAction::triggered, this, &MainWindow::newDirRight);
-    actRenameRight_  = new QAction(tr("Rename"), this);
-    connect(actRenameRight_,  &QAction::triggered, this, &MainWindow::renameRightSelected);
-    actDeleteRight_  = new QAction(tr("Delete"), this);
-    connect(actDeleteRight_,  &QAction::triggered, this, &MainWindow::deleteRightSelected);
+    actNewDirRight_ = new QAction(tr("New folder"), this);
+    connect(actNewDirRight_, &QAction::triggered, this,
+            &MainWindow::newDirRight);
+    actRenameRight_ = new QAction(tr("Rename"), this);
+    connect(actRenameRight_, &QAction::triggered, this,
+            &MainWindow::renameRightSelected);
+    actDeleteRight_ = new QAction(tr("Delete"), this);
+    connect(actDeleteRight_, &QAction::triggered, this,
+            &MainWindow::deleteRightSelected);
     actNewFileRight_ = new QAction(tr("New file"), this);
-    connect(actNewFileRight_, &QAction::triggered, this, &MainWindow::newFileRight);
+    connect(actNewFileRight_, &QAction::triggered, this,
+            &MainWindow::newFileRight);
     actNewDirRight_->setIcon(resIcon("action-new-folder.svg"));
     actNewDirRight_->setToolTip(actNewDirRight_->text());
     actRenameRight_->setIcon(resIcon("action-rename.svg"));
@@ -548,21 +658,26 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Shortcuts (right panel scope)
     actRenameRight_->setShortcut(QKeySequence(Qt::Key_F2));
     actRenameRight_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (rightView_) rightView_->addAction(actRenameRight_);
+    if (rightView_)
+        rightView_->addAction(actRenameRight_);
     actNewDirRight_->setShortcut(QKeySequence(Qt::Key_F9));
     actNewDirRight_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (rightView_) rightView_->addAction(actNewDirRight_);
+    if (rightView_)
+        rightView_->addAction(actNewDirRight_);
     actNewFileRight_->setShortcut(QKeySequence(Qt::Key_F10));
     actNewFileRight_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (rightView_) rightView_->addAction(actNewFileRight_);
+    if (rightView_)
+        rightView_->addAction(actNewFileRight_);
 
     // Order: Copy, Move, Delete, Rename, New folder, then Download/Upload
     rightPaneBar_->addSeparator();
     // Toolbar buttons with generic texts (Copy/Move)
     actCopyRightTb_ = new QAction(tr("Copy"), this);
-    connect(actCopyRightTb_, &QAction::triggered, this, &MainWindow::copyRightToLeft);
+    connect(actCopyRightTb_, &QAction::triggered, this,
+            &MainWindow::copyRightToLeft);
     actMoveRightTb_ = new QAction(tr("Move"), this);
-    connect(actMoveRightTb_, &QAction::triggered, this, &MainWindow::moveRightToLeft);
+    connect(actMoveRightTb_, &QAction::triggered, this,
+            &MainWindow::moveRightToLeft);
     actCopyRightTb_->setIcon(resIcon("action-copy.svg"));
     actCopyRightTb_->setToolTip(actCopyRightTb_->text());
     actMoveRightTb_->setIcon(resIcon("action-move-to-left.svg"));
@@ -570,10 +685,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Shortcuts F5/F6 on right panel (scope: right view)
     actCopyRightTb_->setShortcut(QKeySequence(Qt::Key_F5));
     actCopyRightTb_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (rightView_) rightView_->addAction(actCopyRightTb_);
+    if (rightView_)
+        rightView_->addAction(actCopyRightTb_);
     actMoveRightTb_->setShortcut(QKeySequence(Qt::Key_F6));
     actMoveRightTb_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (rightView_) rightView_->addAction(actMoveRightTb_);
+    if (rightView_)
+        rightView_->addAction(actMoveRightTb_);
     rightPaneBar_->addAction(actCopyRightTb_);
     rightPaneBar_->addAction(actMoveRightTb_);
     rightPaneBar_->addAction(actDeleteRight_);
@@ -587,14 +704,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     if (actDeleteRight_) {
         actDeleteRight_->setShortcut(QKeySequence(Qt::Key_Delete));
         actDeleteRight_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-        if (rightView_) rightView_->addAction(actDeleteRight_);
+        if (rightView_)
+            rightView_->addAction(actDeleteRight_);
     }
-    // Keyboard shortcut F7 on right panel: only acts when remote and with selection
+    // Keyboard shortcut F7 on right panel: only acts when remote and with
+    // selection
     if (rightView_) {
-        auto* scF7 = new QShortcut(QKeySequence(Qt::Key_F7), rightView_);
+        auto *scF7 = new QShortcut(QKeySequence(Qt::Key_F7), rightView_);
         scF7->setContext(Qt::WidgetWithChildrenShortcut);
         connect(scF7, &QShortcut::activated, this, [this] {
-            if (!rightIsRemote_) return; // only when remote
+            if (!rightIsRemote_)
+                return; // only when remote
             auto sel = rightView_->selectionModel();
             if (!sel || sel->selectedRows(NAME_COL).isEmpty()) {
                 statusBar()->showMessage(tr("Select items to download"), 2000);
@@ -604,9 +724,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         });
     }
     // Disable strictly-remote actions at startup
-    if (actDownloadF7_) actDownloadF7_->setEnabled(false);
+    if (actDownloadF7_)
+        actDownloadF7_->setEnabled(false);
     actUploadRight_->setEnabled(false);
-    if (actNewFileRight_) actNewFileRight_->setEnabled(false);
+    if (actNewFileRight_)
+        actNewFileRight_->setEnabled(false);
 
     // Right panel: toolbar -> path -> view
     rightLayout->addWidget(rightPaneBar_);
@@ -619,33 +741,38 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setCentralWidget(splitter);
 
     // Main toolbar (top)
-    auto* tb = addToolBar("Main");
+    auto *tb = addToolBar("Main");
     tb->setToolButtonStyle(Qt::ToolButtonIconOnly);
     tb->setMovable(false);
-    // Keep the system default size for the main toolbar and make sub‑toolbars slightly smaller
-    const int mainIconPx = tb->style()->pixelMetric(QStyle::PM_ToolBarIconSize, nullptr, tb);
-    const int subIconPx  = qMax(16, mainIconPx - 4); // sub‑toolbars slightly smaller
+    // Keep the system default size for the main toolbar and make sub‑toolbars
+    // slightly smaller
+    const int mainIconPx =
+        tb->style()->pixelMetric(QStyle::PM_ToolBarIconSize, nullptr, tb);
+    const int subIconPx =
+        qMax(16, mainIconPx - 4); // sub‑toolbars slightly smaller
     leftPaneBar_->setIconSize(QSize(subIconPx, subIconPx));
     rightPaneBar_->setIconSize(QSize(subIconPx, subIconPx));
     // Copy/move/delete actions now live in the left sub‑toolbar
-    actConnect_    = tb->addAction(tr("Connect (SFTP)"), this, &MainWindow::connectSftp);
+    actConnect_ =
+        tb->addAction(tr("Connect (SFTP)"), this, &MainWindow::connectSftp);
     actConnect_->setIcon(resIcon("action-connect.svg"));
     actConnect_->setToolTip(actConnect_->text());
     tb->addSeparator();
-    actDisconnect_ = tb->addAction(tr("Disconnect"),     this, &MainWindow::disconnectSftp);
+    actDisconnect_ =
+        tb->addAction(tr("Disconnect"), this, &MainWindow::disconnectSftp);
     actDisconnect_->setIcon(resIcon("action-disconnect.svg"));
     actDisconnect_->setToolTip(actDisconnect_->text());
     actDisconnect_->setEnabled(false);
 
     // Show text to the LEFT of the icon for Connect/Disconnect buttons only
-    if (QWidget* w = tb->widgetForAction(actConnect_)) {
-        if (auto* b = qobject_cast<QToolButton*>(w)) {
+    if (QWidget *w = tb->widgetForAction(actConnect_)) {
+        if (auto *b = qobject_cast<QToolButton *>(w)) {
             b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
             b->setText(tr("Connect"));
         }
     }
-    if (QWidget* w = tb->widgetForAction(actDisconnect_)) {
-        if (auto* b = qobject_cast<QToolButton*>(w)) {
+    if (QWidget *w = tb->widgetForAction(actDisconnect_)) {
+        if (auto *b = qobject_cast<QToolButton *>(w)) {
             b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
             b->setText(tr("Disconnect"));
         }
@@ -663,20 +790,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     actSites_->setIcon(resIcon("action-open-saved-sites.svg"));
     actSites_->setToolTip(actSites_->text());
     tb->addSeparator();
-    actShowQueue_ = tb->addAction(tr("Transfers"), [this] {
-        showTransferQueue();
-    });
+    actShowQueue_ =
+        tb->addAction(tr("Transfers"), [this] { showTransferQueue(); });
     actShowQueue_->setIcon(resIcon("action-open-transfer-queue.svg"));
     actShowQueue_->setToolTip(actShowQueue_->text());
     // Show text beside icon for Sites and Queue too
-    if (QWidget* w = tb->widgetForAction(actSites_)) {
-        if (auto* b = qobject_cast<QToolButton*>(w)) {
+    if (QWidget *w = tb->widgetForAction(actSites_)) {
+        if (auto *b = qobject_cast<QToolButton *>(w)) {
             b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
             b->setText(tr("Saved sites"));
         }
     }
-    if (QWidget* w = tb->widgetForAction(actShowQueue_)) {
-        if (auto* b = qobject_cast<QToolButton*>(w)) {
+    if (QWidget *w = tb->widgetForAction(actShowQueue_)) {
+        if (auto *b = qobject_cast<QToolButton *>(w)) {
             b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
             b->setText(tr("Transfers"));
         }
@@ -689,13 +815,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Global fullscreen toggle (standard platform shortcut)
     // macOS: Ctrl+Cmd+F, Linux: F11
     {
-        QAction* actToggleFs = new QAction(tr("Full screen"), this);
+        QAction *actToggleFs = new QAction(tr("Full screen"), this);
         actToggleFs->setShortcut(QKeySequence::FullScreen);
         actToggleFs->setShortcutContext(Qt::ApplicationShortcut);
         connect(actToggleFs, &QAction::triggered, this, [this] {
             const bool fs = (windowState() & Qt::WindowFullScreen);
-            if (fs) setWindowState(windowState() & ~Qt::WindowFullScreen);
-            else    setWindowState(windowState() |  Qt::WindowFullScreen);
+            if (fs)
+                setWindowState(windowState() & ~Qt::WindowFullScreen);
+            else
+                setWindowState(windowState() | Qt::WindowFullScreen);
         });
         this->addAction(actToggleFs);
     }
@@ -705,32 +833,40 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     // Spacer to push next action to the far right
     {
-        QWidget* spacer = new QWidget(this);
+        QWidget *spacer = new QWidget(this);
         spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         tb->addWidget(spacer);
     }
     // Visual separator before the right-side buttons
     tb->addSeparator();
     // About button (to the left of Settings)
-    actAboutToolbar_ = tb->addAction(resIcon("action-open-about-us.svg"), tr("About OpenSCP"), this, &MainWindow::showAboutDialog);
-    if (actAboutToolbar_) actAboutToolbar_->setToolTip(actAboutToolbar_->text());
+    actAboutToolbar_ =
+        tb->addAction(resIcon("action-open-about-us.svg"), tr("About OpenSCP"),
+                      this, &MainWindow::showAboutDialog);
+    if (actAboutToolbar_)
+        actAboutToolbar_->setToolTip(actAboutToolbar_->text());
     // Settings button (far right)
-    actPrefsToolbar_ = tb->addAction(resIcon("action-open-settings.svg"), tr("Settings"), this, &MainWindow::showSettingsDialog);
+    actPrefsToolbar_ =
+        tb->addAction(resIcon("action-open-settings.svg"), tr("Settings"), this,
+                      &MainWindow::showSettingsDialog);
     actPrefsToolbar_->setToolTip(actPrefsToolbar_->text());
 
     // Global shortcuts were already added to their respective actions
 
     // Menu bar (native on macOS)
     // Duplicate actions so users who prefer the classic menu can use it.
-    appMenu_  = menuBar()->addMenu(tr("OpenSCP"));
-    actAbout_ = appMenu_->addAction(tr("About OpenSCP"), this, &MainWindow::showAboutDialog);
+    appMenu_ = menuBar()->addMenu(tr("OpenSCP"));
+    actAbout_ = appMenu_->addAction(tr("About OpenSCP"), this,
+                                    &MainWindow::showAboutDialog);
     actAbout_->setMenuRole(QAction::AboutRole);
-    actPrefs_ = appMenu_->addAction(tr("Settings…"), this, &MainWindow::showSettingsDialog);
+    actPrefs_ = appMenu_->addAction(tr("Settings…"), this,
+                                    &MainWindow::showSettingsDialog);
     actPrefs_->setMenuRole(QAction::PreferencesRole);
-    // Standard cross‑platform shortcut (Cmd+, on macOS; Ctrl+, on Linux/Windows)
+    // Standard cross‑platform shortcut (Cmd+, on macOS; Ctrl+, on
+    // Linux/Windows)
     actPrefs_->setShortcut(QKeySequence::Preferences);
     appMenu_->addSeparator();
-    actQuit_  = appMenu_->addAction(tr("Quit"), qApp, &QApplication::quit);
+    actQuit_ = appMenu_->addAction(tr("Quit"), qApp, &QApplication::quit);
     actQuit_->setMenuRole(QAction::QuitRole);
     // Standard quit shortcut (Cmd+Q / Ctrl+Q)
     actQuit_->setShortcut(QKeySequence::Quit);
@@ -744,7 +880,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     fileMenu_->addAction(actSites_);
     fileMenu_->addAction(actShowQueue_);
     // On non‑macOS platforms, also show Preferences and Quit under "File"
-    // to provide a familiar UX on Linux/Windows while keeping the "OpenSCP" app menu.
+    // to provide a familiar UX on Linux/Windows while keeping the "OpenSCP" app
+    // menu.
 #ifndef Q_OS_MAC
     fileMenu_->addSeparator();
     fileMenu_->addAction(actPrefs_);
@@ -752,52 +889,64 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 #endif
 
     // Help (avoid native help menu to skip the search box)
-    auto* helpMenu = menuBar()->addMenu(tr("Help"));
+    auto *helpMenu = menuBar()->addMenu(tr("Help"));
     // On macOS, a menu titled exactly "Help" triggers the native search bar.
-    // Keep visible label "Help" but avoid detection by inserting a zero‑width space.
+    // Keep visible label "Help" but avoid detection by inserting a zero‑width
+    // space.
 #ifdef Q_OS_MAC
     {
         const QString t = helpMenu->title();
         if (t.compare(QStringLiteral("Help"), Qt::CaseInsensitive) == 0) {
-            helpMenu->setTitle(QStringLiteral("Hel") + QChar(0x200B) + QStringLiteral("p"));
+            helpMenu->setTitle(QStringLiteral("Hel") + QChar(0x200B) +
+                               QStringLiteral("p"));
         }
     }
 #endif
     helpMenu->menuAction()->setMenuRole(QAction::NoRole);
     // Prevent macOS from moving actions to the app menu: force NoRole
     {
-        QAction* helpAboutAct = new QAction(tr("About OpenSCP"), this);
+        QAction *helpAboutAct = new QAction(tr("About OpenSCP"), this);
         helpAboutAct->setMenuRole(QAction::NoRole);
-        connect(helpAboutAct, &QAction::triggered, this, &MainWindow::showAboutDialog);
+        connect(helpAboutAct, &QAction::triggered, this,
+                &MainWindow::showAboutDialog);
         helpMenu->addAction(helpAboutAct);
     }
     {
-        QAction* reportAct = new QAction(tr("Report a bug"), this);
+        QAction *reportAct = new QAction(tr("Report a bug"), this);
         reportAct->setMenuRole(QAction::NoRole);
-        connect(reportAct, &QAction::triggered, this, []{
-            QDesktopServices::openUrl(QUrl("https://github.com/luiscuellar31/openscp/issues"));
+        connect(reportAct, &QAction::triggered, this, [] {
+            QDesktopServices::openUrl(
+                QUrl("https://github.com/luiscuellar31/openscp/issues"));
         });
         helpMenu->addAction(reportAct);
     }
 
     // Double click/Enter navigation on both panes
-    connect(rightView_, &QTreeView::activated, this, &MainWindow::rightItemActivated);
-    connect(leftView_,  &QTreeView::activated, this, &MainWindow::leftItemActivated);
+    connect(rightView_, &QTreeView::activated, this,
+            &MainWindow::rightItemActivated);
+    connect(leftView_, &QTreeView::activated, this,
+            &MainWindow::leftItemActivated);
 
     // Context menu on right pane
     rightView_->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(rightView_, &QWidget::customContextMenuRequested, this, &MainWindow::showRightContextMenu);
+    connect(rightView_, &QWidget::customContextMenuRequested, this,
+            &MainWindow::showRightContextMenu);
     if (rightView_->selectionModel()) {
-        connect(rightView_->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]{ updateDeleteShortcutEnables(); });
+        connect(rightView_->selectionModel(),
+                &QItemSelectionModel::selectionChanged, this,
+                [this] { updateDeleteShortcutEnables(); });
     }
 
     // Context menu on left pane (local)
     leftView_->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(leftView_, &QWidget::customContextMenuRequested, this, &MainWindow::showLeftContextMenu);
+    connect(leftView_, &QWidget::customContextMenuRequested, this,
+            &MainWindow::showLeftContextMenu);
 
     // Enable delete shortcut only when there is a selection on the left pane
     if (leftView_->selectionModel()) {
-        connect(leftView_->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]{ updateDeleteShortcutEnables(); });
+        connect(leftView_->selectionModel(),
+                &QItemSelectionModel::selectionChanged, this,
+                [this] { updateDeleteShortcutEnables(); });
     }
 
     {
@@ -813,26 +962,36 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Transfer queue
     transferMgr_ = new TransferManager(this);
     // Provide transfer manager to views (for async remote drag-out staging)
-    if (auto* lv = qobject_cast<DragAwareTreeView*>(leftView_))  lv->setTransferManager(transferMgr_);
-    if (auto* rv = qobject_cast<DragAwareTreeView*>(rightView_)) rv->setTransferManager(transferMgr_);
+    if (auto *lv = qobject_cast<DragAwareTreeView *>(leftView_))
+        lv->setTransferManager(transferMgr_);
+    if (auto *rv = qobject_cast<DragAwareTreeView *>(rightView_))
+        rv->setTransferManager(transferMgr_);
 
-    // Startup cleanup (deferred): remove old staging batches if autoCleanStaging is enabled
-    QTimer::singleShot(0, this, [this]{
+    // Startup cleanup (deferred): remove old staging batches if
+    // autoCleanStaging is enabled
+    QTimer::singleShot(0, this, [this] {
         QSettings s("OpenSCP", "OpenSCP");
-        const bool autoClean = s.value("Advanced/autoCleanStaging", true).toBool();
-        if (!autoClean) return;
+        const bool autoClean =
+            s.value("Advanced/autoCleanStaging", true).toBool();
+        if (!autoClean)
+            return;
         QString root = s.value("Advanced/stagingRoot").toString();
-        if (root.isEmpty()) root = QDir::homePath() + "/Downloads/OpenSCP-Dragged";
+        if (root.isEmpty())
+            root = QDir::homePath() + "/Downloads/OpenSCP-Dragged";
         QDir r(root);
-        if (!r.exists()) return;
+        if (!r.exists())
+            return;
         const QDateTime now = QDateTime::currentDateTimeUtc();
         const qint64 maxAgeMs = qint64(7) * 24 * 60 * 60 * 1000; // 7 days
         // Match timestamp batches: yyyyMMdd-HHmmss
         QRegularExpression re("^\\d{8}-\\d{6}$");
-        const auto entries = r.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks);
-        for (const QFileInfo& fi : entries) {
-            if (fi.isSymLink()) continue; // do not follow symlinks
-            if (!re.match(fi.fileName()).hasMatch()) continue; // only batches
+        const auto entries = r.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot |
+                                             QDir::NoSymLinks);
+        for (const QFileInfo &fi : entries) {
+            if (fi.isSymLink())
+                continue; // do not follow symlinks
+            if (!re.match(fi.fileName()).hasMatch())
+                continue; // only batches
             const QDateTime m = fi.lastModified().toUTC();
             if (m.isValid() && m.msecsTo(now) > maxAgeMs) {
                 QDir(fi.absoluteFilePath()).removeRecursively();
@@ -840,11 +999,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         }
     });
 
-    // Warn if insecure storage is active (non‑Apple only when explicitly enabled)
+    // Warn if insecure storage is active (non‑Apple only when explicitly
+    // enabled)
     if (SecretStore::insecureFallbackActive()) {
-        auto* warn = new QLabel(tr("Warning: unencrypted secrets storage active (fallback)"), this);
-        warn->setStyleSheet("QLabel{ color:#b00020; font-weight:bold; padding:2px 6px; }");
-        warn->setToolTip(tr("You are using unencrypted credentials storage enabled via environment variable. Disable OPEN_SCP_ENABLE_INSECURE_FALLBACK to hide this warning."));
+        auto *warn = new QLabel(
+            tr("Warning: unencrypted secrets storage active (fallback)"), this);
+        warn->setStyleSheet(
+            "QLabel{ color:#b00020; font-weight:bold; padding:2px 6px; }");
+        warn->setToolTip(
+            tr("You are using unencrypted credentials storage enabled via "
+               "environment variable. Disable "
+               "OPEN_SCP_ENABLE_INSECURE_FALLBACK to hide this warning."));
         statusBar()->addPermanentWidget(warn, 0);
     }
 
@@ -855,16 +1020,21 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Startup preferences and migration
     {
         QSettings s("OpenSCP", "OpenSCP");
-        // One-shot migration: if only showConnOnStart exists, copy to openSiteManagerOnDisconnect
-        if (!s.contains("UI/openSiteManagerOnDisconnect") && s.contains("UI/showConnOnStart")) {
+        // One-shot migration: if only showConnOnStart exists, copy to
+        // openSiteManagerOnDisconnect
+        if (!s.contains("UI/openSiteManagerOnDisconnect") &&
+            s.contains("UI/showConnOnStart")) {
             const bool v = s.value("UI/showConnOnStart", true).toBool();
             s.setValue("UI/openSiteManagerOnDisconnect", v);
             s.sync();
         }
-        m_openSiteManagerOnStartup    = s.value("UI/showConnOnStart", true).toBool();
-        m_openSiteManagerOnDisconnect = s.value("UI/openSiteManagerOnDisconnect", true).toBool();
-        if (m_openSiteManagerOnStartup && !QCoreApplication::closingDown() && !sftp_) {
-            QTimer::singleShot(0, this, [this]{ showSiteManagerNonModal(); });
+        m_openSiteManagerOnStartup =
+            s.value("UI/showConnOnStart", true).toBool();
+        m_openSiteManagerOnDisconnect =
+            s.value("UI/openSiteManagerOnDisconnect", true).toBool();
+        if (m_openSiteManagerOnStartup && !QCoreApplication::closingDown() &&
+            !sftp_) {
+            QTimer::singleShot(0, this, [this] { showSiteManagerNonModal(); });
         }
     }
 }
@@ -885,64 +1055,73 @@ void MainWindow::showSettingsDialog() {
 
 // Browse and set the left pane root directory.
 void MainWindow::chooseLeftDir() {
-    const QString dir = QFileDialog::getExistingDirectory(this, tr("Select left folder"), leftPath_->text());
-    if (!dir.isEmpty()) setLeftRoot(dir);
+    const QString dir = QFileDialog::getExistingDirectory(
+        this, tr("Select left folder"), leftPath_->text());
+    if (!dir.isEmpty())
+        setLeftRoot(dir);
 }
 
 // Browse and set the right pane root directory (local mode).
 void MainWindow::chooseRightDir() {
-    const QString dir = QFileDialog::getExistingDirectory(this, tr("Select right folder"), rightPath_->text());
-    if (!dir.isEmpty()) setRightRoot(dir);
+    const QString dir = QFileDialog::getExistingDirectory(
+        this, tr("Select right folder"), rightPath_->text());
+    if (!dir.isEmpty())
+        setRightRoot(dir);
 }
 
 // Navigate left pane to the path typed by the user.
-void MainWindow::leftPathEntered() {
-    setLeftRoot(leftPath_->text());
-}
+void MainWindow::leftPathEntered() { setLeftRoot(leftPath_->text()); }
 
 // Navigate right pane (local or remote) to the path typed by the user.
 void MainWindow::rightPathEntered() {
-    if (rightIsRemote_) setRightRemoteRoot(rightPath_->text());
-    else setRightRoot(rightPath_->text());
+    if (rightIsRemote_)
+        setRightRemoteRoot(rightPath_->text());
+    else
+        setRightRoot(rightPath_->text());
 }
 
 // Set the left pane root, validating the path and updating view/status.
-void MainWindow::setLeftRoot(const QString& path) {
+void MainWindow::setLeftRoot(const QString &path) {
     if (QDir(path).exists()) {
         leftPath_->setText(path);
         leftView_->setRootIndex(leftModel_->index(path));
         statusBar()->showMessage(tr("Left: ") + path, 3000);
         updateDeleteShortcutEnables();
     } else {
-        QMessageBox::warning(this, tr("Invalid path"), tr("Folder does not exist."));
+        QMessageBox::warning(this, tr("Invalid path"),
+                             tr("Folder does not exist."));
     }
 }
 
 // Set the right (local) pane root and update view/status.
-void MainWindow::setRightRoot(const QString& path) {
+void MainWindow::setRightRoot(const QString &path) {
     if (QDir(path).exists()) {
         rightPath_->setText(path);
         rightView_->setRootIndex(rightLocalModel_->index(path)); // <-- here
         statusBar()->showMessage(tr("Right: ") + path, 3000);
         updateDeleteShortcutEnables();
     } else {
-        QMessageBox::warning(this, tr("Invalid path"), tr("Folder does not exist."));
+        QMessageBox::warning(this, tr("Invalid path"),
+                             tr("Folder does not exist."));
     }
 }
 
-static QString joinRemotePath(const QString& base, const QString& name) {
-    if (base == "/") return "/" + name;
+static QString joinRemotePath(const QString &base, const QString &name) {
+    if (base == "/")
+        return "/" + name;
     return base.endsWith('/') ? base + name : base + "/" + name;
 }
 
 // Center the window on first show for better UX.
-void MainWindow::showEvent(QShowEvent* e) {
+void MainWindow::showEvent(QShowEvent *e) {
     QMainWindow::showEvent(e);
     if (firstShow_) {
         firstShow_ = false;
         QRect avail;
-        if (this->screen()) avail = this->screen()->availableGeometry();
-        else if (auto ps = QGuiApplication::primaryScreen()) avail = ps->availableGeometry();
+        if (this->screen())
+            avail = this->screen()->availableGeometry();
+        else if (auto ps = QGuiApplication::primaryScreen())
+            avail = ps->availableGeometry();
         if (avail.isValid()) {
             const QSize sz = size();
             const int x = avail.center().x() - sz.width() / 2;
@@ -954,49 +1133,62 @@ void MainWindow::showEvent(QShowEvent* e) {
 
 void MainWindow::copyLeftToRight() {
     if (rightIsRemote_) {
-        // ---- REMOTE branch: upload files (PUT) to the current remote directory ----
+        // ---- REMOTE branch: upload files (PUT) to the current remote
+        // directory ----
         if (!sftp_ || !rightRemoteModel_) {
-            QMessageBox::warning(this, tr("SFTP"), tr("No active SFTP session."));
+            QMessageBox::warning(this, tr("SFTP"),
+                                 tr("No active SFTP session."));
             return;
         }
 
         // Selection on the left panel (local source)
         auto sel = leftView_->selectionModel();
         if (!sel) {
-            QMessageBox::warning(this, tr("Copy"), tr("No selection available."));
+            QMessageBox::warning(this, tr("Copy"),
+                                 tr("No selection available."));
             return;
         }
         const auto rows = sel->selectedRows(NAME_COL);
         if (rows.isEmpty()) {
-            QMessageBox::information(this, tr("Copy"), tr("No entries selected in the left panel."));
+            QMessageBox::information(
+                this, tr("Copy"), tr("No entries selected in the left panel."));
             return;
         }
 
         // Always enqueue uploads
         const QString remoteBase = rightRemoteModel_->rootPath();
         int enq = 0;
-        for (const QModelIndex& idx : rows) {
+        for (const QModelIndex &idx : rows) {
             const QFileInfo fi = leftModel_->fileInfo(idx);
             if (fi.isDir()) {
-                const QString remoteDirBase = joinRemotePath(remoteBase, fi.fileName());
-                QDirIterator it(fi.absoluteFilePath(), QDir::NoDotAndDotDot | QDir::AllEntries, QDirIterator::Subdirectories);
+                const QString remoteDirBase =
+                    joinRemotePath(remoteBase, fi.fileName());
+                QDirIterator it(fi.absoluteFilePath(),
+                                QDir::NoDotAndDotDot | QDir::AllEntries,
+                                QDirIterator::Subdirectories);
                 while (it.hasNext()) {
                     it.next();
                     const QFileInfo sfi = it.fileInfo();
-                    if (!sfi.isFile()) continue;
-                    const QString rel = QDir(fi.absoluteFilePath()).relativeFilePath(sfi.absoluteFilePath());
+                    if (!sfi.isFile())
+                        continue;
+                    const QString rel =
+                        QDir(fi.absoluteFilePath())
+                            .relativeFilePath(sfi.absoluteFilePath());
                     const QString rTarget = joinRemotePath(remoteDirBase, rel);
-                    transferMgr_->enqueueUpload(sfi.absoluteFilePath(), rTarget);
+                    transferMgr_->enqueueUpload(sfi.absoluteFilePath(),
+                                                rTarget);
                     ++enq;
                 }
             } else {
-                const QString rTarget = joinRemotePath(remoteBase, fi.fileName());
+                const QString rTarget =
+                    joinRemotePath(remoteBase, fi.fileName());
                 transferMgr_->enqueueUpload(fi.absoluteFilePath(), rTarget);
                 ++enq;
             }
         }
         if (enq > 0) {
-            statusBar()->showMessage(QString(tr("Queued: %1 uploads")).arg(enq), 4000);
+            statusBar()->showMessage(QString(tr("Queued: %1 uploads")).arg(enq),
+                                     4000);
             maybeShowTransferQueue();
         }
         return;
@@ -1006,7 +1198,8 @@ void MainWindow::copyLeftToRight() {
     const QString dstDirPath = rightPath_->text();
     QDir dstDir(dstDirPath);
     if (!dstDir.exists()) {
-        QMessageBox::warning(this, tr("Invalid destination"), tr("Destination folder does not exist."));
+        QMessageBox::warning(this, tr("Invalid destination"),
+                             tr("Destination folder does not exist."));
         return;
     }
 
@@ -1017,7 +1210,8 @@ void MainWindow::copyLeftToRight() {
     }
     const auto rows = sel->selectedRows(NAME_COL);
     if (rows.isEmpty()) {
-        QMessageBox::information(this, tr("Copy"), tr("No entries selected in the left panel."));
+        QMessageBox::information(this, tr("Copy"),
+                                 tr("No entries selected in the left panel."));
         return;
     }
 
@@ -1027,29 +1221,35 @@ void MainWindow::copyLeftToRight() {
     int ok = 0, fail = 0, skipped = 0;
     QString lastError;
 
-    for (const QModelIndex& idx : rows) {
+    for (const QModelIndex &idx : rows) {
         const QFileInfo fi = leftModel_->fileInfo(idx);
         const QString target = dstDir.filePath(fi.fileName());
 
         if (QFileInfo::exists(target)) {
             if (policy == OverwritePolicy::Ask) {
                 auto ret = QMessageBox::question(
-                    this,
-                    tr("Conflict"),
-                    QString(tr("“%1” already exists at destination.\nOverwrite?")) .arg(fi.fileName()),
-                    QMessageBox::Yes | QMessageBox::No | QMessageBox::YesToAll | QMessageBox::NoToAll
-                );
-                if (ret == QMessageBox::YesToAll) policy = OverwritePolicy::OverwriteAll;
-                else if (ret == QMessageBox::NoToAll) policy = OverwritePolicy::SkipAll;
+                    this, tr("Conflict"),
+                    QString(
+                        tr("“%1” already exists at destination.\nOverwrite?"))
+                        .arg(fi.fileName()),
+                    QMessageBox::Yes | QMessageBox::No | QMessageBox::YesToAll |
+                        QMessageBox::NoToAll);
+                if (ret == QMessageBox::YesToAll)
+                    policy = OverwritePolicy::OverwriteAll;
+                else if (ret == QMessageBox::NoToAll)
+                    policy = OverwritePolicy::SkipAll;
 
-                if (ret == QMessageBox::No || policy == OverwritePolicy::SkipAll) {
+                if (ret == QMessageBox::No ||
+                    policy == OverwritePolicy::SkipAll) {
                     ++skipped;
                     continue;
                 }
             }
             QFileInfo tfi(target);
-            if (tfi.isDir()) QDir(target).removeRecursively();
-            else QFile::remove(target);
+            if (tfi.isDir())
+                QDir(target).removeRecursively();
+            else
+                QFile::remove(target);
         }
 
         QString err;
@@ -1065,34 +1265,49 @@ void MainWindow::copyLeftToRight() {
                       .arg(ok)
                       .arg(fail)
                       .arg(skipped);
-    if (fail > 0 && !lastError.isEmpty()) msg += "\n" + tr("Last error: ") + lastError;
+    if (fail > 0 && !lastError.isEmpty())
+        msg += "\n" + tr("Last error: ") + lastError;
     statusBar()->showMessage(msg, 6000);
 }
 
 void MainWindow::moveLeftToRight() {
     if (rightIsRemote_) {
-        if (!sftp_ || !rightRemoteModel_) { QMessageBox::warning(this, tr("SFTP"), tr("No active SFTP session.")); return; }
+        if (!sftp_ || !rightRemoteModel_) {
+            QMessageBox::warning(this, tr("SFTP"),
+                                 tr("No active SFTP session."));
+            return;
+        }
         const auto rows = leftView_->selectionModel()->selectedRows(NAME_COL);
-        if (rows.isEmpty()) { QMessageBox::information(this, tr("Move"), tr("No entries selected in the left panel.")); return; }
+        if (rows.isEmpty()) {
+            QMessageBox::information(
+                this, tr("Move"), tr("No entries selected in the left panel."));
+            return;
+        }
         if (QMessageBox::question(this, tr("Confirm move"),
-                                  tr("This will upload to the server and delete the local source.\nContinue?")) != QMessageBox::Yes) return;
+                                  tr("This will upload to the server and "
+                                     "delete the local source.\nContinue?")) !=
+            QMessageBox::Yes)
+            return;
         const QString remoteBase = rightRemoteModel_->rootPath();
         struct UploadPair {
             QString localPath;
             QString remotePath;
-            QString topLocalDir; // non-empty only for files that belong to a moved directory
+            QString topLocalDir; // non-empty only for files that belong to a
+                                 // moved directory
         };
         QVector<UploadPair> pairs;
         int skippedPrep = 0;
         int movedEmptyDirs = 0;
         QString prepError;
 
-        auto ensureRemoteDir = [&](const QString& dir) -> bool {
-            if (dir.isEmpty()) return true;
+        auto ensureRemoteDir = [&](const QString &dir) -> bool {
+            if (dir.isEmpty())
+                return true;
             QString cur = "/";
             const QStringList parts = dir.split('/', Qt::SkipEmptyParts);
-            for (const QString& part : parts) {
-                const QString next = (cur == "/") ? ("/" + part) : (cur + "/" + part);
+            for (const QString &part : parts) {
+                const QString next =
+                    (cur == "/") ? ("/" + part) : (cur + "/" + part);
                 bool isD = false;
                 std::string e;
                 const bool ex = sftp_->exists(next.toStdString(), isD, e);
@@ -1112,27 +1327,40 @@ void MainWindow::moveLeftToRight() {
             return true;
         };
 
-        for (const QModelIndex& idx : rows) {
+        for (const QModelIndex &idx : rows) {
             const QFileInfo fi = leftModel_->fileInfo(idx);
             if (fi.isDir()) {
                 const QString topLocalDir = fi.absoluteFilePath();
-                const QString baseRemoteDir = joinRemotePath(remoteBase, fi.fileName());
-                if (!ensureRemoteDir(baseRemoteDir)) { ++skippedPrep; continue; }
+                const QString baseRemoteDir =
+                    joinRemotePath(remoteBase, fi.fileName());
+                if (!ensureRemoteDir(baseRemoteDir)) {
+                    ++skippedPrep;
+                    continue;
+                }
                 const int pairStart = pairs.size();
                 bool dirPrepFailed = false;
                 int filesInDir = 0;
-                QDirIterator it(topLocalDir, QDir::NoDotAndDotDot | QDir::AllEntries, QDirIterator::Subdirectories);
+                QDirIterator it(topLocalDir,
+                                QDir::NoDotAndDotDot | QDir::AllEntries,
+                                QDirIterator::Subdirectories);
                 while (it.hasNext()) {
                     it.next();
                     const QFileInfo sfi = it.fileInfo();
-                    const QString rel = QDir(topLocalDir).relativeFilePath(sfi.absoluteFilePath());
+                    const QString rel =
+                        QDir(topLocalDir)
+                            .relativeFilePath(sfi.absoluteFilePath());
                     const QString rTarget = joinRemotePath(baseRemoteDir, rel);
                     if (sfi.isDir()) {
-                        if (!ensureRemoteDir(rTarget)) { dirPrepFailed = true; break; }
+                        if (!ensureRemoteDir(rTarget)) {
+                            dirPrepFailed = true;
+                            break;
+                        }
                         continue;
                     }
-                    if (!sfi.isFile()) continue;
-                    pairs.push_back({ sfi.absoluteFilePath(), rTarget, topLocalDir });
+                    if (!sfi.isFile())
+                        continue;
+                    pairs.push_back(
+                        {sfi.absoluteFilePath(), rTarget, topLocalDir});
                     ++filesInDir;
                 }
                 if (dirPrepFailed) {
@@ -1141,24 +1369,37 @@ void MainWindow::moveLeftToRight() {
                     continue;
                 }
                 if (filesInDir == 0) {
-                    if (QDir(topLocalDir).removeRecursively()) ++movedEmptyDirs;
-                    else { ++skippedPrep; prepError = tr("Could not delete source: ") + topLocalDir; }
+                    if (QDir(topLocalDir).removeRecursively())
+                        ++movedEmptyDirs;
+                    else {
+                        ++skippedPrep;
+                        prepError =
+                            tr("Could not delete source: ") + topLocalDir;
+                    }
                 }
             } else if (fi.isFile()) {
-                const QString rTarget = joinRemotePath(remoteBase, fi.fileName());
-                pairs.push_back({ fi.absoluteFilePath(), rTarget, QString() });
+                const QString rTarget =
+                    joinRemotePath(remoteBase, fi.fileName());
+                pairs.push_back({fi.absoluteFilePath(), rTarget, QString()});
             }
         }
 
-        for (const auto& p : pairs) transferMgr_->enqueueUpload(p.localPath, p.remotePath);
+        for (const auto &p : pairs)
+            transferMgr_->enqueueUpload(p.localPath, p.remotePath);
         if (!pairs.isEmpty()) {
-            statusBar()->showMessage(QString(tr("Queued: %1 uploads (move)")).arg(pairs.size()), 4000);
+            statusBar()->showMessage(
+                QString(tr("Queued: %1 uploads (move)")).arg(pairs.size()),
+                4000);
             maybeShowTransferQueue();
         } else if (movedEmptyDirs > 0) {
-            statusBar()->showMessage(QString(tr("Moved OK: %1 (empty folders)")).arg(movedEmptyDirs), 4000);
+            statusBar()->showMessage(
+                QString(tr("Moved OK: %1 (empty folders)")).arg(movedEmptyDirs),
+                4000);
         } else if (skippedPrep > 0) {
-            QString msg = QString(tr("Could not prepare items to move: %1")).arg(skippedPrep);
-            if (!prepError.isEmpty()) msg += "\n" + tr("Last error: ") + prepError;
+            QString msg = QString(tr("Could not prepare items to move: %1"))
+                              .arg(skippedPrep);
+            if (!prepError.isEmpty())
+                msg += "\n" + tr("Last error: ") + prepError;
             statusBar()->showMessage(msg, 5000);
         }
 
@@ -1180,93 +1421,117 @@ void MainWindow::moveLeftToRight() {
             state->skipped = skippedPrep;
             state->lastError = prepError;
 
-            for (const auto& p : pairs) {
+            for (const auto &p : pairs) {
                 state->pendingLocalFiles.insert(p.localPath);
                 if (!p.topLocalDir.isEmpty()) {
                     state->fileToTopDir.insert(p.localPath, p.topLocalDir);
-                    state->remainingInTopDir[p.topLocalDir] = state->remainingInTopDir.value(p.topLocalDir) + 1;
+                    state->remainingInTopDir[p.topLocalDir] =
+                        state->remainingInTopDir.value(p.topLocalDir) + 1;
                 }
             }
 
             auto connPtr = std::make_shared<QMetaObject::Connection>();
-            *connPtr = connect(transferMgr_, &TransferManager::tasksChanged, this, [this, state, remoteBase, connPtr, pairs]() {
-                const auto tasks = transferMgr_->tasksSnapshot();
+            *connPtr = connect(
+                transferMgr_, &TransferManager::tasksChanged, this,
+                [this, state, remoteBase, connPtr, pairs]() {
+                    const auto tasks = transferMgr_->tasksSnapshot();
 
-                for (const auto& t : tasks) {
-                    if (t.type != TransferTask::Type::Upload) continue;
-                    const QString local = t.src;
-                    if (!state->pendingLocalFiles.contains(local)) continue;
-                    if (state->processedLocalFiles.contains(local)) continue;
-                    if (t.status != TransferTask::Status::Done &&
-                        t.status != TransferTask::Status::Error &&
-                        t.status != TransferTask::Status::Canceled) {
-                        continue;
-                    }
+                    for (const auto &t : tasks) {
+                        if (t.type != TransferTask::Type::Upload)
+                            continue;
+                        const QString local = t.src;
+                        if (!state->pendingLocalFiles.contains(local))
+                            continue;
+                        if (state->processedLocalFiles.contains(local))
+                            continue;
+                        if (t.status != TransferTask::Status::Done &&
+                            t.status != TransferTask::Status::Error &&
+                            t.status != TransferTask::Status::Canceled) {
+                            continue;
+                        }
 
-                    state->processedLocalFiles.insert(local);
-                    const QString topDir = state->fileToTopDir.value(local);
-                    const bool uploadDone = (t.status == TransferTask::Status::Done);
-                    if (uploadDone) {
-                        const bool removed = !QFileInfo::exists(local) || QFile::remove(local);
-                        if (removed) {
-                            ++state->movedOk;
+                        state->processedLocalFiles.insert(local);
+                        const QString topDir = state->fileToTopDir.value(local);
+                        const bool uploadDone =
+                            (t.status == TransferTask::Status::Done);
+                        if (uploadDone) {
+                            const bool removed = !QFileInfo::exists(local) ||
+                                                 QFile::remove(local);
+                            if (removed) {
+                                ++state->movedOk;
+                            } else {
+                                ++state->failed;
+                                state->lastError =
+                                    tr("Could not delete source: ") + local;
+                                if (!topDir.isEmpty())
+                                    state->failedTopDirs.insert(topDir);
+                            }
                         } else {
                             ++state->failed;
-                            state->lastError = tr("Could not delete source: ") + local;
-                            if (!topDir.isEmpty()) state->failedTopDirs.insert(topDir);
+                            if (!t.error.isEmpty())
+                                state->lastError = t.error;
+                            if (!topDir.isEmpty())
+                                state->failedTopDirs.insert(topDir);
                         }
-                    } else {
-                        ++state->failed;
-                        if (!t.error.isEmpty()) state->lastError = t.error;
-                        if (!topDir.isEmpty()) state->failedTopDirs.insert(topDir);
-                    }
 
-                    if (!topDir.isEmpty()) {
-                        const int rem = qMax(0, state->remainingInTopDir.value(topDir) - 1);
-                        state->remainingInTopDir[topDir] = rem;
-                        if (rem == 0 && !state->failedTopDirs.contains(topDir) && QDir(topDir).exists()) {
-                            if (!QDir(topDir).removeRecursively()) {
-                                ++state->failed;
-                                state->lastError = tr("Could not delete source: ") + topDir;
+                        if (!topDir.isEmpty()) {
+                            const int rem = qMax(
+                                0, state->remainingInTopDir.value(topDir) - 1);
+                            state->remainingInTopDir[topDir] = rem;
+                            if (rem == 0 &&
+                                !state->failedTopDirs.contains(topDir) &&
+                                QDir(topDir).exists()) {
+                                if (!QDir(topDir).removeRecursively()) {
+                                    ++state->failed;
+                                    state->lastError =
+                                        tr("Could not delete source: ") +
+                                        topDir;
+                                }
                             }
                         }
                     }
-                }
 
-                bool allFinal = true;
-                for (const auto& p : pairs) {
-                    bool found = false;
-                    bool final = false;
-                    for (const auto& t : tasks) {
-                        if (t.type == TransferTask::Type::Upload && t.src == p.localPath && t.dst == p.remotePath) {
-                            found = true;
-                            if (t.status == TransferTask::Status::Done ||
-                                t.status == TransferTask::Status::Error ||
-                                t.status == TransferTask::Status::Canceled) {
-                                final = true;
+                    bool allFinal = true;
+                    for (const auto &p : pairs) {
+                        bool found = false;
+                        bool final = false;
+                        for (const auto &t : tasks) {
+                            if (t.type == TransferTask::Type::Upload &&
+                                t.src == p.localPath && t.dst == p.remotePath) {
+                                found = true;
+                                if (t.status == TransferTask::Status::Done ||
+                                    t.status == TransferTask::Status::Error ||
+                                    t.status ==
+                                        TransferTask::Status::Canceled) {
+                                    final = true;
+                                }
+                                break;
                             }
+                        }
+                        if (!found || !final) {
+                            allFinal = false;
                             break;
                         }
                     }
-                    if (!found || !final) { allFinal = false; break; }
-                }
 
-                if (allFinal) {
-                    QString msg = QString(tr("Moved OK: %1  |  Failed: %2  |  Skipped: %3"))
-                                      .arg(state->movedOk)
-                                      .arg(state->failed)
-                                      .arg(state->skipped);
-                    if (state->failed > 0 && !state->lastError.isEmpty()) {
-                        msg += "\n" + tr("Last error: ") + state->lastError;
+                    if (allFinal) {
+                        QString msg = QString(tr("Moved OK: %1  |  Failed: %2  "
+                                                 "|  Skipped: %3"))
+                                          .arg(state->movedOk)
+                                          .arg(state->failed)
+                                          .arg(state->skipped);
+                        if (state->failed > 0 && !state->lastError.isEmpty()) {
+                            msg += "\n" + tr("Last error: ") + state->lastError;
+                        }
+                        statusBar()->showMessage(msg, 6000);
+                        setLeftRoot(leftPath_->text());
+                        QString dummy;
+                        if (rightRemoteModel_)
+                            rightRemoteModel_->setRootPath(remoteBase, &dummy);
+                        updateRemoteWriteability();
+                        QObject::disconnect(*connPtr);
                     }
-                    statusBar()->showMessage(msg, 6000);
-                    setLeftRoot(leftPath_->text());
-                    QString dummy;
-                    if (rightRemoteModel_) rightRemoteModel_->setRootPath(remoteBase, &dummy);
-                    updateRemoteWriteability();
-                    QObject::disconnect(*connPtr);
-                }
-            });
+                });
         }
         return;
     }
@@ -1274,67 +1539,104 @@ void MainWindow::moveLeftToRight() {
     // ---- Existing LOCAL→LOCAL branch ----
     const QString dstDirPath = rightPath_->text();
     QDir dstDir(dstDirPath);
-    if (!dstDir.exists()) { QMessageBox::warning(this, tr("Invalid destination"), tr("Destination folder does not exist.")); return; }
+    if (!dstDir.exists()) {
+        QMessageBox::warning(this, tr("Invalid destination"),
+                             tr("Destination folder does not exist."));
+        return;
+    }
     const auto rows = leftView_->selectionModel()->selectedRows(NAME_COL);
-    if (rows.isEmpty()) { QMessageBox::information(this, tr("Move"), tr("No entries selected in the left panel.")); return; }
-    if (QMessageBox::question(this, tr("Confirm move"),
-                              tr("This will copy and then delete the source.\nContinue?")) != QMessageBox::Yes) return;
+    if (rows.isEmpty()) {
+        QMessageBox::information(this, tr("Move"),
+                                 tr("No entries selected in the left panel."));
+        return;
+    }
+    if (QMessageBox::question(
+            this, tr("Confirm move"),
+            tr("This will copy and then delete the source.\nContinue?")) !=
+        QMessageBox::Yes)
+        return;
     int ok = 0, fail = 0;
     QString lastError;
-    for (const QModelIndex& idx : rows) {
+    for (const QModelIndex &idx : rows) {
         const QFileInfo fi = leftModel_->fileInfo(idx);
         const QString target = dstDir.filePath(fi.fileName());
         QString err;
         if (copyEntryRecursively(fi.absoluteFilePath(), target, err)) {
-            bool removed = fi.isDir() ? QDir(fi.absoluteFilePath()).removeRecursively() : QFile::remove(fi.absoluteFilePath());
-            if (removed) ok++;
-            else { fail++; lastError = tr("Could not delete source: ") + fi.absoluteFilePath(); }
+            bool removed = fi.isDir()
+                               ? QDir(fi.absoluteFilePath()).removeRecursively()
+                               : QFile::remove(fi.absoluteFilePath());
+            if (removed)
+                ok++;
+            else {
+                fail++;
+                lastError =
+                    tr("Could not delete source: ") + fi.absoluteFilePath();
+            }
         } else {
             fail++;
             lastError = err;
         }
     }
     QString m = QString(tr("Moved OK: %1  |  Failed: %2")).arg(ok).arg(fail);
-    if (fail > 0 && !lastError.isEmpty()) m += "\n" + tr("Last error: ") + lastError;
+    if (fail > 0 && !lastError.isEmpty())
+        m += "\n" + tr("Last error: ") + lastError;
     statusBar()->showMessage(m, 5000);
 }
 
 void MainWindow::deleteFromLeft() {
     const auto rows = leftView_->selectionModel()->selectedRows(NAME_COL);
-    if (rows.isEmpty()) { QMessageBox::information(this, tr("Delete"), tr("No entries selected in the left panel.")); return; }
-    if (QMessageBox::warning(this, tr("Confirm delete"),
-                              tr("This will permanently delete the selected items in the left panel.\nContinue?"),
-                              QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) return;
-    int ok = 0, fail = 0;
-    for (const QModelIndex& idx : rows) {
-        const QFileInfo fi = leftModel_->fileInfo(idx);
-        bool removed = fi.isDir() ? QDir(fi.absoluteFilePath()).removeRecursively() : QFile::remove(fi.absoluteFilePath());
-        if (removed) ++ok; else ++fail;
+    if (rows.isEmpty()) {
+        QMessageBox::information(this, tr("Delete"),
+                                 tr("No entries selected in the left panel."));
+        return;
     }
-    statusBar()->showMessage(QString(tr("Deleted: %1  |  Failed: %2")).arg(ok).arg(fail), 5000);
+    if (QMessageBox::warning(this, tr("Confirm delete"),
+                             tr("This will permanently delete the selected "
+                                "items in the left panel.\nContinue?"),
+                             QMessageBox::Yes | QMessageBox::No) !=
+        QMessageBox::Yes)
+        return;
+    int ok = 0, fail = 0;
+    for (const QModelIndex &idx : rows) {
+        const QFileInfo fi = leftModel_->fileInfo(idx);
+        bool removed = fi.isDir()
+                           ? QDir(fi.absoluteFilePath()).removeRecursively()
+                           : QFile::remove(fi.absoluteFilePath());
+        if (removed)
+            ++ok;
+        else
+            ++fail;
+    }
+    statusBar()->showMessage(
+        QString(tr("Deleted: %1  |  Failed: %2")).arg(ok).arg(fail), 5000);
 }
 
 void MainWindow::goUpLeft() {
     QString cur = leftPath_->text();
     QDir d(cur);
-    if (!d.cdUp()) return;
+    if (!d.cdUp())
+        return;
     setLeftRoot(d.absolutePath());
     updateDeleteShortcutEnables();
 }
 
 void MainWindow::goUpRight() {
     if (rightIsRemote_) {
-        if (!rightRemoteModel_) return;
+        if (!rightRemoteModel_)
+            return;
         QString cur = rightRemoteModel_->rootPath();
-        if (cur == "/" || cur.isEmpty()) return;
-        if (cur.endsWith('/')) cur.chop(1);
+        if (cur == "/" || cur.isEmpty())
+            return;
+        if (cur.endsWith('/'))
+            cur.chop(1);
         int slash = cur.lastIndexOf('/');
         QString parent = (slash <= 0) ? "/" : cur.left(slash);
         setRightRemoteRoot(parent);
     } else {
         QString cur = rightPath_->text();
         QDir d(cur);
-        if (!d.cdUp()) return;
+        if (!d.cdUp())
+            return;
         setRightRoot(d.absolutePath());
         updateDeleteShortcutEnables();
     }
@@ -1344,7 +1646,8 @@ void MainWindow::goUpRight() {
 void MainWindow::connectSftp() {
     ConnectionDialog dlg(this);
     dlg.setQuickConnectSaveOptionsVisible(true);
-    if (dlg.exec() != QDialog::Accepted) return;
+    if (dlg.exec() != QDialog::Accepted)
+        return;
     auto opt = dlg.options();
     std::optional<PendingSiteSaveRequest> saveRequest = std::nullopt;
     if (dlg.saveSiteRequested()) {
@@ -1353,15 +1656,18 @@ void MainWindow::connectSftp() {
         req.saveCredentials = dlg.saveCredentialsRequested();
         saveRequest = req;
     }
-    // Apply global security preferences also for ad‑hoc connections (Advanced settings)
+    // Apply global security preferences also for ad‑hoc connections (Advanced
+    // settings)
     {
         QSettings s("OpenSCP", "OpenSCP");
-        opt.known_hosts_hash_names = s.value("Security/knownHostsHashed", true).toBool();
+        opt.known_hosts_hash_names =
+            s.value("Security/knownHostsHashed", true).toBool();
         opt.show_fp_hex = s.value("Security/fpHex", false).toBool();
     }
     if (saveRequest.has_value()) {
         maybePersistQuickConnectSite(opt, *saveRequest, false);
-        // Already persisted on request; connection lifecycle no longer needs to do it.
+        // Already persisted on request; connection lifecycle no longer needs to
+        // do it.
         saveRequest.reset();
     }
     startSftpConnect(opt, saveRequest);
@@ -1369,16 +1675,21 @@ void MainWindow::connectSftp() {
 
 // Tear down the current SFTP session and restore local mode.
 void MainWindow::disconnectSftp() {
-    if (m_isDisconnecting) return;
+    if (m_isDisconnecting)
+        return;
     m_isDisconnecting = true;
     // Detach client from the queue to avoid dangling pointers
-    if (transferMgr_) transferMgr_->clearClient();
-    if (sftp_) sftp_->disconnect();
+    if (transferMgr_)
+        transferMgr_->clearClient();
+    if (sftp_)
+        sftp_->disconnect();
     sftp_.reset();
     if (rightRemoteModel_) {
         rightView_->setModel(rightLocalModel_);
         if (rightView_->selectionModel()) {
-            connect(rightView_->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]{ updateDeleteShortcutEnables(); });
+            connect(rightView_->selectionModel(),
+                    &QItemSelectionModel::selectionChanged, this,
+                    [this] { updateDeleteShortcutEnables(); });
         }
         delete rightRemoteModel_;
         rightRemoteModel_ = nullptr;
@@ -1387,20 +1698,32 @@ void MainWindow::disconnectSftp() {
     rightRemoteWritable_ = false;
     m_sessionNoHostVerification_ = false;
     updateHostPolicyRiskBanner();
-    if (actConnect_) actConnect_->setEnabled(true);
-    if (actDisconnect_) actDisconnect_->setEnabled(false);
-    if (actDownloadF7_) actDownloadF7_->setEnabled(false);
-    if (actUploadRight_) actUploadRight_->setEnabled(false);
+    if (actConnect_)
+        actConnect_->setEnabled(true);
+    if (actDisconnect_)
+        actDisconnect_->setEnabled(false);
+    if (actDownloadF7_)
+        actDownloadF7_->setEnabled(false);
+    if (actUploadRight_)
+        actUploadRight_->setEnabled(false);
     // Local mode: re-enable local actions on the right panel
-    if (actNewDirRight_)   actNewDirRight_->setEnabled(true);
-    if (actNewFileRight_)  actNewFileRight_->setEnabled(true);
-    if (actRenameRight_)   actRenameRight_->setEnabled(true);
-    if (actDeleteRight_)   actDeleteRight_->setEnabled(true);
-    if (actMoveRight_)     actMoveRight_->setEnabled(true);
-    if (actMoveRightTb_)   actMoveRightTb_->setEnabled(true);
-    if (actCopyRightTb_)   actCopyRightTb_->setEnabled(true);
+    if (actNewDirRight_)
+        actNewDirRight_->setEnabled(true);
+    if (actNewFileRight_)
+        actNewFileRight_->setEnabled(true);
+    if (actRenameRight_)
+        actRenameRight_->setEnabled(true);
+    if (actDeleteRight_)
+        actDeleteRight_->setEnabled(true);
+    if (actMoveRight_)
+        actMoveRight_->setEnabled(true);
+    if (actMoveRightTb_)
+        actMoveRightTb_->setEnabled(true);
+    if (actCopyRightTb_)
+        actCopyRightTb_->setEnabled(true);
     if (actChooseRight_) {
-        actChooseRight_->setIcon(QIcon(QLatin1String(":/assets/icons/action-open-folder.svg")));
+        actChooseRight_->setIcon(
+            QIcon(QLatin1String(":/assets/icons/action-open-folder.svg")));
         actChooseRight_->setEnabled(true);
         actChooseRight_->setToolTip(actChooseRight_->text());
     }
@@ -1408,15 +1731,17 @@ void MainWindow::disconnectSftp() {
     setWindowTitle(tr("OpenSCP — local/local"));
     updateDeleteShortcutEnables();
 
-    // Per spec: non‑modal Site Manager after disconnect (if enabled), without blocking UI
+    // Per spec: non‑modal Site Manager after disconnect (if enabled), without
+    // blocking UI
     m_isDisconnecting = false;
     if (!QCoreApplication::closingDown() && m_openSiteManagerOnDisconnect) {
-        QTimer::singleShot(0, this, [this]{ showSiteManagerNonModal(); });
+        QTimer::singleShot(0, this, [this] { showSiteManagerNonModal(); });
     }
 }
 
 void MainWindow::setOpenSiteManagerOnDisconnect(bool on) {
-    if (m_openSiteManagerOnDisconnect == on) return;
+    if (m_openSiteManagerOnDisconnect == on)
+        return;
     m_openSiteManagerOnDisconnect = on;
     QSettings s("OpenSCP", "OpenSCP");
     s.setValue("UI/openSiteManagerOnDisconnect", on);
@@ -1426,8 +1751,11 @@ void MainWindow::setOpenSiteManagerOnDisconnect(bool on) {
 void MainWindow::showSiteManagerNonModal() {
     if (QApplication::activeModalWidget()) {
         m_pendingOpenSiteManager = true;
-        QObject* modal = QApplication::activeModalWidget();
-        if (modal) connect(modal, &QObject::destroyed, this, &MainWindow::maybeOpenSiteManagerAfterModal, Qt::UniqueConnection);
+        QObject *modal = QApplication::activeModalWidget();
+        if (modal)
+            connect(modal, &QObject::destroyed, this,
+                    &MainWindow::maybeOpenSiteManagerAfterModal,
+                    Qt::UniqueConnection);
         return; // don't open underneath a modal
     }
     if (m_siteManager) {
@@ -1436,11 +1764,11 @@ void MainWindow::showSiteManagerNonModal() {
         m_siteManager->activateWindow();
         return;
     }
-    auto* dlg = new SiteManagerDialog(this);
+    auto *dlg = new SiteManagerDialog(this);
     m_siteManager = dlg;
     dlg->setAttribute(Qt::WA_DeleteOnClose, true);
-    connect(dlg, &QObject::destroyed, this, [this]{ m_siteManager.clear(); });
-    connect(dlg, &QDialog::finished, this, [this, dlg](int res){
+    connect(dlg, &QObject::destroyed, this, [this] { m_siteManager.clear(); });
+    connect(dlg, &QDialog::finished, this, [this, dlg](int res) {
         if (res == QDialog::Accepted && dlg) {
             openscp::SessionOptions opt{};
             if (dlg->selectedOptions(opt)) {
@@ -1448,11 +1776,16 @@ void MainWindow::showSiteManagerNonModal() {
             }
         }
     });
-    QTimer::singleShot(0, dlg, [dlg]{ dlg->show(); dlg->raise(); dlg->activateWindow(); });
+    QTimer::singleShot(0, dlg, [dlg] {
+        dlg->show();
+        dlg->raise();
+        dlg->activateWindow();
+    });
 }
 
 void MainWindow::setOpenSiteManagerOnStartup(bool on) {
-    if (m_openSiteManagerOnStartup == on) return;
+    if (m_openSiteManagerOnStartup == on)
+        return;
     m_openSiteManagerOnStartup = on;
     QSettings s("OpenSCP", "OpenSCP");
     s.setValue("UI/showConnOnStart", on);
@@ -1462,45 +1795,47 @@ void MainWindow::setOpenSiteManagerOnStartup(bool on) {
 void MainWindow::maybeOpenSiteManagerAfterModal() {
     if (!QApplication::activeModalWidget() && m_pendingOpenSiteManager) {
         m_pendingOpenSiteManager = false;
-        QTimer::singleShot(0, this, [this]{ showSiteManagerNonModal(); });
+        QTimer::singleShot(0, this, [this] { showSiteManagerNonModal(); });
     }
 }
 
-bool MainWindow::confirmInsecureHostPolicyForSession(const openscp::SessionOptions& opt) {
-    if (opt.known_hosts_policy != openscp::KnownHostsPolicy::Off) return true;
+bool MainWindow::confirmInsecureHostPolicyForSession(
+    const openscp::SessionOptions &opt) {
+    if (opt.known_hosts_policy != openscp::KnownHostsPolicy::Off)
+        return true;
 
-    const QString hostKey = QString::fromStdString(opt.host).trimmed().toLower();
-    const QString allowKey = QString("Security/noHostVerificationConfirmedUntilUtc/%1:%2")
-                                 .arg(hostKey)
-                                 .arg((int)opt.port);
+    const QString hostKey =
+        QString::fromStdString(opt.host).trimmed().toLower();
+    const QString allowKey =
+        QString("Security/noHostVerificationConfirmedUntilUtc/%1:%2")
+            .arg(hostKey)
+            .arg((int)opt.port);
     const qint64 now = QDateTime::currentSecsSinceEpoch();
     QSettings s("OpenSCP", "OpenSCP");
     const qint64 allowedUntil = s.value(allowKey, 0).toLongLong();
-    if (allowedUntil > now) return true;
+    if (allowedUntil > now)
+        return true;
 
     const auto first = QMessageBox::warning(
-        this,
-        tr("Critical security risk"),
+        this, tr("Critical security risk"),
         tr("You are about to connect using the \"No verification\" policy.\n"
            "This allows MITM attacks and server impersonation.\n\n"
            "Do you want to continue at your own risk?"),
-        QMessageBox::Yes | QMessageBox::Cancel,
-        QMessageBox::Cancel
-    );
-    if (first != QMessageBox::Yes) return false;
+        QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+    if (first != QMessageBox::Yes)
+        return false;
 
     const QString token = QStringLiteral("UNSAFE");
     bool ok = false;
-    const QString entered = QInputDialog::getText(
-        this,
-        tr("Additional confirmation required"),
-        tr("To confirm, type exactly %1").arg(token),
-        QLineEdit::Normal,
-        QString(),
-        &ok
-    ).trimmed();
+    const QString entered =
+        QInputDialog::getText(this, tr("Additional confirmation required"),
+                              tr("To confirm, type exactly %1").arg(token),
+                              QLineEdit::Normal, QString(), &ok)
+            .trimmed();
     if (!ok || entered != token) {
-        QMessageBox::information(this, tr("Connection canceled"), tr("Risk confirmation was not completed correctly."));
+        QMessageBox::information(
+            this, tr("Connection canceled"),
+            tr("Risk confirmation was not completed correctly."));
         return false;
     }
 
@@ -1509,44 +1844,54 @@ bool MainWindow::confirmInsecureHostPolicyForSession(const openscp::SessionOptio
     const qint64 newUntil = now + qint64(ttlMin) * 60;
     s.setValue(allowKey, newUntil);
     s.sync();
-    const QDateTime expLocal = QDateTime::fromSecsSinceEpoch(newUntil).toLocalTime();
+    const QDateTime expLocal =
+        QDateTime::fromSecsSinceEpoch(newUntil).toLocalTime();
     statusBar()->showMessage(
         tr("Temporary \"no verification\" exception active until %1")
             .arg(QLocale().toString(expLocal, QLocale::ShortFormat)),
-        8000
-    );
+        8000);
     return true;
 }
 
 void MainWindow::updateHostPolicyRiskBanner() {
     const bool show = rightIsRemote_ && m_sessionNoHostVerification_;
     if (!show) {
-        if (m_hostPolicyRiskLabel_) m_hostPolicyRiskLabel_->hide();
+        if (m_hostPolicyRiskLabel_)
+            m_hostPolicyRiskLabel_->hide();
         return;
     }
     if (!m_hostPolicyRiskLabel_) {
         m_hostPolicyRiskLabel_ = new QLabel(this);
-        m_hostPolicyRiskLabel_->setStyleSheet("QLabel { color: #B00020; font-weight: 600; }");
+        m_hostPolicyRiskLabel_->setStyleSheet(
+            "QLabel { color: #B00020; font-weight: 600; }");
         statusBar()->addPermanentWidget(m_hostPolicyRiskLabel_);
     }
-    m_hostPolicyRiskLabel_->setText(tr("Risk: host key not verified in this session"));
-    m_hostPolicyRiskLabel_->setToolTip(tr("The current session does not validate host key; MITM risk exists."));
+    m_hostPolicyRiskLabel_->setText(
+        tr("Risk: host key not verified in this session"));
+    m_hostPolicyRiskLabel_->setToolTip(tr(
+        "The current session does not validate host key; MITM risk exists."));
     m_hostPolicyRiskLabel_->show();
 }
 
-QString MainWindow::defaultDownloadDirFromSettings(const QSettings& s) {
-    QString fallback = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
-    if (fallback.isEmpty()) fallback = QDir::homePath() + "/Downloads";
-    QString configured = QDir::cleanPath(s.value("UI/defaultDownloadDir", fallback).toString().trimmed());
-    if (configured.isEmpty()) configured = fallback;
+QString MainWindow::defaultDownloadDirFromSettings(const QSettings &s) {
+    QString fallback =
+        QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    if (fallback.isEmpty())
+        fallback = QDir::homePath() + "/Downloads";
+    QString configured = QDir::cleanPath(
+        s.value("UI/defaultDownloadDir", fallback).toString().trimmed());
+    if (configured.isEmpty())
+        configured = fallback;
     return configured;
 }
 
 void MainWindow::showTransferQueue() {
-    if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
+    if (!transferDlg_)
+        transferDlg_ = new TransferQueueDialog(transferMgr_, this);
     const bool wasVisible = transferDlg_->isVisible();
     if (!wasVisible) {
-        // Modeless queue: smooth entrance (fade + slight scale/offset) for better perceived polish.
+        // Modeless queue: smooth entrance (fade + slight scale/offset) for
+        // better perceived polish.
         transferDlg_->show();
         transferDlg_->raise();
         transferDlg_->activateWindow();
@@ -1560,24 +1905,28 @@ void MainWindow::showTransferQueue() {
         transferDlg_->setGeometry(startRect);
         transferDlg_->setWindowOpacity(0.0);
 
-        auto* group = new QParallelAnimationGroup(transferDlg_);
+        auto *group = new QParallelAnimationGroup(transferDlg_);
 
-        auto* fade = new QPropertyAnimation(transferDlg_, "windowOpacity", group);
+        auto *fade =
+            new QPropertyAnimation(transferDlg_, "windowOpacity", group);
         fade->setDuration(190);
         fade->setStartValue(0.0);
         fade->setEndValue(1.0);
         fade->setEasingCurve(QEasingCurve::OutCubic);
 
-        auto* grow = new QPropertyAnimation(transferDlg_, "geometry", group);
+        auto *grow = new QPropertyAnimation(transferDlg_, "geometry", group);
         grow->setDuration(190);
         grow->setStartValue(startRect);
         grow->setEndValue(endRect);
         grow->setEasingCurve(QEasingCurve::OutCubic);
 
-        connect(group, &QParallelAnimationGroup::finished, transferDlg_, [this, endRect] {
-            if (transferDlg_) transferDlg_->setWindowOpacity(1.0);
-            if (transferDlg_) transferDlg_->setGeometry(endRect);
-        });
+        connect(group, &QParallelAnimationGroup::finished, transferDlg_,
+                [this, endRect] {
+                    if (transferDlg_)
+                        transferDlg_->setWindowOpacity(1.0);
+                    if (transferDlg_)
+                        transferDlg_->setGeometry(endRect);
+                });
         group->start(QAbstractAnimation::DeleteWhenStopped);
         return;
     }
@@ -1588,10 +1937,11 @@ void MainWindow::showTransferQueue() {
 }
 
 void MainWindow::maybeShowTransferQueue() {
-    if (prefShowQueueOnEnqueue_) showTransferQueue();
+    if (prefShowQueueOnEnqueue_)
+        showTransferQueue();
 }
 
-void MainWindow::openLocalPathWithPreference(const QString& localPath) {
+void MainWindow::openLocalPathWithPreference(const QString &localPath) {
     const QString mode = prefOpenBehaviorMode_.trimmed().toLower();
     if (mode == QStringLiteral("reveal")) {
         revealInFolder(localPath);
@@ -1606,25 +1956,28 @@ void MainWindow::openLocalPathWithPreference(const QString& localPath) {
     box.setIcon(QMessageBox::Question);
     box.setWindowTitle(tr("Opening preference"));
     box.setText(tr("How do you want to open this file?"));
-    QPushButton* btnOpen = box.addButton(tr("Open file"), QMessageBox::NoRole);
-    QPushButton* btnReveal = box.addButton(tr("Show folder"), QMessageBox::AcceptRole);
+    QPushButton *btnOpen = box.addButton(tr("Open file"), QMessageBox::NoRole);
+    QPushButton *btnReveal =
+        box.addButton(tr("Show folder"), QMessageBox::AcceptRole);
     box.setDefaultButton(btnReveal);
     box.exec();
-    if (box.clickedButton() == btnOpen) QDesktopServices::openUrl(QUrl::fromLocalFile(localPath));
-    else revealInFolder(localPath);
+    if (box.clickedButton() == btnOpen)
+        QDesktopServices::openUrl(QUrl::fromLocalFile(localPath));
+    else
+        revealInFolder(localPath);
 }
 
 // Navigate remote pane to a new remote directory.
-void MainWindow::setRightRemoteRoot(const QString& path) {
-    if (!rightIsRemote_ || !rightRemoteModel_) return;
+void MainWindow::setRightRemoteRoot(const QString &path) {
+    if (!rightIsRemote_ || !rightRemoteModel_)
+        return;
     QString e;
     if (!rightRemoteModel_->setRootPath(path, &e)) {
         QMessageBox::warning(
-            this,
-            tr("Remote error"),
+            this, tr("Remote error"),
             tr("Could not open the remote folder.\n%1")
-                .arg(shortRemoteError(e, tr("Failed to read remote contents.")))
-        );
+                .arg(shortRemoteError(e,
+                                      tr("Failed to read remote contents."))));
         return;
     }
     rightPath_->setText(path);
@@ -1633,10 +1986,11 @@ void MainWindow::setRightRemoteRoot(const QString& path) {
 }
 
 // Handle activation (double-click/Enter) on the right pane.
-void MainWindow::rightItemActivated(const QModelIndex& idx) {
+void MainWindow::rightItemActivated(const QModelIndex &idx) {
     // Local mode (right panel is local): navigate into directories
     if (!rightIsRemote_) {
-        if (!rightLocalModel_) return;
+        if (!rightLocalModel_)
+            return;
         const QFileInfo fi = rightLocalModel_->fileInfo(idx);
         if (fi.isDir()) {
             setRightRoot(fi.absoluteFilePath());
@@ -1646,74 +2000,95 @@ void MainWindow::rightItemActivated(const QModelIndex& idx) {
         return;
     }
     // Remote mode: navigate or download/open file
-    if (!rightRemoteModel_) return;
+    if (!rightRemoteModel_)
+        return;
     if (rightRemoteModel_->isDir(idx)) {
         const QString name = rightRemoteModel_->nameAt(idx);
         QString next = rightRemoteModel_->rootPath();
-        if (!next.endsWith('/')) next += '/';
+        if (!next.endsWith('/'))
+            next += '/';
         next += name;
         setRightRemoteRoot(next);
         return;
     }
     const QString name = rightRemoteModel_->nameAt(idx);
     {
-        QString why; if (!isValidEntryName(name, &why)) { QMessageBox::warning(this, tr("Invalid name"), why); return; }
+        QString why;
+        if (!isValidEntryName(name, &why)) {
+            QMessageBox::warning(this, tr("Invalid name"), why);
+            return;
+        }
     }
     QString remotePath = rightRemoteModel_->rootPath();
-    if (!remotePath.endsWith('/')) remotePath += '/';
+    if (!remotePath.endsWith('/'))
+        remotePath += '/';
     remotePath += name;
     const QString localPath = tempDownloadPathFor(name);
-    // Avoid duplicates: if there is already an active download with same src/dst, do not enqueue again
+    // Avoid duplicates: if there is already an active download with same
+    // src/dst, do not enqueue again
     bool alreadyActive = false;
     {
         const auto tasks = transferMgr_->tasksSnapshot();
-        for (const auto& t : tasks) {
-            if (t.type == TransferTask::Type::Download && t.src == remotePath && t.dst == localPath) {
-                if (t.status == TransferTask::Status::Queued || t.status == TransferTask::Status::Running || t.status == TransferTask::Status::Paused) {
-                    alreadyActive = true; break;
+        for (const auto &t : tasks) {
+            if (t.type == TransferTask::Type::Download && t.src == remotePath &&
+                t.dst == localPath) {
+                if (t.status == TransferTask::Status::Queued ||
+                    t.status == TransferTask::Status::Running ||
+                    t.status == TransferTask::Status::Paused) {
+                    alreadyActive = true;
+                    break;
                 }
             }
         }
     }
     if (!alreadyActive) {
-        // Enqueue download so it appears in the queue (instead of direct download)
+        // Enqueue download so it appears in the queue (instead of direct
+        // download)
         transferMgr_->enqueueDownload(remotePath, localPath);
-        statusBar()->showMessage(QString(tr("Queued: %1 downloads")).arg(1), 3000);
+        statusBar()->showMessage(QString(tr("Queued: %1 downloads")).arg(1),
+                                 3000);
         maybeShowTransferQueue();
     } else {
         // There was already an identical task in the queue; optionally show it
         maybeShowTransferQueue();
         statusBar()->showMessage(tr("Download already queued"), 2000);
     }
-    // Open the file when the corresponding task finishes (avoid duplicate listeners)
+    // Open the file when the corresponding task finishes (avoid duplicate
+    // listeners)
     static QSet<QString> sOpenListeners;
     const QString key = remotePath + "->" + localPath;
     if (!sOpenListeners.contains(key)) {
         sOpenListeners.insert(key);
         auto connPtr = std::make_shared<QMetaObject::Connection>();
-        *connPtr = connect(transferMgr_, &TransferManager::tasksChanged, this, [this, remotePath, localPath, key, connPtr]() {
-            const auto tasks = transferMgr_->tasksSnapshot();
-            for (const auto& t : tasks) {
-                if (t.type == TransferTask::Type::Download && t.src == remotePath && t.dst == localPath) {
-                    if (t.status == TransferTask::Status::Done) {
-                        openLocalPathWithPreference(localPath);
-                        statusBar()->showMessage(tr("Downloaded: ") + localPath, 5000);
-                        QObject::disconnect(*connPtr);
-                        sOpenListeners.remove(key);
-                    } else if (t.status == TransferTask::Status::Error || t.status == TransferTask::Status::Canceled) {
-                        QObject::disconnect(*connPtr);
-                        sOpenListeners.remove(key);
+        *connPtr = connect(
+            transferMgr_, &TransferManager::tasksChanged, this,
+            [this, remotePath, localPath, key, connPtr]() {
+                const auto tasks = transferMgr_->tasksSnapshot();
+                for (const auto &t : tasks) {
+                    if (t.type == TransferTask::Type::Download &&
+                        t.src == remotePath && t.dst == localPath) {
+                        if (t.status == TransferTask::Status::Done) {
+                            openLocalPathWithPreference(localPath);
+                            statusBar()->showMessage(
+                                tr("Downloaded: ") + localPath, 5000);
+                            QObject::disconnect(*connPtr);
+                            sOpenListeners.remove(key);
+                        } else if (t.status == TransferTask::Status::Error ||
+                                   t.status == TransferTask::Status::Canceled) {
+                            QObject::disconnect(*connPtr);
+                            sOpenListeners.remove(key);
+                        }
+                        break;
                     }
-                    break;
                 }
-            }
-        });
+            });
     }
-    }
+}
 
 // Double click on the left panel: if it's a folder, enter it and replace root
-void MainWindow::leftItemActivated(const QModelIndex& idx) {
-    if (!leftModel_) return;
+void MainWindow::leftItemActivated(const QModelIndex &idx) {
+    if (!leftModel_)
+        return;
     const QFileInfo fi = leftModel_->fileInfo(idx);
     if (fi.isDir()) {
         setLeftRoot(fi.absoluteFilePath());
@@ -1724,37 +2099,62 @@ void MainWindow::leftItemActivated(const QModelIndex& idx) {
 
 // Enqueue downloads from the right (remote) pane to a chosen local folder.
 void MainWindow::downloadRightToLeft() {
-    if (!rightIsRemote_) { QMessageBox::information(this, tr("Download"), tr("The right panel is not remote.")); return; }
-    if (!sftp_ || !rightRemoteModel_) { QMessageBox::warning(this, tr("SFTP"), tr("No active SFTP session.")); return; }
-    const QString picked = QFileDialog::getExistingDirectory(this, tr("Select destination folder (local)"), downloadDir_.isEmpty() ? QDir::homePath() : downloadDir_);
-    if (picked.isEmpty()) return;
+    if (!rightIsRemote_) {
+        QMessageBox::information(this, tr("Download"),
+                                 tr("The right panel is not remote."));
+        return;
+    }
+    if (!sftp_ || !rightRemoteModel_) {
+        QMessageBox::warning(this, tr("SFTP"), tr("No active SFTP session."));
+        return;
+    }
+    const QString picked = QFileDialog::getExistingDirectory(
+        this, tr("Select destination folder (local)"),
+        downloadDir_.isEmpty() ? QDir::homePath() : downloadDir_);
+    if (picked.isEmpty())
+        return;
     downloadDir_ = picked;
     QDir dst(downloadDir_);
-    if (!dst.exists()) { QMessageBox::warning(this, tr("Invalid destination"), tr("Destination folder does not exist.")); return; }
+    if (!dst.exists()) {
+        QMessageBox::warning(this, tr("Invalid destination"),
+                             tr("Destination folder does not exist."));
+        return;
+    }
     auto sel = rightView_->selectionModel();
     QModelIndexList rows;
-    if (sel) rows = sel->selectedRows(NAME_COL);
+    if (sel)
+        rows = sel->selectedRows(NAME_COL);
     if (rows.isEmpty()) {
         // Download everything visible (first level) if there is no selection
         int rc = rightRemoteModel_ ? rightRemoteModel_->rowCount() : 0;
-        for (int r = 0; r < rc; ++r) rows << rightRemoteModel_->index(r, NAME_COL);
-        if (rows.isEmpty()) { QMessageBox::information(this, tr("Download"), tr("Nothing to download.")); return; }
+        for (int r = 0; r < rc; ++r)
+            rows << rightRemoteModel_->index(r, NAME_COL);
+        if (rows.isEmpty()) {
+            QMessageBox::information(this, tr("Download"),
+                                     tr("Nothing to download."));
+            return;
+        }
     }
     int enq = 0;
     int bad = 0;
     const QString remoteBase = rightRemoteModel_->rootPath();
-    for (const QModelIndex& idx : rows) {
+    for (const QModelIndex &idx : rows) {
         const QString name = rightRemoteModel_->nameAt(idx);
         {
-            QString why; if (!isValidEntryName(name, &why)) { ++bad; continue; }
+            QString why;
+            if (!isValidEntryName(name, &why)) {
+                ++bad;
+                continue;
+            }
         }
         QString rpath = remoteBase;
-        if (!rpath.endsWith('/')) rpath += '/';
+        if (!rpath.endsWith('/'))
+            rpath += '/';
         rpath += name;
         const QString lpath = dst.filePath(name);
         if (rightRemoteModel_->isDir(idx)) {
             QVector<QPair<QString, QString>> stack;
-            stack.push_back({ rpath, lpath });
+            stack.push_back({rpath, lpath});
             while (!stack.isEmpty()) {
                 auto pair = stack.back();
                 stack.pop_back();
@@ -1763,14 +2163,25 @@ void MainWindow::downloadRightToLeft() {
                 QDir().mkpath(curL);
                 std::vector<openscp::FileInfo> out;
                 std::string lerr;
-                if (!sftp_->list(curR.toStdString(), out, lerr)) continue;
-                for (const auto& e : out) {
+                if (!sftp_->list(curR.toStdString(), out, lerr))
+                    continue;
+                for (const auto &e : out) {
                     const QString ename = QString::fromStdString(e.name);
-                    QString why; if (!isValidEntryName(ename, &why)) { ++bad; continue; }
-                    const QString childR = (curR.endsWith('/') ? curR + ename : curR + "/" + ename);
+                    QString why;
+                    if (!isValidEntryName(ename, &why)) {
+                        ++bad;
+                        continue;
+                    }
+                    const QString childR =
+                        (curR.endsWith('/') ? curR + ename
+                                            : curR + "/" + ename);
                     const QString childL = QDir(curL).filePath(ename);
-                    if (e.is_dir) stack.push_back({ childR, childL });
-                    else { transferMgr_->enqueueDownload(childR, childL); ++enq; }
+                    if (e.is_dir)
+                        stack.push_back({childR, childL});
+                    else {
+                        transferMgr_->enqueueDownload(childR, childL);
+                        ++enq;
+                    }
                 }
             }
         } else {
@@ -1780,7 +2191,8 @@ void MainWindow::downloadRightToLeft() {
     }
     if (enq > 0) {
         QString msg = QString(tr("Queued: %1 downloads")).arg(enq);
-        if (bad > 0) msg += QString("  |  ") + tr("Skipped invalid: %1").arg(bad);
+        if (bad > 0)
+            msg += QString("  |  ") + tr("Skipped invalid: %1").arg(bad);
         statusBar()->showMessage(msg, 4000);
         maybeShowTransferQueue();
     }
@@ -1791,11 +2203,22 @@ void MainWindow::downloadRightToLeft() {
 // - Local  -> local-to-local copy (with overwrite policy).
 void MainWindow::copyRightToLeft() {
     QDir dst(leftPath_->text());
-    if (!dst.exists()) { QMessageBox::warning(this, tr("Invalid destination"), tr("The destination folder (left panel) does not exist.")); return; }
+    if (!dst.exists()) {
+        QMessageBox::warning(
+            this, tr("Invalid destination"),
+            tr("The destination folder (left panel) does not exist."));
+        return;
+    }
     auto sel = rightView_->selectionModel();
-    if (!sel) { QMessageBox::warning(this, tr("Copy"), tr("No selection.")); return; }
+    if (!sel) {
+        QMessageBox::warning(this, tr("Copy"), tr("No selection."));
+        return;
+    }
     const auto rows = sel->selectedRows(NAME_COL);
-    if (rows.isEmpty()) { QMessageBox::information(this, tr("Copy"), tr("Nothing selected.")); return; }
+    if (rows.isEmpty()) {
+        QMessageBox::information(this, tr("Copy"), tr("Nothing selected."));
+        return;
+    }
 
     if (!rightIsRemote_) {
         // Local -> Local copy (right to left)
@@ -1803,51 +2226,78 @@ void MainWindow::copyRightToLeft() {
         OverwritePolicy policy = OverwritePolicy::Ask;
         int ok = 0, fail = 0, skipped = 0;
         QString lastError;
-        for (const QModelIndex& idx : rows) {
+        for (const QModelIndex &idx : rows) {
             const QFileInfo fi = rightLocalModel_->fileInfo(idx);
             const QString target = dst.filePath(fi.fileName());
             if (QFileInfo::exists(target)) {
                 if (policy == OverwritePolicy::Ask) {
                     auto ret = QMessageBox::question(
-                        this,
-                        tr("Conflict"),
-                        QString(tr("“%1” already exists at destination.\nOverwrite?")) .arg(fi.fileName()),
-                        QMessageBox::Yes | QMessageBox::No | QMessageBox::YesToAll | QMessageBox::NoToAll
-                    );
-                    if (ret == QMessageBox::YesToAll) policy = OverwritePolicy::OverwriteAll;
-                    else if (ret == QMessageBox::NoToAll) policy = OverwritePolicy::SkipAll;
-                    if (ret == QMessageBox::No || policy == OverwritePolicy::SkipAll) { ++skipped; continue; }
+                        this, tr("Conflict"),
+                        QString(tr("“%1” already exists at "
+                                   "destination.\nOverwrite?"))
+                            .arg(fi.fileName()),
+                        QMessageBox::Yes | QMessageBox::No |
+                            QMessageBox::YesToAll | QMessageBox::NoToAll);
+                    if (ret == QMessageBox::YesToAll)
+                        policy = OverwritePolicy::OverwriteAll;
+                    else if (ret == QMessageBox::NoToAll)
+                        policy = OverwritePolicy::SkipAll;
+                    if (ret == QMessageBox::No ||
+                        policy == OverwritePolicy::SkipAll) {
+                        ++skipped;
+                        continue;
+                    }
                 }
                 QFileInfo tfi(target);
-                if (tfi.isDir()) QDir(target).removeRecursively(); else QFile::remove(target);
+                if (tfi.isDir())
+                    QDir(target).removeRecursively();
+                else
+                    QFile::remove(target);
             }
             QString err;
-            if (copyEntryRecursively(fi.absoluteFilePath(), target, err)) ++ok; else { ++fail; lastError = err; }
+            if (copyEntryRecursively(fi.absoluteFilePath(), target, err))
+                ++ok;
+            else {
+                ++fail;
+                lastError = err;
+            }
         }
-        QString m = QString(tr("Copied: %1  |  Failed: %2  |  Skipped: %3")).arg(ok).arg(fail).arg(skipped);
-        if (fail > 0 && !lastError.isEmpty()) m += "\n" + tr("Last error: ") + lastError;
+        QString m = QString(tr("Copied: %1  |  Failed: %2  |  Skipped: %3"))
+                        .arg(ok)
+                        .arg(fail)
+                        .arg(skipped);
+        if (fail > 0 && !lastError.isEmpty())
+            m += "\n" + tr("Last error: ") + lastError;
         statusBar()->showMessage(m, 5000);
         setRightRoot(rightPath_->text());
         return;
     }
 
     // Remote -> Local: enqueue downloads
-    if (!sftp_ || !rightRemoteModel_) { QMessageBox::warning(this, tr("SFTP"), tr("No active SFTP session.")); return; }
+    if (!sftp_ || !rightRemoteModel_) {
+        QMessageBox::warning(this, tr("SFTP"), tr("No active SFTP session."));
+        return;
+    }
     int enq = 0;
     int bad = 0;
     const QString remoteBase = rightRemoteModel_->rootPath();
-    for (const QModelIndex& idx : rows) {
+    for (const QModelIndex &idx : rows) {
         const QString name = rightRemoteModel_->nameAt(idx);
         {
-            QString why; if (!isValidEntryName(name, &why)) { ++bad; continue; }
+            QString why;
+            if (!isValidEntryName(name, &why)) {
+                ++bad;
+                continue;
+            }
         }
         QString rpath = remoteBase;
-        if (!rpath.endsWith('/')) rpath += '/';
+        if (!rpath.endsWith('/'))
+            rpath += '/';
         rpath += name;
         const QString lpath = dst.filePath(name);
         if (rightRemoteModel_->isDir(idx)) {
             QVector<QPair<QString, QString>> stack;
-            stack.push_back({ rpath, lpath });
+            stack.push_back({rpath, lpath});
             while (!stack.isEmpty()) {
                 auto pair = stack.back();
                 stack.pop_back();
@@ -1856,14 +2306,25 @@ void MainWindow::copyRightToLeft() {
                 QDir().mkpath(curL);
                 std::vector<openscp::FileInfo> out;
                 std::string lerr;
-                if (!sftp_->list(curR.toStdString(), out, lerr)) continue;
-                for (const auto& e : out) {
+                if (!sftp_->list(curR.toStdString(), out, lerr))
+                    continue;
+                for (const auto &e : out) {
                     const QString ename = QString::fromStdString(e.name);
-                    QString why; if (!isValidEntryName(ename, &why)) { ++bad; continue; }
-                    const QString childR = (curR.endsWith('/') ? curR + ename : curR + "/" + ename);
+                    QString why;
+                    if (!isValidEntryName(ename, &why)) {
+                        ++bad;
+                        continue;
+                    }
+                    const QString childR =
+                        (curR.endsWith('/') ? curR + ename
+                                            : curR + "/" + ename);
                     const QString childL = QDir(curL).filePath(ename);
-                    if (e.is_dir) stack.push_back({ childR, childL });
-                    else { transferMgr_->enqueueDownload(childR, childL); ++enq; }
+                    if (e.is_dir)
+                        stack.push_back({childR, childL});
+                    else {
+                        transferMgr_->enqueueDownload(childR, childL);
+                        ++enq;
+                    }
                 }
             }
         } else {
@@ -1873,7 +2334,8 @@ void MainWindow::copyRightToLeft() {
     }
     if (enq > 0) {
         QString msg = QString(tr("Queued: %1 downloads")).arg(enq);
-        if (bad > 0) msg += QString("  |  ") + tr("Skipped invalid: %1").arg(bad);
+        if (bad > 0)
+            msg += QString("  |  ") + tr("Skipped invalid: %1").arg(bad);
         statusBar()->showMessage(msg, 4000);
         maybeShowTransferQueue();
     }
@@ -1884,9 +2346,17 @@ void MainWindow::copyRightToLeft() {
 // - Local  -> local copy and delete the source.
 void MainWindow::moveRightToLeft() {
     auto sel = rightView_->selectionModel();
-    if (!sel || sel->selectedRows(NAME_COL).isEmpty()) { QMessageBox::information(this, tr("Move"), tr("Nothing selected.")); return; }
+    if (!sel || sel->selectedRows(NAME_COL).isEmpty()) {
+        QMessageBox::information(this, tr("Move"), tr("Nothing selected."));
+        return;
+    }
     QDir dst(leftPath_->text());
-    if (!dst.exists()) { QMessageBox::warning(this, tr("Invalid destination"), tr("The destination folder (left panel) does not exist.")); return; }
+    if (!dst.exists()) {
+        QMessageBox::warning(
+            this, tr("Invalid destination"),
+            tr("The destination folder (left panel) does not exist."));
+        return;
+    }
 
     if (!rightIsRemote_) {
         // Local -> Local: move (copy then delete)
@@ -1895,78 +2365,138 @@ void MainWindow::moveRightToLeft() {
         int ok = 0, fail = 0, skipped = 0;
         QString lastError;
         const auto rows = sel->selectedRows(NAME_COL);
-        for (const QModelIndex& idx : rows) {
+        for (const QModelIndex &idx : rows) {
             const QFileInfo fi = rightLocalModel_->fileInfo(idx);
             const QString target = dst.filePath(fi.fileName());
             if (QFileInfo::exists(target)) {
                 if (policy == OverwritePolicy::Ask) {
                     auto ret = QMessageBox::question(
-                        this,
-                        tr("Conflict"),
-                        QString(tr("“%1” already exists at destination.\nOverwrite?")) .arg(fi.fileName()),
-                        QMessageBox::Yes | QMessageBox::No | QMessageBox::YesToAll | QMessageBox::NoToAll
-                    );
-                    if (ret == QMessageBox::YesToAll) policy = OverwritePolicy::OverwriteAll;
-                    else if (ret == QMessageBox::NoToAll) policy = OverwritePolicy::SkipAll;
-                    if (ret == QMessageBox::No || policy == OverwritePolicy::SkipAll) { ++skipped; continue; }
+                        this, tr("Conflict"),
+                        QString(tr("“%1” already exists at "
+                                   "destination.\nOverwrite?"))
+                            .arg(fi.fileName()),
+                        QMessageBox::Yes | QMessageBox::No |
+                            QMessageBox::YesToAll | QMessageBox::NoToAll);
+                    if (ret == QMessageBox::YesToAll)
+                        policy = OverwritePolicy::OverwriteAll;
+                    else if (ret == QMessageBox::NoToAll)
+                        policy = OverwritePolicy::SkipAll;
+                    if (ret == QMessageBox::No ||
+                        policy == OverwritePolicy::SkipAll) {
+                        ++skipped;
+                        continue;
+                    }
                 }
                 QFileInfo tfi(target);
-                if (tfi.isDir()) QDir(target).removeRecursively(); else QFile::remove(target);
+                if (tfi.isDir())
+                    QDir(target).removeRecursively();
+                else
+                    QFile::remove(target);
             }
             QString err;
             if (copyEntryRecursively(fi.absoluteFilePath(), target, err)) {
-                bool removed = fi.isDir() ? QDir(fi.absoluteFilePath()).removeRecursively() : QFile::remove(fi.absoluteFilePath());
-                if (removed) ++ok; else { ++fail; lastError = tr("Could not delete source: ") + fi.absoluteFilePath(); }
-            } else { ++fail; lastError = err; }
+                bool removed =
+                    fi.isDir() ? QDir(fi.absoluteFilePath()).removeRecursively()
+                               : QFile::remove(fi.absoluteFilePath());
+                if (removed)
+                    ++ok;
+                else {
+                    ++fail;
+                    lastError =
+                        tr("Could not delete source: ") + fi.absoluteFilePath();
+                }
+            } else {
+                ++fail;
+                lastError = err;
+            }
         }
-        QString m = QString(tr("Moved OK: %1  |  Failed: %2  |  Skipped: %3")).arg(ok).arg(fail).arg(skipped);
-        if (fail > 0 && !lastError.isEmpty()) m += "\n" + tr("Last error: ") + lastError;
+        QString m = QString(tr("Moved OK: %1  |  Failed: %2  |  Skipped: %3"))
+                        .arg(ok)
+                        .arg(fail)
+                        .arg(skipped);
+        if (fail > 0 && !lastError.isEmpty())
+            m += "\n" + tr("Last error: ") + lastError;
         statusBar()->showMessage(m, 5000);
         setRightRoot(rightPath_->text());
         return;
     }
 
     // Remote -> Local: enqueue downloads and delete remote on completion
-    if (!sftp_ || !rightRemoteModel_) { QMessageBox::warning(this, tr("SFTP"), tr("No active SFTP session.")); return; }
+    if (!sftp_ || !rightRemoteModel_) {
+        QMessageBox::warning(this, tr("SFTP"), tr("No active SFTP session."));
+        return;
+    }
     const auto rows = sel->selectedRows(NAME_COL);
     const QString remoteBase = rightRemoteModel_->rootPath();
     QVector<QPair<QString, QString>> pairs; // (remote, local) files to download
     int bad = 0;
-    struct TopSel { QString rpath; bool isDir; };
+    struct TopSel {
+        QString rpath;
+        bool isDir;
+    };
     QVector<TopSel> top;
     int enq = 0;
-    for (const QModelIndex& idx : rows) {
+    for (const QModelIndex &idx : rows) {
         const QString name = rightRemoteModel_->nameAt(idx);
-        { QString why; if (!isValidEntryName(name, &why)) { ++bad; continue; } }
-        QString rpath = remoteBase; if (!rpath.endsWith('/')) rpath += '/'; rpath += name;
+        {
+            QString why;
+            if (!isValidEntryName(name, &why)) {
+                ++bad;
+                continue;
+            }
+        }
+        QString rpath = remoteBase;
+        if (!rpath.endsWith('/'))
+            rpath += '/';
+        rpath += name;
         const QString lpath = dst.filePath(name);
         const bool isDir = rightRemoteModel_->isDir(idx);
-        top.push_back({ rpath, isDir });
+        top.push_back({rpath, isDir});
         if (isDir) {
-            QVector<QPair<QString, QString>> stack; stack.push_back({ rpath, lpath });
+            QVector<QPair<QString, QString>> stack;
+            stack.push_back({rpath, lpath});
             while (!stack.isEmpty()) {
-                auto pair = stack.back(); stack.pop_back();
-                const QString curR = pair.first; const QString curL = pair.second; QDir().mkpath(curL);
-                std::vector<openscp::FileInfo> out; std::string lerr;
-                if (!sftp_->list(curR.toStdString(), out, lerr)) continue;
-                for (const auto& e : out) {
+                auto pair = stack.back();
+                stack.pop_back();
+                const QString curR = pair.first;
+                const QString curL = pair.second;
+                QDir().mkpath(curL);
+                std::vector<openscp::FileInfo> out;
+                std::string lerr;
+                if (!sftp_->list(curR.toStdString(), out, lerr))
+                    continue;
+                for (const auto &e : out) {
                     const QString ename = QString::fromStdString(e.name);
-                    QString why; if (!isValidEntryName(ename, &why)) { ++bad; continue; }
-                    const QString childR = (curR.endsWith('/') ? curR + ename : curR + "/" + ename);
+                    QString why;
+                    if (!isValidEntryName(ename, &why)) {
+                        ++bad;
+                        continue;
+                    }
+                    const QString childR =
+                        (curR.endsWith('/') ? curR + ename
+                                            : curR + "/" + ename);
                     const QString childL = QDir(curL).filePath(ename);
-                    if (e.is_dir) { stack.push_back({ childR, childL }); }
-                    else { QDir().mkpath(QFileInfo(childL).dir().absolutePath()); pairs.push_back({ childR, childL }); }
+                    if (e.is_dir) {
+                        stack.push_back({childR, childL});
+                    } else {
+                        QDir().mkpath(QFileInfo(childL).dir().absolutePath());
+                        pairs.push_back({childR, childL});
+                    }
                 }
             }
         } else {
             QDir().mkpath(QFileInfo(lpath).dir().absolutePath());
-            pairs.push_back({ rpath, lpath });
+            pairs.push_back({rpath, lpath});
         }
     }
-    for (const auto& p : pairs) { transferMgr_->enqueueDownload(p.first, p.second); ++enq; }
+    for (const auto &p : pairs) {
+        transferMgr_->enqueueDownload(p.first, p.second);
+        ++enq;
+    }
     if (enq > 0) {
         QString msg = QString(tr("Queued: %1 downloads (move)")).arg(enq);
-        if (bad > 0) msg += QString("  |  ") + tr("Skipped invalid: %1").arg(bad);
+        if (bad > 0)
+            msg += QString("  |  ") + tr("Skipped invalid: %1").arg(bad);
         statusBar()->showMessage(msg, 4000);
         maybeShowTransferQueue();
     }
@@ -1974,131 +2504,202 @@ void MainWindow::moveRightToLeft() {
     // when a folder has no pending files left, delete the folder.
     if (enq > 0) {
         struct MoveState {
-            QSet<QString> filesPending;                 // remote files pending deletion
-            QSet<QString> filesProcessed;               // remote files already processed (avoid duplicates)
-            QHash<QString, QString> fileToTopDir;       // remote file -> top dir rpath
-            QHash<QString, int> remainingInTopDir;      // top dir -> count of pending successful files
-            QSet<QString> topDirs;                      // rpaths of top entries that are directories
-            QSet<QString> deletedDirs;                  // top dirs already deleted
+            QSet<QString> filesPending;   // remote files pending deletion
+            QSet<QString> filesProcessed; // remote files already processed
+                                          // (avoid duplicates)
+            QHash<QString, QString>
+                fileToTopDir; // remote file -> top dir rpath
+            QHash<QString, int> remainingInTopDir; // top dir -> count of
+                                                   // pending successful files
+            QSet<QString> topDirs; // rpaths of top entries that are directories
+            QSet<QString> deletedDirs; // top dirs already deleted
         };
         auto state = std::make_shared<MoveState>();
         // Initialize top dir mapping and counters
-        for (const auto& tsel : top) if (tsel.isDir) { state->topDirs.insert(tsel.rpath); state->remainingInTopDir.insert(tsel.rpath, 0); }
-        for (const auto& pr : pairs) {
+        for (const auto &tsel : top)
+            if (tsel.isDir) {
+                state->topDirs.insert(tsel.rpath);
+                state->remainingInTopDir.insert(tsel.rpath, 0);
+            }
+        for (const auto &pr : pairs) {
             state->filesPending.insert(pr.first);
             // Locate containing top directory
             QString foundTop;
-            for (const auto& tsel : top) {
-                if (!tsel.isDir) continue;
-                const QString prefix = tsel.rpath.endsWith('/') ? tsel.rpath : (tsel.rpath + '/');
-                if (pr.first == tsel.rpath || pr.first.startsWith(prefix)) { foundTop = tsel.rpath; break; }
+            for (const auto &tsel : top) {
+                if (!tsel.isDir)
+                    continue;
+                const QString prefix =
+                    tsel.rpath.endsWith('/') ? tsel.rpath : (tsel.rpath + '/');
+                if (pr.first == tsel.rpath || pr.first.startsWith(prefix)) {
+                    foundTop = tsel.rpath;
+                    break;
+                }
             }
             if (!foundTop.isEmpty()) {
                 state->fileToTopDir.insert(pr.first, foundTop);
-                state->remainingInTopDir[foundTop] = state->remainingInTopDir.value(foundTop) + 1;
+                state->remainingInTopDir[foundTop] =
+                    state->remainingInTopDir.value(foundTop) + 1;
             }
         }
-        // If there are directories with 0 files, try to delete them only if empty
-        for (auto it = state->remainingInTopDir.begin(); it != state->remainingInTopDir.end(); ++it) {
+        // If there are directories with 0 files, try to delete them only if
+        // empty
+        for (auto it = state->remainingInTopDir.begin();
+             it != state->remainingInTopDir.end(); ++it) {
             if (it.value() == 0) {
-                std::vector<openscp::FileInfo> out; std::string lerr;
-                if (sftp_ && sftp_->list(it.key().toStdString(), out, lerr) && out.empty()) {
-                    std::string derr; if (sftp_->removeDir(it.key().toStdString(), derr)) {
+                std::vector<openscp::FileInfo> out;
+                std::string lerr;
+                if (sftp_ && sftp_->list(it.key().toStdString(), out, lerr) &&
+                    out.empty()) {
+                    std::string derr;
+                    if (sftp_->removeDir(it.key().toStdString(), derr)) {
                         state->deletedDirs.insert(it.key());
                     }
                 }
             }
         }
         auto connPtr = std::make_shared<QMetaObject::Connection>();
-        *connPtr = connect(transferMgr_, &TransferManager::tasksChanged, this, [this, state, remoteBase, connPtr, pairs]() {
-            const auto tasks = transferMgr_->tasksSnapshot();
-            // 1) For each successfully completed task, delete the corresponding remote file (once)
-            for (const auto& t : tasks) {
-                if (t.type != TransferTask::Type::Download) continue;
-                if (t.status != TransferTask::Status::Done) continue;
-                const QString r = t.src;
-                if (!state->filesPending.contains(r)) continue; // does not belong to this move or already deleted
-                if (state->filesProcessed.contains(r)) continue;
-                // Try to delete the remote file
-                std::string ferr; bool okDel = sftp_ && sftp_->removeFile(r.toStdString(), ferr);
-                state->filesProcessed.insert(r);
-                if (okDel) {
-                    state->filesPending.remove(r);
-                    // Decrement counter for the top directory it belongs to
-                    const QString topDir = state->fileToTopDir.value(r);
-                    if (!topDir.isEmpty()) {
-                        int rem = state->remainingInTopDir.value(topDir) - 1;
-                        state->remainingInTopDir[topDir] = rem;
-                        if (rem == 0 && !state->deletedDirs.contains(topDir)) {
-                            // All files under this top dir were moved: delete folder only if empty
-                            std::vector<openscp::FileInfo> out; std::string lerr;
-                            if (sftp_ && sftp_->list(topDir.toStdString(), out, lerr) && out.empty()) {
-                                std::string derr; if (sftp_->removeDir(topDir.toStdString(), derr)) {
-                                    state->deletedDirs.insert(topDir);
+        *connPtr = connect(
+            transferMgr_, &TransferManager::tasksChanged, this,
+            [this, state, remoteBase, connPtr, pairs]() {
+                const auto tasks = transferMgr_->tasksSnapshot();
+                // 1) For each successfully completed task, delete the
+                // corresponding remote file (once)
+                for (const auto &t : tasks) {
+                    if (t.type != TransferTask::Type::Download)
+                        continue;
+                    if (t.status != TransferTask::Status::Done)
+                        continue;
+                    const QString r = t.src;
+                    if (!state->filesPending.contains(r))
+                        continue; // does not belong to this move or already
+                                  // deleted
+                    if (state->filesProcessed.contains(r))
+                        continue;
+                    // Try to delete the remote file
+                    std::string ferr;
+                    bool okDel =
+                        sftp_ && sftp_->removeFile(r.toStdString(), ferr);
+                    state->filesProcessed.insert(r);
+                    if (okDel) {
+                        state->filesPending.remove(r);
+                        // Decrement counter for the top directory it belongs to
+                        const QString topDir = state->fileToTopDir.value(r);
+                        if (!topDir.isEmpty()) {
+                            int rem =
+                                state->remainingInTopDir.value(topDir) - 1;
+                            state->remainingInTopDir[topDir] = rem;
+                            if (rem == 0 &&
+                                !state->deletedDirs.contains(topDir)) {
+                                // All files under this top dir were moved:
+                                // delete folder only if empty
+                                std::vector<openscp::FileInfo> out;
+                                std::string lerr;
+                                if (sftp_ &&
+                                    sftp_->list(topDir.toStdString(), out,
+                                                lerr) &&
+                                    out.empty()) {
+                                    std::string derr;
+                                    if (sftp_->removeDir(topDir.toStdString(),
+                                                         derr)) {
+                                        state->deletedDirs.insert(topDir);
+                                    }
                                 }
                             }
                         }
+                    } else {
+                        // Not deleted: keep it out to avoid endless retries;
+                        // could retry if desired
+                        state->filesPending.remove(r);
                     }
-                } else {
-                    // Not deleted: keep it out to avoid endless retries; could retry if desired
-                    state->filesPending.remove(r);
                 }
-            }
 
-            // 2) Disconnect when all related tasks have reached a final state
-            bool allFinal = true;
-            for (const auto& pr : pairs) {
-                bool found = false, final = false;
-                for (const auto& t : tasks) {
-                    if (t.type == TransferTask::Type::Download && t.src == pr.first && t.dst == pr.second) {
-                        found = true;
-                        if (t.status == TransferTask::Status::Done || t.status == TransferTask::Status::Error || t.status == TransferTask::Status::Canceled) final = true;
+                // 2) Disconnect when all related tasks have reached a final
+                // state
+                bool allFinal = true;
+                for (const auto &pr : pairs) {
+                    bool found = false, final = false;
+                    for (const auto &t : tasks) {
+                        if (t.type == TransferTask::Type::Download &&
+                            t.src == pr.first && t.dst == pr.second) {
+                            found = true;
+                            if (t.status == TransferTask::Status::Done ||
+                                t.status == TransferTask::Status::Error ||
+                                t.status == TransferTask::Status::Canceled)
+                                final = true;
+                            break;
+                        }
+                    }
+                    if (!found || !final) {
+                        allFinal = false;
                         break;
                     }
                 }
-                if (!found || !final) { allFinal = false; break; }
-            }
-            if (allFinal) {
-                // Refrescar vista remota una vez al final
-                QString dummy; if (rightRemoteModel_) rightRemoteModel_->setRootPath(remoteBase, &dummy);
-                updateRemoteWriteability();
-                QObject::disconnect(*connPtr);
-            }
-        });
+                if (allFinal) {
+                    // Refrescar vista remota una vez al final
+                    QString dummy;
+                    if (rightRemoteModel_)
+                        rightRemoteModel_->setRootPath(remoteBase, &dummy);
+                    updateRemoteWriteability();
+                    QObject::disconnect(*connPtr);
+                }
+            });
     }
 }
 
 void MainWindow::uploadViaDialog() {
-    if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_) { QMessageBox::information(this, tr("Upload"), tr("The right panel is not remote or there is no active session.")); return; }
-    const QString startDir = uploadDir_.isEmpty() ? QDir::homePath() : uploadDir_;
+    if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_) {
+        QMessageBox::information(
+            this, tr("Upload"),
+            tr("The right panel is not remote or there is no active session."));
+        return;
+    }
+    const QString startDir =
+        uploadDir_.isEmpty() ? QDir::homePath() : uploadDir_;
     QFileDialog dlg(this, tr("Select files or folders to upload"), startDir);
     dlg.setFileMode(QFileDialog::ExistingFiles);
     dlg.setOption(QFileDialog::DontUseNativeDialog, true);
     dlg.setViewMode(QFileDialog::Detail);
-    if (auto* lv = dlg.findChild<QListView*>("listView")) lv->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    if (auto* tv = dlg.findChild<QTreeView*>())           tv->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    if (dlg.exec() != QDialog::Accepted) return;
+    if (auto *lv = dlg.findChild<QListView *>("listView"))
+        lv->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    if (auto *tv = dlg.findChild<QTreeView *>())
+        tv->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
     const QStringList picks = dlg.selectedFiles();
-    if (picks.isEmpty()) return;
+    if (picks.isEmpty())
+        return;
     uploadDir_ = QFileInfo(picks.first()).dir().absolutePath();
     QStringList files;
-    for (const QString& p : picks) {
+    for (const QString &p : picks) {
         QFileInfo fi(p);
         if (fi.isDir()) {
-            QDirIterator it(p, QDir::NoDotAndDotDot | QDir::AllEntries, QDirIterator::Subdirectories);
-            while (it.hasNext()) { it.next(); if (it.fileInfo().isFile()) files << it.filePath(); }
+            QDirIterator it(p, QDir::NoDotAndDotDot | QDir::AllEntries,
+                            QDirIterator::Subdirectories);
+            while (it.hasNext()) {
+                it.next();
+                if (it.fileInfo().isFile())
+                    files << it.filePath();
+            }
         } else if (fi.isFile()) {
             files << fi.absoluteFilePath();
         }
     }
-    if (files.isEmpty()) { statusBar()->showMessage(tr("Nothing to upload."), 4000); return; }
+    if (files.isEmpty()) {
+        statusBar()->showMessage(tr("Nothing to upload."), 4000);
+        return;
+    }
     int enq = 0;
     const QString remoteBase = rightRemoteModel_->rootPath();
-    for (const QString& localPath : files) {
+    for (const QString &localPath : files) {
         const QFileInfo fi(localPath);
-        QString relBase = fi.path().startsWith(uploadDir_) ? fi.path().mid(uploadDir_.size()).trimmed() : QString();
-        if (relBase.startsWith('/')) relBase.remove(0, 1);
-        QString targetDir = relBase.isEmpty() ? remoteBase : joinRemotePath(remoteBase, relBase);
+        QString relBase = fi.path().startsWith(uploadDir_)
+                              ? fi.path().mid(uploadDir_.size()).trimmed()
+                              : QString();
+        if (relBase.startsWith('/'))
+            relBase.remove(0, 1);
+        QString targetDir = relBase.isEmpty()
+                                ? remoteBase
+                                : joinRemotePath(remoteBase, relBase);
         if (!targetDir.isEmpty() && targetDir != remoteBase) {
             bool isDir = false;
             std::string se;
@@ -2113,30 +2714,35 @@ void MainWindow::uploadViaDialog() {
         ++enq;
     }
     if (enq > 0) {
-        statusBar()->showMessage(QString(tr("Queued: %1 uploads")).arg(enq), 4000);
+        statusBar()->showMessage(QString(tr("Queued: %1 uploads")).arg(enq),
+                                 4000);
         maybeShowTransferQueue();
     }
 }
 
-
-
 // Create a new directory in the right pane (local or remote).
 void MainWindow::newDirRight() {
     bool ok = false;
-    const QString name = QInputDialog::getText(this, tr("New folder"), tr("Name:"), QLineEdit::Normal, {}, &ok);
-    if (!ok || name.isEmpty()) return;
-    QString why; if (!isValidEntryName(name, &why)) { QMessageBox::warning(this, tr("Invalid name"), why); return; }
+    const QString name = QInputDialog::getText(
+        this, tr("New folder"), tr("Name:"), QLineEdit::Normal, {}, &ok);
+    if (!ok || name.isEmpty())
+        return;
+    QString why;
+    if (!isValidEntryName(name, &why)) {
+        QMessageBox::warning(this, tr("Invalid name"), why);
+        return;
+    }
     if (rightIsRemote_) {
-        if (!sftp_ || !rightRemoteModel_) return;
-        const QString path = joinRemotePath(rightRemoteModel_->rootPath(), name);
+        if (!sftp_ || !rightRemoteModel_)
+            return;
+        const QString path =
+            joinRemotePath(rightRemoteModel_->rootPath(), name);
         std::string err;
         if (!sftp_->mkdir(path.toStdString(), err, 0755)) {
             QMessageBox::critical(
-                this,
-                tr("SFTP"),
+                this, tr("SFTP"),
                 tr("Could not create the remote folder.\n%1")
-                    .arg(shortRemoteError(err, tr("Remote error")))
-            );
+                    .arg(shortRemoteError(err, tr("Remote error"))));
             return;
         }
         QString dummy;
@@ -2144,7 +2750,11 @@ void MainWindow::newDirRight() {
         updateRemoteWriteability();
     } else {
         QDir base(rightPath_->text());
-        if (!base.mkpath(base.filePath(name))) { QMessageBox::critical(this, tr("Local"), tr("Could not create folder.")); return; }
+        if (!base.mkpath(base.filePath(name))) {
+            QMessageBox::critical(this, tr("Local"),
+                                  tr("Could not create folder."));
+            return;
+        }
         setRightRoot(base.absolutePath());
     }
 }
@@ -2152,55 +2762,75 @@ void MainWindow::newDirRight() {
 // Create a new empty file in the right pane (local only).
 void MainWindow::newFileRight() {
     bool ok = false;
-    const QString name = QInputDialog::getText(this, tr("New file"), tr("Name:"), QLineEdit::Normal, {}, &ok);
-    if (!ok || name.isEmpty()) return;
-    QString why; if (!isValidEntryName(name, &why)) { QMessageBox::warning(this, tr("Invalid name"), why); return; }
+    const QString name = QInputDialog::getText(
+        this, tr("New file"), tr("Name:"), QLineEdit::Normal, {}, &ok);
+    if (!ok || name.isEmpty())
+        return;
+    QString why;
+    if (!isValidEntryName(name, &why)) {
+        QMessageBox::warning(this, tr("Invalid name"), why);
+        return;
+    }
     if (rightIsRemote_) {
-        if (!sftp_ || !rightRemoteModel_) return;
-        const QString remotePath = joinRemotePath(rightRemoteModel_->rootPath(), name);
-        bool isDir = false; std::string e;
+        if (!sftp_ || !rightRemoteModel_)
+            return;
+        const QString remotePath =
+            joinRemotePath(rightRemoteModel_->rootPath(), name);
+        bool isDir = false;
+        std::string e;
         bool exists = sftp_->exists(remotePath.toStdString(), isDir, e);
         if (exists) {
-            if (QMessageBox::question(this, tr("File exists"),
-                                      tr("«%1» already exists.\\nOverwrite?").arg(name),
-                                      QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) return;
+            if (QMessageBox::question(
+                    this, tr("File exists"),
+                    tr("«%1» already exists.\\nOverwrite?").arg(name),
+                    QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
+                return;
         } else if (!e.empty()) {
             QMessageBox::critical(
-                this,
-                tr("SFTP"),
-                tr("Could not check whether the remote file already exists.\n%1")
-                    .arg(shortRemoteError(e, tr("Remote error")))
-            );
+                this, tr("SFTP"),
+                tr("Could not check whether the remote file already "
+                   "exists.\n%1")
+                    .arg(shortRemoteError(e, tr("Remote error"))));
             return;
         }
 
         QTemporaryFile tmp;
-        if (!tmp.open()) { QMessageBox::critical(this, tr("Temporary"), tr("Could not create a temporary file.")); return; }
-        tmp.close();
-        std::string err;
-        bool okPut = sftp_->put(tmp.fileName().toStdString(), remotePath.toStdString(), err);
-        if (!okPut) {
-            QMessageBox::critical(
-                this,
-                tr("SFTP"),
-                tr("Could not upload the temporary file to the server.\n%1")
-                    .arg(shortRemoteError(err, tr("Remote error")))
-            );
+        if (!tmp.open()) {
+            QMessageBox::critical(this, tr("Temporary"),
+                                  tr("Could not create a temporary file."));
             return;
         }
-        QString dummy; rightRemoteModel_->setRootPath(rightRemoteModel_->rootPath(), &dummy);
+        tmp.close();
+        std::string err;
+        bool okPut = sftp_->put(tmp.fileName().toStdString(),
+                                remotePath.toStdString(), err);
+        if (!okPut) {
+            QMessageBox::critical(
+                this, tr("SFTP"),
+                tr("Could not upload the temporary file to the server.\n%1")
+                    .arg(shortRemoteError(err, tr("Remote error"))));
+            return;
+        }
+        QString dummy;
+        rightRemoteModel_->setRootPath(rightRemoteModel_->rootPath(), &dummy);
         updateRemoteWriteability();
         statusBar()->showMessage(tr("File created: ") + remotePath, 4000);
     } else {
         QDir base(rightPath_->text());
         const QString path = base.filePath(name);
         if (QFileInfo::exists(path)) {
-            if (QMessageBox::question(this, tr("File exists"),
-                                      tr("«%1» already exists.\\nOverwrite?").arg(name),
-                                      QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) return;
+            if (QMessageBox::question(
+                    this, tr("File exists"),
+                    tr("«%1» already exists.\\nOverwrite?").arg(name),
+                    QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
+                return;
         }
         QFile f(path);
-        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) { QMessageBox::critical(this, tr("Local"), tr("Could not create file.")); return; }
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            QMessageBox::critical(this, tr("Local"),
+                                  tr("Could not create file."));
+            return;
+        }
         f.close();
         setRightRoot(base.absolutePath());
         statusBar()->showMessage(tr("File created: ") + path, 4000);
@@ -2210,27 +2840,34 @@ void MainWindow::newFileRight() {
 // Rename the selected entry on the right pane (local or remote).
 void MainWindow::renameRightSelected() {
     auto sel = rightView_->selectionModel();
-    if (!sel) return;
+    if (!sel)
+        return;
     const auto rows = sel->selectedRows();
-    if (rows.size() != 1) { QMessageBox::information(this, tr("Rename"), tr("Select exactly one item.")); return; }
+    if (rows.size() != 1) {
+        QMessageBox::information(this, tr("Rename"),
+                                 tr("Select exactly one item."));
+        return;
+    }
     if (rightIsRemote_) {
-        if (!sftp_ || !rightRemoteModel_) return;
+        if (!sftp_ || !rightRemoteModel_)
+            return;
         const QModelIndex idx = rows.first();
         const QString oldName = rightRemoteModel_->nameAt(idx);
         bool ok = false;
-        const QString newName = QInputDialog::getText(this, tr("Rename"), tr("New name:"), QLineEdit::Normal, oldName, &ok);
-        if (!ok || newName.isEmpty() || newName == oldName) return;
+        const QString newName =
+            QInputDialog::getText(this, tr("Rename"), tr("New name:"),
+                                  QLineEdit::Normal, oldName, &ok);
+        if (!ok || newName.isEmpty() || newName == oldName)
+            return;
         const QString base = rightRemoteModel_->rootPath();
         const QString from = joinRemotePath(base, oldName);
-        const QString to   = joinRemotePath(base, newName);
+        const QString to = joinRemotePath(base, newName);
         std::string err;
         if (!sftp_->rename(from.toStdString(), to.toStdString(), err, false)) {
             QMessageBox::critical(
-                this,
-                tr("SFTP"),
+                this, tr("SFTP"),
                 tr("Could not rename the remote item.\n%1")
-                    .arg(shortRemoteError(err, tr("Remote error")))
-            );
+                    .arg(shortRemoteError(err, tr("Remote error"))));
             return;
         }
         QString dummy;
@@ -2240,12 +2877,20 @@ void MainWindow::renameRightSelected() {
         const QModelIndex idx = rows.first();
         const QFileInfo fi = rightLocalModel_->fileInfo(idx);
         bool ok = false;
-        const QString newName = QInputDialog::getText(this, tr("Rename"), tr("New name:"), QLineEdit::Normal, fi.fileName(), &ok);
-        if (!ok || newName.isEmpty() || newName == fi.fileName()) return;
+        const QString newName =
+            QInputDialog::getText(this, tr("Rename"), tr("New name:"),
+                                  QLineEdit::Normal, fi.fileName(), &ok);
+        if (!ok || newName.isEmpty() || newName == fi.fileName())
+            return;
         const QString newPath = QDir(fi.absolutePath()).filePath(newName);
         bool renamed = QFile::rename(fi.absoluteFilePath(), newPath);
-        if (!renamed) renamed = QDir(fi.absolutePath()).rename(fi.absoluteFilePath(), newPath);
-        if (!renamed) { QMessageBox::critical(this, tr("Local"), tr("Could not rename.")); return; }
+        if (!renamed)
+            renamed =
+                QDir(fi.absolutePath()).rename(fi.absoluteFilePath(), newPath);
+        if (!renamed) {
+            QMessageBox::critical(this, tr("Local"), tr("Could not rename."));
+            return;
+        }
         setRightRoot(rightPath_->text());
     }
 }
@@ -2253,47 +2898,81 @@ void MainWindow::renameRightSelected() {
 // Rename the selected entry on the left (local) pane.
 void MainWindow::renameLeftSelected() {
     auto sel = leftView_->selectionModel();
-    if (!sel) return;
+    if (!sel)
+        return;
     const auto rows = sel->selectedRows();
-    if (rows.size() != 1) { QMessageBox::information(this, tr("Rename"), tr("Select exactly one item.")); return; }
+    if (rows.size() != 1) {
+        QMessageBox::information(this, tr("Rename"),
+                                 tr("Select exactly one item."));
+        return;
+    }
     const QModelIndex idx = rows.first();
     const QFileInfo fi = leftModel_->fileInfo(idx);
     bool ok = false;
-    const QString newName = QInputDialog::getText(this, tr("Rename"), tr("New name:"), QLineEdit::Normal, fi.fileName(), &ok);
-    if (!ok || newName.isEmpty() || newName == fi.fileName()) return;
+    const QString newName =
+        QInputDialog::getText(this, tr("Rename"), tr("New name:"),
+                              QLineEdit::Normal, fi.fileName(), &ok);
+    if (!ok || newName.isEmpty() || newName == fi.fileName())
+        return;
     const QString newPath = QDir(fi.absolutePath()).filePath(newName);
     bool renamed = QFile::rename(fi.absoluteFilePath(), newPath);
-    if (!renamed) renamed = QDir(fi.absolutePath()).rename(fi.absoluteFilePath(), newPath);
-    if (!renamed) { QMessageBox::critical(this, tr("Local"), tr("Could not rename.")); return; }
+    if (!renamed)
+        renamed =
+            QDir(fi.absolutePath()).rename(fi.absoluteFilePath(), newPath);
+    if (!renamed) {
+        QMessageBox::critical(this, tr("Local"), tr("Could not rename."));
+        return;
+    }
     setLeftRoot(leftPath_->text());
 }
 
 // Create a new directory in the left (local) pane.
 void MainWindow::newDirLeft() {
     bool ok = false;
-    const QString name = QInputDialog::getText(this, tr("New folder"), tr("Name:"), QLineEdit::Normal, {}, &ok);
-    if (!ok || name.isEmpty()) return;
-    QString why; if (!isValidEntryName(name, &why)) { QMessageBox::warning(this, tr("Invalid name"), why); return; }
+    const QString name = QInputDialog::getText(
+        this, tr("New folder"), tr("Name:"), QLineEdit::Normal, {}, &ok);
+    if (!ok || name.isEmpty())
+        return;
+    QString why;
+    if (!isValidEntryName(name, &why)) {
+        QMessageBox::warning(this, tr("Invalid name"), why);
+        return;
+    }
     QDir base(leftPath_->text());
-    if (!base.mkpath(base.filePath(name))) { QMessageBox::critical(this, tr("Local"), tr("Could not create folder.")); return; }
+    if (!base.mkpath(base.filePath(name))) {
+        QMessageBox::critical(this, tr("Local"),
+                              tr("Could not create folder."));
+        return;
+    }
     setLeftRoot(base.absolutePath());
 }
 
 // Create a new empty file in the left (local) pane.
 void MainWindow::newFileLeft() {
     bool ok = false;
-    const QString name = QInputDialog::getText(this, tr("New file"), tr("Name:"), QLineEdit::Normal, {}, &ok);
-    if (!ok || name.isEmpty()) return;
-    QString why; if (!isValidEntryName(name, &why)) { QMessageBox::warning(this, tr("Invalid name"), why); return; }
+    const QString name = QInputDialog::getText(
+        this, tr("New file"), tr("Name:"), QLineEdit::Normal, {}, &ok);
+    if (!ok || name.isEmpty())
+        return;
+    QString why;
+    if (!isValidEntryName(name, &why)) {
+        QMessageBox::warning(this, tr("Invalid name"), why);
+        return;
+    }
     QDir base(leftPath_->text());
     const QString path = base.filePath(name);
     if (QFileInfo::exists(path)) {
-        if (QMessageBox::question(this, tr("File exists"),
-                                  tr("«%1» already exists.\\nOverwrite?").arg(name),
-                                  QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) return;
+        if (QMessageBox::question(
+                this, tr("File exists"),
+                tr("«%1» already exists.\\nOverwrite?").arg(name),
+                QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
+            return;
     }
     QFile f(path);
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) { QMessageBox::critical(this, tr("Local"), tr("Could not create file.")); return; }
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        QMessageBox::critical(this, tr("Local"), tr("Could not create file."));
+        return;
+    }
     f.close();
     setLeftRoot(base.absolutePath());
     statusBar()->showMessage(tr("File created: ") + path, 4000);
@@ -2302,28 +2981,42 @@ void MainWindow::newFileLeft() {
 // Delete the selected entries from the right pane (local or remote).
 void MainWindow::deleteRightSelected() {
     auto sel = rightView_->selectionModel();
-    if (!sel) return;
+    if (!sel)
+        return;
     const auto rows = sel->selectedRows();
-    if (rows.isEmpty()) { QMessageBox::information(this, tr("Delete"), tr("Nothing selected.")); return; }
+    if (rows.isEmpty()) {
+        QMessageBox::information(this, tr("Delete"), tr("Nothing selected."));
+        return;
+    }
     if (rightIsRemote_) {
-        if (!sftp_ || !rightRemoteModel_) return;
-        if (QMessageBox::warning(this, tr("Confirm delete"), tr("This will permanently delete items on the remote server.\\nContinue?"), QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) return;
+        if (!sftp_ || !rightRemoteModel_)
+            return;
+        if (QMessageBox::warning(this, tr("Confirm delete"),
+                                 tr("This will permanently delete items on the "
+                                    "remote server.\\nContinue?"),
+                                 QMessageBox::Yes | QMessageBox::No) !=
+            QMessageBox::Yes)
+            return;
         int ok = 0, fail = 0;
         QString lastErr;
         const QString base = rightRemoteModel_->rootPath();
-        std::function<bool(const QString&)> delRec = [&](const QString& p) {
+        std::function<bool(const QString &)> delRec = [&](const QString &p) {
             // Determine if path is a directory or a file using stat/exists
             bool isDir = false;
             std::string xerr;
             if (!sftp_->exists(p.toStdString(), isDir, xerr)) {
                 // If it doesn't exist, treat as success
-                if (xerr.empty()) return true;
+                if (xerr.empty())
+                    return true;
                 lastErr = QString::fromStdString(xerr);
                 return false;
             }
             if (!isDir) {
                 std::string ferr;
-                if (!sftp_->removeFile(p.toStdString(), ferr)) { lastErr = QString::fromStdString(ferr); return false; }
+                if (!sftp_->removeFile(p.toStdString(), ferr)) {
+                    lastErr = QString::fromStdString(ferr);
+                    return false;
+                }
                 return true;
             }
             // Directory: list and remove children first (depth-first)
@@ -2333,41 +3026,62 @@ void MainWindow::deleteRightSelected() {
                 lastErr = QString::fromStdString(lerr);
                 return false;
             }
-            for (const auto& e : out) {
-                const QString child = joinRemotePath(p, QString::fromStdString(e.name));
-                if (!delRec(child)) return false;
+            for (const auto &e : out) {
+                const QString child =
+                    joinRemotePath(p, QString::fromStdString(e.name));
+                if (!delRec(child))
+                    return false;
             }
             std::string derr;
-            if (!sftp_->removeDir(p.toStdString(), derr)) { lastErr = QString::fromStdString(derr); return false; }
+            if (!sftp_->removeDir(p.toStdString(), derr)) {
+                lastErr = QString::fromStdString(derr);
+                return false;
+            }
             return true;
         };
-        for (const QModelIndex& idx : rows) {
+        for (const QModelIndex &idx : rows) {
             const QString name = rightRemoteModel_->nameAt(idx);
             const QString path = joinRemotePath(base, name);
-            if (delRec(path)) ++ok; else ++fail;
+            if (delRec(path))
+                ++ok;
+            else
+                ++fail;
         }
-    QString msg = QString(tr("Deleted OK: %1  |  Failed: %2")).arg(ok).arg(fail);
-        if (fail > 0 && !lastErr.isEmpty()) msg += "\n" + tr("Last error: ") + lastErr;
+        QString msg =
+            QString(tr("Deleted OK: %1  |  Failed: %2")).arg(ok).arg(fail);
+        if (fail > 0 && !lastErr.isEmpty())
+            msg += "\n" + tr("Last error: ") + lastErr;
         statusBar()->showMessage(msg, 6000);
         QString dummy;
         rightRemoteModel_->setRootPath(base, &dummy);
         updateRemoteWriteability();
     } else {
-        if (QMessageBox::warning(this, tr("Confirm delete"), tr("This will permanently delete on local disk.\nContinue?"), QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) return;
+        if (QMessageBox::warning(
+                this, tr("Confirm delete"),
+                tr("This will permanently delete on local disk.\nContinue?"),
+                QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
+            return;
         int ok = 0, fail = 0;
-        for (const QModelIndex& idx : rows) {
+        for (const QModelIndex &idx : rows) {
             const QFileInfo fi = rightLocalModel_->fileInfo(idx);
-            bool removed = fi.isDir() ? QDir(fi.absoluteFilePath()).removeRecursively() : QFile::remove(fi.absoluteFilePath());
-            if (removed) ++ok; else ++fail;
+            bool removed = fi.isDir()
+                               ? QDir(fi.absoluteFilePath()).removeRecursively()
+                               : QFile::remove(fi.absoluteFilePath());
+            if (removed)
+                ++ok;
+            else
+                ++fail;
         }
-        statusBar()->showMessage(QString(tr("Deleted: %1  |  Failed: %2")).arg(ok).arg(fail), 5000);
+        statusBar()->showMessage(
+            QString(tr("Deleted: %1  |  Failed: %2")).arg(ok).arg(fail), 5000);
         setRightRoot(rightPath_->text());
     }
 }
 
 // Show context menu for the right pane based on current state.
-void MainWindow::showRightContextMenu(const QPoint& pos) {
-    if (!rightContextMenu_) rightContextMenu_ = new QMenu(this);
+void MainWindow::showRightContextMenu(const QPoint &pos) {
+    if (!rightContextMenu_)
+        rightContextMenu_ = new QMenu(this);
     rightContextMenu_->clear();
 
     // Selection state and ability to go up
@@ -2378,8 +3092,10 @@ void MainWindow::showRightContextMenu(const QPoint& pos) {
     // Is there a parent directory?
     bool canGoUp = false;
     if (rightIsRemote_) {
-        QString cur = rightRemoteModel_ ? rightRemoteModel_->rootPath() : QString();
-        if (cur.endsWith('/')) cur.chop(1);
+        QString cur =
+            rightRemoteModel_ ? rightRemoteModel_->rootPath() : QString();
+        if (cur.endsWith('/'))
+            cur.chop(1);
         canGoUp = (!cur.isEmpty() && cur != "/");
     } else {
         QDir d(rightPath_ ? rightPath_->text() : QString());
@@ -2388,57 +3104,80 @@ void MainWindow::showRightContextMenu(const QPoint& pos) {
 
     if (rightIsRemote_) {
         // Up option (if applicable)
-        if (canGoUp && actUpRight_) rightContextMenu_->addAction(actUpRight_);
+        if (canGoUp && actUpRight_)
+            rightContextMenu_->addAction(actUpRight_);
 
         // Always show "Download" on remote, regardless of selection
-        if (actDownloadF7_) rightContextMenu_->addAction(actDownloadF7_);
+        if (actDownloadF7_)
+            rightContextMenu_->addAction(actDownloadF7_);
 
         if (!hasSel) {
             // No selection: creation and navigation
             if (rightRemoteWritable_) {
-                if (actNewFileRight_) rightContextMenu_->addAction(actNewFileRight_);
-                if (actNewDirRight_)  rightContextMenu_->addAction(actNewDirRight_);
+                if (actNewFileRight_)
+                    rightContextMenu_->addAction(actNewFileRight_);
+                if (actNewDirRight_)
+                    rightContextMenu_->addAction(actNewDirRight_);
             }
         } else {
             // With selection on remote
-            if (actCopyRight_)   rightContextMenu_->addAction(actCopyRight_);
+            if (actCopyRight_)
+                rightContextMenu_->addAction(actCopyRight_);
             if (rightRemoteWritable_) {
                 rightContextMenu_->addSeparator();
-                if (actUploadRight_) rightContextMenu_->addAction(actUploadRight_);
-                if (actNewFileRight_) rightContextMenu_->addAction(actNewFileRight_);
-                if (actNewDirRight_)  rightContextMenu_->addAction(actNewDirRight_);
-                if (actRenameRight_)   rightContextMenu_->addAction(actRenameRight_);
-                if (actDeleteRight_)   rightContextMenu_->addAction(actDeleteRight_);
-                if (actMoveRight_)     rightContextMenu_->addAction(actMoveRight_);
+                if (actUploadRight_)
+                    rightContextMenu_->addAction(actUploadRight_);
+                if (actNewFileRight_)
+                    rightContextMenu_->addAction(actNewFileRight_);
+                if (actNewDirRight_)
+                    rightContextMenu_->addAction(actNewDirRight_);
+                if (actRenameRight_)
+                    rightContextMenu_->addAction(actRenameRight_);
+                if (actDeleteRight_)
+                    rightContextMenu_->addAction(actDeleteRight_);
+                if (actMoveRight_)
+                    rightContextMenu_->addAction(actMoveRight_);
                 rightContextMenu_->addSeparator();
-                rightContextMenu_->addAction(tr("Change permissions…"), this, &MainWindow::changeRemotePermissions);
+                rightContextMenu_->addAction(
+                    tr("Change permissions…"), this,
+                    &MainWindow::changeRemotePermissions);
             }
         }
     } else {
         // Local: Up option if applicable
-        if (canGoUp && actUpRight_) rightContextMenu_->addAction(actUpRight_);
+        if (canGoUp && actUpRight_)
+            rightContextMenu_->addAction(actUpRight_);
         if (!hasSel) {
             // No selection: creation
-            if (actNewFileRight_) rightContextMenu_->addAction(actNewFileRight_);
-            if (actNewDirRight_)  rightContextMenu_->addAction(actNewDirRight_);
+            if (actNewFileRight_)
+                rightContextMenu_->addAction(actNewFileRight_);
+            if (actNewDirRight_)
+                rightContextMenu_->addAction(actNewDirRight_);
         } else {
             // With selection: local operations + copy/move from left
-            if (actNewFileRight_) rightContextMenu_->addAction(actNewFileRight_);
-            if (actNewDirRight_)  rightContextMenu_->addAction(actNewDirRight_);
-            if (actRenameRight_)   rightContextMenu_->addAction(actRenameRight_);
-            if (actDeleteRight_)   rightContextMenu_->addAction(actDeleteRight_);
+            if (actNewFileRight_)
+                rightContextMenu_->addAction(actNewFileRight_);
+            if (actNewDirRight_)
+                rightContextMenu_->addAction(actNewDirRight_);
+            if (actRenameRight_)
+                rightContextMenu_->addAction(actRenameRight_);
+            if (actDeleteRight_)
+                rightContextMenu_->addAction(actDeleteRight_);
             rightContextMenu_->addSeparator();
             // Copy/move the selection from the right panel to the left
-            if (actCopyRight_)     rightContextMenu_->addAction(actCopyRight_);
-            if (actMoveRight_)     rightContextMenu_->addAction(actMoveRight_);
+            if (actCopyRight_)
+                rightContextMenu_->addAction(actCopyRight_);
+            if (actMoveRight_)
+                rightContextMenu_->addAction(actMoveRight_);
         }
     }
     rightContextMenu_->popup(rightView_->viewport()->mapToGlobal(pos));
 }
 
 // Show context menu for the left (local) pane.
-void MainWindow::showLeftContextMenu(const QPoint& pos) {
-    if (!leftContextMenu_) leftContextMenu_ = new QMenu(this);
+void MainWindow::showLeftContextMenu(const QPoint &pos) {
+    if (!leftContextMenu_)
+        leftContextMenu_ = new QMenu(this);
     leftContextMenu_->clear();
     // Selection and ability to go up
     bool hasSel = false;
@@ -2449,30 +3188,45 @@ void MainWindow::showLeftContextMenu(const QPoint& pos) {
     bool canGoUp = d.cdUp();
 
     // Local actions on the left panel
-    if (canGoUp && actUpLeft_)   leftContextMenu_->addAction(actUpLeft_);
+    if (canGoUp && actUpLeft_)
+        leftContextMenu_->addAction(actUpLeft_);
     if (!hasSel) {
-        if (actNewFileLeft_) leftContextMenu_->addAction(actNewFileLeft_);
-        if (actNewDirLeft_)  leftContextMenu_->addAction(actNewDirLeft_);
+        if (actNewFileLeft_)
+            leftContextMenu_->addAction(actNewFileLeft_);
+        if (actNewDirLeft_)
+            leftContextMenu_->addAction(actNewDirLeft_);
     } else {
-        if (actNewFileLeft_) leftContextMenu_->addAction(actNewFileLeft_);
-        if (actNewDirLeft_)  leftContextMenu_->addAction(actNewDirLeft_);
-        if (actRenameLeft_) leftContextMenu_->addAction(actRenameLeft_);
+        if (actNewFileLeft_)
+            leftContextMenu_->addAction(actNewFileLeft_);
+        if (actNewDirLeft_)
+            leftContextMenu_->addAction(actNewDirLeft_);
+        if (actRenameLeft_)
+            leftContextMenu_->addAction(actRenameLeft_);
         leftContextMenu_->addSeparator();
         // Directional labels in the menu, wired to existing actions
-        leftContextMenu_->addAction(tr("Copy to right panel"), this, &MainWindow::copyLeftToRight);
-        leftContextMenu_->addAction(tr("Move to right panel"), this, &MainWindow::moveLeftToRight);
-        if (actDelete_)   leftContextMenu_->addAction(actDelete_);
+        leftContextMenu_->addAction(tr("Copy to right panel"), this,
+                                    &MainWindow::copyLeftToRight);
+        leftContextMenu_->addAction(tr("Move to right panel"), this,
+                                    &MainWindow::moveLeftToRight);
+        if (actDelete_)
+            leftContextMenu_->addAction(actDelete_);
     }
     leftContextMenu_->popup(leftView_->viewport()->mapToGlobal(pos));
 }
 
 // Change permissions of the selected remote entry.
 void MainWindow::changeRemotePermissions() {
-    if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_) return;
+    if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_)
+        return;
     auto sel = rightView_->selectionModel();
-    if (!sel) return;
+    if (!sel)
+        return;
     const auto rows = sel->selectedRows();
-    if (rows.size() != 1) { QMessageBox::information(this, tr("Permissions"), tr("Select only one item.")); return; }
+    if (rows.size() != 1) {
+        QMessageBox::information(this, tr("Permissions"),
+                                 tr("Select only one item."));
+        return;
+    }
     const QModelIndex idx = rows.first();
     const QString name = rightRemoteModel_->nameAt(idx);
     const QString base = rightRemoteModel_->rootPath();
@@ -2481,27 +3235,27 @@ void MainWindow::changeRemotePermissions() {
     std::string err;
     if (!sftp_->stat(path.toStdString(), st, err)) {
         QMessageBox::warning(
-            this,
-            tr("Permissions"),
-                tr("Could not read permissions.\\n%1")
-                    .arg(shortRemoteError(err, tr("Error reading remote information.")))
-        );
+            this, tr("Permissions"),
+            tr("Could not read permissions.\\n%1")
+                .arg(shortRemoteError(
+                    err, tr("Error reading remote information."))));
         return;
     }
     PermissionsDialog dlg(this);
     dlg.setMode(st.mode & 0777);
-    if (dlg.exec() != QDialog::Accepted) return;
+    if (dlg.exec() != QDialog::Accepted)
+        return;
     unsigned int newMode = (st.mode & ~0777u) | (dlg.mode() & 0777u);
-    auto applyOne = [&](const QString& p) -> bool {
+    auto applyOne = [&](const QString &p) -> bool {
         std::string cerrs;
         if (!sftp_->chmod(p.toStdString(), newMode, cerrs)) {
-            const QString item = QFileInfo(p).fileName().isEmpty() ? p : QFileInfo(p).fileName();
+            const QString item =
+                QFileInfo(p).fileName().isEmpty() ? p : QFileInfo(p).fileName();
             QMessageBox::critical(
-                this,
-                tr("Permissions"),
+                this, tr("Permissions"),
                 tr("Could not apply permissions to \"%1\".\\n%2")
-                    .arg(item, shortRemoteError(cerrs, tr("Error applying changes.")))
-            );
+                    .arg(item, shortRemoteError(
+                                   cerrs, tr("Error applying changes."))));
             return false;
         }
         return true;
@@ -2513,22 +3267,32 @@ void MainWindow::changeRemotePermissions() {
         while (!stack.isEmpty() && ok) {
             const QString cur = stack.back();
             stack.pop_back();
-            if (!applyOne(cur)) { ok = false; break; }
+            if (!applyOne(cur)) {
+                ok = false;
+                break;
+            }
             std::vector<openscp::FileInfo> out;
             std::string lerr;
-            if (!sftp_->list(cur.toStdString(), out, lerr)) continue;
-            for (const auto& e : out) {
-                const QString child = joinRemotePath(cur, QString::fromStdString(e.name));
-                if (e.is_dir) stack.push_back(child);
+            if (!sftp_->list(cur.toStdString(), out, lerr))
+                continue;
+            for (const auto &e : out) {
+                const QString child =
+                    joinRemotePath(cur, QString::fromStdString(e.name));
+                if (e.is_dir)
+                    stack.push_back(child);
                 else {
-                    if (!applyOne(child)) { ok = false; break; }
+                    if (!applyOne(child)) {
+                        ok = false;
+                        break;
+                    }
                 }
             }
         }
     } else {
         ok = applyOne(path);
     }
-    if (!ok) return;
+    if (!ok)
+        return;
     QString dummy;
     rightRemoteModel_->setRootPath(base, &dummy);
     updateRemoteWriteability();
@@ -2536,32 +3300,39 @@ void MainWindow::changeRemotePermissions() {
 }
 
 // Ask the user to confirm an unknown host key (TOFU).
-bool MainWindow::confirmHostKeyUI(const QString& host,
-                                  quint16 port,
-                                  const QString& algorithm,
-                                  const QString& fingerprint,
-                                  bool canSave) {
+bool MainWindow::confirmHostKeyUI(const QString &host, quint16 port,
+                                  const QString &algorithm,
+                                  const QString &fingerprint, bool canSave) {
     m_tofuHost_ = host + ":" + QString::number(port);
-    m_tofuAlg_  = algorithm;
-    m_tofuFp_   = fingerprint;
+    m_tofuAlg_ = algorithm;
+    m_tofuFp_ = fingerprint;
     m_tofuCanSave_ = canSave;
     {
         std::unique_lock<std::mutex> lk(m_tofuMutex_);
         m_tofuDecided_ = false;
         m_tofuAccepted_ = false;
     }
-    QMetaObject::invokeMethod(this, [this, host, algorithm, fingerprint]{
-        showTOfuDialog(host, algorithm, fingerprint);
-    }, Qt::QueuedConnection);
+    QMetaObject::invokeMethod(
+        this,
+        [this, host, algorithm, fingerprint] {
+            showTOfuDialog(host, algorithm, fingerprint);
+        },
+        Qt::QueuedConnection);
     std::unique_lock<std::mutex> lk(m_tofuMutex_);
-    m_tofuCv_.wait(lk, [&]{ return m_tofuDecided_; });
+    m_tofuCv_.wait(lk, [&] { return m_tofuDecided_; });
     return m_tofuAccepted_;
 }
 
 // Explicit non‑modal TOFU dialog per spec: open() + finished -> onTofuFinished
-void MainWindow::showTOfuDialog(const QString& host, const QString& alg, const QString& fp) {
-    if (m_tofuBox) { m_tofuBox->raise(); m_tofuBox->activateWindow(); return; }
-    // If a connection progress dialog is visible, disable it so it does not capture input
+void MainWindow::showTOfuDialog(const QString &host, const QString &alg,
+                                const QString &fp) {
+    if (m_tofuBox) {
+        m_tofuBox->raise();
+        m_tofuBox->activateWindow();
+        return;
+    }
+    // If a connection progress dialog is visible, disable it so it does not
+    // capture input
     if (m_connectProgress_ && m_connectProgress_->isVisible()) {
         m_connectProgress_->setEnabled(false);
         m_connectProgressDimmed_ = true;
@@ -2569,27 +3340,31 @@ void MainWindow::showTOfuDialog(const QString& host, const QString& alg, const Q
     } else {
         std::fprintf(stderr, "[OpenSCP] TOFU shown; progress paused=false\n");
     }
-    auto* box = new QMessageBox(this);
+    auto *box = new QMessageBox(this);
     m_tofuBox = box;
     box->setAttribute(Qt::WA_DeleteOnClose, true);
     box->setWindowModality(Qt::WindowModal);
     box->setIcon(QMessageBox::Question);
     box->setWindowTitle(tr("Confirm SSH fingerprint"));
-    QString text = QString(tr("Connect to %1\\nAlgorithm: %2\\nFingerprint: %3\\n\\nTrust and save to known_hosts?"))
-                      .arg(host)
-                      .arg(alg)
-                      .arg(fp);
+    QString text = QString(tr("Connect to %1\\nAlgorithm: %2\\nFingerprint: "
+                              "%3\\n\\nTrust and save to known_hosts?"))
+                       .arg(host)
+                       .arg(alg)
+                       .arg(fp);
     if (!m_tofuCanSave_) {
-        text = QString(tr("Connect to %1\\nAlgorithm: %2\\nFingerprint: %3\\n\\nFingerprint cannot be saved. Connection allowed only this time."))
+        text = QString(tr("Connect to %1\\nAlgorithm: %2\\nFingerprint: "
+                          "%3\\n\\nFingerprint cannot be saved. Connection "
+                          "allowed only this time."))
                    .arg(host)
                    .arg(alg)
                    .arg(fp);
     }
     box->setText(text);
-    box->addButton(m_tofuCanSave_ ? tr("Trust") : tr("Connect without saving"), QMessageBox::YesRole);
+    box->addButton(m_tofuCanSave_ ? tr("Trust") : tr("Connect without saving"),
+                   QMessageBox::YesRole);
     box->addButton(tr("Cancel"), QMessageBox::RejectRole);
     connect(box, &QMessageBox::finished, this, &MainWindow::onTofuFinished);
-    QTimer::singleShot(0, box, [this, box]{
+    QTimer::singleShot(0, box, [this, box] {
         box->open();
         box->raise();
         box->activateWindow();
@@ -2600,18 +3375,22 @@ void MainWindow::showTOfuDialog(const QString& host, const QString& alg, const Q
 void MainWindow::onTofuFinished(int r) {
     bool accept = (r == QDialog::Accepted || r == QMessageBox::Yes);
     if (m_tofuBox) {
-        const auto* clicked = m_tofuBox->clickedButton();
+        const auto *clicked = m_tofuBox->clickedButton();
         if (clicked) {
-            auto role = m_tofuBox->buttonRole((QAbstractButton*)clicked);
-            accept = (role == QMessageBox::YesRole || role == QMessageBox::AcceptRole);
+            auto role = m_tofuBox->buttonRole((QAbstractButton *)clicked);
+            accept = (role == QMessageBox::YesRole ||
+                      role == QMessageBox::AcceptRole);
         }
         m_tofuBox->deleteLater();
         m_tofuBox.clear();
     }
     if (!m_tofuCanSave_ && accept) {
-        statusBar()->showMessage(tr("Could not save fingerprint; allowing one-time connection"), 5000);
+        statusBar()->showMessage(
+            tr("Could not save fingerprint; allowing one-time connection"),
+            5000);
     } else if (!accept) {
-        statusBar()->showMessage(tr("Connection cancelled: fingerprint not accepted"), 5000);
+        statusBar()->showMessage(
+            tr("Connection cancelled: fingerprint not accepted"), 5000);
     }
     // Re-enable progress if it was dimmed
     if (m_connectProgressDimmed_ && m_connectProgress_) {
@@ -2630,35 +3409,48 @@ void MainWindow::onTofuFinished(int r) {
 }
 
 // Secondary non‑modal dialog for one‑time connection without saving
-void MainWindow::showOneTimeDialog(const QString& host, const QString& alg, const QString& fp) {
-    if (m_tofuBox) { m_tofuBox->raise(); m_tofuBox->activateWindow(); return; }
-    auto* box = new QMessageBox(this);
+void MainWindow::showOneTimeDialog(const QString &host, const QString &alg,
+                                   const QString &fp) {
+    if (m_tofuBox) {
+        m_tofuBox->raise();
+        m_tofuBox->activateWindow();
+        return;
+    }
+    auto *box = new QMessageBox(this);
     m_tofuBox = box;
     box->setAttribute(Qt::WA_DeleteOnClose, true);
     box->setWindowModality(Qt::WindowModal);
     box->setIcon(QMessageBox::Warning);
     box->setWindowTitle(tr("Additional confirmation"));
-    box->setText(QString(tr("Could not save the fingerprint. Connect only this time without saving?\\n\\nHost: %1\\nAlgorithm: %2\\nFingerprint: %3"))
-                    .arg(host, alg, fp));
+    box->setText(
+        QString(
+            tr("Could not save the fingerprint. Connect only this time without "
+               "saving?\\n\\nHost: %1\\nAlgorithm: %2\\nFingerprint: %3"))
+            .arg(host, alg, fp));
     box->addButton(tr("Connect without saving"), QMessageBox::YesRole);
     box->addButton(tr("Cancel"), QMessageBox::RejectRole);
     connect(box, &QMessageBox::finished, this, &MainWindow::onOneTimeFinished);
-    QTimer::singleShot(0, box, [box]{ box->open(); });
+    QTimer::singleShot(0, box, [box] { box->open(); });
 }
 
 void MainWindow::onOneTimeFinished(int r) {
     bool accept = (r == QDialog::Accepted || r == QMessageBox::Yes);
     if (m_tofuBox) {
-        const auto* clicked = m_tofuBox->clickedButton();
+        const auto *clicked = m_tofuBox->clickedButton();
         if (clicked) {
-            auto role = m_tofuBox->buttonRole((QAbstractButton*)clicked);
-            accept = (role == QMessageBox::YesRole || role == QMessageBox::AcceptRole);
+            auto role = m_tofuBox->buttonRole((QAbstractButton *)clicked);
+            accept = (role == QMessageBox::YesRole ||
+                      role == QMessageBox::AcceptRole);
         }
         m_tofuBox->deleteLater();
         m_tofuBox.clear();
     }
-    if (accept) statusBar()->showMessage(tr("One-time connection without saving confirmed by user"), 5000);
-    else statusBar()->showMessage(tr("Connection cancelled after save failure"), 5000);
+    if (accept)
+        statusBar()->showMessage(
+            tr("One-time connection without saving confirmed by user"), 5000);
+    else
+        statusBar()->showMessage(tr("Connection cancelled after save failure"),
+                                 5000);
     {
         std::unique_lock<std::mutex> lk(m_tofuMutex_);
         m_tofuAccepted_ = accept;
@@ -2668,20 +3460,27 @@ void MainWindow::onOneTimeFinished(int r) {
 }
 
 // Intercept drag-and-drop and global events for panes and dialogs.
-bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
+bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
     // Center QDialog/QMessageBox on show relative to the main window
     if (ev->type() == QEvent::Show) {
-        if (auto* dlg = qobject_cast<QDialog*>(obj)) {
-            // Avoid interfering with native-backed dialogs on macOS (QMessageBox/NSAlert, QProgressDialog, QInputDialog),
-            // which can crash if sized/moved during Show handling.
-            if (qobject_cast<QMessageBox*>(dlg) || qobject_cast<QProgressDialog*>(dlg) || qobject_cast<QInputDialog*>(dlg)) {
+        if (auto *dlg = qobject_cast<QDialog *>(obj)) {
+            // Avoid interfering with native-backed dialogs on macOS
+            // (QMessageBox/NSAlert, QProgressDialog, QInputDialog), which can
+            // crash if sized/moved during Show handling.
+            if (qobject_cast<QMessageBox *>(dlg) ||
+                qobject_cast<QProgressDialog *>(dlg) ||
+                qobject_cast<QInputDialog *>(dlg)) {
                 // Let Qt/macOS handle their own placement
             } else {
-    // Only center dialogs that belong (directly or indirectly) to this window
-                QWidget* p = dlg->parentWidget();
+                // Only center dialogs that belong (directly or indirectly) to
+                // this window
+                QWidget *p = dlg->parentWidget();
                 bool belongsToThis = false;
                 while (p) {
-                    if (p == this) { belongsToThis = true; break; }
+                    if (p == this) {
+                        belongsToThis = true;
+                        break;
+                    }
                     p = p->parentWidget();
                 }
                 if (belongsToThis) {
@@ -2689,11 +3488,15 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
                     dlg->resize(dlg->size().expandedTo(dlg->sizeHint()));
                     QRect base = this->geometry();
                     if (!base.isValid()) {
-                        if (this->screen()) base = this->screen()->availableGeometry();
-                        else if (auto ps = QGuiApplication::primaryScreen()) base = ps->availableGeometry();
+                        if (this->screen())
+                            base = this->screen()->availableGeometry();
+                        else if (auto ps = QGuiApplication::primaryScreen())
+                            base = ps->availableGeometry();
                     }
                     if (base.isValid()) {
-                        const QRect aligned = QStyle::alignedRect(Qt::LeftToRight, Qt::AlignCenter, dlg->size(), base);
+                        const QRect aligned = QStyle::alignedRect(
+                            Qt::LeftToRight, Qt::AlignCenter, dlg->size(),
+                            base);
                         dlg->move(aligned.topLeft());
                     }
                 }
@@ -2704,65 +3507,93 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
     // Drag-and-drop over the right panel (local or remote)
     if (rightView_ && obj == rightView_->viewport()) {
         if (ev->type() == QEvent::DragEnter) {
-            auto* de = static_cast<QDragEnterEvent*>(ev);
-            if (rightIsRemote_ && !rightRemoteWritable_) { de->ignore(); return true; }
+            auto *de = static_cast<QDragEnterEvent *>(ev);
+            if (rightIsRemote_ && !rightRemoteWritable_) {
+                de->ignore();
+                return true;
+            }
             de->acceptProposedAction();
             return true;
         } else if (ev->type() == QEvent::DragMove) {
-            auto* dm = static_cast<QDragMoveEvent*>(ev);
-            if (rightIsRemote_ && !rightRemoteWritable_) { dm->ignore(); return true; }
+            auto *dm = static_cast<QDragMoveEvent *>(ev);
+            if (rightIsRemote_ && !rightRemoteWritable_) {
+                dm->ignore();
+                return true;
+            }
             dm->acceptProposedAction();
             return true;
         } else if (ev->type() == QEvent::Drop) {
-            auto* dd = static_cast<QDropEvent*>(ev);
-            const auto urls = dd->mimeData() ? dd->mimeData()->urls() : QList<QUrl>{};
-            if (urls.isEmpty()) { dd->acceptProposedAction(); return true; }
+            auto *dd = static_cast<QDropEvent *>(ev);
+            const auto urls =
+                dd->mimeData() ? dd->mimeData()->urls() : QList<QUrl>{};
+            if (urls.isEmpty()) {
+                dd->acceptProposedAction();
+                return true;
+            }
             if (rightIsRemote_) {
                 // Block upload if remote is read-only
                 if (!rightRemoteWritable_) {
-                    statusBar()->showMessage(tr("Remote directory is read-only; cannot upload here"), 5000);
+                    statusBar()->showMessage(
+                        tr("Remote directory is read-only; cannot upload here"),
+                        5000);
                     dd->ignore();
                     return true;
                 }
                 // Upload to remote
-                if (!sftp_ || !rightRemoteModel_) { dd->acceptProposedAction(); return true; }
+                if (!sftp_ || !rightRemoteModel_) {
+                    dd->acceptProposedAction();
+                    return true;
+                }
                 const QString remoteBase = rightRemoteModel_->rootPath();
                 int enq = 0;
-                for (const QUrl& u : urls) {
+                for (const QUrl &u : urls) {
                     const QString p = u.toLocalFile();
-                    if (p.isEmpty()) continue;
+                    if (p.isEmpty())
+                        continue;
                     QFileInfo fi(p);
                     if (fi.isDir()) {
-                        QDirIterator it(p, QDir::NoDotAndDotDot | QDir::AllEntries, QDirIterator::Subdirectories);
+                        QDirIterator it(p,
+                                        QDir::NoDotAndDotDot | QDir::AllEntries,
+                                        QDirIterator::Subdirectories);
                         while (it.hasNext()) {
                             it.next();
-                            if (!it.fileInfo().isFile()) continue;
-                            const QString rel = QDir(p).relativeFilePath(it.filePath());
-                            const QString rTarget = joinRemotePath(remoteBase, rel);
+                            if (!it.fileInfo().isFile())
+                                continue;
+                            const QString rel =
+                                QDir(p).relativeFilePath(it.filePath());
+                            const QString rTarget =
+                                joinRemotePath(remoteBase, rel);
                             transferMgr_->enqueueUpload(it.filePath(), rTarget);
                             ++enq;
                         }
                     } else if (fi.isFile()) {
-                        const QString rTarget = joinRemotePath(remoteBase, fi.fileName());
-                        transferMgr_->enqueueUpload(fi.absoluteFilePath(), rTarget);
+                        const QString rTarget =
+                            joinRemotePath(remoteBase, fi.fileName());
+                        transferMgr_->enqueueUpload(fi.absoluteFilePath(),
+                                                    rTarget);
                         ++enq;
                     }
                 }
-    if (enq > 0) {
-        statusBar()->showMessage(QString(tr("Queued: %1 uploads (DND)")).arg(enq), 4000);
-        maybeShowTransferQueue();
-    }
+                if (enq > 0) {
+                    statusBar()->showMessage(
+                        QString(tr("Queued: %1 uploads (DND)")).arg(enq), 4000);
+                    maybeShowTransferQueue();
+                }
                 dd->acceptProposedAction();
                 return true;
             } else {
                 // Local copy to the right panel directory
                 QDir dst(rightPath_->text());
-                if (!dst.exists()) { dd->acceptProposedAction(); return true; }
+                if (!dst.exists()) {
+                    dd->acceptProposedAction();
+                    return true;
+                }
                 int ok = 0, fail = 0;
                 QString lastError;
-                for (const QUrl& u : urls) {
+                for (const QUrl &u : urls) {
                     const QString p = u.toLocalFile();
-                    if (p.isEmpty()) continue;
+                    if (p.isEmpty())
+                        continue;
                     QFileInfo fi(p);
                     const QString target = dst.filePath(fi.fileName());
                     // Avoid copying onto itself if same directory/file
@@ -2770,11 +3601,18 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
                         continue;
                     }
                     QString err;
-                    if (copyEntryRecursively(fi.absoluteFilePath(), target, err)) ++ok;
-                    else { ++fail; lastError = err; }
+                    if (copyEntryRecursively(fi.absoluteFilePath(), target,
+                                             err))
+                        ++ok;
+                    else {
+                        ++fail;
+                        lastError = err;
+                    }
                 }
-                QString m = QString(tr("Copied: %1  |  Failed: %2")).arg(ok).arg(fail);
-                if (fail > 0 && !lastError.isEmpty()) m += "\n" + tr("Last error: ") + lastError;
+                QString m =
+                    QString(tr("Copied: %1  |  Failed: %2")).arg(ok).arg(fail);
+                if (fail > 0 && !lastError.isEmpty())
+                    m += "\n" + tr("Last error: ") + lastError;
                 statusBar()->showMessage(m, 5000);
                 dd->acceptProposedAction();
                 return true;
@@ -2782,28 +3620,34 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
         }
     }
     // Drag-and-drop over the left panel (local): copy/download
-    // Update delete shortcut enablement if selection changes due to DnD or click
+    // Update delete shortcut enablement if selection changes due to DnD or
+    // click
     if (leftView_ && obj == leftView_->viewport()) {
         if (ev->type() == QEvent::DragEnter) {
-            auto* de = static_cast<QDragEnterEvent*>(ev);
+            auto *de = static_cast<QDragEnterEvent *>(ev);
             de->acceptProposedAction();
             return true;
         } else if (ev->type() == QEvent::DragMove) {
-            auto* dm = static_cast<QDragMoveEvent*>(ev);
+            auto *dm = static_cast<QDragMoveEvent *>(ev);
             dm->acceptProposedAction();
             return true;
         } else if (ev->type() == QEvent::Drop) {
-            auto* dd = static_cast<QDropEvent*>(ev);
-            const auto urls = dd->mimeData() ? dd->mimeData()->urls() : QList<QUrl>{};
+            auto *dd = static_cast<QDropEvent *>(ev);
+            const auto urls =
+                dd->mimeData() ? dd->mimeData()->urls() : QList<QUrl>{};
             if (!urls.isEmpty()) {
                 // Local copy towards the left panel
                 QDir dst(leftPath_->text());
-                if (!dst.exists()) { dd->acceptProposedAction(); return true; }
+                if (!dst.exists()) {
+                    dd->acceptProposedAction();
+                    return true;
+                }
                 int ok = 0, fail = 0;
                 QString lastError;
-                for (const QUrl& u : urls) {
+                for (const QUrl &u : urls) {
                     const QString p = u.toLocalFile();
-                    if (p.isEmpty()) continue;
+                    if (p.isEmpty())
+                        continue;
                     QFileInfo fi(p);
                     const QString target = dst.filePath(fi.fileName());
                     // Avoid self-drop: same file/folder and same destination
@@ -2811,11 +3655,18 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
                         continue;
                     }
                     QString err;
-                    if (copyEntryRecursively(fi.absoluteFilePath(), target, err)) ++ok;
-                    else { ++fail; lastError = err; }
+                    if (copyEntryRecursively(fi.absoluteFilePath(), target,
+                                             err))
+                        ++ok;
+                    else {
+                        ++fail;
+                        lastError = err;
+                    }
                 }
-                QString m = QString(tr("Copied: %1  |  Failed: %2")).arg(ok).arg(fail);
-                if (fail > 0 && !lastError.isEmpty()) m += "\n" + tr("Last error: ") + lastError;
+                QString m =
+                    QString(tr("Copied: %1  |  Failed: %2")).arg(ok).arg(fail);
+                if (fail > 0 && !lastError.isEmpty())
+                    m += "\n" + tr("Last error: ") + lastError;
                 statusBar()->showMessage(m, 5000);
                 dd->acceptProposedAction();
                 updateDeleteShortcutEnables();
@@ -2824,22 +3675,32 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
             // Download from remote (based on right panel selection)
             if (rightIsRemote_ == true && rightView_ && rightRemoteModel_) {
                 auto sel = rightView_->selectionModel();
-                if (!sel || sel->selectedRows(NAME_COL).isEmpty()) { dd->acceptProposedAction(); return true; }
+                if (!sel || sel->selectedRows(NAME_COL).isEmpty()) {
+                    dd->acceptProposedAction();
+                    return true;
+                }
                 const auto rows = sel->selectedRows(NAME_COL);
                 int enq = 0;
                 int bad = 0;
                 const QString remoteBase = rightRemoteModel_->rootPath();
                 QDir dst(leftPath_->text());
-                for (const QModelIndex& idx : rows) {
+                for (const QModelIndex &idx : rows) {
                     const QString name = rightRemoteModel_->nameAt(idx);
-                    { QString why; if (!isValidEntryName(name, &why)) { ++bad; continue; } }
+                    {
+                        QString why;
+                        if (!isValidEntryName(name, &why)) {
+                            ++bad;
+                            continue;
+                        }
+                    }
                     QString rpath = remoteBase;
-                    if (!rpath.endsWith('/')) rpath += '/';
+                    if (!rpath.endsWith('/'))
+                        rpath += '/';
                     rpath += name;
                     const QString lpath = dst.filePath(name);
                     if (rightRemoteModel_->isDir(idx)) {
                         QVector<QPair<QString, QString>> stack;
-                        stack.push_back({ rpath, lpath });
+                        stack.push_back({rpath, lpath});
                         while (!stack.isEmpty()) {
                             auto pair = stack.back();
                             stack.pop_back();
@@ -2848,14 +3709,28 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
                             QDir().mkpath(curL);
                             std::vector<openscp::FileInfo> out;
                             std::string lerr;
-                            if (!sftp_->list(curR.toStdString(), out, lerr)) continue;
-                            for (const auto& e : out) {
-                                const QString ename = QString::fromStdString(e.name);
-                                QString why; if (!isValidEntryName(ename, &why)) { ++bad; continue; }
-                                const QString childR = (curR.endsWith('/') ? curR + ename : curR + "/" + ename);
-                                const QString childL = QDir(curL).filePath(ename);
-                                if (e.is_dir) stack.push_back({ childR, childL });
-                                else { transferMgr_->enqueueDownload(childR, childL); ++enq; }
+                            if (!sftp_->list(curR.toStdString(), out, lerr))
+                                continue;
+                            for (const auto &e : out) {
+                                const QString ename =
+                                    QString::fromStdString(e.name);
+                                QString why;
+                                if (!isValidEntryName(ename, &why)) {
+                                    ++bad;
+                                    continue;
+                                }
+                                const QString childR =
+                                    (curR.endsWith('/') ? curR + ename
+                                                        : curR + "/" + ename);
+                                const QString childL =
+                                    QDir(curL).filePath(ename);
+                                if (e.is_dir)
+                                    stack.push_back({childR, childL});
+                                else {
+                                    transferMgr_->enqueueDownload(childR,
+                                                                  childL);
+                                    ++enq;
+                                }
                             }
                         }
                     } else {
@@ -2864,8 +3739,11 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
                     }
                 }
                 if (enq > 0) {
-                    QString msg = QString(tr("Queued: %1 downloads (DND)")).arg(enq);
-                    if (bad > 0) msg += QString("  |  ") + tr("Skipped invalid: %1").arg(bad);
+                    QString msg =
+                        QString(tr("Queued: %1 downloads (DND)")).arg(enq);
+                    if (bad > 0)
+                        msg += QString("  |  ") +
+                               tr("Skipped invalid: %1").arg(bad);
                     statusBar()->showMessage(msg, 4000);
                     maybeShowTransferQueue();
                 }
@@ -2878,19 +3756,25 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
     return QMainWindow::eventFilter(obj, ev);
 }
 
-// Start an SFTP connection in a background thread and finalize in the UI thread.
-void MainWindow::startSftpConnect(openscp::SessionOptions opt,
-                                  std::optional<PendingSiteSaveRequest> saveRequest) {
+// Start an SFTP connection in a background thread and finalize in the UI
+// thread.
+void MainWindow::startSftpConnect(
+    openscp::SessionOptions opt,
+    std::optional<PendingSiteSaveRequest> saveRequest) {
     if (m_connectInProgress_) {
-        statusBar()->showMessage(tr("A connection is already in progress"), 3000);
+        statusBar()->showMessage(tr("A connection is already in progress"),
+                                 3000);
         return;
     }
     if (rightIsRemote_ || sftp_) {
-        statusBar()->showMessage(tr("An active SFTP session already exists"), 3000);
+        statusBar()->showMessage(tr("An active SFTP session already exists"),
+                                 3000);
         return;
     }
     if (!confirmInsecureHostPolicyForSession(opt)) {
-        statusBar()->showMessage(tr("Connection canceled: no-verification policy not confirmed"), 5000);
+        statusBar()->showMessage(
+            tr("Connection canceled: no-verification policy not confirmed"),
+            5000);
         return;
     }
 
@@ -2900,10 +3784,13 @@ void MainWindow::startSftpConnect(openscp::SessionOptions opt,
     m_connectCancelRequested_ = cancelFlag;
     m_connectInProgress_ = true;
 
-    if (actConnect_) actConnect_->setEnabled(false);
-    if (actSites_) actSites_->setEnabled(false);
+    if (actConnect_)
+        actConnect_->setEnabled(false);
+    if (actSites_)
+        actSites_->setEnabled(false);
 
-    auto* progress = new QProgressDialog(tr("Connecting…"), tr("Cancel"), 0, 0, this);
+    auto *progress =
+        new QProgressDialog(tr("Connecting…"), tr("Cancel"), 0, 0, this);
     progress->setWindowModality(Qt::NonModal);
     progress->setMinimumDuration(0);
     progress->setAutoClose(false);
@@ -2920,33 +3807,46 @@ void MainWindow::startSftpConnect(openscp::SessionOptions opt,
     m_connectProgressDimmed_ = false;
 
     // Inject host key confirmation (TOFU) via UI
-    opt.hostkey_confirm_cb = [self](const std::string& h, std::uint16_t p, const std::string& alg, const std::string& fp, bool canSave) {
-        if (!self) return false;
+    opt.hostkey_confirm_cb = [self](const std::string &h, std::uint16_t p,
+                                    const std::string &alg,
+                                    const std::string &fp, bool canSave) {
+        if (!self)
+            return false;
         return self->confirmHostKeyUI(QString::fromStdString(h), (quint16)p,
-                                      QString::fromStdString(alg), QString::fromStdString(fp),
-                                      canSave);
+                                      QString::fromStdString(alg),
+                                      QString::fromStdString(fp), canSave);
     };
-    opt.hostkey_status_cb = [self](const std::string& msg){
-        if (!self) return;
+    opt.hostkey_status_cb = [self](const std::string &msg) {
+        if (!self)
+            return;
         const QString q = QString::fromStdString(msg);
-        QMetaObject::invokeMethod(self, [self, q]{
-            if (self) self->statusBar()->showMessage(q, 5000);
-        }, Qt::QueuedConnection);
+        QMetaObject::invokeMethod(
+            self,
+            [self, q] {
+                if (self)
+                    self->statusBar()->showMessage(q, 5000);
+            },
+            Qt::QueuedConnection);
     };
 
-    // Keyboard-interactive callback (OTP/2FA). Prefer auto-filling password/username; request OTP if needed.
+    // Keyboard-interactive callback (OTP/2FA). Prefer auto-filling
+    // password/username; request OTP if needed.
     const std::string savedUser = opt.username;
     const std::string savedPass = opt.password ? *opt.password : std::string();
-    opt.keyboard_interactive_cb = [self, savedUser, savedPass](const std::string& name,
-                                                               const std::string& instruction,
-                                                               const std::vector<std::string>& prompts,
-                                                               std::vector<std::string>& responses) -> openscp::KbdIntPromptResult {
+    opt.keyboard_interactive_cb =
+        [self, savedUser, savedPass](const std::string &name,
+                                     const std::string &instruction,
+                                     const std::vector<std::string> &prompts,
+                                     std::vector<std::string> &responses)
+        -> openscp::KbdIntPromptResult {
         (void)name;
-        if (!self) return openscp::KbdIntPromptResult::Cancelled;
+        if (!self)
+            return openscp::KbdIntPromptResult::Cancelled;
         responses.clear();
         responses.reserve(prompts.size());
-        // Resolve each prompt: auto-fill user/pass and ask for OTP/codes if present
-        for (const std::string& p : prompts) {
+        // Resolve each prompt: auto-fill user/pass and ask for OTP/codes if
+        // present
+        for (const std::string &p : prompts) {
             QString qprompt = QString::fromStdString(p);
             QString lower = qprompt.toLower();
             // Username
@@ -2955,39 +3855,61 @@ void MainWindow::startSftpConnect(openscp::SessionOptions opt,
                 continue;
             }
             // Password
-            if (lower.contains("password") || lower.contains("passphrase") || lower.contains("passcode")) {
-                if (!savedPass.empty()) { responses.emplace_back(savedPass); continue; }
+            if (lower.contains("password") || lower.contains("passphrase") ||
+                lower.contains("passcode")) {
+                if (!savedPass.empty()) {
+                    responses.emplace_back(savedPass);
+                    continue;
+                }
                 // Ask for password if we did not have it
                 QString ans;
                 bool ok = false;
-                QMetaObject::invokeMethod(self, [&] {
-                    if (!self) return;
-                    ans = QInputDialog::getText(self, tr("Password required"), qprompt,
-                                                QLineEdit::Password, QString(), &ok);
-                }, Qt::BlockingQueuedConnection);
-                if (!ok) return openscp::KbdIntPromptResult::Cancelled;
+                QMetaObject::invokeMethod(
+                    self,
+                    [&] {
+                        if (!self)
+                            return;
+                        ans = QInputDialog::getText(
+                            self, tr("Password required"), qprompt,
+                            QLineEdit::Password, QString(), &ok);
+                    },
+                    Qt::BlockingQueuedConnection);
+                if (!ok)
+                    return openscp::KbdIntPromptResult::Cancelled;
                 {
                     QByteArray bytes = ans.toUtf8();
-                    responses.emplace_back(bytes.constData(), (size_t)bytes.size());
+                    responses.emplace_back(bytes.constData(),
+                                           (size_t)bytes.size());
                     secureClear(bytes);
                 }
                 secureClear(ans);
                 continue;
             }
             // OTP / Verification code / Token
-            if (lower.contains("verification") || lower.contains("verify") || lower.contains("otp") || lower.contains("code") || lower.contains("token")) {
+            if (lower.contains("verification") || lower.contains("verify") ||
+                lower.contains("otp") || lower.contains("code") ||
+                lower.contains("token")) {
                 QString title = tr("Verification code required");
-                if (!instruction.empty()) title += " — " + QString::fromStdString(instruction);
+                if (!instruction.empty())
+                    title += " — " + QString::fromStdString(instruction);
                 QString ans;
                 bool ok = false;
-                QMetaObject::invokeMethod(self, [&] {
-                    if (!self) return;
-                    ans = QInputDialog::getText(self, title, qprompt, QLineEdit::Password, QString(), &ok);
-                }, Qt::BlockingQueuedConnection);
-                if (!ok) return openscp::KbdIntPromptResult::Cancelled;
+                QMetaObject::invokeMethod(
+                    self,
+                    [&] {
+                        if (!self)
+                            return;
+                        ans = QInputDialog::getText(self, title, qprompt,
+                                                    QLineEdit::Password,
+                                                    QString(), &ok);
+                    },
+                    Qt::BlockingQueuedConnection);
+                if (!ok)
+                    return openscp::KbdIntPromptResult::Cancelled;
                 {
                     QByteArray bytes = ans.toUtf8();
-                    responses.emplace_back(bytes.constData(), (size_t)bytes.size());
+                    responses.emplace_back(bytes.constData(),
+                                           (size_t)bytes.size());
                     secureClear(bytes);
                 }
                 secureClear(ans);
@@ -2995,14 +3917,22 @@ void MainWindow::startSftpConnect(openscp::SessionOptions opt,
             }
             // Generic case: ask for text (not hidden)
             QString title = tr("Information required");
-            if (!instruction.empty()) title += " — " + QString::fromStdString(instruction);
+            if (!instruction.empty())
+                title += " — " + QString::fromStdString(instruction);
             QString ans;
             bool ok = false;
-            QMetaObject::invokeMethod(self, [&] {
-                if (!self) return;
-                ans = QInputDialog::getText(self, title, qprompt, QLineEdit::Normal, QString(), &ok);
-            }, Qt::BlockingQueuedConnection);
-            if (!ok) return openscp::KbdIntPromptResult::Cancelled;
+            QMetaObject::invokeMethod(
+                self,
+                [&] {
+                    if (!self)
+                        return;
+                    ans = QInputDialog::getText(self, title, qprompt,
+                                                QLineEdit::Normal, QString(),
+                                                &ok);
+                },
+                Qt::BlockingQueuedConnection);
+            if (!ok)
+                return openscp::KbdIntPromptResult::Cancelled;
             {
                 QByteArray bytes = ans.toUtf8();
                 responses.emplace_back(bytes.constData(), (size_t)bytes.size());
@@ -3011,15 +3941,16 @@ void MainWindow::startSftpConnect(openscp::SessionOptions opt,
             secureClear(ans);
         }
         return (responses.size() == prompts.size())
-            ? openscp::KbdIntPromptResult::Handled
-            : openscp::KbdIntPromptResult::Unhandled;
+                   ? openscp::KbdIntPromptResult::Handled
+                   : openscp::KbdIntPromptResult::Unhandled;
     };
 
-    std::thread([self, opt = std::move(opt), uiOpt, saveRequest, cancelFlag]() mutable {
+    std::thread([self, opt = std::move(opt), uiOpt, saveRequest,
+                 cancelFlag]() mutable {
         bool okConn = false;
         bool canceledByUser = false;
         std::string err;
-        openscp::SftpClient* connectedClient = nullptr;
+        openscp::SftpClient *connectedClient = nullptr;
         try {
             if (cancelFlag && cancelFlag->load()) {
                 canceledByUser = true;
@@ -3029,13 +3960,16 @@ void MainWindow::startSftpConnect(openscp::SessionOptions opt,
                 okConn = tmp->connect(opt, err);
                 if (cancelFlag && cancelFlag->load()) {
                     canceledByUser = true;
-                    if (okConn) tmp->disconnect();
+                    if (okConn)
+                        tmp->disconnect();
                     okConn = false;
-                    if (err.empty()) err = "Connection canceled by user";
+                    if (err.empty())
+                        err = "Connection canceled by user";
                 }
-                if (okConn) connectedClient = tmp.release();
+                if (okConn)
+                    connectedClient = tmp.release();
             }
-        } catch (const std::exception& ex) {
+        } catch (const std::exception &ex) {
             err = std::string("Connection exception: ") + ex.what();
             okConn = false;
         } catch (...) {
@@ -3046,7 +3980,8 @@ void MainWindow::startSftpConnect(openscp::SessionOptions opt,
         const QString qerr = QString::fromStdString(err);
         const bool queued = QMetaObject::invokeMethod(
             qApp,
-            [self, okConn, qerr, connectedClient, uiOpt, saveRequest, canceledByUser]() {
+            [self, okConn, qerr, connectedClient, uiOpt, saveRequest,
+             canceledByUser]() {
                 if (!self) {
                     if (connectedClient) {
                         connectedClient->disconnect();
@@ -3054,10 +3989,10 @@ void MainWindow::startSftpConnect(openscp::SessionOptions opt,
                     }
                     return;
                 }
-                self->finalizeSftpConnect(okConn, qerr, connectedClient, uiOpt, saveRequest, canceledByUser);
+                self->finalizeSftpConnect(okConn, qerr, connectedClient, uiOpt,
+                                          saveRequest, canceledByUser);
             },
-            Qt::QueuedConnection
-        );
+            Qt::QueuedConnection);
         if (!queued && connectedClient) {
             connectedClient->disconnect();
             delete connectedClient;
@@ -3065,12 +4000,10 @@ void MainWindow::startSftpConnect(openscp::SessionOptions opt,
     }).detach();
 }
 
-void MainWindow::finalizeSftpConnect(bool okConn,
-                                     const QString& err,
-                                     openscp::SftpClient* connectedClient,
-                                     const openscp::SessionOptions& uiOpt,
-                                     std::optional<PendingSiteSaveRequest> saveRequest,
-                                     bool canceledByUser) {
+void MainWindow::finalizeSftpConnect(
+    bool okConn, const QString &err, openscp::SftpClient *connectedClient,
+    const openscp::SessionOptions &uiOpt,
+    std::optional<PendingSiteSaveRequest> saveRequest, bool canceledByUser) {
     std::unique_ptr<openscp::SftpClient> guard(connectedClient);
     if (m_connectProgress_) {
         m_connectProgress_->close();
@@ -3079,23 +4012,26 @@ void MainWindow::finalizeSftpConnect(bool okConn,
     m_connectProgressDimmed_ = false;
     m_connectCancelRequested_.reset();
     m_connectInProgress_ = false;
-    if (actSites_) actSites_->setEnabled(true);
+    if (actSites_)
+        actSites_->setEnabled(true);
 
     if (!okConn) {
-        if (actConnect_ && !rightIsRemote_) actConnect_->setEnabled(true);
-        if (canceledByUser) statusBar()->showMessage(tr("Connection canceled"), 4000);
+        if (actConnect_ && !rightIsRemote_)
+            actConnect_->setEnabled(true);
+        if (canceledByUser)
+            statusBar()->showMessage(tr("Connection canceled"), 4000);
         else {
             QMessageBox::critical(
-                this,
-                tr("Connection error"),
+                this, tr("Connection error"),
                 tr("Could not connect to the server.\n%1")
-                    .arg(shortRemoteError(err, tr("Check host, port, and credentials.")))
-            );
+                    .arg(shortRemoteError(
+                        err, tr("Check host, port, and credentials."))));
         }
         return;
     }
 
-    m_sessionNoHostVerification_ = (uiOpt.known_hosts_policy == openscp::KnownHostsPolicy::Off);
+    m_sessionNoHostVerification_ =
+        (uiOpt.known_hosts_policy == openscp::KnownHostsPolicy::Off);
     sftp_ = std::move(guard);
     applyRemoteConnectedUI(uiOpt);
     if (rightIsRemote_ && saveRequest.has_value()) {
@@ -3103,9 +4039,9 @@ void MainWindow::finalizeSftpConnect(bool okConn,
     }
 }
 
-void MainWindow::maybePersistQuickConnectSite(const openscp::SessionOptions& opt,
-                                              const PendingSiteSaveRequest& req,
-                                              bool connectionEstablished) {
+void MainWindow::maybePersistQuickConnectSite(
+    const openscp::SessionOptions &opt, const PendingSiteSaveRequest &req,
+    bool connectionEstablished) {
     bool regeneratedIds = false;
     QVector<SiteEntry> sites = loadSavedSitesForQuickConnect(&regeneratedIds);
 
@@ -3122,9 +4058,8 @@ void MainWindow::maybePersistQuickConnectSite(const openscp::SessionOptions& opt
         SiteEntry e;
         e.id = newQuickSiteId();
         e.name = ensureUniqueQuickSiteName(
-            sites,
-            req.siteName.trimmed().isEmpty() ? defaultQuickSiteName(opt) : req.siteName.trimmed()
-        );
+            sites, req.siteName.trimmed().isEmpty() ? defaultQuickSiteName(opt)
+                                                    : req.siteName.trimmed());
         e.opt = opt;
         e.opt.password.reset();
         e.opt.private_key_passphrase.reset();
@@ -3140,11 +4075,16 @@ void MainWindow::maybePersistQuickConnectSite(const openscp::SessionOptions& opt
 
     if (!req.saveCredentials) {
         if (connectionEstablished) {
-            if (created) statusBar()->showMessage(tr("Connected. Site saved."), 5000);
-            else statusBar()->showMessage(tr("Connected. Site already exists."), 5000);
+            if (created)
+                statusBar()->showMessage(tr("Connected. Site saved."), 5000);
+            else
+                statusBar()->showMessage(tr("Connected. Site already exists."),
+                                         5000);
         } else {
-            if (created) statusBar()->showMessage(tr("Site saved."), 5000);
-            else statusBar()->showMessage(tr("Site already exists."), 5000);
+            if (created)
+                statusBar()->showMessage(tr("Site saved."), 5000);
+            else
+                statusBar()->showMessage(tr("Site already exists."), 5000);
         }
         return;
     }
@@ -3152,56 +4092,71 @@ void MainWindow::maybePersistQuickConnectSite(const openscp::SessionOptions& opt
     SecretStore store;
     QStringList issues;
     bool anyCredentialStored = false;
-    const SiteEntry& target = sites[matchIndex];
+    const SiteEntry &target = sites[matchIndex];
 
     if (opt.password && !opt.password->empty()) {
-        const auto r = store.setSecret(quickSiteSecretKey(target, QStringLiteral("password")),
-                                       QString::fromStdString(*opt.password));
-        if (r.ok()) anyCredentialStored = true;
-        else issues << tr("Password: %1").arg(quickPersistStatusShort(r.status));
+        const auto r = store.setSecret(
+            quickSiteSecretKey(target, QStringLiteral("password")),
+            QString::fromStdString(*opt.password));
+        if (r.ok())
+            anyCredentialStored = true;
+        else
+            issues << tr("Password: %1").arg(quickPersistStatusShort(r.status));
     }
     if (opt.private_key_passphrase && !opt.private_key_passphrase->empty()) {
-        const auto r = store.setSecret(quickSiteSecretKey(target, QStringLiteral("keypass")),
-                                       QString::fromStdString(*opt.private_key_passphrase));
-        if (r.ok()) anyCredentialStored = true;
-        else issues << tr("Passphrase: %1").arg(quickPersistStatusShort(r.status));
+        const auto r = store.setSecret(
+            quickSiteSecretKey(target, QStringLiteral("keypass")),
+            QString::fromStdString(*opt.private_key_passphrase));
+        if (r.ok())
+            anyCredentialStored = true;
+        else
+            issues
+                << tr("Passphrase: %1").arg(quickPersistStatusShort(r.status));
     }
 
     if (!issues.isEmpty()) {
-        QMessageBox::warning(
-            this,
-            tr("Saved sites"),
-            tr("The site was saved, but some credentials could not be saved:\\n%1")
-                .arg(issues.join("\n"))
-        );
+        QMessageBox::warning(this, tr("Saved sites"),
+                             tr("The site was saved, but some credentials "
+                                "could not be saved:\\n%1")
+                                 .arg(issues.join("\n")));
     }
 
     if (connectionEstablished) {
-        if (created && anyCredentialStored) statusBar()->showMessage(tr("Connected. Site and credentials saved."), 5000);
-        else if (created) statusBar()->showMessage(tr("Connected. Site saved."), 5000);
-        else if (anyCredentialStored) statusBar()->showMessage(tr("Connected. Credentials updated."), 5000);
-        else statusBar()->showMessage(tr("Connected. Site already exists."), 5000);
+        if (created && anyCredentialStored)
+            statusBar()->showMessage(
+                tr("Connected. Site and credentials saved."), 5000);
+        else if (created)
+            statusBar()->showMessage(tr("Connected. Site saved."), 5000);
+        else if (anyCredentialStored)
+            statusBar()->showMessage(tr("Connected. Credentials updated."),
+                                     5000);
+        else
+            statusBar()->showMessage(tr("Connected. Site already exists."),
+                                     5000);
     } else {
-        if (created && anyCredentialStored) statusBar()->showMessage(tr("Site and credentials saved."), 5000);
-        else if (created) statusBar()->showMessage(tr("Site saved."), 5000);
-        else if (anyCredentialStored) statusBar()->showMessage(tr("Credentials updated."), 5000);
-        else statusBar()->showMessage(tr("Site already exists."), 5000);
+        if (created && anyCredentialStored)
+            statusBar()->showMessage(tr("Site and credentials saved."), 5000);
+        else if (created)
+            statusBar()->showMessage(tr("Site saved."), 5000);
+        else if (anyCredentialStored)
+            statusBar()->showMessage(tr("Credentials updated."), 5000);
+        else
+            statusBar()->showMessage(tr("Site already exists."), 5000);
     }
 }
 
 // Switch UI into remote mode and wire models/actions for the right pane.
-void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions& opt) {
+void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     delete rightRemoteModel_;
     rightRemoteModel_ = new RemoteModel(sftp_.get(), this);
     rightRemoteModel_->setShowHidden(prefShowHidden_);
     QString e;
     if (!rightRemoteModel_->setRootPath("/", &e)) {
         QMessageBox::critical(
-            this,
-            tr("Error listing remote"),
+            this, tr("Error listing remote"),
             tr("Could not open the initial remote folder.\n%1")
-                .arg(shortRemoteError(e, tr("Failed to read remote contents.")))
-        );
+                .arg(shortRemoteError(e,
+                                      tr("Failed to read remote contents."))));
         sftp_.reset();
         m_sessionNoHostVerification_ = false;
         updateHostPolicyRiskBanner();
@@ -3211,7 +4166,9 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions& opt) {
     }
     rightView_->setModel(rightRemoteModel_);
     if (rightView_->selectionModel()) {
-        connect(rightView_->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]{ updateDeleteShortcutEnables(); });
+        connect(rightView_->selectionModel(),
+                &QItemSelectionModel::selectionChanged, this,
+                [this] { updateDeleteShortcutEnables(); });
     }
     rightView_->header()->setStretchLastSection(false);
     rightView_->setColumnWidth(0, 300);
@@ -3222,23 +4179,37 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions& opt) {
     rightView_->sortByColumn(0, Qt::AscendingOrder);
     rightPath_->setText("/");
     rightIsRemote_ = true;
-    if (transferMgr_) { transferMgr_->setClient(sftp_.get()); transferMgr_->setSessionOptions(opt); }
-    if (actConnect_) actConnect_->setEnabled(false);
-    if (actDisconnect_) actDisconnect_->setEnabled(true);
-    if (actDownloadF7_) actDownloadF7_->setEnabled(true);
-    if (actUploadRight_) actUploadRight_->setEnabled(true);
-    if (actNewDirRight_)  actNewDirRight_->setEnabled(true);
-    if (actNewFileRight_) actNewFileRight_->setEnabled(true);
-    if (actRenameRight_)  actRenameRight_->setEnabled(true);
-    if (actDeleteRight_)  actDeleteRight_->setEnabled(true);
+    if (transferMgr_) {
+        transferMgr_->setClient(sftp_.get());
+        transferMgr_->setSessionOptions(opt);
+    }
+    if (actConnect_)
+        actConnect_->setEnabled(false);
+    if (actDisconnect_)
+        actDisconnect_->setEnabled(true);
+    if (actDownloadF7_)
+        actDownloadF7_->setEnabled(true);
+    if (actUploadRight_)
+        actUploadRight_->setEnabled(true);
+    if (actNewDirRight_)
+        actNewDirRight_->setEnabled(true);
+    if (actNewFileRight_)
+        actNewFileRight_->setEnabled(true);
+    if (actRenameRight_)
+        actRenameRight_->setEnabled(true);
+    if (actDeleteRight_)
+        actDeleteRight_->setEnabled(true);
     if (actChooseRight_) {
-        actChooseRight_->setIcon(QIcon(QLatin1String(":/assets/icons/action-open-folder-remote.svg")));
-        // Opening the system file explorer on a remote host is not supported cross‑platform.
-        // Disable this action in remote mode to avoid confusion.
+        actChooseRight_->setIcon(QIcon(
+            QLatin1String(":/assets/icons/action-open-folder-remote.svg")));
+        // Opening the system file explorer on a remote host is not supported
+        // cross‑platform. Disable this action in remote mode to avoid
+        // confusion.
         actChooseRight_->setEnabled(false);
         actChooseRight_->setToolTip(tr("Not available in remote mode"));
     }
-    statusBar()->showMessage(tr("Connected (SFTP) to ") + QString::fromStdString(opt.host), 4000);
+    statusBar()->showMessage(
+        tr("Connected (SFTP) to ") + QString::fromStdString(opt.host), 4000);
     setWindowTitle(tr("OpenSCP — local/remote (SFTP)"));
     updateHostPolicyRiskBanner();
     updateRemoteWriteability();
@@ -3250,10 +4221,13 @@ void MainWindow::applyPreferences() {
     QSettings s("OpenSCP", "OpenSCP");
     const bool showHidden = s.value("UI/showHidden", false).toBool();
     const bool singleClick = s.value("UI/singleClick", false).toBool();
-    QString openBehaviorMode = s.value("UI/openBehaviorMode").toString().trimmed().toLower();
+    QString openBehaviorMode =
+        s.value("UI/openBehaviorMode").toString().trimmed().toLower();
     if (openBehaviorMode.isEmpty()) {
-        const bool revealLegacy = s.value("UI/openRevealInFolder", false).toBool();
-        openBehaviorMode = revealLegacy ? QStringLiteral("reveal") : QStringLiteral("ask");
+        const bool revealLegacy =
+            s.value("UI/openRevealInFolder", false).toBool();
+        openBehaviorMode =
+            revealLegacy ? QStringLiteral("reveal") : QStringLiteral("ask");
     }
     if (openBehaviorMode != QStringLiteral("ask") &&
         openBehaviorMode != QStringLiteral("reveal") &&
@@ -3262,18 +4236,23 @@ void MainWindow::applyPreferences() {
     }
     prefOpenBehaviorMode_ = openBehaviorMode;
     prefShowQueueOnEnqueue_ = s.value("UI/showQueueOnEnqueue", true).toBool();
-    prefNoHostVerificationTtlMin_ = qBound(1, s.value("Security/noHostVerificationTtlMin", 15).toInt(), 120);
+    prefNoHostVerificationTtlMin_ = qBound(
+        1, s.value("Security/noHostVerificationTtlMin", 15).toInt(), 120);
     downloadDir_ = defaultDownloadDirFromSettings(s);
     QDir().mkpath(downloadDir_);
     // Keep Site Manager auto-open preference up to date
-    m_openSiteManagerOnDisconnect = s.value("UI/openSiteManagerOnDisconnect", true).toBool();
+    m_openSiteManagerOnDisconnect =
+        s.value("UI/openSiteManagerOnDisconnect", true).toBool();
     applyTransferPreferences();
 
     // Local: model filters (hidden on/off)
-    auto applyLocalFilters = [&](QFileSystemModel* m) {
-        if (!m) return;
-        QDir::Filters f = QDir::AllEntries | QDir::NoDotAndDotDot | QDir::AllDirs;
-        if (showHidden) f = f | QDir::Hidden | QDir::System;
+    auto applyLocalFilters = [&](QFileSystemModel *m) {
+        if (!m)
+            return;
+        QDir::Filters f =
+            QDir::AllEntries | QDir::NoDotAndDotDot | QDir::AllDirs;
+        if (showHidden)
+            f = f | QDir::Hidden | QDir::System;
         m->setFilter(f);
     };
     applyLocalFilters(leftModel_);
@@ -3290,37 +4269,56 @@ void MainWindow::applyPreferences() {
     // Single-click activation (connect/disconnect to clicked())
     if (prefSingleClick_ != singleClick) {
         // Disconnect previous connections if they existed
-        if (leftClickConn_)  { QObject::disconnect(leftClickConn_);  leftClickConn_  = QMetaObject::Connection(); }
-        if (rightClickConn_) { QObject::disconnect(rightClickConn_); rightClickConn_ = QMetaObject::Connection(); }
+        if (leftClickConn_) {
+            QObject::disconnect(leftClickConn_);
+            leftClickConn_ = QMetaObject::Connection();
+        }
+        if (rightClickConn_) {
+            QObject::disconnect(rightClickConn_);
+            rightClickConn_ = QMetaObject::Connection();
+        }
         if (singleClick) {
-            if (leftView_)  leftClickConn_  = connect(leftView_,  &QTreeView::clicked,   this, &MainWindow::leftItemActivated);
-            if (rightView_) rightClickConn_ = connect(rightView_, &QTreeView::clicked,  this, &MainWindow::rightItemActivated);
+            if (leftView_)
+                leftClickConn_ = connect(leftView_, &QTreeView::clicked, this,
+                                         &MainWindow::leftItemActivated);
+            if (rightView_)
+                rightClickConn_ = connect(rightView_, &QTreeView::clicked, this,
+                                          &MainWindow::rightItemActivated);
         }
         prefSingleClick_ = singleClick;
     }
 }
 
 void MainWindow::applyTransferPreferences() {
-    if (!transferMgr_) return;
+    if (!transferMgr_)
+        return;
     QSettings s("OpenSCP", "OpenSCP");
-    const int maxConcurrent = qBound(1, s.value("Transfer/maxConcurrent", 2).toInt(), 8);
-    const int globalSpeed = qMax(0, s.value("Transfer/globalSpeedKBps", 0).toInt());
+    const int maxConcurrent =
+        qBound(1, s.value("Transfer/maxConcurrent", 2).toInt(), 8);
+    const int globalSpeed =
+        qMax(0, s.value("Transfer/globalSpeedKBps", 0).toInt());
     transferMgr_->setMaxConcurrent(maxConcurrent);
     transferMgr_->setGlobalSpeedLimitKBps(globalSpeed);
-    if (transferDlg_) QMetaObject::invokeMethod(transferDlg_, "refresh", Qt::QueuedConnection);
+    if (transferDlg_)
+        QMetaObject::invokeMethod(transferDlg_, "refresh",
+                                  Qt::QueuedConnection);
 }
 
 // Check if the current remote directory is writable and update enables.
 void MainWindow::updateRemoteWriteability() {
-    // Determine if the current remote directory is writable by attempting to create and delete
-    // a temporary folder. Conservative: if it fails, consider read-only.
+    // Determine if the current remote directory is writable by attempting to
+    // create and delete a temporary folder. Conservative: if it fails, consider
+    // read-only.
     if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_) {
         rightRemoteWritable_ = false;
         return;
     }
     const QString base = rightRemoteModel_->rootPath();
-    const QString testName = ".openscp-write-test-" + QString::number(QDateTime::currentMSecsSinceEpoch());
-    const QString testPath = base.endsWith('/') ? base + testName : base + "/" + testName;
+    const QString testName =
+        ".openscp-write-test-" +
+        QString::number(QDateTime::currentMSecsSinceEpoch());
+    const QString testPath =
+        base.endsWith('/') ? base + testName : base + "/" + testName;
     std::string err;
     bool created = sftp_->mkdir(testPath.toStdString(), err, 0755);
     if (created) {
@@ -3331,54 +4329,84 @@ void MainWindow::updateRemoteWriteability() {
         rightRemoteWritable_ = false;
     }
     // Reflect in actions that require write access
-    if (actUploadRight_) actUploadRight_->setEnabled(rightRemoteWritable_);
-    if (actNewDirRight_)  actNewDirRight_->setEnabled(rightRemoteWritable_);
-    if (actNewFileRight_) actNewFileRight_->setEnabled(rightRemoteWritable_);
-    if (actRenameRight_)  actRenameRight_->setEnabled(rightRemoteWritable_);
-    if (actDeleteRight_)  actDeleteRight_->setEnabled(rightRemoteWritable_);
-    if (actMoveRight_)    actMoveRight_->setEnabled(rightRemoteWritable_);
-    if (actMoveRightTb_)  actMoveRightTb_->setEnabled(rightRemoteWritable_);
+    if (actUploadRight_)
+        actUploadRight_->setEnabled(rightRemoteWritable_);
+    if (actNewDirRight_)
+        actNewDirRight_->setEnabled(rightRemoteWritable_);
+    if (actNewFileRight_)
+        actNewFileRight_->setEnabled(rightRemoteWritable_);
+    if (actRenameRight_)
+        actRenameRight_->setEnabled(rightRemoteWritable_);
+    if (actDeleteRight_)
+        actDeleteRight_->setEnabled(rightRemoteWritable_);
+    if (actMoveRight_)
+        actMoveRight_->setEnabled(rightRemoteWritable_);
+    if (actMoveRightTb_)
+        actMoveRightTb_->setEnabled(rightRemoteWritable_);
     updateDeleteShortcutEnables();
 }
-    // Enablement rules for buttons/shortcuts on both sub‑toolbars.
+// Enablement rules for buttons/shortcuts on both sub‑toolbars.
 // - General: require a selection.
 // - Exceptions: Up (if parent exists), Upload… (remote RW), Download (remote).
-// Enable Delete shortcuts only when a selection is present in the corresponding pane.
+// Enable Delete shortcuts only when a selection is present in the corresponding
+// pane.
 void MainWindow::updateDeleteShortcutEnables() {
-    auto hasColSel = [&](QTreeView* v) -> bool {
-        if (!v || !v->selectionModel()) return false;
+    auto hasColSel = [&](QTreeView *v) -> bool {
+        if (!v || !v->selectionModel())
+            return false;
         return !v->selectionModel()->selectedRows(NAME_COL).isEmpty();
     };
     const bool leftHasSel = hasColSel(leftView_);
     const bool rightHasSel = hasColSel(rightView_);
-    const bool rightWrite = (!rightIsRemote_) || (rightIsRemote_ && rightRemoteWritable_);
+    const bool rightWrite =
+        (!rightIsRemote_) || (rightIsRemote_ && rightRemoteWritable_);
 
     // Left: enable according to selection (exception: Up)
-    if (actCopyF5_)    actCopyF5_->setEnabled(leftHasSel);
-    if (actMoveF6_)    actMoveF6_->setEnabled(leftHasSel);
-    if (actDelete_)    actDelete_->setEnabled(leftHasSel);
-    if (actRenameLeft_)  actRenameLeft_->setEnabled(leftHasSel);
-    if (actNewDirLeft_)  actNewDirLeft_->setEnabled(true); // always enabled on local
-    if (actNewFileLeft_) actNewFileLeft_->setEnabled(true); // always enabled on local
+    if (actCopyF5_)
+        actCopyF5_->setEnabled(leftHasSel);
+    if (actMoveF6_)
+        actMoveF6_->setEnabled(leftHasSel);
+    if (actDelete_)
+        actDelete_->setEnabled(leftHasSel);
+    if (actRenameLeft_)
+        actRenameLeft_->setEnabled(leftHasSel);
+    if (actNewDirLeft_)
+        actNewDirLeft_->setEnabled(true); // always enabled on local
+    if (actNewFileLeft_)
+        actNewFileLeft_->setEnabled(true); // always enabled on local
     if (actUpLeft_) {
         QDir d(leftPath_ ? leftPath_->text() : QString());
         bool canUp = d.cdUp();
         actUpLeft_->setEnabled(canUp);
     }
 
-    // Right: enable according to selection + permissions (exceptions: Up, Upload, Download)
-    if (actCopyRightTb_) actCopyRightTb_->setEnabled(rightHasSel);
-    if (actMoveRightTb_) actMoveRightTb_->setEnabled(rightHasSel && rightWrite);
-    if (actDeleteRight_) actDeleteRight_->setEnabled(rightHasSel && rightWrite);
-    if (actRenameRight_)  actRenameRight_->setEnabled(rightHasSel && rightWrite);
-    if (actNewDirRight_)  actNewDirRight_->setEnabled(rightWrite); // enabled if local or remote is writable
-    if (actNewFileRight_) actNewFileRight_->setEnabled(rightWrite);
-    if (actUploadRight_) actUploadRight_->setEnabled(rightIsRemote_ && rightRemoteWritable_); // exception
-    if (actDownloadF7_) actDownloadF7_->setEnabled(rightIsRemote_); // exception: enabled without selection
+    // Right: enable according to selection + permissions (exceptions: Up,
+    // Upload, Download)
+    if (actCopyRightTb_)
+        actCopyRightTb_->setEnabled(rightHasSel);
+    if (actMoveRightTb_)
+        actMoveRightTb_->setEnabled(rightHasSel && rightWrite);
+    if (actDeleteRight_)
+        actDeleteRight_->setEnabled(rightHasSel && rightWrite);
+    if (actRenameRight_)
+        actRenameRight_->setEnabled(rightHasSel && rightWrite);
+    if (actNewDirRight_)
+        actNewDirRight_->setEnabled(
+            rightWrite); // enabled if local or remote is writable
+    if (actNewFileRight_)
+        actNewFileRight_->setEnabled(rightWrite);
+    if (actUploadRight_)
+        actUploadRight_->setEnabled(rightIsRemote_ &&
+                                    rightRemoteWritable_); // exception
+    if (actDownloadF7_)
+        actDownloadF7_->setEnabled(
+            rightIsRemote_); // exception: enabled without selection
     if (actUpRight_) {
-        QString cur = rightRemoteModel_ ? rightRemoteModel_->rootPath() : rightPath_->text();
+        QString cur = rightRemoteModel_ ? rightRemoteModel_->rootPath()
+                                        : rightPath_->text();
         if (rightIsRemote_) {
-            if (cur.endsWith('/')) cur.chop(1);
+            if (cur.endsWith('/'))
+                cur.chop(1);
             actUpRight_->setEnabled(!cur.isEmpty() && cur != "/");
         } else {
             QDir d(cur);

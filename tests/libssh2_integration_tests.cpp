@@ -1,5 +1,6 @@
 // Integration tests for real Libssh2SftpClient against a test SFTP server.
-// The test is skipped (exit code 77) unless required OPEN_SCP_IT_* env vars exist.
+// The test is skipped (exit code 77) unless required OPEN_SCP_IT_* env vars
+// exist.
 #include "openscp/Libssh2SftpClient.hpp"
 
 #include <chrono>
@@ -21,7 +22,7 @@ constexpr int kSkipExitCode = 77;
 struct TestContext {
     int failures = 0;
 
-    void check(bool cond, const std::string& msg) {
+    void check(bool cond, const std::string &msg) {
         if (!cond) {
             ++failures;
             std::cerr << "[FAIL] " << msg << "\n";
@@ -29,38 +30,45 @@ struct TestContext {
     }
 };
 
-std::optional<std::string> envValue(const char* key) {
-    const char* raw = std::getenv(key);
-    if (!raw || !*raw) return std::nullopt;
+std::optional<std::string> envValue(const char *key) {
+    const char *raw = std::getenv(key);
+    if (!raw || !*raw)
+        return std::nullopt;
     return std::string(raw);
 }
 
 std::string uniqueToken() {
-    const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto now =
+        std::chrono::steady_clock::now().time_since_epoch().count();
     return std::to_string(static_cast<long long>(now));
 }
 
-std::string joinRemotePath(const std::string& base, const std::string& name) {
-    if (base.empty()) return std::string("/") + name;
-    if (base.back() == '/') return base + name;
+std::string joinRemotePath(const std::string &base, const std::string &name) {
+    if (base.empty())
+        return std::string("/") + name;
+    if (base.back() == '/')
+        return base + name;
     return base + "/" + name;
 }
 
-bool readFile(const fs::path& p, std::string& out) {
+bool readFile(const fs::path &p, std::string &out) {
     std::ifstream in(p, std::ios::binary);
-    if (!in.is_open()) return false;
-    out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    if (!in.is_open())
+        return false;
+    out.assign(std::istreambuf_iterator<char>(in),
+               std::istreambuf_iterator<char>());
     return true;
 }
 
-bool parsePort(const std::optional<std::string>& raw, std::uint16_t& out) {
+bool parsePort(const std::optional<std::string> &raw, std::uint16_t &out) {
     if (!raw.has_value()) {
         out = 22;
         return true;
     }
     try {
         const int n = std::stoi(*raw);
-        if (n < 1 || n > 65535) return false;
+        if (n < 1 || n > 65535)
+            return false;
         out = static_cast<std::uint16_t>(n);
         return true;
     } catch (...) {
@@ -68,9 +76,11 @@ bool parsePort(const std::optional<std::string>& raw, std::uint16_t& out) {
     }
 }
 
-bool listContainsName(const std::vector<openscp::FileInfo>& entries, const std::string& name) {
-    for (const auto& e : entries) {
-        if (e.name == name) return true;
+bool listContainsName(const std::vector<openscp::FileInfo> &entries,
+                      const std::string &name) {
+    for (const auto &e : entries) {
+        if (e.name == name)
+            return true;
     }
     return false;
 }
@@ -83,17 +93,20 @@ int main() {
     const auto pass = envValue("OPEN_SCP_IT_SFTP_PASS");
     const auto keyPath = envValue("OPEN_SCP_IT_SFTP_KEY");
     const auto keyPassphrase = envValue("OPEN_SCP_IT_SFTP_KEY_PASSPHRASE");
-    const std::string remoteBase = envValue("OPEN_SCP_IT_REMOTE_BASE").value_or("/tmp");
+    const std::string remoteBase =
+        envValue("OPEN_SCP_IT_REMOTE_BASE").value_or("/tmp");
 
-    if (!host.has_value() || !user.has_value() || (!pass.has_value() && !keyPath.has_value())) {
-        std::cout
-            << "[SKIP] openscp_sftp_integration_tests requires env vars: "
-            << "OPEN_SCP_IT_SFTP_HOST, OPEN_SCP_IT_SFTP_USER and one auth method "
-            << "(OPEN_SCP_IT_SFTP_PASS or OPEN_SCP_IT_SFTP_KEY)\n";
+    if (!host.has_value() || !user.has_value() ||
+        (!pass.has_value() && !keyPath.has_value())) {
+        std::cout << "[SKIP] openscp_sftp_integration_tests requires env vars: "
+                  << "OPEN_SCP_IT_SFTP_HOST, OPEN_SCP_IT_SFTP_USER and one "
+                     "auth method "
+                  << "(OPEN_SCP_IT_SFTP_PASS or OPEN_SCP_IT_SFTP_KEY)\n";
         return kSkipExitCode;
     }
     if (keyPath.has_value() && !fs::exists(*keyPath)) {
-        std::cerr << "[FAIL] OPEN_SCP_IT_SFTP_KEY does not exist: " << *keyPath << "\n";
+        std::cerr << "[FAIL] OPEN_SCP_IT_SFTP_KEY does not exist: " << *keyPath
+                  << "\n";
         return EXIT_FAILURE;
     }
 
@@ -108,24 +121,30 @@ int main() {
     opt.host = *host;
     opt.port = port;
     opt.username = *user;
-    if (pass.has_value()) opt.password = *pass;
+    if (pass.has_value())
+        opt.password = *pass;
     if (keyPath.has_value()) {
         opt.private_key_path = *keyPath;
-        if (keyPassphrase.has_value()) opt.private_key_passphrase = *keyPassphrase;
+        if (keyPassphrase.has_value())
+            opt.private_key_passphrase = *keyPassphrase;
     }
     opt.known_hosts_policy = openscp::KnownHostsPolicy::Off;
     opt.transfer_integrity_policy = openscp::TransferIntegrityPolicy::Required;
 
     const std::string token = uniqueToken();
-    const std::string remoteSuiteDir = joinRemotePath(remoteBase, "openscp-it-" + token);
+    const std::string remoteSuiteDir =
+        joinRemotePath(remoteBase, "openscp-it-" + token);
     const std::string remoteSrc = joinRemotePath(remoteSuiteDir, "payload.txt");
-    const std::string remoteMoved = joinRemotePath(remoteSuiteDir, "payload-moved.txt");
+    const std::string remoteMoved =
+        joinRemotePath(remoteSuiteDir, "payload-moved.txt");
 
-    const fs::path localTmpRoot = fs::temp_directory_path() / ("openscp-it-" + token);
+    const fs::path localTmpRoot =
+        fs::temp_directory_path() / ("openscp-it-" + token);
     std::error_code ec;
     fs::create_directories(localTmpRoot, ec);
     if (ec) {
-        std::cerr << "[FAIL] could not create temp dir: " << ec.message() << "\n";
+        std::cerr << "[FAIL] could not create temp dir: " << ec.message()
+                  << "\n";
         return EXIT_FAILURE;
     }
 
@@ -145,7 +164,8 @@ int main() {
     openscp::Libssh2SftpClient client;
     std::string err;
 
-    t.check(client.connect(opt, err), std::string("connect should succeed: ") + err);
+    t.check(client.connect(opt, err),
+            std::string("connect should succeed: ") + err);
     if (t.failures == 0) {
         err.clear();
         t.check(client.mkdir(remoteSuiteDir, err, 0755),
@@ -166,24 +186,29 @@ int main() {
     if (t.failures == 0) {
         openscp::FileInfo st{};
         err.clear();
-        t.check(client.stat(remoteSrc, st, err), std::string("stat(remoteSrc) should succeed: ") + err);
+        t.check(client.stat(remoteSrc, st, err),
+                std::string("stat(remoteSrc) should succeed: ") + err);
         t.check(st.has_size, "stat(remoteSrc) should report size");
-        t.check(st.size == payload.size(), "remote file size should match payload size");
+        t.check(st.size == payload.size(),
+                "remote file size should match payload size");
     }
     if (t.failures == 0) {
         std::vector<openscp::FileInfo> entries;
         err.clear();
         t.check(client.list(remoteSuiteDir, entries, err),
                 std::string("list(remoteSuiteDir) should succeed: ") + err);
-        t.check(listContainsName(entries, "payload.txt"), "list should include payload.txt");
+        t.check(listContainsName(entries, "payload.txt"),
+                "list should include payload.txt");
     }
     if (t.failures == 0) {
         err.clear();
         t.check(client.get(remoteSrc, localDst.string(), err, {}, {}, false),
                 std::string("get should succeed: ") + err);
         std::string downloaded;
-        t.check(readFile(localDst, downloaded), "downloaded file should be readable");
-        t.check(downloaded == payload, "downloaded content should match uploaded payload");
+        t.check(readFile(localDst, downloaded),
+                "downloaded file should be readable");
+        t.check(downloaded == payload,
+                "downloaded content should match uploaded payload");
     }
     if (t.failures == 0) {
         err.clear();
@@ -196,9 +221,11 @@ int main() {
     }
     if (t.failures == 0) {
         err.clear();
-        t.check(client.removeFile(remoteMoved, err), std::string("removeFile should succeed: ") + err);
+        t.check(client.removeFile(remoteMoved, err),
+                std::string("removeFile should succeed: ") + err);
         err.clear();
-        t.check(client.removeDir(remoteSuiteDir, err), std::string("removeDir should succeed: ") + err);
+        t.check(client.removeDir(remoteSuiteDir, err),
+                std::string("removeDir should succeed: ") + err);
     }
 
     // Best-effort cleanup regardless of test result.
