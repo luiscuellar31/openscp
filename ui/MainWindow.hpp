@@ -1,5 +1,6 @@
 // Declaration of the main window and its state/actions.
 #pragma once
+#include "openscp/SftpTypes.hpp"
 #include <QAction>
 #include <QFileSystemModel>
 #include <QLineEdit>
@@ -199,6 +200,13 @@ class MainWindow : public QMainWindow {
     };
     void runLocalFsOperation(const QVector<LocalFsPair> &pairs,
                              bool deleteSource, int skippedCount = 0);
+    struct RemoteDownloadSeed {
+        QString remotePath;
+        QString localPath;
+        bool isDir = false;
+    };
+    void runRemoteDownloadPrescan(const QVector<RemoteDownloadSeed> &seeds,
+                                  int initialSkipped, bool dragAndDrop);
 
     // Writable state of the current remote directory
     bool rightRemoteWritable_ = false;
@@ -232,6 +240,10 @@ class MainWindow : public QMainWindow {
     bool m_connectInProgress_ = false;
     std::shared_ptr<std::atomic<bool>> m_connectCancelRequested_;
     std::atomic<int> m_localFsJobsInFlight_{0};
+    std::optional<openscp::SessionOptions> m_activeSessionOptions_;
+    QPointer<class QProgressDialog> m_remoteScanProgress_;
+    std::shared_ptr<std::atomic<bool>> m_remoteScanCancelRequested_;
+    std::atomic<bool> m_remoteScanInProgress_{false};
     // TOFU wait state
     std::mutex m_tofuMutex_;
     std::condition_variable m_tofuCv_;
