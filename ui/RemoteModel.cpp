@@ -1,14 +1,18 @@
 // Remote model implementation (table: Name, Size, Date, Permissions).
 #include "RemoteModel.hpp"
 #include "TimeUtils.hpp"
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QLoggingCategory>
+#include <QMetaObject>
+#include <QPointer>
 #include <QSet>
 #include <QVariant>
+#include <algorithm>
 #include <functional>
+#include <thread>
 
 Q_LOGGING_CATEGORY(ocEnum, "openscp.enum")
-#include <QDateTime>
 #include <QDir>
 #include <QLocale>
 #include <QMimeData>
@@ -102,33 +106,158 @@ Qt::ItemFlags RemoteModel::flags(const QModelIndex &index) const {
     return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled;
 }
 
-bool RemoteModel::setRootPath(const QString &path, QString *errorOut) {
+bool RemoteModel::setRootPath(const QString &path, QString *errorOut,
+                              bool async) {
     if (!client_) {
         if (errorOut)
-            *errorOut = "Sin cliente SFTP";
-        return false;
-    }
-    std::vector<openscp::FileInfo> out;
-    std::string err;
-    if (!client_->list(path.toStdString(), out, err)) {
-        if (errorOut)
-            *errorOut = QString::fromStdString(err);
+            *errorOut = tr("No SFTP client available");
         return false;
     }
 
-    beginResetModel();
-    items_.clear();
-    items_.reserve(out.size());
-    for (const auto &f : out) {
-        const QString name = QString::fromStdString(f.name);
-        if (!showHidden_ && name.startsWith('.'))
-            continue;
-        items_.push_back({name, f.is_dir, f.size, f.has_size, f.mtime, f.mode,
-                          f.uid, f.gid});
+    QString normalized = path.trimmed();
+    if (normalized.isEmpty())
+        normalized = QStringLiteral("/");
+    if (!normalized.startsWith('/'))
+        normalized.prepend('/');
+    if (normalized.size() > 1 && normalized.endsWith('/'))
+        normalized.chop(1);
+
+    const quint64 reqId = ++listRequestSeq_;
+    const bool showHiddenNow = showHidden_;
+    const int sortColNow = sortColumn_;
+    const Qt::SortOrder sortOrdNow = sortOrder_;
+
+    if (!async) {
+        std::vector<openscp::FileInfo> out;
+        std::string err;
+        if (!client_->list(normalized.toStdString(), out, err)) {
+            const QString qerr = QString::fromStdString(err);
+            if (errorOut)
+                *errorOut = qerr;
+            return false;
+        }
+
+        std::vector<Item> nextItems;
+        nextItems.reserve(out.size());
+        for (const auto &f : out) {
+            const QString name = QString::fromStdString(f.name);
+            if (!showHiddenNow && name.startsWith('.'))
+                continue;
+            nextItems.push_back({name, f.is_dir, f.size, f.has_size, f.mtime,
+                                 f.mode, f.uid, f.gid});
+        }
+        sortItemsVector(nextItems, sortColNow, sortOrdNow);
+        replaceItems(std::move(nextItems), normalized);
+        return true;
+    }
+
+    if (!sessionOpt_.has_value()) {
+        if (errorOut)
+            *errorOut = tr("Missing session options for remote listing");
+        return false;
+    }
+    std::string connErr;
+    auto listClient = client_->newConnectionLike(*sessionOpt_, connErr);
+    if (!listClient) {
+        const QString qerr =
+            connErr.empty() ? tr("Could not start remote listing")
+                            : QString::fromStdString(connErr);
+        if (errorOut)
+            *errorOut = qerr;
+        return false;
+    }
+
+    QPointer<RemoteModel> self(this);
+    std::thread([self, reqId, normalized, showHiddenNow, sortColNow,
+                 sortOrdNow, listClient = std::move(listClient)]() mutable {
+        std::vector<openscp::FileInfo> out;
+        std::string err;
+        bool ok = false;
+        QString qerr;
+        ok = listClient->list(normalized.toStdString(), out, err);
+        if (!ok)
+            qerr = QString::fromStdString(err);
+        listClient->disconnect();
+
+        if (!self)
+            return;
+        QObject *app = QCoreApplication::instance();
+        if (!app)
+            return;
+        QMetaObject::invokeMethod(
+            app,
+            [self, reqId, normalized, ok, qerr, out = std::move(out),
+             showHiddenNow, sortColNow, sortOrdNow]() mutable {
+                if (!self)
+                    return;
+                if (reqId != self->listRequestSeq_.load())
+                    return;
+                if (!ok) {
+                    emit self->rootPathLoaded(normalized, false, qerr);
+                    return;
+                }
+                std::vector<Item> nextItems;
+                nextItems.reserve(out.size());
+                for (const auto &f : out) {
+                    const QString name = QString::fromStdString(f.name);
+                    if (!showHiddenNow && name.startsWith('.'))
+                        continue;
+                    nextItems.push_back(
+                        {name, f.is_dir, f.size, f.has_size, f.mtime, f.mode,
+                         f.uid, f.gid});
+                }
+                self->sortItemsVector(nextItems, sortColNow, sortOrdNow);
+                self->replaceItems(std::move(nextItems), normalized);
+                emit self->rootPathLoaded(normalized, true, QString());
+            },
+            Qt::QueuedConnection);
+    }).detach();
+    return true;
+}
+
+void RemoteModel::replaceItems(std::vector<Item> &&nextItems,
+                               const QString &path) {
+    const int oldCount = static_cast<int>(items_.size());
+    if (oldCount > 0) {
+        beginRemoveRows(QModelIndex(), 0, oldCount - 1);
+        items_.clear();
+        endRemoveRows();
+    } else {
+        items_.clear();
+    }
+    const int newCount = static_cast<int>(nextItems.size());
+    if (newCount > 0) {
+        beginInsertRows(QModelIndex(), 0, newCount - 1);
+        items_ = std::move(nextItems);
+        endInsertRows();
     }
     currentPath_ = path;
-    endResetModel();
-    return true;
+}
+
+void RemoteModel::sortItemsVector(std::vector<Item> &items, int column,
+                                  Qt::SortOrder order) const {
+    const bool asc = (order == Qt::AscendingOrder);
+    auto lessStr = [&](const QString &a, const QString &b) {
+        int cmp = QString::compare(a, b, Qt::CaseInsensitive);
+        return asc ? (cmp < 0) : (cmp > 0);
+    };
+    auto less = [&](const Item &a, const Item &b) {
+        if (a.isDir != b.isDir)
+            return a.isDir && !b.isDir;
+        switch (column) {
+        case 0:
+            return lessStr(a.name, b.name);
+        case 1:
+            return asc ? (a.size < b.size) : (a.size > b.size);
+        case 2:
+            return asc ? (a.mtime < b.mtime) : (a.mtime > b.mtime);
+        case 3:
+            return asc ? (a.mode < b.mode) : (a.mode > b.mode);
+        default:
+            return lessStr(a.name, b.name);
+        }
+    };
+    std::sort(items.begin(), items.end(), less);
 }
 
 bool RemoteModel::isDir(const QModelIndex &idx) const {
@@ -333,30 +462,11 @@ bool RemoteModel::enumerateFilesUnder(const QString &baseRemote,
 }
 
 void RemoteModel::sort(int column, Qt::SortOrder order) {
+    sortColumn_ = column;
+    sortOrder_ = order;
     if (items_.empty())
         return;
-    beginResetModel();
-    const bool asc = (order == Qt::AscendingOrder);
-    auto lessStr = [&](const QString &a, const QString &b) {
-        int cmp = QString::compare(a, b, Qt::CaseInsensitive);
-        return asc ? (cmp < 0) : (cmp > 0);
-    };
-    auto less = [&](const Item &a, const Item &b) {
-        // Directories first, then criterion
-        if (a.isDir != b.isDir)
-            return a.isDir && !b.isDir;
-        switch (column) {
-        case 0:
-            return lessStr(a.name, b.name);
-        case 1:
-            return asc ? (a.size < b.size) : (a.size > b.size);
-        case 2:
-            return asc ? (a.mtime < b.mtime) : (a.mtime > b.mtime);
-        case 3:
-            return asc ? (a.mode < b.mode) : (a.mode > b.mode);
-        }
-        return lessStr(a.name, b.name);
-    };
-    std::sort(items_.begin(), items_.end(), less);
-    endResetModel();
+    emit layoutAboutToBeChanged();
+    sortItemsVector(items_, sortColumn_, sortOrder_);
+    emit layoutChanged();
 }

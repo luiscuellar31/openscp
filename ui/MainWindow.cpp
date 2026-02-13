@@ -1824,7 +1824,6 @@ void MainWindow::moveLeftToRight() {
                         QString dummy;
                         if (rightRemoteModel_)
                             rightRemoteModel_->setRootPath(remoteBase, &dummy);
-                        updateRemoteWriteability();
                         QObject::disconnect(*connPtr);
                     }
                 });
@@ -2295,9 +2294,6 @@ void MainWindow::setRightRemoteRoot(const QString &path) {
                                       tr("Failed to read remote contents."))));
         return;
     }
-    rightPath_->setText(path);
-    updateRemoteWriteability();
-    updateDeleteShortcutEnables();
 }
 
 // Handle activation (double-click/Enter) on the right pane.
@@ -2879,7 +2875,6 @@ void MainWindow::moveRightToLeft() {
                     QString dummy;
                     if (rightRemoteModel_)
                         rightRemoteModel_->setRootPath(remoteBase, &dummy);
-                    updateRemoteWriteability();
                     QObject::disconnect(*connPtr);
                 }
             });
@@ -3301,7 +3296,6 @@ void MainWindow::deleteRightSelected() {
             cacheCurrentRemoteWriteability(true);
         QString dummy;
         rightRemoteModel_->setRootPath(base, &dummy);
-        updateRemoteWriteability();
     } else {
         if (QMessageBox::warning(
                 this, tr("Confirm delete"),
@@ -4330,9 +4324,28 @@ void MainWindow::maybePersistQuickConnectSite(
 void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     delete rightRemoteModel_;
     rightRemoteModel_ = new RemoteModel(sftp_.get(), this);
+    rightRemoteModel_->setSessionOptions(opt);
     rightRemoteModel_->setShowHidden(prefShowHidden_);
+    connect(rightRemoteModel_, &RemoteModel::rootPathLoaded, this,
+            [this](const QString &path, bool ok, const QString &error) {
+                if (!rightRemoteModel_)
+                    return;
+                if (!ok) {
+                    QMessageBox::warning(
+                        this, tr("Remote error"),
+                        tr("Could not open the remote folder.\n%1")
+                            .arg(shortRemoteError(
+                                error, tr("Failed to read remote contents."))));
+                    return;
+                }
+                rightPath_->setText(path);
+                if (rightIsRemote_) {
+                    updateRemoteWriteability();
+                    updateDeleteShortcutEnables();
+                }
+            });
     QString e;
-    if (!rightRemoteModel_->setRootPath("/", &e)) {
+    if (!rightRemoteModel_->setRootPath("/", &e, false)) {
         QMessageBox::critical(
             this, tr("Error listing remote"),
             tr("Could not open the initial remote folder.\n%1")
@@ -4360,7 +4373,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     rightView_->setColumnWidth(3, 120);
     rightView_->setSortingEnabled(true);
     rightView_->sortByColumn(0, Qt::AscendingOrder);
-    rightPath_->setText("/");
+    rightPath_->setText(rightRemoteModel_->rootPath());
     rightIsRemote_ = true;
     m_activeSessionOptions_ = opt;
     m_remoteWriteabilityCache_.clear();

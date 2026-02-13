@@ -2,7 +2,9 @@
 #pragma once
 #include "openscp/SftpClient.hpp"
 #include <QAbstractTableModel>
+#include <atomic>
 #include <memory>
+#include <optional>
 #include <vector>
 
 class RemoteModel : public QAbstractTableModel {
@@ -28,8 +30,13 @@ class RemoteModel : public QAbstractTableModel {
     void sort(int column, Qt::SortOrder order) override;
 
     // Set the current remote directory and refresh rows.
-    bool setRootPath(const QString &path, QString *errorOut = nullptr);
+    // By default this is asynchronous and emits rootPathLoaded on completion.
+    bool setRootPath(const QString &path, QString *errorOut = nullptr,
+                     bool async = true);
     QString rootPath() const { return currentPath_; }
+    void setSessionOptions(const openscp::SessionOptions &opt) {
+        sessionOpt_ = opt;
+    }
 
     bool isDir(const QModelIndex &idx) const;
     QString nameAt(const QModelIndex &idx) const;
@@ -66,6 +73,9 @@ class RemoteModel : public QAbstractTableModel {
                              std::vector<EnumeratedFile> &out,
                              QString *errorOut = nullptr) const;
 
+    signals:
+    void rootPathLoaded(const QString &path, bool ok, const QString &error);
+
     private:
     openscp::SftpClient *client_ = nullptr; // no owned
     QString currentPath_;
@@ -81,4 +91,12 @@ class RemoteModel : public QAbstractTableModel {
     };
     std::vector<Item> items_;
     bool showHidden_ = false; // hide names starting with '.' if false
+    int sortColumn_ = 0;
+    Qt::SortOrder sortOrder_ = Qt::AscendingOrder;
+    std::optional<openscp::SessionOptions> sessionOpt_;
+    std::atomic<quint64> listRequestSeq_{0};
+
+    void replaceItems(std::vector<Item> &&nextItems, const QString &path);
+    void sortItemsVector(std::vector<Item> &items, int column,
+                         Qt::SortOrder order) const;
 };

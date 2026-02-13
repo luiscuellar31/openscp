@@ -1214,6 +1214,18 @@ Continue?</source>
             <source>Partial enumeration with errors</source>
             <translation>Enumeración parcial con errores</translation>
         </message>
+        <message>
+            <source>No SFTP client available</source>
+            <translation>No hay cliente SFTP disponible</translation>
+        </message>
+        <message>
+            <source>Could not start remote listing</source>
+            <translation>No se pudo iniciar el listado remoto</translation>
+        </message>
+        <message>
+            <source>Missing session options for remote listing</source>
+            <translation>Faltan opciones de sesión para el listado remoto</translation>
+        </message>
     </context>
     <context>
         <name>SettingsDialog</name>
