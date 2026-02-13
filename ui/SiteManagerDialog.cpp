@@ -2,13 +2,13 @@
 #include "SiteManagerDialog.hpp"
 #include "ConnectionDialog.hpp"
 #include "SecretStore.hpp"
+#include "UiAlerts.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QHeaderView>
-#include <QMessageBox>
 #include <QPushButton>
 #include <QSaveFile>
 #include <QSet>
@@ -42,10 +42,10 @@ static QString persistIssueLine(const QString &label,
 static void showPersistIssues(QWidget *parent, const QStringList &issues) {
     if (issues.isEmpty())
         return;
-    QMessageBox::warning(parent, QObject::tr("Credentials not saved"),
-                         QObject::tr("Could not save one or more credentials "
-                                     "in the secure backend:\\n%1")
-                             .arg(issues.join("\n")));
+    UiAlerts::warning(parent, QObject::tr("Credentials not saved"),
+                      QObject::tr("Could not save one or more credentials "
+                                  "in the secure backend:\\n%1")
+                          .arg(issues.join("\n")));
 }
 
 static QString normalizedSiteName(const QString &name) {
@@ -70,14 +70,14 @@ static bool hasDuplicateSiteName(const QVector<SiteEntry> &sites,
 }
 
 static void showDuplicateNameIssue(QWidget *parent, const QString &name) {
-    QMessageBox::warning(
+    UiAlerts::warning(
         parent, QObject::tr("Duplicate name"),
         QObject::tr("A site named \"%1\" already exists. Use a different name.")
             .arg(name));
 }
 
 static void showMissingNameIssue(QWidget *parent) {
-    QMessageBox::warning(
+    UiAlerts::warning(
         parent, QObject::tr("Name required"),
         QObject::tr("Enter a site name to save this connection."));
 }

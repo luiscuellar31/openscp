@@ -5,6 +5,7 @@
 #include "SecretStore.hpp"
 #include "SiteManagerDialog.hpp"
 #include "TransferManager.hpp"
+#include "UiAlerts.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
 
 #include <QAbstractButton>
@@ -447,7 +448,7 @@ bool MainWindow::confirmInsecureHostPolicyForSession(
     if (allowedUntil > now)
         return true;
 
-    const auto first = QMessageBox::warning(
+    const auto first = UiAlerts::warning(
         this, tr("Critical security risk"),
         tr("You are about to connect using the \"No verification\" policy.\n"
            "This allows MITM attacks and server impersonation.\n\n"
@@ -464,7 +465,7 @@ bool MainWindow::confirmInsecureHostPolicyForSession(
                               QLineEdit::Normal, QString(), &ok)
             .trimmed();
     if (!ok || entered != token) {
-        QMessageBox::information(
+        UiAlerts::information(
             this, tr("Connection canceled"),
             tr("Risk confirmation was not completed correctly."));
         return false;
@@ -557,6 +558,7 @@ void MainWindow::showTOfuDialog(const QString &host, const QString &alg,
         std::fprintf(stderr, "[OpenSCP] TOFU shown; progress paused=false\n");
     }
     auto *box = new QMessageBox(this);
+    UiAlerts::configure(*box);
     m_tofuBox = box;
     box->setAttribute(Qt::WA_DeleteOnClose, true);
     box->setWindowModality(Qt::WindowModal);
@@ -633,6 +635,7 @@ void MainWindow::showOneTimeDialog(const QString &host, const QString &alg,
         return;
     }
     auto *box = new QMessageBox(this);
+    UiAlerts::configure(*box);
     m_tofuBox = box;
     box->setAttribute(Qt::WA_DeleteOnClose, true);
     box->setWindowModality(Qt::WindowModal);
@@ -937,7 +940,7 @@ void MainWindow::finalizeSftpConnect(
         if (canceledByUser)
             statusBar()->showMessage(tr("Connection canceled"), 4000);
         else {
-            QMessageBox::critical(
+            UiAlerts::critical(
                 this, tr("Connection error"),
                 tr("Could not connect to the server.\n%1")
                     .arg(shortRemoteError(
@@ -1031,7 +1034,7 @@ void MainWindow::maybePersistQuickConnectSite(
     }
 
     if (!issues.isEmpty()) {
-        QMessageBox::warning(this, tr("Saved sites"),
+        UiAlerts::warning(this, tr("Saved sites"),
                              tr("The site was saved, but some credentials "
                                 "could not be saved:\\n%1")
                                  .arg(issues.join("\n")));
@@ -1072,7 +1075,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
                 if (!rightRemoteModel_)
                     return;
                 if (!ok) {
-                    QMessageBox::warning(
+                    UiAlerts::warning(
                         this, tr("Remote error"),
                         tr("Could not open the remote folder.\n%1")
                             .arg(shortRemoteError(
@@ -1087,7 +1090,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
             });
     QString e;
     if (!rightRemoteModel_->setRootPath("/", &e, false)) {
-        QMessageBox::critical(
+        UiAlerts::critical(
             this, tr("Error listing remote"),
             tr("Could not open the initial remote folder.\n%1")
                 .arg(shortRemoteError(e,

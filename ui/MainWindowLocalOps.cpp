@@ -2,6 +2,7 @@
 #include "MainWindow.hpp"
 #include "RemoteModel.hpp"
 #include "TransferManager.hpp"
+#include "UiAlerts.hpp"
 
 #include <QCoreApplication>
 #include <QDesktopServices>
@@ -178,7 +179,7 @@ void MainWindow::setLeftRoot(const QString &path) {
         statusBar()->showMessage(tr("Left: ") + path, 3000);
         updateDeleteShortcutEnables();
     } else {
-        QMessageBox::warning(this, tr("Invalid path"),
+        UiAlerts::warning(this, tr("Invalid path"),
                              tr("Folder does not exist."));
     }
 }
@@ -191,7 +192,7 @@ void MainWindow::setRightRoot(const QString &path) {
         statusBar()->showMessage(tr("Right: ") + path, 3000);
         updateDeleteShortcutEnables();
     } else {
-        QMessageBox::warning(this, tr("Invalid path"),
+        UiAlerts::warning(this, tr("Invalid path"),
                              tr("Folder does not exist."));
     }
 }
@@ -307,7 +308,7 @@ void MainWindow::copyLeftToRight() {
         // ---- REMOTE branch: upload files (PUT) to the current remote
         // directory ----
         if (!sftp_ || !rightRemoteModel_) {
-            QMessageBox::warning(this, tr("SFTP"),
+            UiAlerts::warning(this, tr("SFTP"),
                                  tr("No active SFTP session."));
             return;
         }
@@ -315,13 +316,13 @@ void MainWindow::copyLeftToRight() {
         // Selection on the left panel (local source)
         auto sel = leftView_->selectionModel();
         if (!sel) {
-            QMessageBox::warning(this, tr("Copy"),
+            UiAlerts::warning(this, tr("Copy"),
                                  tr("No selection available."));
             return;
         }
         const auto rows = sel->selectedRows(NAME_COL);
         if (rows.isEmpty()) {
-            QMessageBox::information(
+            UiAlerts::information(
                 this, tr("Copy"), tr("No entries selected in the left panel."));
             return;
         }
@@ -369,19 +370,19 @@ void MainWindow::copyLeftToRight() {
     const QString dstDirPath = rightPath_->text();
     QDir dstDir(dstDirPath);
     if (!dstDir.exists()) {
-        QMessageBox::warning(this, tr("Invalid destination"),
+        UiAlerts::warning(this, tr("Invalid destination"),
                              tr("Destination folder does not exist."));
         return;
     }
 
     auto sel = leftView_->selectionModel();
     if (!sel) {
-        QMessageBox::warning(this, tr("Copy"), tr("No selection available."));
+        UiAlerts::warning(this, tr("Copy"), tr("No selection available."));
         return;
     }
     const auto rows = sel->selectedRows(NAME_COL);
     if (rows.isEmpty()) {
-        QMessageBox::information(this, tr("Copy"),
+        UiAlerts::information(this, tr("Copy"),
                                  tr("No entries selected in the left panel."));
         return;
     }
@@ -398,7 +399,7 @@ void MainWindow::copyLeftToRight() {
 
         if (QFileInfo::exists(target)) {
             if (policy == OverwritePolicy::Ask) {
-                auto ret = QMessageBox::question(
+                auto ret = UiAlerts::question(
                     this, tr("Conflict"),
                     QString(
                         tr("“%1” already exists at destination.\nOverwrite?"))
@@ -430,17 +431,17 @@ void MainWindow::copyLeftToRight() {
 void MainWindow::moveLeftToRight() {
     if (rightIsRemote_) {
         if (!sftp_ || !rightRemoteModel_) {
-            QMessageBox::warning(this, tr("SFTP"),
+            UiAlerts::warning(this, tr("SFTP"),
                                  tr("No active SFTP session."));
             return;
         }
         const auto rows = leftView_->selectionModel()->selectedRows(NAME_COL);
         if (rows.isEmpty()) {
-            QMessageBox::information(
+            UiAlerts::information(
                 this, tr("Move"), tr("No entries selected in the left panel."));
             return;
         }
-        if (QMessageBox::question(this, tr("Confirm move"),
+        if (UiAlerts::question(this, tr("Confirm move"),
                                   tr("This will upload to the server and "
                                      "delete the local source.\nContinue?")) !=
             QMessageBox::Yes)
@@ -696,17 +697,17 @@ void MainWindow::moveLeftToRight() {
     const QString dstDirPath = rightPath_->text();
     QDir dstDir(dstDirPath);
     if (!dstDir.exists()) {
-        QMessageBox::warning(this, tr("Invalid destination"),
+        UiAlerts::warning(this, tr("Invalid destination"),
                              tr("Destination folder does not exist."));
         return;
     }
     const auto rows = leftView_->selectionModel()->selectedRows(NAME_COL);
     if (rows.isEmpty()) {
-        QMessageBox::information(this, tr("Move"),
+        UiAlerts::information(this, tr("Move"),
                                  tr("No entries selected in the left panel."));
         return;
     }
-    if (QMessageBox::question(
+    if (UiAlerts::question(
             this, tr("Confirm move"),
             tr("This will copy and then delete the source.\nContinue?")) !=
         QMessageBox::Yes)
@@ -720,7 +721,7 @@ void MainWindow::moveLeftToRight() {
         const QString target = dstDir.filePath(fi.fileName());
         if (QFileInfo::exists(target)) {
             if (policy == OverwritePolicy::Ask) {
-                const auto ret = QMessageBox::question(
+                const auto ret = UiAlerts::question(
                     this, tr("Conflict"),
                     QString(
                         tr("“%1” already exists at destination.\nOverwrite?"))
@@ -751,11 +752,11 @@ void MainWindow::moveLeftToRight() {
 void MainWindow::deleteFromLeft() {
     const auto rows = leftView_->selectionModel()->selectedRows(NAME_COL);
     if (rows.isEmpty()) {
-        QMessageBox::information(this, tr("Delete"),
+        UiAlerts::information(this, tr("Delete"),
                                  tr("No entries selected in the left panel."));
         return;
     }
-    if (QMessageBox::warning(this, tr("Confirm delete"),
+    if (UiAlerts::warning(this, tr("Confirm delete"),
                              tr("This will permanently delete the selected "
                                 "items in the left panel.\nContinue?"),
                              QMessageBox::Yes | QMessageBox::No) !=
@@ -797,6 +798,7 @@ void MainWindow::openLocalPathWithPreference(const QString &localPath) {
     }
 
     QMessageBox box(this);
+    UiAlerts::configure(box);
     box.setIcon(QMessageBox::Question);
     box.setWindowTitle(tr("Opening preference"));
     box.setText(tr("How do you want to open this file?"));
@@ -828,7 +830,7 @@ void MainWindow::renameLeftSelected() {
         return;
     const auto rows = sel->selectedRows();
     if (rows.size() != 1) {
-        QMessageBox::information(this, tr("Rename"),
+        UiAlerts::information(this, tr("Rename"),
                                  tr("Select exactly one item."));
         return;
     }
@@ -846,7 +848,7 @@ void MainWindow::renameLeftSelected() {
         renamed =
             QDir(fi.absolutePath()).rename(fi.absoluteFilePath(), newPath);
     if (!renamed) {
-        QMessageBox::critical(this, tr("Local"), tr("Could not rename."));
+        UiAlerts::critical(this, tr("Local"), tr("Could not rename."));
         return;
     }
     setLeftRoot(leftPath_->text());
@@ -861,12 +863,12 @@ void MainWindow::newDirLeft() {
         return;
     QString why;
     if (!isValidEntryName(name, &why)) {
-        QMessageBox::warning(this, tr("Invalid name"), why);
+        UiAlerts::warning(this, tr("Invalid name"), why);
         return;
     }
     QDir base(leftPath_->text());
     if (!base.mkpath(base.filePath(name))) {
-        QMessageBox::critical(this, tr("Local"),
+        UiAlerts::critical(this, tr("Local"),
                               tr("Could not create folder."));
         return;
     }
@@ -882,13 +884,13 @@ void MainWindow::newFileLeft() {
         return;
     QString why;
     if (!isValidEntryName(name, &why)) {
-        QMessageBox::warning(this, tr("Invalid name"), why);
+        UiAlerts::warning(this, tr("Invalid name"), why);
         return;
     }
     QDir base(leftPath_->text());
     const QString path = base.filePath(name);
     if (QFileInfo::exists(path)) {
-        if (QMessageBox::question(
+        if (UiAlerts::question(
                 this, tr("File exists"),
                 tr("«%1» already exists.\\nOverwrite?").arg(name),
                 QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
@@ -896,7 +898,7 @@ void MainWindow::newFileLeft() {
     }
     QFile f(path);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        QMessageBox::critical(this, tr("Local"), tr("Could not create file."));
+        UiAlerts::critical(this, tr("Local"), tr("Could not create file."));
         return;
     }
     f.close();

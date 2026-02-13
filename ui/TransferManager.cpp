@@ -2,6 +2,7 @@
 // SFTP sessions.
 #include "TransferManager.hpp"
 #include "TimeUtils.hpp"
+#include "UiAlerts.hpp"
 #include "openscp/SftpClient.hpp"
 #include <QAbstractButton>
 #include <QApplication>
@@ -358,6 +359,7 @@ void TransferManager::schedule() {
     auto askOverwrite = [&](const QString &name, const QString &srcInfo,
                             const QString &dstInfo) -> int {
         QMessageBox msg(nullptr);
+        UiAlerts::configure(msg, Qt::ApplicationModal);
         msg.setWindowTitle(tr("Conflict"));
         // Clarify which side is local vs remote for better UX
         msg.setText(tr("«%1» already exists.\\nLocal: %2\\nRemote: %3")

@@ -2,6 +2,7 @@
 #include "MainWindow.hpp"
 #include "RemoteModel.hpp"
 #include "TransferQueueDialog.hpp"
+#include "UiAlerts.hpp"
 
 #include <QAbstractAnimation>
 #include <QCoreApplication>
@@ -67,11 +68,11 @@ void MainWindow::runRemoteDownloadPrescan(
     const QVector<RemoteDownloadSeed> &seeds, int initialSkipped,
     bool dragAndDrop) {
     if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_ || !transferMgr_) {
-        QMessageBox::warning(this, tr("SFTP"), tr("No active SFTP session."));
+        UiAlerts::warning(this, tr("SFTP"), tr("No active SFTP session."));
         return;
     }
     if (!m_activeSessionOptions_.has_value()) {
-        QMessageBox::warning(this, tr("SFTP"),
+        UiAlerts::warning(this, tr("SFTP"),
                              tr("Missing session options for remote scan."));
         return;
     }
@@ -95,7 +96,7 @@ void MainWindow::runRemoteDownloadPrescan(
         sftp_->newConnectionLike(*m_activeSessionOptions_, connErr);
     if (!scanClient) {
         m_remoteScanInProgress_ = false;
-        QMessageBox::warning(
+        UiAlerts::warning(
             this, tr("SFTP"),
             tr("Could not start remote scan.\n%1")
                 .arg(QString::fromStdString(connErr)));

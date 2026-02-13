@@ -3,6 +3,7 @@
 #include "PermissionsDialog.hpp"
 #include "RemoteModel.hpp"
 #include "TransferManager.hpp"
+#include "UiAlerts.hpp"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -166,7 +167,7 @@ void MainWindow::setRightRemoteRoot(const QString &path) {
         return;
     QString e;
     if (!rightRemoteModel_->setRootPath(path, &e)) {
-        QMessageBox::warning(
+        UiAlerts::warning(
             this, tr("Remote error"),
             tr("Could not open the remote folder.\n%1")
                 .arg(shortRemoteError(e,
@@ -204,7 +205,7 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
     {
         QString why;
         if (!isValidEntryName(name, &why)) {
-            QMessageBox::warning(this, tr("Invalid name"), why);
+            UiAlerts::warning(this, tr("Invalid name"), why);
             return;
         }
     }
@@ -276,12 +277,12 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
 
 void MainWindow::downloadRightToLeft() {
     if (!rightIsRemote_) {
-        QMessageBox::information(this, tr("Download"),
+        UiAlerts::information(this, tr("Download"),
                                  tr("The right panel is not remote."));
         return;
     }
     if (!sftp_ || !rightRemoteModel_) {
-        QMessageBox::warning(this, tr("SFTP"), tr("No active SFTP session."));
+        UiAlerts::warning(this, tr("SFTP"), tr("No active SFTP session."));
         return;
     }
     const QString picked = QFileDialog::getExistingDirectory(
@@ -292,7 +293,7 @@ void MainWindow::downloadRightToLeft() {
     downloadDir_ = picked;
     QDir dst(downloadDir_);
     if (!dst.exists()) {
-        QMessageBox::warning(this, tr("Invalid destination"),
+        UiAlerts::warning(this, tr("Invalid destination"),
                              tr("Destination folder does not exist."));
         return;
     }
@@ -306,7 +307,7 @@ void MainWindow::downloadRightToLeft() {
         for (int r = 0; r < rc; ++r)
             rows << rightRemoteModel_->index(r, NAME_COL);
         if (rows.isEmpty()) {
-            QMessageBox::information(this, tr("Download"),
+            UiAlerts::information(this, tr("Download"),
                                      tr("Nothing to download."));
             return;
         }
@@ -380,19 +381,19 @@ void MainWindow::downloadRightToLeft() {
 void MainWindow::copyRightToLeft() {
     QDir dst(leftPath_->text());
     if (!dst.exists()) {
-        QMessageBox::warning(
+        UiAlerts::warning(
             this, tr("Invalid destination"),
             tr("The destination folder (left panel) does not exist."));
         return;
     }
     auto sel = rightView_->selectionModel();
     if (!sel) {
-        QMessageBox::warning(this, tr("Copy"), tr("No selection."));
+        UiAlerts::warning(this, tr("Copy"), tr("No selection."));
         return;
     }
     const auto rows = sel->selectedRows(NAME_COL);
     if (rows.isEmpty()) {
-        QMessageBox::information(this, tr("Copy"), tr("Nothing selected."));
+        UiAlerts::information(this, tr("Copy"), tr("Nothing selected."));
         return;
     }
 
@@ -407,7 +408,7 @@ void MainWindow::copyRightToLeft() {
             const QString target = dst.filePath(fi.fileName());
             if (QFileInfo::exists(target)) {
                 if (policy == OverwritePolicy::Ask) {
-                    auto ret = QMessageBox::question(
+                    auto ret = UiAlerts::question(
                         this, tr("Conflict"),
                         QString(tr("“%1” already exists at "
                                    "destination.\nOverwrite?"))
@@ -438,7 +439,7 @@ void MainWindow::copyRightToLeft() {
 
     // Remote -> Local: enqueue downloads
     if (!sftp_ || !rightRemoteModel_) {
-        QMessageBox::warning(this, tr("SFTP"), tr("No active SFTP session."));
+        UiAlerts::warning(this, tr("SFTP"), tr("No active SFTP session."));
         return;
     }
     int bad = 0;
@@ -470,12 +471,12 @@ void MainWindow::copyRightToLeft() {
 void MainWindow::moveRightToLeft() {
     auto sel = rightView_->selectionModel();
     if (!sel || sel->selectedRows(NAME_COL).isEmpty()) {
-        QMessageBox::information(this, tr("Move"), tr("Nothing selected."));
+        UiAlerts::information(this, tr("Move"), tr("Nothing selected."));
         return;
     }
     QDir dst(leftPath_->text());
     if (!dst.exists()) {
-        QMessageBox::warning(
+        UiAlerts::warning(
             this, tr("Invalid destination"),
             tr("The destination folder (left panel) does not exist."));
         return;
@@ -493,7 +494,7 @@ void MainWindow::moveRightToLeft() {
             const QString target = dst.filePath(fi.fileName());
             if (QFileInfo::exists(target)) {
                 if (policy == OverwritePolicy::Ask) {
-                    auto ret = QMessageBox::question(
+                    auto ret = UiAlerts::question(
                         this, tr("Conflict"),
                         QString(tr("“%1” already exists at "
                                    "destination.\nOverwrite?"))
@@ -524,7 +525,7 @@ void MainWindow::moveRightToLeft() {
 
     // Remote -> Local: enqueue downloads and delete remote on completion
     if (!sftp_ || !rightRemoteModel_) {
-        QMessageBox::warning(this, tr("SFTP"), tr("No active SFTP session."));
+        UiAlerts::warning(this, tr("SFTP"), tr("No active SFTP session."));
         return;
     }
     const auto rows = sel->selectedRows(NAME_COL);
@@ -749,7 +750,7 @@ void MainWindow::moveRightToLeft() {
 
 void MainWindow::uploadViaDialog() {
     if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_) {
-        QMessageBox::information(
+        UiAlerts::information(
             this, tr("Upload"),
             tr("The right panel is not remote or there is no active session."));
         return;
@@ -829,7 +830,7 @@ void MainWindow::newDirRight() {
         return;
     QString why;
     if (!isValidEntryName(name, &why)) {
-        QMessageBox::warning(this, tr("Invalid name"), why);
+        UiAlerts::warning(this, tr("Invalid name"), why);
         return;
     }
     if (rightIsRemote_) {
@@ -840,7 +841,7 @@ void MainWindow::newDirRight() {
         std::string err;
         if (!sftp_->mkdir(path.toStdString(), err, 0755)) {
             invalidateRemoteWriteabilityFromError(QString::fromStdString(err));
-            QMessageBox::critical(
+            UiAlerts::critical(
                 this, tr("SFTP"),
                 tr("Could not create the remote folder.\n%1")
                     .arg(shortRemoteError(err, tr("Remote error"))));
@@ -852,7 +853,7 @@ void MainWindow::newDirRight() {
     } else {
         QDir base(rightPath_->text());
         if (!base.mkpath(base.filePath(name))) {
-            QMessageBox::critical(this, tr("Local"),
+            UiAlerts::critical(this, tr("Local"),
                                   tr("Could not create folder."));
             return;
         }
@@ -869,7 +870,7 @@ void MainWindow::newFileRight() {
         return;
     QString why;
     if (!isValidEntryName(name, &why)) {
-        QMessageBox::warning(this, tr("Invalid name"), why);
+        UiAlerts::warning(this, tr("Invalid name"), why);
         return;
     }
     if (rightIsRemote_) {
@@ -881,13 +882,13 @@ void MainWindow::newFileRight() {
         std::string e;
         bool exists = sftp_->exists(remotePath.toStdString(), isDir, e);
         if (exists) {
-            if (QMessageBox::question(
+            if (UiAlerts::question(
                     this, tr("File exists"),
                     tr("«%1» already exists.\\nOverwrite?").arg(name),
                     QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
                 return;
         } else if (!e.empty()) {
-            QMessageBox::critical(
+            UiAlerts::critical(
                 this, tr("SFTP"),
                 tr("Could not check whether the remote file already "
                    "exists.\n%1")
@@ -897,7 +898,7 @@ void MainWindow::newFileRight() {
 
         QTemporaryFile tmp;
         if (!tmp.open()) {
-            QMessageBox::critical(this, tr("Temporary"),
+            UiAlerts::critical(this, tr("Temporary"),
                                   tr("Could not create a temporary file."));
             return;
         }
@@ -907,7 +908,7 @@ void MainWindow::newFileRight() {
                                 remotePath.toStdString(), err);
         if (!okPut) {
             invalidateRemoteWriteabilityFromError(QString::fromStdString(err));
-            QMessageBox::critical(
+            UiAlerts::critical(
                 this, tr("SFTP"),
                 tr("Could not upload the temporary file to the server.\n%1")
                     .arg(shortRemoteError(err, tr("Remote error"))));
@@ -921,7 +922,7 @@ void MainWindow::newFileRight() {
         QDir base(rightPath_->text());
         const QString path = base.filePath(name);
         if (QFileInfo::exists(path)) {
-            if (QMessageBox::question(
+            if (UiAlerts::question(
                     this, tr("File exists"),
                     tr("«%1» already exists.\\nOverwrite?").arg(name),
                     QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
@@ -929,7 +930,7 @@ void MainWindow::newFileRight() {
         }
         QFile f(path);
         if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            QMessageBox::critical(this, tr("Local"),
+            UiAlerts::critical(this, tr("Local"),
                                   tr("Could not create file."));
             return;
         }
@@ -946,7 +947,7 @@ void MainWindow::renameRightSelected() {
         return;
     const auto rows = sel->selectedRows();
     if (rows.size() != 1) {
-        QMessageBox::information(this, tr("Rename"),
+        UiAlerts::information(this, tr("Rename"),
                                  tr("Select exactly one item."));
         return;
     }
@@ -967,7 +968,7 @@ void MainWindow::renameRightSelected() {
         std::string err;
         if (!sftp_->rename(from.toStdString(), to.toStdString(), err, false)) {
             invalidateRemoteWriteabilityFromError(QString::fromStdString(err));
-            QMessageBox::critical(
+            UiAlerts::critical(
                 this, tr("SFTP"),
                 tr("Could not rename the remote item.\n%1")
                     .arg(shortRemoteError(err, tr("Remote error"))));
@@ -991,7 +992,7 @@ void MainWindow::renameRightSelected() {
             renamed =
                 QDir(fi.absolutePath()).rename(fi.absoluteFilePath(), newPath);
         if (!renamed) {
-            QMessageBox::critical(this, tr("Local"), tr("Could not rename."));
+            UiAlerts::critical(this, tr("Local"), tr("Could not rename."));
             return;
         }
         setRightRoot(rightPath_->text());
@@ -1004,13 +1005,13 @@ void MainWindow::deleteRightSelected() {
         return;
     const auto rows = sel->selectedRows();
     if (rows.isEmpty()) {
-        QMessageBox::information(this, tr("Delete"), tr("Nothing selected."));
+        UiAlerts::information(this, tr("Delete"), tr("Nothing selected."));
         return;
     }
     if (rightIsRemote_) {
         if (!sftp_ || !rightRemoteModel_)
             return;
-        if (QMessageBox::warning(this, tr("Confirm delete"),
+        if (UiAlerts::warning(this, tr("Confirm delete"),
                                  tr("This will permanently delete items on the "
                                     "remote server.\\nContinue?"),
                                  QMessageBox::Yes | QMessageBox::No) !=
@@ -1078,7 +1079,7 @@ void MainWindow::deleteRightSelected() {
         QString dummy;
         rightRemoteModel_->setRootPath(base, &dummy);
     } else {
-        if (QMessageBox::warning(
+        if (UiAlerts::warning(
                 this, tr("Confirm delete"),
                 tr("This will permanently delete on local disk.\nContinue?"),
                 QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
@@ -1204,7 +1205,7 @@ void MainWindow::changeRemotePermissions() {
         return;
     const auto rows = sel->selectedRows();
     if (rows.size() != 1) {
-        QMessageBox::information(this, tr("Permissions"),
+        UiAlerts::information(this, tr("Permissions"),
                                  tr("Select only one item."));
         return;
     }
@@ -1215,7 +1216,7 @@ void MainWindow::changeRemotePermissions() {
     openscp::FileInfo st{};
     std::string err;
     if (!sftp_->stat(path.toStdString(), st, err)) {
-        QMessageBox::warning(
+        UiAlerts::warning(
             this, tr("Permissions"),
             tr("Could not read permissions.\\n%1")
                 .arg(shortRemoteError(
@@ -1234,7 +1235,7 @@ void MainWindow::changeRemotePermissions() {
                 QString::fromStdString(cerrs));
             const QString item =
                 QFileInfo(p).fileName().isEmpty() ? p : QFileInfo(p).fileName();
-            QMessageBox::critical(
+            UiAlerts::critical(
                 this, tr("Permissions"),
                 tr("Could not apply permissions to \"%1\".\\n%2")
                     .arg(item, shortRemoteError(

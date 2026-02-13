@@ -2,6 +2,7 @@
 #include "DragAwareTreeView.hpp"
 #include "RemoteModel.hpp"
 #include "TransferManager.hpp"
+#include "UiAlerts.hpp"
 #include <QApplication>
 #include <QCloseEvent>
 #include <QCoreApplication>
@@ -452,6 +453,7 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *rm) {
         QWidget *parent =
             mw ? static_cast<QWidget *>(mw) : static_cast<QWidget *>(this);
         QMessageBox box(parent);
+        UiAlerts::configure(box);
         box.setIcon(QMessageBox::Question);
         box.setWindowTitle(tr("Confirm staging"));
         QString sizePart;
@@ -572,6 +574,7 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *rm) {
         if (!mw)
             return;
         QMessageBox box(mw);
+        UiAlerts::configure(box);
         box.setIcon(QMessageBox::Information);
         box.setWindowTitle(tr("Preparing files…"));
         box.setText(tr("Still preparing files for drag-out. Wait or cancel?"));

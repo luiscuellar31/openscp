@@ -1,5 +1,6 @@
 // Implementation of OpenSCP settings dialog.
 #include "SettingsDialog.hpp"
+#include "UiAlerts.hpp"
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
@@ -465,7 +466,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                     applyBtn_->setAutoDefault(false);
                     applyBtn_->setDefault(false);
                 }
-                const auto ret = QMessageBox::warning(
+                const auto ret = UiAlerts::warning(
                     this, tr("Enable insecure fallback"),
                     tr("This stores credentials unencrypted on disk using "
                        "QSettings.\n"
@@ -568,7 +569,7 @@ void SettingsDialog::onApply() {
 
     // Only notify if language actually changed
     if (prevLang != chosenLang) {
-        QMessageBox::information(
+        UiAlerts::information(
             this, tr("Language"),
             tr("Language changes take effect after restart."));
     }

@@ -1,6 +1,7 @@
 // Implementation of the "About" dialog for OpenSCP.
 #include "AboutDialog.hpp"
 #include "AppVersion.hpp"
+#include "UiAlerts.hpp"
 #include <QClipboard>
 #include <QCoreApplication>
 #include <QDesktopServices>
@@ -11,7 +12,6 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QMessageBox>
 #include <QPixmap>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -205,9 +205,9 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
             QDesktopServices::openUrl(QUrl::fromLocalFile(licensesDir));
             return;
         }
-        QMessageBox::information(this, tr("Licenses folder not found"),
-                                 tr("No license files were found in this "
-                                    "installation."));
+        UiAlerts::information(this, tr("Licenses folder not found"),
+                              tr("No license files were found in this "
+                                 "installation."));
     });
     actionsRow->addWidget(openLicensesBtn);
 
@@ -216,13 +216,13 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
         tr("Copy version and environment details for support."));
     connect(copyDiagnosticsBtn, &QPushButton::clicked, this, [this] {
         if (QGuiApplication::clipboard() == nullptr) {
-            QMessageBox::information(
+            UiAlerts::information(
                 this, tr("Diagnostics unavailable"),
                 tr("Could not access the system clipboard."));
             return;
         }
         QGuiApplication::clipboard()->setText(buildDiagnosticsText());
-        QMessageBox::information(
+        UiAlerts::information(
             this, tr("Diagnostics copied"),
             tr("Diagnostic information was copied to your clipboard."));
     });
