@@ -3,6 +3,7 @@
 #include "openscp/SftpTypes.hpp"
 #include <QAction>
 #include <QFileSystemModel>
+#include <QHash>
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QPointer>
@@ -210,9 +211,18 @@ class MainWindow : public QMainWindow {
 
     // Writable state of the current remote directory
     bool rightRemoteWritable_ = false;
+    struct RemoteWriteabilityCacheEntry {
+        bool writable = false;
+        qint64 checkedAtMs = 0;
+    };
     // Recompute if the current remote directory is writable (create/remove a
     // temporary folder)
     void updateRemoteWriteability();
+    void applyRemoteWriteabilityActions();
+    void cacheCurrentRemoteWriteability(bool writable);
+    void invalidateRemoteWriteabilityFromError(const QString &rawError);
+    QHash<QString, RemoteWriteabilityCacheEntry> m_remoteWriteabilityCache_;
+    int m_remoteWriteabilityTtlMs_ = 15000;
 
     bool firstShow_ = true;
 

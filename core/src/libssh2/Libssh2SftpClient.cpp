@@ -362,7 +362,7 @@ static bool hash_local_range(const std::string &path, std::uint64_t offset,
         const std::size_t n = std::fread(buf.data(), 1, want, f);
         if (n == 0) {
             if (why)
-                *why = "Lectura local insuficiente durante hash";
+                *why = "Insufficient local read while hashing";
             EVP_MD_CTX_free(ctx);
             std::fclose(f);
             return false;
@@ -432,7 +432,7 @@ static bool hash_remote_range(LIBSSH2_SFTP *sftp, const std::string &remote,
         ssize_t n = libssh2_sftp_read(rh, (char *)buf.data(), want);
         if (n <= 0) {
             if (why)
-                *why = "Lectura remota insuficiente durante hash";
+                *why = "Insufficient remote read while hashing";
             EVP_MD_CTX_free(ctx);
             libssh2_sftp_close(rh);
             return false;

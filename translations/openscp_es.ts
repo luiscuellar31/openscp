@@ -967,7 +967,7 @@ Continue?</source>
         </message>
         <message>
             <source>Error listing remote</source>
-            <translation>Error listando remoto</translation>
+            <translation>Error al listar remoto</translation>
         </message>
         <message>
             <source>Could not open the initial remote folder.
@@ -977,7 +977,7 @@ Continue?</source>
         </message>
         <message>
             <source>Not available in remote mode</source>
-            <translation>No disponible en remoto</translation>
+            <translation>No disponible en modo remoto</translation>
         </message>
         <message>
             <source>Connected (SFTP) to </source>
@@ -986,6 +986,60 @@ Continue?</source>
         <message>
             <source>OpenSCP — local/remote (SFTP)</source>
             <translation>OpenSCP — local/remoto (SFTP)</translation>
+        </message>
+        <message>
+            <source>Moving selected items...</source>
+            <translation>Moviendo elementos seleccionados...</translation>
+        </message>
+        <message>
+            <source>Copying selected items...</source>
+            <translation>Copiando elementos seleccionados...</translation>
+        </message>
+        <message>
+            <source>Could not delete source: %1</source>
+            <translation>No se pudo eliminar el origen: %1</translation>
+        </message>
+        <message>
+            <source>Missing session options for remote scan.</source>
+            <translation>Faltan opciones de sesión para el escaneo remoto.</translation>
+        </message>
+        <message>
+            <source>A remote scan is already in progress</source>
+            <translation>Ya hay un escaneo remoto en curso</translation>
+        </message>
+        <message>
+            <source>Nothing queued. Skipped invalid: %1</source>
+            <translation>No se encoló nada. Inválidos omitidos: %1</translation>
+        </message>
+        <message>
+            <source>Could not start remote scan.
+%1</source>
+            <translation>No se pudo iniciar el escaneo remoto.
+%1</translation>
+        </message>
+        <message>
+            <source>Preparing remote download queue...</source>
+            <translation>Preparando cola de descarga remota...</translation>
+        </message>
+        <message>
+            <source>Preparing queue</source>
+            <translation>Preparando cola</translation>
+        </message>
+        <message>
+            <source>Scanning remote folders... %1 folders, %2 files found</source>
+            <translation>Escaneando carpetas remotas... %1 carpetas, %2 archivos encontrados</translation>
+        </message>
+        <message>
+            <source>Remote scan canceled</source>
+            <translation>Escaneo remoto cancelado</translation>
+        </message>
+        <message>
+            <source>Remote scan finished, but the session is no longer active</source>
+            <translation>El escaneo remoto terminó, pero la sesión ya no está activa</translation>
+        </message>
+        <message>
+            <source>Folders not listed: %1</source>
+            <translation>Carpetas no listadas: %1</translation>
         </message>
     </context>
     <context>

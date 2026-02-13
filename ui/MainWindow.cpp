@@ -222,11 +222,10 @@ static QString shortRemoteError(const QString &raw, const QString &fallback) {
         return fallback;
 
     const QString lower = msg.toLower();
-    if (lower.contains("permission denied") ||
-        lower.contains("permiso denegado")) {
+    if (lower.contains("permission denied")) {
         return QCoreApplication::translate("MainWindow", "Permission denied.");
     }
-    if (lower.contains("read-only") || lower.contains("solo lectura")) {
+    if (lower.contains("read-only")) {
         return QCoreApplication::translate("MainWindow",
                                            "Location is read-only.");
     }
@@ -271,6 +270,17 @@ static QString shortRemoteError(const QString &raw, const QString &fallback) {
 static QString shortRemoteError(const std::string &raw,
                                 const QString &fallback) {
     return shortRemoteError(QString::fromStdString(raw), fallback);
+}
+
+static bool indicatesRemoteWriteabilityDenied(const QString &raw) {
+    const QString lower = raw.trimmed().toLower();
+    if (lower.isEmpty())
+        return false;
+    return lower.contains("permission denied") ||
+           lower.contains("read-only") ||
+           lower.contains("operation not permitted") ||
+           lower.contains("access denied") ||
+           lower.contains("sftp protocol error 3");
 }
 
 static QString newQuickSiteId() {
@@ -1999,6 +2009,7 @@ void MainWindow::disconnectSftp() {
     }
     rightIsRemote_ = false;
     rightRemoteWritable_ = false;
+    m_remoteWriteabilityCache_.clear();
     m_activeSessionOptions_.reset();
     m_sessionNoHostVerification_ = false;
     updateHostPolicyRiskBanner();
@@ -2968,6 +2979,7 @@ void MainWindow::newDirRight() {
             joinRemotePath(rightRemoteModel_->rootPath(), name);
         std::string err;
         if (!sftp_->mkdir(path.toStdString(), err, 0755)) {
+            invalidateRemoteWriteabilityFromError(QString::fromStdString(err));
             QMessageBox::critical(
                 this, tr("SFTP"),
                 tr("Could not create the remote folder.\n%1")
@@ -2976,7 +2988,7 @@ void MainWindow::newDirRight() {
         }
         QString dummy;
         rightRemoteModel_->setRootPath(rightRemoteModel_->rootPath(), &dummy);
-        updateRemoteWriteability();
+        cacheCurrentRemoteWriteability(true);
     } else {
         QDir base(rightPath_->text());
         if (!base.mkpath(base.filePath(name))) {
@@ -3034,6 +3046,7 @@ void MainWindow::newFileRight() {
         bool okPut = sftp_->put(tmp.fileName().toStdString(),
                                 remotePath.toStdString(), err);
         if (!okPut) {
+            invalidateRemoteWriteabilityFromError(QString::fromStdString(err));
             QMessageBox::critical(
                 this, tr("SFTP"),
                 tr("Could not upload the temporary file to the server.\n%1")
@@ -3042,7 +3055,7 @@ void MainWindow::newFileRight() {
         }
         QString dummy;
         rightRemoteModel_->setRootPath(rightRemoteModel_->rootPath(), &dummy);
-        updateRemoteWriteability();
+        cacheCurrentRemoteWriteability(true);
         statusBar()->showMessage(tr("File created: ") + remotePath, 4000);
     } else {
         QDir base(rightPath_->text());
@@ -3093,6 +3106,7 @@ void MainWindow::renameRightSelected() {
         const QString to = joinRemotePath(base, newName);
         std::string err;
         if (!sftp_->rename(from.toStdString(), to.toStdString(), err, false)) {
+            invalidateRemoteWriteabilityFromError(QString::fromStdString(err));
             QMessageBox::critical(
                 this, tr("SFTP"),
                 tr("Could not rename the remote item.\n%1")
@@ -3101,7 +3115,7 @@ void MainWindow::renameRightSelected() {
         }
         QString dummy;
         rightRemoteModel_->setRootPath(base, &dummy);
-        updateRemoteWriteability();
+        cacheCurrentRemoteWriteability(true);
     } else {
         const QModelIndex idx = rows.first();
         const QFileInfo fi = rightLocalModel_->fileInfo(idx);
@@ -3281,6 +3295,10 @@ void MainWindow::deleteRightSelected() {
         if (fail > 0 && !lastErr.isEmpty())
             msg += "\n" + tr("Last error: ") + lastErr;
         statusBar()->showMessage(msg, 6000);
+        if (fail > 0)
+            invalidateRemoteWriteabilityFromError(lastErr);
+        if (fail == 0 && ok > 0)
+            cacheCurrentRemoteWriteability(true);
         QString dummy;
         rightRemoteModel_->setRootPath(base, &dummy);
         updateRemoteWriteability();
@@ -3478,6 +3496,8 @@ void MainWindow::changeRemotePermissions() {
     auto applyOne = [&](const QString &p) -> bool {
         std::string cerrs;
         if (!sftp_->chmod(p.toStdString(), newMode, cerrs)) {
+            invalidateRemoteWriteabilityFromError(
+                QString::fromStdString(cerrs));
             const QString item =
                 QFileInfo(p).fileName().isEmpty() ? p : QFileInfo(p).fileName();
             QMessageBox::critical(
@@ -3524,7 +3544,7 @@ void MainWindow::changeRemotePermissions() {
         return;
     QString dummy;
     rightRemoteModel_->setRootPath(base, &dummy);
-    updateRemoteWriteability();
+    cacheCurrentRemoteWriteability(true);
     statusBar()->showMessage(tr("Permissions updated"), 3000);
 }
 
@@ -4319,6 +4339,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
                 .arg(shortRemoteError(e,
                                       tr("Failed to read remote contents."))));
         sftp_.reset();
+        m_remoteWriteabilityCache_.clear();
         m_activeSessionOptions_.reset();
         m_sessionNoHostVerification_ = false;
         updateHostPolicyRiskBanner();
@@ -4342,6 +4363,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     rightPath_->setText("/");
     rightIsRemote_ = true;
     m_activeSessionOptions_ = opt;
+    m_remoteWriteabilityCache_.clear();
     if (transferMgr_) {
         transferMgr_->setClient(sftp_.get());
         transferMgr_->setSessionOptions(opt);
@@ -4467,31 +4489,7 @@ void MainWindow::applyTransferPreferences() {
                                   Qt::QueuedConnection);
 }
 
-// Check if the current remote directory is writable and update enables.
-void MainWindow::updateRemoteWriteability() {
-    // Determine if the current remote directory is writable by attempting to
-    // create and delete a temporary folder. Conservative: if it fails, consider
-    // read-only.
-    if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_) {
-        rightRemoteWritable_ = false;
-        return;
-    }
-    const QString base = rightRemoteModel_->rootPath();
-    const QString testName =
-        ".openscp-write-test-" +
-        QString::number(QDateTime::currentMSecsSinceEpoch());
-    const QString testPath =
-        base.endsWith('/') ? base + testName : base + "/" + testName;
-    std::string err;
-    bool created = sftp_->mkdir(testPath.toStdString(), err, 0755);
-    if (created) {
-        std::string derr;
-        sftp_->removeDir(testPath.toStdString(), derr);
-        rightRemoteWritable_ = true;
-    } else {
-        rightRemoteWritable_ = false;
-    }
-    // Reflect in actions that require write access
+void MainWindow::applyRemoteWriteabilityActions() {
     if (actUploadRight_)
         actUploadRight_->setEnabled(rightRemoteWritable_);
     if (actNewDirRight_)
@@ -4507,6 +4505,73 @@ void MainWindow::updateRemoteWriteability() {
     if (actMoveRightTb_)
         actMoveRightTb_->setEnabled(rightRemoteWritable_);
     updateDeleteShortcutEnables();
+}
+
+void MainWindow::cacheCurrentRemoteWriteability(bool writable) {
+    if (!rightIsRemote_ || !rightRemoteModel_) {
+        rightRemoteWritable_ = false;
+        m_remoteWriteabilityCache_.clear();
+        applyRemoteWriteabilityActions();
+        return;
+    }
+    const QString base = rightRemoteModel_->rootPath();
+    rightRemoteWritable_ = writable;
+    m_remoteWriteabilityCache_.insert(
+        base, RemoteWriteabilityCacheEntry{writable,
+                                           QDateTime::currentMSecsSinceEpoch()});
+    if (m_remoteWriteabilityCache_.size() > 256)
+        m_remoteWriteabilityCache_.clear();
+    applyRemoteWriteabilityActions();
+}
+
+void MainWindow::invalidateRemoteWriteabilityFromError(
+    const QString &rawError) {
+    if (!rightIsRemote_ || !rightRemoteModel_)
+        return;
+    if (!indicatesRemoteWriteabilityDenied(rawError))
+        return;
+    cacheCurrentRemoteWriteability(false);
+}
+
+// Check if the current remote directory is writable and update enables.
+void MainWindow::updateRemoteWriteability() {
+    if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_) {
+        rightRemoteWritable_ = false;
+        m_remoteWriteabilityCache_.clear();
+        applyRemoteWriteabilityActions();
+        return;
+    }
+
+    const QString base = rightRemoteModel_->rootPath();
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    auto it = m_remoteWriteabilityCache_.constFind(base);
+    if (it != m_remoteWriteabilityCache_.cend()) {
+        if ((nowMs - it->checkedAtMs) <= m_remoteWriteabilityTtlMs_) {
+            rightRemoteWritable_ = it->writable;
+            applyRemoteWriteabilityActions();
+            return;
+        }
+    }
+
+    // Active probe only when cache is stale/missing.
+    const QString testName =
+        ".openscp-write-test-" + QString::number(nowMs);
+    const QString testPath =
+        base.endsWith('/') ? base + testName : base + "/" + testName;
+    std::string err;
+    const bool created = sftp_->mkdir(testPath.toStdString(), err, 0755);
+    if (created) {
+        std::string derr;
+        sftp_->removeDir(testPath.toStdString(), derr);
+        rightRemoteWritable_ = true;
+    } else {
+        rightRemoteWritable_ = false;
+    }
+    m_remoteWriteabilityCache_.insert(
+        base, RemoteWriteabilityCacheEntry{rightRemoteWritable_, nowMs});
+    if (m_remoteWriteabilityCache_.size() > 256)
+        m_remoteWriteabilityCache_.clear();
+    applyRemoteWriteabilityActions();
 }
 // Enablement rules for buttons/shortcuts on both sub‑toolbars.
 // - General: require a selection.
