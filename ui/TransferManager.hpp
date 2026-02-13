@@ -54,6 +54,7 @@ public:
     // Global speed limit (KB/s). 0 = unlimited
     void setGlobalSpeedLimitKBps(int kbps) { globalSpeedKBps_.store(kbps); }
     int globalSpeedLimitKBps() const { return globalSpeedKBps_.load(); }
+    bool isQueuePaused() const { return paused_.load(); }
 
     // Pause/Resume per task
     void pauseTask(quint64 id);

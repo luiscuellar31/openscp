@@ -8,7 +8,14 @@
 #include <QAbstractItemView>
 #include <QTableView>
 #include <QAbstractTableModel>
+#include <QSortFilterProxyModel>
+#include <QStyledItemDelegate>
+#include <QStyleOptionProgressBar>
+#include <QStyle>
+#include <QApplication>
 #include <QSpinBox>
+#include <QButtonGroup>
+#include <QToolButton>
 #include <QInputDialog>
 #include <QMenu>
 
@@ -26,6 +33,12 @@ static QString statusText(TransferTask::Status s) {
 
 class TransferTaskTableModel final : public QAbstractTableModel {
 public:
+  enum Roles {
+    StatusRole = Qt::UserRole + 1,
+    TaskIdRole,
+    ProgressRole
+  };
+
   explicit TransferTaskTableModel(QObject* parent = nullptr) : QAbstractTableModel(parent) {}
 
   int rowCount(const QModelIndex& parent = QModelIndex()) const override {
@@ -55,9 +68,30 @@ public:
   }
 
   QVariant data(const QModelIndex& index, int role) const override {
-    if (!index.isValid() || role != Qt::DisplayRole) return {};
+    if (!index.isValid()) return {};
     if (index.row() < 0 || index.row() >= tasks_.size()) return {};
     const auto& t = tasks_[index.row()];
+
+    if (role == StatusRole) return static_cast<int>(t.status);
+    if (role == TaskIdRole) return static_cast<qulonglong>(t.id);
+    if (role == ProgressRole) return t.progress;
+
+    if (role == Qt::TextAlignmentRole) {
+      if (index.column() == 0 || index.column() == 3 || index.column() == 4 || index.column() == 5) {
+        return static_cast<int>(Qt::AlignCenter);
+      }
+      return static_cast<int>(Qt::AlignLeft | Qt::AlignVCenter);
+    }
+
+    if (role == Qt::ToolTipRole) {
+      if (index.column() == 1) return t.src;
+      if (index.column() == 2) return t.dst;
+      if (index.column() == 3 && t.status == TransferTask::Status::Error && !t.error.isEmpty()) {
+        return TransferQueueDialog::tr("Error details: %1").arg(t.error);
+      }
+    }
+
+    if (role != Qt::DisplayRole) return {};
     switch (index.column()) {
       case 0: return t.type == TransferTask::Type::Upload ? TransferQueueDialog::tr("Upload") : TransferQueueDialog::tr("Download");
       case 1: return t.src;
@@ -103,7 +137,8 @@ public:
                            prev.maxAttempts != next.maxAttempts;
       if (changed) {
         tasks_[row] = next;
-        emit dataChanged(index(row, 0), index(row, 5), {Qt::DisplayRole});
+        emit dataChanged(index(row, 0), index(row, 5),
+                         {Qt::DisplayRole, Qt::TextAlignmentRole, Qt::ToolTipRole, StatusRole, ProgressRole});
       } else {
         // Keep non-rendered fields in sync for action helpers.
         tasks_[row] = next;
@@ -122,6 +157,72 @@ private:
   QVector<TransferTask> tasks_;
 };
 
+class TransferTaskFilterProxyModel final : public QSortFilterProxyModel {
+public:
+  explicit TransferTaskFilterProxyModel(QObject* parent = nullptr) : QSortFilterProxyModel(parent) {
+    setDynamicSortFilter(true);
+  }
+
+  void setFilterMode(int mode) {
+    if (mode_ == mode) return;
+    mode_ = mode;
+    invalidate();
+  }
+
+protected:
+  bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override {
+    if (mode_ == 0) return true; // All
+    const QModelIndex statusIdx = sourceModel()->index(sourceRow, 3, sourceParent);
+    const QVariant raw = sourceModel()->data(statusIdx, TransferTaskTableModel::StatusRole);
+    if (!raw.isValid()) return true;
+    const auto status = static_cast<TransferTask::Status>(raw.toInt());
+    switch (mode_) {
+      case 1: // Active
+        return status == TransferTask::Status::Queued ||
+               status == TransferTask::Status::Running ||
+               status == TransferTask::Status::Paused;
+      case 2: // Errors
+        return status == TransferTask::Status::Error;
+      case 3: // Completed
+        return status == TransferTask::Status::Done;
+      case 4: // Canceled
+        return status == TransferTask::Status::Canceled;
+      default:
+        return true;
+    }
+  }
+
+private:
+  int mode_ = 0;
+};
+
+class ProgressBarDelegate final : public QStyledItemDelegate {
+public:
+  explicit ProgressBarDelegate(QObject* parent = nullptr) : QStyledItemDelegate(parent) {}
+
+  void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+    const int progress = qBound(0, index.data(TransferTaskTableModel::ProgressRole).toInt(), 100);
+
+    QStyleOptionProgressBar bar;
+    bar.rect = option.rect.adjusted(4, 4, -4, -4);
+    bar.minimum = 0;
+    bar.maximum = 100;
+    bar.progress = progress;
+    bar.text = QString::number(progress) + "%";
+    bar.textVisible = true;
+    bar.textAlignment = Qt::AlignCenter;
+    bar.state = option.state;
+    bar.direction = option.direction;
+    bar.fontMetrics = option.fontMetrics;
+
+    if (option.widget) {
+      option.widget->style()->drawControl(QStyle::CE_ProgressBar, &bar, painter, option.widget);
+    } else {
+      QApplication::style()->drawControl(QStyle::CE_ProgressBar, &bar, painter, nullptr);
+    }
+  }
+};
+
 TransferQueueDialog::TransferQueueDialog(TransferManager* mgr, QWidget* parent)
   : QDialog(parent), mgr_(mgr) {
   setWindowTitle(tr("Transfer queue"));
@@ -132,10 +233,18 @@ TransferQueueDialog::TransferQueueDialog(TransferManager* mgr, QWidget* parent)
 
   // Tasks table
   model_ = new TransferTaskTableModel(this);
+  proxy_ = new TransferTaskFilterProxyModel(this);
+  proxy_->setSourceModel(model_);
   table_ = new QTableView(this);
-  table_->setModel(model_);
-  table_->horizontalHeader()->setStretchLastSection(true);
+  table_->setModel(proxy_);
   table_->verticalHeader()->setVisible(false);
+  table_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+  table_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+  table_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+  table_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+  table_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+  table_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
+  table_->setItemDelegateForColumn(4, new ProgressBarDelegate(table_));
   table_->setSelectionBehavior(QAbstractItemView::SelectRows);
   table_->setSelectionMode(QAbstractItemView::ExtendedSelection);
   table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -143,20 +252,64 @@ TransferQueueDialog::TransferQueueDialog(TransferManager* mgr, QWidget* parent)
   table_->setContextMenuPolicy(Qt::CustomContextMenu);
   lay->addWidget(table_);
 
-  // Row 1: Controls (buttons in a single row)
+  // Row 1: quick filters
+  auto* filters = new QWidget(this);
+  auto* hf = new QHBoxLayout(filters);
+  hf->setContentsMargins(0, 0, 0, 0);
+  hf->setSpacing(6);
+  hf->addWidget(new QLabel(tr("Show:"), filters));
+  auto makeChip = [filters](const QString& text) {
+    auto* b = new QToolButton(filters);
+    b->setText(text);
+    b->setCheckable(true);
+    b->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    return b;
+  };
+  filterAllBtn_ = makeChip(tr("All"));
+  filterActiveBtn_ = makeChip(tr("Active"));
+  filterErrorsBtn_ = makeChip(tr("Errors"));
+  filterCompletedBtn_ = makeChip(tr("Completed"));
+  filterCanceledBtn_ = makeChip(tr("Canceled"));
+  filterGroup_ = new QButtonGroup(this);
+  filterGroup_->setExclusive(true);
+  filterGroup_->addButton(filterAllBtn_, FilterAll);
+  filterGroup_->addButton(filterActiveBtn_, FilterActive);
+  filterGroup_->addButton(filterErrorsBtn_, FilterErrors);
+  filterGroup_->addButton(filterCompletedBtn_, FilterCompleted);
+  filterGroup_->addButton(filterCanceledBtn_, FilterCanceled);
+  filterAllBtn_->setChecked(true);
+  hf->addWidget(filterAllBtn_);
+  hf->addWidget(filterActiveBtn_);
+  hf->addWidget(filterErrorsBtn_);
+  hf->addWidget(filterCompletedBtn_);
+  hf->addWidget(filterCanceledBtn_);
+  hf->addStretch();
+  lay->addWidget(filters);
+
+  // Row 2: controls (buttons in a single row)
   auto* controls = new QWidget(this);
   auto* hb = new QHBoxLayout(controls);
   hb->setContentsMargins(0,0,0,0);
 
   pauseBtn_  = new QPushButton(tr("Pause"), controls);
   resumeBtn_ = new QPushButton(tr("Resume"), controls);
-  pauseSelBtn_  = new QPushButton(tr("Pause sel."), controls);
-  resumeSelBtn_ = new QPushButton(tr("Resume sel."), controls);
-  stopSelBtn_   = new QPushButton(tr("Cancel sel."), controls);
-  stopAllBtn_   = new QPushButton(tr("Cancel"), controls);
+  pauseSelBtn_  = new QPushButton(tr("Pause selected"), controls);
+  resumeSelBtn_ = new QPushButton(tr("Resume selected"), controls);
+  stopSelBtn_   = new QPushButton(tr("Cancel selected"), controls);
+  stopAllBtn_   = new QPushButton(tr("Cancel all"), controls);
   retryBtn_  = new QPushButton(tr("Retry"), controls);
-  clearBtn_  = new QPushButton(tr("Clear"), controls);
+  clearBtn_  = new QPushButton(tr("Clear completed"), controls);
   closeBtn_  = new QPushButton(tr("Close"), controls);
+
+  pauseBtn_->setToolTip(tr("Pause all queued and running transfers"));
+  resumeBtn_->setToolTip(tr("Resume the paused queue and paused tasks"));
+  pauseSelBtn_->setToolTip(tr("Pause the selected transfers"));
+  resumeSelBtn_->setToolTip(tr("Resume the selected transfers"));
+  stopSelBtn_->setToolTip(tr("Cancel the selected transfers"));
+  stopAllBtn_->setToolTip(tr("Cancel all queued, running, and paused transfers"));
+  retryBtn_->setToolTip(tr("Retry transfers with Error or Canceled status"));
+  clearBtn_->setToolTip(tr("Remove completed transfers from the list"));
+  closeBtn_->setToolTip(tr("Close this window"));
 
   hb->addWidget(pauseBtn_);
   hb->addWidget(resumeBtn_);
@@ -170,7 +323,7 @@ TransferQueueDialog::TransferQueueDialog(TransferManager* mgr, QWidget* parent)
   hb->addStretch();
   lay->addWidget(controls);
 
-  // Row 2: Global speed setting (speed and apply only)
+  // Row 3: global speed setting
   auto* speedRow = new QWidget(this);
   auto* hs2 = new QHBoxLayout(speedRow);
   hs2->setContentsMargins(0,0,0,0);
@@ -179,8 +332,9 @@ TransferQueueDialog::TransferQueueDialog(TransferManager* mgr, QWidget* parent)
   speedSpin_->setValue(mgr_->globalSpeedLimitKBps());
   speedSpin_->setSuffix(" KB/s");
   applySpeedBtn_ = new QPushButton(tr("Apply limit"), speedRow);
-  // Move "Limit selected" next to the speed control
-  limitSelBtn_  = new QPushButton(tr("Limit sel."), speedRow);
+  limitSelBtn_  = new QPushButton(tr("Limit selected"), speedRow);
+  applySpeedBtn_->setToolTip(tr("Set a global speed limit for all transfers"));
+  limitSelBtn_->setToolTip(tr("Set a speed limit for selected transfers"));
   hs2->addWidget(new QLabel(tr("Speed:"), speedRow));
   hs2->addWidget(speedSpin_);
   hs2->addWidget(applySpeedBtn_);
@@ -209,6 +363,7 @@ TransferQueueDialog::TransferQueueDialog(TransferManager* mgr, QWidget* parent)
   connect(retryBtn_,  &QPushButton::clicked, this, &TransferQueueDialog::onRetry);
   connect(clearBtn_,  &QPushButton::clicked, this, &TransferQueueDialog::onClearDone);
   connect(closeBtn_,  &QPushButton::clicked, this, &QDialog::reject);
+  connect(filterGroup_, &QButtonGroup::idClicked, this, &TransferQueueDialog::onFilterChanged);
 
   connect(mgr_, &TransferManager::tasksChanged, this, &TransferQueueDialog::refresh);
   // Keep selection-dependent button enablement up to date
@@ -229,39 +384,28 @@ void TransferQueueDialog::onRetry() { mgr_->retryFailed(); }
 void TransferQueueDialog::onClearDone() { mgr_->clearCompleted(); }
 
 void TransferQueueDialog::onPauseSelected() {
-  auto sel = table_->selectionModel(); if (!sel || !sel->hasSelection()) return;
-  const auto rows = sel->selectedRows();
-  for (const QModelIndex& r : rows) {
-    if (auto id = model_->taskIdAtRow(r.row()); id.has_value()) mgr_->pauseTask(*id);
-  }
+  const auto ids = selectedTaskIds();
+  for (quint64 id : ids) mgr_->pauseTask(id);
 }
 void TransferQueueDialog::onResumeSelected() {
-  auto sel = table_->selectionModel(); if (!sel || !sel->hasSelection()) return;
-  const auto rows = sel->selectedRows();
-  for (const QModelIndex& r : rows) {
-    if (auto id = model_->taskIdAtRow(r.row()); id.has_value()) mgr_->resumeTask(*id);
-  }
+  const auto ids = selectedTaskIds();
+  for (quint64 id : ids) mgr_->resumeTask(id);
 }
 void TransferQueueDialog::onApplyGlobalSpeed() {
   mgr_->setGlobalSpeedLimitKBps(speedSpin_->value());
   updateSummary();
 }
 void TransferQueueDialog::onLimitSelected() {
-  auto sel = table_->selectionModel(); if (!sel || !sel->hasSelection()) return;
-  const auto rows = sel->selectedRows();
+  const auto ids = selectedTaskIds();
+  if (ids.isEmpty()) return;
   bool ok=false; int v = QInputDialog::getInt(this, tr("Limit for task(s)"), tr("KB/s (0 = no limit)"), 0, 0, 1'000'000, 1, &ok);
   if (!ok) return;
-  for (const QModelIndex& r : rows) {
-    if (auto id = model_->taskIdAtRow(r.row()); id.has_value()) mgr_->setTaskSpeedLimit(*id, v);
-  }
+  for (quint64 id : ids) mgr_->setTaskSpeedLimit(id, v);
 }
 
 void TransferQueueDialog::onStopSelected() {
-  auto sel = table_->selectionModel(); if (!sel || !sel->hasSelection()) return;
-  const auto rows = sel->selectedRows();
-  for (const QModelIndex& r : rows) {
-    if (auto id = model_->taskIdAtRow(r.row()); id.has_value()) mgr_->cancelTask(*id);
-  }
+  const auto ids = selectedTaskIds();
+  for (quint64 id : ids) mgr_->cancelTask(id);
 }
 
 void TransferQueueDialog::onStopAll() {
@@ -298,11 +442,13 @@ void TransferQueueDialog::updateSummary() {
 
   // Enable/Disable actions based on state
   const bool hasAny = !tasks.isEmpty();
-  const bool canPause = (queued + running) > 0; // something to pause
-  const bool canResume = queued > 0;            // something queued to resume
+  const bool queuePaused = mgr_ && mgr_->isQueuePaused();
+  const bool canPause = !queuePaused && (queued + running) > 0;
+  const bool canResume = queuePaused || paused > 0;
   const bool canRetry = (error + canceled) > 0; // there are failed/canceled
   const bool canClear = done > 0;               // there are completed to clear
-  const bool hasSel = table_->selectionModel() && table_->selectionModel()->hasSelection();
+  const bool canCancelAll = (queued + running + paused) > 0;
+  const bool hasSel = !selectedTaskIds().isEmpty();
 
   if (pauseBtn_)  pauseBtn_->setEnabled(hasAny && canPause);
   if (resumeBtn_) resumeBtn_->setEnabled(hasAny && canResume);
@@ -312,7 +458,28 @@ void TransferQueueDialog::updateSummary() {
   if (resumeSelBtn_) resumeSelBtn_->setEnabled(hasSel);
   if (limitSelBtn_) limitSelBtn_->setEnabled(hasSel);
   if (stopSelBtn_)  stopSelBtn_->setEnabled(hasSel);
-  if (stopAllBtn_)  stopAllBtn_->setEnabled(running > 0);
+  if (stopAllBtn_)  stopAllBtn_->setEnabled(hasAny && canCancelAll);
+}
+
+void TransferQueueDialog::onFilterChanged(int id) {
+  if (!proxy_) return;
+  proxy_->setFilterMode(id);
+  if (table_) table_->clearSelection();
+  updateSummary();
+}
+
+QVector<quint64> TransferQueueDialog::selectedTaskIds() const {
+  QVector<quint64> ids;
+  if (!table_ || !table_->selectionModel()) return ids;
+  const auto rows = table_->selectionModel()->selectedRows();
+  ids.reserve(rows.size());
+  for (const QModelIndex& idx : rows) {
+    const QVariant raw = idx.data(TransferTaskTableModel::TaskIdRole);
+    bool ok = false;
+    const quint64 id = raw.toULongLong(&ok);
+    if (ok) ids.push_back(id);
+  }
+  return ids;
 }
 
 void TransferQueueDialog::showContextMenu(const QPoint& pos) {
@@ -330,10 +497,10 @@ void TransferQueueDialog::showContextMenu(const QPoint& pos) {
 
   const bool hasSel = table_->selectionModel() && table_->selectionModel()->hasSelection();
   QMenu menu(this);
-  QAction* actPauseSel  = menu.addAction(tr("Pause sel."));
-  QAction* actResumeSel = menu.addAction(tr("Resume sel."));
-  QAction* actLimitSel  = menu.addAction(tr("Limit sel."));
-  QAction* actCancelSel = menu.addAction(tr("Cancel sel."));
+  QAction* actPauseSel  = menu.addAction(tr("Pause selected"));
+  QAction* actResumeSel = menu.addAction(tr("Resume selected"));
+  QAction* actLimitSel  = menu.addAction(tr("Limit selected"));
+  QAction* actCancelSel = menu.addAction(tr("Cancel selected"));
   actPauseSel->setEnabled(hasSel);
   actResumeSel->setEnabled(hasSel);
   actLimitSel->setEnabled(hasSel);

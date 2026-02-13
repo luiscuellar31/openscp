@@ -61,6 +61,9 @@
 #include <QShortcut>
 #include <QToolButton>
 #include <QProcess>
+#include <QPropertyAnimation>
+#include <QParallelAnimationGroup>
+#include <QEasingCurve>
 #include <cstring>
 #include "DragAwareTreeView.hpp"
 #include <atomic>
@@ -1541,6 +1544,44 @@ QString MainWindow::defaultDownloadDirFromSettings(const QSettings& s) {
 
 void MainWindow::showTransferQueue() {
     if (!transferDlg_) transferDlg_ = new TransferQueueDialog(transferMgr_, this);
+    const bool wasVisible = transferDlg_->isVisible();
+    if (!wasVisible) {
+        // Modeless queue: smooth entrance (fade + slight scale/offset) for better perceived polish.
+        transferDlg_->show();
+        transferDlg_->raise();
+        transferDlg_->activateWindow();
+
+        const QRect endRect = transferDlg_->geometry();
+        QRect startRect = endRect;
+        startRect.setWidth(qMax(220, (endRect.width() * 96) / 100));
+        startRect.setHeight(qMax(140, (endRect.height() * 96) / 100));
+        startRect.moveCenter(endRect.center() + QPoint(0, 10));
+
+        transferDlg_->setGeometry(startRect);
+        transferDlg_->setWindowOpacity(0.0);
+
+        auto* group = new QParallelAnimationGroup(transferDlg_);
+
+        auto* fade = new QPropertyAnimation(transferDlg_, "windowOpacity", group);
+        fade->setDuration(190);
+        fade->setStartValue(0.0);
+        fade->setEndValue(1.0);
+        fade->setEasingCurve(QEasingCurve::OutCubic);
+
+        auto* grow = new QPropertyAnimation(transferDlg_, "geometry", group);
+        grow->setDuration(190);
+        grow->setStartValue(startRect);
+        grow->setEndValue(endRect);
+        grow->setEasingCurve(QEasingCurve::OutCubic);
+
+        connect(group, &QParallelAnimationGroup::finished, transferDlg_, [this, endRect] {
+            if (transferDlg_) transferDlg_->setWindowOpacity(1.0);
+            if (transferDlg_) transferDlg_->setGeometry(endRect);
+        });
+        group->start(QAbstractAnimation::DeleteWhenStopped);
+        return;
+    }
+
     transferDlg_->show();
     transferDlg_->raise();
     transferDlg_->activateWindow();
