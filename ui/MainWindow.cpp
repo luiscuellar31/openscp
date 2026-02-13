@@ -1131,6 +1131,112 @@ void MainWindow::showEvent(QShowEvent *e) {
     }
 }
 
+void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
+                                     bool deleteSource, int skippedCount) {
+    if (pairs.isEmpty()) {
+        QString msg;
+        if (deleteSource) {
+            msg = QString(tr("Moved OK: %1  |  Failed: %2  |  Skipped: %3"))
+                      .arg(0)
+                      .arg(0)
+                      .arg(skippedCount);
+        } else if (skippedCount > 0) {
+            msg = QString(tr("Copied: %1  |  Failed: %2  |  Skipped: %3"))
+                      .arg(0)
+                      .arg(0)
+                      .arg(skippedCount);
+        } else {
+            msg = QString(tr("Copied: %1  |  Failed: %2")).arg(0).arg(0);
+        }
+        statusBar()->showMessage(msg, 5000);
+        return;
+    }
+
+    ++m_localFsJobsInFlight_;
+    statusBar()->showMessage(
+        deleteSource ? tr("Moving selected items...")
+                     : tr("Copying selected items..."),
+        1500);
+
+    QPointer<MainWindow> self(this);
+    std::thread([self, pairs, deleteSource, skippedCount]() {
+        int ok = 0;
+        int fail = 0;
+        QString lastError;
+
+        for (const auto &pair : pairs) {
+            QString err;
+            if (copyEntryRecursively(pair.sourcePath, pair.targetPath, err)) {
+                if (deleteSource) {
+                    const QFileInfo srcInfo(pair.sourcePath);
+                    const bool removed =
+                        srcInfo.isDir()
+                            ? QDir(pair.sourcePath).removeRecursively()
+                            : QFile::remove(pair.sourcePath);
+                    if (removed || !QFileInfo::exists(pair.sourcePath)) {
+                        ++ok;
+                    } else {
+                        ++fail;
+                        lastError =
+                            QString(QCoreApplication::translate(
+                                        "MainWindow",
+                                        "Could not delete source: %1"))
+                                .arg(pair.sourcePath);
+                    }
+                } else {
+                    ++ok;
+                }
+            } else {
+                ++fail;
+                lastError = err;
+            }
+        }
+
+        QObject *const app = QCoreApplication::instance();
+        if (!app)
+            return;
+        QMetaObject::invokeMethod(
+            app, [self, ok, fail, skippedCount, lastError, deleteSource]() {
+                if (!self)
+                    return;
+
+                --self->m_localFsJobsInFlight_;
+
+                QString msg;
+                if (deleteSource) {
+                    msg = QString(
+                              self->tr("Moved OK: %1  |  Failed: %2  |  "
+                                       "Skipped: %3"))
+                              .arg(ok)
+                              .arg(fail)
+                              .arg(skippedCount);
+                } else if (skippedCount > 0) {
+                    msg = QString(
+                              self->tr("Copied: %1  |  Failed: %2  |  "
+                                       "Skipped: %3"))
+                              .arg(ok)
+                              .arg(fail)
+                              .arg(skippedCount);
+                } else {
+                    msg = QString(self->tr("Copied: %1  |  Failed: %2"))
+                              .arg(ok)
+                              .arg(fail);
+                }
+                if (fail > 0 && !lastError.isEmpty()) {
+                    msg += "\n" + self->tr("Last error: ") + lastError;
+                }
+                self->statusBar()->showMessage(msg, 6000);
+
+                self->setLeftRoot(self->leftPath_->text());
+                if (!self->rightIsRemote_) {
+                    self->setRightRoot(self->rightPath_->text());
+                }
+                self->updateDeleteShortcutEnables();
+            },
+            Qt::QueuedConnection);
+    }).detach();
+}
+
 void MainWindow::copyLeftToRight() {
     if (rightIsRemote_) {
         // ---- REMOTE branch: upload files (PUT) to the current remote
@@ -1218,8 +1324,8 @@ void MainWindow::copyLeftToRight() {
     enum class OverwritePolicy { Ask, OverwriteAll, SkipAll };
     OverwritePolicy policy = OverwritePolicy::Ask;
 
-    int ok = 0, fail = 0, skipped = 0;
-    QString lastError;
+    int skipped = 0;
+    QVector<LocalFsPair> pairs;
 
     for (const QModelIndex &idx : rows) {
         const QFileInfo fi = leftModel_->fileInfo(idx);
@@ -1251,23 +1357,9 @@ void MainWindow::copyLeftToRight() {
             else
                 QFile::remove(target);
         }
-
-        QString err;
-        if (copyEntryRecursively(fi.absoluteFilePath(), target, err)) {
-            ++ok;
-        } else {
-            ++fail;
-            lastError = err;
-        }
+        pairs.push_back({fi.absoluteFilePath(), target});
     }
-
-    QString msg = QString(tr("Copied: %1  |  Failed: %2  |  Skipped: %3"))
-                      .arg(ok)
-                      .arg(fail)
-                      .arg(skipped);
-    if (fail > 0 && !lastError.isEmpty())
-        msg += "\n" + tr("Last error: ") + lastError;
-    statusBar()->showMessage(msg, 6000);
+    runLocalFsOperation(pairs, false, skipped);
 }
 
 void MainWindow::moveLeftToRight() {
@@ -1555,32 +1647,41 @@ void MainWindow::moveLeftToRight() {
             tr("This will copy and then delete the source.\nContinue?")) !=
         QMessageBox::Yes)
         return;
-    int ok = 0, fail = 0;
-    QString lastError;
+    enum class OverwritePolicy { Ask, OverwriteAll, SkipAll };
+    OverwritePolicy policy = OverwritePolicy::Ask;
+    int skipped = 0;
+    QVector<LocalFsPair> pairs;
     for (const QModelIndex &idx : rows) {
         const QFileInfo fi = leftModel_->fileInfo(idx);
         const QString target = dstDir.filePath(fi.fileName());
-        QString err;
-        if (copyEntryRecursively(fi.absoluteFilePath(), target, err)) {
-            bool removed = fi.isDir()
-                               ? QDir(fi.absoluteFilePath()).removeRecursively()
-                               : QFile::remove(fi.absoluteFilePath());
-            if (removed)
-                ok++;
-            else {
-                fail++;
-                lastError =
-                    tr("Could not delete source: ") + fi.absoluteFilePath();
+        if (QFileInfo::exists(target)) {
+            if (policy == OverwritePolicy::Ask) {
+                const auto ret = QMessageBox::question(
+                    this, tr("Conflict"),
+                    QString(
+                        tr("“%1” already exists at destination.\nOverwrite?"))
+                        .arg(fi.fileName()),
+                    QMessageBox::Yes | QMessageBox::No |
+                        QMessageBox::YesToAll | QMessageBox::NoToAll);
+                if (ret == QMessageBox::YesToAll)
+                    policy = OverwritePolicy::OverwriteAll;
+                else if (ret == QMessageBox::NoToAll)
+                    policy = OverwritePolicy::SkipAll;
+                if (ret == QMessageBox::No ||
+                    policy == OverwritePolicy::SkipAll) {
+                    ++skipped;
+                    continue;
+                }
             }
-        } else {
-            fail++;
-            lastError = err;
+            QFileInfo tfi(target);
+            if (tfi.isDir())
+                QDir(target).removeRecursively();
+            else
+                QFile::remove(target);
         }
+        pairs.push_back({fi.absoluteFilePath(), target});
     }
-    QString m = QString(tr("Moved OK: %1  |  Failed: %2")).arg(ok).arg(fail);
-    if (fail > 0 && !lastError.isEmpty())
-        m += "\n" + tr("Last error: ") + lastError;
-    statusBar()->showMessage(m, 5000);
+    runLocalFsOperation(pairs, true, skipped);
 }
 
 void MainWindow::deleteFromLeft() {
@@ -2224,8 +2325,8 @@ void MainWindow::copyRightToLeft() {
         // Local -> Local copy (right to left)
         enum class OverwritePolicy { Ask, OverwriteAll, SkipAll };
         OverwritePolicy policy = OverwritePolicy::Ask;
-        int ok = 0, fail = 0, skipped = 0;
-        QString lastError;
+        int skipped = 0;
+        QVector<LocalFsPair> pairs;
         for (const QModelIndex &idx : rows) {
             const QFileInfo fi = rightLocalModel_->fileInfo(idx);
             const QString target = dst.filePath(fi.fileName());
@@ -2254,22 +2355,9 @@ void MainWindow::copyRightToLeft() {
                 else
                     QFile::remove(target);
             }
-            QString err;
-            if (copyEntryRecursively(fi.absoluteFilePath(), target, err))
-                ++ok;
-            else {
-                ++fail;
-                lastError = err;
-            }
+            pairs.push_back({fi.absoluteFilePath(), target});
         }
-        QString m = QString(tr("Copied: %1  |  Failed: %2  |  Skipped: %3"))
-                        .arg(ok)
-                        .arg(fail)
-                        .arg(skipped);
-        if (fail > 0 && !lastError.isEmpty())
-            m += "\n" + tr("Last error: ") + lastError;
-        statusBar()->showMessage(m, 5000);
-        setRightRoot(rightPath_->text());
+        runLocalFsOperation(pairs, false, skipped);
         return;
     }
 
@@ -2362,8 +2450,8 @@ void MainWindow::moveRightToLeft() {
         // Local -> Local: move (copy then delete)
         enum class OverwritePolicy { Ask, OverwriteAll, SkipAll };
         OverwritePolicy policy = OverwritePolicy::Ask;
-        int ok = 0, fail = 0, skipped = 0;
-        QString lastError;
+        int skipped = 0;
+        QVector<LocalFsPair> pairs;
         const auto rows = sel->selectedRows(NAME_COL);
         for (const QModelIndex &idx : rows) {
             const QFileInfo fi = rightLocalModel_->fileInfo(idx);
@@ -2393,31 +2481,9 @@ void MainWindow::moveRightToLeft() {
                 else
                     QFile::remove(target);
             }
-            QString err;
-            if (copyEntryRecursively(fi.absoluteFilePath(), target, err)) {
-                bool removed =
-                    fi.isDir() ? QDir(fi.absoluteFilePath()).removeRecursively()
-                               : QFile::remove(fi.absoluteFilePath());
-                if (removed)
-                    ++ok;
-                else {
-                    ++fail;
-                    lastError =
-                        tr("Could not delete source: ") + fi.absoluteFilePath();
-                }
-            } else {
-                ++fail;
-                lastError = err;
-            }
+            pairs.push_back({fi.absoluteFilePath(), target});
         }
-        QString m = QString(tr("Moved OK: %1  |  Failed: %2  |  Skipped: %3"))
-                        .arg(ok)
-                        .arg(fail)
-                        .arg(skipped);
-        if (fail > 0 && !lastError.isEmpty())
-            m += "\n" + tr("Last error: ") + lastError;
-        statusBar()->showMessage(m, 5000);
-        setRightRoot(rightPath_->text());
+        runLocalFsOperation(pairs, true, skipped);
         return;
     }
 
@@ -3588,8 +3654,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
                     dd->acceptProposedAction();
                     return true;
                 }
-                int ok = 0, fail = 0;
-                QString lastError;
+                QVector<LocalFsPair> pairs;
                 for (const QUrl &u : urls) {
                     const QString p = u.toLocalFile();
                     if (p.isEmpty())
@@ -3600,20 +3665,9 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
                     if (fi.absoluteFilePath() == target) {
                         continue;
                     }
-                    QString err;
-                    if (copyEntryRecursively(fi.absoluteFilePath(), target,
-                                             err))
-                        ++ok;
-                    else {
-                        ++fail;
-                        lastError = err;
-                    }
+                    pairs.push_back({fi.absoluteFilePath(), target});
                 }
-                QString m =
-                    QString(tr("Copied: %1  |  Failed: %2")).arg(ok).arg(fail);
-                if (fail > 0 && !lastError.isEmpty())
-                    m += "\n" + tr("Last error: ") + lastError;
-                statusBar()->showMessage(m, 5000);
+                runLocalFsOperation(pairs, false, 0);
                 dd->acceptProposedAction();
                 return true;
             }
@@ -3642,8 +3696,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
                     dd->acceptProposedAction();
                     return true;
                 }
-                int ok = 0, fail = 0;
-                QString lastError;
+                QVector<LocalFsPair> pairs;
                 for (const QUrl &u : urls) {
                     const QString p = u.toLocalFile();
                     if (p.isEmpty())
@@ -3654,20 +3707,9 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
                     if (fi.absoluteFilePath() == target) {
                         continue;
                     }
-                    QString err;
-                    if (copyEntryRecursively(fi.absoluteFilePath(), target,
-                                             err))
-                        ++ok;
-                    else {
-                        ++fail;
-                        lastError = err;
-                    }
+                    pairs.push_back({fi.absoluteFilePath(), target});
                 }
-                QString m =
-                    QString(tr("Copied: %1  |  Failed: %2")).arg(ok).arg(fail);
-                if (fail > 0 && !lastError.isEmpty())
-                    m += "\n" + tr("Last error: ") + lastError;
-                statusBar()->showMessage(m, 5000);
+                runLocalFsOperation(pairs, false, 0);
                 dd->acceptProposedAction();
                 updateDeleteShortcutEnables();
                 return true;

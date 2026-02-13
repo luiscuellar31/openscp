@@ -6,6 +6,8 @@
 #include <QMainWindow>
 #include <QPointer>
 #include <QTreeView>
+#include <QVector>
+#include <atomic>
 #include <condition_variable>
 #include <memory>
 #include <optional>
@@ -191,6 +193,12 @@ class MainWindow : public QMainWindow {
     void maybePersistQuickConnectSite(const openscp::SessionOptions &opt,
                                       const PendingSiteSaveRequest &req,
                                       bool connectionEstablished);
+    struct LocalFsPair {
+        QString sourcePath;
+        QString targetPath;
+    };
+    void runLocalFsOperation(const QVector<LocalFsPair> &pairs,
+                             bool deleteSource, int skippedCount = 0);
 
     // Writable state of the current remote directory
     bool rightRemoteWritable_ = false;
@@ -223,6 +231,7 @@ class MainWindow : public QMainWindow {
     bool m_connectProgressDimmed_ = false;
     bool m_connectInProgress_ = false;
     std::shared_ptr<std::atomic<bool>> m_connectCancelRequested_;
+    std::atomic<int> m_localFsJobsInFlight_{0};
     // TOFU wait state
     std::mutex m_tofuMutex_;
     std::condition_variable m_tofuCv_;
