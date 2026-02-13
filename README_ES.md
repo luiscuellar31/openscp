@@ -2,131 +2,149 @@
   <img src="assets/program/icon-openscp-2048.png" alt="Icono de OpenSCP" width="128">
   <h1 align="center">OpenSCP</h1>
 
-  <p><strong>Cliente SFTP de doble panel enfocado en la simplicidad y la seguridad</strong></p>
-
-<p align="center">
-<strong>OpenSCP</strong> es un explorador de archivos estilo <em>two-panel commander</em> escrito en <strong>C++/Qt</strong>, con soporte <strong>SFTP</strong> (libssh2 + OpenSSL). Busca ser una alternativa ligera y multiplataforma a herramientas como WinSCP, enfocado en <strong>simplicidad</strong>, <strong>seguridad</strong> y <strong>extensibilidad</strong>.
+<p>
+  <strong>Cliente SFTP de doble panel enfocado en simplicidad y seguridad</strong>
 </p>
 
+<p>
+  <a href="README.md"><strong>Read in English</strong></a>
+</p>
 
-  <br>
+<p>
+  <strong>OpenSCP</strong> es un explorador de archivos estilo <em>two-panel commander</em> escrito en <strong>C++/Qt</strong>, con soporte <strong>SFTP</strong> (libssh2 + OpenSSL). Busca ser una alternativa ligera a herramientas como WinSCP, enfocada en <strong>seguridad</strong>, <strong>claridad</strong> y <strong>extensibilidad</strong>.
+</p>
 
-  <img src="assets/screenshots/screenshot-main-window.png" alt="Ventana principal de OpenSCP con doble panel y cola de transferencias" width="900">
+<br>
+
+<img src="assets/screenshots/screenshot-main-window.png" alt="Ventana principal de OpenSCP con doble panel y cola de transferencias" width="900">
 
 </div>
 
 ## Lanzamientos
 
-¿Buscas una versión fija/estable? Descarga las versiones etiquetadas:
+¿Buscas una versión fija/estable? Descarga versiones etiquetadas:
 https://github.com/luiscuellar31/openscp/releases
 
 - `main`: código probado y estable (avanza entre lanzamientos)
-- `dev`: desarrollo activo (los PRs deben apuntar a dev)
+- `dev`: desarrollo activo (los PR deben apuntar a `dev`)
 
-## Características actuales (v0.6.0)
+## Características actuales (v0.7.0)
 
-### Doble panel (local ↔ remoto)
+### Doble panel (local <-> remoto)
 
-* Panel izquierdo y derecho navegables de forma independiente.
-* Arrastrar-y-soltar entre paneles para copiar/mover.
-* Menú contextual remoto: Descargar, Subir, Renombrar, Borrar, Nueva carpeta, Cambiar permisos (recursivo).
-* Columnas ordenables con ajuste automático de ancho.
+- Navegación independiente en ambos lados.
+- Arrastrar y soltar entre paneles para flujos de copia/movimiento.
+- Acciones de contexto remoto: Descargar, Subir, Renombrar, Eliminar, Nueva carpeta, Cambiar permisos (recursivo).
+- Columnas ordenables y redimensionado responsivo.
 
-### Transferencias
+### Motor de transferencias y cola
 
-* **Cola visible** con pausar/reanudar/cancelar/reintentar.
-* Reanudación por archivo; límites de velocidad (global y por tarea).
-* Reconexión automática con backoff.
-* Progreso global y por archivo.
-* Tiempos: preserva **mtime** remoto al descargar (la UI muestra **hora local**, las operaciones usan **UTC**).
-* Tamaños desconocidos: bandera end-to-end; la UI muestra “—” con tooltip “Size: unknown”.
+- Transferencias concurrentes reales con conexiones aisladas por worker (paralelismo sin un lock global único).
+- Soporte de reanudación, pausar/reanudar/cancelar/reintentar, límites de velocidad globales y por tarea.
+- UI de cola mejorada con actualizaciones basadas en modelo (sin reconstruir toda la tabla en cada refresh).
+- Columnas detalladas por tarea: Tipo, Nombre, Origen, Destino, Estado, Progreso, Transferido, Velocidad, ETA, Intentos, Error.
+- Barras de progreso por fila y filtros rápidos: `All / Active / Errors / Completed / Canceled`.
+- Acciones de contexto: pausar/reanudar/limitar/cancelar/reintentar seleccionadas, abrir destino, copiar ruta origen/destino, limpiar finalizadas.
+- Badges de resumen para total/activas/en ejecución/pausadas/errores/completadas/canceladas + límite global.
+- Políticas de limpieza automática para tareas finalizadas (completadas, fallidas/canceladas, o todas tras N minutos).
+- Persistencia de geometría de ventana, layout/orden de columnas y filtro activo.
 
-### SFTP (libssh2)
+### Arrastrar remoto -> sistema (asíncrono)
 
-* Autenticación: usuario/contraseña, clave privada (con passphrase), **keyboard-interactive** (OTP/2FA), **ssh-agent**.
-* Políticas de verificación de host key:
+- Preparación de drag totalmente asíncrona (sin congelar la UI al preparar URLs/archivos).
+- Staging recursivo de carpetas con estructura preservada.
+- Umbrales de seguridad para lotes grandes (confirmación por cantidad y tamaño).
+- Raíz de staging y limpieza configurables desde Ajustes.
+- Nombres robustos ante colisiones (`name (1).ext`) y manejo seguro de Unicode NFC.
 
-  * **Estricto**
-  * **Aceptar nuevo (TOFU)**
-  * **Desactivado**
-* **TOFU no modal** (macOS/Linux): sin `exec()`, sin bloqueos; la ventana “Conectando…” no roba el foco.
-* `known_hosts` robusto:
+### SFTP y endurecimiento de seguridad
 
-  * Escrituras **atómicas** (POSIX: `mkstemp → fsync → rename`).
-  * Permisos estrictos (`~/.ssh` **0700**, archivo **0600**).
-  * **Hostnames hasheados** por defecto (OpenSSH/TYPE\_SHA1); opción para texto plano.
-  * Huellas por defecto `SHA256:<base64>` (estilo OpenSSH); vista alternativa **HEX con dos puntos**.
-* Cripto moderna:
+- Métodos de autenticación: contraseña, clave privada (passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
+- Políticas de host-key:
+  - `Strict`
+  - `Accept new (TOFU)`
+  - `No verification` (endurecida)
+- Endurecimiento de `No verification`:
+  - doble confirmación
+  - excepción temporal por host con TTL
+  - banner de riesgo persistente durante la sesión
+- Flujo TOFU no modal para mejor respuesta de UI.
+- Persistencia atómica de `known_hosts`:
+  - POSIX: `mkstemp -> write -> fsync -> rename -> fsync(parent)`
+  - En ruta Windows se valida con `FlushFileBuffers` + `MoveFileEx`
+- Si falla la persistencia de huella, la conexión de una sola vez requiere confirmación explícita del usuario.
+- `known_hosts` usa hostnames hasheados por defecto; modo plano opcional.
+- Permisos estrictos en POSIX (`~/.ssh` 0700, archivo 0600).
+- Comportamiento keyboard-interactive más seguro: cancelación explícita evita fallback de contraseña.
+- Limpieza defensiva en rutas fallidas de `connect()`.
+- Verificaciones de integridad de transferencia para reanudar/finalizar (`Off/Optional/Required`), con archivos temporales `.part` y rename final atómico.
+- Datos sensibles en logs redactados por defecto; salida sensible solo en modo opt-in.
+- Log de auditoría de host-key en `~/.openscp/openscp.auth`.
 
-  * Excluye `ssh-dss` y `ssh-rsa` (SHA-1).
-  * Usa hostkeys ED25519/ECDSA/RSA-SHA2 y KEX/cifrados modernos (curve25519, chacha20-poly1305, AES-GCM/CTR, HMAC-SHA-2).
-* Seguridad TOFU:
+### Gestor de sitios y manejo de credenciales
 
-  * Si no se puede persistir la huella, requiere confirmación explícita para **“conectar solo esta vez”**.
-  * **Auditoría** en `~/.openscp/openscp.auth`: host, algoritmo, huella y estado (`saved|skipped|save_failed|rejected`).
-* Limpieza: al eliminar un sitio con “quitar credenciales guardadas”, también se purga su entrada en `known_hosts`.
+- Sitios guardados con identidades estables basadas en UUID (en lugar de nombre únicamente).
+- Bloqueo de nombres de sitio duplicados.
+- Flujos de renombrar/eliminar limpian secretos legacy/huérfanos.
+- Al eliminar un sitio, también puede eliminar credenciales guardadas y entrada relacionada de `known_hosts`.
+- Backends seguros de almacenamiento:
+  - macOS: Keychain
+  - Linux: libsecret (cuando está disponible)
+- Builds secure-only reportan estado explícito cuando la persistencia no está disponible.
+- Quick Connect puede guardar el sitio automáticamente (y opcionalmente credenciales) sin crear duplicados.
 
-### Arrastrar-y-soltar remoto → sistema (asíncrono)
+### Mejoras de UX / UI
 
-* **Asíncrono real**: el drag inicia solo cuando las URLs están preparadas (sin bloquear la UI).
-* **Carpetas (recursivo)** con estructura preservada; confirmación si > **500** ítems o > **1 GiB** estimado.
-* **Staging** por lote:
+- Mejoras del diálogo de conexión:
+  - sin `host/user` prellenados engañosos
+  - placeholders más claros y foco inicial en host
+  - composición `host+port` en la misma fila
+  - toggles mostrar/ocultar para contraseña y passphrase
+  - botones inline para elegir clave privada y `known_hosts`
+- Diálogo de Ajustes rediseñado con secciones laterales (`General` y `Advanced`) y grupos avanzados.
+- Diálogo de permisos con vista octal y presets comunes (644/755/600/700/664/775).
+- Mejoras del diálogo Acerca de:
+  - texto fallback más amigable
+  - botón para copiar diagnóstico (versión app, Qt, OS, build type, commit, repo)
+  - descubrimiento dinámico de rutas docs/licencias
+  - botón de licencias habilitado/deshabilitado según disponibilidad
 
-  * Raíz por defecto `~/Downloads/OpenSCP-Dragged`.
-  * Autolimpieza al finalizar (opcional); limpieza diferida de lotes > **7 días** al arrancar.
-  * Si falla o cancelas: **no** inicia el drag; se muestra enlace clicable al lote (no se borra).
-* Colisiones y nombres: estilo “`name (1).ext`”, seguro para múltiples extensiones y Unicode **NFC**.
-* MIME: `text/uri-list` + `application/x-openscp-staging-batch` (ID de lote).
+### Línea base de calidad: CI, tests y release
 
-### Gestor de sitios
-
-* Lista de servidores con credenciales guardadas.
-* Preferencias independientes:
-
-  * **Abrir al iniciar** (opcional).
-  * **Abrir al desconectar** (opcional).
-    Ambas **ON por defecto** y no modales; si hay un modal activo, la apertura se **difiere**.
-* Edición cómoda: elipsis solo al pintar; al editar ves el **nombre completo**.
-* Keychain (macOS) y Libsecret (Linux) para credenciales; fallback **inseguro** solo con confirmación (banner **rojo** permanente cuando está activo).
-  - macOS: la opción de fallback inseguro no se muestra (siempre se usa Llavero).
-  - Linux: el fallback está disponible solo cuando el build no enlaza Libsecret y no se compila con `OPEN_SCP_BUILD_SECURE_ONLY`.
-
-### UX / UI (Qt)
-
-* Reemplazo de varios botones por **iconos** consistentes; menús más limpios y atajos corregidos.
-* Diálogos **no modales** y estables en macOS (los nativos **no se mueven/centran** en `QEvent::Show`).
-* Tamaño de ventanas estable: nunca se reduce por debajo de `sizeHint()`, respeta `resize()/minimumSize()`.
-* i18n: ES/EN actualizados (terminología y puntuación unificadas).
-
-### Configuración / Ajustes
-
-* Panel **Avanzado** plegable (▸/▾).
-* Opciones nuevas:
-
-  * `known_hosts`: hasheado por defecto; alternar a texto plano si se necesita.
-  * Formato de huella: `SHA256:<base64>` o **HEX con “:”**.
-  * Staging: raíz, autolimpieza, límites de profundidad y timeout de preparación (vía QSettings `Advanced/stagingPrepTimeoutMs`, en milisegundos).
-  * “Al eliminar un sitio, quitar credenciales guardadas.” (primero en la lista).
+- Workflow CI dividido por intención:
+  - push a `dev`: checks rápidos en Linux (build + tests no integración)
+  - PR a `main`: compuerta de integración en Linux y macOS
+- CI de integración levanta un servidor SFTP local temporal para tests end-to-end.
+- Workflow nocturno de calidad incluye:
+  - ASan + UBSan
+  - TSan
+  - análisis estático con `cppcheck`
+- Suites de tests incluidas en el repo:
+  - tests unitarios/mock del core
+  - tests de integración libssh2 (se saltan si no hay entorno de integración)
 
 ### Variables de entorno
 
-* `OPEN_SCP_KNOWNHOSTS_PLAIN=1|0` — Forzar hostnames en texto plano vs. hasheados (por defecto: **hasheado**).
-* `OPEN_SCP_FP_HEX_ONLY=1` — Mostrar huellas solo en HEX con “:”.
-* `OPEN_SCP_ENABLE_INSECURE_FALLBACK=1` — Habilitar fallback inseguro de secretos cuando lo soporta el build/plataforma (no Apple, sin Libsecret y sin `OPEN_SCP_BUILD_SECURE_ONLY`); muestra **banner rojo** cuando está activo.
+- `OPEN_SCP_KNOWNHOSTS_PLAIN=1|0` - fuerza hostnames planos vs hasheados en `known_hosts`.
+- `OPEN_SCP_FP_HEX_ONLY=1` - muestra huellas en HEX con `:`.
+- `OPEN_SCP_TRANSFER_INTEGRITY=off|optional|required` - sobrescribe política de integridad de transferencias.
+- `OPEN_SCP_LOG_LEVEL=error|warn|info|debug` - ajusta verbosidad de logs del core.
+- `OPEN_SCP_LOG_SENSITIVE=1` - habilita detalles sensibles de depuración (apagado por defecto).
+- `OPEN_SCP_ENABLE_INSECURE_FALLBACK=1` - habilita fallback inseguro de secretos solo si el build/plataforma lo permite.
 
 ---
 
 ## Requisitos
 
-* Qt **6.x** (probado con **6.8.3**)
-* libssh2 (**OpenSSL 3** recomendado)
-* CMake **3.22+**
-* Compilador **C++20**
+- Qt `6.x` (probado con `6.8.3`)
+- libssh2 (recomendado OpenSSL 3)
+- CMake `3.22+`
+- Compilador C++20
 
-**Opcional**
+Opcional:
 
-* macOS: **Keychain** (nativo).
-* Linux: **Libsecret/Secret Service** para guardar credenciales.
+- macOS: Keychain (nativo)
+- Linux: libsecret / Secret Service
 
 ---
 
@@ -138,31 +156,40 @@ cd openscp
 rm -rf build
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-# Linux:
+
+# Binario Linux
 ./build/openscp_hello
 ```
 
-Para macOS, usa el flujo de abajo (`./scripts/macos.sh ...`) en lugar de abrir `build/OpenSCP.app` directamente.
+### Ejecutar tests localmente
+
+```bash
+cmake -S . -B build -DOPEN_SCP_BUILD_TESTS=ON
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+Nota: `openscp_sftp_integration_tests` puede saltarse localmente si no están definidas las variables de entorno del entorno SFTP de integración.
 
 ### Flujo rápido macOS (recomendado)
 
 ```bash
-# Desarrollo diario
-./scripts/macos.sh dev      # configure + build + run
-# o explícito:
+# desarrollo diario
+./scripts/macos.sh dev
+
+# o paso a paso
 ./scripts/macos.sh configure
 ./scripts/macos.sh build
 ./scripts/macos.sh run
 
-# Empaquetado local (sin firmar)
-./scripts/macos.sh app      # dist/*.zip (OpenSCP.app comprimida)
-./scripts/macos.sh pkg      # dist/*.pkg
-./scripts/macos.sh dmg      # dist/*.dmg
-# todos:
-./scripts/macos.sh dist
+# empaquetado local sin firma
+./scripts/macos.sh app   # dist/*.zip (OpenSCP.app comprimida)
+./scripts/macos.sh pkg   # dist/*.pkg
+./scripts/macos.sh dmg   # dist/*.dmg
+./scripts/macos.sh dist  # todo lo anterior
 ```
 
-Si Qt no está instalado en la ruta por defecto (`$HOME/Qt/<version>/macos`), define una de estas variables:
+Si Qt no está en la ruta por defecto (`$HOME/Qt/<version>/macos`), define una:
 
 ```bash
 export QT_PREFIX="/ruta/a/Qt/<version>/macos"
@@ -170,12 +197,12 @@ export QT_PREFIX="/ruta/a/Qt/<version>/macos"
 export Qt6_DIR="/ruta/a/Qt/<version>/macos/lib/cmake/Qt6"
 ```
 
-- `scripts/macos.sh` es el punto de entrada fijo para desarrollo y empaquetado en macOS.
-- Consulta `assets/macos/README.md` para detalles de distribución sin firma y notarización.
+Consulta `assets/macos/README.md` para notas detalladas de empaquetado y notarización.
 
-### Linux (compilación + AppImage)
+### Linux (build + AppImage)
 
-- Consulta `assets/linux/README.md` para compilar en Linux y generar un `.AppImage` sin firmar con `scripts/package_appimage.sh`.
+Consulta `assets/linux/README.md` para empaquetar AppImage con `scripts/package_appimage.sh`.
+
 ---
 
 ## Capturas de pantalla
@@ -183,32 +210,31 @@ export Qt6_DIR="/ruta/a/Qt/<version>/macos/lib/cmake/Qt6"
 <p align="center">
   <img src="assets/screenshots/screenshot-site-manager.png" alt="Gestor de sitios con servidores guardados" width="32%">
   <img src="assets/screenshots/screenshot-connect.png" alt="Diálogo de conexión con opciones de autenticación" width="32%">
-  <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Cola de transferencias con pausar/reanudar y progreso" width="32%">
+  <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Cola de transferencias con progreso, filtros y acciones" width="32%">
 </p>
 
 ---
 
 ## Roadmap (corto / medio plazo)
 
-* El soporte para Windows está planeado para futuras versiones.
-* Protocolos: **SCP**; plan para **FTP/FTPS/WebDAV**.
-* Concurrencia real en la cola (múltiples conexiones en paralelo sin bloqueo global).
-* Proxy / Jump host: **SOCKS5**, **HTTP CONNECT**, **ProxyJump**.
-* Sincronización: comparar/sincronizar y “mantener actualizado” con filtros/ignorados.
-* Persistencia de cola: reanudación tras reinicio; checksums opcionales.
-* Mejoras UX: marcadores, historial, paleta de comandos, temas.
+- Soporte para Windows planeado para futuras versiones.
+- Protocolos: `SCP`, luego `FTP/FTPS/WebDAV`.
+- Soporte de proxy/jump: `SOCKS5`, `HTTP CONNECT`, `ProxyJump`.
+- Flujos de sincronización: comparar/sincronizar y keep-up-to-date con filtros/ignorados.
+- Persistencia de cola entre reinicios.
+- Más UX: marcadores, historial, paleta de comandos, temas.
 
 ---
 
 ## Créditos y licencias
 
-* libssh2, OpenSSL, zlib y Qt son propiedad de sus respectivos autores.
-* Textos de licencias: [docs/credits/LICENSES/](docs/credits/LICENSES/) — allí están las licencias de los proyectos de terceros (Qt, libssh2, OpenSSL, zlib, etc.).
-* Materiales de Qt (LGPL): [docs/credits](docs/credits) — ver notas de cumplimiento y licenciamiento (LGPLv3).
+- libssh2, OpenSSL, zlib y Qt pertenecen a sus respectivos autores.
+- Textos de licencia: [docs/credits/LICENSES/](docs/credits/LICENSES/)
+- Materiales de Qt (LGPL): [docs/credits](docs/credits)
 
 ---
 
 ## Contribuir
 
-- Se agradecen contribuciones de la comunidad. Por favor revisa `CONTRIBUTING.md` para conocer el flujo de trabajo, la estrategia de ramas y los estándares.
-- Se agradecen *issues* y *pull requests*, especialmente sobre estabilidad en macOS y Linux, i18n y flujo de arrastrar-y-soltar.
+- Las contribuciones son bienvenidas. Lee `CONTRIBUTING.md` para flujo de trabajo, estrategia de ramas y estándares.
+- Issues y pull requests son bienvenidos, especialmente en estabilidad macOS/Linux, i18n y robustez SFTP.
