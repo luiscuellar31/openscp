@@ -7,6 +7,7 @@
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QPointer>
+#include <QSet>
 #include <QTreeView>
 #include <QVector>
 #include <atomic>
@@ -227,6 +228,7 @@ class MainWindow : public QMainWindow {
     void saveMainWindowUiState() const;
     void saveRightHeaderState(bool remoteMode) const;
     bool restoreRightHeaderState(bool remoteMode);
+    void maybeRefreshRemoteAfterCompletedUploads();
 
     // Writable state of the current remote directory
     bool rightRemoteWritable_ = false;
@@ -245,6 +247,8 @@ class MainWindow : public QMainWindow {
 
     bool firstShow_ = true;
     bool m_restoredWindowGeometry_ = false;
+    bool m_pendingRemoteRefreshFromUpload_ = false;
+    QSet<quint64> m_seenCompletedUploadTaskIds_;
 
     // User preferences
     bool prefShowHidden_ = false;

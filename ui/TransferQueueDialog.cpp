@@ -111,18 +111,20 @@ class TransferTaskTableModel final : public QAbstractTableModel {
     };
 
     enum Column {
+        // Keep logical ids stable to avoid corrupting saved header states
+        // across versions.
         ColType = 0,
-        ColName,
-        ColSource,
-        ColDestination,
-        ColStatus,
-        ColProgress,
-        ColTransferred,
-        ColSpeed,
-        ColEta,
-        ColAttempts,
-        ColError,
-        ColCount
+        ColName = 1,
+        ColSource = 2,
+        ColDestination = 3,
+        ColStatus = 4,
+        ColProgress = 5,
+        ColTransferred = 6,
+        ColSpeed = 7,
+        ColEta = 8,
+        ColAttempts = 9,
+        ColError = 10,
+        ColCount = 11
     };
 
     explicit TransferTaskTableModel(QObject *parent = nullptr)
@@ -146,14 +148,8 @@ class TransferTaskTableModel final : public QAbstractTableModel {
             return {};
         if (orientation == Qt::Horizontal) {
             switch (section) {
-            case ColType:
-                return TransferQueueDialog::tr("Type");
             case ColName:
                 return TransferQueueDialog::tr("Name");
-            case ColSource:
-                return TransferQueueDialog::tr("Source");
-            case ColDestination:
-                return TransferQueueDialog::tr("Destination");
             case ColStatus:
                 return TransferQueueDialog::tr("Status");
             case ColProgress:
@@ -164,6 +160,12 @@ class TransferTaskTableModel final : public QAbstractTableModel {
                 return TransferQueueDialog::tr("Speed");
             case ColEta:
                 return TransferQueueDialog::tr("ETA");
+            case ColType:
+                return TransferQueueDialog::tr("Type");
+            case ColSource:
+                return TransferQueueDialog::tr("Source");
+            case ColDestination:
+                return TransferQueueDialog::tr("Destination");
             case ColAttempts:
                 return TransferQueueDialog::tr("Attempts");
             case ColError:
@@ -196,10 +198,10 @@ class TransferTaskTableModel final : public QAbstractTableModel {
             return t.dst;
 
         if (role == Qt::TextAlignmentRole) {
-            if (index.column() == ColType || index.column() == ColStatus ||
-                index.column() == ColProgress ||
+            if (index.column() == ColStatus || index.column() == ColProgress ||
                 index.column() == ColTransferred ||
                 index.column() == ColSpeed || index.column() == ColEta ||
+                index.column() == ColType ||
                 index.column() == ColAttempts) {
                 return static_cast<int>(Qt::AlignCenter);
             }
@@ -221,16 +223,8 @@ class TransferTaskTableModel final : public QAbstractTableModel {
             return {};
 
         switch (index.column()) {
-        case ColType:
-            return t.type == TransferTask::Type::Upload
-                       ? TransferQueueDialog::tr("Upload")
-                       : TransferQueueDialog::tr("Download");
         case ColName:
             return displayNameForTask(t);
-        case ColSource:
-            return t.src;
-        case ColDestination:
-            return t.dst;
         case ColStatus:
             return statusText(t.status);
         case ColProgress:
@@ -244,6 +238,14 @@ class TransferTaskTableModel final : public QAbstractTableModel {
             return formatSpeed(t.currentSpeedKBps);
         case ColEta:
             return formatEta(t.etaSeconds);
+        case ColType:
+            return t.type == TransferTask::Type::Upload
+                       ? TransferQueueDialog::tr("Upload")
+                       : TransferQueueDialog::tr("Download");
+        case ColSource:
+            return t.src;
+        case ColDestination:
+            return t.dst;
         case ColAttempts:
             return QString("%1/%2").arg(t.attempts).arg(t.maxAttempts);
         case ColError:
@@ -439,23 +441,18 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     table_->setSelectionMode(QAbstractItemView::ExtendedSelection);
     table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     table_->setAlternatingRowColors(true);
+    table_->setStyleSheet("QTableView::item:focus { outline: none; }");
     table_->setContextMenuPolicy(Qt::CustomContextMenu);
     table_->setWordWrap(false);
     table_->setTextElideMode(Qt::ElideMiddle);
     table_->verticalHeader()->setVisible(false);
     table_->horizontalHeader()->setSectionsMovable(true);
     table_->horizontalHeader()->setSectionResizeMode(
-        TransferTaskTableModel::ColType, QHeaderView::ResizeToContents);
-    table_->horizontalHeader()->setSectionResizeMode(
         TransferTaskTableModel::ColName, QHeaderView::ResizeToContents);
-    table_->horizontalHeader()->setSectionResizeMode(
-        TransferTaskTableModel::ColSource, QHeaderView::Stretch);
-    table_->horizontalHeader()->setSectionResizeMode(
-        TransferTaskTableModel::ColDestination, QHeaderView::Stretch);
     table_->horizontalHeader()->setSectionResizeMode(
         TransferTaskTableModel::ColStatus, QHeaderView::ResizeToContents);
     table_->horizontalHeader()->setSectionResizeMode(
-        TransferTaskTableModel::ColProgress, QHeaderView::ResizeToContents);
+        TransferTaskTableModel::ColProgress, QHeaderView::Interactive);
     table_->horizontalHeader()->setSectionResizeMode(
         TransferTaskTableModel::ColTransferred, QHeaderView::ResizeToContents);
     table_->horizontalHeader()->setSectionResizeMode(
@@ -463,11 +460,40 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     table_->horizontalHeader()->setSectionResizeMode(
         TransferTaskTableModel::ColEta, QHeaderView::ResizeToContents);
     table_->horizontalHeader()->setSectionResizeMode(
+        TransferTaskTableModel::ColType, QHeaderView::ResizeToContents);
+    table_->horizontalHeader()->setSectionResizeMode(
+        TransferTaskTableModel::ColSource, QHeaderView::Stretch);
+    table_->horizontalHeader()->setSectionResizeMode(
+        TransferTaskTableModel::ColDestination, QHeaderView::Stretch);
+    table_->horizontalHeader()->setSectionResizeMode(
         TransferTaskTableModel::ColAttempts, QHeaderView::ResizeToContents);
     table_->horizontalHeader()->setSectionResizeMode(
         TransferTaskTableModel::ColError, QHeaderView::Stretch);
+    table_->setColumnWidth(TransferTaskTableModel::ColName, 190);
+    table_->setColumnWidth(TransferTaskTableModel::ColProgress, 150);
     table_->setItemDelegateForColumn(TransferTaskTableModel::ColProgress,
                                      new ProgressBarDelegate(table_));
+
+    // Default visual order (without changing logical column ids).
+    auto *header = table_->horizontalHeader();
+    const QList<int> desiredOrder = {
+        TransferTaskTableModel::ColName,
+        TransferTaskTableModel::ColStatus,
+        TransferTaskTableModel::ColProgress,
+        TransferTaskTableModel::ColTransferred,
+        TransferTaskTableModel::ColSpeed,
+        TransferTaskTableModel::ColEta,
+        TransferTaskTableModel::ColType,
+        TransferTaskTableModel::ColSource,
+        TransferTaskTableModel::ColDestination,
+        TransferTaskTableModel::ColAttempts,
+        TransferTaskTableModel::ColError};
+    for (int visual = 0; visual < desiredOrder.size(); ++visual) {
+        const int logical = desiredOrder[visual];
+        const int currentVisual = header->visualIndex(logical);
+        if (currentVisual >= 0 && currentVisual != visual)
+            header->moveSection(currentVisual, visual);
+    }
     lay->addWidget(table_, 1);
 
     // Row 3: summary badges
@@ -963,9 +989,14 @@ void TransferQueueDialog::loadUiState() {
 
     if (table_ && table_->horizontalHeader()) {
         const QByteArray header =
-            s.value("UI/transferQueue/headerState").toByteArray();
+            s.value("UI/transferQueue/headerStateV4").toByteArray();
         if (!header.isEmpty())
             table_->horizontalHeader()->restoreState(header);
+        table_->horizontalHeader()->setSectionResizeMode(
+            TransferTaskTableModel::ColProgress, QHeaderView::Interactive);
+        if (table_->columnWidth(TransferTaskTableModel::ColProgress) < 130) {
+            table_->setColumnWidth(TransferTaskTableModel::ColProgress, 150);
+        }
     }
 
     const int filter =
@@ -997,7 +1028,7 @@ void TransferQueueDialog::saveUiState() const {
     s.setValue("UI/transferQueue/geometry", saveGeometry());
 
     if (table_ && table_->horizontalHeader()) {
-        s.setValue("UI/transferQueue/headerState",
+        s.setValue("UI/transferQueue/headerStateV4",
                    table_->horizontalHeader()->saveState());
     }
 

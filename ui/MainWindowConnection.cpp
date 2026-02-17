@@ -327,6 +327,8 @@ void MainWindow::disconnectSftp() {
         rightRemoteModel_ = nullptr;
     }
     rightIsRemote_ = false;
+    m_pendingRemoteRefreshFromUpload_ = false;
+    m_seenCompletedUploadTaskIds_.clear();
     restoreRightHeaderState(false);
     if (QDir(rightPath_->text()).exists()) {
         setRightRoot(rightPath_->text());
@@ -1133,6 +1135,8 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     rightView_->sortByColumn(0, Qt::AscendingOrder);
     rightPath_->setText(rightRemoteModel_->rootPath());
     rightIsRemote_ = true;
+    m_pendingRemoteRefreshFromUpload_ = false;
+    m_seenCompletedUploadTaskIds_.clear();
     refreshRightBreadcrumbs();
     m_activeSessionOptions_ = opt;
     m_remoteWriteabilityCache_.clear();

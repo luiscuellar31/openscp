@@ -327,6 +327,91 @@ static bool replace_local_file_atomic(const std::string &from,
 #endif
 }
 
+static bool rename_remote_with_fallback(LIBSSH2_SFTP *sftp,
+                                        const std::string &from,
+                                        const std::string &to, bool overwrite,
+                                        std::string *why) {
+    if (!sftp) {
+        if (why)
+            *why = "SFTP handle is null";
+        return false;
+    }
+
+    struct Attempt {
+        long flags;
+        const char *name;
+    };
+    const std::vector<Attempt> attempts = overwrite
+                                              ? std::vector<Attempt>{
+                                                    {LIBSSH2_SFTP_RENAME_ATOMIC |
+                                                         LIBSSH2_SFTP_RENAME_NATIVE |
+                                                         LIBSSH2_SFTP_RENAME_OVERWRITE,
+                                                     "atomic+native+overwrite"},
+                                                    {LIBSSH2_SFTP_RENAME_ATOMIC |
+                                                         LIBSSH2_SFTP_RENAME_OVERWRITE,
+                                                     "atomic+overwrite"},
+                                                    {LIBSSH2_SFTP_RENAME_NATIVE |
+                                                         LIBSSH2_SFTP_RENAME_OVERWRITE,
+                                                     "native+overwrite"},
+                                                    {LIBSSH2_SFTP_RENAME_OVERWRITE,
+                                                     "overwrite"},
+                                                    {0, "plain"}}
+                                              : std::vector<Attempt>{
+                                                    {LIBSSH2_SFTP_RENAME_ATOMIC |
+                                                         LIBSSH2_SFTP_RENAME_NATIVE,
+                                                     "atomic+native"},
+                                                    {LIBSSH2_SFTP_RENAME_ATOMIC,
+                                                     "atomic"},
+                                                    {LIBSSH2_SFTP_RENAME_NATIVE,
+                                                     "native"},
+                                                    {0, "plain"}};
+
+    int lastRc = 0;
+    unsigned long lastSftpErr = 0;
+    const char *lastAttempt = "none";
+    for (const auto &a : attempts) {
+        const int rc = libssh2_sftp_rename_ex(
+            sftp, from.c_str(), (unsigned)from.size(), to.c_str(),
+            (unsigned)to.size(), a.flags);
+        if (rc == 0)
+            return true;
+        lastRc = rc;
+        lastSftpErr = libssh2_sftp_last_error(sftp);
+        lastAttempt = a.name;
+    }
+
+    // Some servers reject RENAME flags but accept plain rename after removing
+    // destination first.
+    if (overwrite) {
+        int urc = libssh2_sftp_unlink_ex(sftp, to.c_str(), (unsigned)to.size());
+        unsigned long unlinkErr = libssh2_sftp_last_error(sftp);
+        if (urc == 0 || unlinkErr == LIBSSH2_FX_NO_SUCH_FILE) {
+            const int rc = libssh2_sftp_rename_ex(
+                sftp, from.c_str(), (unsigned)from.size(), to.c_str(),
+                (unsigned)to.size(), 0);
+            if (rc == 0)
+                return true;
+            lastRc = rc;
+            lastSftpErr = libssh2_sftp_last_error(sftp);
+            lastAttempt = "plain-after-unlink";
+        }
+    }
+
+    if (why) {
+        std::ostringstream oss;
+        oss << "sftp_rename_ex failed after fallback (attempt=" << lastAttempt
+            << ", rc=" << lastRc << ", sftp_err=" << lastSftpErr << ")";
+        if (lastSftpErr == LIBSSH2_FX_OP_UNSUPPORTED)
+            oss << " [server does not support requested rename mode]";
+        else if (lastSftpErr == LIBSSH2_FX_PERMISSION_DENIED)
+            oss << " [permission denied]";
+        else if (lastSftpErr == LIBSSH2_FX_FAILURE)
+            oss << " [generic failure]";
+        *why = oss.str();
+    }
+    return false;
+}
+
 static bool hash_local_range(const std::string &path, std::uint64_t offset,
                              std::uint64_t length, Sha256Digest &out,
                              std::string *why) {
@@ -2128,13 +2213,10 @@ bool Libssh2SftpClient::put(
         }
     }
 
-    long rnFlags = LIBSSH2_SFTP_RENAME_ATOMIC | LIBSSH2_SFTP_RENAME_NATIVE |
-                   LIBSSH2_SFTP_RENAME_OVERWRITE;
-    int rn = libssh2_sftp_rename_ex(sftp_, remotePart.c_str(),
-                                    (unsigned)remotePart.size(), remote.c_str(),
-                                    (unsigned)remote.size(), rnFlags);
-    if (rn != 0) {
-        err = "Could not finalize atomic upload (.part -> destination)";
+    std::string rnErr;
+    if (!rename_remote_with_fallback(sftp_, remotePart, remote, true, &rnErr)) {
+        err = std::string("Could not finalize upload (.part -> destination): ") +
+              rnErr;
         return false;
     }
 
@@ -2344,13 +2426,9 @@ bool Libssh2SftpClient::rename(const std::string &from, const std::string &to,
         err = "Not connected";
         return false;
     }
-    long flags = LIBSSH2_SFTP_RENAME_ATOMIC | LIBSSH2_SFTP_RENAME_NATIVE;
-    if (overwrite)
-        flags |= LIBSSH2_SFTP_RENAME_OVERWRITE;
-    int rc = libssh2_sftp_rename_ex(sftp_, from.c_str(), (unsigned)from.size(),
-                                    to.c_str(), (unsigned)to.size(), flags);
-    if (rc != 0) {
-        err = "sftp_rename_ex failed";
+    if (!rename_remote_with_fallback(sftp_, from, to, overwrite, &err)) {
+        if (err.empty())
+            err = "sftp_rename_ex failed";
         return false;
     }
     return true;

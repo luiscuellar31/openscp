@@ -74,6 +74,28 @@
 
 static constexpr int NAME_COL = 0;
 
+static QString normalizeRemotePathForMatch(const QString &rawPath) {
+    QString normalized = rawPath.trimmed();
+    if (normalized.isEmpty())
+        normalized = QStringLiteral("/");
+    if (!normalized.startsWith('/'))
+        normalized.prepend('/');
+    while (normalized.contains(QStringLiteral("//")))
+        normalized.replace(QStringLiteral("//"), QStringLiteral("/"));
+    if (normalized.size() > 1 && normalized.endsWith('/'))
+        normalized.chop(1);
+    return normalized;
+}
+
+static bool remotePathIsInsideRoot(const QString &candidatePath,
+                                   const QString &rootPath) {
+    const QString candidate = normalizeRemotePathForMatch(candidatePath);
+    const QString root = normalizeRemotePathForMatch(rootPath);
+    if (root == QStringLiteral("/"))
+        return candidate.startsWith('/');
+    return candidate == root || candidate.startsWith(root + QStringLiteral("/"));
+}
+
 MainWindow::~MainWindow() = default; // define the destructor here
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
@@ -632,6 +654,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
     // Transfer queue
     transferMgr_ = new TransferManager(this);
+    connect(transferMgr_, &TransferManager::tasksChanged, this,
+            [this] { maybeRefreshRemoteAfterCompletedUploads(); });
     // Provide transfer manager to views (for async remote drag-out staging)
     if (auto *lv = qobject_cast<DragAwareTreeView *>(leftView_))
         lv->setTransferManager(transferMgr_);
@@ -979,6 +1003,62 @@ void MainWindow::applyQuickSearch(QTreeView *view, const QString &query) {
         view->scrollTo(idx, QAbstractItemView::PositionAtCenter);
         return;
     }
+}
+
+void MainWindow::maybeRefreshRemoteAfterCompletedUploads() {
+    if (!transferMgr_) {
+        m_seenCompletedUploadTaskIds_.clear();
+        m_pendingRemoteRefreshFromUpload_ = false;
+        return;
+    }
+
+    const auto tasks = transferMgr_->tasksSnapshot();
+    QSet<quint64> activeUploadIds;
+    activeUploadIds.reserve(tasks.size());
+
+    bool shouldRefresh = false;
+    const QString currentRoot =
+        rightRemoteModel_ ? rightRemoteModel_->rootPath() : QString();
+
+    for (const auto &t : tasks) {
+        if (t.type != TransferTask::Type::Upload)
+            continue;
+
+        activeUploadIds.insert(t.id);
+        if (t.status != TransferTask::Status::Done)
+            continue;
+        if (m_seenCompletedUploadTaskIds_.contains(t.id))
+            continue;
+
+        m_seenCompletedUploadTaskIds_.insert(t.id);
+        if (rightIsRemote_ && rightRemoteModel_ &&
+            remotePathIsInsideRoot(t.dst, currentRoot)) {
+            shouldRefresh = true;
+        }
+    }
+
+    for (auto it = m_seenCompletedUploadTaskIds_.begin();
+         it != m_seenCompletedUploadTaskIds_.end();) {
+        if (!activeUploadIds.contains(*it))
+            it = m_seenCompletedUploadTaskIds_.erase(it);
+        else
+            ++it;
+    }
+
+    if (!shouldRefresh || m_pendingRemoteRefreshFromUpload_ || !rightIsRemote_ ||
+        !rightRemoteModel_) {
+        return;
+    }
+
+    m_pendingRemoteRefreshFromUpload_ = true;
+    QTimer::singleShot(150, this, [this] {
+        m_pendingRemoteRefreshFromUpload_ = false;
+        if (!rightIsRemote_ || !rightRemoteModel_)
+            return;
+        QString err;
+        rightRemoteModel_->setRootPath(rightRemoteModel_->rootPath(), &err,
+                                       true);
+    });
 }
 
 void MainWindow::applyPreferences() {
