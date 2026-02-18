@@ -57,9 +57,12 @@ open build/OpenSCP.app
 
 - Real parallel transfers with isolated worker connections.
 - Pause/resume/cancel/retry, per-task/global limits, and resume support.
+- Status-aware queue actions: controls are enabled only when the selected task state allows that action (for example, retry for `Error`/`Canceled`, resume for `Paused`).
 - Queue UI with per-row progress bars, filters, and detailed columns (`Speed`, `ETA`, `Transferred`, `Error`, etc.).
 - Context actions like retry selected, open destination, copy paths, and cleanup policies.
 - Queue window/layout/filter persistence.
+- Transfers use interruptible worker sessions and bounded socket read/write waits to avoid indefinite hangs during stalled network conditions.
+- Upload completion path is hardened and remote views refresh reliably after finished uploads.
 
 ### 3. SFTP security hardening
 
@@ -90,6 +93,8 @@ open build/OpenSCP.app
 - One-click reset for default main-window layout/sizes in Settings.
 - Permissions dialog includes octal preview + common presets.
 - About dialog includes diagnostics copy support and friendlier fallback messaging.
+- Disconnect flow stays responsive: UI returns to local mode immediately while transfer cleanup can continue in background, with watchdog/status feedback.
+- Reconnect is blocked while previous transfer cleanup is still running, preventing session overlap races.
 
 ### 6. Quality baseline (CI and tests)
 
