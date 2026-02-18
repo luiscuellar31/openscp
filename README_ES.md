@@ -1,17 +1,17 @@
 <div align="center">
-  <img src="assets/program/icon-openscp-2048.png" alt="Icono de OpenSCP" width="128">
-  <h1 align="center">OpenSCP</h1>
+    <img src="assets/program/icon-openscp-2048.png" alt="Icono de OpenSCP" width="128">
+    <h1 align="center">OpenSCP</h1>
 
 <p>
-  <strong>Cliente SFTP de doble panel enfocado en simplicidad y seguridad</strong>
+    <strong>Cliente SFTP de doble panel enfocado en simplicidad y seguridad</strong>
 </p>
 
 <p>
-  <a href="README.md"><strong>Read in English</strong></a>
+    <a href="README.md"><strong>Read in English</strong></a>
 </p>
 
 <p>
-  <strong>OpenSCP</strong> es un explorador de archivos estilo two-panel commander escrito en <strong>C++/Qt</strong>, con soporte <strong>SFTP</strong> (libssh2 + OpenSSL). Busca ser una alternativa ligera a herramientas como WinSCP, enfocada en <strong>seguridad</strong>, <strong>claridad</strong> y <strong>extensibilidad</strong>.
+    <strong>OpenSCP</strong> es un explorador de archivos estilo two-panel commander escrito en <strong>C++/Qt</strong>, con soporte <strong>SFTP</strong> (libssh2 + OpenSSL). Busca ser una alternativa ligera a herramientas como WinSCP, enfocada en <strong>seguridad</strong>, <strong>claridad</strong> y <strong>extensibilidad</strong>.
 </p>
 
 <br>
@@ -79,8 +79,8 @@ open build/OpenSCP.app
 - Flujos de renombrar/eliminar limpian secretos legacy o huerfanos.
 - Eliminacion opcional de credenciales guardadas y entradas relacionadas en `known_hosts` al borrar sitios.
 - Backends seguros:
-  - macOS: Keychain
-  - Linux: libsecret (si esta disponible)
+    - macOS: Keychain
+    - Linux: libsecret (si esta disponible)
 - Feedback claro de persistencia en builds secure-only.
 - Quick Connect puede guardar/actualizar datos del sitio sin duplicados.
 
@@ -95,8 +95,8 @@ open build/OpenSCP.app
 ### 6. Linea base de calidad (CI y tests)
 
 - CI dividido por intencion:
-  - push a `dev`: build rapido Linux + tests no integracion
-  - PR a `main`: compuerta de integracion Linux y macOS
+    - push a `dev`: build rapido Linux + tests no integracion
+    - PR a `main`: compuerta de integracion Linux y macOS
 - En integracion CI se levanta un servidor SFTP temporal para pruebas end-to-end.
 - Workflow nocturno con `ASan`, `UBSan`, `TSan` y `cppcheck`.
 
@@ -182,9 +182,9 @@ Detalles para empaquetar AppImage: `assets/linux/README.md`
 ## Capturas
 
 <p align="center">
-  <img src="assets/screenshots/screenshot-site-manager.png" alt="Gestor de sitios con servidores guardados" width="32%">
-  <img src="assets/screenshots/screenshot-connect.png" alt="Dialogo de conexion con opciones de autenticacion" width="32%">
-  <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Cola de transferencias con progreso, filtros y acciones" width="32%">
+    <img src="assets/screenshots/screenshot-site-manager.png" alt="Gestor de sitios con servidores guardados" width="32%">
+    <img src="assets/screenshots/screenshot-connect.png" alt="Dialogo de conexion con opciones de autenticacion" width="32%">
+    <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Cola de transferencias con progreso, filtros y acciones" width="32%">
 </p>
 
 ## Roadmap

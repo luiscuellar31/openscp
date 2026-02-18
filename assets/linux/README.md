@@ -92,8 +92,8 @@ ldd ./build/openscp_hello | grep -E 'Qt6|libssh2|ssl|crypto' || true
 ## Troubleshooting
 
 - CMake can’t find Qt 6:
-  - Set `CMAKE_PREFIX_PATH` or `Qt6_DIR` to your Qt 6 installation.
+    - Set `CMAKE_PREFIX_PATH` or `Qt6_DIR` to your Qt 6 installation.
 - Qt plugin for linuxdeploy not found:
-  - Ensure `linuxdeploy-plugin-qt` is in your `PATH`.
+    - Ensure `linuxdeploy-plugin-qt` is in your `PATH`.
 - AppImage missing dependencies:
-  - The script uses linuxdeploy (+Qt plugin) to bundle Qt and other runtime libs into the AppDir; verify tool versions.
+    - The script uses linuxdeploy (+Qt plugin) to bundle Qt and other runtime libs into the AppDir; verify tool versions.

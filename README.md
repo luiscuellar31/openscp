@@ -1,17 +1,17 @@
 <div align="center">
-  <img src="assets/program/icon-openscp-2048.png" alt="OpenSCP icon" width="128">
-  <h1 align="center">OpenSCP</h1>
+    <img src="assets/program/icon-openscp-2048.png" alt="OpenSCP icon" width="128">
+    <h1 align="center">OpenSCP</h1>
 
 <p>
-  <strong>Two-panel SFTP client focused on simplicity and security</strong>
+    <strong>Two-panel SFTP client focused on simplicity and security</strong>
 </p>
 
 <p>
-  <a href="README_ES.md"><strong>Leer en Espanol</strong></a>
+    <a href="README_ES.md"><strong>Leer en Espanol</strong></a>
 </p>
 
 <p>
-  <strong>OpenSCP</strong> is a two-panel commander-style file explorer written in <strong>C++/Qt</strong>, with <strong>SFTP</strong> support (libssh2 + OpenSSL). It aims to be a lightweight alternative to tools like WinSCP, focused on <strong>security</strong>, <strong>clarity</strong>, and <strong>extensibility</strong>.
+    <strong>OpenSCP</strong> is a two-panel commander-style file explorer written in <strong>C++/Qt</strong>, with <strong>SFTP</strong> support (libssh2 + OpenSSL). It aims to be a lightweight alternative to tools like WinSCP, focused on <strong>security</strong>, <strong>clarity</strong>, and <strong>extensibility</strong>.
 </p>
 
 <br>
@@ -81,8 +81,8 @@ open build/OpenSCP.app
 - Duplicate site names blocked; rename/delete cleans legacy or orphan secrets.
 - Optional cleanup of stored credentials and related `known_hosts` entries when deleting sites.
 - Secure backends:
-  - macOS: Keychain
-  - Linux: libsecret (when available)
+    - macOS: Keychain
+    - Linux: libsecret (when available)
 - Clear persistence feedback in secure-only builds.
 - Quick Connect can save/update site data without creating duplicates.
 
@@ -99,8 +99,8 @@ open build/OpenSCP.app
 ### 6. Quality baseline (CI and tests)
 
 - CI split by intent:
-  - push to `dev`: fast Linux build + non-integration tests
-  - PR to `main`: Linux and macOS integration gate
+    - push to `dev`: fast Linux build + non-integration tests
+    - PR to `main`: Linux and macOS integration gate
 - Integration workflow spins up a temporary SFTP server for end-to-end checks.
 - Nightly quality job includes `ASan`, `UBSan`, `TSan`, and `cppcheck`.
 
@@ -186,9 +186,9 @@ AppImage packaging details: `assets/linux/README.md`
 ## Screenshots
 
 <p align="center">
-  <img src="assets/screenshots/screenshot-site-manager.png" alt="Site Manager with saved servers" width="32%">
-  <img src="assets/screenshots/screenshot-connect.png" alt="Connect dialog with authentication options" width="32%">
-  <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Transfer queue with progress, filters, and actions" width="32%">
+    <img src="assets/screenshots/screenshot-site-manager.png" alt="Site Manager with saved servers" width="32%">
+    <img src="assets/screenshots/screenshot-connect.png" alt="Connect dialog with authentication options" width="32%">
+    <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Transfer queue with progress, filters, and actions" width="32%">
 </p>
 
 ## Roadmap
