@@ -7,6 +7,7 @@
 #include "TransferManager.hpp"
 #include "UiAlerts.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
+#include "openscp/RuntimeLogging.hpp"
 
 #include <QAbstractButton>
 #include <QApplication>
@@ -650,9 +651,15 @@ void MainWindow::showTOfuDialog(const QString &host, const QString &alg,
     if (m_connectProgress_ && m_connectProgress_->isVisible()) {
         m_connectProgress_->setEnabled(false);
         m_connectProgressDimmed_ = true;
-        std::fprintf(stderr, "[OpenSCP] TOFU shown; progress paused=true\n");
+        if (openscp::sensitiveLoggingEnabled()) {
+            std::fprintf(stderr,
+                         "[OpenSCP] TOFU shown; progress paused=true\n");
+        }
     } else {
-        std::fprintf(stderr, "[OpenSCP] TOFU shown; progress paused=false\n");
+        if (openscp::sensitiveLoggingEnabled()) {
+            std::fprintf(stderr,
+                         "[OpenSCP] TOFU shown; progress paused=false\n");
+        }
     }
     auto *box = new QMessageBox(this);
     UiAlerts::configure(*box);
@@ -711,9 +718,15 @@ void MainWindow::onTofuFinished(int r) {
     if (m_connectProgressDimmed_ && m_connectProgress_) {
         m_connectProgress_->setEnabled(true);
         m_connectProgressDimmed_ = false;
-        std::fprintf(stderr, "[OpenSCP] TOFU closed; progress resumed=true\n");
+        if (openscp::sensitiveLoggingEnabled()) {
+            std::fprintf(stderr,
+                         "[OpenSCP] TOFU closed; progress resumed=true\n");
+        }
     } else {
-        std::fprintf(stderr, "[OpenSCP] TOFU closed; progress resumed=false\n");
+        if (openscp::sensitiveLoggingEnabled()) {
+            std::fprintf(stderr,
+                         "[OpenSCP] TOFU closed; progress resumed=false\n");
+        }
     }
     {
         std::unique_lock<std::mutex> lk(m_tofuMutex_);

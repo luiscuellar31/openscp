@@ -180,7 +180,8 @@ AppImage packaging details: `assets/linux/README.md`
 - `OPEN_SCP_FP_HEX_ONLY=1` - show fingerprints in HEX with `:`.
 - `OPEN_SCP_TRANSFER_INTEGRITY=off|optional|required` - override transfer integrity policy.
 - `OPEN_SCP_LOG_LEVEL=error|warn|info|debug` - set log verbosity.
-- `OPEN_SCP_LOG_SENSITIVE=1` - enable sensitive debug details (disabled by default).
+- `OPEN_SCP_ENV=dev|prod` - runtime environment selector (`dev` enables development-only diagnostics).
+- `OPEN_SCP_LOG_SENSITIVE=1` - enable sensitive debug details only when `OPEN_SCP_ENV=dev` (disabled by default).
 - `OPEN_SCP_ENABLE_INSECURE_FALLBACK=1` - enable insecure secret fallback only when supported by the build/platform.
 
 ## Screenshots

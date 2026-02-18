@@ -3,6 +3,7 @@
 #include "TransferManager.hpp"
 #include "TimeUtils.hpp"
 #include "UiAlerts.hpp"
+#include "openscp/RuntimeLogging.hpp"
 #include "openscp/SftpClient.hpp"
 #include <QAbstractButton>
 #include <QApplication>
@@ -1006,9 +1007,15 @@ void TransferManager::schedule() {
                                     if (!f.setFileTime(
                                             tsUtc,
                                             QFileDevice::FileModificationTime)) {
-                                        qWarning(ocXfer)
-                                            << "Failed to set mtime for" << t.dst
-                                            << "to" << tsUtc;
+                                        if (openscp::sensitiveLoggingEnabled()) {
+                                            qWarning(ocXfer)
+                                                << "Failed to set mtime for"
+                                                << t.dst << "to" << tsUtc;
+                                        } else {
+                                            qWarning(ocXfer)
+                                                << "Failed to set local file "
+                                                   "mtime";
+                                        }
                                     }
                                 }
                             }

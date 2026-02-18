@@ -1,6 +1,7 @@
 // Remote model implementation (table: Name, Size, Date, Permissions).
 #include "RemoteModel.hpp"
 #include "TimeUtils.hpp"
+#include "openscp/RuntimeLogging.hpp"
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QLoggingCategory>
@@ -396,7 +397,12 @@ bool RemoteModel::enumerateFilesUnderEx(
         if (opt.cancel && opt.cancel->load(std::memory_order_relaxed))
             return;
         if (depth > configuredMaxDepth) {
-            qWarning(ocEnum) << "max depth reached at" << cur;
+            if (openscp::sensitiveLoggingEnabled()) {
+                qWarning(ocEnum) << "max depth reached at" << cur;
+            } else {
+                qWarning(ocEnum)
+                    << "max depth reached during remote enumeration";
+            }
             return;
         }
         const QString normCur = normalizeRemotePath(cur);
@@ -409,8 +415,12 @@ bool RemoteModel::enumerateFilesUnderEx(
         std::vector<openscp::FileInfo> children;
         std::string err;
         if (!client_->list(normCur.toStdString(), children, err)) {
-            qWarning(ocEnum) << "enumeration error at" << normCur << ":"
-                             << QString::fromStdString(err);
+            if (openscp::sensitiveLoggingEnabled()) {
+                qWarning(ocEnum) << "enumeration error at" << normCur << ":"
+                                 << QString::fromStdString(err);
+            } else {
+                qWarning(ocEnum) << "enumeration error during remote listing";
+            }
             if (partialErrorOut)
                 *partialErrorOut = true;
             if (deniedCountOut)

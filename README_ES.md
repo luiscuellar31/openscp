@@ -176,7 +176,8 @@ Detalles para empaquetar AppImage: `assets/linux/README.md`
 - `OPEN_SCP_FP_HEX_ONLY=1` - muestra huellas en HEX con `:`.
 - `OPEN_SCP_TRANSFER_INTEGRITY=off|optional|required` - sobrescribe la politica de integridad de transferencias.
 - `OPEN_SCP_LOG_LEVEL=error|warn|info|debug` - ajusta la verbosidad de logs.
-- `OPEN_SCP_LOG_SENSITIVE=1` - habilita detalles sensibles de depuracion (apagado por defecto).
+- `OPEN_SCP_ENV=dev|prod` - selector de entorno runtime (`dev` habilita diagnosticos solo de desarrollo).
+- `OPEN_SCP_LOG_SENSITIVE=1` - habilita detalles sensibles de depuracion solo cuando `OPEN_SCP_ENV=dev` (apagado por defecto).
 - `OPEN_SCP_ENABLE_INSECURE_FALLBACK=1` - habilita fallback inseguro solo cuando el build/plataforma lo soporta.
 
 ## Capturas

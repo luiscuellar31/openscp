@@ -1,6 +1,7 @@
 // libssh2 backend: manages TCP socket, SSH session, and SFTP channel.
 // Includes keepalive, known_hosts validation, and resume support.
 #include "openscp/Libssh2SftpClient.hpp"
+#include "openscp/RuntimeLogging.hpp"
 #include <libssh2.h>
 #include <libssh2_sftp.h>
 
@@ -64,10 +65,7 @@ static CoreLogLevel core_log_level() {
 }
 
 static bool core_sensitive_debug_enabled() {
-    static const bool enabled = []() {
-        const char *raw = std::getenv("OPEN_SCP_LOG_SENSITIVE");
-        return raw && *raw == '1';
-    }();
+    static const bool enabled = openscp::sensitiveLoggingEnabled();
     return enabled;
 }
 
@@ -105,6 +103,8 @@ static void auditLogHostKey(const std::string &host, uint16_t port,
                             const std::string &algorithm,
                             const std::string &fingerprint,
                             const char *status) {
+    if (!openscp::sensitiveLoggingEnabled())
+        return;
 #ifndef _WIN32
     const char *home = std::getenv("HOME");
     if (!home)
@@ -1474,6 +1474,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                         core_logf(CoreLogLevel::Debug,
                                   "Manual known_hosts write for ssh-ed25519 "
                                   "fallback; key material redacted (set "
+                                  "OPEN_SCP_ENV=dev and "
                                   "OPEN_SCP_LOG_SENSITIVE=1 to include)");
                     }
                     // Fallback: write OpenSSH line atomically (hashed or plain)
