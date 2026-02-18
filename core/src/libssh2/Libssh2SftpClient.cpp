@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <pwd.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 // OpenSSL for HMAC-SHA1 (hashed known_hosts names) and RNG
@@ -232,6 +233,26 @@ integrity_policy_from_env(TransferIntegrityPolicy fallback) {
     return fallback;
 }
 
+// Protect transfer workers from indefinite kernel-level socket blocking when
+// the peer/network disappears without a clean TCP close.
+static void apply_transfer_socket_timeouts(int sock) {
+    if (sock < 0)
+        return;
+#ifdef _WIN32
+    DWORD tvMs = 15000;
+    (void)::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,
+                       reinterpret_cast<const char *>(&tvMs), sizeof(tvMs));
+    (void)::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO,
+                       reinterpret_cast<const char *>(&tvMs), sizeof(tvMs));
+#else
+    struct timeval tv{};
+    tv.tv_sec = 15;
+    tv.tv_usec = 0;
+    (void)::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    (void)::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
+}
+
 static bool seek_local_file(FILE *f, std::uint64_t off, std::string *why) {
 #ifdef _WIN32
     if (_fseeki64(f, (__int64)off, SEEK_SET) != 0) {
@@ -412,9 +433,16 @@ static bool rename_remote_with_fallback(LIBSSH2_SFTP *sftp,
     return false;
 }
 
+static bool transfer_cancel_requested(
+    const std::function<bool()> *shouldCancel) {
+    return shouldCancel && *shouldCancel && (*shouldCancel)();
+}
+
 static bool hash_local_range(const std::string &path, std::uint64_t offset,
                              std::uint64_t length, Sha256Digest &out,
-                             std::string *why) {
+                             std::string *why,
+                             const std::function<bool()> *shouldCancel =
+                                 nullptr) {
     FILE *f = ::fopen(path.c_str(), "rb");
     if (!f) {
         if (why)
@@ -442,6 +470,13 @@ static bool hash_local_range(const std::string &path, std::uint64_t offset,
     std::array<unsigned char, 64 * 1024> buf{};
     std::uint64_t remain = length;
     while (remain > 0) {
+        if (transfer_cancel_requested(shouldCancel)) {
+            if (why)
+                *why = "Canceled by user";
+            EVP_MD_CTX_free(ctx);
+            std::fclose(f);
+            return false;
+        }
         const std::size_t want =
             (std::size_t)std::min<std::uint64_t>(remain, buf.size());
         const std::size_t n = std::fread(buf.data(), 1, want, f);
@@ -476,16 +511,20 @@ static bool hash_local_range(const std::string &path, std::uint64_t offset,
 }
 
 static bool hash_local_full(const std::string &path, Sha256Digest &out,
-                            std::string *why) {
+                            std::string *why,
+                            const std::function<bool()> *shouldCancel =
+                                nullptr) {
     std::uint64_t sz = 0;
     if (!get_local_file_size(path, sz, why))
         return false;
-    return hash_local_range(path, 0, sz, out, why);
+    return hash_local_range(path, 0, sz, out, why, shouldCancel);
 }
 
 static bool hash_remote_range(LIBSSH2_SFTP *sftp, const std::string &remote,
                               std::uint64_t offset, std::uint64_t length,
-                              Sha256Digest &out, std::string *why) {
+                              Sha256Digest &out, std::string *why,
+                              const std::function<bool()> *shouldCancel =
+                                  nullptr) {
     LIBSSH2_SFTP_HANDLE *rh =
         libssh2_sftp_open_ex(sftp, remote.c_str(), (unsigned)remote.size(),
                              LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
@@ -512,6 +551,13 @@ static bool hash_remote_range(LIBSSH2_SFTP *sftp, const std::string &remote,
     std::array<unsigned char, 64 * 1024> buf{};
     std::uint64_t remain = length;
     while (remain > 0) {
+        if (transfer_cancel_requested(shouldCancel)) {
+            if (why)
+                *why = "Canceled by user";
+            EVP_MD_CTX_free(ctx);
+            libssh2_sftp_close(rh);
+            return false;
+        }
         const std::size_t want =
             (std::size_t)std::min<std::uint64_t>(remain, buf.size());
         ssize_t n = libssh2_sftp_read(rh, (char *)buf.data(), want);
@@ -546,7 +592,9 @@ static bool hash_remote_range(LIBSSH2_SFTP *sftp, const std::string &remote,
 }
 
 static bool hash_remote_full(LIBSSH2_SFTP *sftp, const std::string &remote,
-                             Sha256Digest &out, std::string *why) {
+                             Sha256Digest &out, std::string *why,
+                             const std::function<bool()> *shouldCancel =
+                                 nullptr) {
     LIBSSH2_SFTP_HANDLE *rh =
         libssh2_sftp_open_ex(sftp, remote.c_str(), (unsigned)remote.size(),
                              LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
@@ -571,6 +619,13 @@ static bool hash_remote_full(LIBSSH2_SFTP *sftp, const std::string &remote,
     }
     std::array<unsigned char, 64 * 1024> buf{};
     while (true) {
+        if (transfer_cancel_requested(shouldCancel)) {
+            if (why)
+                *why = "Canceled by user";
+            EVP_MD_CTX_free(ctx);
+            libssh2_sftp_close(rh);
+            return false;
+        }
         ssize_t n = libssh2_sftp_read(rh, (char *)buf.data(), buf.size());
         if (n > 0) {
             if (EVP_DigestUpdate(ctx, buf.data(), (std::size_t)n) != 1) {
@@ -1092,17 +1147,15 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                                       "hmac-sha2-512,hmac-sha2-256");
 #endif
 
-    // Handshake
-    if (libssh2_session_handshake(session_, sock_) != 0) {
-        err = "SSH handshake failed";
-        return false;
-    }
-
-    // Ensure blocking mode and a reasonable timeout to avoid EAGAIN during auth
+    // Ensure blocking mode and bounded waits before handshake/auth.
     libssh2_session_set_blocking(session_, 1);
 #ifdef LIBSSH2_SESSION_TIMEOUT
     libssh2_session_set_timeout(session_, 20000); // 20s
 #endif
+    if (libssh2_session_handshake(session_, sock_) != 0) {
+        err = "SSH handshake failed";
+        return false;
+    }
 
     // SSH keepalive: request libssh2 to send messages every 30s if the peer
     // allows it
@@ -1805,23 +1858,65 @@ bool Libssh2SftpClient::connect(const SessionOptions &opt, std::string &err) {
 }
 
 void Libssh2SftpClient::disconnect() {
-    if (sftp_) {
-        libssh2_sftp_shutdown(sftp_);
+    _LIBSSH2_SFTP *sftp = nullptr;
+    _LIBSSH2_SESSION *session = nullptr;
+    bool wasConnected = false;
+    int sock = -1;
+    {
+        std::lock_guard<std::mutex> lk(stateMutex_);
+        wasConnected = connected_;
+        connected_ = false;
+        sftp = sftp_;
+        session = session_;
+        sock = sock_;
         sftp_ = nullptr;
-    }
-    if (session_) {
-        // Only send SSH disconnect message for fully established sessions.
-        if (connected_) {
-            (void)libssh2_session_disconnect(session_, "bye");
-        }
-        libssh2_session_free(session_);
         session_ = nullptr;
-    }
-    if (sock_ != -1) {
-        ::close(sock_);
         sock_ = -1;
     }
-    connected_ = false;
+
+    // Force the transport down first so libssh2 teardown calls fail fast
+    // instead of waiting indefinitely on a peer that no longer responds.
+    if (sock != -1) {
+#ifdef _WIN32
+        (void)::shutdown(sock, SD_BOTH);
+#else
+        (void)::shutdown(sock, SHUT_RDWR);
+#endif
+        ::close(sock);
+    }
+
+    if (session) {
+        libssh2_session_set_blocking(session, 0);
+#ifdef LIBSSH2_SESSION_TIMEOUT
+        libssh2_session_set_timeout(session, 2000);
+#endif
+    }
+
+    if (sftp) {
+        (void)libssh2_sftp_shutdown(sftp);
+    }
+    if (session) {
+        // Only send SSH disconnect message for fully established sessions.
+        if (wasConnected) {
+            (void)libssh2_session_disconnect(session, "bye");
+        }
+        libssh2_session_free(session);
+    }
+}
+
+void Libssh2SftpClient::interrupt() {
+    int sock = -1;
+    {
+        std::lock_guard<std::mutex> lk(stateMutex_);
+        sock = sock_;
+    }
+    if (sock == -1)
+        return;
+#ifdef _WIN32
+    (void)::shutdown(sock, SD_BOTH);
+#else
+    (void)::shutdown(sock, SHUT_RDWR);
+#endif
 }
 
 bool Libssh2SftpClient::list(const std::string &remote_path,
@@ -1898,6 +1993,8 @@ bool Libssh2SftpClient::get(
         return false;
     }
 
+    apply_transfer_socket_timeouts(sock_);
+
     const TransferIntegrityPolicy policy = transferIntegrityPolicy_;
     const std::string localPart = local + ".part";
 
@@ -1943,10 +2040,16 @@ bool Libssh2SftpClient::get(
             Sha256Digest lh{}, rhh{};
             std::string hErr;
             const bool okLocal =
-                hash_local_range(localPart, start, window, lh, &hErr);
+                hash_local_range(localPart, start, window, lh, &hErr,
+                                 &shouldCancel);
             const bool okRemote =
-                okLocal &&
-                hash_remote_range(sftp_, remote, start, window, rhh, &hErr);
+                okLocal && hash_remote_range(sftp_, remote, start, window, rhh,
+                                             &hErr, &shouldCancel);
+            if (shouldCancel && shouldCancel()) {
+                libssh2_sftp_close(rh);
+                err = "Canceled by user";
+                return false;
+            }
             if (!okLocal || !okRemote) {
                 if (policy == TransferIntegrityPolicy::Required) {
                     libssh2_sftp_close(rh);
@@ -1988,7 +2091,8 @@ bool Libssh2SftpClient::get(
         if (shouldCancel && shouldCancel()) {
             err = "Canceled by user";
             std::fclose(lf);
-            libssh2_sftp_close(rh);
+            // Avoid a potentially blocking per-handle close on cancellation;
+            // the worker session teardown will release pending handles.
             return false;
         }
         ssize_t n = libssh2_sftp_read(rh, buf.data(), (size_t)buf.size());
@@ -2005,9 +2109,12 @@ bool Libssh2SftpClient::get(
         } else if (n == 0) {
             break; // EOF
         } else {
-            err = "Remote read failed";
+            const bool canceledNow = (shouldCancel && shouldCancel());
+            err = canceledNow ? "Canceled by user" : "Remote read failed";
             std::fclose(lf);
-            libssh2_sftp_close(rh);
+            if (!canceledNow) {
+                (void)libssh2_sftp_close(rh);
+            }
             return false;
         }
     }
@@ -2022,11 +2129,21 @@ bool Libssh2SftpClient::get(
     std::fclose(lf);
     libssh2_sftp_close(rh);
 
+    if (shouldCancel && shouldCancel()) {
+        err = "Canceled by user";
+        return false;
+    }
+
     if (policy != TransferIntegrityPolicy::Off) {
         Sha256Digest lsum{}, rsum{};
         std::string herr;
-        const bool lok = hash_local_full(localPart, lsum, &herr);
-        const bool rok = lok && hash_remote_full(sftp_, remote, rsum, &herr);
+        const bool lok = hash_local_full(localPart, lsum, &herr, &shouldCancel);
+        const bool rok =
+            lok && hash_remote_full(sftp_, remote, rsum, &herr, &shouldCancel);
+        if (shouldCancel && shouldCancel()) {
+            err = "Canceled by user";
+            return false;
+        }
         if (!lok || !rok) {
             if (policy == TransferIntegrityPolicy::Required) {
                 err = std::string(
@@ -2039,6 +2156,11 @@ bool Libssh2SftpClient::get(
                   "checksum mismatch";
             return false;
         }
+    }
+
+    if (shouldCancel && shouldCancel()) {
+        err = "Canceled by user";
+        return false;
     }
 
     std::string replaceErr;
@@ -2059,6 +2181,8 @@ bool Libssh2SftpClient::put(
         err = "Not connected";
         return false;
     }
+
+    apply_transfer_socket_timeouts(sock_);
 
     const TransferIntegrityPolicy policy = transferIntegrityPolicy_;
     const std::string remotePart = remote + ".part";
@@ -2104,9 +2228,16 @@ bool Libssh2SftpClient::put(
         const std::uint64_t start = (std::uint64_t)startOffset - window;
         Sha256Digest lsum{}, rsum{};
         std::string herr;
-        const bool lok = hash_local_range(local, start, window, lsum, &herr);
+        const bool lok = hash_local_range(local, start, window, lsum, &herr,
+                                          &shouldCancel);
         const bool rok = lok && hash_remote_range(sftp_, remotePart, start,
-                                                  window, rsum, &herr);
+                                                  window, rsum, &herr,
+                                                  &shouldCancel);
+        if (shouldCancel && shouldCancel()) {
+            std::fclose(lf);
+            err = "Canceled by user";
+            return false;
+        }
         if (!lok || !rok) {
             if (policy == TransferIntegrityPolicy::Required) {
                 std::fclose(lf);
@@ -2162,14 +2293,18 @@ bool Libssh2SftpClient::put(
             while (remain > 0) {
                 if (shouldCancel && shouldCancel()) {
                     err = "Canceled by user";
-                    libssh2_sftp_close(wh);
                     std::fclose(lf);
+                    // Avoid a potentially blocking per-handle close on
+                    // cancellation; worker disconnect will release it.
                     return false;
                 }
                 ssize_t w = libssh2_sftp_write(wh, p, remain);
                 if (w < 0) {
-                    err = "Remote write failed";
-                    libssh2_sftp_close(wh);
+                    const bool canceledNow = (shouldCancel && shouldCancel());
+                    err = canceledNow ? "Canceled by user" : "Remote write failed";
+                    if (!canceledNow) {
+                        (void)libssh2_sftp_close(wh);
+                    }
                     std::fclose(lf);
                     return false;
                 }
@@ -2193,12 +2328,22 @@ bool Libssh2SftpClient::put(
     libssh2_sftp_close(wh);
     std::fclose(lf);
 
+    if (shouldCancel && shouldCancel()) {
+        err = "Canceled by user";
+        return false;
+    }
+
     if (policy != TransferIntegrityPolicy::Off) {
         Sha256Digest lsum{}, rsum{};
         std::string herr;
-        const bool lok = hash_local_full(local, lsum, &herr);
+        const bool lok = hash_local_full(local, lsum, &herr, &shouldCancel);
         const bool rok =
-            lok && hash_remote_full(sftp_, remotePart, rsum, &herr);
+            lok && hash_remote_full(sftp_, remotePart, rsum, &herr,
+                                    &shouldCancel);
+        if (shouldCancel && shouldCancel()) {
+            err = "Canceled by user";
+            return false;
+        }
         if (!lok || !rok) {
             if (policy == TransferIntegrityPolicy::Required) {
                 err =
@@ -2211,6 +2356,11 @@ bool Libssh2SftpClient::put(
                   "checksum mismatch";
             return false;
         }
+    }
+
+    if (shouldCancel && shouldCancel()) {
+        err = "Canceled by user";
+        return false;
     }
 
     std::string rnErr;

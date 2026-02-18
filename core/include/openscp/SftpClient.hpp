@@ -16,6 +16,9 @@ class SftpClient {
     // Connect and disconnect
     virtual bool connect(const SessionOptions &opt, std::string &err) = 0;
     virtual void disconnect() = 0;
+    // Best-effort async interruption for active network I/O (used to speed up
+    // cancellation paths). Backends that cannot interrupt may keep no-op.
+    virtual void interrupt() {}
     virtual bool isConnected() const = 0;
 
     // Remote directory listing

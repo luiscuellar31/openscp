@@ -2,6 +2,7 @@
 // Encapsulates the SSH session, SFTP channel, and TCP socket.
 #pragma once
 #include "SftpClient.hpp"
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,7 @@ class Libssh2SftpClient : public SftpClient {
 
     bool connect(const SessionOptions &opt, std::string &err) override;
     void disconnect() override;
+    void interrupt() override;
     bool isConnected() const override { return connected_; }
 
     bool list(const std::string &remote_path, std::vector<FileInfo> &out,
@@ -69,6 +71,7 @@ class Libssh2SftpClient : public SftpClient {
     _LIBSSH2_SFTP *sftp_ = nullptr;       // <- same
     TransferIntegrityPolicy transferIntegrityPolicy_ =
         TransferIntegrityPolicy::Optional;
+    mutable std::mutex stateMutex_;
 
     // TCP connection + SSH handshake and authentication.
     bool tcpConnect(const std::string &host, uint16_t port, std::string &err);
