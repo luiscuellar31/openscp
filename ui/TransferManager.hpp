@@ -118,6 +118,7 @@ class TransferManager : public QObject {
 
     // Worker threads per task
     std::unordered_map<quint64, std::thread> workers_;
+    std::mutex workersMutex_; // protects workers_
     // Auxiliary state: paused/canceled ids for worker cooperation
     std::unordered_set<quint64> pausedTasks_;
     std::unordered_set<quint64> canceledTasks_;
@@ -128,7 +129,18 @@ class TransferManager : public QObject {
     quint64 nextId_ = 1;
 
     int indexForId(quint64 id) const;
+    void decrementRunningCounter();
+    void interruptActiveWorker(quint64 id);
+    void interruptActiveWorkers();
+    bool isWorkerActive(quint64 id);
     // Build an isolated SFTP client for one worker task.
-    std::unique_ptr<openscp::SftpClient> createWorkerClient(std::string &err);
+    std::unique_ptr<openscp::SftpClient> createWorkerClient(quint64 taskId,
+                                                            std::string &err);
     std::optional<openscp::SessionOptions> sessionOpt_;
+    std::unordered_map<quint64, std::weak_ptr<openscp::SftpClient>>
+        activeWorkerClients_;
+    std::unordered_set<quint64> activeWorkerTaskIds_;
+    std::unordered_set<quint64> pendingInterruptTasks_;
+    std::mutex activeWorkersMutex_;
+    std::unordered_set<quint64> resumeRequestedTasks_;
 };
