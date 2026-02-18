@@ -65,6 +65,7 @@ class MainWindow : public QMainWindow {
 
     void connectSftp();
     void disconnectSftp();
+    void completeDisconnectSftp(quint64 disconnectSeq, bool forced);
     void rightItemActivated(const QModelIndex &idx); // double click on remote
     void
     leftItemActivated(const QModelIndex &idx); // double click on local (left)
@@ -244,6 +245,7 @@ class MainWindow : public QMainWindow {
     void invalidateRemoteWriteabilityFromError(const QString &rawError);
     QHash<QString, RemoteWriteabilityCacheEntry> m_remoteWriteabilityCache_;
     int m_remoteWriteabilityTtlMs_ = 15000;
+    std::atomic<quint64> m_remoteWriteabilityProbeSeq_{0};
 
     bool firstShow_ = true;
     bool m_restoredWindowGeometry_ = false;
@@ -261,11 +263,15 @@ class MainWindow : public QMainWindow {
 
     // Reentrancy guards and dialog pointers
     bool m_isDisconnecting = false;
+    quint64 m_disconnectSeq_ = 0;
+    bool m_transferCleanupInProgress_ = false;
+    qint64 m_transferCleanupStartedAtMs_ = 0;
     QPointer<class QMessageBox> m_tofuBox;
     QPointer<class QWidget> m_siteManager;
     bool m_openSiteManagerOnDisconnect = true;
     bool m_openSiteManagerOnStartup = true;
     bool m_pendingOpenSiteManager = false;
+    bool m_pendingCloseAfterDisconnect_ = false;
     bool m_sessionNoHostVerification_ = false;
     QLabel *m_hostPolicyRiskLabel_ = nullptr;
     // Connection progress dialog (non-modal), to avoid blocking TOFU

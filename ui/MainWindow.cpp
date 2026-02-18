@@ -432,6 +432,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
     // Main toolbar (top)
     auto *tb = addToolBar("Main");
+    tb->setObjectName("mainToolbar");
     tb->setToolButtonStyle(Qt::ToolButtonIconOnly);
     tb->setMovable(false);
     // Keep the system default size for the main toolbar and make sub‑toolbars
@@ -769,6 +770,17 @@ void MainWindow::showEvent(QShowEvent *e) {
 }
 
 void MainWindow::closeEvent(QCloseEvent *e) {
+    if (m_isDisconnecting) {
+        m_pendingCloseAfterDisconnect_ = true;
+        e->ignore();
+        return;
+    }
+    if (rightIsRemote_) {
+        m_pendingCloseAfterDisconnect_ = true;
+        disconnectSftp();
+        e->ignore();
+        return;
+    }
     saveMainWindowUiState();
     QMainWindow::closeEvent(e);
 }

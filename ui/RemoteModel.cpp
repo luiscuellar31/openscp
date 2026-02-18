@@ -156,28 +156,35 @@ bool RemoteModel::setRootPath(const QString &path, QString *errorOut,
             *errorOut = tr("Missing session options for remote listing");
         return false;
     }
-    std::string connErr;
-    auto listClient = client_->newConnectionLike(*sessionOpt_, connErr);
-    if (!listClient) {
-        const QString qerr =
-            connErr.empty() ? tr("Could not start remote listing")
-                            : QString::fromStdString(connErr);
-        if (errorOut)
-            *errorOut = qerr;
-        return false;
-    }
 
+    openscp::SftpClient *baseClient = client_;
+    const openscp::SessionOptions optNow = *sessionOpt_;
     QPointer<RemoteModel> self(this);
     std::thread([self, reqId, normalized, showHiddenNow, sortColNow,
-                 sortOrdNow, listClient = std::move(listClient)]() mutable {
+                 sortOrdNow, baseClient, optNow]() mutable {
         std::vector<openscp::FileInfo> out;
         std::string err;
         bool ok = false;
         QString qerr;
-        ok = listClient->list(normalized.toStdString(), out, err);
-        if (!ok)
-            qerr = QString::fromStdString(err);
-        listClient->disconnect();
+
+        std::unique_ptr<openscp::SftpClient> listClient;
+        std::string connErr;
+        if (!self || !baseClient) {
+            qerr = QStringLiteral("Remote model is no longer available");
+        } else {
+            listClient = baseClient->newConnectionLike(optNow, connErr);
+            if (!listClient) {
+                qerr = connErr.empty()
+                           ? QStringLiteral("Could not start remote listing")
+                           : QString::fromStdString(connErr);
+            } else {
+                ok = listClient->list(normalized.toStdString(), out, err);
+                if (!ok)
+                    qerr = QString::fromStdString(err);
+            }
+        }
+        if (listClient)
+            listClient->disconnect();
 
         if (!self)
             return;

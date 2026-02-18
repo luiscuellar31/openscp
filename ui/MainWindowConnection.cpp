@@ -301,7 +301,19 @@ void MainWindow::disconnectSftp() {
     if (m_isDisconnecting)
         return;
     m_isDisconnecting = true;
+    const quint64 disconnectSeq = ++m_disconnectSeq_;
+    m_transferCleanupInProgress_ = (transferMgr_ != nullptr);
+    m_transferCleanupStartedAtMs_ =
+        m_transferCleanupInProgress_ ? QDateTime::currentMSecsSinceEpoch() : 0;
     saveRightHeaderState(true);
+    if (actDisconnect_)
+        actDisconnect_->setEnabled(false);
+    if (actConnect_) {
+        actConnect_->setEnabled(false);
+        actConnect_->setToolTip(
+            tr("Please wait while active transfers are canceled"));
+    }
+
     if (m_remoteScanCancelRequested_)
         m_remoteScanCancelRequested_->store(true);
     if (m_remoteScanProgress_) {
@@ -310,12 +322,9 @@ void MainWindow::disconnectSftp() {
         m_remoteScanProgress_.clear();
     }
     m_remoteScanInProgress_ = false;
-    // Detach client from the queue to avoid dangling pointers
-    if (transferMgr_)
-        transferMgr_->clearClient();
-    if (sftp_)
-        sftp_->disconnect();
-    sftp_.reset();
+
+    // Switch UI immediately to local/local so the app remains usable while
+    // transfer workers unwind in the background.
     if (rightRemoteModel_) {
         rightView_->setModel(rightLocalModel_);
         if (rightView_->selectionModel()) {
@@ -337,13 +346,10 @@ void MainWindow::disconnectSftp() {
     }
     rightRemoteWritable_ = false;
     m_remoteWriteabilityCache_.clear();
+    ++m_remoteWriteabilityProbeSeq_;
     m_activeSessionOptions_.reset();
     m_sessionNoHostVerification_ = false;
     updateHostPolicyRiskBanner();
-    if (actConnect_)
-        actConnect_->setEnabled(true);
-    if (actDisconnect_)
-        actDisconnect_->setEnabled(false);
     if (actDownloadF7_)
         actDownloadF7_->setEnabled(false);
     if (actUploadRight_)
@@ -369,13 +375,94 @@ void MainWindow::disconnectSftp() {
         actChooseRight_->setEnabled(true);
         actChooseRight_->setToolTip(actChooseRight_->text());
     }
-    statusBar()->showMessage(tr("Disconnected"), 3000);
+    if (rightView_)
+        rightView_->setEnabled(true);
     setWindowTitle(tr("OpenSCP — local/local"));
     updateDeleteShortcutEnables();
+    statusBar()->showMessage(
+        tr("Disconnecting… waiting for active transfers to stop"), 0);
+    constexpr int kDisconnectWatchdogMs = 25000;
+    QTimer::singleShot(kDisconnectWatchdogMs, this, [this, disconnectSeq]() {
+        if (!m_isDisconnecting || disconnectSeq != m_disconnectSeq_)
+            return;
+        statusBar()->showMessage(
+            tr("Disconnect timeout reached; forcing local mode while cleanup "
+               "continues"),
+            5000);
+        completeDisconnectSftp(disconnectSeq, true);
+    });
+
+    // Stop transfer workers off the UI thread; clearClient() may need to join
+    // active workers and can block while they unwind.
+    if (transferMgr_) {
+        QPointer<MainWindow> self(this);
+        TransferManager *mgr = transferMgr_;
+        std::thread([self, mgr, disconnectSeq]() {
+            try {
+                mgr->clearClient();
+            } catch (...) {
+                // Best effort: continue UI teardown even if queue cleanup
+                // throws unexpectedly.
+            }
+            QObject *app = QCoreApplication::instance();
+            if (!app)
+                return;
+            QMetaObject::invokeMethod(
+                app,
+                [self, disconnectSeq]() {
+                    if (!self)
+                        return;
+                    if (disconnectSeq == self->m_disconnectSeq_ &&
+                        self->m_transferCleanupInProgress_) {
+                        self->m_transferCleanupInProgress_ = false;
+                        self->m_transferCleanupStartedAtMs_ = 0;
+                        if (!self->m_isDisconnecting && !self->rightIsRemote_) {
+                            if (self->actConnect_)
+                                self->actConnect_->setToolTip(
+                                    self->actConnect_->text());
+                            self->statusBar()->showMessage(
+                                tr("Background transfer cleanup finished"),
+                                3000);
+                        }
+                    }
+                    self->completeDisconnectSftp(disconnectSeq, false);
+                },
+                Qt::QueuedConnection);
+        }).detach();
+        return;
+    }
+
+    m_transferCleanupInProgress_ = false;
+    m_transferCleanupStartedAtMs_ = 0;
+    completeDisconnectSftp(disconnectSeq, false);
+}
+
+void MainWindow::completeDisconnectSftp(quint64 disconnectSeq, bool forced) {
+    if (!m_isDisconnecting || disconnectSeq != m_disconnectSeq_)
+        return;
+    if (sftp_)
+        sftp_->disconnect();
+    sftp_.reset();
+    if (actConnect_) {
+        actConnect_->setEnabled(true);
+        actConnect_->setToolTip(actConnect_->text());
+    }
 
     // Per spec: non‑modal Site Manager after disconnect (if enabled), without
     // blocking UI
     m_isDisconnecting = false;
+    if (forced) {
+        statusBar()->showMessage(
+            tr("Disconnected (transfer cleanup still finishing in background)"),
+            5000);
+    } else {
+        statusBar()->showMessage(tr("Disconnected"), 3000);
+    }
+    if (m_pendingCloseAfterDisconnect_) {
+        m_pendingCloseAfterDisconnect_ = false;
+        QTimer::singleShot(0, this, [this] { close(); });
+        return;
+    }
     if (!QCoreApplication::closingDown() && m_openSiteManagerOnDisconnect) {
         QTimer::singleShot(0, this, [this] { showSiteManagerNonModal(); });
     }
@@ -690,6 +777,18 @@ void MainWindow::onOneTimeFinished(int r) {
 void MainWindow::startSftpConnect(
     openscp::SessionOptions opt,
     std::optional<PendingSiteSaveRequest> saveRequest) {
+    if (m_transferCleanupInProgress_) {
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        const int elapsedSec =
+            (m_transferCleanupStartedAtMs_ > 0)
+                ? int((nowMs - m_transferCleanupStartedAtMs_) / 1000)
+                : 0;
+        statusBar()->showMessage(
+            tr("Please wait: previous transfer cleanup is still running (%1s)")
+                .arg(elapsedSec),
+            4000);
+        return;
+    }
     if (m_connectInProgress_) {
         statusBar()->showMessage(tr("A connection is already in progress"),
                                  3000);

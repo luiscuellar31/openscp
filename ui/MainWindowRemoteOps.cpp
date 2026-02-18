@@ -4,6 +4,7 @@
 #include "RemoteModel.hpp"
 #include "TransferManager.hpp"
 #include "UiAlerts.hpp"
+#include "openscp/Libssh2SftpClient.hpp"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -17,6 +18,7 @@
 #include <QListView>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPointer>
 #include <QSet>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -25,6 +27,7 @@
 
 #include <functional>
 #include <string>
+#include <thread>
 #include <vector>
 
 static constexpr int NAME_COL = 0;
@@ -1330,6 +1333,7 @@ void MainWindow::invalidateRemoteWriteabilityFromError(
 // Check if the current remote directory is writable and update enables.
 void MainWindow::updateRemoteWriteability() {
     if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_) {
+        ++m_remoteWriteabilityProbeSeq_;
         rightRemoteWritable_ = false;
         m_remoteWriteabilityCache_.clear();
         applyRemoteWriteabilityActions();
@@ -1347,23 +1351,68 @@ void MainWindow::updateRemoteWriteability() {
         }
     }
 
-    // Active probe only when cache is stale/missing.
-    const QString testName =
-        ".openscp-write-test-" + QString::number(nowMs);
-    const QString testPath =
-        base.endsWith('/') ? base + testName : base + "/" + testName;
-    std::string err;
-    const bool created = sftp_->mkdir(testPath.toStdString(), err, 0755);
-    if (created) {
-        std::string derr;
-        sftp_->removeDir(testPath.toStdString(), derr);
-        rightRemoteWritable_ = true;
-    } else {
-        rightRemoteWritable_ = false;
+    if (!m_activeSessionOptions_.has_value()) {
+        // Without session options we cannot probe off-thread safely.
+        applyRemoteWriteabilityActions();
+        return;
     }
-    m_remoteWriteabilityCache_.insert(
-        base, RemoteWriteabilityCacheEntry{rightRemoteWritable_, nowMs});
-    if (m_remoteWriteabilityCache_.size() > 256)
-        m_remoteWriteabilityCache_.clear();
+
+    // Keep UI responsive: optimistic state while background probe runs.
+    rightRemoteWritable_ =
+        (it != m_remoteWriteabilityCache_.cend()) ? it->writable : true;
     applyRemoteWriteabilityActions();
+
+    const quint64 reqId = ++m_remoteWriteabilityProbeSeq_;
+    const openscp::SessionOptions opt = *m_activeSessionOptions_;
+    QPointer<MainWindow> self(this);
+    std::thread([self, reqId, base, opt]() mutable {
+        bool probeFinished = false;
+        bool writable = false;
+
+        openscp::Libssh2SftpClient probe;
+        std::string connErr;
+        if (probe.connect(opt, connErr)) {
+            probeFinished = true;
+            const qint64 ts = QDateTime::currentMSecsSinceEpoch();
+            const QString testName =
+                ".openscp-write-test-" + QString::number(ts);
+            const QString testPath =
+                base.endsWith('/') ? base + testName : base + "/" + testName;
+            std::string err;
+            const bool created = probe.mkdir(testPath.toStdString(), err, 0755);
+            if (created) {
+                std::string derr;
+                (void)probe.removeDir(testPath.toStdString(), derr);
+                writable = true;
+            } else {
+                writable = false;
+            }
+            probe.disconnect();
+        }
+
+        QObject *app = QCoreApplication::instance();
+        if (!app)
+            return;
+        QMetaObject::invokeMethod(
+            app,
+            [self, reqId, base, probeFinished, writable]() {
+                if (!self || !probeFinished)
+                    return;
+                if (reqId != self->m_remoteWriteabilityProbeSeq_.load())
+                    return;
+                if (!self->rightIsRemote_ || !self->rightRemoteModel_)
+                    return;
+                if (self->rightRemoteModel_->rootPath() != base)
+                    return;
+
+                const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+                self->rightRemoteWritable_ = writable;
+                self->m_remoteWriteabilityCache_.insert(
+                    base, RemoteWriteabilityCacheEntry{writable, nowMs});
+                if (self->m_remoteWriteabilityCache_.size() > 256)
+                    self->m_remoteWriteabilityCache_.clear();
+                self->applyRemoteWriteabilityActions();
+            },
+            Qt::QueuedConnection);
+    }).detach();
 }
