@@ -668,14 +668,14 @@ void MainWindow::showTOfuDialog(const QString &host, const QString &alg,
     box->setWindowModality(Qt::WindowModal);
     box->setIcon(QMessageBox::Question);
     box->setWindowTitle(tr("Confirm SSH fingerprint"));
-    QString text = QString(tr("Connect to %1\\nAlgorithm: %2\\nFingerprint: "
-                              "%3\\n\\nTrust and save to known_hosts?"))
+    QString text = QString(tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
+                              "%3\n\nTrust and save to known_hosts?"))
                        .arg(host)
                        .arg(alg)
                        .arg(fp);
     if (!m_tofuCanSave_) {
-        text = QString(tr("Connect to %1\\nAlgorithm: %2\\nFingerprint: "
-                          "%3\\n\\nFingerprint cannot be saved. Connection "
+        text = QString(tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
+                          "%3\n\nFingerprint cannot be saved. Connection "
                           "allowed only this time."))
                    .arg(host)
                    .arg(alg)
@@ -754,7 +754,7 @@ void MainWindow::showOneTimeDialog(const QString &host, const QString &alg,
     box->setText(
         QString(
             tr("Could not save the fingerprint. Connect only this time without "
-               "saving?\\n\\nHost: %1\\nAlgorithm: %2\\nFingerprint: %3"))
+               "saving?\n\nHost: %1\nAlgorithm: %2\nFingerprint: %3"))
             .arg(host, alg, fp));
     box->addButton(tr("Connect without saving"), QMessageBox::YesRole);
     box->addButton(tr("Cancel"), QMessageBox::RejectRole);
@@ -1158,7 +1158,7 @@ void MainWindow::maybePersistQuickConnectSite(
     if (!issues.isEmpty()) {
         UiAlerts::warning(this, tr("Saved sites"),
                              tr("The site was saved, but some credentials "
-                                "could not be saved:\\n%1")
+                                "could not be saved:\n%1")
                                  .arg(issues.join("\n")));
     }
 

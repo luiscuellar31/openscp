@@ -44,7 +44,7 @@ static void showPersistIssues(QWidget *parent, const QStringList &issues) {
         return;
     UiAlerts::warning(parent, QObject::tr("Credentials not saved"),
                       QObject::tr("Could not save one or more credentials "
-                                  "in the secure backend:\\n%1")
+                                  "in the secure backend:\n%1")
                           .arg(issues.join("\n")));
 }
 

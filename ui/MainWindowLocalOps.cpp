@@ -901,7 +901,7 @@ void MainWindow::newFileLeft() {
     if (QFileInfo::exists(path)) {
         if (UiAlerts::question(
                 this, tr("File exists"),
-                tr("«%1» already exists.\\nOverwrite?").arg(name),
+                tr("«%1» already exists.\nOverwrite?").arg(name),
                 QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
             return;
     }

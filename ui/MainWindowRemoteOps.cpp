@@ -887,7 +887,7 @@ void MainWindow::newFileRight() {
         if (exists) {
             if (UiAlerts::question(
                     this, tr("File exists"),
-                    tr("«%1» already exists.\\nOverwrite?").arg(name),
+                    tr("«%1» already exists.\nOverwrite?").arg(name),
                     QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
                 return;
         } else if (!e.empty()) {
@@ -927,7 +927,7 @@ void MainWindow::newFileRight() {
         if (QFileInfo::exists(path)) {
             if (UiAlerts::question(
                     this, tr("File exists"),
-                    tr("«%1» already exists.\\nOverwrite?").arg(name),
+                    tr("«%1» already exists.\nOverwrite?").arg(name),
                     QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
                 return;
         }
@@ -1016,7 +1016,7 @@ void MainWindow::deleteRightSelected() {
             return;
         if (UiAlerts::warning(this, tr("Confirm delete"),
                                  tr("This will permanently delete items on the "
-                                    "remote server.\\nContinue?"),
+                                    "remote server.\nContinue?"),
                                  QMessageBox::Yes | QMessageBox::No) !=
             QMessageBox::Yes)
             return;
@@ -1221,7 +1221,7 @@ void MainWindow::changeRemotePermissions() {
     if (!sftp_->stat(path.toStdString(), st, err)) {
         UiAlerts::warning(
             this, tr("Permissions"),
-            tr("Could not read permissions.\\n%1")
+            tr("Could not read permissions.\n%1")
                 .arg(shortRemoteError(
                     err, tr("Error reading remote information."))));
         return;
@@ -1240,7 +1240,7 @@ void MainWindow::changeRemotePermissions() {
                 QFileInfo(p).fileName().isEmpty() ? p : QFileInfo(p).fileName();
             UiAlerts::critical(
                 this, tr("Permissions"),
-                tr("Could not apply permissions to \"%1\".\\n%2")
+                tr("Could not apply permissions to \"%1\".\n%2")
                     .arg(item, shortRemoteError(
                                    cerrs, tr("Error applying changes."))));
             return false;

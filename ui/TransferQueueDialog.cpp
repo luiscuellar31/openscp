@@ -27,6 +27,8 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+static constexpr int kProgressColumnWidthPx = 84;
+
 static QString statusText(TransferTask::Status s) {
     switch (s) {
     case TransferTask::Status::Queued:
@@ -479,7 +481,7 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     table_->horizontalHeader()->setSectionResizeMode(
         TransferTaskTableModel::ColStatus, QHeaderView::ResizeToContents);
     table_->horizontalHeader()->setSectionResizeMode(
-        TransferTaskTableModel::ColProgress, QHeaderView::ResizeToContents);
+        TransferTaskTableModel::ColProgress, QHeaderView::Fixed);
     table_->horizontalHeader()->setSectionResizeMode(
         TransferTaskTableModel::ColTransferred, QHeaderView::ResizeToContents);
     table_->horizontalHeader()->setSectionResizeMode(
@@ -497,7 +499,8 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     table_->horizontalHeader()->setSectionResizeMode(
         TransferTaskTableModel::ColError, QHeaderView::Stretch);
     table_->setColumnWidth(TransferTaskTableModel::ColName, 190);
-    table_->setColumnWidth(TransferTaskTableModel::ColProgress, 90);
+    table_->setColumnWidth(TransferTaskTableModel::ColProgress,
+                           kProgressColumnWidthPx);
 
     // Default visual order (without changing logical column ids).
     auto *header = table_->horizontalHeader();
@@ -1059,10 +1062,9 @@ void TransferQueueDialog::loadUiState() {
         if (!header.isEmpty())
             table_->horizontalHeader()->restoreState(header);
         table_->horizontalHeader()->setSectionResizeMode(
-            TransferTaskTableModel::ColProgress, QHeaderView::Interactive);
-        if (table_->columnWidth(TransferTaskTableModel::ColProgress) < 130) {
-            table_->setColumnWidth(TransferTaskTableModel::ColProgress, 150);
-        }
+            TransferTaskTableModel::ColProgress, QHeaderView::Fixed);
+        table_->setColumnWidth(TransferTaskTableModel::ColProgress,
+                               kProgressColumnWidthPx);
     }
 
     const int filter =

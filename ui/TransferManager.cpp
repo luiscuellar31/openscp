@@ -507,7 +507,7 @@ void TransferManager::schedule() {
         UiAlerts::configure(msg, Qt::ApplicationModal);
         msg.setWindowTitle(tr("Conflict"));
         // Clarify which side is local vs remote for better UX
-        msg.setText(tr("«%1» already exists.\\nLocal: %2\\nRemote: %3")
+        msg.setText(tr("«%1» already exists.\nLocal: %2\nRemote: %3")
                         .arg(name, srcInfo, dstInfo));
         QAbstractButton *btResume =
             msg.addButton(tr("Resume"), QMessageBox::ActionRole);
