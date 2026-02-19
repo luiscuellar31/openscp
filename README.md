@@ -58,7 +58,7 @@ open build/OpenSCP.app
 - Real parallel transfers with isolated worker connections.
 - Pause/resume/cancel/retry, per-task/global limits, and resume support.
 - Status-aware queue actions: controls are enabled only when the selected task state allows that action (for example, retry for `Error`/`Canceled`, resume for `Paused`).
-- Queue UI with per-row progress bars, filters, and detailed columns (`Speed`, `ETA`, `Transferred`, `Error`, etc.).
+- Queue UI with per-row progress percentages, filters, and detailed columns (`Speed`, `ETA`, `Transferred`, `Error`, etc.).
 - Context actions like retry selected, open destination, copy paths, and cleanup policies.
 - Queue window/layout/filter persistence.
 - Transfers use interruptible worker sessions and bounded socket read/write waits to avoid indefinite hangs during stalled network conditions.
@@ -90,6 +90,7 @@ open build/OpenSCP.app
 
 - Connection dialog improved (clearer inputs, inline key/known_hosts selectors, show/hide password fields).
 - Settings redesigned into `General` and `Advanced` sections.
+- Settings keeps controls visible while resizing (minimum size + scrollable pages).
 - One-click reset for default main-window layout/sizes in Settings.
 - Permissions dialog includes octal preview + common presets.
 - About dialog includes diagnostics copy support and friendlier fallback messaging.

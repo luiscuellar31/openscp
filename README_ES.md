@@ -57,7 +57,7 @@ open build/OpenSCP.app
 
 - Transferencias paralelas reales con conexiones aisladas por worker.
 - Pausar/reanudar/cancelar/reintentar, limites por tarea/global y soporte de resume.
-- UI de cola con barras de progreso por fila, filtros y columnas detalladas (`Speed`, `ETA`, `Transferred`, `Error`, etc.).
+- UI de cola con porcentaje de progreso por fila, filtros y columnas detalladas (`Speed`, `ETA`, `Transferred`, `Error`, etc.).
 - Acciones de contexto como reintentar seleccionadas, abrir destino, copiar rutas y politicas de limpieza.
 - Persistencia de ventana/layout/filtro de la cola.
 
@@ -88,6 +88,7 @@ open build/OpenSCP.app
 
 - Dialogo de conexion mejorado (campos mas claros, selectores inline para key/known_hosts, mostrar/ocultar contrasena).
 - Ajustes redisenados en secciones `General` y `Advanced`.
+- Ajustes mantiene los controles visibles al redimensionar (tamano minimo + paginas con scroll).
 - Accion de un clic en Ajustes para restaurar layout/tamanos por defecto de la ventana principal.
 - Dialogo de permisos con vista octal y presets comunes.
 - Dialogo Acerca de con copia de diagnostico y mensajes fallback mas amigables.
