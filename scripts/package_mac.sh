@@ -88,7 +88,7 @@ discover_macdeployqt() {
   fi
   # 2) Qt6_DIR based lookup
   if [[ -n "${Qt6_DIR:-}" ]]; then
-    local cand="${Qt6_DIR}/../../bin/macdeployqt"
+    local cand="${Qt6_DIR}/../../../bin/macdeployqt"
     if [[ -x "$cand" ]]; then
       # Avoid conda/macdeployqt
       local real
@@ -154,16 +154,42 @@ detect_qt_prefix_from_home() {
   local qt6_dir
   qt6_dir="$(detect_qt6_dir_from_home || true)"
   if [[ -n "$qt6_dir" ]]; then
-    (cd "$qt6_dir/../.." && pwd)
+    (cd "$qt6_dir/../../.." && pwd)
   fi
 }
 
 detect_version() {
   # Try to extract from top-level CMakeLists.txt: project(... VERSION x.y.z)
   local ver
-  ver=$(sed -n 's/^project(.*VERSION[[:space:]]*\([0-9][0-9.]*\).*/\1/p' "${REPO_DIR}/CMakeLists.txt" | head -n1 || true)
+  ver=$(
+    awk '
+      BEGIN { in_project=0; buf="" }
+      {
+        if (!in_project && $0 ~ /^[[:space:]]*project[[:space:]]*\(/) {
+          in_project=1;
+          buf=$0;
+        } else if (in_project) {
+          buf=buf " " $0;
+        }
+        if (in_project && index($0, ")") > 0) {
+          if (match(buf, /VERSION[[:space:]]*([0-9]+(\.[0-9]+)*)/, m)) {
+            print m[1];
+            exit;
+          }
+          in_project=0;
+          buf="";
+        }
+      }
+    ' "${REPO_DIR}/CMakeLists.txt" | head -n1 || true
+  )
   if [[ -z "$ver" ]]; then ver="0.0.0"; fi
   echo "$ver"
+}
+
+detect_bundle_version() {
+  local plist="$1"
+  [[ -f "$plist" ]] || return 0
+  /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist" 2>/dev/null || true
 }
 
 join_archs() {
@@ -465,11 +491,35 @@ create_app_zip() {
 }
 
 create_pkg() {
-  local pkg_path="$1"; local src_app="$2"
-  ensure_cmd productbuild
+  local pkg_path="$1"; local src_app="$2"; local pkg_version="$3"
+  ensure_cmd pkgbuild
   rm -f "$pkg_path"
-  # Unsigned component package for local distribution/testing.
-  productbuild --component "$src_app" /Applications "$pkg_path"
+  # Build from a raw root payload instead of --component to avoid relocatable
+  # bundle/version checks that can skip install on dev machines with a local
+  # build/OpenSCP.app present.
+  local staging component_pkg pkg_id
+  local component_plist
+  staging="$(mktemp -d)"
+  component_pkg="${staging}/component.pkg"
+  component_plist="${staging}/components.plist"
+  pkg_id="${PKG_IDENTIFIER:-com.luiscuellar.openscp}"
+  cp -R "$src_app" "$staging/"
+  pkgbuild --analyze --root "$staging" "$component_plist" >/dev/null
+  # Disable bundle relocation/version checks for the main app so local dev
+  # copies (e.g., build/OpenSCP.app) do not cause Installer to skip payload.
+  if [[ -x /usr/libexec/PlistBuddy ]]; then
+    /usr/libexec/PlistBuddy -c 'Set :0:BundleIsVersionChecked false' "$component_plist" || true
+    /usr/libexec/PlistBuddy -c 'Set :0:BundleIsRelocatable false' "$component_plist" || true
+  fi
+  pkgbuild \
+    --root "$staging" \
+    --component-plist "$component_plist" \
+    --identifier "$pkg_id" \
+    --version "$pkg_version" \
+    --install-location /Applications \
+    "$component_pkg"
+  mv "$component_pkg" "$pkg_path"
+  rm -rf "$staging"
 }
 
 notarize_and_staple() {
@@ -515,9 +565,8 @@ main() {
     unset missing_notar
   fi
 
-  # Determine app version (from CMake), architecture suffix and requested outputs.
+  # Determine architecture suffix and requested outputs.
   local version arch_suffix selected_formats
-  version="${APP_VERSION:-$(detect_version)}"
   # Artifact suffix reflects requested architectures (e.g., arm64, x86_64, or arm64+x86_64)
   arch_suffix="$(join_archs "$ARCHS")"
   selected_formats="$(normalize_formats "$PACKAGE_FORMATS")"
@@ -542,7 +591,7 @@ main() {
   fi
   local qt_prefix
   if [[ -d "$qt_cfg_dir" ]]; then
-    qt_prefix="$(cd "$qt_cfg_dir/../.." && pwd)"
+    qt_prefix="$(cd "$qt_cfg_dir/../../.." && pwd)"
     log "Using Qt from: $qt_prefix"
     cmake -S "$REPO_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_PREFIX_PATH="$qt_prefix" -DQt6_DIR="$qt_cfg_dir" \
@@ -560,6 +609,16 @@ main() {
 
   # Expect CMake to have produced build/OpenSCP.app already
   [[ -d "$APP_DIR" ]] || die "App bundle not found at $APP_DIR. Build it first: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j"
+
+  # Use bundle version when available; fallback to CMake project version.
+  version="$(detect_bundle_version "$INFO_PLIST_OUT")"
+  if [[ -z "$version" ]]; then
+    version="$(detect_version)"
+  fi
+  if [[ -n "${APP_VERSION:-}" && "${APP_VERSION}" != "$version" ]]; then
+    warn "Ignoring APP_VERSION=${APP_VERSION}; using project version ${version} for artifact names."
+  fi
+  log "Packaging version: ${version}"
 
   # Ensure bundle key paths exist (Resources/Frameworks/PlugIns)
   mkdir -p "$RESOURCES_DIR" "$FRAMEWORKS_DIR" "$PLUGINS_DIR"
@@ -696,7 +755,7 @@ main() {
     local pkg_path
     pkg_path="${DIST_DIR}/${APP_NAME}-${version}-${arch_suffix}-UNSIGNED.pkg"
     log "Creating PKG: $pkg_path"
-    create_pkg "$pkg_path" "$APP_DIR"
+    create_pkg "$pkg_path" "$APP_DIR" "$version"
     write_sha256 "$pkg_path"
     produced+=("$pkg_path")
     if [[ "${SKIP_CODESIGN:-0}" != "1" && "${SKIP_NOTARIZATION:-0}" != "1" ]]; then

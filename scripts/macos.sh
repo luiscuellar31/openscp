@@ -53,7 +53,7 @@ resolve_qt_paths() {
   if [[ -n "${QT_PREFIX:-}" ]]; then
     EFFECTIVE_QT_PREFIX="${QT_PREFIX}"
   elif [[ -n "$qt6_dir" && -d "$qt6_dir" ]]; then
-    EFFECTIVE_QT_PREFIX="$(cd "$qt6_dir/../.." && pwd)"
+    EFFECTIVE_QT_PREFIX="$(cd "$qt6_dir/../../.." && pwd)"
   else
     EFFECTIVE_QT_PREFIX=""
   fi
