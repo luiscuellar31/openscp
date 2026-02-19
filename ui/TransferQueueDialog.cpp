@@ -17,15 +17,11 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QMenu>
-#include <QPainter>
 #include <QPushButton>
 #include <QSet>
 #include <QSettings>
 #include <QSortFilterProxyModel>
 #include <QSpinBox>
-#include <QStyle>
-#include <QStyleOptionProgressBar>
-#include <QStyledItemDelegate>
 #include <QTableView>
 #include <QToolButton>
 #include <QUrl>
@@ -418,37 +414,6 @@ class TransferTaskFilterProxyModel final : public QSortFilterProxyModel {
     int mode_ = 0;
 };
 
-class ProgressBarDelegate final : public QStyledItemDelegate {
-    public:
-    explicit ProgressBarDelegate(QObject *parent = nullptr)
-        : QStyledItemDelegate(parent) {}
-
-    void paint(QPainter *painter, const QStyleOptionViewItem &option,
-               const QModelIndex &index) const override {
-        const int progress = qBound(
-            0, index.data(TransferTaskTableModel::ProgressRole).toInt(), 100);
-
-        QStyleOptionProgressBar bar;
-        bar.rect = option.rect.adjusted(4, 4, -4, -4);
-        bar.minimum = 0;
-        bar.maximum = 100;
-        bar.progress = progress;
-        bar.text = QString::number(progress) + "%";
-        bar.textVisible = true;
-        bar.textAlignment = Qt::AlignCenter;
-        bar.state = option.state;
-        bar.direction = option.direction;
-        bar.fontMetrics = option.fontMetrics;
-
-        if (option.widget)
-            option.widget->style()->drawControl(QStyle::CE_ProgressBar, &bar,
-                                                painter, option.widget);
-        else
-            QApplication::style()->drawControl(QStyle::CE_ProgressBar, &bar,
-                                               painter, nullptr);
-    }
-};
-
 TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     : QDialog(parent), mgr_(mgr) {
     setWindowTitle(tr("Transfer queue"));
@@ -514,7 +479,7 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     table_->horizontalHeader()->setSectionResizeMode(
         TransferTaskTableModel::ColStatus, QHeaderView::ResizeToContents);
     table_->horizontalHeader()->setSectionResizeMode(
-        TransferTaskTableModel::ColProgress, QHeaderView::Interactive);
+        TransferTaskTableModel::ColProgress, QHeaderView::ResizeToContents);
     table_->horizontalHeader()->setSectionResizeMode(
         TransferTaskTableModel::ColTransferred, QHeaderView::ResizeToContents);
     table_->horizontalHeader()->setSectionResizeMode(
@@ -532,9 +497,7 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     table_->horizontalHeader()->setSectionResizeMode(
         TransferTaskTableModel::ColError, QHeaderView::Stretch);
     table_->setColumnWidth(TransferTaskTableModel::ColName, 190);
-    table_->setColumnWidth(TransferTaskTableModel::ColProgress, 150);
-    table_->setItemDelegateForColumn(TransferTaskTableModel::ColProgress,
-                                     new ProgressBarDelegate(table_));
+    table_->setColumnWidth(TransferTaskTableModel::ColProgress, 90);
 
     // Default visual order (without changing logical column ids).
     auto *header = table_->horizontalHeader();
