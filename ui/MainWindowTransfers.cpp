@@ -141,8 +141,10 @@ void MainWindow::runRemoteDownloadPrescan(
                     if (!self || !self->m_remoteScanProgress_)
                         return;
                     self->m_remoteScanProgress_->setLabelText(
-                        self->tr("Scanning remote folders... %1 folders, %2 "
-                                 "files found")
+                        QCoreApplication::translate(
+                            "MainWindow",
+                            "Scanning remote folders... %1 folders, %2 "
+                            "files found")
                             .arg(dirs)
                             .arg(files));
                 },
@@ -212,14 +214,17 @@ void MainWindow::runRemoteDownloadPrescan(
 
                 if (canceled) {
                     self->statusBar()->showMessage(
-                        self->tr("Remote scan canceled"), 4000);
+                        QCoreApplication::translate("MainWindow",
+                                                    "Remote scan canceled"),
+                        4000);
                     return;
                 }
 
                 if (!self->rightIsRemote_ || !self->sftp_ ||
                     !self->transferMgr_) {
                     self->statusBar()->showMessage(
-                        self->tr(
+                        QCoreApplication::translate(
+                            "MainWindow",
                             "Remote scan finished, but the session is no "
                             "longer active"),
                         5000);
@@ -233,17 +238,27 @@ void MainWindow::runRemoteDownloadPrescan(
                 }
 
                 QString msg =
-                    dragAndDrop ? self->tr("Queued: %1 downloads (DND)")
-                                : self->tr("Queued: %1 downloads");
+                    dragAndDrop
+                        ? QCoreApplication::translate(
+                              "MainWindow", "Queued: %1 downloads (DND)")
+                        : QCoreApplication::translate("MainWindow",
+                                                      "Queued: %1 downloads");
                 msg = msg.arg(enq);
                 if (skipped > 0)
                     msg += QString("  |  ") +
-                           self->tr("Skipped invalid: %1").arg(skipped);
+                           QCoreApplication::translate(
+                               "MainWindow", "Skipped invalid: %1")
+                               .arg(skipped);
                 if (listFailures > 0)
                     msg += QString("  |  ") +
-                           self->tr("Folders not listed: %1").arg(listFailures);
+                           QCoreApplication::translate(
+                               "MainWindow", "Folders not listed: %1")
+                               .arg(listFailures);
                 if (listFailures > 0 && !lastError.isEmpty())
-                    msg += "\n" + self->tr("Last error: ") + lastError;
+                    msg += "\n" +
+                           QCoreApplication::translate("MainWindow",
+                                                       "Last error: ") +
+                           lastError;
                 self->statusBar()->showMessage(msg, 6000);
                 if (enq > 0)
                     self->maybeShowTransferQueue();

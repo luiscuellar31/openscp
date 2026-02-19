@@ -280,25 +280,34 @@ void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
                 QString msg;
                 if (deleteSource) {
                     msg = QString(
-                              self->tr("Moved OK: %1  |  Failed: %2  |  "
-                                       "Skipped: %3"))
+                              QCoreApplication::translate(
+                                  "MainWindow",
+                                  "Moved OK: %1  |  Failed: %2  |  "
+                                  "Skipped: %3"))
                               .arg(ok)
                               .arg(fail)
                               .arg(skippedCount);
                 } else if (skippedCount > 0) {
                     msg = QString(
-                              self->tr("Copied: %1  |  Failed: %2  |  "
-                                       "Skipped: %3"))
+                              QCoreApplication::translate(
+                                  "MainWindow",
+                                  "Copied: %1  |  Failed: %2  |  "
+                                  "Skipped: %3"))
                               .arg(ok)
                               .arg(fail)
                               .arg(skippedCount);
                 } else {
-                    msg = QString(self->tr("Copied: %1  |  Failed: %2"))
+                    msg = QString(QCoreApplication::translate(
+                                      "MainWindow",
+                                      "Copied: %1  |  Failed: %2"))
                               .arg(ok)
                               .arg(fail);
                 }
                 if (fail > 0 && !lastError.isEmpty()) {
-                    msg += "\n" + self->tr("Last error: ") + lastError;
+                    msg += "\n" +
+                           QCoreApplication::translate("MainWindow",
+                                                       "Last error: ") +
+                           lastError;
                 }
                 self->statusBar()->showMessage(msg, 6000);
 
