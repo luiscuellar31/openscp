@@ -14,6 +14,7 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSettings>
 #include <QSpinBox>
 #include <QStackedWidget>
@@ -30,8 +31,8 @@ static QString defaultDownloadDirPath() {
 
 SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle(tr("Settings"));
-    resize(780, 520);
-    setMinimumSize(560, 420);
+    resize(860, 620);
+    setMinimumSize(760, 560);
 
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(12, 12, 12, 12);
@@ -64,7 +65,10 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     auto createFormPage = [pages,
                            sectionList](const QString &title,
                                         QFormLayout *&outForm) -> QWidget * {
-        auto *page = new QWidget(pages);
+        auto *scroll = new QScrollArea(pages);
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        auto *page = new QWidget(scroll);
         auto *pageLay = new QVBoxLayout(page);
         pageLay->setContentsMargins(12, 12, 12, 12);
         pageLay->setSpacing(8);
@@ -75,7 +79,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         form->setVerticalSpacing(8);
         pageLay->addLayout(form);
         pageLay->addStretch(1);
-        pages->addWidget(page);
+        scroll->setWidget(page);
+        pages->addWidget(scroll);
         sectionList->addItem(title);
         outForm = form;
         return page;
