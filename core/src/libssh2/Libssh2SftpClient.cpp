@@ -1594,7 +1594,18 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             NULL, // public key path (NULL: derived from the private key)
             opt.private_key_path->c_str(), passphrase);
         if (rc != 0) {
-            err = "Key authentication failed";
+            char *emsgPtr = nullptr;
+            int emlen = 0;
+            (void)libssh2_session_last_error(session_, &emsgPtr, &emlen, 0);
+            const std::string lastErr =
+                (emsgPtr && emlen > 0) ? std::string(emsgPtr, (size_t)emlen)
+                                       : std::string();
+            const long lastErrno = libssh2_session_last_errno(session_);
+            err = std::string("Key authentication failed") +
+                  (lastErr.empty() ? std::string()
+                                   : (std::string(" — ") + lastErr)) +
+                  " [rc=" + std::to_string(rc) +
+                  ", errno=" + std::to_string(lastErrno) + "]";
             return false;
         }
     } else {

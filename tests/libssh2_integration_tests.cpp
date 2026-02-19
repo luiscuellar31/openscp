@@ -164,8 +164,8 @@ int main() {
     openscp::Libssh2SftpClient client;
     std::string err;
 
-    t.check(client.connect(opt, err),
-            std::string("connect should succeed: ") + err);
+    const bool connected = client.connect(opt, err);
+    t.check(connected, std::string("connect should succeed: ") + err);
     if (t.failures == 0) {
         err.clear();
         t.check(client.mkdir(remoteSuiteDir, err, 0755),

@@ -90,6 +90,10 @@ jobs:
           sudo ssh-keygen -A
 
           sudo useradd --create-home --shell /bin/bash openscp_it || true
+          # Ubuntu images may leave service users locked; unlock for pubkey auth.
+          sudo usermod -U openscp_it || true
+          sudo passwd -d openscp_it || true
+          sudo chage -E -1 openscp_it || true
           ssh-keygen -t ed25519 -N "" -f /tmp/openscp_it_linux_ed25519 -q
           sudo install -d -o openscp_it -g openscp_it -m 700 /home/openscp_it/.ssh
           sudo install -o openscp_it -g openscp_it -m 600 /tmp/openscp_it_linux_ed25519.pub /home/openscp_it/.ssh/authorized_keys
@@ -138,6 +142,19 @@ jobs:
 
           if ! (echo > /dev/tcp/127.0.0.1/2222) >/dev/null 2>&1; then
             echo "SFTP integration server did not start"
+            sudo cat /tmp/openscp_sshd.log || true
+            exit 1
+          fi
+
+          if ! ssh \
+            -i /tmp/openscp_it_linux_ed25519 \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -p 2222 \
+            openscp_it@127.0.0.1 true; then
+            echo "SFTP auth smoke test failed"
             sudo cat /tmp/openscp_sshd.log || true
             exit 1
           fi
