@@ -1,42 +1,68 @@
-# Local macOS Packaging (Unsigned DMG)
+# Local macOS Packaging (Unsigned app/pkg/dmg)
 
-This guide explains how to build the `.app` and create an unsigned `.dmg` locally for testing or for sharing with users who can open it manually on macOS.
+This guide explains how to build the `.app` and create unsigned macOS artifacts (`.zip` app, `.pkg`, `.dmg`) for local testing/distribution.
 
 - Target app bundle: `build/OpenSCP.app`
-- Output artifact: `dist/OpenSCP-<version>-<arch>-UNSIGNED.dmg` (where `<arch>` is `arm64`, `x86_64`, or `arm64+x86_64`)
-- Script: `scripts/package_mac.sh`
+- Output artifacts:
+    - `dist/OpenSCP-<version>-<arch>-UNSIGNED.zip` (app bundle zipped)
+    - `dist/OpenSCP-<version>-<arch>-UNSIGNED.pkg`
+    - `dist/OpenSCP-<version>-<arch>-UNSIGNED.dmg`
+- Scripts: `scripts/macos.sh` (simple entrypoint) and `scripts/package_mac.sh` (advanced)
 
 ## Prerequisites
 
-- Qt 6.8.3 (official installer), not Conda. The script prioritizes:
-  - `/Users/luiscuellar/Qt/6.8.3/macos/bin/macdeployqt`
-  - or `Qt6_DIR=/Users/luiscuellar/Qt/6.8.3/macos/lib/cmake/Qt6`
+- Qt 6.x (official installer), not Conda. The script prioritizes:
+    - `QT_PREFIX` / `Qt6_DIR` if provided
+    - or auto-detection under `$HOME/Qt/<version>/macos`
+- If your Qt is in another location, set:
+    - `QT_PREFIX=/path/to/Qt/<version>/macos`
+    - or `Qt6_DIR=/path/to/Qt/<version>/macos/lib/cmake/Qt6`
 - Homebrew libraries for build/runtime (copied into the bundle and rewritten):
-  - `brew install libssh2 openssl@3`
+    - `brew install libssh2 openssl@3`
 - CMake 3.22+, a C++20 compiler.
 
 Tip: The script clears env vars like `QT_PLUGIN_PATH` and `DYLD_*` to avoid pulling plugins from Conda/Homebrew.
+
+## Daily Development Workflow
+
+Use `scripts/macos.sh` for a consistent local loop:
+
+```bash
+# configure + build + open app bundle
+./scripts/macos.sh dev
+
+# step-by-step
+./scripts/macos.sh configure
+./scripts/macos.sh build
+./scripts/macos.sh run
+```
+
+`run` opens `build/OpenSCP.app`. If LaunchServices fails, the script falls back to running the app binary directly with Qt env hints.
 
 ## Build & Package (Unsigned)
 
 ```bash
 # From the repository root
-export SKIP_CODESIGN=1
-export SKIP_NOTARIZATION=1
-./scripts/package_mac.sh
+./scripts/macos.sh app   # ZIP containing OpenSCP.app
+./scripts/macos.sh pkg   # PKG installer
+./scripts/macos.sh dmg   # DMG
+# all:
+./scripts/macos.sh dist
 ```
 
 What it does:
 - Builds Release with CMake and produces `build/OpenSCP.app`.
 - Runs `macdeployqt` to bundle Qt frameworks/plugins.
 - Bundles non‑Qt deps (`libssh2`, `libcrypto`) into `Contents/Frameworks` and fixes `install_name_tool` + `@rpath`.
-- Creates `dist/OpenSCP-<version>-<arch>-UNSIGNED.dmg` and `… .sha256`.
-- Prints a “GitHub Release Notes” block with usage instructions and SHA256.
+- Creates the selected artifact(s) under `dist/` plus `*.sha256`.
+- Prints release notes snippet when DMG is generated.
 
-## DMG and SHA256
+## Artifacts and SHA256
 
-- Artifact: `dist/OpenSCP-<version>-<arch>-UNSIGNED.dmg`
-- Checksum: `dist/OpenSCP-<version>-<arch>-UNSIGNED.dmg.sha256`
+- App ZIP: `dist/OpenSCP-<version>-<arch>-UNSIGNED.zip`
+- PKG: `dist/OpenSCP-<version>-<arch>-UNSIGNED.pkg`
+- DMG: `dist/OpenSCP-<version>-<arch>-UNSIGNED.dmg`
+- Checksum: same file with `.sha256` suffix.
 
 ## Architectures (Intel vs Apple Silicon)
 
@@ -50,11 +76,9 @@ export CMAKE_OSX_ARCHITECTURES=x86_64
 export CMAKE_OSX_ARCHITECTURES='arm64;x86_64'
 
 # Make sure Qt matches your target arch; e.g. for Intel:
-export Qt6_DIR=/path/to/Qt/6.8.3/macos/lib/cmake/Qt6
+export Qt6_DIR=/path/to/Qt/<version>/macos/lib/cmake/Qt6
 
-export SKIP_CODESIGN=1
-export SKIP_NOTARIZATION=1
-./scripts/package_mac.sh
+./scripts/macos.sh dist
 ```
 
 Tip: When switching architectures, clean the build directory (`rm -rf build`) to avoid cache mismatches.
@@ -76,7 +100,7 @@ The script also validates and corrects linkage, but you can check manually:
 
 ```bash
 otool -L build/OpenSCP.app/Contents/MacOS/OpenSCP | \
-  grep -E 'libssh2|libcrypto|libssl|@executable_path'
+    grep -E 'libssh2|libcrypto|libssl|@executable_path'
 ```
 
 Expect library references to be `@executable_path/../Frameworks/...`.
@@ -84,15 +108,15 @@ Expect library references to be `@executable_path/../Frameworks/...`.
 ## Troubleshooting
 
 - Script refuses `macdeployqt` from Conda:
-  - Set `Qt6_DIR=/Users/luiscuellar/Qt/6.8.3/macos/lib/cmake/Qt6` or ensure the official Qt path exists at `/Users/luiscuellar/Qt/6.8.3/macos/bin/macdeployqt`.
+    - Set `Qt6_DIR=$HOME/Qt/<version>/macos/lib/cmake/Qt6` or set `QT_PREFIX=$HOME/Qt/<version>/macos`.
 - Missing `libssh2`/`openssl@3`:
-  - `brew install libssh2 openssl@3`
+    - `brew install libssh2 openssl@3`
 - Still seeing Homebrew/Conda absolute paths in the binary:
-  - Re‑run the script; it rewrites to `@executable_path/../Frameworks` where possible.
+    - Re‑run the script; it rewrites to `@executable_path/../Frameworks` where possible.
 
 ## Later: Signing/Notarization
 
-This flow intentionally skips signing/notarization. If you later obtain a Developer ID certificate and an Apple API key, you can remove the `SKIP_*` flags and configure:
+This flow intentionally skips signing/notarization. If you later obtain a Developer ID certificate and an Apple API key, run `scripts/package_mac.sh` directly and configure:
 - `APPLE_IDENTITY`, `APPLE_TEAM_ID`
 - `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, `APPLE_API_KEY_P8`
 

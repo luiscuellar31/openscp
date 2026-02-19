@@ -1,141 +1,34 @@
 <div align="center">
-	<img src="assets/program/icon-openscp-2048.png" alt="OpenSCP icon" width="128">
-	<h1 align="center">OpenSCP</h1>
+    <img src="assets/program/icon-openscp-2048.png" alt="OpenSCP icon" width="128">
+    <h1 align="center">OpenSCP</h1>
 
 <p>
-	<strong>Two‑panel SFTP client focused on simplicity and security</strong>
+    <strong>Two-panel SFTP client focused on simplicity and security</strong>
 </p>
 
 <p>
-	<a href="README_ES.md"><strong>Leer en Español</strong></a>
+    <a href="README_ES.md"><strong>Leer en Espanol</strong></a>
 </p>
 
 <p>
-	<strong>OpenSCP</strong> is a <em>two-panel commander</em>-style file explorer written in <strong>C++/Qt</strong>, with <strong>SFTP</strong> support (libssh2 + OpenSSL). It aims to be a lightweight, cross-platform alternative to tools like WinSCP, focused on <strong>simplicity</strong>, <strong>security</strong>, and <strong>extensibility</strong>.
+    <strong>OpenSCP</strong> is a two-panel commander-style file explorer written in <strong>C++/Qt</strong>, with <strong>SFTP</strong> support (libssh2 + OpenSSL). It aims to be a lightweight alternative to tools like WinSCP, focused on <strong>security</strong>, <strong>clarity</strong>, and <strong>extensibility</strong>.
 </p>
 
-  <br>
+<br>
 
-  <img src="assets/screenshots/screenshot-main-window.png" alt="OpenSCP main window showing dual panels and transfer queue" width="900">
+<img src="assets/screenshots/screenshot-main-window.png" alt="OpenSCP main window showing dual panels and transfer queue" width="900">
 
 </div>
 
-## Releases
+## Releases and Branches
 
-Looking for a fixed/stable build? Download tagged releases:
+Stable tagged releases:
 https://github.com/luiscuellar31/openscp/releases
 
-- `main`: tested, stable code (moves between releases)
-- `dev`: active development (PRs should target dev)
+- `main`: tested and stable branch
+- `dev`: active development branch (PR target)
 
-## Current Features (v0.6.0)
-
-### Dual panels (local ↔ remote)
-
-* Left and right panels navigate independently.
-* Drag-and-drop between panels to copy/move.
-* Remote context menu: Download, Upload, Rename, Delete, New Folder, Change Permissions (recursive).
-* Sortable columns with automatic width adjustment.
-
-### Transfers
-
-* **Visible queue** with pause/resume/cancel/retry.
-* Per-file resume; speed limits (global and per task).
-* Automatic reconnection with backoff.
-* Global and per-file progress.
-* Timestamps: preserves remote **mtime** on download (UI shows **local time**, operations use **UTC**).
-* Unknown sizes: end-to-end flag; the UI shows “—” with tooltip “Size: unknown”.
-
-### SFTP (libssh2)
-
-* Authentication: user/password, private key (with passphrase), **keyboard-interactive** (OTP/2FA), **ssh-agent**.
-* Host-key verification policies:
-
-  * **Strict**
-  * **Accept new (TOFU)**
-  * **Disabled**
-* **Non-modal TOFU** (macOS/Linux/Windows): no `exec()`, no blocking; the “Connecting…” window never steals focus.
-* Robust `known_hosts`:
-
-  * **Atomic writes** (POSIX: `mkstemp → fsync → rename`; Windows: `FlushFileBuffers + MoveFileEx`).
-  * Strict permissions (`~/.ssh` **0700**, file **0600**).
-  * **Hashed hostnames** by default (`OpenSSH/TYPE_SHA1`); option for plain text.
-  * Default fingerprints `SHA256:<base64>` (OpenSSH style); alternative **HEX with colons** view.
-* Modern crypto:
-
-  * Excludes `ssh-dss` and `ssh-rsa` (SHA-1).
-  * Uses ED25519/ECDSA/RSA-SHA2 host keys and modern KEX/ciphers (curve25519, chacha20-poly1305, AES-GCM/CTR, HMAC-SHA-2).
-* TOFU security:
-
-  * If the fingerprint cannot be persisted, explicit confirmation is required to **“connect this time only.”**
-  * **Audit log** at `~/.openscp/openscp.auth`: host, algorithm, fingerprint, and status (`saved|skipped|save_failed|rejected`).
-* Cleanup: when deleting a site with “remove saved credentials,” its `known_hosts` entry is purged as well.
-
-### Remote → system drag-and-drop (asynchronous)
-
-* **Truly asynchronous**: the drag starts only after URLs are prepared (no UI blocking).
-* **Folders (recursive)** with structure preserved; confirmation if > **500** items or > **1 GiB** estimated.
-* **Per-batch staging**:
-
-  * Default root `~/Downloads/OpenSCP-Dragged`.
-  * Optional auto-clean on completion; deferred cleanup of batches older than **7 days** at startup.
-  * If something fails or you cancel: drag **does not** start; a clickable link to the batch is shown (not deleted).
-* Collisions & names: “`name (1).ext`” style, safe for multi-extension files and Unicode **NFC**.
-* MIME: `text/uri-list` + `application/x-openscp-staging-batch` (batch ID).
-
-### Site Manager
-
-* Server list with stored credentials.
-* Independent preferences:
-
-  * **Open at startup** (optional).
-  * **Open on disconnect** (optional).
-    Both **ON by default** and non-modal; if a modal is active, opening is **deferred**.
-* Comfortable editing: ellipsis only while painting; the editor shows the **full name**.
-* Keychain (macOS) and Libsecret (Linux) for credentials; **insecure** fallback only with confirmation (persistent **red** banner when active).
-  - macOS: the insecure fallback option is not shown (Keychain is always used).
-  - Linux/Windows: the fallback is available only when the build does not link Libsecret and is not compiled with `OPEN_SCP_BUILD_SECURE_ONLY`.
-
-### UX / UI (Qt)
-
-* Several buttons replaced with consistent **icons**; cleaner menus and fixed shortcuts.
-* **Non-modal** dialogs with macOS stability (native dialogs **are not moved/centered** on `QEvent::Show`).
-* Stable window sizing: never shrinks below `sizeHint()`, honors `resize()/minimumSize()`.
-* i18n: ES/EN updated (unified terminology and punctuation).
-
-### Settings / Configuration
-
-* Collapsible **Advanced** panel (▸/▾).
-* New options:
-
-  * `known_hosts`: hashed by default; switch to plain text if needed.
-  * Fingerprint format: `SHA256:<base64>` or **HEX with “:”**.
-  * Staging: root, auto-cleanup, depth limits, and preparation timeout (via QSettings `Advanced/stagingPrepTimeoutMs`, in milliseconds).
-  * “When deleting a site, also remove saved credentials.” (listed first).
-
-### Environment variables
-
-* `OPEN_SCP_KNOWNHOSTS_PLAIN=1|0` — Force plain vs. hashed hostnames in `known_hosts` (default: **hashed**).
-* `OPEN_SCP_FP_HEX_ONLY=1` — Show fingerprints only in HEX with “:”.
-* `OPEN_SCP_ENABLE_INSECURE_FALLBACK=1` — Enable insecure secrets fallback when supported by the build/platform (non‑Apple, without Libsecret, and not `OPEN_SCP_BUILD_SECURE_ONLY`); shows a **red banner** when active.
-
----
-
-## Requirements
-
-* Qt **6.8.3**
-* libssh2 (**OpenSSL 3** recommended)
-* CMake **3.22+**
-* **C++20** compiler
-
-**Optional**
-
-* macOS: **Keychain** (native).
-* Linux: **Libsecret/Secret Service** for credential storage.
-
----
-
-## Build
+## Quick Start
 
 ```bash
 git clone https://github.com/luiscuellar31/openscp.git
@@ -143,52 +36,179 @@ cd openscp
 rm -rf build
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-# Linux/Windows (ejecutable):
+
+# Linux
 ./build/openscp_hello
-# macOS (bundle):
+
+# macOS
 open build/OpenSCP.app
 ```
 
-### macOS DMG (local, unsigned)
+## What OpenSCP Offers (v0.7.0)
 
-- See `assets/macos/README.md` for producing `OpenSCP.app` and an unsigned `.dmg` locally via `scripts/package_mac.sh`.
+### 1. Dual-panel workflow
 
-### Linux (build + AppImage)
+- Independent local/remote navigation.
+- Drag-and-drop copy/move between panels.
+- Remote context operations: download, upload, rename, delete, new folder/file, permissions.
+- Clickable breadcrumbs and per-panel incremental search.
 
-- See `assets/linux/README.md` for building on Linux and producing an unsigned `.AppImage` via `scripts/package_appimage.sh`.
+### 2. Transfer engine and queue
 
----
+- Real parallel transfers with isolated worker connections.
+- Pause/resume/cancel/retry, per-task/global limits, and resume support.
+- Status-aware queue actions: controls are enabled only when the selected task state allows that action (for example, retry for `Error`/`Canceled`, resume for `Paused`).
+- Queue UI with per-row progress percentages, filters, and detailed columns (`Speed`, `ETA`, `Transferred`, `Error`, etc.).
+- Context actions like retry selected, open destination, copy paths, and cleanup policies.
+- Queue window/layout/filter persistence.
+- Transfers use interruptible worker sessions and bounded socket read/write waits to avoid indefinite hangs during stalled network conditions.
+- Upload completion path is hardened and remote views refresh reliably after finished uploads.
+
+### 3. SFTP security hardening
+
+- Auth: password, private key (+passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
+- Host-key policies: `Strict`, `Accept new (TOFU)`, `No verification` (hardened).
+- Hardened no-verification flow: double confirmation, TTL-based temporary exception, risk banner.
+- Atomic `known_hosts` persistence and strict POSIX permissions (`~/.ssh` 0700, file 0600).
+- One-time-connect confirmation when fingerprint persistence fails.
+- Safer keyboard-interactive cancel path (no accidental password fallback).
+- Transfer integrity policy (`off/optional/required`) using `.part` + atomic finalize.
+- Sensitive data redacted from production logs by default.
+
+### 4. Sites and credential storage
+
+- Saved sites use stable UUID identities.
+- Duplicate site names blocked; rename/delete cleans legacy or orphan secrets.
+- Optional cleanup of stored credentials and related `known_hosts` entries when deleting sites.
+- Secure backends:
+    - macOS: Keychain
+    - Linux: libsecret (when available)
+- Clear persistence feedback in secure-only builds.
+- Quick Connect can save/update site data without creating duplicates.
+
+### 5. UX/UI quality
+
+- Connection dialog improved (clearer inputs, inline key/known_hosts selectors, show/hide password fields).
+- Settings redesigned into `General` and `Advanced` sections.
+- Settings keeps controls visible while resizing (minimum size + scrollable pages).
+- One-click reset for default main-window layout/sizes in Settings.
+- Permissions dialog includes octal preview + common presets.
+- About dialog includes diagnostics copy support and friendlier fallback messaging.
+- Disconnect flow stays responsive: UI returns to local mode immediately while transfer cleanup can continue in background, with watchdog/status feedback.
+- Reconnect is blocked while previous transfer cleanup is still running, preventing session overlap races.
+
+### 6. Quality baseline (CI and tests)
+
+- CI split by intent:
+    - push to `dev`: fast Linux build + non-integration tests
+    - PR to `main`: Linux and macOS integration gate
+- Integration workflow spins up a temporary SFTP server for end-to-end checks.
+- Nightly quality job includes `ASan`, `UBSan`, `TSan`, and `cppcheck`.
+
+## Requirements
+
+- Qt `6.x` (tested with `6.8.3`)
+- libssh2 (OpenSSL 3 recommended)
+- CMake `3.22+`
+- C++20 compiler
+
+Optional:
+
+- macOS: Keychain (native)
+- Linux: libsecret / Secret Service
+
+## Testing Locally
+
+```bash
+cmake -S . -B build -DOPEN_SCP_BUILD_TESTS=ON
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+`openscp_sftp_integration_tests` is skipped unless integration variables are set:
+
+- `OPEN_SCP_IT_SFTP_HOST`
+- `OPEN_SCP_IT_SFTP_PORT`
+- `OPEN_SCP_IT_SFTP_USER`
+- `OPEN_SCP_IT_SFTP_PASS` or `OPEN_SCP_IT_SFTP_KEY`
+- `OPEN_SCP_IT_SFTP_KEY_PASSPHRASE` (if needed)
+- `OPEN_SCP_IT_REMOTE_BASE`
+
+## Platform Workflows
+
+### macOS
+
+Recommended daily loop:
+
+```bash
+./scripts/macos.sh dev
+```
+
+Step-by-step:
+
+```bash
+./scripts/macos.sh configure
+./scripts/macos.sh build
+./scripts/macos.sh run
+```
+
+Local unsigned packaging:
+
+```bash
+./scripts/macos.sh app
+./scripts/macos.sh pkg
+./scripts/macos.sh dmg
+./scripts/macos.sh dist
+```
+
+If Qt is outside the default path (`$HOME/Qt/<version>/macos`):
+
+```bash
+export QT_PREFIX="/path/to/Qt/<version>/macos"
+# or
+export Qt6_DIR="/path/to/Qt/<version>/macos/lib/cmake/Qt6"
+```
+
+Full packaging details: `assets/macos/README.md`
+
+### Linux
+
+AppImage packaging details: `assets/linux/README.md`
+
+## Runtime Environment Variables
+
+- `OPEN_SCP_KNOWNHOSTS_PLAIN=1|0` - force plain vs hashed hostnames in `known_hosts`.
+- `OPEN_SCP_FP_HEX_ONLY=1` - show fingerprints in HEX with `:`.
+- `OPEN_SCP_TRANSFER_INTEGRITY=off|optional|required` - override transfer integrity policy.
+- `OPEN_SCP_LOG_LEVEL=error|warn|info|debug` - set log verbosity.
+- `OPEN_SCP_ENV=dev|prod` - runtime environment selector (`dev` enables development-only diagnostics).
+- `OPEN_SCP_LOG_SENSITIVE=1` - enable sensitive debug details only when `OPEN_SCP_ENV=dev` (disabled by default).
+- `OPEN_SCP_ENABLE_INSECURE_FALLBACK=1` - enable insecure secret fallback only when supported by the build/platform.
 
 ## Screenshots
 
 <p align="center">
-  <img src="assets/screenshots/screenshot-site-manager.png" alt="Site Manager with saved servers" width="32%">
-  <img src="assets/screenshots/screenshot-connect.png" alt="Connect dialog with authentication options" width="32%">
-  <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Transfer queue with pause/resume and progress" width="32%">
+    <img src="assets/screenshots/screenshot-site-manager.png" alt="Site Manager with saved servers" width="32%">
+    <img src="assets/screenshots/screenshot-connect.png" alt="Connect dialog with authentication options" width="32%">
+    <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Transfer queue with progress, filters, and actions" width="32%">
 </p>
 
----
+## Roadmap
 
-## Roadmap (short / mid-term)
+- Windows support is planned for future releases.
+- Protocols: `SCP`, then `FTP/FTPS/WebDAV`.
+- Proxy and jump support: `SOCKS5`, `HTTP CONNECT`, `ProxyJump`.
+- Sync workflows: compare/sync and keep-up-to-date with filters/ignores.
+- Queue persistence across restarts.
+- More UX features: bookmarks, history, command palette, themes.
 
-* Protocols: **SCP**; plan for **FTP/FTPS/WebDAV**.
-* Real queue concurrency (multiple parallel connections without global locking).
-* Proxy / Jump host: **SOCKS5**, **HTTP CONNECT**, **ProxyJump**.
-* Sync: compare/sync and “keep up to date” with filters/ignores.
-* Queue persistence: resume after restart; optional checksums.
-* More UX: bookmarks, history, command palette, themes.
+## Credits and Licenses
 
----
-
-## Credits & Licenses
-
-* libssh2, OpenSSL, zlib, and Qt are owned by their respective authors.
-* License texts: [docs/credits/LICENSES/](docs/credits/LICENSES/) — license files for third‑party components (Qt, libssh2, OpenSSL, zlib, etc.).
-* Qt (LGPL) materials: [docs/credits](docs/credits) — see Qt LGPLv3 compliance and licensing notes.
-
----
+- libssh2, OpenSSL, zlib, and Qt are owned by their respective authors.
+- License texts: [docs/credits/LICENSES/](docs/credits/LICENSES/)
+- Qt (LGPL) materials: [docs/credits](docs/credits)
 
 ## Contributing
 
-- We welcome contributions from the community. Please read `CONTRIBUTING.md` for the workflow, branch strategy, and standards.
-- Issues and pull requests are welcome, especially around macOS/Linux stability, i18n, and the drag-and-drop flow.
+- Contributions are welcome. See `CONTRIBUTING.md` for workflow and standards.
+- Issues and pull requests are welcome, especially around macOS/Linux stability, i18n, and SFTP robustness.

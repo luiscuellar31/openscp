@@ -8,7 +8,7 @@ This guide explains how to build OpenSCP from source on Linux and how to package
 
 ## Prerequisites
 
-- Qt 6.8.3
+- Qt 6.x (tested with 6.8.3)
 - libssh2 (OpenSSL 3 recommended)
 - CMake 3.22+ and a C++20 compiler
 
@@ -31,12 +31,28 @@ cmake --build build -j
 ./build/openscp_hello
 ```
 
+## Run Tests Locally (Optional)
+
+```bash
+cmake -S . -B build -DOPEN_SCP_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+`openscp_sftp_integration_tests` is skipped unless integration env vars are set:
+- `OPEN_SCP_IT_SFTP_HOST`
+- `OPEN_SCP_IT_SFTP_PORT`
+- `OPEN_SCP_IT_SFTP_USER`
+- `OPEN_SCP_IT_SFTP_PASS` or `OPEN_SCP_IT_SFTP_KEY`
+- `OPEN_SCP_IT_SFTP_KEY_PASSPHRASE` (if needed)
+- `OPEN_SCP_IT_REMOTE_BASE`
+
 If Qt 6 is not auto‑detected, set one of:
 
 ```bash
-CMAKE_PREFIX_PATH=/path/to/Qt/6.8.3/gcc_64 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+CMAKE_PREFIX_PATH=/path/to/Qt/<version>/gcc_64 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 # or
-Qt6_DIR=/path/to/Qt/6.8.3/gcc_64/lib/cmake/Qt6 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+Qt6_DIR=/path/to/Qt/<version>/gcc_64/lib/cmake/Qt6 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 ```
 
 ## AppImage Packaging (Unsigned)
@@ -51,9 +67,9 @@ Produce a portable AppImage suitable for most Linux distributions:
 If Qt 6 is not auto‑detected by the script, provide the path:
 
 ```bash
-CMAKE_PREFIX_PATH=/path/to/Qt/6.8.3/gcc_64 ./scripts/package_appimage.sh
+CMAKE_PREFIX_PATH=/path/to/Qt/<version>/gcc_64 ./scripts/package_appimage.sh
 # or
-Qt6_DIR=/path/to/Qt/6.8.3/gcc_64/lib/cmake/Qt6 ./scripts/package_appimage.sh
+Qt6_DIR=/path/to/Qt/<version>/gcc_64/lib/cmake/Qt6 ./scripts/package_appimage.sh
 ```
 
 Output:
@@ -76,9 +92,8 @@ ldd ./build/openscp_hello | grep -E 'Qt6|libssh2|ssl|crypto' || true
 ## Troubleshooting
 
 - CMake can’t find Qt 6:
-  - Set `CMAKE_PREFIX_PATH` or `Qt6_DIR` to your Qt 6 installation.
+    - Set `CMAKE_PREFIX_PATH` or `Qt6_DIR` to your Qt 6 installation.
 - Qt plugin for linuxdeploy not found:
-  - Ensure `linuxdeploy-plugin-qt` is in your `PATH`.
+    - Ensure `linuxdeploy-plugin-qt` is in your `PATH`.
 - AppImage missing dependencies:
-  - The script uses linuxdeploy (+Qt plugin) to bundle Qt and other runtime libs into the AppDir; verify tool versions.
-
+    - The script uses linuxdeploy (+Qt plugin) to bundle Qt and other runtime libs into the AppDir; verify tool versions.

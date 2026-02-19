@@ -1,0 +1,241 @@
+name: CI (Dev Quick + Main Integration)
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quick-dev:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    name: Quick Checks (push to dev)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake ninja-build pkg-config \
+            libssh2-1-dev libssl-dev \
+            qt6-base-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools \
+            libgl1-mesa-dev
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOPEN_SCP_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test (quick, no integration)
+        run: ctest --test-dir build --output-on-failure -LE integration
+
+  pr-main-integration:
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    name: Integration Gate (PR to main only)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake ninja-build pkg-config \
+            libssh2-1-dev libssl-dev \
+            qt6-base-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools \
+            libgl1-mesa-dev
+
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install qt libssh2 openssl@3 pkg-config
+          echo "$(brew --prefix qt)/bin" >> "$GITHUB_PATH"
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix qt)" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$(brew --prefix libssh2)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig:${PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+
+      - name: Setup Linux SFTP integration server
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server
+          sudo mkdir -p /run/sshd
+          sudo chmod 755 /run/sshd
+          sudo ssh-keygen -A
+
+          sudo useradd --create-home --shell /bin/bash openscp_it || true
+          # Ubuntu images may leave service users locked; unlock for pubkey auth.
+          sudo usermod -U openscp_it || true
+          sudo passwd -d openscp_it || true
+          sudo chage -E -1 openscp_it || true
+          ssh-keygen -t ed25519 -N "" -f /tmp/openscp_it_linux_ed25519 -q
+          sudo install -d -o openscp_it -g openscp_it -m 700 /home/openscp_it/.ssh
+          sudo install -o openscp_it -g openscp_it -m 600 /tmp/openscp_it_linux_ed25519.pub /home/openscp_it/.ssh/authorized_keys
+          sudo install -d -o openscp_it -g openscp_it -m 700 /home/openscp_it/upload
+
+          cat > /tmp/openscp_sshd_config <<'EOF'
+          Port 2222
+          ListenAddress 127.0.0.1
+          Protocol 2
+          HostKey /etc/ssh/ssh_host_ed25519_key
+          HostKey /etc/ssh/ssh_host_rsa_key
+          PubkeyAuthentication yes
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          ChallengeResponseAuthentication no
+          UsePAM no
+          PermitRootLogin no
+          AllowUsers openscp_it
+          AuthorizedKeysFile .ssh/authorized_keys
+          Subsystem sftp internal-sftp
+          PidFile /tmp/openscp_sshd.pid
+          LogLevel VERBOSE
+          PrintMotd no
+          UseDNS no
+          EOF
+
+          if ! sudo /usr/sbin/sshd -t -f /tmp/openscp_sshd_config; then
+            echo "Invalid sshd config"
+            sudo cat /tmp/openscp_sshd.log || true
+            exit 1
+          fi
+
+          if ! sudo /usr/sbin/sshd -f /tmp/openscp_sshd_config -E /tmp/openscp_sshd.log; then
+            echo "Failed to start sshd"
+            sudo cat /tmp/openscp_sshd.log || true
+            exit 1
+          fi
+
+          for i in {1..20}; do
+            if (echo > /dev/tcp/127.0.0.1/2222) >/dev/null 2>&1; then
+              echo "SFTP integration server is ready"
+              break
+            fi
+            sleep 1
+          done
+
+          if ! (echo > /dev/tcp/127.0.0.1/2222) >/dev/null 2>&1; then
+            echo "SFTP integration server did not start"
+            sudo cat /tmp/openscp_sshd.log || true
+            exit 1
+          fi
+
+          if ! ssh \
+            -i /tmp/openscp_it_linux_ed25519 \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -p 2222 \
+            openscp_it@127.0.0.1 true; then
+            echo "SFTP auth smoke test failed"
+            sudo cat /tmp/openscp_sshd.log || true
+            exit 1
+          fi
+
+      - name: Setup macOS SFTP integration server
+        if: runner.os == 'macOS'
+        run: |
+          RUNNER_USER="$(whoami)"
+          sudo ssh-keygen -A
+
+          ssh-keygen -t ed25519 -N "" -f /tmp/openscp_it_ed25519 -q
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          cat /tmp/openscp_it_ed25519.pub > "$HOME/.ssh/openscp_it_authorized_keys"
+          chmod 600 "$HOME/.ssh/openscp_it_authorized_keys"
+
+          mkdir -p /tmp/openscp-it-upload
+          chmod 700 /tmp/openscp-it-upload
+
+          cat > /tmp/openscp_sshd_mac_config <<EOF
+          Port 2222
+          ListenAddress 127.0.0.1
+          Protocol 2
+          HostKey /etc/ssh/ssh_host_ed25519_key
+          HostKey /etc/ssh/ssh_host_rsa_key
+          PubkeyAuthentication yes
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          ChallengeResponseAuthentication no
+          UsePAM no
+          PermitRootLogin no
+          AllowUsers ${RUNNER_USER}
+          AuthorizedKeysFile .ssh/openscp_it_authorized_keys
+          Subsystem sftp internal-sftp
+          PidFile /tmp/openscp_sshd_mac.pid
+          LogLevel VERBOSE
+          UseDNS no
+          EOF
+
+          sudo /usr/sbin/sshd -f /tmp/openscp_sshd_mac_config -E /tmp/openscp_sshd_mac.log
+
+          for i in {1..20}; do
+            if nc -z 127.0.0.1 2222 >/dev/null 2>&1; then
+              echo "SFTP integration server is ready"
+              break
+            fi
+            sleep 1
+          done
+
+          if ! nc -z 127.0.0.1 2222 >/dev/null 2>&1; then
+            echo "SFTP integration server did not start"
+            sudo cat /tmp/openscp_sshd_mac.log || true
+            exit 1
+          fi
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOPEN_SCP_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test (Linux, with SFTP integration)
+        if: runner.os == 'Linux'
+        env:
+          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
+          OPEN_SCP_IT_SFTP_PORT: "2222"
+          OPEN_SCP_IT_SFTP_USER: openscp_it
+          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
+          OPEN_SCP_IT_REMOTE_BASE: /home/openscp_it/upload
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Test (macOS, with SFTP integration)
+        if: runner.os == 'macOS'
+        env:
+          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
+          OPEN_SCP_IT_SFTP_PORT: "2222"
+          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_ed25519
+          OPEN_SCP_IT_REMOTE_BASE: /tmp/openscp-it-upload
+        run: |
+          OPEN_SCP_IT_SFTP_USER="$(whoami)" \
+          ctest --test-dir build --output-on-failure
