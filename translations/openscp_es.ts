@@ -716,8 +716,10 @@ Esto permite ataques MITM y suplantación del servidor.
             <translation>Archivo existe</translation>
         </message>
         <message>
-            <source>«%1» already exists.\nOverwrite?</source>
-            <translation>«%1» ya existe.\n¿Sobrescribir?</translation>
+            <source>«%1» already exists.
+Overwrite?</source>
+            <translation>«%1» ya existe.
+¿Sobrescribir?</translation>
         </message>
         <message>
             <source>Could not check whether the remote file already exists.
@@ -766,8 +768,10 @@ Esto permite ataques MITM y suplantación del servidor.
             <translation>No se pudo renombrar.</translation>
         </message>
         <message>
-            <source>This will permanently delete items on the remote server.\nContinue?</source>
-            <translation>Esto eliminará permanentemente en el servidor remoto.\n¿Continuar?</translation>
+            <source>This will permanently delete items on the remote server.
+Continue?</source>
+            <translation>Esto eliminará permanentemente en el servidor remoto.
+¿Continuar?</translation>
         </message>
         <message>
             <source>Deleted OK: %1  |  Failed: %2</source>
@@ -800,16 +804,20 @@ Continue?</source>
             <translation>Selecciona solo un elemento.</translation>
         </message>
         <message>
-            <source>Could not read permissions.\n%1</source>
-            <translation>No se pudieron leer los permisos.\n%1</translation>
+            <source>Could not read permissions.
+%1</source>
+            <translation>No se pudieron leer los permisos.
+%1</translation>
         </message>
         <message>
             <source>Error reading remote information.</source>
             <translation>Error al leer información remota.</translation>
         </message>
         <message>
-            <source>Could not apply permissions to "%1".\n%2</source>
-            <translation>No se pudieron aplicar permisos en "%1".\n%2</translation>
+            <source>Could not apply permissions to "%1".
+%2</source>
+            <translation>No se pudieron aplicar permisos en "%1".
+%2</translation>
         </message>
         <message>
             <source>Error applying changes.</source>
@@ -824,12 +832,28 @@ Continue?</source>
             <translation>Confirmar huella SSH</translation>
         </message>
         <message>
-            <source>Connect to %1\nAlgorithm: %2\nFingerprint: %3\n\nTrust and save to known_hosts?</source>
-            <translation>Conectar a %1\nAlgoritmo: %2\nHuella: %3\n\n¿Confiar y guardar en known_hosts?</translation>
+            <source>Connect to %1
+Algorithm: %2
+Fingerprint: %3
+
+Trust and save to known_hosts?</source>
+            <translation>Conectar a %1
+Algoritmo: %2
+Huella: %3
+
+¿Confiar y guardar en known_hosts?</translation>
         </message>
         <message>
-            <source>Connect to %1\nAlgorithm: %2\nFingerprint: %3\n\nFingerprint cannot be saved. Connection allowed only this time.</source>
-            <translation>Conectar a %1\nAlgoritmo: %2\nHuella: %3\n\nNo se podrá guardar la huella. Conexión sólo por esta vez.</translation>
+            <source>Connect to %1
+Algorithm: %2
+Fingerprint: %3
+
+Fingerprint cannot be saved. Connection allowed only this time.</source>
+            <translation>Conectar a %1
+Algoritmo: %2
+Huella: %3
+
+No se podrá guardar la huella. Conexión solo por esta vez.</translation>
         </message>
         <message>
             <source>Trust</source>
@@ -856,8 +880,16 @@ Continue?</source>
             <translation>Confirmación adicional</translation>
         </message>
         <message>
-            <source>Could not save the fingerprint. Connect only this time without saving?\n\nHost: %1\nAlgorithm: %2\nFingerprint: %3</source>
-            <translation>No se pudo guardar la huella. ¿Conectar solo esta vez sin guardar?\n\nHost: %1\nAlgoritmo: %2\nHuella: %3</translation>
+            <source>Could not save the fingerprint. Connect only this time without saving?
+
+Host: %1
+Algorithm: %2
+Fingerprint: %3</source>
+            <translation>No se pudo guardar la huella. ¿Conectar solo esta vez sin guardar?
+
+Host: %1
+Algoritmo: %2
+Huella: %3</translation>
         </message>
         <message>
             <source>One-time connection without saving confirmed by user</source>
@@ -954,8 +986,34 @@ Continue?</source>
             <translation>Passphrase: %1</translation>
         </message>
         <message>
-            <source>The site was saved, but some credentials could not be saved:\n%1</source>
-            <translation>El sitio se guardó, pero no fue posible guardar algunas credenciales:\n%1</translation>
+            <source>The site was saved, but some credentials could not be saved:
+%1</source>
+            <translation>El sitio se guardó, pero no fue posible guardar algunas credenciales:
+%1</translation>
+        </message>
+        <message>
+            <source>Please wait while active transfers are canceled</source>
+            <translation>Espera mientras se cancelan las transferencias activas</translation>
+        </message>
+        <message>
+            <source>Disconnecting… waiting for active transfers to stop</source>
+            <translation>Desconectando… esperando a que se detengan las transferencias activas</translation>
+        </message>
+        <message>
+            <source>Disconnect timeout reached; forcing local mode while cleanup continues</source>
+            <translation>Se alcanzó el tiempo límite de desconexión; forzando modo local mientras la limpieza continúa</translation>
+        </message>
+        <message>
+            <source>Background transfer cleanup finished</source>
+            <translation>Limpieza de transferencias en segundo plano finalizada</translation>
+        </message>
+        <message>
+            <source>Disconnected (transfer cleanup still finishing in background)</source>
+            <translation>Desconectado (la limpieza de transferencias sigue finalizando en segundo plano)</translation>
+        </message>
+        <message>
+            <source>Please wait: previous transfer cleanup is still running (%1s)</source>
+            <translation>Espera: la limpieza de transferencias anterior sigue en ejecución (%1s)</translation>
         </message>
         <message>
             <source>Connected. Site and credentials saved.</source>
@@ -1160,8 +1218,10 @@ Continue?</source>
             <translation>Credenciales no guardadas</translation>
         </message>
         <message>
-            <source>Could not save one or more credentials in the secure backend:\n%1</source>
-            <translation>No se pudieron guardar una o más credenciales en el backend seguro:\n%1</translation>
+            <source>Could not save one or more credentials in the secure backend:
+%1</source>
+            <translation>No se pudieron guardar una o más credenciales en el backend seguro:
+%1</translation>
         </message>
         <message>
             <source>Duplicate name</source>
@@ -1558,8 +1618,12 @@ En Linux, se recomienda instalar y usar libsecret/Secret Service para mayor segu
             <translation>Conflicto</translation>
         </message>
         <message>
-            <source>«%1» already exists.\nLocal: %2\nRemote: %3</source>
-            <translation>«%1» ya existe.\nLocal: %2\nRemoto: %3</translation>
+            <source>«%1» already exists.
+Local: %2
+Remote: %3</source>
+            <translation>«%1» ya existe.
+Local: %2
+Remoto: %3</translation>
         </message>
         <message>
             <source>Resume</source>
