@@ -53,8 +53,10 @@ static CoreLogLevel core_log_level() {
         if (!raw || !*raw)
             return CoreLogLevel::Off;
         std::string v(raw);
-        for (char &c : v)
-            c = (char)std::tolower((unsigned char)c);
+        std::transform(v.begin(), v.end(), v.begin(),
+                       [](unsigned char c) -> char {
+                           return static_cast<char>(std::tolower(c));
+                       });
         if (v == "debug" || v == "2")
             return CoreLogLevel::Debug;
         if (v == "info" || v == "1")
@@ -222,8 +224,9 @@ integrity_policy_from_env(TransferIntegrityPolicy fallback) {
     if (!raw || !*raw)
         return fallback;
     std::string v(raw);
-    for (char &c : v)
-        c = (char)std::tolower((unsigned char)c);
+    std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) -> char {
+        return static_cast<char>(std::tolower(c));
+    });
     if (v == "off" || v == "0" || v == "false")
         return TransferIntegrityPolicy::Off;
     if (v == "required" || v == "strict")
@@ -560,7 +563,8 @@ static bool hash_remote_range(LIBSSH2_SFTP *sftp, const std::string &remote,
         }
         const std::size_t want =
             (std::size_t)std::min<std::uint64_t>(remain, buf.size());
-        ssize_t n = libssh2_sftp_read(rh, (char *)buf.data(), want);
+        ssize_t n = libssh2_sftp_read(rh, reinterpret_cast<char *>(buf.data()),
+                                      want);
         if (n <= 0) {
             if (why)
                 *why = "Insufficient remote read while hashing";
@@ -626,7 +630,8 @@ static bool hash_remote_full(LIBSSH2_SFTP *sftp, const std::string &remote,
             libssh2_sftp_close(rh);
             return false;
         }
-        ssize_t n = libssh2_sftp_read(rh, (char *)buf.data(), buf.size());
+        ssize_t n = libssh2_sftp_read(rh, reinterpret_cast<char *>(buf.data()),
+                                      buf.size());
         if (n > 0) {
             if (EVP_DigestUpdate(ctx, buf.data(), (std::size_t)n) != 1) {
                 if (why)
@@ -932,13 +937,13 @@ kbint_password_callback(const char *name, int name_len, const char *instruction,
     if (!abstract || !*abstract)
         return;
     const KbdIntCtx *ctx = static_cast<const KbdIntCtx *>(*abstract);
-    const char *user = ctx ? ctx->user : nullptr;
-    const char *pass = ctx ? ctx->pass : nullptr;
+    const char *user = ctx->user;
+    const char *pass = ctx->pass;
     const size_t ulen = user ? std::strlen(user) : 0;
     const size_t plen = pass ? std::strlen(pass) : 0;
 
     // If a UI callback is provided, give it a chance to answer the prompts.
-    if (ctx && ctx->cb && *(ctx->cb) && num_prompts > 0) {
+    if (ctx->cb && *(ctx->cb) && num_prompts > 0) {
         std::vector<std::string> ptxts;
         ptxts.reserve((size_t)num_prompts);
         for (int i = 0; i < num_prompts; ++i) {
@@ -1069,9 +1074,8 @@ bool Libssh2SftpClient::tcpConnect(const std::string &host, uint16_t port,
         return false;
     }
 
-    int s = -1;
     for (auto rp = res; rp != nullptr; rp = rp->ai_next) {
-        s = ::socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        int s = ::socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (s == -1)
             continue;
         // Note: avoid setting SO_RCVTIMEO/SO_SNDTIMEO during authentication
@@ -1096,7 +1100,6 @@ bool Libssh2SftpClient::tcpConnect(const std::string &host, uint16_t port,
             return true;
         }
         ::close(s);
-        s = -1;
     }
     freeaddrinfo(res);
     err = "Could not connect to host/port.";
@@ -1199,8 +1202,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
 
         size_t keylen = 0;
         int keytype = 0;
-        const char *hostkey =
-            (const char *)libssh2_session_hostkey(session_, &keylen, &keytype);
+        const char *hostkey = libssh2_session_hostkey(session_, &keylen, &keytype);
         if (!hostkey || keylen == 0) {
             libssh2_knownhost_free(nh);
             err = "Could not get host key";
@@ -1312,13 +1314,12 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             // Obtain SHA256 fingerprint if available (Base64 by default);
             // optional hex for compat
             std::string fpStr;
-            std::string fpB64;
 #ifdef LIBSSH2_HOSTKEY_HASH_SHA256
             const unsigned char *h =
-                (const unsigned char *)libssh2_hostkey_hash(
-                    session_, LIBSSH2_HOSTKEY_HASH_SHA256);
+                reinterpret_cast<const unsigned char *>(libssh2_hostkey_hash(
+                    session_, LIBSSH2_HOSTKEY_HASH_SHA256));
             if (h) {
-                fpB64 = b64encode(h, 32);
+                std::string fpB64 = b64encode(h, 32);
                 // Strip padding '=' to match OpenSSH presentation
                 while (!fpB64.empty() && fpB64.back() == '=')
                     fpB64.pop_back();
@@ -1342,8 +1343,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             }
 #else
             const unsigned char *h =
-                (const unsigned char *)libssh2_hostkey_hash(
-                    session_, LIBSSH2_HOSTKEY_HASH_SHA1);
+                reinterpret_cast<const unsigned char *>(libssh2_hostkey_hash(
+                    session_, LIBSSH2_HOSTKEY_HASH_SHA1));
             if (h) {
                 std::ostringstream oss;
                 oss << "SHA1:";
@@ -1453,6 +1454,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                 // mask
 #ifdef LIBSSH2_HOSTKEY_TYPE_ED25519
                 if (!saved && keytype == LIBSSH2_HOSTKEY_TYPE_ED25519) {
+                    const auto *hostkeyBytes =
+                        reinterpret_cast<const unsigned char *>(hostkey);
                     if (core_sensitive_debug_enabled()) {
                         std::ostringstream preview;
                         const std::size_t n = std::min<std::size_t>(
@@ -1463,7 +1466,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                             char b[4];
                             std::snprintf(
                                 b, sizeof(b), "%02X",
-                                (unsigned)((const unsigned char *)hostkey)[i]);
+                                (unsigned)hostkeyBytes[i]);
                             preview << b;
                         }
                         core_logf(CoreLogLevel::Debug,
@@ -1505,8 +1508,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                         if (!existing.empty() && existing.back() != '\n')
                             lines.push_back(tmp);
                     }
-                    std::string b64 = b64encode((const unsigned char *)hostkey,
-                                                (size_t)keylen);
+                    std::string b64 = b64encode(hostkeyBytes, (size_t)keylen);
                     std::string hostToken;
                     if (preferHashed) {
                         hostToken = openssh_hash_hostname(hostForKnown);
@@ -1515,16 +1517,16 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                     } else {
                         hostToken = hostForKnown;
                         std::string prefix = hostToken + " ssh-ed25519 ";
-                        bool replaced = false;
-                        for (std::string &ln : lines) {
-                            if (ln.rfind(prefix, 0) == 0) {
-                                ln = prefix + b64;
-                                replaced = true;
-                                break;
-                            }
-                        }
-                        if (!replaced)
+                        auto it = std::find_if(
+                            lines.begin(), lines.end(),
+                            [&prefix](const std::string &ln) {
+                                return ln.rfind(prefix, 0) == 0;
+                            });
+                        if (it != lines.end()) {
+                            *it = prefix + b64;
+                        } else {
                             lines.push_back(prefix + b64);
+                        }
                     }
                     std::string content;
                     content.reserve(lines.size() * 64);
@@ -1780,12 +1782,10 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
         } else {
             // Without a password: query methods and then try ssh-agent if the
             // server allows.
-            if (authlist.empty()) {
-                char *methods =
-                    libssh2_userauth_list(session_, opt.username.c_str(),
-                                          (unsigned)opt.username.size());
-                authlist = methods ? std::string(methods) : std::string();
-            }
+            char *methods =
+                libssh2_userauth_list(session_, opt.username.c_str(),
+                                      (unsigned)opt.username.size());
+            authlist = methods ? std::string(methods) : std::string();
             bool authed = false;
             if (hasMethod("publickey")) {
                 LIBSSH2_AGENT *agent = libssh2_agent_init(session_);
@@ -1850,22 +1850,14 @@ bool Libssh2SftpClient::connect(const SessionOptions &opt, std::string &err) {
     // Defensive: ensure no leftover state from any previous partial attempt.
     disconnect();
 
-    struct ConnectCleanupGuard {
-        Libssh2SftpClient *self;
-        bool committed = false;
-        ~ConnectCleanupGuard() {
-            if (!committed)
-                self->disconnect();
-        }
-    } cleanup{this, false};
-
     if (!tcpConnect(opt.host, opt.port, err))
         return false;
-    if (!sshHandshakeAuth(opt, err))
+    if (!sshHandshakeAuth(opt, err)) {
+        disconnect();
         return false;
+    }
 
     connected_ = true;
-    cleanup.committed = true;
     return true;
 }
 

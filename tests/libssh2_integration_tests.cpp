@@ -3,6 +3,7 @@
 // exist.
 #include "openscp/Libssh2SftpClient.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -78,11 +79,10 @@ bool parsePort(const std::optional<std::string> &raw, std::uint16_t &out) {
 
 bool listContainsName(const std::vector<openscp::FileInfo> &entries,
                       const std::string &name) {
-    for (const auto &e : entries) {
-        if (e.name == name)
-            return true;
-    }
-    return false;
+    return std::any_of(entries.begin(), entries.end(),
+                       [&name](const openscp::FileInfo &e) {
+                           return e.name == name;
+                       });
 }
 
 } // namespace
