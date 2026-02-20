@@ -1,0 +1,329 @@
+name: Release Artifacts (Tag Push to Draft Release)
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  verify-tag:
+    name: Verify Tag (main + version)
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.meta.outputs.tag_name }}
+      tag_commit: ${{ steps.meta.outputs.tag_commit }}
+      version: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+
+      - name: Validate tag, branch ancestry, and version
+        id: meta
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          if [[ ! "$tag" =~ ^v[0-9]+(\.[0-9]+)*$ ]]; then
+            echo "Invalid tag format: '$tag' (expected: vX.Y.Z)"
+            exit 1
+          fi
+
+          git fetch --no-tags origin main
+          commit="$(git rev-list -n1 "$tag")"
+          if ! git merge-base --is-ancestor "$commit" origin/main; then
+            echo "Tag commit is not contained in origin/main: $commit"
+            exit 1
+          fi
+
+          version="$(sed -n 's/^project(.*VERSION[[:space:]]*\([0-9][0-9.]*\).*/\1/p' CMakeLists.txt | head -n1)"
+          if [[ -z "$version" ]]; then
+            echo "Could not detect project version from CMakeLists.txt"
+            exit 1
+          fi
+          if [[ "v${version}" != "$tag" ]]; then
+            echo "Tag/version mismatch: tag=${tag}, project=v${version}"
+            exit 1
+          fi
+
+          echo "tag_name=${tag}" >> "$GITHUB_OUTPUT"
+          echo "tag_commit=${commit}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+  prepare-draft-release:
+    name: Prepare Draft Release
+    needs: verify-tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Create or reuse draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.verify-tag.outputs.tag_name }}"
+          version="${{ needs.verify-tag.outputs.version }}"
+          commit="${{ needs.verify-tag.outputs.tag_commit }}"
+          title="OpenSCP v${version}"
+          notes="Auto-generated draft release for ${tag}. You can edit these notes before publishing."
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$tag" --json isDraft --jq '.isDraft')"
+            if [[ "$is_draft" == "true" ]]; then
+              echo "Draft release already exists for ${tag}."
+            else
+              echo "Release for ${tag} already exists and is not a draft. Reusing it for asset upload."
+            fi
+          else
+            gh release create "$tag" \
+              --target "$commit" \
+              --title "$title" \
+              --draft \
+              --notes "$notes"
+          fi
+
+  build-macos:
+    name: Build macOS (${{ matrix.arch }})
+    needs:
+      - verify-tag
+      - prepare-draft-release
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            arch: arm64
+          - runner: macos-13
+            arch: x86_64
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.verify-tag.outputs.tag_name }}
+
+      - name: Install macOS dependencies
+        run: |
+          brew update
+          brew install qt libssh2 openssl@3 pkg-config
+          echo "$(brew --prefix qt)/bin" >> "$GITHUB_PATH"
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix qt)" >> "$GITHUB_ENV"
+          echo "Qt6_DIR=$(brew --prefix qt)/lib/cmake/Qt6" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$(brew --prefix libssh2)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig:${PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+
+      - name: Build macOS release artifacts
+        run: |
+          rm -rf dist build
+          SKIP_CODESIGN=1 \
+          SKIP_NOTARIZATION=1 \
+          DO_ADHOC_SIGN=1 \
+          PACKAGE_FORMATS=app,pkg,dmg \
+          CMAKE_OSX_ARCHITECTURES="${{ matrix.arch }}" \
+          ./scripts/package_mac.sh
+
+      - name: Collect macOS artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          shopt -s nullglob
+          files=(
+            dist/*-${{ matrix.arch }}-UNSIGNED.zip
+            dist/*-${{ matrix.arch }}-UNSIGNED.zip.sha256
+            dist/*-${{ matrix.arch }}-UNSIGNED.pkg
+            dist/*-${{ matrix.arch }}-UNSIGNED.pkg.sha256
+            dist/*-${{ matrix.arch }}-UNSIGNED.dmg
+            dist/*-${{ matrix.arch }}-UNSIGNED.dmg.sha256
+          )
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No macOS artifacts found for arch ${{ matrix.arch }}"
+            ls -la dist || true
+            exit 1
+          fi
+          cp "${files[@]}" out/
+          ls -lah out
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: out/*
+          if-no-files-found: error
+
+  build-linux:
+    name: Build Linux (${{ matrix.arch_name }})
+    needs:
+      - verify-tag
+      - prepare-draft-release
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch_name: x86_64
+          - runner: ubuntu-24.04-arm
+            arch_name: aarch64
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.verify-tag.outputs.tag_name }}
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake ninja-build pkg-config curl file \
+            libssh2-1-dev libssl-dev libsecret-1-dev \
+            qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools \
+            libgl1-mesa-dev \
+            flatpak flatpak-builder \
+            squashfs-tools
+
+      - name: Install AppImage tools
+        run: |
+          set -euo pipefail
+          arch="$(uname -m)"
+          case "$arch" in
+            x86_64) appimg_arch="x86_64" ;;
+            aarch64|arm64) appimg_arch="aarch64" ;;
+            *)
+              echo "Unsupported Linux arch for AppImage tools: $arch"
+              exit 1
+              ;;
+          esac
+
+          mkdir -p "$HOME/.local/bin"
+          curl -fL "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${appimg_arch}.AppImage" \
+            -o "$HOME/.local/bin/linuxdeploy"
+          curl -fL "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-${appimg_arch}.AppImage" \
+            -o "$HOME/.local/bin/linuxdeploy-plugin-qt"
+          curl -fL "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${appimg_arch}.AppImage" \
+            -o "$HOME/.local/bin/appimagetool"
+          chmod +x "$HOME/.local/bin/linuxdeploy" \
+                   "$HOME/.local/bin/linuxdeploy-plugin-qt" \
+                   "$HOME/.local/bin/appimagetool"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install Snapcraft
+        run: |
+          if ! command -v snap >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y snapd
+            sudo systemctl start snapd.socket || true
+            sudo systemctl start snapd || true
+          fi
+          if snap list snapcraft >/dev/null 2>&1; then
+            sudo snap refresh snapcraft || true
+          else
+            sudo snap install snapcraft --classic
+          fi
+
+      - name: Setup Flathub remote
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Build AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          rm -rf dist build
+          ./scripts/package_appimage.sh
+
+      - name: Build Snap
+        run: |
+          ./scripts/package_snap.sh --destructive-mode
+
+      - name: Build Flatpak
+        run: |
+          rm -rf dist/flatpak
+          ./scripts/package_flatpak.sh --user --install-deps-from=flathub
+
+      - name: Collect Linux artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          arch="$(uname -m)"
+
+          shopt -s nullglob
+          appimage_files=(dist/*.AppImage dist/*.AppImage.sha256)
+          snap_files=(packaging/snap/*.snap)
+          if [[ ${#appimage_files[@]} -gt 0 ]]; then
+            cp "${appimage_files[@]}" out/
+          fi
+          if [[ ${#snap_files[@]} -gt 0 ]]; then
+            cp "${snap_files[@]}" out/
+          fi
+
+          if [[ -f dist/OpenSCP.flatpak ]]; then
+            mv dist/OpenSCP.flatpak "out/OpenSCP-${arch}.flatpak"
+          fi
+
+          if ! compgen -G "out/*" > /dev/null; then
+            echo "No Linux artifacts produced."
+            ls -la dist || true
+            ls -la packaging/snap || true
+            exit 1
+          fi
+
+          for f in out/*; do
+            [[ "$f" == *.sha256 ]] && continue
+            sha256sum "$f" | awk '{print $1}' > "${f}.sha256"
+          done
+
+          ls -lah out
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch_name }}
+          path: out/*
+          if-no-files-found: error
+
+  publish-assets:
+    name: Upload assets to release
+    needs:
+      - verify-tag
+      - build-macos
+      - build-linux
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Show artifact tree
+        run: |
+          find release-assets -type f | sort
+
+      - name: Upload artifacts to GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.verify-tag.outputs.tag_name }}"
+          mapfile -t files < <(find release-assets -type f | sort)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No files found to upload."
+            exit 1
+          fi
+          gh release upload "$tag" "${files[@]}" --clobber
