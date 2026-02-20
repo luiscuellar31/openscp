@@ -39,7 +39,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(OPEN_SCP_BUILD_TESTS "Build and run automated tests (CTest)" OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets LinguistTools)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Svg LinguistTools)
 include(GNUInstallDirs)
 
 # Qt 6.8.x on recent macOS SDKs may expose legacy AGL through WrapOpenGL.
@@ -128,6 +128,7 @@ target_include_directories(openscp_hello PRIVATE
 
 target_link_libraries(openscp_hello PRIVATE
     Qt6::Widgets
+    Qt6::Svg
     openscp_core
 )
 
