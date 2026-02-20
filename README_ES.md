@@ -169,7 +169,7 @@ Detalles completos de empaquetado: `assets/macos/README.md`
 
 ### Linux
 
-Detalles para empaquetar AppImage: `assets/linux/README.md`
+Detalles de build y empaquetado Linux (AppImage, Snap, Flatpak): `assets/linux/README.md`
 
 ## Variables de Entorno en Runtime
 

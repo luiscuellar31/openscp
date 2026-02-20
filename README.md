@@ -173,7 +173,7 @@ Full packaging details: `assets/macos/README.md`
 
 ### Linux
 
-AppImage packaging details: `assets/linux/README.md`
+Linux build and packaging details (AppImage, Snap, Flatpak): `assets/linux/README.md`
 
 ## Runtime Environment Variables
 
