@@ -122,6 +122,13 @@ copy_about_png_fallback() {
   fi
 }
 
+# Validate that Qt SVG plugins are present in the packaged tree.
+verify_svg_plugins() {
+  local checker="${REPO_DIR}/scripts/verify_qt_svg_plugins.sh"
+  [[ -x "$checker" ]] || die "SVG plugin checker not found or not executable: $checker"
+  "$checker" --context appimage "$APPDIR"
+}
+
 main() {
   mkdir -p "$BUILD_DIR" "$DIST_DIR"
 
@@ -175,6 +182,7 @@ main() {
   cmd+=( --output appimage )
   log "Running: ${cmd[*]}"
   "${cmd[@]}"
+  verify_svg_plugins
 
   # Rename the produced AppImage to our canonical name if needed
   local produced

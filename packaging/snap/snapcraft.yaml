@@ -1,0 +1,47 @@
+name: openscp
+base: core24
+version: "0.7.0"
+summary: Two-panel SFTP client focused on simplicity and security
+description: |
+  OpenSCP is a two-panel commander-style SFTP client written in C++ and Qt.
+  It focuses on secure defaults, clear UX, and practical transfer workflows.
+grade: stable
+confinement: strict
+icon: icon.png
+
+apps:
+  openscp:
+    command: usr/bin/openscp_hello
+    desktop: usr/share/applications/openscp-snap.desktop
+    extensions: [kde-neon-6]
+    plugs:
+      - home
+      - network
+      - network-bind
+      - removable-media
+      - password-manager-service
+
+parts:
+  openscp:
+    plugin: cmake
+    source: ../..
+    cmake-parameters:
+      - -DCMAKE_BUILD_TYPE=Release
+    build-packages:
+      - pkg-config
+      - libssh2-1-dev
+      - libssl-dev
+      - libsecret-1-dev
+    stage-packages:
+      - libssh2-1
+      - libsecret-1-0
+    override-build: |
+      craftctl default
+      install -Dm644 "${CRAFT_PROJECT_DIR}/openscp-snap.desktop" \
+        "${CRAFT_PART_INSTALL}/usr/share/applications/openscp-snap.desktop"
+    override-prime: |
+      craftctl default
+      "${CRAFT_PROJECT_DIR}/../../scripts/verify_qt_svg_plugins.sh" \
+        --allow-runtime-provided \
+        --context snap \
+        "${CRAFT_PRIME}"
