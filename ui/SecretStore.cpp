@@ -1,5 +1,6 @@
 // SecretStore implementation: Keychain (macOS), Libsecret (Linux), or optional
 // fallback with QSettings.
+#define QT_NO_KEYWORDS // this line for macros break gio macros C
 #include "SecretStore.hpp"
 #include <QByteArray>
 #include <QSettings>
@@ -164,7 +165,11 @@ static const SecretSchema *openscp_schema() {
     static const SecretSchema schema = {
         "openscp.secret",
         SECRET_SCHEMA_NONE,
-        {{"key", SECRET_SCHEMA_ATTRIBUTE_STRING}, {NULL, 0}}};
+        {
+            {"key", SECRET_SCHEMA_ATTRIBUTE_STRING}, 
+            {NULL}
+        }
+    };
     return &schema;
 }
 
@@ -191,7 +196,8 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
 
 std::optional<QString> SecretStore::getSecret(const QString &key) const {
     QByteArray k = key.toUtf8();
-    gchar *pw = secret_password_lookup_sync(openscp_schema(), nullptr, "key",
+    GError *err;
+    gchar *pw = secret_password_lookup_sync(openscp_schema(), nullptr, &err, "key",
                                             k.constData(), nullptr);
     if (!pw)
         return std::nullopt;
@@ -202,7 +208,8 @@ std::optional<QString> SecretStore::getSecret(const QString &key) const {
 
 void SecretStore::removeSecret(const QString &key) {
     QByteArray k = key.toUtf8();
-    (void)secret_password_clear_sync(openscp_schema(), nullptr, "key",
+    GError *error;
+    (void)secret_password_clear_sync(openscp_schema(), nullptr, &error, "key",
                                      k.constData(), nullptr);
 }
 
