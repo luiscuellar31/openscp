@@ -165,11 +165,7 @@ static const SecretSchema *openscp_schema() {
     static const SecretSchema schema = {
         "openscp.secret",
         SECRET_SCHEMA_NONE,
-        {
-            {"key", SECRET_SCHEMA_ATTRIBUTE_STRING}, 
-            {NULL}
-        }
-    };
+        {{"key", SECRET_SCHEMA_ATTRIBUTE_STRING}, {NULL}}};
     return &schema;
 }
 
@@ -196,9 +192,14 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
 
 std::optional<QString> SecretStore::getSecret(const QString &key) const {
     QByteArray k = key.toUtf8();
-    GError *err;
-    gchar *pw = secret_password_lookup_sync(openscp_schema(), nullptr, &err, "key",
-                                            k.constData(), nullptr);
+    GError *error = nullptr;
+    gchar *pw = secret_password_lookup_sync(openscp_schema(), nullptr, &error,
+                                            "key", k.constData(), nullptr);
+
+    if (error != nullptr) {
+        g_error_free(error);
+    }
+
     if (!pw)
         return std::nullopt;
     QString out = QString::fromUtf8(pw);
@@ -211,6 +212,9 @@ void SecretStore::removeSecret(const QString &key) {
     GError *error;
     (void)secret_password_clear_sync(openscp_schema(), nullptr, &error, "key",
                                      k.constData(), nullptr);
+    if (error != nullptr) {
+        g_error_free(error);
+    }
 }
 
 bool SecretStore::insecureFallbackActive() {
