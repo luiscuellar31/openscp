@@ -66,6 +66,45 @@ Tags are immutable and represent tested snapshots you can depend on. The `main` 
 
 ---
 
+## Keeping Your Fork Up to Date (`dev`)
+
+Your fork only matches the main repository the first time you create it.
+Before opening or updating a PR to `dev`, sync your local/fork `dev` branch with the upstream repository and then rebase your feature branch.
+
+1. Add `upstream` once (if you do not have it yet):
+
+   ```bash
+   git remote add upstream https://github.com/luiscuellar31/openscp.git
+   ```
+
+2. Sync your local `dev` and your fork's `dev` with upstream:
+
+   ```bash
+   git fetch upstream
+   git checkout dev
+   git rebase upstream/dev
+   git push origin dev
+   ```
+
+3. Rebase your working branch on top of the latest `upstream/dev`:
+
+   ```bash
+   git checkout feature/your-feature-name
+   git rebase upstream/dev
+   ```
+
+4. Push your rebased branch:
+
+   ```bash
+   git push --force-with-lease origin feature/your-feature-name
+   ```
+
+Notes:
+- `--force-with-lease` is required after a rebase if the branch was already pushed before.
+- Do not use plain `--force`; `--force-with-lease` is safer.
+
+---
+
 ## Code Style and Standards
 
 - Follow Conventional Commits for commit messages.
