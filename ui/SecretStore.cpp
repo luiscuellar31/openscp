@@ -1,5 +1,6 @@
 // SecretStore implementation: Keychain (macOS), Libsecret (Linux), or optional
 // fallback with QSettings.
+#define QT_NO_KEYWORDS //error GDBusSignalInfo  **signals macros
 #include "SecretStore.hpp"
 #if defined(HAVE_LIBSECRET)
 #include <libsecret/secret.h>
@@ -165,7 +166,7 @@ static const SecretSchema *openscp_schema() {
     static const SecretSchema schema = {
         "openscp.secret",
         SECRET_SCHEMA_NONE,
-        {{"key", SECRET_SCHEMA_ATTRIBUTE_STRING}, {NULL, 0}}};
+        {{"key", SECRET_SCHEMA_ATTRIBUTE_STRING}, {NULL}}};
     return &schema;
 }
 
