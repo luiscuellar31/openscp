@@ -270,7 +270,7 @@ set_source_files_properties(assets/program/icon-openscp-2048.png
 if(UNIX AND NOT APPLE)
     # Desktop entry and app icon installation for Linux (XDG paths)
     set(APP_DESKTOP_FILE assets/linux/openscp.desktop)
-    set(APP_ICON_PNG     assets/program/icon-openscp-2048.png)
+    set(APP_ICON_PNG     assets/program/icon-openscp-256.png)
     set(APP_ICON_NAME    openscp) # must match Icon= in the .desktop
 
     # Install binary
