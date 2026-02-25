@@ -115,6 +115,7 @@ open build/OpenSCP.app
     - push to `dev`: fast Linux build + non-integration tests
     - PR to `main`: Linux and macOS integration gate
 - Integration workflow spins up a temporary SFTP server for end-to-end checks.
+- PR integration coverage validates transport variants in CI: direct, `SOCKS5` proxy tunnel, and SSH jump host tunnel.
 - Nightly quality job includes `ASan`, `UBSan`, `TSan`, and `cppcheck`.
 
 ## Requirements
