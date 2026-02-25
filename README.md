@@ -7,7 +7,7 @@
 </p>
 
 <p>
-    <a href="README_ES.md"><strong>Leer en Espanol</strong></a>
+    <a href="README_ES.md"><strong>Leer en Español</strong></a>
 </p>
 
 <p>
@@ -72,6 +72,8 @@ open build/OpenSCP.app
 - Auth: password, private key (+passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
 - Host-key policies: `Strict`, `Accept new (TOFU)`, `No verification` (hardened).
 - Per-site transport can use direct TCP, `SOCKS5`, or `HTTP CONNECT` proxy tunneling.
+- Per-site SSH jump host (`ProxyJump`/bastion) tunneling is supported.
+- Current implementation treats proxy tunneling and jump host tunneling as mutually exclusive per session.
 - Hardened no-verification flow: double confirmation, TTL-based temporary exception, risk banner.
 - Atomic `known_hosts` persistence and strict POSIX permissions (`~/.ssh` 0700, file 0600).
 - One-time-connect confirmation when fingerprint persistence fails.
@@ -83,6 +85,7 @@ open build/OpenSCP.app
 
 - Saved sites use stable UUID identities.
 - Saved sites persist proxy type/endpoint/username per site.
+- Saved sites persist SSH jump host settings (host/port/user/key path) per site.
 - Duplicate site names blocked; rename/delete cleans legacy or orphan secrets.
 - Optional cleanup of stored credentials and related `known_hosts` entries when deleting sites.
 - Secure backends:
@@ -96,6 +99,7 @@ open build/OpenSCP.app
 
 - Connection dialog improved (clearer inputs, inline key/known_hosts selectors, show/hide password fields).
 - Connection dialog includes per-site proxy configuration (`Direct`, `SOCKS5`, `HTTP CONNECT`) with optional auth.
+- Connection dialog includes optional per-site SSH jump host (bastion) configuration.
 - Settings redesigned into `General` and `Advanced` sections.
 - Settings keeps controls visible while resizing (minimum size + scrollable pages).
 - One-click reset for default main-window layout/sizes in Settings.
@@ -124,6 +128,7 @@ Optional:
 
 - macOS: Keychain (native)
 - Linux: libsecret / Secret Service
+- OpenSSH client (`ssh`) for SSH jump host tunneling.
 
 ## Testing Locally
 
@@ -146,6 +151,10 @@ ctest --test-dir build --output-on-failure
 - `OPEN_SCP_IT_PROXY_PORT` (optional; defaults: `1080` for `socks5`, `8080` for `http`)
 - `OPEN_SCP_IT_PROXY_USER` (optional)
 - `OPEN_SCP_IT_PROXY_PASS` (optional)
+- `OPEN_SCP_IT_JUMP_HOST` (optional)
+- `OPEN_SCP_IT_JUMP_PORT` (optional; default `22`)
+- `OPEN_SCP_IT_JUMP_USER` (optional)
+- `OPEN_SCP_IT_JUMP_KEY` (optional)
 
 ## Platform Workflows
 
@@ -210,7 +219,7 @@ Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/READM
 
 - Windows support is planned for future releases.
 - Protocols: `SCP`, then `FTP/FTPS/WebDAV`.
-- SSH jump host support (`ProxyJump`) and broader enterprise proxy auth flows.
+- Broader enterprise proxy/jump auth flows (for example, non-batch/interactive jump auth).
 - Sync workflows: compare/sync and keep-up-to-date with filters/ignores.
 - Queue persistence across restarts.
 - More UX features: bookmarks, history, command palette, themes.

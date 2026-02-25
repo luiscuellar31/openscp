@@ -69,6 +69,8 @@ open build/OpenSCP.app
 - Auth: contrasena, clave privada (+passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
 - Politicas de host-key: `Strict`, `Accept new (TOFU)`, `No verification` (endurecida).
 - El transporte por sitio puede usar TCP directo, proxy `SOCKS5` o tunel `HTTP CONNECT`.
+- Se soporta tunel por sitio via SSH jump host (`ProxyJump`/bastion).
+- La implementacion actual trata proxy y jump host como opciones mutuamente excluyentes por sesion.
 - Flujo endurecido para no-verificacion: doble confirmacion, excepcion temporal con TTL y banner de riesgo.
 - Persistencia atomica de `known_hosts` y permisos POSIX estrictos (`~/.ssh` 0700, archivo 0600).
 - Confirmacion explicita de conexion de una sola vez cuando falla persistir huella.
@@ -80,6 +82,7 @@ open build/OpenSCP.app
 
 - Sitios guardados con identidad estable por UUID.
 - Los sitios guardados persisten por sitio el tipo/endpoint/usuario de proxy.
+- Los sitios guardados persisten por sitio configuracion de jump host SSH (host/puerto/usuario/ruta de llave).
 - Bloqueo de nombres de sitio duplicados.
 - Flujos de renombrar/eliminar limpian secretos legacy o huerfanos.
 - Eliminacion opcional de credenciales guardadas y entradas relacionadas en `known_hosts` al borrar sitios.
@@ -94,6 +97,7 @@ open build/OpenSCP.app
 
 - Dialogo de conexion mejorado (campos mas claros, selectores inline para key/known_hosts, mostrar/ocultar contrasena).
 - Dialogo de conexion con configuracion de proxy por sitio (`Direct`, `SOCKS5`, `HTTP CONNECT`) y auth opcional.
+- Dialogo de conexion con configuracion opcional de SSH jump host (bastion) por sitio.
 - Ajustes redisenados en secciones `General` y `Advanced`.
 - Ajustes mantiene los controles visibles al redimensionar (tamano minimo + paginas con scroll).
 - Accion de un clic en Ajustes para restaurar layout/tamanos por defecto de la ventana principal.
@@ -120,6 +124,7 @@ Opcional:
 
 - macOS: Keychain (nativo)
 - Linux: libsecret / Secret Service
+- Cliente OpenSSH (`ssh`) para tunel de jump host SSH.
 
 ## Probar Localmente
 
@@ -142,6 +147,10 @@ ctest --test-dir build --output-on-failure
 - `OPEN_SCP_IT_PROXY_PORT` (opcional; por defecto: `1080` para `socks5`, `8080` para `http`)
 - `OPEN_SCP_IT_PROXY_USER` (opcional)
 - `OPEN_SCP_IT_PROXY_PASS` (opcional)
+- `OPEN_SCP_IT_JUMP_HOST` (opcional)
+- `OPEN_SCP_IT_JUMP_PORT` (opcional; por defecto `22`)
+- `OPEN_SCP_IT_JUMP_USER` (opcional)
+- `OPEN_SCP_IT_JUMP_KEY` (opcional)
 
 ## Flujos por Plataforma
 
@@ -206,7 +215,7 @@ Detalles de build y empaquetado Linux (AppImage, Snap, Flatpak): [assets/linux/R
 
 - El soporte para Windows esta planeado para futuras versiones.
 - Protocolos: `SCP`, luego `FTP/FTPS/WebDAV`.
-- Soporte de salto SSH (`ProxyJump`) y flujos de autenticacion proxy enterprise mas amplios.
+- Flujos de autenticacion enterprise mas amplios para proxy/jump (por ejemplo, autenticacion jump interactiva fuera de modo batch).
 - Flujos de sincronizacion: comparar/sincronizar y keep-up-to-date con filtros/ignorados.
 - Persistencia de cola entre reinicios.
 - Mas UX: marcadores, historial, command palette y temas.
