@@ -72,6 +72,9 @@ class Libssh2SftpClient : public SftpClient {
     TransferIntegrityPolicy transferIntegrityPolicy_ =
         TransferIntegrityPolicy::Optional;
     mutable std::mutex stateMutex_;
+#ifndef _WIN32
+    int jumpProxyPid_ = -1;
+#endif
 
     // TCP connection + SSH handshake and authentication.
     bool tcpConnect(const SessionOptions &opt, std::string &err);
