@@ -2,12 +2,19 @@
 #include "RemoteModel.hpp"
 #include "TimeUtils.hpp"
 #include "openscp/RuntimeLogging.hpp"
+#include <QApplication>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QFileIconProvider>
+#include <QFileInfo>
+#include <QIcon>
 #include <QLoggingCategory>
 #include <QMetaObject>
+#include <QMimeDatabase>
+#include <QMimeType>
 #include <QPointer>
 #include <QSet>
+#include <QStyle>
 #include <QVariant>
 #include <algorithm>
 #include <functional>
@@ -30,15 +37,118 @@ int RemoteModel::rowCount(const QModelIndex &parent) const {
     return static_cast<int>(items_.size());
 }
 
+static QIcon remoteFolderIcon() {
+    static const QIcon icon = [] {
+        QIcon themed = QIcon::fromTheme(QStringLiteral("folder"));
+        if (!themed.isNull())
+            return themed;
+        return QApplication::style()
+                   ? QApplication::style()->standardIcon(QStyle::SP_DirIcon)
+                   : QIcon();
+    }();
+    return icon;
+}
+
+static QIcon remoteFileIcon() {
+    static const QIcon icon = [] {
+        QIcon themed = QIcon::fromTheme(QStringLiteral("text-x-generic"));
+        if (!themed.isNull())
+            return themed;
+        return QApplication::style()
+                   ? QApplication::style()->standardIcon(QStyle::SP_FileIcon)
+                   : QIcon();
+    }();
+    return icon;
+}
+
+static QIcon remoteLinkIcon() {
+    static const QIcon icon = [] {
+        QIcon themed = QIcon::fromTheme(QStringLiteral("emblem-symbolic-link"));
+        if (!themed.isNull())
+            return themed;
+        return QApplication::style()
+                   ? QApplication::style()->standardIcon(
+                         QStyle::SP_FileLinkIcon)
+                   : QIcon();
+    }();
+    return icon;
+}
+
+static QIcon iconFromMimeTheme(const QString &name) {
+    static QMimeDatabase mimeDb;
+    const QMimeType mt =
+        mimeDb.mimeTypeForFile(name, QMimeDatabase::MatchExtension);
+    if (!mt.isValid())
+        return QIcon();
+
+    QIcon icon = QIcon::fromTheme(mt.iconName());
+    if (icon.isNull() && !mt.genericIconName().isEmpty()) {
+        icon = QIcon::fromTheme(mt.genericIconName());
+    }
+    return icon;
+}
+
+static QIcon iconForRemoteEntry(const QString &name, bool isDir, bool isLink) {
+    QString key;
+    if (isLink) {
+        key = QStringLiteral("__link");
+    } else if (isDir) {
+        key = QStringLiteral("__dir");
+    } else {
+        const QString ext = QFileInfo(name).completeSuffix().toLower();
+        key = ext.isEmpty() ? QStringLiteral("__file")
+                            : QStringLiteral("ext:") + ext;
+    }
+
+    static QHash<QString, QIcon> cache;
+    if (cache.contains(key))
+        return cache.value(key);
+
+    QIcon icon;
+#ifdef Q_OS_MAC
+    static QFileIconProvider provider;
+    if (isDir) {
+        icon = provider.icon(QFileIconProvider::Folder);
+    } else if (!isLink) {
+        const QString ext = QFileInfo(name).completeSuffix().toLower();
+        QString probeName = QStringLiteral("remote-entry");
+        if (!ext.isEmpty())
+            probeName += QStringLiteral(".") + ext;
+        icon = provider.icon(QFileInfo(probeName));
+    }
+#endif
+    if (icon.isNull() && isLink) {
+        icon = remoteLinkIcon();
+    }
+    if (icon.isNull() && isDir) {
+        icon = remoteFolderIcon();
+    }
+    if (icon.isNull() && !isDir && !isLink) {
+        icon = iconFromMimeTheme(name);
+    }
+    if (icon.isNull() && !isDir && !isLink) {
+        icon = remoteFileIcon();
+    }
+    if (icon.isNull()) {
+        icon = remoteFileIcon();
+    }
+
+    cache.insert(key, icon);
+    return icon;
+}
+
 QVariant RemoteModel::data(const QModelIndex &index, int role) const {
     if (!index.isValid() || index.row() < 0 ||
         index.row() >= (int)items_.size())
         return {};
     const auto &it = items_[index.row()];
+    const bool isLnk = (it.mode & 0120000u) == 0120000u; // S_IFLNK
+    if (role == Qt::DecorationRole && index.column() == 0) {
+        return iconForRemoteEntry(it.name, it.isDir, isLnk);
+    }
     if (role == Qt::DisplayRole) {
         switch (index.column()) {
         case 0: {
-            bool isLnk = (it.mode & 0120000u) == 0120000u; // S_IFLNK
             QString suffix;
             if (isLnk)
                 suffix = "@";
