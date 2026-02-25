@@ -4,6 +4,7 @@
 #include "openscp/Libssh2SftpClient.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -85,6 +86,41 @@ bool parsePort(const std::optional<std::string> &raw, std::uint16_t &out) {
     }
 }
 
+bool parseProxyType(const std::optional<std::string> &raw,
+                    openscp::ProxyType &out) {
+    if (!raw.has_value() || raw->empty()) {
+        out = openscp::ProxyType::None;
+        return true;
+    }
+    std::string v = *raw;
+    std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    if (v == "none" || v == "direct" || v == "off") {
+        out = openscp::ProxyType::None;
+        return true;
+    }
+    if (v == "socks5" || v == "socks") {
+        out = openscp::ProxyType::Socks5;
+        return true;
+    }
+    if (v == "http" || v == "http_connect" || v == "http-connect" ||
+        v == "connect") {
+        out = openscp::ProxyType::HttpConnect;
+        return true;
+    }
+    return false;
+}
+
+bool parsePortOrDefault(const std::optional<std::string> &raw,
+                        std::uint16_t fallback, std::uint16_t &out) {
+    if (!raw.has_value()) {
+        out = fallback;
+        return true;
+    }
+    return parsePort(raw, out);
+}
+
 bool listContainsName(const std::vector<openscp::FileInfo> &entries,
                       const std::string &name) {
     return std::any_of(entries.begin(), entries.end(),
@@ -101,6 +137,10 @@ int main() {
     const auto pass = envValue("OPEN_SCP_IT_SFTP_PASS");
     const auto keyPath = envValue("OPEN_SCP_IT_SFTP_KEY");
     const auto keyPassphrase = envValue("OPEN_SCP_IT_SFTP_KEY_PASSPHRASE");
+    const auto proxyTypeRaw = envValue("OPEN_SCP_IT_PROXY_TYPE");
+    const auto proxyHost = envValue("OPEN_SCP_IT_PROXY_HOST");
+    const auto proxyUser = envValue("OPEN_SCP_IT_PROXY_USER");
+    const auto proxyPass = envValue("OPEN_SCP_IT_PROXY_PASS");
     const std::string remoteBase =
         envValue("OPEN_SCP_IT_REMOTE_BASE").value_or("/tmp");
 
@@ -124,6 +164,27 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    openscp::ProxyType proxyType = openscp::ProxyType::None;
+    if (!parseProxyType(proxyTypeRaw, proxyType)) {
+        std::cerr << "[FAIL] OPEN_SCP_IT_PROXY_TYPE is invalid\n";
+        return EXIT_FAILURE;
+    }
+    std::uint16_t proxyPort = 0;
+    if (proxyType != openscp::ProxyType::None) {
+        if (!proxyHost.has_value()) {
+            std::cerr << "[FAIL] OPEN_SCP_IT_PROXY_HOST is required when "
+                         "OPEN_SCP_IT_PROXY_TYPE is set\n";
+            return EXIT_FAILURE;
+        }
+        const std::uint16_t defaultProxyPort =
+            (proxyType == openscp::ProxyType::Socks5) ? 1080 : 8080;
+        if (!parsePortOrDefault(envValue("OPEN_SCP_IT_PROXY_PORT"),
+                                defaultProxyPort, proxyPort)) {
+            std::cerr << "[FAIL] OPEN_SCP_IT_PROXY_PORT is invalid\n";
+            return EXIT_FAILURE;
+        }
+    }
+
     TestContext t;
     openscp::SessionOptions opt;
     opt.host = *host;
@@ -138,6 +199,15 @@ int main() {
     }
     opt.known_hosts_policy = openscp::KnownHostsPolicy::Off;
     opt.transfer_integrity_policy = openscp::TransferIntegrityPolicy::Required;
+    opt.proxy_type = proxyType;
+    if (proxyType != openscp::ProxyType::None) {
+        opt.proxy_host = *proxyHost;
+        opt.proxy_port = proxyPort;
+        if (proxyUser.has_value())
+            opt.proxy_username = *proxyUser;
+        if (proxyPass.has_value())
+            opt.proxy_password = *proxyPass;
+    }
 
     const std::string token = uniqueToken();
     const std::string remoteSuiteDir =
