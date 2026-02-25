@@ -23,6 +23,7 @@ enum class KnownHostsPolicy {
 // - Required: verification is mandatory; fail if verification cannot be
 // completed.
 enum class TransferIntegrityPolicy { Off, Optional, Required };
+enum class ProxyType { None, Socks5, HttpConnect };
 
 struct FileInfo {
     std::string name; // base name
@@ -67,6 +68,13 @@ struct SessionOptions {
     // Transfer integrity checks for resume and final content verification.
     TransferIntegrityPolicy transfer_integrity_policy =
         TransferIntegrityPolicy::Optional;
+
+    // Optional TCP proxy tunnel for SSH transport.
+    ProxyType proxy_type = ProxyType::None;
+    std::string proxy_host;
+    std::uint16_t proxy_port = 0;
+    std::optional<std::string> proxy_username;
+    std::optional<std::string> proxy_password;
 
     // Host key confirmation (TOFU) when known_hosts lacks an entry.
     // Return true to accept and save, false to reject.

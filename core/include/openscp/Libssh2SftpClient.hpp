@@ -74,7 +74,7 @@ class Libssh2SftpClient : public SftpClient {
     mutable std::mutex stateMutex_;
 
     // TCP connection + SSH handshake and authentication.
-    bool tcpConnect(const std::string &host, uint16_t port, std::string &err);
+    bool tcpConnect(const SessionOptions &opt, std::string &err);
     bool sshHandshakeAuth(const SessionOptions &opt, std::string &err);
 };
 
