@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -13,6 +14,7 @@
 #include <iterator>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -128,6 +130,66 @@ bool listContainsName(const std::vector<openscp::FileInfo> &entries,
                            return e.name == name;
                        });
 }
+
+#ifndef _WIN32
+std::string formatHostPortAuthority(const std::string &host, std::uint16_t port) {
+    if (host.find(':') != std::string::npos && host.find(']') == std::string::npos)
+        return "[" + host + "]:" + std::to_string(port);
+    return host + ":" + std::to_string(port);
+}
+
+std::size_t countJumpTunnelProcesses(const std::string &targetHost,
+                                     std::uint16_t targetPort,
+                                     const std::string &jumpHost,
+                                     std::uint16_t jumpPort) {
+    const std::string needleTarget =
+        std::string("-W ") + formatHostPortAuthority(targetHost, targetPort);
+    const std::string needlePort = std::string("-p ") + std::to_string(jumpPort);
+
+    FILE *pipe = ::popen("ps -ax -o command=", "r");
+    if (!pipe)
+        return 0;
+
+    std::size_t matches = 0;
+    char lineBuf[4096];
+    while (std::fgets(lineBuf, sizeof(lineBuf), pipe)) {
+        std::string line(lineBuf);
+        if (!line.empty() && line.back() == '\n')
+            line.pop_back();
+        if (line.find("ssh") == std::string::npos)
+            continue;
+        if (line.find(needleTarget) == std::string::npos)
+            continue;
+        if (line.find(needlePort) == std::string::npos)
+            continue;
+        if (line.find(jumpHost) == std::string::npos)
+            continue;
+        ++matches;
+    }
+    (void)::pclose(pipe);
+    return matches;
+}
+
+bool waitForJumpTunnelCountAtMost(const std::string &targetHost,
+                                  std::uint16_t targetPort,
+                                  const std::string &jumpHost,
+                                  std::uint16_t jumpPort,
+                                  std::size_t baselineCount,
+                                  std::chrono::milliseconds timeout) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    for (;;) {
+        if (countJumpTunnelProcesses(targetHost, targetPort, jumpHost, jumpPort) <=
+            baselineCount) {
+            return true;
+        }
+        if (std::chrono::steady_clock::now() >= deadline)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    }
+    return countJumpTunnelProcesses(targetHost, targetPort, jumpHost, jumpPort) <=
+           baselineCount;
+}
+#endif
 
 } // namespace
 
@@ -414,6 +476,30 @@ int main() {
     (void)client.removeDir(remoteSuiteDir, cleanupErr);
     client.disconnect();
     fs::remove_all(localTmpRoot, ec);
+
+#ifndef _WIN32
+    // Dedicated lifecycle regression: when jump transport is in use, the
+    // helper ssh process must be torn down after disconnect (no leaked tunnels).
+    if (jumpHost.has_value() && t.failures == 0) {
+        const std::size_t baselineJumpCount =
+            countJumpTunnelProcesses(*host, port, *jumpHost, jumpPort);
+        openscp::Libssh2SftpClient jumpLifecycleClient;
+        std::string jumpLifecycleErr;
+        const bool jumpLifecycleConnected =
+            jumpLifecycleClient.connect(opt, jumpLifecycleErr);
+        t.check(jumpLifecycleConnected,
+                std::string("jump lifecycle connect should succeed: ") +
+                    jumpLifecycleErr);
+        if (jumpLifecycleConnected) {
+            jumpLifecycleClient.disconnect();
+            const bool drained = waitForJumpTunnelCountAtMost(
+                *host, port, *jumpHost, jumpPort, baselineJumpCount,
+                std::chrono::milliseconds(4000));
+            t.check(drained,
+                    "jump lifecycle should stop tunnel process after disconnect");
+        }
+    }
+#endif
 
     if (t.failures != 0) {
         std::cerr << "[FAILURES] " << t.failures << "\n";
