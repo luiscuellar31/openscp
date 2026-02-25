@@ -141,6 +141,9 @@ int main() {
     const auto proxyHost = envValue("OPEN_SCP_IT_PROXY_HOST");
     const auto proxyUser = envValue("OPEN_SCP_IT_PROXY_USER");
     const auto proxyPass = envValue("OPEN_SCP_IT_PROXY_PASS");
+    const auto jumpHost = envValue("OPEN_SCP_IT_JUMP_HOST");
+    const auto jumpUser = envValue("OPEN_SCP_IT_JUMP_USER");
+    const auto jumpKey = envValue("OPEN_SCP_IT_JUMP_KEY");
     const std::string remoteBase =
         envValue("OPEN_SCP_IT_REMOTE_BASE").value_or("/tmp");
 
@@ -154,6 +157,11 @@ int main() {
     }
     if (keyPath.has_value() && !fs::exists(*keyPath)) {
         std::cerr << "[FAIL] OPEN_SCP_IT_SFTP_KEY does not exist: " << *keyPath
+                  << "\n";
+        return EXIT_FAILURE;
+    }
+    if (jumpKey.has_value() && !fs::exists(*jumpKey)) {
+        std::cerr << "[FAIL] OPEN_SCP_IT_JUMP_KEY does not exist: " << *jumpKey
                   << "\n";
         return EXIT_FAILURE;
     }
@@ -184,6 +192,17 @@ int main() {
             return EXIT_FAILURE;
         }
     }
+    std::uint16_t jumpPort = 22;
+    if (jumpHost.has_value() &&
+        !parsePortOrDefault(envValue("OPEN_SCP_IT_JUMP_PORT"), 22, jumpPort)) {
+        std::cerr << "[FAIL] OPEN_SCP_IT_JUMP_PORT is invalid\n";
+        return EXIT_FAILURE;
+    }
+    if (proxyType != openscp::ProxyType::None && jumpHost.has_value()) {
+        std::cerr << "[FAIL] OPEN_SCP_IT_PROXY_TYPE and OPEN_SCP_IT_JUMP_HOST "
+                     "cannot be used together in the same run\n";
+        return EXIT_FAILURE;
+    }
 
     TestContext t;
     openscp::SessionOptions opt;
@@ -207,6 +226,14 @@ int main() {
             opt.proxy_username = *proxyUser;
         if (proxyPass.has_value())
             opt.proxy_password = *proxyPass;
+    }
+    if (jumpHost.has_value()) {
+        opt.jump_host = *jumpHost;
+        opt.jump_port = jumpPort;
+        if (jumpUser.has_value())
+            opt.jump_username = *jumpUser;
+        if (jumpKey.has_value())
+            opt.jump_private_key_path = *jumpKey;
     }
 
     const std::string token = uniqueToken();
