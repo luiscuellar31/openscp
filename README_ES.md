@@ -178,11 +178,11 @@ export QT_PREFIX="/ruta/a/Qt/<version>/macos"
 export Qt6_DIR="/ruta/a/Qt/<version>/macos/lib/cmake/Qt6"
 ```
 
-Detalles completos de empaquetado: `assets/macos/README.md`
+Detalles completos de empaquetado: [`assets/macos/README.md`](assets/macos/README.md)
 
 ### Linux
 
-Detalles de build y empaquetado Linux (AppImage, Snap, Flatpak): `assets/linux/README.md`
+Detalles de build y empaquetado Linux (AppImage, Snap, Flatpak): [`assets/linux/README.md`](assets/linux/README.md)
 
 ## Variables de Entorno en Runtime
 
@@ -219,5 +219,5 @@ Detalles de build y empaquetado Linux (AppImage, Snap, Flatpak): `assets/linux/R
 
 ## Contribuir
 
-- Las contribuciones son bienvenidas. Revisa `CONTRIBUTING.md` para flujo y estandares.
+- Las contribuciones son bienvenidas. Revisa [`CONTRIBUTING.md`](CONTRIBUTING.md) para flujo y estandares.
 - Issues y pull requests son bienvenidos, especialmente en estabilidad macOS/Linux, i18n y robustez SFTP.
