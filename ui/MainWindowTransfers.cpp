@@ -13,10 +13,12 @@
 #include <QDropEvent>
 #include <QEasingCurve>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QMimeData>
 #include <QParallelAnimationGroup>
 #include <QProgressDialog>
 #include <QPropertyAnimation>
+#include <QScreen>
 #include <QStatusBar>
 
 #include <atomic>
@@ -56,6 +58,50 @@ static QString joinRemotePath(const QString &base, const QString &name) {
     if (base == "/")
         return "/" + name;
     return base.endsWith('/') ? base + name : base + "/" + name;
+}
+
+static QRect centeredQueueRect(QWidget *dialog, QWidget *mainWindow) {
+    if (!dialog)
+        return {};
+
+    QRect rect = dialog->geometry();
+    if (!rect.isValid())
+        rect = QRect(QPoint(0, 0), dialog->size());
+
+    if (mainWindow) {
+        QRect anchor = mainWindow->frameGeometry();
+        if (!anchor.isValid())
+            anchor = mainWindow->geometry();
+        if (anchor.isValid())
+            rect.moveCenter(anchor.center());
+    }
+
+    QScreen *screen = nullptr;
+    if (mainWindow)
+        screen = mainWindow->screen();
+    if (!screen)
+        screen = dialog->screen();
+    if (!screen)
+        screen = QGuiApplication::primaryScreen();
+    if (!screen)
+        return rect;
+
+    const QRect avail = screen->availableGeometry();
+    if (!avail.isValid())
+        return rect;
+
+    int x = rect.x();
+    int y = rect.y();
+    const int minX = avail.left();
+    const int minY = avail.top();
+    const int maxX = avail.right() - rect.width() + 1;
+    const int maxY = avail.bottom() - rect.height() + 1;
+    if (maxX >= minX)
+        x = qBound(minX, x, maxX);
+    if (maxY >= minY)
+        y = qBound(minY, y, maxY);
+    rect.moveTopLeft(QPoint(x, y));
+    return rect;
 }
 
 void MainWindow::runRemoteDownloadPrescan(
@@ -272,13 +318,15 @@ void MainWindow::showTransferQueue() {
         transferDlg_ = new TransferQueueDialog(transferMgr_, this);
     const bool wasVisible = transferDlg_->isVisible();
     if (!wasVisible) {
+        const QRect endRect = centeredQueueRect(transferDlg_, this);
+        if (endRect.isValid())
+            transferDlg_->setGeometry(endRect);
         // Modeless queue: smooth entrance (fade + slight scale/offset) for
         // better perceived polish.
         transferDlg_->show();
         transferDlg_->raise();
         transferDlg_->activateWindow();
 
-        const QRect endRect = transferDlg_->geometry();
         QRect startRect = endRect;
         startRect.setWidth(qMax(220, (endRect.width() * 96) / 100));
         startRect.setHeight(qMax(140, (endRect.height() * 96) / 100));
