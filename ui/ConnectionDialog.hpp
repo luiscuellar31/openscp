@@ -2,6 +2,7 @@
 #pragma once
 #include "openscp/SftpTypes.hpp"
 #include <QDialog>
+#include <QSize>
 #include <QString>
 
 class QLineEdit;
@@ -48,4 +49,9 @@ class ConnectionDialog : public QDialog {
     QSpinBox *proxyPort_ = nullptr;
     QLineEdit *proxyUser_ = nullptr;
     QLineEdit *proxyPass_ = nullptr;
+
+    // Keep the compact dialog size when proxy rows are hidden (Direct mode).
+    QSize directModeSize_;
+    bool hasDirectModeSize_ = false;
+    bool proxyRowsVisible_ = false;
 };

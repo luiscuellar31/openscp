@@ -14,6 +14,15 @@
 #include <QToolButton>
 #include <QWidget>
 
+static void setFormRowVisible(QFormLayout *layout, QWidget *field,
+                              bool visible) {
+    if (!layout || !field)
+        return;
+    if (QWidget *label = layout->labelForField(field))
+        label->setVisible(visible);
+    field->setVisible(visible);
+}
+
 ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle(tr("Connect (SFTP)"));
     auto *lay = new QFormLayout(this);
@@ -223,16 +232,36 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     lay->addRow(tr("Policy:"), khPolicy_);
     lay->addRow(tr("Integrity:"), integrityPolicy_);
 
-    auto updateProxyFields = [this]() {
+    auto updateProxyFields = [this, lay, proxyHostPortRow, proxyPassRow]() {
         const auto type = static_cast<openscp::ProxyType>(
             proxyType_->currentData().toInt());
-        const bool enabled = (type != openscp::ProxyType::None);
-        proxyHost_->setEnabled(enabled);
-        proxyPort_->setEnabled(enabled);
-        proxyUser_->setEnabled(enabled);
-        proxyPass_->setEnabled(enabled);
-        if (!enabled)
+        const bool showProxyRows = (type != openscp::ProxyType::None);
+        if (showProxyRows && !proxyRowsVisible_) {
+            directModeSize_ = size();
+            hasDirectModeSize_ = true;
+        }
+        setFormRowVisible(lay, proxyHostPortRow, showProxyRows);
+        setFormRowVisible(lay, proxyUser_, showProxyRows);
+        setFormRowVisible(lay, proxyPassRow, showProxyRows);
+        proxyHost_->setEnabled(showProxyRows);
+        proxyPort_->setEnabled(showProxyRows);
+        proxyUser_->setEnabled(showProxyRows);
+        proxyPass_->setEnabled(showProxyRows);
+        if (!showProxyRows)
             proxyPort_->setValue(1080);
+        const bool visibilityChanged = (showProxyRows != proxyRowsVisible_);
+        proxyRowsVisible_ = showProxyRows;
+        if (visibilityChanged) {
+            if (layout())
+                layout()->activate();
+            if (showProxyRows) {
+                adjustSize();
+            } else if (hasDirectModeSize_) {
+                resize(directModeSize_);
+            } else {
+                adjustSize();
+            }
+        }
     };
     connect(proxyType_, &QComboBox::currentIndexChanged, this,
             [updateProxyFields](int) { updateProxyFields(); });
