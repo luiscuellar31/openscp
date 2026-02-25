@@ -229,6 +229,60 @@ jobs:
           OPEN_SCP_IT_REMOTE_BASE: /home/openscp_it/upload
         run: ctest --test-dir build --output-on-failure
 
+      - name: Test (Linux, with SOCKS5 proxy integration)
+        if: runner.os == 'Linux'
+        env:
+          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
+          OPEN_SCP_IT_SFTP_PORT: "2222"
+          OPEN_SCP_IT_SFTP_USER: openscp_it
+          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
+          OPEN_SCP_IT_REMOTE_BASE: /home/openscp_it/upload
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i /tmp/openscp_it_linux_ed25519 \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o ExitOnForwardFailure=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -N -D 127.0.0.1:1081 \
+            -p 2222 openscp_it@127.0.0.1 &
+          SOCKS_PID=$!
+          trap 'kill "$SOCKS_PID" 2>/dev/null || true; wait "$SOCKS_PID" 2>/dev/null || true' EXIT
+
+          for i in {1..20}; do
+            if (echo > /dev/tcp/127.0.0.1/1081) >/dev/null 2>&1; then
+              break
+            fi
+            sleep 0.5
+          done
+          if ! (echo > /dev/tcp/127.0.0.1/1081) >/dev/null 2>&1; then
+            echo "SOCKS5 proxy tunnel did not start"
+            exit 1
+          fi
+
+          OPEN_SCP_IT_PROXY_TYPE=socks5 \
+          OPEN_SCP_IT_PROXY_HOST=127.0.0.1 \
+          OPEN_SCP_IT_PROXY_PORT=1081 \
+          ./build/tests/openscp_sftp_integration_tests
+
+      - name: Test (Linux, with SSH jump integration)
+        if: runner.os == 'Linux'
+        env:
+          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
+          OPEN_SCP_IT_SFTP_PORT: "2222"
+          OPEN_SCP_IT_SFTP_USER: openscp_it
+          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
+          OPEN_SCP_IT_REMOTE_BASE: /home/openscp_it/upload
+        run: |
+          OPEN_SCP_IT_JUMP_HOST=127.0.0.1 \
+          OPEN_SCP_IT_JUMP_PORT=2222 \
+          OPEN_SCP_IT_JUMP_USER=openscp_it \
+          OPEN_SCP_IT_JUMP_KEY=/tmp/openscp_it_linux_ed25519 \
+          ./build/tests/openscp_sftp_integration_tests
+
       - name: Test (macOS, with SFTP integration)
         if: runner.os == 'macOS'
         env:
@@ -239,3 +293,58 @@ jobs:
         run: |
           OPEN_SCP_IT_SFTP_USER="$(whoami)" \
           ctest --test-dir build --output-on-failure
+
+      - name: Test (macOS, with SOCKS5 proxy integration)
+        if: runner.os == 'macOS'
+        env:
+          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
+          OPEN_SCP_IT_SFTP_PORT: "2222"
+          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_ed25519
+          OPEN_SCP_IT_REMOTE_BASE: /tmp/openscp-it-upload
+        run: |
+          set -euo pipefail
+          RUNNER_USER="$(whoami)"
+
+          ssh \
+            -i /tmp/openscp_it_ed25519 \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o ExitOnForwardFailure=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -N -D 127.0.0.1:1081 \
+            -p 2222 "${RUNNER_USER}@127.0.0.1" &
+          SOCKS_PID=$!
+          trap 'kill "$SOCKS_PID" 2>/dev/null || true; wait "$SOCKS_PID" 2>/dev/null || true' EXIT
+
+          for i in {1..20}; do
+            if (echo > /dev/tcp/127.0.0.1/1081) >/dev/null 2>&1; then
+              break
+            fi
+            sleep 0.5
+          done
+          if ! (echo > /dev/tcp/127.0.0.1/1081) >/dev/null 2>&1; then
+            echo "SOCKS5 proxy tunnel did not start"
+            exit 1
+          fi
+
+          OPEN_SCP_IT_SFTP_USER="${RUNNER_USER}" \
+          OPEN_SCP_IT_PROXY_TYPE=socks5 \
+          OPEN_SCP_IT_PROXY_HOST=127.0.0.1 \
+          OPEN_SCP_IT_PROXY_PORT=1081 \
+          ./build/tests/openscp_sftp_integration_tests
+
+      - name: Test (macOS, with SSH jump integration)
+        if: runner.os == 'macOS'
+        env:
+          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
+          OPEN_SCP_IT_SFTP_PORT: "2222"
+          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_ed25519
+          OPEN_SCP_IT_REMOTE_BASE: /tmp/openscp-it-upload
+        run: |
+          OPEN_SCP_IT_SFTP_USER="$(whoami)" \
+          OPEN_SCP_IT_JUMP_HOST=127.0.0.1 \
+          OPEN_SCP_IT_JUMP_PORT=2222 \
+          OPEN_SCP_IT_JUMP_USER="$(whoami)" \
+          OPEN_SCP_IT_JUMP_KEY=/tmp/openscp_it_ed25519 \
+          ./build/tests/openscp_sftp_integration_tests
