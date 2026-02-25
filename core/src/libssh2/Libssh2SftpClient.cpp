@@ -50,7 +50,13 @@
 
 namespace openscp {
 
-enum class CoreLogLevel : int { Off = 0, Info = 1, Debug = 2 };
+enum class CoreLogLevel : int {
+    Off = 0,
+    Error = 1,
+    Warn = 2,
+    Info = 3,
+    Debug = 4
+};
 
 static CoreLogLevel core_log_level() {
     static const CoreLogLevel level = []() {
@@ -62,6 +68,12 @@ static CoreLogLevel core_log_level() {
                        [](unsigned char c) -> char {
                            return static_cast<char>(std::tolower(c));
                        });
+        if (v == "off" || v == "none" || v == "0")
+            return CoreLogLevel::Off;
+        if (v == "error" || v == "err")
+            return CoreLogLevel::Error;
+        if (v == "warn" || v == "warning")
+            return CoreLogLevel::Warn;
         if (v == "debug" || v == "2")
             return CoreLogLevel::Debug;
         if (v == "info" || v == "1")
