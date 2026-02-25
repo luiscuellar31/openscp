@@ -32,6 +32,8 @@ struct TransferTask {
     int etaSeconds = -1;           // -1 unknown
     int attempts = 0;
     int maxAttempts = 3;
+    qint64 queuedAtMs = 0;   // epoch ms when task entered queued state
+    qint64 startedAtMs = 0;  // epoch ms when task entered running state
     // Task state:
     //  - Queued: in queue, pending execution
     //  - Running: in progress
@@ -143,4 +145,17 @@ class TransferManager : public QObject {
     std::unordered_set<quint64> pendingInterruptTasks_;
     std::mutex activeWorkersMutex_;
     std::unordered_set<quint64> resumeRequestedTasks_;
+    int schedulingCursor_ = 0;
+    mutable std::mutex perfMtx_;
+    quint64 perfCompletedTasks_ = 0;
+    quint64 perfCompletedBytes_ = 0;
+    qint64 perfTotalQueueLatencyMs_ = 0;
+    qint64 perfTotalPrecheckMs_ = 0;
+    qint64 perfTotalTransferMs_ = 0;
+    qint64 perfLastLogAtMs_ = 0;
+
+    int nextQueuedTaskIndexLocked();
+    void recordCompletionMetrics(quint64 taskId, TransferTask::Status status,
+                                 quint64 bytesDone, qint64 queueLatencyMs,
+                                 qint64 precheckMs, qint64 transferMs);
 };
