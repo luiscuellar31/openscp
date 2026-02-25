@@ -182,11 +182,11 @@ export QT_PREFIX="/path/to/Qt/<version>/macos"
 export Qt6_DIR="/path/to/Qt/<version>/macos/lib/cmake/Qt6"
 ```
 
-Full packaging details: [`assets/macos/README.md`](assets/macos/README.md)
+Full packaging details: [assets/macos/README.md](assets/macos/README.md)
 
 ### Linux
 
-Linux build and packaging details (AppImage, Snap, Flatpak): [`assets/linux/README.md`](assets/linux/README.md)
+Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/README.md](assets/linux/README.md)
 
 ## Runtime Environment Variables
 
@@ -223,5 +223,5 @@ Linux build and packaging details (AppImage, Snap, Flatpak): [`assets/linux/READ
 
 ## Contributing
 
-- Contributions are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for workflow and standards.
+- Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for workflow and standards.
 - Issues and pull requests are welcome, especially around macOS/Linux stability, i18n, and SFTP robustness.
