@@ -72,7 +72,7 @@ open build/OpenSCP.app
 - Atomic `known_hosts` persistence and strict POSIX permissions (`~/.ssh` 0700, file 0600).
 - One-time-connect confirmation when fingerprint persistence fails.
 - Safer keyboard-interactive cancel path (no accidental password fallback).
-- Transfer integrity policy (`off/optional/required`) using `.part` + atomic finalize.
+- Transfer integrity policy (`off/optional/required`) per site/session (and env override) using `.part` + atomic finalize.
 - Sensitive data redacted from production logs by default.
 
 ### 4. Sites and credential storage

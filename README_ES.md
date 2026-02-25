@@ -69,7 +69,7 @@ open build/OpenSCP.app
 - Persistencia atomica de `known_hosts` y permisos POSIX estrictos (`~/.ssh` 0700, archivo 0600).
 - Confirmacion explicita de conexion de una sola vez cuando falla persistir huella.
 - Cancelacion segura en keyboard-interactive (sin fallback accidental de contrasena).
-- Politica de integridad de transferencias (`off/optional|required`) con `.part` + finalize atomico.
+- Politica de integridad de transferencias (`off/optional|required`) por sitio/sesion (y sobrescritura por variable de entorno) con `.part` + finalize atomico.
 - Redaccion de datos sensibles en logs de produccion por defecto.
 
 ### 4. Sitios guardados y credenciales
