@@ -7,6 +7,7 @@
 #include "openscp/SftpClient.hpp"
 #include <QAbstractButton>
 #include <QApplication>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -40,6 +41,35 @@ static const char *transferStatusName(TransferTask::Status st) {
         return "Canceled";
     }
     return "Unknown";
+}
+
+static QString transferErrorForUi(const std::string &rawError) {
+    const QString msg = QString::fromStdString(rawError).trimmed();
+    if (msg.isEmpty())
+        return msg;
+
+    const QString lower = msg.toLower();
+    if (lower.contains("checksum mismatch")) {
+        return QCoreApplication::translate(
+            "TransferManager",
+            "Integrity mismatch detected: local and remote checksums differ. "
+            "Transfer was stopped to prevent corrupted data.");
+    }
+    if (lower.contains("prefix does not match")) {
+        return QCoreApplication::translate(
+            "TransferManager",
+            "Resume integrity mismatch detected between local and remote "
+            "partial data. Transfer was stopped.");
+    }
+    if (lower.contains("could not verify final integrity") ||
+        lower.contains("could not validate resume integrity")) {
+        return QCoreApplication::translate(
+                   "TransferManager",
+                   "Integrity verification is required but could not be "
+                   "completed. Transfer failed.") +
+               "\n" + msg;
+    }
+    return msg;
 }
 
 TransferManager::TransferManager(QObject *parent) : QObject(parent) {}
@@ -561,7 +591,7 @@ void TransferManager::schedule() {
             {
                 std::lock_guard<std::mutex> lk(mtx_);
                 tasks_[idx].status = TransferTask::Status::Error;
-                tasks_[idx].error = QString::fromStdString(preErr);
+                tasks_[idx].error = transferErrorForUi(preErr);
                 tasks_[idx].currentSpeedKBps = 0.0;
                 tasks_[idx].etaSeconds = -1;
                 tasks_[idx].finishedAtMs = nowMs;
@@ -579,7 +609,7 @@ void TransferManager::schedule() {
                 {
                     std::lock_guard<std::mutex> lk(mtx_);
                     tasks_[idx].status = TransferTask::Status::Error;
-                    tasks_[idx].error = QString::fromStdString(sErr);
+                    tasks_[idx].error = transferErrorForUi(sErr);
                     tasks_[idx].currentSpeedKBps = 0.0;
                     tasks_[idx].etaSeconds = -1;
                     tasks_[idx].finishedAtMs = nowMs;
@@ -780,7 +810,7 @@ void TransferManager::schedule() {
                                         explicitlyCanceled ? nowMs : 0;
                                 } else {
                                     tasks_[i].status = TransferTask::Status::Error;
-                                    tasks_[i].error = QString::fromStdString(err);
+                                    tasks_[i].error = transferErrorForUi(err);
                                     tasks_[i].currentSpeedKBps = 0.0;
                                     tasks_[i].etaSeconds = -1;
                                     tasks_[i].finishedAtMs = nowMs;
@@ -943,7 +973,7 @@ void TransferManager::schedule() {
                             int i = indexForId(taskId);
                             if (i >= 0) {
                                 tasks_[i].status = TransferTask::Status::Error;
-                                tasks_[i].error = QString::fromStdString(perr);
+                                tasks_[i].error = transferErrorForUi(perr);
                                 tasks_[i].currentSpeedKBps = 0.0;
                                 tasks_[i].etaSeconds = -1;
                                 tasks_[i].finishedAtMs = nowMs;
@@ -987,7 +1017,7 @@ void TransferManager::schedule() {
                             int i = indexForId(taskId);
                             if (i >= 0) {
                                 tasks_[i].status = TransferTask::Status::Error;
-                                tasks_[i].error = QString::fromStdString(gerr);
+                                tasks_[i].error = transferErrorForUi(gerr);
                                 tasks_[i].currentSpeedKBps = 0.0;
                                 tasks_[i].etaSeconds = -1;
                                 tasks_[i].finishedAtMs = nowMs;
