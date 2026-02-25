@@ -9,6 +9,7 @@
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QtGlobal>
 #include <QSpinBox>
 #include <QTimer>
 #include <QToolButton>
@@ -73,6 +74,12 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     jumpUser_->setPlaceholderText(tr("optional"));
     jumpKeyPath_->setPlaceholderText(tr("optional"));
     jumpKeyBrowse_->setText(tr("Choose…"));
+#ifdef Q_OS_WIN
+    jumpEnabled_->setChecked(false);
+    jumpEnabled_->setEnabled(false);
+    jumpEnabled_->setToolTip(
+        tr("SSH jump host is currently unavailable on Windows."));
+#endif
 
     // Make text inputs a bit wider by default for better readability.
     const int kInputMinWidth = 360;
@@ -298,11 +305,21 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         }
     };
     connect(proxyType_, &QComboBox::currentIndexChanged, this,
-            [updateProxyFields](int) { updateProxyFields(); });
+            [this, updateProxyFields](int) {
+                const auto type = static_cast<openscp::ProxyType>(
+                    proxyType_->currentData().toInt());
+                if (type != openscp::ProxyType::None && jumpEnabled_ &&
+                    jumpEnabled_->isChecked()) {
+                    jumpEnabled_->setChecked(false);
+                }
+                updateProxyFields();
+            });
     updateProxyFields();
 
     auto updateJumpFields = [this, lay, jumpHostPortRow, jumpKeyPathRow]() {
-        const bool showJumpRows = jumpEnabled_ && jumpEnabled_->isChecked();
+        const bool showJumpRows =
+            jumpEnabled_ && jumpEnabled_->isEnabled() &&
+            jumpEnabled_->isChecked();
         setFormRowVisible(lay, jumpHostPortRow, showJumpRows);
         setFormRowVisible(lay, jumpUser_, showJumpRows);
         setFormRowVisible(lay, jumpKeyPathRow, showJumpRows);
@@ -320,7 +337,15 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         }
     };
     connect(jumpEnabled_, &QCheckBox::toggled, this,
-            [updateJumpFields](bool) { updateJumpFields(); });
+            [this, updateJumpFields](bool checked) {
+                if (checked && proxyType_) {
+                    const int directIdx = proxyType_->findData(
+                        static_cast<int>(openscp::ProxyType::None));
+                    if (directIdx >= 0 && proxyType_->currentIndex() != directIdx)
+                        proxyType_->setCurrentIndex(directIdx);
+                }
+                updateJumpFields();
+            });
     updateJumpFields();
 
     connect(khBrowse_, &QToolButton::clicked, this, [this] {
@@ -425,10 +450,14 @@ openscp::SessionOptions ConnectionDialog::options() const {
                 integrityPolicy_->currentData().toInt());
     }
     if (proxyType_) {
-        o.proxy_type = static_cast<openscp::ProxyType>(
-            proxyType_->currentData().toInt());
+        o.proxy_type =
+            static_cast<openscp::ProxyType>(proxyType_->currentData().toInt());
     }
-    if (o.proxy_type != openscp::ProxyType::None) {
+    const bool useJump = jumpEnabled_ && jumpEnabled_->isChecked() &&
+                         !jumpHost_->text().trimmed().isEmpty();
+    const bool useProxy =
+        (o.proxy_type != openscp::ProxyType::None) && !useJump;
+    if (useProxy) {
         o.proxy_host = proxyHost_->text().trimmed().toStdString();
         o.proxy_port = static_cast<std::uint16_t>(proxyPort_->value());
         if (!proxyUser_->text().isEmpty())
@@ -436,8 +465,8 @@ openscp::SessionOptions ConnectionDialog::options() const {
         if (!proxyPass_->text().isEmpty())
             o.proxy_password = proxyPass_->text().toUtf8().toStdString();
     }
-    if (jumpEnabled_ && jumpEnabled_->isChecked() &&
-        !jumpHost_->text().trimmed().isEmpty()) {
+    if (useJump) {
+        o.proxy_type = openscp::ProxyType::None;
         o.jump_host = jumpHost_->text().trimmed().toStdString();
         o.jump_port = static_cast<std::uint16_t>(jumpPort_->value());
         if (!jumpUser_->text().isEmpty())
@@ -474,20 +503,25 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &o) {
         if (i >= 0)
             integrityPolicy_->setCurrentIndex(i);
     }
+
+    const bool hasJump = o.jump_host.has_value() && !o.jump_host->empty();
+    const openscp::ProxyType effectiveProxyType =
+        hasJump ? openscp::ProxyType::None : o.proxy_type;
     if (proxyType_) {
-        int i = proxyType_->findData(static_cast<int>(o.proxy_type));
+        int i = proxyType_->findData(static_cast<int>(effectiveProxyType));
         if (i >= 0)
             proxyType_->setCurrentIndex(i);
     }
-    if (!o.proxy_host.empty())
+    if (effectiveProxyType != openscp::ProxyType::None && !o.proxy_host.empty())
         proxyHost_->setText(QString::fromStdString(o.proxy_host));
-    if (o.proxy_port != 0)
+    if (effectiveProxyType != openscp::ProxyType::None && o.proxy_port != 0)
         proxyPort_->setValue(static_cast<int>(o.proxy_port));
-    if (o.proxy_username && !o.proxy_username->empty())
+    if (effectiveProxyType != openscp::ProxyType::None && o.proxy_username &&
+        !o.proxy_username->empty())
         proxyUser_->setText(QString::fromStdString(*o.proxy_username));
-    if (o.proxy_password && !o.proxy_password->empty())
+    if (effectiveProxyType != openscp::ProxyType::None && o.proxy_password &&
+        !o.proxy_password->empty())
         proxyPass_->setText(QString::fromStdString(*o.proxy_password));
-    const bool hasJump = o.jump_host.has_value() && !o.jump_host->empty();
     if (jumpEnabled_)
         jumpEnabled_->setChecked(hasJump);
     if (hasJump)
