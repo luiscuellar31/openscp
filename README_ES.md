@@ -52,19 +52,23 @@ open build/OpenSCP.app
 - Copia y movimiento entre paneles con drag-and-drop.
 - Operaciones remotas de contexto: descargar, subir, renombrar, eliminar, nueva carpeta/archivo y permisos.
 - Breadcrumbs clicables y busqueda incremental por panel.
+- El panel remoto usa deteccion de iconos por MIME (y proveedor nativo en macOS) para mayor paridad con iconos locales.
 
 ### 2. Motor de transferencias y cola
 
 - Transferencias paralelas reales con conexiones aisladas por worker.
+- Los prechecks costosos de cola se ejecutan fuera del hilo UI; fairness de scheduling y metricas de cola reducen starvation en alta concurrencia.
 - Pausar/reanudar/cancelar/reintentar, limites por tarea/global y soporte de resume.
 - UI de cola con porcentaje de progreso por fila, filtros y columnas detalladas (`Speed`, `ETA`, `Transferred`, `Error`, etc.).
 - Acciones de contexto como reintentar seleccionadas, abrir destino, copiar rutas y politicas de limpieza.
 - Persistencia de ventana/layout/filtro de la cola.
+- La barra de estado principal muestra avisos de transferencias completadas (subidas/descargas exitosas).
 
 ### 3. Endurecimiento de seguridad SFTP
 
 - Auth: contrasena, clave privada (+passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
 - Politicas de host-key: `Strict`, `Accept new (TOFU)`, `No verification` (endurecida).
+- El transporte por sitio puede usar TCP directo, proxy `SOCKS5` o tunel `HTTP CONNECT`.
 - Flujo endurecido para no-verificacion: doble confirmacion, excepcion temporal con TTL y banner de riesgo.
 - Persistencia atomica de `known_hosts` y permisos POSIX estrictos (`~/.ssh` 0700, archivo 0600).
 - Confirmacion explicita de conexion de una sola vez cuando falla persistir huella.
@@ -75,23 +79,27 @@ open build/OpenSCP.app
 ### 4. Sitios guardados y credenciales
 
 - Sitios guardados con identidad estable por UUID.
+- Los sitios guardados persisten por sitio el tipo/endpoint/usuario de proxy.
 - Bloqueo de nombres de sitio duplicados.
 - Flujos de renombrar/eliminar limpian secretos legacy o huerfanos.
 - Eliminacion opcional de credenciales guardadas y entradas relacionadas en `known_hosts` al borrar sitios.
 - Backends seguros:
     - macOS: Keychain
     - Linux: libsecret (si esta disponible)
+- Las contrasenas de proxy se guardan en backend seguro (nunca en texto plano en ajustes del sitio).
 - Feedback claro de persistencia en builds secure-only.
 - Quick Connect puede guardar/actualizar datos del sitio sin duplicados.
 
 ### 5. Calidad de UX/UI
 
 - Dialogo de conexion mejorado (campos mas claros, selectores inline para key/known_hosts, mostrar/ocultar contrasena).
+- Dialogo de conexion con configuracion de proxy por sitio (`Direct`, `SOCKS5`, `HTTP CONNECT`) y auth opcional.
 - Ajustes redisenados en secciones `General` y `Advanced`.
 - Ajustes mantiene los controles visibles al redimensionar (tamano minimo + paginas con scroll).
 - Accion de un clic en Ajustes para restaurar layout/tamanos por defecto de la ventana principal.
 - Dialogo de permisos con vista octal y presets comunes.
 - Dialogo Acerca de con copia de diagnostico y mensajes fallback mas amigables.
+- La ventana de cola de transferencias abre centrada respecto a la ventana principal.
 
 ### 6. Linea base de calidad (CI y tests)
 
@@ -129,6 +137,11 @@ ctest --test-dir build --output-on-failure
 - `OPEN_SCP_IT_SFTP_PASS` o `OPEN_SCP_IT_SFTP_KEY`
 - `OPEN_SCP_IT_SFTP_KEY_PASSPHRASE` (si aplica)
 - `OPEN_SCP_IT_REMOTE_BASE`
+- `OPEN_SCP_IT_PROXY_TYPE` (`socks5` o `http`, opcional)
+- `OPEN_SCP_IT_PROXY_HOST` (requerido cuando `OPEN_SCP_IT_PROXY_TYPE` esta definido)
+- `OPEN_SCP_IT_PROXY_PORT` (opcional; por defecto: `1080` para `socks5`, `8080` para `http`)
+- `OPEN_SCP_IT_PROXY_USER` (opcional)
+- `OPEN_SCP_IT_PROXY_PASS` (opcional)
 
 ## Flujos por Plataforma
 
@@ -193,7 +206,7 @@ Detalles de build y empaquetado Linux (AppImage, Snap, Flatpak): `assets/linux/R
 
 - El soporte para Windows esta planeado para futuras versiones.
 - Protocolos: `SCP`, luego `FTP/FTPS/WebDAV`.
-- Soporte de proxy y salto: `SOCKS5`, `HTTP CONNECT`, `ProxyJump`.
+- Soporte de salto SSH (`ProxyJump`) y flujos de autenticacion proxy enterprise mas amplios.
 - Flujos de sincronizacion: comparar/sincronizar y keep-up-to-date con filtros/ignorados.
 - Persistencia de cola entre reinicios.
 - Mas UX: marcadores, historial, command palette y temas.

@@ -52,15 +52,18 @@ open build/OpenSCP.app
 - Drag-and-drop copy/move between panels.
 - Remote context operations: download, upload, rename, delete, new folder/file, permissions.
 - Clickable breadcrumbs and per-panel incremental search.
+- Remote panel icons use MIME-based detection (plus native provider on macOS) for closer parity with local icons.
 
 ### 2. Transfer engine and queue
 
 - Real parallel transfers with isolated worker connections.
+- Expensive queue prechecks run off the UI thread; scheduling fairness and queue metrics reduce starvation under high concurrency.
 - Pause/resume/cancel/retry, per-task/global limits, and resume support.
 - Status-aware queue actions: controls are enabled only when the selected task state allows that action (for example, retry for `Error`/`Canceled`, resume for `Paused`).
 - Queue UI with per-row progress percentages, filters, and detailed columns (`Speed`, `ETA`, `Transferred`, `Error`, etc.).
 - Context actions like retry selected, open destination, copy paths, and cleanup policies.
 - Queue window/layout/filter persistence.
+- Main status bar emits transfer completion notices (for successful uploads/downloads).
 - Transfers use interruptible worker sessions and bounded socket read/write waits to avoid indefinite hangs during stalled network conditions.
 - Upload completion path is hardened and remote views refresh reliably after finished uploads.
 
@@ -68,6 +71,7 @@ open build/OpenSCP.app
 
 - Auth: password, private key (+passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
 - Host-key policies: `Strict`, `Accept new (TOFU)`, `No verification` (hardened).
+- Per-site transport can use direct TCP, `SOCKS5`, or `HTTP CONNECT` proxy tunneling.
 - Hardened no-verification flow: double confirmation, TTL-based temporary exception, risk banner.
 - Atomic `known_hosts` persistence and strict POSIX permissions (`~/.ssh` 0700, file 0600).
 - One-time-connect confirmation when fingerprint persistence fails.
@@ -78,22 +82,26 @@ open build/OpenSCP.app
 ### 4. Sites and credential storage
 
 - Saved sites use stable UUID identities.
+- Saved sites persist proxy type/endpoint/username per site.
 - Duplicate site names blocked; rename/delete cleans legacy or orphan secrets.
 - Optional cleanup of stored credentials and related `known_hosts` entries when deleting sites.
 - Secure backends:
     - macOS: Keychain
     - Linux: libsecret (when available)
+- Proxy passwords are stored in the secure backend (never in plaintext site settings).
 - Clear persistence feedback in secure-only builds.
 - Quick Connect can save/update site data without creating duplicates.
 
 ### 5. UX/UI quality
 
 - Connection dialog improved (clearer inputs, inline key/known_hosts selectors, show/hide password fields).
+- Connection dialog includes per-site proxy configuration (`Direct`, `SOCKS5`, `HTTP CONNECT`) with optional auth.
 - Settings redesigned into `General` and `Advanced` sections.
 - Settings keeps controls visible while resizing (minimum size + scrollable pages).
 - One-click reset for default main-window layout/sizes in Settings.
 - Permissions dialog includes octal preview + common presets.
 - About dialog includes diagnostics copy support and friendlier fallback messaging.
+- Transfer queue dialog opens centered relative to the main window.
 - Disconnect flow stays responsive: UI returns to local mode immediately while transfer cleanup can continue in background, with watchdog/status feedback.
 - Reconnect is blocked while previous transfer cleanup is still running, preventing session overlap races.
 
@@ -133,6 +141,11 @@ ctest --test-dir build --output-on-failure
 - `OPEN_SCP_IT_SFTP_PASS` or `OPEN_SCP_IT_SFTP_KEY`
 - `OPEN_SCP_IT_SFTP_KEY_PASSPHRASE` (if needed)
 - `OPEN_SCP_IT_REMOTE_BASE`
+- `OPEN_SCP_IT_PROXY_TYPE` (`socks5` or `http`, optional)
+- `OPEN_SCP_IT_PROXY_HOST` (required when `OPEN_SCP_IT_PROXY_TYPE` is set)
+- `OPEN_SCP_IT_PROXY_PORT` (optional; defaults: `1080` for `socks5`, `8080` for `http`)
+- `OPEN_SCP_IT_PROXY_USER` (optional)
+- `OPEN_SCP_IT_PROXY_PASS` (optional)
 
 ## Platform Workflows
 
@@ -197,7 +210,7 @@ Linux build and packaging details (AppImage, Snap, Flatpak): `assets/linux/READM
 
 - Windows support is planned for future releases.
 - Protocols: `SCP`, then `FTP/FTPS/WebDAV`.
-- Proxy and jump support: `SOCKS5`, `HTTP CONNECT`, `ProxyJump`.
+- SSH jump host support (`ProxyJump`) and broader enterprise proxy auth flows.
 - Sync workflows: compare/sync and keep-up-to-date with filters/ignores.
 - Queue persistence across restarts.
 - More UX features: bookmarks, history, command palette, themes.
