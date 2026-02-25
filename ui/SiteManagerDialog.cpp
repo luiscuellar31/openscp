@@ -113,6 +113,8 @@ static std::uint16_t defaultProxyPort(openscp::ProxyType type) {
     return 0;
 }
 
+static std::uint16_t defaultJumpPort() { return 22; }
+
 static void removeLegacyNameSecrets(SecretStore &store,
                                     const QString &siteName) {
     if (siteName.isEmpty())
@@ -221,6 +223,17 @@ void SiteManagerDialog::loadSites() {
         const QString proxyUser = s.value("proxyUser").toString().trimmed();
         if (!proxyUser.isEmpty())
             e.opt.proxy_username = proxyUser.toStdString();
+        const QString jumpHost = s.value("jumpHost").toString().trimmed();
+        if (!jumpHost.isEmpty())
+            e.opt.jump_host = jumpHost.toStdString();
+        e.opt.jump_port = static_cast<std::uint16_t>(
+            s.value("jumpPort", static_cast<int>(defaultJumpPort())).toUInt());
+        const QString jumpUser = s.value("jumpUser").toString().trimmed();
+        if (!jumpUser.isEmpty())
+            e.opt.jump_username = jumpUser.toStdString();
+        const QString jumpKeyPath = s.value("jumpKeyPath").toString();
+        if (!jumpKeyPath.isEmpty())
+            e.opt.jump_private_key_path = jumpKeyPath.toStdString();
         const QString kh = s.value("knownHosts").toString();
         if (!kh.isEmpty())
             e.opt.known_hosts_path = kh.toStdString();
@@ -266,6 +279,18 @@ void SiteManagerDialog::saveSites() {
         s.setValue("proxyUser",
                    e.opt.proxy_username
                        ? QString::fromStdString(*e.opt.proxy_username)
+                       : QString());
+        s.setValue("jumpHost",
+                   e.opt.jump_host ? QString::fromStdString(*e.opt.jump_host)
+                                   : QString());
+        s.setValue("jumpPort", static_cast<int>(e.opt.jump_port));
+        s.setValue("jumpUser",
+                   e.opt.jump_username
+                       ? QString::fromStdString(*e.opt.jump_username)
+                       : QString());
+        s.setValue("jumpKeyPath",
+                   e.opt.jump_private_key_path
+                       ? QString::fromStdString(*e.opt.jump_private_key_path)
                        : QString());
         s.setValue("knownHosts",
                    e.opt.known_hosts_path

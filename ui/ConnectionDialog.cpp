@@ -41,6 +41,12 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     proxyPort_ = new QSpinBox(this);
     proxyUser_ = new QLineEdit(this);
     proxyPass_ = new QLineEdit(this);
+    jumpEnabled_ = new QCheckBox(tr("Use SSH jump host (bastion)"), this);
+    jumpHost_ = new QLineEdit(this);
+    jumpPort_ = new QSpinBox(this);
+    jumpUser_ = new QLineEdit(this);
+    jumpKeyPath_ = new QLineEdit(this);
+    jumpKeyBrowse_ = new QToolButton(this);
 
     // Safer defaults: no implicit host/user values to avoid accidental
     // connections.
@@ -60,6 +66,13 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     proxyPort_->setFixedWidth(110);
     proxyUser_->setPlaceholderText(tr("optional"));
     proxyPass_->setPlaceholderText(tr("optional"));
+    jumpHost_->setPlaceholderText(tr("bastion.example.com"));
+    jumpPort_->setRange(1, 65535);
+    jumpPort_->setValue(22);
+    jumpPort_->setFixedWidth(110);
+    jumpUser_->setPlaceholderText(tr("optional"));
+    jumpKeyPath_->setPlaceholderText(tr("optional"));
+    jumpKeyBrowse_->setText(tr("Choose…"));
 
     // Make text inputs a bit wider by default for better readability.
     const int kInputMinWidth = 360;
@@ -72,6 +85,9 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     proxyHost_->setMinimumWidth(kInputMinWidth);
     proxyUser_->setMinimumWidth(kInputMinWidth);
     proxyPass_->setMinimumWidth(kInputMinWidth);
+    jumpHost_->setMinimumWidth(kInputMinWidth);
+    jumpUser_->setMinimumWidth(kInputMinWidth);
+    jumpKeyPath_->setMinimumWidth(kInputMinWidth);
 
     pass_->setEchoMode(QLineEdit::Password);
     keyPass_->setEchoMode(QLineEdit::Password);
@@ -160,6 +176,20 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     proxyPassRowLayout->addWidget(proxyPass_);
     proxyPassRowLayout->addWidget(proxyPassToggle);
 
+    auto *jumpHostPortRow = new QWidget(this);
+    auto *jumpHostPortLayout = new QHBoxLayout(jumpHostPortRow);
+    jumpHostPortLayout->setContentsMargins(0, 0, 0, 0);
+    jumpHostPortLayout->setSpacing(6);
+    jumpHostPortLayout->addWidget(jumpHost_, 1);
+    jumpHostPortLayout->addWidget(jumpPort_);
+
+    auto *jumpKeyPathRow = new QWidget(this);
+    auto *jumpKeyPathLayout = new QHBoxLayout(jumpKeyPathRow);
+    jumpKeyPathLayout->setContentsMargins(0, 0, 0, 0);
+    jumpKeyPathLayout->setSpacing(6);
+    jumpKeyPathLayout->addWidget(jumpKeyPath_);
+    jumpKeyPathLayout->addWidget(jumpKeyBrowse_);
+
     // Layout
     lay->addRow(tr("Site name:"), siteName_);
     siteNameLabel_ = lay->labelForField(siteName_);
@@ -191,6 +221,10 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     lay->addRow(tr("Proxy host / port:"), proxyHostPortRow);
     lay->addRow(tr("Proxy user:"), proxyUser_);
     lay->addRow(tr("Proxy password:"), proxyPassRow);
+    lay->addRow(QString(), jumpEnabled_);
+    lay->addRow(tr("Jump host / port:"), jumpHostPortRow);
+    lay->addRow(tr("Jump user:"), jumpUser_);
+    lay->addRow(tr("Jump private key:"), jumpKeyPathRow);
 
     // known_hosts
     khPath_ = new QLineEdit(this);
@@ -267,6 +301,28 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
             [updateProxyFields](int) { updateProxyFields(); });
     updateProxyFields();
 
+    auto updateJumpFields = [this, lay, jumpHostPortRow, jumpKeyPathRow]() {
+        const bool showJumpRows = jumpEnabled_ && jumpEnabled_->isChecked();
+        setFormRowVisible(lay, jumpHostPortRow, showJumpRows);
+        setFormRowVisible(lay, jumpUser_, showJumpRows);
+        setFormRowVisible(lay, jumpKeyPathRow, showJumpRows);
+        jumpHost_->setEnabled(showJumpRows);
+        jumpPort_->setEnabled(showJumpRows);
+        jumpUser_->setEnabled(showJumpRows);
+        jumpKeyPath_->setEnabled(showJumpRows);
+        jumpKeyBrowse_->setEnabled(showJumpRows);
+        const bool visibilityChanged = (showJumpRows != jumpRowsVisible_);
+        jumpRowsVisible_ = showJumpRows;
+        if (visibilityChanged) {
+            if (layout())
+                layout()->activate();
+            adjustSize();
+        }
+    };
+    connect(jumpEnabled_, &QCheckBox::toggled, this,
+            [updateJumpFields](bool) { updateJumpFields(); });
+    updateJumpFields();
+
     connect(khBrowse_, &QToolButton::clicked, this, [this] {
         const QString f = QFileDialog::getOpenFileName(
             this, tr("Select known_hosts"), QDir::homePath() + "/.ssh");
@@ -279,6 +335,13 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
             this, tr("Select private key"), QDir::homePath() + "/.ssh");
         if (!f.isEmpty())
             keyPath_->setText(f);
+    });
+
+    connect(jumpKeyBrowse_, &QToolButton::clicked, this, [this] {
+        const QString f = QFileDialog::getOpenFileName(
+            this, tr("Select jump private key"), QDir::homePath() + "/.ssh");
+        if (!f.isEmpty())
+            jumpKeyPath_->setText(f);
     });
 
     auto *bb = new QDialogButtonBox(
@@ -373,6 +436,15 @@ openscp::SessionOptions ConnectionDialog::options() const {
         if (!proxyPass_->text().isEmpty())
             o.proxy_password = proxyPass_->text().toUtf8().toStdString();
     }
+    if (jumpEnabled_ && jumpEnabled_->isChecked() &&
+        !jumpHost_->text().trimmed().isEmpty()) {
+        o.jump_host = jumpHost_->text().trimmed().toStdString();
+        o.jump_port = static_cast<std::uint16_t>(jumpPort_->value());
+        if (!jumpUser_->text().isEmpty())
+            o.jump_username = jumpUser_->text().toStdString();
+        if (!jumpKeyPath_->text().isEmpty())
+            o.jump_private_key_path = jumpKeyPath_->text().toStdString();
+    }
 
     return o;
 }
@@ -415,4 +487,15 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &o) {
         proxyUser_->setText(QString::fromStdString(*o.proxy_username));
     if (o.proxy_password && !o.proxy_password->empty())
         proxyPass_->setText(QString::fromStdString(*o.proxy_password));
+    const bool hasJump = o.jump_host.has_value() && !o.jump_host->empty();
+    if (jumpEnabled_)
+        jumpEnabled_->setChecked(hasJump);
+    if (hasJump)
+        jumpHost_->setText(QString::fromStdString(*o.jump_host));
+    if (o.jump_port != 0)
+        jumpPort_->setValue(static_cast<int>(o.jump_port));
+    if (o.jump_username && !o.jump_username->empty())
+        jumpUser_->setText(QString::fromStdString(*o.jump_username));
+    if (o.jump_private_key_path && !o.jump_private_key_path->empty())
+        jumpKeyPath_->setText(QString::fromStdString(*o.jump_private_key_path));
 }

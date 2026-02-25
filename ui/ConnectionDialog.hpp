@@ -49,9 +49,16 @@ class ConnectionDialog : public QDialog {
     QSpinBox *proxyPort_ = nullptr;
     QLineEdit *proxyUser_ = nullptr;
     QLineEdit *proxyPass_ = nullptr;
+    QCheckBox *jumpEnabled_ = nullptr;
+    QLineEdit *jumpHost_ = nullptr;
+    QSpinBox *jumpPort_ = nullptr;
+    QLineEdit *jumpUser_ = nullptr;
+    QLineEdit *jumpKeyPath_ = nullptr;
+    QToolButton *jumpKeyBrowse_ = nullptr;
 
     // Keep the compact dialog size when proxy rows are hidden (Direct mode).
     QSize directModeSize_;
     bool hasDirectModeSize_ = false;
     bool proxyRowsVisible_ = false;
+    bool jumpRowsVisible_ = false;
 };

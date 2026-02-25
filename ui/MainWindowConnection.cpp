@@ -127,6 +127,22 @@ static QString normalizedIdentityProxyUser(
     return QString::fromStdString(*user).trimmed();
 }
 
+static QString normalizedIdentityJumpHost(
+    const std::optional<std::string> &host) {
+    if (!host || host->empty())
+        return {};
+    return QString::fromStdString(*host).trimmed().toLower();
+}
+
+static QString normalizedIdentityJumpUser(
+    const std::optional<std::string> &user) {
+    if (!user || user->empty())
+        return {};
+    return QString::fromStdString(*user).trimmed();
+}
+
+static std::uint16_t defaultJumpPort() { return 22; }
+
 static std::uint16_t defaultProxyPort(openscp::ProxyType type) {
     switch (type) {
     case openscp::ProxyType::Socks5:
@@ -159,6 +175,13 @@ static bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
            a.proxy_port == b.proxy_port &&
            normalizedIdentityProxyUser(a.proxy_username) ==
                normalizedIdentityProxyUser(b.proxy_username) &&
+           normalizedIdentityJumpHost(a.jump_host) ==
+               normalizedIdentityJumpHost(b.jump_host) &&
+           a.jump_port == b.jump_port &&
+           normalizedIdentityJumpUser(a.jump_username) ==
+               normalizedIdentityJumpUser(b.jump_username) &&
+           normalizedIdentityKeyPath(a.jump_private_key_path) ==
+               normalizedIdentityKeyPath(b.jump_private_key_path) &&
            normalizedIdentityKeyPath(a.private_key_path) ==
                normalizedIdentityKeyPath(b.private_key_path);
 }
@@ -201,6 +224,17 @@ static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool *needsSave) {
         const QString proxyUser = s.value("proxyUser").toString().trimmed();
         if (!proxyUser.isEmpty())
             e.opt.proxy_username = proxyUser.toStdString();
+        const QString jumpHost = s.value("jumpHost").toString().trimmed();
+        if (!jumpHost.isEmpty())
+            e.opt.jump_host = jumpHost.toStdString();
+        e.opt.jump_port = static_cast<std::uint16_t>(
+            s.value("jumpPort", static_cast<int>(defaultJumpPort())).toUInt());
+        const QString jumpUser = s.value("jumpUser").toString().trimmed();
+        if (!jumpUser.isEmpty())
+            e.opt.jump_username = jumpUser.toStdString();
+        const QString jumpKeyPath = s.value("jumpKeyPath").toString();
+        if (!jumpKeyPath.isEmpty())
+            e.opt.jump_private_key_path = jumpKeyPath.toStdString();
         const QString kh = s.value("knownHosts").toString();
         if (!kh.isEmpty())
             e.opt.known_hosts_path = kh.toStdString();
@@ -244,6 +278,18 @@ static void saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
         s.setValue("proxyUser",
                    e.opt.proxy_username
                        ? QString::fromStdString(*e.opt.proxy_username)
+                       : QString());
+        s.setValue("jumpHost",
+                   e.opt.jump_host ? QString::fromStdString(*e.opt.jump_host)
+                                   : QString());
+        s.setValue("jumpPort", static_cast<int>(e.opt.jump_port));
+        s.setValue("jumpUser",
+                   e.opt.jump_username
+                       ? QString::fromStdString(*e.opt.jump_username)
+                       : QString());
+        s.setValue("jumpKeyPath",
+                   e.opt.jump_private_key_path
+                       ? QString::fromStdString(*e.opt.jump_private_key_path)
                        : QString());
         s.setValue("knownHosts",
                    e.opt.known_hosts_path
