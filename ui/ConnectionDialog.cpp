@@ -453,7 +453,8 @@ openscp::SessionOptions ConnectionDialog::options() const {
         o.proxy_type =
             static_cast<openscp::ProxyType>(proxyType_->currentData().toInt());
     }
-    const bool useJump = jumpEnabled_ && jumpEnabled_->isChecked() &&
+    const bool useJump = jumpEnabled_ && jumpEnabled_->isEnabled() &&
+                         jumpEnabled_->isChecked() &&
                          !jumpHost_->text().trimmed().isEmpty();
     const bool useProxy =
         (o.proxy_type != openscp::ProxyType::None) && !useJump;
@@ -504,7 +505,12 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &o) {
             integrityPolicy_->setCurrentIndex(i);
     }
 
-    const bool hasJump = o.jump_host.has_value() && !o.jump_host->empty();
+    bool jumpSupportedInUi = true;
+#ifdef Q_OS_WIN
+    jumpSupportedInUi = false;
+#endif
+    const bool hasJump =
+        jumpSupportedInUi && o.jump_host.has_value() && !o.jump_host->empty();
     const openscp::ProxyType effectiveProxyType =
         hasJump ? openscp::ProxyType::None : o.proxy_type;
     if (proxyType_) {
