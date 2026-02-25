@@ -26,6 +26,7 @@
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTimer>
+#include <QtGlobal>
 #include <QUuid>
 
 #include <atomic>
@@ -161,6 +162,15 @@ normalizedIdentityKeyPath(const std::optional<std::string> &keyPath) {
         return {};
     return QDir::cleanPath(
         QDir::fromNativeSeparators(QString::fromStdString(*keyPath).trimmed()));
+}
+
+static bool hasConfiguredJumpHost(const openscp::SessionOptions &opt) {
+    return opt.jump_host.has_value() && !opt.jump_host->empty();
+}
+
+static bool hasTransportSelectionConflict(const openscp::SessionOptions &opt) {
+    return opt.proxy_type != openscp::ProxyType::None &&
+           hasConfiguredJumpHost(opt);
 }
 
 static bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
@@ -388,6 +398,26 @@ void MainWindow::connectSftp() {
             s.value("Security/knownHostsHashed", true).toBool();
         opt.show_fp_hex = s.value("Security/fpHex", false).toBool();
     }
+    if (hasTransportSelectionConflict(opt)) {
+        UiAlerts::warning(
+            this, tr("Invalid transport configuration"),
+            tr("Proxy and SSH jump host cannot be used together in the same "
+               "connection.\nChoose only one transport method."));
+        statusBar()->showMessage(
+            tr("Connection canceled: invalid transport configuration"), 5000);
+        return;
+    }
+#ifdef Q_OS_WIN
+    if (hasConfiguredJumpHost(opt)) {
+        UiAlerts::warning(
+            this, tr("Unsupported transport"),
+            tr("SSH jump host is currently unavailable on Windows."));
+        statusBar()->showMessage(
+            tr("Connection canceled: SSH jump host is unsupported on Windows"),
+            5000);
+        return;
+    }
+#endif
     if (saveRequest.has_value()) {
         maybePersistQuickConnectSite(opt, *saveRequest, false);
         // Already persisted on request; connection lifecycle no longer needs to
@@ -913,6 +943,26 @@ void MainWindow::startSftpConnect(
                                  3000);
         return;
     }
+    if (hasTransportSelectionConflict(opt)) {
+        UiAlerts::warning(
+            this, tr("Invalid transport configuration"),
+            tr("Proxy and SSH jump host cannot be used together in the same "
+               "connection.\nEdit the site and keep only one transport."));
+        statusBar()->showMessage(
+            tr("Connection canceled: invalid transport configuration"), 5000);
+        return;
+    }
+#ifdef Q_OS_WIN
+    if (hasConfiguredJumpHost(opt)) {
+        UiAlerts::warning(
+            this, tr("Unsupported transport"),
+            tr("SSH jump host is currently unavailable on Windows."));
+        statusBar()->showMessage(
+            tr("Connection canceled: SSH jump host is unsupported on Windows"),
+            5000);
+        return;
+    }
+#endif
     if (!confirmInsecureHostPolicyForSession(opt)) {
         statusBar()->showMessage(
             tr("Connection canceled: no-verification policy not confirmed"),
