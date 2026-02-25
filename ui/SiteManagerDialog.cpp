@@ -101,6 +101,18 @@ static QString siteSecretKey(const SiteEntry &e, const QString &item) {
     return legacyNameSecretKey(e.name, item);
 }
 
+static std::uint16_t defaultProxyPort(openscp::ProxyType type) {
+    switch (type) {
+    case openscp::ProxyType::Socks5:
+        return 1080;
+    case openscp::ProxyType::HttpConnect:
+        return 8080;
+    case openscp::ProxyType::None:
+        break;
+    }
+    return 0;
+}
+
 static void removeLegacyNameSecrets(SecretStore &store,
                                     const QString &siteName) {
     if (siteName.isEmpty())
@@ -109,6 +121,8 @@ static void removeLegacyNameSecrets(SecretStore &store,
         legacyNameSecretKey(siteName, QStringLiteral("password")));
     store.removeSecret(
         legacyNameSecretKey(siteName, QStringLiteral("keypass")));
+    store.removeSecret(
+        legacyNameSecretKey(siteName, QStringLiteral("proxypass")));
 }
 
 SiteManagerDialog::SiteManagerDialog(QWidget *parent) : QDialog(parent) {
@@ -197,6 +211,16 @@ void SiteManagerDialog::loadSites() {
         if (!kp.isEmpty())
             e.opt.private_key_path = kp.toStdString();
         // keyPass will be retrieved dynamically
+        e.opt.proxy_type = static_cast<openscp::ProxyType>(
+            s.value("proxyType", static_cast<int>(openscp::ProxyType::None))
+                .toInt());
+        e.opt.proxy_host = s.value("proxyHost").toString().trimmed().toStdString();
+        e.opt.proxy_port = static_cast<std::uint16_t>(
+            s.value("proxyPort", static_cast<int>(defaultProxyPort(e.opt.proxy_type)))
+                .toUInt());
+        const QString proxyUser = s.value("proxyUser").toString().trimmed();
+        if (!proxyUser.isEmpty())
+            e.opt.proxy_username = proxyUser.toStdString();
         const QString kh = s.value("knownHosts").toString();
         if (!kh.isEmpty())
             e.opt.known_hosts_path = kh.toStdString();
@@ -235,6 +259,13 @@ void SiteManagerDialog::saveSites() {
         s.setValue("keyPath",
                    e.opt.private_key_path
                        ? QString::fromStdString(*e.opt.private_key_path)
+                       : QString());
+        s.setValue("proxyType", static_cast<int>(e.opt.proxy_type));
+        s.setValue("proxyHost", QString::fromStdString(e.opt.proxy_host));
+        s.setValue("proxyPort", static_cast<int>(e.opt.proxy_port));
+        s.setValue("proxyUser",
+                   e.opt.proxy_username
+                       ? QString::fromStdString(*e.opt.proxy_username)
                        : QString());
         s.setValue("knownHosts",
                    e.opt.known_hosts_path
@@ -323,6 +354,14 @@ void SiteManagerDialog::onAdd() {
         if (!r.ok())
             persistIssues << persistIssueLine(tr("Key passphrase"), r);
     }
+    if (opt.proxy_type != openscp::ProxyType::None && opt.proxy_password) {
+        auto r = store.setSecret(siteSecretKey(e, QStringLiteral("proxypass")),
+                                 QString::fromStdString(*opt.proxy_password));
+        if (!r.ok())
+            persistIssues << persistIssueLine(tr("Proxy password"), r);
+    } else {
+        store.removeSecret(siteSecretKey(e, QStringLiteral("proxypass")));
+    }
     showPersistIssues(this, persistIssues);
 }
 
@@ -358,6 +397,15 @@ void SiteManagerDialog::onEdit() {
         } else if (auto legacyKp = store.getSecret(legacyNameSecretKey(
                        e.name, QStringLiteral("keypass")))) {
             opt.private_key_passphrase = legacyKp->toStdString();
+        }
+        if (opt.proxy_type != openscp::ProxyType::None) {
+            if (auto pp = store.getSecret(
+                    siteSecretKey(e, QStringLiteral("proxypass")))) {
+                opt.proxy_password = pp->toStdString();
+            } else if (auto legacyPp = store.getSecret(legacyNameSecretKey(
+                           e.name, QStringLiteral("proxypass")))) {
+                opt.proxy_password = legacyPp->toStdString();
+            }
         }
         dlg.setOptions(opt);
     }
@@ -406,6 +454,14 @@ void SiteManagerDialog::onEdit() {
         if (!r.ok())
             persistIssues << persistIssueLine(tr("Key passphrase"), r);
     }
+    if (e.opt.proxy_type != openscp::ProxyType::None && e.opt.proxy_password) {
+        auto r = store.setSecret(siteSecretKey(e, QStringLiteral("proxypass")),
+                                 QString::fromStdString(*e.opt.proxy_password));
+        if (!r.ok())
+            persistIssues << persistIssueLine(tr("Proxy password"), r);
+    } else {
+        store.removeSecret(siteSecretKey(e, QStringLiteral("proxypass")));
+    }
     if (!oldName.isEmpty() && oldName != name) {
         removeLegacyNameSecrets(store, oldName);
     }
@@ -441,6 +497,7 @@ void SiteManagerDialog::onRemove() {
         SecretStore store;
         store.removeSecret(siteSecretKey(removed, QStringLiteral("password")));
         store.removeSecret(siteSecretKey(removed, QStringLiteral("keypass")));
+        store.removeSecret(siteSecretKey(removed, QStringLiteral("proxypass")));
         removeLegacyNameSecrets(store, name);
         // Also remove known_hosts entry if we know the file and host
         // Derive effective known_hosts path from the entry we just removed (if
@@ -489,6 +546,7 @@ bool SiteManagerDialog::selectedOptions(openscp::SessionOptions &out) const {
     QStringList persistIssues;
     bool migratedNamePw = false;
     bool migratedNameKp = false;
+    bool migratedNamePp = false;
     if (auto pw = store.getSecret(
             siteSecretKey(selected, QStringLiteral("password")))) {
         out.password = pw->toStdString();
@@ -519,21 +577,45 @@ bool SiteManagerDialog::selectedOptions(openscp::SessionOptions &out) const {
         else
             persistIssues << persistIssueLine(QObject::tr("Key passphrase"), r);
     }
+    if (out.proxy_type != openscp::ProxyType::None) {
+        if (auto pp = store.getSecret(
+                siteSecretKey(selected, QStringLiteral("proxypass")))) {
+            out.proxy_password = pp->toStdString();
+            haveSecret = true;
+        } else if (auto legacyPp = store.getSecret(legacyNameSecretKey(
+                       name, QStringLiteral("proxypass")))) {
+            out.proxy_password = legacyPp->toStdString();
+            haveSecret = true;
+            auto r = store.setSecret(
+                siteSecretKey(selected, QStringLiteral("proxypass")), *legacyPp);
+            if (r.ok())
+                migratedNamePp = true;
+            else
+                persistIssues << persistIssueLine(QObject::tr("Proxy password"),
+                                                  r);
+        }
+    } else {
+        out.proxy_password.reset();
+    }
     if (hasStableId && migratedNamePw)
         store.removeSecret(
             legacyNameSecretKey(name, QStringLiteral("password")));
     if (hasStableId && migratedNameKp)
         store.removeSecret(
             legacyNameSecretKey(name, QStringLiteral("keypass")));
+    if (hasStableId && migratedNamePp)
+        store.removeSecret(
+            legacyNameSecretKey(name, QStringLiteral("proxypass")));
     if (!haveSecret) {
         // Compatibility: migrate old values from QSettings if present
         QSettings s("OpenSCP", "OpenSCP");
         int n = s.beginReadArray("sites");
-        bool migratedPw = false, migratedKp = false;
+        bool migratedPw = false, migratedKp = false, migratedPp = false;
         if (modelIndex >= 0 && modelIndex < n) {
             s.setArrayIndex(modelIndex);
             const QString oldPw = s.value("password").toString();
             const QString oldKp = s.value("keyPass").toString();
+            const QString oldPp = s.value("proxyPass").toString();
             if (!oldPw.isEmpty()) {
                 out.password = oldPw.toStdString();
                 auto r = store.setSecret(
@@ -554,17 +636,34 @@ bool SiteManagerDialog::selectedOptions(openscp::SessionOptions &out) const {
                     persistIssues
                         << persistIssueLine(QObject::tr("Key passphrase"), r);
             }
+            if (out.proxy_type != openscp::ProxyType::None &&
+                !oldPp.isEmpty()) {
+                out.proxy_password = oldPp.toStdString();
+                auto r = store.setSecret(
+                    siteSecretKey(selected, QStringLiteral("proxypass")),
+                    oldPp);
+                if (r.ok())
+                    migratedPp = true;
+                else
+                    persistIssues
+                        << persistIssueLine(QObject::tr("Proxy password"), r);
+            } else if (out.proxy_type == openscp::ProxyType::None &&
+                       !oldPp.isEmpty()) {
+                migratedPp = true;
+            }
         }
         s.endArray();
         // After migrating, remove legacy keys from QSettings to avoid storing
         // secrets in plaintext
-        if ((migratedPw || migratedKp) && modelIndex >= 0) {
+        if ((migratedPw || migratedKp || migratedPp) && modelIndex >= 0) {
             s.beginWriteArray("sites");
             s.setArrayIndex(modelIndex);
             if (migratedPw)
                 s.remove("password");
             if (migratedKp)
                 s.remove("keyPass");
+            if (migratedPp)
+                s.remove("proxyPass");
             s.endArray();
             s.sync();
         }

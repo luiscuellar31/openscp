@@ -41,4 +41,11 @@ class ConnectionDialog : public QDialog {
     QToolButton *khBrowse_ = nullptr;
     QComboBox *khPolicy_ = nullptr;
     QComboBox *integrityPolicy_ = nullptr;
+
+    // proxy
+    QComboBox *proxyType_ = nullptr;
+    QLineEdit *proxyHost_ = nullptr;
+    QSpinBox *proxyPort_ = nullptr;
+    QLineEdit *proxyUser_ = nullptr;
+    QLineEdit *proxyPass_ = nullptr;
 };

@@ -28,6 +28,10 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     // Private key fields (optional)
     keyPath_ = new QLineEdit(this);
     keyPass_ = new QLineEdit(this);
+    proxyHost_ = new QLineEdit(this);
+    proxyPort_ = new QSpinBox(this);
+    proxyUser_ = new QLineEdit(this);
+    proxyPass_ = new QLineEdit(this);
 
     // Safer defaults: no implicit host/user values to avoid accidental
     // connections.
@@ -41,6 +45,12 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     pass_->setPlaceholderText(tr("optional"));
     keyPath_->setPlaceholderText(tr("~/.ssh/id_ed25519"));
     keyPass_->setPlaceholderText(tr("optional"));
+    proxyHost_->setPlaceholderText(tr("proxy.example.com"));
+    proxyPort_->setRange(1, 65535);
+    proxyPort_->setValue(1080);
+    proxyPort_->setFixedWidth(110);
+    proxyUser_->setPlaceholderText(tr("optional"));
+    proxyPass_->setPlaceholderText(tr("optional"));
 
     // Make text inputs a bit wider by default for better readability.
     const int kInputMinWidth = 360;
@@ -50,9 +60,13 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     pass_->setMinimumWidth(kInputMinWidth);
     keyPath_->setMinimumWidth(kInputMinWidth);
     keyPass_->setMinimumWidth(kInputMinWidth);
+    proxyHost_->setMinimumWidth(kInputMinWidth);
+    proxyUser_->setMinimumWidth(kInputMinWidth);
+    proxyPass_->setMinimumWidth(kInputMinWidth);
 
     pass_->setEchoMode(QLineEdit::Password);
     keyPass_->setEchoMode(QLineEdit::Password);
+    proxyPass_->setEchoMode(QLineEdit::Password);
 
     auto *passToggle = new QToolButton(this);
     passToggle->setText(tr("Show"));
@@ -72,6 +86,16 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
                 keyPass_->setEchoMode(checked ? QLineEdit::Normal
                                               : QLineEdit::Password);
                 keyPassToggle->setText(checked ? tr("Hide") : tr("Show"));
+            });
+
+    auto *proxyPassToggle = new QToolButton(this);
+    proxyPassToggle->setText(tr("Show"));
+    proxyPassToggle->setCheckable(true);
+    connect(proxyPassToggle, &QToolButton::toggled, this,
+            [this, proxyPassToggle](bool checked) {
+                proxyPass_->setEchoMode(checked ? QLineEdit::Normal
+                                                : QLineEdit::Password);
+                proxyPassToggle->setText(checked ? tr("Hide") : tr("Show"));
             });
 
     auto *passRow = new QWidget(this);
@@ -105,13 +129,36 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     keyPathRowLayout->addWidget(keyPath_);
     keyPathRowLayout->addWidget(keyBrowseBtn);
 
+    proxyType_ = new QComboBox(this);
+    proxyType_->addItem(tr("Direct (no proxy)"),
+                        static_cast<int>(openscp::ProxyType::None));
+    proxyType_->addItem(tr("SOCKS5"),
+                        static_cast<int>(openscp::ProxyType::Socks5));
+    proxyType_->addItem(tr("HTTP CONNECT"),
+                        static_cast<int>(openscp::ProxyType::HttpConnect));
+
+    auto *proxyHostPortRow = new QWidget(this);
+    auto *proxyHostPortLayout = new QHBoxLayout(proxyHostPortRow);
+    proxyHostPortLayout->setContentsMargins(0, 0, 0, 0);
+    proxyHostPortLayout->setSpacing(6);
+    proxyHostPortLayout->addWidget(proxyHost_, 1);
+    proxyHostPortLayout->addWidget(proxyPort_);
+
+    auto *proxyPassRow = new QWidget(this);
+    auto *proxyPassRowLayout = new QHBoxLayout(proxyPassRow);
+    proxyPassRowLayout->setContentsMargins(0, 0, 0, 0);
+    proxyPassRowLayout->setSpacing(6);
+    proxyPassRowLayout->addWidget(proxyPass_);
+    proxyPassRowLayout->addWidget(proxyPassToggle);
+
     // Layout
     lay->addRow(tr("Site name:"), siteName_);
     siteNameLabel_ = lay->labelForField(siteName_);
     setSiteNameVisible(false);
     saveSite_ = new QCheckBox(tr("Save to saved sites"), this);
     saveSite_->setChecked(true);
-    saveCredentials_ = new QCheckBox(tr("Save password/passphrase"), this);
+    saveCredentials_ =
+        new QCheckBox(tr("Save passwords/passphrases"), this);
     saveCredentials_->setChecked(false);
     lay->addRow(QString(), saveSite_);
     lay->addRow(QString(), saveCredentials_);
@@ -131,6 +178,10 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     lay->addRow(tr("Password:"), passRow);
     lay->addRow(tr("Private key path:"), keyPathRow);
     lay->addRow(tr("Key passphrase:"), keyPassRow);
+    lay->addRow(tr("Proxy:"), proxyType_);
+    lay->addRow(tr("Proxy host / port:"), proxyHostPortRow);
+    lay->addRow(tr("Proxy user:"), proxyUser_);
+    lay->addRow(tr("Proxy password:"), proxyPassRow);
 
     // known_hosts
     khPath_ = new QLineEdit(this);
@@ -171,6 +222,21 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     lay->addRow(tr("known_hosts:"), khPathRow);
     lay->addRow(tr("Policy:"), khPolicy_);
     lay->addRow(tr("Integrity:"), integrityPolicy_);
+
+    auto updateProxyFields = [this]() {
+        const auto type = static_cast<openscp::ProxyType>(
+            proxyType_->currentData().toInt());
+        const bool enabled = (type != openscp::ProxyType::None);
+        proxyHost_->setEnabled(enabled);
+        proxyPort_->setEnabled(enabled);
+        proxyUser_->setEnabled(enabled);
+        proxyPass_->setEnabled(enabled);
+        if (!enabled)
+            proxyPort_->setValue(1080);
+    };
+    connect(proxyType_, &QComboBox::currentIndexChanged, this,
+            [updateProxyFields](int) { updateProxyFields(); });
+    updateProxyFields();
 
     connect(khBrowse_, &QToolButton::clicked, this, [this] {
         const QString f = QFileDialog::getOpenFileName(
@@ -266,6 +332,18 @@ openscp::SessionOptions ConnectionDialog::options() const {
             static_cast<openscp::TransferIntegrityPolicy>(
                 integrityPolicy_->currentData().toInt());
     }
+    if (proxyType_) {
+        o.proxy_type = static_cast<openscp::ProxyType>(
+            proxyType_->currentData().toInt());
+    }
+    if (o.proxy_type != openscp::ProxyType::None) {
+        o.proxy_host = proxyHost_->text().trimmed().toStdString();
+        o.proxy_port = static_cast<std::uint16_t>(proxyPort_->value());
+        if (!proxyUser_->text().isEmpty())
+            o.proxy_username = proxyUser_->text().toStdString();
+        if (!proxyPass_->text().isEmpty())
+            o.proxy_password = proxyPass_->text().toUtf8().toStdString();
+    }
 
     return o;
 }
@@ -295,4 +373,17 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &o) {
         if (i >= 0)
             integrityPolicy_->setCurrentIndex(i);
     }
+    if (proxyType_) {
+        int i = proxyType_->findData(static_cast<int>(o.proxy_type));
+        if (i >= 0)
+            proxyType_->setCurrentIndex(i);
+    }
+    if (!o.proxy_host.empty())
+        proxyHost_->setText(QString::fromStdString(o.proxy_host));
+    if (o.proxy_port != 0)
+        proxyPort_->setValue(static_cast<int>(o.proxy_port));
+    if (o.proxy_username && !o.proxy_username->empty())
+        proxyUser_->setText(QString::fromStdString(*o.proxy_username));
+    if (o.proxy_password && !o.proxy_password->empty())
+        proxyPass_->setText(QString::fromStdString(*o.proxy_password));
 }

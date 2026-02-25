@@ -116,6 +116,29 @@ static QString normalizedIdentityUser(const std::string &user) {
     return QString::fromStdString(user).trimmed();
 }
 
+static QString normalizedIdentityProxyHost(const std::string &host) {
+    return QString::fromStdString(host).trimmed().toLower();
+}
+
+static QString normalizedIdentityProxyUser(
+    const std::optional<std::string> &user) {
+    if (!user || user->empty())
+        return {};
+    return QString::fromStdString(*user).trimmed();
+}
+
+static std::uint16_t defaultProxyPort(openscp::ProxyType type) {
+    switch (type) {
+    case openscp::ProxyType::Socks5:
+        return 1080;
+    case openscp::ProxyType::HttpConnect:
+        return 8080;
+    case openscp::ProxyType::None:
+        break;
+    }
+    return 0;
+}
+
 static QString
 normalizedIdentityKeyPath(const std::optional<std::string> &keyPath) {
     if (!keyPath || keyPath->empty())
@@ -130,6 +153,12 @@ static bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
            a.port == b.port &&
            normalizedIdentityUser(a.username) ==
                normalizedIdentityUser(b.username) &&
+           a.proxy_type == b.proxy_type &&
+           normalizedIdentityProxyHost(a.proxy_host) ==
+               normalizedIdentityProxyHost(b.proxy_host) &&
+           a.proxy_port == b.proxy_port &&
+           normalizedIdentityProxyUser(a.proxy_username) ==
+               normalizedIdentityProxyUser(b.proxy_username) &&
            normalizedIdentityKeyPath(a.private_key_path) ==
                normalizedIdentityKeyPath(b.private_key_path);
 }
@@ -162,6 +191,16 @@ static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool *needsSave) {
         const QString kp = s.value("keyPath").toString();
         if (!kp.isEmpty())
             e.opt.private_key_path = kp.toStdString();
+        e.opt.proxy_type = static_cast<openscp::ProxyType>(
+            s.value("proxyType", static_cast<int>(openscp::ProxyType::None))
+                .toInt());
+        e.opt.proxy_host = s.value("proxyHost").toString().trimmed().toStdString();
+        e.opt.proxy_port = static_cast<std::uint16_t>(
+            s.value("proxyPort", static_cast<int>(defaultProxyPort(e.opt.proxy_type)))
+                .toUInt());
+        const QString proxyUser = s.value("proxyUser").toString().trimmed();
+        if (!proxyUser.isEmpty())
+            e.opt.proxy_username = proxyUser.toStdString();
         const QString kh = s.value("knownHosts").toString();
         if (!kh.isEmpty())
             e.opt.known_hosts_path = kh.toStdString();
@@ -198,6 +237,13 @@ static void saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
         s.setValue("keyPath",
                    e.opt.private_key_path
                        ? QString::fromStdString(*e.opt.private_key_path)
+                       : QString());
+        s.setValue("proxyType", static_cast<int>(e.opt.proxy_type));
+        s.setValue("proxyHost", QString::fromStdString(e.opt.proxy_host));
+        s.setValue("proxyPort", static_cast<int>(e.opt.proxy_port));
+        s.setValue("proxyUser",
+                   e.opt.proxy_username
+                       ? QString::fromStdString(*e.opt.proxy_username)
                        : QString());
         s.setValue("knownHosts",
                    e.opt.known_hosts_path
@@ -1113,6 +1159,7 @@ void MainWindow::maybePersistQuickConnectSite(
         e.opt = opt;
         e.opt.password.reset();
         e.opt.private_key_passphrase.reset();
+        e.opt.proxy_password.reset();
         sites.push_back(e);
         matchIndex = sites.size() - 1;
         created = true;
@@ -1162,6 +1209,19 @@ void MainWindow::maybePersistQuickConnectSite(
         else
             issues
                 << tr("Passphrase: %1").arg(quickPersistStatusShort(r.status));
+    }
+    if (opt.proxy_type != openscp::ProxyType::None && opt.proxy_password &&
+        !opt.proxy_password->empty()) {
+        const auto r = store.setSecret(
+            quickSiteSecretKey(target, QStringLiteral("proxypass")),
+            QString::fromStdString(*opt.proxy_password));
+        if (r.ok())
+            anyCredentialStored = true;
+        else
+            issues << tr("Proxy password: %1")
+                          .arg(quickPersistStatusShort(r.status));
+    } else if (opt.proxy_type == openscp::ProxyType::None) {
+        store.removeSecret(quickSiteSecretKey(target, QStringLiteral("proxypass")));
     }
 
     if (!issues.isEmpty()) {
