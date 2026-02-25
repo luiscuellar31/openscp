@@ -347,6 +347,7 @@ void MainWindow::disconnectSftp() {
     rightIsRemote_ = false;
     m_pendingRemoteRefreshFromUpload_ = false;
     m_seenCompletedUploadTaskIds_.clear();
+    m_seenCompletedTransferNoticeTaskIds_.clear();
     restoreRightHeaderState(false);
     if (QDir(rightPath_->text()).exists()) {
         setRightRoot(rightPath_->text());
@@ -1257,6 +1258,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     rightIsRemote_ = true;
     m_pendingRemoteRefreshFromUpload_ = false;
     m_seenCompletedUploadTaskIds_.clear();
+    m_seenCompletedTransferNoticeTaskIds_.clear();
     refreshRightBreadcrumbs();
     m_activeSessionOptions_ = opt;
     m_remoteWriteabilityCache_.clear();

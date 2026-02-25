@@ -230,6 +230,7 @@ class MainWindow : public QMainWindow {
     void saveRightHeaderState(bool remoteMode) const;
     bool restoreRightHeaderState(bool remoteMode);
     void maybeRefreshRemoteAfterCompletedUploads();
+    void maybeNotifyCompletedTransfers();
 
     // Writable state of the current remote directory
     bool rightRemoteWritable_ = false;
@@ -251,6 +252,7 @@ class MainWindow : public QMainWindow {
     bool m_restoredWindowGeometry_ = false;
     bool m_pendingRemoteRefreshFromUpload_ = false;
     QSet<quint64> m_seenCompletedUploadTaskIds_;
+    QSet<quint64> m_seenCompletedTransferNoticeTaskIds_;
 
     // User preferences
     bool prefShowHidden_ = false;

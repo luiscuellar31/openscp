@@ -656,7 +656,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     // Transfer queue
     transferMgr_ = new TransferManager(this);
     connect(transferMgr_, &TransferManager::tasksChanged, this,
-            [this] { maybeRefreshRemoteAfterCompletedUploads(); });
+            [this] {
+                maybeRefreshRemoteAfterCompletedUploads();
+                maybeNotifyCompletedTransfers();
+            });
     // Provide transfer manager to views (for async remote drag-out staging)
     if (auto *lv = qobject_cast<DragAwareTreeView *>(leftView_))
         lv->setTransferManager(transferMgr_);
@@ -1071,6 +1074,53 @@ void MainWindow::maybeRefreshRemoteAfterCompletedUploads() {
         rightRemoteModel_->setRootPath(rightRemoteModel_->rootPath(), &err,
                                        true);
     });
+}
+
+void MainWindow::maybeNotifyCompletedTransfers() {
+    if (!transferMgr_) {
+        m_seenCompletedTransferNoticeTaskIds_.clear();
+        return;
+    }
+
+    const auto tasks = transferMgr_->tasksSnapshot();
+    QSet<quint64> activeTaskIds;
+    activeTaskIds.reserve(tasks.size());
+
+    QString message;
+    int newlyCompleted = 0;
+    for (const auto &t : tasks) {
+        activeTaskIds.insert(t.id);
+        if (t.status != TransferTask::Status::Done)
+            continue;
+        if (m_seenCompletedTransferNoticeTaskIds_.contains(t.id))
+            continue;
+
+        m_seenCompletedTransferNoticeTaskIds_.insert(t.id);
+        ++newlyCompleted;
+        if (newlyCompleted == 1) {
+            const bool upload = (t.type == TransferTask::Type::Upload);
+            const QString path = upload ? t.src : t.dst;
+            QString name = QFileInfo(path).fileName();
+            if (name.isEmpty())
+                name = path;
+            message = upload ? tr("Upload completed: %1").arg(name)
+                             : tr("Download completed: %1").arg(name);
+        }
+    }
+
+    for (auto it = m_seenCompletedTransferNoticeTaskIds_.begin();
+         it != m_seenCompletedTransferNoticeTaskIds_.end();) {
+        if (!activeTaskIds.contains(*it))
+            it = m_seenCompletedTransferNoticeTaskIds_.erase(it);
+        else
+            ++it;
+    }
+
+    if (newlyCompleted == 0)
+        return;
+    if (newlyCompleted > 1)
+        message = tr("%1 transfers completed").arg(newlyCompleted);
+    statusBar()->showMessage(message, 5000);
 }
 
 void MainWindow::applyPreferences() {
