@@ -61,6 +61,14 @@ bool readFile(const fs::path &p, std::string &out) {
     return true;
 }
 
+bool writeFile(const fs::path &p, const std::string &content) {
+    std::ofstream out(p, std::ios::binary | std::ios::trunc);
+    if (!out.is_open())
+        return false;
+    out << content;
+    return out.good();
+}
+
 bool parsePort(const std::optional<std::string> &raw, std::uint16_t &out) {
     if (!raw.has_value()) {
         out = 22;
@@ -137,6 +145,13 @@ int main() {
     const std::string remoteSrc = joinRemotePath(remoteSuiteDir, "payload.txt");
     const std::string remoteMoved =
         joinRemotePath(remoteSuiteDir, "payload-moved.txt");
+    const std::string remoteResumeDownload =
+        joinRemotePath(remoteSuiteDir, "resume-download.txt");
+    const std::string remoteResumeUpload =
+        joinRemotePath(remoteSuiteDir, "resume-upload.txt");
+    const std::string remoteResumeUploadSeed =
+        joinRemotePath(remoteSuiteDir, "resume-upload-seed.txt");
+    const std::string remoteResumeUploadPart = remoteResumeUpload + ".part";
 
     const fs::path localTmpRoot =
         fs::temp_directory_path() / ("openscp-it-" + token);
@@ -149,8 +164,12 @@ int main() {
     }
 
     const fs::path localSrc = localTmpRoot / "payload.txt";
+    const fs::path localBad = localTmpRoot / "payload-bad.txt";
     const fs::path localDst = localTmpRoot / "payload-downloaded.txt";
+    const fs::path localResumeDst =
+        localTmpRoot / "payload-resume-downloaded.txt";
     const std::string payload = "OpenSCP integration payload\nline-2\n";
+    const std::string badPayload = "CORRUPTED prefix\nline-x\n";
     {
         std::ofstream out(localSrc, std::ios::binary | std::ios::trunc);
         if (!out.is_open()) {
@@ -159,6 +178,11 @@ int main() {
             return EXIT_FAILURE;
         }
         out << payload;
+    }
+    if (!writeFile(localBad, badPayload)) {
+        std::cerr << "[FAIL] could not create bad source file\n";
+        fs::remove_all(localTmpRoot, ec);
+        return EXIT_FAILURE;
     }
 
     openscp::Libssh2SftpClient client;
@@ -210,6 +234,54 @@ int main() {
         t.check(downloaded == payload,
                 "downloaded content should match uploaded payload");
     }
+    // Regression: Required integrity must fail on resume mismatch (download).
+    if (t.failures == 0) {
+        err.clear();
+        t.check(client.put(localSrc.string(), remoteResumeDownload, err, {}, {},
+                           false),
+                std::string("put(remoteResumeDownload) should succeed: ") +
+                    err);
+    }
+    if (t.failures == 0) {
+        const fs::path localPart = localResumeDst.string() + ".part";
+        t.check(writeFile(localPart, badPayload),
+                "local .part for download mismatch should be writable");
+        err.clear();
+        const bool ok = client.get(remoteResumeDownload, localResumeDst.string(),
+                                   err, {}, {}, true);
+        t.check(!ok,
+                "get resume with required integrity should fail on mismatch");
+        t.check(err.find("Integrity check failed in resume (download)") !=
+                    std::string::npos,
+                std::string("download mismatch should report integrity error: ") +
+                    err);
+    }
+    // Regression: Required integrity must fail on resume mismatch (upload).
+    if (t.failures == 0) {
+        err.clear();
+        t.check(client.put(localBad.string(), remoteResumeUploadSeed, err, {},
+                           {}, false),
+                std::string("put(remoteResumeUploadSeed) should succeed: ") +
+                    err);
+    }
+    if (t.failures == 0) {
+        err.clear();
+        t.check(client.rename(remoteResumeUploadSeed, remoteResumeUploadPart,
+                              err, false),
+                std::string("rename(seed->.part) should succeed: ") + err);
+    }
+    if (t.failures == 0) {
+        err.clear();
+        const bool ok =
+            client.put(localSrc.string(), remoteResumeUpload, err, {}, {},
+                       true);
+        t.check(!ok,
+                "put resume with required integrity should fail on mismatch");
+        t.check(err.find("Integrity check failed in resume (upload)") !=
+                    std::string::npos,
+                std::string("upload mismatch should report integrity error: ") +
+                    err);
+    }
     if (t.failures == 0) {
         err.clear();
         t.check(client.rename(remoteSrc, remoteMoved, err, false),
@@ -233,6 +305,14 @@ int main() {
     (void)client.removeFile(remoteSrc, cleanupErr);
     cleanupErr.clear();
     (void)client.removeFile(remoteMoved, cleanupErr);
+    cleanupErr.clear();
+    (void)client.removeFile(remoteResumeDownload, cleanupErr);
+    cleanupErr.clear();
+    (void)client.removeFile(remoteResumeUpload, cleanupErr);
+    cleanupErr.clear();
+    (void)client.removeFile(remoteResumeUploadSeed, cleanupErr);
+    cleanupErr.clear();
+    (void)client.removeFile(remoteResumeUploadPart, cleanupErr);
     cleanupErr.clear();
     (void)client.removeDir(remoteSuiteDir, cleanupErr);
     client.disconnect();
