@@ -11,6 +11,8 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <thread>
 #include <vector>
@@ -21,9 +23,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
-// OpenSSL for HMAC-SHA1 (hashed known_hosts names) and RNG
-#include <openssl/evp.h>
-#include <openssl/hmac.h>
+// OpenSSL RNG for hashed known_hosts hostnames fallback.
 #include <openssl/rand.h>
 #else
 #include <windows.h>
@@ -32,6 +32,8 @@
 #include <cstdarg>
 #include <cstdio>
 #include <ctime>
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <openssl/sha.h>
 #include <sstream>
 
@@ -852,6 +854,69 @@ static bool persist_text_atomic(const std::string &path,
         return false;
     return true;
 }
+#else
+static bool persist_text_atomic(const std::string &path,
+                                const std::string &content, std::string *why) {
+    if (path.empty()) {
+        if (why)
+            *why = "empty destination path";
+        return false;
+    }
+
+    std::string tmpPath = path + ".tmp";
+    HANDLE h = CreateFileA(tmpPath.c_str(), GENERIC_WRITE, 0, NULL,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) {
+        if (why)
+            *why = win_err("CreateFile(tmp)", GetLastError());
+        return false;
+    }
+
+    const char *ptr = content.data();
+    std::size_t rem = content.size();
+    while (rem > 0) {
+        const DWORD chunk =
+            rem > static_cast<std::size_t>(0xFFFFFFFFu)
+                ? static_cast<DWORD>(0xFFFFFFFFu)
+                : static_cast<DWORD>(rem);
+        DWORD written = 0;
+        if (!WriteFile(h, ptr, chunk, &written, NULL) || written != chunk) {
+            DWORD ec = GetLastError();
+            (void)CloseHandle(h);
+            (void)DeleteFileA(tmpPath.c_str());
+            if (why)
+                *why = win_err("WriteFile(tmp)", ec);
+            return false;
+        }
+        ptr += written;
+        rem -= written;
+    }
+
+    if (!FlushFileBuffers(h)) {
+        DWORD ec = GetLastError();
+        (void)CloseHandle(h);
+        (void)DeleteFileA(tmpPath.c_str());
+        if (why)
+            *why = win_err("FlushFileBuffers(tmp)", ec);
+        return false;
+    }
+    if (!CloseHandle(h)) {
+        DWORD ec = GetLastError();
+        (void)DeleteFileA(tmpPath.c_str());
+        if (why)
+            *why = win_err("CloseHandle(tmp)", ec);
+        return false;
+    }
+    if (!MoveFileExA(tmpPath.c_str(), path.c_str(),
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) {
+        DWORD ec = GetLastError();
+        (void)DeleteFileA(tmpPath.c_str());
+        if (why)
+            *why = win_err("MoveFileEx(tmp->known_hosts)", ec);
+        return false;
+    }
+    return true;
+}
 #endif
 
 // Simple Base64 encoder (standard, with '=' padding)
@@ -883,6 +948,118 @@ static std::string b64encode(const unsigned char *data, std::size_t len) {
         out.push_back('=');
     }
     return out;
+}
+
+static bool b64decode(const std::string &input,
+                      std::vector<unsigned char> &out) {
+    if (input.empty() || (input.size() % 4) != 0)
+        return false;
+    out.assign((input.size() / 4) * 3, 0);
+    int decoded =
+        EVP_DecodeBlock(out.data(),
+                        reinterpret_cast<const unsigned char *>(input.data()),
+                        static_cast<int>(input.size()));
+    if (decoded < 0)
+        return false;
+    int pad = 0;
+    if (!input.empty() && input.back() == '=')
+        ++pad;
+    if (input.size() > 1 && input[input.size() - 2] == '=')
+        ++pad;
+    decoded -= pad;
+    if (decoded < 0)
+        return false;
+    out.resize(static_cast<std::size_t>(decoded));
+    return true;
+}
+
+static bool parse_known_hosts_host_field(const std::string &line,
+                                         std::size_t &hostStart,
+                                         std::size_t &hostEnd) {
+    auto isSpace = [](unsigned char c) { return std::isspace(c) != 0; };
+    std::size_t i = 0;
+    while (i < line.size() && isSpace(static_cast<unsigned char>(line[i])))
+        ++i;
+    if (i >= line.size() || line[i] == '#')
+        return false;
+
+    auto readFieldEnd = [&](std::size_t from) {
+        std::size_t p = from;
+        while (p < line.size() && !isSpace(static_cast<unsigned char>(line[p])))
+            ++p;
+        return p;
+    };
+
+    hostStart = i;
+    hostEnd = readFieldEnd(i);
+    if (hostStart >= hostEnd)
+        return false;
+
+    if (line[hostStart] == '@') {
+        i = hostEnd;
+        while (i < line.size() && isSpace(static_cast<unsigned char>(line[i])))
+            ++i;
+        if (i >= line.size())
+            return false;
+        hostStart = i;
+        hostEnd = readFieldEnd(i);
+        if (hostStart >= hostEnd)
+            return false;
+    }
+    return true;
+}
+
+static bool token_matches_hashed_host(const std::string &token,
+                                      const std::string &hostToken) {
+    if (token.size() <= 4 || token[0] != '|' || token[1] != '1' ||
+        token[2] != '|')
+        return false;
+    const std::size_t sep = token.find('|', 3);
+    if (sep == std::string::npos || sep == 3 || sep + 1 >= token.size())
+        return false;
+
+    std::vector<unsigned char> salt;
+    std::vector<unsigned char> expectedMac;
+    if (!b64decode(token.substr(3, sep - 3), salt) ||
+        !b64decode(token.substr(sep + 1), expectedMac) || salt.empty() ||
+        expectedMac.empty()) {
+        return false;
+    }
+
+    unsigned char mac[EVP_MAX_MD_SIZE];
+    unsigned int macLen = 0;
+    if (!HMAC(EVP_sha1(), salt.data(), static_cast<int>(salt.size()),
+              reinterpret_cast<const unsigned char *>(hostToken.data()),
+              static_cast<int>(hostToken.size()), mac, &macLen)) {
+        return false;
+    }
+    if (expectedMac.size() != static_cast<std::size_t>(macLen))
+        return false;
+    return std::equal(expectedMac.begin(), expectedMac.end(), mac);
+}
+
+static bool line_matches_site_host(const std::string &line,
+                                   const std::vector<std::string> &targets) {
+    std::size_t hostStart = 0;
+    std::size_t hostEnd = 0;
+    if (!parse_known_hosts_host_field(line, hostStart, hostEnd))
+        return false;
+
+    std::size_t pos = hostStart;
+    while (pos <= hostEnd) {
+        std::size_t comma = line.find(',', pos);
+        if (comma == std::string::npos || comma > hostEnd)
+            comma = hostEnd;
+        const std::string token = line.substr(pos, comma - pos);
+        for (const std::string &target : targets) {
+            if (token == target || token_matches_hashed_host(token, target))
+                return true;
+        }
+        if (comma == hostEnd)
+            break;
+        pos = comma + 1;
+    }
+    return false;
 }
 
 // Preference: write hashed hostnames to known_hosts (OpenSSH style) unless
@@ -2591,50 +2768,70 @@ bool Libssh2SftpClient::rename(const std::string &from, const std::string &to,
 bool RemoveKnownHostEntry(const std::string &khPath, const std::string &host,
                           std::uint16_t port, std::string &err) {
     err.clear();
-    LIBSSH2_SESSION *s = libssh2_session_init();
-    if (!s) {
-        err = "Could not initialize libssh2";
+    if (khPath.empty()) {
+        err = "known_hosts path is empty";
         return false;
     }
-    LIBSSH2_KNOWNHOSTS *nh = libssh2_knownhost_init(s);
-    if (!nh) {
-        libssh2_session_free(s);
-        err = "Could not initialize known_hosts";
+    if (host.empty()) {
+        err = "host is empty";
         return false;
     }
-    // load existing file if present
-    (void)libssh2_knownhost_readfile(nh, khPath.c_str(),
-                                     LIBSSH2_KNOWNHOST_FILE_OPENSSH);
-    struct libssh2_knownhost *kh = nullptr;
-    int typemaskPlain =
-        LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW;
-    int typemaskHash =
-        LIBSSH2_KNOWNHOST_TYPE_SHA1 | LIBSSH2_KNOWNHOST_KEYENC_RAW;
-    // Delete all matches (plain or hashed)
-    while (true) {
-        int rc = libssh2_knownhost_checkp(nh, host.c_str(), port, nullptr, 0,
-                                          typemaskPlain, &kh);
-        if (rc == LIBSSH2_KNOWNHOST_CHECK_MATCH && kh) {
-            libssh2_knownhost_del(nh, kh);
-            continue;
-        }
-        rc = libssh2_knownhost_checkp(nh, host.c_str(), port, nullptr, 0,
-                                      typemaskHash, &kh);
-        if (rc == LIBSSH2_KNOWNHOST_CHECK_MATCH && kh) {
-            libssh2_knownhost_del(nh, kh);
-            continue;
-        }
-        break;
+
+    std::ifstream in(khPath, std::ios::binary);
+    if (!in.is_open()) {
+        err = "Could not open known_hosts";
+        return false;
     }
+
+    const std::string content((std::istreambuf_iterator<char>(in)),
+                              std::istreambuf_iterator<char>());
+    if (!in.good() && !in.eof()) {
+        err = "Could not read known_hosts";
+        return false;
+    }
+
+    std::vector<std::string> hostTokens;
+    if (port == 22) {
+        hostTokens.push_back(host);
+        // Support this uncommon notation if present in existing files.
+        hostTokens.push_back("[" + host + "]:22");
+    } else {
+        hostTokens.push_back("[" + host + "]:" + std::to_string(port));
+    }
+
+    const bool hadTrailingLf = !content.empty() && content.back() == '\n';
+    std::istringstream inLines(content);
+    std::vector<std::string> keptLines;
+    std::string line;
+    bool removedAny = false;
+
+    while (std::getline(inLines, line)) {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        if (line_matches_site_host(line, hostTokens)) {
+            removedAny = true;
+            continue;
+        }
+        keptLines.push_back(line);
+    }
+
+    if (!removedAny)
+        return true;
+
+    std::string rewritten;
+    for (std::size_t i = 0; i < keptLines.size(); ++i) {
+        if (i > 0)
+            rewritten.push_back('\n');
+        rewritten += keptLines[i];
+    }
+    if (hadTrailingLf && !keptLines.empty())
+        rewritten.push_back('\n');
+
     std::string persistErr;
-    if (!persist_known_hosts_atomic(nh, khPath, &persistErr)) {
-        libssh2_knownhost_free(nh);
-        libssh2_session_free(s);
+    if (!persist_text_atomic(khPath, rewritten, &persistErr)) {
         err = std::string("Could not write known_hosts: ") + persistErr;
         return false;
     }
-    libssh2_knownhost_free(nh);
-    libssh2_session_free(s);
     return true;
 }
 
