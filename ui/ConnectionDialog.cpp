@@ -155,8 +155,22 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     khBrowse_->setText(tr("Choose…"));
     khPathRowLayout->addWidget(khBrowse_);
 
+    integrityPolicy_ = new QComboBox(this);
+    integrityPolicy_->addItem(
+        tr("Optional (recommended)"),
+        static_cast<int>(openscp::TransferIntegrityPolicy::Optional));
+    integrityPolicy_->addItem(
+        tr("Required (strict)"),
+        static_cast<int>(openscp::TransferIntegrityPolicy::Required));
+    integrityPolicy_->addItem(
+        tr("Off (not recommended)"),
+        static_cast<int>(openscp::TransferIntegrityPolicy::Off));
+    integrityPolicy_->setToolTip(tr(
+        "Checksum verification for resume and final transfer validation."));
+
     lay->addRow(tr("known_hosts:"), khPathRow);
     lay->addRow(tr("Policy:"), khPolicy_);
+    lay->addRow(tr("Integrity:"), integrityPolicy_);
 
     connect(khBrowse_, &QToolButton::clicked, this, [this] {
         const QString f = QFileDialog::getOpenFileName(
@@ -247,6 +261,11 @@ openscp::SessionOptions ConnectionDialog::options() const {
         o.known_hosts_path = khPath_->text().toStdString();
     o.known_hosts_policy = static_cast<openscp::KnownHostsPolicy>(
         khPolicy_->currentData().toInt());
+    if (integrityPolicy_) {
+        o.transfer_integrity_policy =
+            static_cast<openscp::TransferIntegrityPolicy>(
+                integrityPolicy_->currentData().toInt());
+    }
 
     return o;
 }
@@ -270,4 +289,10 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &o) {
     int idx = khPolicy_->findData(static_cast<int>(o.known_hosts_policy));
     if (idx >= 0)
         khPolicy_->setCurrentIndex(idx);
+    if (integrityPolicy_) {
+        int i = integrityPolicy_->findData(
+            static_cast<int>(o.transfer_integrity_policy));
+        if (i >= 0)
+            integrityPolicy_->setCurrentIndex(i);
+    }
 }

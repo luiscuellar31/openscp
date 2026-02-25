@@ -40,4 +40,5 @@ class ConnectionDialog : public QDialog {
     QLineEdit *khPath_ = nullptr;
     QToolButton *khBrowse_ = nullptr;
     QComboBox *khPolicy_ = nullptr;
+    QComboBox *integrityPolicy_ = nullptr;
 };

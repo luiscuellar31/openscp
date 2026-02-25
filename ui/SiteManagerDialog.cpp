@@ -204,6 +204,11 @@ void SiteManagerDialog::loadSites() {
             (openscp::KnownHostsPolicy)s
                 .value("khPolicy", (int)openscp::KnownHostsPolicy::Strict)
                 .toInt();
+        e.opt.transfer_integrity_policy =
+            (openscp::TransferIntegrityPolicy)s
+                .value("integrityPolicy",
+                       (int)openscp::TransferIntegrityPolicy::Optional)
+                .toInt();
         sites_.push_back(e);
     }
     s.endArray();
@@ -236,6 +241,7 @@ void SiteManagerDialog::saveSites() {
                        ? QString::fromStdString(*e.opt.known_hosts_path)
                        : QString());
         s.setValue("khPolicy", (int)e.opt.known_hosts_policy);
+        s.setValue("integrityPolicy", (int)e.opt.transfer_integrity_policy);
     }
     s.endArray();
 }

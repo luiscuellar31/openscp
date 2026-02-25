@@ -169,6 +169,12 @@ static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool *needsSave) {
             s.value("khPolicy",
                     static_cast<int>(openscp::KnownHostsPolicy::Strict))
                 .toInt());
+        e.opt.transfer_integrity_policy =
+            static_cast<openscp::TransferIntegrityPolicy>(
+                s.value("integrityPolicy",
+                        static_cast<int>(
+                            openscp::TransferIntegrityPolicy::Optional))
+                    .toInt());
         sites.push_back(e);
     }
     s.endArray();
@@ -198,6 +204,8 @@ static void saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
                        ? QString::fromStdString(*e.opt.known_hosts_path)
                        : QString());
         s.setValue("khPolicy", static_cast<int>(e.opt.known_hosts_policy));
+        s.setValue("integrityPolicy",
+                   static_cast<int>(e.opt.transfer_integrity_policy));
     }
     s.endArray();
     s.sync();
