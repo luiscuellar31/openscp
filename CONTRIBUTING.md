@@ -66,6 +66,24 @@ Tags are immutable and represent tested snapshots you can depend on. The `main` 
 
 ---
 
+## Issue Reporting and Labels
+
+When opening an issue, please apply the label that best matches the report so triage is faster.
+
+Recommended labels:
+
+- `bug` for defects or regressions.
+- `enhancement` for feature requests or UX improvements.
+- `documentation` for docs/readme related changes.
+- `question` for usage or behavior questions.
+- `security` for potential security vulnerabilities.
+
+Title prefixes like `[BUG]`, `[FEATURE]`, etc. are **not required** for regular issues.
+
+Security reports are the only exception: follow [SECURITY.md](SECURITY.md), including the `security` label and the `[SECURITY]` title prefix.
+
+---
+
 ## Keeping Your Fork Up to Date (`dev`)
 
 Your fork only matches the main repository the first time you create it.
