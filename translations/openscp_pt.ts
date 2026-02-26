@@ -528,7 +528,7 @@ Correspondências: %2</translation>
     </message>
     <message>
         <source>Refresh</source>
-        <translation>Actualizar</translation>
+        <translation>Atualizar</translation>
     </message>
     <message>
         <source>Download</source>
@@ -584,7 +584,7 @@ Correspondências: %2</translation>
     </message>
     <message>
         <source>Quit</source>
-        <translation>Salir</translation>
+        <translation>Sair</translation>
     </message>
     <message>
         <source>File</source>
@@ -592,7 +592,7 @@ Correspondências: %2</translation>
     </message>
     <message>
         <source>Help</source>
-        <translation>Ayuda</translation>
+        <translation>Ajuda</translation>
     </message>
     <message>
         <source>Report a bug</source>
@@ -1748,7 +1748,7 @@ Edite o site e mantenha apenas um transporte.</translation>
     </message>
     <message>
         <source>Hash hostnames in known_hosts (recommended).</source>
-        <translation>Salvar hostnames em known_hosts com hash (recomendado).</translation>
+        <translation>Salvar nomes de host em known_hosts com hash (recomendado).</translation>
     </message>
     <message>
         <source>Show fingerprint in HEX (colon) format (visual only).</source>
@@ -1760,7 +1760,7 @@ Edite o site e mantenha apenas um transporte.</translation>
     </message>
     <message>
         <source>Allow insecure credentials fallback (not recommended).</source>
-        <translation>Permitir fallback inseguro de credenciais (não recomendado).</translation>
+        <translation>Permitir alternativa insegura para credenciais (não recomendado).</translation>
     </message>
     <message>
         <source> min</source>
@@ -1768,27 +1768,27 @@ Edite o site e mantenha apenas um transporte.</translation>
     </message>
     <message>
         <source>Duration of the temporary exception for no host-key verification policy.</source>
-        <translation>Duração da exceção temporária para a política sem verificação de host key.</translation>
+        <translation>Duração da exceção temporária para a política sem verificação da chave do host.</translation>
     </message>
     <message>
         <source>No-verification TTL:</source>
-        <translation>TTL sem verificação:</translation>
+        <translation>TTL da exceção sem verificação:</translation>
     </message>
     <message>
         <source>Staging and drag-out</source>
-        <translation>Staging e arrastar para fora</translation>
+        <translation>Área temporária e arrastar para fora</translation>
     </message>
     <message>
         <source>Staging folder:</source>
-        <translation>Pasta de staging:</translation>
+        <translation>Pasta temporária:</translation>
     </message>
     <message>
         <source>Select staging folder</source>
-        <translation>Selecione a pasta de staging</translation>
+        <translation>Selecione a pasta temporária</translation>
     </message>
     <message>
         <source>Auto-clean staging after successful drag-out (recommended).</source>
-        <translation>Excluir automaticamente a pasta de staging após concluir o arrastar para fora (recomendado).</translation>
+        <translation>Limpar automaticamente a pasta temporária após arrastar para fora com sucesso (recomendado).</translation>
     </message>
     <message>
         <source> ms</source>
@@ -1844,7 +1844,7 @@ Edite o site e mantenha apenas um transporte.</translation>
     </message>
     <message>
         <source>Enable insecure fallback</source>
-        <translation>Ativar fallback inseguro</translation>
+        <translation>Ativar alternativa insegura</translation>
     </message>
     <message>
         <source>This stores credentials unencrypted on disk using QSettings.
@@ -1854,7 +1854,7 @@ Do you still want to enable insecure fallback?</source>
         <translation>Isto armazenará credenciais sem criptografia em disco usando QSettings.
 No Linux, recomenda-se instalar e usar libsecret/Secret Service para maior segurança.
 
-Deseja ativar o fallback inseguro mesmo assim?</translation>
+Deseja ativar a alternativa insegura mesmo assim?</translation>
     </message>
     <message>
         <source>Language</source>

@@ -7,6 +7,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QFontMetrics>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -59,6 +60,18 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
 
     auto *pages = new QStackedWidget(this);
     contentRow->addWidget(pages, 1);
+    auto recalcSectionListWidth = [sectionList]() {
+        const QFontMetrics fm(sectionList->font());
+        int maxTextWidth = 0;
+        for (int i = 0; i < sectionList->count(); ++i) {
+            if (auto *item = sectionList->item(i)) {
+                maxTextWidth = qMax(maxTextWidth, fm.horizontalAdvance(item->text()));
+            }
+        }
+        // Padding/frame/margins for the list plus translated label width.
+        const int width = qBound(150, maxTextWidth + 48, 260);
+        sectionList->setFixedWidth(width);
+    };
 
     constexpr int kFieldMinWidth = 320;
     constexpr int kFieldMaxWidth = 520;
@@ -74,7 +87,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         pageLay->setSpacing(8);
         auto *form = new QFormLayout();
         form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-        form->setRowWrapPolicy(QFormLayout::DontWrapRows);
+        form->setRowWrapPolicy(QFormLayout::WrapLongRows);
         form->setHorizontalSpacing(8);
         form->setVerticalSpacing(8);
         pageLay->addLayout(form);
@@ -82,6 +95,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         scroll->setWidget(page);
         pages->addWidget(scroll);
         sectionList->addItem(title);
+        recalcSectionListWidth();
         outForm = form;
         return page;
     };
