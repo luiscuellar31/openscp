@@ -20,6 +20,7 @@
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QDirIterator>
 #include <QDragEnterEvent>
@@ -29,15 +30,16 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFrame>
 #include <QGuiApplication>
 #include <QHash>
 #include <QHeaderView>
 #include <QIcon>
-#include <QInputDialog>
 #include <QItemSelectionModel>
 #include <QKeySequence>
 #include <QLabel>
 #include <QListView>
+#include <QListWidget>
 #include <QLocale>
 #include <QMenu>
 #include <QMenuBar>
@@ -170,6 +172,145 @@ static QRegularExpression compilePanelSearchRegex(const QString &rawPattern,
     return regex;
 }
 
+struct PanelSearchPromptResult {
+    QString pattern;
+    bool recursive = false;
+};
+
+static bool promptPanelSearch(QWidget *parent, const QString &panelLabel,
+                              PanelSearchPromptResult *out) {
+    if (!out)
+        return false;
+
+    QDialog dlg(parent);
+    dlg.setWindowTitle(
+        QCoreApplication::translate("MainWindow", "Search items (%1)")
+            .arg(panelLabel));
+    auto *layout = new QVBoxLayout(&dlg);
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(8);
+
+    auto *help = new QLabel(
+        QCoreApplication::translate(
+            "MainWindow",
+            "Pattern accepts wildcard (*, ?) or regex.\nExamples: *report*, "
+            "report, ^report_.*\\.pdf$"),
+        &dlg);
+    help->setWordWrap(true);
+    layout->addWidget(help);
+
+    auto *patternEdit = new QLineEdit(&dlg);
+    patternEdit->setPlaceholderText(
+        QCoreApplication::translate("MainWindow", "e.g. *report*"));
+    patternEdit->setClearButtonEnabled(true);
+    layout->addWidget(patternEdit);
+
+    auto *recursiveCheck = new QCheckBox(
+        QCoreApplication::translate(
+            "MainWindow", "Search recursively in subfolders"),
+        &dlg);
+    recursiveCheck->setChecked(false);
+    layout->addWidget(recursiveCheck);
+
+    auto *box = new QDialogButtonBox(QDialogButtonBox::Ok |
+                                         QDialogButtonBox::Cancel,
+                                     &dlg);
+    QObject::connect(box, &QDialogButtonBox::accepted, &dlg,
+                     &QDialog::accept);
+    QObject::connect(box, &QDialogButtonBox::rejected, &dlg,
+                     &QDialog::reject);
+    layout->addWidget(box);
+
+    if (QAbstractButton *okBtn = box->button(QDialogButtonBox::Ok))
+        okBtn->setEnabled(false);
+    QObject::connect(patternEdit, &QLineEdit::textChanged, &dlg,
+                     [box](const QString &text) {
+                         if (QAbstractButton *okBtn =
+                                 box->button(QDialogButtonBox::Ok)) {
+                             okBtn->setEnabled(!text.trimmed().isEmpty());
+                         }
+                     });
+
+    patternEdit->setFocus();
+    dlg.adjustSize();
+    const QSize minSearchSize = dlg.sizeHint();
+    dlg.setMinimumSize(minSearchSize);
+    dlg.resize(minSearchSize);
+    if (dlg.exec() != QDialog::Accepted)
+        return false;
+
+    out->pattern = patternEdit->text().trimmed();
+    out->recursive = recursiveCheck->isChecked();
+    return !out->pattern.isEmpty();
+}
+
+static void showRecursiveSearchResultsDialog(
+    QWidget *parent, const QString &panelLabel, const QString &basePath,
+    const QVector<QPair<QString, bool>> &rows, int scanErrors, bool canceled,
+    bool truncated) {
+    QDialog dlg(parent);
+    dlg.setWindowTitle(
+        QCoreApplication::translate("MainWindow", "Search results (%1)")
+            .arg(panelLabel));
+
+    auto *layout = new QVBoxLayout(&dlg);
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(8);
+
+    QString summary =
+        QCoreApplication::translate("MainWindow",
+                                    "Base: %1\nMatches: %2")
+            .arg(basePath, QString::number(rows.size()));
+    if (scanErrors > 0) {
+        summary += QStringLiteral("\n") +
+                   QCoreApplication::translate("MainWindow",
+                                               "Scan errors: %1")
+                       .arg(QString::number(scanErrors));
+    }
+    if (canceled) {
+        summary += QStringLiteral("\n") +
+                   QCoreApplication::translate("MainWindow",
+                                               "Search canceled by user.");
+    }
+    if (truncated) {
+        summary += QStringLiteral("\n") +
+                   QCoreApplication::translate(
+                       "MainWindow", "Results truncated to safety limit.");
+    }
+    auto *summaryLabel = new QLabel(summary, &dlg);
+    summaryLabel->setWordWrap(true);
+    summaryLabel->setFrameStyle(QFrame::StyledPanel | QFrame::Plain);
+    summaryLabel->setMargin(8);
+    layout->addWidget(summaryLabel);
+
+    auto *list = new QListWidget(&dlg);
+    list->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    list->setSelectionBehavior(QAbstractItemView::SelectRows);
+    list->setAlternatingRowColors(true);
+    list->setUniformItemSizes(true);
+    list->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    for (const auto &row : rows) {
+        QString label = row.first;
+        if (row.second && !label.endsWith('/'))
+            label += QLatin1Char('/');
+        list->addItem(label);
+    }
+    layout->addWidget(list, 1);
+
+    auto *box = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
+    QObject::connect(box, &QDialogButtonBox::rejected, &dlg,
+                     &QDialog::reject);
+    QObject::connect(box, &QDialogButtonBox::accepted, &dlg,
+                     &QDialog::accept);
+    layout->addWidget(box);
+
+    dlg.adjustSize();
+    const QSize minResultsSize = dlg.sizeHint();
+    dlg.setMinimumSize(minResultsSize);
+    dlg.resize(minResultsSize);
+    dlg.exec();
+}
+
 MainWindow::~MainWindow() = default; // define the destructor here
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
@@ -260,6 +401,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     auto resIcon = [](const char *fname) -> QIcon {
         return QIcon(QStringLiteral(":/assets/icons/") + QLatin1String(fname));
     };
+    auto leftSearchLabel = [this]() {
+        return rightIsRemote_ ? tr("Local panel") : tr("Local panel - left");
+    };
+    auto rightSearchLabel = [this]() {
+        return rightIsRemote_ ? tr("Remote panel")
+                              : tr("Local panel - right");
+    };
     // Left sub‑toolbar: Up, Copy, Move, Delete, Rename, New folder
     actUpLeft_ = leftPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpLeft);
     actUpLeft_->setIcon(resIcon("action-go-up.svg"));
@@ -269,9 +417,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                                              &MainWindow::chooseLeftDir);
     actChooseLeft_->setIcon(resIcon("action-open-folder.svg"));
     actChooseLeft_->setToolTip(actChooseLeft_->text());
-    actSearchLeft_ = leftPaneBar_->addAction(tr("Search items"), this, [this] {
-        searchItemsInCurrentFolder(leftView_, tr("left panel"));
-    });
+    actSearchLeft_ =
+        leftPaneBar_->addAction(tr("Search items"), this,
+                                [this, leftSearchLabel] {
+                                    searchItemsInCurrentFolder(
+                                        leftView_, leftSearchLabel());
+                                });
     actSearchLeft_->setIcon(resIcon("action-search-item.svg"));
     actSearchLeft_->setToolTip(actSearchLeft_->text());
     leftPaneBar_->addSeparator();
@@ -371,9 +522,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     actChooseRight_->setIcon(resIcon("action-open-folder.svg"));
     actChooseRight_->setToolTip(actChooseRight_->text());
     actSearchRight_ =
-        rightPaneBar_->addAction(tr("Search items"), this, [this] {
-            searchItemsInCurrentFolder(rightView_, tr("right panel"));
-        });
+        rightPaneBar_->addAction(tr("Search items"), this,
+                                 [this, rightSearchLabel] {
+                                     searchItemsInCurrentFolder(
+                                         rightView_, rightSearchLabel());
+                                 });
     actSearchRight_->setIcon(resIcon("action-search-item.svg"));
     actSearchRight_->setToolTip(actSearchRight_->text());
 
@@ -496,7 +649,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     // Ctrl+F / Cmd+F: open search dialog for the focused panel.
     auto *scFind = new QShortcut(QKeySequence::Find, this);
     scFind->setContext(Qt::WindowShortcut);
-    connect(scFind, &QShortcut::activated, this, [this] {
+    connect(scFind, &QShortcut::activated, this,
+            [this, leftSearchLabel, rightSearchLabel] {
         QWidget *focus = QApplication::focusWidget();
         const bool inRightPanel =
             focusWithinWidget(focus, rightView_) ||
@@ -504,7 +658,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
             focusWithinWidget(focus, rightPaneBar_) ||
             focusWithinWidget(focus, rightBreadcrumbsBar_);
         if (inRightPanel) {
-            searchItemsInCurrentFolder(rightView_, tr("right panel"));
+            searchItemsInCurrentFolder(rightView_, rightSearchLabel());
             return;
         }
 
@@ -514,14 +668,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
             focusWithinWidget(focus, leftPaneBar_) ||
             focusWithinWidget(focus, leftBreadcrumbsBar_);
         if (inLeftPanel) {
-            searchItemsInCurrentFolder(leftView_, tr("left panel"));
+            searchItemsInCurrentFolder(leftView_, leftSearchLabel());
             return;
         }
 
         if (rightIsRemote_)
-            searchItemsInCurrentFolder(rightView_, tr("right panel"));
+            searchItemsInCurrentFolder(rightView_, rightSearchLabel());
         else
-            searchItemsInCurrentFolder(leftView_, tr("left panel"));
+            searchItemsInCurrentFolder(leftView_, leftSearchLabel());
     });
     // Disable strictly-remote actions at startup
     if (actDownloadF7_)
@@ -1203,16 +1357,12 @@ void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
     if (!view || !view->model() || !view->selectionModel())
         return;
 
-    const QString patternInput = QInputDialog::getText(
-        this, tr("Search items"),
-        tr("Pattern (regex or wildcard, e.g. *hola*):"), QLineEdit::Normal);
-    const QString pattern = patternInput.trimmed();
-    if (pattern.isEmpty())
+    PanelSearchPromptResult req;
+    if (!promptPanelSearch(this, panelLabel, &req))
         return;
 
     QString regexError;
-    const QRegularExpression regex =
-        compilePanelSearchRegex(pattern, &regexError);
+    const QRegularExpression regex = compilePanelSearchRegex(req.pattern, &regexError);
     if (!regex.isValid()) {
         QMessageBox::warning(
             this, tr("Invalid pattern"),
@@ -1224,38 +1374,260 @@ void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
 
     QAbstractItemModel *model = view->model();
     QItemSelectionModel *selection = view->selectionModel();
-    const QModelIndex root = view->rootIndex();
-    const int rows = model->rowCount(root);
 
-    selection->clearSelection();
-    QModelIndex firstMatch;
-    int matches = 0;
+    if (!req.recursive) {
+        const QModelIndex root = view->rootIndex();
+        const int rows = model->rowCount(root);
 
-    for (int row = 0; row < rows; ++row) {
-        const QModelIndex idx = model->index(row, NAME_COL, root);
-        const QString itemName = model->data(idx, Qt::DisplayRole).toString();
-        if (!regex.match(itemName).hasMatch())
-            continue;
+        selection->clearSelection();
+        QModelIndex firstMatch;
+        int matches = 0;
 
-        selection->select(idx,
-                          QItemSelectionModel::Select |
-                              QItemSelectionModel::Rows);
-        if (!firstMatch.isValid())
-            firstMatch = idx;
-        ++matches;
+        for (int row = 0; row < rows; ++row) {
+            const QModelIndex idx = model->index(row, NAME_COL, root);
+            QString itemName = model->data(idx, Qt::DisplayRole).toString();
+            if (view == rightView_ && rightIsRemote_ && rightRemoteModel_) {
+                itemName = rightRemoteModel_->nameAt(idx);
+            } else if (itemName.endsWith('/')) {
+                itemName.chop(1);
+            }
+            if (!regex.match(itemName).hasMatch())
+                continue;
+
+            selection->select(idx,
+                              QItemSelectionModel::Select |
+                                  QItemSelectionModel::Rows);
+            if (!firstMatch.isValid())
+                firstMatch = idx;
+            ++matches;
+        }
+
+        if (firstMatch.isValid()) {
+            selection->setCurrentIndex(firstMatch, QItemSelectionModel::NoUpdate);
+            view->scrollTo(firstMatch, QAbstractItemView::PositionAtCenter);
+            statusBar()->showMessage(
+                tr("Found %1 match(es) in %2.")
+                    .arg(QString::number(matches), panelLabel),
+                4000);
+        } else {
+            statusBar()->showMessage(
+                tr("No matches found in %1.").arg(panelLabel), 4000);
+        }
+        return;
     }
 
-    if (firstMatch.isValid()) {
-        selection->setCurrentIndex(firstMatch, QItemSelectionModel::NoUpdate);
-        view->scrollTo(firstMatch, QAbstractItemView::PositionAtCenter);
-        statusBar()->showMessage(
-            tr("Found %1 match(es) in %2.")
-                .arg(QString::number(matches), panelLabel),
-            4000);
+    static constexpr int kRecursiveSearchMaxMatches = 5000;
+    static constexpr int kRecursiveSearchPumpEvery = 128;
+    QVector<QPair<QString, bool>> recursiveMatches; // path, isDir
+    int scanErrors = 0;
+    bool canceled = false;
+    bool truncated = false;
+
+    if (view == rightView_ && rightIsRemote_ && (!rightRemoteModel_ || !sftp_)) {
+        QMessageBox::warning(this, tr("SFTP"),
+                             tr("No active SFTP session."));
+        return;
+    }
+
+    const bool isRemotePanelSearch =
+        (view == rightView_ && rightIsRemote_ && rightRemoteModel_ && sftp_);
+    QString basePathForSummary;
+
+    if (isRemotePanelSearch) {
+        QString baseRemote = rightRemoteModel_->rootPath().trimmed();
+        if (baseRemote.isEmpty())
+            baseRemote = QStringLiteral("/");
+        baseRemote = normalizeRemotePathForMatch(baseRemote);
+        basePathForSummary = baseRemote;
+
+        QProgressDialog progress(
+            tr("Searching recursively in %1...").arg(panelLabel), tr("Cancel"),
+            0, 0, this);
+        progress.setWindowModality(Qt::WindowModal);
+        progress.setMinimumDuration(0);
+
+        QSet<QString> visited;
+        QVector<QString> stack;
+        stack.push_back(baseRemote);
+        qint64 pumped = 0;
+
+        while (!stack.isEmpty()) {
+            if (progress.wasCanceled()) {
+                canceled = true;
+                break;
+            }
+
+            const QString current = stack.back();
+            stack.pop_back();
+            const QString currentNorm = normalizeRemotePathForMatch(current);
+            if (visited.contains(currentNorm))
+                continue;
+            visited.insert(currentNorm);
+
+            progress.setLabelText(tr("Scanning %1").arg(currentNorm));
+            QCoreApplication::processEvents();
+            if (progress.wasCanceled()) {
+                canceled = true;
+                break;
+            }
+
+            std::vector<openscp::FileInfo> out;
+            std::string err;
+            if (!sftp_->list(currentNorm.toStdString(), out, err)) {
+                ++scanErrors;
+                continue;
+            }
+
+            for (const auto &entry : out) {
+                const QString name = QString::fromStdString(entry.name);
+                if (name.isEmpty() || name == QStringLiteral(".") ||
+                    name == QStringLiteral("..")) {
+                    continue;
+                }
+                if (!prefShowHidden_ && name.startsWith('.'))
+                    continue;
+
+                const bool isSymlink = (entry.mode & 0120000u) == 0120000u;
+                const bool isDir = entry.is_dir;
+                const QString child =
+                    (currentNorm == QStringLiteral("/")
+                         ? (QStringLiteral("/") + name)
+                         : (currentNorm + QStringLiteral("/") + name));
+                const QString childNorm = normalizeRemotePathForMatch(child);
+
+                QString rel;
+                if (baseRemote == QStringLiteral("/")) {
+                    rel = childNorm.mid(1);
+                } else if (childNorm.startsWith(baseRemote + QStringLiteral("/"))) {
+                    rel = childNorm.mid(baseRemote.size() + 1);
+                } else {
+                    rel = childNorm;
+                }
+                if (rel.isEmpty())
+                    rel = name;
+
+                if (regex.match(name).hasMatch()) {
+                    recursiveMatches.push_back({rel, isDir});
+                    if (recursiveMatches.size() >= kRecursiveSearchMaxMatches) {
+                        truncated = true;
+                        break;
+                    }
+                }
+
+                if (isDir && !isSymlink)
+                    stack.push_back(childNorm);
+
+                ++pumped;
+                if ((pumped % kRecursiveSearchPumpEvery) == 0) {
+                    QCoreApplication::processEvents();
+                    if (progress.wasCanceled()) {
+                        canceled = true;
+                        break;
+                    }
+                }
+            }
+
+            if (canceled || truncated)
+                break;
+        }
     } else {
-        statusBar()->showMessage(tr("No matches found in %1.").arg(panelLabel),
-                                 4000);
+        QString baseLocal =
+            (view == leftView_) ? (leftPath_ ? leftPath_->text() : QString())
+                                : (rightPath_ ? rightPath_->text() : QString());
+        baseLocal = QDir::cleanPath(baseLocal.trimmed());
+        if (baseLocal.isEmpty() || !QDir(baseLocal).exists()) {
+            QMessageBox::warning(this, tr("Invalid folder"),
+                                 tr("The current folder does not exist."));
+            return;
+        }
+        basePathForSummary = baseLocal;
+        QDir baseDir(baseLocal);
+
+        QDir::Filters filters =
+            QDir::AllEntries | QDir::NoDotAndDotDot | QDir::System;
+        if (prefShowHidden_)
+            filters |= QDir::Hidden;
+
+        QProgressDialog progress(
+            tr("Searching recursively in %1...").arg(panelLabel), tr("Cancel"),
+            0, 0, this);
+        progress.setWindowModality(Qt::WindowModal);
+        progress.setMinimumDuration(0);
+
+        QDirIterator it(baseLocal, filters, QDirIterator::Subdirectories);
+        qint64 pumped = 0;
+        while (it.hasNext()) {
+            if (progress.wasCanceled()) {
+                canceled = true;
+                break;
+            }
+
+            const QString absPath = it.next();
+            const QFileInfo fi = it.fileInfo();
+            const QString name = fi.fileName();
+            if (name.isEmpty() || name == QStringLiteral(".") ||
+                name == QStringLiteral("..")) {
+                continue;
+            }
+
+            if (regex.match(name).hasMatch()) {
+                QString rel = QDir::fromNativeSeparators(
+                    baseDir.relativeFilePath(absPath));
+                if (rel.isEmpty())
+                    rel = name;
+                recursiveMatches.push_back({rel, fi.isDir()});
+                if (recursiveMatches.size() >= kRecursiveSearchMaxMatches) {
+                    truncated = true;
+                    break;
+                }
+            }
+
+            ++pumped;
+            if ((pumped % kRecursiveSearchPumpEvery) == 0) {
+                progress.setLabelText(tr("Scanning %1")
+                                          .arg(QDir::fromNativeSeparators(
+                                              baseDir.relativeFilePath(
+                                                  fi.absoluteFilePath()))));
+                QCoreApplication::processEvents();
+                if (progress.wasCanceled()) {
+                    canceled = true;
+                    break;
+                }
+            }
+        }
     }
+
+    if (recursiveMatches.isEmpty()) {
+        QString msg = canceled ? tr("Search canceled in %1.").arg(panelLabel)
+                               : tr("No recursive matches found in %1.")
+                                     .arg(panelLabel);
+        if (scanErrors > 0) {
+            msg += QStringLiteral("  ") +
+                   tr("Folders with errors: %1")
+                       .arg(QString::number(scanErrors));
+        }
+        statusBar()->showMessage(msg, 5000);
+        return;
+    }
+
+    showRecursiveSearchResultsDialog(this, panelLabel, basePathForSummary,
+                                     recursiveMatches, scanErrors, canceled,
+                                     truncated);
+
+    QString msg = tr("Found %1 recursive match(es) in %2.")
+                      .arg(QString::number(recursiveMatches.size()), panelLabel);
+    if (truncated) {
+        msg += QStringLiteral("  ") +
+               tr("Results limited to %1.")
+                   .arg(QString::number(kRecursiveSearchMaxMatches));
+    }
+    if (scanErrors > 0) {
+        msg += QStringLiteral("  ") +
+               tr("Folders with errors: %1").arg(QString::number(scanErrors));
+    }
+    if (canceled)
+        msg += QStringLiteral("  ") + tr("(Canceled)");
+    statusBar()->showMessage(msg, 6000);
 }
 
 void MainWindow::maybeRefreshRemoteAfterCompletedUploads() {
