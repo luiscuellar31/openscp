@@ -98,6 +98,7 @@ open build/OpenSCP.app
 - Dialogo de conexion mejorado (campos mas claros, selectores inline para key/known_hosts, mostrar/ocultar contrasena).
 - Dialogo de conexion con configuracion de proxy por sitio (`Direct`, `SOCKS5`, `HTTP CONNECT`) y auth opcional.
 - Dialogo de conexion con configuracion opcional de SSH jump host (bastion) por sitio.
+- Selector de idioma de la UI con `Ingles`, `Español` y `Portugués`.
 - Ajustes redisenados en secciones `General` y `Advanced`.
 - Ajustes mantiene los controles visibles al redimensionar (tamano minimo + paginas con scroll).
 - Accion de un clic en Ajustes para restaurar layout/tamanos por defecto de la ventana principal.

@@ -165,7 +165,7 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     QSettings s("OpenSCP", "OpenSCP");
     const QString lang = s.value("UI/language", "en").toString().toLower();
     const QString suffix =
-        lang.startsWith("en") ? QStringLiteral("EN") : QStringLiteral("ES");
+        lang.startsWith("es") ? QStringLiteral("ES") : QStringLiteral("EN");
 
     const QStringList candidates = {
         QStringLiteral("ABOUT_LIBRARIES_%1.txt").arg(suffix),

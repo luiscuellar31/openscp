@@ -100,6 +100,7 @@ open build/OpenSCP.app
 - Connection dialog improved (clearer inputs, inline key/known_hosts selectors, show/hide password fields).
 - Connection dialog includes per-site proxy configuration (`Direct`, `SOCKS5`, `HTTP CONNECT`) with optional auth.
 - Connection dialog includes optional per-site SSH jump host (bastion) configuration.
+- UI language selection includes `English`, `Spanish`, and `Portuguese`.
 - Settings redesigned into `General` and `Advanced` sections.
 - Settings keeps controls visible while resizing (minimum size + scrollable pages).
 - One-click reset for default main-window layout/sizes in Settings.
