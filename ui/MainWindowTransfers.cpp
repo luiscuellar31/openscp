@@ -20,12 +20,15 @@
 #include <QPropertyAnimation>
 #include <QScreen>
 #include <QStatusBar>
+#include <QTimer>
 
 #include <atomic>
 #include <memory>
 #include <thread>
 
 static constexpr int NAME_COL = 0;
+static const char *kStagingBatchMime =
+    "application/x-openscp-staging-batch";
 
 static bool isValidEntryName(const QString &name, QString *why = nullptr) {
     if (name == "." || name == "..") {
@@ -377,6 +380,45 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
     if (obj != rightViewport && obj != leftViewport)
         return QMainWindow::eventFilter(obj, ev);
 
+    auto extractStagingBatchDir = [](const QMimeData *md) -> QString {
+        if (!md || !md->hasFormat(kStagingBatchMime))
+            return QString();
+        const QByteArray raw = md->data(kStagingBatchMime);
+        return QString::fromUtf8(raw).trimmed();
+    };
+
+    auto scheduleStagingCleanupAfterLocalJobs = [this](const QString &batchDir) {
+        if (batchDir.isEmpty())
+            return;
+        auto *timer = new QTimer(this);
+        timer->setInterval(350);
+        timer->setSingleShot(false);
+        auto *attempts = new int(0);
+        connect(timer, &QTimer::timeout, this, [this, timer, attempts, batchDir] {
+            ++(*attempts);
+            const bool giveUp = (*attempts >= 300); // ~105s max wait
+            if (!giveUp && m_localFsJobsInFlight_.load() > 0)
+                return;
+
+            timer->stop();
+            timer->deleteLater();
+            delete attempts;
+
+            QDir batch(batchDir);
+            if (batch.exists())
+                (void)batch.removeRecursively();
+
+            // If the staging root is now empty, remove it as well.
+            const QString rootPath = QFileInfo(batchDir).absolutePath();
+            QDir root(rootPath);
+            if (root.exists() &&
+                root.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty()) {
+                (void)root.rmdir(".");
+            }
+        });
+        timer->start();
+    };
+
     // Drag-and-drop over the right panel (local or remote)
     if (obj == rightViewport) {
         if (ev->type() == QEvent::DragEnter) {
@@ -397,6 +439,8 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
             return true;
         } else if (ev->type() == QEvent::Drop) {
             auto *dd = static_cast<QDropEvent *>(ev);
+            const QString stagingBatchDir =
+                extractStagingBatchDir(dd->mimeData());
             const auto urls =
                 dd->mimeData() ? dd->mimeData()->urls() : QList<QUrl>{};
             if (urls.isEmpty()) {
@@ -404,6 +448,14 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
                 return true;
             }
             if (rightIsRemote_) {
+                if (!stagingBatchDir.isEmpty()) {
+                    statusBar()->showMessage(
+                        tr("Drop ignored: remote-origin drag cannot be dropped "
+                           "back into the same remote panel"),
+                        5000);
+                    dd->ignore();
+                    return true;
+                }
                 // Block upload if remote is read-only
                 if (!rightRemoteWritable_) {
                     statusBar()->showMessage(
@@ -494,6 +546,8 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
             return true;
         } else if (ev->type() == QEvent::Drop) {
             auto *dd = static_cast<QDropEvent *>(ev);
+            const QString stagingBatchDir =
+                extractStagingBatchDir(dd->mimeData());
             const auto urls =
                 dd->mimeData() ? dd->mimeData()->urls() : QList<QUrl>{};
             if (!urls.isEmpty()) {
@@ -517,6 +571,8 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
                     pairs.push_back({fi.absoluteFilePath(), target});
                 }
                 runLocalFsOperation(pairs, false, 0);
+                if (!stagingBatchDir.isEmpty())
+                    scheduleStagingCleanupAfterLocalJobs(stagingBatchDir);
                 dd->acceptProposedAction();
                 updateDeleteShortcutEnables();
                 return true;

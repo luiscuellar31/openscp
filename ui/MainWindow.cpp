@@ -128,6 +128,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     // Basic view tuning
     auto tuneView = [](QTreeView *v) {
         v->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        v->setSelectionBehavior(QAbstractItemView::SelectRows);
         v->setSortingEnabled(true);
         v->sortByColumn(0, Qt::AscendingOrder);
         v->header()->setStretchLastSection(true);
