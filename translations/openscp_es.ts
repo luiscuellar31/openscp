@@ -342,6 +342,110 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
             <translation>Buscar en panel derecho</translation>
         </message>
         <message>
+            <source>Search items</source>
+            <translation>Buscar elementos</translation>
+        </message>
+        <message>
+            <source>Local panel</source>
+            <translation>Panel local</translation>
+        </message>
+        <message>
+            <source>Local panel - left</source>
+            <translation>Panel local - izquierdo</translation>
+        </message>
+        <message>
+            <source>Local panel - right</source>
+            <translation>Panel local - derecho</translation>
+        </message>
+        <message>
+            <source>Remote panel</source>
+            <translation>Panel remoto</translation>
+        </message>
+        <message>
+            <source>Search items (%1)</source>
+            <translation>Buscar elementos (%1)</translation>
+        </message>
+        <message>
+            <source>Pattern accepts wildcard (*, ?) or regex.
+Examples: *report*, report, ^report_.*\.pdf$</source>
+            <translation>El patrón acepta comodines (*, ?) o regex.
+Ejemplos: *report*, report, ^report_.*\.pdf$</translation>
+        </message>
+        <message>
+            <source>e.g. *report*</source>
+            <translation>p. ej. *report*</translation>
+        </message>
+        <message>
+            <source>Search recursively in subfolders</source>
+            <translation>Buscar recursivamente en subcarpetas</translation>
+        </message>
+        <message>
+            <source>Search results (%1)</source>
+            <translation>Resultados de búsqueda (%1)</translation>
+        </message>
+        <message>
+            <source>Base: %1
+Matches: %2</source>
+            <translation>Base: %1
+Coincidencias: %2</translation>
+        </message>
+        <message>
+            <source>Scan errors: %1</source>
+            <translation>Errores de escaneo: %1</translation>
+        </message>
+        <message>
+            <source>Search canceled by user.</source>
+            <translation>Búsqueda cancelada por el usuario.</translation>
+        </message>
+        <message>
+            <source>Results truncated to safety limit.</source>
+            <translation>Resultados recortados por límite de seguridad.</translation>
+        </message>
+        <message>
+            <source>Searching recursively in %1...</source>
+            <translation>Buscando recursivamente en %1...</translation>
+        </message>
+        <message>
+            <source>Scanning %1</source>
+            <translation>Escaneando %1</translation>
+        </message>
+        <message>
+            <source>Search canceled in %1.</source>
+            <translation>Búsqueda cancelada en %1.</translation>
+        </message>
+        <message>
+            <source>No recursive matches found in %1.</source>
+            <translation>No se encontraron coincidencias recursivas en %1.</translation>
+        </message>
+        <message>
+            <source>Folders with errors: %1</source>
+            <translation>Carpetas con errores: %1</translation>
+        </message>
+        <message>
+            <source>Found %1 recursive match(es) in %2.</source>
+            <translation>Se encontraron %1 coincidencias recursivas en %2.</translation>
+        </message>
+        <message>
+            <source>Results limited to %1.</source>
+            <translation>Resultados limitados a %1.</translation>
+        </message>
+        <message>
+            <source>(Canceled)</source>
+            <translation>(Cancelado)</translation>
+        </message>
+        <message>
+            <source>Invalid folder</source>
+            <translation>Carpeta inválida</translation>
+        </message>
+        <message>
+            <source>The current folder does not exist.</source>
+            <translation>La carpeta actual no existe.</translation>
+        </message>
+        <message>
+            <source>Refresh</source>
+            <translation>Actualizar</translation>
+        </message>
+        <message>
             <source>Download</source>
             <translation>Descarga</translation>
         </message>
@@ -412,6 +516,42 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
         <message>
             <source>Ready</source>
             <translation>Listo</translation>
+        </message>
+        <message>
+            <source>Type: HttpConnect</source>
+            <translation>Tipo: HttpConnect</translation>
+        </message>
+        <message>
+            <source>Active connection method for this session</source>
+            <translation>Método de conexión activo para esta sesión</translation>
+        </message>
+        <message>
+            <source>Session: 000:00:00</source>
+            <translation>Sesión: 000:00:00</translation>
+        </message>
+        <message>
+            <source>Elapsed time for the current connection session</source>
+            <translation>Tiempo transcurrido de la sesión de conexión actual</translation>
+        </message>
+        <message>
+            <source>Unknown</source>
+            <translation>Desconocido</translation>
+        </message>
+        <message>
+            <source>None</source>
+            <translation>Ninguno</translation>
+        </message>
+        <message>
+            <source>Type: %1</source>
+            <translation>Tipo: %1</translation>
+        </message>
+        <message>
+            <source>Session: --:--:--</source>
+            <translation>Sesión: --:--:--</translation>
+        </message>
+        <message>
+            <source>Session: %1</source>
+            <translation>Sesión: %1</translation>
         </message>
         <message>
             <source>OpenSCP — local/local (click Connect for remote)</source>
