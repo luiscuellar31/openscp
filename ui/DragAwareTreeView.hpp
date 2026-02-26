@@ -24,7 +24,7 @@ class DragAwareTreeView : public QTreeView {
     void showKeepMessage(const QString &batchDir);
     void showKeepMessageWithPrefix(const QString &prefix,
                                    const QString &batchDir);
-    void scheduleAutoCleanup(const QString &batchDir);
+    void scheduleAutoCleanup(const QString &batchDir, int initialDelayMs = 500);
     // Remote -> system drag-out: prepare asynchronously using TransferManager
     void startRemoteDragAsync(class RemoteModel *rm);
 

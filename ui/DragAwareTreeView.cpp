@@ -149,7 +149,8 @@ void DragAwareTreeView::showKeepMessageWithPrefix(const QString &prefix,
     });
 }
 
-void DragAwareTreeView::scheduleAutoCleanup(const QString &batchDir) {
+void DragAwareTreeView::scheduleAutoCleanup(const QString &batchDir,
+                                            int initialDelayMs) {
     auto tryDelete = [this](const QString &dir) -> bool {
         QDir d(dir);
         if (!d.exists())
@@ -167,8 +168,9 @@ void DragAwareTreeView::scheduleAutoCleanup(const QString &batchDir) {
         return true;
     };
 
+    const int firstDelayMs = qBound(0, initialDelayMs, 60000);
     // First attempt with a brief delay to allow OS to finish copying
-    QTimer::singleShot(500, this, [this, batchDir, tryDelete]() {
+    QTimer::singleShot(firstDelayMs, this, [this, batchDir, tryDelete]() {
         if (tryDelete(batchDir))
             return;
         // Retry up to 3 times at 1s intervals
@@ -261,9 +263,26 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *rm) {
 
     // Collect selected rows (name column only)
     auto sel = selectionModel();
-    const auto rows = sel ? sel->selectedRows(0) : QModelIndexList{};
-    if (rows.isEmpty())
+    QModelIndexList rows = sel ? sel->selectedRows(0) : QModelIndexList{};
+    if (rows.isEmpty() && sel) {
+        // Fallback: when selection behavior is not row-based yet, infer unique
+        // rows from any selected column to keep drag responsive.
+        const auto selected = sel->selectedIndexes();
+        QSet<int> seenRows;
+        for (const QModelIndex &idx : selected) {
+            if (!idx.isValid() || seenRows.contains(idx.row()))
+                continue;
+            const QModelIndex row0 = idx.sibling(idx.row(), 0);
+            if (row0.isValid()) {
+                rows.push_back(row0);
+                seenRows.insert(idx.row());
+            }
+        }
+    }
+    if (rows.isEmpty()) {
+        dragInProgress_ = false;
         return;
+    }
 
     // Compute staging directory
     const QString root = buildStagingRoot();
@@ -671,6 +690,17 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *rm) {
                 auto *drag = new QDrag(self);
                 drag->setMimeData(md);
                 const auto res = drag->exec(Qt::CopyAction);
+                const QObject *dropTarget = drag->target();
+                bool droppedInsideThisWindow = false;
+                if (dropTarget) {
+                    const QWidget *targetWidget =
+                        qobject_cast<const QWidget *>(dropTarget);
+                    QWidget *const sourceWindow = self->window();
+                    if (targetWidget && sourceWindow &&
+                        targetWidget->window() == sourceWindow) {
+                        droppedInsideThisWindow = true;
+                    }
+                }
 
                 // Post-drag behavior: cleanup or keep
                 QSettings s("OpenSCP", "OpenSCP");
@@ -728,7 +758,11 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *rm) {
                     }
                     return;
                 }
-                scheduleAutoCleanup(currentBatchDir_);
+                // Internal drops may still be copying staged files in the
+                // target panel. Give them extra time; the drop target also
+                // performs explicit cleanup after local copy/move completion.
+                const int cleanupDelayMs = droppedInsideThisWindow ? 10000 : 500;
+                scheduleAutoCleanup(currentBatchDir_, cleanupDelayMs);
                 {
                     const qint64 stagingMs =
                         stagingTimer_.isValid() ? stagingTimer_.elapsed() : -1;
