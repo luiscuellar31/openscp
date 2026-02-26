@@ -2011,9 +2011,18 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             libssh2_knownhost_free(nh);
         } else if (opt.known_hosts_policy ==
                        openscp::KnownHostsPolicy::AcceptNew &&
-                   (check == LIBSSH2_KNOWNHOST_CHECK_NOTFOUND ||
-                    check == LIBSSH2_KNOWNHOST_CHECK_MISMATCH)) {
-            // TOFU: ask the user for confirmation if a callback is available
+                   check == LIBSSH2_KNOWNHOST_CHECK_MISMATCH) {
+            // TOFU rejects changed keys: changed host identities must fail hard.
+            libssh2_knownhost_free(nh);
+            err = "Host key does not match known_hosts (TOFU rejects changed keys)";
+            if (opt.hostkey_status_cb) {
+                opt.hostkey_status_cb(err);
+            }
+            return false;
+        } else if (opt.known_hosts_policy ==
+                       openscp::KnownHostsPolicy::AcceptNew &&
+                   check == LIBSSH2_KNOWNHOST_CHECK_NOTFOUND) {
+            // TOFU: for unknown hosts ask the user for confirmation.
             std::string algName;
             switch (keytype) {
             case LIBSSH2_HOSTKEY_TYPE_RSA:
@@ -2294,6 +2303,15 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                                     fpStr, "skipped");
                 }
             }
+        } else if (opt.known_hosts_policy ==
+                       openscp::KnownHostsPolicy::AcceptNew &&
+                   check == LIBSSH2_KNOWNHOST_CHECK_FAILURE) {
+            libssh2_knownhost_free(nh);
+            err = "known_hosts validation failed (TOFU policy)";
+            if (opt.hostkey_status_cb) {
+                opt.hostkey_status_cb(err);
+            }
+            return false;
         } else {
             libssh2_knownhost_free(nh);
             // Policy handling for non-match cases
