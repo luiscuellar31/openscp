@@ -486,6 +486,8 @@ void MainWindow::disconnectSftp() {
         actDownloadF7_->setEnabled(false);
     if (actUploadRight_)
         actUploadRight_->setEnabled(false);
+    if (actRefreshRight_)
+        actRefreshRight_->setEnabled(false);
     // Local mode: re-enable local actions on the right panel
     if (actNewDirRight_)
         actNewDirRight_->setEnabled(true);
@@ -1430,6 +1432,8 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         actDownloadF7_->setEnabled(true);
     if (actUploadRight_)
         actUploadRight_->setEnabled(true);
+    if (actRefreshRight_)
+        actRefreshRight_->setEnabled(true);
     if (actNewDirRight_)
         actNewDirRight_->setEnabled(true);
     if (actNewFileRight_)

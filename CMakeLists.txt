@@ -241,6 +241,8 @@ set(ICON_FILES
     assets/icons/action-open-saved-sites.svg
     assets/icons/action-open-transfer-queue.svg
     assets/icons/action-open-settings.svg
+    assets/icons/action-refresh.svg
+    assets/icons/action-search-item.svg
     assets/icons/action-rename.svg
     assets/icons/action-upload.svg
 )

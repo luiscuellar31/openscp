@@ -96,6 +96,68 @@ static bool remotePathIsInsideRoot(const QString &candidatePath,
     return candidate == root || candidate.startsWith(root + QStringLiteral("/"));
 }
 
+static bool focusWithinWidget(QWidget *focus, QWidget *root) {
+    if (!focus || !root)
+        return false;
+    for (QWidget *cur = focus; cur != nullptr; cur = cur->parentWidget()) {
+        if (cur == root)
+            return true;
+    }
+    return false;
+}
+
+static bool hasRegexMetaBeyondWildcards(const QString &pattern) {
+    static const QString kRegexMeta = QStringLiteral("\\.^$+()[]{}|");
+    for (const QChar ch : pattern) {
+        if (kRegexMeta.contains(ch))
+            return true;
+    }
+    return false;
+}
+
+static QString wildcardPatternToRegex(const QString &wildcard) {
+    QString regex;
+    regex.reserve((wildcard.size() * 2) + 4);
+    regex += QLatin1Char('^');
+    for (const QChar ch : wildcard) {
+        if (ch == QLatin1Char('*')) {
+            regex += QStringLiteral(".*");
+        } else if (ch == QLatin1Char('?')) {
+            regex += QLatin1Char('.');
+        } else {
+            regex += QRegularExpression::escape(QString(ch));
+        }
+    }
+    regex += QLatin1Char('$');
+    return regex;
+}
+
+static QRegularExpression compilePanelSearchRegex(const QString &rawPattern,
+                                                  QString *errorOut) {
+    if (errorOut)
+        errorOut->clear();
+    const QString pattern = rawPattern.trimmed();
+    if (pattern.isEmpty())
+        return QRegularExpression();
+
+    QString regexPattern;
+    if (hasRegexMetaBeyondWildcards(pattern)) {
+        regexPattern = pattern;
+    } else if (pattern.contains(QLatin1Char('*')) ||
+               pattern.contains(QLatin1Char('?'))) {
+        regexPattern = wildcardPatternToRegex(pattern);
+    } else {
+        regexPattern = QStringLiteral(".*%1.*")
+                           .arg(QRegularExpression::escape(pattern));
+    }
+
+    QRegularExpression regex(regexPattern,
+                             QRegularExpression::CaseInsensitiveOption);
+    if (!regex.isValid() && errorOut)
+        *errorOut = regex.errorString();
+    return regex;
+}
+
 MainWindow::~MainWindow() = default; // define the destructor here
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
@@ -207,6 +269,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                                              &MainWindow::chooseLeftDir);
     actChooseLeft_->setIcon(resIcon("action-open-folder.svg"));
     actChooseLeft_->setToolTip(actChooseLeft_->text());
+    actSearchLeft_ = leftPaneBar_->addAction(tr("Search items"), this, [this] {
+        searchItemsInCurrentFolder(leftView_, tr("left panel"));
+    });
+    actSearchLeft_->setIcon(resIcon("action-search-item.svg"));
+    actSearchLeft_->setToolTip(actSearchLeft_->text());
     leftPaneBar_->addSeparator();
     actCopyF5_ =
         leftPaneBar_->addAction(tr("Copy"), this, &MainWindow::copyLeftToRight);
@@ -304,6 +371,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                                                &MainWindow::chooseRightDir);
     actChooseRight_->setIcon(resIcon("action-open-folder.svg"));
     actChooseRight_->setToolTip(actChooseRight_->text());
+    actSearchRight_ =
+        rightPaneBar_->addAction(tr("Search items"), this, [this] {
+            searchItemsInCurrentFolder(rightView_, tr("right panel"));
+        });
+    actSearchRight_->setIcon(resIcon("action-search-item.svg"));
+    actSearchRight_->setToolTip(actSearchRight_->text());
 
     // Right panel actions (create first, then add in requested order)
     actDownloadF7_ = new QAction(tr("Download"), this);
@@ -323,6 +396,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     actUploadRight_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
     if (rightView_)
         rightView_->addAction(actUploadRight_);
+
+    actRefreshRight_ = new QAction(tr("Refresh"), this);
+    connect(actRefreshRight_, &QAction::triggered, this,
+            &MainWindow::refreshRightRemotePanel);
+    actRefreshRight_->setIcon(resIcon("action-refresh.svg"));
+    actRefreshRight_->setToolTip(actRefreshRight_->text());
 
     actNewDirRight_ = new QAction(tr("New folder"), this);
     connect(actNewDirRight_, &QAction::triggered, this,
@@ -358,7 +437,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     if (rightView_)
         rightView_->addAction(actNewFileRight_);
 
-    // Order: Copy, Move, Delete, Rename, New folder, then Download/Upload
+    // Order: Copy, Move, Delete, Rename, New folder, then
+    // Download/Upload/Refresh
     rightPaneBar_->addSeparator();
     // Toolbar buttons with generic texts (Copy/Move)
     actCopyRightTb_ = new QAction(tr("Copy"), this);
@@ -389,6 +469,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     rightPaneBar_->addSeparator();
     rightPaneBar_->addAction(actDownloadF7_);
     rightPaneBar_->addAction(actUploadRight_);
+    rightPaneBar_->addSeparator();
+    rightPaneBar_->addAction(actRefreshRight_);
     // Delete shortcut also on right panel (limited to right panel widget)
     if (actDeleteRight_) {
         actDeleteRight_->setShortcut(QKeySequence(Qt::Key_Delete));
@@ -412,10 +494,44 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
             downloadRightToLeft();
         });
     }
+    // Ctrl+F / Cmd+F: open search dialog for the focused panel.
+    auto *scFind = new QShortcut(QKeySequence::Find, this);
+    scFind->setContext(Qt::WindowShortcut);
+    connect(scFind, &QShortcut::activated, this, [this] {
+        QWidget *focus = QApplication::focusWidget();
+        const bool inRightPanel =
+            focusWithinWidget(focus, rightView_) ||
+            focusWithinWidget(focus, rightPath_) ||
+            focusWithinWidget(focus, rightSearch_) ||
+            focusWithinWidget(focus, rightPaneBar_) ||
+            focusWithinWidget(focus, rightBreadcrumbsBar_);
+        if (inRightPanel) {
+            searchItemsInCurrentFolder(rightView_, tr("right panel"));
+            return;
+        }
+
+        const bool inLeftPanel =
+            focusWithinWidget(focus, leftView_) ||
+            focusWithinWidget(focus, leftPath_) ||
+            focusWithinWidget(focus, leftSearch_) ||
+            focusWithinWidget(focus, leftPaneBar_) ||
+            focusWithinWidget(focus, leftBreadcrumbsBar_);
+        if (inLeftPanel) {
+            searchItemsInCurrentFolder(leftView_, tr("left panel"));
+            return;
+        }
+
+        if (rightIsRemote_)
+            searchItemsInCurrentFolder(rightView_, tr("right panel"));
+        else
+            searchItemsInCurrentFolder(leftView_, tr("left panel"));
+    });
     // Disable strictly-remote actions at startup
     if (actDownloadF7_)
         actDownloadF7_->setEnabled(false);
     actUploadRight_->setEnabled(false);
+    if (actRefreshRight_)
+        actRefreshRight_->setEnabled(false);
     if (actNewFileRight_)
         actNewFileRight_->setEnabled(false);
 
@@ -1021,6 +1137,66 @@ void MainWindow::applyQuickSearch(QTreeView *view, const QString &query) {
     }
 }
 
+void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
+                                            const QString &panelLabel) {
+    if (!view || !view->model() || !view->selectionModel())
+        return;
+
+    const QString patternInput = QInputDialog::getText(
+        this, tr("Search items"),
+        tr("Pattern (regex or wildcard, e.g. *hola*):"), QLineEdit::Normal);
+    const QString pattern = patternInput.trimmed();
+    if (pattern.isEmpty())
+        return;
+
+    QString regexError;
+    const QRegularExpression regex =
+        compilePanelSearchRegex(pattern, &regexError);
+    if (!regex.isValid()) {
+        QMessageBox::warning(
+            this, tr("Invalid pattern"),
+            tr("The pattern is not valid.\n%1")
+                .arg(regexError.isEmpty() ? tr("Unknown regex error.")
+                                          : regexError));
+        return;
+    }
+
+    QAbstractItemModel *model = view->model();
+    QItemSelectionModel *selection = view->selectionModel();
+    const QModelIndex root = view->rootIndex();
+    const int rows = model->rowCount(root);
+
+    selection->clearSelection();
+    QModelIndex firstMatch;
+    int matches = 0;
+
+    for (int row = 0; row < rows; ++row) {
+        const QModelIndex idx = model->index(row, NAME_COL, root);
+        const QString itemName = model->data(idx, Qt::DisplayRole).toString();
+        if (!regex.match(itemName).hasMatch())
+            continue;
+
+        selection->select(idx,
+                          QItemSelectionModel::Select |
+                              QItemSelectionModel::Rows);
+        if (!firstMatch.isValid())
+            firstMatch = idx;
+        ++matches;
+    }
+
+    if (firstMatch.isValid()) {
+        selection->setCurrentIndex(firstMatch, QItemSelectionModel::NoUpdate);
+        view->scrollTo(firstMatch, QAbstractItemView::PositionAtCenter);
+        statusBar()->showMessage(
+            tr("Found %1 match(es) in %2.")
+                .arg(QString::number(matches), panelLabel),
+            4000);
+    } else {
+        statusBar()->showMessage(tr("No matches found in %1.").arg(panelLabel),
+                                 4000);
+    }
+}
+
 void MainWindow::maybeRefreshRemoteAfterCompletedUploads() {
     if (!transferMgr_) {
         m_seenCompletedUploadTaskIds_.clear();
@@ -1261,6 +1437,9 @@ void MainWindow::updateDeleteShortcutEnables() {
                                     rightRemoteWritable_); // exception
     if (actDownloadF7_)
         actDownloadF7_->setEnabled(
+            rightIsRemote_); // exception: enabled without selection
+    if (actRefreshRight_)
+        actRefreshRight_->setEnabled(
             rightIsRemote_); // exception: enabled without selection
     if (actUpRight_) {
         QString cur = rightRemoteModel_ ? rightRemoteModel_->rootPath()

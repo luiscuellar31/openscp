@@ -179,6 +179,22 @@ void MainWindow::setRightRemoteRoot(const QString &path) {
     }
 }
 
+void MainWindow::refreshRightRemotePanel() {
+    if (!rightIsRemote_ || !rightRemoteModel_)
+        return;
+
+    QString e;
+    if (!rightRemoteModel_->setRootPath(rightRemoteModel_->rootPath(), &e,
+                                        true)) {
+        UiAlerts::warning(
+            this, tr("Remote error"),
+            tr("Could not refresh the remote folder.\n%1")
+                .arg(shortRemoteError(e,
+                                      tr("Failed to read remote contents."))));
+        return;
+    }
+}
+
 void MainWindow::rightItemActivated(const QModelIndex &idx) {
     // Local mode (right panel is local): navigate into directories
     if (!rightIsRemote_) {

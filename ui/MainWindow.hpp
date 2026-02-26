@@ -62,6 +62,7 @@ class MainWindow : public QMainWindow {
     void deleteFromLeft();  // Delete
     void goUpRight();       // Go up one level (right)
     void goUpLeft();        // Go up one level (left)
+    void refreshRightRemotePanel(); // Refresh current remote folder (right)
 
     void connectSftp();
     void disconnectSftp();
@@ -131,6 +132,9 @@ class MainWindow : public QMainWindow {
     QAction *actDisconnect_ = nullptr;
     QAction *actDownloadF7_ = nullptr;
     QAction *actUploadRight_ = nullptr;
+    QAction *actRefreshRight_ = nullptr;
+    QAction *actSearchLeft_ = nullptr;
+    QAction *actSearchRight_ = nullptr;
     QAction *actNewDirRight_ = nullptr;
     QAction *actNewFileRight_ = nullptr;
     QAction *actRenameRight_ = nullptr;
@@ -219,6 +223,8 @@ class MainWindow : public QMainWindow {
     };
     void runRemoteDownloadPrescan(const QVector<RemoteDownloadSeed> &seeds,
                                   int initialSkipped, bool dragAndDrop);
+    void searchItemsInCurrentFolder(QTreeView *view,
+                                    const QString &panelLabel);
     void refreshLeftBreadcrumbs();
     void refreshRightBreadcrumbs();
     void rebuildLocalBreadcrumbs(QToolBar *bar, const QString &path,
