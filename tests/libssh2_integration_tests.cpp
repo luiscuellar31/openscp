@@ -55,6 +55,12 @@ std::string joinRemotePath(const std::string &base, const std::string &name) {
     return base + "/" + name;
 }
 
+std::string knownHostsHostToken(const std::string &host, std::uint16_t port) {
+    if (port == 22)
+        return host;
+    return "[" + host + "]:" + std::to_string(port);
+}
+
 bool readFile(const fs::path &p, std::string &out) {
     std::ifstream in(p, std::ios::binary);
     if (!in.is_open())
@@ -342,6 +348,48 @@ int main() {
         std::cerr << "[FAIL] could not create bad source file\n";
         fs::remove_all(localTmpRoot, ec);
         return EXIT_FAILURE;
+    }
+
+    // Regression: TOFU must reject known_hosts mismatches (changed keys),
+    // without allowing callback-based override.
+    const fs::path tofuMismatchKnownHosts =
+        localTmpRoot / "known_hosts_tofu_mismatch";
+    {
+        static constexpr const char *kFakeEd25519Key =
+            "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/qwU9iIfMHkUqPnwGwGZRuQQ3v1d";
+        std::ofstream khOut(tofuMismatchKnownHosts,
+                            std::ios::binary | std::ios::trunc);
+        if (!khOut.is_open()) {
+            std::cerr << "[FAIL] could not create TOFU mismatch known_hosts\n";
+            fs::remove_all(localTmpRoot, ec);
+            return EXIT_FAILURE;
+        }
+        khOut << knownHostsHostToken(*host, port) << " ssh-ed25519 "
+              << kFakeEd25519Key << "\n";
+    }
+    if (t.failures == 0) {
+        openscp::Libssh2SftpClient mismatchClient;
+        openscp::SessionOptions mismatchOpt = opt;
+        mismatchOpt.known_hosts_policy = openscp::KnownHostsPolicy::AcceptNew;
+        mismatchOpt.known_hosts_path = tofuMismatchKnownHosts.string();
+        bool confirmCalled = false;
+        mismatchOpt.hostkey_confirm_cb =
+            [&confirmCalled](const std::string &, std::uint16_t,
+                             const std::string &, const std::string &, bool) {
+                confirmCalled = true;
+                return true;
+            };
+        std::string mismatchErr;
+        const bool mismatchOk = mismatchClient.connect(mismatchOpt, mismatchErr);
+        t.check(!mismatchOk,
+                "TOFU connect should fail when known_hosts entry mismatches");
+        t.check(mismatchErr.find("does not match known_hosts") !=
+                    std::string::npos,
+                std::string("TOFU mismatch should report host-key mismatch: ") +
+                    mismatchErr);
+        t.check(!confirmCalled,
+                "TOFU mismatch should fail before invoking confirmation callback");
+        mismatchClient.disconnect();
     }
 
     openscp::Libssh2SftpClient client;
