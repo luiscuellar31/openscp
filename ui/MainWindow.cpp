@@ -106,6 +106,18 @@ static bool focusWithinWidget(QWidget *focus, QWidget *root) {
     return false;
 }
 
+static QString formatConnectionElapsed(qint64 totalSeconds) {
+    if (totalSeconds < 0)
+        totalSeconds = 0;
+    const qint64 hours = totalSeconds / 3600;
+    const qint64 minutes = (totalSeconds % 3600) / 60;
+    const qint64 seconds = totalSeconds % 60;
+    return QStringLiteral("%1:%2:%3")
+        .arg(hours, 2, 10, QLatin1Char('0'))
+        .arg(minutes, 2, 10, QLatin1Char('0'))
+        .arg(seconds, 2, 10, QLatin1Char('0'));
+}
+
 static bool hasRegexMetaBeyondWildcards(const QString &pattern) {
     static const QString kRegexMeta = QStringLiteral("\\.^$+()[]{}|");
     for (const QChar ch : pattern) {
@@ -224,18 +236,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(rightPath_, &QLineEdit::returnPressed, this,
             &MainWindow::rightPathEntered);
 
-    // Per-pane quick search (incremental selection inside the current folder)
-    leftSearch_ = new QLineEdit(this);
-    rightSearch_ = new QLineEdit(this);
-    leftSearch_->setPlaceholderText(tr("Search in left panel"));
-    rightSearch_->setPlaceholderText(tr("Search in right panel"));
-    leftSearch_->setClearButtonEnabled(true);
-    rightSearch_->setClearButtonEnabled(true);
-    connect(leftSearch_, &QLineEdit::textChanged, this,
-            [this](const QString &text) { applyQuickSearch(leftView_, text); });
-    connect(rightSearch_, &QLineEdit::textChanged, this,
-            [this](const QString &text) { applyQuickSearch(rightView_, text); });
-
     // Central splitter with two panes
     mainSplitter_ = new QSplitter(this);
     auto *leftPane = new QWidget(this);
@@ -346,10 +346,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     leftPaneBar_->addAction(actNewDirLeft_);
     leftLayout->addWidget(leftPaneBar_);
 
-    // Left panel: toolbar -> breadcrumbs -> path -> search -> view
+    // Left panel: toolbar -> breadcrumbs -> path -> view
     leftLayout->addWidget(leftBreadcrumbsBar_);
     leftLayout->addWidget(leftPath_);
-    leftLayout->addWidget(leftSearch_);
     leftLayout->addWidget(leftView_);
 
     // Right pane sub‑toolbar
@@ -502,7 +501,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         const bool inRightPanel =
             focusWithinWidget(focus, rightView_) ||
             focusWithinWidget(focus, rightPath_) ||
-            focusWithinWidget(focus, rightSearch_) ||
             focusWithinWidget(focus, rightPaneBar_) ||
             focusWithinWidget(focus, rightBreadcrumbsBar_);
         if (inRightPanel) {
@@ -513,7 +511,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         const bool inLeftPanel =
             focusWithinWidget(focus, leftView_) ||
             focusWithinWidget(focus, leftPath_) ||
-            focusWithinWidget(focus, leftSearch_) ||
             focusWithinWidget(focus, leftPaneBar_) ||
             focusWithinWidget(focus, leftBreadcrumbsBar_);
         if (inLeftPanel) {
@@ -535,11 +532,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     if (actNewFileRight_)
         actNewFileRight_->setEnabled(false);
 
-    // Right panel: toolbar -> breadcrumbs -> path -> search -> view
+    // Right panel: toolbar -> breadcrumbs -> path -> view
     rightLayout->addWidget(rightPaneBar_);
     rightLayout->addWidget(rightBreadcrumbsBar_);
     rightLayout->addWidget(rightPath_);
-    rightLayout->addWidget(rightSearch_);
     rightLayout->addWidget(rightView_);
 
     // Mount panes into the splitter
@@ -763,6 +759,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     }
     QDir().mkpath(downloadDir_);
 
+    initializeConnectionSessionIndicators();
     statusBar()->showMessage(tr("Ready"));
     setWindowTitle(tr("OpenSCP — local/local (click Connect for remote)"));
     resize(1100, 650);
@@ -851,6 +848,92 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         if (m_openSiteManagerOnStartup && !QCoreApplication::closingDown() &&
             !sftp_) {
             QTimer::singleShot(0, this, [this] { showSiteManagerNonModal(); });
+        }
+    }
+}
+
+void MainWindow::initializeConnectionSessionIndicators() {
+    if (!statusBar())
+        return;
+
+    if (!m_connectionTypeLabel_) {
+        m_connectionTypeLabel_ = new QLabel(this);
+        m_connectionTypeLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        m_connectionTypeLabel_->setMinimumWidth(
+            m_connectionTypeLabel_->fontMetrics().horizontalAdvance(
+                tr("Type: HttpConnect")) +
+            12);
+        m_connectionTypeLabel_->setToolTip(
+            tr("Active connection method for this session"));
+        statusBar()->addPermanentWidget(m_connectionTypeLabel_);
+    }
+
+    if (!m_connectionElapsedLabel_) {
+        m_connectionElapsedLabel_ = new QLabel(this);
+        m_connectionElapsedLabel_->setAlignment(Qt::AlignRight |
+                                                Qt::AlignVCenter);
+        m_connectionElapsedLabel_->setMinimumWidth(
+            m_connectionElapsedLabel_->fontMetrics().horizontalAdvance(
+                tr("Session: 000:00:00")) +
+            12);
+        m_connectionElapsedLabel_->setToolTip(
+            tr("Elapsed time for the current connection session"));
+        statusBar()->addPermanentWidget(m_connectionElapsedLabel_);
+    }
+
+    if (!m_connectionElapsedTimer_) {
+        m_connectionElapsedTimer_ = new QTimer(this);
+        m_connectionElapsedTimer_->setInterval(1000);
+        connect(m_connectionElapsedTimer_, &QTimer::timeout, this,
+                &MainWindow::updateConnectionSessionIndicators);
+    }
+
+    resetConnectionSessionIndicators();
+}
+
+void MainWindow::startConnectionSessionIndicators(
+    const QString &connectionType) {
+    if (!m_connectionTypeLabel_ || !m_connectionElapsedLabel_ ||
+        !m_connectionElapsedTimer_) {
+        initializeConnectionSessionIndicators();
+    }
+
+    const QString normalizedType = connectionType.trimmed();
+    m_activeConnectionType_ =
+        normalizedType.isEmpty() ? tr("Unknown") : normalizedType;
+    m_connectionStartedAtMs_ = QDateTime::currentMSecsSinceEpoch();
+    if (m_connectionElapsedTimer_)
+        m_connectionElapsedTimer_->start();
+    updateConnectionSessionIndicators();
+}
+
+void MainWindow::resetConnectionSessionIndicators() {
+    m_activeConnectionType_.clear();
+    m_connectionStartedAtMs_ = 0;
+    if (m_connectionElapsedTimer_)
+        m_connectionElapsedTimer_->stop();
+    updateConnectionSessionIndicators();
+}
+
+void MainWindow::updateConnectionSessionIndicators() {
+    if (m_connectionTypeLabel_) {
+        const QString typeLabel =
+            m_activeConnectionType_.isEmpty() ? tr("None")
+                                              : m_activeConnectionType_;
+        m_connectionTypeLabel_->setText(tr("Type: %1").arg(typeLabel));
+    }
+
+    if (m_connectionElapsedLabel_) {
+        if (m_connectionStartedAtMs_ <= 0) {
+            m_connectionElapsedLabel_->setText(tr("Session: --:--:--"));
+        } else {
+            const qint64 elapsedSeconds =
+                qMax<qint64>(0, (QDateTime::currentMSecsSinceEpoch() -
+                                 m_connectionStartedAtMs_) /
+                                    1000);
+            m_connectionElapsedLabel_->setText(
+                tr("Session: %1")
+                    .arg(formatConnectionElapsed(elapsedSeconds)));
         }
     }
 }
@@ -1113,28 +1196,6 @@ void MainWindow::refreshRightBreadcrumbs() {
         rebuildRemoteBreadcrumbs(path);
     else
         rebuildLocalBreadcrumbs(rightBreadcrumbsBar_, path, true);
-}
-
-void MainWindow::applyQuickSearch(QTreeView *view, const QString &query) {
-    if (!view || !view->model() || !view->selectionModel())
-        return;
-    const QString needle = query.trimmed();
-    if (needle.isEmpty())
-        return;
-
-    QAbstractItemModel *model = view->model();
-    const QModelIndex root = view->rootIndex();
-    const int rows = model->rowCount(root);
-    for (int row = 0; row < rows; ++row) {
-        const QModelIndex idx = model->index(row, NAME_COL, root);
-        const QString itemName = model->data(idx, Qt::DisplayRole).toString();
-        if (!itemName.contains(needle, Qt::CaseInsensitive))
-            continue;
-        view->selectionModel()->setCurrentIndex(
-            idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-        view->scrollTo(idx, QAbstractItemView::PositionAtCenter);
-        return;
-    }
 }
 
 void MainWindow::searchItemsInCurrentFolder(QTreeView *view,

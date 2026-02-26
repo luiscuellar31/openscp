@@ -178,8 +178,6 @@ void MainWindow::setLeftRoot(const QString &path) {
         leftPath_->setText(normalized);
         leftView_->setRootIndex(leftModel_->index(normalized));
         refreshLeftBreadcrumbs();
-        if (leftSearch_ && !leftSearch_->text().trimmed().isEmpty())
-            applyQuickSearch(leftView_, leftSearch_->text());
         statusBar()->showMessage(tr("Left: ") + normalized, 3000);
         updateDeleteShortcutEnables();
     } else {
@@ -196,8 +194,6 @@ void MainWindow::setRightRoot(const QString &path) {
         rightView_->setRootIndex(
             rightLocalModel_->index(normalized)); // <-- here
         refreshRightBreadcrumbs();
-        if (rightSearch_ && !rightSearch_->text().trimmed().isEmpty())
-            applyQuickSearch(rightView_, rightSearch_->text());
         statusBar()->showMessage(tr("Right: ") + normalized, 3000);
         updateDeleteShortcutEnables();
     } else {

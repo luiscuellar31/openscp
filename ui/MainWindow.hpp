@@ -24,6 +24,7 @@ class QEvent;      // fwd for eventFilter
 class QCloseEvent; // fwd for closeEvent
 class QDialog;     // fwd
 class QLabel;      // fwd
+class QTimer;      // fwd
 class QSplitter;   // fwd
 namespace openscp {
 class SftpClient;
@@ -114,8 +115,6 @@ class MainWindow : public QMainWindow {
 
     QLineEdit *leftPath_ = nullptr;
     QLineEdit *rightPath_ = nullptr;
-    QLineEdit *leftSearch_ = nullptr;
-    QLineEdit *rightSearch_ = nullptr;
     QToolBar *leftBreadcrumbsBar_ = nullptr;
     QToolBar *rightBreadcrumbsBar_ = nullptr;
     QSplitter *mainSplitter_ = nullptr;
@@ -191,6 +190,10 @@ class MainWindow : public QMainWindow {
     bool
     confirmInsecureHostPolicyForSession(const openscp::SessionOptions &opt);
     void updateHostPolicyRiskBanner();
+    void initializeConnectionSessionIndicators();
+    void startConnectionSessionIndicators(const QString &connectionType);
+    void resetConnectionSessionIndicators();
+    void updateConnectionSessionIndicators();
     void showTransferQueue();
     void maybeShowTransferQueue();
     void openLocalPathWithPreference(const QString &localPath);
@@ -230,7 +233,6 @@ class MainWindow : public QMainWindow {
     void rebuildLocalBreadcrumbs(QToolBar *bar, const QString &path,
                                  bool rightPane);
     void rebuildRemoteBreadcrumbs(const QString &path);
-    void applyQuickSearch(QTreeView *view, const QString &query);
     void restoreMainWindowUiState();
     void saveMainWindowUiState() const;
     void saveRightHeaderState(bool remoteMode) const;
@@ -282,6 +284,11 @@ class MainWindow : public QMainWindow {
     bool m_pendingCloseAfterDisconnect_ = false;
     bool m_sessionNoHostVerification_ = false;
     QLabel *m_hostPolicyRiskLabel_ = nullptr;
+    QLabel *m_connectionTypeLabel_ = nullptr;
+    QLabel *m_connectionElapsedLabel_ = nullptr;
+    QTimer *m_connectionElapsedTimer_ = nullptr;
+    qint64 m_connectionStartedAtMs_ = 0;
+    QString m_activeConnectionType_;
     // Connection progress dialog (non-modal), to avoid blocking TOFU
     QPointer<class QProgressDialog> m_connectProgress_;
     bool m_connectProgressDimmed_ = false;

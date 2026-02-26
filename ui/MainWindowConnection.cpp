@@ -577,6 +577,7 @@ void MainWindow::completeDisconnectSftp(quint64 disconnectSeq, bool forced) {
     if (sftp_)
         sftp_->disconnect();
     sftp_.reset();
+    resetConnectionSessionIndicators();
     if (actConnect_) {
         actConnect_->setEnabled(true);
         actConnect_->setToolTip(actConnect_->text());
@@ -1374,8 +1375,6 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
                 }
                 rightPath_->setText(path);
                 refreshRightBreadcrumbs();
-                if (rightSearch_ && !rightSearch_->text().trimmed().isEmpty())
-                    applyQuickSearch(rightView_, rightSearch_->text());
                 if (rightIsRemote_) {
                     updateRemoteWriteability();
                     updateDeleteShortcutEnables();
@@ -1451,6 +1450,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         actChooseRight_->setEnabled(false);
         actChooseRight_->setToolTip(tr("Not available in remote mode"));
     }
+    startConnectionSessionIndicators(QStringLiteral("SFTP"));
     statusBar()->showMessage(
         tr("Connected (SFTP) to ") + QString::fromStdString(opt.host), 4000);
     setWindowTitle(tr("OpenSCP — local/remote (SFTP)"));
