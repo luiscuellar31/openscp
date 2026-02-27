@@ -219,6 +219,128 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
+      - name: Write HTTP CONNECT proxy helper
+        run: |
+          cat > /tmp/openscp_http_connect_proxy.py <<'PY'
+          import base64
+          import os
+          import select
+          import socket
+          import threading
+
+          BIND_HOST = "127.0.0.1"
+          BIND_PORT = int(os.environ["IT_HTTP_PROXY_PORT"])
+          AUTH_USER = os.environ.get("IT_HTTP_PROXY_USER", "")
+          AUTH_PASS = os.environ.get("IT_HTTP_PROXY_PASS", "")
+          EXPECTED_AUTH = "Basic " + base64.b64encode(
+              f"{AUTH_USER}:{AUTH_PASS}".encode("utf-8")
+          ).decode("ascii")
+
+
+          def parse_authority(authority: str):
+              if authority.startswith("["):
+                  end = authority.find("]")
+                  if end <= 0:
+                      raise ValueError("invalid IPv6 authority")
+                  host = authority[1:end]
+                  rest = authority[end + 1 :]
+                  if not rest.startswith(":"):
+                      raise ValueError("missing port")
+                  return host, int(rest[1:])
+              host, port = authority.rsplit(":", 1)
+              return host, int(port)
+
+
+          def tunnel(client: socket.socket, upstream: socket.socket):
+              sockets = [client, upstream]
+              while True:
+                  readable, _, _ = select.select(sockets, [], [], 30.0)
+                  if not readable:
+                      continue
+                  for src in readable:
+                      data = src.recv(65536)
+                      if not data:
+                          return
+                      dst = upstream if src is client else client
+                      dst.sendall(data)
+
+
+          def handle(client: socket.socket):
+              upstream = None
+              try:
+                  client.settimeout(10.0)
+                  reader = client.makefile("rb")
+                  request_line = reader.readline(8192).decode(
+                      "iso-8859-1", errors="replace"
+                  ).strip()
+                  if not request_line:
+                      return
+                  parts = request_line.split()
+                  if len(parts) < 3 or parts[0].upper() != "CONNECT":
+                      client.sendall(
+                          b"HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n"
+                      )
+                      return
+                  authority = parts[1]
+                  headers = {}
+                  while True:
+                      line = reader.readline(8192)
+                      if not line or line in (b"\r\n", b"\n"):
+                          break
+                      decoded = line.decode("iso-8859-1", errors="replace").strip()
+                      if not decoded or ":" not in decoded:
+                          continue
+                      key, value = decoded.split(":", 1)
+                      headers[key.strip().lower()] = value.strip()
+                  if headers.get("proxy-authorization", "") != EXPECTED_AUTH:
+                      client.sendall(
+                          b"HTTP/1.1 407 Proxy Authentication Required\r\n"
+                          b"Proxy-Authenticate: Basic realm=\"OpenSCP IT\"\r\n"
+                          b"Connection: close\r\n\r\n"
+                      )
+                      return
+                  host, port = parse_authority(authority)
+                  upstream = socket.create_connection((host, port), timeout=10.0)
+                  client.sendall(
+                      b"HTTP/1.1 200 Connection Established\r\nConnection: keep-alive\r\n\r\n"
+                  )
+                  client.settimeout(None)
+                  upstream.settimeout(None)
+                  tunnel(client, upstream)
+              except Exception:
+                  try:
+                      client.sendall(
+                          b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"
+                      )
+                  except Exception:
+                      pass
+              finally:
+                  try:
+                      if upstream is not None:
+                          upstream.close()
+                  except Exception:
+                      pass
+                  try:
+                      client.close()
+                  except Exception:
+                      pass
+
+
+          def main():
+              server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+              server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+              server.bind((BIND_HOST, BIND_PORT))
+              server.listen(64)
+              while True:
+                  client, _ = server.accept()
+                  thread = threading.Thread(target=handle, args=(client,), daemon=True)
+                  thread.start()
+
+
+          if __name__ == "__main__":
+              main()
+          PY
+
       - name: Test (Linux, with SFTP integration)
         if: runner.os == 'Linux'
         env:
@@ -266,6 +388,45 @@ jobs:
           OPEN_SCP_IT_PROXY_TYPE=socks5 \
           OPEN_SCP_IT_PROXY_HOST=127.0.0.1 \
           OPEN_SCP_IT_PROXY_PORT=1081 \
+          ./build/tests/openscp_sftp_integration_tests
+
+      - name: Test (Linux, with HTTP CONNECT proxy integration)
+        if: runner.os == 'Linux'
+        env:
+          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
+          OPEN_SCP_IT_SFTP_PORT: "2222"
+          OPEN_SCP_IT_SFTP_USER: openscp_it
+          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
+          OPEN_SCP_IT_REMOTE_BASE: /home/openscp_it/upload
+        run: |
+          set -euo pipefail
+          PROXY_PORT=18081
+          PROXY_USER=openscp_proxy
+          PROXY_PASS=openscp_proxy_pass
+
+          IT_HTTP_PROXY_PORT="${PROXY_PORT}" \
+          IT_HTTP_PROXY_USER="${PROXY_USER}" \
+          IT_HTTP_PROXY_PASS="${PROXY_PASS}" \
+          python3 /tmp/openscp_http_connect_proxy.py &
+          PROXY_PID=$!
+          trap 'kill "$PROXY_PID" 2>/dev/null || true; wait "$PROXY_PID" 2>/dev/null || true' EXIT
+
+          for i in {1..40}; do
+            if nc -z 127.0.0.1 "${PROXY_PORT}" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 0.25
+          done
+          if ! nc -z 127.0.0.1 "${PROXY_PORT}" >/dev/null 2>&1; then
+            echo "HTTP CONNECT proxy did not start"
+            exit 1
+          fi
+
+          OPEN_SCP_IT_PROXY_TYPE=http \
+          OPEN_SCP_IT_PROXY_HOST=127.0.0.1 \
+          OPEN_SCP_IT_PROXY_PORT="${PROXY_PORT}" \
+          OPEN_SCP_IT_PROXY_USER="${PROXY_USER}" \
+          OPEN_SCP_IT_PROXY_PASS="${PROXY_PASS}" \
           ./build/tests/openscp_sftp_integration_tests
 
       - name: Test (Linux, with SSH jump integration)
@@ -332,6 +493,46 @@ jobs:
           OPEN_SCP_IT_PROXY_TYPE=socks5 \
           OPEN_SCP_IT_PROXY_HOST=127.0.0.1 \
           OPEN_SCP_IT_PROXY_PORT=1081 \
+          ./build/tests/openscp_sftp_integration_tests
+
+      - name: Test (macOS, with HTTP CONNECT proxy integration)
+        if: runner.os == 'macOS'
+        env:
+          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
+          OPEN_SCP_IT_SFTP_PORT: "2222"
+          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_ed25519
+          OPEN_SCP_IT_REMOTE_BASE: /tmp/openscp-it-upload
+        run: |
+          set -euo pipefail
+          RUNNER_USER="$(whoami)"
+          PROXY_PORT=18081
+          PROXY_USER=openscp_proxy
+          PROXY_PASS=openscp_proxy_pass
+
+          IT_HTTP_PROXY_PORT="${PROXY_PORT}" \
+          IT_HTTP_PROXY_USER="${PROXY_USER}" \
+          IT_HTTP_PROXY_PASS="${PROXY_PASS}" \
+          python3 /tmp/openscp_http_connect_proxy.py &
+          PROXY_PID=$!
+          trap 'kill "$PROXY_PID" 2>/dev/null || true; wait "$PROXY_PID" 2>/dev/null || true' EXIT
+
+          for i in {1..40}; do
+            if nc -z 127.0.0.1 "${PROXY_PORT}" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 0.25
+          done
+          if ! nc -z 127.0.0.1 "${PROXY_PORT}" >/dev/null 2>&1; then
+            echo "HTTP CONNECT proxy did not start"
+            exit 1
+          fi
+
+          OPEN_SCP_IT_SFTP_USER="${RUNNER_USER}" \
+          OPEN_SCP_IT_PROXY_TYPE=http \
+          OPEN_SCP_IT_PROXY_HOST=127.0.0.1 \
+          OPEN_SCP_IT_PROXY_PORT="${PROXY_PORT}" \
+          OPEN_SCP_IT_PROXY_USER="${PROXY_USER}" \
+          OPEN_SCP_IT_PROXY_PASS="${PROXY_PASS}" \
           ./build/tests/openscp_sftp_integration_tests
 
       - name: Test (macOS, with SSH jump integration)
