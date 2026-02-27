@@ -11,19 +11,21 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <thread>
 #include <vector>
 #ifndef _WIN32
 #include <fcntl.h>
 #include <pwd.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
-// OpenSSL for HMAC-SHA1 (hashed known_hosts names) and RNG
-#include <openssl/evp.h>
-#include <openssl/hmac.h>
+// OpenSSL RNG for hashed known_hosts hostnames fallback.
 #include <openssl/rand.h>
 #else
 #include <windows.h>
@@ -32,10 +34,13 @@
 #include <cstdarg>
 #include <cstdio>
 #include <ctime>
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <openssl/sha.h>
 #include <sstream>
 
 // POSIX sockets
+#include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -45,7 +50,13 @@
 
 namespace openscp {
 
-enum class CoreLogLevel : int { Off = 0, Info = 1, Debug = 2 };
+enum class CoreLogLevel : int {
+    Off = 0,
+    Error = 1,
+    Warn = 2,
+    Info = 3,
+    Debug = 4
+};
 
 static CoreLogLevel core_log_level() {
     static const CoreLogLevel level = []() {
@@ -53,8 +64,16 @@ static CoreLogLevel core_log_level() {
         if (!raw || !*raw)
             return CoreLogLevel::Off;
         std::string v(raw);
-        for (char &c : v)
-            c = (char)std::tolower((unsigned char)c);
+        std::transform(v.begin(), v.end(), v.begin(),
+                       [](unsigned char c) -> char {
+                           return static_cast<char>(std::tolower(c));
+                       });
+        if (v == "off" || v == "none" || v == "0")
+            return CoreLogLevel::Off;
+        if (v == "error" || v == "err")
+            return CoreLogLevel::Error;
+        if (v == "warn" || v == "warning")
+            return CoreLogLevel::Warn;
         if (v == "debug" || v == "2")
             return CoreLogLevel::Debug;
         if (v == "info" || v == "1")
@@ -222,8 +241,9 @@ integrity_policy_from_env(TransferIntegrityPolicy fallback) {
     if (!raw || !*raw)
         return fallback;
     std::string v(raw);
-    for (char &c : v)
-        c = (char)std::tolower((unsigned char)c);
+    std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) -> char {
+        return static_cast<char>(std::tolower(c));
+    });
     if (v == "off" || v == "0" || v == "false")
         return TransferIntegrityPolicy::Off;
     if (v == "required" || v == "strict")
@@ -560,7 +580,8 @@ static bool hash_remote_range(LIBSSH2_SFTP *sftp, const std::string &remote,
         }
         const std::size_t want =
             (std::size_t)std::min<std::uint64_t>(remain, buf.size());
-        ssize_t n = libssh2_sftp_read(rh, (char *)buf.data(), want);
+        ssize_t n = libssh2_sftp_read(rh, reinterpret_cast<char *>(buf.data()),
+                                      want);
         if (n <= 0) {
             if (why)
                 *why = "Insufficient remote read while hashing";
@@ -626,7 +647,8 @@ static bool hash_remote_full(LIBSSH2_SFTP *sftp, const std::string &remote,
             libssh2_sftp_close(rh);
             return false;
         }
-        ssize_t n = libssh2_sftp_read(rh, (char *)buf.data(), buf.size());
+        ssize_t n = libssh2_sftp_read(rh, reinterpret_cast<char *>(buf.data()),
+                                      buf.size());
         if (n > 0) {
             if (EVP_DigestUpdate(ctx, buf.data(), (std::size_t)n) != 1) {
                 if (why)
@@ -847,6 +869,69 @@ static bool persist_text_atomic(const std::string &path,
         return false;
     return true;
 }
+#else
+static bool persist_text_atomic(const std::string &path,
+                                const std::string &content, std::string *why) {
+    if (path.empty()) {
+        if (why)
+            *why = "empty destination path";
+        return false;
+    }
+
+    std::string tmpPath = path + ".tmp";
+    HANDLE h = CreateFileA(tmpPath.c_str(), GENERIC_WRITE, 0, NULL,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) {
+        if (why)
+            *why = win_err("CreateFile(tmp)", GetLastError());
+        return false;
+    }
+
+    const char *ptr = content.data();
+    std::size_t rem = content.size();
+    while (rem > 0) {
+        const DWORD chunk =
+            rem > static_cast<std::size_t>(0xFFFFFFFFu)
+                ? static_cast<DWORD>(0xFFFFFFFFu)
+                : static_cast<DWORD>(rem);
+        DWORD written = 0;
+        if (!WriteFile(h, ptr, chunk, &written, NULL) || written != chunk) {
+            DWORD ec = GetLastError();
+            (void)CloseHandle(h);
+            (void)DeleteFileA(tmpPath.c_str());
+            if (why)
+                *why = win_err("WriteFile(tmp)", ec);
+            return false;
+        }
+        ptr += written;
+        rem -= written;
+    }
+
+    if (!FlushFileBuffers(h)) {
+        DWORD ec = GetLastError();
+        (void)CloseHandle(h);
+        (void)DeleteFileA(tmpPath.c_str());
+        if (why)
+            *why = win_err("FlushFileBuffers(tmp)", ec);
+        return false;
+    }
+    if (!CloseHandle(h)) {
+        DWORD ec = GetLastError();
+        (void)DeleteFileA(tmpPath.c_str());
+        if (why)
+            *why = win_err("CloseHandle(tmp)", ec);
+        return false;
+    }
+    if (!MoveFileExA(tmpPath.c_str(), path.c_str(),
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) {
+        DWORD ec = GetLastError();
+        (void)DeleteFileA(tmpPath.c_str());
+        if (why)
+            *why = win_err("MoveFileEx(tmp->known_hosts)", ec);
+        return false;
+    }
+    return true;
+}
 #endif
 
 // Simple Base64 encoder (standard, with '=' padding)
@@ -878,6 +963,118 @@ static std::string b64encode(const unsigned char *data, std::size_t len) {
         out.push_back('=');
     }
     return out;
+}
+
+static bool b64decode(const std::string &input,
+                      std::vector<unsigned char> &out) {
+    if (input.empty() || (input.size() % 4) != 0)
+        return false;
+    out.assign((input.size() / 4) * 3, 0);
+    int decoded =
+        EVP_DecodeBlock(out.data(),
+                        reinterpret_cast<const unsigned char *>(input.data()),
+                        static_cast<int>(input.size()));
+    if (decoded < 0)
+        return false;
+    int pad = 0;
+    if (!input.empty() && input.back() == '=')
+        ++pad;
+    if (input.size() > 1 && input[input.size() - 2] == '=')
+        ++pad;
+    decoded -= pad;
+    if (decoded < 0)
+        return false;
+    out.resize(static_cast<std::size_t>(decoded));
+    return true;
+}
+
+static bool parse_known_hosts_host_field(const std::string &line,
+                                         std::size_t &hostStart,
+                                         std::size_t &hostEnd) {
+    auto isSpace = [](unsigned char c) { return std::isspace(c) != 0; };
+    std::size_t i = 0;
+    while (i < line.size() && isSpace(static_cast<unsigned char>(line[i])))
+        ++i;
+    if (i >= line.size() || line[i] == '#')
+        return false;
+
+    auto readFieldEnd = [&](std::size_t from) {
+        std::size_t p = from;
+        while (p < line.size() && !isSpace(static_cast<unsigned char>(line[p])))
+            ++p;
+        return p;
+    };
+
+    hostStart = i;
+    hostEnd = readFieldEnd(i);
+    if (hostStart >= hostEnd)
+        return false;
+
+    if (line[hostStart] == '@') {
+        i = hostEnd;
+        while (i < line.size() && isSpace(static_cast<unsigned char>(line[i])))
+            ++i;
+        if (i >= line.size())
+            return false;
+        hostStart = i;
+        hostEnd = readFieldEnd(i);
+        if (hostStart >= hostEnd)
+            return false;
+    }
+    return true;
+}
+
+static bool token_matches_hashed_host(const std::string &token,
+                                      const std::string &hostToken) {
+    if (token.size() <= 4 || token[0] != '|' || token[1] != '1' ||
+        token[2] != '|')
+        return false;
+    const std::size_t sep = token.find('|', 3);
+    if (sep == std::string::npos || sep == 3 || sep + 1 >= token.size())
+        return false;
+
+    std::vector<unsigned char> salt;
+    std::vector<unsigned char> expectedMac;
+    if (!b64decode(token.substr(3, sep - 3), salt) ||
+        !b64decode(token.substr(sep + 1), expectedMac) || salt.empty() ||
+        expectedMac.empty()) {
+        return false;
+    }
+
+    unsigned char mac[EVP_MAX_MD_SIZE];
+    unsigned int macLen = 0;
+    if (!HMAC(EVP_sha1(), salt.data(), static_cast<int>(salt.size()),
+              reinterpret_cast<const unsigned char *>(hostToken.data()),
+              static_cast<int>(hostToken.size()), mac, &macLen)) {
+        return false;
+    }
+    if (expectedMac.size() != static_cast<std::size_t>(macLen))
+        return false;
+    return std::equal(expectedMac.begin(), expectedMac.end(), mac);
+}
+
+static bool line_matches_site_host(const std::string &line,
+                                   const std::vector<std::string> &targets) {
+    std::size_t hostStart = 0;
+    std::size_t hostEnd = 0;
+    if (!parse_known_hosts_host_field(line, hostStart, hostEnd))
+        return false;
+
+    std::size_t pos = hostStart;
+    while (pos <= hostEnd) {
+        std::size_t comma = line.find(',', pos);
+        if (comma == std::string::npos || comma > hostEnd)
+            comma = hostEnd;
+        const std::string token = line.substr(pos, comma - pos);
+        for (const std::string &target : targets) {
+            if (token == target || token_matches_hashed_host(token, target))
+                return true;
+        }
+        if (comma == hostEnd)
+            break;
+        pos = comma + 1;
+    }
+    return false;
 }
 
 // Preference: write hashed hostnames to known_hosts (OpenSSH style) unless
@@ -932,13 +1129,13 @@ kbint_password_callback(const char *name, int name_len, const char *instruction,
     if (!abstract || !*abstract)
         return;
     const KbdIntCtx *ctx = static_cast<const KbdIntCtx *>(*abstract);
-    const char *user = ctx ? ctx->user : nullptr;
-    const char *pass = ctx ? ctx->pass : nullptr;
+    const char *user = ctx->user;
+    const char *pass = ctx->pass;
     const size_t ulen = user ? std::strlen(user) : 0;
     const size_t plen = pass ? std::strlen(pass) : 0;
 
     // If a UI callback is provided, give it a chance to answer the prompts.
-    if (ctx && ctx->cb && *(ctx->cb) && num_prompts > 0) {
+    if (ctx->cb && *(ctx->cb) && num_prompts > 0) {
         std::vector<std::string> ptxts;
         ptxts.reserve((size_t)num_prompts);
         for (int i = 0; i < num_prompts; ++i) {
@@ -1052,8 +1249,126 @@ Libssh2SftpClient::Libssh2SftpClient() {
 
 Libssh2SftpClient::~Libssh2SftpClient() { disconnect(); }
 
-bool Libssh2SftpClient::tcpConnect(const std::string &host, uint16_t port,
-                                   std::string &err) {
+static void configure_tcp_keepalive(int s) {
+    // Enable TCP keepalive
+    int opt = 1;
+    (void)::setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt));
+#ifdef __APPLE__
+    int idle = 60;
+    (void)::setsockopt(s, IPPROTO_TCP, TCP_KEEPALIVE, &idle, sizeof(idle));
+#elif defined(__linux__)
+    int idle = 60;
+    int intvl = 10;
+    int cnt = 3;
+    (void)::setsockopt(s, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
+    (void)::setsockopt(s, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl));
+    (void)::setsockopt(s, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt));
+#endif
+}
+
+static bool set_socket_timeout_ms(int sock, int timeoutMs) {
+    if (sock < 0)
+        return false;
+    if (timeoutMs < 0)
+        timeoutMs = 0;
+#ifdef _WIN32
+    DWORD tvMs = static_cast<DWORD>(timeoutMs);
+    const int r1 = ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,
+                                reinterpret_cast<const char *>(&tvMs),
+                                sizeof(tvMs));
+    const int r2 = ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO,
+                                reinterpret_cast<const char *>(&tvMs),
+                                sizeof(tvMs));
+    return r1 == 0 && r2 == 0;
+#else
+    struct timeval tv{};
+    tv.tv_sec = timeoutMs / 1000;
+    tv.tv_usec = (timeoutMs % 1000) * 1000;
+    const int r1 = ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    const int r2 = ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    return r1 == 0 && r2 == 0;
+#endif
+}
+
+static bool socket_send_all(int sock, const unsigned char *data,
+                            std::size_t len, const char *stage,
+                            std::string &err) {
+    std::size_t off = 0;
+    while (off < len) {
+        const ssize_t w =
+            ::send(sock, reinterpret_cast<const char *>(data + off), len - off,
+                   0);
+        if (w < 0) {
+            if (errno == EINTR)
+                continue;
+            err = std::string(stage) + " send failed: " + std::strerror(errno);
+            return false;
+        }
+        if (w == 0) {
+            err = std::string(stage) + " send failed: connection closed";
+            return false;
+        }
+        off += static_cast<std::size_t>(w);
+    }
+    return true;
+}
+
+static bool socket_recv_exact(int sock, unsigned char *buf, std::size_t len,
+                              const char *stage, std::string &err) {
+    std::size_t off = 0;
+    while (off < len) {
+        const ssize_t r =
+            ::recv(sock, reinterpret_cast<char *>(buf + off), len - off, 0);
+        if (r < 0) {
+            if (errno == EINTR)
+                continue;
+            err =
+                std::string(stage) + " recv failed: " + std::strerror(errno);
+            return false;
+        }
+        if (r == 0) {
+            err = std::string(stage) + " recv failed: connection closed";
+            return false;
+        }
+        off += static_cast<std::size_t>(r);
+    }
+    return true;
+}
+
+static bool socket_recv_until(int sock, const std::string &delimiter,
+                              std::size_t maxBytes, const char *stage,
+                              std::string &out, std::string &err) {
+    out.clear();
+    if (delimiter.empty()) {
+        err = std::string(stage) + " invalid delimiter";
+        return false;
+    }
+    std::array<char, 512> chunk{};
+    while (out.find(delimiter) == std::string::npos) {
+        const ssize_t r = ::recv(sock, chunk.data(), chunk.size(), 0);
+        if (r < 0) {
+            if (errno == EINTR)
+                continue;
+            err =
+                std::string(stage) + " recv failed: " + std::strerror(errno);
+            return false;
+        }
+        if (r == 0) {
+            err = std::string(stage) + " recv failed: connection closed";
+            return false;
+        }
+        out.append(chunk.data(), static_cast<std::size_t>(r));
+        if (out.size() > maxBytes) {
+            err = std::string(stage) + " too large";
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool connect_tcp_endpoint(const std::string &host, uint16_t port,
+                                 int &sockOut, std::string &err) {
+    sockOut = -1;
     struct addrinfo hints{};
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
@@ -1069,38 +1384,529 @@ bool Libssh2SftpClient::tcpConnect(const std::string &host, uint16_t port,
         return false;
     }
 
-    int s = -1;
+    std::string lastConnectErr;
     for (auto rp = res; rp != nullptr; rp = rp->ai_next) {
-        s = ::socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        int s = ::socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (s == -1)
             continue;
-        // Note: avoid setting SO_RCVTIMEO/SO_SNDTIMEO during authentication
-        // because it may interfere with userauth on some servers/libc. Rely on
-        // libssh2_session_set_timeout (when available) to manage timeouts.
-        // Enable TCP keepalive
-        int opt = 1;
-        ::setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt));
-#ifdef __APPLE__
-        int idle = 60;
-        ::setsockopt(s, IPPROTO_TCP, TCP_KEEPALIVE, &idle, sizeof(idle));
-#elif defined(__linux__)
-        int idle = 60, intvl = 10, cnt = 3;
-        ::setsockopt(s, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
-        ::setsockopt(s, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl));
-        ::setsockopt(s, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt));
-#endif
+        configure_tcp_keepalive(s);
         if (::connect(s, rp->ai_addr, rp->ai_addrlen) == 0) {
-            // connected
-            sock_ = s;
+            sockOut = s;
             freeaddrinfo(res);
             return true;
         }
+        lastConnectErr = std::strerror(errno);
         ::close(s);
-        s = -1;
     }
     freeaddrinfo(res);
-    err = "Could not connect to host/port.";
+    err = "Could not connect to host/port";
+    if (!lastConnectErr.empty())
+        err += ": " + lastConnectErr;
+    err += ".";
     return false;
+}
+
+static const char *socks5_reply_text(unsigned char rep) {
+    switch (rep) {
+    case 0x00:
+        return "succeeded";
+    case 0x01:
+        return "general failure";
+    case 0x02:
+        return "connection not allowed by ruleset";
+    case 0x03:
+        return "network unreachable";
+    case 0x04:
+        return "host unreachable";
+    case 0x05:
+        return "connection refused";
+    case 0x06:
+        return "TTL expired";
+    case 0x07:
+        return "command not supported";
+    case 0x08:
+        return "address type not supported";
+    default:
+        break;
+    }
+    return "unknown error";
+}
+
+static std::string format_host_port_authority(const std::string &host,
+                                              std::uint16_t port) {
+    if (host.find(':') != std::string::npos && host.find(']') == std::string::npos)
+        return "[" + host + "]:" + std::to_string(port);
+    return host + ":" + std::to_string(port);
+}
+
+#ifndef _WIN32
+static std::string trim_ascii_whitespace(std::string value) {
+    auto notSpace = [](unsigned char ch) { return !std::isspace(ch); };
+    value.erase(value.begin(),
+                std::find_if(value.begin(), value.end(), notSpace));
+    value.erase(std::find_if(value.rbegin(), value.rend(), notSpace).base(),
+                value.end());
+    return value;
+}
+
+static std::string read_jump_tunnel_stderr(int fd) {
+    if (fd < 0)
+        return std::string();
+
+    std::string out;
+    out.reserve(256);
+    char buf[256];
+    while (out.size() < 4096) {
+        const std::size_t remaining = 4096 - out.size();
+        const ssize_t n = ::read(fd, buf,
+                                 remaining < sizeof(buf) ? remaining
+                                                         : sizeof(buf));
+        if (n > 0) {
+            out.append(buf, static_cast<std::size_t>(n));
+            continue;
+        }
+        if (n == 0)
+            break;
+        if (errno == EINTR)
+            continue;
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+            break;
+        break;
+    }
+    return trim_ascii_whitespace(out);
+}
+
+static std::string format_jump_tunnel_exit_error(const char *prefix,
+                                                 const std::string &stderrText) {
+    std::string out(prefix ? prefix : "SSH jump tunnel failed.");
+    if (!stderrText.empty()) {
+        if (!out.empty() && out.back() != '.' && out.back() != ':')
+            out += ":";
+        out += " " + stderrText;
+    }
+    return out;
+}
+
+static bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut,
+                                  int &pidOut, int &stderrFdOut,
+                                  std::string &err) {
+    sockOut = -1;
+    pidOut = -1;
+    stderrFdOut = -1;
+    if (!opt.jump_host || opt.jump_host->empty()) {
+        err = "SSH jump host is empty.";
+        return false;
+    }
+    if (opt.jump_port == 0) {
+        err = "SSH jump host port is invalid.";
+        return false;
+    }
+    if (opt.host.empty()) {
+        err = "SSH target host is empty.";
+        return false;
+    }
+
+    int pairfd[2] = {-1, -1};
+    if (::socketpair(AF_UNIX, SOCK_STREAM, 0, pairfd) != 0) {
+        err = std::string("socketpair failed: ") + std::strerror(errno);
+        return false;
+    }
+
+    int stderrPipe[2] = {-1, -1};
+    if (::pipe(stderrPipe) != 0) {
+        err = std::string("pipe failed: ") + std::strerror(errno);
+        ::close(pairfd[0]);
+        ::close(pairfd[1]);
+        return false;
+    }
+
+    const pid_t pid = ::fork();
+    if (pid < 0) {
+        err = std::string("fork failed: ") + std::strerror(errno);
+        ::close(pairfd[0]);
+        ::close(pairfd[1]);
+        ::close(stderrPipe[0]);
+        ::close(stderrPipe[1]);
+        return false;
+    }
+
+    if (pid == 0) {
+        ::close(pairfd[0]);
+        ::close(stderrPipe[0]);
+        if (::dup2(pairfd[1], STDIN_FILENO) < 0 ||
+            ::dup2(pairfd[1], STDOUT_FILENO) < 0) {
+            _exit(127);
+        }
+        if (pairfd[1] != STDIN_FILENO && pairfd[1] != STDOUT_FILENO)
+            ::close(pairfd[1]);
+        if (::dup2(stderrPipe[1], STDERR_FILENO) < 0) {
+            _exit(127);
+        }
+        if (stderrPipe[1] != STDERR_FILENO)
+            ::close(stderrPipe[1]);
+
+        std::vector<std::string> args;
+        args.reserve(24);
+        args.emplace_back("ssh");
+        args.emplace_back("-o");
+        args.emplace_back("BatchMode=yes");
+        args.emplace_back("-o");
+        args.emplace_back("IdentitiesOnly=yes");
+        args.emplace_back("-o");
+        args.emplace_back("ExitOnForwardFailure=yes");
+        args.emplace_back("-o");
+        args.emplace_back("ConnectTimeout=20");
+        args.emplace_back("-o");
+        args.emplace_back("ServerAliveInterval=30");
+        args.emplace_back("-o");
+        args.emplace_back("ServerAliveCountMax=2");
+        if (opt.jump_username && !opt.jump_username->empty()) {
+            args.emplace_back("-l");
+            args.emplace_back(*opt.jump_username);
+        }
+        if (opt.jump_private_key_path && !opt.jump_private_key_path->empty()) {
+            args.emplace_back("-i");
+            args.emplace_back(*opt.jump_private_key_path);
+        }
+        args.emplace_back("-p");
+        args.emplace_back(std::to_string(opt.jump_port));
+        args.emplace_back("-W");
+        args.emplace_back(format_host_port_authority(opt.host, opt.port));
+        args.emplace_back(*opt.jump_host);
+
+        std::vector<char *> argv;
+        argv.reserve(args.size() + 1);
+        for (auto &a : args)
+            argv.push_back(const_cast<char *>(a.c_str()));
+        argv.push_back(nullptr);
+        ::execvp("ssh", argv.data());
+        const std::string execErr =
+            std::string("exec ssh failed: ") + std::strerror(errno);
+        (void)::write(STDERR_FILENO, execErr.c_str(), execErr.size());
+        _exit(127);
+    }
+
+    ::close(pairfd[1]);
+    ::close(stderrPipe[1]);
+    const int fdFlags = ::fcntl(pairfd[0], F_GETFD);
+    if (fdFlags >= 0)
+        (void)::fcntl(pairfd[0], F_SETFD, fdFlags | FD_CLOEXEC);
+    const int stderrFdFlags = ::fcntl(stderrPipe[0], F_GETFD);
+    if (stderrFdFlags >= 0)
+        (void)::fcntl(stderrPipe[0], F_SETFD, stderrFdFlags | FD_CLOEXEC);
+    const int stderrStatusFlags = ::fcntl(stderrPipe[0], F_GETFL);
+    if (stderrStatusFlags >= 0)
+        (void)::fcntl(stderrPipe[0], F_SETFL, stderrStatusFlags | O_NONBLOCK);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    int status = 0;
+    const pid_t wr = ::waitpid(pid, &status, WNOHANG);
+    if (wr == pid) {
+        ::close(pairfd[0]);
+        const std::string stderrText = read_jump_tunnel_stderr(stderrPipe[0]);
+        ::close(stderrPipe[0]);
+        err = format_jump_tunnel_exit_error(
+            "Failed to start SSH jump tunnel process.", stderrText);
+        return false;
+    }
+
+    sockOut = pairfd[0];
+    pidOut = static_cast<int>(pid);
+    stderrFdOut = stderrPipe[0];
+    return true;
+}
+
+static void stop_ssh_jump_tunnel(int pid) {
+    if (pid <= 0)
+        return;
+
+    int status = 0;
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        const pid_t wr = ::waitpid(static_cast<pid_t>(pid), &status, WNOHANG);
+        if (wr == static_cast<pid_t>(pid) ||
+            (wr == -1 && errno == ECHILD)) {
+            return;
+        }
+        if (attempt == 0) {
+            (void)::kill(static_cast<pid_t>(pid), SIGTERM);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    }
+    (void)::kill(static_cast<pid_t>(pid), SIGKILL);
+    while (true) {
+        const pid_t wr = ::waitpid(static_cast<pid_t>(pid), &status, 0);
+        if (wr == static_cast<pid_t>(pid) ||
+            (wr == -1 && errno == ECHILD)) {
+            return;
+        }
+        if (wr == -1 && errno != EINTR)
+            return;
+    }
+}
+#endif
+
+static bool establish_socks5_tunnel(int sock, const SessionOptions &opt,
+                                    std::string &err) {
+    const bool haveProxyUser =
+        opt.proxy_username.has_value() && !opt.proxy_username->empty();
+    const bool haveProxyPass =
+        opt.proxy_password.has_value() && !opt.proxy_password->empty();
+    const bool wantProxyAuth = haveProxyUser || haveProxyPass;
+
+    std::vector<unsigned char> greeting;
+    if (wantProxyAuth)
+        greeting = {0x05, 0x02, 0x00, 0x02};
+    else
+        greeting = {0x05, 0x01, 0x00};
+
+    if (!socket_send_all(sock, greeting.data(), greeting.size(),
+                         "SOCKS5 greeting", err)) {
+        return false;
+    }
+
+    unsigned char helloResp[2] = {0, 0};
+    if (!socket_recv_exact(sock, helloResp, sizeof(helloResp),
+                           "SOCKS5 greeting", err)) {
+        return false;
+    }
+    if (helloResp[0] != 0x05) {
+        err = "SOCKS5 proxy returned invalid greeting version.";
+        return false;
+    }
+    if (helloResp[1] == 0xFF) {
+        err = "SOCKS5 proxy has no compatible authentication method.";
+        return false;
+    }
+
+    if (helloResp[1] == 0x02) {
+        const std::string user = haveProxyUser ? *opt.proxy_username : "";
+        const std::string pass = haveProxyPass ? *opt.proxy_password : "";
+        if (user.empty()) {
+            err = "SOCKS5 proxy authentication requires username.";
+            return false;
+        }
+        if (user.size() > 255 || pass.size() > 255) {
+            err = "SOCKS5 proxy credentials are too long.";
+            return false;
+        }
+        std::vector<unsigned char> authReq;
+        authReq.reserve(3 + user.size() + pass.size());
+        authReq.push_back(0x01);
+        authReq.push_back(static_cast<unsigned char>(user.size()));
+        authReq.insert(authReq.end(), user.begin(), user.end());
+        authReq.push_back(static_cast<unsigned char>(pass.size()));
+        authReq.insert(authReq.end(), pass.begin(), pass.end());
+        if (!socket_send_all(sock, authReq.data(), authReq.size(),
+                             "SOCKS5 auth", err)) {
+            return false;
+        }
+        unsigned char authResp[2] = {0, 0};
+        if (!socket_recv_exact(sock, authResp, sizeof(authResp), "SOCKS5 auth",
+                               err)) {
+            return false;
+        }
+        if (authResp[1] != 0x00) {
+            err = "SOCKS5 proxy authentication failed.";
+            return false;
+        }
+    } else if (helloResp[1] != 0x00) {
+        err = "SOCKS5 proxy returned unsupported auth method.";
+        return false;
+    }
+
+    if (opt.host.empty()) {
+        err = "SOCKS5 target host is empty.";
+        return false;
+    }
+    std::vector<unsigned char> connectReq = {0x05, 0x01, 0x00};
+    std::array<unsigned char, 16> ipbuf{};
+    if (::inet_pton(AF_INET, opt.host.c_str(), ipbuf.data()) == 1) {
+        connectReq.push_back(0x01);
+        connectReq.insert(connectReq.end(), ipbuf.begin(), ipbuf.begin() + 4);
+    } else if (::inet_pton(AF_INET6, opt.host.c_str(), ipbuf.data()) == 1) {
+        connectReq.push_back(0x04);
+        connectReq.insert(connectReq.end(), ipbuf.begin(), ipbuf.end());
+    } else {
+        if (opt.host.size() > 255) {
+            err = "SOCKS5 target hostname is too long.";
+            return false;
+        }
+        connectReq.push_back(0x03);
+        connectReq.push_back(static_cast<unsigned char>(opt.host.size()));
+        connectReq.insert(connectReq.end(), opt.host.begin(), opt.host.end());
+    }
+    connectReq.push_back(static_cast<unsigned char>((opt.port >> 8) & 0xFF));
+    connectReq.push_back(static_cast<unsigned char>(opt.port & 0xFF));
+
+    if (!socket_send_all(sock, connectReq.data(), connectReq.size(),
+                         "SOCKS5 connect", err)) {
+        return false;
+    }
+
+    unsigned char connHead[4] = {0, 0, 0, 0};
+    if (!socket_recv_exact(sock, connHead, sizeof(connHead), "SOCKS5 connect",
+                           err)) {
+        return false;
+    }
+    if (connHead[0] != 0x05) {
+        err = "SOCKS5 proxy returned invalid connect version.";
+        return false;
+    }
+    if (connHead[1] != 0x00) {
+        err = std::string("SOCKS5 proxy connect failed: ") +
+              socks5_reply_text(connHead[1]) + ".";
+        return false;
+    }
+
+    std::size_t tail = 0;
+    if (connHead[3] == 0x01) {
+        tail = 4 + 2;
+    } else if (connHead[3] == 0x04) {
+        tail = 16 + 2;
+    } else if (connHead[3] == 0x03) {
+        unsigned char nameLen = 0;
+        if (!socket_recv_exact(sock, &nameLen, 1, "SOCKS5 connect", err))
+            return false;
+        tail = static_cast<std::size_t>(nameLen) + 2;
+    } else {
+        err = "SOCKS5 proxy returned unsupported bind address type.";
+        return false;
+    }
+    std::vector<unsigned char> sink(tail);
+    if (tail > 0 &&
+        !socket_recv_exact(sock, sink.data(), sink.size(), "SOCKS5 connect",
+                           err)) {
+        return false;
+    }
+    return true;
+}
+
+static bool establish_http_connect_tunnel(int sock, const SessionOptions &opt,
+                                          std::string &err) {
+    if (opt.host.empty()) {
+        err = "HTTP CONNECT target host is empty.";
+        return false;
+    }
+    const std::string authority = format_host_port_authority(opt.host, opt.port);
+    std::ostringstream req;
+    req << "CONNECT " << authority << " HTTP/1.1\r\n";
+    req << "Host: " << authority << "\r\n";
+    req << "Proxy-Connection: Keep-Alive\r\n";
+    req << "User-Agent: OpenSCP\r\n";
+    if ((opt.proxy_username && !opt.proxy_username->empty()) ||
+        (opt.proxy_password && !opt.proxy_password->empty())) {
+        const std::string user =
+            opt.proxy_username ? *opt.proxy_username : std::string();
+        const std::string pass =
+            opt.proxy_password ? *opt.proxy_password : std::string();
+        const std::string creds = user + ":" + pass;
+        req << "Proxy-Authorization: Basic "
+            << b64encode(reinterpret_cast<const unsigned char *>(creds.data()),
+                         creds.size())
+            << "\r\n";
+    }
+    req << "\r\n";
+    const std::string payload = req.str();
+    if (!socket_send_all(
+            sock, reinterpret_cast<const unsigned char *>(payload.data()),
+            payload.size(), "HTTP CONNECT", err)) {
+        return false;
+    }
+
+    std::string response;
+    if (!socket_recv_until(sock, "\r\n\r\n", 8192, "HTTP CONNECT", response,
+                           err)) {
+        return false;
+    }
+    const std::size_t eol = response.find("\r\n");
+    const std::string statusLine =
+        (eol == std::string::npos) ? response : response.substr(0, eol);
+    if (statusLine.rfind("HTTP/", 0) != 0) {
+        err = "HTTP proxy returned invalid response to CONNECT.";
+        return false;
+    }
+    std::istringstream iss(statusLine);
+    std::string httpVersion;
+    int statusCode = 0;
+    iss >> httpVersion >> statusCode;
+    if (statusCode == 200)
+        return true;
+    if (statusCode == 407) {
+        err = "HTTP proxy authentication required or failed (407).";
+        return false;
+    }
+    if (statusCode > 0) {
+        err = "HTTP CONNECT tunnel rejected: " + statusLine;
+        return false;
+    }
+    err = "HTTP proxy returned malformed CONNECT status.";
+    return false;
+}
+
+bool Libssh2SftpClient::tcpConnect(const SessionOptions &opt,
+                                   std::string &err) {
+    const bool useJump = opt.jump_host.has_value() && !opt.jump_host->empty();
+    const bool useProxy = (opt.proxy_type != ProxyType::None);
+    if (useJump && useProxy) {
+        err = "Proxy and SSH jump host cannot be used together.";
+        return false;
+    }
+
+    if (useJump) {
+#ifdef _WIN32
+        err = "SSH jump host is not supported on this platform.";
+        return false;
+#else
+        int jumpSock = -1;
+        int jumpPid = -1;
+        int jumpStderrFd = -1;
+        if (!spawn_ssh_jump_tunnel(opt, jumpSock, jumpPid, jumpStderrFd, err))
+            return false;
+        {
+            std::lock_guard<std::mutex> lk(stateMutex_);
+            jumpProxyPid_ = jumpPid;
+            jumpProxyStderrFd_ = jumpStderrFd;
+        }
+        sock_ = jumpSock;
+        return true;
+#endif
+    }
+
+    const std::string endpointHost = useProxy ? opt.proxy_host : opt.host;
+    const std::uint16_t endpointPort = useProxy ? opt.proxy_port : opt.port;
+    if (endpointHost.empty()) {
+        err = useProxy ? "Proxy host is empty." : "Host is empty.";
+        return false;
+    }
+    if (endpointPort == 0) {
+        err = useProxy ? "Proxy port is invalid." : "Port is invalid.";
+        return false;
+    }
+
+    int socketFd = -1;
+    if (!connect_tcp_endpoint(endpointHost, endpointPort, socketFd, err))
+        return false;
+
+    if (useProxy) {
+        constexpr int kProxyHandshakeTimeoutMs = 20000;
+        (void)set_socket_timeout_ms(socketFd, kProxyHandshakeTimeoutMs);
+        bool ok = false;
+        if (opt.proxy_type == ProxyType::Socks5) {
+            ok = establish_socks5_tunnel(socketFd, opt, err);
+        } else if (opt.proxy_type == ProxyType::HttpConnect) {
+            ok = establish_http_connect_tunnel(socketFd, opt, err);
+        } else {
+            err = "Unsupported proxy type.";
+        }
+        (void)set_socket_timeout_ms(socketFd, 0);
+        if (!ok) {
+            ::close(socketFd);
+            return false;
+        }
+    }
+
+    sock_ = socketFd;
+    return true;
 }
 
 bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
@@ -1153,6 +1959,12 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
     libssh2_session_set_timeout(session_, 20000); // 20s
 #endif
     if (libssh2_session_handshake(session_, sock_) != 0) {
+#ifndef _WIN32
+        if (opt.jump_host.has_value() && !opt.jump_host->empty() &&
+            describeJumpTunnelFailure(err)) {
+            return false;
+        }
+#endif
         err = "SSH handshake failed";
         return false;
     }
@@ -1199,8 +2011,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
 
         size_t keylen = 0;
         int keytype = 0;
-        const char *hostkey =
-            (const char *)libssh2_session_hostkey(session_, &keylen, &keytype);
+        const char *hostkey = libssh2_session_hostkey(session_, &keylen, &keytype);
         if (!hostkey || keylen == 0) {
             libssh2_knownhost_free(nh);
             err = "Could not get host key";
@@ -1282,9 +2093,18 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             libssh2_knownhost_free(nh);
         } else if (opt.known_hosts_policy ==
                        openscp::KnownHostsPolicy::AcceptNew &&
-                   (check == LIBSSH2_KNOWNHOST_CHECK_NOTFOUND ||
-                    check == LIBSSH2_KNOWNHOST_CHECK_MISMATCH)) {
-            // TOFU: ask the user for confirmation if a callback is available
+                   check == LIBSSH2_KNOWNHOST_CHECK_MISMATCH) {
+            // TOFU rejects changed keys: changed host identities must fail hard.
+            libssh2_knownhost_free(nh);
+            err = "Host key does not match known_hosts (TOFU rejects changed keys)";
+            if (opt.hostkey_status_cb) {
+                opt.hostkey_status_cb(err);
+            }
+            return false;
+        } else if (opt.known_hosts_policy ==
+                       openscp::KnownHostsPolicy::AcceptNew &&
+                   check == LIBSSH2_KNOWNHOST_CHECK_NOTFOUND) {
+            // TOFU: for unknown hosts ask the user for confirmation.
             std::string algName;
             switch (keytype) {
             case LIBSSH2_HOSTKEY_TYPE_RSA:
@@ -1312,13 +2132,12 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             // Obtain SHA256 fingerprint if available (Base64 by default);
             // optional hex for compat
             std::string fpStr;
-            std::string fpB64;
 #ifdef LIBSSH2_HOSTKEY_HASH_SHA256
             const unsigned char *h =
-                (const unsigned char *)libssh2_hostkey_hash(
-                    session_, LIBSSH2_HOSTKEY_HASH_SHA256);
+                reinterpret_cast<const unsigned char *>(libssh2_hostkey_hash(
+                    session_, LIBSSH2_HOSTKEY_HASH_SHA256));
             if (h) {
-                fpB64 = b64encode(h, 32);
+                std::string fpB64 = b64encode(h, 32);
                 // Strip padding '=' to match OpenSSH presentation
                 while (!fpB64.empty() && fpB64.back() == '=')
                     fpB64.pop_back();
@@ -1342,8 +2161,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             }
 #else
             const unsigned char *h =
-                (const unsigned char *)libssh2_hostkey_hash(
-                    session_, LIBSSH2_HOSTKEY_HASH_SHA1);
+                reinterpret_cast<const unsigned char *>(libssh2_hostkey_hash(
+                    session_, LIBSSH2_HOSTKEY_HASH_SHA1));
             if (h) {
                 std::ostringstream oss;
                 oss << "SHA1:";
@@ -1453,6 +2272,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                 // mask
 #ifdef LIBSSH2_HOSTKEY_TYPE_ED25519
                 if (!saved && keytype == LIBSSH2_HOSTKEY_TYPE_ED25519) {
+                    const auto *hostkeyBytes =
+                        reinterpret_cast<const unsigned char *>(hostkey);
                     if (core_sensitive_debug_enabled()) {
                         std::ostringstream preview;
                         const std::size_t n = std::min<std::size_t>(
@@ -1463,7 +2284,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                             char b[4];
                             std::snprintf(
                                 b, sizeof(b), "%02X",
-                                (unsigned)((const unsigned char *)hostkey)[i]);
+                                (unsigned)hostkeyBytes[i]);
                             preview << b;
                         }
                         core_logf(CoreLogLevel::Debug,
@@ -1505,8 +2326,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                         if (!existing.empty() && existing.back() != '\n')
                             lines.push_back(tmp);
                     }
-                    std::string b64 = b64encode((const unsigned char *)hostkey,
-                                                (size_t)keylen);
+                    std::string b64 = b64encode(hostkeyBytes, (size_t)keylen);
                     std::string hostToken;
                     if (preferHashed) {
                         hostToken = openssh_hash_hostname(hostForKnown);
@@ -1515,16 +2335,16 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                     } else {
                         hostToken = hostForKnown;
                         std::string prefix = hostToken + " ssh-ed25519 ";
-                        bool replaced = false;
-                        for (std::string &ln : lines) {
-                            if (ln.rfind(prefix, 0) == 0) {
-                                ln = prefix + b64;
-                                replaced = true;
-                                break;
-                            }
-                        }
-                        if (!replaced)
+                        auto it = std::find_if(
+                            lines.begin(), lines.end(),
+                            [&prefix](const std::string &ln) {
+                                return ln.rfind(prefix, 0) == 0;
+                            });
+                        if (it != lines.end()) {
+                            *it = prefix + b64;
+                        } else {
                             lines.push_back(prefix + b64);
+                        }
                     }
                     std::string content;
                     content.reserve(lines.size() * 64);
@@ -1565,6 +2385,15 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                                     fpStr, "skipped");
                 }
             }
+        } else if (opt.known_hosts_policy ==
+                       openscp::KnownHostsPolicy::AcceptNew &&
+                   check == LIBSSH2_KNOWNHOST_CHECK_FAILURE) {
+            libssh2_knownhost_free(nh);
+            err = "known_hosts validation failed (TOFU policy)";
+            if (opt.hostkey_status_cb) {
+                opt.hostkey_status_cb(err);
+            }
+            return false;
         } else {
             libssh2_knownhost_free(nh);
             // Policy handling for non-match cases
@@ -1780,12 +2609,10 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
         } else {
             // Without a password: query methods and then try ssh-agent if the
             // server allows.
-            if (authlist.empty()) {
-                char *methods =
-                    libssh2_userauth_list(session_, opt.username.c_str(),
-                                          (unsigned)opt.username.size());
-                authlist = methods ? std::string(methods) : std::string();
-            }
+            char *methods =
+                libssh2_userauth_list(session_, opt.username.c_str(),
+                                      (unsigned)opt.username.size());
+            authlist = methods ? std::string(methods) : std::string();
             bool authed = false;
             if (hasMethod("publickey")) {
                 LIBSSH2_AGENT *agent = libssh2_agent_init(session_);
@@ -1850,22 +2677,14 @@ bool Libssh2SftpClient::connect(const SessionOptions &opt, std::string &err) {
     // Defensive: ensure no leftover state from any previous partial attempt.
     disconnect();
 
-    struct ConnectCleanupGuard {
-        Libssh2SftpClient *self;
-        bool committed = false;
-        ~ConnectCleanupGuard() {
-            if (!committed)
-                self->disconnect();
-        }
-    } cleanup{this, false};
-
-    if (!tcpConnect(opt.host, opt.port, err))
+    if (!tcpConnect(opt, err))
         return false;
-    if (!sshHandshakeAuth(opt, err))
+    if (!sshHandshakeAuth(opt, err)) {
+        disconnect();
         return false;
+    }
 
     connected_ = true;
-    cleanup.committed = true;
     return true;
 }
 
@@ -1874,6 +2693,10 @@ void Libssh2SftpClient::disconnect() {
     _LIBSSH2_SESSION *session = nullptr;
     bool wasConnected = false;
     int sock = -1;
+#ifndef _WIN32
+    int jumpPid = -1;
+    int jumpStderrFd = -1;
+#endif
     {
         std::lock_guard<std::mutex> lk(stateMutex_);
         wasConnected = connected_;
@@ -1884,6 +2707,12 @@ void Libssh2SftpClient::disconnect() {
         sftp_ = nullptr;
         session_ = nullptr;
         sock_ = -1;
+#ifndef _WIN32
+        jumpPid = jumpProxyPid_;
+        jumpProxyPid_ = -1;
+        jumpStderrFd = jumpProxyStderrFd_;
+        jumpProxyStderrFd_ = -1;
+#endif
     }
 
     // Force the transport down first so libssh2 teardown calls fail fast
@@ -1896,6 +2725,12 @@ void Libssh2SftpClient::disconnect() {
 #endif
         ::close(sock);
     }
+#ifndef _WIN32
+    if (jumpStderrFd != -1)
+        ::close(jumpStderrFd);
+    if (jumpPid > 0)
+        stop_ssh_jump_tunnel(jumpPid);
+#endif
 
     if (session) {
         libssh2_session_set_blocking(session, 0);
@@ -1915,6 +2750,52 @@ void Libssh2SftpClient::disconnect() {
         libssh2_session_free(session);
     }
 }
+
+#ifndef _WIN32
+bool Libssh2SftpClient::describeJumpTunnelFailure(std::string &err) {
+    int jumpPid = -1;
+    int jumpStderrFd = -1;
+    {
+        std::lock_guard<std::mutex> lk(stateMutex_);
+        jumpPid = jumpProxyPid_;
+        jumpStderrFd = jumpProxyStderrFd_;
+    }
+
+    if (jumpPid <= 0 && jumpStderrFd < 0)
+        return false;
+
+    bool exited = false;
+    if (jumpPid > 0) {
+        int status = 0;
+        const pid_t wr = ::waitpid(static_cast<pid_t>(jumpPid), &status, WNOHANG);
+        if (wr == static_cast<pid_t>(jumpPid) ||
+            (wr == -1 && errno == ECHILD)) {
+            exited = true;
+        }
+    }
+
+    const std::string stderrText = read_jump_tunnel_stderr(jumpStderrFd);
+    if (!exited && stderrText.empty())
+        return false;
+
+    if (exited) {
+        std::lock_guard<std::mutex> lk(stateMutex_);
+        if (jumpProxyPid_ == jumpPid)
+            jumpProxyPid_ = -1;
+        if (jumpProxyStderrFd_ == jumpStderrFd) {
+            if (jumpProxyStderrFd_ != -1)
+                ::close(jumpProxyStderrFd_);
+            jumpProxyStderrFd_ = -1;
+        }
+    }
+
+    err = format_jump_tunnel_exit_error(
+        exited ? "SSH jump tunnel failed before the SSH handshake."
+               : "SSH jump tunnel reported an error before the SSH handshake.",
+        stderrText);
+    return true;
+}
+#endif
 
 void Libssh2SftpClient::interrupt() {
     int sock = -1;
@@ -2599,50 +3480,70 @@ bool Libssh2SftpClient::rename(const std::string &from, const std::string &to,
 bool RemoveKnownHostEntry(const std::string &khPath, const std::string &host,
                           std::uint16_t port, std::string &err) {
     err.clear();
-    LIBSSH2_SESSION *s = libssh2_session_init();
-    if (!s) {
-        err = "Could not initialize libssh2";
+    if (khPath.empty()) {
+        err = "known_hosts path is empty";
         return false;
     }
-    LIBSSH2_KNOWNHOSTS *nh = libssh2_knownhost_init(s);
-    if (!nh) {
-        libssh2_session_free(s);
-        err = "Could not initialize known_hosts";
+    if (host.empty()) {
+        err = "host is empty";
         return false;
     }
-    // load existing file if present
-    (void)libssh2_knownhost_readfile(nh, khPath.c_str(),
-                                     LIBSSH2_KNOWNHOST_FILE_OPENSSH);
-    struct libssh2_knownhost *kh = nullptr;
-    int typemaskPlain =
-        LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW;
-    int typemaskHash =
-        LIBSSH2_KNOWNHOST_TYPE_SHA1 | LIBSSH2_KNOWNHOST_KEYENC_RAW;
-    // Delete all matches (plain or hashed)
-    while (true) {
-        int rc = libssh2_knownhost_checkp(nh, host.c_str(), port, nullptr, 0,
-                                          typemaskPlain, &kh);
-        if (rc == LIBSSH2_KNOWNHOST_CHECK_MATCH && kh) {
-            libssh2_knownhost_del(nh, kh);
-            continue;
-        }
-        rc = libssh2_knownhost_checkp(nh, host.c_str(), port, nullptr, 0,
-                                      typemaskHash, &kh);
-        if (rc == LIBSSH2_KNOWNHOST_CHECK_MATCH && kh) {
-            libssh2_knownhost_del(nh, kh);
-            continue;
-        }
-        break;
+
+    std::ifstream in(khPath, std::ios::binary);
+    if (!in.is_open()) {
+        err = "Could not open known_hosts";
+        return false;
     }
+
+    const std::string content((std::istreambuf_iterator<char>(in)),
+                              std::istreambuf_iterator<char>());
+    if (!in.good() && !in.eof()) {
+        err = "Could not read known_hosts";
+        return false;
+    }
+
+    std::vector<std::string> hostTokens;
+    if (port == 22) {
+        hostTokens.push_back(host);
+        // Support this uncommon notation if present in existing files.
+        hostTokens.push_back("[" + host + "]:22");
+    } else {
+        hostTokens.push_back("[" + host + "]:" + std::to_string(port));
+    }
+
+    const bool hadTrailingLf = !content.empty() && content.back() == '\n';
+    std::istringstream inLines(content);
+    std::vector<std::string> keptLines;
+    std::string line;
+    bool removedAny = false;
+
+    while (std::getline(inLines, line)) {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        if (line_matches_site_host(line, hostTokens)) {
+            removedAny = true;
+            continue;
+        }
+        keptLines.push_back(line);
+    }
+
+    if (!removedAny)
+        return true;
+
+    std::string rewritten;
+    for (std::size_t i = 0; i < keptLines.size(); ++i) {
+        if (i > 0)
+            rewritten.push_back('\n');
+        rewritten += keptLines[i];
+    }
+    if (hadTrailingLf && !keptLines.empty())
+        rewritten.push_back('\n');
+
     std::string persistErr;
-    if (!persist_known_hosts_atomic(nh, khPath, &persistErr)) {
-        libssh2_knownhost_free(nh);
-        libssh2_session_free(s);
+    if (!persist_text_atomic(khPath, rewritten, &persistErr)) {
         err = std::string("Could not write known_hosts: ") + persistErr;
         return false;
     }
-    libssh2_knownhost_free(nh);
-    libssh2_session_free(s);
     return true;
 }
 

@@ -1,22 +1,33 @@
 // Settings dialog: language, hidden files, click mode, and startup behavior.
 #pragma once
 #include <QDialog>
+#include <QVector>
 
 class QComboBox;
 class QPushButton;
 class QCheckBox;
+class QResizeEvent;
+class QFontMetrics;
 
 class SettingsDialog : public QDialog {
     Q_OBJECT
-    public:
+  public:
     explicit SettingsDialog(QWidget *parent = nullptr);
 
-    private slots:
+  protected:
+    void resizeEvent(QResizeEvent *event) override;
+
+  private slots:
     void onApply(); // save without closing; disable until further changes
     void updateApplyFromControls(); // enable Apply if any option differs from
                                     // persisted
 
-    private:
+  private:
+    static QString wrapTextToWidth(const QString &text, const QFontMetrics &fm,
+                                   int maxWidth);
+    void refreshWrappedCheckTexts();
+    void trackWrappedCheck(QCheckBox *cb);
+
     QComboBox *langCombo_ = nullptr;        // es/en
     QCheckBox *showHidden_ = nullptr;       // show hidden files
     QComboBox *clickMode_ = nullptr;        // single click vs double click
@@ -62,4 +73,5 @@ class SettingsDialog : public QDialog {
     QPushButton *applyBtn_ =
         nullptr; // Apply button (enabled only when modified)
     QPushButton *closeBtn_ = nullptr; // Close button (never primary/default)
+    QVector<QCheckBox *> wrappedChecks_; // checkboxes with auto text wrapping
 };

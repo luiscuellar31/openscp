@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE TS>
-<TS version="2.1" language="es" sourcelanguage="en">
+<TS version="2.1" language="pt" sourcelanguage="en">
 <context>
     <name>AboutDialog</name>
     <message>
         <source>About OpenSCP</source>
-        <translation>Acerca de OpenSCP</translation>
+        <translation>Sobre o OpenSCP</translation>
     </message>
     <message>
         <source>Author: &lt;a href=&quot;%1&quot;&gt;%2&lt;/a&gt;</source>
@@ -13,37 +13,37 @@
     </message>
     <message>
         <source>Used libraries:</source>
-        <translation>Librerías utilizadas:</translation>
+        <translation>Bibliotecas utilizadas:</translation>
     </message>
     <message>
         <source>No third-party license details were found in this installation.
 Use an official package for full license information.</source>
-        <translation>No se encontraron detalles de licencias de terceros en esta instalación.
-Usa un paquete oficial para ver la información completa de licencias.</translation>
+        <translation>Não foram encontrados detalhes de licenças de terceiros nesta instalação.
+Use um pacote oficial para ver as informações completas de licenças.</translation>
     </message>
     <message>
         <source>Open Licenses Folder</source>
-        <translation>Abrir carpeta de licencias</translation>
+        <translation>Abrir pasta de licenças</translation>
     </message>
     <message>
         <source>Licenses folder not found</source>
-        <translation>Carpeta de licencias no encontrada</translation>
+        <translation>Pasta de licenças não encontrada</translation>
     </message>
     <message>
         <source>No license files were found in this installation.</source>
-        <translation>No se encontraron archivos de licencia en esta instalación.</translation>
+        <translation>Nenhum arquivo de licença foi encontrado nesta instalação.</translation>
     </message>
     <message>
         <source>Report an issue</source>
-        <translation>Informar de un error</translation>
+        <translation>Reportar um problema</translation>
     </message>
     <message>
         <source>License files are not available in this installation.</source>
-        <translation>Los archivos de licencia no están disponibles en esta instalación.</translation>
+        <translation>Os arquivos de licença não estão disponíveis nesta instalação.</translation>
     </message>
     <message>
         <source>Open the folder that contains third-party licenses.</source>
-        <translation>Abrir la carpeta que contiene las licencias de terceros.</translation>
+        <translation>Abrir a pasta que contém as licenças de terceiros.</translation>
     </message>
     <message>
         <source>Copy diagnostics</source>
@@ -51,15 +51,15 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <source>Copy version and environment details for support.</source>
-        <translation>Copiar versión y detalles del entorno para soporte.</translation>
+        <translation>Copiar versão e detalhes do ambiente para suporte.</translation>
     </message>
     <message>
         <source>Diagnostics unavailable</source>
-        <translation>Diagnóstico no disponible</translation>
+        <translation>Diagnóstico indisponível</translation>
     </message>
     <message>
         <source>Could not access the system clipboard.</source>
-        <translation>No se pudo acceder al portapapeles del sistema.</translation>
+        <translation>Não foi possível acessar a área de transferência do sistema.</translation>
     </message>
     <message>
         <source>Diagnostics copied</source>
@@ -67,7 +67,7 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <source>Diagnostic information was copied to your clipboard.</source>
-        <translation>La información de diagnóstico se copió al portapapeles.</translation>
+        <translation>As informações de diagnóstico foram copiadas para a área de transferência.</translation>
     </message>
 </context>
 <context>
@@ -78,19 +78,19 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <source>My server</source>
-        <translation>Mi servidor</translation>
+        <translation>Meu servidor</translation>
     </message>
     <message>
         <source>sftp.example.com</source>
-        <translation>sftp.ejemplo.com</translation>
+        <translation>sftp.exemplo.com</translation>
     </message>
     <message>
         <source>SSH/SFTP port</source>
-        <translation>Puerto SSH/SFTP</translation>
+        <translation>Porta SSH/SFTP</translation>
     </message>
     <message>
         <source>user</source>
-        <translation>usuario</translation>
+        <translation>usuário</translation>
     </message>
     <message>
         <source>optional</source>
@@ -110,35 +110,35 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <source>Choose…</source>
-        <translation>Elegir…</translation>
+        <translation>Escolher…</translation>
     </message>
     <message>
         <source>Site name:</source>
-        <translation>Nombre del sitio:</translation>
+        <translation>Nome do site:</translation>
     </message>
     <message>
         <source>Save to saved sites</source>
-        <translation>Guardar en sitios guardados</translation>
+        <translation>Salvar em sites salvos</translation>
     </message>
     <message>
         <source>Host / Port:</source>
-        <translation>Host / Puerto:</translation>
+        <translation>Host / Porta:</translation>
     </message>
     <message>
         <source>User:</source>
-        <translation>Usuario:</translation>
+        <translation>Usuário:</translation>
     </message>
     <message>
         <source>Password:</source>
-        <translation>Contraseña:</translation>
+        <translation>Senha:</translation>
     </message>
     <message>
         <source>Private key path:</source>
-        <translation>Ruta clave privada:</translation>
+        <translation>Caminho chave privada:</translation>
     </message>
     <message>
         <source>Key passphrase:</source>
-        <translation>Passphrase clave:</translation>
+        <translation>Frase secreta da chave:</translation>
     </message>
     <message>
         <source>~/.ssh/known_hosts</source>
@@ -146,15 +146,15 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <source>Strict</source>
-        <translation>Estricto</translation>
+        <translation>Estrito</translation>
     </message>
     <message>
         <source>Accept new (TOFU)</source>
-        <translation>Aceptar nuevo (TOFU)</translation>
+        <translation>Aceitar novo (TOFU)</translation>
     </message>
     <message>
         <source>No verification (double confirmation, expires in 15 min)</source>
-        <translation>Sin verificación (doble confirmación, expira en 15 min)</translation>
+        <translation>Sem verificação (confirmação dupla, expira em 15 min)</translation>
     </message>
     <message>
         <source>known_hosts:</source>
@@ -166,31 +166,31 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <source>Select known_hosts</source>
-        <translation>Selecciona known_hosts</translation>
+        <translation>Selecione known_hosts</translation>
     </message>
     <message>
         <source>Select private key</source>
-        <translation>Selecciona clave privada</translation>
+        <translation>Selecione a chave privada</translation>
     </message>
     <message>
         <source>Use SSH jump host (bastion)</source>
-        <translation>Usar host de salto SSH (bastión)</translation>
+        <translation>Usar host de salto SSH (bastion)</translation>
     </message>
     <message>
         <source>proxy.example.com</source>
-        <translation>proxy.ejemplo.com</translation>
+        <translation>proxy.exemplo.com</translation>
     </message>
     <message>
         <source>bastion.example.com</source>
-        <translation>bastion.ejemplo.com</translation>
+        <translation>bastion.exemplo.com</translation>
     </message>
     <message>
         <source>SSH jump host is currently unavailable on Windows.</source>
-        <translation>El host de salto SSH no está disponible actualmente en Windows.</translation>
+        <translation>O host de salto SSH está indisponível no Windows no momento.</translation>
     </message>
     <message>
         <source>Direct (no proxy)</source>
-        <translation>Directo (sin proxy)</translation>
+        <translation>Direto (sem proxy)</translation>
     </message>
     <message>
         <source>SOCKS5</source>
@@ -202,7 +202,7 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <source>Save passwords/passphrases</source>
-        <translation>Guardar contraseñas/passphrases</translation>
+        <translation>Salvar senhas/passphrases</translation>
     </message>
     <message>
         <source>Proxy:</source>
@@ -210,27 +210,27 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <source>Proxy host / port:</source>
-        <translation>Host proxy / Puerto:</translation>
+        <translation>Host do proxy / Porta:</translation>
     </message>
     <message>
         <source>Proxy user:</source>
-        <translation>Usuario proxy:</translation>
+        <translation>Usuário do proxy:</translation>
     </message>
     <message>
         <source>Proxy password:</source>
-        <translation>Contraseña del proxy:</translation>
+        <translation>Senha do proxy:</translation>
     </message>
     <message>
         <source>Jump host / port:</source>
-        <translation>Host de salto / Puerto:</translation>
+        <translation>Host de salto / Porta:</translation>
     </message>
     <message>
         <source>Jump user:</source>
-        <translation>Usuario de salto:</translation>
+        <translation>Usuário de salto:</translation>
     </message>
     <message>
         <source>Jump private key:</source>
-        <translation>Clave privada de salto:</translation>
+        <translation>Chave privada de salto:</translation>
     </message>
     <message>
         <source>Optional (recommended)</source>
@@ -238,34 +238,34 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <source>Required (strict)</source>
-        <translation>Requerido (estricto)</translation>
+        <translation>Obrigatório (estrito)</translation>
     </message>
     <message>
         <source>Off (not recommended)</source>
-        <translation>Desactivado (no recomendado)</translation>
+        <translation>Desativado (não recomendado)</translation>
     </message>
     <message>
         <source>Checksum verification for resume and final transfer validation.</source>
-        <translation>Verificación de checksum para reanudar y validar la transferencia final.</translation>
+        <translation>Verificação de checksum para retomada e validação final da transferência.</translation>
     </message>
     <message>
         <source>Integrity:</source>
-        <translation>Integridad:</translation>
+        <translation>Integridade:</translation>
     </message>
     <message>
         <source>Select jump private key</source>
-        <translation>Selecciona clave privada de salto</translation>
+        <translation>Selecione a chave privada de salto</translation>
     </message>
 </context>
 <context>
     <name>DragAwareTreeView</name>
     <message>
         <source>Preparation in progress; please wait.</source>
-        <translation>Preparación en curso; espera a que termine.</translation>
+        <translation>Preparação em andamento; aguarde a conclusão.</translation>
     </message>
     <message>
         <source>Staging kept at: &lt;a href=&quot;%1&quot;&gt;%2&lt;/a&gt;</source>
-        <translation>Staging conservado en: &lt;a href=&quot;%1&quot;&gt;%2&lt;/a&gt;</translation>
+        <translation>Staging mantido em: &lt;a href=&quot;%1&quot;&gt;%2&lt;/a&gt;</translation>
     </message>
     <message>
         <source>Cancel</source>
@@ -273,7 +273,7 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <source>Preparing files…</source>
-        <translation>Preparando archivos…</translation>
+        <translation>Preparando arquivos…</translation>
     </message>
     <message>
         <source>Confirm staging</source>
@@ -281,11 +281,11 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <source>~%1 (some unknown)</source>
-        <translation>~%1 (algunos desconocidos)</translation>
+        <translation>~%1 (algunos desconhecidos)</translation>
     </message>
     <message>
         <source>You are about to prepare %1 items%2. Continue?</source>
-        <translation>Vas a preparar %1 elementos%2. ¿Continuar?</translation>
+        <translation>Você vai preparar %1 elementos%2. Continuar?</translation>
     </message>
     <message>
         <source>Continue</source>
@@ -293,90 +293,90 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <source>Still preparing files for drag-out. Wait or cancel?</source>
-        <translation>Aún preparando archivos para el arrastre. ¿Esperar o cancelar?</translation>
+        <translation>Ainda preparando arquivos para arrastar para fora. Aguardar ou cancelar?</translation>
     </message>
     <message>
         <source>Wait</source>
-        <translation>Esperar</translation>
+        <translation>Aguardar</translation>
     </message>
     <message>
         <source>%1 of %2 files failed. Staging at:</source>
-        <translation>%1 de %2 archivos fallaron. Staging en:</translation>
+        <translation>%1 de %2 arquivos falharam. Staging em:</translation>
     </message>
 </context>
 <context>
     <name>MainWindow</name>
     <message>
         <source>Could not copy file: %1</source>
-        <translation>No se pudo copiar archivo: %1</translation>
+        <translation>Não foi possível copiar arquivo: %1</translation>
     </message>
     <message>
         <source>Could not create destination folder: %1</source>
-        <translation>No se pudo crear carpeta destino: %1</translation>
+        <translation>Não foi possível criar pasta de destino: %1</translation>
     </message>
     <message>
         <source>Could not create destination subfolder: %1</source>
-        <translation>No se pudo crear subcarpeta destino: %1</translation>
+        <translation>Não foi possível criar subpasta de destino: %1</translation>
     </message>
     <message>
         <source>Failed to copy: %1</source>
-        <translation>Falló al copiar: %1</translation>
+        <translation>Falha ao copiar: %1</translation>
     </message>
     <message>
         <source>Source entry is neither file nor folder.</source>
-        <translation>Entrada de origen ni archivo ni carpeta.</translation>
+        <translation>A entrada de origem não é arquivo nem pasta.</translation>
     </message>
     <message>
         <source>Invalid name: cannot be &apos;.&apos; or &apos;..&apos;.</source>
-        <translation>Nombre inválido: no puede ser &apos;.&apos; ni &apos;..&apos;.</translation>
+        <translation>Nome inválido: não pode ser &apos;.&apos; nem &apos;..&apos;.</translation>
     </message>
     <message>
         <source>Invalid name: cannot contain separators (&apos;/&apos; or &apos;\\&apos;).</source>
-        <translation>Nombre inválido: no puede contener separadores (&apos;/&apos; o &apos;\\&apos;).</translation>
+        <translation>Nome inválido: não pode conter separadores (&apos;/&apos; ou &apos;\\&apos;).</translation>
     </message>
     <message>
         <source>Invalid name: cannot contain control characters.</source>
-        <translation>Nombre inválido: no puede tener caracteres de control.</translation>
+        <translation>Nome inválido: não pode conter caracteres de controle.</translation>
     </message>
     <message>
         <source>Permission denied.</source>
-        <translation>Permiso denegado.</translation>
+        <translation>Permissão negada.</translation>
     </message>
     <message>
         <source>Location is read-only.</source>
-        <translation>Ubicación en modo solo lectura.</translation>
+        <translation>Local em modo somente leitura.</translation>
     </message>
     <message>
         <source>File or folder does not exist.</source>
-        <translation>No existe el archivo o carpeta.</translation>
+        <translation>O arquivo ou pasta não existe.</translation>
     </message>
     <message>
         <source>Connection timed out.</source>
-        <translation>Tiempo de espera agotado.</translation>
+        <translation>Tempo limite de conexão atingido.</translation>
     </message>
     <message>
         <source>Could not resolve the server hostname.</source>
-        <translation>No se pudo resolver el nombre del servidor.</translation>
+        <translation>Não foi possível resolver o nome do servidor.</translation>
     </message>
     <message>
         <source>Connection refused by the server.</source>
-        <translation>Conexión rechazada por el servidor.</translation>
+        <translation>Conexão recusada pelo servidor.</translation>
     </message>
     <message>
         <source>Network unavailable or host unreachable.</source>
-        <translation>Red no disponible o host inalcanzable.</translation>
+        <translation>Rede indisponível ou host inacessível.</translation>
     </message>
     <message>
         <source>Authentication failed.</source>
-        <translation>Autenticación fallida.</translation>
+        <translation>Falha na autenticação.</translation>
     </message>
     <message>
         <source>Up</source>
-        <translation>Arriba</translation>
+        <translation>Acima</translation>
     </message>
     <message>
         <source>Open left folder</source>
-        <translation>Abrir carpeta izquierda</translation>
+        <translation>Abrir pasta esquerda</translation>
     </message>
     <message>
         <source>Copy</source>
@@ -388,115 +388,115 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <source>Delete</source>
-        <translation>Eliminar</translation>
+        <translation>Excluir</translation>
     </message>
     <message>
         <source>Copy to left panel</source>
-        <translation>Copiar al panel izquierdo</translation>
+        <translation>Copiar para o painel esquerdo</translation>
     </message>
     <message>
         <source>Move to left panel</source>
-        <translation>Mover al panel izquierdo</translation>
+        <translation>Mover para o painel esquerdo</translation>
     </message>
     <message>
         <source>New folder</source>
-        <translation>Nueva carpeta</translation>
+        <translation>Nova pasta</translation>
     </message>
     <message>
         <source>Rename</source>
-        <translation>Renombrar</translation>
+        <translation>Renomear</translation>
     </message>
     <message>
         <source>New file</source>
-        <translation>Nuevo archivo</translation>
+        <translation>Novo arquivo</translation>
     </message>
     <message>
         <source>Open right folder</source>
-        <translation>Abrir carpeta derecha</translation>
+        <translation>Abrir pasta direita</translation>
     </message>
     <message>
         <source>Search items</source>
-        <translation>Buscar elementos</translation>
+        <translation>Buscar itens</translation>
     </message>
     <message>
         <source>Local panel</source>
-        <translation>Panel local</translation>
+        <translation>Painel local</translation>
     </message>
     <message>
         <source>Local panel - left</source>
-        <translation>Panel local - izquierdo</translation>
+        <translation>Painel local - esquerdo</translation>
     </message>
     <message>
         <source>Local panel - right</source>
-        <translation>Panel local - derecho</translation>
+        <translation>Painel local - direito</translation>
     </message>
     <message>
         <source>Remote panel</source>
-        <translation>Panel remoto</translation>
+        <translation>Painel remoto</translation>
     </message>
     <message>
         <source>Search items (%1)</source>
-        <translation>Buscar elementos (%1)</translation>
+        <translation>Buscar itens (%1)</translation>
     </message>
     <message>
         <source>Pattern accepts wildcard (*, ?) or regex.
 Examples: *report*, report, ^report_.*\.pdf$</source>
-        <translation>El patrón acepta comodines (*, ?) o regex.
-Ejemplos: *report*, report, ^report_.*\.pdf$</translation>
+        <translation>O padrão aceita curingas (*, ?) ou regex.
+Exemplos: *report*, report, ^report_.*\.pdf$</translation>
     </message>
     <message>
         <source>e.g. *report*</source>
-        <translation>p. ej. *report*</translation>
+        <translation>ex.: *report*</translation>
     </message>
     <message>
         <source>Search recursively in subfolders</source>
-        <translation>Buscar recursivamente en subcarpetas</translation>
+        <translation>Buscar recursivamente em subpastas</translation>
     </message>
     <message>
         <source>Search results (%1)</source>
-        <translation>Resultados de búsqueda (%1)</translation>
+        <translation>Resultados da busca (%1)</translation>
     </message>
     <message>
         <source>Base: %1
 Matches: %2</source>
         <translation>Base: %1
-Coincidencias: %2</translation>
+Correspondências: %2</translation>
     </message>
     <message>
         <source>Scan errors: %1</source>
-        <translation>Errores de escaneo: %1</translation>
+        <translation>Erros de varredura: %1</translation>
     </message>
     <message>
         <source>Search canceled by user.</source>
-        <translation>Búsqueda cancelada por el usuario.</translation>
+        <translation>Busca cancelada pelo usuário.</translation>
     </message>
     <message>
         <source>Results truncated to safety limit.</source>
-        <translation>Resultados recortados por límite de seguridad.</translation>
+        <translation>Resultados truncados pelo limite de segurança.</translation>
     </message>
     <message>
         <source>Searching recursively in %1...</source>
-        <translation>Buscando recursivamente en %1...</translation>
+        <translation>Buscando recursivamente em %1...</translation>
     </message>
     <message>
         <source>Scanning %1</source>
-        <translation>Escaneando %1</translation>
+        <translation>Varrendo %1</translation>
     </message>
     <message>
         <source>Search canceled in %1.</source>
-        <translation>Búsqueda cancelada en %1.</translation>
+        <translation>Busca cancelada em %1.</translation>
     </message>
     <message>
         <source>No recursive matches found in %1.</source>
-        <translation>No se encontraron coincidencias recursivas en %1.</translation>
+        <translation>Nenhuma correspondência recursiva encontrada em %1.</translation>
     </message>
     <message>
         <source>Folders with errors: %1</source>
-        <translation>Carpetas con errores: %1</translation>
+        <translation>Pastas com erros: %1</translation>
     </message>
     <message>
         <source>Found %1 recursive match(es) in %2.</source>
-        <translation>Se encontraron %1 coincidencias recursivas en %2.</translation>
+        <translation>Foram encontradas %1 correspondência(s) recursiva(s) em %2.</translation>
     </message>
     <message>
         <source>Results limited to %1.</source>
@@ -508,27 +508,27 @@ Coincidencias: %2</translation>
     </message>
     <message>
         <source>Invalid folder</source>
-        <translation>Carpeta inválida</translation>
+        <translation>Pasta inválida</translation>
     </message>
     <message>
         <source>The current folder does not exist.</source>
-        <translation>La carpeta actual no existe.</translation>
+        <translation>La pasta actual no existe.</translation>
     </message>
     <message>
         <source>Refresh</source>
-        <translation>Actualizar</translation>
+        <translation>Atualizar</translation>
     </message>
     <message>
         <source>Download</source>
-        <translation>Descarga</translation>
+        <translation>Download</translation>
     </message>
     <message>
         <source>Upload…</source>
-        <translation>Subir…</translation>
+        <translation>Enviar…</translation>
     </message>
     <message>
         <source>Select items to download</source>
-        <translation>Selecciona elementos para descargar</translation>
+        <translation>Selecione itens para baixar</translation>
     </message>
     <message>
         <source>Connect (SFTP)</source>
@@ -544,23 +544,23 @@ Coincidencias: %2</translation>
     </message>
     <message>
         <source>Saved sites</source>
-        <translation>Sitios guardados</translation>
+        <translation>Sites salvos</translation>
     </message>
     <message>
         <source>Transfers</source>
-        <translation>Transferencias</translation>
+        <translation>Transferências</translation>
     </message>
     <message>
         <source>Full screen</source>
-        <translation>Pantalla completa</translation>
+        <translation>Tela cheia</translation>
     </message>
     <message>
         <source>About OpenSCP</source>
-        <translation>Acerca de OpenSCP</translation>
+        <translation>Sobre o OpenSCP</translation>
     </message>
     <message>
         <source>Settings</source>
-        <translation>Ajustes</translation>
+        <translation>Configurações</translation>
     </message>
     <message>
         <source>OpenSCP</source>
@@ -568,27 +568,27 @@ Coincidencias: %2</translation>
     </message>
     <message>
         <source>Settings…</source>
-        <translation>Ajustes…</translation>
+        <translation>Configurações…</translation>
     </message>
     <message>
         <source>Quit</source>
-        <translation>Salir</translation>
+        <translation>Sair</translation>
     </message>
     <message>
         <source>File</source>
-        <translation>Archivo</translation>
+        <translation>Arquivo</translation>
     </message>
     <message>
         <source>Help</source>
-        <translation>Ayuda</translation>
+        <translation>Ajuda</translation>
     </message>
     <message>
         <source>Report a bug</source>
-        <translation>Informar un error</translation>
+        <translation>Informar un erro</translation>
     </message>
     <message>
         <source>Ready</source>
-        <translation>Listo</translation>
+        <translation>Pronto</translation>
     </message>
     <message>
         <source>Type: HttpConnect</source>
@@ -596,23 +596,23 @@ Coincidencias: %2</translation>
     </message>
     <message>
         <source>Active connection method for this session</source>
-        <translation>Método de conexión activo para esta sesión</translation>
+        <translation>Método de conexão ativo para esta sessão</translation>
     </message>
     <message>
         <source>Session: 000:00:00</source>
-        <translation>Sesión: 000:00:00</translation>
+        <translation>Sessão: 000:00:00</translation>
     </message>
     <message>
         <source>Elapsed time for the current connection session</source>
-        <translation>Tiempo transcurrido de la sesión de conexión actual</translation>
+        <translation>Tempo decorrido da sessão de conexão atual</translation>
     </message>
     <message>
         <source>Unknown</source>
-        <translation>Desconocido</translation>
+        <translation>Desconhecido</translation>
     </message>
     <message>
         <source>None</source>
-        <translation>Ninguno</translation>
+        <translation>Nenhum</translation>
     </message>
     <message>
         <source>Type: %1</source>
@@ -620,47 +620,47 @@ Coincidencias: %2</translation>
     </message>
     <message>
         <source>Session: --:--:--</source>
-        <translation>Sesión: --:--:--</translation>
+        <translation>Sessão: --:--:--</translation>
     </message>
     <message>
         <source>Session: %1</source>
-        <translation>Sesión: %1</translation>
+        <translation>Sessão: %1</translation>
     </message>
     <message>
         <source>OpenSCP — local/local (click Connect for remote)</source>
-        <translation>OpenSCP — local/local (clic en Conectar para remoto)</translation>
+        <translation>OpenSCP — local/local (clique em Conectar para remoto)</translation>
     </message>
     <message>
         <source>Warning: unencrypted secrets storage active (fallback)</source>
-        <translation>Advertencia: almacenamiento de secretos sin cifrar activado (fallback)</translation>
+        <translation>Aviso: armazenamento de segredos sem criptografia ativado (fallback)</translation>
     </message>
     <message>
         <source>You are using unencrypted credentials storage enabled via environment variable. Disable OPEN_SCP_ENABLE_INSECURE_FALLBACK to hide this warning.</source>
-        <translation>Estás usando un almacenamiento de credenciales sin cifrar activado por variable de entorno. Desactiva OPEN_SCP_ENABLE_INSECURE_FALLBACK para ocultar este aviso.</translation>
+        <translation>Você está usando armazenamento de credenciais sem criptografia ativado por variável de ambiente. Desative OPEN_SCP_ENABLE_INSECURE_FALLBACK para ocultar este aviso.</translation>
     </message>
     <message>
         <source>Select left folder</source>
-        <translation>Selecciona carpeta izquierda</translation>
+        <translation>Selecione a pasta esquerda</translation>
     </message>
     <message>
         <source>Select right folder</source>
-        <translation>Selecciona carpeta derecha</translation>
+        <translation>Selecione a pasta direita</translation>
     </message>
     <message>
         <source>Left: </source>
-        <translation>Izquierda: </translation>
+        <translation>Esquerda: </translation>
     </message>
     <message>
         <source>Invalid path</source>
-        <translation>Ruta inválida</translation>
+        <translation>Caminho inválido</translation>
     </message>
     <message>
         <source>Folder does not exist.</source>
-        <translation>La carpeta no existe.</translation>
+        <translation>La pasta no existe.</translation>
     </message>
     <message>
         <source>Right: </source>
-        <translation>Derecha: </translation>
+        <translation>Direita: </translation>
     </message>
     <message>
         <source>SFTP</source>
@@ -668,19 +668,19 @@ Coincidencias: %2</translation>
     </message>
     <message>
         <source>No active SFTP session.</source>
-        <translation>No hay sesión SFTP activa.</translation>
+        <translation>Nenhuma sessão SFTP ativa.</translation>
     </message>
     <message>
         <source>No selection available.</source>
-        <translation>No hay selección disponible.</translation>
+        <translation>Nenhuma seleção disponível.</translation>
     </message>
     <message>
         <source>No entries selected in the left panel.</source>
-        <translation>No hay entradas seleccionadas en el panel izquierdo.</translation>
+        <translation>Não há entradas selecionadas no painel esquerdo.</translation>
     </message>
     <message>
         <source>Queued: %1 uploads</source>
-        <translation>Encolados: %1 subidas</translation>
+        <translation>Enfileirados: %1 uploads</translation>
     </message>
     <message>
         <source>Invalid destination</source>
@@ -688,75 +688,75 @@ Coincidencias: %2</translation>
     </message>
     <message>
         <source>Destination folder does not exist.</source>
-        <translation>La carpeta de destino no existe.</translation>
+        <translation>A pasta de destino não existe.</translation>
     </message>
     <message>
         <source>Conflict</source>
-        <translation>Conflicto</translation>
+        <translation>Conflito</translation>
     </message>
     <message>
         <source>“%1” already exists at destination.
 Overwrite?</source>
-        <translation>«%1» ya existe en destino.
-¿Sobrescribir?</translation>
+        <translation>«%1» já existe no destino.
+Sobrdigiter?</translation>
     </message>
     <message>
         <source>Copied: %1  |  Failed: %2  |  Skipped: %3</source>
-        <translation>Copiados: %1  |  Fallidos: %2  |  Saltados: %3</translation>
+        <translation>Copiados: %1  |  Falhas: %2  |  Ignorados: %3</translation>
     </message>
     <message>
         <source>Last error: </source>
-        <translation>Último error: </translation>
+        <translation>Último erro: </translation>
     </message>
     <message>
         <source>Confirm move</source>
-        <translation>Confirmar mover</translation>
+        <translation>Confirmar movimentação</translation>
     </message>
     <message>
         <source>This will upload to the server and delete the local source.
 Continue?</source>
-        <translation>Esto subirá al servidor y eliminará el origen local.
-¿Deseas continuar?</translation>
+        <translation>Isto enviará para o servidor e excluirá a origem local.
+Deseja continuar?</translation>
     </message>
     <message>
         <source>Could not delete source: </source>
-        <translation>No se pudo borrar origen: </translation>
+        <translation>Não foi possível excluir origem: </translation>
     </message>
     <message>
         <source>Queued: %1 uploads (move)</source>
-        <translation>Encolados: %1 subidas (mover)</translation>
+        <translation>Enfileirados: %1 uploads (mover)</translation>
     </message>
     <message>
         <source>Moved OK: %1 (empty folders)</source>
-        <translation>Movidos OK: %1 (carpetas vacías)</translation>
+        <translation>Movidos OK: %1 (pastas vazias)</translation>
     </message>
     <message>
         <source>Could not prepare items to move: %1</source>
-        <translation>No se pudieron preparar elementos para mover: %1</translation>
+        <translation>Não foi possível preparar elementos para mover: %1</translation>
     </message>
     <message>
         <source>Moved OK: %1  |  Failed: %2  |  Skipped: %3</source>
-        <translation>Movidos OK: %1  |  Fallidos: %2  |  Omitidos: %3</translation>
+        <translation>Movidos OK: %1  |  Falhas: %2  |  Ignorados: %3</translation>
     </message>
     <message>
         <source>This will copy and then delete the source.
 Continue?</source>
-        <translation>Esto copiará y luego eliminará el origen.
-¿Deseas continuar?</translation>
+        <translation>Isto copiará e depois excluirá a origem.
+Deseja continuar?</translation>
     </message>
     <message>
         <source>Confirm delete</source>
-        <translation>Confirmar borrado</translation>
+        <translation>Confirmar exclusão</translation>
     </message>
     <message>
         <source>This will permanently delete the selected items in the left panel.
 Continue?</source>
-        <translation>Esto eliminará permanentemente los elementos seleccionados en el panel izquierdo.
-¿Deseas continuar?</translation>
+        <translation>Isto excluirá permanentemente os itens selecionados no painel esquerdo.
+Deseja continuar?</translation>
     </message>
     <message>
         <source>Deleted: %1  |  Failed: %2</source>
-        <translation>Borrados: %1  |  Fallidos: %2</translation>
+        <translation>Excluídos: %1  |  Falhas: %2</translation>
     </message>
     <message>
         <source>Disconnected</source>
@@ -768,148 +768,148 @@ Continue?</source>
     </message>
     <message>
         <source>Critical security risk</source>
-        <translation>Riesgo crítico de seguridad</translation>
+        <translation>Riesgo crítico de segurança</translation>
     </message>
     <message>
         <source>You are about to connect using the &quot;No verification&quot; policy.
 This allows MITM attacks and server impersonation.
 
 Do you want to continue at your own risk?</source>
-        <translation>Estás a punto de conectar con la política &quot;Sin verificación&quot;.
-Esto permite ataques MITM y suplantación del servidor.
+        <translation>Você está prestes a conectar com a política &quot;Sem verificação&quot;.
+Isso permite ataques MITM e personificação do servidor.
 
-¿Deseas continuar bajo tu responsabilidad?</translation>
+Deseja continuar por sua conta e risco?</translation>
     </message>
     <message>
         <source>Additional confirmation required</source>
-        <translation>Confirmación adicional requerida</translation>
+        <translation>Confirmação adicional requerida</translation>
     </message>
     <message>
         <source>To confirm, type exactly %1</source>
-        <translation>Para confirmar, escribe exactamente %1</translation>
+        <translation>Para confirmar, digite exatamente %1</translation>
     </message>
     <message>
         <source>Connection canceled</source>
-        <translation>Conexión cancelada</translation>
+        <translation>Conexão cancelada</translation>
     </message>
     <message>
         <source>Risk confirmation was not completed correctly.</source>
-        <translation>No se confirmó el riesgo de forma válida.</translation>
+        <translation>A confirmação de risco não foi concluída corretamente.</translation>
     </message>
     <message>
         <source>Temporary &quot;no verification&quot; exception active until %1</source>
-        <translation>Excepción temporal de &quot;sin verificación&quot; activa hasta %1</translation>
+        <translation>Exceção temporária de &quot;sem verificação&quot; ativa até %1</translation>
     </message>
     <message>
         <source>Risk: host key not verified in this session</source>
-        <translation>Riesgo: host key sin verificación en esta sesión</translation>
+        <translation>Risco: host key sem verificação nesta sessão</translation>
     </message>
     <message>
         <source>The current session does not validate host key; MITM risk exists.</source>
-        <translation>La sesión actual no valida host key; existe riesgo de MITM.</translation>
+        <translation>A sessão atual não valida host key; existe risco de MITM.</translation>
     </message>
     <message>
         <source>Opening preference</source>
-        <translation>Preferencia de apertura</translation>
+        <translation>Preferência de abertura</translation>
     </message>
     <message>
         <source>How do you want to open this file?</source>
-        <translation>¿Cómo deseas abrir este archivo?</translation>
+        <translation>Como deseja abrir este arquivo?</translation>
     </message>
     <message>
         <source>Open file</source>
-        <translation>Abrir archivo</translation>
+        <translation>Abrir arquivo</translation>
     </message>
     <message>
         <source>Show folder</source>
-        <translation>Mostrar carpeta</translation>
+        <translation>Mostrar pasta</translation>
     </message>
     <message>
         <source>Remote error</source>
-        <translation>Error remoto</translation>
+        <translation>Erro remoto</translation>
     </message>
     <message>
         <source>Could not open the remote folder.
 %1</source>
-        <translation>No se pudo abrir la carpeta remota.
+        <translation>Não foi possível abrir a pasta remota.
 %1</translation>
     </message>
     <message>
         <source>Failed to read remote contents.</source>
-        <translation>Error al leer contenido remoto.</translation>
+        <translation>Erro ao ler conteúdo remoto.</translation>
     </message>
     <message>
         <source>Invalid name</source>
-        <translation>Nombre inválido</translation>
+        <translation>Nome inválido</translation>
     </message>
     <message>
         <source>Queued: %1 downloads</source>
-        <translation>Encolados: %1 descargas</translation>
+        <translation>Enfileirados: %1 downloads</translation>
     </message>
     <message>
         <source>Download already queued</source>
-        <translation>Descarga ya encolada</translation>
+        <translation>Download já enfileirado</translation>
     </message>
     <message>
         <source>Downloaded: </source>
-        <translation>Descargado: </translation>
+        <translation>Baixado: </translation>
     </message>
     <message>
         <source>The right panel is not remote.</source>
-        <translation>El panel derecho no es remoto.</translation>
+        <translation>O painel direito não está em modo remoto.</translation>
     </message>
     <message>
         <source>Select destination folder (local)</source>
-        <translation>Selecciona carpeta de destino (local)</translation>
+        <translation>Selecione a pasta de destino (local)</translation>
     </message>
     <message>
         <source>Nothing to download.</source>
-        <translation>Nada para descargar.</translation>
+        <translation>Nada para baixar.</translation>
     </message>
     <message>
         <source>Skipped invalid: %1</source>
-        <translation>Omitidos inválidos: %1</translation>
+        <translation>Ignorados inválidos: %1</translation>
     </message>
     <message>
         <source>The destination folder (left panel) does not exist.</source>
-        <translation>La carpeta de destino (panel izquierdo) no existe.</translation>
+        <translation>A pasta de destino (painel esquerdo) não existe.</translation>
     </message>
     <message>
         <source>No selection.</source>
-        <translation>No hay selección.</translation>
+        <translation>Sem seleção.</translation>
     </message>
     <message>
         <source>Nothing selected.</source>
-        <translation>Nada seleccionado.</translation>
+        <translation>Nada selecionado.</translation>
     </message>
     <message>
         <source>Queued: %1 downloads (move)</source>
-        <translation>Encolados: %1 descargas (mover)</translation>
+        <translation>Enfileirados: %1 downloads (mover)</translation>
     </message>
     <message>
         <source>Upload</source>
-        <translation>Subida</translation>
+        <translation>Upload</translation>
     </message>
     <message>
         <source>The right panel is not remote or there is no active session.</source>
-        <translation>El panel derecho no es remoto o no hay sesión activa.</translation>
+        <translation>O painel direito não está em modo remoto ou não há sessão ativa.</translation>
     </message>
     <message>
         <source>Select files or folders to upload</source>
-        <translation>Selecciona archivos o carpetas a subir</translation>
+        <translation>Selecione arquivos ou pastas para enviar</translation>
     </message>
     <message>
         <source>Nothing to upload.</source>
-        <translation>Nada para subir.</translation>
+        <translation>Nada para enviar.</translation>
     </message>
     <message>
         <source>Name:</source>
-        <translation>Nombre:</translation>
+        <translation>Nome:</translation>
     </message>
     <message>
         <source>Could not create the remote folder.
 %1</source>
-        <translation>No se pudo crear la carpeta remota.
+        <translation>Não foi possível criar a pasta remota.
 %1</translation>
     </message>
     <message>
@@ -918,22 +918,22 @@ Esto permite ataques MITM y suplantación del servidor.
     </message>
     <message>
         <source>Could not create folder.</source>
-        <translation>No se pudo crear carpeta.</translation>
+        <translation>Não foi possível criar a pasta.</translation>
     </message>
     <message>
         <source>File exists</source>
-        <translation>Archivo existe</translation>
+        <translation>Arquivo já existe</translation>
     </message>
     <message>
         <source>«%1» already exists.
 Overwrite?</source>
-        <translation>«%1» ya existe.
-¿Sobrescribir?</translation>
+        <translation>«%1» já existe.
+Sobrescrever?</translation>
     </message>
     <message>
         <source>Could not check whether the remote file already exists.
 %1</source>
-        <translation>No se pudo comprobar si el archivo remoto ya existe.
+        <translation>Não foi possível verificar se o arquivo remoto já existe.
 %1</translation>
     </message>
     <message>
@@ -942,103 +942,103 @@ Overwrite?</source>
     </message>
     <message>
         <source>Could not create a temporary file.</source>
-        <translation>No se pudo crear un archivo temporal.</translation>
+        <translation>Não foi possível criar um arquivo temporário.</translation>
     </message>
     <message>
         <source>Could not upload the temporary file to the server.
 %1</source>
-        <translation>No se pudo subir el archivo temporal al servidor.
+        <translation>Não foi possível enviar o arquivo temporário ao servidor.
 %1</translation>
     </message>
     <message>
         <source>File created: </source>
-        <translation>Archivo creado: </translation>
+        <translation>Arquivo criado: </translation>
     </message>
     <message>
         <source>Could not create file.</source>
-        <translation>No se pudo crear archivo.</translation>
+        <translation>Não foi possível criar arquivo.</translation>
     </message>
     <message>
         <source>Select exactly one item.</source>
-        <translation>Selecciona exactamente un elemento.</translation>
+        <translation>Selecione exatamente um item.</translation>
     </message>
     <message>
         <source>New name:</source>
-        <translation>Nuevo nombre:</translation>
+        <translation>Novo nome:</translation>
     </message>
     <message>
         <source>Could not rename the remote item.
 %1</source>
-        <translation>No se pudo renombrar en remoto.
+        <translation>Não foi possível renomear no remoto.
 %1</translation>
     </message>
     <message>
         <source>Could not rename.</source>
-        <translation>No se pudo renombrar.</translation>
+        <translation>Não foi possível renomear.</translation>
     </message>
     <message>
         <source>This will permanently delete items on the remote server.
 Continue?</source>
-        <translation>Esto eliminará permanentemente en el servidor remoto.
-¿Continuar?</translation>
+        <translation>Isto excluirá permanentemente no servidor remoto.
+Continuar?</translation>
     </message>
     <message>
         <source>Deleted OK: %1  |  Failed: %2</source>
-        <translation>Borrados OK: %1  |  Fallidos: %2</translation>
+        <translation>Excluídos OK: %1  |  Falhas: %2</translation>
     </message>
     <message>
         <source>This will permanently delete on local disk.
 Continue?</source>
-        <translation>Esto eliminará permanentemente en el disco local.
-¿Continuar?</translation>
+        <translation>Isto excluirá permanentemente no disco local.
+Continuar?</translation>
     </message>
     <message>
         <source>Change permissions…</source>
-        <translation>Cambiar permisos…</translation>
+        <translation>Alterar permissões…</translation>
     </message>
     <message>
         <source>Copy to right panel</source>
-        <translation>Copiar al panel derecho</translation>
+        <translation>Copiar para o painel direito</translation>
     </message>
     <message>
         <source>Move to right panel</source>
-        <translation>Mover al panel derecho</translation>
+        <translation>Mover para o painel direito</translation>
     </message>
     <message>
         <source>Permissions</source>
-        <translation>Permisos</translation>
+        <translation>Permissões</translation>
     </message>
     <message>
         <source>Select only one item.</source>
-        <translation>Selecciona solo un elemento.</translation>
+        <translation>Selecione apenas um item.</translation>
     </message>
     <message>
         <source>Could not read permissions.
 %1</source>
-        <translation>No se pudieron leer los permisos.
+        <translation>Não foi possível ler as permissões.
 %1</translation>
     </message>
     <message>
         <source>Error reading remote information.</source>
-        <translation>Error al leer información remota.</translation>
+        <translation>Erro ao ler informações remotas.</translation>
     </message>
     <message>
         <source>Could not apply permissions to &quot;%1&quot;.
 %2</source>
-        <translation>No se pudieron aplicar permisos en &quot;%1&quot;.
+        <translation>Não foi possível aplicar permissões em &quot;%1&quot;.
 %2</translation>
     </message>
     <message>
         <source>Error applying changes.</source>
-        <translation>Error al aplicar cambios.</translation>
+        <translation>Erro ao aplicar alterações.</translation>
     </message>
     <message>
         <source>Permissions updated</source>
-        <translation>Permisos actualizados</translation>
+        <translation>Permissões atualizadas</translation>
     </message>
     <message>
         <source>Confirm SSH fingerprint</source>
-        <translation>Confirmar huella SSH</translation>
+        <translation>Confirmar impressão digital SSH</translation>
     </message>
     <message>
         <source>Connect to %1
@@ -1048,9 +1048,9 @@ Fingerprint: %3
 Trust and save to known_hosts?</source>
         <translation>Conectar a %1
 Algoritmo: %2
-Huella: %3
+Impressão digital: %3
 
-¿Confiar y guardar en known_hosts?</translation>
+Confiar e salvar em known_hosts?</translation>
     </message>
     <message>
         <source>Connect to %1
@@ -1060,9 +1060,9 @@ Fingerprint: %3
 Fingerprint cannot be saved. Connection allowed only this time.</source>
         <translation>Conectar a %1
 Algoritmo: %2
-Huella: %3
+Impressão digital: %3
 
-No se podrá guardar la huella. Conexión solo por esta vez.</translation>
+Não foi possível salvar a impressão digital. Conexão permitida somente desta vez.</translation>
     </message>
     <message>
         <source>Trust</source>
@@ -1070,7 +1070,7 @@ No se podrá guardar la huella. Conexión solo por esta vez.</translation>
     </message>
     <message>
         <source>Connect without saving</source>
-        <translation>Conectar sin guardar</translation>
+        <translation>Conectar sem salvar</translation>
     </message>
     <message>
         <source>Cancel</source>
@@ -1078,15 +1078,15 @@ No se podrá guardar la huella. Conexión solo por esta vez.</translation>
     </message>
     <message>
         <source>Could not save fingerprint; allowing one-time connection</source>
-        <translation>No se pudo guardar la huella, conexión permitida solo esta vez</translation>
+        <translation>Não foi possível salvar a impressão digital; conexão permitida somente desta vez</translation>
     </message>
     <message>
         <source>Connection cancelled: fingerprint not accepted</source>
-        <translation>Conexión cancelada: huella no aceptada</translation>
+        <translation>Conexão cancelada: impressão digital não aceita</translation>
     </message>
     <message>
         <source>Additional confirmation</source>
-        <translation>Confirmación adicional</translation>
+        <translation>Confirmação adicional</translation>
     </message>
     <message>
         <source>Could not save the fingerprint. Connect only this time without saving?
@@ -1094,47 +1094,47 @@ No se podrá guardar la huella. Conexión solo por esta vez.</translation>
 Host: %1
 Algorithm: %2
 Fingerprint: %3</source>
-        <translation>No se pudo guardar la huella. ¿Conectar solo esta vez sin guardar?
+        <translation>Não foi possível salvar a impressão digital. Conectar somente desta vez sem salvar?
 
 Host: %1
 Algoritmo: %2
-Huella: %3</translation>
+Impressão digital: %3</translation>
     </message>
     <message>
         <source>One-time connection without saving confirmed by user</source>
-        <translation>Conexión sin guardar confirmada por el usuario</translation>
+        <translation>Conexão sem salvar confirmada pelo usuário</translation>
     </message>
     <message>
         <source>Connection cancelled after save failure</source>
-        <translation>Conexión cancelada tras fallo de guardado</translation>
+        <translation>Conexão cancelada após falha ao salvar</translation>
     </message>
     <message>
         <source>Remote directory is read-only; cannot upload here</source>
-        <translation>Directorio remoto en solo lectura; no se puede subir aquí</translation>
+        <translation>Diretório remoto somente leitura; não é possível enviar aqui</translation>
     </message>
     <message>
         <source>Queued: %1 uploads (DND)</source>
-        <translation>Encolados: %1 subidas (DND)</translation>
+        <translation>Enfileirados: %1 uploads (DND)</translation>
     </message>
     <message>
         <source>Copied: %1  |  Failed: %2</source>
-        <translation>Copiados: %1  |  Fallidos: %2</translation>
+        <translation>Copiardos: %1  |  Fallidos: %2</translation>
     </message>
     <message>
         <source>Queued: %1 downloads (DND)</source>
-        <translation>Encolados: %1 descargas (DND)</translation>
+        <translation>Enfileirados: %1 downloads (DND)</translation>
     </message>
     <message>
         <source>A connection is already in progress</source>
-        <translation>Ya hay una conexión en progreso</translation>
+        <translation>Já há uma conexão em andamento</translation>
     </message>
     <message>
         <source>An active SFTP session already exists</source>
-        <translation>Ya existe una sesión SFTP activa</translation>
+        <translation>Já existe uma sessão SFTP ativa</translation>
     </message>
     <message>
         <source>Connection canceled: no-verification policy not confirmed</source>
-        <translation>Conexión cancelada: política sin verificación no confirmada</translation>
+        <translation>Conexão cancelada: política sem verificação não confirmada</translation>
     </message>
     <message>
         <source>Connecting…</source>
@@ -1142,53 +1142,53 @@ Huella: %3</translation>
     </message>
     <message>
         <source>Canceling connection…</source>
-        <translation>Cancelando conexión…</translation>
+        <translation>Cancelando conexão…</translation>
     </message>
     <message>
         <source>Password required</source>
-        <translation>Contraseña requerida</translation>
+        <translation>Senha obrigatória</translation>
     </message>
     <message>
         <source>Verification code required</source>
-        <translation>Código de verificación requerido</translation>
+        <translation>Código de verificação obrigatório</translation>
     </message>
     <message>
         <source>Information required</source>
-        <translation>Información requerida</translation>
+        <translation>Informação obrigatória</translation>
     </message>
     <message>
         <source>Connection error</source>
-        <translation>Error de conexión</translation>
+        <translation>Erro de conexão</translation>
     </message>
     <message>
         <source>Could not connect to the server.
 %1</source>
-        <translation>No fue posible conectar con el servidor.
+        <translation>Não foi possível conectar ao servidor.
 %1</translation>
     </message>
     <message>
         <source>Check host, port, and credentials.</source>
-        <translation>Revisa host, puerto y credenciales.</translation>
+        <translation>Verifique host, porta e credenciais.</translation>
     </message>
     <message>
         <source>Connected. Site saved.</source>
-        <translation>Conectado. Sitio guardado.</translation>
+        <translation>Conectado. Site salvo.</translation>
     </message>
     <message>
         <source>Connected. Site already exists.</source>
-        <translation>Conectado. Sitio ya existente.</translation>
+        <translation>Conectado. Site já existente.</translation>
     </message>
     <message>
         <source>Site saved.</source>
-        <translation>Sitio guardado.</translation>
+        <translation>Site salvo.</translation>
     </message>
     <message>
         <source>Site already exists.</source>
-        <translation>Sitio ya existente.</translation>
+        <translation>Site já existente.</translation>
     </message>
     <message>
         <source>Password: %1</source>
-        <translation>Contraseña: %1</translation>
+        <translation>Senha: %1</translation>
     </message>
     <message>
         <source>Passphrase: %1</source>
@@ -1197,62 +1197,62 @@ Huella: %3</translation>
     <message>
         <source>The site was saved, but some credentials could not be saved:
 %1</source>
-        <translation>El sitio se guardó, pero no fue posible guardar algunas credenciales:
+        <translation>O site foi salvo, mas não foi possível salvar algumas credenciais:
 %1</translation>
     </message>
     <message>
         <source>Please wait while active transfers are canceled</source>
-        <translation>Espera mientras se cancelan las transferencias activas</translation>
+        <translation>Aguarde enquanto as transferências ativas são canceladas</translation>
     </message>
     <message>
         <source>Disconnecting… waiting for active transfers to stop</source>
-        <translation>Desconectando… esperando a que se detengan las transferencias activas</translation>
+        <translation>Desconectando… aguardando as transferências ativas serem interrompidas</translation>
     </message>
     <message>
         <source>Disconnect timeout reached; forcing local mode while cleanup continues</source>
-        <translation>Se alcanzó el tiempo límite de desconexión; forzando modo local mientras la limpieza continúa</translation>
+        <translation>Tempo limite de desconexão atingido; forçando modo local enquanto a limpeza continua</translation>
     </message>
     <message>
         <source>Background transfer cleanup finished</source>
-        <translation>Limpieza de transferencias en segundo plano finalizada</translation>
+        <translation>Limpeza de transferências em segundo plano finalizada</translation>
     </message>
     <message>
         <source>Disconnected (transfer cleanup still finishing in background)</source>
-        <translation>Desconectado (la limpieza de transferencias sigue finalizando en segundo plano)</translation>
+        <translation>Desconectado (a limpeza de transferências ainda está finalizando em segundo plano)</translation>
     </message>
     <message>
         <source>Please wait: previous transfer cleanup is still running (%1s)</source>
-        <translation>Espera: la limpieza de transferencias anterior sigue en ejecución (%1s)</translation>
+        <translation>Aguarde: a limpeza de transferências anterior ainda está em execução (%1s)</translation>
     </message>
     <message>
         <source>Connected. Site and credentials saved.</source>
-        <translation>Conectado. Sitio y credenciales guardados.</translation>
+        <translation>Conectado. Site e credenciais salvos.</translation>
     </message>
     <message>
         <source>Connected. Credentials updated.</source>
-        <translation>Conectado. Credenciales actualizadas.</translation>
+        <translation>Conectado. Credenciais atualizadas.</translation>
     </message>
     <message>
         <source>Site and credentials saved.</source>
-        <translation>Sitio y credenciales guardados.</translation>
+        <translation>Site e credenciais salvos.</translation>
     </message>
     <message>
         <source>Credentials updated.</source>
-        <translation>Credenciales actualizadas.</translation>
+        <translation>Credenciais atualizadas.</translation>
     </message>
     <message>
         <source>Error listing remote</source>
-        <translation>Error al listar remoto</translation>
+        <translation>Erro ao listar remoto</translation>
     </message>
     <message>
         <source>Could not open the initial remote folder.
 %1</source>
-        <translation>No se pudo abrir la carpeta remota inicial.
+        <translation>Não foi possível abrir a pasta remota inicial.
 %1</translation>
     </message>
     <message>
         <source>Not available in remote mode</source>
-        <translation>No disponible en modo remoto</translation>
+        <translation>Indisponível no modo remoto</translation>
     </message>
     <message>
         <source>Connected (SFTP) to </source>
@@ -1264,152 +1264,152 @@ Huella: %3</translation>
     </message>
     <message>
         <source>Moving selected items...</source>
-        <translation>Moviendo elementos seleccionados...</translation>
+        <translation>Movendo itens selecionados...</translation>
     </message>
     <message>
         <source>Copying selected items...</source>
-        <translation>Copiando elementos seleccionados...</translation>
+        <translation>Copiando itens selecionados...</translation>
     </message>
     <message>
         <source>Could not delete source: %1</source>
-        <translation>No se pudo eliminar el origen: %1</translation>
+        <translation>Não foi possível excluir a origem: %1</translation>
     </message>
     <message>
         <source>Missing session options for remote scan.</source>
-        <translation>Faltan opciones de sesión para el escaneo remoto.</translation>
+        <translation>Faltam opções de sessão para a varredura remota.</translation>
     </message>
     <message>
         <source>A remote scan is already in progress</source>
-        <translation>Ya hay un escaneo remoto en curso</translation>
+        <translation>Já há uma varredura remota em andamento</translation>
     </message>
     <message>
         <source>Nothing queued. Skipped invalid: %1</source>
-        <translation>No se encoló nada. Inválidos omitidos: %1</translation>
+        <translation>Nada foi enfileirado. Inválidos ignorados: %1</translation>
     </message>
     <message>
         <source>Could not start remote scan.
 %1</source>
-        <translation>No se pudo iniciar el escaneo remoto.
+        <translation>Não foi possível iniciar a varredura remota.
 %1</translation>
     </message>
     <message>
         <source>Preparing remote download queue...</source>
-        <translation>Preparando cola de descarga remota...</translation>
+        <translation>Preparando fila de download remoto...</translation>
     </message>
     <message>
         <source>Preparing queue</source>
-        <translation>Preparando cola</translation>
+        <translation>Preparando fila</translation>
     </message>
     <message>
         <source>Scanning remote folders... %1 folders, %2 files found</source>
-        <translation>Escaneando carpetas remotas... %1 carpetas, %2 archivos encontrados</translation>
+        <translation>Varrendo pastas remotas... %1 pastas, %2 arquivos encontrados</translation>
     </message>
     <message>
         <source>Remote scan canceled</source>
-        <translation>Escaneo remoto cancelado</translation>
+        <translation>Varredura remota cancelada</translation>
     </message>
     <message>
         <source>Remote scan finished, but the session is no longer active</source>
-        <translation>El escaneo remoto terminó, pero la sesión ya no está activa</translation>
+        <translation>A varredura remota terminou, mas a sessão não está mais ativa</translation>
     </message>
     <message>
         <source>Folders not listed: %1</source>
-        <translation>Carpetas no listadas: %1</translation>
+        <translation>Pastas não listadas: %1</translation>
     </message>
     <message>
         <source>Window layout restored to defaults</source>
-        <translation>Diseño de ventana restaurado a valores predeterminados</translation>
+        <translation>Layout da janela restaurado para os padrões</translation>
     </message>
     <message>
         <source>Invalid pattern</source>
-        <translation>Patrón inválido</translation>
+        <translation>Padrão inválido</translation>
     </message>
     <message>
         <source>The pattern is not valid.
 %1</source>
-        <translation>El patrón no es válido.
+        <translation>O padrão não é válido.
 %1</translation>
     </message>
     <message>
         <source>Unknown regex error.</source>
-        <translation>Error de regex desconocido.</translation>
+        <translation>Erro de regex desconhecido.</translation>
     </message>
     <message>
         <source>Found %1 match(es) in %2.</source>
-        <translation>Se encontraron %1 coincidencia(s) en %2.</translation>
+        <translation>Foram encontradas %1 correspondência(s) em %2.</translation>
     </message>
     <message>
         <source>No matches found in %1.</source>
-        <translation>No se encontraron coincidencias en %1.</translation>
+        <translation>Nenhuma correspondência encontrada em %1.</translation>
     </message>
     <message>
         <source>Upload completed: %1</source>
-        <translation>Subida completada: %1</translation>
+        <translation>Upload concluído: %1</translation>
     </message>
     <message>
         <source>Download completed: %1</source>
-        <translation>Descarga completada: %1</translation>
+        <translation>Download concluído: %1</translation>
     </message>
     <message>
         <source>%1 transfers completed</source>
-        <translation>%1 transferencias completadas</translation>
+        <translation>%1 transferências concluídas</translation>
     </message>
     <message>
         <source>Invalid transport configuration</source>
-        <translation>Configuración de transporte inválida</translation>
+        <translation>Configuração de transporte inválida</translation>
     </message>
     <message>
         <source>Proxy and SSH jump host cannot be used together in the same connection.
 Choose only one transport method.</source>
-        <translation>El proxy y el host de salto SSH no pueden usarse juntos en la misma conexión.
-Elige solo un método de transporte.</translation>
+        <translation>Proxy e host de salto SSH não podem ser usados juntos na mesma conexão.
+Escolha apenas um método de transporte.</translation>
     </message>
     <message>
         <source>Connection canceled: invalid transport configuration</source>
-        <translation>Conexión cancelada: configuración de transporte inválida</translation>
+        <translation>Conexão cancelada: configuração de transporte inválida</translation>
     </message>
     <message>
         <source>Unsupported transport</source>
-        <translation>Transporte no compatible</translation>
+        <translation>Transporte não suportado</translation>
     </message>
     <message>
         <source>SSH jump host is currently unavailable on Windows.</source>
-        <translation>El host de salto SSH no está disponible actualmente en Windows.</translation>
+        <translation>O host de salto SSH está indisponível no Windows no momento.</translation>
     </message>
     <message>
         <source>Connection canceled: SSH jump host is unsupported on Windows</source>
-        <translation>Conexión cancelada: el host de salto SSH no es compatible en Windows</translation>
+        <translation>Conexão cancelada: host de salto SSH não é suportado no Windows</translation>
     </message>
     <message>
         <source>Proxy and SSH jump host cannot be used together in the same connection.
 Edit the site and keep only one transport.</source>
-        <translation>El proxy y el host de salto SSH no pueden usarse juntos en la misma conexión.
-Edita el sitio y deja solo un transporte.</translation>
+        <translation>Proxy e host de salto SSH não podem ser usados juntos na mesma conexão.
+Edite o site e mantenha apenas um transporte.</translation>
     </message>
     <message>
         <source>Proxy password: %1</source>
-        <translation>Contraseña del proxy: %1</translation>
+        <translation>Senha do proxy: %1</translation>
     </message>
     <message>
         <source>Could not refresh the remote folder.
 %1</source>
-        <translation>No se pudo actualizar la carpeta remota.
+        <translation>Não foi possível atualizar a pasta remota.
 %1</translation>
     </message>
     <message>
         <source>Drop ignored: remote-origin drag cannot be dropped back into the same remote panel</source>
-        <translation>Soltado ignorado: el arrastre de origen remoto no puede soltarse de nuevo en el mismo panel remoto</translation>
+        <translation>Soltar ignorado: arrasto de origem remota não pode ser solto novamente no mesmo painel remoto</translation>
     </message>
 </context>
 <context>
     <name>PermissionsDialog</name>
     <message>
         <source>Change permissions</source>
-        <translation>Cambiar permisos</translation>
+        <translation>Alterar permissões</translation>
     </message>
     <message>
         <source>User</source>
-        <translation>Usuario</translation>
+        <translation>Usuário</translation>
     </message>
     <message>
         <source>Group</source>
@@ -1417,19 +1417,19 @@ Edita el sitio y deja solo un transporte.</translation>
     </message>
     <message>
         <source>Others</source>
-        <translation>Otros</translation>
+        <translation>Outros</translation>
     </message>
     <message>
         <source>Read</source>
-        <translation>Leer</translation>
+        <translation>Ler</translation>
     </message>
     <message>
         <source>Write</source>
-        <translation>Escribir</translation>
+        <translation>Escrever</translation>
     </message>
     <message>
         <source>Execute</source>
-        <translation>Ejecutar</translation>
+        <translation>Executar</translation>
     </message>
     <message>
         <source>Preset</source>
@@ -1441,11 +1441,11 @@ Edita el sitio y deja solo un transporte.</translation>
     </message>
     <message>
         <source>File (644)</source>
-        <translation>Archivo (644)</translation>
+        <translation>Arquivo (644)</translation>
     </message>
     <message>
         <source>Executable file (755)</source>
-        <translation>Archivo ejecutable (755)</translation>
+        <translation>Arquivo executável (755)</translation>
     </message>
     <message>
         <source>Private (600)</source>
@@ -1453,19 +1453,19 @@ Edita el sitio y deja solo un transporte.</translation>
     </message>
     <message>
         <source>Private directory (700)</source>
-        <translation>Directorio privado (700)</translation>
+        <translation>Diretório privado (700)</translation>
     </message>
     <message>
         <source>Shared (664)</source>
-        <translation>Compartido (664)</translation>
+        <translation>Compartilhado (664)</translation>
     </message>
     <message>
         <source>Shared directory (775)</source>
-        <translation>Directorio compartido (775)</translation>
+        <translation>Diretório compartilhado (775)</translation>
     </message>
     <message>
         <source>Apply recursively to subfolders</source>
-        <translation>Aplicar recursivo a subcarpetas</translation>
+        <translation>Aplicar recursivamente a subpastas</translation>
     </message>
     <message>
         <source>Octal mode: %1</source>
@@ -1476,127 +1476,127 @@ Edita el sitio y deja solo un transporte.</translation>
     <name>QObject</name>
     <message>
         <source>New site</source>
-        <translation>Nuevo sitio</translation>
+        <translation>Novo site</translation>
     </message>
     <message>
         <source>stored</source>
-        <translation>guardado</translation>
+        <translation>salvo</translation>
     </message>
     <message>
         <source>unavailable</source>
-        <translation>no disponible</translation>
+        <translation>indisponível</translation>
     </message>
     <message>
         <source>permission denied</source>
-        <translation>permiso denegado</translation>
+        <translation>permissão negada</translation>
     </message>
     <message>
         <source>backend error</source>
-        <translation>error del backend</translation>
+        <translation>erro de backend</translation>
     </message>
     <message>
         <source>error</source>
-        <translation>error</translation>
+        <translation>erro</translation>
     </message>
     <message>
         <source>unknown</source>
-        <translation>desconocido</translation>
+        <translation>desconhecido</translation>
     </message>
     <message>
         <source>Credentials not saved</source>
-        <translation>Credenciales no guardadas</translation>
+        <translation>Credenciais não salvas</translation>
     </message>
     <message>
         <source>Could not save one or more credentials in the secure backend:
 %1</source>
-        <translation>No se pudieron guardar una o más credenciales en el backend seguro:
+        <translation>Não foi possível salvar uma ou mais credenciais no backend seguro:
 %1</translation>
     </message>
     <message>
         <source>Duplicate name</source>
-        <translation>Nombre duplicado</translation>
+        <translation>Nome duplicado</translation>
     </message>
     <message>
         <source>A site named &quot;%1&quot; already exists. Use a different name.</source>
-        <translation>Ya existe un sitio con el nombre &quot;%1&quot;. Usa un nombre distinto.</translation>
+        <translation>Já existe um site com o nome &quot;%1&quot;. Use um nome diferente.</translation>
     </message>
     <message>
         <source>Name required</source>
-        <translation>Nombre requerido</translation>
+        <translation>Nome obrigatório</translation>
     </message>
     <message>
         <source>Enter a site name to save this connection.</source>
-        <translation>Escribe un nombre de sitio para guardar esta conexión.</translation>
+        <translation>Informe um nome de site para salvar esta conexão.</translation>
     </message>
     <message>
         <source>Password</source>
-        <translation>Contraseña</translation>
+        <translation>Senha</translation>
     </message>
     <message>
         <source>Key passphrase</source>
-        <translation>Passphrase de clave</translation>
+        <translation>Frase secreta da chave</translation>
     </message>
     <message>
         <source>Proxy password</source>
-        <translation>Contraseña del proxy</translation>
+        <translation>Senha do proxy</translation>
     </message>
 </context>
 <context>
     <name>RemoteModel</name>
     <message>
         <source>Folder</source>
-        <translation>Carpeta</translation>
+        <translation>Pasta</translation>
     </message>
     <message>
         <source>Size: unknown (not provided by the server)</source>
-        <translation>Tamaño: desconocido (no informado por el servidor)</translation>
+        <translation>Tamanho: desconhecido (não informado pelo servidor)</translation>
     </message>
     <message>
         <source>File</source>
-        <translation>Archivo</translation>
+        <translation>Arquivo</translation>
     </message>
     <message>
         <source>Name</source>
-        <translation>Nombre</translation>
+        <translation>Nome</translation>
     </message>
     <message>
         <source>Size</source>
-        <translation>Tamaño</translation>
+        <translation>Tamanho</translation>
     </message>
     <message>
         <source>Date</source>
-        <translation>Fecha</translation>
+        <translation>Data</translation>
     </message>
     <message>
         <source>Permissions</source>
-        <translation>Permisos</translation>
+        <translation>Permissões</translation>
     </message>
     <message>
         <source>Enumeration error</source>
-        <translation>Error de enumeración</translation>
+        <translation>Erro de enumeração</translation>
     </message>
     <message>
         <source>Partial enumeration with errors</source>
-        <translation>Enumeración parcial con errores</translation>
+        <translation>Enumeração parcial com erros</translation>
     </message>
     <message>
         <source>No SFTP client available</source>
-        <translation>No hay cliente SFTP disponible</translation>
+        <translation>Nenhum cliente SFTP disponível</translation>
     </message>
     <message>
         <source>Missing session options for remote listing</source>
-        <translation>Faltan opciones de sesión para el listado remoto</translation>
+        <translation>Faltam opções de sessão para a listagem remota</translation>
     </message>
 </context>
 <context>
     <name>SettingsDialog</name>
     <message>
         <source>Settings</source>
-        <translation>Ajustes</translation>
+        <translation>Configurações</translation>
     </message>
     <message>
         <source>General</source>
-        <translation>General</translation>
+        <translation>Geral</translation>
     </message>
     <message>
         <source>Language:</source>
@@ -1604,143 +1604,143 @@ Edita el sitio y deja solo un transporte.</translation>
     </message>
     <message>
         <source>Spanish</source>
-        <translation>Español</translation>
+        <translation>Espanhol</translation>
     </message>
     <message>
         <source>English</source>
-        <translation>Inglés</translation>
+        <translation>Inglês</translation>
     </message>
     <message>
         <source>Open with:</source>
-        <translation>Apertura con:</translation>
+        <translation>Abrir com:</translation>
     </message>
     <message>
         <source>Double click</source>
-        <translation>Doble clic</translation>
+        <translation>Duplo clique</translation>
     </message>
     <message>
         <source>Single click</source>
-        <translation>Un clic</translation>
+        <translation>Clique único</translation>
     </message>
     <message>
         <source>On file open:</source>
-        <translation>Al abrir archivos:</translation>
+        <translation>Ao abrir arquivos:</translation>
     </message>
     <message>
         <source>Always ask</source>
-        <translation>Preguntar siempre</translation>
+        <translation>Perguntar sempre</translation>
     </message>
     <message>
         <source>Show folder</source>
-        <translation>Mostrar carpeta</translation>
+        <translation>Mostrar pasta</translation>
     </message>
     <message>
         <source>Open file</source>
-        <translation>Abrir archivo</translation>
+        <translation>Abrir arquivo</translation>
     </message>
     <message>
         <source>Show hidden files</source>
-        <translation>Mostrar archivos ocultos</translation>
+        <translation>Mostrar arquivos ocultos</translation>
     </message>
     <message>
         <source>Open Site Manager on startup</source>
-        <translation>Abrir Gestor de Sitios al iniciar</translation>
+        <translation>Abrir Gerenciador de Sites na inicialização</translation>
     </message>
     <message>
         <source>Open Site Manager on disconnect</source>
-        <translation>Abrir Gestor de Sitios al desconectar</translation>
+        <translation>Abrir Gerenciador de Sites ao desconectar</translation>
     </message>
     <message>
         <source>Open queue when enqueuing transfers</source>
-        <translation>Abrir cola al encolar transferencias</translation>
+        <translation>Abrir fila ao enfileirar transferências</translation>
     </message>
     <message>
         <source>Choose…</source>
-        <translation>Elegir…</translation>
+        <translation>Escolher…</translation>
     </message>
     <message>
         <source>Download folder:</source>
-        <translation>Carpeta descargas:</translation>
+        <translation>Pasta de downloads:</translation>
     </message>
     <message>
         <source>Select download folder</source>
-        <translation>Selecciona carpeta de descargas</translation>
+        <translation>Selecione a pasta de downloads</translation>
     </message>
     <message>
         <source>Restore default sizes</source>
-        <translation>Restaurar tamaños predeterminados</translation>
+        <translation>Restaurar tamanhos padrão</translation>
     </message>
     <message>
         <source>Window layout:</source>
-        <translation>Diseño de ventana:</translation>
+        <translation>Layout da janela:</translation>
     </message>
     <message>
         <source>Restore layout</source>
-        <translation>Restaurar diseño</translation>
+        <translation>Restaurar layout</translation>
     </message>
     <message>
         <source>Restore the main window layout and column sizes to their defaults?</source>
-        <translation>¿Restaurar el diseño de la ventana principal y los tamaños de columna a sus valores predeterminados?</translation>
+        <translation>Restaurar o layout da janela principal e os tamanhos das colunas para os padrões?</translation>
     </message>
     <message>
         <source>Default layout restored.</source>
-        <translation>Diseño predeterminado restaurado.</translation>
+        <translation>Layout padrão restaurado.</translation>
     </message>
     <message>
         <source>Default layout will be used the next time the app starts.</source>
-        <translation>El diseño predeterminado se usará la próxima vez que se inicie la app.</translation>
+        <translation>O layout padrão será usado na próxima vez que o aplicativo iniciar.</translation>
     </message>
     <message>
         <source>Advanced</source>
-        <translation>Avanzado</translation>
+        <translation>Avançado</translation>
     </message>
     <message>
         <source>Transfers</source>
-        <translation>Transferencias</translation>
+        <translation>Transferências</translation>
     </message>
     <message>
         <source>Maximum number of concurrent transfers.</source>
-        <translation>Cantidad máxima de transferencias simultáneas.</translation>
+        <translation>Quantidade máxima de transferências simultâneas.</translation>
     </message>
     <message>
         <source>Parallel tasks:</source>
-        <translation>Simultáneas:</translation>
+        <translation>Tarefas paralelas:</translation>
     </message>
     <message>
         <source>0 = no global speed limit.</source>
-        <translation>0 = sin límite global de velocidad.</translation>
+        <translation>0 = sem limite global de velocidade.</translation>
     </message>
     <message>
         <source>Default global limit:</source>
-        <translation>Límite global por defecto:</translation>
+        <translation>Limite global padrão:</translation>
     </message>
     <message>
         <source>Sites</source>
-        <translation>Sitios</translation>
+        <translation>Sites</translation>
     </message>
     <message>
         <source>When deleting a site, also remove its stored credentials.</source>
-        <translation>Al eliminar un sitio, borrar también sus credenciales guardadas.</translation>
+        <translation>Ao excluir um site, excluir também suas credenciais salvas.</translation>
     </message>
     <message>
         <source>Security</source>
-        <translation>Seguridad</translation>
+        <translation>Segurança</translation>
     </message>
     <message>
         <source>Hash hostnames in known_hosts (recommended).</source>
-        <translation>Guardar hostnames en known_hosts como hash (recomendado).</translation>
+        <translation>Salvar nomes de host em known_hosts com hash (recomendado).</translation>
     </message>
     <message>
         <source>Show fingerprint in HEX (colon) format (visual only).</source>
-        <translation>Mostrar huella en HEX colonado (solo visual).</translation>
+        <translation>Mostrar impressão digital em formato HEX com dois-pontos (apenas visual).</translation>
     </message>
     <message>
         <source>Use stricter Keychain accessibility (this device only).</source>
-        <translation>Usar accesibilidad de llavero más restrictiva (solo en este dispositivo).</translation>
+        <translation>Usar acessibilidade do chaveiro mais restrita (somente neste dispositivo).</translation>
     </message>
     <message>
         <source>Allow insecure credentials fallback (not recommended).</source>
-        <translation>Permitir fallback inseguro de credenciales (no recomendado).</translation>
+        <translation>Permitir alternativa insegura para credenciais (não recomendado).</translation>
     </message>
     <message>
         <source> min</source>
@@ -1748,27 +1748,27 @@ Edita el sitio y deja solo un transporte.</translation>
     </message>
     <message>
         <source>Duration of the temporary exception for no host-key verification policy.</source>
-        <translation>Duración de la excepción temporal para la política sin verificación de host key.</translation>
+        <translation>Duração da exceção temporária para a política sem verificação da chave do host.</translation>
     </message>
     <message>
         <source>No-verification TTL:</source>
-        <translation>TTL sin verificación:</translation>
+        <translation>TTL da exceção sem verificação:</translation>
     </message>
     <message>
         <source>Staging and drag-out</source>
-        <translation>Staging y arrastre</translation>
+        <translation>Área temporária e arrastar para fora</translation>
     </message>
     <message>
         <source>Staging folder:</source>
-        <translation>Carpeta de staging:</translation>
+        <translation>Pasta temporária:</translation>
     </message>
     <message>
         <source>Select staging folder</source>
-        <translation>Selecciona carpeta de staging</translation>
+        <translation>Selecione a pasta temporária</translation>
     </message>
     <message>
         <source>Auto-clean staging after successful drag-out (recommended).</source>
-        <translation>Eliminar automáticamente la carpeta staging tras completar el arrastre (recomendado).</translation>
+        <translation>Limpar automaticamente a pasta temporária após arrastar para fora com sucesso (recomendado).</translation>
     </message>
     <message>
         <source> ms</source>
@@ -1776,19 +1776,19 @@ Edita el sitio y deja solo un transporte.</translation>
     </message>
     <message>
         <source>Time before showing the Wait/Cancel dialog.</source>
-        <translation>Tiempo antes de mostrar el diálogo Esperar/Cancelar.</translation>
+        <translation>Tempo antes de exibir o diálogo Aguardar/Cancelar.</translation>
     </message>
     <message>
         <source>Preparation timeout:</source>
-        <translation>Timeout preparación:</translation>
+        <translation>Timeout de preparação:</translation>
     </message>
     <message>
         <source>Item count threshold to request confirmation for large batches.</source>
-        <translation>Cantidad de elementos para pedir confirmación en lotes grandes.</translation>
+        <translation>Quantidade de itens para pedir confirmação em lotes grandes.</translation>
     </message>
     <message>
         <source>Confirm from items:</source>
-        <translation>Confirmar desde elementos:</translation>
+        <translation>Confirmar a partir de itens:</translation>
     </message>
     <message>
         <source> MiB</source>
@@ -1796,15 +1796,15 @@ Edita el sitio y deja solo un transporte.</translation>
     </message>
     <message>
         <source>Estimated size threshold to request confirmation for large batches.</source>
-        <translation>Tamaño estimado para pedir confirmación en lotes grandes.</translation>
+        <translation>Tamanho estimado para pedir confirmação em lotes grandes.</translation>
     </message>
     <message>
         <source>Confirm from size:</source>
-        <translation>Confirmar desde tamaño:</translation>
+        <translation>Confirmar a partir do tamanho:</translation>
     </message>
     <message>
         <source>Limit for recursive folder drag-out to avoid deep trees and loops.</source>
-        <translation>Límite para arrastre recursivo y evitar árboles muy profundos y bucles.</translation>
+        <translation>Limite para arrastar recursivamente e evitar árvores muito profundas e loops.</translation>
     </message>
     <message>
         <source>Recommended: 32</source>
@@ -1812,11 +1812,11 @@ Edita el sitio y deja solo un transporte.</translation>
     </message>
     <message>
         <source>Maximum depth:</source>
-        <translation>Profundidad máxima:</translation>
+        <translation>Profundidade máxima:</translation>
     </message>
     <message>
         <source>Close</source>
-        <translation>Cerrar</translation>
+        <translation>Fechar</translation>
     </message>
     <message>
         <source>Apply</source>
@@ -1824,17 +1824,17 @@ Edita el sitio y deja solo un transporte.</translation>
     </message>
     <message>
         <source>Enable insecure fallback</source>
-        <translation>Activar fallback inseguro</translation>
+        <translation>Ativar alternativa insegura</translation>
     </message>
     <message>
         <source>This stores credentials unencrypted on disk using QSettings.
 On Linux, it is recommended to install and use libsecret/Secret Service for better security.
 
 Do you still want to enable insecure fallback?</source>
-        <translation>Esto almacenará credenciales sin cifrar en el disco usando QSettings.
-En Linux, se recomienda instalar y usar libsecret/Secret Service para mayor seguridad.
+        <translation>Isto armazenará credenciais sem criptografia em disco usando QSettings.
+No Linux, recomenda-se instalar e usar libsecret/Secret Service para maior segurança.
 
-¿Deseas activar el fallback inseguro igualmente?</translation>
+Deseja ativar a alternativa insegura mesmo assim?</translation>
     </message>
     <message>
         <source>Language</source>
@@ -1842,22 +1842,22 @@ En Linux, se recomienda instalar y usar libsecret/Secret Service para mayor segu
     </message>
     <message>
         <source>Language changes take effect after restart.</source>
-        <translation>El cambio de idioma se aplicará al reiniciar.</translation>
+        <translation>A mudança de idioma será aplicada após reiniciar.</translation>
     </message>
     <message>
         <source>Portuguese</source>
-        <translation>Portugués</translation>
+        <translation>Português</translation>
     </message>
 </context>
 <context>
     <name>SiteManagerDialog</name>
     <message>
         <source>Site Manager</source>
-        <translation>Gestor de sitios</translation>
+        <translation>Gerenciador de sites</translation>
     </message>
     <message>
         <source>Name</source>
-        <translation>Nombre</translation>
+        <translation>Nome</translation>
     </message>
     <message>
         <source>Host</source>
@@ -1865,11 +1865,11 @@ En Linux, se recomienda instalar y usar libsecret/Secret Service para mayor segu
     </message>
     <message>
         <source>User</source>
-        <translation>Usuario</translation>
+        <translation>Usuário</translation>
     </message>
     <message>
         <source>Add</source>
-        <translation>Añadir</translation>
+        <translation>Adicionar</translation>
     </message>
     <message>
         <source>Edit</source>
@@ -1877,7 +1877,7 @@ En Linux, se recomienda instalar y usar libsecret/Secret Service para mayor segu
     </message>
     <message>
         <source>Delete</source>
-        <translation>Eliminar</translation>
+        <translation>Excluir</translation>
     </message>
     <message>
         <source>Connect</source>
@@ -1885,77 +1885,77 @@ En Linux, se recomienda instalar y usar libsecret/Secret Service para mayor segu
     </message>
     <message>
         <source>Close</source>
-        <translation>Cerrar</translation>
+        <translation>Fechar</translation>
     </message>
     <message>
         <source>Add site</source>
-        <translation>Añadir sitio</translation>
+        <translation>Adicionar site</translation>
     </message>
     <message>
         <source>Password</source>
-        <translation>Contraseña</translation>
+        <translation>Senha</translation>
     </message>
     <message>
         <source>Key passphrase</source>
-        <translation>Passphrase de clave</translation>
+        <translation>Frase secreta da chave</translation>
     </message>
     <message>
         <source>Edit site</source>
-        <translation>Editar sitio</translation>
+        <translation>Editar site</translation>
     </message>
     <message>
         <source>Proxy password</source>
-        <translation>Contraseña del proxy</translation>
+        <translation>Senha do proxy</translation>
     </message>
 </context>
 <context>
     <name>TransferManager</name>
     <message>
         <source>Conflict</source>
-        <translation>Conflicto</translation>
+        <translation>Conflito</translation>
     </message>
     <message>
         <source>«%1» already exists.
 Local: %2
 Remote: %3</source>
-        <translation>«%1» ya existe.
+        <translation>«%1» já existe.
 Local: %2
 Remoto: %3</translation>
     </message>
     <message>
         <source>Resume</source>
-        <translation>Reanudar</translation>
+        <translation>Retomar</translation>
     </message>
     <message>
         <source>Overwrite</source>
-        <translation>Sobrescribir</translation>
+        <translation>Sobrescrever</translation>
     </message>
     <message>
         <source>Skip</source>
-        <translation>Omitir</translation>
+        <translation>Ignorar</translation>
     </message>
     <message>
         <source>Integrity mismatch detected: local and remote checksums differ. Transfer was stopped to prevent corrupted data.</source>
-        <translation>Se detectó un desajuste de integridad: los checksums local y remoto difieren. La transferencia se detuvo para evitar datos corruptos.</translation>
+        <translation>Foi detectada divergência de integridade: os checksums local e remoto são diferentes. A transferência foi interrompida para evitar dados corrompidos.</translation>
     </message>
     <message>
         <source>Resume integrity mismatch detected between local and remote partial data. Transfer was stopped.</source>
-        <translation>Se detectó un desajuste de integridad al reanudar entre los datos parciales local y remoto. La transferencia se detuvo.</translation>
+        <translation>Foi detectada divergência de integridade ao retomar entre os dados parciais local e remoto. A transferência foi interrompida.</translation>
     </message>
     <message>
         <source>Integrity verification is required but could not be completed. Transfer failed.</source>
-        <translation>La verificación de integridad es obligatoria, pero no pudo completarse. La transferencia falló.</translation>
+        <translation>A verificação de integridade é obrigatória, mas não pôde ser concluída. A transferência falhou.</translation>
     </message>
 </context>
 <context>
     <name>TransferQueueDialog</name>
     <message>
         <source>Queued</source>
-        <translation>En cola</translation>
+        <translation>Na fila</translation>
     </message>
     <message>
         <source>Running</source>
-        <translation>En progreso</translation>
+        <translation>Em andamento</translation>
     </message>
     <message>
         <source>Paused</source>
@@ -1963,11 +1963,11 @@ Remoto: %3</translation>
     </message>
     <message>
         <source>Completed</source>
-        <translation>Completado</translation>
+        <translation>Concluído</translation>
     </message>
     <message>
         <source>Error</source>
-        <translation>Error</translation>
+        <translation>Erro</translation>
     </message>
     <message>
         <source>Canceled</source>
@@ -1979,7 +1979,7 @@ Remoto: %3</translation>
     </message>
     <message>
         <source>Source</source>
-        <translation>Origen</translation>
+        <translation>Origem</translation>
     </message>
     <message>
         <source>Destination</source>
@@ -1991,23 +1991,23 @@ Remoto: %3</translation>
     </message>
     <message>
         <source>Progress</source>
-        <translation>Progreso</translation>
+        <translation>Progresso</translation>
     </message>
     <message>
         <source>Attempts</source>
-        <translation>Intentos</translation>
+        <translation>Tentativas</translation>
     </message>
     <message>
         <source>Upload</source>
-        <translation>Subida</translation>
+        <translation>Upload</translation>
     </message>
     <message>
         <source>Download</source>
-        <translation>Descarga</translation>
+        <translation>Download</translation>
     </message>
     <message>
         <source>Transfer queue</source>
-        <translation>Cola de transferencias</translation>
+        <translation>Fila de transferências</translation>
     </message>
     <message>
         <source>Pause</source>
@@ -2015,39 +2015,39 @@ Remoto: %3</translation>
     </message>
     <message>
         <source>Resume</source>
-        <translation>Reanudar</translation>
+        <translation>Retomar</translation>
     </message>
     <message>
         <source>Retry</source>
-        <translation>Reintentar</translation>
+        <translation>Tentar novamente</translation>
     </message>
     <message>
         <source>Close</source>
-        <translation>Cerrar</translation>
+        <translation>Fechar</translation>
     </message>
     <message>
         <source>Apply limit</source>
-        <translation>Aplicar vel.</translation>
+        <translation>Aplicar limite</translation>
     </message>
     <message>
         <source>Speed:</source>
-        <translation>Velocidad:</translation>
+        <translation>Velocidade:</translation>
     </message>
     <message>
         <source>Limit for task(s)</source>
-        <translation>Límite para tarea(s)</translation>
+        <translation>Limite para tarefa(s)</translation>
     </message>
     <message>
         <source>KB/s (0 = no limit)</source>
-        <translation>KB/s (0 = sin límite)</translation>
+        <translation>KB/s (0 = sem limite)</translation>
     </message>
     <message>
         <source>(unnamed)</source>
-        <translation>(sin nombre)</translation>
+        <translation>(sem nome)</translation>
     </message>
     <message>
         <source>Name</source>
-        <translation>Nombre</translation>
+        <translation>Nome</translation>
     </message>
     <message>
         <source>Transferred</source>
@@ -2055,7 +2055,7 @@ Remoto: %3</translation>
     </message>
     <message>
         <source>Speed</source>
-        <translation>Velocidad</translation>
+        <translation>Velocidade</translation>
     </message>
     <message>
         <source>ETA</source>
@@ -2067,15 +2067,15 @@ Remoto: %3</translation>
     </message>
     <message>
         <source>All</source>
-        <translation>Todo</translation>
+        <translation>Todos</translation>
     </message>
     <message>
         <source>Active</source>
-        <translation>Activas</translation>
+        <translation>Ativas</translation>
     </message>
     <message>
         <source>Errors</source>
-        <translation>Errores</translation>
+        <translation>Erros</translation>
     </message>
     <message>
         <source>Total: 0</source>
@@ -2083,11 +2083,11 @@ Remoto: %3</translation>
     </message>
     <message>
         <source>Active: 0</source>
-        <translation>Activas: 0</translation>
+        <translation>Ativas: 0</translation>
     </message>
     <message>
         <source>Running: 0</source>
-        <translation>En progreso: 0</translation>
+        <translation>Em andamento: 0</translation>
     </message>
     <message>
         <source>Paused: 0</source>
@@ -2095,11 +2095,11 @@ Remoto: %3</translation>
     </message>
     <message>
         <source>Errors: 0</source>
-        <translation>Errores: 0</translation>
+        <translation>Erros: 0</translation>
     </message>
     <message>
         <source>Completed: 0</source>
-        <translation>Completadas: 0</translation>
+        <translation>Concluídas: 0</translation>
     </message>
     <message>
         <source>Canceled: 0</source>
@@ -2107,83 +2107,83 @@ Remoto: %3</translation>
     </message>
     <message>
         <source>Global limit: off</source>
-        <translation>Límite global: sin límite</translation>
+        <translation>Limite global: sem limite</translation>
     </message>
     <message>
         <source>Pause selected</source>
-        <translation>Pausar selección</translation>
+        <translation>Pausar seleção</translation>
     </message>
     <message>
         <source>Resume selected</source>
-        <translation>Reanudar selección</translation>
+        <translation>Retomar seleção</translation>
     </message>
     <message>
         <source>Cancel selected</source>
-        <translation>Cancelar selección</translation>
+        <translation>Cancelar seleção</translation>
     </message>
     <message>
         <source>Cancel all</source>
-        <translation>Cancelar todo</translation>
+        <translation>Cancelar tudo</translation>
     </message>
     <message>
         <source>Clear completed</source>
-        <translation>Limpiar completadas</translation>
+        <translation>Limpar concluídas</translation>
     </message>
     <message>
         <source>Clear failed/canceled</source>
-        <translation>Limpiar fallidas/canceladas</translation>
+        <translation>Limpar falhas/canceladas</translation>
     </message>
     <message>
         <source>Pause all queued and running transfers</source>
-        <translation>Pausar todas las transferencias en cola y en progreso</translation>
+        <translation>Pausar todas as transferências na fila e em andamento</translation>
     </message>
     <message>
         <source>Resume the paused queue and paused tasks</source>
-        <translation>Reanudar la cola pausada y las tareas pausadas</translation>
+        <translation>Retomar a fila pausada e as tarefas pausadas</translation>
     </message>
     <message>
         <source>Pause the selected transfers</source>
-        <translation>Pausar transferencias seleccionadas</translation>
+        <translation>Pausar transferências selecionadas</translation>
     </message>
     <message>
         <source>Resume the selected transfers</source>
-        <translation>Reanudar transferencias seleccionadas</translation>
+        <translation>Retomar transferências selecionadas</translation>
     </message>
     <message>
         <source>Cancel the selected transfers</source>
-        <translation>Cancelar transferencias seleccionadas</translation>
+        <translation>Cancelar transferências selecionadas</translation>
     </message>
     <message>
         <source>Cancel all queued, running, and paused transfers</source>
-        <translation>Cancelar todas las transferencias en cola, en progreso y pausadas</translation>
+        <translation>Cancelar todas as transferências na fila, em andamento e pausadas</translation>
     </message>
     <message>
         <source>Retry transfers with Error or Canceled status</source>
-        <translation>Reintentar transferencias con estado Error o Cancelado</translation>
+        <translation>Tentar novamente transferências com status Erro ou Cancelado</translation>
     </message>
     <message>
         <source>Remove completed transfers from the list</source>
-        <translation>Quitar transferencias completadas de la lista</translation>
+        <translation>Remover transferências concluídas da lista</translation>
     </message>
     <message>
         <source>Remove failed and canceled transfers from the list</source>
-        <translation>Quitar transferencias fallidas y canceladas de la lista</translation>
+        <translation>Remover transferências falhas e canceladas da lista</translation>
     </message>
     <message>
         <source>Limit selected</source>
-        <translation>Limitar selección</translation>
+        <translation>Limitar seleção</translation>
     </message>
     <message>
         <source>Off</source>
-        <translation>Desactivado</translation>
+        <translation>Desativado</translation>
     </message>
     <message>
         <source>Failed/Canceled</source>
-        <translation>Fallidas/Canceladas</translation>
+        <translation>Falhas/Canceladas</translation>
     </message>
     <message>
         <source>All finished</source>
-        <translation>Todo finalizado</translation>
+        <translation>Todos finalizado</translation>
     </message>
     <message>
         <source> min</source>
@@ -2191,7 +2191,7 @@ Remoto: %3</translation>
     </message>
     <message>
         <source>Auto clear:</source>
-        <translation>Limpieza automática:</translation>
+        <translation>Limpeza automática:</translation>
     </message>
     <message>
         <source>Total: %1</source>
@@ -2199,11 +2199,11 @@ Remoto: %3</translation>
     </message>
     <message>
         <source>Active: %1</source>
-        <translation>Activas: %1</translation>
+        <translation>Ativas: %1</translation>
     </message>
     <message>
         <source>Running: %1</source>
-        <translation>En progreso: %1</translation>
+        <translation>Em andamento: %1</translation>
     </message>
     <message>
         <source>Paused: %1</source>
@@ -2211,11 +2211,11 @@ Remoto: %3</translation>
     </message>
     <message>
         <source>Errors: %1</source>
-        <translation>Errores: %1</translation>
+        <translation>Erros: %1</translation>
     </message>
     <message>
         <source>Completed: %1</source>
-        <translation>Completadas: %1</translation>
+        <translation>Concluídas: %1</translation>
     </message>
     <message>
         <source>Canceled: %1</source>
@@ -2223,11 +2223,11 @@ Remoto: %3</translation>
     </message>
     <message>
         <source>Global limit: %1 KB/s</source>
-        <translation>Límite global: %1 KB/s</translation>
+        <translation>Limite global: %1 KB/s</translation>
     </message>
     <message>
         <source>Retry selected</source>
-        <translation>Reintentar selección</translation>
+        <translation>Tentar novamente seleção</translation>
     </message>
     <message>
         <source>Open destination</source>
@@ -2235,15 +2235,15 @@ Remoto: %3</translation>
     </message>
     <message>
         <source>Copy source path</source>
-        <translation>Copiar ruta de origen</translation>
+        <translation>Copiar caminho de origem</translation>
     </message>
     <message>
         <source>Copy destination path</source>
-        <translation>Copiar ruta de destino</translation>
+        <translation>Copiar caminho de destino</translation>
     </message>
     <message>
         <source>Clear finished</source>
-        <translation>Limpiar finalizadas</translation>
+        <translation>Limpar finalizadas</translation>
     </message>
 </context>
 </TS>

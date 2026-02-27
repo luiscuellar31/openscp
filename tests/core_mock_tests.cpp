@@ -1,13 +1,20 @@
 // Core unit tests without external framework (run via CTest).
+#include "openscp/Libssh2SftpClient.hpp"
 #include "openscp/MockSftpClient.hpp"
 
+#include <chrono>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace {
+
+namespace fs = std::filesystem;
 
 struct TestContext {
     int failures = 0;
@@ -30,6 +37,26 @@ openscp::SessionOptions validOptions() {
     opt.host = "example.test";
     opt.username = "alice";
     return opt;
+}
+
+fs::path makeTempFilePath(const std::string &tag) {
+    const auto now =
+        std::chrono::steady_clock::now().time_since_epoch().count();
+    const fs::path dir =
+        fs::temp_directory_path() /
+        ("openscp-tests-" + std::to_string(static_cast<long long>(now)));
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    return dir / (tag + ".txt");
+}
+
+bool readTextFile(const fs::path &path, std::string &out) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in.is_open())
+        return false;
+    out.assign(std::istreambuf_iterator<char>(in),
+               std::istreambuf_iterator<char>());
+    return in.good() || in.eof();
 }
 
 void test_session_defaults(TestContext &t) {
@@ -243,6 +270,108 @@ void test_set_times(TestContext &t) {
     t.check(err.empty(), "setTimes should not set an error in mock client");
 }
 
+void test_libssh2_rejects_conflicting_proxy_and_jump(TestContext &t) {
+    openscp::Libssh2SftpClient c;
+    openscp::SessionOptions opt = validOptions();
+    opt.proxy_type = openscp::ProxyType::Socks5;
+    opt.proxy_host = "127.0.0.1";
+    opt.proxy_port = 1080;
+    opt.jump_host = std::string("bastion.example.test");
+    opt.jump_port = 22;
+
+    std::string err;
+    const bool ok = c.connect(opt, err);
+    t.check(!ok, "connect should fail when proxy and jump are both configured");
+    t.checkContains(
+        err, "Proxy and SSH jump host cannot be used together",
+        "connect should explain proxy/jump mutual exclusion");
+}
+
+#ifdef _WIN32
+void test_libssh2_rejects_jump_on_windows(TestContext &t) {
+    openscp::Libssh2SftpClient c;
+    openscp::SessionOptions opt = validOptions();
+    opt.jump_host = std::string("bastion.example.test");
+    opt.jump_port = 22;
+
+    std::string err;
+    const bool ok = c.connect(opt, err);
+    t.check(!ok, "connect should fail when jump is configured on Windows");
+    t.checkContains(err, "not supported on this platform",
+                    "connect should explain jump is unsupported on Windows");
+}
+#endif
+
+void test_remove_known_hosts_entry_plain_and_hashed(TestContext &t) {
+    const std::string key =
+        "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/qwU9iIfMHkUqPnwGwGZRuQQ3v1d";
+    const fs::path khPath = makeTempFilePath("openscp-knownhosts-cleanup");
+    {
+        std::ofstream out(khPath, std::ios::binary | std::ios::trunc);
+        t.check(out.is_open(), "known_hosts fixture should be writable");
+        if (!out.is_open())
+            return;
+        out << "example.com ssh-ed25519 " << key << "\n";
+        out << "|1|ONUTBfXmPZryon7OlPHra65ZfXs=|lFM22IlwQQfIf9tvjwmXgUKqebE= "
+               "ssh-ed25519 "
+            << key << "\n";
+        out << "other.example ssh-ed25519 " << key << "\n";
+    }
+
+    std::string err;
+    const bool ok =
+        openscp::RemoveKnownHostEntry(khPath.string(), "example.com", 22, err);
+    t.check(ok, std::string("RemoveKnownHostEntry should succeed: ") + err);
+
+    std::string content;
+    t.check(readTextFile(khPath, content),
+            "updated known_hosts fixture should be readable");
+    t.check(content.find("example.com ssh-ed25519") == std::string::npos,
+            "plain example.com entry should be removed");
+    t.check(content.find("|1|ONUTBfXmPZryon7OlPHra65ZfXs=") ==
+                std::string::npos,
+            "hashed example.com entry should be removed");
+    t.check(content.find("other.example ssh-ed25519") != std::string::npos,
+            "unrelated known_hosts entry should be preserved");
+
+    std::error_code ec;
+    fs::remove(khPath, ec);
+    fs::remove_all(khPath.parent_path(), ec);
+}
+
+void test_remove_known_hosts_entry_non_default_port(TestContext &t) {
+    const std::string key =
+        "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/qwU9iIfMHkUqPnwGwGZRuQQ3v1d";
+    const fs::path khPath = makeTempFilePath("openscp-knownhosts-port");
+    {
+        std::ofstream out(khPath, std::ios::binary | std::ios::trunc);
+        t.check(out.is_open(), "known_hosts port fixture should be writable");
+        if (!out.is_open())
+            return;
+        out << "[example.com]:2222 ssh-ed25519 " << key << "\n";
+        out << "example.com ssh-ed25519 " << key << "\n";
+    }
+
+    std::string err;
+    const bool ok =
+        openscp::RemoveKnownHostEntry(khPath.string(), "example.com", 2222,
+                                      err);
+    t.check(ok, std::string("port-specific removal should succeed: ") + err);
+
+    std::string content;
+    t.check(readTextFile(khPath, content),
+            "updated known_hosts port fixture should be readable");
+    t.check(content.find("[example.com]:2222 ssh-ed25519") ==
+                std::string::npos,
+            "port-specific known_hosts entry should be removed");
+    t.check(content.find("example.com ssh-ed25519") != std::string::npos,
+            "default-port known_hosts entry should remain");
+
+    std::error_code ec;
+    fs::remove(khPath, ec);
+    fs::remove_all(khPath.parent_path(), ec);
+}
+
 } // namespace
 
 int main() {
@@ -258,6 +387,12 @@ int main() {
     test_new_connection_like(t);
     test_new_connection_like_validation(t);
     test_set_times(t);
+    test_libssh2_rejects_conflicting_proxy_and_jump(t);
+#ifdef _WIN32
+    test_libssh2_rejects_jump_on_windows(t);
+#endif
+    test_remove_known_hosts_entry_plain_and_hashed(t);
+    test_remove_known_hosts_entry_non_default_port(t);
 
     if (t.failures != 0) {
         std::cerr << "[FAILURES] " << t.failures << "\n";

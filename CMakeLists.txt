@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(OpenSCP_hello LANGUAGES CXX VERSION 0.7.0)
+project(OpenSCP_hello LANGUAGES CXX VERSION 0.8.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,7 +39,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(OPEN_SCP_BUILD_TESTS "Build and run automated tests (CTest)" OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets LinguistTools)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Svg LinguistTools)
 include(GNUInstallDirs)
 
 # Qt 6.8.x on recent macOS SDKs may expose legacy AGL through WrapOpenGL.
@@ -128,6 +128,7 @@ target_include_directories(openscp_hello PRIVATE
 
 target_link_libraries(openscp_hello PRIVATE
     Qt6::Widgets
+    Qt6::Svg
     openscp_core
 )
 
@@ -202,21 +203,17 @@ if (OPEN_SCP_BUILD_SECURE_ONLY)
     target_compile_definitions(openscp_hello PRIVATE OPEN_SCP_BUILD_SECURE_ONLY=1)
 endif()
 
-# Translations: compile Spanish TS to QM and embed as a resource.
+# Translations: compile TS catalogs to QM and embed as resources.
 # .ts files live in the top-level 'translations/' folder.
 qt_add_translation(QM_FILES
     translations/openscp_es.ts
+    translations/openscp_pt.ts
 )
-# Set relative aliases for resources to avoid absolute paths in the qrc
-set(QM_ES "")
+# Set relative aliases for resources to avoid absolute paths in the qrc.
 foreach(qm ${QM_FILES})
-    if(qm MATCHES "openscp_es\\.qm$")
-        set(QM_ES "${qm}")
-    endif()
+    get_filename_component(_qm_name "${qm}" NAME)
+    set_source_files_properties(${qm} PROPERTIES QT_RESOURCE_ALIAS "${_qm_name}")
 endforeach()
-if(QM_ES)
-    set_source_files_properties(${QM_ES} PROPERTIES QT_RESOURCE_ALIAS "openscp_es.qm")
-endif()
 qt_add_resources(openscp_hello i18n
     PREFIX "/i18n"
     FILES ${QM_FILES}
@@ -240,6 +237,8 @@ set(ICON_FILES
     assets/icons/action-open-saved-sites.svg
     assets/icons/action-open-transfer-queue.svg
     assets/icons/action-open-settings.svg
+    assets/icons/action-refresh.svg
+    assets/icons/action-search-item.svg
     assets/icons/action-rename.svg
     assets/icons/action-upload.svg
 )
@@ -269,7 +268,7 @@ set_source_files_properties(assets/program/icon-openscp-2048.png
 if(UNIX AND NOT APPLE)
     # Desktop entry and app icon installation for Linux (XDG paths)
     set(APP_DESKTOP_FILE assets/linux/openscp.desktop)
-    set(APP_ICON_PNG     assets/program/icon-openscp-2048.png)
+    set(APP_ICON_PNG     assets/program/icon-openscp-256.png)
     set(APP_ICON_NAME    openscp) # must match Icon= in the .desktop
 
     # Install binary

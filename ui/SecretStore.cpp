@@ -1,6 +1,10 @@
 // SecretStore implementation: Keychain (macOS), Libsecret (Linux), or optional
 // fallback with QSettings.
+#define QT_NO_KEYWORDS //error GDBusSignalInfo  **signals macros
 #include "SecretStore.hpp"
+#if defined(HAVE_LIBSECRET)
+#include <libsecret/secret.h>
+#endif
 #include <QByteArray>
 #include <QSettings>
 #include <QString>
@@ -158,13 +162,11 @@ bool SecretStore::insecureFallbackActive() { return false; }
 
 #elif defined(HAVE_LIBSECRET) // Linux with Libsecret/Secret Service
 
-#include <libsecret/secret.h>
-
 static const SecretSchema *openscp_schema() {
     static const SecretSchema schema = {
         "openscp.secret",
         SECRET_SCHEMA_NONE,
-        {{"key", SECRET_SCHEMA_ATTRIBUTE_STRING}, {NULL, 0}}};
+        {{"key", SECRET_SCHEMA_ATTRIBUTE_STRING}, {NULL}}};
     return &schema;
 }
 
@@ -191,19 +193,28 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
 
 std::optional<QString> SecretStore::getSecret(const QString &key) const {
     QByteArray k = key.toUtf8();
-    gchar *pw = secret_password_lookup_sync(openscp_schema(), nullptr, "key",
-                                            k.constData(), nullptr);
-    if (!pw)
+    GError *gerr = nullptr;
+    gchar *pw = secret_password_lookup_sync(openscp_schema(), nullptr, &gerr,
+                                            "key", k.constData(), nullptr);
+    if (!pw) {
+        if (gerr)
+            g_error_free(gerr);
         return std::nullopt;
+    }
     QString out = QString::fromUtf8(pw);
     secret_password_free(pw);
+    if (gerr)
+        g_error_free(gerr);
     return out.isEmpty() ? std::nullopt : std::optional<QString>(out);
 }
 
 void SecretStore::removeSecret(const QString &key) {
     QByteArray k = key.toUtf8();
-    (void)secret_password_clear_sync(openscp_schema(), nullptr, "key",
+    GError *gerr = nullptr;
+    (void)secret_password_clear_sync(openscp_schema(), nullptr, &gerr, "key",
                                      k.constData(), nullptr);
+    if (gerr)
+        g_error_free(gerr);
 }
 
 bool SecretStore::insecureFallbackActive() {

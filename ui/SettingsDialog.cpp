@@ -7,6 +7,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QFontMetrics>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -14,11 +15,14 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QScrollArea>
 #include <QSettings>
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QStandardPaths>
+#include <QStyle>
+#include <QTimer>
 #include <QVBoxLayout>
 
 static QString defaultDownloadDirPath() {
@@ -27,6 +31,94 @@ static QString defaultDownloadDirPath() {
     if (p.isEmpty())
         p = QDir::homePath() + "/Downloads";
     return p;
+}
+
+QString SettingsDialog::wrapTextToWidth(const QString &text,
+                                        const QFontMetrics &fm,
+                                        int maxWidth) {
+    if (text.isEmpty() || maxWidth <= 0)
+        return text;
+
+    const QStringList paragraphs = text.split('\n', Qt::KeepEmptyParts);
+    QStringList wrappedParagraphs;
+    wrappedParagraphs.reserve(paragraphs.size());
+
+    for (const QString &paragraph : paragraphs) {
+        if (paragraph.trimmed().isEmpty()) {
+            wrappedParagraphs << QString();
+            continue;
+        }
+        const QStringList words = paragraph.split(' ', Qt::SkipEmptyParts);
+        QStringList lines;
+        QString current;
+        for (const QString &word : words) {
+            const QString candidate =
+                current.isEmpty() ? word : (current + QStringLiteral(" ") + word);
+            if (current.isEmpty() || fm.horizontalAdvance(candidate) <= maxWidth) {
+                current = candidate;
+                continue;
+            }
+            lines << current;
+            current = word;
+        }
+        if (!current.isEmpty())
+            lines << current;
+        wrappedParagraphs << lines.join('\n');
+    }
+    return wrappedParagraphs.join('\n');
+}
+
+void SettingsDialog::trackWrappedCheck(QCheckBox *cb) {
+    if (!cb)
+        return;
+    cb->setProperty("rawText", cb->text());
+    cb->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    wrappedChecks_.push_back(cb);
+}
+
+void SettingsDialog::refreshWrappedCheckTexts() {
+    for (QCheckBox *cb : wrappedChecks_) {
+        if (!cb)
+            continue;
+        const QString raw = cb->property("rawText").toString();
+        if (raw.isEmpty())
+            continue;
+
+        int widgetWidth = cb->width();
+        if (widgetWidth <= 0)
+            widgetWidth = cb->contentsRect().width();
+        if (widgetWidth <= 0) {
+            int viewportWidth = 0;
+            for (QWidget *p = cb->parentWidget(); p; p = p->parentWidget()) {
+                if (auto *scroll = qobject_cast<QScrollArea *>(p)) {
+                    viewportWidth = scroll->viewport()
+                                        ? scroll->viewport()->width()
+                                        : scroll->width();
+                    break;
+                }
+            }
+            widgetWidth = viewportWidth > 0 ? viewportWidth : width();
+        }
+
+        const int indicatorW =
+            cb->style()->pixelMetric(QStyle::PM_IndicatorWidth, nullptr, cb);
+        const int indicatorH =
+            cb->style()->pixelMetric(QStyle::PM_IndicatorHeight, nullptr, cb);
+        const int spacingW = cb->style()->pixelMetric(
+            QStyle::PM_CheckBoxLabelSpacing, nullptr, cb);
+        const int textWidth = qMax(100, widgetWidth - indicatorW - spacingW - 10);
+        const QString wrapped = wrapTextToWidth(raw, QFontMetrics(cb->font()),
+                                                textWidth);
+        if (cb->text() != wrapped) {
+            cb->setText(wrapped);
+            cb->updateGeometry();
+        }
+        const int lineCount = wrapped.count('\n') + 1;
+        const int textHeight = lineCount * QFontMetrics(cb->font()).lineSpacing();
+        const int minHeight = qMax(indicatorH, textHeight) + 6;
+        if (cb->minimumHeight() != minHeight)
+            cb->setMinimumHeight(minHeight);
+    }
 }
 
 SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
@@ -59,22 +151,42 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
 
     auto *pages = new QStackedWidget(this);
     contentRow->addWidget(pages, 1);
+    auto recalcSectionListWidth = [sectionList]() {
+        const QFontMetrics fm(sectionList->font());
+        int maxTextWidth = 0;
+        for (int i = 0; i < sectionList->count(); ++i) {
+            if (auto *item = sectionList->item(i)) {
+                maxTextWidth = qMax(maxTextWidth, fm.horizontalAdvance(item->text()));
+            }
+        }
+        // Padding/frame/margins for the list plus translated label width.
+        const int width = qBound(150, maxTextWidth + 48, 260);
+        sectionList->setFixedWidth(width);
+    };
 
     constexpr int kFieldMinWidth = 320;
     constexpr int kFieldMaxWidth = 520;
-    auto createFormPage = [pages,
-                           sectionList](const QString &title,
-                                        QFormLayout *&outForm) -> QWidget * {
+    auto addLabeledRow = [](QFormLayout *target, QWidget *parent,
+                            const QString &labelText, QWidget *field) {
+        auto *label = new QLabel(labelText, parent);
+        label->setWordWrap(true);
+        label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+        target->addRow(label, field);
+    };
+    auto createFormPage = [pages, sectionList, recalcSectionListWidth](
+                              const QString &title,
+                              QFormLayout *&outForm) -> QWidget * {
         auto *scroll = new QScrollArea(pages);
         scroll->setWidgetResizable(true);
         scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         auto *page = new QWidget(scroll);
         auto *pageLay = new QVBoxLayout(page);
         pageLay->setContentsMargins(12, 12, 12, 12);
         pageLay->setSpacing(8);
         auto *form = new QFormLayout();
         form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-        form->setRowWrapPolicy(QFormLayout::DontWrapRows);
+        form->setRowWrapPolicy(QFormLayout::WrapLongRows);
         form->setHorizontalSpacing(8);
         form->setVerticalSpacing(8);
         pageLay->addLayout(form);
@@ -82,22 +194,25 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         scroll->setWidget(page);
         pages->addWidget(scroll);
         sectionList->addItem(title);
+        recalcSectionListWidth();
         outForm = form;
         return page;
     };
-    auto addCheckRow = [](QFormLayout *target, QWidget *parent,
-                          const QString &text) {
+    auto addCheckRow = [this](QFormLayout *target, QWidget *parent,
+                              const QString &text) {
         auto *cb = new QCheckBox(text, parent);
+        trackWrappedCheck(cb);
         target->addRow(QString(), cb);
         return cb;
     };
     auto addComboRow = [kFieldMinWidth,
-                        kFieldMaxWidth](QFormLayout *target, QWidget *parent,
+                        kFieldMaxWidth,
+                        addLabeledRow](QFormLayout *target, QWidget *parent,
                                         const QString &labelText) {
         auto *combo = new QComboBox(parent);
         combo->setMinimumWidth(kFieldMinWidth);
         combo->setMaximumWidth(kFieldMaxWidth);
-        target->addRow(labelText, combo);
+        addLabeledRow(target, parent, labelText, combo);
         return combo;
     };
     auto bindDirtyFlag = [this]<typename Sender, typename Signal>(
@@ -114,6 +229,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     langCombo_ = addComboRow(generalForm, generalPage, tr("Language:"));
     langCombo_->addItem(tr("Spanish"), "es");
     langCombo_->addItem(tr("English"), "en");
+    langCombo_->addItem(tr("Portuguese"), "pt");
     clickMode_ = addComboRow(generalForm, generalPage, tr("Open with:"));
     clickMode_->addItem(tr("Double click"), 2);
     clickMode_->addItem(tr("Single click"), 1);
@@ -142,7 +258,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         defaultDownloadBrowseBtn_ = new QPushButton(tr("Choose…"), generalPage);
         row->addWidget(defaultDownloadDirEdit_, 1);
         row->addWidget(defaultDownloadBrowseBtn_);
-        generalForm->addRow(tr("Download folder:"), rowWidget);
+        addLabeledRow(generalForm, generalPage, tr("Download folder:"),
+                      rowWidget);
         connect(defaultDownloadBrowseBtn_, &QPushButton::clicked, this, [this] {
             const QString cur = defaultDownloadDirEdit_
                                     ? defaultDownloadDirEdit_->text()
@@ -157,7 +274,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     {
         resetMainLayoutBtn_ =
             new QPushButton(tr("Restore default sizes"), generalPage);
-        generalForm->addRow(tr("Window layout:"), resetMainLayoutBtn_);
+        addLabeledRow(generalForm, generalPage, tr("Window layout:"),
+                      resetMainLayoutBtn_);
         connect(resetMainLayoutBtn_, &QPushButton::clicked, this, [this] {
             const auto ret = UiAlerts::question(
                 this, tr("Restore layout"),
@@ -209,14 +327,16 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     maxConcurrentSpin_->setMinimumWidth(90);
     maxConcurrentSpin_->setToolTip(
         tr("Maximum number of concurrent transfers."));
-    transferForm->addRow(tr("Parallel tasks:"), maxConcurrentSpin_);
+    addLabeledRow(transferForm, transferGroup, tr("Parallel tasks:"),
+                  maxConcurrentSpin_);
     globalSpeedDefaultSpin_ = new QSpinBox(transferGroup);
     globalSpeedDefaultSpin_->setRange(0, 1'000'000);
     globalSpeedDefaultSpin_->setValue(0);
     globalSpeedDefaultSpin_->setSuffix(" KB/s");
     globalSpeedDefaultSpin_->setMinimumWidth(120);
     globalSpeedDefaultSpin_->setToolTip(tr("0 = no global speed limit."));
-    transferForm->addRow(tr("Default global limit:"), globalSpeedDefaultSpin_);
+    addLabeledRow(transferForm, transferGroup, tr("Default global limit:"),
+                  globalSpeedDefaultSpin_);
     advancedForm->addRow(QString(), transferGroup);
 
     // Advanced/Sites
@@ -227,6 +347,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     deleteSecretsOnRemove_ = new QCheckBox(
         tr("When deleting a site, also remove its stored credentials."),
         sitesGroup);
+    trackWrappedCheck(deleteSecretsOnRemove_);
     sitesLay->addWidget(deleteSecretsOnRemove_);
     advancedForm->addRow(QString(), sitesGroup);
 
@@ -240,12 +361,15 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     fpHex_ = new QCheckBox(
         tr("Show fingerprint in HEX (colon) format (visual only)."),
         securityGroup);
+    trackWrappedCheck(knownHostsHashed_);
+    trackWrappedCheck(fpHex_);
     securityLay->addWidget(knownHostsHashed_);
     securityLay->addWidget(fpHex_);
 #if defined(Q_OS_MAC) || defined(Q_OS_MACOS) || defined(__APPLE__)
     macKeychainRestrictive_ = new QCheckBox(
         tr("Use stricter Keychain accessibility (this device only)."),
         securityGroup);
+    trackWrappedCheck(macKeychainRestrictive_);
     securityLay->addWidget(macKeychainRestrictive_);
 #endif
 #if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) &&       \
@@ -253,6 +377,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     insecureFallback_ = new QCheckBox(
         tr("Allow insecure credentials fallback (not recommended)."),
         securityGroup);
+    trackWrappedCheck(insecureFallback_);
     securityLay->addWidget(insecureFallback_);
 #endif
     {
@@ -272,7 +397,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         ttlLay->addStretch(1);
         auto *ttlForm = new QFormLayout();
         ttlForm->setContentsMargins(0, 0, 0, 0);
-        ttlForm->addRow(tr("No-verification TTL:"), ttlRow);
+        addLabeledRow(ttlForm, securityGroup, tr("No-verification TTL:"),
+                      ttlRow);
         securityLay->addLayout(ttlForm);
     }
     advancedForm->addRow(QString(), securityGroup);
@@ -296,7 +422,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         stagingBrowseBtn_ = new QPushButton(tr("Choose…"), stagingGroup);
         row->addWidget(stagingRootEdit_, 1);
         row->addWidget(stagingBrowseBtn_);
-        stagingForm->addRow(tr("Staging folder:"), rowWidget);
+        addLabeledRow(stagingForm, stagingGroup, tr("Staging folder:"),
+                      rowWidget);
         connect(stagingBrowseBtn_, &QPushButton::clicked, this, [this] {
             const QString cur =
                 stagingRootEdit_ ? stagingRootEdit_->text() : QString();
@@ -310,6 +437,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     autoCleanStaging_ = new QCheckBox(
         tr("Auto-clean staging after successful drag-out (recommended)."),
         stagingGroup);
+    trackWrappedCheck(autoCleanStaging_);
     stagingForm->addRow(QString(), autoCleanStaging_);
     stagingPrepTimeoutMsSpin_ = new QSpinBox(stagingGroup);
     stagingPrepTimeoutMsSpin_->setRange(250, 60000);
@@ -319,14 +447,16 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     stagingPrepTimeoutMsSpin_->setMinimumWidth(110);
     stagingPrepTimeoutMsSpin_->setToolTip(
         tr("Time before showing the Wait/Cancel dialog."));
-    stagingForm->addRow(tr("Preparation timeout:"), stagingPrepTimeoutMsSpin_);
+    addLabeledRow(stagingForm, stagingGroup, tr("Preparation timeout:"),
+                  stagingPrepTimeoutMsSpin_);
     stagingConfirmItemsSpin_ = new QSpinBox(stagingGroup);
     stagingConfirmItemsSpin_->setRange(50, 100000);
     stagingConfirmItemsSpin_->setValue(500);
     stagingConfirmItemsSpin_->setMinimumWidth(110);
     stagingConfirmItemsSpin_->setToolTip(
         tr("Item count threshold to request confirmation for large batches."));
-    stagingForm->addRow(tr("Confirm from items:"), stagingConfirmItemsSpin_);
+    addLabeledRow(stagingForm, stagingGroup, tr("Confirm from items:"),
+                  stagingConfirmItemsSpin_);
     stagingConfirmMiBSpin_ = new QSpinBox(stagingGroup);
     stagingConfirmMiBSpin_->setRange(128, 65536);
     stagingConfirmMiBSpin_->setValue(1024);
@@ -334,7 +464,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     stagingConfirmMiBSpin_->setMinimumWidth(120);
     stagingConfirmMiBSpin_->setToolTip(tr(
         "Estimated size threshold to request confirmation for large batches."));
-    stagingForm->addRow(tr("Confirm from size:"), stagingConfirmMiBSpin_);
+    addLabeledRow(stagingForm, stagingGroup, tr("Confirm from size:"),
+                  stagingConfirmMiBSpin_);
 
     // Maximum folder recursion depth
     {
@@ -353,11 +484,18 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         row->addWidget(maxDepthSpin_);
         row->addWidget(hint);
         row->addStretch(1);
-        stagingForm->addRow(tr("Maximum depth:"), rowWidget);
+        addLabeledRow(stagingForm, stagingGroup, tr("Maximum depth:"),
+                      rowWidget);
     }
     advancedForm->addRow(QString(), stagingGroup);
     connect(sectionList, &QListWidget::currentRowChanged, pages,
             &QStackedWidget::setCurrentIndex);
+    connect(sectionList, &QListWidget::currentRowChanged, this,
+            [this](int) {
+                refreshWrappedCheckTexts();
+                QTimer::singleShot(0, this,
+                                   [this] { refreshWrappedCheckTexts(); });
+            });
     sectionList->setCurrentRow(0);
 
     // Buttons row: align to right, order: Close (left) then Apply (right)
@@ -531,6 +669,12 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     }
 
     updateApplyFromControls();
+    QTimer::singleShot(0, this, [this] { refreshWrappedCheckTexts(); });
+}
+
+void SettingsDialog::resizeEvent(QResizeEvent *event) {
+    QDialog::resizeEvent(event);
+    refreshWrappedCheckTexts();
 }
 
 void SettingsDialog::onApply() {

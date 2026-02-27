@@ -26,6 +26,7 @@
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTimer>
+#include <QtGlobal>
 #include <QUuid>
 
 #include <atomic>
@@ -116,6 +117,45 @@ static QString normalizedIdentityUser(const std::string &user) {
     return QString::fromStdString(user).trimmed();
 }
 
+static QString normalizedIdentityProxyHost(const std::string &host) {
+    return QString::fromStdString(host).trimmed().toLower();
+}
+
+static QString normalizedIdentityProxyUser(
+    const std::optional<std::string> &user) {
+    if (!user || user->empty())
+        return {};
+    return QString::fromStdString(*user).trimmed();
+}
+
+static QString normalizedIdentityJumpHost(
+    const std::optional<std::string> &host) {
+    if (!host || host->empty())
+        return {};
+    return QString::fromStdString(*host).trimmed().toLower();
+}
+
+static QString normalizedIdentityJumpUser(
+    const std::optional<std::string> &user) {
+    if (!user || user->empty())
+        return {};
+    return QString::fromStdString(*user).trimmed();
+}
+
+static std::uint16_t defaultJumpPort() { return 22; }
+
+static std::uint16_t defaultProxyPort(openscp::ProxyType type) {
+    switch (type) {
+    case openscp::ProxyType::Socks5:
+        return 1080;
+    case openscp::ProxyType::HttpConnect:
+        return 8080;
+    case openscp::ProxyType::None:
+        break;
+    }
+    return 0;
+}
+
 static QString
 normalizedIdentityKeyPath(const std::optional<std::string> &keyPath) {
     if (!keyPath || keyPath->empty())
@@ -124,12 +164,34 @@ normalizedIdentityKeyPath(const std::optional<std::string> &keyPath) {
         QDir::fromNativeSeparators(QString::fromStdString(*keyPath).trimmed()));
 }
 
+static bool hasConfiguredJumpHost(const openscp::SessionOptions &opt) {
+    return opt.jump_host.has_value() && !opt.jump_host->empty();
+}
+
+static bool hasTransportSelectionConflict(const openscp::SessionOptions &opt) {
+    return opt.proxy_type != openscp::ProxyType::None &&
+           hasConfiguredJumpHost(opt);
+}
+
 static bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
                                   const openscp::SessionOptions &b) {
     return normalizedIdentityHost(a.host) == normalizedIdentityHost(b.host) &&
            a.port == b.port &&
            normalizedIdentityUser(a.username) ==
                normalizedIdentityUser(b.username) &&
+           a.proxy_type == b.proxy_type &&
+           normalizedIdentityProxyHost(a.proxy_host) ==
+               normalizedIdentityProxyHost(b.proxy_host) &&
+           a.proxy_port == b.proxy_port &&
+           normalizedIdentityProxyUser(a.proxy_username) ==
+               normalizedIdentityProxyUser(b.proxy_username) &&
+           normalizedIdentityJumpHost(a.jump_host) ==
+               normalizedIdentityJumpHost(b.jump_host) &&
+           a.jump_port == b.jump_port &&
+           normalizedIdentityJumpUser(a.jump_username) ==
+               normalizedIdentityJumpUser(b.jump_username) &&
+           normalizedIdentityKeyPath(a.jump_private_key_path) ==
+               normalizedIdentityKeyPath(b.jump_private_key_path) &&
            normalizedIdentityKeyPath(a.private_key_path) ==
                normalizedIdentityKeyPath(b.private_key_path);
 }
@@ -162,6 +224,27 @@ static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool *needsSave) {
         const QString kp = s.value("keyPath").toString();
         if (!kp.isEmpty())
             e.opt.private_key_path = kp.toStdString();
+        e.opt.proxy_type = static_cast<openscp::ProxyType>(
+            s.value("proxyType", static_cast<int>(openscp::ProxyType::None))
+                .toInt());
+        e.opt.proxy_host = s.value("proxyHost").toString().trimmed().toStdString();
+        e.opt.proxy_port = static_cast<std::uint16_t>(
+            s.value("proxyPort", static_cast<int>(defaultProxyPort(e.opt.proxy_type)))
+                .toUInt());
+        const QString proxyUser = s.value("proxyUser").toString().trimmed();
+        if (!proxyUser.isEmpty())
+            e.opt.proxy_username = proxyUser.toStdString();
+        const QString jumpHost = s.value("jumpHost").toString().trimmed();
+        if (!jumpHost.isEmpty())
+            e.opt.jump_host = jumpHost.toStdString();
+        e.opt.jump_port = static_cast<std::uint16_t>(
+            s.value("jumpPort", static_cast<int>(defaultJumpPort())).toUInt());
+        const QString jumpUser = s.value("jumpUser").toString().trimmed();
+        if (!jumpUser.isEmpty())
+            e.opt.jump_username = jumpUser.toStdString();
+        const QString jumpKeyPath = s.value("jumpKeyPath").toString();
+        if (!jumpKeyPath.isEmpty())
+            e.opt.jump_private_key_path = jumpKeyPath.toStdString();
         const QString kh = s.value("knownHosts").toString();
         if (!kh.isEmpty())
             e.opt.known_hosts_path = kh.toStdString();
@@ -169,6 +252,12 @@ static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool *needsSave) {
             s.value("khPolicy",
                     static_cast<int>(openscp::KnownHostsPolicy::Strict))
                 .toInt());
+        e.opt.transfer_integrity_policy =
+            static_cast<openscp::TransferIntegrityPolicy>(
+                s.value("integrityPolicy",
+                        static_cast<int>(
+                            openscp::TransferIntegrityPolicy::Optional))
+                    .toInt());
         sites.push_back(e);
     }
     s.endArray();
@@ -193,11 +282,32 @@ static void saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
                    e.opt.private_key_path
                        ? QString::fromStdString(*e.opt.private_key_path)
                        : QString());
+        s.setValue("proxyType", static_cast<int>(e.opt.proxy_type));
+        s.setValue("proxyHost", QString::fromStdString(e.opt.proxy_host));
+        s.setValue("proxyPort", static_cast<int>(e.opt.proxy_port));
+        s.setValue("proxyUser",
+                   e.opt.proxy_username
+                       ? QString::fromStdString(*e.opt.proxy_username)
+                       : QString());
+        s.setValue("jumpHost",
+                   e.opt.jump_host ? QString::fromStdString(*e.opt.jump_host)
+                                   : QString());
+        s.setValue("jumpPort", static_cast<int>(e.opt.jump_port));
+        s.setValue("jumpUser",
+                   e.opt.jump_username
+                       ? QString::fromStdString(*e.opt.jump_username)
+                       : QString());
+        s.setValue("jumpKeyPath",
+                   e.opt.jump_private_key_path
+                       ? QString::fromStdString(*e.opt.jump_private_key_path)
+                       : QString());
         s.setValue("knownHosts",
                    e.opt.known_hosts_path
                        ? QString::fromStdString(*e.opt.known_hosts_path)
                        : QString());
         s.setValue("khPolicy", static_cast<int>(e.opt.known_hosts_policy));
+        s.setValue("integrityPolicy",
+                   static_cast<int>(e.opt.transfer_integrity_policy));
     }
     s.endArray();
     s.sync();
@@ -288,6 +398,26 @@ void MainWindow::connectSftp() {
             s.value("Security/knownHostsHashed", true).toBool();
         opt.show_fp_hex = s.value("Security/fpHex", false).toBool();
     }
+    if (hasTransportSelectionConflict(opt)) {
+        UiAlerts::warning(
+            this, tr("Invalid transport configuration"),
+            tr("Proxy and SSH jump host cannot be used together in the same "
+               "connection.\nChoose only one transport method."));
+        statusBar()->showMessage(
+            tr("Connection canceled: invalid transport configuration"), 5000);
+        return;
+    }
+#ifdef Q_OS_WIN
+    if (hasConfiguredJumpHost(opt)) {
+        UiAlerts::warning(
+            this, tr("Unsupported transport"),
+            tr("SSH jump host is currently unavailable on Windows."));
+        statusBar()->showMessage(
+            tr("Connection canceled: SSH jump host is unsupported on Windows"),
+            5000);
+        return;
+    }
+#endif
     if (saveRequest.has_value()) {
         maybePersistQuickConnectSite(opt, *saveRequest, false);
         // Already persisted on request; connection lifecycle no longer needs to
@@ -339,6 +469,7 @@ void MainWindow::disconnectSftp() {
     rightIsRemote_ = false;
     m_pendingRemoteRefreshFromUpload_ = false;
     m_seenCompletedUploadTaskIds_.clear();
+    m_seenCompletedTransferNoticeTaskIds_.clear();
     restoreRightHeaderState(false);
     if (QDir(rightPath_->text()).exists()) {
         setRightRoot(rightPath_->text());
@@ -355,6 +486,8 @@ void MainWindow::disconnectSftp() {
         actDownloadF7_->setEnabled(false);
     if (actUploadRight_)
         actUploadRight_->setEnabled(false);
+    if (actRefreshRight_)
+        actRefreshRight_->setEnabled(false);
     // Local mode: re-enable local actions on the right panel
     if (actNewDirRight_)
         actNewDirRight_->setEnabled(true);
@@ -444,6 +577,7 @@ void MainWindow::completeDisconnectSftp(quint64 disconnectSeq, bool forced) {
     if (sftp_)
         sftp_->disconnect();
     sftp_.reset();
+    resetConnectionSessionIndicators();
     if (actConnect_) {
         actConnect_->setEnabled(true);
         actConnect_->setToolTip(actConnect_->text());
@@ -812,6 +946,26 @@ void MainWindow::startSftpConnect(
                                  3000);
         return;
     }
+    if (hasTransportSelectionConflict(opt)) {
+        UiAlerts::warning(
+            this, tr("Invalid transport configuration"),
+            tr("Proxy and SSH jump host cannot be used together in the same "
+               "connection.\nEdit the site and keep only one transport."));
+        statusBar()->showMessage(
+            tr("Connection canceled: invalid transport configuration"), 5000);
+        return;
+    }
+#ifdef Q_OS_WIN
+    if (hasConfiguredJumpHost(opt)) {
+        UiAlerts::warning(
+            this, tr("Unsupported transport"),
+            tr("SSH jump host is currently unavailable on Windows."));
+        statusBar()->showMessage(
+            tr("Connection canceled: SSH jump host is unsupported on Windows"),
+            5000);
+        return;
+    }
+#endif
     if (!confirmInsecureHostPolicyForSession(opt)) {
         statusBar()->showMessage(
             tr("Connection canceled: no-verification policy not confirmed"),
@@ -1104,6 +1258,7 @@ void MainWindow::maybePersistQuickConnectSite(
         e.opt = opt;
         e.opt.password.reset();
         e.opt.private_key_passphrase.reset();
+        e.opt.proxy_password.reset();
         sites.push_back(e);
         matchIndex = sites.size() - 1;
         created = true;
@@ -1153,6 +1308,19 @@ void MainWindow::maybePersistQuickConnectSite(
         else
             issues
                 << tr("Passphrase: %1").arg(quickPersistStatusShort(r.status));
+    }
+    if (opt.proxy_type != openscp::ProxyType::None && opt.proxy_password &&
+        !opt.proxy_password->empty()) {
+        const auto r = store.setSecret(
+            quickSiteSecretKey(target, QStringLiteral("proxypass")),
+            QString::fromStdString(*opt.proxy_password));
+        if (r.ok())
+            anyCredentialStored = true;
+        else
+            issues << tr("Proxy password: %1")
+                          .arg(quickPersistStatusShort(r.status));
+    } else if (opt.proxy_type == openscp::ProxyType::None) {
+        store.removeSecret(quickSiteSecretKey(target, QStringLiteral("proxypass")));
     }
 
     if (!issues.isEmpty()) {
@@ -1207,8 +1375,6 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
                 }
                 rightPath_->setText(path);
                 refreshRightBreadcrumbs();
-                if (rightSearch_ && !rightSearch_->text().trimmed().isEmpty())
-                    applyQuickSearch(rightView_, rightSearch_->text());
                 if (rightIsRemote_) {
                     updateRemoteWriteability();
                     updateDeleteShortcutEnables();
@@ -1249,6 +1415,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     rightIsRemote_ = true;
     m_pendingRemoteRefreshFromUpload_ = false;
     m_seenCompletedUploadTaskIds_.clear();
+    m_seenCompletedTransferNoticeTaskIds_.clear();
     refreshRightBreadcrumbs();
     m_activeSessionOptions_ = opt;
     m_remoteWriteabilityCache_.clear();
@@ -1264,6 +1431,8 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         actDownloadF7_->setEnabled(true);
     if (actUploadRight_)
         actUploadRight_->setEnabled(true);
+    if (actRefreshRight_)
+        actRefreshRight_->setEnabled(true);
     if (actNewDirRight_)
         actNewDirRight_->setEnabled(true);
     if (actNewFileRight_)
@@ -1281,6 +1450,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         actChooseRight_->setEnabled(false);
         actChooseRight_->setToolTip(tr("Not available in remote mode"));
     }
+    startConnectionSessionIndicators(QStringLiteral("SFTP"));
     statusBar()->showMessage(
         tr("Connected (SFTP) to ") + QString::fromStdString(opt.host), 4000);
     setWindowTitle(tr("OpenSCP — local/remote (SFTP)"));

@@ -13,17 +13,22 @@
 #include <QDropEvent>
 #include <QEasingCurve>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QMimeData>
 #include <QParallelAnimationGroup>
 #include <QProgressDialog>
 #include <QPropertyAnimation>
+#include <QScreen>
 #include <QStatusBar>
+#include <QTimer>
 
 #include <atomic>
 #include <memory>
 #include <thread>
 
 static constexpr int NAME_COL = 0;
+static const char *kStagingBatchMime =
+    "application/x-openscp-staging-batch";
 
 static bool isValidEntryName(const QString &name, QString *why = nullptr) {
     if (name == "." || name == "..") {
@@ -56,6 +61,50 @@ static QString joinRemotePath(const QString &base, const QString &name) {
     if (base == "/")
         return "/" + name;
     return base.endsWith('/') ? base + name : base + "/" + name;
+}
+
+static QRect centeredQueueRect(QWidget *dialog, QWidget *mainWindow) {
+    if (!dialog)
+        return {};
+
+    QRect rect = dialog->geometry();
+    if (!rect.isValid())
+        rect = QRect(QPoint(0, 0), dialog->size());
+
+    if (mainWindow) {
+        QRect anchor = mainWindow->frameGeometry();
+        if (!anchor.isValid())
+            anchor = mainWindow->geometry();
+        if (anchor.isValid())
+            rect.moveCenter(anchor.center());
+    }
+
+    QScreen *screen = nullptr;
+    if (mainWindow)
+        screen = mainWindow->screen();
+    if (!screen)
+        screen = dialog->screen();
+    if (!screen)
+        screen = QGuiApplication::primaryScreen();
+    if (!screen)
+        return rect;
+
+    const QRect avail = screen->availableGeometry();
+    if (!avail.isValid())
+        return rect;
+
+    int x = rect.x();
+    int y = rect.y();
+    const int minX = avail.left();
+    const int minY = avail.top();
+    const int maxX = avail.right() - rect.width() + 1;
+    const int maxY = avail.bottom() - rect.height() + 1;
+    if (maxX >= minX)
+        x = qBound(minX, x, maxX);
+    if (maxY >= minY)
+        y = qBound(minY, y, maxY);
+    rect.moveTopLeft(QPoint(x, y));
+    return rect;
 }
 
 void MainWindow::runRemoteDownloadPrescan(
@@ -272,13 +321,15 @@ void MainWindow::showTransferQueue() {
         transferDlg_ = new TransferQueueDialog(transferMgr_, this);
     const bool wasVisible = transferDlg_->isVisible();
     if (!wasVisible) {
+        const QRect endRect = centeredQueueRect(transferDlg_, this);
+        if (endRect.isValid())
+            transferDlg_->setGeometry(endRect);
         // Modeless queue: smooth entrance (fade + slight scale/offset) for
         // better perceived polish.
         transferDlg_->show();
         transferDlg_->raise();
         transferDlg_->activateWindow();
 
-        const QRect endRect = transferDlg_->geometry();
         QRect startRect = endRect;
         startRect.setWidth(qMax(220, (endRect.width() * 96) / 100));
         startRect.setHeight(qMax(140, (endRect.height() * 96) / 100));
@@ -329,6 +380,45 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
     if (obj != rightViewport && obj != leftViewport)
         return QMainWindow::eventFilter(obj, ev);
 
+    auto extractStagingBatchDir = [](const QMimeData *md) -> QString {
+        if (!md || !md->hasFormat(kStagingBatchMime))
+            return QString();
+        const QByteArray raw = md->data(kStagingBatchMime);
+        return QString::fromUtf8(raw).trimmed();
+    };
+
+    auto scheduleStagingCleanupAfterLocalJobs = [this](const QString &batchDir) {
+        if (batchDir.isEmpty())
+            return;
+        auto *timer = new QTimer(this);
+        timer->setInterval(350);
+        timer->setSingleShot(false);
+        auto *attempts = new int(0);
+        connect(timer, &QTimer::timeout, this, [this, timer, attempts, batchDir] {
+            ++(*attempts);
+            const bool giveUp = (*attempts >= 300); // ~105s max wait
+            if (!giveUp && m_localFsJobsInFlight_.load() > 0)
+                return;
+
+            timer->stop();
+            timer->deleteLater();
+            delete attempts;
+
+            QDir batch(batchDir);
+            if (batch.exists())
+                (void)batch.removeRecursively();
+
+            // If the staging root is now empty, remove it as well.
+            const QString rootPath = QFileInfo(batchDir).absolutePath();
+            QDir root(rootPath);
+            if (root.exists() &&
+                root.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty()) {
+                (void)root.rmdir(".");
+            }
+        });
+        timer->start();
+    };
+
     // Drag-and-drop over the right panel (local or remote)
     if (obj == rightViewport) {
         if (ev->type() == QEvent::DragEnter) {
@@ -349,6 +439,8 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
             return true;
         } else if (ev->type() == QEvent::Drop) {
             auto *dd = static_cast<QDropEvent *>(ev);
+            const QString stagingBatchDir =
+                extractStagingBatchDir(dd->mimeData());
             const auto urls =
                 dd->mimeData() ? dd->mimeData()->urls() : QList<QUrl>{};
             if (urls.isEmpty()) {
@@ -356,6 +448,14 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
                 return true;
             }
             if (rightIsRemote_) {
+                if (!stagingBatchDir.isEmpty()) {
+                    statusBar()->showMessage(
+                        tr("Drop ignored: remote-origin drag cannot be dropped "
+                           "back into the same remote panel"),
+                        5000);
+                    dd->ignore();
+                    return true;
+                }
                 // Block upload if remote is read-only
                 if (!rightRemoteWritable_) {
                     statusBar()->showMessage(
@@ -446,6 +546,8 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
             return true;
         } else if (ev->type() == QEvent::Drop) {
             auto *dd = static_cast<QDropEvent *>(ev);
+            const QString stagingBatchDir =
+                extractStagingBatchDir(dd->mimeData());
             const auto urls =
                 dd->mimeData() ? dd->mimeData()->urls() : QList<QUrl>{};
             if (!urls.isEmpty()) {
@@ -469,6 +571,8 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
                     pairs.push_back({fi.absoluteFilePath(), target});
                 }
                 runLocalFsOperation(pairs, false, 0);
+                if (!stagingBatchDir.isEmpty())
+                    scheduleStagingCleanupAfterLocalJobs(stagingBatchDir);
                 dd->acceptProposedAction();
                 updateDeleteShortcutEnables();
                 return true;

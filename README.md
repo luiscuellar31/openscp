@@ -7,7 +7,7 @@
 </p>
 
 <p>
-    <a href="README_ES.md"><strong>Leer en Espanol</strong></a>
+    <a href="README_ES.md"><strong>Leer en Español</strong></a>
 </p>
 
 <p>
@@ -44,23 +44,26 @@ cmake --build build -j
 open build/OpenSCP.app
 ```
 
-## What OpenSCP Offers (v0.7.0)
+## What OpenSCP Offers (v0.8.0)
 
 ### 1. Dual-panel workflow
 
 - Independent local/remote navigation.
 - Drag-and-drop copy/move between panels.
 - Remote context operations: download, upload, rename, delete, new folder/file, permissions.
-- Clickable breadcrumbs and per-panel incremental search.
+- Clickable breadcrumbs and per-panel search (toolbar button or `Ctrl/Cmd+F`) with wildcard/regex patterns and optional recursive mode.
+- Remote panel icons use MIME-based detection (plus native provider on macOS) for closer parity with local icons.
 
 ### 2. Transfer engine and queue
 
 - Real parallel transfers with isolated worker connections.
+- Expensive queue prechecks run off the UI thread; scheduling fairness and queue metrics reduce starvation under high concurrency.
 - Pause/resume/cancel/retry, per-task/global limits, and resume support.
 - Status-aware queue actions: controls are enabled only when the selected task state allows that action (for example, retry for `Error`/`Canceled`, resume for `Paused`).
 - Queue UI with per-row progress percentages, filters, and detailed columns (`Speed`, `ETA`, `Transferred`, `Error`, etc.).
 - Context actions like retry selected, open destination, copy paths, and cleanup policies.
 - Queue window/layout/filter persistence.
+- Main status bar emits transfer completion notices (for successful uploads/downloads).
 - Transfers use interruptible worker sessions and bounded socket read/write waits to avoid indefinite hangs during stalled network conditions.
 - Upload completion path is hardened and remote views refresh reliably after finished uploads.
 
@@ -68,32 +71,43 @@ open build/OpenSCP.app
 
 - Auth: password, private key (+passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
 - Host-key policies: `Strict`, `Accept new (TOFU)`, `No verification` (hardened).
+- Per-site transport can use direct TCP, `SOCKS5`, or `HTTP CONNECT` proxy tunneling.
+- Per-site SSH jump host (`ProxyJump`/bastion) tunneling is supported.
+- Current implementation treats proxy tunneling and jump host tunneling as mutually exclusive per session.
 - Hardened no-verification flow: double confirmation, TTL-based temporary exception, risk banner.
 - Atomic `known_hosts` persistence and strict POSIX permissions (`~/.ssh` 0700, file 0600).
 - One-time-connect confirmation when fingerprint persistence fails.
 - Safer keyboard-interactive cancel path (no accidental password fallback).
-- Transfer integrity policy (`off/optional/required`) using `.part` + atomic finalize.
+- Transfer integrity policy (`off/optional/required`) per site/session (and env override) using `.part` + atomic finalize.
 - Sensitive data redacted from production logs by default.
 
 ### 4. Sites and credential storage
 
 - Saved sites use stable UUID identities.
+- Saved sites persist proxy type/endpoint/username per site.
+- Saved sites persist SSH jump host settings (host/port/user/key path) per site.
 - Duplicate site names blocked; rename/delete cleans legacy or orphan secrets.
 - Optional cleanup of stored credentials and related `known_hosts` entries when deleting sites.
 - Secure backends:
     - macOS: Keychain
     - Linux: libsecret (when available)
+- Proxy passwords are stored in the secure backend (never in plaintext site settings).
 - Clear persistence feedback in secure-only builds.
 - Quick Connect can save/update site data without creating duplicates.
 
 ### 5. UX/UI quality
 
 - Connection dialog improved (clearer inputs, inline key/known_hosts selectors, show/hide password fields).
+- Connection dialog includes per-site proxy configuration (`Direct`, `SOCKS5`, `HTTP CONNECT`) with optional auth.
+- Connection dialog includes optional per-site SSH jump host (bastion) configuration.
+- UI language selection includes `English`, `Spanish`, and `Portuguese`.
 - Settings redesigned into `General` and `Advanced` sections.
 - Settings keeps controls visible while resizing (minimum size + scrollable pages).
 - One-click reset for default main-window layout/sizes in Settings.
 - Permissions dialog includes octal preview + common presets.
 - About dialog includes diagnostics copy support and friendlier fallback messaging.
+- Transfer queue dialog opens centered relative to the main window.
+- Status bar shows connection type and per-session elapsed connection time.
 - Disconnect flow stays responsive: UI returns to local mode immediately while transfer cleanup can continue in background, with watchdog/status feedback.
 - Reconnect is blocked while previous transfer cleanup is still running, preventing session overlap races.
 
@@ -103,6 +117,8 @@ open build/OpenSCP.app
     - push to `dev`: fast Linux build + non-integration tests
     - PR to `main`: Linux and macOS integration gate
 - Integration workflow spins up a temporary SFTP server for end-to-end checks.
+- PR integration coverage validates transport variants in CI: direct, `SOCKS5` proxy tunnel, `HTTP CONNECT` proxy tunnel (with auth), and SSH jump host tunnel.
+- Tag release workflow auto-generates draft release notes from Conventional Commits (`feat`, `fix`, `BREAKING CHANGE`, etc.).
 - Nightly quality job includes `ASan`, `UBSan`, `TSan`, and `cppcheck`.
 
 ## Requirements
@@ -116,6 +132,7 @@ Optional:
 
 - macOS: Keychain (native)
 - Linux: libsecret / Secret Service
+- OpenSSH client (`ssh`) for SSH jump host tunneling.
 
 ## Testing Locally
 
@@ -133,6 +150,15 @@ ctest --test-dir build --output-on-failure
 - `OPEN_SCP_IT_SFTP_PASS` or `OPEN_SCP_IT_SFTP_KEY`
 - `OPEN_SCP_IT_SFTP_KEY_PASSPHRASE` (if needed)
 - `OPEN_SCP_IT_REMOTE_BASE`
+- `OPEN_SCP_IT_PROXY_TYPE` (`socks5` or `http`, optional)
+- `OPEN_SCP_IT_PROXY_HOST` (required when `OPEN_SCP_IT_PROXY_TYPE` is set)
+- `OPEN_SCP_IT_PROXY_PORT` (optional; defaults: `1080` for `socks5`, `8080` for `http`)
+- `OPEN_SCP_IT_PROXY_USER` (optional)
+- `OPEN_SCP_IT_PROXY_PASS` (optional)
+- `OPEN_SCP_IT_JUMP_HOST` (optional)
+- `OPEN_SCP_IT_JUMP_PORT` (optional; default `22`)
+- `OPEN_SCP_IT_JUMP_USER` (optional)
+- `OPEN_SCP_IT_JUMP_KEY` (optional)
 
 ## Platform Workflows
 
@@ -169,18 +195,18 @@ export QT_PREFIX="/path/to/Qt/<version>/macos"
 export Qt6_DIR="/path/to/Qt/<version>/macos/lib/cmake/Qt6"
 ```
 
-Full packaging details: `assets/macos/README.md`
+Full packaging details: [assets/macos/README.md](assets/macos/README.md)
 
 ### Linux
 
-AppImage packaging details: `assets/linux/README.md`
+Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/README.md](assets/linux/README.md)
 
 ## Runtime Environment Variables
 
 - `OPEN_SCP_KNOWNHOSTS_PLAIN=1|0` - force plain vs hashed hostnames in `known_hosts`.
 - `OPEN_SCP_FP_HEX_ONLY=1` - show fingerprints in HEX with `:`.
 - `OPEN_SCP_TRANSFER_INTEGRITY=off|optional|required` - override transfer integrity policy.
-- `OPEN_SCP_LOG_LEVEL=error|warn|info|debug` - set log verbosity.
+- `OPEN_SCP_LOG_LEVEL=off|error|warn|info|debug` - set log verbosity.
 - `OPEN_SCP_ENV=dev|prod` - runtime environment selector (`dev` enables development-only diagnostics).
 - `OPEN_SCP_LOG_SENSITIVE=1` - enable sensitive debug details only when `OPEN_SCP_ENV=dev` (disabled by default).
 - `OPEN_SCP_ENABLE_INSECURE_FALLBACK=1` - enable insecure secret fallback only when supported by the build/platform.
@@ -197,7 +223,7 @@ AppImage packaging details: `assets/linux/README.md`
 
 - Windows support is planned for future releases.
 - Protocols: `SCP`, then `FTP/FTPS/WebDAV`.
-- Proxy and jump support: `SOCKS5`, `HTTP CONNECT`, `ProxyJump`.
+- Broader enterprise proxy/jump auth flows (for example, non-batch/interactive jump auth).
 - Sync workflows: compare/sync and keep-up-to-date with filters/ignores.
 - Queue persistence across restarts.
 - More UX features: bookmarks, history, command palette, themes.
@@ -210,5 +236,5 @@ AppImage packaging details: `assets/linux/README.md`
 
 ## Contributing
 
-- Contributions are welcome. See `CONTRIBUTING.md` for workflow and standards.
+- Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for workflow and standards.
 - Issues and pull requests are welcome, especially around macOS/Linux stability, i18n, and SFTP robustness.

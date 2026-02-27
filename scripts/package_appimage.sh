@@ -74,7 +74,7 @@ prepare_desktop() {
 Type=Application
 Name=OpenSCP
 GenericName=SFTP Client
-Comment=Two‑panel SFTP client focused on simplicity and security
+Comment=Two-panel SFTP client focused on simplicity and security
 Exec=openscp_hello
 Icon=openscp
 Terminal=false
@@ -120,6 +120,13 @@ copy_about_png_fallback() {
     mkdir -p "$APPDIR/assets/program"
     cp "${REPO_DIR}/assets/program/icon-openscp-2048.png" "$APPDIR/assets/program/"
   fi
+}
+
+# Validate that Qt SVG plugins are present in the packaged tree.
+verify_svg_plugins() {
+  local checker="${REPO_DIR}/scripts/verify_qt_svg_plugins.sh"
+  [[ -x "$checker" ]] || die "SVG plugin checker not found or not executable: $checker"
+  "$checker" --context appimage "$APPDIR"
 }
 
 main() {
@@ -175,6 +182,7 @@ main() {
   cmd+=( --output appimage )
   log "Running: ${cmd[*]}"
   "${cmd[@]}"
+  verify_svg_plugins
 
   # Rename the produced AppImage to our canonical name if needed
   local produced

@@ -1,10 +1,17 @@
-# Linux Build & AppImage (Unsigned)
+# Linux Build and Packaging
 
-This guide explains how to build OpenSCP from source on Linux and how to package a portable AppImage for distribution.
+This guide explains how to build OpenSCP from source on Linux and package it as:
 
-- Binary target (from source): `build/openscp_hello`
-- AppImage artifact: `dist/OpenSCP-<version>-<arch>.AppImage` and `… .sha256`
-- Script: `scripts/package_appimage.sh`
+- AppImage
+- Snap
+- Flatpak
+
+Main artifacts:
+
+- Source binary: `build/openscp_hello`
+- AppImage: `dist/OpenSCP-<version>-<arch>.AppImage`
+- Snap: `packaging/snap/*.snap`
+- Flatpak bundle: `dist/OpenSCP.flatpak`
 
 ## Prerequisites
 
@@ -12,42 +19,24 @@ This guide explains how to build OpenSCP from source on Linux and how to package
 - libssh2 (OpenSSL 3 recommended)
 - CMake 3.22+ and a C++20 compiler
 
-For AppImage packaging, ensure these tools are available in your `PATH`:
-- `linuxdeploy`
-- `linuxdeploy-plugin-qt`
-- `appimagetool`
+Packaging tools:
 
-Tip: If CMake cannot auto-detect Qt, point to your Qt 6 root using one of the env vars shown below.
+- AppImage: `linuxdeploy`, `linuxdeploy-plugin-qt`, `appimagetool`
+- Snap: `snapcraft`, `unsquashfs`
+- Flatpak: `flatpak`, `flatpak-builder`
+
+Tip: if CMake cannot auto-detect Qt, set `CMAKE_PREFIX_PATH` or `Qt6_DIR`.
 
 ## Build From Source
 
 ```bash
-# From the repository root
 rm -rf build
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-
-# Run
 ./build/openscp_hello
 ```
 
-## Run Tests Locally (Optional)
-
-```bash
-cmake -S . -B build -DOPEN_SCP_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-```
-
-`openscp_sftp_integration_tests` is skipped unless integration env vars are set:
-- `OPEN_SCP_IT_SFTP_HOST`
-- `OPEN_SCP_IT_SFTP_PORT`
-- `OPEN_SCP_IT_SFTP_USER`
-- `OPEN_SCP_IT_SFTP_PASS` or `OPEN_SCP_IT_SFTP_KEY`
-- `OPEN_SCP_IT_SFTP_KEY_PASSPHRASE` (if needed)
-- `OPEN_SCP_IT_REMOTE_BASE`
-
-If Qt 6 is not auto‑detected, set one of:
+If Qt 6 is not auto-detected:
 
 ```bash
 CMAKE_PREFIX_PATH=/path/to/Qt/<version>/gcc_64 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -55,16 +44,13 @@ CMAKE_PREFIX_PATH=/path/to/Qt/<version>/gcc_64 cmake -S . -B build -DCMAKE_BUILD
 Qt6_DIR=/path/to/Qt/<version>/gcc_64/lib/cmake/Qt6 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 ```
 
-## AppImage Packaging (Unsigned)
-
-Produce a portable AppImage suitable for most Linux distributions:
+## AppImage Packaging
 
 ```bash
-# From the repository root
 ./scripts/package_appimage.sh
 ```
 
-If Qt 6 is not auto‑detected by the script, provide the path:
+Optional Qt path override:
 
 ```bash
 CMAKE_PREFIX_PATH=/path/to/Qt/<version>/gcc_64 ./scripts/package_appimage.sh
@@ -72,18 +58,95 @@ CMAKE_PREFIX_PATH=/path/to/Qt/<version>/gcc_64 ./scripts/package_appimage.sh
 Qt6_DIR=/path/to/Qt/<version>/gcc_64/lib/cmake/Qt6 ./scripts/package_appimage.sh
 ```
 
-Output:
-- `dist/OpenSCP-<version>-<arch>.AppImage`
-- `dist/OpenSCP-<version>-<arch>.AppImage.sha256`
+The script now validates Qt SVG plugins (`qsvg` and `qsvgicon`) inside the AppDir before completing.
 
-## Desktop Entry (optional)
+## Snap Packaging
 
-A launcher file is provided at `assets/linux/openscp.desktop`. Distros may use this file during packaging.
-For local integration without packaging, you can copy it to `~/.local/share/applications/` and adjust `Exec=`/`Icon=` as needed.
+Manifest and assets:
 
-## Verify Linked Libraries (optional)
+- `packaging/snap/snapcraft.yaml`
+- `packaging/snap/openscp-snap.desktop`
+- `packaging/snap/icon.png` (store/snap launcher icon, 256x256)
 
-You can check the runtime linkage of the built binary:
+The Snap desktop entry uses an explicit sandbox icon path:
+
+- `Icon=${SNAP}/meta/gui/icon.png`
+
+Build the snap (Linux only):
+
+```bash
+./scripts/package_snap.sh
+```
+
+If your environment requires direct host builds:
+
+```bash
+./scripts/package_snap.sh --destructive-mode
+```
+
+This script:
+
+- builds using `snapcraft`
+- extracts the generated `.snap`
+- validates `qsvg` and `qsvgicon` (runtime-aware when `kde-neon-6` is used)
+
+## Flatpak Packaging
+
+Manifest:
+
+- `packaging/flatpak/com.openscp.OpenSCP.yml`
+
+Build and bundle (Linux only):
+
+```bash
+./scripts/package_flatpak.sh
+```
+
+To auto-install missing SDK/runtime dependencies from Flathub during build:
+
+```bash
+./scripts/package_flatpak.sh --install-deps-from=flathub
+```
+
+To force a different Flatpak runtime branch without editing the manifest:
+
+```bash
+RUNTIME_VERSION_OVERRIDE=6.9 ./scripts/package_flatpak.sh
+```
+
+This script:
+
+- builds the Flatpak with `flatpak-builder`
+- validates `qsvg` and `qsvgicon` (runtime-aware for platform runtimes)
+- creates `dist/OpenSCP.flatpak`
+
+## Desktop Entry (General)
+
+The generic desktop file for distro/system packaging remains:
+
+- `assets/linux/openscp.desktop`
+
+For local integration without packaging, copy it to:
+
+- `~/.local/share/applications/`
+
+and adjust `Exec=` and `Icon=` as needed.
+
+## Manual Qt SVG Plugin Check
+
+You can validate any packaged tree manually:
+
+```bash
+./scripts/verify_qt_svg_plugins.sh /path/to/package-root
+```
+
+Runtime-aware mode (for packages that rely on external Qt runtimes):
+
+```bash
+./scripts/verify_qt_svg_plugins.sh --allow-runtime-provided --context snap /path/to/package-root
+```
+
+## Verify Linked Libraries (Optional)
 
 ```bash
 ldd ./build/openscp_hello | grep -E 'Qt6|libssh2|ssl|crypto' || true
@@ -91,9 +154,9 @@ ldd ./build/openscp_hello | grep -E 'Qt6|libssh2|ssl|crypto' || true
 
 ## Troubleshooting
 
-- CMake can’t find Qt 6:
-    - Set `CMAKE_PREFIX_PATH` or `Qt6_DIR` to your Qt 6 installation.
-- Qt plugin for linuxdeploy not found:
-    - Ensure `linuxdeploy-plugin-qt` is in your `PATH`.
-- AppImage missing dependencies:
-    - The script uses linuxdeploy (+Qt plugin) to bundle Qt and other runtime libs into the AppDir; verify tool versions.
+- CMake cannot find Qt 6:
+  - Set `CMAKE_PREFIX_PATH` or `Qt6_DIR`.
+- AppImage misses dependencies:
+  - Verify `linuxdeploy` and the Qt plugin are installed and recent.
+- Snap/Flatpak build fails:
+  - Confirm you are building on Linux with required host tooling installed.

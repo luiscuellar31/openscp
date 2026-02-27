@@ -1,0 +1,42 @@
+app-id: com.openscp.OpenSCP
+runtime: org.kde.Platform
+runtime-version: "6.9"
+sdk: org.kde.Sdk
+command: openscp_hello
+rename-desktop-file: openscp.desktop
+rename-icon: openscp
+copy-icon: true
+
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --socket=ssh-auth
+  - --device=dri
+  - --filesystem=home
+  - --filesystem=xdg-run/gvfs
+  - --talk-name=org.freedesktop.secrets
+  - --env=QT_AUTO_SCREEN_SCALE_FACTOR=1
+
+modules:
+  - name: libssh2
+    buildsystem: autotools
+    sources:
+      - type: archive
+        url: https://libssh2.org/download/libssh2-1.11.1.tar.gz
+        sha256: d9ec76cbe34db98eec3539fe2c899d26b0c837cb3eb466a56b0f109cabf658f7
+        
+  - name: openscp
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DOPEN_SCP_BUILD_TESTS=OFF
+    sources:
+      - type: dir
+        path: ../..
+    cleanup:
+      - /include
+      - /lib/cmake
+      - /lib/pkgconfig
+      - "*.a"
