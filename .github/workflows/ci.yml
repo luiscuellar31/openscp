@@ -438,6 +438,12 @@ jobs:
           OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
           OPEN_SCP_IT_REMOTE_BASE: /home/openscp_it/upload
         run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          ssh-keyscan -p 2222 127.0.0.1 >> "$HOME/.ssh/known_hosts" 2>/dev/null
+          chmod 600 "$HOME/.ssh/known_hosts"
+
           OPEN_SCP_IT_JUMP_HOST=127.0.0.1 \
           OPEN_SCP_IT_JUMP_PORT=2222 \
           OPEN_SCP_IT_JUMP_USER=openscp_it \
@@ -543,6 +549,12 @@ jobs:
           OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_ed25519
           OPEN_SCP_IT_REMOTE_BASE: /tmp/openscp-it-upload
         run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          ssh-keyscan -p 2222 127.0.0.1 >> "$HOME/.ssh/known_hosts" 2>/dev/null
+          chmod 600 "$HOME/.ssh/known_hosts"
+
           OPEN_SCP_IT_SFTP_USER="$(whoami)" \
           OPEN_SCP_IT_JUMP_HOST=127.0.0.1 \
           OPEN_SCP_IT_JUMP_PORT=2222 \
