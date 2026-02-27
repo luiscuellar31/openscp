@@ -67,6 +67,28 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.verify-tag.outputs.tag_name }}
+
+      - name: Generate draft release notes
+        id: notes
+        run: |
+          set -euo pipefail
+          tag="${{ needs.verify-tag.outputs.tag_name }}"
+          version="${{ needs.verify-tag.outputs.version }}"
+          notes_file="$PWD/release-notes.md"
+          bash ./scripts/generate_release_notes.sh \
+            --tag "$tag" \
+            --version "$version" \
+            --repo "${{ github.repository }}" \
+            --output "$notes_file"
+          echo "notes_file=${notes_file}" >> "$GITHUB_OUTPUT"
+          echo "Generated release notes:"
+          sed -n '1,120p' "$notes_file"
+
       - name: Create or reuse draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -74,14 +96,17 @@ jobs:
           set -euo pipefail
           tag="${{ needs.verify-tag.outputs.tag_name }}"
           version="${{ needs.verify-tag.outputs.version }}"
+          notes_file="${{ steps.notes.outputs.notes_file }}"
           commit="${{ needs.verify-tag.outputs.tag_commit }}"
           title="OpenSCP v${version}"
-          notes="Auto-generated draft release for ${tag}. You can edit these notes before publishing."
 
           if gh release view "$tag" >/dev/null 2>&1; then
             is_draft="$(gh release view "$tag" --json isDraft --jq '.isDraft')"
             if [[ "$is_draft" == "true" ]]; then
               echo "Draft release already exists for ${tag}."
+              gh release edit "$tag" \
+                --title "$title" \
+                --notes-file "$notes_file"
             else
               echo "Release for ${tag} already exists and is not a draft. Reusing it for asset upload."
             fi
@@ -90,7 +115,7 @@ jobs:
               --target "$commit" \
               --title "$title" \
               --draft \
-              --notes "$notes"
+              --notes-file "$notes_file"
           fi
 
   build-macos:
