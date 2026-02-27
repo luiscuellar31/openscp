@@ -137,6 +137,23 @@ bool listContainsName(const std::vector<openscp::FileInfo> &entries,
                        });
 }
 
+bool removeRemoteFileIfExists(openscp::Libssh2SftpClient &client,
+                              const std::string &remotePath,
+                              std::string &err) {
+    bool isDir = false;
+    err.clear();
+    const bool exists = client.exists(remotePath, isDir, err);
+    if (!exists) {
+        return err.empty();
+    }
+    if (isDir) {
+        err = "path is a directory";
+        return false;
+    }
+    err.clear();
+    return client.removeFile(remotePath, err);
+}
+
 #ifndef _WIN32
 std::string formatHostPortAuthority(const std::string &host, std::uint16_t port) {
     if (host.find(':') != std::string::npos && host.find(']') == std::string::npos)
@@ -503,23 +520,39 @@ int main() {
         t.check(client.removeFile(remoteMoved, err),
                 std::string("removeFile should succeed: ") + err);
         err.clear();
+        t.check(removeRemoteFileIfExists(client, remoteResumeDownload, err),
+                std::string("remove remoteResumeDownload should succeed: ") +
+                    err);
+        err.clear();
+        t.check(removeRemoteFileIfExists(client, remoteResumeUpload, err),
+                std::string("remove remoteResumeUpload should succeed: ") +
+                    err);
+        err.clear();
+        t.check(removeRemoteFileIfExists(client, remoteResumeUploadSeed, err),
+                std::string("remove remoteResumeUploadSeed should succeed: ") +
+                    err);
+        err.clear();
+        t.check(removeRemoteFileIfExists(client, remoteResumeUploadPart, err),
+                std::string("remove remoteResumeUploadPart should succeed: ") +
+                    err);
+        err.clear();
         t.check(client.removeDir(remoteSuiteDir, err),
                 std::string("removeDir should succeed: ") + err);
     }
 
     // Best-effort cleanup regardless of test result.
     std::string cleanupErr;
-    (void)client.removeFile(remoteSrc, cleanupErr);
+    (void)removeRemoteFileIfExists(client, remoteSrc, cleanupErr);
     cleanupErr.clear();
-    (void)client.removeFile(remoteMoved, cleanupErr);
+    (void)removeRemoteFileIfExists(client, remoteMoved, cleanupErr);
     cleanupErr.clear();
-    (void)client.removeFile(remoteResumeDownload, cleanupErr);
+    (void)removeRemoteFileIfExists(client, remoteResumeDownload, cleanupErr);
     cleanupErr.clear();
-    (void)client.removeFile(remoteResumeUpload, cleanupErr);
+    (void)removeRemoteFileIfExists(client, remoteResumeUpload, cleanupErr);
     cleanupErr.clear();
-    (void)client.removeFile(remoteResumeUploadSeed, cleanupErr);
+    (void)removeRemoteFileIfExists(client, remoteResumeUploadSeed, cleanupErr);
     cleanupErr.clear();
-    (void)client.removeFile(remoteResumeUploadPart, cleanupErr);
+    (void)removeRemoteFileIfExists(client, remoteResumeUploadPart, cleanupErr);
     cleanupErr.clear();
     (void)client.removeDir(remoteSuiteDir, cleanupErr);
     client.disconnect();
