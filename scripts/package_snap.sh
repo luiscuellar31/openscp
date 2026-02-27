@@ -15,9 +15,27 @@ ensure_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required tool: $1"
 }
 
+validate_png_256() {
+  local icon_file="$1"
+  [[ -f "$icon_file" ]] || die "Required PNG icon not found: $icon_file"
+  local meta
+  meta="$(file -b "$icon_file" 2>/dev/null || true)"
+  [[ "$meta" == PNG\ image\ data,* ]] ||
+    die "Icon is not a PNG image: $icon_file"
+  if [[ ! "$meta" =~ ([0-9]+)[[:space:]]x[[:space:]]([0-9]+) ]]; then
+    die "Could not detect PNG dimensions for: $icon_file"
+  fi
+  local width="${BASH_REMATCH[1]}"
+  local height="${BASH_REMATCH[2]}"
+  if [[ "$width" != "256" || "$height" != "256" ]]; then
+    die "snap icon must be 256x256 (got ${width}x${height}): $icon_file"
+  fi
+}
+
 validate_snap_icon() {
   local icon_file="${PROJECT_DIR}/icon.png"
   [[ -f "$icon_file" ]] || die "Required snap icon not found: $icon_file"
+  validate_png_256 "$icon_file"
   local size_bytes
   size_bytes="$(wc -c < "$icon_file" | tr -d ' ')"
   if [[ "$size_bytes" -gt 262144 ]]; then
@@ -38,6 +56,7 @@ main() {
 
   ensure_cmd "$SNAPCRAFT"
   ensure_cmd unsquashfs
+  ensure_cmd file
   validate_snap_icon
 
   log "Building snap from: $PROJECT_DIR"
