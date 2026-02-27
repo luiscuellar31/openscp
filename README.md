@@ -51,7 +51,7 @@ open build/OpenSCP.app
 - Independent local/remote navigation.
 - Drag-and-drop copy/move between panels.
 - Remote context operations: download, upload, rename, delete, new folder/file, permissions.
-- Clickable breadcrumbs and per-panel incremental search.
+- Clickable breadcrumbs and per-panel search (toolbar button or `Ctrl/Cmd+F`) with wildcard/regex patterns and optional recursive mode.
 - Remote panel icons use MIME-based detection (plus native provider on macOS) for closer parity with local icons.
 
 ### 2. Transfer engine and queue
@@ -107,6 +107,7 @@ open build/OpenSCP.app
 - Permissions dialog includes octal preview + common presets.
 - About dialog includes diagnostics copy support and friendlier fallback messaging.
 - Transfer queue dialog opens centered relative to the main window.
+- Status bar shows connection type and per-session elapsed connection time.
 - Disconnect flow stays responsive: UI returns to local mode immediately while transfer cleanup can continue in background, with watchdog/status feedback.
 - Reconnect is blocked while previous transfer cleanup is still running, preventing session overlap races.
 
@@ -204,7 +205,7 @@ Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/READM
 - `OPEN_SCP_KNOWNHOSTS_PLAIN=1|0` - force plain vs hashed hostnames in `known_hosts`.
 - `OPEN_SCP_FP_HEX_ONLY=1` - show fingerprints in HEX with `:`.
 - `OPEN_SCP_TRANSFER_INTEGRITY=off|optional|required` - override transfer integrity policy.
-- `OPEN_SCP_LOG_LEVEL=error|warn|info|debug` - set log verbosity.
+- `OPEN_SCP_LOG_LEVEL=off|error|warn|info|debug` - set log verbosity.
 - `OPEN_SCP_ENV=dev|prod` - runtime environment selector (`dev` enables development-only diagnostics).
 - `OPEN_SCP_LOG_SENSITIVE=1` - enable sensitive debug details only when `OPEN_SCP_ENV=dev` (disabled by default).
 - `OPEN_SCP_ENABLE_INSECURE_FALLBACK=1` - enable insecure secret fallback only when supported by the build/platform.

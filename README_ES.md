@@ -51,7 +51,7 @@ open build/OpenSCP.app
 - Navegacion independiente local/remoto.
 - Copia y movimiento entre paneles con drag-and-drop.
 - Operaciones remotas de contexto: descargar, subir, renombrar, eliminar, nueva carpeta/archivo y permisos.
-- Breadcrumbs clicables y busqueda incremental por panel.
+- Breadcrumbs clicables y busqueda por panel (boton de barra o `Ctrl/Cmd+F`) con patrones wildcard/regex y modo recursivo opcional.
 - El panel remoto usa deteccion de iconos por MIME (y proveedor nativo en macOS) para mayor paridad con iconos locales.
 
 ### 2. Motor de transferencias y cola
@@ -59,10 +59,13 @@ open build/OpenSCP.app
 - Transferencias paralelas reales con conexiones aisladas por worker.
 - Los prechecks costosos de cola se ejecutan fuera del hilo UI; fairness de scheduling y metricas de cola reducen starvation en alta concurrencia.
 - Pausar/reanudar/cancelar/reintentar, limites por tarea/global y soporte de resume.
+- Acciones de cola segun estado: los controles solo se habilitan cuando la seleccion/tarea permite la accion (por ejemplo, reintentar en `Error`/`Canceled`, reanudar en `Paused`).
 - UI de cola con porcentaje de progreso por fila, filtros y columnas detalladas (`Speed`, `ETA`, `Transferred`, `Error`, etc.).
 - Acciones de contexto como reintentar seleccionadas, abrir destino, copiar rutas y politicas de limpieza.
 - Persistencia de ventana/layout/filtro de la cola.
 - La barra de estado principal muestra avisos de transferencias completadas (subidas/descargas exitosas).
+- Las transferencias usan sesiones de worker interrumpibles y tiempos de espera acotados de lectura/escritura en socket para evitar bloqueos indefinidos cuando la red se estanca.
+- El flujo de finalizacion de subidas esta endurecido y las vistas remotas se refrescan de forma confiable al terminar uploads.
 
 ### 3. Endurecimiento de seguridad SFTP
 
@@ -105,6 +108,9 @@ open build/OpenSCP.app
 - Dialogo de permisos con vista octal y presets comunes.
 - Dialogo Acerca de con copia de diagnostico y mensajes fallback mas amigables.
 - La ventana de cola de transferencias abre centrada respecto a la ventana principal.
+- La barra de estado muestra el tipo de conexion activa y el tiempo transcurrido por sesion.
+- El flujo de desconexion se mantiene responsivo: la UI vuelve de inmediato a modo local mientras la limpieza de transferencias puede continuar en segundo plano con watchdog/feedback.
+- El reconectar se bloquea mientras la limpieza previa de transferencias siga en curso, evitando solapamientos de sesion.
 
 ### 6. Linea base de calidad (CI y tests)
 
@@ -200,7 +206,7 @@ Detalles de build y empaquetado Linux (AppImage, Snap, Flatpak): [assets/linux/R
 - `OPEN_SCP_KNOWNHOSTS_PLAIN=1|0` - fuerza hostnames planos vs hasheados en `known_hosts`.
 - `OPEN_SCP_FP_HEX_ONLY=1` - muestra huellas en HEX con `:`.
 - `OPEN_SCP_TRANSFER_INTEGRITY=off|optional|required` - sobrescribe la politica de integridad de transferencias.
-- `OPEN_SCP_LOG_LEVEL=error|warn|info|debug` - ajusta la verbosidad de logs.
+- `OPEN_SCP_LOG_LEVEL=off|error|warn|info|debug` - ajusta la verbosidad de logs.
 - `OPEN_SCP_ENV=dev|prod` - selector de entorno runtime (`dev` habilita diagnosticos solo de desarrollo).
 - `OPEN_SCP_LOG_SENSITIVE=1` - habilita detalles sensibles de depuracion solo cuando `OPEN_SCP_ENV=dev` (apagado por defecto).
 - `OPEN_SCP_ENABLE_INSECURE_FALLBACK=1` - habilita fallback inseguro solo cuando el build/plataforma lo soporta.
