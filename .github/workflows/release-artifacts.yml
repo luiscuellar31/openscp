@@ -272,7 +272,7 @@ jobs:
 
       - name: Build Snap
         run: |
-          ./scripts/package_snap.sh --destructive-mode
+          sudo env "PATH=$PATH" ./scripts/package_snap.sh --destructive-mode
 
       - name: Build Flatpak
         run: |

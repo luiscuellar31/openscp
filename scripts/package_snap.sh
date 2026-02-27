@@ -61,7 +61,7 @@ main() {
 
   log "Building snap from: $PROJECT_DIR"
   pushd "$PROJECT_DIR" >/dev/null
-  "$SNAPCRAFT" "$@"
+  "$SNAPCRAFT" pack "$@"
 
   local snap_file
   snap_file="$(ls -1t ./*.snap 2>/dev/null | head -n1 || true)"
