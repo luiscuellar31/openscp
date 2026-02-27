@@ -22,8 +22,8 @@ Main artifacts:
 Packaging tools:
 
 - AppImage: `linuxdeploy`, `linuxdeploy-plugin-qt`, `appimagetool`
-- Snap: `snapcraft`, `unsquashfs`
-- Flatpak: `flatpak`, `flatpak-builder`
+- Snap: `snapcraft`, `unsquashfs`, `file`
+- Flatpak: `flatpak`, `flatpak-builder`, `file`
 
 Tip: if CMake cannot auto-detect Qt, set `CMAKE_PREFIX_PATH` or `Qt6_DIR`.
 

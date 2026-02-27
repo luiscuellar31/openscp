@@ -85,14 +85,22 @@ EOF
 }
 
 prepare_icon() {
-  local src_png="${REPO_DIR}/assets/program/icon-openscp-2048.png"
+  local src_png_256="${REPO_DIR}/assets/program/icon-openscp-256.png"
+  local src_png_large="${REPO_DIR}/assets/program/icon-openscp-2048.png"
   local dst_png="$1"
   mkdir -p "$(dirname "$dst_png")"
-  if command -v convert >/dev/null 2>&1; then
-    convert "$src_png" -resize 256x256 "$dst_png"
-  else
-    cp "$src_png" "$dst_png" || true
+  if [[ -f "$src_png_256" ]]; then
+    cp "$src_png_256" "$dst_png"
+    return
   fi
+  if [[ -f "$src_png_large" ]] && command -v convert >/dev/null 2>&1; then
+    convert "$src_png_large" -resize 256x256 "$dst_png"
+    return
+  fi
+  if [[ -f "$src_png_large" ]]; then
+    die "Missing 256x256 icon asset and ImageMagick 'convert' is unavailable to resize ${src_png_large}"
+  fi
+  die "No source icon found for AppImage packaging"
 }
 
 copy_licenses() {

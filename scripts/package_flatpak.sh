@@ -11,6 +11,7 @@ APP_ID="${APP_ID:-com.openscp.OpenSCP}"
 BRANCH="${BRANCH:-stable}"
 RUNTIME_VERSION_OVERRIDE="${RUNTIME_VERSION_OVERRIDE:-}"
 CHECKER="${REPO_DIR}/scripts/verify_qt_svg_plugins.sh"
+APP_ICON="${APP_ICON:-${REPO_DIR}/assets/program/icon-openscp-256.png}"
 
 log() { printf "\033[1;34m[flatpak]\033[0m %s\n" "$*"; }
 err() { printf "\033[1;31m[err    ]\033[0m %s\n" "$*"; }
@@ -18,6 +19,23 @@ die() { err "$*"; exit 1; }
 
 ensure_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required tool: $1"
+}
+
+validate_png_256() {
+  local icon_file="$1"
+  [[ -f "$icon_file" ]] || die "Required PNG icon not found: $icon_file"
+  local meta
+  meta="$(file -b "$icon_file" 2>/dev/null || true)"
+  [[ "$meta" == PNG\ image\ data,* ]] ||
+    die "Icon is not a PNG image: $icon_file"
+  if [[ ! "$meta" =~ ([0-9]+)[[:space:]]x[[:space:]]([0-9]+) ]]; then
+    die "Could not detect PNG dimensions for: $icon_file"
+  fi
+  local width="${BASH_REMATCH[1]}"
+  local height="${BASH_REMATCH[2]}"
+  if [[ "$width" != "256" || "$height" != "256" ]]; then
+    die "Flatpak source icon must be 256x256 (got ${width}x${height}): $icon_file"
+  fi
 }
 
 uses_external_qt_runtime() {
@@ -45,6 +63,8 @@ main() {
 
   ensure_cmd flatpak-builder
   ensure_cmd flatpak
+  ensure_cmd file
+  validate_png_256 "$APP_ICON"
 
   mkdir -p "$(dirname "$BUILD_DIR")" "$(dirname "$BUNDLE_OUT")" "$REPO_OUT"
 
