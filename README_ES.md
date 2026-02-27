@@ -119,6 +119,7 @@ open build/OpenSCP.app
     - PR a `main`: compuerta de integracion Linux y macOS
 - En integracion CI se levanta un servidor SFTP temporal para pruebas end-to-end.
 - La cobertura de integracion en PR valida variantes de transporte en CI: directo, tunel proxy `SOCKS5`, tunel proxy `HTTP CONNECT` (con auth) y tunel SSH jump host.
+- El workflow de release por tag genera automaticamente notas de draft release desde Conventional Commits (`feat`, `fix`, `BREAKING CHANGE`, etc.).
 - Workflow nocturno con `ASan`, `UBSan`, `TSan` y `cppcheck`.
 
 ## Requisitos

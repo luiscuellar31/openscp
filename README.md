@@ -118,6 +118,7 @@ open build/OpenSCP.app
     - PR to `main`: Linux and macOS integration gate
 - Integration workflow spins up a temporary SFTP server for end-to-end checks.
 - PR integration coverage validates transport variants in CI: direct, `SOCKS5` proxy tunnel, `HTTP CONNECT` proxy tunnel (with auth), and SSH jump host tunnel.
+- Tag release workflow auto-generates draft release notes from Conventional Commits (`feat`, `fix`, `BREAKING CHANGE`, etc.).
 - Nightly quality job includes `ASan`, `UBSan`, `TSan`, and `cppcheck`.
 
 ## Requirements
