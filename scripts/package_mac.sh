@@ -437,38 +437,84 @@ copy_qt_framework() {
 }
 
 # Ensure Qt image format plugins (e.g., qpng) are present so QPixmap can
-# load PNGs from Qt resources in the About dialog.
-ensure_qt_imageformats() {
-  local dest_dir="$PLUGINS_DIR/imageformats"
-  # If qpng already present, nothing to do
-  if [[ -f "$dest_dir/libqpng.dylib" || -f "$dest_dir/qpng.dylib" ]]; then
-    return
+# load PNGs from Qt resources in the About dialog, and ensure SVG icon engines
+# are bundled for resource/file SVG icons.
+find_qt_plugins_root() {
+  local candidate=""
+  local hbqt=""
+
+  if [[ -n "$QTPREFIX" ]]; then
+    for candidate in \
+      "$QTPREFIX/plugins" \
+      "$QTPREFIX/lib/qt6/plugins" \
+      "$QTPREFIX/share/qt/plugins" \
+      "$QTPREFIX/share/qt6/plugins"
+    do
+      [[ -d "$candidate" ]] && { echo "$candidate"; return; }
+    done
   fi
-  local src=""
-  # Prefer the prefix discovered from macdeployqt
-  if [[ -n "$QTPREFIX" && -d "$QTPREFIX/plugins/imageformats" ]]; then
-    src="$QTPREFIX/plugins/imageformats"
+
+  if command -v qtpaths6 >/dev/null 2>&1; then
+    candidate="$(qtpaths6 --query QT_INSTALL_PLUGINS 2>/dev/null || true)"
+    [[ -n "$candidate" && -d "$candidate" ]] && { echo "$candidate"; return; }
   fi
-  # Fallback: try Homebrew Qt prefix
-  if [[ -z "$src" && $(command -v brew >/dev/null 2>&1; echo $?) -eq 0 ]]; then
-    local hbqt
-    hbqt=$(brew --prefix qt 2>/dev/null || brew --prefix qt@6 2>/dev/null || true)
-    if [[ -n "$hbqt" && -d "$hbqt/plugins/imageformats" ]]; then
-      src="$hbqt/plugins/imageformats"
+  if command -v qtpaths >/dev/null 2>&1; then
+    candidate="$(qtpaths --query QT_INSTALL_PLUGINS 2>/dev/null || true)"
+    [[ -n "$candidate" && -d "$candidate" ]] && { echo "$candidate"; return; }
+  fi
+  if command -v qmake6 >/dev/null 2>&1; then
+    candidate="$(qmake6 -query QT_INSTALL_PLUGINS 2>/dev/null || true)"
+    [[ -n "$candidate" && -d "$candidate" ]] && { echo "$candidate"; return; }
+  fi
+  if command -v qmake >/dev/null 2>&1; then
+    candidate="$(qmake -query QT_INSTALL_PLUGINS 2>/dev/null || true)"
+    [[ -n "$candidate" && -d "$candidate" ]] && { echo "$candidate"; return; }
+  fi
+
+  if command -v brew >/dev/null 2>&1; then
+    hbqt="$(brew --prefix qt 2>/dev/null || brew --prefix qt@6 2>/dev/null || true)"
+    if [[ -n "$hbqt" ]]; then
+      for candidate in \
+        "$hbqt/plugins" \
+        "$hbqt/share/qt/plugins" \
+        "$hbqt/share/qt6/plugins"
+      do
+        [[ -d "$candidate" ]] && { echo "$candidate"; return; }
+      done
     fi
   fi
-  if [[ -n "$src" && -d "$src" ]]; then
-    log "Ensuring Qt imageformats plugins from: $src"
+
+  return 1
+}
+
+ensure_qt_plugin_subdir() {
+  local subdir="$1"
+  local sentinel="$2"
+  local description="$3"
+  local dest_dir="$PLUGINS_DIR/$subdir"
+  if [[ -f "$dest_dir/lib${sentinel}.dylib" || -f "$dest_dir/${sentinel}.dylib" ]]; then
+    return
+  fi
+
+  local plugins_root=""
+  plugins_root="$(find_qt_plugins_root || true)"
+  if [[ -n "$plugins_root" && -d "$plugins_root/$subdir" ]]; then
+    local src="$plugins_root/$subdir"
+    log "Ensuring ${description} plugins from: $src"
     mkdir -p "$dest_dir"
-    # Copy all imageformats to be safe (qpng, qjpeg, etc.)
     if command -v ditto >/dev/null 2>&1; then
       ditto "$src" "$dest_dir"
     else
       cp -R "$src/." "$dest_dir/"
     fi
   else
-    warn "Could not locate Qt imageformats plugins; PNG resources may fail to load"
+    warn "Could not locate ${description} plugins; ${sentinel} may fail to load"
   fi
+}
+
+ensure_qt_support_plugins() {
+  ensure_qt_plugin_subdir "imageformats" "qpng" "Qt imageformats"
+  ensure_qt_plugin_subdir "iconengines" "qsvgicon" "Qt iconengines"
 }
 
 create_dmg() {
@@ -708,8 +754,8 @@ main() {
     fi
   fi
 
-  # Ensure image format plugins (particularly qpng) are present for QPixmap PNGs
-  ensure_qt_imageformats
+  # Ensure image format and SVG icon plugins are present for bundled resources.
+  ensure_qt_support_plugins
 
   # Bundle non-Qt dependencies: libssh2 + OpenSSL (libcrypto)
   log "Bundling non-Qt dependencies"

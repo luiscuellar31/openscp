@@ -46,6 +46,37 @@ ensure_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required tool: $1"
 }
 
+detect_qt_plugins_root() {
+  local candidate=""
+
+  if command -v qtpaths6 >/dev/null 2>&1; then
+    candidate="$(qtpaths6 --query QT_INSTALL_PLUGINS 2>/dev/null || true)"
+    [[ -n "$candidate" && -d "$candidate" ]] && { echo "$candidate"; return; }
+  fi
+  if command -v qtpaths >/dev/null 2>&1; then
+    candidate="$(qtpaths --query QT_INSTALL_PLUGINS 2>/dev/null || true)"
+    [[ -n "$candidate" && -d "$candidate" ]] && { echo "$candidate"; return; }
+  fi
+  if command -v qmake6 >/dev/null 2>&1; then
+    candidate="$(qmake6 -query QT_INSTALL_PLUGINS 2>/dev/null || true)"
+    [[ -n "$candidate" && -d "$candidate" ]] && { echo "$candidate"; return; }
+  fi
+  if command -v qmake >/dev/null 2>&1; then
+    candidate="$(qmake -query QT_INSTALL_PLUGINS 2>/dev/null || true)"
+    [[ -n "$candidate" && -d "$candidate" ]] && { echo "$candidate"; return; }
+  fi
+
+  for candidate in \
+    "/usr/lib/qt6/plugins" \
+    "/usr/lib/$(uname -m)-linux-gnu/qt6/plugins" \
+    "/usr/lib64/qt6/plugins"
+  do
+    [[ -d "$candidate" ]] && { echo "$candidate"; return; }
+  done
+
+  return 1
+}
+
 detect_version() {
   local ver
   ver=$(sed -n 's/^project(.*VERSION[[:space:]]*\([0-9][0-9.]*\).*/\1/p' "${REPO_DIR}/CMakeLists.txt" | head -n1 || true)
@@ -137,6 +168,28 @@ verify_svg_plugins() {
   "$checker" --context appimage "$APPDIR"
 }
 
+ensure_qt_svg_iconengine() {
+  local dest_dir="$APPDIR/usr/plugins/iconengines"
+  if compgen -G "$dest_dir/libqsvgicon.so*" >/dev/null 2>&1 || compgen -G "$dest_dir/qsvgicon.so*" >/dev/null 2>&1; then
+    return
+  fi
+
+  local plugin_root=""
+  plugin_root="$(detect_qt_plugins_root || true)"
+  [[ -n "$plugin_root" ]] || die "Could not locate the Qt plugins directory needed to bundle qsvgicon"
+
+  local src_dir="${plugin_root}/iconengines"
+  [[ -d "$src_dir" ]] || die "Qt iconengines directory not found under: $plugin_root"
+
+  local src_plugin=""
+  src_plugin="$(find "$src_dir" -maxdepth 1 \( -type f -o -type l \) \( -name 'libqsvgicon.so*' -o -name 'qsvgicon.so*' \) | head -n1 || true)"
+  [[ -n "$src_plugin" ]] || die "Required Qt icon engine qsvgicon not found in: $src_dir"
+
+  log "Copying required Qt icon engine: $(basename "$src_plugin")"
+  mkdir -p "$dest_dir"
+  cp -L "$src_plugin" "$dest_dir/"
+}
+
 main() {
   mkdir -p "$BUILD_DIR" "$DIST_DIR"
 
@@ -190,6 +243,7 @@ main() {
   cmd+=( --output appimage )
   log "Running: ${cmd[*]}"
   "${cmd[@]}"
+  ensure_qt_svg_iconengine
   verify_svg_plugins
 
   # Rename the produced AppImage to our canonical name if needed

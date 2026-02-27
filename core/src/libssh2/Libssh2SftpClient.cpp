@@ -117,6 +117,18 @@ static std::string resolve_posix_home() {
 #endif
 
 // Append host key audit log lines to ~/.openscp/openscp.auth (0600).
+#ifndef _WIN32
+static void write_best_effort(int fd, const char *data, std::size_t len) {
+    while (len > 0) {
+        const ssize_t written = ::write(fd, data, len);
+        if (written <= 0)
+            return;
+        data += (std::size_t)written;
+        len -= (std::size_t)written;
+    }
+}
+#endif
+
 // Best-effort.
 static void auditLogHostKey(const std::string &host, uint16_t port,
                             const std::string &algorithm,
@@ -146,7 +158,7 @@ static void auditLogHostKey(const std::string &host, uint16_t port,
                   (long)time(nullptr), host.c_str(), (unsigned)port,
                   algorithm.c_str(), fingerprint.c_str(),
                   status ? status : "unknown");
-    (void)::write(fd, line, (unsigned)std::strlen(line));
+    write_best_effort(fd, line, std::strlen(line));
     ::close(fd);
 #else
     (void)host;
@@ -1582,7 +1594,7 @@ static bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut,
         ::execvp("ssh", argv.data());
         const std::string execErr =
             std::string("exec ssh failed: ") + std::strerror(errno);
-        (void)::write(STDERR_FILENO, execErr.c_str(), execErr.size());
+        write_best_effort(STDERR_FILENO, execErr.c_str(), execErr.size());
         _exit(127);
     }
 
