@@ -3,8 +3,7 @@ base: core24
 version: "0.7.0"
 summary: Two-panel SFTP client focused on simplicity and security
 description: |
-  OpenSCP is a two-panel commander-style SFTP client written in C++ and Qt.
-  It focuses on secure defaults, clear UX, and practical transfer workflows.
+  Two-panel SFTP client focused on simplicity and security
 grade: stable
 confinement: strict
 icon: icon.png

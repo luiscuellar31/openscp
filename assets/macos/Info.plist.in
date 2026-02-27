@@ -62,6 +62,9 @@
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.developer-tools</string>
 
+  <key>CFBundleGetInfoString</key>
+  <string>Two-panel SFTP client focused on simplicity and security</string>
+
   <key>NSHumanReadableCopyright</key>
   <string>© @CURRENT_YEAR@ OpenSCP contributors</string>
 

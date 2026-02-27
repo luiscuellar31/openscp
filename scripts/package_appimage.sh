@@ -74,7 +74,7 @@ prepare_desktop() {
 Type=Application
 Name=OpenSCP
 GenericName=SFTP Client
-Comment=Two‑panel SFTP client focused on simplicity and security
+Comment=Two-panel SFTP client focused on simplicity and security
 Exec=openscp_hello
 Icon=openscp
 Terminal=false
