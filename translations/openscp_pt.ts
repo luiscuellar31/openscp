@@ -121,10 +121,6 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
         <translation>Salvar em sites salvos</translation>
     </message>
     <message>
-        <source>Save password/passphrase</source>
-        <translation type="vanished">Salvar senha/passphrase</translation>
-    </message>
-    <message>
         <source>Host / Port:</source>
         <translation>Host / Porta:</translation>
     </message>
@@ -417,14 +413,6 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <source>Open right folder</source>
         <translation>Abrir pasta direita</translation>
-    </message>
-    <message>
-        <source>Search in left panel</source>
-        <translation type="vanished">Buscar no painel esquerdo</translation>
-    </message>
-    <message>
-        <source>Search in right panel</source>
-        <translation type="vanished">Buscar no painel direito</translation>
     </message>
     <message>
         <source>Search items</source>
@@ -755,10 +743,6 @@ Deseja continuar?</translation>
 Continue?</source>
         <translation>Isto copiará e depois excluirá a origem.
 Deseja continuar?</translation>
-    </message>
-    <message>
-        <source>Moved OK: %1  |  Failed: %2</source>
-        <translation type="vanished">Movidos OK: %1  |  Falhas: %2</translation>
     </message>
     <message>
         <source>Confirm delete</source>
@@ -1600,10 +1584,6 @@ Edite o site e mantenha apenas um transporte.</translation>
         <translation>Nenhum cliente SFTP disponível</translation>
     </message>
     <message>
-        <source>Could not start remote listing</source>
-        <translation type="vanished">Não foi possível iniciar a listagem remota</translation>
-    </message>
-    <message>
         <source>Missing session options for remote listing</source>
         <translation>Faltam opções de sessão para a listagem remota</translation>
     </message>
@@ -2038,28 +2018,8 @@ Remoto: %3</translation>
         <translation>Retomar</translation>
     </message>
     <message>
-        <source>Pause sel.</source>
-        <translation type="vanished">Pausar sel.</translation>
-    </message>
-    <message>
-        <source>Resume sel.</source>
-        <translation type="vanished">Retomar sel.</translation>
-    </message>
-    <message>
-        <source>Cancel sel.</source>
-        <translation type="vanished">Cancelar sel.</translation>
-    </message>
-    <message>
-        <source>Cancel</source>
-        <translation type="vanished">Cancelar</translation>
-    </message>
-    <message>
         <source>Retry</source>
         <translation>Tentar novamente</translation>
-    </message>
-    <message>
-        <source>Clear</source>
-        <translation type="vanished">Limpar</translation>
     </message>
     <message>
         <source>Close</source>
@@ -2068,10 +2028,6 @@ Remoto: %3</translation>
     <message>
         <source>Apply limit</source>
         <translation>Aplicar limite</translation>
-    </message>
-    <message>
-        <source>Limit sel.</source>
-        <translation type="vanished">Limitar sel.</translation>
     </message>
     <message>
         <source>Speed:</source>
@@ -2084,14 +2040,6 @@ Remoto: %3</translation>
     <message>
         <source>KB/s (0 = no limit)</source>
         <translation>KB/s (0 = sem limite)</translation>
-    </message>
-    <message>
-        <source>Total: %1  |  Queued: %2  |  Running: %3  |  Paused: %4  |  Error: %5  |  Done: %6  |  Canceled: %7</source>
-        <translation type="vanished">Total: %1  |  Na fila: %2  |  Em andamento: %3  |  Pausado: %4  |  Erro: %5  |  Concluído: %6  |  Cancelado: %7</translation>
-    </message>
-    <message>
-        <source>  |  Global limit: %1 KB/s</source>
-        <translation type="vanished">  |  Limite global: %1 KB/s</translation>
     </message>
     <message>
         <source>(unnamed)</source>
