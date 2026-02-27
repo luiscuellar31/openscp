@@ -75,9 +75,9 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
 
     constexpr int kFieldMinWidth = 320;
     constexpr int kFieldMaxWidth = 520;
-    auto createFormPage = [pages,
-                           sectionList](const QString &title,
-                                        QFormLayout *&outForm) -> QWidget * {
+    auto createFormPage = [pages, sectionList, recalcSectionListWidth](
+                              const QString &title,
+                              QFormLayout *&outForm) -> QWidget * {
         auto *scroll = new QScrollArea(pages);
         scroll->setWidgetResizable(true);
         scroll->setFrameShape(QFrame::NoFrame);
