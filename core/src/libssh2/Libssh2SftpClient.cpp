@@ -1440,10 +1440,59 @@ static std::string format_host_port_authority(const std::string &host,
 }
 
 #ifndef _WIN32
+static std::string trim_ascii_whitespace(std::string value) {
+    auto notSpace = [](unsigned char ch) { return !std::isspace(ch); };
+    value.erase(value.begin(),
+                std::find_if(value.begin(), value.end(), notSpace));
+    value.erase(std::find_if(value.rbegin(), value.rend(), notSpace).base(),
+                value.end());
+    return value;
+}
+
+static std::string read_jump_tunnel_stderr(int fd) {
+    if (fd < 0)
+        return std::string();
+
+    std::string out;
+    out.reserve(256);
+    char buf[256];
+    while (out.size() < 4096) {
+        const std::size_t remaining = 4096 - out.size();
+        const ssize_t n = ::read(fd, buf,
+                                 remaining < sizeof(buf) ? remaining
+                                                         : sizeof(buf));
+        if (n > 0) {
+            out.append(buf, static_cast<std::size_t>(n));
+            continue;
+        }
+        if (n == 0)
+            break;
+        if (errno == EINTR)
+            continue;
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+            break;
+        break;
+    }
+    return trim_ascii_whitespace(out);
+}
+
+static std::string format_jump_tunnel_exit_error(const char *prefix,
+                                                 const std::string &stderrText) {
+    std::string out(prefix ? prefix : "SSH jump tunnel failed.");
+    if (!stderrText.empty()) {
+        if (!out.empty() && out.back() != '.' && out.back() != ':')
+            out += ":";
+        out += " " + stderrText;
+    }
+    return out;
+}
+
 static bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut,
-                                  int &pidOut, std::string &err) {
+                                  int &pidOut, int &stderrFdOut,
+                                  std::string &err) {
     sockOut = -1;
     pidOut = -1;
+    stderrFdOut = -1;
     if (!opt.jump_host || opt.jump_host->empty()) {
         err = "SSH jump host is empty.";
         return false;
@@ -1463,35 +1512,46 @@ static bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut,
         return false;
     }
 
-    const pid_t pid = ::fork();
-    if (pid < 0) {
-        err = std::string("fork failed: ") + std::strerror(errno);
+    int stderrPipe[2] = {-1, -1};
+    if (::pipe(stderrPipe) != 0) {
+        err = std::string("pipe failed: ") + std::strerror(errno);
         ::close(pairfd[0]);
         ::close(pairfd[1]);
         return false;
     }
 
+    const pid_t pid = ::fork();
+    if (pid < 0) {
+        err = std::string("fork failed: ") + std::strerror(errno);
+        ::close(pairfd[0]);
+        ::close(pairfd[1]);
+        ::close(stderrPipe[0]);
+        ::close(stderrPipe[1]);
+        return false;
+    }
+
     if (pid == 0) {
         ::close(pairfd[0]);
+        ::close(stderrPipe[0]);
         if (::dup2(pairfd[1], STDIN_FILENO) < 0 ||
             ::dup2(pairfd[1], STDOUT_FILENO) < 0) {
             _exit(127);
         }
         if (pairfd[1] != STDIN_FILENO && pairfd[1] != STDOUT_FILENO)
             ::close(pairfd[1]);
-
-        const int devNull = ::open("/dev/null", O_WRONLY);
-        if (devNull >= 0) {
-            (void)::dup2(devNull, STDERR_FILENO);
-            if (devNull != STDERR_FILENO)
-                ::close(devNull);
+        if (::dup2(stderrPipe[1], STDERR_FILENO) < 0) {
+            _exit(127);
         }
+        if (stderrPipe[1] != STDERR_FILENO)
+            ::close(stderrPipe[1]);
 
         std::vector<std::string> args;
-        args.reserve(20);
+        args.reserve(24);
         args.emplace_back("ssh");
         args.emplace_back("-o");
         args.emplace_back("BatchMode=yes");
+        args.emplace_back("-o");
+        args.emplace_back("IdentitiesOnly=yes");
         args.emplace_back("-o");
         args.emplace_back("ExitOnForwardFailure=yes");
         args.emplace_back("-o");
@@ -1520,25 +1580,39 @@ static bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut,
             argv.push_back(const_cast<char *>(a.c_str()));
         argv.push_back(nullptr);
         ::execvp("ssh", argv.data());
+        const std::string execErr =
+            std::string("exec ssh failed: ") + std::strerror(errno);
+        (void)::write(STDERR_FILENO, execErr.c_str(), execErr.size());
         _exit(127);
     }
 
     ::close(pairfd[1]);
+    ::close(stderrPipe[1]);
     const int fdFlags = ::fcntl(pairfd[0], F_GETFD);
     if (fdFlags >= 0)
         (void)::fcntl(pairfd[0], F_SETFD, fdFlags | FD_CLOEXEC);
+    const int stderrFdFlags = ::fcntl(stderrPipe[0], F_GETFD);
+    if (stderrFdFlags >= 0)
+        (void)::fcntl(stderrPipe[0], F_SETFD, stderrFdFlags | FD_CLOEXEC);
+    const int stderrStatusFlags = ::fcntl(stderrPipe[0], F_GETFL);
+    if (stderrStatusFlags >= 0)
+        (void)::fcntl(stderrPipe[0], F_SETFL, stderrStatusFlags | O_NONBLOCK);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(40));
     int status = 0;
     const pid_t wr = ::waitpid(pid, &status, WNOHANG);
     if (wr == pid) {
         ::close(pairfd[0]);
-        err = "Failed to start SSH jump tunnel process.";
+        const std::string stderrText = read_jump_tunnel_stderr(stderrPipe[0]);
+        ::close(stderrPipe[0]);
+        err = format_jump_tunnel_exit_error(
+            "Failed to start SSH jump tunnel process.", stderrText);
         return false;
     }
 
     sockOut = pairfd[0];
     pidOut = static_cast<int>(pid);
+    stderrFdOut = stderrPipe[0];
     return true;
 }
 
@@ -1785,11 +1859,13 @@ bool Libssh2SftpClient::tcpConnect(const SessionOptions &opt,
 #else
         int jumpSock = -1;
         int jumpPid = -1;
-        if (!spawn_ssh_jump_tunnel(opt, jumpSock, jumpPid, err))
+        int jumpStderrFd = -1;
+        if (!spawn_ssh_jump_tunnel(opt, jumpSock, jumpPid, jumpStderrFd, err))
             return false;
         {
             std::lock_guard<std::mutex> lk(stateMutex_);
             jumpProxyPid_ = jumpPid;
+            jumpProxyStderrFd_ = jumpStderrFd;
         }
         sock_ = jumpSock;
         return true;
@@ -1883,6 +1959,12 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
     libssh2_session_set_timeout(session_, 20000); // 20s
 #endif
     if (libssh2_session_handshake(session_, sock_) != 0) {
+#ifndef _WIN32
+        if (opt.jump_host.has_value() && !opt.jump_host->empty() &&
+            describeJumpTunnelFailure(err)) {
+            return false;
+        }
+#endif
         err = "SSH handshake failed";
         return false;
     }
@@ -2613,6 +2695,7 @@ void Libssh2SftpClient::disconnect() {
     int sock = -1;
 #ifndef _WIN32
     int jumpPid = -1;
+    int jumpStderrFd = -1;
 #endif
     {
         std::lock_guard<std::mutex> lk(stateMutex_);
@@ -2627,6 +2710,8 @@ void Libssh2SftpClient::disconnect() {
 #ifndef _WIN32
         jumpPid = jumpProxyPid_;
         jumpProxyPid_ = -1;
+        jumpStderrFd = jumpProxyStderrFd_;
+        jumpProxyStderrFd_ = -1;
 #endif
     }
 
@@ -2641,6 +2726,8 @@ void Libssh2SftpClient::disconnect() {
         ::close(sock);
     }
 #ifndef _WIN32
+    if (jumpStderrFd != -1)
+        ::close(jumpStderrFd);
     if (jumpPid > 0)
         stop_ssh_jump_tunnel(jumpPid);
 #endif
@@ -2663,6 +2750,52 @@ void Libssh2SftpClient::disconnect() {
         libssh2_session_free(session);
     }
 }
+
+#ifndef _WIN32
+bool Libssh2SftpClient::describeJumpTunnelFailure(std::string &err) {
+    int jumpPid = -1;
+    int jumpStderrFd = -1;
+    {
+        std::lock_guard<std::mutex> lk(stateMutex_);
+        jumpPid = jumpProxyPid_;
+        jumpStderrFd = jumpProxyStderrFd_;
+    }
+
+    if (jumpPid <= 0 && jumpStderrFd < 0)
+        return false;
+
+    bool exited = false;
+    if (jumpPid > 0) {
+        int status = 0;
+        const pid_t wr = ::waitpid(static_cast<pid_t>(jumpPid), &status, WNOHANG);
+        if (wr == static_cast<pid_t>(jumpPid) ||
+            (wr == -1 && errno == ECHILD)) {
+            exited = true;
+        }
+    }
+
+    const std::string stderrText = read_jump_tunnel_stderr(jumpStderrFd);
+    if (!exited && stderrText.empty())
+        return false;
+
+    if (exited) {
+        std::lock_guard<std::mutex> lk(stateMutex_);
+        if (jumpProxyPid_ == jumpPid)
+            jumpProxyPid_ = -1;
+        if (jumpProxyStderrFd_ == jumpStderrFd) {
+            if (jumpProxyStderrFd_ != -1)
+                ::close(jumpProxyStderrFd_);
+            jumpProxyStderrFd_ = -1;
+        }
+    }
+
+    err = format_jump_tunnel_exit_error(
+        exited ? "SSH jump tunnel failed before the SSH handshake."
+               : "SSH jump tunnel reported an error before the SSH handshake.",
+        stderrText);
+    return true;
+}
+#endif
 
 void Libssh2SftpClient::interrupt() {
     int sock = -1;

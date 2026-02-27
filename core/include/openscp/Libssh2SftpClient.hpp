@@ -74,11 +74,15 @@ class Libssh2SftpClient : public SftpClient {
     mutable std::mutex stateMutex_;
 #ifndef _WIN32
     int jumpProxyPid_ = -1;
+    int jumpProxyStderrFd_ = -1;
 #endif
 
     // TCP connection + SSH handshake and authentication.
     bool tcpConnect(const SessionOptions &opt, std::string &err);
     bool sshHandshakeAuth(const SessionOptions &opt, std::string &err);
+#ifndef _WIN32
+    bool describeJumpTunnelFailure(std::string &err);
+#endif
 };
 
 // Utility: remove a known_hosts entry for host:port and rewrite the file
