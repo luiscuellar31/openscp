@@ -436,9 +436,8 @@ copy_qt_framework() {
   fi
 }
 
-# Ensure Qt image format plugins (e.g., qpng) are present so QPixmap can
-# load PNGs from Qt resources in the About dialog, and ensure SVG icon engines
-# are bundled for resource/file SVG icons.
+# Ensure Qt runtime plugins are present without relying on macdeployqt's broad
+# plugin scan. We stage only the plugin families the app actually uses.
 find_qt_plugins_root() {
   local candidate=""
   local hbqt=""
@@ -513,6 +512,7 @@ ensure_qt_plugin_subdir() {
 }
 
 ensure_qt_support_plugins() {
+  ensure_qt_plugin_subdir "platforms" "qcocoa" "Qt platform"
   ensure_qt_plugin_subdir "imageformats" "qpng" "Qt imageformats"
   ensure_qt_plugin_subdir "iconengines" "qsvgicon" "Qt iconengines"
 }
@@ -713,12 +713,22 @@ main() {
   local mqt
   mqt="$(discover_macdeployqt)"
   log "Running macdeployqt at: $mqt"
+  local disable_plugin_scan=0
+  if find_qt_plugins_root >/dev/null 2>&1; then
+    disable_plugin_scan=1
+    log "Using targeted Qt plugin deployment (macdeployqt plugin scan disabled)"
+  else
+    warn "Could not locate a Qt plugins root ahead of macdeployqt; falling back to macdeployqt plugin scanning"
+  fi
   # Build macdeployqt command safely even with set -u and possibly empty extra args
   local libarg=()
   if [[ -n "$QTPREFIX" && -d "$QTPREFIX/lib" ]]; then
     libarg=( -libpath "$QTPREFIX/lib" )
   fi
   local cmd=("$mqt" "$APP_DIR" -always-overwrite -verbose=1)
+  if [[ $disable_plugin_scan -eq 1 ]]; then
+    cmd+=( -no-plugins )
+  fi
   if ((${#libarg[@]:-0})); then
     cmd+=("${libarg[@]}")
   fi
@@ -727,6 +737,9 @@ main() {
     # through Rosetta (seen as "Incompatible processor ... neon").
     warn "macdeployqt failed natively; retrying through Rosetta (x86_64)"
     local cmd_x86=(/usr/bin/arch -x86_64 "$mqt" "$APP_DIR" -always-overwrite -verbose=1)
+    if [[ $disable_plugin_scan -eq 1 ]]; then
+      cmd_x86+=( -no-plugins )
+    fi
     if ((${#libarg[@]:-0})); then
       cmd_x86+=("${libarg[@]}")
     fi
@@ -754,7 +767,7 @@ main() {
     fi
   fi
 
-  # Ensure image format and SVG icon plugins are present for bundled resources.
+  # Ensure the specific plugin families we depend on are present in the bundle.
   ensure_qt_support_plugins
 
   # Bundle non-Qt dependencies: libssh2 + OpenSSL (libcrypto)
