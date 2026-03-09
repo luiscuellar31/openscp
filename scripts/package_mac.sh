@@ -525,7 +525,22 @@ create_dmg() {
   mkdir -p "$staging"
   cp -R "$src_app" "$staging/"
   ln -s /Applications "$staging/Applications"
-  hdiutil create -quiet -fs HFS+ -volname "$volname" -srcfolder "$staging" -format UDZO -imagekey zlib-level=9 "$dmg_path"
+  ensure_cmd hdiutil
+  local attempt=1
+  local max_attempts=3
+  while (( attempt <= max_attempts )); do
+    if hdiutil create -ov -fs HFS+ -volname "$volname" -srcfolder "$staging" -format UDZO -imagekey zlib-level=9 "$dmg_path"; then
+      break
+    fi
+    warn "hdiutil create failed (attempt ${attempt}/${max_attempts})"
+    rm -f "$dmg_path"
+    if (( attempt == max_attempts )); then
+      rm -rf "$staging"
+      die "Unable to create DMG after ${max_attempts} attempts"
+    fi
+    sleep 2
+    ((attempt++))
+  done
   rm -rf "$staging"
 }
 
