@@ -71,7 +71,7 @@ main() {
 
   local tmp_dir
   tmp_dir="$(mktemp -d)"
-  trap 'rm -rf "$tmp_dir"' EXIT
+  trap '[[ -n "${tmp_dir:-}" ]] && rm -rf "${tmp_dir}"' EXIT
 
   log "Extracting snap for plugin validation"
   unsquashfs -f -d "${tmp_dir}/root" "${PROJECT_DIR}/$(basename "$snap_file")" >/dev/null
