@@ -26,6 +26,7 @@ parts:
     source: ../..
     cmake-parameters:
       - -DCMAKE_BUILD_TYPE=Release
+      - -DCMAKE_INSTALL_PREFIX=/usr
     build-packages:
       - pkg-config
       - libssh2-1-dev
