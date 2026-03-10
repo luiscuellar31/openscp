@@ -351,4 +351,4 @@ jobs:
             echo "No files found to upload."
             exit 1
           fi
-          gh release upload "$tag" "${files[@]}" --clobber
+          gh release upload "$tag" "${files[@]}" --clobber --repo "${{ github.repository }}"
