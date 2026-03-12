@@ -159,6 +159,10 @@ jobs:
           CMAKE_OSX_ARCHITECTURES="${{ matrix.arch }}" \
           ./scripts/package_mac.sh
 
+      - name: Verify macOS bundle linkage
+        run: |
+          bash ./scripts/verify_macos_bundle.sh build/OpenSCP.app
+
       - name: Collect macOS artifacts
         run: |
           set -euo pipefail

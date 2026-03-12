@@ -59,7 +59,7 @@ uses_external_qt_runtime() {
 main() {
   [[ "$(uname -s)" == "Linux" ]] || die "Flatpak packaging must run on Linux."
   [[ -f "$MANIFEST" ]] || die "Manifest not found: $MANIFEST"
-  [[ -x "$CHECKER" ]] || die "SVG plugin checker not found/executable: $CHECKER"
+  [[ -x "$CHECKER" ]] || die "Qt runtime checker not found/executable: $CHECKER"
 
   ensure_cmd flatpak-builder
   ensure_cmd flatpak
@@ -90,7 +90,7 @@ main() {
     "$build_manifest"
 
   if uses_external_qt_runtime "$build_manifest"; then
-    log "Detected external Flatpak runtime; allowing runtime-provided SVG plugins."
+    log "Detected external Flatpak runtime; allowing runtime-provided Qt plugins."
     "$CHECKER" --allow-runtime-provided --context flatpak "${BUILD_DIR}/files"
   else
     "$CHECKER" --context flatpak "${BUILD_DIR}/files"
