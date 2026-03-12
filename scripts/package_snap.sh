@@ -52,7 +52,7 @@ uses_kde_neon_extension() {
 main() {
   [[ "$(uname -s)" == "Linux" ]] || die "Snap packaging must run on Linux."
   [[ -d "$PROJECT_DIR" ]] || die "Snap project directory not found: $PROJECT_DIR"
-  [[ -x "$CHECKER" ]] || die "SVG plugin checker not found/executable: $CHECKER"
+  [[ -x "$CHECKER" ]] || die "Qt runtime checker not found/executable: $CHECKER"
 
   ensure_cmd "$SNAPCRAFT"
   ensure_cmd unsquashfs
@@ -73,10 +73,10 @@ main() {
   tmp_dir="$(mktemp -d)"
   trap '[[ -n "${tmp_dir:-}" ]] && rm -rf "${tmp_dir}"' EXIT
 
-  log "Extracting snap for plugin validation"
+  log "Extracting snap for Qt runtime validation"
   unsquashfs -f -d "${tmp_dir}/root" "${PROJECT_DIR}/$(basename "$snap_file")" >/dev/null
   if uses_kde_neon_extension; then
-    log "Detected kde-neon-6 extension; allowing runtime-provided SVG plugins."
+    log "Detected kde-neon-6 extension; allowing runtime-provided Qt plugins."
     "$CHECKER" --allow-runtime-provided --context snap "${tmp_dir}/root"
   else
     "$CHECKER" --context snap "${tmp_dir}/root"
