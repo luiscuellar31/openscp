@@ -19,6 +19,10 @@ set -euo pipefail
 #   QT_PREFIX              Path to Qt install root (…/Qt/<version>/macos)
 #   Qt6_DIR                Path to Qt6 CMake config dir (…/lib/cmake/Qt6); used to derive Qt bin for macdeployqt
 #   PACKAGE_FORMATS        Comma-separated outputs: app,pkg,dmg (default: dmg)
+#   MACDEPLOYQT_DISABLE_PLUGIN_SCAN
+#                          Set to 1 to pass -no-plugins to macdeployqt.
+#                          Default: 0 (recommended). When disabled, the script
+#                          still stages required plugin families manually.
 #
 # Signing / notarization env vars:
 #   APPLE_IDENTITY         Required for signing, e.g. "Developer ID Application: Your Name (TEAMID)"
@@ -436,8 +440,8 @@ copy_qt_framework() {
   fi
 }
 
-# Ensure Qt runtime plugins are present without relying on macdeployqt's broad
-# plugin scan. We stage only the plugin families the app actually uses.
+# Ensure critical Qt runtime plugin families are present in the bundle.
+# This acts as a safety net on top of what macdeployqt already deploys.
 find_qt_plugins_root() {
   local candidate=""
   local hbqt=""
@@ -729,11 +733,15 @@ main() {
   mqt="$(discover_macdeployqt)"
   log "Running macdeployqt at: $mqt"
   local disable_plugin_scan=0
-  if find_qt_plugins_root >/dev/null 2>&1; then
-    disable_plugin_scan=1
-    log "Using targeted Qt plugin deployment (macdeployqt plugin scan disabled)"
+  if [[ "${MACDEPLOYQT_DISABLE_PLUGIN_SCAN:-0}" == "1" ]]; then
+    if find_qt_plugins_root >/dev/null 2>&1; then
+      disable_plugin_scan=1
+      warn "MACDEPLOYQT_DISABLE_PLUGIN_SCAN=1: disabling macdeployqt plugin scan"
+    else
+      warn "MACDEPLOYQT_DISABLE_PLUGIN_SCAN=1 but Qt plugins root was not found; keeping macdeployqt plugin scan enabled"
+    fi
   else
-    warn "Could not locate a Qt plugins root ahead of macdeployqt; falling back to macdeployqt plugin scanning"
+    log "Using macdeployqt plugin scan (default)"
   fi
   # Build macdeployqt command safely even with set -u and possibly empty extra args
   local libarg=()
