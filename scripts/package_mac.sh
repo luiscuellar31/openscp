@@ -261,6 +261,59 @@ redirect_dep_to_rpath() {
   install_name_tool -change "$old" "@rpath/${base}" "$bin"
 }
 
+qt_framework_dep_to_bundle_rpath() {
+  local dep="$1"
+  # Example source dep:
+  # /opt/homebrew/opt/qtbase/lib/QtGui.framework/Versions/A/QtGui
+  # target:
+  # @rpath/QtGui.framework/Versions/A/QtGui
+  if [[ "$dep" =~ /((Qt[^/]+)\.framework)/Versions/[^/]+/(Qt[^/]+)$ ]]; then
+    local fw_name="${BASH_REMATCH[2]}"
+    local bin_name="${BASH_REMATCH[3]}"
+    if [[ "$fw_name" == "$bin_name" ]]; then
+      printf '@rpath/%s.framework/Versions/A/%s\n' "$fw_name" "$fw_name"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+ensure_loader_framework_rpath() {
+  local bin="$1"
+  local rpath='@loader_path/../../Frameworks'
+  if ! otool -l "$bin" | grep -q "$rpath"; then
+    install_name_tool -add_rpath "$rpath" "$bin" || true
+  fi
+}
+
+rewrite_external_refs_to_bundle() {
+  local bin="$1"
+  [[ -f "$bin" ]] || return 0
+
+  local dep=""
+  while IFS= read -r dep; do
+    [[ -n "$dep" ]] || continue
+    case "$dep" in
+      /opt/homebrew/*|/usr/local/*|/Users/runner/*|/private/tmp/*|/tmp/*|/var/folders/*)
+        local mapped=""
+        mapped="$(qt_framework_dep_to_bundle_rpath "$dep" || true)"
+        if [[ -n "$mapped" ]]; then
+          install_name_tool -change "$dep" "$mapped" "$bin" || true
+          continue
+        fi
+
+        local base
+        base="$(basename "$dep")"
+        if [[ -e "$FRAMEWORKS_DIR/$base" ]]; then
+          install_name_tool -change "$dep" "@rpath/$base" "$bin" || true
+        fi
+        ;;
+      *)
+        ;;
+    esac
+  done < <(otool -L "$bin" | awk 'NR>1 {print $1}')
+}
+
 sign_item() {
   local path="$1"
   [[ "${SKIP_CODESIGN:-0}" == "1" ]] && { warn "Skipping codesign: $path"; return; }
@@ -583,6 +636,15 @@ ensure_qt_plugin_subdir() {
     else
       cp -RL "$src/." "$dest_dir/"
     fi
+
+    # Normalize plugin linkage to avoid leaking absolute Homebrew paths.
+    local plugin_bin
+    while IFS= read -r plugin_bin; do
+      [[ -n "$plugin_bin" ]] || continue
+      rewrite_external_refs_to_bundle "$plugin_bin"
+      ensure_loader_framework_rpath "$plugin_bin"
+    done < <(find "$dest_dir" -maxdepth 1 -type f -name '*.dylib' | sort)
+
     if [[ ! -f "$dest_dir/lib${sentinel}.dylib" && ! -f "$dest_dir/${sentinel}.dylib" ]]; then
       if [[ "$required" == "1" ]]; then
         die "Failed to stage ${description} plugin '${sentinel}' from: ${src}"
