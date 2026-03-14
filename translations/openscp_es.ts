@@ -1400,6 +1400,102 @@ Edita el sitio y deja solo un transporte.</translation>
         <source>Drop ignored: remote-origin drag cannot be dropped back into the same remote panel</source>
         <translation>Soltado ignorado: el arrastre de origen remoto no puede soltarse de nuevo en el mismo panel remoto</translation>
     </message>
+    <message>
+        <source>No active remote session to reconnect.</source>
+        <translation>No hay sesión remota activa para reconectar.</translation>
+    </message>
+    <message>
+        <source>Connection state is changing; reconnect skipped.</source>
+        <translation>El estado de la conexión está cambiando; se omitió la reconexión.</translation>
+    </message>
+    <message>
+        <source>Reconnect already in progress.</source>
+        <translation>Ya hay una reconexión en progreso.</translation>
+    </message>
+    <message>
+        <source>Remote session became stale. Reconnecting…</source>
+        <translation>La sesión remota quedó obsoleta. Reconectando…</translation>
+    </message>
+    <message>
+        <source>Reconnected transport, but remote panel restore failed.</source>
+        <translation>Se reconectó el transporte, pero falló restaurar el panel remoto.</translation>
+    </message>
+    <message>
+        <source>Remote session reconnected</source>
+        <translation>Sesión remota reconectada</translation>
+    </message>
+    <message>
+        <source>Recovered remote session while trying to %1</source>
+        <translation>Se recuperó la sesión remota al intentar %1</translation>
+    </message>
+    <message>
+        <source>Invalid operation callback</source>
+        <translation>Callback de operación inválido</translation>
+    </message>
+    <message>
+        <source>No active remote session</source>
+        <translation>No hay sesión remota activa</translation>
+    </message>
+    <message>
+        <source>The remote session failed while trying to %1.
+OpenSCP will disconnect to avoid inconsistent operations.
+%2</source>
+        <translation>La sesión remota falló al intentar %1.
+OpenSCP se desconectará para evitar operaciones inconsistentes.
+%2</translation>
+    </message>
+    <message>
+        <source>validate the remote session</source>
+        <translation>validar la sesión remota</translation>
+    </message>
+    <message>
+        <source>periodic</source>
+        <translation>periódica</translation>
+    </message>
+    <message>
+        <source>resume (%1s)</source>
+        <translation>reanudación (%1s)</translation>
+    </message>
+    <message>
+        <source>Remote session validated (%1)</source>
+        <translation>Sesión remota validada (%1)</translation>
+    </message>
+    <message>
+        <source>The remote session no longer responds (%1).
+OpenSCP will disconnect to avoid inconsistent operations.
+%2</source>
+        <translation>La sesión remota dejó de responder (%1).
+OpenSCP se desconectará para evitar operaciones inconsistentes.
+%2</translation>
+    </message>
+    <message>
+        <source>create a remote folder</source>
+        <translation>crear una carpeta remota</translation>
+    </message>
+    <message>
+        <source>check remote item existence</source>
+        <translation>comprobar existencia del elemento remoto</translation>
+    </message>
+    <message>
+        <source>create a remote file</source>
+        <translation>crear un archivo remoto</translation>
+    </message>
+    <message>
+        <source>rename a remote item</source>
+        <translation>renombrar un elemento remoto</translation>
+    </message>
+    <message>
+        <source>delete remote items</source>
+        <translation>eliminar elementos remotos</translation>
+    </message>
+    <message>
+        <source>read remote permissions</source>
+        <translation>leer permisos remotos</translation>
+    </message>
+    <message>
+        <source>change remote permissions</source>
+        <translation>cambiar permisos remotos</translation>
+    </message>
 </context>
 <context>
     <name>PermissionsDialog</name>

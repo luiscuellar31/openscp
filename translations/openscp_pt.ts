@@ -1400,6 +1400,102 @@ Edite o site e mantenha apenas um transporte.</translation>
         <source>Drop ignored: remote-origin drag cannot be dropped back into the same remote panel</source>
         <translation>Soltar ignorado: arrasto de origem remota não pode ser solto novamente no mesmo painel remoto</translation>
     </message>
+    <message>
+        <source>No active remote session to reconnect.</source>
+        <translation>Não há sessão remota ativa para reconectar.</translation>
+    </message>
+    <message>
+        <source>Connection state is changing; reconnect skipped.</source>
+        <translation>O estado da conexão está mudando; reconexão ignorada.</translation>
+    </message>
+    <message>
+        <source>Reconnect already in progress.</source>
+        <translation>Já existe uma reconexão em andamento.</translation>
+    </message>
+    <message>
+        <source>Remote session became stale. Reconnecting…</source>
+        <translation>A sessão remota ficou obsoleta. Reconectando…</translation>
+    </message>
+    <message>
+        <source>Reconnected transport, but remote panel restore failed.</source>
+        <translation>O transporte foi reconectado, mas a restauração do painel remoto falhou.</translation>
+    </message>
+    <message>
+        <source>Remote session reconnected</source>
+        <translation>Sessão remota reconectada</translation>
+    </message>
+    <message>
+        <source>Recovered remote session while trying to %1</source>
+        <translation>Sessão remota recuperada ao tentar %1</translation>
+    </message>
+    <message>
+        <source>Invalid operation callback</source>
+        <translation>Callback de operação inválido</translation>
+    </message>
+    <message>
+        <source>No active remote session</source>
+        <translation>Não há sessão remota ativa</translation>
+    </message>
+    <message>
+        <source>The remote session failed while trying to %1.
+OpenSCP will disconnect to avoid inconsistent operations.
+%2</source>
+        <translation>A sessão remota falhou ao tentar %1.
+O OpenSCP vai desconectar para evitar operações inconsistentes.
+%2</translation>
+    </message>
+    <message>
+        <source>validate the remote session</source>
+        <translation>validar a sessão remota</translation>
+    </message>
+    <message>
+        <source>periodic</source>
+        <translation>periódica</translation>
+    </message>
+    <message>
+        <source>resume (%1s)</source>
+        <translation>retomada (%1s)</translation>
+    </message>
+    <message>
+        <source>Remote session validated (%1)</source>
+        <translation>Sessão remota validada (%1)</translation>
+    </message>
+    <message>
+        <source>The remote session no longer responds (%1).
+OpenSCP will disconnect to avoid inconsistent operations.
+%2</source>
+        <translation>A sessão remota não responde mais (%1).
+O OpenSCP vai desconectar para evitar operações inconsistentes.
+%2</translation>
+    </message>
+    <message>
+        <source>create a remote folder</source>
+        <translation>criar uma pasta remota</translation>
+    </message>
+    <message>
+        <source>check remote item existence</source>
+        <translation>verificar existência do item remoto</translation>
+    </message>
+    <message>
+        <source>create a remote file</source>
+        <translation>criar um arquivo remoto</translation>
+    </message>
+    <message>
+        <source>rename a remote item</source>
+        <translation>renomear um item remoto</translation>
+    </message>
+    <message>
+        <source>delete remote items</source>
+        <translation>excluir itens remotos</translation>
+    </message>
+    <message>
+        <source>read remote permissions</source>
+        <translation>ler permissões remotas</translation>
+    </message>
+    <message>
+        <source>change remote permissions</source>
+        <translation>alterar permissões remotas</translation>
+    </message>
 </context>
 <context>
     <name>PermissionsDialog</name>
