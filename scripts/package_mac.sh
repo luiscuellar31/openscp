@@ -626,24 +626,32 @@ ensure_qt_plugin_subdir() {
   plugins_root="$(find_qt_plugins_root_for_subdir "$subdir" "$sentinel" || true)"
   if [[ -n "$plugins_root" && -d "$plugins_root/$subdir" ]]; then
     local src="$plugins_root/$subdir"
-    log "Ensuring ${description} plugins from: $src"
-    mkdir -p "$dest_dir"
-    # Homebrew plugin trees frequently expose symlinks via /opt/homebrew/opt.
-    # Copy plugins by dereferencing links so bundled dylibs remain valid after
-    # relocation into OpenSCP.app.
-    if command -v rsync >/dev/null 2>&1; then
-      rsync -aL "$src"/ "$dest_dir"/
-    else
-      cp -RL "$src/." "$dest_dir/"
+    local src_plugin=""
+    if [[ -f "$src/lib${sentinel}.dylib" ]]; then
+      src_plugin="$src/lib${sentinel}.dylib"
+    elif [[ -f "$src/${sentinel}.dylib" ]]; then
+      src_plugin="$src/${sentinel}.dylib"
     fi
+
+    if [[ -z "$src_plugin" ]]; then
+      if [[ "$required" == "1" ]]; then
+        die "Required ${description} plugin '${sentinel}' was not found in: $src"
+      fi
+      warn "Optional ${description} plugin '${sentinel}' not found in: $src"
+      return
+    fi
+
+    log "Ensuring ${description} plugin from: $src_plugin"
+    mkdir -p "$dest_dir"
+    # Copy only the required plugin to avoid bundling optional plugins that can
+    # introduce undeployed third-party dependencies (for example, qjp2 -> jasper).
+    cp -L "$src_plugin" "$dest_dir/"
 
     # Normalize plugin linkage to avoid leaking absolute Homebrew paths.
     local plugin_bin
-    while IFS= read -r plugin_bin; do
-      [[ -n "$plugin_bin" ]] || continue
-      rewrite_external_refs_to_bundle "$plugin_bin"
-      ensure_loader_framework_rpath "$plugin_bin"
-    done < <(find "$dest_dir" -maxdepth 1 -type f -name '*.dylib' | sort)
+    plugin_bin="$dest_dir/$(basename "$src_plugin")"
+    rewrite_external_refs_to_bundle "$plugin_bin"
+    ensure_loader_framework_rpath "$plugin_bin"
 
     if [[ ! -f "$dest_dir/lib${sentinel}.dylib" && ! -f "$dest_dir/${sentinel}.dylib" ]]; then
       if [[ "$required" == "1" ]]; then
@@ -688,6 +696,45 @@ prune_optional_qt_plugins() {
       fi
     fi
   fi
+}
+
+is_required_qt_plugin_binary() {
+  local plugin="$1"
+  case "$plugin" in
+    */platforms/libqcocoa.dylib|*/platforms/qcocoa.dylib|*/iconengines/libqsvgicon.dylib|*/iconengines/qsvgicon.dylib)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+sanitize_qt_plugins_linkage() {
+  local forbidden_regex='^/(opt/homebrew|usr/local/(Cellar|opt)|Users/runner|private/tmp|tmp|var/folders|.*miniconda.*|.*anaconda.*)'
+  local plugin=""
+  while IFS= read -r plugin; do
+    [[ -n "$plugin" ]] || continue
+
+    rewrite_external_refs_to_bundle "$plugin"
+    ensure_loader_framework_rpath "$plugin"
+
+    local bad_refs=""
+    bad_refs="$(otool -L "$plugin" | awk 'NR>1 {print $1}' | grep -E "$forbidden_regex" || true)"
+    if [[ -n "$bad_refs" ]]; then
+      if is_required_qt_plugin_binary "$plugin"; then
+        err "Required Qt plugin has unresolved external refs: $plugin"
+        printf '%s\n' "$bad_refs" >&2
+        die "Cannot continue with unresolved required plugin dependencies"
+      fi
+      warn "Pruning optional plugin with unresolved external refs: $plugin"
+      printf '%s\n' "$bad_refs" >&2
+      rm -f "$plugin"
+    fi
+  done < <(find "$PLUGINS_DIR" -type f -name '*.dylib' | sort)
+
+  # Best-effort cleanup for empty plugin directories after pruning.
+  find "$PLUGINS_DIR" -type d -empty -delete 2>/dev/null || true
 }
 
 create_dmg() {
@@ -966,6 +1013,10 @@ main() {
   # Bundle non-Qt dependencies: libssh2 + OpenSSL (libcrypto)
   log "Bundling non-Qt dependencies"
   bundle_non_qt_deps
+
+  # Final pass: prune optional plugins that still leak external references.
+  log "Sanitizing bundled Qt plugins"
+  sanitize_qt_plugins_linkage
 
   # Validate and fix any lingering Homebrew/Conda refs
   log "Validating linkage for internal libraries"
