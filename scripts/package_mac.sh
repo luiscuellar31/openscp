@@ -510,11 +510,17 @@ list_qt_plugins_roots() {
 
 find_qt_plugins_root() {
   local candidate=""
+  local first=""
   while IFS= read -r candidate; do
     [[ -n "$candidate" ]] || continue
-    echo "$candidate"
-    return 0
+    if [[ -z "$first" ]]; then
+      first="$candidate"
+    fi
   done < <(list_qt_plugins_roots)
+  if [[ -n "$first" ]]; then
+    echo "$first"
+    return 0
+  fi
   return 1
 }
 
@@ -523,20 +529,33 @@ find_qt_plugins_root_for_subdir() {
   local sentinel="$2"
   local candidate=""
   local subpath=""
+  local match=""
+  local fallback=""
   while IFS= read -r candidate; do
     [[ -n "$candidate" ]] || continue
     subpath="${candidate}/${subdir}"
     [[ -d "$subpath" ]] || continue
     if [[ -f "$subpath/lib${sentinel}.dylib" || -f "$subpath/${sentinel}.dylib" ]]; then
-      echo "$candidate"
-      return 0
+      if [[ -z "$match" ]]; then
+        match="$candidate"
+      fi
+      continue
     fi
     # Keep a fallback for plugin dirs that exist but use a different plugin name.
     if find "$subpath" -maxdepth 1 -type f -name '*.dylib' | grep -q .; then
-      echo "$candidate"
-      return 0
+      if [[ -z "$fallback" ]]; then
+        fallback="$candidate"
+      fi
     fi
   done < <(list_qt_plugins_roots)
+  if [[ -n "$match" ]]; then
+    echo "$match"
+    return 0
+  fi
+  if [[ -n "$fallback" ]]; then
+    echo "$fallback"
+    return 0
+  fi
   return 1
 }
 
@@ -544,6 +563,7 @@ ensure_qt_plugin_subdir() {
   local subdir="$1"
   local sentinel="$2"
   local description="$3"
+  local required="${4:-1}"
   local dest_dir="$PLUGINS_DIR/$subdir"
   if [[ -f "$dest_dir/lib${sentinel}.dylib" || -f "$dest_dir/${sentinel}.dylib" ]]; then
     return
@@ -564,20 +584,25 @@ ensure_qt_plugin_subdir() {
       cp -RL "$src/." "$dest_dir/"
     fi
     if [[ ! -f "$dest_dir/lib${sentinel}.dylib" && ! -f "$dest_dir/${sentinel}.dylib" ]]; then
-      die "Failed to stage ${description} plugin '${sentinel}' from: ${src}"
+      if [[ "$required" == "1" ]]; then
+        die "Failed to stage ${description} plugin '${sentinel}' from: ${src}"
+      fi
+      warn "Could not stage optional ${description} plugin '${sentinel}' from: ${src}"
     fi
   else
-    warn "Could not locate ${description} plugins; ${sentinel} may fail to load"
+    warn "Could not locate ${description} plugins; ${sentinel} may be unavailable"
     local roots
     roots="$(list_qt_plugins_roots | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
     [[ -n "$roots" ]] && warn "Searched Qt plugin roots: $roots"
-    die "Missing required ${description} plugin '${sentinel}' for macOS bundle"
+    if [[ "$required" == "1" ]]; then
+      die "Missing required ${description} plugin '${sentinel}' for macOS bundle"
+    fi
   fi
 }
 
 ensure_qt_support_plugins() {
   ensure_qt_plugin_subdir "platforms" "qcocoa" "Qt platform"
-  ensure_qt_plugin_subdir "imageformats" "qpng" "Qt imageformats"
+  ensure_qt_plugin_subdir "imageformats" "qsvg" "Qt imageformats" 0
   ensure_qt_plugin_subdir "iconengines" "qsvgicon" "Qt iconengines"
 }
 
