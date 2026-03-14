@@ -448,36 +448,48 @@ copy_qt_framework() {
 
 # Ensure critical Qt runtime plugin families are present in the bundle.
 # This acts as a safety net on top of what macdeployqt already deploys.
-find_qt_plugins_root() {
+list_qt_plugins_roots() {
   local candidate=""
   local hbqt=""
+  local seen=""
+
+  emit_root_if_new() {
+    local root="$1"
+    [[ -n "$root" && -d "$root" ]] || return 0
+    if [[ -n "$seen" ]] && printf '%s' "$seen" | grep -Fqx "$root"; then
+      return 0
+    fi
+    seen="${seen}${root}"$'\n'
+    printf '%s\n' "$root"
+  }
 
   if [[ -n "$QTPREFIX" ]]; then
     for candidate in \
       "$QTPREFIX/plugins" \
+      "$QTPREFIX/lib/qt/plugins" \
       "$QTPREFIX/lib/qt6/plugins" \
       "$QTPREFIX/share/qt/plugins" \
       "$QTPREFIX/share/qt6/plugins"
     do
-      [[ -d "$candidate" ]] && { echo "$candidate"; return; }
+      emit_root_if_new "$candidate"
     done
   fi
 
   if command -v qtpaths6 >/dev/null 2>&1; then
     candidate="$(qtpaths6 --query QT_INSTALL_PLUGINS 2>/dev/null || true)"
-    [[ -n "$candidate" && -d "$candidate" ]] && { echo "$candidate"; return; }
+    emit_root_if_new "$candidate"
   fi
   if command -v qtpaths >/dev/null 2>&1; then
     candidate="$(qtpaths --query QT_INSTALL_PLUGINS 2>/dev/null || true)"
-    [[ -n "$candidate" && -d "$candidate" ]] && { echo "$candidate"; return; }
+    emit_root_if_new "$candidate"
   fi
   if command -v qmake6 >/dev/null 2>&1; then
     candidate="$(qmake6 -query QT_INSTALL_PLUGINS 2>/dev/null || true)"
-    [[ -n "$candidate" && -d "$candidate" ]] && { echo "$candidate"; return; }
+    emit_root_if_new "$candidate"
   fi
   if command -v qmake >/dev/null 2>&1; then
     candidate="$(qmake -query QT_INSTALL_PLUGINS 2>/dev/null || true)"
-    [[ -n "$candidate" && -d "$candidate" ]] && { echo "$candidate"; return; }
+    emit_root_if_new "$candidate"
   fi
 
   if command -v brew >/dev/null 2>&1; then
@@ -485,14 +497,46 @@ find_qt_plugins_root() {
     if [[ -n "$hbqt" ]]; then
       for candidate in \
         "$hbqt/plugins" \
+        "$hbqt/lib/qt/plugins" \
+        "$hbqt/lib/qt6/plugins" \
         "$hbqt/share/qt/plugins" \
         "$hbqt/share/qt6/plugins"
       do
-        [[ -d "$candidate" ]] && { echo "$candidate"; return; }
+        emit_root_if_new "$candidate"
       done
     fi
   fi
+}
 
+find_qt_plugins_root() {
+  local candidate=""
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    echo "$candidate"
+    return 0
+  done < <(list_qt_plugins_roots)
+  return 1
+}
+
+find_qt_plugins_root_for_subdir() {
+  local subdir="$1"
+  local sentinel="$2"
+  local candidate=""
+  local subpath=""
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    subpath="${candidate}/${subdir}"
+    [[ -d "$subpath" ]] || continue
+    if [[ -f "$subpath/lib${sentinel}.dylib" || -f "$subpath/${sentinel}.dylib" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+    # Keep a fallback for plugin dirs that exist but use a different plugin name.
+    if find "$subpath" -maxdepth 1 -type f -name '*.dylib' | grep -q .; then
+      echo "$candidate"
+      return 0
+    fi
+  done < <(list_qt_plugins_roots)
   return 1
 }
 
@@ -506,18 +550,28 @@ ensure_qt_plugin_subdir() {
   fi
 
   local plugins_root=""
-  plugins_root="$(find_qt_plugins_root || true)"
+  plugins_root="$(find_qt_plugins_root_for_subdir "$subdir" "$sentinel" || true)"
   if [[ -n "$plugins_root" && -d "$plugins_root/$subdir" ]]; then
     local src="$plugins_root/$subdir"
     log "Ensuring ${description} plugins from: $src"
     mkdir -p "$dest_dir"
-    if command -v ditto >/dev/null 2>&1; then
-      ditto "$src" "$dest_dir"
+    # Homebrew plugin trees frequently expose symlinks via /opt/homebrew/opt.
+    # Copy plugins by dereferencing links so bundled dylibs remain valid after
+    # relocation into OpenSCP.app.
+    if command -v rsync >/dev/null 2>&1; then
+      rsync -aL "$src"/ "$dest_dir"/
     else
-      cp -R "$src/." "$dest_dir/"
+      cp -RL "$src/." "$dest_dir/"
+    fi
+    if [[ ! -f "$dest_dir/lib${sentinel}.dylib" && ! -f "$dest_dir/${sentinel}.dylib" ]]; then
+      die "Failed to stage ${description} plugin '${sentinel}' from: ${src}"
     fi
   else
     warn "Could not locate ${description} plugins; ${sentinel} may fail to load"
+    local roots
+    roots="$(list_qt_plugins_roots | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    [[ -n "$roots" ]] && warn "Searched Qt plugin roots: $roots"
+    die "Missing required ${description} plugin '${sentinel}' for macOS bundle"
   fi
 }
 
