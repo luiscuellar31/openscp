@@ -155,6 +155,7 @@ jobs:
           SKIP_CODESIGN=1 \
           SKIP_NOTARIZATION=1 \
           DO_ADHOC_SIGN=1 \
+          MACDEPLOYQT_DISABLE_PLUGIN_SCAN=1 \
           PACKAGE_FORMATS=app,pkg,dmg \
           CMAKE_OSX_ARCHITECTURES="${{ matrix.arch }}" \
           ./scripts/package_mac.sh
