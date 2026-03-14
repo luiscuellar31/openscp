@@ -23,6 +23,12 @@ set -euo pipefail
 #                          Set to 1 to pass -no-plugins to macdeployqt.
 #                          Default: 0 (recommended). When disabled, the script
 #                          still stages required plugin families manually.
+#   PRUNE_OPTIONAL_QT_PLUGINS
+#                          Set to 1 (default) to remove optional Qt plugins
+#                          that OpenSCP does not use but may pull unresolved
+#                          framework deps on some Qt builds (for example,
+#                          libqtvirtualkeyboardplugin.dylib -> QtVirtualKeyboardQml).
+#                          Set to 0 to keep all scanned plugins.
 #
 # Signing / notarization env vars:
 #   APPLE_IDENTITY         Required for signing, e.g. "Developer ID Application: Your Name (TEAMID)"
@@ -521,6 +527,28 @@ ensure_qt_support_plugins() {
   ensure_qt_plugin_subdir "iconengines" "qsvgicon" "Qt iconengines"
 }
 
+prune_optional_qt_plugins() {
+  if [[ "${PRUNE_OPTIONAL_QT_PLUGINS:-1}" != "1" ]]; then
+    return
+  fi
+
+  # OpenSCP does not use Qt Virtual Keyboard on desktop. Some Qt distributions
+  # (notably certain Homebrew builds) can ship this plugin with dependencies
+  # that are not deployed by macdeployqt, causing strict linkage verification
+  # failures even though the plugin is never loaded by OpenSCP.
+  local vk_plugin="${PLUGINS_DIR}/platforminputcontexts/libqtvirtualkeyboardplugin.dylib"
+  if [[ -f "$vk_plugin" ]]; then
+    warn "Pruning optional plugin: ${vk_plugin}"
+    rm -f "$vk_plugin"
+    local pic_dir="${PLUGINS_DIR}/platforminputcontexts"
+    if [[ -d "$pic_dir" ]]; then
+      if ! find "$pic_dir" -type f -name '*.dylib' | grep -q .; then
+        rmdir "$pic_dir" 2>/dev/null || true
+      fi
+    fi
+  fi
+}
+
 create_dmg() {
   local dmg_path="$1"; local volname="$2"; local src_app="$3"
   local staging
@@ -792,6 +820,7 @@ main() {
 
   # Ensure the specific plugin families we depend on are present in the bundle.
   ensure_qt_support_plugins
+  prune_optional_qt_plugins
 
   # Bundle non-Qt dependencies: libssh2 + OpenSSL (libcrypto)
   log "Bundling non-Qt dependencies"
