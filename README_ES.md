@@ -44,7 +44,7 @@ cmake --build build -j
 open build/OpenSCP.app
 ```
 
-## Lo que Ofrece OpenSCP (v0.8.0)
+## Lo que Ofrece OpenSCP (v0.8.1)
 
 ### 1. Flujo de doble panel
 
@@ -66,6 +66,8 @@ open build/OpenSCP.app
 - La barra de estado principal muestra avisos de transferencias completadas (subidas/descargas exitosas).
 - Las transferencias usan sesiones de worker interrumpibles y tiempos de espera acotados de lectura/escritura en socket para evitar bloqueos indefinidos cuando la red se estanca.
 - El flujo de finalizacion de subidas esta endurecido y las vistas remotas se refrescan de forma confiable al terminar uploads.
+- Las operaciones remotas criticas ahora intentan una recuperacion automatica de sesion stale (reconexion + reintento) antes de fallar.
+- La sesion remota principal se valida de forma periodica y al volver de suspension/bloqueo; si el transporte ya no es valido, OpenSCP se desconecta de forma segura con aviso claro.
 
 ### 3. Endurecimiento de seguridad SFTP
 

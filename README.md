@@ -44,7 +44,7 @@ cmake --build build -j
 open build/OpenSCP.app
 ```
 
-## What OpenSCP Offers (v0.8.0)
+## What OpenSCP Offers (v0.8.1)
 
 ### 1. Dual-panel workflow
 
@@ -66,6 +66,8 @@ open build/OpenSCP.app
 - Main status bar emits transfer completion notices (for successful uploads/downloads).
 - Transfers use interruptible worker sessions and bounded socket read/write waits to avoid indefinite hangs during stalled network conditions.
 - Upload completion path is hardened and remote views refresh reliably after finished uploads.
+- Critical remote operations now attempt one automatic stale-session recovery (reconnect + retry) before failing.
+- Main remote session health checks run periodically and after wake/resume; if transport is no longer valid, OpenSCP disconnects safely with a clear warning.
 
 ### 3. SFTP security hardening
 

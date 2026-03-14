@@ -858,7 +858,13 @@ void MainWindow::newDirRight() {
         const QString path =
             joinRemotePath(rightRemoteModel_->rootPath(), name);
         std::string err;
-        if (!sftp_->mkdir(path.toStdString(), err, 0755)) {
+        const bool okMkdir = executeCriticalRemoteOperation(
+            tr("create a remote folder"),
+            [path](openscp::SftpClient *client, std::string &opErr) {
+                return client->mkdir(path.toStdString(), opErr, 0755);
+            },
+            err);
+        if (!okMkdir) {
             invalidateRemoteWriteabilityFromError(QString::fromStdString(err));
             UiAlerts::critical(
                 this, tr("SFTP"),
@@ -898,21 +904,32 @@ void MainWindow::newFileRight() {
         const QString remotePath =
             joinRemotePath(rightRemoteModel_->rootPath(), name);
         bool isDir = false;
+        bool exists = false;
         std::string e;
-        bool exists = sftp_->exists(remotePath.toStdString(), isDir, e);
-        if (exists) {
-            if (UiAlerts::question(
-                    this, tr("File exists"),
-                    tr("«%1» already exists.\nOverwrite?").arg(name),
-                    QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
-                return;
-        } else if (!e.empty()) {
+        const bool existsCheckOk = executeCriticalRemoteOperation(
+            tr("check remote item existence"),
+            [remotePath, &isDir,
+             &exists](openscp::SftpClient *client, std::string &opErr) {
+                exists = client->exists(remotePath.toStdString(), isDir, opErr);
+                if (exists)
+                    return true;
+                return opErr.empty();
+            },
+            e);
+        if (!existsCheckOk) {
             UiAlerts::critical(
                 this, tr("SFTP"),
                 tr("Could not check whether the remote file already "
                    "exists.\n%1")
                     .arg(shortRemoteError(e, tr("Remote error"))));
             return;
+        }
+        if (exists) {
+            if (UiAlerts::question(
+                    this, tr("File exists"),
+                    tr("«%1» already exists.\nOverwrite?").arg(name),
+                    QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
+                return;
         }
 
         QTemporaryFile tmp;
@@ -923,8 +940,14 @@ void MainWindow::newFileRight() {
         }
         tmp.close();
         std::string err;
-        bool okPut = sftp_->put(tmp.fileName().toStdString(),
-                                remotePath.toStdString(), err);
+        const bool okPut = executeCriticalRemoteOperation(
+            tr("create a remote file"),
+            [tmpPath = tmp.fileName(),
+             remotePath](openscp::SftpClient *client, std::string &opErr) {
+                return client->put(tmpPath.toStdString(), remotePath.toStdString(),
+                                   opErr);
+            },
+            err);
         if (!okPut) {
             invalidateRemoteWriteabilityFromError(QString::fromStdString(err));
             UiAlerts::critical(
@@ -985,7 +1008,14 @@ void MainWindow::renameRightSelected() {
         const QString from = joinRemotePath(base, oldName);
         const QString to = joinRemotePath(base, newName);
         std::string err;
-        if (!sftp_->rename(from.toStdString(), to.toStdString(), err, false)) {
+        const bool okRename = executeCriticalRemoteOperation(
+            tr("rename a remote item"),
+            [from, to](openscp::SftpClient *client, std::string &opErr) {
+                return client->rename(from.toStdString(), to.toStdString(),
+                                      opErr, false);
+            },
+            err);
+        if (!okRename) {
             invalidateRemoteWriteabilityFromError(QString::fromStdString(err));
             UiAlerts::critical(
                 this, tr("SFTP"),
@@ -1039,20 +1069,41 @@ void MainWindow::deleteRightSelected() {
         int ok = 0, fail = 0;
         QString lastErr;
         const QString base = rightRemoteModel_->rootPath();
+        QStringList names;
+        names.reserve(rows.size());
+        for (const QModelIndex &idx : rows)
+            names.push_back(rightRemoteModel_->nameAt(idx));
         std::function<bool(const QString &)> delRec = [&](const QString &p) {
             // Determine if path is a directory or a file using stat/exists
             bool isDir = false;
+            bool exists = false;
             std::string xerr;
-            if (!sftp_->exists(p.toStdString(), isDir, xerr)) {
-                // If it doesn't exist, treat as success
-                if (xerr.empty())
-                    return true;
+            const bool existsOk = executeCriticalRemoteOperation(
+                tr("delete remote items"),
+                [p, &isDir,
+                 &exists](openscp::SftpClient *client, std::string &opErr) {
+                    exists = client->exists(p.toStdString(), isDir, opErr);
+                    if (exists)
+                        return true;
+                    // Not found is not an error in delete flow.
+                    return opErr.empty();
+                },
+                xerr);
+            if (!existsOk) {
                 lastErr = QString::fromStdString(xerr);
                 return false;
             }
+            if (!exists)
+                return true;
             if (!isDir) {
                 std::string ferr;
-                if (!sftp_->removeFile(p.toStdString(), ferr)) {
+                const bool removed = executeCriticalRemoteOperation(
+                    tr("delete remote items"),
+                    [p](openscp::SftpClient *client, std::string &opErr) {
+                        return client->removeFile(p.toStdString(), opErr);
+                    },
+                    ferr);
+                if (!removed) {
                     lastErr = QString::fromStdString(ferr);
                     return false;
                 }
@@ -1061,7 +1112,14 @@ void MainWindow::deleteRightSelected() {
             // Directory: list and remove children first (depth-first)
             std::vector<openscp::FileInfo> out;
             std::string lerr;
-            if (!sftp_->list(p.toStdString(), out, lerr)) {
+            const bool listed = executeCriticalRemoteOperation(
+                tr("delete remote items"),
+                [p, &out](openscp::SftpClient *client, std::string &opErr) {
+                    out.clear();
+                    return client->list(p.toStdString(), out, opErr);
+                },
+                lerr);
+            if (!listed) {
                 lastErr = QString::fromStdString(lerr);
                 return false;
             }
@@ -1072,14 +1130,19 @@ void MainWindow::deleteRightSelected() {
                     return false;
             }
             std::string derr;
-            if (!sftp_->removeDir(p.toStdString(), derr)) {
+            const bool removedDir = executeCriticalRemoteOperation(
+                tr("delete remote items"),
+                [p](openscp::SftpClient *client, std::string &opErr) {
+                    return client->removeDir(p.toStdString(), opErr);
+                },
+                derr);
+            if (!removedDir) {
                 lastErr = QString::fromStdString(derr);
                 return false;
             }
             return true;
         };
-        for (const QModelIndex &idx : rows) {
-            const QString name = rightRemoteModel_->nameAt(idx);
+        for (const QString &name : names) {
             const QString path = joinRemotePath(base, name);
             if (delRec(path))
                 ++ok;
@@ -1234,7 +1297,13 @@ void MainWindow::changeRemotePermissions() {
     const QString path = joinRemotePath(base, name);
     openscp::FileInfo st{};
     std::string err;
-    if (!sftp_->stat(path.toStdString(), st, err)) {
+    const bool statOk = executeCriticalRemoteOperation(
+        tr("read remote permissions"),
+        [path, &st](openscp::SftpClient *client, std::string &opErr) {
+            return client->stat(path.toStdString(), st, opErr);
+        },
+        err);
+    if (!statOk) {
         UiAlerts::warning(
             this, tr("Permissions"),
             tr("Could not read permissions.\n%1")
@@ -1249,7 +1318,13 @@ void MainWindow::changeRemotePermissions() {
     unsigned int newMode = (st.mode & ~0777u) | (dlg.mode() & 0777u);
     auto applyOne = [&](const QString &p) -> bool {
         std::string cerrs;
-        if (!sftp_->chmod(p.toStdString(), newMode, cerrs)) {
+        const bool chmodOk = executeCriticalRemoteOperation(
+            tr("change remote permissions"),
+            [p, newMode](openscp::SftpClient *client, std::string &opErr) {
+                return client->chmod(p.toStdString(), newMode, opErr);
+            },
+            cerrs);
+        if (!chmodOk) {
             invalidateRemoteWriteabilityFromError(
                 QString::fromStdString(cerrs));
             const QString item =
@@ -1276,7 +1351,14 @@ void MainWindow::changeRemotePermissions() {
             }
             std::vector<openscp::FileInfo> out;
             std::string lerr;
-            if (!sftp_->list(cur.toStdString(), out, lerr))
+            const bool listed = executeCriticalRemoteOperation(
+                tr("read remote permissions"),
+                [cur, &out](openscp::SftpClient *client, std::string &opErr) {
+                    out.clear();
+                    return client->list(cur.toStdString(), out, opErr);
+                },
+                lerr);
+            if (!listed)
                 continue;
             for (const auto &e : out) {
                 const QString child =

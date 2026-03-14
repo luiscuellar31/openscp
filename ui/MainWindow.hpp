@@ -12,6 +12,7 @@
 #include <QVector>
 #include <atomic>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -239,6 +240,20 @@ class MainWindow : public QMainWindow {
     bool restoreRightHeaderState(bool remoteMode);
     void maybeRefreshRemoteAfterCompletedUploads();
     void maybeNotifyCompletedTransfers();
+    bool isLikelyRemoteTransportError(const QString &rawError) const;
+    bool reconnectActiveRemoteSession(QString *errorOut = nullptr);
+    bool maybeRecoverRemoteSession(const QString &operationLabel,
+                                   const QString &rawError);
+    bool executeCriticalRemoteOperation(
+        const QString &operationLabel,
+        const std::function<bool(openscp::SftpClient *, std::string &)>
+            &operation,
+        std::string &err);
+    void ensureRemoteSessionHealthMonitoring();
+    void startRemoteSessionHealthMonitoring();
+    void stopRemoteSessionHealthMonitoring();
+    void runRemoteSessionHealthCheck(const QString &reason,
+                                     bool force = false);
 
     // Writable state of the current remote directory
     bool rightRemoteWritable_ = false;
@@ -287,8 +302,13 @@ class MainWindow : public QMainWindow {
     QLabel *m_connectionTypeLabel_ = nullptr;
     QLabel *m_connectionElapsedLabel_ = nullptr;
     QTimer *m_connectionElapsedTimer_ = nullptr;
+    QTimer *m_remoteSessionHealthTimer_ = nullptr;
     qint64 m_connectionStartedAtMs_ = 0;
     QString m_activeConnectionType_;
+    qint64 m_lastAppInactiveAtMs_ = 0;
+    std::atomic<bool> m_remoteSessionHealthProbeInFlight_{false};
+    std::atomic<bool> m_remoteSessionReconnectInFlight_{false};
+    int m_remoteSessionHealthIntervalMs_ = 10 * 60 * 1000;
     // Connection progress dialog (non-modal), to avoid blocking TOFU
     QPointer<class QProgressDialog> m_connectProgress_;
     bool m_connectProgressDimmed_ = false;

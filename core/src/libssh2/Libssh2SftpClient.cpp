@@ -1078,9 +1078,12 @@ static bool line_matches_site_host(const std::string &line,
         if (comma == std::string::npos || comma > hostEnd)
             comma = hostEnd;
         const std::string token = line.substr(pos, comma - pos);
-        for (const std::string &target : targets) {
-            if (token == target || token_matches_hashed_host(token, target))
-                return true;
+        if (std::any_of(targets.begin(), targets.end(),
+                        [&token](const std::string &target) {
+                            return token == target ||
+                                   token_matches_hashed_host(token, target);
+                        })) {
+            return true;
         }
         if (comma == hostEnd)
             break;
@@ -1588,8 +1591,10 @@ static bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut,
 
         std::vector<char *> argv;
         argv.reserve(args.size() + 1);
-        for (auto &a : args)
-            argv.push_back(const_cast<char *>(a.c_str()));
+        std::transform(args.begin(), args.end(), std::back_inserter(argv),
+                       [](const std::string &a) {
+                           return const_cast<char *>(a.c_str());
+                       });
         argv.push_back(nullptr);
         ::execvp("ssh", argv.data());
         const std::string execErr =
