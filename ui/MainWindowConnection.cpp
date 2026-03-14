@@ -14,6 +14,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QGuiApplication>
 #include <QHeaderView>
 #include <QInputDialog>
 #include <QLabel>
@@ -23,6 +24,7 @@
 #include <QProgressDialog>
 #include <QSet>
 #include <QSettings>
+#include <QStringList>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTimer>
@@ -377,6 +379,269 @@ static void refreshOpenSiteManagerWidget(QPointer<QWidget> siteManager) {
     dlg->reloadFromSettings();
 }
 
+bool MainWindow::isLikelyRemoteTransportError(const QString &rawError) const {
+    const QString lower = rawError.trimmed().toLower();
+    if (lower.isEmpty())
+        return false;
+
+    // Permission/auth/path problems should not trigger reconnect logic.
+    if (lower.contains("permission denied") || lower.contains("read-only") ||
+        lower.contains("no such file") || lower.contains("not found") ||
+        lower.contains("auth fail") || lower.contains("authentication failed"))
+        return false;
+
+    static const QStringList markers = {
+        QStringLiteral("socket send"),
+        QStringLiteral("socket recv"),
+        QStringLiteral("socket error"),
+        QStringLiteral("session disconnected"),
+        QStringLiteral("channel closed"),
+        QStringLiteral("connection lost"),
+        QStringLiteral("connection reset"),
+        QStringLiteral("connection aborted"),
+        QStringLiteral("broken pipe"),
+        QStringLiteral("transport endpoint is not connected"),
+        QStringLiteral("end of file"),
+        QStringLiteral("timeout"),
+        QStringLiteral("timed out"),
+        QStringLiteral("rc=-7"),  // LIBSSH2_ERROR_SOCKET_SEND
+        QStringLiteral("rc=-34"), // LIBSSH2_ERROR_SOCKET_RECV
+        QStringLiteral("rc=-37"), // LIBSSH2_ERROR_CHANNEL_CLOSED
+        QStringLiteral("rc=-13"), // LIBSSH2_ERROR_SOCKET_DISCONNECT
+    };
+    for (const QString &marker : markers) {
+        if (lower.contains(marker))
+            return true;
+    }
+    return false;
+}
+
+bool MainWindow::reconnectActiveRemoteSession(QString *errorOut) {
+    if (errorOut)
+        errorOut->clear();
+    if (!rightIsRemote_ || !sftp_ || !m_activeSessionOptions_.has_value()) {
+        if (errorOut)
+            *errorOut = tr("No active remote session to reconnect.");
+        return false;
+    }
+    if (m_isDisconnecting || m_connectInProgress_) {
+        if (errorOut)
+            *errorOut = tr("Connection state is changing; reconnect skipped.");
+        return false;
+    }
+    if (m_remoteSessionReconnectInFlight_.exchange(true)) {
+        if (errorOut)
+            *errorOut = tr("Reconnect already in progress.");
+        return false;
+    }
+
+    const QString restorePath =
+        rightRemoteModel_ ? rightRemoteModel_->rootPath() : QStringLiteral("/");
+    statusBar()->showMessage(tr("Remote session became stale. Reconnecting…"),
+                             0);
+
+    std::string connErr;
+    auto replacement = sftp_->newConnectionLike(*m_activeSessionOptions_, connErr);
+    if (!replacement) {
+        m_remoteSessionReconnectInFlight_.store(false);
+        if (errorOut)
+            *errorOut = QString::fromStdString(connErr);
+        return false;
+    }
+
+    sftp_->disconnect();
+    sftp_ = std::move(replacement);
+    applyRemoteConnectedUI(*m_activeSessionOptions_);
+    if (!sftp_ || !rightRemoteModel_) {
+        m_remoteSessionReconnectInFlight_.store(false);
+        if (errorOut) {
+            *errorOut = tr("Reconnected transport, but remote panel restore "
+                           "failed.");
+        }
+        return false;
+    }
+
+    if (!restorePath.isEmpty() && restorePath != QStringLiteral("/"))
+        setRightRemoteRoot(restorePath);
+
+    if (transferMgr_) {
+        transferMgr_->setClient(sftp_.get());
+        transferMgr_->setSessionOptions(*m_activeSessionOptions_);
+    }
+
+    startRemoteSessionHealthMonitoring();
+    statusBar()->showMessage(tr("Remote session reconnected"), 4000);
+    m_remoteSessionReconnectInFlight_.store(false);
+    return true;
+}
+
+bool MainWindow::maybeRecoverRemoteSession(const QString &operationLabel,
+                                           const QString &rawError) {
+    if (!isLikelyRemoteTransportError(rawError))
+        return false;
+
+    QString reconnectErr;
+    const bool recovered = reconnectActiveRemoteSession(&reconnectErr);
+    if (recovered) {
+        statusBar()->showMessage(
+            tr("Recovered remote session while trying to %1")
+                .arg(operationLabel),
+            4000);
+        return true;
+    }
+    return false;
+}
+
+bool MainWindow::executeCriticalRemoteOperation(
+    const QString &operationLabel,
+    const std::function<bool(openscp::SftpClient *, std::string &)> &operation,
+    std::string &err) {
+    err.clear();
+    if (!operation) {
+        err = "Invalid operation callback";
+        return false;
+    }
+    if (!rightIsRemote_ || !sftp_) {
+        err = "No active remote session";
+        return false;
+    }
+
+    if (operation(sftp_.get(), err))
+        return true;
+
+    const QString firstError = QString::fromStdString(err);
+    if (!maybeRecoverRemoteSession(operationLabel, firstError)) {
+        if (isLikelyRemoteTransportError(firstError) && rightIsRemote_ &&
+            sftp_ && !m_isDisconnecting) {
+            UiAlerts::warning(
+                this, tr("Connection lost"),
+                tr("The remote session failed while trying to %1.\n"
+                   "OpenSCP will disconnect to avoid inconsistent operations.\n%2")
+                    .arg(operationLabel,
+                         shortRemoteError(firstError, tr("Transport error."))));
+            disconnectSftp();
+        }
+        return false;
+    }
+
+    err.clear();
+    if (!sftp_) {
+        err = "Remote session unavailable after recovery";
+        return false;
+    }
+    return operation(sftp_.get(), err);
+}
+
+void MainWindow::ensureRemoteSessionHealthMonitoring() {
+    if (m_remoteSessionHealthTimer_)
+        return;
+
+    m_remoteSessionHealthTimer_ = new QTimer(this);
+    m_remoteSessionHealthTimer_->setSingleShot(false);
+    m_remoteSessionHealthTimer_->setInterval(m_remoteSessionHealthIntervalMs_);
+    connect(m_remoteSessionHealthTimer_, &QTimer::timeout, this, [this] {
+        runRemoteSessionHealthCheck(tr("periodic"), false);
+    });
+
+    auto *guiApp = qobject_cast<QGuiApplication *>(QCoreApplication::instance());
+    if (!guiApp)
+        return;
+    connect(guiApp, &QGuiApplication::applicationStateChanged, this,
+            [this](Qt::ApplicationState state) {
+                const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+                if (state == Qt::ApplicationActive) {
+                    if (m_lastAppInactiveAtMs_ <= 0) {
+                        m_lastAppInactiveAtMs_ = 0;
+                        return;
+                    }
+                    const qint64 inactiveMs = nowMs - m_lastAppInactiveAtMs_;
+                    m_lastAppInactiveAtMs_ = 0;
+                    constexpr qint64 kResumeProbeThresholdMs = 60 * 1000;
+                    if (inactiveMs >= kResumeProbeThresholdMs && rightIsRemote_ &&
+                        sftp_) {
+                        runRemoteSessionHealthCheck(
+                            tr("resume (%1s)").arg(inactiveMs / 1000), true);
+                    }
+                    return;
+                }
+                m_lastAppInactiveAtMs_ = nowMs;
+            });
+}
+
+void MainWindow::startRemoteSessionHealthMonitoring() {
+    if (!rightIsRemote_ || !sftp_)
+        return;
+    ensureRemoteSessionHealthMonitoring();
+    if (!m_remoteSessionHealthTimer_)
+        return;
+    if (m_remoteSessionHealthIntervalMs_ < 60000)
+        m_remoteSessionHealthIntervalMs_ = 60000;
+    m_remoteSessionHealthTimer_->setInterval(m_remoteSessionHealthIntervalMs_);
+    m_remoteSessionHealthProbeInFlight_.store(false);
+    m_lastAppInactiveAtMs_ = 0;
+    if (!m_remoteSessionHealthTimer_->isActive())
+        m_remoteSessionHealthTimer_->start();
+}
+
+void MainWindow::stopRemoteSessionHealthMonitoring() {
+    if (m_remoteSessionHealthTimer_)
+        m_remoteSessionHealthTimer_->stop();
+    m_remoteSessionHealthProbeInFlight_.store(false);
+    m_remoteSessionReconnectInFlight_.store(false);
+    m_lastAppInactiveAtMs_ = 0;
+}
+
+void MainWindow::runRemoteSessionHealthCheck(const QString &reason, bool force) {
+    if (!rightIsRemote_ || !sftp_ || !m_activeSessionOptions_.has_value())
+        return;
+    if (m_isDisconnecting || m_connectInProgress_)
+        return;
+    bool expected = false;
+    if (!m_remoteSessionHealthProbeInFlight_.compare_exchange_strong(expected,
+                                                                     true)) {
+        return;
+    }
+
+    const QString probePath =
+        (rightRemoteModel_ && !rightRemoteModel_->rootPath().isEmpty())
+            ? rightRemoteModel_->rootPath()
+            : QStringLiteral("/");
+    std::string err;
+    bool isDir = false;
+    const bool ok = executeCriticalRemoteOperation(
+        tr("validate the remote session"),
+        [probePath, &isDir](openscp::SftpClient *client, std::string &opErr) {
+            bool exists = false;
+            exists = client->exists(probePath.toStdString(), isDir, opErr);
+            if (exists)
+                return true;
+            return opErr.empty();
+        },
+        err);
+    m_remoteSessionHealthProbeInFlight_.store(false);
+    if (ok) {
+        if (force && !reason.isEmpty()) {
+            statusBar()->showMessage(tr("Remote session validated (%1)")
+                                         .arg(reason),
+                                     2500);
+        }
+        return;
+    }
+    if (!rightIsRemote_ || !sftp_ || m_isDisconnecting)
+        return;
+
+    const QString rawErr = QString::fromStdString(err);
+    if (!isLikelyRemoteTransportError(rawErr))
+        return;
+
+    UiAlerts::warning(
+        this, tr("Connection lost"),
+        tr("The remote session no longer responds (%1).\n"
+           "OpenSCP will disconnect to avoid inconsistent operations.\n%2")
+            .arg(reason, shortRemoteError(rawErr, tr("Transport error."))));
+    disconnectSftp();
+}
+
 void MainWindow::connectSftp() {
     ConnectionDialog dlg(this);
     dlg.setQuickConnectSaveOptionsVisible(true);
@@ -432,6 +697,7 @@ void MainWindow::disconnectSftp() {
     if (m_isDisconnecting)
         return;
     m_isDisconnecting = true;
+    stopRemoteSessionHealthMonitoring();
     const quint64 disconnectSeq = ++m_disconnectSeq_;
     m_transferCleanupInProgress_ = (transferMgr_ != nullptr);
     m_transferCleanupStartedAtMs_ =
@@ -1356,7 +1622,7 @@ void MainWindow::maybePersistQuickConnectSite(
 
 // Switch UI into remote mode and wire models/actions for the right pane.
 void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
-    saveRightHeaderState(false);
+    saveRightHeaderState(rightIsRemote_);
     delete rightRemoteModel_;
     rightRemoteModel_ = new RemoteModel(sftp_.get(), this);
     rightRemoteModel_->setSessionOptions(opt);
@@ -1388,12 +1654,58 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
                 .arg(shortRemoteError(e,
                                       tr("Failed to read remote contents."))));
         sftp_.reset();
+        rightView_->setModel(rightLocalModel_);
         m_remoteWriteabilityCache_.clear();
         m_activeSessionOptions_.reset();
         m_sessionNoHostVerification_ = false;
+        rightIsRemote_ = false;
+        stopRemoteSessionHealthMonitoring();
+        if (transferMgr_)
+            transferMgr_->setClient(nullptr);
         updateHostPolicyRiskBanner();
         delete rightRemoteModel_;
         rightRemoteModel_ = nullptr;
+        if (actConnect_)
+            actConnect_->setEnabled(true);
+        if (actDisconnect_)
+            actDisconnect_->setEnabled(false);
+        if (actDownloadF7_)
+            actDownloadF7_->setEnabled(false);
+        if (actUploadRight_)
+            actUploadRight_->setEnabled(false);
+        if (actRefreshRight_)
+            actRefreshRight_->setEnabled(false);
+        if (actNewDirRight_)
+            actNewDirRight_->setEnabled(true);
+        if (actNewFileRight_)
+            actNewFileRight_->setEnabled(true);
+        if (actRenameRight_)
+            actRenameRight_->setEnabled(true);
+        if (actDeleteRight_)
+            actDeleteRight_->setEnabled(true);
+        if (actMoveRight_)
+            actMoveRight_->setEnabled(true);
+        if (actMoveRightTb_)
+            actMoveRightTb_->setEnabled(true);
+        if (actCopyRightTb_)
+            actCopyRightTb_->setEnabled(true);
+        if (actChooseRight_) {
+            actChooseRight_->setIcon(
+                QIcon(QLatin1String(":/assets/icons/action-open-folder.svg")));
+            actChooseRight_->setEnabled(true);
+            actChooseRight_->setToolTip(actChooseRight_->text());
+        }
+        if (QDir(rightPath_->text()).exists()) {
+            setRightRoot(rightPath_->text());
+        } else {
+            setRightRoot(QDir::homePath());
+        }
+        if (rightView_)
+            rightView_->setEnabled(true);
+        rightRemoteWritable_ = false;
+        applyRemoteWriteabilityActions();
+        updateDeleteShortcutEnables();
+        setWindowTitle(tr("OpenSCP — local/local"));
         return;
     }
     rightView_->setModel(rightRemoteModel_);
@@ -1455,6 +1767,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         tr("Connected (SFTP) to ") + QString::fromStdString(opt.host), 4000);
     setWindowTitle(tr("OpenSCP — local/remote (SFTP)"));
     updateHostPolicyRiskBanner();
+    startRemoteSessionHealthMonitoring();
     updateRemoteWriteability();
     updateDeleteShortcutEnables();
 }
