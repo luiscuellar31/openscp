@@ -9,7 +9,49 @@ EFFECTIVE_QT6_DIR=""
 EFFECTIVE_QT_PREFIX=""
 
 log() { printf "\033[1;34m[macos]\033[0m %s\n" "$*"; }
+warn() { printf "\033[1;33m[warn]\033[0m %s\n" "$*"; }
 die() { printf "\033[1;31m[err ]\033[0m %s\n" "$*"; exit 1; }
+
+list_rpaths() {
+  local bin="$1"
+  otool -l "$bin" | awk '
+    $1 == "cmd" && $2 == "LC_RPATH" { in_rpath=1; next }
+    in_rpath && $1 == "path" { print $2; in_rpath=0 }
+  '
+}
+
+sanitize_dev_rpaths() {
+  local bin="$1"
+  local bundled_rpath='@executable_path/../Frameworks'
+  local qt_lib_rpath=""
+  if [[ -d "${EFFECTIVE_QT_PREFIX}/lib" ]]; then
+    qt_lib_rpath="${EFFECTIVE_QT_PREFIX}/lib"
+  fi
+
+  local rp=""
+  while IFS= read -r rp; do
+    [[ -n "$rp" ]] || continue
+    case "$rp" in
+      "$bundled_rpath"|@executable_path/*|@loader_path/*|@rpath/*)
+        ;;
+      "$qt_lib_rpath")
+        ;;
+      /*)
+        # Remove stale absolute build paths to keep dev launches relocatable.
+        install_name_tool -delete_rpath "$rp" "$bin" >/dev/null 2>&1 || true
+        ;;
+      *)
+        ;;
+    esac
+  done < <(list_rpaths "$bin")
+
+  if ! list_rpaths "$bin" | grep -Fxq "$bundled_rpath"; then
+    install_name_tool -add_rpath "$bundled_rpath" "$bin" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$qt_lib_rpath" ]] && ! list_rpaths "$bin" | grep -Fxq "$qt_lib_rpath"; then
+    install_name_tool -add_rpath "$qt_lib_rpath" "$bin" >/dev/null 2>&1 || true
+  fi
+}
 
 version_key() {
   local v="${1:-0}"
@@ -121,20 +163,30 @@ build_release() {
 
 run_app() {
   [[ -d "$APP_PATH" ]] || die "App bundle not found at ${APP_PATH}. Run './scripts/macos.sh build' first."
-  log "Opening ${APP_PATH}"
-  if ! open "$APP_PATH"; then
-    local bin="${APP_PATH}/Contents/MacOS/OpenSCP"
-    [[ -x "$bin" ]] || die "Cannot launch app: missing executable at ${bin}"
-    log "LaunchServices open() failed; running binary directly with Qt env"
-    if [[ -d "${EFFECTIVE_QT_PREFIX}/lib" ]]; then
-      QT_PLUGIN_PATH="${EFFECTIVE_QT_PREFIX}/plugins" \
-      QML2_IMPORT_PATH="${EFFECTIVE_QT_PREFIX}/qml" \
-      DYLD_FRAMEWORK_PATH="${EFFECTIVE_QT_PREFIX}/lib" \
-      DYLD_LIBRARY_PATH="${EFFECTIVE_QT_PREFIX}/lib" \
-      nohup "$bin" >/dev/null 2>&1 &
-    else
-      nohup "$bin" >/dev/null 2>&1 &
+  local bin="${APP_PATH}/Contents/MacOS/OpenSCP"
+  [[ -x "$bin" ]] || die "Cannot launch app: missing executable at ${bin}"
+  sanitize_dev_rpaths "$bin"
+
+  local bundled_qt_widgets="${APP_PATH}/Contents/Frameworks/QtWidgets.framework/Versions/A/QtWidgets"
+  if [[ -f "$bundled_qt_widgets" ]]; then
+    log "Opening ${APP_PATH}"
+    if open "$APP_PATH"; then
+      return
     fi
+    warn "LaunchServices open() failed; falling back to direct binary launch"
+  else
+    warn "Dev bundle has no bundled Qt frameworks; launching with Qt runtime env"
+  fi
+
+  if [[ -d "${EFFECTIVE_QT_PREFIX}/lib" ]]; then
+    QT_PLUGIN_PATH="${EFFECTIVE_QT_PREFIX}/plugins" \
+    QML2_IMPORT_PATH="${EFFECTIVE_QT_PREFIX}/qml" \
+    DYLD_FRAMEWORK_PATH="${EFFECTIVE_QT_PREFIX}/lib" \
+    DYLD_LIBRARY_PATH="${EFFECTIVE_QT_PREFIX}/lib" \
+    nohup "$bin" >/dev/null 2>&1 &
+  else
+    warn "Qt runtime prefix was not detected; launching without Qt env overrides"
+    nohup "$bin" >/dev/null 2>&1 &
   fi
 }
 
