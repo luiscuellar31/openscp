@@ -190,6 +190,42 @@ ensure_qt_svg_iconengine() {
   cp -L "$src_plugin" "$dest_dir/"
 }
 
+copy_optional_qt_plugin() {
+  local plugin_root="$1"
+  local subdir="$2"
+  local plugin_name="$3"
+  local dest_dir="$APPDIR/usr/plugins/$subdir"
+  local src_dir="${plugin_root}/${subdir}"
+
+  [[ -d "$src_dir" ]] || return 0
+
+  if compgen -G "$dest_dir/lib${plugin_name}.so*" >/dev/null 2>&1 || compgen -G "$dest_dir/${plugin_name}.so*" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local src_plugin=""
+  src_plugin="$(find "$src_dir" -maxdepth 1 \( -type f -o -type l \) \( -name "lib${plugin_name}.so*" -o -name "${plugin_name}.so*" \) | head -n1 || true)"
+  [[ -n "$src_plugin" ]] || return 0
+
+  mkdir -p "$dest_dir"
+  cp -L "$src_plugin" "$dest_dir/"
+  log "Copying optional Qt ${subdir} plugin: $(basename "$src_plugin")"
+}
+
+ensure_optional_qt_desktop_theme_plugins() {
+  local plugin_root=""
+  plugin_root="$(detect_qt_plugins_root || true)"
+  if [[ -z "$plugin_root" ]]; then
+    warn "Could not detect Qt plugins root for optional desktop theme plugins"
+    return 0
+  fi
+
+  # Keep Linux look closer to host desktop theme when these plugins are available.
+  copy_optional_qt_plugin "$plugin_root" "styles" "qgtk3"
+  copy_optional_qt_plugin "$plugin_root" "platformthemes" "qgtk3"
+  copy_optional_qt_plugin "$plugin_root" "platformthemes" "qxdgdesktopportal"
+}
+
 main() {
   mkdir -p "$BUILD_DIR" "$DIST_DIR"
 
@@ -244,6 +280,7 @@ main() {
   log "Running: ${cmd[*]}"
   "${cmd[@]}"
   ensure_qt_svg_iconengine
+  ensure_optional_qt_desktop_theme_plugins
   verify_qt_runtime_plugins
 
   # Rename the produced AppImage to our canonical name if needed
