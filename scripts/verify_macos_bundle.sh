@@ -77,7 +77,7 @@ resolve_dep_path() {
 
 check_forbidden_absolute_refs() {
   local file="$1"
-  local forbidden_regex='^/(opt/homebrew|usr/local/(Cellar|opt)|Users/runner|private/tmp|tmp|var/folders|.*miniconda.*|.*anaconda.*)'
+  local forbidden_regex='^/(opt/homebrew|usr/local/(Cellar|opt)|Users/runner|Users/|private/tmp|tmp|var/folders|.*miniconda.*|.*anaconda.*)'
   local deps
   deps="$(list_deps "$file")"
   local bad_refs
@@ -85,6 +85,37 @@ check_forbidden_absolute_refs() {
   if [[ -n "$bad_refs" ]]; then
     err "Forbidden absolute references in: $file"
     printf "%s\n" "$bad_refs" >&2
+    return 1
+  fi
+  return 0
+}
+
+list_rpaths() {
+  local file="$1"
+  local out
+  if ! out="$(otool -l "$file" 2>&1)"; then
+    err "$out"
+    die "otool failed while listing rpaths for: $file"
+  fi
+  if [[ "$out" == *"You have not agreed to the Xcode license agreements"* ]]; then
+    die "otool is unavailable (Xcode license not accepted); cannot validate rpaths for $file"
+  fi
+  printf "%s\n" "$out" | awk '
+    $1 == "cmd" && $2 == "LC_RPATH" { in_rpath=1; next }
+    in_rpath && $1 == "path" { print $2; in_rpath=0 }
+  '
+}
+
+check_forbidden_rpaths() {
+  local file="$1"
+  local forbidden_regex='^/(opt/homebrew|usr/local/(Cellar|opt)|Users/runner|Users/|private/tmp|tmp|var/folders|.*miniconda.*|.*anaconda.*)'
+  local rpaths
+  rpaths="$(list_rpaths "$file")"
+  local bad_rpaths
+  bad_rpaths="$(printf "%s\n" "$rpaths" | grep -E "$forbidden_regex" || true)"
+  if [[ -n "$bad_rpaths" ]]; then
+    err "Forbidden absolute rpath(s) in: $file"
+    printf "%s\n" "$bad_rpaths" >&2
     return 1
   fi
   return 0
@@ -138,6 +169,7 @@ done < <(find "$PLUGINS_DIR" -type f -name '*.dylib' | sort)
 log "Checking Mach-O linkage for ${#targets[@]} binaries"
 for bin in "${targets[@]}"; do
   check_forbidden_absolute_refs "$bin"
+  check_forbidden_rpaths "$bin"
   check_linkage "$bin"
 done
 

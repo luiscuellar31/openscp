@@ -248,11 +248,41 @@ generate_icns_from_png() {
   rm -rf "$(dirname "$tmp_iconset")"
 }
 
-ensure_rpath() {
-  local bin="$1"; local rpath='@executable_path/../Frameworks'
-  if ! otool -l "$bin" | grep -q "$rpath"; then
-    install_name_tool -add_rpath "$rpath" "$bin"
+list_binary_rpaths() {
+  local bin="$1"
+  otool -l "$bin" | awk '
+    $1 == "cmd" && $2 == "LC_RPATH" { in_rpath=1; next }
+    in_rpath && $1 == "path" { print $2; in_rpath=0 }
+  '
+}
+
+sanitize_binary_rpaths() {
+  local bin="$1"
+  local required_rpath="$2"
+  local existing_rpath=""
+
+  while IFS= read -r existing_rpath; do
+    [[ -n "$existing_rpath" ]] || continue
+    case "$existing_rpath" in
+      "$required_rpath"|@executable_path/*|@loader_path/*|@rpath/*)
+        ;;
+      /*)
+        # Strip absolute rpaths so the bundle can be relocated.
+        install_name_tool -delete_rpath "$existing_rpath" "$bin" >/dev/null 2>&1 || true
+        ;;
+      *)
+        ;;
+    esac
+  done < <(list_binary_rpaths "$bin")
+
+  if ! list_binary_rpaths "$bin" | grep -Fxq "$required_rpath"; then
+    install_name_tool -add_rpath "$required_rpath" "$bin" || true
   fi
+}
+
+ensure_rpath() {
+  local bin="$1"
+  sanitize_binary_rpaths "$bin" "@executable_path/../Frameworks"
 }
 
 redirect_dep_to_rpath() {
@@ -280,10 +310,7 @@ qt_framework_dep_to_bundle_rpath() {
 
 ensure_loader_framework_rpath() {
   local bin="$1"
-  local rpath='@loader_path/../../Frameworks'
-  if ! otool -l "$bin" | grep -q "$rpath"; then
-    install_name_tool -add_rpath "$rpath" "$bin" || true
-  fi
+  sanitize_binary_rpaths "$bin" "@loader_path/../../Frameworks"
 }
 
 rewrite_external_refs_to_bundle() {
@@ -674,6 +701,7 @@ ensure_qt_support_plugins() {
   ensure_qt_plugin_subdir "platforms" "qcocoa" "Qt platform"
   ensure_qt_plugin_subdir "imageformats" "qsvg" "Qt imageformats" 0
   ensure_qt_plugin_subdir "iconengines" "qsvgicon" "Qt iconengines"
+  ensure_qt_plugin_subdir "styles" "qmacstyle" "Qt macOS style" 0
 }
 
 prune_optional_qt_plugins() {
