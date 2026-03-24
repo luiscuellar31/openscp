@@ -19,6 +19,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPointer>
+#include <QProcess>
 #include <QSet>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -143,6 +144,299 @@ static QString joinRemotePath(const QString &base, const QString &name) {
     return base.endsWith('/') ? base + name : base + "/" + name;
 }
 
+static QString trimOptionalString(const std::optional<std::string> &v) {
+    if (!v || v->empty())
+        return {};
+    return QString::fromStdString(*v).trimmed();
+}
+
+static QString normalizeRemotePath(const QString &rawPath) {
+    QString normalized = rawPath.trimmed();
+    if (normalized.isEmpty())
+        normalized = QStringLiteral("/");
+    if (!normalized.startsWith('/'))
+        normalized.prepend('/');
+    while (normalized.contains(QStringLiteral("//")))
+        normalized.replace(QStringLiteral("//"), QStringLiteral("/"));
+    if (normalized.size() > 1 && normalized.endsWith('/'))
+        normalized.chop(1);
+    return normalized;
+}
+
+static QString shellSingleQuote(const QString &value) {
+    QString escaped = value;
+    escaped.replace(QStringLiteral("'"), QStringLiteral("'\"'\"'"));
+    return QStringLiteral("'") + escaped + QStringLiteral("'");
+}
+
+static QString shellJoinQuoted(const QStringList &args) {
+    QStringList quoted;
+    quoted.reserve(args.size());
+    for (const QString &arg : args)
+        quoted.push_back(shellSingleQuote(arg));
+    return quoted.join(QLatin1Char(' '));
+}
+
+static QString defaultKnownHostsPath() {
+    const QString home = QDir::homePath();
+    if (home.isEmpty())
+        return {};
+    return QDir(home).filePath(QStringLiteral(".ssh/known_hosts"));
+}
+
+static bool buildRemoteTerminalSshCommand(const openscp::SessionOptions &opt,
+                                          const QString &remotePath,
+                                          QString *commandOut,
+                                          QString *errorOut) {
+    if (commandOut)
+        commandOut->clear();
+    if (errorOut)
+        errorOut->clear();
+
+    if (!commandOut)
+        return false;
+
+    const QString sshExe = QStandardPaths::findExecutable(QStringLiteral("ssh"));
+    if (sshExe.isEmpty()) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow", "OpenSSH client was not found in PATH.");
+        }
+        return false;
+    }
+
+    const QString host = QString::fromStdString(opt.host).trimmed();
+    const QString user = QString::fromStdString(opt.username).trimmed();
+    if (host.isEmpty() || user.isEmpty()) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow",
+                "Session is missing host or username information.");
+        }
+        return false;
+    }
+
+    if (opt.proxy_type != openscp::ProxyType::None) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow",
+                "Terminal mode is not available for SOCKS5/HTTP proxy "
+                "transport sessions.");
+        }
+        return false;
+    }
+
+    QStringList args;
+    args << sshExe << QStringLiteral("-tt");
+    args << QStringLiteral("-p") << QString::number(opt.port);
+
+    if (opt.known_hosts_policy == openscp::KnownHostsPolicy::Off) {
+        args << QStringLiteral("-o") << QStringLiteral("StrictHostKeyChecking=no");
+        args << QStringLiteral("-o")
+             << QStringLiteral("UserKnownHostsFile=/dev/null");
+    } else {
+        const QString strictValue =
+            (opt.known_hosts_policy == openscp::KnownHostsPolicy::AcceptNew)
+                ? QStringLiteral("accept-new")
+                : QStringLiteral("yes");
+        args << QStringLiteral("-o")
+             << QStringLiteral("StrictHostKeyChecking=%1").arg(strictValue);
+
+        QString khPath = trimOptionalString(opt.known_hosts_path);
+        if (khPath.isEmpty())
+            khPath = defaultKnownHostsPath();
+        if (!khPath.isEmpty()) {
+            const QString normalizedKh =
+                QDir::fromNativeSeparators(QDir::cleanPath(khPath));
+            args << QStringLiteral("-o")
+                 << QStringLiteral("UserKnownHostsFile=%1").arg(normalizedKh);
+        }
+    }
+
+    const QString keyPath = trimOptionalString(opt.private_key_path);
+    if (!keyPath.isEmpty()) {
+        const QString normalizedKey =
+            QDir::fromNativeSeparators(QDir::cleanPath(keyPath));
+        args << QStringLiteral("-i") << normalizedKey;
+        args << QStringLiteral("-o") << QStringLiteral("IdentitiesOnly=yes");
+    }
+
+    const QString jumpHost = trimOptionalString(opt.jump_host);
+    if (!jumpHost.isEmpty()) {
+        const QString jumpUser = trimOptionalString(opt.jump_username);
+        const QString jumpKeyPath = trimOptionalString(opt.jump_private_key_path);
+        const std::uint16_t jumpPort = (opt.jump_port == 0) ? 22 : opt.jump_port;
+
+        if (jumpKeyPath.isEmpty()) {
+            QString jumpSpec = jumpHost;
+            if (!jumpUser.isEmpty())
+                jumpSpec = jumpUser + QStringLiteral("@") + jumpSpec;
+            if (jumpPort != 22)
+                jumpSpec += QStringLiteral(":") + QString::number(jumpPort);
+            args << QStringLiteral("-J") << jumpSpec;
+        } else {
+            QStringList jumpCmd;
+            jumpCmd << QStringLiteral("ssh");
+            jumpCmd << QStringLiteral("-W") << QStringLiteral("%h:%p");
+            jumpCmd << QStringLiteral("-p") << QString::number(jumpPort);
+            if (!jumpUser.isEmpty())
+                jumpCmd << QStringLiteral("-l") << jumpUser;
+            jumpCmd << QStringLiteral("-i")
+                    << QDir::fromNativeSeparators(
+                           QDir::cleanPath(jumpKeyPath));
+            jumpCmd << QStringLiteral("-o")
+                    << QStringLiteral("IdentitiesOnly=yes");
+            jumpCmd << jumpHost;
+            args << QStringLiteral("-o")
+                 << QStringLiteral("ProxyCommand=%1").arg(shellJoinQuoted(jumpCmd));
+        }
+    }
+
+    args << QStringLiteral("%1@%2").arg(user, host);
+    const QString remoteInit =
+        QStringLiteral(
+            "cd -- %1 2>/dev/null || cd /; exec ${SHELL:-/bin/sh} -l")
+            .arg(shellSingleQuote(normalizeRemotePath(remotePath)));
+    args << remoteInit;
+
+    *commandOut = shellJoinQuoted(args);
+    return true;
+}
+
+static bool buildSimpleRemoteTerminalSshCommand(const openscp::SessionOptions &opt,
+                                                QString *commandOut,
+                                                QString *errorOut) {
+    if (commandOut)
+        commandOut->clear();
+    if (errorOut)
+        errorOut->clear();
+
+    if (!commandOut)
+        return false;
+
+    const QString sshExe = QStandardPaths::findExecutable(QStringLiteral("ssh"));
+    if (sshExe.isEmpty()) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow", "OpenSSH client was not found in PATH.");
+        }
+        return false;
+    }
+
+    const QString host = QString::fromStdString(opt.host).trimmed();
+    const QString user = QString::fromStdString(opt.username).trimmed();
+    if (host.isEmpty() || user.isEmpty()) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow",
+                "Session is missing host or username information.");
+        }
+        return false;
+    }
+
+    QStringList args;
+    args << sshExe << QStringLiteral("-tt");
+    args << QStringLiteral("-p") << QString::number(opt.port);
+    args << QStringLiteral("%1@%2").arg(user, host);
+
+    *commandOut = shellJoinQuoted(args);
+    return true;
+}
+
+static QString appleScriptStringLiteral(const QString &raw) {
+    QString escaped = raw;
+    escaped.replace(QStringLiteral("\\"), QStringLiteral("\\\\"));
+    escaped.replace(QStringLiteral("\""), QStringLiteral("\\\""));
+    return QStringLiteral("\"") + escaped + QStringLiteral("\"");
+}
+
+static bool launchShellCommandInSystemTerminal(const QString &shellCommand,
+                                               QString *errorOut) {
+    if (errorOut)
+        errorOut->clear();
+
+#ifdef Q_OS_MAC
+    const QString osaExe =
+        QStandardPaths::findExecutable(QStringLiteral("osascript"));
+    if (osaExe.isEmpty()) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow", "Could not locate osascript.");
+        }
+        return false;
+    }
+    const QString line1 = QStringLiteral("tell application \"Terminal\" to activate");
+    const QString line2 =
+        QStringLiteral("tell application \"Terminal\" to do script %1")
+            .arg(appleScriptStringLiteral(shellCommand));
+    if (!QProcess::startDetached(osaExe,
+                                 {QStringLiteral("-e"), line1,
+                                  QStringLiteral("-e"), line2})) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow", "Could not launch Terminal.app.");
+        }
+        return false;
+    }
+    return true;
+#elif defined(Q_OS_LINUX)
+    auto tryLaunch = [&](const QString &program,
+                         const QStringList &args) -> bool {
+        const QString exe = QStandardPaths::findExecutable(program);
+        return !exe.isEmpty() && QProcess::startDetached(exe, args);
+    };
+    if (tryLaunch(QStringLiteral("x-terminal-emulator"),
+                  {QStringLiteral("-e"), QStringLiteral("sh"),
+                   QStringLiteral("-lc"), shellCommand})) {
+        return true;
+    }
+    if (tryLaunch(QStringLiteral("gnome-terminal"),
+                  {QStringLiteral("--"), QStringLiteral("sh"),
+                   QStringLiteral("-lc"), shellCommand})) {
+        return true;
+    }
+    if (tryLaunch(QStringLiteral("konsole"),
+                  {QStringLiteral("-e"), QStringLiteral("sh"),
+                   QStringLiteral("-lc"), shellCommand})) {
+        return true;
+    }
+    if (tryLaunch(QStringLiteral("xfce4-terminal"),
+                  {QStringLiteral("--command"),
+                   QStringLiteral("sh -lc %1").arg(shellSingleQuote(shellCommand))})) {
+        return true;
+    }
+    if (tryLaunch(QStringLiteral("xterm"),
+                  {QStringLiteral("-e"), QStringLiteral("sh"),
+                   QStringLiteral("-lc"), shellCommand})) {
+        return true;
+    }
+    if (tryLaunch(QStringLiteral("alacritty"),
+                  {QStringLiteral("-e"), QStringLiteral("sh"),
+                   QStringLiteral("-lc"), shellCommand})) {
+        return true;
+    }
+    if (tryLaunch(QStringLiteral("kitty"),
+                  {QStringLiteral("sh"), QStringLiteral("-lc"),
+                   shellCommand})) {
+        return true;
+    }
+
+    if (errorOut) {
+        *errorOut = QCoreApplication::translate(
+            "MainWindow",
+            "No compatible terminal emulator was found.");
+    }
+    return false;
+#else
+    if (errorOut) {
+        *errorOut = QCoreApplication::translate(
+            "MainWindow",
+            "Open terminal action is not supported on this platform.");
+    }
+    return false;
+#endif
+}
+
 void MainWindow::goUpRight() {
     if (rightIsRemote_) {
         if (!rightRemoteModel_)
@@ -173,6 +467,78 @@ void MainWindow::goHomeRight() {
         setRightRoot(preferredLocalHomePath());
         updateDeleteShortcutEnables();
     }
+}
+
+void MainWindow::openRightRemoteTerminal() {
+    if (!rightIsRemote_ || !m_activeSessionOptions_.has_value()) {
+        UiAlerts::information(this, tr("Open terminal"),
+                              tr("The right panel must be connected as remote."));
+        return;
+    }
+    if (!rightRemoteModel_) {
+        UiAlerts::warning(this, tr("Open terminal"),
+                          tr("No active remote panel is available."));
+        return;
+    }
+
+    const openscp::SessionOptions &opt = *m_activeSessionOptions_;
+    const QString remotePath = normalizeRemotePath(rightRemoteModel_->rootPath());
+
+    QString fullCommand;
+    QString fullPrepareError;
+    const bool fullReady = buildRemoteTerminalSshCommand(
+        opt, remotePath, &fullCommand, &fullPrepareError);
+    if (fullReady) {
+        QString fullLaunchError;
+        if (launchShellCommandInSystemTerminal(fullCommand, &fullLaunchError)) {
+            const bool hasSavedPassword = opt.password.has_value() &&
+                                          !opt.password->empty() &&
+                                          trimOptionalString(opt.private_key_path)
+                                              .isEmpty();
+            QString statusMsg = tr("Opening remote terminal at %1").arg(remotePath);
+            if (hasSavedPassword) {
+                statusMsg +=
+                    tr(" (password may be requested by OpenSSH for security)");
+            }
+            statusBar()->showMessage(statusMsg, 6000);
+            return;
+        }
+        fullPrepareError = fullLaunchError;
+    }
+
+    QString fallbackCommand;
+    QString fallbackPrepareError;
+    if (!buildSimpleRemoteTerminalSshCommand(opt, &fallbackCommand,
+                                             &fallbackPrepareError)) {
+        UiAlerts::warning(
+            this, tr("Open terminal"),
+            tr("Could not open a remote terminal.\nPrimary mode: %1\nFallback "
+               "mode: %2")
+                .arg(fullPrepareError.isEmpty() ? tr("Unknown error.")
+                                                : fullPrepareError,
+                     fallbackPrepareError.isEmpty() ? tr("Unknown error.")
+                                                    : fallbackPrepareError));
+        return;
+    }
+
+    QString fallbackLaunchError;
+    if (!launchShellCommandInSystemTerminal(fallbackCommand,
+                                            &fallbackLaunchError)) {
+        UiAlerts::warning(
+            this, tr("Open terminal"),
+            tr("Could not open a remote terminal.\nPrimary mode: %1\nFallback "
+               "mode: %2")
+                .arg(fullPrepareError.isEmpty() ? tr("Unknown error.")
+                                                : fullPrepareError,
+                     fallbackLaunchError.isEmpty() ? tr("Unknown error.")
+                                                   : fallbackLaunchError));
+        return;
+    }
+
+    statusBar()->showMessage(
+        tr("Opened terminal with basic SSH command. Enter credentials manually "
+           "if needed."),
+        7000);
 }
 
 void MainWindow::setRightRemoteRoot(const QString &path) {

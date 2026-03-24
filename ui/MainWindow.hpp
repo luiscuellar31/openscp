@@ -66,6 +66,7 @@ class MainWindow : public QMainWindow {
     void goUpLeft();        // Go up one level (left)
     void goHomeRight();     // Go to home/root (right)
     void goHomeLeft();      // Go to local home (left)
+    void openRightRemoteTerminal(); // Open SSH terminal at current right path
     void refreshRightRemotePanel(); // Refresh current remote folder (right)
 
     void connectSftp();
@@ -135,6 +136,7 @@ class MainWindow : public QMainWindow {
     QAction *actDownloadF7_ = nullptr;
     QAction *actUploadRight_ = nullptr;
     QAction *actRefreshRight_ = nullptr;
+    QAction *actOpenTerminalRight_ = nullptr;
     QAction *actSearchLeft_ = nullptr;
     QAction *actSearchRight_ = nullptr;
     QAction *actNewDirRight_ = nullptr;

@@ -563,6 +563,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     actRefreshRight_->setIcon(resIcon("action-refresh.svg"));
     actRefreshRight_->setToolTip(actRefreshRight_->text());
 
+    actOpenTerminalRight_ = new QAction(tr("Open terminal"), this);
+    connect(actOpenTerminalRight_, &QAction::triggered, this,
+            &MainWindow::openRightRemoteTerminal);
+    actOpenTerminalRight_->setIcon(resIcon("action-open-terminal.svg"));
+    actOpenTerminalRight_->setToolTip(actOpenTerminalRight_->text());
+
     actNewDirRight_ = new QAction(tr("New folder"), this);
     connect(actNewDirRight_, &QAction::triggered, this,
             &MainWindow::newDirRight);
@@ -631,6 +637,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     rightPaneBar_->addAction(actUploadRight_);
     rightPaneBar_->addSeparator();
     rightPaneBar_->addAction(actRefreshRight_);
+    rightPaneBar_->addAction(actOpenTerminalRight_);
     // Delete shortcut also on right panel (limited to right panel widget)
     if (actDeleteRight_) {
         actDeleteRight_->setShortcut(QKeySequence(Qt::Key_Delete));
@@ -691,6 +698,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     actUploadRight_->setEnabled(false);
     if (actRefreshRight_)
         actRefreshRight_->setEnabled(false);
+    if (actOpenTerminalRight_)
+        actOpenTerminalRight_->setEnabled(false);
     if (actNewFileRight_)
         actNewFileRight_->setEnabled(false);
 
@@ -1882,6 +1891,9 @@ void MainWindow::updateDeleteShortcutEnables() {
     if (actRefreshRight_)
         actRefreshRight_->setEnabled(
             rightIsRemote_); // exception: enabled without selection
+    if (actOpenTerminalRight_)
+        actOpenTerminalRight_->setEnabled(
+            rightIsRemote_ && m_activeSessionOptions_.has_value());
     if (actUpRight_) {
         QString cur = rightRemoteModel_ ? rightRemoteModel_->rootPath()
                                         : rightPath_->text();
