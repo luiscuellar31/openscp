@@ -408,19 +408,19 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         return rightIsRemote_ ? tr("Remote panel")
                               : tr("Local panel - right");
     };
-    // Left sub‑toolbar: Up, Home, Open, Search, Copy/Move/Delete, Rename/New
+    // Left sub‑toolbar: Up, Open, Home, Search, Copy/Move/Delete, Rename/New
     actUpLeft_ = leftPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpLeft);
     actUpLeft_->setIcon(resIcon("action-go-up.svg"));
     actUpLeft_->setToolTip(actUpLeft_->text());
-    actHomeLeft_ =
-        leftPaneBar_->addAction(tr("Home"), this, &MainWindow::goHomeLeft);
-    actHomeLeft_->setIcon(resIcon("action-go-home.svg"));
-    actHomeLeft_->setToolTip(actHomeLeft_->text());
     // Button "Open left folder" next to Up
     actChooseLeft_ = leftPaneBar_->addAction(tr("Open left folder"), this,
                                              &MainWindow::chooseLeftDir);
     actChooseLeft_->setIcon(resIcon("action-open-folder.svg"));
     actChooseLeft_->setToolTip(actChooseLeft_->text());
+    actHomeLeft_ =
+        leftPaneBar_->addAction(tr("Home"), this, &MainWindow::goHomeLeft);
+    actHomeLeft_->setIcon(resIcon("action-go-home.svg"));
+    actHomeLeft_->setToolTip(actHomeLeft_->text());
     actSearchLeft_ =
         leftPaneBar_->addAction(tr("Search items"), this,
                                 [this, leftSearchLabel] {
@@ -520,15 +520,15 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         rightPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpRight);
     actUpRight_->setIcon(resIcon("action-go-up.svg"));
     actUpRight_->setToolTip(actUpRight_->text());
-    actHomeRight_ =
-        rightPaneBar_->addAction(tr("Home"), this, &MainWindow::goHomeRight);
-    actHomeRight_->setIcon(resIcon("action-go-home.svg"));
-    actHomeRight_->setToolTip(actHomeRight_->text());
     // Button "Open right folder" next to Up
     actChooseRight_ = rightPaneBar_->addAction(tr("Open right folder"), this,
                                                &MainWindow::chooseRightDir);
     actChooseRight_->setIcon(resIcon("action-open-folder.svg"));
     actChooseRight_->setToolTip(actChooseRight_->text());
+    actHomeRight_ =
+        rightPaneBar_->addAction(tr("Home"), this, &MainWindow::goHomeRight);
+    actHomeRight_->setIcon(resIcon("action-go-home.svg"));
+    actHomeRight_->setToolTip(actHomeRight_->text());
     actSearchRight_ =
         rightPaneBar_->addAction(tr("Search items"), this,
                                  [this, rightSearchLabel] {
