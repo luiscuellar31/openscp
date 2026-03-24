@@ -44,11 +44,12 @@ cmake --build build -j
 open build/OpenSCP.app
 ```
 
-## Lo que Ofrece OpenSCP (v0.8.1)
+## Lo que Ofrece OpenSCP (v0.9.0)
 
 ### 1. Flujo de doble panel
 
 - Navegacion independiente local/remoto.
+- Navegacion rapida con boton `Home` en las barras de panel (siempre en panel local izquierdo; en el panel derecho usa `HOME` en modo local y fallback a `/` en modo remoto).
 - Copia y movimiento entre paneles con drag-and-drop.
 - Operaciones remotas de contexto: descargar, subir, renombrar, eliminar, nueva carpeta/archivo y permisos.
 - Breadcrumbs clicables y busqueda por panel (boton de barra o `Ctrl/Cmd+F`) con patrones wildcard/regex y modo recursivo opcional.
