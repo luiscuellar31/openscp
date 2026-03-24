@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(OpenSCP_hello LANGUAGES CXX VERSION 0.8.1)
+project(OpenSCP_hello LANGUAGES CXX VERSION 0.9.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -226,6 +226,7 @@ set(ICON_FILES
     assets/icons/action-delete.svg
     assets/icons/action-disconnect.svg
     assets/icons/action-download.svg
+    assets/icons/action-go-home.svg
     assets/icons/action-go-up.svg
     assets/icons/action-open-about-us.svg
     assets/icons/action-move-to-left.svg

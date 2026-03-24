@@ -145,6 +145,16 @@ static QString joinRemotePath(const QString &base, const QString &name) {
     return base.endsWith('/') ? base + name : base + "/" + name;
 }
 
+QString MainWindow::preferredLocalHomePath() const {
+    const QString home = QDir::homePath();
+    if (!home.isEmpty()) {
+        const QString absoluteHome = QDir(home).absolutePath();
+        if (QDir(absoluteHome).exists())
+            return absoluteHome;
+    }
+    return QDir::rootPath();
+}
+
 void MainWindow::chooseLeftDir() {
     const QString dir = QFileDialog::getExistingDirectory(
         this, tr("Select left folder"), leftPath_->text());
@@ -797,6 +807,11 @@ void MainWindow::goUpLeft() {
     if (!d.cdUp())
         return;
     setLeftRoot(d.absolutePath());
+    updateDeleteShortcutEnables();
+}
+
+void MainWindow::goHomeLeft() {
+    setLeftRoot(preferredLocalHomePath());
     updateDeleteShortcutEnables();
 }
 

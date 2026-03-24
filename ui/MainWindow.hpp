@@ -64,6 +64,8 @@ class MainWindow : public QMainWindow {
     void deleteFromLeft();  // Delete
     void goUpRight();       // Go up one level (right)
     void goUpLeft();        // Go up one level (left)
+    void goHomeRight();     // Go to home/root (right)
+    void goHomeLeft();      // Go to local home (left)
     void refreshRightRemotePanel(); // Refresh current remote folder (right)
 
     void connectSftp();
@@ -147,7 +149,9 @@ class MainWindow : public QMainWindow {
 
     // Sub-toolbar actions
     QAction *actUpLeft_ = nullptr;  // back left
+    QAction *actHomeLeft_ = nullptr;
     QAction *actUpRight_ = nullptr; // back right
+    QAction *actHomeRight_ = nullptr;
 
     // Sub-toolbars
     QToolBar *leftPaneBar_ = nullptr;
@@ -254,6 +258,7 @@ class MainWindow : public QMainWindow {
     void stopRemoteSessionHealthMonitoring();
     void runRemoteSessionHealthCheck(const QString &reason,
                                      bool force = false);
+    QString preferredLocalHomePath() const;
 
     // Writable state of the current remote directory
     bool rightRemoteWritable_ = false;

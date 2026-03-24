@@ -165,6 +165,16 @@ void MainWindow::goUpRight() {
     }
 }
 
+void MainWindow::goHomeRight() {
+    if (rightIsRemote_) {
+        // SFTP does not provide a portable remote HOME query; use root fallback.
+        setRightRemoteRoot(QStringLiteral("/"));
+    } else {
+        setRightRoot(preferredLocalHomePath());
+        updateDeleteShortcutEnables();
+    }
+}
+
 void MainWindow::setRightRemoteRoot(const QString &path) {
     if (!rightIsRemote_ || !rightRemoteModel_)
         return;

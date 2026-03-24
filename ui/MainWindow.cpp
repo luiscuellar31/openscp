@@ -323,8 +323,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     rightLocalModel_->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot |
                                 QDir::AllDirs);
 
-    // Initial paths: HOME
-    const QString home = QDir::homePath();
+    // Initial paths: local home (fallback to root if HOME is unavailable)
+    const QString home = preferredLocalHomePath();
     leftModel_->setRootPath(home);
     rightLocalModel_->setRootPath(home);
 
@@ -408,10 +408,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         return rightIsRemote_ ? tr("Remote panel")
                               : tr("Local panel - right");
     };
-    // Left sub‑toolbar: Up, Copy, Move, Delete, Rename, New folder
+    // Left sub‑toolbar: Up, Home, Open, Search, Copy/Move/Delete, Rename/New
     actUpLeft_ = leftPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpLeft);
     actUpLeft_->setIcon(resIcon("action-go-up.svg"));
     actUpLeft_->setToolTip(actUpLeft_->text());
+    actHomeLeft_ =
+        leftPaneBar_->addAction(tr("Home"), this, &MainWindow::goHomeLeft);
+    actHomeLeft_->setIcon(resIcon("action-go-home.svg"));
+    actHomeLeft_->setToolTip(actHomeLeft_->text());
     // Button "Open left folder" next to Up
     actChooseLeft_ = leftPaneBar_->addAction(tr("Open left folder"), this,
                                              &MainWindow::chooseLeftDir);
@@ -516,6 +520,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         rightPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpRight);
     actUpRight_->setIcon(resIcon("action-go-up.svg"));
     actUpRight_->setToolTip(actUpRight_->text());
+    actHomeRight_ =
+        rightPaneBar_->addAction(tr("Home"), this, &MainWindow::goHomeRight);
+    actHomeRight_->setIcon(resIcon("action-go-home.svg"));
+    actHomeRight_->setToolTip(actHomeRight_->text());
     // Button "Open right folder" next to Up
     actChooseRight_ = rightPaneBar_->addAction(tr("Open right folder"), this,
                                                &MainWindow::chooseRightDir);
