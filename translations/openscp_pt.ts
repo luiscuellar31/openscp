@@ -371,8 +371,40 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
         <translation>Falha na autenticação.</translation>
     </message>
     <message>
+        <source>OpenSSH client was not found in PATH.</source>
+        <translation>O cliente OpenSSH não foi encontrado no PATH.</translation>
+    </message>
+    <message>
+        <source>Session is missing host or username information.</source>
+        <translation>Faltam informações de host ou usuário na sessão.</translation>
+    </message>
+    <message>
+        <source>Terminal mode is not available for SOCKS5/HTTP proxy transport sessions.</source>
+        <translation>O modo terminal não está disponível para sessões com proxy SOCKS5/HTTP.</translation>
+    </message>
+    <message>
+        <source>Could not locate osascript.</source>
+        <translation>Não foi possível localizar o osascript.</translation>
+    </message>
+    <message>
+        <source>Could not launch Terminal.app.</source>
+        <translation>Não foi possível abrir o Terminal.app.</translation>
+    </message>
+    <message>
+        <source>No compatible terminal emulator was found.</source>
+        <translation>Nenhum emulador de terminal compatível foi encontrado.</translation>
+    </message>
+    <message>
+        <source>Open terminal action is not supported on this platform.</source>
+        <translation>A ação de abrir terminal não é suportada nesta plataforma.</translation>
+    </message>
+    <message>
         <source>Up</source>
         <translation>Acima</translation>
+    </message>
+    <message>
+        <source>Home</source>
+        <translation>Início</translation>
     </message>
     <message>
         <source>Open left folder</source>
@@ -413,6 +445,50 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <source>Open right folder</source>
         <translation>Abrir pasta direita</translation>
+    </message>
+    <message>
+        <source>Open terminal</source>
+        <translation>Abrir terminal</translation>
+    </message>
+    <message>
+        <source>The right panel must be connected as remote.</source>
+        <translation>O painel direito deve estar conectado como remoto.</translation>
+    </message>
+    <message>
+        <source>No active remote panel is available.</source>
+        <translation>Nenhum painel remoto ativo está disponível.</translation>
+    </message>
+    <message>
+        <source>Could not prepare an SSH terminal command.
+%1</source>
+        <translation>Não foi possível preparar um comando SSH de terminal.
+%1</translation>
+    </message>
+    <message>
+        <source>Could not launch the system terminal.
+%1</source>
+        <translation>Não foi possível abrir o terminal do sistema.
+%1</translation>
+    </message>
+    <message>
+        <source>Opening remote terminal at %1</source>
+        <translation>Abrindo terminal remoto em %1</translation>
+    </message>
+    <message>
+        <source> (password may be requested by OpenSSH for security)</source>
+        <translation> (o OpenSSH pode solicitar senha por segurança)</translation>
+    </message>
+    <message>
+        <source>Could not open a remote terminal.
+Primary mode: %1
+Fallback mode: %2</source>
+        <translation>Não foi possível abrir um terminal remoto.
+Modo principal: %1
+Modo fallback: %2</translation>
+    </message>
+    <message>
+        <source>Opened terminal with basic SSH command. Enter credentials manually if needed.</source>
+        <translation>Terminal aberto com comando SSH básico. Informe credenciais manualmente se necessário.</translation>
     </message>
     <message>
         <source>Search items</source>
