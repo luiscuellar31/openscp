@@ -74,7 +74,7 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     <name>ConnectionDialog</name>
     <message>
         <source>Connect (SFTP)</source>
-        <translation>Conectar (SFTP)</translation>
+        <translation type="vanished">Conectar (SFTP)</translation>
     </message>
     <message>
         <source>My server</source>
@@ -86,7 +86,7 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <source>SSH/SFTP port</source>
-        <translation>Puerto SSH/SFTP</translation>
+        <translation type="vanished">Puerto SSH/SFTP</translation>
     </message>
     <message>
         <source>user</source>
@@ -256,6 +256,42 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
         <source>Select jump private key</source>
         <translation>Selecciona clave privada de salto</translation>
     </message>
+    <message>
+        <source>Connect</source>
+        <translation>Conectar</translation>
+    </message>
+    <message>
+        <source>SFTP</source>
+        <translation>SFTP</translation>
+    </message>
+    <message>
+        <source>SCP</source>
+        <translation>SCP</translation>
+    </message>
+    <message>
+        <source>Server port for the selected protocol</source>
+        <translation>Puerto del servidor para el protocolo seleccionado</translation>
+    </message>
+    <message>
+        <source>Protocol:</source>
+        <translation>Protocolo:</translation>
+    </message>
+    <message>
+        <source>scp.example.com</source>
+        <translation>scp.example.com</translation>
+    </message>
+    <message>
+        <source>ftp.example.com</source>
+        <translation>ftp.example.com</translation>
+    </message>
+    <message>
+        <source>ftps.example.com</source>
+        <translation>ftps.example.com</translation>
+    </message>
+    <message>
+        <source>webdav.example.com</source>
+        <translation>webdav.example.com</translation>
+    </message>
 </context>
 <context>
     <name>DragAwareTreeView</name>
@@ -380,7 +416,7 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <source>Terminal mode is not available for SOCKS5/HTTP proxy transport sessions.</source>
-        <translation>El modo terminal no está disponible para sesiones con proxy SOCKS5/HTTP.</translation>
+        <translation type="vanished">El modo terminal no está disponible para sesiones con proxy SOCKS5/HTTP.</translation>
     </message>
     <message>
         <source>Could not locate osascript.</source>
@@ -461,7 +497,7 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     <message>
         <source>Could not prepare an SSH terminal command.
 %1</source>
-        <translation>No se pudo preparar un comando SSH para terminal.
+        <translation type="vanished">No se pudo preparar un comando SSH para terminal.
 %1</translation>
     </message>
     <message>
@@ -473,7 +509,7 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     <message>
         <source>Could not launch the system terminal.
 %1</source>
-        <translation>No se pudo abrir la terminal del sistema.
+        <translation type="vanished">No se pudo abrir la terminal del sistema.
 %1</translation>
     </message>
     <message>
@@ -506,13 +542,13 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
         <source>Could not open a remote terminal.
 Primary mode: %1
 Fallback mode: %2</source>
-        <translation>No se pudo abrir una terminal remota.
+        <translation type="vanished">No se pudo abrir una terminal remota.
 Modo principal: %1
 Modo fallback: %2</translation>
     </message>
     <message>
         <source>Opened terminal with basic SSH command. Enter credentials manually if needed.</source>
-        <translation>Se abrió la terminal con comando SSH básico. Ingresa credenciales manualmente si es necesario.</translation>
+        <translation type="vanished">Se abrió la terminal con comando SSH básico. Ingresa credenciales manualmente si es necesario.</translation>
     </message>
     <message>
         <source>Search items</source>
@@ -632,7 +668,7 @@ Coincidencias: %2</translation>
     </message>
     <message>
         <source>Connect (SFTP)</source>
-        <translation>Conectar (SFTP)</translation>
+        <translation type="vanished">Conectar (SFTP)</translation>
     </message>
     <message>
         <source>Disconnect</source>
@@ -764,11 +800,11 @@ Coincidencias: %2</translation>
     </message>
     <message>
         <source>SFTP</source>
-        <translation>SFTP</translation>
+        <translation type="vanished">SFTP</translation>
     </message>
     <message>
         <source>No active SFTP session.</source>
-        <translation>No hay sesión SFTP activa.</translation>
+        <translation type="vanished">No hay sesión SFTP activa.</translation>
     </message>
     <message>
         <source>No selection available.</source>
@@ -1230,7 +1266,7 @@ Huella: %3</translation>
     </message>
     <message>
         <source>An active SFTP session already exists</source>
-        <translation>Ya existe una sesión SFTP activa</translation>
+        <translation type="vanished">Ya existe una sesión SFTP activa</translation>
     </message>
     <message>
         <source>Connection canceled: no-verification policy not confirmed</source>
@@ -1356,11 +1392,11 @@ Huella: %3</translation>
     </message>
     <message>
         <source>Connected (SFTP) to </source>
-        <translation>Conectado (SFTP) a </translation>
+        <translation type="vanished">Conectado (SFTP) a </translation>
     </message>
     <message>
         <source>OpenSCP — local/remote (SFTP)</source>
-        <translation>OpenSCP — local/remoto (SFTP)</translation>
+        <translation type="vanished">OpenSCP — local/remoto (SFTP)</translation>
     </message>
     <message>
         <source>Moving selected items...</source>
@@ -1530,11 +1566,11 @@ Edita el sitio y deja solo un transporte.</translation>
     </message>
     <message>
         <source>Invalid operation callback</source>
-        <translation>Callback de operación inválido</translation>
+        <translation type="vanished">Callback de operación inválido</translation>
     </message>
     <message>
         <source>No active remote session</source>
-        <translation>No hay sesión remota activa</translation>
+        <translation type="vanished">No hay sesión remota activa</translation>
     </message>
     <message>
         <source>The remote session failed while trying to %1.
@@ -1643,6 +1679,38 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
     <message>
         <source>Unknown error.</source>
         <translation>Error desconocido.</translation>
+    </message>
+    <message>
+        <source>Remote</source>
+        <translation>Remoto</translation>
+    </message>
+    <message>
+        <source>No active remote session.</source>
+        <translation>No hay sesión remota activa.</translation>
+    </message>
+    <message>
+        <source>An active remote session already exists</source>
+        <translation>Ya existe una sesión remota activa</translation>
+    </message>
+    <message>
+        <source>Protocol not available</source>
+        <translation>Protocolo no disponible</translation>
+    </message>
+    <message>
+        <source>%1 support is not implemented yet.</source>
+        <translation>El soporte para %1 aún no está implementado.</translation>
+    </message>
+    <message>
+        <source>Connection canceled: unsupported protocol %1</source>
+        <translation>Conexión cancelada: protocolo no compatible %1</translation>
+    </message>
+    <message>
+        <source>Connected (%1) to %2</source>
+        <translation>Conectado (%1) a %2</translation>
+    </message>
+    <message>
+        <source>OpenSCP — local/remote (%1)</source>
+        <translation>OpenSCP — local/remoto (%1)</translation>
     </message>
 </context>
 <context>
@@ -1825,11 +1893,15 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
     </message>
     <message>
         <source>No SFTP client available</source>
-        <translation>No hay cliente SFTP disponible</translation>
+        <translation type="vanished">No hay cliente SFTP disponible</translation>
     </message>
     <message>
         <source>Missing session options for remote listing</source>
         <translation>Faltan opciones de sesión para el listado remoto</translation>
+    </message>
+    <message>
+        <source>No remote client available</source>
+        <translation>No hay cliente remoto disponible</translation>
     </message>
 </context>
 <context>
@@ -2154,6 +2226,10 @@ En Linux, se recomienda instalar y usar libsecret/Secret Service para mayor segu
     <message>
         <source>Proxy password</source>
         <translation>Contraseña del proxy</translation>
+    </message>
+    <message>
+        <source>Protocol</source>
+        <translation>Protocolo</translation>
     </message>
 </context>
 <context>
