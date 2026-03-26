@@ -9,6 +9,7 @@
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QtGlobal>
 #include <QSpinBox>
 #include <QTimer>
@@ -25,9 +26,14 @@ static void setFormRowVisible(QFormLayout *layout, QWidget *field,
 }
 
 ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
-    setWindowTitle(tr("Connect (SFTP)"));
+    setWindowTitle(tr("Connect"));
     auto *lay = new QFormLayout(this);
     lay->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+
+    protocol_ = new QComboBox(this);
+    protocol_->addItem(tr("SFTP"),
+                       static_cast<int>(openscp::Protocol::Sftp));
+    protocol_->addItem(tr("SCP"), static_cast<int>(openscp::Protocol::Scp));
 
     siteName_ = new QLineEdit(this);
     host_ = new QLineEdit(this);
@@ -52,11 +58,9 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     // Safer defaults: no implicit host/user values to avoid accidental
     // connections.
     siteName_->setPlaceholderText(tr("My server"));
-    host_->setPlaceholderText(tr("sftp.example.com"));
     port_->setRange(1, 65535);
-    port_->setValue(22);
     port_->setFixedWidth(110);
-    port_->setToolTip(tr("SSH/SFTP port"));
+    port_->setToolTip(tr("Server port for the selected protocol"));
     user_->setPlaceholderText(tr("user"));
     pass_->setPlaceholderText(tr("optional"));
     keyPath_->setPlaceholderText(tr("~/.ssh/id_ed25519"));
@@ -219,6 +223,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
             setSiteNameVisible(checked);
         }
     });
+    lay->addRow(tr("Protocol:"), protocol_);
     lay->addRow(tr("Host / Port:"), hostPortRow);
     lay->addRow(tr("User:"), user_);
     lay->addRow(tr("Password:"), passRow);
@@ -315,6 +320,15 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
                 updateProxyFields();
             });
     updateProxyFields();
+
+    connect(protocol_, &QComboBox::currentIndexChanged, this, [this](int) {
+        if (!protocol_)
+            return;
+        const auto protocol = static_cast<openscp::Protocol>(
+            protocol_->currentData().toInt());
+        updateProtocolUi(protocol);
+    });
+    updateProtocolUi(openscp::Protocol::Sftp);
 
     auto updateJumpFields = [this, lay, jumpHostPortRow, jumpKeyPathRow]() {
         const bool showJumpRows =
@@ -423,6 +437,10 @@ bool ConnectionDialog::saveCredentialsRequested() const {
 
 openscp::SessionOptions ConnectionDialog::options() const {
     openscp::SessionOptions o;
+    if (protocol_) {
+        o.protocol =
+            static_cast<openscp::Protocol>(protocol_->currentData().toInt());
+    }
     o.host = host_->text().toStdString();
     o.port = static_cast<std::uint16_t>(port_->value());
     o.username = user_->text().toStdString();
@@ -480,6 +498,17 @@ openscp::SessionOptions ConnectionDialog::options() const {
 }
 
 void ConnectionDialog::setOptions(const openscp::SessionOptions &o) {
+    openscp::Protocol effectiveProtocol = o.protocol;
+    if (protocol_) {
+        int pidx = protocol_->findData(static_cast<int>(o.protocol));
+        if (pidx >= 0) {
+            QSignalBlocker block(protocol_);
+            protocol_->setCurrentIndex(pidx);
+        } else {
+            effectiveProtocol = openscp::Protocol::Sftp;
+        }
+        updateProtocolUi(effectiveProtocol);
+    }
     if (!o.host.empty())
         host_->setText(QString::fromStdString(o.host));
     if (o.port)
@@ -538,4 +567,27 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &o) {
         jumpUser_->setText(QString::fromStdString(*o.jump_username));
     if (o.jump_private_key_path && !o.jump_private_key_path->empty())
         jumpKeyPath_->setText(QString::fromStdString(*o.jump_private_key_path));
+}
+
+void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol) {
+    if (!host_ || !port_)
+        return;
+    switch (protocol) {
+    case openscp::Protocol::Sftp:
+        host_->setPlaceholderText(tr("sftp.example.com"));
+        break;
+    case openscp::Protocol::Scp:
+        host_->setPlaceholderText(tr("scp.example.com"));
+        break;
+    case openscp::Protocol::Ftp:
+        host_->setPlaceholderText(tr("ftp.example.com"));
+        break;
+    case openscp::Protocol::Ftps:
+        host_->setPlaceholderText(tr("ftps.example.com"));
+        break;
+    case openscp::Protocol::WebDav:
+        host_->setPlaceholderText(tr("webdav.example.com"));
+        break;
+    }
+    port_->setValue(static_cast<int>(openscp::defaultPortForProtocol(protocol)));
 }

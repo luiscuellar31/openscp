@@ -1,4 +1,4 @@
-// Dialog to capture SFTP connection options (host/port/user/key/known_hosts).
+// Dialog to capture remote connection options (protocol/host/auth/security).
 #pragma once
 #include "openscp/SftpTypes.hpp"
 #include <QDialog>
@@ -25,7 +25,10 @@ class ConnectionDialog : public QDialog {
     bool saveCredentialsRequested() const;
 
     private:
+    void updateProtocolUi(openscp::Protocol protocol);
+
     bool quickConnectSaveOptionsVisible_ = false;
+    QComboBox *protocol_ = nullptr;
     QLineEdit *siteName_ = nullptr;
     QWidget *siteNameLabel_ = nullptr;
     QCheckBox *saveSite_ = nullptr;
