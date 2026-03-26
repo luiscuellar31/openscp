@@ -1,4 +1,5 @@
 // Core unit tests without external framework (run via CTest).
+#include "openscp/ClientFactory.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
 #include "openscp/MockSftpClient.hpp"
 
@@ -61,7 +62,10 @@ bool readTextFile(const fs::path &path, std::string &out) {
 
 void test_session_defaults(TestContext &t) {
     openscp::SessionOptions o;
-    t.check(o.port == 22, "default port should be 22");
+    t.check(o.protocol == openscp::Protocol::Sftp,
+            "default protocol should be SFTP");
+    t.check(o.port == openscp::defaultPortForProtocol(openscp::Protocol::Sftp),
+            "default port should match the SFTP default");
     t.check(o.known_hosts_policy == openscp::KnownHostsPolicy::Strict,
             "default known_hosts_policy should be Strict");
     t.check(o.known_hosts_hash_names,
@@ -73,6 +77,40 @@ void test_session_defaults(TestContext &t) {
     t.check(!o.password.has_value(), "password should be empty by default");
     t.check(!o.private_key_path.has_value(),
             "private_key_path should be empty by default");
+}
+
+void test_protocol_helpers(TestContext &t) {
+    t.check(openscp::protocolFromStorageName("sftp") ==
+                openscp::Protocol::Sftp,
+            "protocolFromStorageName should parse sftp");
+    t.check(openscp::protocolFromStorageName("SCP") == openscp::Protocol::Scp,
+            "protocolFromStorageName should parse scp case-insensitively");
+    t.check(openscp::protocolFromStorageName("unknown") ==
+                openscp::Protocol::Sftp,
+            "protocolFromStorageName should fallback to sftp");
+    t.check(std::string(openscp::protocolStorageName(openscp::Protocol::Scp)) ==
+                "scp",
+            "protocolStorageName should serialize SCP");
+    t.check(std::string(openscp::protocolDisplayName(openscp::Protocol::Scp)) ==
+                "SCP",
+            "protocolDisplayName should expose SCP label");
+
+    const auto sftpCaps =
+        openscp::capabilitiesForProtocol(openscp::Protocol::Sftp);
+    t.check(sftpCaps.implemented, "SFTP capabilities should be implemented");
+    t.check(sftpCaps.supports_listing,
+            "SFTP capabilities should include listing");
+
+    const auto scpCaps =
+        openscp::capabilitiesForProtocol(openscp::Protocol::Scp);
+    t.check(scpCaps.implemented, "SCP capabilities should be implemented");
+    t.check(scpCaps.supports_file_transfers,
+            "SCP capabilities should include file transfers");
+
+    const auto webdavCaps =
+        openscp::capabilitiesForProtocol(openscp::Protocol::WebDav);
+    t.check(!webdavCaps.implemented,
+            "WebDAV capabilities should report not implemented");
 }
 
 void test_connect_validation(TestContext &t) {
@@ -262,6 +300,27 @@ void test_new_connection_like_validation(TestContext &t) {
     t.check(!err.empty(), "newConnectionLike should report validation errors");
 }
 
+void test_client_factory(TestContext &t) {
+    auto sftp = openscp::CreateClientForProtocol(openscp::Protocol::Sftp);
+    t.check(static_cast<bool>(sftp),
+            "factory should create SFTP backend instance");
+    if (sftp) {
+        t.check(sftp->protocol() == openscp::Protocol::Sftp,
+                "SFTP backend should report SFTP protocol");
+    }
+
+    auto scp = openscp::CreateClientForProtocol(openscp::Protocol::Scp);
+    t.check(static_cast<bool>(scp),
+            "factory should create SCP backend instance");
+    if (scp) {
+        t.check(scp->protocol() == openscp::Protocol::Scp,
+                "SCP backend should report SCP protocol");
+    }
+
+    auto ftp = openscp::CreateClientForProtocol(openscp::Protocol::Ftp);
+    t.check(!ftp, "factory should return null for unsupported FTP backend");
+}
+
 void test_set_times(TestContext &t) {
     openscp::MockSftpClient c;
     std::string err;
@@ -377,6 +436,7 @@ void test_remove_known_hosts_entry_non_default_port(TestContext &t) {
 int main() {
     TestContext t;
     test_session_defaults(t);
+    test_protocol_helpers(t);
     test_connect_validation(t);
     test_disconnect_changes_state(t);
     test_list_requires_connection(t);
@@ -386,6 +446,7 @@ int main() {
     test_unsupported_methods_report_error(t);
     test_new_connection_like(t);
     test_new_connection_like_validation(t);
+    test_client_factory(t);
     test_set_times(t);
     test_libssh2_rejects_conflicting_proxy_and_jump(t);
 #ifdef _WIN32
