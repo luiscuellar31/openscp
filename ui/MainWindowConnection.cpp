@@ -6,7 +6,7 @@
 #include "SiteManagerDialog.hpp"
 #include "TransferManager.hpp"
 #include "UiAlerts.hpp"
-#include "openscp/Libssh2SftpClient.hpp"
+#include "openscp/ClientFactory.hpp"
 #include "openscp/RuntimeLogging.hpp"
 
 #include <QAbstractButton>
@@ -119,6 +119,10 @@ static QString normalizedIdentityUser(const std::string &user) {
     return QString::fromStdString(user).trimmed();
 }
 
+static QString normalizedIdentityProtocol(openscp::Protocol protocol) {
+    return QString::fromLatin1(openscp::protocolStorageName(protocol));
+}
+
 static QString normalizedIdentityProxyHost(const std::string &host) {
     return QString::fromStdString(host).trimmed().toLower();
 }
@@ -158,6 +162,10 @@ static std::uint16_t defaultProxyPort(openscp::ProxyType type) {
     return 0;
 }
 
+static QString protocolDisplayLabel(openscp::Protocol protocol) {
+    return QString::fromLatin1(openscp::protocolDisplayName(protocol));
+}
+
 static QString
 normalizedIdentityKeyPath(const std::optional<std::string> &keyPath) {
     if (!keyPath || keyPath->empty())
@@ -177,7 +185,9 @@ static bool hasTransportSelectionConflict(const openscp::SessionOptions &opt) {
 
 static bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
                                   const openscp::SessionOptions &b) {
-    return normalizedIdentityHost(a.host) == normalizedIdentityHost(b.host) &&
+    return normalizedIdentityProtocol(a.protocol) ==
+               normalizedIdentityProtocol(b.protocol) &&
+           normalizedIdentityHost(a.host) == normalizedIdentityHost(b.host) &&
            a.port == b.port &&
            normalizedIdentityUser(a.username) ==
                normalizedIdentityUser(b.username) &&
@@ -220,8 +230,20 @@ static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool *needsSave) {
         }
         usedIds.insert(e.id);
         e.name = s.value("name").toString().trimmed();
+        e.opt.protocol = openscp::protocolFromStorageName(
+            s.value("protocol",
+                    QString::fromLatin1(
+                        openscp::protocolStorageName(openscp::Protocol::Sftp)))
+                .toString()
+                .trimmed()
+                .toLower()
+                .toStdString());
         e.opt.host = s.value("host").toString().toStdString();
-        e.opt.port = static_cast<std::uint16_t>(s.value("port", 22).toUInt());
+        e.opt.port = static_cast<std::uint16_t>(
+            s.value("port",
+                    static_cast<int>(
+                        openscp::defaultPortForProtocol(e.opt.protocol)))
+                .toUInt());
         e.opt.username = s.value("user").toString().toStdString();
         const QString kp = s.value("keyPath").toString();
         if (!kp.isEmpty())
@@ -277,6 +299,9 @@ static void saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
         const SiteEntry &e = sites[i];
         s.setValue("id", e.id);
         s.setValue("name", e.name);
+        s.setValue("protocol",
+                   QString::fromLatin1(
+                       openscp::protocolStorageName(e.opt.protocol)));
         s.setValue("host", QString::fromStdString(e.opt.host));
         s.setValue("port", static_cast<int>(e.opt.port));
         s.setValue("user", QString::fromStdString(e.opt.username));
@@ -318,6 +343,7 @@ static void saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
 static QString defaultQuickSiteName(const openscp::SessionOptions &opt) {
     const QString user = normalizedIdentityUser(opt.username);
     const QString host = normalizedIdentityHost(opt.host);
+    const QString protocol = protocolDisplayLabel(opt.protocol);
     QString out;
     if (!user.isEmpty() && !host.isEmpty())
         out = QString("%1@%2").arg(user, host);
@@ -327,8 +353,11 @@ static QString defaultQuickSiteName(const openscp::SessionOptions &opt) {
         out = user;
     else
         out = QObject::tr("New site");
-    if (!host.isEmpty() && opt.port != 22)
+    if (!host.isEmpty() &&
+        opt.port != openscp::defaultPortForProtocol(opt.protocol))
         out += QString(":%1").arg(opt.port);
+    if (opt.protocol != openscp::Protocol::Sftp)
+        out = QString("%1 (%2)").arg(out, protocol);
     return out;
 }
 
@@ -692,7 +721,7 @@ void MainWindow::connectSftp() {
     startSftpConnect(opt, saveRequest);
 }
 
-// Tear down the current SFTP session and restore local mode.
+// Tear down the current remote session and restore local mode.
 void MainWindow::disconnectSftp() {
     if (m_isDisconnecting)
         return;
@@ -1210,8 +1239,20 @@ void MainWindow::startSftpConnect(
         return;
     }
     if (rightIsRemote_ || sftp_) {
-        statusBar()->showMessage(tr("An active SFTP session already exists"),
+        statusBar()->showMessage(tr("An active remote session already exists"),
                                  3000);
+        return;
+    }
+    const openscp::ProtocolCapabilities caps =
+        openscp::capabilitiesForProtocol(opt.protocol);
+    if (!caps.implemented) {
+        const QString protocol = protocolDisplayLabel(opt.protocol);
+        UiAlerts::information(
+            this, tr("Protocol not available"),
+            tr("%1 support is not implemented yet.").arg(protocol));
+        statusBar()->showMessage(
+            tr("Connection canceled: unsupported protocol %1").arg(protocol),
+            5000);
         return;
     }
     if (hasTransportSelectionConflict(opt)) {
@@ -1419,8 +1460,8 @@ void MainWindow::startSftpConnect(
                 canceledByUser = true;
                 err = "Connection canceled by user";
             } else {
-                auto tmp = std::make_unique<openscp::Libssh2SftpClient>();
-                okConn = tmp->connect(opt, err);
+                auto tmp = openscp::CreateConnectedClient(opt, err);
+                okConn = static_cast<bool>(tmp);
                 if (cancelFlag && cancelFlag->load()) {
                     canceledByUser = true;
                     if (okConn)
@@ -1768,10 +1809,13 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         actChooseRight_->setEnabled(false);
         actChooseRight_->setToolTip(tr("Not available in remote mode"));
     }
-    startConnectionSessionIndicators(QStringLiteral("SFTP"));
+    const QString activeProtocol = protocolDisplayLabel(opt.protocol);
+    startConnectionSessionIndicators(activeProtocol);
     statusBar()->showMessage(
-        tr("Connected (SFTP) to ") + QString::fromStdString(opt.host), 4000);
-    setWindowTitle(tr("OpenSCP — local/remote (SFTP)"));
+        tr("Connected (%1) to %2")
+            .arg(activeProtocol, QString::fromStdString(opt.host)),
+        4000);
+    setWindowTitle(tr("OpenSCP — local/remote (%1)").arg(activeProtocol));
     updateHostPolicyRiskBanner();
     startRemoteSessionHealthMonitoring();
     updateRemoteWriteability();
