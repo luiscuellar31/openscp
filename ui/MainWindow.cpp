@@ -11,7 +11,6 @@
 #include "SiteManagerDialog.hpp"
 #include "TransferManager.hpp"
 #include "TransferQueueDialog.hpp"
-#include "openscp/Libssh2SftpClient.hpp"
 #include <QAbstractButton>
 #include <QApplication>
 #include <QCheckBox>
@@ -729,7 +728,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     rightPaneBar_->setIconSize(QSize(subIconPx, subIconPx));
     // Copy/move/delete actions now live in the left sub‑toolbar
     actConnect_ =
-        tb->addAction(tr("Connect (SFTP)"), this, &MainWindow::connectSftp);
+        tb->addAction(tr("Connect"), this, &MainWindow::connectSftp);
     actConnect_->setIcon(resIcon("action-connect.svg"));
     actConnect_->setToolTip(actConnect_->text());
     tb->addSeparator();
@@ -1441,8 +1440,8 @@ void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
     bool truncated = false;
 
     if (view == rightView_ && rightIsRemote_ && (!rightRemoteModel_ || !sftp_)) {
-        QMessageBox::warning(this, tr("SFTP"),
-                             tr("No active SFTP session."));
+        QMessageBox::warning(this, tr("Remote"),
+                             tr("No active remote session."));
         return;
     }
 
