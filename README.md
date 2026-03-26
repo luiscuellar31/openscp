@@ -50,7 +50,7 @@ open build/OpenSCP.app
 
 - Independent local/remote navigation.
 - Quick `Home` navigation in panel toolbars (left local panel always; right panel uses local `HOME` in local mode and `/` fallback in remote mode).
-- Right panel includes `Open terminal` in remote mode to start an SSH terminal directly in the currently viewed remote path, with automatic fallback to a basic `ssh user@host -p port` command (manual credential entry).
+- Right panel includes `Open in terminal` in remote mode to start an SSH terminal directly in the currently viewed remote path using the active transport settings (direct, proxy tunnel, or jump host); if the SSH shell fails with a session error (for example PTY denied), it automatically falls back to `sftp` CLI in the same terminal. If transport requirements cannot be reproduced safely, the app shows an explicit error instead of downgrading to a basic direct SSH fallback. An advanced setting can force interactive login (password/keyboard-interactive) for these commands.
 - Drag-and-drop copy/move between panels.
 - Remote context operations: download, upload, rename, delete, new folder/file, permissions.
 - Clickable breadcrumbs and per-panel search (toolbar button or `Ctrl/Cmd+F`) with wildcard/regex patterns and optional recursive mode.
