@@ -111,11 +111,12 @@ void MainWindow::runRemoteDownloadPrescan(
     const QVector<RemoteDownloadSeed> &seeds, int initialSkipped,
     bool dragAndDrop) {
     if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_ || !transferMgr_) {
-        UiAlerts::warning(this, tr("SFTP"), tr("No active SFTP session."));
+        UiAlerts::warning(this, tr("Remote"),
+                          tr("No active remote session."));
         return;
     }
     if (!m_activeSessionOptions_.has_value()) {
-        UiAlerts::warning(this, tr("SFTP"),
+        UiAlerts::warning(this, tr("Remote"),
                              tr("Missing session options for remote scan."));
         return;
     }
@@ -140,7 +141,7 @@ void MainWindow::runRemoteDownloadPrescan(
     if (!scanClient) {
         m_remoteScanInProgress_ = false;
         UiAlerts::warning(
-            this, tr("SFTP"),
+            this, tr("Remote"),
             tr("Could not start remote scan.\n%1")
                 .arg(QString::fromStdString(connErr)));
         return;
