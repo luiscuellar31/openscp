@@ -1,10 +1,10 @@
-// MainWindow remote-side operations, SFTP actions, and writeability state.
+// MainWindow remote-side operations and writeability state.
 #include "MainWindow.hpp"
 #include "PermissionsDialog.hpp"
 #include "RemoteModel.hpp"
 #include "TransferManager.hpp"
 #include "UiAlerts.hpp"
-#include "openscp/Libssh2SftpClient.hpp"
+#include "openscp/ClientFactory.hpp"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -950,7 +950,7 @@ void MainWindow::downloadRightToLeft() {
         return;
     }
     if (!sftp_ || !rightRemoteModel_) {
-        UiAlerts::warning(this, tr("SFTP"), tr("No active SFTP session."));
+        UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
     const QString picked = QFileDialog::getExistingDirectory(
@@ -1107,7 +1107,7 @@ void MainWindow::copyRightToLeft() {
 
     // Remote -> Local: enqueue downloads
     if (!sftp_ || !rightRemoteModel_) {
-        UiAlerts::warning(this, tr("SFTP"), tr("No active SFTP session."));
+        UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
     int bad = 0;
@@ -1193,7 +1193,7 @@ void MainWindow::moveRightToLeft() {
 
     // Remote -> Local: enqueue downloads and delete remote on completion
     if (!sftp_ || !rightRemoteModel_) {
-        UiAlerts::warning(this, tr("SFTP"), tr("No active SFTP session."));
+        UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
     const auto rows = sel->selectedRows(NAME_COL);
@@ -1516,7 +1516,7 @@ void MainWindow::newDirRight() {
         if (!okMkdir) {
             invalidateRemoteWriteabilityFromError(QString::fromStdString(err));
             UiAlerts::critical(
-                this, tr("SFTP"),
+                this, tr("Remote"),
                 tr("Could not create the remote folder.\n%1")
                     .arg(shortRemoteError(err, tr("Remote error"))));
             return;
@@ -1567,7 +1567,7 @@ void MainWindow::newFileRight() {
             e);
         if (!existsCheckOk) {
             UiAlerts::critical(
-                this, tr("SFTP"),
+                this, tr("Remote"),
                 tr("Could not check whether the remote file already "
                    "exists.\n%1")
                     .arg(shortRemoteError(e, tr("Remote error"))));
@@ -1600,7 +1600,7 @@ void MainWindow::newFileRight() {
         if (!okPut) {
             invalidateRemoteWriteabilityFromError(QString::fromStdString(err));
             UiAlerts::critical(
-                this, tr("SFTP"),
+                this, tr("Remote"),
                 tr("Could not upload the temporary file to the server.\n%1")
                     .arg(shortRemoteError(err, tr("Remote error"))));
             return;
@@ -1667,7 +1667,7 @@ void MainWindow::renameRightSelected() {
         if (!okRename) {
             invalidateRemoteWriteabilityFromError(QString::fromStdString(err));
             UiAlerts::critical(
-                this, tr("SFTP"),
+                this, tr("Remote"),
                 tr("Could not rename the remote item.\n%1")
                     .arg(shortRemoteError(err, tr("Remote error"))));
             return;
@@ -2116,9 +2116,9 @@ void MainWindow::updateRemoteWriteability() {
         bool probeFinished = false;
         bool writable = false;
 
-        openscp::Libssh2SftpClient probe;
         std::string connErr;
-        if (probe.connect(opt, connErr)) {
+        auto probe = openscp::CreateConnectedClient(opt, connErr);
+        if (probe) {
             probeFinished = true;
             const qint64 ts = QDateTime::currentMSecsSinceEpoch();
             const QString testName =
@@ -2126,15 +2126,16 @@ void MainWindow::updateRemoteWriteability() {
             const QString testPath =
                 base.endsWith('/') ? base + testName : base + "/" + testName;
             std::string err;
-            const bool created = probe.mkdir(testPath.toStdString(), err, 0755);
+            const bool created =
+                probe->mkdir(testPath.toStdString(), err, 0755);
             if (created) {
                 std::string derr;
-                (void)probe.removeDir(testPath.toStdString(), derr);
+                (void)probe->removeDir(testPath.toStdString(), derr);
                 writable = true;
             } else {
                 writable = false;
             }
-            probe.disconnect();
+            probe->disconnect();
         }
 
         QObject *app = QCoreApplication::instance();
