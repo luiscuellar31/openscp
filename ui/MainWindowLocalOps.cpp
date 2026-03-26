@@ -332,8 +332,8 @@ void MainWindow::copyLeftToRight() {
         // ---- REMOTE branch: upload files (PUT) to the current remote
         // directory ----
         if (!sftp_ || !rightRemoteModel_) {
-            UiAlerts::warning(this, tr("SFTP"),
-                                 tr("No active SFTP session."));
+            UiAlerts::warning(this, tr("Remote"),
+                                 tr("No active remote session."));
             return;
         }
 
@@ -455,8 +455,8 @@ void MainWindow::copyLeftToRight() {
 void MainWindow::moveLeftToRight() {
     if (rightIsRemote_) {
         if (!sftp_ || !rightRemoteModel_) {
-            UiAlerts::warning(this, tr("SFTP"),
-                                 tr("No active SFTP session."));
+            UiAlerts::warning(this, tr("Remote"),
+                                 tr("No active remote session."));
             return;
         }
         const auto rows = leftView_->selectionModel()->selectedRows(NAME_COL);
