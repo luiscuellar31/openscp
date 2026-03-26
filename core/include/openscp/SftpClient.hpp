@@ -1,5 +1,5 @@
-// Abstract interface for SFTP operations. Concrete implementations (e.g.,
-// libssh2) must follow this API to keep the UI decoupled from the backend.
+// Abstract interface for remote operations. Concrete implementations (e.g.,
+// libssh2-based SFTP/SCP backends) follow this API to keep the UI decoupled.
 #pragma once
 #include "SftpTypes.hpp"
 #include <functional>
@@ -12,6 +12,12 @@ class SftpClient {
     using ProgressCB = std::function<void(double)>; // 0..1 (currently unused)
 
     virtual ~SftpClient() = default;
+
+    // Protocol/capabilities exposed to UI and orchestration layers.
+    virtual Protocol protocol() const { return Protocol::Sftp; }
+    virtual ProtocolCapabilities capabilities() const {
+        return capabilitiesForProtocol(protocol());
+    }
 
     // Connect and disconnect
     virtual bool connect(const SessionOptions &opt, std::string &err) = 0;

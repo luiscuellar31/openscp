@@ -18,6 +18,11 @@ class Libssh2SftpClient : public SftpClient {
     Libssh2SftpClient();
     ~Libssh2SftpClient() override;
 
+    Protocol protocol() const override { return Protocol::Sftp; }
+    ProtocolCapabilities capabilities() const override {
+        return capabilitiesForProtocol(Protocol::Sftp);
+    }
+
     bool connect(const SessionOptions &opt, std::string &err) override;
     void disconnect() override;
     void interrupt() override;
