@@ -221,7 +221,7 @@ bool RemoteModel::setRootPath(const QString &path, QString *errorOut,
                               bool async) {
     if (!client_) {
         if (errorOut)
-            *errorOut = tr("No SFTP client available");
+            *errorOut = tr("No remote client available");
         return false;
     }
 
