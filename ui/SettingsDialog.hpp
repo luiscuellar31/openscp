@@ -52,6 +52,8 @@ class SettingsDialog : public QDialog {
         nullptr; // save hostnames hashed in known_hosts (recommended)
     QCheckBox *fpHex_ =
         nullptr; // show fingerprints in HEX colon format (visual only)
+    QCheckBox *terminalForceInteractiveLogin_ =
+        nullptr; // force password/kbd-interactive login in "Open in terminal"
     class QSpinBox *noHostVerifyTtlMinSpin_ =
         nullptr; // temporary "no host verification" ttl in minutes
     QCheckBox *insecureFallback_ =

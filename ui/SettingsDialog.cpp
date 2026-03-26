@@ -361,10 +361,16 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     fpHex_ = new QCheckBox(
         tr("Show fingerprint in HEX (colon) format (visual only)."),
         securityGroup);
+    terminalForceInteractiveLogin_ = new QCheckBox(
+        tr("Force interactive login when using Open in terminal "
+           "(disable key/agent auth)."),
+        securityGroup);
     trackWrappedCheck(knownHostsHashed_);
     trackWrappedCheck(fpHex_);
+    trackWrappedCheck(terminalForceInteractiveLogin_);
     securityLay->addWidget(knownHostsHashed_);
     securityLay->addWidget(fpHex_);
+    securityLay->addWidget(terminalForceInteractiveLogin_);
 #if defined(Q_OS_MAC) || defined(Q_OS_MACOS) || defined(__APPLE__)
     macKeychainRestrictive_ = new QCheckBox(
         tr("Use stricter Keychain accessibility (this device only)."),
@@ -564,6 +570,10 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
             s.value("Security/knownHostsHashed", true).toBool());
     if (fpHex_)
         fpHex_->setChecked(s.value("Security/fpHex", false).toBool());
+    if (terminalForceInteractiveLogin_) {
+        terminalForceInteractiveLogin_->setChecked(
+            s.value("Terminal/forceInteractiveLogin", false).toBool());
+    }
     if (noHostVerifyTtlMinSpin_)
         noHostVerifyTtlMinSpin_->setValue(
             s.value("Security/noHostVerificationTtlMin", 15).toInt());
@@ -617,6 +627,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     bindDirtyFlag(deleteSecretsOnRemove_, &QCheckBox::toggled);
     bindDirtyFlag(knownHostsHashed_, &QCheckBox::toggled);
     bindDirtyFlag(fpHex_, &QCheckBox::toggled);
+    bindDirtyFlag(terminalForceInteractiveLogin_, &QCheckBox::toggled);
     bindDirtyFlag(noHostVerifyTtlMinSpin_,
                   qOverload<int>(&QSpinBox::valueChanged));
     bindDirtyFlag(maxConcurrentSpin_, qOverload<int>(&QSpinBox::valueChanged));
@@ -720,6 +731,10 @@ void SettingsDialog::onApply() {
         s.setValue("Security/knownHostsHashed", knownHostsHashed_->isChecked());
     if (fpHex_)
         s.setValue("Security/fpHex", fpHex_->isChecked());
+    if (terminalForceInteractiveLogin_) {
+        s.setValue("Terminal/forceInteractiveLogin",
+                   terminalForceInteractiveLogin_->isChecked());
+    }
     if (noHostVerifyTtlMinSpin_)
         s.setValue("Security/noHostVerificationTtlMin",
                    noHostVerifyTtlMinSpin_->value());
@@ -794,6 +809,8 @@ void SettingsDialog::updateApplyFromControls() {
     const bool knownHashed =
         s.value("Security/knownHostsHashed", true).toBool();
     const bool fpHex = s.value("Security/fpHex", false).toBool();
+    const bool terminalForceInteractiveLogin =
+        s.value("Terminal/forceInteractiveLogin", false).toBool();
     const int noHostVerifyTtlMin =
         s.value("Security/noHostVerificationTtlMin", 15).toInt();
 // Only compare insecure fallback when available in this build/platform
@@ -843,6 +860,9 @@ void SettingsDialog::updateApplyFromControls() {
     const bool curKnownHashed =
         knownHostsHashed_ && knownHostsHashed_->isChecked();
     const bool curFpHex = fpHex_ && fpHex_->isChecked();
+    const bool curTerminalForceInteractiveLogin =
+        terminalForceInteractiveLogin_ &&
+        terminalForceInteractiveLogin_->isChecked();
     const int curNoHostVerifyTtlMin = noHostVerifyTtlMinSpin_
                                           ? noHostVerifyTtlMinSpin_->value()
                                           : noHostVerifyTtlMin;
@@ -881,6 +901,7 @@ void SettingsDialog::updateApplyFromControls() {
         (curDefaultDownload != defaultDownload) ||
         (curDeleteSecrets != deleteSecrets) ||
         (curKnownHashed != knownHashed) || (curFpHex != fpHex) ||
+        (curTerminalForceInteractiveLogin != terminalForceInteractiveLogin) ||
         (curNoHostVerifyTtlMin != noHostVerifyTtlMin)
 #if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) &&       \
     !defined(HAVE_LIBSECRET) && !defined(OPEN_SCP_BUILD_SECURE_ONLY)
