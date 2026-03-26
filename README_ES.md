@@ -3,7 +3,7 @@
     <h1 align="center">OpenSCP</h1>
 
 <p>
-    <strong>Cliente SFTP de doble panel enfocado en simplicidad y seguridad</strong>
+    <strong>Cliente SFTP/SCP de doble panel enfocado en simplicidad y seguridad</strong>
 </p>
 
 <p>
@@ -11,7 +11,7 @@
 </p>
 
 <p>
-    <strong>OpenSCP</strong> es un explorador de archivos estilo two-panel commander escrito en <strong>C++/Qt</strong>, con soporte <strong>SFTP</strong> (libssh2 + OpenSSL). Busca ser una alternativa ligera a herramientas como WinSCP, enfocada en <strong>seguridad</strong>, <strong>claridad</strong> y <strong>extensibilidad</strong>.
+    <strong>OpenSCP</strong> es un explorador de archivos estilo two-panel commander escrito en <strong>C++/Qt</strong>, con soporte <strong>SFTP</strong> y soporte inicial para <strong>SCP</strong> (libssh2 + OpenSSL). Busca ser una alternativa ligera a herramientas como WinSCP, enfocada en <strong>seguridad</strong>, <strong>claridad</strong> y <strong>extensibilidad</strong>.
 </p>
 
 <br>
@@ -71,9 +71,10 @@ open build/OpenSCP.app
 - Las operaciones remotas criticas ahora intentan una recuperacion automatica de sesion stale (reconexion + reintento) antes de fallar.
 - La sesion remota principal se valida de forma periodica y al volver de suspension/bloqueo; si el transporte ya no es valido, OpenSCP se desconecta de forma segura con aviso claro.
 
-### 3. Endurecimiento de seguridad SFTP
+### 3. Endurecimiento de seguridad de transporte SSH
 
 - Auth: contrasena, clave privada (+passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
+- Selector de protocolo por sitio/sesion (`SFTP`, `SCP`).
 - Politicas de host-key: `Strict`, `Accept new (TOFU)`, `No verification` (endurecida).
 - El transporte por sitio puede usar TCP directo, proxy `SOCKS5` o tunel `HTTP CONNECT`.
 - Se soporta tunel por sitio via SSH jump host (`ProxyJump`/bastion).
@@ -227,7 +228,7 @@ Detalles de build y empaquetado Linux (AppImage, Snap, Flatpak): [assets/linux/R
 ## Roadmap
 
 - El soporte para Windows esta planeado para futuras versiones.
-- Protocolos: `SCP`, luego `FTP/FTPS/WebDAV`.
+- Protocolos: `FTP/FTPS/WebDAV`.
 - Flujos de autenticacion enterprise mas amplios para proxy/jump (por ejemplo, autenticacion jump interactiva fuera de modo batch).
 - Flujos de sincronizacion: comparar/sincronizar y keep-up-to-date con filtros/ignorados.
 - Persistencia de cola entre reinicios.
@@ -242,4 +243,4 @@ Detalles de build y empaquetado Linux (AppImage, Snap, Flatpak): [assets/linux/R
 ## Contribuir
 
 - Las contribuciones son bienvenidas. Revisa [CONTRIBUTING.md](CONTRIBUTING.md) para flujo y estandares.
-- Issues y pull requests son bienvenidos, especialmente en estabilidad macOS/Linux, i18n y robustez SFTP.
+- Issues y pull requests son bienvenidos, especialmente en estabilidad macOS/Linux, i18n y robustez SFTP/SCP.
