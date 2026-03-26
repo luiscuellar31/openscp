@@ -395,8 +395,8 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
         <translation>Nenhum emulador de terminal compatível foi encontrado.</translation>
     </message>
     <message>
-        <source>Open terminal action is not supported on this platform.</source>
-        <translation>A ação de abrir terminal não é suportada nesta plataforma.</translation>
+        <source>Open in terminal action is not supported on this platform.</source>
+        <translation>A ação de abrir no terminal não é suportada nesta plataforma.</translation>
     </message>
     <message>
         <source>Up</source>
@@ -447,8 +447,8 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
         <translation>Abrir pasta direita</translation>
     </message>
     <message>
-        <source>Open terminal</source>
-        <translation>Abrir terminal</translation>
+        <source>Open in terminal</source>
+        <translation>Abrir no terminal</translation>
     </message>
     <message>
         <source>The right panel must be connected as remote.</source>
@@ -465,6 +465,12 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
 %1</translation>
     </message>
     <message>
+        <source>Could not prepare the terminal command.
+%1</source>
+        <translation>Não foi possível preparar o comando de terminal.
+%1</translation>
+    </message>
+    <message>
         <source>Could not launch the system terminal.
 %1</source>
         <translation>Não foi possível abrir o terminal do sistema.
@@ -477,6 +483,24 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <source> (password may be requested by OpenSSH for security)</source>
         <translation> (o OpenSSH pode solicitar senha por segurança)</translation>
+    </message>
+    <message>
+        <source> (interactive login required)</source>
+        <translation> (login interativo obrigatório)</translation>
+    </message>
+    <message>
+        <source> (auto-fallback to SFTP CLI enabled)</source>
+        <translation> (fallback automático para SFTP CLI habilitado)</translation>
+    </message>
+    <message>
+        <source>OpenSCP: SSH shell was not available. Falling back to SFTP CLI.</source>
+        <translation>OpenSCP: O shell SSH não estava disponível. Aplicando fallback para SFTP CLI.</translation>
+    </message>
+    <message>
+        <source>Could not open a remote terminal.
+%1</source>
+        <translation>Não foi possível abrir um terminal remoto.
+%1</translation>
     </message>
     <message>
         <source>Could not open a remote terminal.
@@ -1572,6 +1596,54 @@ O OpenSCP vai desconectar para evitar operações inconsistentes.
         <source>change remote permissions</source>
         <translation>alterar permissões remotas</translation>
     </message>
+    <message>
+        <source>Connection lost</source>
+        <translation>Conexão perdida</translation>
+    </message>
+    <message>
+        <source>Transport error.</source>
+        <translation>Erro de transporte.</translation>
+    </message>
+    <message>
+        <source>Proxy command requested without proxy settings.</source>
+        <translation>Comando de proxy solicitado sem configurações de proxy.</translation>
+    </message>
+    <message>
+        <source>Proxy host/port is missing for terminal command.</source>
+        <translation>Host/porta do proxy ausente para o comando de terminal.</translation>
+    </message>
+    <message>
+        <source>Proxy authentication requires a username.</source>
+        <translation>A autenticação do proxy requer um nome de usuário.</translation>
+    </message>
+    <message>
+        <source>Proxy authentication in terminal mode requires &apos;ncat&apos; (with --proxy-auth support).</source>
+        <translation>A autenticação de proxy no modo terminal requer &apos;ncat&apos; (com suporte a --proxy-auth).</translation>
+    </message>
+    <message>
+        <source>Unsupported proxy type for terminal command.</source>
+        <translation>Tipo de proxy não suportado para o comando de terminal.</translation>
+    </message>
+    <message>
+        <source>Could not find a proxy helper for terminal mode (tried: nc, ncat).</source>
+        <translation>Não foi possível encontrar um helper de proxy para o modo terminal (tentado: nc, ncat).</translation>
+    </message>
+    <message>
+        <source>Proxy and SSH jump host cannot be used together in the same terminal command.</source>
+        <translation>Proxy e host de salto SSH não podem ser usados juntos no mesmo comando de terminal.</translation>
+    </message>
+    <message>
+        <source>Could not build proxy command for terminal mode.</source>
+        <translation>Não foi possível montar o comando de proxy para o modo terminal.</translation>
+    </message>
+    <message>
+        <source>OpenSSH sftp client was not found in PATH.</source>
+        <translation>O cliente sftp do OpenSSH não foi encontrado no PATH.</translation>
+    </message>
+    <message>
+        <source>Unknown error.</source>
+        <translation>Erro desconhecido.</translation>
+    </message>
 </context>
 <context>
     <name>PermissionsDialog</name>
@@ -1905,6 +1977,10 @@ O OpenSCP vai desconectar para evitar operações inconsistentes.
     <message>
         <source>Show fingerprint in HEX (colon) format (visual only).</source>
         <translation>Mostrar impressão digital em formato HEX com dois-pontos (apenas visual).</translation>
+    </message>
+    <message>
+        <source>Force interactive login when using Open in terminal (disable key/agent auth).</source>
+        <translation>Forçar login interativo ao usar Open in terminal (desativa autenticação por chave/agente).</translation>
     </message>
     <message>
         <source>Use stricter Keychain accessibility (this device only).</source>
