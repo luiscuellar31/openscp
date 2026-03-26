@@ -563,7 +563,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     actRefreshRight_->setIcon(resIcon("action-refresh.svg"));
     actRefreshRight_->setToolTip(actRefreshRight_->text());
 
-    actOpenTerminalRight_ = new QAction(tr("Open terminal"), this);
+    actOpenTerminalRight_ = new QAction(tr("Open in terminal"), this);
     connect(actOpenTerminalRight_, &QAction::triggered, this,
             &MainWindow::openRightRemoteTerminal);
     actOpenTerminalRight_->setIcon(resIcon("action-open-terminal.svg"));

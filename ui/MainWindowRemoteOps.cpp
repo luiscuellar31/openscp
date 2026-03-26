@@ -21,6 +21,7 @@
 #include <QPointer>
 #include <QProcess>
 #include <QSet>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTemporaryFile>
@@ -184,8 +185,140 @@ static QString defaultKnownHostsPath() {
     return QDir(home).filePath(QStringLiteral(".ssh/known_hosts"));
 }
 
+static bool buildOpenSshProxyCommand(const openscp::SessionOptions &opt,
+                                     QString *proxyCommandOut,
+                                     QString *errorOut) {
+    if (proxyCommandOut)
+        proxyCommandOut->clear();
+    if (errorOut)
+        errorOut->clear();
+
+    if (!proxyCommandOut)
+        return false;
+
+    if (opt.proxy_type == openscp::ProxyType::None) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow", "Proxy command requested without proxy settings.");
+        }
+        return false;
+    }
+
+    const QString proxyHost = QString::fromStdString(opt.proxy_host).trimmed();
+    const std::uint16_t proxyPort = opt.proxy_port;
+    if (proxyHost.isEmpty() || proxyPort == 0) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow",
+                "Proxy host/port is missing for terminal command.");
+        }
+        return false;
+    }
+
+    const QString proxyUser = trimOptionalString(opt.proxy_username);
+    const QString proxyPass = trimOptionalString(opt.proxy_password);
+    const bool wantsProxyAuth = !proxyUser.isEmpty() || !proxyPass.isEmpty();
+    if (wantsProxyAuth && proxyUser.isEmpty()) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow", "Proxy authentication requires a username.");
+        }
+        return false;
+    }
+
+    auto ncatTypeForProxy = [&]() -> QString {
+        if (opt.proxy_type == openscp::ProxyType::Socks5)
+            return QStringLiteral("socks5");
+        if (opt.proxy_type == openscp::ProxyType::HttpConnect)
+            return QStringLiteral("http");
+        return {};
+    };
+
+    if (wantsProxyAuth) {
+        const QString ncatExe =
+            QStandardPaths::findExecutable(QStringLiteral("ncat"));
+        if (ncatExe.isEmpty()) {
+            if (errorOut) {
+                *errorOut = QCoreApplication::translate(
+                    "MainWindow",
+                    "Proxy authentication in terminal mode requires 'ncat' "
+                    "(with --proxy-auth support).");
+            }
+            return false;
+        }
+        const QString ncatProxyType = ncatTypeForProxy();
+        if (ncatProxyType.isEmpty()) {
+            if (errorOut) {
+                *errorOut = QCoreApplication::translate(
+                    "MainWindow",
+                    "Unsupported proxy type for terminal command.");
+            }
+            return false;
+        }
+        QStringList ncatArgs;
+        ncatArgs << ncatExe << QStringLiteral("--proxy")
+                 << QStringLiteral("%1:%2").arg(proxyHost).arg(proxyPort)
+                 << QStringLiteral("--proxy-type") << ncatProxyType
+                 << QStringLiteral("--proxy-auth")
+                 << QStringLiteral("%1:%2").arg(proxyUser, proxyPass)
+                 << QStringLiteral("%h") << QStringLiteral("%p");
+        *proxyCommandOut = shellJoinQuoted(ncatArgs);
+        return true;
+    }
+
+    const QString ncExe = QStandardPaths::findExecutable(QStringLiteral("nc"));
+    if (!ncExe.isEmpty()) {
+        QStringList ncArgs;
+        ncArgs << ncExe << QStringLiteral("-x")
+               << QStringLiteral("%1:%2").arg(proxyHost).arg(proxyPort);
+        if (opt.proxy_type == openscp::ProxyType::Socks5) {
+            ncArgs << QStringLiteral("-X") << QStringLiteral("5");
+        } else if (opt.proxy_type == openscp::ProxyType::HttpConnect) {
+            ncArgs << QStringLiteral("-X") << QStringLiteral("connect");
+        } else {
+            if (errorOut) {
+                *errorOut = QCoreApplication::translate(
+                    "MainWindow",
+                    "Unsupported proxy type for terminal command.");
+            }
+            return false;
+        }
+        ncArgs << QStringLiteral("%h") << QStringLiteral("%p");
+        *proxyCommandOut = shellJoinQuoted(ncArgs);
+        return true;
+    }
+
+    const QString ncatExe = QStandardPaths::findExecutable(QStringLiteral("ncat"));
+    if (!ncatExe.isEmpty()) {
+        const QString ncatProxyType = ncatTypeForProxy();
+        if (ncatProxyType.isEmpty()) {
+            if (errorOut) {
+                *errorOut = QCoreApplication::translate(
+                    "MainWindow",
+                    "Unsupported proxy type for terminal command.");
+            }
+            return false;
+        }
+        QStringList ncatArgs;
+        ncatArgs << ncatExe << QStringLiteral("--proxy")
+                 << QStringLiteral("%1:%2").arg(proxyHost).arg(proxyPort)
+                 << QStringLiteral("--proxy-type") << ncatProxyType
+                 << QStringLiteral("%h") << QStringLiteral("%p");
+        *proxyCommandOut = shellJoinQuoted(ncatArgs);
+        return true;
+    }
+
+    if (errorOut) {
+        *errorOut = QCoreApplication::translate(
+            "MainWindow",
+            "Could not find a proxy helper for terminal mode (tried: nc, ncat).");
+    }
+    return false;
+}
+
 static bool buildRemoteTerminalSshCommand(const openscp::SessionOptions &opt,
                                           const QString &remotePath,
+                                          bool forceInteractiveLogin,
                                           QString *commandOut,
                                           QString *errorOut) {
     if (commandOut)
@@ -212,16 +345,6 @@ static bool buildRemoteTerminalSshCommand(const openscp::SessionOptions &opt,
             *errorOut = QCoreApplication::translate(
                 "MainWindow",
                 "Session is missing host or username information.");
-        }
-        return false;
-    }
-
-    if (opt.proxy_type != openscp::ProxyType::None) {
-        if (errorOut) {
-            *errorOut = QCoreApplication::translate(
-                "MainWindow",
-                "Terminal mode is not available for SOCKS5/HTTP proxy "
-                "transport sessions.");
         }
         return false;
     }
@@ -253,16 +376,35 @@ static bool buildRemoteTerminalSshCommand(const openscp::SessionOptions &opt,
         }
     }
 
-    const QString keyPath = trimOptionalString(opt.private_key_path);
-    if (!keyPath.isEmpty()) {
-        const QString normalizedKey =
-            QDir::fromNativeSeparators(QDir::cleanPath(keyPath));
-        args << QStringLiteral("-i") << normalizedKey;
-        args << QStringLiteral("-o") << QStringLiteral("IdentitiesOnly=yes");
+    if (forceInteractiveLogin) {
+        args << QStringLiteral("-o") << QStringLiteral("PubkeyAuthentication=no");
+        args << QStringLiteral("-o")
+             << QStringLiteral(
+                    "PreferredAuthentications=keyboard-interactive,password");
+    } else {
+        const QString keyPath = trimOptionalString(opt.private_key_path);
+        if (!keyPath.isEmpty()) {
+            const QString normalizedKey =
+                QDir::fromNativeSeparators(QDir::cleanPath(keyPath));
+            args << QStringLiteral("-i") << normalizedKey;
+            args << QStringLiteral("-o") << QStringLiteral("IdentitiesOnly=yes");
+        }
     }
 
     const QString jumpHost = trimOptionalString(opt.jump_host);
-    if (!jumpHost.isEmpty()) {
+    const bool useJump = !jumpHost.isEmpty();
+    const bool useProxy = (opt.proxy_type != openscp::ProxyType::None);
+    if (useJump && useProxy) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow",
+                "Proxy and SSH jump host cannot be used together in the same "
+                "terminal command.");
+        }
+        return false;
+    }
+
+    if (useJump) {
         const QString jumpUser = trimOptionalString(opt.jump_username);
         const QString jumpKeyPath = trimOptionalString(opt.jump_private_key_path);
         const std::uint16_t jumpPort = (opt.jump_port == 0) ? 22 : opt.jump_port;
@@ -290,6 +432,22 @@ static bool buildRemoteTerminalSshCommand(const openscp::SessionOptions &opt,
             args << QStringLiteral("-o")
                  << QStringLiteral("ProxyCommand=%1").arg(shellJoinQuoted(jumpCmd));
         }
+    } else if (useProxy) {
+        QString proxyCommand;
+        QString proxyErr;
+        if (!buildOpenSshProxyCommand(opt, &proxyCommand, &proxyErr)) {
+            if (errorOut) {
+                *errorOut = proxyErr.isEmpty()
+                                ? QCoreApplication::translate(
+                                      "MainWindow",
+                                      "Could not build proxy command for "
+                                      "terminal mode.")
+                                : proxyErr;
+            }
+            return false;
+        }
+        args << QStringLiteral("-o")
+             << QStringLiteral("ProxyCommand=%1").arg(proxyCommand);
     }
 
     args << QStringLiteral("%1@%2").arg(user, host);
@@ -303,9 +461,11 @@ static bool buildRemoteTerminalSshCommand(const openscp::SessionOptions &opt,
     return true;
 }
 
-static bool buildSimpleRemoteTerminalSshCommand(const openscp::SessionOptions &opt,
-                                                QString *commandOut,
-                                                QString *errorOut) {
+static bool buildRemoteSftpCliCommand(const openscp::SessionOptions &opt,
+                                      const QString &remotePath,
+                                      bool forceInteractiveLogin,
+                                      QString *commandOut,
+                                      QString *errorOut) {
     if (commandOut)
         commandOut->clear();
     if (errorOut)
@@ -314,11 +474,11 @@ static bool buildSimpleRemoteTerminalSshCommand(const openscp::SessionOptions &o
     if (!commandOut)
         return false;
 
-    const QString sshExe = QStandardPaths::findExecutable(QStringLiteral("ssh"));
-    if (sshExe.isEmpty()) {
+    const QString sftpExe = QStandardPaths::findExecutable(QStringLiteral("sftp"));
+    if (sftpExe.isEmpty()) {
         if (errorOut) {
             *errorOut = QCoreApplication::translate(
-                "MainWindow", "OpenSSH client was not found in PATH.");
+                "MainWindow", "OpenSSH sftp client was not found in PATH.");
         }
         return false;
     }
@@ -335,12 +495,132 @@ static bool buildSimpleRemoteTerminalSshCommand(const openscp::SessionOptions &o
     }
 
     QStringList args;
-    args << sshExe << QStringLiteral("-tt");
-    args << QStringLiteral("-p") << QString::number(opt.port);
-    args << QStringLiteral("%1@%2").arg(user, host);
+    args << sftpExe;
+    args << QStringLiteral("-P") << QString::number(opt.port);
 
+    if (opt.known_hosts_policy == openscp::KnownHostsPolicy::Off) {
+        args << QStringLiteral("-o") << QStringLiteral("StrictHostKeyChecking=no");
+        args << QStringLiteral("-o")
+             << QStringLiteral("UserKnownHostsFile=/dev/null");
+    } else {
+        const QString strictValue =
+            (opt.known_hosts_policy == openscp::KnownHostsPolicy::AcceptNew)
+                ? QStringLiteral("accept-new")
+                : QStringLiteral("yes");
+        args << QStringLiteral("-o")
+             << QStringLiteral("StrictHostKeyChecking=%1").arg(strictValue);
+
+        QString khPath = trimOptionalString(opt.known_hosts_path);
+        if (khPath.isEmpty())
+            khPath = defaultKnownHostsPath();
+        if (!khPath.isEmpty()) {
+            const QString normalizedKh =
+                QDir::fromNativeSeparators(QDir::cleanPath(khPath));
+            args << QStringLiteral("-o")
+                 << QStringLiteral("UserKnownHostsFile=%1").arg(normalizedKh);
+        }
+    }
+
+    if (forceInteractiveLogin) {
+        args << QStringLiteral("-o") << QStringLiteral("PubkeyAuthentication=no");
+        args << QStringLiteral("-o")
+             << QStringLiteral(
+                    "PreferredAuthentications=keyboard-interactive,password");
+    } else {
+        const QString keyPath = trimOptionalString(opt.private_key_path);
+        if (!keyPath.isEmpty()) {
+            const QString normalizedKey =
+                QDir::fromNativeSeparators(QDir::cleanPath(keyPath));
+            args << QStringLiteral("-i") << normalizedKey;
+            args << QStringLiteral("-o") << QStringLiteral("IdentitiesOnly=yes");
+        }
+    }
+
+    const QString jumpHost = trimOptionalString(opt.jump_host);
+    const bool useJump = !jumpHost.isEmpty();
+    const bool useProxy = (opt.proxy_type != openscp::ProxyType::None);
+    if (useJump && useProxy) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow",
+                "Proxy and SSH jump host cannot be used together in the same "
+                "terminal command.");
+        }
+        return false;
+    }
+
+    if (useJump) {
+        const QString jumpUser = trimOptionalString(opt.jump_username);
+        const QString jumpKeyPath = trimOptionalString(opt.jump_private_key_path);
+        const std::uint16_t jumpPort = (opt.jump_port == 0) ? 22 : opt.jump_port;
+
+        if (jumpKeyPath.isEmpty()) {
+            QString jumpSpec = jumpHost;
+            if (!jumpUser.isEmpty())
+                jumpSpec = jumpUser + QStringLiteral("@") + jumpSpec;
+            if (jumpPort != 22)
+                jumpSpec += QStringLiteral(":") + QString::number(jumpPort);
+            args << QStringLiteral("-J") << jumpSpec;
+        } else {
+            QStringList jumpCmd;
+            jumpCmd << QStringLiteral("ssh");
+            jumpCmd << QStringLiteral("-W") << QStringLiteral("%h:%p");
+            jumpCmd << QStringLiteral("-p") << QString::number(jumpPort);
+            if (!jumpUser.isEmpty())
+                jumpCmd << QStringLiteral("-l") << jumpUser;
+            jumpCmd << QStringLiteral("-i")
+                    << QDir::fromNativeSeparators(
+                           QDir::cleanPath(jumpKeyPath));
+            jumpCmd << QStringLiteral("-o")
+                    << QStringLiteral("IdentitiesOnly=yes");
+            jumpCmd << jumpHost;
+            args << QStringLiteral("-o")
+                 << QStringLiteral("ProxyCommand=%1").arg(shellJoinQuoted(jumpCmd));
+        }
+    } else if (useProxy) {
+        QString proxyCommand;
+        QString proxyErr;
+        if (!buildOpenSshProxyCommand(opt, &proxyCommand, &proxyErr)) {
+            if (errorOut) {
+                *errorOut = proxyErr.isEmpty()
+                                ? QCoreApplication::translate(
+                                      "MainWindow",
+                                      "Could not build proxy command for "
+                                      "terminal mode.")
+                                : proxyErr;
+            }
+            return false;
+        }
+        args << QStringLiteral("-o")
+             << QStringLiteral("ProxyCommand=%1").arg(proxyCommand);
+    }
+
+    const QString target =
+        QStringLiteral("%1@%2:%3")
+            .arg(user, host, normalizeRemotePath(remotePath));
+    args << target;
     *commandOut = shellJoinQuoted(args);
     return true;
+}
+
+static QString buildSshWithSftpFallbackCommand(const QString &sshCommand,
+                                               const QString &sftpCommand) {
+    if (sftpCommand.trimmed().isEmpty())
+        return sshCommand;
+
+    // OpenSSH returns 255 for transport/session errors (for example PTY denied).
+    return QStringLiteral(
+               "%1; _openscp_ssh_status=$?; "
+               "if [ \"$_openscp_ssh_status\" -eq 255 ]; then "
+               "printf '%s\\n' %2; "
+               "%3; "
+               "fi")
+        .arg(sshCommand,
+             shellSingleQuote(QCoreApplication::translate(
+                 "MainWindow",
+                 "OpenSCP: SSH shell was not available. Falling back to SFTP "
+                 "CLI.")),
+             sftpCommand);
 }
 
 static QString appleScriptStringLiteral(const QString &raw) {
@@ -431,7 +711,7 @@ static bool launchShellCommandInSystemTerminal(const QString &shellCommand,
     if (errorOut) {
         *errorOut = QCoreApplication::translate(
             "MainWindow",
-            "Open terminal action is not supported on this platform.");
+            "Open in terminal action is not supported on this platform.");
     }
     return false;
 #endif
@@ -471,74 +751,67 @@ void MainWindow::goHomeRight() {
 
 void MainWindow::openRightRemoteTerminal() {
     if (!rightIsRemote_ || !m_activeSessionOptions_.has_value()) {
-        UiAlerts::information(this, tr("Open terminal"),
+        UiAlerts::information(this, tr("Open in terminal"),
                               tr("The right panel must be connected as remote."));
         return;
     }
     if (!rightRemoteModel_) {
-        UiAlerts::warning(this, tr("Open terminal"),
+        UiAlerts::warning(this, tr("Open in terminal"),
                           tr("No active remote panel is available."));
         return;
     }
 
     const openscp::SessionOptions &opt = *m_activeSessionOptions_;
     const QString remotePath = normalizeRemotePath(rightRemoteModel_->rootPath());
+    QSettings s("OpenSCP", "OpenSCP");
+    const bool forceInteractiveLogin =
+        s.value("Terminal/forceInteractiveLogin", false).toBool();
 
-    QString fullCommand;
-    QString fullPrepareError;
-    const bool fullReady = buildRemoteTerminalSshCommand(
-        opt, remotePath, &fullCommand, &fullPrepareError);
-    if (fullReady) {
-        QString fullLaunchError;
-        if (launchShellCommandInSystemTerminal(fullCommand, &fullLaunchError)) {
-            const bool hasSavedPassword = opt.password.has_value() &&
-                                          !opt.password->empty() &&
-                                          trimOptionalString(opt.private_key_path)
-                                              .isEmpty();
-            QString statusMsg = tr("Opening remote terminal at %1").arg(remotePath);
-            if (hasSavedPassword) {
-                statusMsg +=
-                    tr(" (password may be requested by OpenSSH for security)");
-            }
-            statusBar()->showMessage(statusMsg, 6000);
-            return;
-        }
-        fullPrepareError = fullLaunchError;
-    }
-
-    QString fallbackCommand;
-    QString fallbackPrepareError;
-    if (!buildSimpleRemoteTerminalSshCommand(opt, &fallbackCommand,
-                                             &fallbackPrepareError)) {
+    QString command;
+    QString prepareError;
+    if (!buildRemoteTerminalSshCommand(opt, remotePath, forceInteractiveLogin,
+                                       &command, &prepareError)) {
         UiAlerts::warning(
-            this, tr("Open terminal"),
-            tr("Could not open a remote terminal.\nPrimary mode: %1\nFallback "
-               "mode: %2")
-                .arg(fullPrepareError.isEmpty() ? tr("Unknown error.")
-                                                : fullPrepareError,
-                     fallbackPrepareError.isEmpty() ? tr("Unknown error.")
-                                                    : fallbackPrepareError));
+            this, tr("Open in terminal"),
+            tr("Could not prepare the terminal command.\n%1")
+                .arg(prepareError.isEmpty() ? tr("Unknown error.")
+                                            : prepareError));
         return;
     }
 
-    QString fallbackLaunchError;
-    if (!launchShellCommandInSystemTerminal(fallbackCommand,
-                                            &fallbackLaunchError)) {
+    QString sftpFallbackCommand;
+    const bool hasSftpFallback = buildRemoteSftpCliCommand(
+        opt, remotePath, forceInteractiveLogin, &sftpFallbackCommand, nullptr);
+    if (!hasSftpFallback)
+        sftpFallbackCommand.clear();
+
+    const QString launchCommand =
+        buildSshWithSftpFallbackCommand(command, sftpFallbackCommand);
+
+    QString launchError;
+    if (!launchShellCommandInSystemTerminal(launchCommand, &launchError)) {
         UiAlerts::warning(
-            this, tr("Open terminal"),
-            tr("Could not open a remote terminal.\nPrimary mode: %1\nFallback "
-               "mode: %2")
-                .arg(fullPrepareError.isEmpty() ? tr("Unknown error.")
-                                                : fullPrepareError,
-                     fallbackLaunchError.isEmpty() ? tr("Unknown error.")
-                                                   : fallbackLaunchError));
+            this, tr("Open in terminal"),
+            tr("Could not open a remote terminal.\n%1")
+                .arg(launchError.isEmpty() ? tr("Unknown error.")
+                                           : launchError));
         return;
     }
 
-    statusBar()->showMessage(
-        tr("Opened terminal with basic SSH command. Enter credentials manually "
-           "if needed."),
-        7000);
+    const bool hasSavedPassword = opt.password.has_value() &&
+                                  !opt.password->empty() &&
+                                  trimOptionalString(opt.private_key_path)
+                                      .isEmpty();
+    QString statusMsg = tr("Opening remote terminal at %1").arg(remotePath);
+    if (forceInteractiveLogin) {
+        statusMsg += tr(" (interactive login required)");
+    } else if (hasSavedPassword) {
+        statusMsg += tr(" (password may be requested by OpenSSH for security)");
+    }
+    if (hasSftpFallback) {
+        statusMsg += tr(" (auto-fallback to SFTP CLI enabled)");
+    }
+    statusBar()->showMessage(statusMsg, 6000);
 }
 
 void MainWindow::setRightRemoteRoot(const QString &path) {
