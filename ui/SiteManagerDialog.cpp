@@ -132,14 +132,16 @@ SiteManagerDialog::SiteManagerDialog(QWidget *parent) : QDialog(parent) {
     resize(720, 480); // compact default; view will elide/scroll as needed
     auto *lay = new QVBoxLayout(this);
     table_ = new QTableWidget(this);
-    table_->setColumnCount(3);
-    table_->setHorizontalHeaderLabels({tr("Name"), tr("Host"), tr("User")});
+    table_->setColumnCount(4);
+    table_->setHorizontalHeaderLabels(
+        {tr("Name"), tr("Protocol"), tr("Host"), tr("User")});
     table_->verticalHeader()->setVisible(false);
     // Column sizing: stretch to fill and adapt on resize
     table_->horizontalHeader()->setStretchLastSection(true);
     table_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     table_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     table_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    table_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
     table_->horizontalHeader()->setMinimumSectionSize(80);
     // Elide long text on the right to avoid oversized cells
     table_->setTextElideMode(Qt::ElideRight);
@@ -204,8 +206,20 @@ void SiteManagerDialog::loadSites() {
         }
         usedIds.insert(e.id);
         e.name = s.value("name").toString();
+        e.opt.protocol = openscp::protocolFromStorageName(
+            s.value("protocol",
+                    QString::fromLatin1(
+                        openscp::protocolStorageName(openscp::Protocol::Sftp)))
+                .toString()
+                .trimmed()
+                .toLower()
+                .toStdString());
         e.opt.host = s.value("host").toString().toStdString();
-        e.opt.port = (std::uint16_t)s.value("port", 22).toUInt();
+        e.opt.port = static_cast<std::uint16_t>(
+            s.value("port",
+                    static_cast<int>(
+                        openscp::defaultPortForProtocol(e.opt.protocol)))
+                .toUInt());
         e.opt.username = s.value("user").toString().toStdString();
         // Password and passphrase are no longer read from QSettings; they will
         // be fetched from SecretStore when connecting
@@ -264,6 +278,9 @@ void SiteManagerDialog::saveSites() {
         const auto &e = sites_[i];
         s.setValue("id", e.id);
         s.setValue("name", e.name);
+        s.setValue("protocol",
+                   QString::fromLatin1(
+                       openscp::protocolStorageName(e.opt.protocol)));
         s.setValue("host", QString::fromStdString(e.opt.host));
         s.setValue("port", (int)e.opt.port);
         s.setValue("user", QString::fromStdString(e.opt.username));
@@ -318,17 +335,24 @@ void SiteManagerDialog::refresh() {
         auto *itHost = new QTableWidgetItem(fullHost);
         itHost->setToolTip(fullHost);
         itHost->setData(Qt::UserRole + 1, fullHost);
+        const QString fullProtocol = QString::fromLatin1(
+            openscp::protocolDisplayName(sites_[i].opt.protocol));
+        auto *itProtocol = new QTableWidgetItem(fullProtocol);
+        itProtocol->setToolTip(fullProtocol);
+        itProtocol->setData(Qt::UserRole + 1, fullProtocol);
         const QString fullUser = QString::fromStdString(sites_[i].opt.username);
         auto *itUser = new QTableWidgetItem(fullUser);
         itUser->setToolTip(fullUser);
         itUser->setData(Qt::UserRole + 1, fullUser);
         // Store original index so selection works even when the view is sorted
         itName->setData(Qt::UserRole, i);
+        itProtocol->setData(Qt::UserRole, i);
         itHost->setData(Qt::UserRole, i);
         itUser->setData(Qt::UserRole, i);
         table_->setItem(i, 0, itName);
-        table_->setItem(i, 1, itHost);
-        table_->setItem(i, 2, itUser);
+        table_->setItem(i, 1, itProtocol);
+        table_->setItem(i, 2, itHost);
+        table_->setItem(i, 3, itUser);
     }
     if (wasSorting)
         table_->setSortingEnabled(true);
