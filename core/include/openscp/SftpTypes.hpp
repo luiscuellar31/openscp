@@ -2,6 +2,8 @@
 // Keeping these structures simple and serializable makes them easy to use in
 // the UI.
 #pragma once
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -24,6 +26,114 @@ enum class KnownHostsPolicy {
 // completed.
 enum class TransferIntegrityPolicy { Off, Optional, Required };
 enum class ProxyType { None, Socks5, HttpConnect };
+enum class Protocol { Sftp, Scp, Ftp, Ftps, WebDav };
+
+struct ProtocolCapabilities {
+    bool implemented = false;
+    bool supports_listing = false;
+    bool supports_file_transfers = false;
+    bool supports_resume = false;
+    bool supports_metadata = false;
+    bool supports_permissions = false;
+    bool supports_ownership = false;
+    bool supports_timestamps = false;
+    bool supports_proxy = false;
+    bool supports_jump_host = false;
+    bool supports_known_hosts = false;
+    bool supports_transfer_integrity = false;
+};
+
+inline constexpr std::uint16_t defaultPortForProtocol(Protocol protocol) {
+    switch (protocol) {
+    case Protocol::Sftp:
+    case Protocol::Scp:
+        return 22;
+    case Protocol::Ftp:
+        return 21;
+    case Protocol::Ftps:
+        return 990;
+    case Protocol::WebDav:
+        return 443;
+    }
+    return 22;
+}
+
+inline constexpr const char *protocolStorageName(Protocol protocol) {
+    switch (protocol) {
+    case Protocol::Sftp:
+        return "sftp";
+    case Protocol::Scp:
+        return "scp";
+    case Protocol::Ftp:
+        return "ftp";
+    case Protocol::Ftps:
+        return "ftps";
+    case Protocol::WebDav:
+        return "webdav";
+    }
+    return "sftp";
+}
+
+inline constexpr const char *protocolDisplayName(Protocol protocol) {
+    switch (protocol) {
+    case Protocol::Sftp:
+        return "SFTP";
+    case Protocol::Scp:
+        return "SCP";
+    case Protocol::Ftp:
+        return "FTP";
+    case Protocol::Ftps:
+        return "FTPS";
+    case Protocol::WebDav:
+        return "WebDAV";
+    }
+    return "SFTP";
+}
+
+inline Protocol protocolFromStorageName(const std::string &raw) {
+    if (raw.empty())
+        return Protocol::Sftp;
+    std::string normalized = raw;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char c) -> char {
+                       return static_cast<char>(std::tolower(c));
+                   });
+    if (normalized == "scp")
+        return Protocol::Scp;
+    if (normalized == "ftp")
+        return Protocol::Ftp;
+    if (normalized == "ftps")
+        return Protocol::Ftps;
+    if (normalized == "webdav")
+        return Protocol::WebDav;
+    return Protocol::Sftp;
+}
+
+inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
+    ProtocolCapabilities caps{};
+    switch (protocol) {
+    case Protocol::Sftp:
+    case Protocol::Scp:
+        caps.implemented = true;
+        caps.supports_listing = true;
+        caps.supports_file_transfers = true;
+        caps.supports_resume = true;
+        caps.supports_metadata = true;
+        caps.supports_permissions = true;
+        caps.supports_ownership = true;
+        caps.supports_timestamps = true;
+        caps.supports_proxy = true;
+        caps.supports_jump_host = true;
+        caps.supports_known_hosts = true;
+        caps.supports_transfer_integrity = true;
+        return caps;
+    case Protocol::Ftp:
+    case Protocol::Ftps:
+    case Protocol::WebDav:
+        return caps;
+    }
+    return caps;
+}
 
 struct FileInfo {
     std::string name; // base name
@@ -49,8 +159,9 @@ using KbdIntPromptsCB = std::function<KbdIntPromptResult(
     std::vector<std::string> &responses)>;
 
 struct SessionOptions {
+    Protocol protocol = Protocol::Sftp;
     std::string host;
-    std::uint16_t port = 22;
+    std::uint16_t port = defaultPortForProtocol(Protocol::Sftp);
     std::string username;
 
     std::optional<std::string> password;
