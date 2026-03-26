@@ -3,7 +3,7 @@
     <h1 align="center">OpenSCP</h1>
 
 <p>
-    <strong>Two-panel SFTP client focused on simplicity and security</strong>
+    <strong>Two-panel SFTP/SCP client focused on simplicity and security</strong>
 </p>
 
 <p>
@@ -11,7 +11,7 @@
 </p>
 
 <p>
-    <strong>OpenSCP</strong> is a two-panel commander-style file explorer written in <strong>C++/Qt</strong>, with <strong>SFTP</strong> support (libssh2 + OpenSSL). It aims to be a lightweight alternative to tools like WinSCP, focused on <strong>security</strong>, <strong>clarity</strong>, and <strong>extensibility</strong>.
+    <strong>OpenSCP</strong> is a two-panel commander-style file explorer written in <strong>C++/Qt</strong>, with <strong>SFTP</strong> and initial <strong>SCP</strong> support (libssh2 + OpenSSL). It aims to be a lightweight alternative to tools like WinSCP, focused on <strong>security</strong>, <strong>clarity</strong>, and <strong>extensibility</strong>.
 </p>
 
 <br>
@@ -71,9 +71,10 @@ open build/OpenSCP.app
 - Critical remote operations now attempt one automatic stale-session recovery (reconnect + retry) before failing.
 - Main remote session health checks run periodically and after wake/resume; if transport is no longer valid, OpenSCP disconnects safely with a clear warning.
 
-### 3. SFTP security hardening
+### 3. SSH transport security hardening
 
 - Auth: password, private key (+passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
+- Protocol selector per site/session (`SFTP`, `SCP`).
 - Host-key policies: `Strict`, `Accept new (TOFU)`, `No verification` (hardened).
 - Per-site transport can use direct TCP, `SOCKS5`, or `HTTP CONNECT` proxy tunneling.
 - Per-site SSH jump host (`ProxyJump`/bastion) tunneling is supported.
@@ -226,7 +227,7 @@ Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/READM
 ## Roadmap
 
 - Windows support is planned for future releases.
-- Protocols: `SCP`, then `FTP/FTPS/WebDAV`.
+- Protocols: `FTP/FTPS/WebDAV`.
 - Broader enterprise proxy/jump auth flows (for example, non-batch/interactive jump auth).
 - Sync workflows: compare/sync and keep-up-to-date with filters/ignores.
 - Queue persistence across restarts.
@@ -241,4 +242,4 @@ Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/READM
 ## Contributing
 
 - Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for workflow and standards.
-- Issues and pull requests are welcome, especially around macOS/Linux stability, i18n, and SFTP robustness.
+- Issues and pull requests are welcome, especially around macOS/Linux stability, i18n, and SFTP/SCP robustness.
