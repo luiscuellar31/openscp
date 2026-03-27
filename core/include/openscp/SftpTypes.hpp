@@ -134,6 +134,10 @@ inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
         caps.supports_known_hosts = true;
         return caps;
     case Protocol::Ftp:
+        caps.implemented = true;
+        caps.supports_file_transfers = true;
+        caps.supports_proxy = true;
+        return caps;
     case Protocol::Ftps:
     case Protocol::WebDav:
         return caps;

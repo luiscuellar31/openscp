@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.22)
 option(OPEN_SCP_ENABLE_MOCK "Build mock SFTP client" OFF)
 
 set(OPEN_SCP_CORE_SRCS
+    src/curl/CurlFtpClient.cpp        # FTP backend module
     src/libssh2/ClientFactory.cpp      # protocol -> backend factory
     src/libssh2/Libssh2ScpClient.cpp   # SCP backend module
     src/libssh2/Libssh2SftpClient.cpp   # real implementation
@@ -36,6 +37,12 @@ if (OpenSSL_FOUND)
             target_link_libraries(openscp_core PRIVATE ${OPENSSL_CRYPTO})
         endif()
     endif()
+endif()
+
+# libcurl (FTP backend)
+find_package(CURL REQUIRED)
+if (CURL_FOUND)
+    target_link_libraries(openscp_core PRIVATE CURL::libcurl)
 endif()
 
 if (TARGET PkgConfig::LIBSSH2)

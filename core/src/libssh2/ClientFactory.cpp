@@ -1,5 +1,6 @@
 // Protocol-aware backend factory.
 #include "openscp/ClientFactory.hpp"
+#include "openscp/CurlFtpClient.hpp"
 #include "openscp/Libssh2ScpClient.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
 
@@ -12,6 +13,7 @@ std::unique_ptr<SftpClient> CreateClientForProtocol(Protocol protocol) {
     case Protocol::Scp:
         return std::make_unique<Libssh2ScpClient>();
     case Protocol::Ftp:
+        return std::make_unique<CurlFtpClient>();
     case Protocol::Ftps:
     case Protocol::WebDav:
         return nullptr;
