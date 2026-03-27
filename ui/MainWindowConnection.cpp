@@ -166,6 +166,19 @@ static QString protocolDisplayLabel(openscp::Protocol protocol) {
     return QString::fromLatin1(openscp::protocolDisplayName(protocol));
 }
 
+static QString normalizeRemotePanelPath(const QString &rawPath) {
+    QString normalized = rawPath.trimmed();
+    if (normalized.isEmpty())
+        normalized = QStringLiteral("/");
+    if (!normalized.startsWith('/'))
+        normalized.prepend('/');
+    while (normalized.contains(QStringLiteral("//")))
+        normalized.replace(QStringLiteral("//"), QStringLiteral("/"));
+    if (normalized.size() > 1 && normalized.endsWith('/'))
+        normalized.chop(1);
+    return normalized;
+}
+
 static QString
 normalizedIdentityKeyPath(const std::optional<std::string> &keyPath) {
     if (!keyPath || keyPath->empty())
@@ -464,8 +477,13 @@ bool MainWindow::reconnectActiveRemoteSession(QString *errorOut) {
         return false;
     }
 
-    const QString restorePath =
-        rightRemoteModel_ ? rightRemoteModel_->rootPath() : QStringLiteral("/");
+    QString restorePath = QStringLiteral("/");
+    if (isScpTransferMode()) {
+        restorePath = normalizeRemotePanelPath(
+            rightPath_ ? rightPath_->text() : QString());
+    } else if (rightRemoteModel_) {
+        restorePath = rightRemoteModel_->rootPath();
+    }
     statusBar()->showMessage(tr("Remote session became stale. Reconnecting…"),
                              0);
 
@@ -481,7 +499,7 @@ bool MainWindow::reconnectActiveRemoteSession(QString *errorOut) {
     sftp_->disconnect();
     sftp_ = std::move(replacement);
     applyRemoteConnectedUI(*m_activeSessionOptions_);
-    if (!sftp_ || !rightRemoteModel_) {
+    if (!sftp_ || (!isScpTransferMode() && !rightRemoteModel_)) {
         m_remoteSessionReconnectInFlight_.store(false);
         if (errorOut) {
             *errorOut = tr("Reconnected transport, but remote panel restore "
@@ -762,6 +780,7 @@ void MainWindow::disconnectSftp() {
         rightRemoteModel_ = nullptr;
     }
     rightIsRemote_ = false;
+    activateScpTransferModeUi(false);
     m_pendingRemoteRefreshFromUpload_ = false;
     m_seenCompletedUploadTaskIds_.clear();
     m_seenCompletedTransferNoticeTaskIds_.clear();
@@ -1245,7 +1264,7 @@ void MainWindow::startSftpConnect(
     }
     const openscp::ProtocolCapabilities caps =
         openscp::capabilitiesForProtocol(opt.protocol);
-    if (!caps.implemented || !caps.supports_listing) {
+    if (!caps.implemented || !caps.supports_file_transfers) {
         const QString protocol = protocolDisplayLabel(opt.protocol);
         UiAlerts::information(
             this, tr("Protocol not available"),
@@ -1666,60 +1685,150 @@ void MainWindow::maybePersistQuickConnectSite(
 // Switch UI into remote mode and wire models/actions for the right pane.
 void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     saveRightHeaderState(rightIsRemote_);
-    delete rightRemoteModel_;
-    rightRemoteModel_ = new RemoteModel(sftp_.get(), this);
-    rightRemoteModel_->setSessionOptions(opt);
-    rightRemoteModel_->setShowHidden(prefShowHidden_);
-    connect(rightRemoteModel_, &RemoteModel::rootPathLoaded, this,
-            [this](const QString &path, bool ok, const QString &error) {
-                if (!rightRemoteModel_)
-                    return;
-                if (!ok) {
-                    UiAlerts::warning(
-                        this, tr("Remote error"),
-                        tr("Could not open the remote folder.\n%1")
-                            .arg(shortRemoteError(
-                                error, tr("Failed to read remote contents."))));
-                    return;
-                }
-                rightPath_->setText(path);
-                refreshRightBreadcrumbs();
-                if (rightIsRemote_) {
-                    updateRemoteWriteability();
-                    updateDeleteShortcutEnables();
-                }
-            });
-    QString e;
-    if (!rightRemoteModel_->setRootPath("/", &e, false)) {
-        UiAlerts::critical(
-            this, tr("Error listing remote"),
-            tr("Could not open the initial remote folder.\n%1")
-                .arg(shortRemoteError(e,
-                                      tr("Failed to read remote contents."))));
-        sftp_.reset();
+    if (rightRemoteModel_) {
         rightView_->setModel(rightLocalModel_);
-        m_remoteWriteabilityCache_.clear();
-        m_activeSessionOptions_.reset();
-        m_sessionNoHostVerification_ = false;
-        rightIsRemote_ = false;
-        stopRemoteSessionHealthMonitoring();
-        if (transferMgr_)
-            transferMgr_->setClient(nullptr);
-        updateHostPolicyRiskBanner();
         delete rightRemoteModel_;
         rightRemoteModel_ = nullptr;
+    }
+
+    const openscp::ProtocolCapabilities caps =
+        openscp::capabilitiesForProtocol(opt.protocol);
+    const bool transferOnlyMode = !caps.supports_listing;
+
+    if (!transferOnlyMode) {
+        rightRemoteModel_ = new RemoteModel(sftp_.get(), this);
+        rightRemoteModel_->setSessionOptions(opt);
+        rightRemoteModel_->setShowHidden(prefShowHidden_);
+        connect(rightRemoteModel_, &RemoteModel::rootPathLoaded, this,
+                [this](const QString &path, bool ok, const QString &error) {
+                    if (!rightRemoteModel_)
+                        return;
+                    if (!ok) {
+                        UiAlerts::warning(
+                            this, tr("Remote error"),
+                            tr("Could not open the remote folder.\n%1")
+                                .arg(shortRemoteError(
+                                    error,
+                                    tr("Failed to read remote contents."))));
+                        return;
+                    }
+                    rightPath_->setText(path);
+                    refreshRightBreadcrumbs();
+                    if (rightIsRemote_) {
+                        updateRemoteWriteability();
+                        updateDeleteShortcutEnables();
+                    }
+                });
+        QString e;
+        if (!rightRemoteModel_->setRootPath("/", &e, false)) {
+            UiAlerts::critical(
+                this, tr("Error listing remote"),
+                tr("Could not open the initial remote folder.\n%1")
+                    .arg(shortRemoteError(
+                        e, tr("Failed to read remote contents."))));
+            sftp_.reset();
+            rightView_->setModel(rightLocalModel_);
+            activateScpTransferModeUi(false);
+            m_remoteWriteabilityCache_.clear();
+            m_activeSessionOptions_.reset();
+            m_sessionNoHostVerification_ = false;
+            rightIsRemote_ = false;
+            stopRemoteSessionHealthMonitoring();
+            if (transferMgr_)
+                transferMgr_->setClient(nullptr);
+            updateHostPolicyRiskBanner();
+            resetConnectionSessionIndicators();
+            delete rightRemoteModel_;
+            rightRemoteModel_ = nullptr;
+            if (actConnect_)
+                actConnect_->setEnabled(true);
+            if (actDisconnect_)
+                actDisconnect_->setEnabled(false);
+            if (actDownloadF7_)
+                actDownloadF7_->setEnabled(false);
+            if (actUploadRight_)
+                actUploadRight_->setEnabled(false);
+            if (actRefreshRight_)
+                actRefreshRight_->setEnabled(false);
+            if (actOpenTerminalRight_)
+                actOpenTerminalRight_->setEnabled(false);
+            if (actNewDirRight_)
+                actNewDirRight_->setEnabled(true);
+            if (actNewFileRight_)
+                actNewFileRight_->setEnabled(true);
+            if (actRenameRight_)
+                actRenameRight_->setEnabled(true);
+            if (actDeleteRight_)
+                actDeleteRight_->setEnabled(true);
+            if (actMoveRight_)
+                actMoveRight_->setEnabled(true);
+            if (actMoveRightTb_)
+                actMoveRightTb_->setEnabled(true);
+            if (actCopyRightTb_)
+                actCopyRightTb_->setEnabled(true);
+            if (actSearchRight_)
+                actSearchRight_->setEnabled(true);
+            if (actChooseRight_) {
+                actChooseRight_->setIcon(QIcon(
+                    QLatin1String(":/assets/icons/action-open-folder.svg")));
+                actChooseRight_->setEnabled(true);
+                actChooseRight_->setToolTip(actChooseRight_->text());
+            }
+            if (QDir(rightPath_->text()).exists()) {
+                setRightRoot(rightPath_->text());
+            } else {
+                setRightRoot(QDir::homePath());
+            }
+            if (rightView_)
+                rightView_->setEnabled(true);
+            rightRemoteWritable_ = false;
+            applyRemoteWriteabilityActions();
+            updateDeleteShortcutEnables();
+            setWindowTitle(tr("OpenSCP — local/local"));
+            return;
+        }
+        activateScpTransferModeUi(false);
+        rightView_->setModel(rightRemoteModel_);
+        if (rightView_->selectionModel()) {
+            connect(rightView_->selectionModel(),
+                    &QItemSelectionModel::selectionChanged, this,
+                    [this] { updateDeleteShortcutEnables(); });
+        }
+        rightView_->header()->setStretchLastSection(false);
+        if (!restoreRightHeaderState(true)) {
+            rightView_->setColumnWidth(0, 300);
+            rightView_->setColumnWidth(1, 120);
+            rightView_->setColumnWidth(2, 180);
+            rightView_->setColumnWidth(3, 120);
+        }
+        rightView_->setSortingEnabled(true);
+        rightView_->sortByColumn(0, Qt::AscendingOrder);
+        rightPath_->setText(rightRemoteModel_->rootPath());
+        rightIsRemote_ = true;
+        m_pendingRemoteRefreshFromUpload_ = false;
+        m_seenCompletedUploadTaskIds_.clear();
+        m_seenCompletedTransferNoticeTaskIds_.clear();
+        refreshRightBreadcrumbs();
+        m_activeSessionOptions_ = opt;
+        m_remoteWriteabilityCache_.clear();
+        if (transferMgr_) {
+            transferMgr_->setClient(sftp_.get());
+            transferMgr_->setSessionOptions(opt);
+        }
         if (actConnect_)
-            actConnect_->setEnabled(true);
+            actConnect_->setEnabled(false);
         if (actDisconnect_)
-            actDisconnect_->setEnabled(false);
+            actDisconnect_->setEnabled(true);
         if (actDownloadF7_)
-            actDownloadF7_->setEnabled(false);
+            actDownloadF7_->setEnabled(true);
         if (actUploadRight_)
-            actUploadRight_->setEnabled(false);
+            actUploadRight_->setEnabled(true);
         if (actRefreshRight_)
-            actRefreshRight_->setEnabled(false);
+            actRefreshRight_->setEnabled(true);
         if (actOpenTerminalRight_)
-            actOpenTerminalRight_->setEnabled(false);
+            actOpenTerminalRight_->setEnabled(true);
+        if (actSearchRight_)
+            actSearchRight_->setEnabled(true);
         if (actNewDirRight_)
             actNewDirRight_->setEnabled(true);
         if (actNewFileRight_)
@@ -1728,54 +1837,41 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
             actRenameRight_->setEnabled(true);
         if (actDeleteRight_)
             actDeleteRight_->setEnabled(true);
-        if (actMoveRight_)
-            actMoveRight_->setEnabled(true);
-        if (actMoveRightTb_)
-            actMoveRightTb_->setEnabled(true);
-        if (actCopyRightTb_)
-            actCopyRightTb_->setEnabled(true);
         if (actChooseRight_) {
-            actChooseRight_->setIcon(
-                QIcon(QLatin1String(":/assets/icons/action-open-folder.svg")));
-            actChooseRight_->setEnabled(true);
-            actChooseRight_->setToolTip(actChooseRight_->text());
+            actChooseRight_->setIcon(QIcon(
+                QLatin1String(":/assets/icons/action-open-folder-remote.svg")));
+            // Opening the system file explorer on a remote host is not
+            // supported cross‑platform. Disable this action in remote mode to
+            // avoid confusion.
+            actChooseRight_->setEnabled(false);
+            actChooseRight_->setToolTip(tr("Not available in remote mode"));
         }
-        if (QDir(rightPath_->text()).exists()) {
-            setRightRoot(rightPath_->text());
-        } else {
-            setRightRoot(QDir::homePath());
-        }
-        if (rightView_)
-            rightView_->setEnabled(true);
-        rightRemoteWritable_ = false;
-        applyRemoteWriteabilityActions();
+        const QString activeProtocol = protocolDisplayLabel(opt.protocol);
+        startConnectionSessionIndicators(activeProtocol);
+        statusBar()->showMessage(
+            tr("Connected (%1) to %2")
+                .arg(activeProtocol, QString::fromStdString(opt.host)),
+            4000);
+        setWindowTitle(tr("OpenSCP — local/remote (%1)").arg(activeProtocol));
+        updateHostPolicyRiskBanner();
+        startRemoteSessionHealthMonitoring();
+        updateRemoteWriteability();
         updateDeleteShortcutEnables();
-        setWindowTitle(tr("OpenSCP — local/local"));
         return;
     }
-    rightView_->setModel(rightRemoteModel_);
-    if (rightView_->selectionModel()) {
-        connect(rightView_->selectionModel(),
-                &QItemSelectionModel::selectionChanged, this,
-                [this] { updateDeleteShortcutEnables(); });
-    }
-    rightView_->header()->setStretchLastSection(false);
-    if (!restoreRightHeaderState(true)) {
-        rightView_->setColumnWidth(0, 300);
-        rightView_->setColumnWidth(1, 120);
-        rightView_->setColumnWidth(2, 180);
-        rightView_->setColumnWidth(3, 120);
-    }
-    rightView_->setSortingEnabled(true);
-    rightView_->sortByColumn(0, Qt::AscendingOrder);
-    rightPath_->setText(rightRemoteModel_->rootPath());
+
+    rightView_->setModel(rightLocalModel_);
+    rightPath_->setText(QStringLiteral("/"));
     rightIsRemote_ = true;
+    activateScpTransferModeUi(true);
     m_pendingRemoteRefreshFromUpload_ = false;
     m_seenCompletedUploadTaskIds_.clear();
     m_seenCompletedTransferNoticeTaskIds_.clear();
     refreshRightBreadcrumbs();
     m_activeSessionOptions_ = opt;
     m_remoteWriteabilityCache_.clear();
+    ++m_remoteWriteabilityProbeSeq_;
+    rightRemoteWritable_ = false;
     if (transferMgr_) {
         transferMgr_->setClient(sftp_.get());
         transferMgr_->setSessionOptions(opt);
@@ -1789,23 +1885,28 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     if (actUploadRight_)
         actUploadRight_->setEnabled(true);
     if (actRefreshRight_)
-        actRefreshRight_->setEnabled(true);
+        actRefreshRight_->setEnabled(false);
     if (actOpenTerminalRight_)
         actOpenTerminalRight_->setEnabled(true);
+    if (actSearchRight_)
+        actSearchRight_->setEnabled(false);
     if (actNewDirRight_)
-        actNewDirRight_->setEnabled(true);
+        actNewDirRight_->setEnabled(false);
     if (actNewFileRight_)
-        actNewFileRight_->setEnabled(true);
+        actNewFileRight_->setEnabled(false);
     if (actRenameRight_)
-        actRenameRight_->setEnabled(true);
+        actRenameRight_->setEnabled(false);
     if (actDeleteRight_)
-        actDeleteRight_->setEnabled(true);
+        actDeleteRight_->setEnabled(false);
+    if (actMoveRight_)
+        actMoveRight_->setEnabled(false);
+    if (actMoveRightTb_)
+        actMoveRightTb_->setEnabled(false);
+    if (actCopyRightTb_)
+        actCopyRightTb_->setEnabled(false);
     if (actChooseRight_) {
-        actChooseRight_->setIcon(QIcon(
-            QLatin1String(":/assets/icons/action-open-folder-remote.svg")));
-        // Opening the system file explorer on a remote host is not supported
-        // cross‑platform. Disable this action in remote mode to avoid
-        // confusion.
+        actChooseRight_->setIcon(
+            QIcon(QLatin1String(":/assets/icons/action-open-folder-remote.svg")));
         actChooseRight_->setEnabled(false);
         actChooseRight_->setToolTip(tr("Not available in remote mode"));
     }
@@ -1818,6 +1919,5 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     setWindowTitle(tr("OpenSCP — local/remote (%1)").arg(activeProtocol));
     updateHostPolicyRiskBanner();
     startRemoteSessionHealthMonitoring();
-    updateRemoteWriteability();
     updateDeleteShortcutEnables();
 }
