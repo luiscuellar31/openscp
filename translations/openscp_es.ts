@@ -269,6 +269,10 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
         <translation>SCP</translation>
     </message>
     <message>
+        <source>FTP</source>
+        <translation>FTP</translation>
+    </message>
+    <message>
         <source>Server port for the selected protocol</source>
         <translation>Puerto del servidor para el protocolo seleccionado</translation>
     </message>
@@ -291,6 +295,10 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     <message>
         <source>webdav.example.com</source>
         <translation>webdav.example.com</translation>
+    </message>
+    <message>
+        <source>Not available for the selected protocol.</source>
+        <translation>No disponible para el protocolo seleccionado.</translation>
     </message>
 </context>
 <context>
@@ -549,6 +557,34 @@ Modo fallback: %2</translation>
     <message>
         <source>Opened terminal with basic SSH command. Enter credentials manually if needed.</source>
         <translation type="vanished">Se abrió la terminal con comando SSH básico. Ingresa credenciales manualmente si es necesario.</translation>
+    </message>
+    <message>
+        <source>This protocol works in transfer-only mode.
+Use the remote path above as the target folder for uploads.
+For downloads, choose a remote file path explicitly.</source>
+        <translation>Este protocolo funciona en modo solo transferencia.
+Usa la ruta remota de arriba como carpeta de destino para subidas.
+Para descargas, elige una ruta remota de archivo explícitamente.</translation>
+    </message>
+    <message>
+        <source>This protocol works in transfer-only mode.
+Uploads use the remote folder path above.
+Downloads require entering a remote file path.</source>
+        <translation>Este protocolo funciona en modo solo transferencia.
+Las subidas usan la ruta de carpeta remota de arriba.
+Las descargas requieren introducir una ruta remota de archivo.</translation>
+    </message>
+    <message>
+        <source>Skipped folders in transfer-only mode: %1</source>
+        <translation>Carpetas omitidas en modo solo transferencia: %1</translation>
+    </message>
+    <message>
+        <source>Transfer-only mode currently supports uploading files only.</source>
+        <translation>El modo solo transferencia actualmente solo admite subir archivos.</translation>
+    </message>
+    <message>
+        <source>Refresh is not available in transfer-only mode.</source>
+        <translation>Actualizar no está disponible en modo solo transferencia.</translation>
     </message>
     <message>
         <source>Search items</source>
@@ -1507,6 +1543,22 @@ Elige solo un método de transporte.</translation>
     <message>
         <source>Unsupported transport</source>
         <translation>Transporte no compatible</translation>
+    </message>
+    <message>
+        <source>SSH jump host is not available for %1.</source>
+        <translation>El host de salto SSH no está disponible para %1.</translation>
+    </message>
+    <message>
+        <source>Connection canceled: SSH jump host is not supported for %1</source>
+        <translation>Conexión cancelada: el host de salto SSH no es compatible para %1</translation>
+    </message>
+    <message>
+        <source>Proxy settings are not available for %1.</source>
+        <translation>La configuración de proxy no está disponible para %1.</translation>
+    </message>
+    <message>
+        <source>Connection canceled: proxy is not supported for %1</source>
+        <translation>Conexión cancelada: el proxy no es compatible para %1</translation>
     </message>
     <message>
         <source>SSH jump host is currently unavailable on Windows.</source>
