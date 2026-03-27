@@ -25,8 +25,10 @@ class QEvent;      // fwd for eventFilter
 class QCloseEvent; // fwd for closeEvent
 class QDialog;     // fwd
 class QLabel;      // fwd
+class QStackedWidget; // fwd
 class QTimer;      // fwd
 class QSplitter;   // fwd
+class QPushButton; // fwd
 namespace openscp {
 class SftpClient;
 struct SessionOptions;
@@ -99,6 +101,8 @@ class MainWindow : public QMainWindow {
     };
 
     void updateDeleteShortcutEnables();
+    bool isScpTransferMode() const;
+    void activateScpTransferModeUi(bool enabled);
     void applyPreferences();
     // Remote state (a single active session)
     std::unique_ptr<openscp::SftpClient> sftp_;
@@ -116,6 +120,11 @@ class MainWindow : public QMainWindow {
     // Views and path inputs
     QTreeView *leftView_ = nullptr;
     QTreeView *rightView_ = nullptr;
+    QStackedWidget *rightContentStack_ = nullptr;
+    QWidget *scpTransferPanel_ = nullptr;
+    QLabel *scpModeHintLabel_ = nullptr;
+    QPushButton *scpQuickUploadBtn_ = nullptr;
+    QPushButton *scpQuickDownloadBtn_ = nullptr;
 
     QLineEdit *leftPath_ = nullptr;
     QLineEdit *rightPath_ = nullptr;

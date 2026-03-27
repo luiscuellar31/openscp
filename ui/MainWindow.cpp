@@ -61,6 +61,7 @@
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QStyle>
+#include <QStackedWidget>
 #include <QTemporaryFile>
 #include <QTimer>
 #include <QToolBar>
@@ -386,6 +387,35 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     leftLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->setContentsMargins(0, 0, 0, 0);
 
+    // Right content stack:
+    // - index 0: standard file tree view (local/SFTP)
+    // - index 1: SCP transfer-only panel (no remote listing)
+    rightContentStack_ = new QStackedWidget(rightPane);
+    rightContentStack_->addWidget(rightView_);
+    scpTransferPanel_ = new QWidget(rightPane);
+    auto *scpLay = new QVBoxLayout(scpTransferPanel_);
+    scpLay->setContentsMargins(12, 12, 12, 12);
+    scpLay->setSpacing(8);
+    scpModeHintLabel_ = new QLabel(
+        tr("SCP mode is transfer-only.\nUse the remote path above as the "
+           "target folder for uploads.\nFor downloads, choose a remote file "
+           "path explicitly."),
+        scpTransferPanel_);
+    scpModeHintLabel_->setWordWrap(true);
+    scpQuickUploadBtn_ = new QPushButton(tr("Upload local files…"), scpTransferPanel_);
+    scpQuickDownloadBtn_ =
+        new QPushButton(tr("Download remote file…"), scpTransferPanel_);
+    scpLay->addWidget(scpModeHintLabel_);
+    scpLay->addWidget(scpQuickUploadBtn_);
+    scpLay->addWidget(scpQuickDownloadBtn_);
+    scpLay->addStretch(1);
+    connect(scpQuickUploadBtn_, &QPushButton::clicked, this,
+            &MainWindow::uploadViaDialog);
+    connect(scpQuickDownloadBtn_, &QPushButton::clicked, this,
+            &MainWindow::downloadRightToLeft);
+    rightContentStack_->addWidget(scpTransferPanel_);
+    rightContentStack_->setCurrentWidget(rightView_);
+
     // Left pane sub‑toolbar
     leftPaneBar_ = new QToolBar("LeftBar", leftPane);
     leftPaneBar_->setIconSize(QSize(18, 18));
@@ -706,7 +736,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     rightLayout->addWidget(rightPaneBar_);
     rightLayout->addWidget(rightBreadcrumbsBar_);
     rightLayout->addWidget(rightPath_);
-    rightLayout->addWidget(rightView_);
+    rightLayout->addWidget(rightContentStack_);
 
     // Mount panes into the splitter
     mainSplitter_->addWidget(leftPane);
@@ -1749,6 +1779,35 @@ void MainWindow::maybeNotifyCompletedTransfers() {
     statusBar()->showMessage(message, 5000);
 }
 
+bool MainWindow::isScpTransferMode() const {
+    return rightIsRemote_ && m_activeSessionOptions_.has_value() &&
+           m_activeSessionOptions_->protocol == openscp::Protocol::Scp;
+}
+
+void MainWindow::activateScpTransferModeUi(bool enabled) {
+    if (!rightContentStack_ || !rightView_)
+        return;
+    if (enabled && scpTransferPanel_) {
+        rightContentStack_->setCurrentWidget(scpTransferPanel_);
+        if (rightPath_) {
+            rightPath_->setPlaceholderText(tr("/remote/folder"));
+            if (rightPath_->text().trimmed().isEmpty())
+                rightPath_->setText(QStringLiteral("/"));
+        }
+        if (scpModeHintLabel_) {
+            scpModeHintLabel_->setText(
+                tr("SCP mode is transfer-only.\n"
+                   "Uploads use the remote folder path above.\n"
+                   "Downloads require entering a remote file path."));
+        }
+        return;
+    }
+
+    rightContentStack_->setCurrentWidget(rightView_);
+    if (rightPath_)
+        rightPath_->setPlaceholderText(QString());
+}
+
 void MainWindow::applyPreferences() {
     QSettings s("OpenSCP", "OpenSCP");
     const bool showHidden = s.value("UI/showHidden", false).toBool();
@@ -1844,6 +1903,7 @@ void MainWindow::updateDeleteShortcutEnables() {
     };
     const bool leftHasSel = hasColSel(leftView_);
     const bool rightHasSel = hasColSel(rightView_);
+    const bool scpMode = isScpTransferMode();
     const bool rightWrite =
         (!rightIsRemote_) || (rightIsRemote_ && rightRemoteWritable_);
 
@@ -1851,7 +1911,7 @@ void MainWindow::updateDeleteShortcutEnables() {
     if (actCopyF5_)
         actCopyF5_->setEnabled(leftHasSel);
     if (actMoveF6_)
-        actMoveF6_->setEnabled(leftHasSel);
+        actMoveF6_->setEnabled(leftHasSel && !scpMode);
     if (actDelete_)
         actDelete_->setEnabled(leftHasSel);
     if (actRenameLeft_)
@@ -1868,6 +1928,44 @@ void MainWindow::updateDeleteShortcutEnables() {
 
     // Right: enable according to selection + permissions (exceptions: Up,
     // Upload, Download)
+    if (scpMode) {
+        if (actCopyRightTb_)
+            actCopyRightTb_->setEnabled(false);
+        if (actMoveRightTb_)
+            actMoveRightTb_->setEnabled(false);
+        if (actDeleteRight_)
+            actDeleteRight_->setEnabled(false);
+        if (actRenameRight_)
+            actRenameRight_->setEnabled(false);
+        if (actNewDirRight_)
+            actNewDirRight_->setEnabled(false);
+        if (actNewFileRight_)
+            actNewFileRight_->setEnabled(false);
+        if (actUploadRight_)
+            actUploadRight_->setEnabled(true);
+        if (actDownloadF7_)
+            actDownloadF7_->setEnabled(true);
+        if (actRefreshRight_)
+            actRefreshRight_->setEnabled(false);
+        if (actOpenTerminalRight_)
+            actOpenTerminalRight_->setEnabled(true);
+        if (actSearchRight_)
+            actSearchRight_->setEnabled(false);
+        if (actMoveRight_)
+            actMoveRight_->setEnabled(false);
+        if (actCopyRight_)
+            actCopyRight_->setEnabled(false);
+        if (actUpRight_) {
+            QString cur = rightPath_ ? rightPath_->text().trimmed() : QString();
+            if (cur.isEmpty())
+                cur = QStringLiteral("/");
+            if (cur.endsWith('/') && cur.size() > 1)
+                cur.chop(1);
+            actUpRight_->setEnabled(cur != "/");
+        }
+        return;
+    }
+
     if (actCopyRightTb_)
         actCopyRightTb_->setEnabled(rightHasSel);
     if (actMoveRightTb_)
@@ -1893,6 +1991,8 @@ void MainWindow::updateDeleteShortcutEnables() {
     if (actOpenTerminalRight_)
         actOpenTerminalRight_->setEnabled(
             rightIsRemote_ && m_activeSessionOptions_.has_value());
+    if (actSearchRight_)
+        actSearchRight_->setEnabled(true);
     if (actUpRight_) {
         QString cur = rightRemoteModel_ ? rightRemoteModel_->rootPath()
                                         : rightPath_->text();
