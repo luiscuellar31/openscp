@@ -3,6 +3,7 @@
 #include "ConnectionDialog.hpp"
 #include "SecretStore.hpp"
 #include "UiAlerts.hpp"
+#include "openscp/KnownHostsUtils.hpp"
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>

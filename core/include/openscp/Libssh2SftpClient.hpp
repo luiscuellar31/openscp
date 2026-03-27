@@ -1,6 +1,7 @@
 // SftpClient implementation using libssh2 for SSH/SFTP.
 // Encapsulates the SSH session, SFTP channel, and TCP socket.
 #pragma once
+#include "KnownHostsUtils.hpp"
 #include "SftpClient.hpp"
 #include <mutex>
 #include <string>
@@ -93,10 +94,5 @@ class Libssh2SftpClient : public SftpClient {
     bool describeJumpTunnelFailure(std::string &err);
 #endif
 };
-
-// Utility: remove a known_hosts entry for host:port and rewrite the file
-// atomically.
-bool RemoveKnownHostEntry(const std::string &khPath, const std::string &host,
-                          std::uint16_t port, std::string &err);
 
 } // namespace openscp
