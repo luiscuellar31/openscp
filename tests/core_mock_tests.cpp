@@ -106,6 +106,14 @@ void test_protocol_helpers(TestContext &t) {
     t.check(scpCaps.implemented, "SCP capabilities should be implemented");
     t.check(scpCaps.supports_file_transfers,
             "SCP capabilities should include file transfers");
+    t.check(!scpCaps.supports_listing,
+            "SCP capabilities should not include listing");
+    t.check(!scpCaps.supports_resume,
+            "SCP capabilities should not include resume");
+    t.check(!scpCaps.supports_permissions,
+            "SCP capabilities should not include chmod/chown metadata edits");
+    t.check(scpCaps.supports_known_hosts,
+            "SCP capabilities should include known_hosts verification");
 
     const auto webdavCaps =
         openscp::capabilitiesForProtocol(openscp::Protocol::WebDav);
