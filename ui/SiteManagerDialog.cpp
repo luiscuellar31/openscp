@@ -3,7 +3,6 @@
 #include "ConnectionDialog.hpp"
 #include "SecretStore.hpp"
 #include "UiAlerts.hpp"
-#include "openscp/Libssh2SftpClient.hpp"
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>

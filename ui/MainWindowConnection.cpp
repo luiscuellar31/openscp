@@ -1245,7 +1245,7 @@ void MainWindow::startSftpConnect(
     }
     const openscp::ProtocolCapabilities caps =
         openscp::capabilitiesForProtocol(opt.protocol);
-    if (!caps.implemented) {
+    if (!caps.implemented || !caps.supports_listing) {
         const QString protocol = protocolDisplayLabel(opt.protocol);
         UiAlerts::information(
             this, tr("Protocol not available"),
