@@ -892,6 +892,8 @@ void TransferManager::schedule() {
                     activeGuard.emplace();
                     activeGuard->self = this;
                     activeGuard->id = taskId;
+                    const openscp::ProtocolCapabilities workerCaps =
+                        workerClient->capabilities();
 
                     // Mark attempt
                     {
@@ -981,123 +983,137 @@ void TransferManager::schedule() {
                     };
 
                     if (t.type == TransferTask::Type::Upload) {
-                        bool isDir = false;
-                        std::string existsErr;
-                        const bool existsRemote = workerClient->exists(
-                            t.dst.toStdString(), isDir, existsErr);
-                        if (!existsErr.empty()) {
-                            failPrecheck(existsErr);
-                            return;
-                        }
-
-                        if (existsRemote) {
-                            openscp::FileInfo rinfo{};
-                            std::string stErr;
-                            (void)workerClient->stat(t.dst.toStdString(), rinfo,
-                                                     stErr);
-                            const QString srcInfo =
-                                QString("%1 bytes, %2")
-                                    .arg(QFileInfo(t.src).size())
-                                    .arg(openscpui::localShortTime(
-                                        QFileInfo(t.src).lastModified()));
-                            const QString dstInfo =
-                                QString("%1 bytes, %2")
-                                    .arg(rinfo.size)
-                                    .arg(rinfo.mtime
-                                             ? openscpui::localShortTime(
-                                                   (quint64)rinfo.mtime)
-                                             : QStringLiteral("?"));
-                            const int choice = askOverwriteConflictOnUi(
-                                this, QFileInfo(t.src).fileName(), srcInfo,
-                                dstInfo, shouldCancel);
-                            if (choice < 0 || shouldCancel()) {
-                                precheckDoneMs =
-                                    QDateTime::currentMSecsSinceEpoch();
-                                markCanceledOrPaused(precheckDoneMs);
-                                workerClient->disconnect();
-                                emitAndFinalize(precheckDoneMs -
-                                                    precheckStartedMs,
-                                                0);
+                        if (workerCaps.supports_metadata) {
+                            bool isDir = false;
+                            std::string existsErr;
+                            const bool existsRemote = workerClient->exists(
+                                t.dst.toStdString(), isDir, existsErr);
+                            if (!existsErr.empty()) {
+                                failPrecheck(existsErr);
                                 return;
                             }
-                            if (choice == 0) {
-                                skipTransfer();
-                                return;
-                            }
-                            resume = (choice == 2);
-                        }
 
-                        auto ensureRemoteDir =
-                            [&](const QString &dir,
-                                std::string &ensureErr) -> bool {
-                            if (dir.isEmpty())
-                                return true;
-                            QString cur = "/";
-                            const QStringList parts =
-                                dir.split('/', Qt::SkipEmptyParts);
-                            for (const QString &part : parts) {
-                                const QString next = (cur == "/")
-                                                         ? ("/" + part)
-                                                         : (cur + "/" + part);
-                                bool isD = false;
-                                std::string e;
-                                const bool exs = workerClient->exists(
-                                    next.toStdString(), isD, e);
-                                if (!e.empty()) {
-                                    ensureErr = e;
-                                    return false;
+                            if (existsRemote) {
+                                openscp::FileInfo rinfo{};
+                                std::string stErr;
+                                (void)workerClient->stat(
+                                    t.dst.toStdString(), rinfo, stErr);
+                                const QString srcInfo =
+                                    QString("%1 bytes, %2")
+                                        .arg(QFileInfo(t.src).size())
+                                        .arg(openscpui::localShortTime(
+                                            QFileInfo(t.src).lastModified()));
+                                const QString dstInfo =
+                                    QString("%1 bytes, %2")
+                                        .arg(rinfo.size)
+                                        .arg(rinfo.mtime
+                                                 ? openscpui::localShortTime(
+                                                       (quint64)rinfo.mtime)
+                                                 : QStringLiteral("?"));
+                                int choice = askOverwriteConflictOnUi(
+                                    this, QFileInfo(t.src).fileName(), srcInfo,
+                                    dstInfo, shouldCancel);
+                                if (choice < 0 || shouldCancel()) {
+                                    precheckDoneMs =
+                                        QDateTime::currentMSecsSinceEpoch();
+                                    markCanceledOrPaused(precheckDoneMs);
+                                    workerClient->disconnect();
+                                    emitAndFinalize(precheckDoneMs -
+                                                        precheckStartedMs,
+                                                    0);
+                                    return;
                                 }
-                                if (!exs) {
-                                    std::string me;
-                                    if (!workerClient->mkdir(next.toStdString(),
-                                                             me, 0755)) {
-                                        ensureErr = me.empty()
-                                                        ? ("Could not create "
-                                                           "remote directory: " +
-                                                           next.toStdString())
-                                                        : me;
+                                if (choice == 0) {
+                                    skipTransfer();
+                                    return;
+                                }
+                                if (choice == 2 &&
+                                    !workerCaps.supports_resume) {
+                                    choice = 1;
+                                }
+                                resume = (choice == 2);
+                            }
+                        }
+
+                        if (resume && !workerCaps.supports_resume)
+                            resume = false;
+
+                        if (workerCaps.supports_metadata) {
+                            auto ensureRemoteDir =
+                                [&](const QString &dir,
+                                    std::string &ensureErr) -> bool {
+                                if (dir.isEmpty())
+                                    return true;
+                                QString cur = "/";
+                                const QStringList parts =
+                                    dir.split('/', Qt::SkipEmptyParts);
+                                for (const QString &part : parts) {
+                                    const QString next =
+                                        (cur == "/") ? ("/" + part)
+                                                     : (cur + "/" + part);
+                                    bool isD = false;
+                                    std::string e;
+                                    const bool exs = workerClient->exists(
+                                        next.toStdString(), isD, e);
+                                    if (!e.empty()) {
+                                        ensureErr = e;
                                         return false;
                                     }
-                                } else if (!isD) {
-                                    ensureErr =
-                                        "Remote path component is not a "
-                                        "directory: " +
-                                        next.toStdString();
-                                    return false;
+                                    if (!exs) {
+                                        std::string me;
+                                        if (!workerClient->mkdir(
+                                                next.toStdString(), me, 0755)) {
+                                            ensureErr = me.empty()
+                                                            ? ("Could not "
+                                                               "create remote "
+                                                               "directory: " +
+                                                               next.toStdString())
+                                                            : me;
+                                            return false;
+                                        }
+                                    } else if (!isD) {
+                                        ensureErr =
+                                            "Remote path component is not a "
+                                            "directory: " +
+                                            next.toStdString();
+                                        return false;
+                                    }
+                                    cur = next;
                                 }
-                                cur = next;
-                            }
-                            return true;
-                        };
+                                return true;
+                            };
 
-                        const QString parentDir = QFileInfo(t.dst).path();
-                        if (!parentDir.isEmpty()) {
-                            std::string ensureErr;
-                            if (!ensureRemoteDir(parentDir, ensureErr)) {
-                                failPrecheck(ensureErr);
-                                return;
+                            const QString parentDir = QFileInfo(t.dst).path();
+                            if (!parentDir.isEmpty()) {
+                                std::string ensureErr;
+                                if (!ensureRemoteDir(parentDir, ensureErr)) {
+                                    failPrecheck(ensureErr);
+                                    return;
+                                }
                             }
                         }
                     } else {
                         const QFileInfo lfi(t.dst);
                         if (lfi.exists()) {
-                            openscp::FileInfo rinfo{};
-                            std::string stErr;
-                            (void)workerClient->stat(t.src.toStdString(), rinfo,
-                                                     stErr);
-                            const QString srcInfo =
-                                QString("%1 bytes, %2")
-                                    .arg(rinfo.size)
-                                    .arg(rinfo.mtime
-                                             ? openscpui::localShortTime(
-                                                   (quint64)rinfo.mtime)
-                                             : QStringLiteral("?"));
+                            QString srcInfo = QStringLiteral("? bytes, ?");
+                            if (workerCaps.supports_metadata) {
+                                openscp::FileInfo rinfo{};
+                                std::string stErr;
+                                (void)workerClient->stat(t.src.toStdString(),
+                                                         rinfo, stErr);
+                                srcInfo = QString("%1 bytes, %2")
+                                              .arg(rinfo.size)
+                                              .arg(rinfo.mtime
+                                                       ? openscpui::localShortTime(
+                                                             (quint64)rinfo.mtime)
+                                                       : QStringLiteral("?"));
+                            }
                             const QString dstInfo =
                                 QString("%1 bytes, %2")
                                     .arg(lfi.size())
                                     .arg(openscpui::localShortTime(
                                         lfi.lastModified()));
-                            const int choice = askOverwriteConflictOnUi(
+                            int choice = askOverwriteConflictOnUi(
                                 this, lfi.fileName(), srcInfo, dstInfo,
                                 shouldCancel);
                             if (choice < 0 || shouldCancel()) {
@@ -1114,6 +1130,8 @@ void TransferManager::schedule() {
                                 skipTransfer();
                                 return;
                             }
+                            if (choice == 2 && !workerCaps.supports_resume)
+                                choice = 1;
                             resume = (choice == 2);
                         }
                         if (!QDir().mkpath(QFileInfo(t.dst).dir().absolutePath())) {
@@ -1122,6 +1140,9 @@ void TransferManager::schedule() {
                             return;
                         }
                     }
+
+                    if (resume && !workerCaps.supports_resume)
+                        resume = false;
 
                     precheckDoneMs = QDateTime::currentMSecsSinceEpoch();
 

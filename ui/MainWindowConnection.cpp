@@ -1274,6 +1274,28 @@ void MainWindow::startSftpConnect(
             5000);
         return;
     }
+    if (hasConfiguredJumpHost(opt) && !caps.supports_jump_host) {
+        UiAlerts::warning(
+            this, tr("Unsupported transport"),
+            tr("SSH jump host is not available for %1.")
+                .arg(protocolDisplayLabel(opt.protocol)));
+        statusBar()->showMessage(
+            tr("Connection canceled: SSH jump host is not supported for %1")
+                .arg(protocolDisplayLabel(opt.protocol)),
+            5000);
+        return;
+    }
+    if (opt.proxy_type != openscp::ProxyType::None && !caps.supports_proxy) {
+        UiAlerts::warning(
+            this, tr("Unsupported transport"),
+            tr("Proxy settings are not available for %1.")
+                .arg(protocolDisplayLabel(opt.protocol)));
+        statusBar()->showMessage(
+            tr("Connection canceled: proxy is not supported for %1")
+                .arg(protocolDisplayLabel(opt.protocol)),
+            5000);
+        return;
+    }
     if (hasTransportSelectionConflict(opt)) {
         UiAlerts::warning(
             this, tr("Invalid transport configuration"),

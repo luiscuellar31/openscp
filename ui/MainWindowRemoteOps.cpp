@@ -839,7 +839,7 @@ void MainWindow::refreshRightRemotePanel() {
         return;
     if (!rightRemoteModel_) {
         statusBar()->showMessage(
-            tr("Refresh is not available in SCP transfer mode."), 3000);
+            tr("Refresh is not available in transfer-only mode."), 3000);
         return;
     }
 

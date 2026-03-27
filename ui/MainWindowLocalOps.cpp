@@ -413,7 +413,7 @@ void MainWindow::copyLeftToRight() {
             QString msg = QString(tr("Queued: %1 uploads")).arg(enq);
             if (skippedDirs > 0) {
                 msg += QStringLiteral("  |  ") +
-                       tr("Skipped folders in SCP mode: %1")
+                       tr("Skipped folders in transfer-only mode: %1")
                            .arg(skippedDirs);
             }
             statusBar()->showMessage(msg, 4000);
@@ -421,7 +421,8 @@ void MainWindow::copyLeftToRight() {
         } else if (skippedDirs > 0) {
             UiAlerts::information(
                 this, tr("Upload"),
-                tr("SCP mode currently supports uploading files only."));
+                tr("Transfer-only mode currently supports uploading files "
+                   "only."));
         }
         return;
     }

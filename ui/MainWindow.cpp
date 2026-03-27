@@ -397,9 +397,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     scpLay->setContentsMargins(12, 12, 12, 12);
     scpLay->setSpacing(8);
     scpModeHintLabel_ = new QLabel(
-        tr("SCP mode is transfer-only.\nUse the remote path above as the "
-           "target folder for uploads.\nFor downloads, choose a remote file "
-           "path explicitly."),
+        tr("This protocol works in transfer-only mode.\nUse the remote path "
+           "above as the target folder for uploads.\nFor downloads, choose a "
+           "remote file path explicitly."),
         scpTransferPanel_);
     scpModeHintLabel_->setWordWrap(true);
     scpQuickUploadBtn_ = new QPushButton(tr("Upload local files…"), scpTransferPanel_);
@@ -1780,8 +1780,11 @@ void MainWindow::maybeNotifyCompletedTransfers() {
 }
 
 bool MainWindow::isScpTransferMode() const {
-    return rightIsRemote_ && m_activeSessionOptions_.has_value() &&
-           m_activeSessionOptions_->protocol == openscp::Protocol::Scp;
+    if (!rightIsRemote_ || !m_activeSessionOptions_.has_value())
+        return false;
+    const openscp::ProtocolCapabilities caps =
+        openscp::capabilitiesForProtocol(m_activeSessionOptions_->protocol);
+    return caps.supports_file_transfers && !caps.supports_listing;
 }
 
 void MainWindow::activateScpTransferModeUi(bool enabled) {
@@ -1796,7 +1799,7 @@ void MainWindow::activateScpTransferModeUi(bool enabled) {
         }
         if (scpModeHintLabel_) {
             scpModeHintLabel_->setText(
-                tr("SCP mode is transfer-only.\n"
+                tr("This protocol works in transfer-only mode.\n"
                    "Uploads use the remote folder path above.\n"
                    "Downloads require entering a remote file path."));
         }

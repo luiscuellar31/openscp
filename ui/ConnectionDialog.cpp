@@ -34,6 +34,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     protocol_->addItem(tr("SFTP"),
                        static_cast<int>(openscp::Protocol::Sftp));
     protocol_->addItem(tr("SCP"), static_cast<int>(openscp::Protocol::Scp));
+    protocol_->addItem(tr("FTP"), static_cast<int>(openscp::Protocol::Ftp));
 
     siteName_ = new QLineEdit(this);
     host_ = new QLineEdit(this);
@@ -572,6 +573,8 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &o) {
 void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol) {
     if (!host_ || !port_)
         return;
+    const openscp::ProtocolCapabilities caps =
+        openscp::capabilitiesForProtocol(protocol);
     switch (protocol) {
     case openscp::Protocol::Sftp:
         host_->setPlaceholderText(tr("sftp.example.com"));
@@ -590,4 +593,49 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol) {
         break;
     }
     port_->setValue(static_cast<int>(openscp::defaultPortForProtocol(protocol)));
+
+    const bool sshAuthSupported =
+        (protocol == openscp::Protocol::Sftp ||
+         protocol == openscp::Protocol::Scp);
+    if (keyPath_)
+        keyPath_->setEnabled(sshAuthSupported);
+    if (keyPass_)
+        keyPass_->setEnabled(sshAuthSupported);
+
+    if (khPath_)
+        khPath_->setEnabled(caps.supports_known_hosts);
+    if (khBrowse_)
+        khBrowse_->setEnabled(caps.supports_known_hosts);
+    if (khPolicy_)
+        khPolicy_->setEnabled(caps.supports_known_hosts);
+    if (integrityPolicy_)
+        integrityPolicy_->setEnabled(caps.supports_transfer_integrity);
+
+    if (proxyType_) {
+        if (!caps.supports_proxy) {
+            const int directIdx =
+                proxyType_->findData(static_cast<int>(openscp::ProxyType::None));
+            if (directIdx >= 0)
+                proxyType_->setCurrentIndex(directIdx);
+            proxyType_->setEnabled(false);
+        } else {
+            proxyType_->setEnabled(true);
+        }
+    }
+
+    bool jumpSupported = caps.supports_jump_host;
+#ifdef Q_OS_WIN
+    jumpSupported = false;
+#endif
+    if (jumpEnabled_) {
+        if (!jumpSupported && jumpEnabled_->isChecked())
+            jumpEnabled_->setChecked(false);
+        jumpEnabled_->setEnabled(jumpSupported);
+        if (!jumpSupported) {
+            jumpEnabled_->setToolTip(
+                tr("Not available for the selected protocol."));
+        } else {
+            jumpEnabled_->setToolTip(QString());
+        }
+    }
 }
