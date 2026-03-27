@@ -113,7 +113,6 @@ inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
     ProtocolCapabilities caps{};
     switch (protocol) {
     case Protocol::Sftp:
-    case Protocol::Scp:
         caps.implemented = true;
         caps.supports_listing = true;
         caps.supports_file_transfers = true;
@@ -126,6 +125,13 @@ inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
         caps.supports_jump_host = true;
         caps.supports_known_hosts = true;
         caps.supports_transfer_integrity = true;
+        return caps;
+    case Protocol::Scp:
+        caps.implemented = true;
+        caps.supports_file_transfers = true;
+        caps.supports_proxy = true;
+        caps.supports_jump_host = true;
+        caps.supports_known_hosts = true;
         return caps;
     case Protocol::Ftp:
     case Protocol::Ftps:

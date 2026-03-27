@@ -69,6 +69,10 @@ class Libssh2SftpClient : public SftpClient {
     std::unique_ptr<SftpClient> newConnectionLike(const SessionOptions &opt,
                                                   std::string &err) override;
 
+    // Exposed for protocol adapters that share the authenticated SSH transport
+    // (for example, SCP channel operations).
+    _LIBSSH2_SESSION *sessionHandle() const { return session_; }
+
     private:
     bool connected_ = false;
     int sock_ = -1;

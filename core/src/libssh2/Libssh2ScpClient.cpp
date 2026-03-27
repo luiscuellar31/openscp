@@ -1,8 +1,37 @@
-// SCP backend module forwarding to the libssh2 SSH/SFTP implementation.
+// SCP backend module using libssh2 scp_send/scp_recv channels for file
+// transfers over SSH.
 #include "openscp/Libssh2ScpClient.hpp"
+#include <libssh2.h>
+
+#include <chrono>
+#include <cstdio>
+#include <filesystem>
+#include <thread>
 #include <utility>
+#include <vector>
 
 namespace openscp {
+namespace {
+
+constexpr std::size_t kScpChunkSize = 64 * 1024;
+
+bool unsupportedScpOperation(const char *what, std::string &err) {
+    err = std::string("SCP backend does not support ") + what + ".";
+    return false;
+}
+
+void closeScpChannel(LIBSSH2_CHANNEL *channel, bool graceful) {
+    if (!channel)
+        return;
+    if (graceful) {
+        (void)libssh2_channel_send_eof(channel);
+        (void)libssh2_channel_wait_eof(channel);
+        (void)libssh2_channel_wait_closed(channel);
+    }
+    (void)libssh2_channel_free(channel);
+}
+
+} // namespace
 
 bool Libssh2ScpClient::connect(const SessionOptions &opt, std::string &err) {
     SessionOptions copy = opt;
@@ -18,69 +47,262 @@ bool Libssh2ScpClient::isConnected() const { return delegate_.isConnected(); }
 
 bool Libssh2ScpClient::list(const std::string &remote_path,
                             std::vector<FileInfo> &out, std::string &err) {
-    return delegate_.list(remote_path, out, err);
+    (void)remote_path;
+    out.clear();
+    return unsupportedScpOperation("directory listing", err);
 }
 
 bool Libssh2ScpClient::get(
     const std::string &remote, const std::string &local, std::string &err,
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
-    return delegate_.get(remote, local, err, std::move(progress),
-                         std::move(shouldCancel), resume);
+    if (resume) {
+        err = "SCP downloads do not support resume.";
+        return false;
+    }
+    if (!delegate_.isConnected()) {
+        err = "Not connected";
+        return false;
+    }
+    _LIBSSH2_SESSION *session = delegate_.sessionHandle();
+    if (!session) {
+        err = "Not connected";
+        return false;
+    }
+
+    libssh2_struct_stat fileInfo{};
+    LIBSSH2_CHANNEL *channel =
+        libssh2_scp_recv2(session, remote.c_str(), &fileInfo);
+    if (!channel) {
+        err = "Could not open remote file for SCP download";
+        return false;
+    }
+
+    std::FILE *localFile = std::fopen(local.c_str(), "wb");
+    if (!localFile) {
+        err = "Could not open local file for writing";
+        closeScpChannel(channel, false);
+        return false;
+    }
+
+    const std::size_t total =
+        (fileInfo.st_size > 0) ? static_cast<std::size_t>(fileInfo.st_size) : 0;
+    std::vector<char> buffer(kScpChunkSize);
+    std::size_t done = 0;
+
+    while (true) {
+        if (shouldCancel && shouldCancel()) {
+            err = "Canceled by user";
+            std::fclose(localFile);
+            (void)std::remove(local.c_str());
+            closeScpChannel(channel, false);
+            return false;
+        }
+
+        const ssize_t n = libssh2_channel_read(channel, buffer.data(),
+                                               static_cast<size_t>(buffer.size()));
+        if (n == LIBSSH2_ERROR_EAGAIN) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+        if (n < 0) {
+            err = "SCP read failed";
+            std::fclose(localFile);
+            (void)std::remove(local.c_str());
+            closeScpChannel(channel, false);
+            return false;
+        }
+        if (n == 0) {
+            if (libssh2_channel_eof(channel))
+                break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+
+        if (std::fwrite(buffer.data(), 1, static_cast<size_t>(n), localFile) !=
+            static_cast<size_t>(n)) {
+            err = "Local write failed";
+            std::fclose(localFile);
+            (void)std::remove(local.c_str());
+            closeScpChannel(channel, false);
+            return false;
+        }
+
+        done += static_cast<std::size_t>(n);
+        if (progress && total)
+            progress(done, total);
+    }
+
+    if (std::fclose(localFile) != 0) {
+        err = "Could not finalize local file";
+        (void)std::remove(local.c_str());
+        closeScpChannel(channel, false);
+        return false;
+    }
+    closeScpChannel(channel, true);
+    if (progress && total)
+        progress(done, total);
+    return true;
 }
 
 bool Libssh2ScpClient::put(
     const std::string &local, const std::string &remote, std::string &err,
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
-    return delegate_.put(local, remote, err, std::move(progress),
-                         std::move(shouldCancel), resume);
+    if (resume) {
+        err = "SCP uploads do not support resume.";
+        return false;
+    }
+    if (!delegate_.isConnected()) {
+        err = "Not connected";
+        return false;
+    }
+    _LIBSSH2_SESSION *session = delegate_.sessionHandle();
+    if (!session) {
+        err = "Not connected";
+        return false;
+    }
+
+    std::uint64_t total = 0;
+    try {
+        total = std::filesystem::file_size(local);
+    } catch (...) {
+        err = "Could not determine local file size";
+        return false;
+    }
+
+    std::FILE *localFile = std::fopen(local.c_str(), "rb");
+    if (!localFile) {
+        err = "Could not open local file for reading";
+        return false;
+    }
+
+    LIBSSH2_CHANNEL *channel = libssh2_scp_send64(
+        session, remote.c_str(), 0644, static_cast<libssh2_int64_t>(total), 0,
+        0);
+    if (!channel) {
+        std::fclose(localFile);
+        err = "Could not open remote file for SCP upload";
+        return false;
+    }
+
+    std::vector<char> buffer(kScpChunkSize);
+    std::size_t done = 0;
+    while (true) {
+        const std::size_t nread =
+            std::fread(buffer.data(), 1, buffer.size(), localFile);
+        if (nread == 0) {
+            if (std::ferror(localFile)) {
+                err = "Local read failed";
+                std::fclose(localFile);
+                closeScpChannel(channel, false);
+                return false;
+            }
+            break; // EOF
+        }
+
+        char *ptr = buffer.data();
+        std::size_t remaining = nread;
+        while (remaining > 0) {
+            if (shouldCancel && shouldCancel()) {
+                err = "Canceled by user";
+                std::fclose(localFile);
+                closeScpChannel(channel, false);
+                return false;
+            }
+            const ssize_t wr = libssh2_channel_write(channel, ptr, remaining);
+            if (wr == LIBSSH2_ERROR_EAGAIN) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
+            }
+            if (wr < 0) {
+                err = "SCP write failed";
+                std::fclose(localFile);
+                closeScpChannel(channel, false);
+                return false;
+            }
+            ptr += wr;
+            remaining -= static_cast<std::size_t>(wr);
+            done += static_cast<std::size_t>(wr);
+            if (progress && total)
+                progress(done, static_cast<std::size_t>(total));
+        }
+    }
+
+    if (std::fclose(localFile) != 0) {
+        err = "Could not close local file";
+        closeScpChannel(channel, false);
+        return false;
+    }
+    closeScpChannel(channel, true);
+    if (progress && total)
+        progress(done, static_cast<std::size_t>(total));
+    return true;
 }
 
 bool Libssh2ScpClient::exists(const std::string &remote_path, bool &isDir,
                               std::string &err) {
-    return delegate_.exists(remote_path, isDir, err);
+    (void)remote_path;
+    isDir = false;
+    return unsupportedScpOperation("path existence checks", err);
 }
 
 bool Libssh2ScpClient::stat(const std::string &remote_path, FileInfo &info,
                             std::string &err) {
-    return delegate_.stat(remote_path, info, err);
+    (void)remote_path;
+    info = FileInfo{};
+    return unsupportedScpOperation("metadata stat", err);
 }
 
 bool Libssh2ScpClient::chmod(const std::string &remote_path, std::uint32_t mode,
                              std::string &err) {
-    return delegate_.chmod(remote_path, mode, err);
+    (void)remote_path;
+    (void)mode;
+    return unsupportedScpOperation("chmod", err);
 }
 
 bool Libssh2ScpClient::chown(const std::string &remote_path, std::uint32_t uid,
                              std::uint32_t gid, std::string &err) {
-    return delegate_.chown(remote_path, uid, gid, err);
+    (void)remote_path;
+    (void)uid;
+    (void)gid;
+    return unsupportedScpOperation("chown", err);
 }
 
 bool Libssh2ScpClient::setTimes(const std::string &remote_path,
                                 std::uint64_t atime, std::uint64_t mtime,
                                 std::string &err) {
-    return delegate_.setTimes(remote_path, atime, mtime, err);
+    (void)remote_path;
+    (void)atime;
+    (void)mtime;
+    return unsupportedScpOperation("timestamp updates", err);
 }
 
 bool Libssh2ScpClient::mkdir(const std::string &remote_dir, std::string &err,
                              unsigned int mode) {
-    return delegate_.mkdir(remote_dir, err, mode);
+    (void)remote_dir;
+    (void)mode;
+    return unsupportedScpOperation("mkdir", err);
 }
 
 bool Libssh2ScpClient::removeFile(const std::string &remote_path,
                                   std::string &err) {
-    return delegate_.removeFile(remote_path, err);
+    (void)remote_path;
+    return unsupportedScpOperation("file deletion", err);
 }
 
 bool Libssh2ScpClient::removeDir(const std::string &remote_dir,
                                  std::string &err) {
-    return delegate_.removeDir(remote_dir, err);
+    (void)remote_dir;
+    return unsupportedScpOperation("directory deletion", err);
 }
 
 bool Libssh2ScpClient::rename(const std::string &from, const std::string &to,
                               std::string &err, bool overwrite) {
-    return delegate_.rename(from, to, err, overwrite);
+    (void)from;
+    (void)to;
+    (void)overwrite;
+    return unsupportedScpOperation("rename", err);
 }
 
 std::unique_ptr<SftpClient>

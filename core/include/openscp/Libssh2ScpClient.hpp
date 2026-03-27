@@ -1,5 +1,5 @@
-// SCP backend module. Uses the libssh2 SSH stack and delegates shared remote
-// operations through the existing libssh2 client pipeline.
+// SCP backend module. Uses real libssh2 SCP send/recv channels and reuses the
+// authenticated SSH transport setup from Libssh2SftpClient.
 #pragma once
 #include "Libssh2SftpClient.hpp"
 
