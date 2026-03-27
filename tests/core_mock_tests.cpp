@@ -119,6 +119,13 @@ void test_protocol_helpers(TestContext &t) {
         openscp::capabilitiesForProtocol(openscp::Protocol::WebDav);
     t.check(!webdavCaps.implemented,
             "WebDAV capabilities should report not implemented");
+
+    const auto ftpCaps = openscp::capabilitiesForProtocol(openscp::Protocol::Ftp);
+    t.check(ftpCaps.implemented, "FTP capabilities should be implemented");
+    t.check(ftpCaps.supports_file_transfers,
+            "FTP capabilities should include file transfers");
+    t.check(!ftpCaps.supports_listing,
+            "FTP capabilities should currently run in transfer-only mode");
 }
 
 void test_connect_validation(TestContext &t) {
@@ -326,7 +333,12 @@ void test_client_factory(TestContext &t) {
     }
 
     auto ftp = openscp::CreateClientForProtocol(openscp::Protocol::Ftp);
-    t.check(!ftp, "factory should return null for unsupported FTP backend");
+    t.check(static_cast<bool>(ftp),
+            "factory should create FTP backend instance");
+    if (ftp) {
+        t.check(ftp->protocol() == openscp::Protocol::Ftp,
+                "FTP backend should report FTP protocol");
+    }
 }
 
 void test_set_times(TestContext &t) {
