@@ -719,9 +719,10 @@ static bool launchShellCommandInSystemTerminal(const QString &shellCommand,
 
 void MainWindow::goUpRight() {
     if (rightIsRemote_) {
-        if (!rightRemoteModel_)
-            return;
-        QString cur = rightRemoteModel_->rootPath();
+        QString cur = rightRemoteModel_ ? rightRemoteModel_->rootPath()
+                                        : (rightPath_ ? rightPath_->text()
+                                                      : QString());
+        cur = normalizeRemotePath(cur);
         if (cur == "/" || cur.isEmpty())
             return;
         if (cur.endsWith('/'))
@@ -755,14 +756,11 @@ void MainWindow::openRightRemoteTerminal() {
                               tr("The right panel must be connected as remote."));
         return;
     }
-    if (!rightRemoteModel_) {
-        UiAlerts::warning(this, tr("Open in terminal"),
-                          tr("No active remote panel is available."));
-        return;
-    }
 
     const openscp::SessionOptions &opt = *m_activeSessionOptions_;
-    const QString remotePath = normalizeRemotePath(rightRemoteModel_->rootPath());
+    const QString remotePath = normalizeRemotePath(
+        rightRemoteModel_ ? rightRemoteModel_->rootPath()
+                          : (rightPath_ ? rightPath_->text() : QString()));
     QSettings s("OpenSCP", "OpenSCP");
     const bool forceInteractiveLogin =
         s.value("Terminal/forceInteractiveLogin", false).toBool();
@@ -815,8 +813,16 @@ void MainWindow::openRightRemoteTerminal() {
 }
 
 void MainWindow::setRightRemoteRoot(const QString &path) {
-    if (!rightIsRemote_ || !rightRemoteModel_)
+    if (!rightIsRemote_)
         return;
+    if (!rightRemoteModel_) {
+        const QString normalized = normalizeRemotePath(path);
+        rightPath_->setText(normalized);
+        refreshRightBreadcrumbs();
+        updateDeleteShortcutEnables();
+        statusBar()->showMessage(tr("Remote path: %1").arg(normalized), 3000);
+        return;
+    }
     QString e;
     if (!rightRemoteModel_->setRootPath(path, &e)) {
         UiAlerts::warning(
@@ -829,8 +835,13 @@ void MainWindow::setRightRemoteRoot(const QString &path) {
 }
 
 void MainWindow::refreshRightRemotePanel() {
-    if (!rightIsRemote_ || !rightRemoteModel_)
+    if (!rightIsRemote_)
         return;
+    if (!rightRemoteModel_) {
+        statusBar()->showMessage(
+            tr("Refresh is not available in SCP transfer mode."), 3000);
+        return;
+    }
 
     QString e;
     if (!rightRemoteModel_->setRootPath(rightRemoteModel_->rootPath(), &e,
@@ -949,7 +960,7 @@ void MainWindow::downloadRightToLeft() {
                                  tr("The right panel is not remote."));
         return;
     }
-    if (!sftp_ || !rightRemoteModel_) {
+    if (!sftp_) {
         UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
@@ -963,6 +974,44 @@ void MainWindow::downloadRightToLeft() {
     if (!dst.exists()) {
         UiAlerts::warning(this, tr("Invalid destination"),
                              tr("Destination folder does not exist."));
+        return;
+    }
+    if (isScpTransferMode()) {
+        const QString baseRemote = normalizeRemotePath(
+            rightPath_ ? rightPath_->text() : QStringLiteral("/"));
+        bool ok = false;
+        QString remoteInput = QInputDialog::getText(
+            this, tr("Download"),
+            tr("Remote file path (absolute or relative to %1):")
+                .arg(baseRemote),
+            QLineEdit::Normal, baseRemote, &ok);
+        if (!ok)
+            return;
+        remoteInput = remoteInput.trimmed();
+        if (remoteInput.isEmpty())
+            return;
+        QString remotePath = remoteInput;
+        if (!remotePath.startsWith('/'))
+            remotePath = joinRemotePath(baseRemote, remotePath);
+        remotePath = normalizeRemotePath(remotePath);
+        const QString name = QFileInfo(remotePath).fileName();
+        if (name.isEmpty()) {
+            UiAlerts::warning(this, tr("Download"),
+                              tr("Enter a valid remote file path."));
+            return;
+        }
+        transferMgr_->enqueueDownload(remotePath, dst.filePath(name));
+        statusBar()->showMessage(QString(tr("Queued: %1 downloads")).arg(1),
+                                 4000);
+        maybeShowTransferQueue();
+        const int slash = remotePath.lastIndexOf('/');
+        const QString parent = (slash <= 0) ? QStringLiteral("/")
+                                            : remotePath.left(slash);
+        setRightRemoteRoot(parent);
+        return;
+    }
+    if (!rightRemoteModel_) {
+        UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
     auto sel = rightView_->selectionModel();
@@ -1417,14 +1466,43 @@ void MainWindow::moveRightToLeft() {
 
 
 void MainWindow::uploadViaDialog() {
-    if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_) {
+    if (!rightIsRemote_ || !sftp_) {
         UiAlerts::information(
             this, tr("Upload"),
             tr("The right panel is not remote or there is no active session."));
         return;
     }
+    const bool scpMode = isScpTransferMode();
+    if (!scpMode && !rightRemoteModel_) {
+        UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
+        return;
+    }
     const QString startDir =
         uploadDir_.isEmpty() ? QDir::homePath() : uploadDir_;
+    if (scpMode) {
+        const QStringList picks = QFileDialog::getOpenFileNames(
+            this, tr("Select files to upload"), startDir);
+        if (picks.isEmpty())
+            return;
+        uploadDir_ = QFileInfo(picks.first()).dir().absolutePath();
+        const QString remoteBase = normalizeRemotePath(
+            rightPath_ ? rightPath_->text() : QStringLiteral("/"));
+        int enq = 0;
+        for (const QString &localPath : picks) {
+            const QFileInfo fi(localPath);
+            if (!fi.isFile())
+                continue;
+            transferMgr_->enqueueUpload(
+                fi.absoluteFilePath(), joinRemotePath(remoteBase, fi.fileName()));
+            ++enq;
+        }
+        if (enq > 0) {
+            statusBar()->showMessage(QString(tr("Queued: %1 uploads")).arg(enq),
+                                     4000);
+            maybeShowTransferQueue();
+        }
+        return;
+    }
     QFileDialog dlg(this, tr("Select files or folders to upload"), startDir);
     dlg.setFileMode(QFileDialog::ExistingFiles);
     dlg.setOption(QFileDialog::DontUseNativeDialog, true);
@@ -1847,13 +1925,27 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
     bool canGoUp = false;
     if (rightIsRemote_) {
         QString cur =
-            rightRemoteModel_ ? rightRemoteModel_->rootPath() : QString();
+            rightRemoteModel_ ? rightRemoteModel_->rootPath()
+                              : (rightPath_ ? rightPath_->text() : QString());
         if (cur.endsWith('/'))
             cur.chop(1);
         canGoUp = (!cur.isEmpty() && cur != "/");
     } else {
         QDir d(rightPath_ ? rightPath_->text() : QString());
         canGoUp = d.cdUp();
+    }
+
+    if (isScpTransferMode()) {
+        if (canGoUp && actUpRight_)
+            rightContextMenu_->addAction(actUpRight_);
+        if (actUploadRight_)
+            rightContextMenu_->addAction(actUploadRight_);
+        if (actDownloadF7_)
+            rightContextMenu_->addAction(actDownloadF7_);
+        if (actOpenTerminalRight_)
+            rightContextMenu_->addAction(actOpenTerminalRight_);
+        rightContextMenu_->popup(rightView_->viewport()->mapToGlobal(pos));
+        return;
     }
 
     if (rightIsRemote_) {

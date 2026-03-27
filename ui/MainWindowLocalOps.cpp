@@ -145,6 +145,19 @@ static QString joinRemotePath(const QString &base, const QString &name) {
     return base.endsWith('/') ? base + name : base + "/" + name;
 }
 
+static QString normalizeRemotePath(const QString &rawPath) {
+    QString normalized = rawPath.trimmed();
+    if (normalized.isEmpty())
+        normalized = QStringLiteral("/");
+    if (!normalized.startsWith('/'))
+        normalized.prepend('/');
+    while (normalized.contains(QStringLiteral("//")))
+        normalized.replace(QStringLiteral("//"), QStringLiteral("/"));
+    if (normalized.size() > 1 && normalized.endsWith('/'))
+        normalized.chop(1);
+    return normalized;
+}
+
 QString MainWindow::preferredLocalHomePath() const {
     const QString home = QDir::homePath();
     if (!home.isEmpty()) {
@@ -331,9 +344,15 @@ void MainWindow::copyLeftToRight() {
     if (rightIsRemote_) {
         // ---- REMOTE branch: upload files (PUT) to the current remote
         // directory ----
-        if (!sftp_ || !rightRemoteModel_) {
+        if (!sftp_) {
             UiAlerts::warning(this, tr("Remote"),
                                  tr("No active remote session."));
+            return;
+        }
+        const bool scpMode = isScpTransferMode();
+        if (!scpMode && !rightRemoteModel_) {
+            UiAlerts::warning(this, tr("Remote"),
+                              tr("No active remote session."));
             return;
         }
 
@@ -352,11 +371,19 @@ void MainWindow::copyLeftToRight() {
         }
 
         // Always enqueue uploads
-        const QString remoteBase = rightRemoteModel_->rootPath();
+        const QString remoteBase =
+            scpMode ? normalizeRemotePath(
+                          rightPath_ ? rightPath_->text() : QString())
+                    : rightRemoteModel_->rootPath();
         int enq = 0;
+        int skippedDirs = 0;
         for (const QModelIndex &idx : rows) {
             const QFileInfo fi = leftModel_->fileInfo(idx);
             if (fi.isDir()) {
+                if (scpMode) {
+                    ++skippedDirs;
+                    continue;
+                }
                 const QString remoteDirBase =
                     joinRemotePath(remoteBase, fi.fileName());
                 QDirIterator it(fi.absoluteFilePath(),
@@ -383,9 +410,18 @@ void MainWindow::copyLeftToRight() {
             }
         }
         if (enq > 0) {
-            statusBar()->showMessage(QString(tr("Queued: %1 uploads")).arg(enq),
-                                     4000);
+            QString msg = QString(tr("Queued: %1 uploads")).arg(enq);
+            if (skippedDirs > 0) {
+                msg += QStringLiteral("  |  ") +
+                       tr("Skipped folders in SCP mode: %1")
+                           .arg(skippedDirs);
+            }
+            statusBar()->showMessage(msg, 4000);
             maybeShowTransferQueue();
+        } else if (skippedDirs > 0) {
+            UiAlerts::information(
+                this, tr("Upload"),
+                tr("SCP mode currently supports uploading files only."));
         }
         return;
     }
