@@ -131,6 +131,7 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
     return true;
 }
 
+// cppcheck-suppress constParameterCallback
 size_t writeFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
     if (!userdata)
         return 0;
