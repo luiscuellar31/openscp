@@ -75,6 +75,8 @@ open build/OpenSCP.app
 
 - Auth: contrasena, clave privada (+passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
 - Selector de protocolo por sitio/sesion (`SFTP`, `SCP`, `FTP`).
+- Politica de modo SCP por sitio/sesion: `Automatico (SCP + fallback SFTP)` o
+  `Solo SCP` (sin fallback), con valor global por defecto para conexiones nuevas.
 - Politicas de host-key: `Strict`, `Accept new (TOFU)`, `No verification` (endurecida).
 - El transporte por sitio puede usar TCP directo, proxy `SOCKS5` o tunel `HTTP CONNECT`.
 - Se soporta tunel por sitio via SSH jump host (`ProxyJump`/bastion).
@@ -91,6 +93,7 @@ open build/OpenSCP.app
 - Sitios guardados con identidad estable por UUID.
 - Los sitios guardados persisten por sitio el tipo/endpoint/usuario de proxy.
 - Los sitios guardados persisten por sitio configuracion de jump host SSH (host/puerto/usuario/ruta de llave).
+- Los sitios guardados persisten por sitio la politica de modo SCP.
 - Bloqueo de nombres de sitio duplicados.
 - Flujos de renombrar/eliminar limpian secretos legacy o huerfanos.
 - Eliminacion opcional de credenciales guardadas y entradas relacionadas en `known_hosts` al borrar sitios.

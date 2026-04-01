@@ -75,6 +75,8 @@ open build/OpenSCP.app
 
 - Auth: password, private key (+passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
 - Protocol selector per site/session (`SFTP`, `SCP`, `FTP`).
+- SCP mode policy per site/session: `Automatic (SCP + SFTP fallback)` or
+  `SCP only` (disable fallback), plus a global default for new connections.
 - Host-key policies: `Strict`, `Accept new (TOFU)`, `No verification` (hardened).
 - Per-site transport can use direct TCP, `SOCKS5`, or `HTTP CONNECT` proxy tunneling.
 - Per-site SSH jump host (`ProxyJump`/bastion) tunneling is supported.
@@ -91,6 +93,7 @@ open build/OpenSCP.app
 - Saved sites use stable UUID identities.
 - Saved sites persist proxy type/endpoint/username per site.
 - Saved sites persist SSH jump host settings (host/port/user/key path) per site.
+- Saved sites persist SCP mode policy per site.
 - Duplicate site names blocked; rename/delete cleans legacy or orphan secrets.
 - Optional cleanup of stored credentials and related `known_hosts` entries when deleting sites.
 - Secure backends:
