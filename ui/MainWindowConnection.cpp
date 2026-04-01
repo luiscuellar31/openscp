@@ -123,6 +123,25 @@ static QString normalizedIdentityProtocol(openscp::Protocol protocol) {
     return QString::fromLatin1(openscp::protocolStorageName(protocol));
 }
 
+static openscp::ScpTransferMode normalizedIdentityScpMode(
+    const openscp::SessionOptions &opt) {
+    if (opt.protocol != openscp::Protocol::Scp)
+        return openscp::ScpTransferMode::Auto;
+    return opt.scp_transfer_mode;
+}
+
+static openscp::ScpTransferMode
+loadDefaultScpTransferModeFromSettings(const QSettings &s) {
+    return openscp::scpTransferModeFromStorageName(
+        s.value("Protocol/scpTransferModeDefault",
+                QString::fromLatin1(openscp::scpTransferModeStorageName(
+                    openscp::ScpTransferMode::Auto)))
+            .toString()
+            .trimmed()
+            .toLower()
+            .toStdString());
+}
+
 static QString normalizedIdentityProxyHost(const std::string &host) {
     return QString::fromStdString(host).trimmed().toLower();
 }
@@ -200,6 +219,7 @@ static bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
                                   const openscp::SessionOptions &b) {
     return normalizedIdentityProtocol(a.protocol) ==
                normalizedIdentityProtocol(b.protocol) &&
+           normalizedIdentityScpMode(a) == normalizedIdentityScpMode(b) &&
            normalizedIdentityHost(a.host) == normalizedIdentityHost(b.host) &&
            a.port == b.port &&
            normalizedIdentityUser(a.username) ==
@@ -231,6 +251,7 @@ static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool *needsSave) {
     QVector<SiteEntry> sites;
     bool shouldSave = false;
     QSettings s("OpenSCP", "OpenSCP");
+    const auto defaultScpMode = loadDefaultScpTransferModeFromSettings(s);
     const int n = s.beginReadArray("sites");
     QSet<QString> usedIds;
     for (int i = 0; i < n; ++i) {
@@ -251,6 +272,17 @@ static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool *needsSave) {
                 .trimmed()
                 .toLower()
                 .toStdString());
+        const bool hasScpTransferModeKey = s.contains("scpTransferMode");
+        e.opt.scp_transfer_mode = openscp::scpTransferModeFromStorageName(
+            s.value("scpTransferMode",
+                    QString::fromLatin1(openscp::scpTransferModeStorageName(
+                        defaultScpMode)))
+                .toString()
+                .trimmed()
+                .toLower()
+                .toStdString());
+        if (!hasScpTransferModeKey)
+            shouldSave = true;
         e.opt.host = s.value("host").toString().toStdString();
         e.opt.port = static_cast<std::uint16_t>(
             s.value("port",
@@ -315,6 +347,9 @@ static void saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
         s.setValue("protocol",
                    QString::fromLatin1(
                        openscp::protocolStorageName(e.opt.protocol)));
+        s.setValue("scpTransferMode",
+                   QString::fromLatin1(openscp::scpTransferModeStorageName(
+                       e.opt.scp_transfer_mode)));
         s.setValue("host", QString::fromStdString(e.opt.host));
         s.setValue("port", static_cast<int>(e.opt.port));
         s.setValue("user", QString::fromStdString(e.opt.username));

@@ -115,6 +115,18 @@ static std::uint16_t defaultProxyPort(openscp::ProxyType type) {
 
 static std::uint16_t defaultJumpPort() { return 22; }
 
+static openscp::ScpTransferMode
+loadDefaultScpTransferModeFromSettings(const QSettings &s) {
+    return openscp::scpTransferModeFromStorageName(
+        s.value("Protocol/scpTransferModeDefault",
+                QString::fromLatin1(openscp::scpTransferModeStorageName(
+                    openscp::ScpTransferMode::Auto)))
+            .toString()
+            .trimmed()
+            .toLower()
+            .toStdString());
+}
+
 static void removeLegacyNameSecrets(SecretStore &store,
                                     const QString &siteName) {
     if (siteName.isEmpty())
@@ -193,6 +205,7 @@ void SiteManagerDialog::reloadFromSettings() {
 void SiteManagerDialog::loadSites() {
     sites_.clear();
     QSettings s("OpenSCP", "OpenSCP");
+    const auto defaultScpMode = loadDefaultScpTransferModeFromSettings(s);
     int n = s.beginReadArray("sites");
     bool needsSave = false;
     QSet<QString> usedIds;
@@ -214,6 +227,17 @@ void SiteManagerDialog::loadSites() {
                 .trimmed()
                 .toLower()
                 .toStdString());
+        const bool hasScpTransferModeKey = s.contains("scpTransferMode");
+        e.opt.scp_transfer_mode = openscp::scpTransferModeFromStorageName(
+            s.value("scpTransferMode",
+                    QString::fromLatin1(openscp::scpTransferModeStorageName(
+                        defaultScpMode)))
+                .toString()
+                .trimmed()
+                .toLower()
+                .toStdString());
+        if (!hasScpTransferModeKey)
+            needsSave = true;
         e.opt.host = s.value("host").toString().toStdString();
         e.opt.port = static_cast<std::uint16_t>(
             s.value("port",
@@ -281,6 +305,9 @@ void SiteManagerDialog::saveSites() {
         s.setValue("protocol",
                    QString::fromLatin1(
                        openscp::protocolStorageName(e.opt.protocol)));
+        s.setValue("scpTransferMode",
+                   QString::fromLatin1(openscp::scpTransferModeStorageName(
+                       e.opt.scp_transfer_mode)));
         s.setValue("host", QString::fromStdString(e.opt.host));
         s.setValue("port", (int)e.opt.port);
         s.setValue("user", QString::fromStdString(e.opt.username));
