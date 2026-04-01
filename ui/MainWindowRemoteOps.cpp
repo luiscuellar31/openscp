@@ -764,6 +764,8 @@ void MainWindow::openRightRemoteTerminal() {
     QSettings s("OpenSCP", "OpenSCP");
     const bool forceInteractiveLogin =
         s.value("Terminal/forceInteractiveLogin", false).toBool();
+    const bool enableSftpCliFallback =
+        s.value("Terminal/enableSftpCliFallback", true).toBool();
 
     QString command;
     QString prepareError;
@@ -778,13 +780,19 @@ void MainWindow::openRightRemoteTerminal() {
     }
 
     QString sftpFallbackCommand;
-    const bool hasSftpFallback = buildRemoteSftpCliCommand(
-        opt, remotePath, forceInteractiveLogin, &sftpFallbackCommand, nullptr);
-    if (!hasSftpFallback)
-        sftpFallbackCommand.clear();
+    bool hasSftpFallback = false;
+    if (enableSftpCliFallback) {
+        hasSftpFallback =
+            buildRemoteSftpCliCommand(opt, remotePath, forceInteractiveLogin,
+                                      &sftpFallbackCommand, nullptr);
+        if (!hasSftpFallback)
+            sftpFallbackCommand.clear();
+    }
 
-    const QString launchCommand =
-        buildSshWithSftpFallbackCommand(command, sftpFallbackCommand);
+    const QString launchCommand = hasSftpFallback
+                                      ? buildSshWithSftpFallbackCommand(
+                                            command, sftpFallbackCommand)
+                                      : command;
 
     QString launchError;
     if (!launchShellCommandInSystemTerminal(launchCommand, &launchError)) {

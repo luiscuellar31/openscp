@@ -995,7 +995,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         if (!r.exists())
             return;
         const QDateTime now = QDateTime::currentDateTimeUtc();
-        const qint64 maxAgeMs = qint64(7) * 24 * 60 * 60 * 1000; // 7 days
+        const int retentionDays =
+            qBound(1, s.value("Advanced/stagingRetentionDays", 7).toInt(),
+                   365);
+        const qint64 maxAgeMs = qint64(retentionDays) * 24 * 60 * 60 * 1000;
         // Match timestamp batches: yyyyMMdd-HHmmss
         QRegularExpression re("^\\d{8}-\\d{6}$");
         const auto entries = r.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot |
@@ -1832,6 +1835,16 @@ void MainWindow::applyPreferences() {
     prefShowQueueOnEnqueue_ = s.value("UI/showQueueOnEnqueue", true).toBool();
     prefNoHostVerificationTtlMin_ = qBound(
         1, s.value("Security/noHostVerificationTtlMin", 15).toInt(), 120);
+    m_remoteSessionHealthIntervalMs_ =
+        qBound(60, s.value("Network/sessionHealthIntervalSec", 600).toInt(),
+               86400) *
+        1000;
+    m_remoteWriteabilityTtlMs_ = qBound(
+        1000, s.value("Network/remoteWriteabilityTtlMs", 15000).toInt(),
+        120000);
+    if (m_remoteSessionHealthTimer_) {
+        m_remoteSessionHealthTimer_->setInterval(m_remoteSessionHealthIntervalMs_);
+    }
     downloadDir_ = defaultDownloadDirFromSettings(s);
     QDir().mkpath(downloadDir_);
     // Keep Site Manager auto-open preference up to date
