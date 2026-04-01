@@ -2,6 +2,9 @@
 #include "openscp/ClientFactory.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
 #include "openscp/MockSftpClient.hpp"
+#if OPEN_SCP_HAS_CURL_FTP
+#include "openscp/CurlFtpClient.hpp"
+#endif
 
 #include <chrono>
 #include <cstdlib>
@@ -109,6 +112,23 @@ void test_protocol_helpers(TestContext &t) {
         std::string(openscp::scpTransferModeStorageName(
             openscp::ScpTransferMode::ScpOnly)) == "scp-only",
         "scpTransferModeStorageName should serialize scp-only");
+    t.check(openscp::proxyTypeFromStorageValue(
+                static_cast<int>(openscp::ProxyType::Socks5)) ==
+                openscp::ProxyType::Socks5,
+            "proxyTypeFromStorageValue should parse SOCKS5");
+    t.check(openscp::proxyTypeFromStorageValue(
+                static_cast<int>(openscp::ProxyType::HttpConnect)) ==
+                openscp::ProxyType::HttpConnect,
+            "proxyTypeFromStorageValue should parse HTTP CONNECT");
+    t.check(openscp::proxyTypeFromStorageValue(999) ==
+                openscp::ProxyType::None,
+            "proxyTypeFromStorageValue should fallback invalid values to None");
+    t.check(openscp::defaultPortForProxyType(openscp::ProxyType::Socks5) ==
+                1080,
+            "default SOCKS5 proxy port should be 1080");
+    t.check(openscp::defaultPortForProxyType(openscp::ProxyType::HttpConnect) ==
+                8080,
+            "default HTTP CONNECT proxy port should be 8080");
 
     const auto sftpCaps =
         openscp::capabilitiesForProtocol(openscp::Protocol::Sftp);
@@ -165,6 +185,27 @@ void test_protocol_helpers(TestContext &t) {
     t.check(!ftpsCaps.supports_listing,
             "FTPS capabilities should currently run in transfer-only mode");
 }
+
+#if OPEN_SCP_HAS_CURL_FTP
+void test_curlftp_rejects_unsupported_proxy_type(TestContext &t) {
+    openscp::CurlFtpClient client(openscp::Protocol::Ftp);
+    openscp::SessionOptions opt;
+    opt.protocol = openscp::Protocol::Ftp;
+    opt.host = "127.0.0.1";
+    opt.port = openscp::defaultPortForProtocol(openscp::Protocol::Ftp);
+    opt.username = "alice";
+    opt.proxy_type = static_cast<openscp::ProxyType>(999);
+    opt.proxy_host = "127.0.0.1";
+    opt.proxy_port = 8080;
+
+    std::string err;
+    const bool ok = client.connect(opt, err);
+    t.check(!ok, "FTP connect should reject unsupported proxy enum values");
+    t.checkContains(
+        err, "Unsupported proxy type",
+        "FTP connect should explain unsupported proxy enum values");
+}
+#endif
 
 void test_connect_validation(TestContext &t) {
     openscp::MockSftpClient c;
@@ -521,6 +562,9 @@ int main() {
     test_client_factory(t);
     test_set_times(t);
     test_libssh2_rejects_conflicting_proxy_and_jump(t);
+#if OPEN_SCP_HAS_CURL_FTP
+    test_curlftp_rejects_unsupported_proxy_type(t);
+#endif
 #ifdef _WIN32
     test_libssh2_rejects_jump_on_windows(t);
 #endif
