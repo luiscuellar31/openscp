@@ -1,13 +1,32 @@
 cmake_minimum_required(VERSION 3.22)
 
 option(OPEN_SCP_ENABLE_MOCK "Build mock SFTP client" OFF)
+option(OPEN_SCP_ENABLE_FTP_BACKEND
+       "Build FTP backend module (requires libcurl development files)" ON)
 
 set(OPEN_SCP_CORE_SRCS
-    src/curl/CurlFtpClient.cpp        # FTP backend module
     src/libssh2/ClientFactory.cpp      # protocol -> backend factory
     src/libssh2/Libssh2ScpClient.cpp   # SCP backend module
     src/libssh2/Libssh2SftpClient.cpp   # real implementation
 )
+
+set(OPEN_SCP_HAS_CURL_FTP 0)
+if (OPEN_SCP_ENABLE_FTP_BACKEND)
+    find_package(CURL QUIET)
+    if (CURL_FOUND)
+        list(APPEND OPEN_SCP_CORE_SRCS
+            src/curl/CurlFtpClient.cpp        # FTP backend module
+        )
+        set(OPEN_SCP_HAS_CURL_FTP 1)
+        message(STATUS "OpenSCP: FTP backend enabled (libcurl found)")
+    else()
+        message(WARNING
+            "OpenSCP: libcurl not found; FTP backend disabled. "
+            "Install curl dev package to enable Protocol::Ftp backend.")
+    endif()
+else()
+    message(STATUS "OpenSCP: FTP backend disabled by OPEN_SCP_ENABLE_FTP_BACKEND=OFF")
+endif()
 
 if (OPEN_SCP_ENABLE_MOCK)
     list(APPEND OPEN_SCP_CORE_SRCS src/mock/MockSftpClient.cpp)
@@ -18,6 +37,11 @@ add_library(openscp_core STATIC ${OPEN_SCP_CORE_SRCS})
 target_include_directories(openscp_core
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+target_compile_definitions(openscp_core
+    PUBLIC OPEN_SCP_HAS_CURL_FTP=${OPEN_SCP_HAS_CURL_FTP}
+)
+set_property(TARGET openscp_core PROPERTY OPEN_SCP_HAS_CURL_FTP
+             ${OPEN_SCP_HAS_CURL_FTP})
 
 # libssh2 (Homebrew/pkg-config) with robust link flags on macOS/Homebrew.
 find_package(PkgConfig QUIET)
@@ -39,9 +63,8 @@ if (OpenSSL_FOUND)
     endif()
 endif()
 
-# libcurl (FTP backend)
-find_package(CURL REQUIRED)
-if (CURL_FOUND)
+# libcurl (FTP backend, optional)
+if (OPEN_SCP_HAS_CURL_FTP)
     target_link_libraries(openscp_core PRIVATE CURL::libcurl)
 endif()
 
