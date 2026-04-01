@@ -50,7 +50,7 @@ open build/OpenSCP.app
 
 - Navegacion independiente local/remoto.
 - Navegacion rapida con boton `Home` en las barras de panel (siempre en panel local izquierdo; en el panel derecho usa `HOME` en modo local y fallback a `/` en modo remoto).
-- El panel derecho incluye `Open in terminal` en modo remoto para abrir una terminal SSH en la ruta remota actual usando el transporte activo (directo, proxy o jump host); si el shell SSH falla con error de sesion (por ejemplo PTY denegado), hace fallback automatico a `sftp` CLI en la misma terminal. Si ese transporte no se puede reproducir de forma segura, la app muestra un error explicito en lugar de degradar a un SSH directo basico. En Ajustes avanzados puedes forzar login interactivo (password/keyboard-interactive) para estos comandos.
+- El panel derecho incluye `Open in terminal` en modo remoto para abrir una terminal SSH en la ruta remota actual usando el transporte activo (directo, proxy o jump host); si el shell SSH falla con error de sesion (por ejemplo PTY denegado), hace fallback automatico a `sftp` CLI en la misma terminal. Si ese transporte no se puede reproducir de forma segura, la app muestra un error explicito en lugar de degradar a un SSH directo basico. En `Ajustes > Seguridad` puedes forzar login interactivo (password/keyboard-interactive) y activar/desactivar el fallback automatico a `sftp` CLI para estos comandos.
 - Copia y movimiento entre paneles con drag-and-drop.
 - Operaciones remotas de contexto: descargar, subir, renombrar, eliminar, nueva carpeta/archivo y permisos.
 - Breadcrumbs clicables y busqueda por panel (boton de barra o `Ctrl/Cmd+F`) con patrones wildcard/regex y modo recursivo opcional.
@@ -110,7 +110,7 @@ open build/OpenSCP.app
 - Dialogo de conexion con configuracion de proxy por sitio (`Direct`, `SOCKS5`, `HTTP CONNECT`) y auth opcional.
 - Dialogo de conexion con configuracion opcional de SSH jump host (bastion) por sitio.
 - Selector de idioma de la UI con `Ingles`, `Español` y `Portugués`.
-- Ajustes redisenados en secciones `General` y `Advanced`.
+- Ajustes redisenados en secciones enfocadas: `General`, `Transferencias`, `Sitios`, `Seguridad`, `Red` y `Staging y arrastre`.
 - Ajustes mantiene los controles visibles al redimensionar (tamano minimo + paginas con scroll).
 - Accion de un clic en Ajustes para restaurar layout/tamanos por defecto de la ventana principal.
 - Dialogo de permisos con vista octal y presets comunes.

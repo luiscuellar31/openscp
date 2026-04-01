@@ -50,7 +50,7 @@ open build/OpenSCP.app
 
 - Independent local/remote navigation.
 - Quick `Home` navigation in panel toolbars (left local panel always; right panel uses local `HOME` in local mode and `/` fallback in remote mode).
-- Right panel includes `Open in terminal` in remote mode to start an SSH terminal directly in the currently viewed remote path using the active transport settings (direct, proxy tunnel, or jump host); if the SSH shell fails with a session error (for example PTY denied), it automatically falls back to `sftp` CLI in the same terminal. If transport requirements cannot be reproduced safely, the app shows an explicit error instead of downgrading to a basic direct SSH fallback. An advanced setting can force interactive login (password/keyboard-interactive) for these commands.
+- Right panel includes `Open in terminal` in remote mode to start an SSH terminal directly in the currently viewed remote path using the active transport settings (direct, proxy tunnel, or jump host); if the SSH shell fails with a session error (for example PTY denied), it automatically falls back to `sftp` CLI in the same terminal. If transport requirements cannot be reproduced safely, the app shows an explicit error instead of downgrading to a basic direct SSH fallback. In `Settings > Security`, you can force interactive login (password/keyboard-interactive) and toggle automatic `sftp` CLI fallback for these commands.
 - Drag-and-drop copy/move between panels.
 - Remote context operations: download, upload, rename, delete, new folder/file, permissions.
 - Clickable breadcrumbs and per-panel search (toolbar button or `Ctrl/Cmd+F`) with wildcard/regex patterns and optional recursive mode.
@@ -109,7 +109,7 @@ open build/OpenSCP.app
 - Connection dialog includes per-site proxy configuration (`Direct`, `SOCKS5`, `HTTP CONNECT`) with optional auth.
 - Connection dialog includes optional per-site SSH jump host (bastion) configuration.
 - UI language selection includes `English`, `Spanish`, and `Portuguese`.
-- Settings redesigned into `General` and `Advanced` sections.
+- Settings redesigned into focused sections: `General`, `Transfers`, `Sites`, `Security`, `Network`, and `Staging and drag-out`.
 - Settings keeps controls visible while resizing (minimum size + scrollable pages).
 - One-click reset for default main-window layout/sizes in Settings.
 - Permissions dialog includes octal preview + common presets.
