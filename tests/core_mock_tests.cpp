@@ -87,6 +87,9 @@ void test_protocol_helpers(TestContext &t) {
             "protocolFromStorageName should parse sftp");
     t.check(openscp::protocolFromStorageName("SCP") == openscp::Protocol::Scp,
             "protocolFromStorageName should parse scp case-insensitively");
+    t.check(openscp::protocolFromStorageName("FTPS") ==
+                openscp::Protocol::Ftps,
+            "protocolFromStorageName should parse ftps case-insensitively");
     t.check(openscp::protocolFromStorageName("unknown") ==
                 openscp::Protocol::Sftp,
             "protocolFromStorageName should fallback to sftp");
@@ -134,10 +137,15 @@ void test_protocol_helpers(TestContext &t) {
 
     const auto ftpCaps =
         openscp::capabilitiesForProtocol(openscp::Protocol::Ftp);
+    const auto ftpsCaps =
+        openscp::capabilitiesForProtocol(openscp::Protocol::Ftps);
 #if OPEN_SCP_HAS_CURL_FTP
     t.check(ftpCaps.implemented, "FTP capabilities should be implemented");
     t.check(ftpCaps.supports_file_transfers,
             "FTP capabilities should include file transfers");
+    t.check(ftpsCaps.implemented, "FTPS capabilities should be implemented");
+    t.check(ftpsCaps.supports_file_transfers,
+            "FTPS capabilities should include file transfers");
 #else
     t.check(!ftpCaps.implemented,
             "FTP capabilities should report not implemented when backend is "
@@ -145,9 +153,17 @@ void test_protocol_helpers(TestContext &t) {
     t.check(!ftpCaps.supports_file_transfers,
             "FTP capabilities should not advertise transfers when backend is "
             "disabled");
+    t.check(!ftpsCaps.implemented,
+            "FTPS capabilities should report not implemented when backend is "
+            "disabled");
+    t.check(!ftpsCaps.supports_file_transfers,
+            "FTPS capabilities should not advertise transfers when backend is "
+            "disabled");
 #endif
     t.check(!ftpCaps.supports_listing,
             "FTP capabilities should currently run in transfer-only mode");
+    t.check(!ftpsCaps.supports_listing,
+            "FTPS capabilities should currently run in transfer-only mode");
 }
 
 void test_connect_validation(TestContext &t) {
@@ -355,6 +371,7 @@ void test_client_factory(TestContext &t) {
     }
 
     auto ftp = openscp::CreateClientForProtocol(openscp::Protocol::Ftp);
+    auto ftps = openscp::CreateClientForProtocol(openscp::Protocol::Ftps);
 #if OPEN_SCP_HAS_CURL_FTP
     t.check(static_cast<bool>(ftp),
             "factory should create FTP backend instance");
@@ -362,9 +379,17 @@ void test_client_factory(TestContext &t) {
         t.check(ftp->protocol() == openscp::Protocol::Ftp,
                 "FTP backend should report FTP protocol");
     }
+    t.check(static_cast<bool>(ftps),
+            "factory should create FTPS backend instance");
+    if (ftps) {
+        t.check(ftps->protocol() == openscp::Protocol::Ftps,
+                "FTPS backend should report FTPS protocol");
+    }
 #else
     t.check(!ftp,
             "factory should return null for FTP when backend is disabled");
+    t.check(!ftps,
+            "factory should return null for FTPS when backend is disabled");
 #endif
 }
 

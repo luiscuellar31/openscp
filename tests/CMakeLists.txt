@@ -69,6 +69,25 @@ if (_OPEN_SCP_CORE_HAS_CURL_FTP)
         LABELS "integration;ftp"
         SKIP_RETURN_CODE 77
     )
+
+    add_executable(openscp_ftps_integration_tests
+        curl_ftps_integration_tests.cpp
+    )
+
+    target_include_directories(openscp_ftps_integration_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/include
+    )
+
+    target_link_libraries(openscp_ftps_integration_tests PRIVATE
+        openscp_core
+    )
+
+    add_test(NAME openscp_ftps_integration_tests
+             COMMAND openscp_ftps_integration_tests)
+    set_tests_properties(openscp_ftps_integration_tests PROPERTIES
+        LABELS "integration;ftps"
+        SKIP_RETURN_CODE 77
+    )
 else()
-    message(STATUS "OpenSCP tests: skipping FTP integration tests (FTP backend disabled)")
+    message(STATUS "OpenSCP tests: skipping FTP/FTPS integration tests (FTP/FTPS backend disabled)")
 endif()
