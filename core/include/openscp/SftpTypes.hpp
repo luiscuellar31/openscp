@@ -27,6 +27,10 @@ enum class KnownHostsPolicy {
 enum class TransferIntegrityPolicy { Off, Optional, Required };
 enum class ProxyType { None, Socks5, HttpConnect };
 enum class Protocol { Sftp, Scp, Ftp, Ftps, WebDav };
+enum class ScpTransferMode {
+    Auto,    // Try native SCP first and fallback to SFTP transfers if needed.
+    ScpOnly, // Enforce classic SCP transfers only (no SFTP fallback).
+};
 
 struct ProtocolCapabilities {
     bool implemented = false;
@@ -109,6 +113,29 @@ inline Protocol protocolFromStorageName(const std::string &raw) {
     return Protocol::Sftp;
 }
 
+inline constexpr const char *scpTransferModeStorageName(ScpTransferMode mode) {
+    switch (mode) {
+    case ScpTransferMode::Auto:
+        return "auto";
+    case ScpTransferMode::ScpOnly:
+        return "scp-only";
+    }
+    return "auto";
+}
+
+inline ScpTransferMode scpTransferModeFromStorageName(const std::string &raw) {
+    if (raw.empty())
+        return ScpTransferMode::Auto;
+    std::string normalized = raw;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char c) -> char {
+                       return static_cast<char>(std::tolower(c));
+                   });
+    if (normalized == "scp-only")
+        return ScpTransferMode::ScpOnly;
+    return ScpTransferMode::Auto;
+}
+
 inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
     ProtocolCapabilities caps{};
     switch (protocol) {
@@ -170,6 +197,7 @@ using KbdIntPromptsCB = std::function<KbdIntPromptResult(
 
 struct SessionOptions {
     Protocol protocol = Protocol::Sftp;
+    ScpTransferMode scp_transfer_mode = ScpTransferMode::Auto;
     std::string host;
     std::uint16_t port = defaultPortForProtocol(Protocol::Sftp);
     std::string username;

@@ -31,15 +31,41 @@ void closeScpChannel(LIBSSH2_CHANNEL *channel, bool graceful) {
     (void)libssh2_channel_free(channel);
 }
 
+void appendSessionErrorDetail(_LIBSSH2_SESSION *session, std::string &msg) {
+    if (!session)
+        return;
+    char *emsg = nullptr;
+    int emlen = 0;
+    (void)libssh2_session_last_error(session, &emsg, &emlen, 0);
+    if (emsg && emlen > 0) {
+        msg += ": ";
+        msg.append(emsg, static_cast<std::size_t>(emlen));
+        return;
+    }
+    const long eno = libssh2_session_last_errno(session);
+    if (eno != 0) {
+        msg += " (libssh2 errno ";
+        msg += std::to_string(eno);
+        msg += ")";
+    }
+}
+
 } // namespace
 
 bool Libssh2ScpClient::connect(const SessionOptions &opt, std::string &err) {
+    sessionOptions_.reset();
     SessionOptions copy = opt;
     copy.protocol = Protocol::Scp;
-    return delegate_.connect(copy, err);
+    if (!delegate_.connectTransportOnly(copy, err))
+        return false;
+    sessionOptions_ = copy;
+    return true;
 }
 
-void Libssh2ScpClient::disconnect() { delegate_.disconnect(); }
+void Libssh2ScpClient::disconnect() {
+    delegate_.disconnect();
+    sessionOptions_.reset();
+}
 
 void Libssh2ScpClient::interrupt() { delegate_.interrupt(); }
 
@@ -74,7 +100,25 @@ bool Libssh2ScpClient::get(
     LIBSSH2_CHANNEL *channel =
         libssh2_scp_recv2(session, remote.c_str(), &fileInfo);
     if (!channel) {
-        err = "Could not open remote file for SCP download";
+        std::string scpErr = "Could not open remote file for SCP download";
+        appendSessionErrorDetail(session, scpErr);
+        if (!sftpFallbackEnabled()) {
+            scpErr +=
+                " (SFTP fallback is disabled by the selected SCP mode)";
+            err = std::move(scpErr);
+            return false;
+        }
+
+        std::string fallbackErr;
+        if (transferViaSftpFallbackGet(remote, local, fallbackErr, progress,
+                                       shouldCancel)) {
+            return true;
+        }
+        if (!fallbackErr.empty()) {
+            scpErr += " | SFTP fallback failed: ";
+            scpErr += fallbackErr;
+        }
+        err = std::move(scpErr);
         return false;
     }
 
@@ -181,8 +225,26 @@ bool Libssh2ScpClient::put(
         session, remote.c_str(), 0644, static_cast<libssh2_int64_t>(total), 0,
         0);
     if (!channel) {
+        std::string scpErr = "Could not open remote file for SCP upload";
+        appendSessionErrorDetail(session, scpErr);
         std::fclose(localFile);
-        err = "Could not open remote file for SCP upload";
+        if (!sftpFallbackEnabled()) {
+            scpErr +=
+                " (SFTP fallback is disabled by the selected SCP mode)";
+            err = std::move(scpErr);
+            return false;
+        }
+
+        std::string fallbackErr;
+        if (transferViaSftpFallbackPut(local, remote, fallbackErr, progress,
+                                       shouldCancel)) {
+            return true;
+        }
+        if (!fallbackErr.empty()) {
+            scpErr += " | SFTP fallback failed: ";
+            scpErr += fallbackErr;
+        }
+        err = std::move(scpErr);
         return false;
     }
 
@@ -312,6 +374,60 @@ Libssh2ScpClient::newConnectionLike(const SessionOptions &opt,
     if (!ptr->connect(opt, err))
         return nullptr;
     return ptr;
+}
+
+bool Libssh2ScpClient::transferViaSftpFallbackGet(
+    const std::string &remote, const std::string &local, std::string &err,
+    std::function<void(std::size_t, std::size_t)> progress,
+    std::function<bool()> shouldCancel) {
+    if (!sessionOptions_.has_value()) {
+        err = "missing session options";
+        return false;
+    }
+    if (shouldCancel && shouldCancel()) {
+        err = "Canceled by user";
+        return false;
+    }
+
+    SessionOptions sftpOpt = *sessionOptions_;
+    sftpOpt.protocol = Protocol::Sftp;
+    Libssh2SftpClient sftpFallback;
+    if (!sftpFallback.connect(sftpOpt, err))
+        return false;
+    const bool ok = sftpFallback.get(remote, local, err, std::move(progress),
+                                     std::move(shouldCancel), false);
+    sftpFallback.disconnect();
+    return ok;
+}
+
+bool Libssh2ScpClient::transferViaSftpFallbackPut(
+    const std::string &local, const std::string &remote, std::string &err,
+    std::function<void(std::size_t, std::size_t)> progress,
+    std::function<bool()> shouldCancel) {
+    if (!sessionOptions_.has_value()) {
+        err = "missing session options";
+        return false;
+    }
+    if (shouldCancel && shouldCancel()) {
+        err = "Canceled by user";
+        return false;
+    }
+
+    SessionOptions sftpOpt = *sessionOptions_;
+    sftpOpt.protocol = Protocol::Sftp;
+    Libssh2SftpClient sftpFallback;
+    if (!sftpFallback.connect(sftpOpt, err))
+        return false;
+    const bool ok = sftpFallback.put(local, remote, err, std::move(progress),
+                                     std::move(shouldCancel), false);
+    sftpFallback.disconnect();
+    return ok;
+}
+
+bool Libssh2ScpClient::sftpFallbackEnabled() const {
+    if (!sessionOptions_.has_value())
+        return true;
+    return sessionOptions_->scp_transfer_mode == ScpTransferMode::Auto;
 }
 
 } // namespace openscp

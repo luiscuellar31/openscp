@@ -2,6 +2,7 @@
 // authenticated SSH transport setup from Libssh2SftpClient.
 #pragma once
 #include "Libssh2SftpClient.hpp"
+#include <optional>
 
 namespace openscp {
 
@@ -62,7 +63,18 @@ class Libssh2ScpClient : public SftpClient {
                                                   std::string &err) override;
 
     private:
+    bool transferViaSftpFallbackGet(
+        const std::string &remote, const std::string &local, std::string &err,
+        std::function<void(std::size_t, std::size_t)> progress,
+        std::function<bool()> shouldCancel);
+    bool transferViaSftpFallbackPut(
+        const std::string &local, const std::string &remote, std::string &err,
+        std::function<void(std::size_t, std::size_t)> progress,
+        std::function<bool()> shouldCancel);
+    bool sftpFallbackEnabled() const;
+
     Libssh2SftpClient delegate_;
+    std::optional<SessionOptions> sessionOptions_;
 };
 
 } // namespace openscp

@@ -1927,7 +1927,8 @@ bool Libssh2SftpClient::tcpConnect(const SessionOptions &opt,
 }
 
 bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
-                                         std::string &err) {
+                                         std::string &err,
+                                         bool initializeSftpSubsystem) {
     session_ = libssh2_session_init();
     if (!session_) {
         err = "libssh2_session_init failed";
@@ -2672,17 +2673,22 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
         }
     }
 
-    // Inicializar SFTP
-    sftp_ = libssh2_sftp_init(session_);
-    if (!sftp_) {
-        err = "Could not initialize SFTP";
-        return false;
+    if (initializeSftpSubsystem) {
+        // Initialize SFTP only for backends that require directory/metadata
+        // operations. SCP may reuse this transport without SFTP.
+        sftp_ = libssh2_sftp_init(session_);
+        if (!sftp_) {
+            err = "Could not initialize SFTP";
+            return false;
+        }
     }
 
     return true;
 }
 
-bool Libssh2SftpClient::connect(const SessionOptions &opt, std::string &err) {
+bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
+                                        std::string &err,
+                                        bool initializeSftpSubsystem) {
     if (connected_) {
         err = "Already connected";
         return false;
@@ -2696,13 +2702,22 @@ bool Libssh2SftpClient::connect(const SessionOptions &opt, std::string &err) {
 
     if (!tcpConnect(opt, err))
         return false;
-    if (!sshHandshakeAuth(opt, err)) {
+    if (!sshHandshakeAuth(opt, err, initializeSftpSubsystem)) {
         disconnect();
         return false;
     }
 
     connected_ = true;
     return true;
+}
+
+bool Libssh2SftpClient::connect(const SessionOptions &opt, std::string &err) {
+    return connectInternal(opt, err, true);
+}
+
+bool Libssh2SftpClient::connectTransportOnly(const SessionOptions &opt,
+                                             std::string &err) {
+    return connectInternal(opt, err, false);
 }
 
 void Libssh2SftpClient::disconnect() {
