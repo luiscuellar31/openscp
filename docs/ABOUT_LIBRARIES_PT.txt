@@ -1,0 +1,43 @@
+Bibliotecas de terceiros usadas pelo OpenSCP
+(Frameworks do sistema operacional como Security, AppKit etc. são excluídos.)
+
+- Qt 6.8.3 (Qt Widgets, Qt Gui, Qt Core)
+  Descrição: framework multiplataforma para interface gráfica e utilitários.
+  Licença: LGPL-3.0 / GPL-3.0 / Comercial (multi-licenciamento)
+  Site: https://www.qt.io/
+  Texto da licença: docs/credits/LICENSES/Qt-LGPL-3.0.txt
+  Copyright: The Qt Company Ltd.
+
+- libssh2
+  Descrição: implementação do protocolo SSH2 com suporte a SFTP (cliente).
+  Licença: BSD-3-Clause
+  Site: https://www.libssh2.org/
+  Texto da licença: docs/credits/LICENSES/libssh2-BSD-3-Clause.txt
+  Copyright: The libssh2 Project
+
+- libcurl
+  Descrição: biblioteca de transferência usada pelo backend FTP.
+  Licença: curl
+  Site: https://curl.se/libcurl/
+  Texto da licença: docs/credits/LICENSES/libcurl-curl-license.txt
+  Copyright: Daniel Stenberg e colaboradores
+
+- OpenSSL 3 (libssl, libcrypto)
+  Descrição: toolkit de criptografia e TLS/SSL usado pelo libssh2.
+  Licença: Apache-2.0
+  Site: https://www.openssl.org/
+  Texto da licença: docs/credits/LICENSES/OpenSSL-Apache-2.0.txt
+  Copyright: The OpenSSL Project Authors
+
+- zlib
+  Descrição: compressão DEFLATE; dependência transitiva do libssh2/OpenSSL em alguns sistemas.
+  Licença: zlib License
+  Site: https://zlib.net/
+  Texto da licença: docs/credits/LICENSES/zlib-license.txt
+  Copyright: Jean-loup Gailly e Mark Adler
+
+Notas:
+- As versões específicas podem variar conforme a plataforma/distribuição.
+- Agradecimentos aos autores e comunidades de cada projeto pelo trabalho.
+
+Ícones: Tango Icon Theme (Domínio Público)

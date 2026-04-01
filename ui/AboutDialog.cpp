@@ -164,8 +164,12 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     // Decide which file to load based on UI language (settings: UI/language)
     QSettings s("OpenSCP", "OpenSCP");
     const QString lang = s.value("UI/language", "en").toString().toLower();
-    const QString suffix =
-        lang.startsWith("es") ? QStringLiteral("ES") : QStringLiteral("EN");
+    QString suffix = QStringLiteral("EN");
+    if (lang.startsWith("es")) {
+        suffix = QStringLiteral("ES");
+    } else if (lang.startsWith("pt")) {
+        suffix = QStringLiteral("PT");
+    }
 
     const QStringList candidates = {
         QStringLiteral("ABOUT_LIBRARIES_%1.txt").arg(suffix),
