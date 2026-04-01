@@ -9,6 +9,7 @@
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QSettings>
 #include <QSignalBlocker>
 #include <QtGlobal>
 #include <QSpinBox>
@@ -28,6 +29,7 @@ static void setFormRowVisible(QFormLayout *layout, QWidget *field,
 ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle(tr("Connect"));
     auto *lay = new QFormLayout(this);
+    formLayout_ = lay;
     lay->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
     protocol_ = new QComboBox(this);
@@ -35,6 +37,27 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
                        static_cast<int>(openscp::Protocol::Sftp));
     protocol_->addItem(tr("SCP"), static_cast<int>(openscp::Protocol::Scp));
     protocol_->addItem(tr("FTP"), static_cast<int>(openscp::Protocol::Ftp));
+    scpMode_ = new QComboBox(this);
+    scpMode_->addItem(
+        tr("Automatic (SCP with SFTP fallback)"),
+        static_cast<int>(openscp::ScpTransferMode::Auto));
+    scpMode_->addItem(
+        tr("SCP only (disable SFTP fallback)"),
+        static_cast<int>(openscp::ScpTransferMode::ScpOnly));
+    {
+        QSettings s("OpenSCP", "OpenSCP");
+        const auto defaultMode = openscp::scpTransferModeFromStorageName(
+            s.value("Protocol/scpTransferModeDefault",
+                    QString::fromLatin1(openscp::scpTransferModeStorageName(
+                        openscp::ScpTransferMode::Auto)))
+                .toString()
+                .trimmed()
+                .toLower()
+                .toStdString());
+        const int i = scpMode_->findData(static_cast<int>(defaultMode));
+        if (i >= 0)
+            scpMode_->setCurrentIndex(i);
+    }
 
     siteName_ = new QLineEdit(this);
     host_ = new QLineEdit(this);
@@ -225,6 +248,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         }
     });
     lay->addRow(tr("Protocol:"), protocol_);
+    lay->addRow(tr("SCP mode:"), scpMode_);
     lay->addRow(tr("Host / Port:"), hostPortRow);
     lay->addRow(tr("User:"), user_);
     lay->addRow(tr("Password:"), passRow);
@@ -442,6 +466,12 @@ openscp::SessionOptions ConnectionDialog::options() const {
         o.protocol =
             static_cast<openscp::Protocol>(protocol_->currentData().toInt());
     }
+    if (scpMode_) {
+        o.scp_transfer_mode = static_cast<openscp::ScpTransferMode>(
+            scpMode_->currentData().toInt());
+    }
+    if (o.protocol != openscp::Protocol::Scp)
+        o.scp_transfer_mode = openscp::ScpTransferMode::Auto;
     o.host = host_->text().toStdString();
     o.port = static_cast<std::uint16_t>(port_->value());
     o.username = user_->text().toStdString();
@@ -510,6 +540,12 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &o) {
         }
         updateProtocolUi(effectiveProtocol);
     }
+    if (scpMode_) {
+        const int modeIdx =
+            scpMode_->findData(static_cast<int>(o.scp_transfer_mode));
+        if (modeIdx >= 0)
+            scpMode_->setCurrentIndex(modeIdx);
+    }
     if (!o.host.empty())
         host_->setText(QString::fromStdString(o.host));
     if (o.port)
@@ -573,6 +609,11 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &o) {
 void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol) {
     if (!host_ || !port_)
         return;
+    if (formLayout_ && scpMode_) {
+        const bool isScpProtocol = (protocol == openscp::Protocol::Scp);
+        setFormRowVisible(formLayout_, scpMode_, isScpProtocol);
+        scpMode_->setEnabled(isScpProtocol);
+    }
     const openscp::ProtocolCapabilities caps =
         openscp::capabilitiesForProtocol(protocol);
     switch (protocol) {

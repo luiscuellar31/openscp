@@ -10,6 +10,7 @@ class QSpinBox;
 class QComboBox;
 class QToolButton;
 class QCheckBox;
+class QFormLayout;
 
 class ConnectionDialog : public QDialog {
     Q_OBJECT
@@ -28,7 +29,9 @@ class ConnectionDialog : public QDialog {
     void updateProtocolUi(openscp::Protocol protocol);
 
     bool quickConnectSaveOptionsVisible_ = false;
+    QFormLayout *formLayout_ = nullptr;
     QComboBox *protocol_ = nullptr;
+    QComboBox *scpMode_ = nullptr;
     QLineEdit *siteName_ = nullptr;
     QWidget *siteNameLabel_ = nullptr;
     QCheckBox *saveSite_ = nullptr;

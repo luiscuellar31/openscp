@@ -1,6 +1,7 @@
 // Implementation of OpenSCP settings dialog.
 #include "SettingsDialog.hpp"
 #include "UiAlerts.hpp"
+#include "openscp/SftpTypes.hpp"
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
@@ -344,6 +345,25 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     auto *sitesLay = new QVBoxLayout(sitesGroup);
     sitesLay->setContentsMargins(12, 10, 12, 10);
     sitesLay->setSpacing(6);
+    {
+        auto *sitesForm = new QFormLayout();
+        sitesForm->setContentsMargins(0, 0, 0, 0);
+        sitesForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+        sitesForm->setHorizontalSpacing(8);
+        sitesForm->setVerticalSpacing(6);
+        scpModeDefault_ = new QComboBox(sitesGroup);
+        scpModeDefault_->setMinimumWidth(kFieldMinWidth);
+        scpModeDefault_->setMaximumWidth(kFieldMaxWidth);
+        scpModeDefault_->addItem(
+            tr("Automatic (SCP with SFTP fallback)"),
+            static_cast<int>(openscp::ScpTransferMode::Auto));
+        scpModeDefault_->addItem(
+            tr("SCP only (disable SFTP fallback)"),
+            static_cast<int>(openscp::ScpTransferMode::ScpOnly));
+        addLabeledRow(sitesForm, sitesGroup, tr("Default SCP mode:"),
+                      scpModeDefault_);
+        sitesLay->addLayout(sitesForm);
+    }
     deleteSecretsOnRemove_ = new QCheckBox(
         tr("When deleting a site, also remove its stored credentials."),
         sitesGroup);
@@ -565,6 +585,20 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     if (deleteSecretsOnRemove_)
         deleteSecretsOnRemove_->setChecked(
             s.value("Sites/deleteSecretsOnRemove", false).toBool());
+    if (scpModeDefault_) {
+        const auto scpMode = openscp::scpTransferModeFromStorageName(
+            s.value("Protocol/scpTransferModeDefault",
+                    QString::fromLatin1(openscp::scpTransferModeStorageName(
+                        openscp::ScpTransferMode::Auto)))
+                .toString()
+                .trimmed()
+                .toLower()
+                .toStdString());
+        const int scpModeIdx =
+            scpModeDefault_->findData(static_cast<int>(scpMode));
+        if (scpModeIdx >= 0)
+            scpModeDefault_->setCurrentIndex(scpModeIdx);
+    }
     if (knownHostsHashed_)
         knownHostsHashed_->setChecked(
             s.value("Security/knownHostsHashed", true).toBool());
@@ -625,6 +659,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     bindDirtyFlag(showQueueOnEnqueue_, &QCheckBox::toggled);
     bindDirtyFlag(defaultDownloadDirEdit_, &QLineEdit::textChanged);
     bindDirtyFlag(deleteSecretsOnRemove_, &QCheckBox::toggled);
+    bindDirtyFlag(scpModeDefault_,
+                  qOverload<int>(&QComboBox::currentIndexChanged));
     bindDirtyFlag(knownHostsHashed_, &QCheckBox::toggled);
     bindDirtyFlag(fpHex_, &QCheckBox::toggled);
     bindDirtyFlag(terminalForceInteractiveLogin_, &QCheckBox::toggled);
@@ -727,6 +763,13 @@ void SettingsDialog::onApply() {
     if (deleteSecretsOnRemove_)
         s.setValue("Sites/deleteSecretsOnRemove",
                    deleteSecretsOnRemove_->isChecked());
+    if (scpModeDefault_) {
+        const auto mode = static_cast<openscp::ScpTransferMode>(
+            scpModeDefault_->currentData().toInt());
+        s.setValue("Protocol/scpTransferModeDefault",
+                   QString::fromLatin1(
+                       openscp::scpTransferModeStorageName(mode)));
+    }
     if (knownHostsHashed_)
         s.setValue("Security/knownHostsHashed", knownHostsHashed_->isChecked());
     if (fpHex_)
@@ -806,6 +849,14 @@ void SettingsDialog::updateApplyFromControls() {
     defaultDownload = QDir::cleanPath(defaultDownload);
     const bool deleteSecrets =
         s.value("Sites/deleteSecretsOnRemove", false).toBool();
+    const auto scpModeDefault = openscp::scpTransferModeFromStorageName(
+        s.value("Protocol/scpTransferModeDefault",
+                QString::fromLatin1(openscp::scpTransferModeStorageName(
+                    openscp::ScpTransferMode::Auto)))
+            .toString()
+            .trimmed()
+            .toLower()
+            .toStdString());
     const bool knownHashed =
         s.value("Security/knownHostsHashed", true).toBool();
     const bool fpHex = s.value("Security/fpHex", false).toBool();
@@ -857,6 +908,11 @@ void SettingsDialog::updateApplyFromControls() {
     curDefaultDownload = QDir::cleanPath(curDefaultDownload);
     const bool curDeleteSecrets =
         deleteSecretsOnRemove_ && deleteSecretsOnRemove_->isChecked();
+    const auto curScpModeDefault =
+        scpModeDefault_
+            ? static_cast<openscp::ScpTransferMode>(
+                  scpModeDefault_->currentData().toInt())
+            : scpModeDefault;
     const bool curKnownHashed =
         knownHostsHashed_ && knownHostsHashed_->isChecked();
     const bool curFpHex = fpHex_ && fpHex_->isChecked();
@@ -900,6 +956,7 @@ void SettingsDialog::updateApplyFromControls() {
         (curShowQueue != showQueue) ||
         (curDefaultDownload != defaultDownload) ||
         (curDeleteSecrets != deleteSecrets) ||
+        (curScpModeDefault != scpModeDefault) ||
         (curKnownHashed != knownHashed) || (curFpHex != fpHex) ||
         (curTerminalForceInteractiveLogin != terminalForceInteractiveLogin) ||
         (curNoHostVerifyTtlMin != noHostVerifyTtlMin)
