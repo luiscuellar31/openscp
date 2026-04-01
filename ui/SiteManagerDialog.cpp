@@ -206,6 +206,12 @@ void SiteManagerDialog::loadSites() {
     sites_.clear();
     QSettings s("OpenSCP", "OpenSCP");
     const auto defaultScpMode = loadDefaultScpTransferModeFromSettings(s);
+    const bool defaultFtpsVerifyPeer =
+        s.value("Security/ftpsVerifyPeerDefault", true).toBool();
+    const QString defaultFtpsCaPath =
+        s.value("Security/ftpsCaCertPathDefault", QString())
+            .toString()
+            .trimmed();
     int n = s.beginReadArray("sites");
     bool needsSave = false;
     QSet<QString> usedIds;
@@ -284,6 +290,12 @@ void SiteManagerDialog::loadSites() {
                 .value("integrityPolicy",
                        (int)openscp::TransferIntegrityPolicy::Optional)
                 .toInt();
+        e.opt.ftps_verify_peer =
+            s.value("ftpsVerifyPeer", defaultFtpsVerifyPeer).toBool();
+        const QString ftpsCaPath =
+            s.value("ftpsCaCertPath", defaultFtpsCaPath).toString().trimmed();
+        if (!ftpsCaPath.isEmpty())
+            e.opt.ftps_ca_cert_path = ftpsCaPath.toStdString();
         sites_.push_back(e);
     }
     s.endArray();
@@ -342,6 +354,11 @@ void SiteManagerDialog::saveSites() {
                        : QString());
         s.setValue("khPolicy", (int)e.opt.known_hosts_policy);
         s.setValue("integrityPolicy", (int)e.opt.transfer_integrity_policy);
+        s.setValue("ftpsVerifyPeer", e.opt.ftps_verify_peer);
+        s.setValue("ftpsCaCertPath",
+                   e.opt.ftps_ca_cert_path
+                       ? QString::fromStdString(*e.opt.ftps_ca_cert_path)
+                       : QString());
     }
     s.endArray();
 }

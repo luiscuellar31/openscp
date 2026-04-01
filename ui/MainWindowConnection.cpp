@@ -238,7 +238,10 @@ static bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
            normalizedIdentityKeyPath(a.jump_private_key_path) ==
                normalizedIdentityKeyPath(b.jump_private_key_path) &&
            normalizedIdentityKeyPath(a.private_key_path) ==
-               normalizedIdentityKeyPath(b.private_key_path);
+               normalizedIdentityKeyPath(b.private_key_path) &&
+           a.ftps_verify_peer == b.ftps_verify_peer &&
+           normalizedIdentityKeyPath(a.ftps_ca_cert_path) ==
+               normalizedIdentityKeyPath(b.ftps_ca_cert_path);
 }
 
 static QString quickSiteSecretKey(const SiteEntry &e, const QString &item) {
@@ -252,6 +255,12 @@ static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool *needsSave) {
     bool shouldSave = false;
     QSettings s("OpenSCP", "OpenSCP");
     const auto defaultScpMode = loadDefaultScpTransferModeFromSettings(s);
+    const bool defaultFtpsVerifyPeer =
+        s.value("Security/ftpsVerifyPeerDefault", true).toBool();
+    const QString defaultFtpsCaPath =
+        s.value("Security/ftpsCaCertPathDefault", QString())
+            .toString()
+            .trimmed();
     const int n = s.beginReadArray("sites");
     QSet<QString> usedIds;
     for (int i = 0; i < n; ++i) {
@@ -327,6 +336,12 @@ static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool *needsSave) {
                         static_cast<int>(
                             openscp::TransferIntegrityPolicy::Optional))
                     .toInt());
+        e.opt.ftps_verify_peer =
+            s.value("ftpsVerifyPeer", defaultFtpsVerifyPeer).toBool();
+        const QString ftpsCaPath =
+            s.value("ftpsCaCertPath", defaultFtpsCaPath).toString().trimmed();
+        if (!ftpsCaPath.isEmpty())
+            e.opt.ftps_ca_cert_path = ftpsCaPath.toStdString();
         sites.push_back(e);
     }
     s.endArray();
@@ -383,6 +398,11 @@ static void saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
         s.setValue("khPolicy", static_cast<int>(e.opt.known_hosts_policy));
         s.setValue("integrityPolicy",
                    static_cast<int>(e.opt.transfer_integrity_policy));
+        s.setValue("ftpsVerifyPeer", e.opt.ftps_verify_peer);
+        s.setValue("ftpsCaCertPath",
+                   e.opt.ftps_ca_cert_path
+                       ? QString::fromStdString(*e.opt.ftps_ca_cert_path)
+                       : QString());
     }
     s.endArray();
     s.sync();
