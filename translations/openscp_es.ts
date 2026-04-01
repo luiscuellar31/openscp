@@ -253,6 +253,22 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
         <translation>Integridad:</translation>
     </message>
     <message>
+        <source>Verify FTPS server certificate (recommended)</source>
+        <translation>Verificar certificado del servidor FTPS (recomendado)</translation>
+    </message>
+    <message>
+        <source>System CA bundle</source>
+        <translation>Bundle de CA del sistema</translation>
+    </message>
+    <message>
+        <source>FTPS CA bundle:</source>
+        <translation>Bundle CA de FTPS:</translation>
+    </message>
+    <message>
+        <source>Select FTPS CA bundle</source>
+        <translation>Selecciona bundle CA para FTPS</translation>
+    </message>
+    <message>
         <source>Select jump private key</source>
         <translation>Selecciona clave privada de salto</translation>
     </message>
@@ -271,6 +287,10 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     <message>
         <source>FTP</source>
         <translation>FTP</translation>
+    </message>
+    <message>
+        <source>FTPS</source>
+        <translation>FTPS</translation>
     </message>
     <message>
         <source>Server port for the selected protocol</source>
@@ -2217,6 +2237,22 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
     <message>
         <source>Default integrity policy:</source>
         <translation>Política de integridad predeterminada:</translation>
+    </message>
+    <message>
+        <source>Verify FTPS server certificate by default (recommended).</source>
+        <translation>Verificar por defecto el certificado del servidor FTPS (recomendado).</translation>
+    </message>
+    <message>
+        <source>System CA bundle</source>
+        <translation>Bundle de CA del sistema</translation>
+    </message>
+    <message>
+        <source>Default FTPS CA bundle:</source>
+        <translation>Bundle CA FTPS predeterminado:</translation>
+    </message>
+    <message>
+        <source>Select FTPS CA bundle</source>
+        <translation>Selecciona bundle CA para FTPS</translation>
     </message>
     <message>
         <source>Hash hostnames in known_hosts (recommended).</source>
