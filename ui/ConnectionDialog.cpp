@@ -37,6 +37,8 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
                        static_cast<int>(openscp::Protocol::Sftp));
     protocol_->addItem(tr("SCP"), static_cast<int>(openscp::Protocol::Scp));
     protocol_->addItem(tr("FTP"), static_cast<int>(openscp::Protocol::Ftp));
+    protocol_->addItem(tr("FTPS"),
+                       static_cast<int>(openscp::Protocol::Ftps));
     scpMode_ = new QComboBox(this);
     scpMode_->addItem(
         tr("Automatic (SCP with SFTP fallback)"),
@@ -311,6 +313,19 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         static_cast<int>(openscp::TransferIntegrityPolicy::Off));
     integrityPolicy_->setToolTip(tr(
         "Checksum verification for resume and final transfer validation."));
+    ftpsVerifyPeer_ =
+        new QCheckBox(tr("Verify FTPS server certificate (recommended)"), this);
+    ftpsCaPath_ = new QLineEdit(this);
+    ftpsCaPath_->setPlaceholderText(tr("System CA bundle"));
+    ftpsCaPath_->setMinimumWidth(kInputMinWidth);
+    ftpsCaBrowse_ = new QToolButton(this);
+    ftpsCaBrowse_->setText(tr("Choose…"));
+    ftpsCaPathRow_ = new QWidget(this);
+    auto *ftpsCaRowLayout = new QHBoxLayout(ftpsCaPathRow_);
+    ftpsCaRowLayout->setContentsMargins(0, 0, 0, 0);
+    ftpsCaRowLayout->setSpacing(6);
+    ftpsCaRowLayout->addWidget(ftpsCaPath_);
+    ftpsCaRowLayout->addWidget(ftpsCaBrowse_);
     {
         QSettings s("OpenSCP", "OpenSCP");
         int khPolicyIdx = khPolicy_->findData(
@@ -335,11 +350,24 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         }
         if (integrityIdx >= 0)
             integrityPolicy_->setCurrentIndex(integrityIdx);
+
+        if (ftpsVerifyPeer_) {
+            ftpsVerifyPeer_->setChecked(
+                s.value("Security/ftpsVerifyPeerDefault", true).toBool());
+        }
+        if (ftpsCaPath_) {
+            ftpsCaPath_->setText(
+                s.value("Security/ftpsCaCertPathDefault", QString())
+                    .toString()
+                    .trimmed());
+        }
     }
 
     lay->addRow(tr("known_hosts:"), khPathRow);
     lay->addRow(tr("Policy:"), khPolicy_);
     lay->addRow(tr("Integrity:"), integrityPolicy_);
+    lay->addRow(QString(), ftpsVerifyPeer_);
+    lay->addRow(tr("FTPS CA bundle:"), ftpsCaPathRow_);
 
     auto updateProxyFields = [this, lay, proxyHostPortRow, proxyPassRow]() {
         const auto type = static_cast<openscp::ProxyType>(
@@ -433,6 +461,13 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
             this, tr("Select known_hosts"), QDir::homePath() + "/.ssh");
         if (!f.isEmpty())
             khPath_->setText(f);
+    });
+
+    connect(ftpsCaBrowse_, &QToolButton::clicked, this, [this] {
+        const QString f = QFileDialog::getOpenFileName(
+            this, tr("Select FTPS CA bundle"), QDir::homePath());
+        if (!f.isEmpty())
+            ftpsCaPath_->setText(f);
     });
 
     connect(keyBrowseBtn, &QToolButton::clicked, this, [this] {
@@ -539,6 +574,12 @@ openscp::SessionOptions ConnectionDialog::options() const {
             static_cast<openscp::TransferIntegrityPolicy>(
                 integrityPolicy_->currentData().toInt());
     }
+    if (ftpsVerifyPeer_) {
+        o.ftps_verify_peer = ftpsVerifyPeer_->isChecked();
+    }
+    if (ftpsCaPath_ && !ftpsCaPath_->text().trimmed().isEmpty()) {
+        o.ftps_ca_cert_path = ftpsCaPath_->text().trimmed().toStdString();
+    }
     if (proxyType_) {
         o.proxy_type =
             static_cast<openscp::ProxyType>(proxyType_->currentData().toInt());
@@ -564,6 +605,10 @@ openscp::SessionOptions ConnectionDialog::options() const {
             o.jump_username = jumpUser_->text().toStdString();
         if (!jumpKeyPath_->text().isEmpty())
             o.jump_private_key_path = jumpKeyPath_->text().toStdString();
+    }
+    if (o.protocol != openscp::Protocol::Ftps) {
+        o.ftps_verify_peer = true;
+        o.ftps_ca_cert_path.reset();
     }
 
     return o;
@@ -611,6 +656,15 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &o) {
         if (i >= 0)
             integrityPolicy_->setCurrentIndex(i);
     }
+    if (ftpsVerifyPeer_)
+        ftpsVerifyPeer_->setChecked(o.ftps_verify_peer);
+    if (ftpsCaPath_) {
+        if (o.ftps_ca_cert_path && !o.ftps_ca_cert_path->empty()) {
+            ftpsCaPath_->setText(QString::fromStdString(*o.ftps_ca_cert_path));
+        } else {
+            ftpsCaPath_->clear();
+        }
+    }
 
     bool jumpSupportedInUi = true;
 #ifdef Q_OS_WIN
@@ -654,6 +708,20 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol) {
         const bool isScpProtocol = (protocol == openscp::Protocol::Scp);
         setFormRowVisible(formLayout_, scpMode_, isScpProtocol);
         scpMode_->setEnabled(isScpProtocol);
+    }
+    if (formLayout_) {
+        const bool isFtpsProtocol = (protocol == openscp::Protocol::Ftps);
+        if (ftpsVerifyPeer_) {
+            setFormRowVisible(formLayout_, ftpsVerifyPeer_, isFtpsProtocol);
+            ftpsVerifyPeer_->setEnabled(isFtpsProtocol);
+        }
+        if (ftpsCaPathRow_) {
+            setFormRowVisible(formLayout_, ftpsCaPathRow_, isFtpsProtocol);
+            if (ftpsCaPath_)
+                ftpsCaPath_->setEnabled(isFtpsProtocol);
+            if (ftpsCaBrowse_)
+                ftpsCaBrowse_->setEnabled(isFtpsProtocol);
+        }
     }
     const openscp::ProtocolCapabilities caps =
         openscp::capabilitiesForProtocol(protocol);

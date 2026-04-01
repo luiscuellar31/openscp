@@ -379,6 +379,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                               static_cast<int>(openscp::Protocol::Scp));
     defaultProtocol_->addItem(tr("FTP"),
                               static_cast<int>(openscp::Protocol::Ftp));
+    defaultProtocol_->addItem(tr("FTPS"),
+                              static_cast<int>(openscp::Protocol::Ftps));
     addLabeledRow(sitesForm, sitesPage, tr("Default protocol:"),
                   defaultProtocol_);
     scpModeDefault_ = new QComboBox(sitesPage);
@@ -426,6 +428,38 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         static_cast<int>(openscp::TransferIntegrityPolicy::Off));
     addLabeledRow(securityForm, securityPage, tr("Default integrity policy:"),
                   defaultIntegrityPolicy_);
+    ftpsVerifyPeerDefault_ = new QCheckBox(
+        tr("Verify FTPS server certificate by default (recommended)."),
+        securityPage);
+    trackWrappedCheck(ftpsVerifyPeerDefault_);
+    securityForm->addRow(QString(), ftpsVerifyPeerDefault_);
+    {
+        auto *rowWidget = new QWidget(securityPage);
+        auto *row = new QHBoxLayout(rowWidget);
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(6);
+        ftpsCaCertPathDefaultEdit_ = new QLineEdit(securityPage);
+        ftpsCaCertPathDefaultEdit_->setMinimumWidth(kFieldMinWidth);
+        ftpsCaCertPathDefaultEdit_->setMaximumWidth(kFieldMaxWidth);
+        ftpsCaCertPathDefaultEdit_->setPlaceholderText(tr("System CA bundle"));
+        ftpsCaCertPathDefaultBrowseBtn_ =
+            new QPushButton(tr("Choose…"), securityPage);
+        row->addWidget(ftpsCaCertPathDefaultEdit_, 1);
+        row->addWidget(ftpsCaCertPathDefaultBrowseBtn_);
+        addLabeledRow(securityForm, securityPage, tr("Default FTPS CA bundle:"),
+                      rowWidget);
+        connect(ftpsCaCertPathDefaultBrowseBtn_, &QPushButton::clicked, this,
+                [this] {
+                    const QString cur = ftpsCaCertPathDefaultEdit_
+                                            ? ftpsCaCertPathDefaultEdit_->text()
+                                            : QString();
+                    const QString pick = QFileDialog::getOpenFileName(
+                        this, tr("Select FTPS CA bundle"),
+                        cur.isEmpty() ? QDir::homePath() : cur);
+                    if (!pick.isEmpty() && ftpsCaCertPathDefaultEdit_)
+                        ftpsCaCertPathDefaultEdit_->setText(pick);
+                });
+    }
     knownHostsHashed_ = new QCheckBox(
         tr("Hash hostnames in known_hosts (recommended)."), securityPage);
     fpHex_ = new QCheckBox(
@@ -709,6 +743,16 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         if (integrityIdx >= 0)
             defaultIntegrityPolicy_->setCurrentIndex(integrityIdx);
     }
+    if (ftpsVerifyPeerDefault_) {
+        ftpsVerifyPeerDefault_->setChecked(
+            s.value("Security/ftpsVerifyPeerDefault", true).toBool());
+    }
+    if (ftpsCaCertPathDefaultEdit_) {
+        ftpsCaCertPathDefaultEdit_->setText(
+            s.value("Security/ftpsCaCertPathDefault", QString())
+                .toString()
+                .trimmed());
+    }
     if (knownHostsHashed_)
         knownHostsHashed_->setChecked(
             s.value("Security/knownHostsHashed", true).toBool());
@@ -819,6 +863,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                   qOverload<int>(&QComboBox::currentIndexChanged));
     bindDirtyFlag(defaultIntegrityPolicy_,
                   qOverload<int>(&QComboBox::currentIndexChanged));
+    bindDirtyFlag(ftpsVerifyPeerDefault_, &QCheckBox::toggled);
+    bindDirtyFlag(ftpsCaCertPathDefaultEdit_, &QLineEdit::textChanged);
     bindDirtyFlag(knownHostsHashed_, &QCheckBox::toggled);
     bindDirtyFlag(fpHex_, &QCheckBox::toggled);
     bindDirtyFlag(terminalForceInteractiveLogin_, &QCheckBox::toggled);
@@ -953,6 +999,14 @@ void SettingsDialog::onApply() {
         s.setValue("Security/defaultTransferIntegrityPolicy",
                    defaultIntegrityPolicy_->currentData().toInt());
     }
+    if (ftpsVerifyPeerDefault_) {
+        s.setValue("Security/ftpsVerifyPeerDefault",
+                   ftpsVerifyPeerDefault_->isChecked());
+    }
+    if (ftpsCaCertPathDefaultEdit_) {
+        s.setValue("Security/ftpsCaCertPathDefault",
+                   ftpsCaCertPathDefaultEdit_->text().trimmed());
+    }
     if (knownHostsHashed_)
         s.setValue("Security/knownHostsHashed", knownHostsHashed_->isChecked());
     if (fpHex_)
@@ -1080,6 +1134,12 @@ void SettingsDialog::updateApplyFromControls() {
         s.value("Security/defaultTransferIntegrityPolicy",
                 static_cast<int>(openscp::TransferIntegrityPolicy::Optional))
             .toInt();
+    const bool ftpsVerifyPeerDefault =
+        s.value("Security/ftpsVerifyPeerDefault", true).toBool();
+    const QString ftpsCaCertPathDefault =
+        s.value("Security/ftpsCaCertPathDefault", QString())
+            .toString()
+            .trimmed();
     const bool knownHashed =
         s.value("Security/knownHostsHashed", true).toBool();
     const bool fpHex = s.value("Security/fpHex", false).toBool();
@@ -1164,6 +1224,12 @@ void SettingsDialog::updateApplyFromControls() {
     const int curDefaultIntegrityPolicy =
         defaultIntegrityPolicy_ ? defaultIntegrityPolicy_->currentData().toInt()
                                 : defaultIntegrityPolicy;
+    const bool curFtpsVerifyPeerDefault =
+        ftpsVerifyPeerDefault_ ? ftpsVerifyPeerDefault_->isChecked()
+                               : ftpsVerifyPeerDefault;
+    const QString curFtpsCaCertPathDefault =
+        ftpsCaCertPathDefaultEdit_ ? ftpsCaCertPathDefaultEdit_->text().trimmed()
+                                   : ftpsCaCertPathDefault;
     const bool curKnownHashed =
         knownHostsHashed_ && knownHostsHashed_->isChecked();
     const bool curFpHex = fpHex_ && fpHex_->isChecked();
@@ -1233,6 +1299,8 @@ void SettingsDialog::updateApplyFromControls() {
         (curScpModeDefault != scpModeDefault) ||
         (curDefaultKnownHostsPolicy != defaultKnownHostsPolicy) ||
         (curDefaultIntegrityPolicy != defaultIntegrityPolicy) ||
+        (curFtpsVerifyPeerDefault != ftpsVerifyPeerDefault) ||
+        (curFtpsCaCertPathDefault != ftpsCaCertPathDefault) ||
         (curKnownHashed != knownHashed) || (curFpHex != fpHex) ||
         (curTerminalForceInteractiveLogin != terminalForceInteractiveLogin) ||
         (curTerminalEnableSftpCliFallback != terminalEnableSftpCliFallback) ||

@@ -58,6 +58,11 @@ class SettingsDialog : public QDialog {
         nullptr; // force password/kbd-interactive login in "Open in terminal"
     QCheckBox *terminalEnableSftpCliFallback_ =
         nullptr; // allow SSH terminal command to fallback to SFTP CLI
+    QCheckBox *ftpsVerifyPeerDefault_ =
+        nullptr; // default FTPS peer/host certificate verification
+    class QLineEdit *ftpsCaCertPathDefaultEdit_ =
+        nullptr; // default FTPS CA bundle path (optional)
+    class QPushButton *ftpsCaCertPathDefaultBrowseBtn_ = nullptr;
     QComboBox *defaultKnownHostsPolicy_ =
         nullptr; // default policy for new connections/sites
     QComboBox *defaultIntegrityPolicy_ =

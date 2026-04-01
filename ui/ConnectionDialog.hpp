@@ -48,6 +48,10 @@ class ConnectionDialog : public QDialog {
     QToolButton *khBrowse_ = nullptr;
     QComboBox *khPolicy_ = nullptr;
     QComboBox *integrityPolicy_ = nullptr;
+    QCheckBox *ftpsVerifyPeer_ = nullptr;
+    QLineEdit *ftpsCaPath_ = nullptr;
+    QToolButton *ftpsCaBrowse_ = nullptr;
+    QWidget *ftpsCaPathRow_ = nullptr;
 
     // proxy
     QComboBox *proxyType_ = nullptr;
