@@ -13,6 +13,11 @@ OpenSCP bundles or links against:
 - Project: https://www.libssh2.org
 - License: `LICENSES/libssh2-BSD-3-Clause.txt`
 
+## libcurl
+- License: curl
+- Project: https://curl.se/libcurl/
+- License: `LICENSES/libcurl-curl-license.txt`
+
 ## OpenSSL 3
 - License: Apache-2.0
 - Project: https://www.openssl.org

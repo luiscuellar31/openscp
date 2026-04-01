@@ -15,6 +15,13 @@ Third‑party libraries used by OpenSCP
   License text: docs/credits/LICENSES/libssh2-BSD-3-Clause.txt
   Copyright: The libssh2 Project
 
+- libcurl
+  Description: transfer library used by the FTP backend.
+  License: curl
+  Site: https://curl.se/libcurl/
+  License text: docs/credits/LICENSES/libcurl-curl-license.txt
+  Copyright: Daniel Stenberg and contributors
+
 - OpenSSL 3 (libssl, libcrypto)
   Description: cryptography and TLS/SSL toolkit used by libssh2.
   License: Apache‑2.0
