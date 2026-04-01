@@ -133,7 +133,7 @@ open build/OpenSCP.app
 
 - Qt `6.x` (tested with `6.8.3`)
 - libssh2 (OpenSSL 3 recommended)
-- libcurl (required for FTP backend)
+- libcurl (optional; required only for FTP backend)
 - CMake `3.22+`
 - C++20 compiler
 
@@ -142,6 +142,8 @@ Optional:
 - macOS: Keychain (native)
 - Linux: libsecret / Secret Service
 - OpenSSH client (`ssh`) for SSH jump host tunneling.
+- FTP backend can be disabled explicitly with
+  `-DOPEN_SCP_ENABLE_FTP_BACKEND=OFF`.
 
 ## Testing Locally
 
