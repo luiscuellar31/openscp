@@ -36,6 +36,37 @@ enum class ScpTransferMode {
     ScpOnly, // Enforce classic SCP transfers only (no SFTP fallback).
 };
 
+inline constexpr bool isValidProxyType(ProxyType type) {
+    switch (type) {
+    case ProxyType::None:
+    case ProxyType::Socks5:
+    case ProxyType::HttpConnect:
+        return true;
+    }
+    return false;
+}
+
+inline constexpr ProxyType normalizeProxyType(ProxyType type) {
+    return isValidProxyType(type) ? type : ProxyType::None;
+}
+
+inline ProxyType proxyTypeFromStorageValue(int raw) {
+    const auto candidate = static_cast<ProxyType>(raw);
+    return normalizeProxyType(candidate);
+}
+
+inline constexpr std::uint16_t defaultPortForProxyType(ProxyType type) {
+    switch (type) {
+    case ProxyType::Socks5:
+        return 1080;
+    case ProxyType::HttpConnect:
+        return 8080;
+    case ProxyType::None:
+        break;
+    }
+    return 0;
+}
+
 struct ProtocolCapabilities {
     bool implemented = false;
     bool supports_listing = false;

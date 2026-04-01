@@ -155,11 +155,28 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
             return false;
         }
 
-        const long proxyType =
-            (opt.proxy_type == ProxyType::Socks5) ? CURLPROXY_SOCKS5_HOSTNAME
-                                                  : CURLPROXY_HTTP;
+        const ProxyType normalizedProxyType = normalizeProxyType(opt.proxy_type);
+        long proxyType = 0;
+        switch (normalizedProxyType) {
+        case ProxyType::Socks5:
+            proxyType = CURLPROXY_SOCKS5_HOSTNAME;
+            break;
+        case ProxyType::HttpConnect:
+            proxyType = CURLPROXY_HTTP;
+            break;
+        case ProxyType::None:
+            err = "Unsupported proxy type for FTP/FTPS backend.";
+            return false;
+        }
         if (curl_easy_setopt(curl, CURLOPT_PROXYTYPE, proxyType) != CURLE_OK) {
             err = "Could not configure FTP proxy type.";
+            return false;
+        }
+        if (curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL,
+                             (normalizedProxyType == ProxyType::HttpConnect)
+                                 ? 1L
+                                 : 0L) != CURLE_OK) {
+            err = "Could not configure FTP proxy tunnel mode.";
             return false;
         }
 
