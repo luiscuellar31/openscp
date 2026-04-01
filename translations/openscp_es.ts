@@ -512,7 +512,7 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <source>No active remote panel is available.</source>
-        <translation>No hay un panel remoto activo disponible.</translation>
+        <translation type="vanished">No hay un panel remoto activo disponible.</translation>
     </message>
     <message>
         <source>Could not prepare an SSH terminal command.
@@ -1776,6 +1776,34 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
         <source>OpenSCP — local/remote (%1)</source>
         <translation>OpenSCP — local/remoto (%1)</translation>
     </message>
+    <message>
+        <source>Upload local files…</source>
+        <translation>Subir archivos locales…</translation>
+    </message>
+    <message>
+        <source>Download remote file…</source>
+        <translation>Descargar archivo remoto…</translation>
+    </message>
+    <message>
+        <source>/remote/folder</source>
+        <translation>/remoto/carpeta</translation>
+    </message>
+    <message>
+        <source>Remote path: %1</source>
+        <translation>Ruta remota: %1</translation>
+    </message>
+    <message>
+        <source>Remote file path (absolute or relative to %1):</source>
+        <translation>Ruta del archivo remoto (absoluta o relativa a %1):</translation>
+    </message>
+    <message>
+        <source>Enter a valid remote file path.</source>
+        <translation>Introduce una ruta de archivo remoto válida.</translation>
+    </message>
+    <message>
+        <source>Select files to upload</source>
+        <translation>Selecciona archivos para subir</translation>
+    </message>
 </context>
 <context>
     <name>PermissionsDialog</name>
@@ -2072,7 +2100,7 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
     </message>
     <message>
         <source>Advanced</source>
-        <translation>Avanzado</translation>
+        <translation type="vanished">Avanzado</translation>
     </message>
     <message>
         <source>Transfers</source>
