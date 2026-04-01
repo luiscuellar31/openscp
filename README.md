@@ -3,7 +3,7 @@
     <h1 align="center">OpenSCP</h1>
 
 <p>
-    <strong>Two-panel SFTP/SCP/FTP client focused on simplicity and security</strong>
+    <strong>Two-panel SFTP/SCP/FTP/FTPS client focused on simplicity and security</strong>
 </p>
 
 <p>
@@ -11,7 +11,7 @@
 </p>
 
 <p>
-    <strong>OpenSCP</strong> is a two-panel commander-style file explorer written in <strong>C++/Qt</strong>, with <strong>SFTP</strong>, initial <strong>SCP</strong>, and initial <strong>FTP</strong> support. It aims to be a lightweight alternative to tools like WinSCP, focused on <strong>security</strong>, <strong>clarity</strong>, and <strong>extensibility</strong>.
+    <strong>OpenSCP</strong> is a two-panel commander-style file explorer written in <strong>C++/Qt</strong>, with <strong>SFTP</strong>, initial <strong>SCP</strong>, and initial <strong>FTP/FTPS</strong> support. It aims to be a lightweight alternative to tools like WinSCP, focused on <strong>security</strong>, <strong>clarity</strong>, and <strong>extensibility</strong>.
 </p>
 
 <br>
@@ -74,9 +74,11 @@ open build/OpenSCP.app
 ### 3. SSH transport security hardening
 
 - Auth: password, private key (+passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
-- Protocol selector per site/session (`SFTP`, `SCP`, `FTP`).
+- Protocol selector per site/session (`SFTP`, `SCP`, `FTP`, `FTPS`).
+- FTP/FTPS currently run in transfer-only mode (no remote listing panel).
 - SCP mode policy per site/session: `Automatic (SCP + SFTP fallback)` or
   `SCP only` (disable fallback), plus a global default for new connections.
+- FTPS certificate verification (peer+host) is enabled by default, with optional custom CA bundle per site/session.
 - Host-key policies: `Strict`, `Accept new (TOFU)`, `No verification` (hardened).
 - Per-site transport can use direct TCP, `SOCKS5`, or `HTTP CONNECT` proxy tunneling.
 - Per-site SSH jump host (`ProxyJump`/bastion) tunneling is supported.
@@ -94,6 +96,7 @@ open build/OpenSCP.app
 - Saved sites persist proxy type/endpoint/username per site.
 - Saved sites persist SSH jump host settings (host/port/user/key path) per site.
 - Saved sites persist SCP mode policy per site.
+- Saved sites persist FTPS certificate settings (verify toggle and optional CA bundle path) per site.
 - Duplicate site names blocked; rename/delete cleans legacy or orphan secrets.
 - Optional cleanup of stored credentials and related `known_hosts` entries when deleting sites.
 - Secure backends:
@@ -108,6 +111,7 @@ open build/OpenSCP.app
 - Connection dialog improved (clearer inputs, inline key/known_hosts selectors, show/hide password fields).
 - Connection dialog includes per-site proxy configuration (`Direct`, `SOCKS5`, `HTTP CONNECT`) with optional auth.
 - Connection dialog includes optional per-site SSH jump host (bastion) configuration.
+- Connection dialog includes FTPS certificate controls (verify toggle + optional CA bundle selector).
 - UI language selection includes `English`, `Spanish`, and `Portuguese`.
 - Settings redesigned into focused sections: `General`, `Transfers`, `Sites`, `Security`, `Network`, and `Staging and drag-out`.
 - Settings keeps controls visible while resizing (minimum size + scrollable pages).
@@ -133,7 +137,7 @@ open build/OpenSCP.app
 
 - Qt `6.x` (tested with `6.8.3`)
 - libssh2 (OpenSSL 3 recommended)
-- libcurl (optional; required only for FTP backend)
+- libcurl (optional; required only for FTP/FTPS backends)
 - CMake `3.22+`
 - C++20 compiler
 
@@ -142,7 +146,7 @@ Optional:
 - macOS: Keychain (native)
 - Linux: libsecret / Secret Service
 - OpenSSH client (`ssh`) for SSH jump host tunneling.
-- FTP backend can be disabled explicitly with
+- FTP/FTPS backend can be disabled explicitly with
   `-DOPEN_SCP_ENABLE_FTP_BACKEND=OFF`.
 
 ## Testing Locally
@@ -170,6 +174,24 @@ ctest --test-dir build --output-on-failure
 - `OPEN_SCP_IT_JUMP_PORT` (optional; default `22`)
 - `OPEN_SCP_IT_JUMP_USER` (optional)
 - `OPEN_SCP_IT_JUMP_KEY` (optional)
+
+`openscp_ftp_integration_tests` is skipped unless integration variables are set:
+
+- `OPEN_SCP_IT_FTP_HOST`
+- `OPEN_SCP_IT_FTP_PORT` (optional; default `21`)
+- `OPEN_SCP_IT_FTP_USER` (optional)
+- `OPEN_SCP_IT_FTP_PASS` (optional)
+- `OPEN_SCP_IT_FTP_REMOTE_BASE`
+
+`openscp_ftps_integration_tests` is skipped unless integration variables are set:
+
+- `OPEN_SCP_IT_FTPS_HOST`
+- `OPEN_SCP_IT_FTPS_PORT` (optional; default `990`)
+- `OPEN_SCP_IT_FTPS_USER` (optional)
+- `OPEN_SCP_IT_FTPS_PASS` (optional)
+- `OPEN_SCP_IT_FTPS_REMOTE_BASE`
+- `OPEN_SCP_IT_FTPS_VERIFY_PEER` (`1`/`0`, optional; default `1`)
+- `OPEN_SCP_IT_FTPS_CA_CERT` (optional)
 
 ## Platform Workflows
 
@@ -233,7 +255,7 @@ Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/READM
 ## Roadmap
 
 - Windows support is planned for future releases.
-- Protocols: `FTPS/WebDAV`.
+- Protocols: `WebDAV`.
 - Broader enterprise proxy/jump auth flows (for example, non-batch/interactive jump auth).
 - Sync workflows: compare/sync and keep-up-to-date with filters/ignores.
 - Queue persistence across restarts.
@@ -248,4 +270,4 @@ Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/READM
 ## Contributing
 
 - Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for workflow and standards.
-- Issues and pull requests are welcome, especially around macOS/Linux stability, i18n, and SFTP/SCP/FTP robustness.
+- Issues and pull requests are welcome, especially around macOS/Linux stability, i18n, and SFTP/SCP/FTP/FTPS robustness.
