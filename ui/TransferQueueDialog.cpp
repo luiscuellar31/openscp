@@ -1076,10 +1076,18 @@ void TransferQueueDialog::loadUiState() {
     }
 
     suppressAutoClearSignal_ = true;
+    const int defaultAutoMode = qBound(
+        static_cast<int>(AutoClearOff),
+        s.value("Transfer/defaultQueueAutoClearMode",
+                static_cast<int>(AutoClearOff))
+            .toInt(),
+        static_cast<int>(AutoClearFinished));
+    const int defaultAutoMin = qBound(
+        1, s.value("Transfer/defaultQueueAutoClearMinutes", 15).toInt(), 1440);
     const int autoMode =
-        s.value("UI/transferQueue/autoClearMode", AutoClearOff).toInt();
+        s.value("UI/transferQueue/autoClearMode", defaultAutoMode).toInt();
     const int autoMin =
-        s.value("UI/transferQueue/autoClearMinutes", 15).toInt();
+        s.value("UI/transferQueue/autoClearMinutes", defaultAutoMin).toInt();
     if (autoClearModeCombo_) {
         int idx = autoClearModeCombo_->findData(autoMode);
         if (idx < 0)

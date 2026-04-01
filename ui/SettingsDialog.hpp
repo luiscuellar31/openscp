@@ -38,6 +38,7 @@ class SettingsDialog : public QDialog {
         nullptr; // default local download directory
     class QPushButton *defaultDownloadBrowseBtn_ = nullptr;
     class QPushButton *resetMainLayoutBtn_ = nullptr;
+    QComboBox *defaultProtocol_ = nullptr; // default protocol in connect/site dialogs
     QComboBox *scpModeDefault_ = nullptr; // default SCP transfer mode
     QCheckBox *showConnOnStart_ = nullptr; // open Site Manager at startup
     QCheckBox *showConnOnDisconnect_ =
@@ -55,6 +56,12 @@ class SettingsDialog : public QDialog {
         nullptr; // show fingerprints in HEX colon format (visual only)
     QCheckBox *terminalForceInteractiveLogin_ =
         nullptr; // force password/kbd-interactive login in "Open in terminal"
+    QCheckBox *terminalEnableSftpCliFallback_ =
+        nullptr; // allow SSH terminal command to fallback to SFTP CLI
+    QComboBox *defaultKnownHostsPolicy_ =
+        nullptr; // default policy for new connections/sites
+    QComboBox *defaultIntegrityPolicy_ =
+        nullptr; // default integrity policy for new connections/sites
     class QSpinBox *noHostVerifyTtlMinSpin_ =
         nullptr; // temporary "no host verification" ttl in minutes
     QCheckBox *insecureFallback_ =
@@ -62,10 +69,16 @@ class SettingsDialog : public QDialog {
     class QSpinBox *maxConcurrentSpin_ = nullptr; // transfer worker concurrency
     class QSpinBox *globalSpeedDefaultSpin_ =
         nullptr; // default global speed limit KB/s (0 = unlimited)
+    QComboBox *queueAutoClearModeDefault_ =
+        nullptr; // default auto-clear mode for the transfer queue
+    class QSpinBox *queueAutoClearMinutesDefaultSpin_ =
+        nullptr; // default auto-clear delay in minutes
     class QLineEdit *stagingRootEdit_ = nullptr; // staging folder path
     class QPushButton *stagingBrowseBtn_ = nullptr;
     QCheckBox *autoCleanStaging_ =
         nullptr; // Auto-clean staging after successful drag-out
+    class QSpinBox *stagingRetentionDaysSpin_ =
+        nullptr; // startup cleanup retention for old staging batches
     class QSpinBox *stagingPrepTimeoutMsSpin_ =
         nullptr; // timeout before "wait/cancel" prompt
     class QSpinBox *stagingConfirmItemsSpin_ =
@@ -73,6 +86,10 @@ class SettingsDialog : public QDialog {
     class QSpinBox *stagingConfirmMiBSpin_ =
         nullptr; // threshold in MiB for "large batch" confirmation
     class QSpinBox *maxDepthSpin_ = nullptr; // Advanced/maxFolderDepth
+    class QSpinBox *sessionHealthIntervalSecSpin_ =
+        nullptr; // remote session health probe interval
+    class QSpinBox *remoteWriteabilityTtlMsSpin_ =
+        nullptr; // cache ttl for remote writeability checks
     QPushButton *applyBtn_ =
         nullptr; // Apply button (enabled only when modified)
     QPushButton *closeBtn_ = nullptr; // Close button (never primary/default)

@@ -9,7 +9,6 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QFontMetrics>
-#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -33,6 +32,11 @@ static QString defaultDownloadDirPath() {
         p = QDir::homePath() + "/Downloads";
     return p;
 }
+
+constexpr int kQueueAutoClearOff = 0;
+constexpr int kQueueAutoClearCompleted = 1;
+constexpr int kQueueAutoClearFailedCanceled = 2;
+constexpr int kQueueAutoClearFinished = 3;
 
 QString SettingsDialog::wrapTextToWidth(const QString &text,
                                         const QFontMetrics &fm,
@@ -311,107 +315,158 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         });
     }
 
-    QFormLayout *advancedForm = nullptr;
-    QWidget *advancedPage = createFormPage(tr("Advanced"), advancedForm);
-    advancedForm->setVerticalSpacing(10);
-
-    // Advanced/Transfers
-    auto *transferGroup = new QGroupBox(tr("Transfers"), advancedPage);
-    auto *transferForm = new QFormLayout(transferGroup);
-    transferForm->setContentsMargins(12, 10, 12, 10);
-    transferForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-    transferForm->setHorizontalSpacing(8);
-    transferForm->setVerticalSpacing(8);
-    maxConcurrentSpin_ = new QSpinBox(transferGroup);
+    QFormLayout *transfersForm = nullptr;
+    QWidget *transfersPage = createFormPage(tr("Transfers"), transfersForm);
+    transfersForm->setVerticalSpacing(10);
+    maxConcurrentSpin_ = new QSpinBox(transfersPage);
     maxConcurrentSpin_->setRange(1, 8);
     maxConcurrentSpin_->setValue(2);
     maxConcurrentSpin_->setMinimumWidth(90);
     maxConcurrentSpin_->setToolTip(
         tr("Maximum number of concurrent transfers."));
-    addLabeledRow(transferForm, transferGroup, tr("Parallel tasks:"),
+    addLabeledRow(transfersForm, transfersPage, tr("Parallel tasks:"),
                   maxConcurrentSpin_);
-    globalSpeedDefaultSpin_ = new QSpinBox(transferGroup);
+    globalSpeedDefaultSpin_ = new QSpinBox(transfersPage);
     globalSpeedDefaultSpin_->setRange(0, 1'000'000);
     globalSpeedDefaultSpin_->setValue(0);
     globalSpeedDefaultSpin_->setSuffix(" KB/s");
     globalSpeedDefaultSpin_->setMinimumWidth(120);
     globalSpeedDefaultSpin_->setToolTip(tr("0 = no global speed limit."));
-    addLabeledRow(transferForm, transferGroup, tr("Default global limit:"),
+    addLabeledRow(transfersForm, transfersPage, tr("Default global limit:"),
                   globalSpeedDefaultSpin_);
-    advancedForm->addRow(QString(), transferGroup);
+    queueAutoClearModeDefault_ = new QComboBox(transfersPage);
+    queueAutoClearModeDefault_->setMinimumWidth(kFieldMinWidth);
+    queueAutoClearModeDefault_->setMaximumWidth(kFieldMaxWidth);
+    queueAutoClearModeDefault_->addItem(tr("Off"), kQueueAutoClearOff);
+    queueAutoClearModeDefault_->addItem(tr("Completed"),
+                                        kQueueAutoClearCompleted);
+    queueAutoClearModeDefault_->addItem(tr("Failed/Canceled"),
+                                        kQueueAutoClearFailedCanceled);
+    queueAutoClearModeDefault_->addItem(tr("All finished"),
+                                        kQueueAutoClearFinished);
+    addLabeledRow(transfersForm, transfersPage, tr("Queue auto-clear default:"),
+                  queueAutoClearModeDefault_);
+    queueAutoClearMinutesDefaultSpin_ = new QSpinBox(transfersPage);
+    queueAutoClearMinutesDefaultSpin_->setRange(1, 1440);
+    queueAutoClearMinutesDefaultSpin_->setValue(15);
+    queueAutoClearMinutesDefaultSpin_->setSuffix(tr(" min"));
+    queueAutoClearMinutesDefaultSpin_->setMinimumWidth(100);
+    addLabeledRow(transfersForm, transfersPage, tr("Queue auto-clear after:"),
+                  queueAutoClearMinutesDefaultSpin_);
+    auto updateQueueAutoClearDefaultsUi = [this]() {
+        if (!queueAutoClearModeDefault_ || !queueAutoClearMinutesDefaultSpin_)
+            return;
+        const bool enabled =
+            queueAutoClearModeDefault_->currentData().toInt() !=
+            kQueueAutoClearOff;
+        queueAutoClearMinutesDefaultSpin_->setEnabled(enabled);
+    };
+    connect(queueAutoClearModeDefault_, &QComboBox::currentIndexChanged, this,
+            [this, updateQueueAutoClearDefaultsUi](int) {
+                updateQueueAutoClearDefaultsUi();
+                updateApplyFromControls();
+            });
 
-    // Advanced/Sites
-    auto *sitesGroup = new QGroupBox(tr("Sites"), advancedPage);
-    auto *sitesLay = new QVBoxLayout(sitesGroup);
-    sitesLay->setContentsMargins(12, 10, 12, 10);
-    sitesLay->setSpacing(6);
-    {
-        auto *sitesForm = new QFormLayout();
-        sitesForm->setContentsMargins(0, 0, 0, 0);
-        sitesForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-        sitesForm->setHorizontalSpacing(8);
-        sitesForm->setVerticalSpacing(6);
-        scpModeDefault_ = new QComboBox(sitesGroup);
-        scpModeDefault_->setMinimumWidth(kFieldMinWidth);
-        scpModeDefault_->setMaximumWidth(kFieldMaxWidth);
-        scpModeDefault_->addItem(
-            tr("Automatic (SCP with SFTP fallback)"),
-            static_cast<int>(openscp::ScpTransferMode::Auto));
-        scpModeDefault_->addItem(
-            tr("SCP only (disable SFTP fallback)"),
-            static_cast<int>(openscp::ScpTransferMode::ScpOnly));
-        addLabeledRow(sitesForm, sitesGroup, tr("Default SCP mode:"),
-                      scpModeDefault_);
-        sitesLay->addLayout(sitesForm);
-    }
-    deleteSecretsOnRemove_ = new QCheckBox(
-        tr("When deleting a site, also remove its stored credentials."),
-        sitesGroup);
-    trackWrappedCheck(deleteSecretsOnRemove_);
-    sitesLay->addWidget(deleteSecretsOnRemove_);
-    advancedForm->addRow(QString(), sitesGroup);
+    QFormLayout *sitesForm = nullptr;
+    QWidget *sitesPage = createFormPage(tr("Sites"), sitesForm);
+    sitesForm->setVerticalSpacing(8);
+    defaultProtocol_ = new QComboBox(sitesPage);
+    defaultProtocol_->setMinimumWidth(kFieldMinWidth);
+    defaultProtocol_->setMaximumWidth(kFieldMaxWidth);
+    defaultProtocol_->addItem(tr("SFTP"),
+                              static_cast<int>(openscp::Protocol::Sftp));
+    defaultProtocol_->addItem(tr("SCP"),
+                              static_cast<int>(openscp::Protocol::Scp));
+    defaultProtocol_->addItem(tr("FTP"),
+                              static_cast<int>(openscp::Protocol::Ftp));
+    addLabeledRow(sitesForm, sitesPage, tr("Default protocol:"),
+                  defaultProtocol_);
+    scpModeDefault_ = new QComboBox(sitesPage);
+    scpModeDefault_->setMinimumWidth(kFieldMinWidth);
+    scpModeDefault_->setMaximumWidth(kFieldMaxWidth);
+    scpModeDefault_->addItem(
+        tr("Automatic (SCP with SFTP fallback)"),
+        static_cast<int>(openscp::ScpTransferMode::Auto));
+    scpModeDefault_->addItem(
+        tr("SCP only (disable SFTP fallback)"),
+        static_cast<int>(openscp::ScpTransferMode::ScpOnly));
+    addLabeledRow(sitesForm, sitesPage, tr("Default SCP mode:"),
+                  scpModeDefault_);
+    deleteSecretsOnRemove_ = addCheckRow(
+        sitesForm, sitesPage,
+        tr("When deleting a site, also remove its stored credentials."));
 
-    // Advanced/Security
-    auto *securityGroup = new QGroupBox(tr("Security"), advancedPage);
-    auto *securityLay = new QVBoxLayout(securityGroup);
-    securityLay->setContentsMargins(12, 10, 12, 10);
-    securityLay->setSpacing(6);
+    QFormLayout *securityForm = nullptr;
+    QWidget *securityPage = createFormPage(tr("Security"), securityForm);
+    securityForm->setVerticalSpacing(8);
+    defaultKnownHostsPolicy_ = new QComboBox(securityPage);
+    defaultKnownHostsPolicy_->setMinimumWidth(kFieldMinWidth);
+    defaultKnownHostsPolicy_->setMaximumWidth(kFieldMaxWidth);
+    defaultKnownHostsPolicy_->addItem(
+        tr("Strict"), static_cast<int>(openscp::KnownHostsPolicy::Strict));
+    defaultKnownHostsPolicy_->addItem(
+        tr("Accept new (TOFU)"),
+        static_cast<int>(openscp::KnownHostsPolicy::AcceptNew));
+    defaultKnownHostsPolicy_->addItem(
+        tr("No verification (double confirmation, expires in 15 min)"),
+        static_cast<int>(openscp::KnownHostsPolicy::Off));
+    addLabeledRow(securityForm, securityPage, tr("Default known_hosts policy:"),
+                  defaultKnownHostsPolicy_);
+    defaultIntegrityPolicy_ = new QComboBox(securityPage);
+    defaultIntegrityPolicy_->setMinimumWidth(kFieldMinWidth);
+    defaultIntegrityPolicy_->setMaximumWidth(kFieldMaxWidth);
+    defaultIntegrityPolicy_->addItem(
+        tr("Optional (recommended)"),
+        static_cast<int>(openscp::TransferIntegrityPolicy::Optional));
+    defaultIntegrityPolicy_->addItem(
+        tr("Required (strict)"),
+        static_cast<int>(openscp::TransferIntegrityPolicy::Required));
+    defaultIntegrityPolicy_->addItem(
+        tr("Off (not recommended)"),
+        static_cast<int>(openscp::TransferIntegrityPolicy::Off));
+    addLabeledRow(securityForm, securityPage, tr("Default integrity policy:"),
+                  defaultIntegrityPolicy_);
     knownHostsHashed_ = new QCheckBox(
-        tr("Hash hostnames in known_hosts (recommended)."), securityGroup);
+        tr("Hash hostnames in known_hosts (recommended)."), securityPage);
     fpHex_ = new QCheckBox(
         tr("Show fingerprint in HEX (colon) format (visual only)."),
-        securityGroup);
+        securityPage);
     terminalForceInteractiveLogin_ = new QCheckBox(
         tr("Force interactive login when using Open in terminal "
            "(disable key/agent auth)."),
-        securityGroup);
+        securityPage);
+    terminalEnableSftpCliFallback_ = new QCheckBox(
+        tr("Enable automatic SFTP CLI fallback when using Open in terminal."),
+        securityPage);
     trackWrappedCheck(knownHostsHashed_);
     trackWrappedCheck(fpHex_);
     trackWrappedCheck(terminalForceInteractiveLogin_);
-    securityLay->addWidget(knownHostsHashed_);
-    securityLay->addWidget(fpHex_);
-    securityLay->addWidget(terminalForceInteractiveLogin_);
+    trackWrappedCheck(terminalEnableSftpCliFallback_);
+    securityForm->addRow(QString(), knownHostsHashed_);
+    securityForm->addRow(QString(), fpHex_);
+    securityForm->addRow(QString(), terminalForceInteractiveLogin_);
+    securityForm->addRow(QString(), terminalEnableSftpCliFallback_);
 #if defined(Q_OS_MAC) || defined(Q_OS_MACOS) || defined(__APPLE__)
     macKeychainRestrictive_ = new QCheckBox(
         tr("Use stricter Keychain accessibility (this device only)."),
-        securityGroup);
+        securityPage);
     trackWrappedCheck(macKeychainRestrictive_);
-    securityLay->addWidget(macKeychainRestrictive_);
+    securityForm->addRow(QString(), macKeychainRestrictive_);
 #endif
 #if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) &&       \
     !defined(HAVE_LIBSECRET) && !defined(OPEN_SCP_BUILD_SECURE_ONLY)
     insecureFallback_ = new QCheckBox(
         tr("Allow insecure credentials fallback (not recommended)."),
-        securityGroup);
+        securityPage);
     trackWrappedCheck(insecureFallback_);
-    securityLay->addWidget(insecureFallback_);
+    securityForm->addRow(QString(), insecureFallback_);
 #endif
     {
-        auto *ttlRow = new QWidget(securityGroup);
+        auto *ttlRow = new QWidget(securityPage);
         auto *ttlLay = new QHBoxLayout(ttlRow);
         ttlLay->setContentsMargins(0, 0, 0, 0);
         ttlLay->setSpacing(6);
-        noHostVerifyTtlMinSpin_ = new QSpinBox(securityGroup);
+        noHostVerifyTtlMinSpin_ = new QSpinBox(securityPage);
         noHostVerifyTtlMinSpin_->setRange(1, 120);
         noHostVerifyTtlMinSpin_->setValue(15);
         noHostVerifyTtlMinSpin_->setSuffix(tr(" min"));
@@ -421,34 +476,45 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                "verification policy."));
         ttlLay->addWidget(noHostVerifyTtlMinSpin_);
         ttlLay->addStretch(1);
-        auto *ttlForm = new QFormLayout();
-        ttlForm->setContentsMargins(0, 0, 0, 0);
-        addLabeledRow(ttlForm, securityGroup, tr("No-verification TTL:"),
+        addLabeledRow(securityForm, securityPage, tr("No-verification TTL:"),
                       ttlRow);
-        securityLay->addLayout(ttlForm);
     }
-    advancedForm->addRow(QString(), securityGroup);
 
-    // Advanced/Staging and drag-out
-    auto *stagingGroup =
-        new QGroupBox(tr("Staging and drag-out"), advancedPage);
-    auto *stagingForm = new QFormLayout(stagingGroup);
-    stagingForm->setContentsMargins(12, 10, 12, 10);
-    stagingForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-    stagingForm->setHorizontalSpacing(8);
+    QFormLayout *networkForm = nullptr;
+    QWidget *networkPage = createFormPage(tr("Network"), networkForm);
+    networkForm->setVerticalSpacing(8);
+    sessionHealthIntervalSecSpin_ = new QSpinBox(networkPage);
+    sessionHealthIntervalSecSpin_->setRange(60, 86400);
+    sessionHealthIntervalSecSpin_->setValue(600);
+    sessionHealthIntervalSecSpin_->setSuffix(tr(" s"));
+    sessionHealthIntervalSecSpin_->setMinimumWidth(100);
+    addLabeledRow(networkForm, networkPage, tr("Session health check interval:"),
+                  sessionHealthIntervalSecSpin_);
+    remoteWriteabilityTtlMsSpin_ = new QSpinBox(networkPage);
+    remoteWriteabilityTtlMsSpin_->setRange(1000, 120000);
+    remoteWriteabilityTtlMsSpin_->setValue(15000);
+    remoteWriteabilityTtlMsSpin_->setSuffix(tr(" ms"));
+    remoteWriteabilityTtlMsSpin_->setSingleStep(500);
+    remoteWriteabilityTtlMsSpin_->setMinimumWidth(110);
+    addLabeledRow(networkForm, networkPage, tr("Remote writeability cache TTL:"),
+                  remoteWriteabilityTtlMsSpin_);
+
+    QFormLayout *stagingForm = nullptr;
+    QWidget *stagingPage =
+        createFormPage(tr("Staging and drag-out"), stagingForm);
     stagingForm->setVerticalSpacing(8);
     {
-        auto *rowWidget = new QWidget(stagingGroup);
+        auto *rowWidget = new QWidget(stagingPage);
         auto *row = new QHBoxLayout(rowWidget);
         row->setContentsMargins(0, 0, 0, 0);
         row->setSpacing(6);
-        stagingRootEdit_ = new QLineEdit(stagingGroup);
+        stagingRootEdit_ = new QLineEdit(stagingPage);
         stagingRootEdit_->setMinimumWidth(kFieldMinWidth);
         stagingRootEdit_->setMaximumWidth(kFieldMaxWidth);
-        stagingBrowseBtn_ = new QPushButton(tr("Choose…"), stagingGroup);
+        stagingBrowseBtn_ = new QPushButton(tr("Choose…"), stagingPage);
         row->addWidget(stagingRootEdit_, 1);
         row->addWidget(stagingBrowseBtn_);
-        addLabeledRow(stagingForm, stagingGroup, tr("Staging folder:"),
+        addLabeledRow(stagingForm, stagingPage, tr("Staging folder:"),
                       rowWidget);
         connect(stagingBrowseBtn_, &QPushButton::clicked, this, [this] {
             const QString cur =
@@ -462,10 +528,17 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     }
     autoCleanStaging_ = new QCheckBox(
         tr("Auto-clean staging after successful drag-out (recommended)."),
-        stagingGroup);
+        stagingPage);
     trackWrappedCheck(autoCleanStaging_);
     stagingForm->addRow(QString(), autoCleanStaging_);
-    stagingPrepTimeoutMsSpin_ = new QSpinBox(stagingGroup);
+    stagingRetentionDaysSpin_ = new QSpinBox(stagingPage);
+    stagingRetentionDaysSpin_->setRange(1, 365);
+    stagingRetentionDaysSpin_->setValue(7);
+    stagingRetentionDaysSpin_->setSuffix(tr(" days"));
+    stagingRetentionDaysSpin_->setMinimumWidth(110);
+    addLabeledRow(stagingForm, stagingPage, tr("Startup cleanup retention:"),
+                  stagingRetentionDaysSpin_);
+    stagingPrepTimeoutMsSpin_ = new QSpinBox(stagingPage);
     stagingPrepTimeoutMsSpin_->setRange(250, 60000);
     stagingPrepTimeoutMsSpin_->setSingleStep(250);
     stagingPrepTimeoutMsSpin_->setValue(2000);
@@ -473,47 +546,46 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     stagingPrepTimeoutMsSpin_->setMinimumWidth(110);
     stagingPrepTimeoutMsSpin_->setToolTip(
         tr("Time before showing the Wait/Cancel dialog."));
-    addLabeledRow(stagingForm, stagingGroup, tr("Preparation timeout:"),
+    addLabeledRow(stagingForm, stagingPage, tr("Preparation timeout:"),
                   stagingPrepTimeoutMsSpin_);
-    stagingConfirmItemsSpin_ = new QSpinBox(stagingGroup);
+    stagingConfirmItemsSpin_ = new QSpinBox(stagingPage);
     stagingConfirmItemsSpin_->setRange(50, 100000);
     stagingConfirmItemsSpin_->setValue(500);
     stagingConfirmItemsSpin_->setMinimumWidth(110);
     stagingConfirmItemsSpin_->setToolTip(
         tr("Item count threshold to request confirmation for large batches."));
-    addLabeledRow(stagingForm, stagingGroup, tr("Confirm from items:"),
+    addLabeledRow(stagingForm, stagingPage, tr("Confirm from items:"),
                   stagingConfirmItemsSpin_);
-    stagingConfirmMiBSpin_ = new QSpinBox(stagingGroup);
+    stagingConfirmMiBSpin_ = new QSpinBox(stagingPage);
     stagingConfirmMiBSpin_->setRange(128, 65536);
     stagingConfirmMiBSpin_->setValue(1024);
     stagingConfirmMiBSpin_->setSuffix(tr(" MiB"));
     stagingConfirmMiBSpin_->setMinimumWidth(120);
     stagingConfirmMiBSpin_->setToolTip(tr(
         "Estimated size threshold to request confirmation for large batches."));
-    addLabeledRow(stagingForm, stagingGroup, tr("Confirm from size:"),
+    addLabeledRow(stagingForm, stagingPage, tr("Confirm from size:"),
                   stagingConfirmMiBSpin_);
 
     // Maximum folder recursion depth
     {
-        auto *rowWidget = new QWidget(stagingGroup);
+        auto *rowWidget = new QWidget(stagingPage);
         auto *row = new QHBoxLayout(rowWidget);
         row->setContentsMargins(0, 0, 0, 0);
         row->setSpacing(6);
-        maxDepthSpin_ = new QSpinBox(stagingGroup);
+        maxDepthSpin_ = new QSpinBox(stagingPage);
         maxDepthSpin_->setRange(4, 256);
         maxDepthSpin_->setValue(32);
         maxDepthSpin_->setMinimumWidth(90);
         maxDepthSpin_->setToolTip(tr("Limit for recursive folder drag-out to "
                                      "avoid deep trees and loops."));
-        auto *hint = new QLabel(tr("Recommended: 32"), stagingGroup);
+        auto *hint = new QLabel(tr("Recommended: 32"), stagingPage);
         hint->setStyleSheet("color: palette(window-text);");
         row->addWidget(maxDepthSpin_);
         row->addWidget(hint);
         row->addStretch(1);
-        addLabeledRow(stagingForm, stagingGroup, tr("Maximum depth:"),
+        addLabeledRow(stagingForm, stagingPage, tr("Maximum depth:"),
                       rowWidget);
     }
-    advancedForm->addRow(QString(), stagingGroup);
     connect(sectionList, &QListWidget::currentRowChanged, pages,
             &QStackedWidget::setCurrentIndex);
     connect(sectionList, &QListWidget::currentRowChanged, this,
@@ -585,6 +657,20 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     if (deleteSecretsOnRemove_)
         deleteSecretsOnRemove_->setChecked(
             s.value("Sites/deleteSecretsOnRemove", false).toBool());
+    if (defaultProtocol_) {
+        const auto defaultProtocol = openscp::protocolFromStorageName(
+            s.value("Protocol/defaultProtocol",
+                    QString::fromLatin1(openscp::protocolStorageName(
+                        openscp::Protocol::Sftp)))
+                .toString()
+                .trimmed()
+                .toLower()
+                .toStdString());
+        const int protocolIdx =
+            defaultProtocol_->findData(static_cast<int>(defaultProtocol));
+        if (protocolIdx >= 0)
+            defaultProtocol_->setCurrentIndex(protocolIdx);
+    }
     if (scpModeDefault_) {
         const auto scpMode = openscp::scpTransferModeFromStorageName(
             s.value("Protocol/scpTransferModeDefault",
@@ -599,6 +685,30 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         if (scpModeIdx >= 0)
             scpModeDefault_->setCurrentIndex(scpModeIdx);
     }
+    if (defaultKnownHostsPolicy_) {
+        int policyIdx = defaultKnownHostsPolicy_->findData(
+            s.value("Security/defaultKnownHostsPolicy",
+                    static_cast<int>(openscp::KnownHostsPolicy::Strict))
+                .toInt());
+        if (policyIdx < 0) {
+            policyIdx = defaultKnownHostsPolicy_->findData(
+                static_cast<int>(openscp::KnownHostsPolicy::Strict));
+        }
+        if (policyIdx >= 0)
+            defaultKnownHostsPolicy_->setCurrentIndex(policyIdx);
+    }
+    if (defaultIntegrityPolicy_) {
+        int integrityIdx = defaultIntegrityPolicy_->findData(
+            s.value("Security/defaultTransferIntegrityPolicy",
+                    static_cast<int>(openscp::TransferIntegrityPolicy::Optional))
+                .toInt());
+        if (integrityIdx < 0) {
+            integrityIdx = defaultIntegrityPolicy_->findData(
+                static_cast<int>(openscp::TransferIntegrityPolicy::Optional));
+        }
+        if (integrityIdx >= 0)
+            defaultIntegrityPolicy_->setCurrentIndex(integrityIdx);
+    }
     if (knownHostsHashed_)
         knownHostsHashed_->setChecked(
             s.value("Security/knownHostsHashed", true).toBool());
@@ -607,6 +717,10 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     if (terminalForceInteractiveLogin_) {
         terminalForceInteractiveLogin_->setChecked(
             s.value("Terminal/forceInteractiveLogin", false).toBool());
+    }
+    if (terminalEnableSftpCliFallback_) {
+        terminalEnableSftpCliFallback_->setChecked(
+            s.value("Terminal/enableSftpCliFallback", true).toBool());
     }
     if (noHostVerifyTtlMinSpin_)
         noHostVerifyTtlMinSpin_->setValue(
@@ -623,6 +737,34 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     if (globalSpeedDefaultSpin_)
         globalSpeedDefaultSpin_->setValue(
             s.value("Transfer/globalSpeedKBps", 0).toInt());
+    if (queueAutoClearModeDefault_) {
+        int queueMode = s.value("Transfer/defaultQueueAutoClearMode",
+                                kQueueAutoClearOff)
+                            .toInt();
+        queueMode = qBound(kQueueAutoClearOff, queueMode,
+                           kQueueAutoClearFinished);
+        int modeIdx = queueAutoClearModeDefault_->findData(queueMode);
+        if (modeIdx < 0)
+            modeIdx = queueAutoClearModeDefault_->findData(kQueueAutoClearOff);
+        if (modeIdx >= 0)
+            queueAutoClearModeDefault_->setCurrentIndex(modeIdx);
+    }
+    if (queueAutoClearMinutesDefaultSpin_) {
+        queueAutoClearMinutesDefaultSpin_->setValue(qBound(
+            1, s.value("Transfer/defaultQueueAutoClearMinutes", 15).toInt(),
+            1440));
+    }
+    if (sessionHealthIntervalSecSpin_) {
+        sessionHealthIntervalSecSpin_->setValue(
+            qBound(60, s.value("Network/sessionHealthIntervalSec", 600).toInt(),
+                   86400));
+    }
+    if (remoteWriteabilityTtlMsSpin_) {
+        remoteWriteabilityTtlMsSpin_->setValue(
+            qBound(1000,
+                   s.value("Network/remoteWriteabilityTtlMs", 15000).toInt(),
+                   120000));
+    }
     if (stagingRootEdit_)
         stagingRootEdit_->setText(
             s.value("Advanced/stagingRoot",
@@ -631,6 +773,10 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     if (autoCleanStaging_)
         autoCleanStaging_->setChecked(
             s.value("Advanced/autoCleanStaging", true).toBool());
+    if (stagingRetentionDaysSpin_)
+        stagingRetentionDaysSpin_->setValue(
+            qBound(1, s.value("Advanced/stagingRetentionDays", 7).toInt(),
+                   365));
     if (stagingPrepTimeoutMsSpin_)
         stagingPrepTimeoutMsSpin_->setValue(
             s.value("Advanced/stagingPrepTimeoutMs", 2000).toInt());
@@ -647,6 +793,12 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         macKeychainRestrictive_->setChecked(
             s.value("Security/macKeychainRestrictive", false).toBool());
 #endif
+    if (queueAutoClearModeDefault_ && queueAutoClearMinutesDefaultSpin_) {
+        const bool queueMinutesEnabled =
+            queueAutoClearModeDefault_->currentData().toInt() !=
+            kQueueAutoClearOff;
+        queueAutoClearMinutesDefaultSpin_->setEnabled(queueMinutesEnabled);
+    }
 
     // Bind controls to dirty flag
     bindDirtyFlag(langCombo_, qOverload<int>(&QComboBox::currentIndexChanged));
@@ -659,18 +811,35 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     bindDirtyFlag(showQueueOnEnqueue_, &QCheckBox::toggled);
     bindDirtyFlag(defaultDownloadDirEdit_, &QLineEdit::textChanged);
     bindDirtyFlag(deleteSecretsOnRemove_, &QCheckBox::toggled);
+    bindDirtyFlag(defaultProtocol_,
+                  qOverload<int>(&QComboBox::currentIndexChanged));
     bindDirtyFlag(scpModeDefault_,
+                  qOverload<int>(&QComboBox::currentIndexChanged));
+    bindDirtyFlag(defaultKnownHostsPolicy_,
+                  qOverload<int>(&QComboBox::currentIndexChanged));
+    bindDirtyFlag(defaultIntegrityPolicy_,
                   qOverload<int>(&QComboBox::currentIndexChanged));
     bindDirtyFlag(knownHostsHashed_, &QCheckBox::toggled);
     bindDirtyFlag(fpHex_, &QCheckBox::toggled);
     bindDirtyFlag(terminalForceInteractiveLogin_, &QCheckBox::toggled);
+    bindDirtyFlag(terminalEnableSftpCliFallback_, &QCheckBox::toggled);
     bindDirtyFlag(noHostVerifyTtlMinSpin_,
                   qOverload<int>(&QSpinBox::valueChanged));
     bindDirtyFlag(maxConcurrentSpin_, qOverload<int>(&QSpinBox::valueChanged));
     bindDirtyFlag(globalSpeedDefaultSpin_,
                   qOverload<int>(&QSpinBox::valueChanged));
+    bindDirtyFlag(queueAutoClearModeDefault_,
+                  qOverload<int>(&QComboBox::currentIndexChanged));
+    bindDirtyFlag(queueAutoClearMinutesDefaultSpin_,
+                  qOverload<int>(&QSpinBox::valueChanged));
+    bindDirtyFlag(sessionHealthIntervalSecSpin_,
+                  qOverload<int>(&QSpinBox::valueChanged));
+    bindDirtyFlag(remoteWriteabilityTtlMsSpin_,
+                  qOverload<int>(&QSpinBox::valueChanged));
     bindDirtyFlag(stagingRootEdit_, &QLineEdit::textChanged);
     bindDirtyFlag(autoCleanStaging_, &QCheckBox::toggled);
+    bindDirtyFlag(stagingRetentionDaysSpin_,
+                  qOverload<int>(&QSpinBox::valueChanged));
     bindDirtyFlag(stagingPrepTimeoutMsSpin_,
                   qOverload<int>(&QSpinBox::valueChanged));
     bindDirtyFlag(stagingConfirmItemsSpin_,
@@ -763,12 +932,26 @@ void SettingsDialog::onApply() {
     if (deleteSecretsOnRemove_)
         s.setValue("Sites/deleteSecretsOnRemove",
                    deleteSecretsOnRemove_->isChecked());
+    if (defaultProtocol_) {
+        const auto protocol = static_cast<openscp::Protocol>(
+            defaultProtocol_->currentData().toInt());
+        s.setValue("Protocol/defaultProtocol",
+                   QString::fromLatin1(openscp::protocolStorageName(protocol)));
+    }
     if (scpModeDefault_) {
         const auto mode = static_cast<openscp::ScpTransferMode>(
             scpModeDefault_->currentData().toInt());
         s.setValue("Protocol/scpTransferModeDefault",
                    QString::fromLatin1(
                        openscp::scpTransferModeStorageName(mode)));
+    }
+    if (defaultKnownHostsPolicy_) {
+        s.setValue("Security/defaultKnownHostsPolicy",
+                   defaultKnownHostsPolicy_->currentData().toInt());
+    }
+    if (defaultIntegrityPolicy_) {
+        s.setValue("Security/defaultTransferIntegrityPolicy",
+                   defaultIntegrityPolicy_->currentData().toInt());
     }
     if (knownHostsHashed_)
         s.setValue("Security/knownHostsHashed", knownHostsHashed_->isChecked());
@@ -777,6 +960,10 @@ void SettingsDialog::onApply() {
     if (terminalForceInteractiveLogin_) {
         s.setValue("Terminal/forceInteractiveLogin",
                    terminalForceInteractiveLogin_->isChecked());
+    }
+    if (terminalEnableSftpCliFallback_) {
+        s.setValue("Terminal/enableSftpCliFallback",
+                   terminalEnableSftpCliFallback_->isChecked());
     }
     if (noHostVerifyTtlMinSpin_)
         s.setValue("Security/noHostVerificationTtlMin",
@@ -794,10 +981,30 @@ void SettingsDialog::onApply() {
     if (globalSpeedDefaultSpin_)
         s.setValue("Transfer/globalSpeedKBps",
                    globalSpeedDefaultSpin_->value());
+    if (queueAutoClearModeDefault_) {
+        s.setValue("Transfer/defaultQueueAutoClearMode",
+                   queueAutoClearModeDefault_->currentData().toInt());
+    }
+    if (queueAutoClearMinutesDefaultSpin_) {
+        s.setValue("Transfer/defaultQueueAutoClearMinutes",
+                   queueAutoClearMinutesDefaultSpin_->value());
+    }
+    if (sessionHealthIntervalSecSpin_) {
+        s.setValue("Network/sessionHealthIntervalSec",
+                   sessionHealthIntervalSecSpin_->value());
+    }
+    if (remoteWriteabilityTtlMsSpin_) {
+        s.setValue("Network/remoteWriteabilityTtlMs",
+                   remoteWriteabilityTtlMsSpin_->value());
+    }
     if (stagingRootEdit_)
         s.setValue("Advanced/stagingRoot", stagingRootEdit_->text());
     if (autoCleanStaging_)
         s.setValue("Advanced/autoCleanStaging", autoCleanStaging_->isChecked());
+    if (stagingRetentionDaysSpin_) {
+        s.setValue("Advanced/stagingRetentionDays",
+                   stagingRetentionDaysSpin_->value());
+    }
     if (stagingPrepTimeoutMsSpin_)
         s.setValue("Advanced/stagingPrepTimeoutMs",
                    stagingPrepTimeoutMsSpin_->value());
@@ -849,6 +1056,14 @@ void SettingsDialog::updateApplyFromControls() {
     defaultDownload = QDir::cleanPath(defaultDownload);
     const bool deleteSecrets =
         s.value("Sites/deleteSecretsOnRemove", false).toBool();
+    const auto defaultProtocol = openscp::protocolFromStorageName(
+        s.value("Protocol/defaultProtocol",
+                QString::fromLatin1(
+                    openscp::protocolStorageName(openscp::Protocol::Sftp)))
+            .toString()
+            .trimmed()
+            .toLower()
+            .toStdString());
     const auto scpModeDefault = openscp::scpTransferModeFromStorageName(
         s.value("Protocol/scpTransferModeDefault",
                 QString::fromLatin1(openscp::scpTransferModeStorageName(
@@ -857,11 +1072,21 @@ void SettingsDialog::updateApplyFromControls() {
             .trimmed()
             .toLower()
             .toStdString());
+    const int defaultKnownHostsPolicy =
+        s.value("Security/defaultKnownHostsPolicy",
+                static_cast<int>(openscp::KnownHostsPolicy::Strict))
+            .toInt();
+    const int defaultIntegrityPolicy =
+        s.value("Security/defaultTransferIntegrityPolicy",
+                static_cast<int>(openscp::TransferIntegrityPolicy::Optional))
+            .toInt();
     const bool knownHashed =
         s.value("Security/knownHostsHashed", true).toBool();
     const bool fpHex = s.value("Security/fpHex", false).toBool();
     const bool terminalForceInteractiveLogin =
         s.value("Terminal/forceInteractiveLogin", false).toBool();
+    const bool terminalEnableSftpCliFallback =
+        s.value("Terminal/enableSftpCliFallback", true).toBool();
     const int noHostVerifyTtlMin =
         s.value("Security/noHostVerificationTtlMin", 15).toInt();
 // Only compare insecure fallback when available in this build/platform
@@ -873,12 +1098,26 @@ void SettingsDialog::updateApplyFromControls() {
     const int maxConcurrent = s.value("Transfer/maxConcurrent", 2).toInt();
     const int globalSpeedDefault =
         s.value("Transfer/globalSpeedKBps", 0).toInt();
+    const int queueAutoClearModeDefault =
+        qBound(kQueueAutoClearOff,
+               s.value("Transfer/defaultQueueAutoClearMode", kQueueAutoClearOff)
+                   .toInt(),
+               kQueueAutoClearFinished);
+    const int queueAutoClearMinutesDefault = qBound(
+        1, s.value("Transfer/defaultQueueAutoClearMinutes", 15).toInt(), 1440);
+    const int sessionHealthIntervalSec = qBound(
+        60, s.value("Network/sessionHealthIntervalSec", 600).toInt(), 86400);
+    const int remoteWriteabilityTtlMs = qBound(
+        1000, s.value("Network/remoteWriteabilityTtlMs", 15000).toInt(),
+        120000);
     const QString stagingRoot =
         s.value("Advanced/stagingRoot",
                 QDir::homePath() + "/Downloads/OpenSCP-Dragged")
             .toString();
     const bool autoCleanSt =
         s.value("Advanced/autoCleanStaging", true).toBool();
+    const int stagingRetentionDays = qBound(
+        1, s.value("Advanced/stagingRetentionDays", 7).toInt(), 365);
     const int stagingPrepTimeoutMs =
         s.value("Advanced/stagingPrepTimeoutMs", 2000).toInt();
     const int stagingConfirmItems =
@@ -908,17 +1147,32 @@ void SettingsDialog::updateApplyFromControls() {
     curDefaultDownload = QDir::cleanPath(curDefaultDownload);
     const bool curDeleteSecrets =
         deleteSecretsOnRemove_ && deleteSecretsOnRemove_->isChecked();
+    const auto curDefaultProtocol =
+        defaultProtocol_
+            ? static_cast<openscp::Protocol>(
+                  defaultProtocol_->currentData().toInt())
+            : defaultProtocol;
     const auto curScpModeDefault =
         scpModeDefault_
             ? static_cast<openscp::ScpTransferMode>(
                   scpModeDefault_->currentData().toInt())
             : scpModeDefault;
+    const int curDefaultKnownHostsPolicy =
+        defaultKnownHostsPolicy_
+            ? defaultKnownHostsPolicy_->currentData().toInt()
+            : defaultKnownHostsPolicy;
+    const int curDefaultIntegrityPolicy =
+        defaultIntegrityPolicy_ ? defaultIntegrityPolicy_->currentData().toInt()
+                                : defaultIntegrityPolicy;
     const bool curKnownHashed =
         knownHostsHashed_ && knownHostsHashed_->isChecked();
     const bool curFpHex = fpHex_ && fpHex_->isChecked();
     const bool curTerminalForceInteractiveLogin =
         terminalForceInteractiveLogin_ &&
         terminalForceInteractiveLogin_->isChecked();
+    const bool curTerminalEnableSftpCliFallback =
+        terminalEnableSftpCliFallback_ &&
+        terminalEnableSftpCliFallback_->isChecked();
     const int curNoHostVerifyTtlMin = noHostVerifyTtlMinSpin_
                                           ? noHostVerifyTtlMinSpin_->value()
                                           : noHostVerifyTtlMin;
@@ -933,10 +1187,29 @@ void SettingsDialog::updateApplyFromControls() {
     const int curGlobalSpeedDefault = globalSpeedDefaultSpin_
                                           ? globalSpeedDefaultSpin_->value()
                                           : globalSpeedDefault;
+    const int curQueueAutoClearModeDefault =
+        queueAutoClearModeDefault_
+            ? queueAutoClearModeDefault_->currentData().toInt()
+            : queueAutoClearModeDefault;
+    const int curQueueAutoClearMinutesDefault =
+        queueAutoClearMinutesDefaultSpin_
+            ? queueAutoClearMinutesDefaultSpin_->value()
+            : queueAutoClearMinutesDefault;
+    const int curSessionHealthIntervalSec = sessionHealthIntervalSecSpin_
+                                                ? sessionHealthIntervalSecSpin_
+                                                      ->value()
+                                                : sessionHealthIntervalSec;
+    const int curRemoteWriteabilityTtlMs = remoteWriteabilityTtlMsSpin_
+                                               ? remoteWriteabilityTtlMsSpin_
+                                                     ->value()
+                                               : remoteWriteabilityTtlMs;
     const QString curStagingRoot =
         stagingRootEdit_ ? stagingRootEdit_->text() : stagingRoot;
     const bool curAutoCleanSt =
         autoCleanStaging_ && autoCleanStaging_->isChecked();
+    const int curStagingRetentionDays =
+        stagingRetentionDaysSpin_ ? stagingRetentionDaysSpin_->value()
+                                  : stagingRetentionDays;
     const int curStagingPrepTimeoutMs = stagingPrepTimeoutMsSpin_
                                             ? stagingPrepTimeoutMsSpin_->value()
                                             : stagingPrepTimeoutMs;
@@ -956,9 +1229,13 @@ void SettingsDialog::updateApplyFromControls() {
         (curShowQueue != showQueue) ||
         (curDefaultDownload != defaultDownload) ||
         (curDeleteSecrets != deleteSecrets) ||
+        (curDefaultProtocol != defaultProtocol) ||
         (curScpModeDefault != scpModeDefault) ||
+        (curDefaultKnownHostsPolicy != defaultKnownHostsPolicy) ||
+        (curDefaultIntegrityPolicy != defaultIntegrityPolicy) ||
         (curKnownHashed != knownHashed) || (curFpHex != fpHex) ||
         (curTerminalForceInteractiveLogin != terminalForceInteractiveLogin) ||
+        (curTerminalEnableSftpCliFallback != terminalEnableSftpCliFallback) ||
         (curNoHostVerifyTtlMin != noHostVerifyTtlMin)
 #if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) &&       \
     !defined(HAVE_LIBSECRET) && !defined(OPEN_SCP_BUILD_SECURE_ONLY)
@@ -966,7 +1243,12 @@ void SettingsDialog::updateApplyFromControls() {
 #endif
         || (curMaxConcurrent != maxConcurrent) ||
         (curGlobalSpeedDefault != globalSpeedDefault) ||
+        (curQueueAutoClearModeDefault != queueAutoClearModeDefault) ||
+        (curQueueAutoClearMinutesDefault != queueAutoClearMinutesDefault) ||
+        (curSessionHealthIntervalSec != sessionHealthIntervalSec) ||
+        (curRemoteWriteabilityTtlMs != remoteWriteabilityTtlMs) ||
         (curStagingRoot != stagingRoot) || (curAutoCleanSt != autoCleanSt) ||
+        (curStagingRetentionDays != stagingRetentionDays) ||
         (curStagingPrepTimeoutMs != stagingPrepTimeoutMs) ||
         (curStagingConfirmItems != stagingConfirmItems) ||
         (curStagingConfirmMiB != stagingConfirmMiB) ||

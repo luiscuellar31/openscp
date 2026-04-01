@@ -46,6 +46,19 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         static_cast<int>(openscp::ScpTransferMode::ScpOnly));
     {
         QSettings s("OpenSCP", "OpenSCP");
+        const auto defaultProtocol = openscp::protocolFromStorageName(
+            s.value("Protocol/defaultProtocol",
+                    QString::fromLatin1(openscp::protocolStorageName(
+                        openscp::Protocol::Sftp)))
+                .toString()
+                .trimmed()
+                .toLower()
+                .toStdString());
+        const int pidx =
+            protocol_->findData(static_cast<int>(defaultProtocol));
+        if (pidx >= 0)
+            protocol_->setCurrentIndex(pidx);
+
         const auto defaultMode = openscp::scpTransferModeFromStorageName(
             s.value("Protocol/scpTransferModeDefault",
                     QString::fromLatin1(openscp::scpTransferModeStorageName(
@@ -298,6 +311,31 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         static_cast<int>(openscp::TransferIntegrityPolicy::Off));
     integrityPolicy_->setToolTip(tr(
         "Checksum verification for resume and final transfer validation."));
+    {
+        QSettings s("OpenSCP", "OpenSCP");
+        int khPolicyIdx = khPolicy_->findData(
+            s.value("Security/defaultKnownHostsPolicy",
+                    static_cast<int>(openscp::KnownHostsPolicy::Strict))
+                .toInt());
+        if (khPolicyIdx < 0) {
+            khPolicyIdx = khPolicy_->findData(
+                static_cast<int>(openscp::KnownHostsPolicy::Strict));
+        }
+        if (khPolicyIdx >= 0)
+            khPolicy_->setCurrentIndex(khPolicyIdx);
+
+        int integrityIdx = integrityPolicy_->findData(
+            s.value("Security/defaultTransferIntegrityPolicy",
+                    static_cast<int>(openscp::TransferIntegrityPolicy::Optional))
+                .toInt());
+        if (integrityIdx < 0) {
+            integrityIdx = integrityPolicy_->findData(
+                static_cast<int>(
+                    openscp::TransferIntegrityPolicy::Optional));
+        }
+        if (integrityIdx >= 0)
+            integrityPolicy_->setCurrentIndex(integrityIdx);
+    }
 
     lay->addRow(tr("known_hosts:"), khPathRow);
     lay->addRow(tr("Policy:"), khPolicy_);
@@ -353,7 +391,10 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
             protocol_->currentData().toInt());
         updateProtocolUi(protocol);
     });
-    updateProtocolUi(openscp::Protocol::Sftp);
+    const auto initialProtocol =
+        protocol_ ? static_cast<openscp::Protocol>(protocol_->currentData().toInt())
+                  : openscp::Protocol::Sftp;
+    updateProtocolUi(initialProtocol);
 
     auto updateJumpFields = [this, lay, jumpHostPortRow, jumpKeyPathRow]() {
         const bool showJumpRows =
