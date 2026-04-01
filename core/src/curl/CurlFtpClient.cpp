@@ -54,16 +54,15 @@ std::string buildFtpUrl(const SessionOptions &opt,
            path;
 }
 
-bool shouldFailConnectCode(CURLcode code) {
-    switch (code) {
-    case CURLE_OK:
-    case CURLE_REMOTE_ACCESS_DENIED:
-    case CURLE_QUOTE_ERROR:
-    case CURLE_FTP_COULDNT_RETR_FILE:
-        return false;
-    default:
-        return true;
+std::string formatCurlProbeFailure(CURLcode code, long responseCode) {
+    std::string msg =
+        std::string("FTP connect probe failed: ") + curl_easy_strerror(code);
+    if (responseCode > 0) {
+        msg += " (FTP response ";
+        msg += std::to_string(responseCode);
+        msg += ")";
     }
+    return msg;
 }
 
 bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
@@ -232,10 +231,11 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
     }
 
     const CURLcode rc = curl_easy_perform(curl);
+    long responseCode = 0;
+    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
     curl_easy_cleanup(curl);
-    if (shouldFailConnectCode(rc)) {
-        err = std::string("FTP connect probe failed: ") +
-              curl_easy_strerror(rc);
+    if (rc != CURLE_OK) {
+        err = formatCurlProbeFailure(rc, responseCode);
         return false;
     }
 
