@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 option(OPEN_SCP_ENABLE_MOCK "Build mock SFTP client" OFF)
 option(OPEN_SCP_ENABLE_FTP_BACKEND
-       "Build FTP backend module (requires libcurl development files)" ON)
+       "Build FTP/FTPS backend module (requires libcurl development files)" ON)
 
 set(OPEN_SCP_CORE_SRCS
     src/libssh2/ClientFactory.cpp      # protocol -> backend factory
@@ -15,17 +15,17 @@ if (OPEN_SCP_ENABLE_FTP_BACKEND)
     find_package(CURL QUIET)
     if (CURL_FOUND)
         list(APPEND OPEN_SCP_CORE_SRCS
-            src/curl/CurlFtpClient.cpp        # FTP backend module
+            src/curl/CurlFtpClient.cpp        # FTP/FTPS backend module
         )
         set(OPEN_SCP_HAS_CURL_FTP 1)
-        message(STATUS "OpenSCP: FTP backend enabled (libcurl found)")
+        message(STATUS "OpenSCP: FTP/FTPS backend enabled (libcurl found)")
     else()
         message(WARNING
-            "OpenSCP: libcurl not found; FTP backend disabled. "
-            "Install curl dev package to enable Protocol::Ftp backend.")
+            "OpenSCP: libcurl not found; FTP/FTPS backend disabled. "
+            "Install curl dev package to enable Protocol::Ftp/Protocol::Ftps backends.")
     endif()
 else()
-    message(STATUS "OpenSCP: FTP backend disabled by OPEN_SCP_ENABLE_FTP_BACKEND=OFF")
+    message(STATUS "OpenSCP: FTP/FTPS backend disabled by OPEN_SCP_ENABLE_FTP_BACKEND=OFF")
 endif()
 
 if (OPEN_SCP_ENABLE_MOCK)
@@ -63,7 +63,7 @@ if (OpenSSL_FOUND)
     endif()
 endif()
 
-# libcurl (FTP backend, optional)
+# libcurl (FTP/FTPS backend, optional)
 if (OPEN_SCP_HAS_CURL_FTP)
     target_link_libraries(openscp_core PRIVATE CURL::libcurl)
 endif()

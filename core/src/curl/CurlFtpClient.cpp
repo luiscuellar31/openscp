@@ -1,4 +1,4 @@
-// FTP backend implementation based on libcurl.
+// FTP/FTPS backend implementation based on libcurl.
 #include "openscp/CurlFtpClient.hpp"
 
 #include <curl/curl.h>
@@ -25,8 +25,16 @@ bool ensureCurlInitialized(std::string &err) {
     return true;
 }
 
+bool isFtpFamilyProtocol(Protocol protocol) {
+    return protocol == Protocol::Ftp || protocol == Protocol::Ftps;
+}
+
+const char *protocolLabel(Protocol protocol) {
+    return protocol == Protocol::Ftps ? "FTPS" : "FTP";
+}
+
 bool unsupportedFtpOperation(const char *what, std::string &err) {
-    err = std::string("FTP backend does not support ") + what + ".";
+    err = std::string("FTP/FTPS backend does not support ") + what + ".";
     return false;
 }
 
@@ -46,19 +54,32 @@ std::string normalizeFtpHostAuthority(const std::string &host) {
     return host;
 }
 
+bool useImplicitFtps(const SessionOptions &opt) {
+    return opt.protocol == Protocol::Ftps &&
+           opt.port == defaultPortForProtocol(Protocol::Ftps);
+}
+
+const char *ftpUrlScheme(const SessionOptions &opt) {
+    if (opt.protocol != Protocol::Ftps)
+        return "ftp";
+    return useImplicitFtps(opt) ? "ftps" : "ftp";
+}
+
 std::string buildFtpUrl(const SessionOptions &opt,
                         const std::string &remotePath) {
     const std::string host = normalizeFtpHostAuthority(opt.host);
     const std::string path = normalizeRemotePath(remotePath);
-    return std::string("ftp://") + host + ":" + std::to_string(opt.port) +
+    return std::string(ftpUrlScheme(opt)) + "://" + host + ":" +
+           std::to_string(opt.port) +
            path;
 }
 
-std::string formatCurlProbeFailure(CURLcode code, long responseCode) {
-    std::string msg =
-        std::string("FTP connect probe failed: ") + curl_easy_strerror(code);
+std::string formatCurlProbeFailure(Protocol protocol, CURLcode code,
+                                   long responseCode) {
+    std::string msg = std::string(protocolLabel(protocol)) +
+                      " connect probe failed: " + curl_easy_strerror(code);
     if (responseCode > 0) {
-        msg += " (FTP response ";
+        msg += " (server response ";
         msg += std::to_string(responseCode);
         msg += ")";
     }
@@ -89,6 +110,37 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
         curl_easy_setopt(curl, CURLOPT_PASSWORD, password.c_str()) != CURLE_OK) {
         err = "Could not set FTP credentials.";
         return false;
+    }
+
+    if (opt.protocol == Protocol::Ftps) {
+        if (curl_easy_setopt(curl, CURLOPT_USE_SSL, CURLUSESSL_ALL) != CURLE_OK ||
+            curl_easy_setopt(curl, CURLOPT_FTPSSLAUTH, CURLFTPAUTH_TLS) !=
+                CURLE_OK) {
+            err = "Could not configure FTPS TLS mode.";
+            return false;
+        }
+        const long verifyPeer = opt.ftps_verify_peer ? 1L : 0L;
+        const long verifyHost = opt.ftps_verify_peer ? 2L : 0L;
+        if (curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, verifyPeer) !=
+                CURLE_OK ||
+            curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, verifyHost) !=
+                CURLE_OK) {
+            err = "Could not configure FTPS certificate verification.";
+            return false;
+        }
+        if (opt.ftps_ca_cert_path && !opt.ftps_ca_cert_path->empty()) {
+            if (curl_easy_setopt(curl, CURLOPT_CAINFO,
+                                 opt.ftps_ca_cert_path->c_str()) != CURLE_OK) {
+                err = "Could not configure FTPS CA certificate path.";
+                return false;
+            }
+        }
+    } else {
+        if (curl_easy_setopt(curl, CURLOPT_USE_SSL, CURLUSESSL_NONE) !=
+            CURLE_OK) {
+            err = "Could not configure FTP TLS mode.";
+            return false;
+        }
     }
 
     if (opt.proxy_type != ProxyType::None) {
@@ -178,6 +230,13 @@ int transferProgressCallback(void *userdata, curl_off_t dltotal, curl_off_t dlno
 
 } // namespace
 
+CurlFtpClient::CurlFtpClient(Protocol protocol) : protocol_(protocol) {
+    if (!isFtpFamilyProtocol(protocol_))
+        protocol_ = Protocol::Ftp;
+    options_.protocol = protocol_;
+    options_.port = defaultPortForProtocol(protocol_);
+}
+
 bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
     err.clear();
     interrupted_.store(false);
@@ -185,21 +244,27 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
         err = "Host is required.";
         return false;
     }
-    if (opt.protocol != Protocol::Ftp) {
-        err = "CurlFtpClient only supports FTP protocol.";
+    if (!isFtpFamilyProtocol(opt.protocol)) {
+        err = "CurlFtpClient only supports FTP and FTPS protocols.";
+        return false;
+    }
+    if (opt.protocol != protocol_) {
+        err = std::string("CurlFtpClient protocol mismatch: expected ") +
+              protocolLabel(protocol_) + ", got " + protocolLabel(opt.protocol) +
+              ".";
         return false;
     }
     if (opt.jump_host.has_value() && !opt.jump_host->empty()) {
-        err = "FTP backend does not support SSH jump host.";
+        err = "FTP/FTPS backend does not support SSH jump host.";
         return false;
     }
     if (!ensureCurlInitialized(err))
         return false;
 
     SessionOptions normalized = opt;
-    normalized.protocol = Protocol::Ftp;
+    normalized.protocol = protocol_;
     if (normalized.port == 0)
-        normalized.port = defaultPortForProtocol(Protocol::Ftp);
+        normalized.port = defaultPortForProtocol(protocol_);
 
     CURL *curl = curl_easy_init();
     if (!curl) {
@@ -235,7 +300,7 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
     curl_easy_cleanup(curl);
     if (rc != CURLE_OK) {
-        err = formatCurlProbeFailure(rc, responseCode);
+        err = formatCurlProbeFailure(normalized.protocol, rc, responseCode);
         return false;
     }
 
@@ -252,8 +317,8 @@ void CurlFtpClient::disconnect() {
     std::lock_guard<std::mutex> lk(stateMutex_);
     connected_ = false;
     options_ = SessionOptions{};
-    options_.protocol = Protocol::Ftp;
-    options_.port = defaultPortForProtocol(Protocol::Ftp);
+    options_.protocol = protocol_;
+    options_.port = defaultPortForProtocol(protocol_);
 }
 
 void CurlFtpClient::interrupt() { interrupted_.store(true); }
@@ -276,7 +341,8 @@ bool CurlFtpClient::get(
     std::function<bool()> shouldCancel, bool resume) {
     err.clear();
     if (resume) {
-        err = "FTP backend does not support resume.";
+        err = std::string(protocolLabel(protocol_)) +
+              " backend does not support resume.";
         return false;
     }
 
@@ -341,7 +407,8 @@ bool CurlFtpClient::get(
         return false;
     }
     if (rc != CURLE_OK) {
-        err = std::string("FTP download failed: ") + curl_easy_strerror(rc);
+        err = std::string(protocolLabel(opt.protocol)) +
+              " download failed: " + curl_easy_strerror(rc);
         return false;
     }
     return true;
@@ -353,7 +420,8 @@ bool CurlFtpClient::put(
     std::function<bool()> shouldCancel, bool resume) {
     err.clear();
     if (resume) {
-        err = "FTP backend does not support resume.";
+        err = std::string(protocolLabel(protocol_)) +
+              " backend does not support resume.";
         return false;
     }
 
@@ -431,7 +499,8 @@ bool CurlFtpClient::put(
         return false;
     }
     if (rc != CURLE_OK) {
-        err = std::string("FTP upload failed: ") + curl_easy_strerror(rc);
+        err = std::string(protocolLabel(opt.protocol)) +
+              " upload failed: " + curl_easy_strerror(rc);
         return false;
     }
     return true;
@@ -502,7 +571,9 @@ bool CurlFtpClient::rename(const std::string &from, const std::string &to,
 
 std::unique_ptr<SftpClient>
 CurlFtpClient::newConnectionLike(const SessionOptions &opt, std::string &err) {
-    auto ptr = std::make_unique<CurlFtpClient>();
+    const Protocol nextProtocol =
+        isFtpFamilyProtocol(opt.protocol) ? opt.protocol : protocol_;
+    auto ptr = std::make_unique<CurlFtpClient>(nextProtocol);
     if (!ptr->connect(opt, err))
         return nullptr;
     return ptr;

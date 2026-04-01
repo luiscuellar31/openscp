@@ -1,4 +1,4 @@
-// FTP backend using libcurl for basic file transfers.
+// FTP/FTPS backend using libcurl for basic file transfers.
 #pragma once
 #include "SftpClient.hpp"
 
@@ -9,12 +9,12 @@ namespace openscp {
 
 class CurlFtpClient : public SftpClient {
     public:
-    CurlFtpClient() = default;
+    explicit CurlFtpClient(Protocol protocol = Protocol::Ftp);
     ~CurlFtpClient() override = default;
 
-    Protocol protocol() const override { return Protocol::Ftp; }
+    Protocol protocol() const override { return protocol_; }
     ProtocolCapabilities capabilities() const override {
-        return capabilitiesForProtocol(Protocol::Ftp);
+        return capabilitiesForProtocol(protocol_);
     }
 
     bool connect(const SessionOptions &opt, std::string &err) override;
@@ -64,6 +64,7 @@ class CurlFtpClient : public SftpClient {
                                                   std::string &err) override;
 
     private:
+    Protocol protocol_ = Protocol::Ftp;
     mutable std::mutex stateMutex_;
     SessionOptions options_{};
     bool connected_ = false;

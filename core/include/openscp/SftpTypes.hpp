@@ -172,6 +172,12 @@ inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
 #endif
         return caps;
     case Protocol::Ftps:
+#if OPEN_SCP_HAS_CURL_FTP
+        caps.implemented = true;
+        caps.supports_file_transfers = true;
+        caps.supports_proxy = true;
+#endif
+        return caps;
     case Protocol::WebDav:
         return caps;
     }
@@ -223,6 +229,10 @@ struct SessionOptions {
     // Transfer integrity checks for resume and final content verification.
     TransferIntegrityPolicy transfer_integrity_policy =
         TransferIntegrityPolicy::Optional;
+
+    // FTPS security
+    bool ftps_verify_peer = true;
+    std::optional<std::string> ftps_ca_cert_path;
 
     // Optional TCP proxy tunnel for SSH transport.
     ProxyType proxy_type = ProxyType::None;
