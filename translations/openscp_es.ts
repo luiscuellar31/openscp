@@ -2095,8 +2095,48 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
         <translation>Límite global por defecto:</translation>
     </message>
     <message>
+        <source>Off</source>
+        <translation>Desactivado</translation>
+    </message>
+    <message>
+        <source>Completed</source>
+        <translation>Completadas</translation>
+    </message>
+    <message>
+        <source>Failed/Canceled</source>
+        <translation>Fallidas/Canceladas</translation>
+    </message>
+    <message>
+        <source>All finished</source>
+        <translation>Todas finalizadas</translation>
+    </message>
+    <message>
+        <source>Queue auto-clear default:</source>
+        <translation>Auto-limpieza de cola por defecto:</translation>
+    </message>
+    <message>
+        <source>Queue auto-clear after:</source>
+        <translation>Auto-limpiar cola después de:</translation>
+    </message>
+    <message>
         <source>Sites</source>
         <translation>Sitios</translation>
+    </message>
+    <message>
+        <source>SFTP</source>
+        <translation>SFTP</translation>
+    </message>
+    <message>
+        <source>SCP</source>
+        <translation>SCP</translation>
+    </message>
+    <message>
+        <source>FTP</source>
+        <translation>FTP</translation>
+    </message>
+    <message>
+        <source>Default protocol:</source>
+        <translation>Protocolo predeterminado:</translation>
     </message>
     <message>
         <source>When deleting a site, also remove its stored credentials.</source>
@@ -2119,6 +2159,38 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
         <translation>Seguridad</translation>
     </message>
     <message>
+        <source>Strict</source>
+        <translation>Estricta</translation>
+    </message>
+    <message>
+        <source>Accept new (TOFU)</source>
+        <translation>Aceptar nuevas (TOFU)</translation>
+    </message>
+    <message>
+        <source>No verification (double confirmation, expires in 15 min)</source>
+        <translation>Sin verificación (doble confirmación, expira en 15 min)</translation>
+    </message>
+    <message>
+        <source>Default known_hosts policy:</source>
+        <translation>Política known_hosts predeterminada:</translation>
+    </message>
+    <message>
+        <source>Optional (recommended)</source>
+        <translation>Opcional (recomendado)</translation>
+    </message>
+    <message>
+        <source>Required (strict)</source>
+        <translation>Requerida (estricta)</translation>
+    </message>
+    <message>
+        <source>Off (not recommended)</source>
+        <translation>Desactivada (no recomendado)</translation>
+    </message>
+    <message>
+        <source>Default integrity policy:</source>
+        <translation>Política de integridad predeterminada:</translation>
+    </message>
+    <message>
         <source>Hash hostnames in known_hosts (recommended).</source>
         <translation>Guardar hostnames en known_hosts como hash (recomendado).</translation>
     </message>
@@ -2129,6 +2201,10 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
     <message>
         <source>Force interactive login when using Open in terminal (disable key/agent auth).</source>
         <translation>Forzar inicio de sesión interactivo al usar Open in terminal (desactiva autenticación por clave/agente).</translation>
+    </message>
+    <message>
+        <source>Enable automatic SFTP CLI fallback when using Open in terminal.</source>
+        <translation>Activar fallback automático a CLI SFTP al usar Open in terminal.</translation>
     </message>
     <message>
         <source>Use stricter Keychain accessibility (this device only).</source>
@@ -2151,6 +2227,22 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
         <translation>TTL sin verificación:</translation>
     </message>
     <message>
+        <source>Network</source>
+        <translation>Red</translation>
+    </message>
+    <message>
+        <source> s</source>
+        <translation> s</translation>
+    </message>
+    <message>
+        <source>Session health check interval:</source>
+        <translation>Intervalo de verificación de sesión:</translation>
+    </message>
+    <message>
+        <source>Remote writeability cache TTL:</source>
+        <translation>TTL de caché de escritura remota:</translation>
+    </message>
+    <message>
         <source>Staging and drag-out</source>
         <translation>Staging y arrastre</translation>
     </message>
@@ -2165,6 +2257,14 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
     <message>
         <source>Auto-clean staging after successful drag-out (recommended).</source>
         <translation>Eliminar automáticamente la carpeta staging tras completar el arrastre (recomendado).</translation>
+    </message>
+    <message>
+        <source> days</source>
+        <translation> días</translation>
+    </message>
+    <message>
+        <source>Startup cleanup retention:</source>
+        <translation>Retención de limpieza al iniciar:</translation>
     </message>
     <message>
         <source> ms</source>
