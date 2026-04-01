@@ -70,5 +70,6 @@ class ConnectionDialog : public QDialog {
     QSize directModeSize_;
     bool hasDirectModeSize_ = false;
     bool proxyRowsVisible_ = false;
+    openscp::ProxyType lastProxyType_ = openscp::ProxyType::None;
     bool jumpRowsVisible_ = false;
 };

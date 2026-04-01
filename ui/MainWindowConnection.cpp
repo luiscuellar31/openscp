@@ -170,15 +170,7 @@ static QString normalizedIdentityJumpUser(
 static std::uint16_t defaultJumpPort() { return 22; }
 
 static std::uint16_t defaultProxyPort(openscp::ProxyType type) {
-    switch (type) {
-    case openscp::ProxyType::Socks5:
-        return 1080;
-    case openscp::ProxyType::HttpConnect:
-        return 8080;
-    case openscp::ProxyType::None:
-        break;
-    }
-    return 0;
+    return openscp::defaultPortForProxyType(type);
 }
 
 static QString protocolDisplayLabel(openscp::Protocol protocol) {
@@ -302,7 +294,7 @@ static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool *needsSave) {
         const QString kp = s.value("keyPath").toString();
         if (!kp.isEmpty())
             e.opt.private_key_path = kp.toStdString();
-        e.opt.proxy_type = static_cast<openscp::ProxyType>(
+        e.opt.proxy_type = openscp::proxyTypeFromStorageValue(
             s.value("proxyType", static_cast<int>(openscp::ProxyType::None))
                 .toInt());
         e.opt.proxy_host = s.value("proxyHost").toString().trimmed().toStdString();

@@ -106,7 +106,8 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     keyPass_->setPlaceholderText(tr("optional"));
     proxyHost_->setPlaceholderText(tr("proxy.example.com"));
     proxyPort_->setRange(1, 65535);
-    proxyPort_->setValue(1080);
+    proxyPort_->setValue(static_cast<int>(
+        openscp::defaultPortForProxyType(openscp::ProxyType::Socks5)));
     proxyPort_->setFixedWidth(110);
     proxyUser_->setPlaceholderText(tr("optional"));
     proxyPass_->setPlaceholderText(tr("optional"));
@@ -370,9 +371,13 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     lay->addRow(tr("FTPS CA bundle:"), ftpsCaPathRow_);
 
     auto updateProxyFields = [this, lay, proxyHostPortRow, proxyPassRow]() {
-        const auto type = static_cast<openscp::ProxyType>(
-            proxyType_->currentData().toInt());
+        const auto type = openscp::normalizeProxyType(
+            static_cast<openscp::ProxyType>(proxyType_->currentData().toInt()));
         const bool showProxyRows = (type != openscp::ProxyType::None);
+        const std::uint16_t defaultPortForType =
+            openscp::defaultPortForProxyType(type);
+        const std::uint16_t previousDefaultPort =
+            openscp::defaultPortForProxyType(lastProxyType_);
         if (showProxyRows && !proxyRowsVisible_) {
             directModeSize_ = size();
             hasDirectModeSize_ = true;
@@ -384,8 +389,23 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         proxyPort_->setEnabled(showProxyRows);
         proxyUser_->setEnabled(showProxyRows);
         proxyPass_->setEnabled(showProxyRows);
-        if (!showProxyRows)
-            proxyPort_->setValue(1080);
+        if (!showProxyRows) {
+            proxyPort_->setValue(static_cast<int>(
+                openscp::defaultPortForProxyType(openscp::ProxyType::Socks5)));
+        } else {
+            const int currentPort = proxyPort_->value();
+            const bool isFirstProxySelection =
+                (lastProxyType_ == openscp::ProxyType::None);
+            const bool usesPreviousDefault =
+                (previousDefaultPort != 0) &&
+                (currentPort == static_cast<int>(previousDefaultPort));
+            if (defaultPortForType != 0 &&
+                (isFirstProxySelection || usesPreviousDefault) &&
+                currentPort != static_cast<int>(defaultPortForType)) {
+                proxyPort_->setValue(static_cast<int>(defaultPortForType));
+            }
+        }
+        lastProxyType_ = type;
         const bool visibilityChanged = (showProxyRows != proxyRowsVisible_);
         proxyRowsVisible_ = showProxyRows;
         if (visibilityChanged) {
@@ -402,8 +422,9 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     };
     connect(proxyType_, &QComboBox::currentIndexChanged, this,
             [this, updateProxyFields](int) {
-                const auto type = static_cast<openscp::ProxyType>(
-                    proxyType_->currentData().toInt());
+                const auto type = openscp::normalizeProxyType(
+                    static_cast<openscp::ProxyType>(
+                        proxyType_->currentData().toInt()));
                 if (type != openscp::ProxyType::None && jumpEnabled_ &&
                     jumpEnabled_->isChecked()) {
                     jumpEnabled_->setChecked(false);
@@ -581,8 +602,8 @@ openscp::SessionOptions ConnectionDialog::options() const {
         o.ftps_ca_cert_path = ftpsCaPath_->text().trimmed().toStdString();
     }
     if (proxyType_) {
-        o.proxy_type =
-            static_cast<openscp::ProxyType>(proxyType_->currentData().toInt());
+        o.proxy_type = openscp::normalizeProxyType(
+            static_cast<openscp::ProxyType>(proxyType_->currentData().toInt()));
     }
     const bool useJump = jumpEnabled_ && jumpEnabled_->isEnabled() &&
                          jumpEnabled_->isChecked() &&
@@ -673,7 +694,8 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &o) {
     const bool hasJump =
         jumpSupportedInUi && o.jump_host.has_value() && !o.jump_host->empty();
     const openscp::ProxyType effectiveProxyType =
-        hasJump ? openscp::ProxyType::None : o.proxy_type;
+        hasJump ? openscp::ProxyType::None
+                : openscp::normalizeProxyType(o.proxy_type);
     if (proxyType_) {
         int i = proxyType_->findData(static_cast<int>(effectiveProxyType));
         if (i >= 0)
@@ -681,8 +703,14 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &o) {
     }
     if (effectiveProxyType != openscp::ProxyType::None && !o.proxy_host.empty())
         proxyHost_->setText(QString::fromStdString(o.proxy_host));
-    if (effectiveProxyType != openscp::ProxyType::None && o.proxy_port != 0)
-        proxyPort_->setValue(static_cast<int>(o.proxy_port));
+    if (effectiveProxyType != openscp::ProxyType::None) {
+        const std::uint16_t effectiveProxyPort =
+            (o.proxy_port != 0)
+                ? o.proxy_port
+                : openscp::defaultPortForProxyType(effectiveProxyType);
+        if (effectiveProxyPort != 0)
+            proxyPort_->setValue(static_cast<int>(effectiveProxyPort));
+    }
     if (effectiveProxyType != openscp::ProxyType::None && o.proxy_username &&
         !o.proxy_username->empty())
         proxyUser_->setText(QString::fromStdString(*o.proxy_username));
