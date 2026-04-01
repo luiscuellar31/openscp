@@ -64,6 +64,8 @@ void test_session_defaults(TestContext &t) {
     openscp::SessionOptions o;
     t.check(o.protocol == openscp::Protocol::Sftp,
             "default protocol should be SFTP");
+    t.check(o.scp_transfer_mode == openscp::ScpTransferMode::Auto,
+            "default SCP transfer mode should be Auto");
     t.check(o.port == openscp::defaultPortForProtocol(openscp::Protocol::Sftp),
             "default port should match the SFTP default");
     t.check(o.known_hosts_policy == openscp::KnownHostsPolicy::Strict,
@@ -94,6 +96,16 @@ void test_protocol_helpers(TestContext &t) {
     t.check(std::string(openscp::protocolDisplayName(openscp::Protocol::Scp)) ==
                 "SCP",
             "protocolDisplayName should expose SCP label");
+    t.check(openscp::scpTransferModeFromStorageName("auto") ==
+                openscp::ScpTransferMode::Auto,
+            "scpTransferModeFromStorageName should parse auto");
+    t.check(openscp::scpTransferModeFromStorageName("SCP-ONLY") ==
+                openscp::ScpTransferMode::ScpOnly,
+            "scpTransferModeFromStorageName should parse scp-only");
+    t.check(
+        std::string(openscp::scpTransferModeStorageName(
+            openscp::ScpTransferMode::ScpOnly)) == "scp-only",
+        "scpTransferModeStorageName should serialize scp-only");
 
     const auto sftpCaps =
         openscp::capabilitiesForProtocol(openscp::Protocol::Sftp);
