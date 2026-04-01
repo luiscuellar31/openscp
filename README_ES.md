@@ -134,6 +134,7 @@ open build/OpenSCP.app
 
 - Qt `6.x` (probado con `6.8.3`)
 - libssh2 (recomendado OpenSSL 3)
+- libcurl (requerido para el backend FTP)
 - CMake `3.22+`
 - Compilador C++20
 
@@ -239,7 +240,7 @@ Detalles de build y empaquetado Linux (AppImage, Snap, Flatpak): [assets/linux/R
 
 ## Creditos y Licencias
 
-- libssh2, OpenSSL, zlib y Qt pertenecen a sus respectivos autores.
+- libssh2, libcurl, OpenSSL, zlib y Qt pertenecen a sus respectivos autores.
 - Textos de licencia: [docs/credits/LICENSES/](docs/credits/LICENSES/)
 - Materiales Qt (LGPL): [docs/credits](docs/credits)
 

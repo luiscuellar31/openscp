@@ -133,6 +133,7 @@ open build/OpenSCP.app
 
 - Qt `6.x` (tested with `6.8.3`)
 - libssh2 (OpenSSL 3 recommended)
+- libcurl (required for FTP backend)
 - CMake `3.22+`
 - C++20 compiler
 
@@ -238,7 +239,7 @@ Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/READM
 
 ## Credits and Licenses
 
-- libssh2, OpenSSL, zlib, and Qt are owned by their respective authors.
+- libssh2, libcurl, OpenSSL, zlib, and Qt are owned by their respective authors.
 - License texts: [docs/credits/LICENSES/](docs/credits/LICENSES/)
 - Qt (LGPL) materials: [docs/credits](docs/credits)
 
