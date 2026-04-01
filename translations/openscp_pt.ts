@@ -281,6 +281,18 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
         <translation>Protocolo:</translation>
     </message>
     <message>
+        <source>SCP mode:</source>
+        <translation>Modo SCP:</translation>
+    </message>
+    <message>
+        <source>Automatic (SCP with SFTP fallback)</source>
+        <translation>Automático (SCP com fallback para SFTP)</translation>
+    </message>
+    <message>
+        <source>SCP only (disable SFTP fallback)</source>
+        <translation>Somente SCP (desativar fallback para SFTP)</translation>
+    </message>
+    <message>
         <source>scp.example.com</source>
         <translation>scp.example.com</translation>
     </message>
@@ -2089,6 +2101,18 @@ O OpenSCP vai desconectar para evitar operações inconsistentes.
     <message>
         <source>When deleting a site, also remove its stored credentials.</source>
         <translation>Ao excluir um site, excluir também suas credenciais salvas.</translation>
+    </message>
+    <message>
+        <source>Default SCP mode:</source>
+        <translation>Modo SCP padrão:</translation>
+    </message>
+    <message>
+        <source>Automatic (SCP with SFTP fallback)</source>
+        <translation>Automático (SCP com fallback para SFTP)</translation>
+    </message>
+    <message>
+        <source>SCP only (disable SFTP fallback)</source>
+        <translation>Somente SCP (desativar fallback para SFTP)</translation>
     </message>
     <message>
         <source>Security</source>
