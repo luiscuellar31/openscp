@@ -73,20 +73,12 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
 <context>
     <name>ConnectionDialog</name>
     <message>
-        <source>Connect (SFTP)</source>
-        <translation type="vanished">Conectar (SFTP)</translation>
-    </message>
-    <message>
         <source>My server</source>
         <translation>Meu servidor</translation>
     </message>
     <message>
         <source>sftp.example.com</source>
         <translation>sftp.exemplo.com</translation>
-    </message>
-    <message>
-        <source>SSH/SFTP port</source>
-        <translation type="vanished">Porta SSH/SFTP</translation>
     </message>
     <message>
         <source>user</source>
@@ -455,10 +447,6 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
         <translation>Faltam informações de host ou usuário na sessão.</translation>
     </message>
     <message>
-        <source>Terminal mode is not available for SOCKS5/HTTP proxy transport sessions.</source>
-        <translation type="vanished">O modo terminal não está disponível para sessões com proxy SOCKS5/HTTP.</translation>
-    </message>
-    <message>
         <source>Could not locate osascript.</source>
         <translation>Não foi possível localizar o osascript.</translation>
     </message>
@@ -531,25 +519,9 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
         <translation>O painel direito deve estar conectado como remoto.</translation>
     </message>
     <message>
-        <source>No active remote panel is available.</source>
-        <translation type="vanished">Nenhum painel remoto ativo está disponível.</translation>
-    </message>
-    <message>
-        <source>Could not prepare an SSH terminal command.
-%1</source>
-        <translation type="vanished">Não foi possível preparar um comando SSH de terminal.
-%1</translation>
-    </message>
-    <message>
         <source>Could not prepare the terminal command.
 %1</source>
         <translation>Não foi possível preparar o comando de terminal.
-%1</translation>
-    </message>
-    <message>
-        <source>Could not launch the system terminal.
-%1</source>
-        <translation type="vanished">Não foi possível abrir o terminal do sistema.
 %1</translation>
     </message>
     <message>
@@ -577,18 +549,6 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
 %1</source>
         <translation>Não foi possível abrir um terminal remoto.
 %1</translation>
-    </message>
-    <message>
-        <source>Could not open a remote terminal.
-Primary mode: %1
-Fallback mode: %2</source>
-        <translation type="vanished">Não foi possível abrir um terminal remoto.
-Modo principal: %1
-Modo fallback: %2</translation>
-    </message>
-    <message>
-        <source>Opened terminal with basic SSH command. Enter credentials manually if needed.</source>
-        <translation type="vanished">Terminal aberto com comando SSH básico. Informe credenciais manualmente se necessário.</translation>
     </message>
     <message>
         <source>This protocol works in transfer-only mode.
@@ -735,10 +695,6 @@ Correspondências: %2</translation>
         <translation>Selecione itens para baixar</translation>
     </message>
     <message>
-        <source>Connect (SFTP)</source>
-        <translation type="vanished">Conectar (SFTP)</translation>
-    </message>
-    <message>
         <source>Disconnect</source>
         <translation>Desconectar</translation>
     </message>
@@ -865,14 +821,6 @@ Correspondências: %2</translation>
     <message>
         <source>Right: </source>
         <translation>Direita: </translation>
-    </message>
-    <message>
-        <source>SFTP</source>
-        <translation type="vanished">SFTP</translation>
-    </message>
-    <message>
-        <source>No active SFTP session.</source>
-        <translation type="vanished">Nenhuma sessão SFTP ativa.</translation>
     </message>
     <message>
         <source>No selection available.</source>
@@ -1333,10 +1281,6 @@ Impressão digital: %3</translation>
         <translation>Já há uma conexão em andamento</translation>
     </message>
     <message>
-        <source>An active SFTP session already exists</source>
-        <translation type="vanished">Já existe uma sessão SFTP ativa</translation>
-    </message>
-    <message>
         <source>Connection canceled: no-verification policy not confirmed</source>
         <translation>Conexão cancelada: política sem verificação não confirmada</translation>
     </message>
@@ -1457,14 +1401,6 @@ Impressão digital: %3</translation>
     <message>
         <source>Not available in remote mode</source>
         <translation>Indisponível no modo remoto</translation>
-    </message>
-    <message>
-        <source>Connected (SFTP) to </source>
-        <translation type="vanished">Conectado (SFTP) a </translation>
-    </message>
-    <message>
-        <source>OpenSCP — local/remote (SFTP)</source>
-        <translation type="vanished">OpenSCP — local/remoto (SFTP)</translation>
     </message>
     <message>
         <source>Moving selected items...</source>
@@ -1647,14 +1583,6 @@ Edite o site e mantenha apenas um transporte.</translation>
     <message>
         <source>Recovered remote session while trying to %1</source>
         <translation>Sessão remota recuperada ao tentar %1</translation>
-    </message>
-    <message>
-        <source>Invalid operation callback</source>
-        <translation type="vanished">Callback de operação inválido</translation>
-    </message>
-    <message>
-        <source>No active remote session</source>
-        <translation type="vanished">Não há sessão remota ativa</translation>
     </message>
     <message>
         <source>The remote session failed while trying to %1.
@@ -2004,10 +1932,6 @@ O OpenSCP vai desconectar para evitar operações inconsistentes.
         <translation>Enumeração parcial com erros</translation>
     </message>
     <message>
-        <source>No SFTP client available</source>
-        <translation type="vanished">Nenhum cliente SFTP disponível</translation>
-    </message>
-    <message>
         <source>Missing session options for remote listing</source>
         <translation>Faltam opções de sessão para a listagem remota</translation>
     </message>
@@ -2117,10 +2041,6 @@ O OpenSCP vai desconectar para evitar operações inconsistentes.
     <message>
         <source>Default layout will be used the next time the app starts.</source>
         <translation>O layout padrão será usado na próxima vez que o aplicativo iniciar.</translation>
-    </message>
-    <message>
-        <source>Advanced</source>
-        <translation type="vanished">Avançado</translation>
     </message>
     <message>
         <source>Transfers</source>
@@ -2407,6 +2327,10 @@ Deseja ativar a alternativa insegura mesmo assim?</translation>
     <message>
         <source>Portuguese</source>
         <translation>Português</translation>
+    </message>
+    <message>
+        <source>FTPS</source>
+        <translation>FTPS</translation>
     </message>
 </context>
 <context>
