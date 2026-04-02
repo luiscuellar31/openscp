@@ -90,12 +90,12 @@ QString buildDiagnosticsText() {
                           "Build type: %5\n"
                           "Git commit: %6\n"
                           "Repository: %7")
-        .arg(QString::fromUtf8(OPEN_SCP_APP_VERSION),
+        .arg(QString::fromUtf8(OPENSCP_APP_VERSION),
              QString::fromUtf8(qVersion()), QSysInfo::prettyProductName(),
              QSysInfo::currentCpuArchitecture(),
-             QString::fromUtf8(OPEN_SCP_BUILD_TYPE),
-             QString::fromUtf8(OPEN_SCP_GIT_COMMIT),
-             QString::fromUtf8(OPEN_SCP_REPOSITORY_URL));
+             QString::fromUtf8(OPENSCP_BUILD_TYPE),
+             QString::fromUtf8(OPENSCP_GIT_COMMIT),
+             QString::fromUtf8(OPENSCP_REPOSITORY_URL));
 }
 
 } // namespace
@@ -117,9 +117,9 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     title->setTextFormat(Qt::RichText);
     leftCol->addWidget(title);
 
-    const QString authorName = QString::fromUtf8(OPEN_SCP_AUTHOR_NAME);
-    const QString authorUrl = QString::fromUtf8(OPEN_SCP_AUTHOR_URL);
-    const QString issuesUrl = QString::fromUtf8(OPEN_SCP_ISSUES_URL);
+    const QString authorName = QString::fromUtf8(OPENSCP_AUTHOR_NAME);
+    const QString authorUrl = QString::fromUtf8(OPENSCP_AUTHOR_URL);
+    const QString issuesUrl = QString::fromUtf8(OPENSCP_ISSUES_URL);
 
     auto *author = new QLabel(
         tr("Author: <a href=\"%1\">%2</a>")

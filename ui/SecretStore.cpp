@@ -225,7 +225,7 @@ bool SecretStore::insecureFallbackActive() {
       // by env var or settings
 
 static bool fallbackEnabledEnv() {
-    const char *v = std::getenv("OPEN_SCP_ENABLE_INSECURE_FALLBACK");
+    const char *v = std::getenv("OPENSCP_ENABLE_INSECURE_FALLBACK");
     return v && *v == '1';
 }
 
@@ -240,7 +240,7 @@ static bool fallbackEnabled() {
 
 SecretStore::PersistResult SecretStore::setSecret(const QString &key,
                                                   const QString &value) {
-#ifdef OPEN_SCP_BUILD_SECURE_ONLY
+#ifdef OPENSCP_BUILD_SECURE_ONLY
     Q_UNUSED(key);
     Q_UNUSED(value);
     return {
@@ -267,7 +267,7 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
 }
 
 std::optional<QString> SecretStore::getSecret(const QString &key) const {
-#ifdef OPEN_SCP_BUILD_SECURE_ONLY
+#ifdef OPENSCP_BUILD_SECURE_ONLY
     Q_UNUSED(key);
     return std::nullopt;
 #else
@@ -282,7 +282,7 @@ std::optional<QString> SecretStore::getSecret(const QString &key) const {
 }
 
 void SecretStore::removeSecret(const QString &key) {
-#ifdef OPEN_SCP_BUILD_SECURE_ONLY
+#ifdef OPENSCP_BUILD_SECURE_ONLY
     Q_UNUSED(key);
     return;
 #else
@@ -294,7 +294,7 @@ void SecretStore::removeSecret(const QString &key) {
 }
 
 bool SecretStore::insecureFallbackActive() {
-#ifdef OPEN_SCP_BUILD_SECURE_ONLY
+#ifdef OPENSCP_BUILD_SECURE_ONLY
     return false;
 #else
     return fallbackEnabled();

@@ -1025,7 +1025,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         warn->setToolTip(
             tr("You are using unencrypted credentials storage enabled via "
                "environment variable. Disable "
-               "OPEN_SCP_ENABLE_INSECURE_FALLBACK to hide this warning."));
+               "OPENSCP_ENABLE_INSECURE_FALLBACK to hide this warning."));
         statusBar()->addPermanentWidget(warn, 0);
     }
 

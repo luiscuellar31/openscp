@@ -7,7 +7,7 @@
 namespace openscp {
 
 inline bool logEnabled() {
-    const char *v = std::getenv("OPEN_SCP_LOG");
+    const char *v = std::getenv("OPENSCP_LOG");
     return v && *v && *v != '0';
 }
 

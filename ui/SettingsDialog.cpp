@@ -488,7 +488,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     securityForm->addRow(QString(), macKeychainRestrictive_);
 #endif
 #if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) &&       \
-    !defined(HAVE_LIBSECRET) && !defined(OPEN_SCP_BUILD_SECURE_ONLY)
+    !defined(HAVE_LIBSECRET) && !defined(OPENSCP_BUILD_SECURE_ONLY)
     insecureFallback_ = new QCheckBox(
         tr("Allow insecure credentials fallback (not recommended)."),
         securityPage);
@@ -770,7 +770,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         noHostVerifyTtlMinSpin_->setValue(
             s.value("Security/noHostVerificationTtlMin", 15).toInt());
 #if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) &&       \
-    !defined(HAVE_LIBSECRET) && !defined(OPEN_SCP_BUILD_SECURE_ONLY)
+    !defined(HAVE_LIBSECRET) && !defined(OPENSCP_BUILD_SECURE_ONLY)
     if (insecureFallback_)
         insecureFallback_->setChecked(
             s.value("Security/enableInsecureSecretFallback", false).toBool());
@@ -1151,7 +1151,7 @@ void SettingsDialog::updateApplyFromControls() {
         s.value("Security/noHostVerificationTtlMin", 15).toInt();
 // Only compare insecure fallback when available in this build/platform
 #if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) &&       \
-    !defined(HAVE_LIBSECRET) && !defined(OPEN_SCP_BUILD_SECURE_ONLY)
+    !defined(HAVE_LIBSECRET) && !defined(OPENSCP_BUILD_SECURE_ONLY)
     const bool insecureFb =
         s.value("Security/enableInsecureSecretFallback", false).toBool();
 #endif
@@ -1244,7 +1244,7 @@ void SettingsDialog::updateApplyFromControls() {
                                           : noHostVerifyTtlMin;
 // Current value only when applicable
 #if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) &&       \
-    !defined(HAVE_LIBSECRET) && !defined(OPEN_SCP_BUILD_SECURE_ONLY)
+    !defined(HAVE_LIBSECRET) && !defined(OPENSCP_BUILD_SECURE_ONLY)
     const bool curInsecureFb =
         insecureFallback_ && insecureFallback_->isChecked();
 #endif
@@ -1306,7 +1306,7 @@ void SettingsDialog::updateApplyFromControls() {
         (curTerminalEnableSftpCliFallback != terminalEnableSftpCliFallback) ||
         (curNoHostVerifyTtlMin != noHostVerifyTtlMin)
 #if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) &&       \
-    !defined(HAVE_LIBSECRET) && !defined(OPEN_SCP_BUILD_SECURE_ONLY)
+    !defined(HAVE_LIBSECRET) && !defined(OPENSCP_BUILD_SECURE_ONLY)
         || (curInsecureFb != insecureFb)
 #endif
         || (curMaxConcurrent != maxConcurrent) ||

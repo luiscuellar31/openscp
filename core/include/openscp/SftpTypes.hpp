@@ -10,8 +10,8 @@
 #include <string>
 #include <vector>
 
-#ifndef OPEN_SCP_HAS_CURL_FTP
-#define OPEN_SCP_HAS_CURL_FTP 1
+#ifndef OPENSCP_HAS_CURL_FTP
+#define OPENSCP_HAS_CURL_FTP 1
 #endif
 
 namespace openscp {
@@ -196,14 +196,14 @@ inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
         caps.supports_known_hosts = true;
         return caps;
     case Protocol::Ftp:
-#if OPEN_SCP_HAS_CURL_FTP
+#if OPENSCP_HAS_CURL_FTP
         caps.implemented = true;
         caps.supports_file_transfers = true;
         caps.supports_proxy = true;
 #endif
         return caps;
     case Protocol::Ftps:
-#if OPEN_SCP_HAS_CURL_FTP
+#if OPENSCP_HAS_CURL_FTP
         caps.implemented = true;
         caps.supports_file_transfers = true;
         caps.supports_proxy = true;
