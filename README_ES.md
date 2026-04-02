@@ -148,51 +148,51 @@ Opcional:
 - Linux: libsecret / Secret Service
 - Cliente OpenSSH (`ssh`) para tunel de jump host SSH.
 - El backend FTP/FTPS se puede desactivar explicitamente con
-  `-DOPEN_SCP_ENABLE_FTP_BACKEND=OFF`.
+  `-DOPENSCP_ENABLE_FTP_BACKEND=OFF`.
 
 ## Probar Localmente
 
 ```bash
-cmake -S . -B build -DOPEN_SCP_BUILD_TESTS=ON
+cmake -S . -B build -DOPENSCP_BUILD_TESTS=ON
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
 `openscp_sftp_integration_tests` se omite si no defines variables de integracion:
 
-- `OPEN_SCP_IT_SFTP_HOST`
-- `OPEN_SCP_IT_SFTP_PORT`
-- `OPEN_SCP_IT_SFTP_USER`
-- `OPEN_SCP_IT_SFTP_PASS` o `OPEN_SCP_IT_SFTP_KEY`
-- `OPEN_SCP_IT_SFTP_KEY_PASSPHRASE` (si aplica)
-- `OPEN_SCP_IT_REMOTE_BASE`
-- `OPEN_SCP_IT_PROXY_TYPE` (`socks5` o `http`, opcional)
-- `OPEN_SCP_IT_PROXY_HOST` (requerido cuando `OPEN_SCP_IT_PROXY_TYPE` esta definido)
-- `OPEN_SCP_IT_PROXY_PORT` (opcional; por defecto: `1080` para `socks5`, `8080` para `http`)
-- `OPEN_SCP_IT_PROXY_USER` (opcional)
-- `OPEN_SCP_IT_PROXY_PASS` (opcional)
-- `OPEN_SCP_IT_JUMP_HOST` (opcional)
-- `OPEN_SCP_IT_JUMP_PORT` (opcional; por defecto `22`)
-- `OPEN_SCP_IT_JUMP_USER` (opcional)
-- `OPEN_SCP_IT_JUMP_KEY` (opcional)
+- `OPENSCP_IT_SFTP_HOST`
+- `OPENSCP_IT_SFTP_PORT`
+- `OPENSCP_IT_SFTP_USER`
+- `OPENSCP_IT_SFTP_PASS` o `OPENSCP_IT_SFTP_KEY`
+- `OPENSCP_IT_SFTP_KEY_PASSPHRASE` (si aplica)
+- `OPENSCP_IT_REMOTE_BASE`
+- `OPENSCP_IT_PROXY_TYPE` (`socks5` o `http`, opcional)
+- `OPENSCP_IT_PROXY_HOST` (requerido cuando `OPENSCP_IT_PROXY_TYPE` esta definido)
+- `OPENSCP_IT_PROXY_PORT` (opcional; por defecto: `1080` para `socks5`, `8080` para `http`)
+- `OPENSCP_IT_PROXY_USER` (opcional)
+- `OPENSCP_IT_PROXY_PASS` (opcional)
+- `OPENSCP_IT_JUMP_HOST` (opcional)
+- `OPENSCP_IT_JUMP_PORT` (opcional; por defecto `22`)
+- `OPENSCP_IT_JUMP_USER` (opcional)
+- `OPENSCP_IT_JUMP_KEY` (opcional)
 
 `openscp_ftp_integration_tests` se omite si no defines variables de integracion:
 
-- `OPEN_SCP_IT_FTP_HOST`
-- `OPEN_SCP_IT_FTP_PORT` (opcional; por defecto `21`)
-- `OPEN_SCP_IT_FTP_USER` (opcional)
-- `OPEN_SCP_IT_FTP_PASS` (opcional)
-- `OPEN_SCP_IT_FTP_REMOTE_BASE`
+- `OPENSCP_IT_FTP_HOST`
+- `OPENSCP_IT_FTP_PORT` (opcional; por defecto `21`)
+- `OPENSCP_IT_FTP_USER` (opcional)
+- `OPENSCP_IT_FTP_PASS` (opcional)
+- `OPENSCP_IT_FTP_REMOTE_BASE`
 
 `openscp_ftps_integration_tests` se omite si no defines variables de integracion:
 
-- `OPEN_SCP_IT_FTPS_HOST`
-- `OPEN_SCP_IT_FTPS_PORT` (opcional; por defecto `990`)
-- `OPEN_SCP_IT_FTPS_USER` (opcional)
-- `OPEN_SCP_IT_FTPS_PASS` (opcional)
-- `OPEN_SCP_IT_FTPS_REMOTE_BASE`
-- `OPEN_SCP_IT_FTPS_VERIFY_PEER` (`1`/`0`, opcional; por defecto `1`)
-- `OPEN_SCP_IT_FTPS_CA_CERT` (opcional)
+- `OPENSCP_IT_FTPS_HOST`
+- `OPENSCP_IT_FTPS_PORT` (opcional; por defecto `990`)
+- `OPENSCP_IT_FTPS_USER` (opcional)
+- `OPENSCP_IT_FTPS_PASS` (opcional)
+- `OPENSCP_IT_FTPS_REMOTE_BASE`
+- `OPENSCP_IT_FTPS_VERIFY_PEER` (`1`/`0`, opcional; por defecto `1`)
+- `OPENSCP_IT_FTPS_CA_CERT` (opcional)
 
 ## Flujos por Plataforma
 
@@ -237,13 +237,13 @@ Detalles de build y empaquetado Linux (AppImage, Snap, Flatpak): [assets/linux/R
 
 ## Variables de Entorno en Runtime
 
-- `OPEN_SCP_KNOWNHOSTS_PLAIN=1|0` - fuerza hostnames planos vs hasheados en `known_hosts`.
-- `OPEN_SCP_FP_HEX_ONLY=1` - muestra huellas en HEX con `:`.
-- `OPEN_SCP_TRANSFER_INTEGRITY=off|optional|required` - sobrescribe la politica de integridad de transferencias.
-- `OPEN_SCP_LOG_LEVEL=off|error|warn|info|debug` - ajusta la verbosidad de logs.
-- `OPEN_SCP_ENV=dev|prod` - selector de entorno runtime (`dev` habilita diagnosticos solo de desarrollo).
-- `OPEN_SCP_LOG_SENSITIVE=1` - habilita detalles sensibles de depuracion solo cuando `OPEN_SCP_ENV=dev` (apagado por defecto).
-- `OPEN_SCP_ENABLE_INSECURE_FALLBACK=1` - habilita fallback inseguro solo cuando el build/plataforma lo soporta.
+- `OPENSCP_KNOWNHOSTS_PLAIN=1|0` - fuerza hostnames planos vs hasheados en `known_hosts`.
+- `OPENSCP_FP_HEX_ONLY=1` - muestra huellas en HEX con `:`.
+- `OPENSCP_TRANSFER_INTEGRITY=off|optional|required` - sobrescribe la politica de integridad de transferencias.
+- `OPENSCP_LOG_LEVEL=off|error|warn|info|debug` - ajusta la verbosidad de logs.
+- `OPENSCP_ENV=dev|prod` - selector de entorno runtime (`dev` habilita diagnosticos solo de desarrollo).
+- `OPENSCP_LOG_SENSITIVE=1` - habilita detalles sensibles de depuracion solo cuando `OPENSCP_ENV=dev` (apagado por defecto).
+- `OPENSCP_ENABLE_INSECURE_FALLBACK=1` - habilita fallback inseguro solo cuando el build/plataforma lo soporta.
 
 ## Capturas
 

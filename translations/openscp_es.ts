@@ -839,8 +839,8 @@ Coincidencias: %2</translation>
         <translation>Advertencia: almacenamiento de secretos sin cifrar activado (fallback)</translation>
     </message>
     <message>
-        <source>You are using unencrypted credentials storage enabled via environment variable. Disable OPEN_SCP_ENABLE_INSECURE_FALLBACK to hide this warning.</source>
-        <translation>Estás usando un almacenamiento de credenciales sin cifrar activado por variable de entorno. Desactiva OPEN_SCP_ENABLE_INSECURE_FALLBACK para ocultar este aviso.</translation>
+        <source>You are using unencrypted credentials storage enabled via environment variable. Disable OPENSCP_ENABLE_INSECURE_FALLBACK to hide this warning.</source>
+        <translation>Estás usando un almacenamiento de credenciales sin cifrar activado por variable de entorno. Desactiva OPENSCP_ENABLE_INSECURE_FALLBACK para ocultar este aviso.</translation>
     </message>
     <message>
         <source>Select left folder</source>

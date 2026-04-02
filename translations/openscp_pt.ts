@@ -839,8 +839,8 @@ Correspondências: %2</translation>
         <translation>Aviso: armazenamento de segredos sem criptografia ativado (fallback)</translation>
     </message>
     <message>
-        <source>You are using unencrypted credentials storage enabled via environment variable. Disable OPEN_SCP_ENABLE_INSECURE_FALLBACK to hide this warning.</source>
-        <translation>Você está usando armazenamento de credenciais sem criptografia ativado por variável de ambiente. Desative OPEN_SCP_ENABLE_INSECURE_FALLBACK para ocultar este aviso.</translation>
+        <source>You are using unencrypted credentials storage enabled via environment variable. Disable OPENSCP_ENABLE_INSECURE_FALLBACK to hide this warning.</source>
+        <translation>Você está usando armazenamento de credenciais sem criptografia ativado por variável de ambiente. Desative OPENSCP_ENABLE_INSECURE_FALLBACK para ocultar este aviso.</translation>
     </message>
     <message>
         <source>Select left folder</source>
