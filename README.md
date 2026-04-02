@@ -75,7 +75,7 @@ open build/OpenSCP.app
 
 - Auth: password, private key (+passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
 - Protocol selector per site/session (`SFTP`, `SCP`, `FTP`, `FTPS`).
-- FTP/FTPS currently run in transfer-only mode (no remote listing panel).
+- FTP/FTPS support remote directory listing (MLSD with LIST fallback).
 - SCP mode policy per site/session: `Automatic (SCP + SFTP fallback)` or
   `SCP only` (disable fallback), plus a global default for new connections.
 - FTPS certificate verification (peer+host) is enabled by default, with optional custom CA bundle per site/session.
