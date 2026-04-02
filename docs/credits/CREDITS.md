@@ -22,7 +22,6 @@ OpenSCP bundles or links against:
 - License: Apache-2.0
 - Project: [https://www.openssl.org](https://www.openssl.org)
 - License file: [LICENSES/OpenSSL-Apache-2.0.txt](LICENSES/OpenSSL-Apache-2.0.txt)
-- Notice: [NOTICES/OpenSSL-NOTICE.txt](NOTICES/OpenSSL-NOTICE.txt) (if provided upstream)
 
 ## zlib
 - License: zlib
