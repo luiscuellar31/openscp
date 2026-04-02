@@ -48,9 +48,9 @@ set_tests_properties(openscp_scp_integration_tests PROPERTIES
     SKIP_RETURN_CODE 77
 )
 
-get_target_property(_OPEN_SCP_CORE_HAS_CURL_FTP
-                    openscp_core OPEN_SCP_HAS_CURL_FTP)
-if (_OPEN_SCP_CORE_HAS_CURL_FTP)
+get_target_property(_OPENSCP_CORE_HAS_CURL_FTP
+                    openscp_core OPENSCP_HAS_CURL_FTP)
+if (_OPENSCP_CORE_HAS_CURL_FTP)
     add_executable(openscp_ftp_integration_tests
         curl_ftp_integration_tests.cpp
     )

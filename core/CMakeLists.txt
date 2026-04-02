@@ -1,23 +1,23 @@
 cmake_minimum_required(VERSION 3.22)
 
-option(OPEN_SCP_ENABLE_MOCK "Build mock SFTP client" OFF)
-option(OPEN_SCP_ENABLE_FTP_BACKEND
+option(OPENSCP_ENABLE_MOCK "Build mock SFTP client" OFF)
+option(OPENSCP_ENABLE_FTP_BACKEND
        "Build FTP/FTPS backend module (requires libcurl development files)" ON)
 
-set(OPEN_SCP_CORE_SRCS
+set(OPENSCP_CORE_SRCS
     src/libssh2/ClientFactory.cpp      # protocol -> backend factory
     src/libssh2/Libssh2ScpClient.cpp   # SCP backend module
     src/libssh2/Libssh2SftpClient.cpp   # real implementation
 )
 
-set(OPEN_SCP_HAS_CURL_FTP 0)
-if (OPEN_SCP_ENABLE_FTP_BACKEND)
+set(OPENSCP_HAS_CURL_FTP 0)
+if (OPENSCP_ENABLE_FTP_BACKEND)
     find_package(CURL QUIET)
     if (CURL_FOUND)
-        list(APPEND OPEN_SCP_CORE_SRCS
+        list(APPEND OPENSCP_CORE_SRCS
             src/curl/CurlFtpClient.cpp        # FTP/FTPS backend module
         )
-        set(OPEN_SCP_HAS_CURL_FTP 1)
+        set(OPENSCP_HAS_CURL_FTP 1)
         message(STATUS "OpenSCP: FTP/FTPS backend enabled (libcurl found)")
     else()
         message(WARNING
@@ -25,23 +25,23 @@ if (OPEN_SCP_ENABLE_FTP_BACKEND)
             "Install curl dev package to enable Protocol::Ftp/Protocol::Ftps backends.")
     endif()
 else()
-    message(STATUS "OpenSCP: FTP/FTPS backend disabled by OPEN_SCP_ENABLE_FTP_BACKEND=OFF")
+    message(STATUS "OpenSCP: FTP/FTPS backend disabled by OPENSCP_ENABLE_FTP_BACKEND=OFF")
 endif()
 
-if (OPEN_SCP_ENABLE_MOCK)
-    list(APPEND OPEN_SCP_CORE_SRCS src/mock/MockSftpClient.cpp)
+if (OPENSCP_ENABLE_MOCK)
+    list(APPEND OPENSCP_CORE_SRCS src/mock/MockSftpClient.cpp)
 endif()
 
-add_library(openscp_core STATIC ${OPEN_SCP_CORE_SRCS})
+add_library(openscp_core STATIC ${OPENSCP_CORE_SRCS})
 
 target_include_directories(openscp_core
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 target_compile_definitions(openscp_core
-    PUBLIC OPEN_SCP_HAS_CURL_FTP=${OPEN_SCP_HAS_CURL_FTP}
+    PUBLIC OPENSCP_HAS_CURL_FTP=${OPENSCP_HAS_CURL_FTP}
 )
-set_property(TARGET openscp_core PROPERTY OPEN_SCP_HAS_CURL_FTP
-             ${OPEN_SCP_HAS_CURL_FTP})
+set_property(TARGET openscp_core PROPERTY OPENSCP_HAS_CURL_FTP
+             ${OPENSCP_HAS_CURL_FTP})
 
 # libssh2 (Homebrew/pkg-config) with robust link flags on macOS/Homebrew.
 find_package(PkgConfig QUIET)
@@ -64,7 +64,7 @@ if (OpenSSL_FOUND)
 endif()
 
 # libcurl (FTP/FTPS backend, optional)
-if (OPEN_SCP_HAS_CURL_FTP)
+if (OPENSCP_HAS_CURL_FTP)
     target_link_libraries(openscp_core PRIVATE CURL::libcurl)
 endif()
 

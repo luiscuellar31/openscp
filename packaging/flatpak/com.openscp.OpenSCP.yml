@@ -31,7 +31,7 @@ modules:
     buildsystem: cmake-ninja
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
-      - -DOPEN_SCP_BUILD_TESTS=OFF
+      - -DOPENSCP_BUILD_TESTS=OFF
     sources:
       - type: dir
         path: ../..
