@@ -1,6 +1,5 @@
 # CMake / Build
-/build/
-/build-core/
+/build*/
 /dist/
 cmake-build-*/
 
