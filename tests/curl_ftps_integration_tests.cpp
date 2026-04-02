@@ -2,6 +2,7 @@
 // Skips with exit code 77 unless required OPENSCP_IT_FTPS_* vars exist.
 #include "openscp/ClientFactory.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -147,8 +148,7 @@ int main() {
     const auto caps = client->capabilities();
     t.check(caps.implemented, "FTPS should be marked implemented");
     t.check(caps.supports_file_transfers, "FTPS should support transfers");
-    t.check(!caps.supports_listing,
-            "FTPS should currently run without remote listing");
+    t.check(caps.supports_listing, "FTPS should support remote listing");
 
     const std::string token = uniqueToken();
     const fs::path tempDir =
@@ -196,9 +196,14 @@ int main() {
 
     std::vector<openscp::FileInfo> listing;
     err.clear();
-    t.check(!client->list(*remoteBase, listing, err),
-            "FTPS listing should report unsupported");
-    t.check(!err.empty(), "FTPS listing unsupported should set error message");
+    t.check(client->list(*remoteBase, listing, err),
+            std::string("FTPS listing should succeed: ") + err);
+    const std::string remoteFileName = "openscp_ftps_it_" + token + ".txt";
+    const auto listed = std::find_if(
+        listing.begin(), listing.end(),
+        [&](const openscp::FileInfo &f) { return f.name == remoteFileName; });
+    t.check(listed != listing.end(),
+            "FTPS listing should include the uploaded file");
 
     client->disconnect();
     std::error_code ec;

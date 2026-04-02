@@ -180,10 +180,10 @@ void test_protocol_helpers(TestContext &t) {
             "FTPS capabilities should not advertise transfers when backend is "
             "disabled");
 #endif
-    t.check(!ftpCaps.supports_listing,
-            "FTP capabilities should currently run in transfer-only mode");
-    t.check(!ftpsCaps.supports_listing,
-            "FTPS capabilities should currently run in transfer-only mode");
+    t.check(ftpCaps.supports_listing,
+            "FTP capabilities should include directory listing support");
+    t.check(ftpsCaps.supports_listing,
+            "FTPS capabilities should include directory listing support");
 }
 
 #if OPENSCP_HAS_CURL_FTP
