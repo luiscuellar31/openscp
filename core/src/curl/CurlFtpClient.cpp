@@ -3,10 +3,18 @@
 
 #include <curl/curl.h>
 
+#include <algorithm>
+#include <cctype>
+#include <cerrno>
 #include <cstdio>
+#include <cstdlib>
+#include <ctime>
 #include <filesystem>
+#include <limits>
 #include <mutex>
+#include <sstream>
 #include <string>
+#include <string_view>
 
 namespace openscp {
 namespace {
@@ -38,12 +46,119 @@ bool unsupportedFtpOperation(const char *what, std::string &err) {
     return false;
 }
 
+std::string trimAscii(std::string s) {
+    auto isWs = [](unsigned char c) { return std::isspace(c) != 0; };
+    while (!s.empty() && isWs(static_cast<unsigned char>(s.front())))
+        s.erase(s.begin());
+    while (!s.empty() && isWs(static_cast<unsigned char>(s.back())))
+        s.pop_back();
+    return s;
+}
+
+std::string trimAsciiLeft(std::string s) {
+    auto isWs = [](unsigned char c) { return std::isspace(c) != 0; };
+    while (!s.empty() && isWs(static_cast<unsigned char>(s.front())))
+        s.erase(s.begin());
+    return s;
+}
+
 std::string normalizeRemotePath(std::string path) {
     if (path.empty())
         return "/";
     if (path.front() != '/')
         path.insert(path.begin(), '/');
     return path;
+}
+
+std::string normalizeRemoteDirPath(std::string path) {
+    path = normalizeRemotePath(std::move(path));
+    if (path != "/" && !path.empty() && path.back() != '/')
+        path.push_back('/');
+    return path;
+}
+
+bool parseUnsignedDec(std::string_view token, std::uint64_t &out) {
+    if (token.empty())
+        return false;
+    std::uint64_t value = 0;
+    for (char ch : token) {
+        if (ch < '0' || ch > '9')
+            return false;
+        const std::uint64_t digit = static_cast<std::uint64_t>(ch - '0');
+        if (value > (std::numeric_limits<std::uint64_t>::max() - digit) / 10)
+            return false;
+        value = value * 10 + digit;
+    }
+    out = value;
+    return true;
+}
+
+std::string toLowerAscii(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) -> char {
+                       return static_cast<char>(std::tolower(c));
+                   });
+    return s;
+}
+
+std::uint32_t parseUnixPermBits(const std::string &perm) {
+    if (perm.empty())
+        return 0;
+    std::uint32_t mode = 0;
+    if (perm[0] == 'd')
+        mode |= 0040000u;
+    else if (perm[0] == 'l')
+        mode |= 0120000u;
+    else if (perm[0] == '-')
+        mode |= 0100000u;
+
+    if (perm.size() < 10)
+        return mode;
+
+    const std::uint32_t bits[9] = {0400u, 0200u, 0100u, 040u, 020u,
+                                   010u,  04u,   02u,   01u};
+    for (int i = 0; i < 9; ++i) {
+        const char c = perm[1 + i];
+        if (c != '-' && c != '\0')
+            mode |= bits[i];
+    }
+    return mode;
+}
+
+bool parseMlsdUtcTimestamp(const std::string &raw, std::uint64_t &outEpoch) {
+    if (raw.size() < 14)
+        return false;
+    std::uint64_t y = 0, mon = 0, day = 0, hh = 0, mm = 0, ss = 0;
+    if (!parseUnsignedDec(std::string_view(raw).substr(0, 4), y) ||
+        !parseUnsignedDec(std::string_view(raw).substr(4, 2), mon) ||
+        !parseUnsignedDec(std::string_view(raw).substr(6, 2), day) ||
+        !parseUnsignedDec(std::string_view(raw).substr(8, 2), hh) ||
+        !parseUnsignedDec(std::string_view(raw).substr(10, 2), mm) ||
+        !parseUnsignedDec(std::string_view(raw).substr(12, 2), ss)) {
+        return false;
+    }
+    if (mon < 1 || mon > 12 || day < 1 || day > 31 || hh > 23 || mm > 59 ||
+        ss > 60 || y < 1970 || y > 9999) {
+        return false;
+    }
+    std::tm tm{};
+    tm.tm_year = static_cast<int>(y - 1900);
+    tm.tm_mon = static_cast<int>(mon - 1);
+    tm.tm_mday = static_cast<int>(day);
+    tm.tm_hour = static_cast<int>(hh);
+    tm.tm_min = static_cast<int>(mm);
+    tm.tm_sec = static_cast<int>(ss);
+    tm.tm_isdst = 0;
+    std::tm localCopy = tm;
+#ifdef _WIN32
+    const std::time_t tt = _mkgmtime(&localCopy);
+#else
+    const std::time_t tt = timegm(&localCopy);
+#endif
+    if (tt < 0)
+        return false;
+    outEpoch = static_cast<std::uint64_t>(tt);
+    return true;
 }
 
 std::string normalizeFtpHostAuthority(const std::string &host) {
@@ -200,6 +315,285 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
 }
 
 // cppcheck-suppress constParameterCallback
+size_t appendListingChunk(char *ptr, size_t size, size_t nmemb, void *userdata) {
+    if (!userdata)
+        return 0;
+    std::string *buffer = static_cast<std::string *>(userdata);
+    const size_t total = size * nmemb;
+    buffer->append(ptr, total);
+    return total;
+}
+
+bool runDirectoryListingCommand(const SessionOptions &opt,
+                                const std::string &remotePath,
+                                const char *command, std::string &payload,
+                                std::string &err) {
+    payload.clear();
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        err = "Could not create CURL handle.";
+        return false;
+    }
+    if (!configureCommonCurlHandle(curl, opt, err)) {
+        curl_easy_cleanup(curl);
+        return false;
+    }
+
+    const std::string url = buildFtpUrl(opt, normalizeRemoteDirPath(remotePath));
+    const bool configured =
+        (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_DIRLISTONLY, 0L) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, command) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, appendListingChunk) ==
+         CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_WRITEDATA, &payload) == CURLE_OK);
+    if (!configured) {
+        err = std::string("Could not configure ") + protocolLabel(opt.protocol) +
+              " listing command " + command + ".";
+        curl_easy_cleanup(curl);
+        return false;
+    }
+
+    const CURLcode rc = curl_easy_perform(curl);
+    long responseCode = 0;
+    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
+    curl_easy_cleanup(curl);
+    if (rc != CURLE_OK) {
+        err = std::string(protocolLabel(opt.protocol)) + " listing command " +
+              command + " failed: " + curl_easy_strerror(rc);
+        return false;
+    }
+    if (responseCode >= 400) {
+        err = std::string(protocolLabel(opt.protocol)) + " listing command " +
+              command + " was rejected (server response " +
+              std::to_string(responseCode) + ").";
+        return false;
+    }
+    return true;
+}
+
+bool parseMlsdLine(const std::string &raw, FileInfo &info, bool &emit) {
+    emit = false;
+    std::string line = raw;
+    if (!line.empty() && line.back() == '\r')
+        line.pop_back();
+    line = trimAscii(line);
+    if (line.empty())
+        return true;
+
+    const std::size_t sep = line.find_first_of(" \t");
+    if (sep == std::string::npos)
+        return false;
+
+    const std::string factsPart = line.substr(0, sep);
+    std::string name = trimAsciiLeft(line.substr(sep + 1));
+    if (name.empty())
+        return false;
+    if (name == "." || name == "..")
+        return true;
+
+    FileInfo parsed{};
+    parsed.name = name;
+    std::string type;
+
+    std::size_t start = 0;
+    while (start < factsPart.size()) {
+        const std::size_t end = factsPart.find(';', start);
+        const std::string fact = (end == std::string::npos)
+                                     ? factsPart.substr(start)
+                                     : factsPart.substr(start, end - start);
+        start = (end == std::string::npos) ? factsPart.size() : end + 1;
+        if (fact.empty())
+            continue;
+        const std::size_t eq = fact.find('=');
+        if (eq == std::string::npos)
+            continue;
+        const std::string key = toLowerAscii(fact.substr(0, eq));
+        const std::string value = fact.substr(eq + 1);
+        if (key == "type") {
+            type = toLowerAscii(value);
+        } else if (key == "size") {
+            std::uint64_t sz = 0;
+            if (parseUnsignedDec(value, sz)) {
+                parsed.size = sz;
+                parsed.has_size = true;
+            }
+        } else if (key == "modify") {
+            std::uint64_t ts = 0;
+            if (parseMlsdUtcTimestamp(value, ts))
+                parsed.mtime = ts;
+        } else if (key == "unix.mode") {
+            char *endp = nullptr;
+            errno = 0;
+            const unsigned long mode = std::strtoul(value.c_str(), &endp, 8);
+            if (errno == 0 && endp && *endp == '\0') {
+                parsed.mode = static_cast<std::uint32_t>(mode & 07777u);
+            }
+        } else if (key == "unix.uid") {
+            std::uint64_t uid = 0;
+            if (parseUnsignedDec(value, uid))
+                parsed.uid = static_cast<std::uint32_t>(std::min<std::uint64_t>(
+                    uid, std::numeric_limits<std::uint32_t>::max()));
+        } else if (key == "unix.gid") {
+            std::uint64_t gid = 0;
+            if (parseUnsignedDec(value, gid))
+                parsed.gid = static_cast<std::uint32_t>(std::min<std::uint64_t>(
+                    gid, std::numeric_limits<std::uint32_t>::max()));
+        }
+    }
+
+    if (type.empty())
+        return false;
+    if (type == "cdir" || type == "pdir")
+        return true;
+
+    parsed.is_dir = (type == "dir");
+    if (parsed.is_dir) {
+        parsed.has_size = false;
+        parsed.size = 0;
+        if ((parsed.mode & 0170000u) == 0)
+            parsed.mode |= 0040000u;
+    } else if ((parsed.mode & 0170000u) == 0) {
+        parsed.mode |= 0100000u;
+    }
+
+    info = std::move(parsed);
+    emit = true;
+    return true;
+}
+
+bool parseMlsdListing(const std::string &payload, std::vector<FileInfo> &out) {
+    out.clear();
+    std::istringstream iss(payload);
+    std::string line;
+    while (std::getline(iss, line)) {
+        const std::string normalized = trimAscii(line);
+        if (normalized.empty())
+            continue;
+        FileInfo info{};
+        bool emit = false;
+        if (!parseMlsdLine(line, info, emit))
+            return false;
+        if (emit)
+            out.push_back(std::move(info));
+    }
+    return true;
+}
+
+bool parseUnixListLine(const std::string &line, FileInfo &info, bool &emit) {
+    emit = false;
+    std::istringstream iss(line);
+    std::string perm, links, owner, group, sizeTok, month, day, timeOrYear;
+    if (!(iss >> perm >> links >> owner >> group >> sizeTok >> month >> day >>
+          timeOrYear)) {
+        return false;
+    }
+    std::string name;
+    std::getline(iss, name);
+    name = trimAscii(name);
+    if (name.empty())
+        return false;
+    const std::size_t arrowPos = name.find(" -> ");
+    if (arrowPos != std::string::npos)
+        name.erase(arrowPos);
+    if (name == "." || name == "..")
+        return true;
+
+    FileInfo parsed{};
+    parsed.name = name;
+    parsed.mode = parseUnixPermBits(perm);
+    parsed.is_dir = !perm.empty() && perm[0] == 'd';
+    if (!parsed.is_dir) {
+        std::uint64_t sz = 0;
+        if (parseUnsignedDec(sizeTok, sz)) {
+            parsed.size = sz;
+            parsed.has_size = true;
+        }
+    }
+    info = std::move(parsed);
+    emit = true;
+    return true;
+}
+
+bool parseDosListLine(const std::string &line, FileInfo &info, bool &emit) {
+    emit = false;
+    std::istringstream iss(line);
+    std::string dateTok, timeTok, sizeOrDir;
+    if (!(iss >> dateTok >> timeTok >> sizeOrDir))
+        return false;
+    std::string name;
+    std::getline(iss, name);
+    name = trimAscii(name);
+    if (name.empty())
+        return false;
+    if (name == "." || name == "..")
+        return true;
+
+    FileInfo parsed{};
+    parsed.name = name;
+    const std::string kind = toLowerAscii(sizeOrDir);
+    parsed.is_dir = (kind == "<dir>");
+    if (parsed.is_dir) {
+        parsed.mode = 0040000u;
+    } else {
+        std::string normalizedSize = sizeOrDir;
+        normalizedSize.erase(
+            std::remove(normalizedSize.begin(), normalizedSize.end(), ','),
+            normalizedSize.end());
+        std::uint64_t sz = 0;
+        if (!parseUnsignedDec(normalizedSize, sz))
+            return false;
+        parsed.size = sz;
+        parsed.has_size = true;
+        parsed.mode = 0100000u;
+    }
+    info = std::move(parsed);
+    emit = true;
+    return true;
+}
+
+bool parseListListing(const std::string &payload, std::vector<FileInfo> &out) {
+    out.clear();
+    std::istringstream iss(payload);
+    std::string line;
+    bool sawContent = false;
+    bool parsedAny = false;
+    bool sawUnparsedLine = false;
+    while (std::getline(iss, line)) {
+        const std::string normalized = trimAscii(line);
+        if (normalized.empty())
+            continue;
+        const std::string lowered = toLowerAscii(normalized);
+        if (lowered.rfind("total ", 0) == 0)
+            continue;
+        sawContent = true;
+
+        FileInfo info{};
+        bool emit = false;
+        bool ok = false;
+        if (normalized.front() == 'd' || normalized.front() == '-' ||
+            normalized.front() == 'l' || normalized.front() == 'c' ||
+            normalized.front() == 'b' || normalized.front() == 's' ||
+            normalized.front() == 'p') {
+            ok = parseUnixListLine(normalized, info, emit);
+        }
+        if (!ok)
+            ok = parseDosListLine(normalized, info, emit);
+        if (!ok) {
+            sawUnparsedLine = true;
+            continue;
+        }
+        if (emit) {
+            out.push_back(std::move(info));
+            parsedAny = true;
+        }
+    }
+    if (!sawContent)
+        return true;
+    return parsedAny || !sawUnparsedLine;
+}
+
+// cppcheck-suppress constParameterCallback
 size_t writeFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
     if (!userdata)
         return 0;
@@ -347,9 +741,51 @@ bool CurlFtpClient::isConnected() const {
 
 bool CurlFtpClient::list(const std::string &remote_path,
                          std::vector<FileInfo> &out, std::string &err) {
-    (void)remote_path;
+    err.clear();
     out.clear();
-    return unsupportedFtpOperation("directory listing", err);
+
+    SessionOptions opt;
+    {
+        std::lock_guard<std::mutex> lk(stateMutex_);
+        if (!connected_) {
+            err = "Not connected.";
+            return false;
+        }
+        opt = options_;
+    }
+    if (!ensureCurlInitialized(err))
+        return false;
+
+    std::string mlsdPayload;
+    std::string mlsdErr;
+    const bool mlsdOk =
+        runDirectoryListingCommand(opt, remote_path, "MLSD", mlsdPayload, mlsdErr);
+    if (mlsdOk && parseMlsdListing(mlsdPayload, out))
+        return true;
+
+    std::string listPayload;
+    std::string listErr;
+    const bool listOk =
+        runDirectoryListingCommand(opt, remote_path, "LIST", listPayload, listErr);
+    if (listOk && parseListListing(listPayload, out))
+        return true;
+
+    if (!mlsdOk && !listOk) {
+        err = std::string(protocolLabel(opt.protocol)) +
+              " directory listing failed. MLSD: " + mlsdErr +
+              " | LIST: " + listErr;
+        return false;
+    }
+    if (mlsdOk && !listOk) {
+        err = std::string(protocolLabel(opt.protocol)) +
+              " directory listing parse failed for MLSD output, and LIST "
+              "fallback failed: " +
+              listErr;
+        return false;
+    }
+    err = std::string(protocolLabel(opt.protocol)) +
+          " directory listing parse failed for MLSD and LIST output.";
+    return false;
 }
 
 bool CurlFtpClient::get(

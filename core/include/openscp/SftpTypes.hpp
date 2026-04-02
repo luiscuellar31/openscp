@@ -198,6 +198,7 @@ inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
     case Protocol::Ftp:
 #if OPENSCP_HAS_CURL_FTP
         caps.implemented = true;
+        caps.supports_listing = true;
         caps.supports_file_transfers = true;
         caps.supports_proxy = true;
 #endif
@@ -205,6 +206,7 @@ inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
     case Protocol::Ftps:
 #if OPENSCP_HAS_CURL_FTP
         caps.implemented = true;
+        caps.supports_listing = true;
         caps.supports_file_transfers = true;
         caps.supports_proxy = true;
 #endif
