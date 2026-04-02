@@ -1,5 +1,5 @@
 // Integration tests for real Libssh2ScpClient against an SSH server with SCP.
-// The test is skipped (exit code 77) unless required OPEN_SCP_IT_* env vars
+// The test is skipped (exit code 77) unless required OPENSCP_IT_* env vars
 // exist.
 #include "openscp/Libssh2ScpClient.hpp"
 
@@ -97,26 +97,26 @@ bool readFile(const fs::path &path, std::string &out) {
 
 int main() {
     const auto host =
-        envValueWithFallback("OPEN_SCP_IT_SCP_HOST", "OPEN_SCP_IT_SFTP_HOST");
+        envValueWithFallback("OPENSCP_IT_SCP_HOST", "OPENSCP_IT_SFTP_HOST");
     const auto user =
-        envValueWithFallback("OPEN_SCP_IT_SCP_USER", "OPEN_SCP_IT_SFTP_USER");
+        envValueWithFallback("OPENSCP_IT_SCP_USER", "OPENSCP_IT_SFTP_USER");
     const auto pass =
-        envValueWithFallback("OPEN_SCP_IT_SCP_PASS", "OPEN_SCP_IT_SFTP_PASS");
+        envValueWithFallback("OPENSCP_IT_SCP_PASS", "OPENSCP_IT_SFTP_PASS");
     const auto keyPath =
-        envValueWithFallback("OPEN_SCP_IT_SCP_KEY", "OPEN_SCP_IT_SFTP_KEY");
-    const auto keyPassphrase = envValueWithFallback("OPEN_SCP_IT_SCP_KEY_PASSPHRASE",
-                                                    "OPEN_SCP_IT_SFTP_KEY_PASSPHRASE");
+        envValueWithFallback("OPENSCP_IT_SCP_KEY", "OPENSCP_IT_SFTP_KEY");
+    const auto keyPassphrase = envValueWithFallback("OPENSCP_IT_SCP_KEY_PASSPHRASE",
+                                                    "OPENSCP_IT_SFTP_KEY_PASSPHRASE");
     const std::string remoteBase =
-        envValue("OPEN_SCP_IT_SCP_REMOTE_BASE")
-            .value_or(envValue("OPEN_SCP_IT_REMOTE_BASE").value_or("/tmp"));
+        envValue("OPENSCP_IT_SCP_REMOTE_BASE")
+            .value_or(envValue("OPENSCP_IT_REMOTE_BASE").value_or("/tmp"));
 
     if (!host.has_value() || !user.has_value() ||
         (!pass.has_value() && !keyPath.has_value())) {
         std::cout << "[SKIP] openscp_scp_integration_tests requires env vars: "
-                  << "OPEN_SCP_IT_SCP_HOST, OPEN_SCP_IT_SCP_USER and one auth "
+                  << "OPENSCP_IT_SCP_HOST, OPENSCP_IT_SCP_USER and one auth "
                      "method "
-                  << "(OPEN_SCP_IT_SCP_PASS or OPEN_SCP_IT_SCP_KEY). It also "
-                     "accepts OPEN_SCP_IT_SFTP_* fallbacks.\n";
+                  << "(OPENSCP_IT_SCP_PASS or OPENSCP_IT_SCP_KEY). It also "
+                     "accepts OPENSCP_IT_SFTP_* fallbacks.\n";
         return kSkipExitCode;
     }
     if (keyPath.has_value() && !fs::exists(*keyPath)) {
@@ -126,8 +126,8 @@ int main() {
     }
 
     std::uint16_t port = 22;
-    if (!parsePort(envValueWithFallback("OPEN_SCP_IT_SCP_PORT",
-                                        "OPEN_SCP_IT_SFTP_PORT"),
+    if (!parsePort(envValueWithFallback("OPENSCP_IT_SCP_PORT",
+                                        "OPENSCP_IT_SFTP_PORT"),
                    port, 22)) {
         std::cerr << "[FAIL] SCP port is invalid\n";
         return EXIT_FAILURE;

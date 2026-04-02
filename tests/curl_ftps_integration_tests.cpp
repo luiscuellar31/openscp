@@ -1,5 +1,5 @@
 // Integration tests for CurlFtpClient against a real FTPS server.
-// Skips with exit code 77 unless required OPEN_SCP_IT_FTPS_* vars exist.
+// Skips with exit code 77 unless required OPENSCP_IT_FTPS_* vars exist.
 #include "openscp/ClientFactory.hpp"
 
 #include <chrono>
@@ -98,23 +98,23 @@ bool readFile(const fs::path &path, std::string &out) {
 } // namespace
 
 int main() {
-    const auto host = envValue("OPEN_SCP_IT_FTPS_HOST");
-    const auto user = envValue("OPEN_SCP_IT_FTPS_USER");
-    const auto pass = envValue("OPEN_SCP_IT_FTPS_PASS");
-    const auto remoteBase = envValue("OPEN_SCP_IT_FTPS_REMOTE_BASE");
-    const auto caCert = envValue("OPEN_SCP_IT_FTPS_CA_CERT");
+    const auto host = envValue("OPENSCP_IT_FTPS_HOST");
+    const auto user = envValue("OPENSCP_IT_FTPS_USER");
+    const auto pass = envValue("OPENSCP_IT_FTPS_PASS");
+    const auto remoteBase = envValue("OPENSCP_IT_FTPS_REMOTE_BASE");
+    const auto caCert = envValue("OPENSCP_IT_FTPS_CA_CERT");
     const bool verifyPeer =
-        parseBool(envValue("OPEN_SCP_IT_FTPS_VERIFY_PEER"), true);
+        parseBool(envValue("OPENSCP_IT_FTPS_VERIFY_PEER"), true);
 
     if (!host.has_value() || !remoteBase.has_value()) {
         std::cout << "[SKIP] openscp_ftps_integration_tests requires "
-                  << "OPEN_SCP_IT_FTPS_HOST and OPEN_SCP_IT_FTPS_REMOTE_BASE\n";
+                  << "OPENSCP_IT_FTPS_HOST and OPENSCP_IT_FTPS_REMOTE_BASE\n";
         return kSkipExitCode;
     }
 
     std::uint16_t port = 990;
-    if (!parsePort(envValue("OPEN_SCP_IT_FTPS_PORT"), port, 990)) {
-        std::cerr << "[FAIL] OPEN_SCP_IT_FTPS_PORT is invalid\n";
+    if (!parsePort(envValue("OPENSCP_IT_FTPS_PORT"), port, 990)) {
+        std::cerr << "[FAIL] OPENSCP_IT_FTPS_PORT is invalid\n";
         return EXIT_FAILURE;
     }
 

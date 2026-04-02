@@ -2,7 +2,7 @@
 #include "openscp/ClientFactory.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
 #include "openscp/MockSftpClient.hpp"
-#if OPEN_SCP_HAS_CURL_FTP
+#if OPENSCP_HAS_CURL_FTP
 #include "openscp/CurlFtpClient.hpp"
 #endif
 
@@ -159,7 +159,7 @@ void test_protocol_helpers(TestContext &t) {
         openscp::capabilitiesForProtocol(openscp::Protocol::Ftp);
     const auto ftpsCaps =
         openscp::capabilitiesForProtocol(openscp::Protocol::Ftps);
-#if OPEN_SCP_HAS_CURL_FTP
+#if OPENSCP_HAS_CURL_FTP
     t.check(ftpCaps.implemented, "FTP capabilities should be implemented");
     t.check(ftpCaps.supports_file_transfers,
             "FTP capabilities should include file transfers");
@@ -186,7 +186,7 @@ void test_protocol_helpers(TestContext &t) {
             "FTPS capabilities should currently run in transfer-only mode");
 }
 
-#if OPEN_SCP_HAS_CURL_FTP
+#if OPENSCP_HAS_CURL_FTP
 void test_curlftp_rejects_unsupported_proxy_type(TestContext &t) {
     openscp::CurlFtpClient client(openscp::Protocol::Ftp);
     openscp::SessionOptions opt;
@@ -413,7 +413,7 @@ void test_client_factory(TestContext &t) {
 
     auto ftp = openscp::CreateClientForProtocol(openscp::Protocol::Ftp);
     auto ftps = openscp::CreateClientForProtocol(openscp::Protocol::Ftps);
-#if OPEN_SCP_HAS_CURL_FTP
+#if OPENSCP_HAS_CURL_FTP
     t.check(static_cast<bool>(ftp),
             "factory should create FTP backend instance");
     if (ftp) {
@@ -562,7 +562,7 @@ int main() {
     test_client_factory(t);
     test_set_times(t);
     test_libssh2_rejects_conflicting_proxy_and_jump(t);
-#if OPEN_SCP_HAS_CURL_FTP
+#if OPENSCP_HAS_CURL_FTP
     test_curlftp_rejects_unsupported_proxy_type(t);
 #endif
 #ifdef _WIN32

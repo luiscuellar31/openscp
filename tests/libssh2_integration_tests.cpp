@@ -1,5 +1,5 @@
 // Integration tests for real Libssh2SftpClient against a test SFTP server.
-// The test is skipped (exit code 77) unless required OPEN_SCP_IT_* env vars
+// The test is skipped (exit code 77) unless required OPENSCP_IT_* env vars
 // exist.
 #include "openscp/Libssh2SftpClient.hpp"
 
@@ -217,74 +217,74 @@ bool waitForJumpTunnelCountAtMost(const std::string &targetHost,
 } // namespace
 
 int main() {
-    const auto host = envValue("OPEN_SCP_IT_SFTP_HOST");
-    const auto user = envValue("OPEN_SCP_IT_SFTP_USER");
-    const auto pass = envValue("OPEN_SCP_IT_SFTP_PASS");
-    const auto keyPath = envValue("OPEN_SCP_IT_SFTP_KEY");
-    const auto keyPassphrase = envValue("OPEN_SCP_IT_SFTP_KEY_PASSPHRASE");
-    const auto proxyTypeRaw = envValue("OPEN_SCP_IT_PROXY_TYPE");
-    const auto proxyHost = envValue("OPEN_SCP_IT_PROXY_HOST");
-    const auto proxyUser = envValue("OPEN_SCP_IT_PROXY_USER");
-    const auto proxyPass = envValue("OPEN_SCP_IT_PROXY_PASS");
-    const auto jumpHost = envValue("OPEN_SCP_IT_JUMP_HOST");
-    const auto jumpUser = envValue("OPEN_SCP_IT_JUMP_USER");
-    const auto jumpKey = envValue("OPEN_SCP_IT_JUMP_KEY");
+    const auto host = envValue("OPENSCP_IT_SFTP_HOST");
+    const auto user = envValue("OPENSCP_IT_SFTP_USER");
+    const auto pass = envValue("OPENSCP_IT_SFTP_PASS");
+    const auto keyPath = envValue("OPENSCP_IT_SFTP_KEY");
+    const auto keyPassphrase = envValue("OPENSCP_IT_SFTP_KEY_PASSPHRASE");
+    const auto proxyTypeRaw = envValue("OPENSCP_IT_PROXY_TYPE");
+    const auto proxyHost = envValue("OPENSCP_IT_PROXY_HOST");
+    const auto proxyUser = envValue("OPENSCP_IT_PROXY_USER");
+    const auto proxyPass = envValue("OPENSCP_IT_PROXY_PASS");
+    const auto jumpHost = envValue("OPENSCP_IT_JUMP_HOST");
+    const auto jumpUser = envValue("OPENSCP_IT_JUMP_USER");
+    const auto jumpKey = envValue("OPENSCP_IT_JUMP_KEY");
     const std::string remoteBase =
-        envValue("OPEN_SCP_IT_REMOTE_BASE").value_or("/tmp");
+        envValue("OPENSCP_IT_REMOTE_BASE").value_or("/tmp");
 
     if (!host.has_value() || !user.has_value() ||
         (!pass.has_value() && !keyPath.has_value())) {
         std::cout << "[SKIP] openscp_sftp_integration_tests requires env vars: "
-                  << "OPEN_SCP_IT_SFTP_HOST, OPEN_SCP_IT_SFTP_USER and one "
+                  << "OPENSCP_IT_SFTP_HOST, OPENSCP_IT_SFTP_USER and one "
                      "auth method "
-                  << "(OPEN_SCP_IT_SFTP_PASS or OPEN_SCP_IT_SFTP_KEY)\n";
+                  << "(OPENSCP_IT_SFTP_PASS or OPENSCP_IT_SFTP_KEY)\n";
         return kSkipExitCode;
     }
     if (keyPath.has_value() && !fs::exists(*keyPath)) {
-        std::cerr << "[FAIL] OPEN_SCP_IT_SFTP_KEY does not exist: " << *keyPath
+        std::cerr << "[FAIL] OPENSCP_IT_SFTP_KEY does not exist: " << *keyPath
                   << "\n";
         return EXIT_FAILURE;
     }
     if (jumpKey.has_value() && !fs::exists(*jumpKey)) {
-        std::cerr << "[FAIL] OPEN_SCP_IT_JUMP_KEY does not exist: " << *jumpKey
+        std::cerr << "[FAIL] OPENSCP_IT_JUMP_KEY does not exist: " << *jumpKey
                   << "\n";
         return EXIT_FAILURE;
     }
 
     std::uint16_t port = 22;
-    if (!parsePort(envValue("OPEN_SCP_IT_SFTP_PORT"), port)) {
-        std::cerr << "[FAIL] OPEN_SCP_IT_SFTP_PORT is invalid\n";
+    if (!parsePort(envValue("OPENSCP_IT_SFTP_PORT"), port)) {
+        std::cerr << "[FAIL] OPENSCP_IT_SFTP_PORT is invalid\n";
         return EXIT_FAILURE;
     }
 
     openscp::ProxyType proxyType = openscp::ProxyType::None;
     if (!parseProxyType(proxyTypeRaw, proxyType)) {
-        std::cerr << "[FAIL] OPEN_SCP_IT_PROXY_TYPE is invalid\n";
+        std::cerr << "[FAIL] OPENSCP_IT_PROXY_TYPE is invalid\n";
         return EXIT_FAILURE;
     }
     std::uint16_t proxyPort = 0;
     if (proxyType != openscp::ProxyType::None) {
         if (!proxyHost.has_value()) {
-            std::cerr << "[FAIL] OPEN_SCP_IT_PROXY_HOST is required when "
-                         "OPEN_SCP_IT_PROXY_TYPE is set\n";
+            std::cerr << "[FAIL] OPENSCP_IT_PROXY_HOST is required when "
+                         "OPENSCP_IT_PROXY_TYPE is set\n";
             return EXIT_FAILURE;
         }
         const std::uint16_t defaultProxyPort =
             (proxyType == openscp::ProxyType::Socks5) ? 1080 : 8080;
-        if (!parsePortOrDefault(envValue("OPEN_SCP_IT_PROXY_PORT"),
+        if (!parsePortOrDefault(envValue("OPENSCP_IT_PROXY_PORT"),
                                 defaultProxyPort, proxyPort)) {
-            std::cerr << "[FAIL] OPEN_SCP_IT_PROXY_PORT is invalid\n";
+            std::cerr << "[FAIL] OPENSCP_IT_PROXY_PORT is invalid\n";
             return EXIT_FAILURE;
         }
     }
     std::uint16_t jumpPort = 22;
     if (jumpHost.has_value() &&
-        !parsePortOrDefault(envValue("OPEN_SCP_IT_JUMP_PORT"), 22, jumpPort)) {
-        std::cerr << "[FAIL] OPEN_SCP_IT_JUMP_PORT is invalid\n";
+        !parsePortOrDefault(envValue("OPENSCP_IT_JUMP_PORT"), 22, jumpPort)) {
+        std::cerr << "[FAIL] OPENSCP_IT_JUMP_PORT is invalid\n";
         return EXIT_FAILURE;
     }
     if (proxyType != openscp::ProxyType::None && jumpHost.has_value()) {
-        std::cerr << "[FAIL] OPEN_SCP_IT_PROXY_TYPE and OPEN_SCP_IT_JUMP_HOST "
+        std::cerr << "[FAIL] OPENSCP_IT_PROXY_TYPE and OPENSCP_IT_JUMP_HOST "
                      "cannot be used together in the same run\n";
         return EXIT_FAILURE;
     }

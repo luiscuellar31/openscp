@@ -1,5 +1,5 @@
 // Integration tests for CurlFtpClient against a real FTP server.
-// Skips with exit code 77 unless required OPEN_SCP_IT_FTP_* vars exist.
+// Skips with exit code 77 unless required OPENSCP_IT_FTP_* vars exist.
 #include "openscp/ClientFactory.hpp"
 
 #include <chrono>
@@ -87,20 +87,20 @@ bool readFile(const fs::path &path, std::string &out) {
 } // namespace
 
 int main() {
-    const auto host = envValue("OPEN_SCP_IT_FTP_HOST");
-    const auto user = envValue("OPEN_SCP_IT_FTP_USER");
-    const auto pass = envValue("OPEN_SCP_IT_FTP_PASS");
-    const auto remoteBase = envValue("OPEN_SCP_IT_FTP_REMOTE_BASE");
+    const auto host = envValue("OPENSCP_IT_FTP_HOST");
+    const auto user = envValue("OPENSCP_IT_FTP_USER");
+    const auto pass = envValue("OPENSCP_IT_FTP_PASS");
+    const auto remoteBase = envValue("OPENSCP_IT_FTP_REMOTE_BASE");
 
     if (!host.has_value() || !remoteBase.has_value()) {
         std::cout << "[SKIP] openscp_ftp_integration_tests requires "
-                  << "OPEN_SCP_IT_FTP_HOST and OPEN_SCP_IT_FTP_REMOTE_BASE\n";
+                  << "OPENSCP_IT_FTP_HOST and OPENSCP_IT_FTP_REMOTE_BASE\n";
         return kSkipExitCode;
     }
 
     std::uint16_t port = 21;
-    if (!parsePort(envValue("OPEN_SCP_IT_FTP_PORT"), port, 21)) {
-        std::cerr << "[FAIL] OPEN_SCP_IT_FTP_PORT is invalid\n";
+    if (!parsePort(envValue("OPENSCP_IT_FTP_PORT"), port, 21)) {
+        std::cerr << "[FAIL] OPENSCP_IT_FTP_PORT is invalid\n";
         return EXIT_FAILURE;
     }
 
