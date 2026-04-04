@@ -112,7 +112,7 @@ open build/OpenSCP.app
 - Connection dialog includes per-site proxy configuration (`Direct`, `SOCKS5`, `HTTP CONNECT`) with optional auth.
 - Connection dialog includes optional per-site SSH jump host (bastion) configuration.
 - Connection dialog includes FTPS certificate controls (verify toggle + optional CA bundle selector).
-- UI language selection includes `English`, `Spanish`, and `Portuguese`.
+- UI language selection includes `English`, `Spanish`, `French`, and `Portuguese`.
 - Settings redesigned into focused sections: `General`, `Transfers`, `Sites`, `Security`, `Network`, and `Staging and drag-out`.
 - Settings keeps controls visible while resizing (minimum size + scrollable pages).
 - One-click reset for default main-window layout/sizes in Settings.
