@@ -167,6 +167,8 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     QString suffix = QStringLiteral("EN");
     if (lang.startsWith("es")) {
         suffix = QStringLiteral("ES");
+    } else if (lang.startsWith("fr")) {
+        suffix = QStringLiteral("FR");
     } else if (lang.startsWith("pt")) {
         suffix = QStringLiteral("PT");
     }

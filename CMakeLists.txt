@@ -207,6 +207,7 @@ endif()
 # .ts files live in the top-level 'translations/' folder.
 qt_add_translation(QM_FILES
     translations/openscp_es.ts
+    translations/openscp_fr.ts
     translations/openscp_pt.ts
 )
 # Set relative aliases for resources to avoid absolute paths in the qrc.

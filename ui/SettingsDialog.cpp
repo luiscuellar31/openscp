@@ -234,6 +234,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     langCombo_ = addComboRow(generalForm, generalPage, tr("Language:"));
     langCombo_->addItem(tr("Spanish"), "es");
     langCombo_->addItem(tr("English"), "en");
+    langCombo_->addItem(tr("French"), "fr");
     langCombo_->addItem(tr("Portuguese"), "pt");
     clickMode_ = addComboRow(generalForm, generalPage, tr("Open with:"));
     clickMode_->addItem(tr("Double click"), 2);

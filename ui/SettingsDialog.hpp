@@ -28,7 +28,7 @@ class SettingsDialog : public QDialog {
     void refreshWrappedCheckTexts();
     void trackWrappedCheck(QCheckBox *cb);
 
-    QComboBox *langCombo_ = nullptr;        // es/en
+    QComboBox *langCombo_ = nullptr;        // es/en/fr/pt
     QCheckBox *showHidden_ = nullptr;       // show hidden files
     QComboBox *clickMode_ = nullptr;        // single click vs double click
     QComboBox *openBehaviorMode_ = nullptr; // ask/reveal/open downloaded files
