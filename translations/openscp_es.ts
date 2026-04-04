@@ -2325,6 +2325,10 @@ En Linux, se recomienda instalar y usar libsecret/Secret Service para mayor segu
         <translation>El cambio de idioma se aplicará al reiniciar.</translation>
     </message>
     <message>
+        <source>French</source>
+        <translation>Francés</translation>
+    </message>
+    <message>
         <source>Portuguese</source>
         <translation>Portugués</translation>
     </message>

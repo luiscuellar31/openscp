@@ -8,8 +8,8 @@
         <translation>Sobre o OpenSCP</translation>
     </message>
     <message>
-        <source>Author: &lt;a href=&quot;%1&quot;&gt;%2&lt;/a&gt;</source>
-        <translation>Autor: &lt;a href=&quot;%1&quot;&gt;%2&lt;/a&gt;</translation>
+        <source>Author: &lt;a href="%1"&gt;%2&lt;/a&gt;</source>
+        <translation>Autor: &lt;a href="%1"&gt;%2&lt;/a&gt;</translation>
     </message>
     <message>
         <source>Used libraries:</source>
@@ -332,8 +332,8 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
         <translation>Preparação em andamento; aguarde a conclusão.</translation>
     </message>
     <message>
-        <source>Staging kept at: &lt;a href=&quot;%1&quot;&gt;%2&lt;/a&gt;</source>
-        <translation>Staging mantido em: &lt;a href=&quot;%1&quot;&gt;%2&lt;/a&gt;</translation>
+        <source>Staging kept at: &lt;a href="%1"&gt;%2&lt;/a&gt;</source>
+        <translation>Staging mantido em: &lt;a href="%1"&gt;%2&lt;/a&gt;</translation>
     </message>
     <message>
         <source>Cancel</source>
@@ -395,12 +395,12 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
         <translation>A entrada de origem não é arquivo nem pasta.</translation>
     </message>
     <message>
-        <source>Invalid name: cannot be &apos;.&apos; or &apos;..&apos;.</source>
-        <translation>Nome inválido: não pode ser &apos;.&apos; nem &apos;..&apos;.</translation>
+        <source>Invalid name: cannot be '.' or '..'.</source>
+        <translation>Nome inválido: não pode ser '.' nem '..'.</translation>
     </message>
     <message>
-        <source>Invalid name: cannot contain separators (&apos;/&apos; or &apos;\\&apos;).</source>
-        <translation>Nome inválido: não pode conter separadores (&apos;/&apos; ou &apos;\\&apos;).</translation>
+        <source>Invalid name: cannot contain separators ('/' or '\\').</source>
+        <translation>Nome inválido: não pode conter separadores ('/' ou '\\').</translation>
     </message>
     <message>
         <source>Invalid name: cannot contain control characters.</source>
@@ -676,7 +676,7 @@ Correspondências: %2</translation>
     </message>
     <message>
         <source>The current folder does not exist.</source>
-        <translation>La pasta actual no existe.</translation>
+        <translation>A pasta atual não existe.</translation>
     </message>
     <message>
         <source>Refresh</source>
@@ -744,7 +744,7 @@ Correspondências: %2</translation>
     </message>
     <message>
         <source>Report a bug</source>
-        <translation>Informar un erro</translation>
+        <translation>Informar um erro</translation>
     </message>
     <message>
         <source>Ready</source>
@@ -816,7 +816,7 @@ Correspondências: %2</translation>
     </message>
     <message>
         <source>Folder does not exist.</source>
-        <translation>La pasta no existe.</translation>
+        <translation>A pasta não existe.</translation>
     </message>
     <message>
         <source>Right: </source>
@@ -850,7 +850,7 @@ Correspondências: %2</translation>
         <source>“%1” already exists at destination.
 Overwrite?</source>
         <translation>«%1» já existe no destino.
-Sobrdigiter?</translation>
+Sobrescrever?</translation>
     </message>
     <message>
         <source>Copied: %1  |  Failed: %2  |  Skipped: %3</source>
@@ -923,11 +923,11 @@ Deseja continuar?</translation>
         <translation>Riesgo crítico de segurança</translation>
     </message>
     <message>
-        <source>You are about to connect using the &quot;No verification&quot; policy.
+        <source>You are about to connect using the "No verification" policy.
 This allows MITM attacks and server impersonation.
 
 Do you want to continue at your own risk?</source>
-        <translation>Você está prestes a conectar com a política &quot;Sem verificação&quot;.
+        <translation>Você está prestes a conectar com a política "Sem verificação".
 Isso permite ataques MITM e personificação do servidor.
 
 Deseja continuar por sua conta e risco?</translation>
@@ -949,8 +949,8 @@ Deseja continuar por sua conta e risco?</translation>
         <translation>A confirmação de risco não foi concluída corretamente.</translation>
     </message>
     <message>
-        <source>Temporary &quot;no verification&quot; exception active until %1</source>
-        <translation>Exceção temporária de &quot;sem verificação&quot; ativa até %1</translation>
+        <source>Temporary "no verification" exception active until %1</source>
+        <translation>Exceção temporária de "sem verificação" ativa até %1</translation>
     </message>
     <message>
         <source>Risk: host key not verified in this session</source>
@@ -1175,9 +1175,9 @@ Continuar?</translation>
         <translation>Erro ao ler informações remotas.</translation>
     </message>
     <message>
-        <source>Could not apply permissions to &quot;%1&quot;.
+        <source>Could not apply permissions to "%1".
 %2</source>
-        <translation>Não foi possível aplicar permissões em &quot;%1&quot;.
+        <translation>Não foi possível aplicar permissões em "%1".
 %2</translation>
     </message>
     <message>
@@ -1665,8 +1665,8 @@ O OpenSCP vai desconectar para evitar operações inconsistentes.
         <translation>A autenticação do proxy requer um nome de usuário.</translation>
     </message>
     <message>
-        <source>Proxy authentication in terminal mode requires &apos;ncat&apos; (with --proxy-auth support).</source>
-        <translation>A autenticação de proxy no modo terminal requer &apos;ncat&apos; (com suporte a --proxy-auth).</translation>
+        <source>Proxy authentication in terminal mode requires 'ncat' (with --proxy-auth support).</source>
+        <translation>A autenticação de proxy no modo terminal requer 'ncat' (com suporte a --proxy-auth).</translation>
     </message>
     <message>
         <source>Unsupported proxy type for terminal command.</source>
@@ -1869,8 +1869,8 @@ O OpenSCP vai desconectar para evitar operações inconsistentes.
         <translation>Nome duplicado</translation>
     </message>
     <message>
-        <source>A site named &quot;%1&quot; already exists. Use a different name.</source>
-        <translation>Já existe um site com o nome &quot;%1&quot;. Use um nome diferente.</translation>
+        <source>A site named "%1" already exists. Use a different name.</source>
+        <translation>Já existe um site com o nome "%1". Use um nome diferente.</translation>
     </message>
     <message>
         <source>Name required</source>
@@ -2323,6 +2323,10 @@ Deseja ativar a alternativa insegura mesmo assim?</translation>
     <message>
         <source>Language changes take effect after restart.</source>
         <translation>A mudança de idioma será aplicada após reiniciar.</translation>
+    </message>
+    <message>
+        <source>French</source>
+        <translation>Francês</translation>
     </message>
     <message>
         <source>Portuguese</source>
