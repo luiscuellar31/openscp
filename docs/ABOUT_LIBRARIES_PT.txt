@@ -16,11 +16,18 @@ Bibliotecas de terceiros usadas pelo OpenSCP
   Copyright: The libssh2 Project
 
 - libcurl
-  Descrição: biblioteca de transferência usada pelo backend FTP.
+  Descrição: biblioteca de transferência usada pelos backends FTP/FTPS e WebDAV.
   Licença: curl
   Site: https://curl.se/libcurl/
   Texto da licença: docs/credits/LICENSES/libcurl-curl-license.txt
   Copyright: Daniel Stenberg e colaboradores
+
+- tinyxml2
+  Descrição: parser XML leve usado nas respostas WebDAV PROPFIND.
+  Licença: zlib
+  Site: https://github.com/leethomason/tinyxml2
+  Texto da licença: docs/credits/LICENSES/tinyxml2-zlib-license.txt
+  Copyright: Lee Thomason e colaboradores
 
 - OpenSSL 3 (libssl, libcrypto)
   Descrição: toolkit de criptografia e TLS/SSL usado pelo libssh2.

@@ -3,7 +3,7 @@
     <h1 align="center">OpenSCP</h1>
 
 <p>
-    <strong>Two-panel SFTP/SCP/FTP/FTPS client focused on simplicity and security</strong>
+    <strong>Two-panel SFTP/SCP/FTP/FTPS/WebDAV client focused on simplicity and security</strong>
 </p>
 
 <p>
@@ -11,7 +11,7 @@
 </p>
 
 <p>
-    <strong>OpenSCP</strong> is a two-panel commander-style file explorer written in <strong>C++/Qt</strong>, with <strong>SFTP</strong>, initial <strong>SCP</strong>, and initial <strong>FTP/FTPS</strong> support. It aims to be a lightweight alternative to tools like WinSCP, focused on <strong>security</strong>, <strong>clarity</strong>, and <strong>extensibility</strong>.
+    <strong>OpenSCP</strong> is a two-panel commander-style file explorer written in <strong>C++/Qt</strong>, with <strong>SFTP</strong>, initial <strong>SCP</strong>, initial <strong>FTP/FTPS</strong>, and initial <strong>WebDAV</strong> support. It aims to be a lightweight alternative to tools like WinSCP, focused on <strong>security</strong>, <strong>clarity</strong>, and <strong>extensibility</strong>.
 </p>
 
 <br>
@@ -74,8 +74,9 @@ open build/OpenSCP.app
 ### 3. SSH transport security hardening
 
 - Auth: password, private key (+passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
-- Protocol selector per site/session (`SFTP`, `SCP`, `FTP`, `FTPS`).
+- Protocol selector per site/session (`SFTP`, `SCP`, `FTP`, `FTPS`, `WebDAV`).
 - FTP/FTPS support remote directory listing (MLSD with LIST fallback).
+- WebDAV support includes remote listing (`PROPFIND`) and basic file operations (`GET`, `PUT`, `MKCOL`, `DELETE`, `MOVE`).
 - SCP mode policy per site/session: `Automatic (SCP + SFTP fallback)` or
   `SCP only` (disable fallback), plus a global default for new connections.
 - FTPS certificate verification (peer+host) is enabled by default, with optional custom CA bundle per site/session.
@@ -137,7 +138,8 @@ open build/OpenSCP.app
 
 - Qt `6.x` (tested with `6.8.3`)
 - libssh2 (OpenSSL 3 recommended)
-- libcurl (optional; required only for FTP/FTPS backends)
+- libcurl (optional; required for FTP/FTPS/WebDAV backends)
+- tinyxml2 (optional; required for WebDAV backend XML parsing)
 - CMake `3.22+`
 - C++20 compiler
 
@@ -148,6 +150,8 @@ Optional:
 - OpenSSH client (`ssh`) for SSH jump host tunneling.
 - FTP/FTPS backend can be disabled explicitly with
   `-DOPENSCP_ENABLE_FTP_BACKEND=OFF`.
+- WebDAV backend can be disabled explicitly with
+  `-DOPENSCP_ENABLE_WEBDAV_BACKEND=OFF`.
 
 ## Testing Locally
 
@@ -255,7 +259,7 @@ Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/READM
 ## Roadmap
 
 - Windows support is planned for future releases.
-- Protocols: `WebDAV`.
+- Protocols: broader WebDAV interoperability coverage.
 - Broader enterprise proxy/jump auth flows (for example, non-batch/interactive jump auth).
 - Sync workflows: compare/sync and keep-up-to-date with filters/ignores.
 - Queue persistence across restarts.
@@ -263,11 +267,11 @@ Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/READM
 
 ## Credits and Licenses
 
-- libssh2, libcurl, OpenSSL, zlib, and Qt are owned by their respective authors.
+- libssh2, libcurl, tinyxml2, OpenSSL, zlib, and Qt are owned by their respective authors.
 - License texts: [docs/credits/LICENSES/](docs/credits/LICENSES/)
 - Qt (LGPL) materials: [docs/credits](docs/credits)
 
 ## Contributing
 
 - Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for workflow and standards.
-- Issues and pull requests are welcome, especially around macOS/Linux stability, i18n, and SFTP/SCP/FTP/FTPS robustness.
+- Issues and pull requests are welcome, especially around macOS/Linux stability, i18n, and SFTP/SCP/FTP/FTPS/WebDAV robustness.

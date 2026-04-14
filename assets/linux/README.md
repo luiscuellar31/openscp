@@ -17,6 +17,8 @@ Main artifacts:
 
 - Qt 6.x (tested with 6.8.3)
 - libssh2 (OpenSSL 3 recommended)
+- libcurl (for FTP/FTPS/WebDAV backends)
+- tinyxml2 (for WebDAV backend XML parsing)
 - CMake 3.22+ and a C++20 compiler
 
 Packaging tools:
@@ -149,7 +151,7 @@ Runtime-aware mode (for packages that rely on external Qt runtimes):
 ## Verify Linked Libraries (Optional)
 
 ```bash
-ldd ./build/openscp_hello | grep -E 'Qt6|libssh2|ssl|crypto' || true
+ldd ./build/openscp_hello | grep -E 'Qt6|libssh2|curl|tinyxml2|ssl|crypto' || true
 ```
 
 ## Troubleshooting

@@ -18,6 +18,11 @@ OpenSCP bundles or links against:
 - Project: [https://curl.se/libcurl/](https://curl.se/libcurl/)
 - License file: [LICENSES/libcurl-curl-license.txt](LICENSES/libcurl-curl-license.txt)
 
+## tinyxml2
+- License: zlib
+- Project: [https://github.com/leethomason/tinyxml2](https://github.com/leethomason/tinyxml2)
+- License file: [LICENSES/tinyxml2-zlib-license.txt](LICENSES/tinyxml2-zlib-license.txt)
+
 ## OpenSSL 3
 - License: Apache-2.0
 - Project: [https://www.openssl.org](https://www.openssl.org)
