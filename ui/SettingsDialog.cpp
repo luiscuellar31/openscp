@@ -382,6 +382,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                               static_cast<int>(openscp::Protocol::Ftp));
     defaultProtocol_->addItem(tr("FTPS"),
                               static_cast<int>(openscp::Protocol::Ftps));
+    defaultProtocol_->addItem(tr("WebDAV"),
+                              static_cast<int>(openscp::Protocol::WebDav));
     addLabeledRow(sitesForm, sitesPage, tr("Default protocol:"),
                   defaultProtocol_);
     scpModeDefault_ = new QComboBox(sitesPage);

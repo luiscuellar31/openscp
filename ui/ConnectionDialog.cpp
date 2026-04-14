@@ -39,6 +39,8 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     protocol_->addItem(tr("FTP"), static_cast<int>(openscp::Protocol::Ftp));
     protocol_->addItem(tr("FTPS"),
                        static_cast<int>(openscp::Protocol::Ftps));
+    protocol_->addItem(tr("WebDAV"),
+                       static_cast<int>(openscp::Protocol::WebDav));
     scpMode_ = new QComboBox(this);
     scpMode_->addItem(
         tr("Automatic (SCP with SFTP fallback)"),
