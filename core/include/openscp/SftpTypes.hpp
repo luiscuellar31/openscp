@@ -14,6 +14,10 @@
 #define OPENSCP_HAS_CURL_FTP 1
 #endif
 
+#ifndef OPENSCP_HAS_CURL_WEBDAV
+#define OPENSCP_HAS_CURL_WEBDAV 0
+#endif
+
 namespace openscp {
 
 // known_hosts validation policy for the server host key.
@@ -212,6 +216,13 @@ inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
 #endif
         return caps;
     case Protocol::WebDav:
+#if OPENSCP_HAS_CURL_WEBDAV
+        caps.implemented = true;
+        caps.supports_listing = true;
+        caps.supports_file_transfers = true;
+        caps.supports_metadata = true;
+        caps.supports_proxy = true;
+#endif
         return caps;
     }
     return caps;

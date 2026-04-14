@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.22)
 option(OPENSCP_ENABLE_MOCK "Build mock SFTP client" OFF)
 option(OPENSCP_ENABLE_FTP_BACKEND
        "Build FTP/FTPS backend module (requires libcurl development files)" ON)
+option(OPENSCP_ENABLE_WEBDAV_BACKEND
+       "Build WebDAV backend module (requires libcurl + tinyxml2 development files)" ON)
 
 set(OPENSCP_CORE_SRCS
     src/libssh2/ClientFactory.cpp      # protocol -> backend factory
@@ -11,8 +13,18 @@ set(OPENSCP_CORE_SRCS
 )
 
 set(OPENSCP_HAS_CURL_FTP 0)
-if (OPENSCP_ENABLE_FTP_BACKEND)
+set(OPENSCP_HAS_CURL_WEBDAV 0)
+
+set(_openscp_need_curl OFF)
+if (OPENSCP_ENABLE_FTP_BACKEND OR OPENSCP_ENABLE_WEBDAV_BACKEND)
+    set(_openscp_need_curl ON)
+endif()
+
+if (_openscp_need_curl)
     find_package(CURL QUIET)
+endif()
+
+if (OPENSCP_ENABLE_FTP_BACKEND)
     if (CURL_FOUND)
         list(APPEND OPENSCP_CORE_SRCS
             src/curl/CurlFtpClient.cpp        # FTP/FTPS backend module
@@ -25,7 +37,60 @@ if (OPENSCP_ENABLE_FTP_BACKEND)
             "Install curl dev package to enable Protocol::Ftp/Protocol::Ftps backends.")
     endif()
 else()
-    message(STATUS "OpenSCP: FTP/FTPS backend disabled by OPENSCP_ENABLE_FTP_BACKEND=OFF")
+    message(STATUS
+        "OpenSCP: FTP/FTPS backend disabled by OPENSCP_ENABLE_FTP_BACKEND=OFF")
+endif()
+
+set(OPENSCP_TINYXML2_TARGET "")
+if (OPENSCP_ENABLE_WEBDAV_BACKEND)
+    if (CURL_FOUND)
+        find_package(tinyxml2 CONFIG QUIET)
+        if (TARGET tinyxml2::tinyxml2)
+            set(OPENSCP_TINYXML2_TARGET tinyxml2::tinyxml2)
+        else()
+            find_path(OPENSCP_TINYXML2_INCLUDE_DIR
+                NAMES tinyxml2.h
+                PATHS /opt/homebrew/include /opt/homebrew/opt/tinyxml2/include
+                      /usr/local/include /usr/local/opt/tinyxml2/include
+                      /usr/include
+            )
+            find_library(OPENSCP_TINYXML2_LIBRARY
+                NAMES tinyxml2
+                PATHS /opt/homebrew/lib /opt/homebrew/opt/tinyxml2/lib
+                      /usr/local/lib /usr/local/opt/tinyxml2/lib /usr/lib
+                      /usr/lib/x86_64-linux-gnu
+            )
+            if (OPENSCP_TINYXML2_INCLUDE_DIR AND OPENSCP_TINYXML2_LIBRARY)
+                add_library(openscp_tinyxml2 UNKNOWN IMPORTED)
+                set_target_properties(openscp_tinyxml2 PROPERTIES
+                    IMPORTED_LOCATION "${OPENSCP_TINYXML2_LIBRARY}"
+                    INTERFACE_INCLUDE_DIRECTORIES
+                        "${OPENSCP_TINYXML2_INCLUDE_DIR}"
+                )
+                set(OPENSCP_TINYXML2_TARGET openscp_tinyxml2)
+            endif()
+        endif()
+
+        if (OPENSCP_TINYXML2_TARGET)
+            list(APPEND OPENSCP_CORE_SRCS
+                src/curl/CurlWebDavClient.cpp   # WebDAV backend module
+            )
+            set(OPENSCP_HAS_CURL_WEBDAV 1)
+            message(STATUS
+                "OpenSCP: WebDAV backend enabled (libcurl + tinyxml2 found)")
+        else()
+            message(WARNING
+                "OpenSCP: tinyxml2 not found; WebDAV backend disabled. "
+                "Install tinyxml2 dev package to enable Protocol::WebDav backend.")
+        endif()
+    else()
+        message(WARNING
+            "OpenSCP: libcurl not found; WebDAV backend disabled. "
+            "Install curl dev package to enable Protocol::WebDav backend.")
+    endif()
+else()
+    message(STATUS
+        "OpenSCP: WebDAV backend disabled by OPENSCP_ENABLE_WEBDAV_BACKEND=OFF")
 endif()
 
 if (OPENSCP_ENABLE_MOCK)
@@ -39,9 +104,12 @@ target_include_directories(openscp_core
 )
 target_compile_definitions(openscp_core
     PUBLIC OPENSCP_HAS_CURL_FTP=${OPENSCP_HAS_CURL_FTP}
+           OPENSCP_HAS_CURL_WEBDAV=${OPENSCP_HAS_CURL_WEBDAV}
 )
 set_property(TARGET openscp_core PROPERTY OPENSCP_HAS_CURL_FTP
              ${OPENSCP_HAS_CURL_FTP})
+set_property(TARGET openscp_core PROPERTY OPENSCP_HAS_CURL_WEBDAV
+             ${OPENSCP_HAS_CURL_WEBDAV})
 
 # libssh2 (Homebrew/pkg-config) with robust link flags on macOS/Homebrew.
 find_package(PkgConfig QUIET)
@@ -66,6 +134,10 @@ endif()
 # libcurl (FTP/FTPS backend, optional)
 if (OPENSCP_HAS_CURL_FTP)
     target_link_libraries(openscp_core PRIVATE CURL::libcurl)
+endif()
+if (OPENSCP_HAS_CURL_WEBDAV)
+    target_link_libraries(openscp_core PRIVATE CURL::libcurl
+                                               ${OPENSCP_TINYXML2_TARGET})
 endif()
 
 if (TARGET PkgConfig::LIBSSH2)

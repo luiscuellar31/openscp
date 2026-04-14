@@ -3,6 +3,9 @@
 #if defined(OPENSCP_HAS_CURL_FTP) && OPENSCP_HAS_CURL_FTP
 #include "openscp/CurlFtpClient.hpp"
 #endif
+#if defined(OPENSCP_HAS_CURL_WEBDAV) && OPENSCP_HAS_CURL_WEBDAV
+#include "openscp/CurlWebDavClient.hpp"
+#endif
 #include "openscp/Libssh2ScpClient.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
 
@@ -27,7 +30,11 @@ std::unique_ptr<SftpClient> CreateClientForProtocol(Protocol protocol) {
         return nullptr;
 #endif
     case Protocol::WebDav:
+#if defined(OPENSCP_HAS_CURL_WEBDAV) && OPENSCP_HAS_CURL_WEBDAV
+        return std::make_unique<CurlWebDavClient>();
+#else
         return nullptr;
+#endif
     }
     return nullptr;
 }
