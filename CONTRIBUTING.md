@@ -151,6 +151,8 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
+Shortcut script available: `./scripts/check_ci_local.sh --clean` (script: [scripts/check_ci_local.sh](scripts/check_ci_local.sh), usage details: [README.md#testing-locally](README.md#testing-locally), script index: [scripts/README.md](scripts/README.md))
+
 If your change is platform-specific (e.g., macOS packaging), validate on that platform too.
 
 ### SFTP Integration Test (Optional Locally, Required in Linux/macOS CI)

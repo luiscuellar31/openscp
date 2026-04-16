@@ -162,6 +162,27 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
+Script local de CI antes de push/PR:
+
+```bash
+./scripts/check_ci_local.sh --clean
+```
+
+Variantes utiles:
+
+```bash
+# Tambien construye el target GUI de la app
+./scripts/check_ci_local.sh --clean --full
+
+# Directorio de build personalizado + jobs en paralelo
+./scripts/check_ci_local.sh --clean --build-dir build-ci-local -j 8
+
+# Lo mismo via variables de entorno
+BUILD_DIR=build-ci-local JOBS=8 ./scripts/check_ci_local.sh --clean
+```
+
+Indice de scripts: [scripts/README.md](scripts/README.md)
+
 `openscp_sftp_integration_tests` se omite si no defines variables de integracion:
 
 - `OPENSCP_IT_SFTP_HOST`
