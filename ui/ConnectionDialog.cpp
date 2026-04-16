@@ -8,6 +8,7 @@
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLineEdit>
+#include <QPointer>
 #include <QPushButton>
 #include <QSettings>
 #include <QSignalBlocker>
@@ -183,8 +184,8 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     passRowLayout->addWidget(pass_);
     passRowLayout->addWidget(passToggle);
 
-    auto *keyPassRow = new QWidget(this);
-    auto *keyPassRowLayout = new QHBoxLayout(keyPassRow);
+    keyPassRow_ = new QWidget(this);
+    auto *keyPassRowLayout = new QHBoxLayout(keyPassRow_);
     keyPassRowLayout->setContentsMargins(0, 0, 0, 0);
     keyPassRowLayout->setSpacing(6);
     keyPassRowLayout->addWidget(keyPass_);
@@ -200,8 +201,8 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     hostPortRowLayout->addWidget(host_, 1);
     hostPortRowLayout->addWidget(port_);
 
-    auto *keyPathRow = new QWidget(this);
-    auto *keyPathRowLayout = new QHBoxLayout(keyPathRow);
+    keyPathRow_ = new QWidget(this);
+    auto *keyPathRowLayout = new QHBoxLayout(keyPathRow_);
     keyPathRowLayout->setContentsMargins(0, 0, 0, 0);
     keyPathRowLayout->setSpacing(6);
     keyPathRowLayout->addWidget(keyPath_);
@@ -215,29 +216,29 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     proxyType_->addItem(tr("HTTP CONNECT"),
                         static_cast<int>(openscp::ProxyType::HttpConnect));
 
-    auto *proxyHostPortRow = new QWidget(this);
-    auto *proxyHostPortLayout = new QHBoxLayout(proxyHostPortRow);
+    proxyHostPortRow_ = new QWidget(this);
+    auto *proxyHostPortLayout = new QHBoxLayout(proxyHostPortRow_);
     proxyHostPortLayout->setContentsMargins(0, 0, 0, 0);
     proxyHostPortLayout->setSpacing(6);
     proxyHostPortLayout->addWidget(proxyHost_, 1);
     proxyHostPortLayout->addWidget(proxyPort_);
 
-    auto *proxyPassRow = new QWidget(this);
-    auto *proxyPassRowLayout = new QHBoxLayout(proxyPassRow);
+    proxyPassRow_ = new QWidget(this);
+    auto *proxyPassRowLayout = new QHBoxLayout(proxyPassRow_);
     proxyPassRowLayout->setContentsMargins(0, 0, 0, 0);
     proxyPassRowLayout->setSpacing(6);
     proxyPassRowLayout->addWidget(proxyPass_);
     proxyPassRowLayout->addWidget(proxyPassToggle);
 
-    auto *jumpHostPortRow = new QWidget(this);
-    auto *jumpHostPortLayout = new QHBoxLayout(jumpHostPortRow);
+    jumpHostPortRow_ = new QWidget(this);
+    auto *jumpHostPortLayout = new QHBoxLayout(jumpHostPortRow_);
     jumpHostPortLayout->setContentsMargins(0, 0, 0, 0);
     jumpHostPortLayout->setSpacing(6);
     jumpHostPortLayout->addWidget(jumpHost_, 1);
     jumpHostPortLayout->addWidget(jumpPort_);
 
-    auto *jumpKeyPathRow = new QWidget(this);
-    auto *jumpKeyPathLayout = new QHBoxLayout(jumpKeyPathRow);
+    jumpKeyPathRow_ = new QWidget(this);
+    auto *jumpKeyPathLayout = new QHBoxLayout(jumpKeyPathRow_);
     jumpKeyPathLayout->setContentsMargins(0, 0, 0, 0);
     jumpKeyPathLayout->setSpacing(6);
     jumpKeyPathLayout->addWidget(jumpKeyPath_);
@@ -270,16 +271,16 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     lay->addRow(tr("Host / Port:"), hostPortRow);
     lay->addRow(tr("User:"), user_);
     lay->addRow(tr("Password:"), passRow);
-    lay->addRow(tr("Private key path:"), keyPathRow);
-    lay->addRow(tr("Key passphrase:"), keyPassRow);
+    lay->addRow(tr("Private key path:"), keyPathRow_);
+    lay->addRow(tr("Key passphrase:"), keyPassRow_);
     lay->addRow(tr("Proxy:"), proxyType_);
-    lay->addRow(tr("Proxy host / port:"), proxyHostPortRow);
+    lay->addRow(tr("Proxy host / port:"), proxyHostPortRow_);
     lay->addRow(tr("Proxy user:"), proxyUser_);
-    lay->addRow(tr("Proxy password:"), proxyPassRow);
+    lay->addRow(tr("Proxy password:"), proxyPassRow_);
     lay->addRow(QString(), jumpEnabled_);
-    lay->addRow(tr("Jump host / port:"), jumpHostPortRow);
+    lay->addRow(tr("Jump host / port:"), jumpHostPortRow_);
     lay->addRow(tr("Jump user:"), jumpUser_);
-    lay->addRow(tr("Jump private key:"), jumpKeyPathRow);
+    lay->addRow(tr("Jump private key:"), jumpKeyPathRow_);
 
     // known_hosts
     khPath_ = new QLineEdit(this);
@@ -293,8 +294,8 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     khPolicy_->addItem(
         tr("No verification (double confirmation, expires in 15 min)"),
         static_cast<int>(openscp::KnownHostsPolicy::Off));
-    auto *khPathRow = new QWidget(this);
-    auto *khPathRowLayout = new QHBoxLayout(khPathRow);
+    khPathRow_ = new QWidget(this);
+    auto *khPathRowLayout = new QHBoxLayout(khPathRow_);
     khPathRowLayout->setContentsMargins(0, 0, 0, 0);
     khPathRowLayout->setSpacing(6);
     khPathRowLayout->addWidget(khPath_);
@@ -366,16 +367,22 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         }
     }
 
-    lay->addRow(tr("known_hosts:"), khPathRow);
+    lay->addRow(tr("known_hosts:"), khPathRow_);
     lay->addRow(tr("Policy:"), khPolicy_);
     lay->addRow(tr("Integrity:"), integrityPolicy_);
     lay->addRow(QString(), ftpsVerifyPeer_);
     lay->addRow(tr("FTPS CA bundle:"), ftpsCaPathRow_);
 
-    auto updateProxyFields = [this, lay, proxyHostPortRow, proxyPassRow]() {
+    auto updateProxyFields = [this, lay]() {
         const auto type = openscp::normalizeProxyType(
             static_cast<openscp::ProxyType>(proxyType_->currentData().toInt()));
-        const bool showProxyRows = (type != openscp::ProxyType::None);
+        const auto protocol = protocol_
+                                  ? static_cast<openscp::Protocol>(
+                                        protocol_->currentData().toInt())
+                                  : openscp::Protocol::Sftp;
+        const auto caps = openscp::capabilitiesForProtocol(protocol);
+        const bool showProxyRows =
+            caps.supports_proxy && (type != openscp::ProxyType::None);
         const std::uint16_t defaultPortForType =
             openscp::defaultPortForProxyType(type);
         const std::uint16_t previousDefaultPort =
@@ -384,13 +391,9 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
             directModeSize_ = size();
             hasDirectModeSize_ = true;
         }
-        setFormRowVisible(lay, proxyHostPortRow, showProxyRows);
+        setFormRowVisible(lay, proxyHostPortRow_, showProxyRows);
         setFormRowVisible(lay, proxyUser_, showProxyRows);
-        setFormRowVisible(lay, proxyPassRow, showProxyRows);
-        proxyHost_->setEnabled(showProxyRows);
-        proxyPort_->setEnabled(showProxyRows);
-        proxyUser_->setEnabled(showProxyRows);
-        proxyPass_->setEnabled(showProxyRows);
+        setFormRowVisible(lay, proxyPassRow_, showProxyRows);
         if (!showProxyRows) {
             proxyPort_->setValue(static_cast<int>(
                 openscp::defaultPortForProxyType(openscp::ProxyType::Socks5)));
@@ -433,32 +436,26 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
                 }
                 updateProxyFields();
             });
-    updateProxyFields();
 
-    connect(protocol_, &QComboBox::currentIndexChanged, this, [this](int) {
-        if (!protocol_)
-            return;
-        const auto protocol = static_cast<openscp::Protocol>(
-            protocol_->currentData().toInt());
-        updateProtocolUi(protocol);
-    });
-    const auto initialProtocol =
-        protocol_ ? static_cast<openscp::Protocol>(protocol_->currentData().toInt())
-                  : openscp::Protocol::Sftp;
-    updateProtocolUi(initialProtocol);
+    auto updateJumpFields = [this, lay]() {
+        const auto protocol = protocol_
+                                  ? static_cast<openscp::Protocol>(
+                                        protocol_->currentData().toInt())
+                                  : openscp::Protocol::Sftp;
+        bool jumpSupported =
+            openscp::capabilitiesForProtocol(protocol).supports_jump_host;
+#ifdef Q_OS_WIN
+        jumpSupported = false;
+#endif
+        if (!jumpSupported && jumpEnabled_ && jumpEnabled_->isChecked())
+            jumpEnabled_->setChecked(false);
 
-    auto updateJumpFields = [this, lay, jumpHostPortRow, jumpKeyPathRow]() {
         const bool showJumpRows =
-            jumpEnabled_ && jumpEnabled_->isEnabled() &&
+            jumpEnabled_ && jumpEnabled_->isVisible() &&
             jumpEnabled_->isChecked();
-        setFormRowVisible(lay, jumpHostPortRow, showJumpRows);
+        setFormRowVisible(lay, jumpHostPortRow_, showJumpRows);
         setFormRowVisible(lay, jumpUser_, showJumpRows);
-        setFormRowVisible(lay, jumpKeyPathRow, showJumpRows);
-        jumpHost_->setEnabled(showJumpRows);
-        jumpPort_->setEnabled(showJumpRows);
-        jumpUser_->setEnabled(showJumpRows);
-        jumpKeyPath_->setEnabled(showJumpRows);
-        jumpKeyBrowse_->setEnabled(showJumpRows);
+        setFormRowVisible(lay, jumpKeyPathRow_, showJumpRows);
         const bool visibilityChanged = (showJumpRows != jumpRowsVisible_);
         jumpRowsVisible_ = showJumpRows;
         if (visibilityChanged) {
@@ -477,6 +474,29 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
                 }
                 updateJumpFields();
             });
+
+    connect(protocol_, &QComboBox::currentIndexChanged, this,
+            [this, updateProxyFields, updateJumpFields](int) {
+                if (!protocol_)
+                    return;
+                QPointer<QWidget> previouslyFocused = focusWidget();
+                const auto protocol = static_cast<openscp::Protocol>(
+                    protocol_->currentData().toInt());
+                updateProtocolUi(protocol);
+                updateProxyFields();
+                updateJumpFields();
+                if (host_ && previouslyFocused && previouslyFocused != protocol_ &&
+                    previouslyFocused != host_ &&
+                    !previouslyFocused->isVisibleTo(this)) {
+                    host_->setFocus(Qt::OtherFocusReason);
+                }
+            });
+    const auto initialProtocol =
+        protocol_ ? static_cast<openscp::Protocol>(
+                        protocol_->currentData().toInt())
+                  : openscp::Protocol::Sftp;
+    updateProtocolUi(initialProtocol);
+    updateProxyFields();
     updateJumpFields();
 
     connect(khBrowse_, &QToolButton::clicked, this, [this] {
@@ -607,11 +627,17 @@ openscp::SessionOptions ConnectionDialog::options() const {
         o.proxy_type = openscp::normalizeProxyType(
             static_cast<openscp::ProxyType>(proxyType_->currentData().toInt()));
     }
-    const bool useJump = jumpEnabled_ && jumpEnabled_->isEnabled() &&
+    const auto caps = openscp::capabilitiesForProtocol(o.protocol);
+    bool jumpSupported = caps.supports_jump_host;
+#ifdef Q_OS_WIN
+    jumpSupported = false;
+#endif
+    const bool useJump = jumpEnabled_ && jumpSupported &&
                          jumpEnabled_->isChecked() &&
                          !jumpHost_->text().trimmed().isEmpty();
     const bool useProxy =
-        (o.proxy_type != openscp::ProxyType::None) && !useJump;
+        caps.supports_proxy && (o.proxy_type != openscp::ProxyType::None) &&
+        !useJump;
     if (useProxy) {
         o.proxy_host = proxyHost_->text().trimmed().toStdString();
         o.proxy_port = static_cast<std::uint16_t>(proxyPort_->value());
@@ -628,6 +654,17 @@ openscp::SessionOptions ConnectionDialog::options() const {
             o.jump_username = jumpUser_->text().toStdString();
         if (!jumpKeyPath_->text().isEmpty())
             o.jump_private_key_path = jumpKeyPath_->text().toStdString();
+    } else {
+        o.jump_host.reset();
+        o.jump_username.reset();
+        o.jump_private_key_path.reset();
+    }
+    if (!caps.supports_proxy) {
+        o.proxy_type = openscp::ProxyType::None;
+        o.proxy_host.clear();
+        o.proxy_port = 0;
+        o.proxy_username.reset();
+        o.proxy_password.reset();
     }
     if (o.protocol != openscp::Protocol::Ftps) {
         o.ftps_verify_peer = true;
@@ -689,15 +726,18 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &o) {
         }
     }
 
-    bool jumpSupportedInUi = true;
+    const auto caps = openscp::capabilitiesForProtocol(effectiveProtocol);
+    bool jumpSupportedInUi = caps.supports_jump_host;
 #ifdef Q_OS_WIN
     jumpSupportedInUi = false;
 #endif
     const bool hasJump =
         jumpSupportedInUi && o.jump_host.has_value() && !o.jump_host->empty();
+    const bool proxySupportedInUi = caps.supports_proxy;
+    const auto requestedProxyType = openscp::normalizeProxyType(o.proxy_type);
     const openscp::ProxyType effectiveProxyType =
-        hasJump ? openscp::ProxyType::None
-                : openscp::normalizeProxyType(o.proxy_type);
+        (!proxySupportedInUi || hasJump) ? openscp::ProxyType::None
+                                         : requestedProxyType;
     if (proxyType_) {
         int i = proxyType_->findData(static_cast<int>(effectiveProxyType));
         if (i >= 0)
@@ -737,20 +777,14 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol) {
     if (formLayout_ && scpMode_) {
         const bool isScpProtocol = (protocol == openscp::Protocol::Scp);
         setFormRowVisible(formLayout_, scpMode_, isScpProtocol);
-        scpMode_->setEnabled(isScpProtocol);
     }
     if (formLayout_) {
         const bool isFtpsProtocol = (protocol == openscp::Protocol::Ftps);
         if (ftpsVerifyPeer_) {
             setFormRowVisible(formLayout_, ftpsVerifyPeer_, isFtpsProtocol);
-            ftpsVerifyPeer_->setEnabled(isFtpsProtocol);
         }
         if (ftpsCaPathRow_) {
             setFormRowVisible(formLayout_, ftpsCaPathRow_, isFtpsProtocol);
-            if (ftpsCaPath_)
-                ftpsCaPath_->setEnabled(isFtpsProtocol);
-            if (ftpsCaBrowse_)
-                ftpsCaBrowse_->setEnabled(isFtpsProtocol);
         }
     }
     const openscp::ProtocolCapabilities caps =
@@ -777,19 +811,18 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol) {
     const bool sshAuthSupported =
         (protocol == openscp::Protocol::Sftp ||
          protocol == openscp::Protocol::Scp);
-    if (keyPath_)
-        keyPath_->setEnabled(sshAuthSupported);
-    if (keyPass_)
-        keyPass_->setEnabled(sshAuthSupported);
+    if (formLayout_ && keyPathRow_)
+        setFormRowVisible(formLayout_, keyPathRow_, sshAuthSupported);
+    if (formLayout_ && keyPassRow_)
+        setFormRowVisible(formLayout_, keyPassRow_, sshAuthSupported);
 
-    if (khPath_)
-        khPath_->setEnabled(caps.supports_known_hosts);
-    if (khBrowse_)
-        khBrowse_->setEnabled(caps.supports_known_hosts);
-    if (khPolicy_)
-        khPolicy_->setEnabled(caps.supports_known_hosts);
-    if (integrityPolicy_)
-        integrityPolicy_->setEnabled(caps.supports_transfer_integrity);
+    if (formLayout_ && khPathRow_)
+        setFormRowVisible(formLayout_, khPathRow_, caps.supports_known_hosts);
+    if (formLayout_ && khPolicy_)
+        setFormRowVisible(formLayout_, khPolicy_, caps.supports_known_hosts);
+    if (formLayout_ && integrityPolicy_)
+        setFormRowVisible(formLayout_, integrityPolicy_,
+                          caps.supports_transfer_integrity);
 
     if (proxyType_) {
         if (!caps.supports_proxy) {
@@ -797,9 +830,18 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol) {
                 proxyType_->findData(static_cast<int>(openscp::ProxyType::None));
             if (directIdx >= 0)
                 proxyType_->setCurrentIndex(directIdx);
-            proxyType_->setEnabled(false);
-        } else {
-            proxyType_->setEnabled(true);
+        }
+        if (formLayout_)
+            setFormRowVisible(formLayout_, proxyType_, caps.supports_proxy);
+        const auto selectedProxyType = openscp::normalizeProxyType(
+            static_cast<openscp::ProxyType>(proxyType_->currentData().toInt()));
+        const bool showProxyRows =
+            caps.supports_proxy &&
+            (selectedProxyType != openscp::ProxyType::None);
+        if (formLayout_) {
+            setFormRowVisible(formLayout_, proxyHostPortRow_, showProxyRows);
+            setFormRowVisible(formLayout_, proxyUser_, showProxyRows);
+            setFormRowVisible(formLayout_, proxyPassRow_, showProxyRows);
         }
     }
 
@@ -810,12 +852,19 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol) {
     if (jumpEnabled_) {
         if (!jumpSupported && jumpEnabled_->isChecked())
             jumpEnabled_->setChecked(false);
-        jumpEnabled_->setEnabled(jumpSupported);
-        if (!jumpSupported) {
-            jumpEnabled_->setToolTip(
-                tr("Not available for the selected protocol."));
-        } else {
-            jumpEnabled_->setToolTip(QString());
+        if (formLayout_)
+            setFormRowVisible(formLayout_, jumpEnabled_, jumpSupported);
+        jumpEnabled_->setToolTip(
+            jumpSupported ? QString()
+                          : tr("Not available for the selected protocol."));
+        const bool showJumpRows =
+            jumpSupported && jumpEnabled_->isChecked();
+        if (formLayout_) {
+            setFormRowVisible(formLayout_, jumpHostPortRow_, showJumpRows);
+            setFormRowVisible(formLayout_, jumpUser_, showJumpRows);
+            setFormRowVisible(formLayout_, jumpKeyPathRow_, showJumpRows);
         }
     }
+    if (layout())
+        layout()->activate();
 }
