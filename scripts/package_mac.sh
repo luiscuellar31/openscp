@@ -5,7 +5,7 @@ set -euo pipefail
 # OpenSCP macOS packaging script
 # - Assumes OpenSCP.app is already produced by CMake (MACOSX_BUNDLE)
 # - Runs macdeployqt to bundle Qt frameworks/plugins
-# - Bundles non-Qt deps (libssh2, OpenSSL)
+# - Bundles non-Qt deps (libssh2, OpenSSL, tinyxml2)
 # - Code-signs (hardened runtime) recursively
 # - Creates a compressed .dmg
 # - Notarizes with notarytool and staples the ticket
@@ -395,14 +395,15 @@ adhoc_sign_bundle() {
 }
 
 bundle_non_qt_deps() {
-  # Ensure non-Qt libraries (libssh2, OpenSSL libcrypto) are present in Frameworks.
+  # Ensure non-Qt libraries (libssh2, OpenSSL libcrypto, tinyxml2) are present in Frameworks.
   # Newer macdeployqt may already copy them; in that case we skip copying and just ensure IDs/RPATH.
   mkdir -p "$FRAMEWORKS_DIR"
 
   local exe="$MACOS_DIR/${APP_NAME}"
-  local want_libssh2="" want_libcrypto=""
+  local want_libssh2="" want_libcrypto="" want_tinyxml2=""
   if otool -L "$exe" | grep -q "libssh2"; then want_libssh2=1; fi
   if otool -L "$exe" | grep -q "libcrypto"; then want_libcrypto=1; fi
+  if otool -L "$exe" | grep -q "tinyxml2"; then want_tinyxml2=1; fi
 
   # helper to maybe copy a dylib if missing
 maybe_copy() {
@@ -470,6 +471,39 @@ maybe_copy() {
         done
       fi
       [[ -z "$src" ]] && die "OpenSSL libcrypto dylib not found. Install with 'brew install openssl@3'."
+      existing=$(maybe_copy "$src" "$FRAMEWORKS_DIR")
+      libs_to_fix+=("$existing")
+      if otool -L "$exe" | grep -q "$src"; then
+        redirect_dep_to_rpath "$exe" "$src"
+      fi
+    fi
+    if [[ -f "$existing" ]]; then
+      install_name_tool -id "@rpath/$(basename "$existing")" "$existing" || true
+    fi
+  fi
+
+  if [[ -n "$want_tinyxml2" ]]; then
+    local existing
+    existing=$(ls "$FRAMEWORKS_DIR"/libtinyxml2*.dylib 2>/dev/null | head -n1 || true)
+    if [[ -n "$existing" ]]; then
+      libs_to_fix+=("$existing")
+    else
+      local libdir="" src=""
+      libdir=$(pkg-config --variable=libdir tinyxml2 2>/dev/null || true)
+      if [[ -z "$libdir" ]] && command -v brew >/dev/null 2>&1; then
+        local pfx
+        pfx=$(brew --prefix tinyxml2 2>/dev/null || true)
+        if [[ -n "$pfx" && -d "$pfx/lib" ]]; then
+          libdir="$pfx/lib"
+        fi
+      fi
+      if [[ -z "$libdir" ]]; then
+        for d in /opt/homebrew/opt/tinyxml2/lib /usr/local/opt/tinyxml2/lib /opt/homebrew/lib /usr/local/lib; do
+          [[ -d "$d" ]] && libdir="$d" && break
+        done
+      fi
+      src=$(ls "$libdir"/libtinyxml2*.dylib 2>/dev/null | head -n1 || true)
+      [[ -z "$src" ]] && die "tinyxml2 dylib not found (looked under $libdir). Install with 'brew install tinyxml2'."
       existing=$(maybe_copy "$src" "$FRAMEWORKS_DIR")
       libs_to_fix+=("$existing")
       if otool -L "$exe" | grep -q "$src"; then
@@ -1038,7 +1072,7 @@ main() {
   ensure_qt_support_plugins
   prune_optional_qt_plugins
 
-  # Bundle non-Qt dependencies: libssh2 + OpenSSL (libcrypto)
+  # Bundle non-Qt dependencies: libssh2 + OpenSSL (libcrypto) + tinyxml2
   log "Bundling non-Qt dependencies"
   bundle_non_qt_deps
 
@@ -1048,14 +1082,14 @@ main() {
 
   # Validate and fix any lingering Homebrew/Conda refs
   log "Validating linkage for internal libraries"
-  otool -L "$MACOS_DIR/${APP_NAME}" | grep -E 'libssh2|libcrypto|libssl|@executable_path' || true
+  otool -L "$MACOS_DIR/${APP_NAME}" | grep -E 'libssh2|libcrypto|libssl|tinyxml2|@executable_path' || true
   # Redirect any remaining absolute paths for our key libs found in the executable
   while read -r dep; do
     base=$(basename "$dep")
     if [[ -f "$FRAMEWORKS_DIR/$base" ]]; then
       install_name_tool -change "$dep" "@executable_path/../Frameworks/$base" "$MACOS_DIR/${APP_NAME}" || true
     fi
-  done < <(otool -L "$MACOS_DIR/${APP_NAME}" | awk 'NR>1{print $1}' | grep -E '/(opt/homebrew|usr/local|miniconda).*(lib(ssh2|crypto|ssl).*)' || true)
+  done < <(otool -L "$MACOS_DIR/${APP_NAME}" | awk 'NR>1{print $1}' | grep -E '/(opt/homebrew|usr/local|miniconda).*(lib(ssh2|crypto|ssl|tinyxml2).*)' || true)
 
   # Sign (hardened runtime) — skipped entirely when SKIP_CODESIGN=1
   if [[ "${SKIP_CODESIGN:-0}" != "1" ]]; then

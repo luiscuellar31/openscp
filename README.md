@@ -3,7 +3,7 @@
     <h1 align="center">OpenSCP</h1>
 
 <p>
-    <strong>Two-panel SFTP client focused on simplicity and security</strong>
+    <strong>Two-panel SFTP/SCP/FTP/FTPS/WebDAV client focused on simplicity and security</strong>
 </p>
 
 <p>
@@ -11,7 +11,7 @@
 </p>
 
 <p>
-    <strong>OpenSCP</strong> is a two-panel commander-style file explorer written in <strong>C++/Qt</strong>, with <strong>SFTP</strong> support (libssh2 + OpenSSL). It aims to be a lightweight alternative to tools like WinSCP, focused on <strong>security</strong>, <strong>clarity</strong>, and <strong>extensibility</strong>.
+    <strong>OpenSCP</strong> is a two-panel commander-style file explorer written in <strong>C++/Qt</strong>, with <strong>SFTP</strong>, initial <strong>SCP</strong>, initial <strong>FTP/FTPS</strong>, and initial <strong>WebDAV</strong> support. It aims to be a lightweight alternative to tools like WinSCP, focused on <strong>security</strong>, <strong>clarity</strong>, and <strong>extensibility</strong>.
 </p>
 
 <br>
@@ -44,11 +44,13 @@ cmake --build build -j
 open build/OpenSCP.app
 ```
 
-## What OpenSCP Offers (v0.8.1)
+## What OpenSCP Offers (v0.9.0)
 
 ### 1. Dual-panel workflow
 
 - Independent local/remote navigation.
+- Quick `Home` navigation in panel toolbars (left local panel always; right panel uses local `HOME` in local mode and `/` fallback in remote mode).
+- Right panel includes `Open in terminal` in remote mode to start an SSH terminal directly in the currently viewed remote path using the active transport settings (direct, proxy tunnel, or jump host); if the SSH shell fails with a session error (for example PTY denied), it automatically falls back to `sftp` CLI in the same terminal. If transport requirements cannot be reproduced safely, the app shows an explicit error instead of downgrading to a basic direct SSH fallback. In `Settings > Security`, you can force interactive login (password/keyboard-interactive) and toggle automatic `sftp` CLI fallback for these commands.
 - Drag-and-drop copy/move between panels.
 - Remote context operations: download, upload, rename, delete, new folder/file, permissions.
 - Clickable breadcrumbs and per-panel search (toolbar button or `Ctrl/Cmd+F`) with wildcard/regex patterns and optional recursive mode.
@@ -69,9 +71,15 @@ open build/OpenSCP.app
 - Critical remote operations now attempt one automatic stale-session recovery (reconnect + retry) before failing.
 - Main remote session health checks run periodically and after wake/resume; if transport is no longer valid, OpenSCP disconnects safely with a clear warning.
 
-### 3. SFTP security hardening
+### 3. SSH transport security hardening
 
 - Auth: password, private key (+passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
+- Protocol selector per site/session (`SFTP`, `SCP`, `FTP`, `FTPS`, `WebDAV`).
+- FTP/FTPS support remote directory listing (MLSD with LIST fallback).
+- WebDAV support includes remote listing (`PROPFIND`) and basic file operations (`GET`, `PUT`, `MKCOL`, `DELETE`, `MOVE`).
+- SCP mode policy per site/session: `Automatic (SCP + SFTP fallback)` or
+  `SCP only` (disable fallback), plus a global default for new connections.
+- FTPS certificate verification (peer+host) is enabled by default, with optional custom CA bundle per site/session.
 - Host-key policies: `Strict`, `Accept new (TOFU)`, `No verification` (hardened).
 - Per-site transport can use direct TCP, `SOCKS5`, or `HTTP CONNECT` proxy tunneling.
 - Per-site SSH jump host (`ProxyJump`/bastion) tunneling is supported.
@@ -88,6 +96,8 @@ open build/OpenSCP.app
 - Saved sites use stable UUID identities.
 - Saved sites persist proxy type/endpoint/username per site.
 - Saved sites persist SSH jump host settings (host/port/user/key path) per site.
+- Saved sites persist SCP mode policy per site.
+- Saved sites persist FTPS certificate settings (verify toggle and optional CA bundle path) per site.
 - Duplicate site names blocked; rename/delete cleans legacy or orphan secrets.
 - Optional cleanup of stored credentials and related `known_hosts` entries when deleting sites.
 - Secure backends:
@@ -102,8 +112,9 @@ open build/OpenSCP.app
 - Connection dialog improved (clearer inputs, inline key/known_hosts selectors, show/hide password fields).
 - Connection dialog includes per-site proxy configuration (`Direct`, `SOCKS5`, `HTTP CONNECT`) with optional auth.
 - Connection dialog includes optional per-site SSH jump host (bastion) configuration.
-- UI language selection includes `English`, `Spanish`, and `Portuguese`.
-- Settings redesigned into `General` and `Advanced` sections.
+- Connection dialog includes FTPS certificate controls (verify toggle + optional CA bundle selector).
+- UI language selection includes `English`, `Spanish`, `French`, and `Portuguese`.
+- Settings redesigned into focused sections: `General`, `Transfers`, `Sites`, `Security`, `Network`, and `Staging and drag-out`.
 - Settings keeps controls visible while resizing (minimum size + scrollable pages).
 - One-click reset for default main-window layout/sizes in Settings.
 - Permissions dialog includes octal preview + common presets.
@@ -127,6 +138,8 @@ open build/OpenSCP.app
 
 - Qt `6.x` (tested with `6.8.3`)
 - libssh2 (OpenSSL 3 recommended)
+- libcurl (optional; required for FTP/FTPS/WebDAV backends)
+- tinyxml2 (optional; required for WebDAV backend XML parsing)
 - CMake `3.22+`
 - C++20 compiler
 
@@ -135,32 +148,75 @@ Optional:
 - macOS: Keychain (native)
 - Linux: libsecret / Secret Service
 - OpenSSH client (`ssh`) for SSH jump host tunneling.
+- FTP/FTPS backend can be disabled explicitly with
+  `-DOPENSCP_ENABLE_FTP_BACKEND=OFF`.
+- WebDAV backend can be disabled explicitly with
+  `-DOPENSCP_ENABLE_WEBDAV_BACKEND=OFF`.
 
 ## Testing Locally
 
 ```bash
-cmake -S . -B build -DOPEN_SCP_BUILD_TESTS=ON
+cmake -S . -B build -DOPENSCP_BUILD_TESTS=ON
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
+Local CI helper before push/PR:
+
+```bash
+./scripts/check_ci_local.sh --clean
+```
+
+Useful variants:
+
+```bash
+# Also build the GUI app target
+./scripts/check_ci_local.sh --clean --full
+
+# Custom build directory + parallel jobs
+./scripts/check_ci_local.sh --clean --build-dir build-ci-local -j 8
+
+# Same via environment variables
+BUILD_DIR=build-ci-local JOBS=8 ./scripts/check_ci_local.sh --clean
+```
+
+Script index: [scripts/README.md](scripts/README.md)
+
 `openscp_sftp_integration_tests` is skipped unless integration variables are set:
 
-- `OPEN_SCP_IT_SFTP_HOST`
-- `OPEN_SCP_IT_SFTP_PORT`
-- `OPEN_SCP_IT_SFTP_USER`
-- `OPEN_SCP_IT_SFTP_PASS` or `OPEN_SCP_IT_SFTP_KEY`
-- `OPEN_SCP_IT_SFTP_KEY_PASSPHRASE` (if needed)
-- `OPEN_SCP_IT_REMOTE_BASE`
-- `OPEN_SCP_IT_PROXY_TYPE` (`socks5` or `http`, optional)
-- `OPEN_SCP_IT_PROXY_HOST` (required when `OPEN_SCP_IT_PROXY_TYPE` is set)
-- `OPEN_SCP_IT_PROXY_PORT` (optional; defaults: `1080` for `socks5`, `8080` for `http`)
-- `OPEN_SCP_IT_PROXY_USER` (optional)
-- `OPEN_SCP_IT_PROXY_PASS` (optional)
-- `OPEN_SCP_IT_JUMP_HOST` (optional)
-- `OPEN_SCP_IT_JUMP_PORT` (optional; default `22`)
-- `OPEN_SCP_IT_JUMP_USER` (optional)
-- `OPEN_SCP_IT_JUMP_KEY` (optional)
+- `OPENSCP_IT_SFTP_HOST`
+- `OPENSCP_IT_SFTP_PORT`
+- `OPENSCP_IT_SFTP_USER`
+- `OPENSCP_IT_SFTP_PASS` or `OPENSCP_IT_SFTP_KEY`
+- `OPENSCP_IT_SFTP_KEY_PASSPHRASE` (if needed)
+- `OPENSCP_IT_REMOTE_BASE`
+- `OPENSCP_IT_PROXY_TYPE` (`socks5` or `http`, optional)
+- `OPENSCP_IT_PROXY_HOST` (required when `OPENSCP_IT_PROXY_TYPE` is set)
+- `OPENSCP_IT_PROXY_PORT` (optional; defaults: `1080` for `socks5`, `8080` for `http`)
+- `OPENSCP_IT_PROXY_USER` (optional)
+- `OPENSCP_IT_PROXY_PASS` (optional)
+- `OPENSCP_IT_JUMP_HOST` (optional)
+- `OPENSCP_IT_JUMP_PORT` (optional; default `22`)
+- `OPENSCP_IT_JUMP_USER` (optional)
+- `OPENSCP_IT_JUMP_KEY` (optional)
+
+`openscp_ftp_integration_tests` is skipped unless integration variables are set:
+
+- `OPENSCP_IT_FTP_HOST`
+- `OPENSCP_IT_FTP_PORT` (optional; default `21`)
+- `OPENSCP_IT_FTP_USER` (optional)
+- `OPENSCP_IT_FTP_PASS` (optional)
+- `OPENSCP_IT_FTP_REMOTE_BASE`
+
+`openscp_ftps_integration_tests` is skipped unless integration variables are set:
+
+- `OPENSCP_IT_FTPS_HOST`
+- `OPENSCP_IT_FTPS_PORT` (optional; default `990`)
+- `OPENSCP_IT_FTPS_USER` (optional)
+- `OPENSCP_IT_FTPS_PASS` (optional)
+- `OPENSCP_IT_FTPS_REMOTE_BASE`
+- `OPENSCP_IT_FTPS_VERIFY_PEER` (`1`/`0`, optional; default `1`)
+- `OPENSCP_IT_FTPS_CA_CERT` (optional)
 
 ## Platform Workflows
 
@@ -205,13 +261,13 @@ Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/READM
 
 ## Runtime Environment Variables
 
-- `OPEN_SCP_KNOWNHOSTS_PLAIN=1|0` - force plain vs hashed hostnames in `known_hosts`.
-- `OPEN_SCP_FP_HEX_ONLY=1` - show fingerprints in HEX with `:`.
-- `OPEN_SCP_TRANSFER_INTEGRITY=off|optional|required` - override transfer integrity policy.
-- `OPEN_SCP_LOG_LEVEL=off|error|warn|info|debug` - set log verbosity.
-- `OPEN_SCP_ENV=dev|prod` - runtime environment selector (`dev` enables development-only diagnostics).
-- `OPEN_SCP_LOG_SENSITIVE=1` - enable sensitive debug details only when `OPEN_SCP_ENV=dev` (disabled by default).
-- `OPEN_SCP_ENABLE_INSECURE_FALLBACK=1` - enable insecure secret fallback only when supported by the build/platform.
+- `OPENSCP_KNOWNHOSTS_PLAIN=1|0` - force plain vs hashed hostnames in `known_hosts`.
+- `OPENSCP_FP_HEX_ONLY=1` - show fingerprints in HEX with `:`.
+- `OPENSCP_TRANSFER_INTEGRITY=off|optional|required` - override transfer integrity policy.
+- `OPENSCP_LOG_LEVEL=off|error|warn|info|debug` - set log verbosity.
+- `OPENSCP_ENV=dev|prod` - runtime environment selector (`dev` enables development-only diagnostics).
+- `OPENSCP_LOG_SENSITIVE=1` - enable sensitive debug details only when `OPENSCP_ENV=dev` (disabled by default).
+- `OPENSCP_ENABLE_INSECURE_FALLBACK=1` - enable insecure secret fallback only when supported by the build/platform.
 
 ## Screenshots
 
@@ -224,7 +280,7 @@ Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/READM
 ## Roadmap
 
 - Windows support is planned for future releases.
-- Protocols: `SCP`, then `FTP/FTPS/WebDAV`.
+- Protocols: broader WebDAV interoperability coverage.
 - Broader enterprise proxy/jump auth flows (for example, non-batch/interactive jump auth).
 - Sync workflows: compare/sync and keep-up-to-date with filters/ignores.
 - Queue persistence across restarts.
@@ -232,11 +288,11 @@ Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/READM
 
 ## Credits and Licenses
 
-- libssh2, OpenSSL, zlib, and Qt are owned by their respective authors.
+- libssh2, libcurl, tinyxml2, OpenSSL, zlib, and Qt are owned by their respective authors.
 - License texts: [docs/credits/LICENSES/](docs/credits/LICENSES/)
 - Qt (LGPL) materials: [docs/credits](docs/credits)
 
 ## Contributing
 
 - Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for workflow and standards.
-- Issues and pull requests are welcome, especially around macOS/Linux stability, i18n, and SFTP robustness.
+- Issues and pull requests are welcome, especially around macOS/Linux stability, i18n, and SFTP/SCP/FTP/FTPS/WebDAV robustness.

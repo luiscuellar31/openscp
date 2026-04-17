@@ -73,20 +73,12 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
 <context>
     <name>ConnectionDialog</name>
     <message>
-        <source>Connect (SFTP)</source>
-        <translation>Conectar (SFTP)</translation>
-    </message>
-    <message>
         <source>My server</source>
         <translation>Mi servidor</translation>
     </message>
     <message>
         <source>sftp.example.com</source>
         <translation>sftp.ejemplo.com</translation>
-    </message>
-    <message>
-        <source>SSH/SFTP port</source>
-        <translation>Puerto SSH/SFTP</translation>
     </message>
     <message>
         <source>user</source>
@@ -253,8 +245,84 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
         <translation>Integridad:</translation>
     </message>
     <message>
+        <source>Verify FTPS server certificate (recommended)</source>
+        <translation>Verificar certificado del servidor FTPS (recomendado)</translation>
+    </message>
+    <message>
+        <source>System CA bundle</source>
+        <translation>Bundle de CA del sistema</translation>
+    </message>
+    <message>
+        <source>FTPS CA bundle:</source>
+        <translation>Bundle CA de FTPS:</translation>
+    </message>
+    <message>
+        <source>Select FTPS CA bundle</source>
+        <translation>Selecciona bundle CA para FTPS</translation>
+    </message>
+    <message>
         <source>Select jump private key</source>
         <translation>Selecciona clave privada de salto</translation>
+    </message>
+    <message>
+        <source>Connect</source>
+        <translation>Conectar</translation>
+    </message>
+    <message>
+        <source>SFTP</source>
+        <translation>SFTP</translation>
+    </message>
+    <message>
+        <source>SCP</source>
+        <translation>SCP</translation>
+    </message>
+    <message>
+        <source>FTP</source>
+        <translation>FTP</translation>
+    </message>
+    <message>
+        <source>FTPS</source>
+        <translation>FTPS</translation>
+    </message>
+    <message>
+        <source>Server port for the selected protocol</source>
+        <translation>Puerto del servidor para el protocolo seleccionado</translation>
+    </message>
+    <message>
+        <source>Protocol:</source>
+        <translation>Protocolo:</translation>
+    </message>
+    <message>
+        <source>SCP mode:</source>
+        <translation>Modo SCP:</translation>
+    </message>
+    <message>
+        <source>Automatic (SCP with SFTP fallback)</source>
+        <translation>Automático (SCP con fallback a SFTP)</translation>
+    </message>
+    <message>
+        <source>SCP only (disable SFTP fallback)</source>
+        <translation>Solo SCP (desactivar fallback a SFTP)</translation>
+    </message>
+    <message>
+        <source>scp.example.com</source>
+        <translation>scp.example.com</translation>
+    </message>
+    <message>
+        <source>ftp.example.com</source>
+        <translation>ftp.example.com</translation>
+    </message>
+    <message>
+        <source>ftps.example.com</source>
+        <translation>ftps.example.com</translation>
+    </message>
+    <message>
+        <source>webdav.example.com</source>
+        <translation>webdav.example.com</translation>
+    </message>
+    <message>
+        <source>Not available for the selected protocol.</source>
+        <translation>No disponible para el protocolo seleccionado.</translation>
     </message>
 </context>
 <context>
@@ -371,8 +439,36 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
         <translation>Autenticación fallida.</translation>
     </message>
     <message>
+        <source>OpenSSH client was not found in PATH.</source>
+        <translation>No se encontró el cliente OpenSSH en PATH.</translation>
+    </message>
+    <message>
+        <source>Session is missing host or username information.</source>
+        <translation>Faltan datos de host o usuario en la sesión.</translation>
+    </message>
+    <message>
+        <source>Could not locate osascript.</source>
+        <translation>No se pudo encontrar osascript.</translation>
+    </message>
+    <message>
+        <source>Could not launch Terminal.app.</source>
+        <translation>No se pudo abrir Terminal.app.</translation>
+    </message>
+    <message>
+        <source>No compatible terminal emulator was found.</source>
+        <translation>No se encontró un emulador de terminal compatible.</translation>
+    </message>
+    <message>
+        <source>Open in terminal action is not supported on this platform.</source>
+        <translation>La acción de abrir en terminal no es compatible en esta plataforma.</translation>
+    </message>
+    <message>
         <source>Up</source>
         <translation>Arriba</translation>
+    </message>
+    <message>
+        <source>Home</source>
+        <translation>Inicio</translation>
     </message>
     <message>
         <source>Open left folder</source>
@@ -413,6 +509,74 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     <message>
         <source>Open right folder</source>
         <translation>Abrir carpeta derecha</translation>
+    </message>
+    <message>
+        <source>Open in terminal</source>
+        <translation>Abrir en terminal</translation>
+    </message>
+    <message>
+        <source>The right panel must be connected as remote.</source>
+        <translation>El panel derecho debe estar conectado como remoto.</translation>
+    </message>
+    <message>
+        <source>Could not prepare the terminal command.
+%1</source>
+        <translation>No se pudo preparar el comando de terminal.
+%1</translation>
+    </message>
+    <message>
+        <source>Opening remote terminal at %1</source>
+        <translation>Abriendo terminal remota en %1</translation>
+    </message>
+    <message>
+        <source> (password may be requested by OpenSSH for security)</source>
+        <translation> (OpenSSH puede solicitar contraseña por seguridad)</translation>
+    </message>
+    <message>
+        <source> (interactive login required)</source>
+        <translation> (se requiere inicio de sesión interactivo)</translation>
+    </message>
+    <message>
+        <source> (auto-fallback to SFTP CLI enabled)</source>
+        <translation> (fallback automático a SFTP CLI habilitado)</translation>
+    </message>
+    <message>
+        <source>OpenSCP: SSH shell was not available. Falling back to SFTP CLI.</source>
+        <translation>OpenSCP: El shell SSH no estaba disponible. Se aplicará fallback a SFTP CLI.</translation>
+    </message>
+    <message>
+        <source>Could not open a remote terminal.
+%1</source>
+        <translation>No se pudo abrir una terminal remota.
+%1</translation>
+    </message>
+    <message>
+        <source>This protocol works in transfer-only mode.
+Use the remote path above as the target folder for uploads.
+For downloads, choose a remote file path explicitly.</source>
+        <translation>Este protocolo funciona en modo solo transferencia.
+Usa la ruta remota de arriba como carpeta de destino para subidas.
+Para descargas, elige una ruta remota de archivo explícitamente.</translation>
+    </message>
+    <message>
+        <source>This protocol works in transfer-only mode.
+Uploads use the remote folder path above.
+Downloads require entering a remote file path.</source>
+        <translation>Este protocolo funciona en modo solo transferencia.
+Las subidas usan la ruta de carpeta remota de arriba.
+Las descargas requieren introducir una ruta remota de archivo.</translation>
+    </message>
+    <message>
+        <source>Skipped folders in transfer-only mode: %1</source>
+        <translation>Carpetas omitidas en modo solo transferencia: %1</translation>
+    </message>
+    <message>
+        <source>Transfer-only mode currently supports uploading files only.</source>
+        <translation>El modo solo transferencia actualmente solo admite subir archivos.</translation>
+    </message>
+    <message>
+        <source>Refresh is not available in transfer-only mode.</source>
+        <translation>Actualizar no está disponible en modo solo transferencia.</translation>
     </message>
     <message>
         <source>Search items</source>
@@ -531,10 +695,6 @@ Coincidencias: %2</translation>
         <translation>Selecciona elementos para descargar</translation>
     </message>
     <message>
-        <source>Connect (SFTP)</source>
-        <translation>Conectar (SFTP)</translation>
-    </message>
-    <message>
         <source>Disconnect</source>
         <translation>Desconectar</translation>
     </message>
@@ -549,6 +709,50 @@ Coincidencias: %2</translation>
     <message>
         <source>Transfers</source>
         <translation>Transferencias</translation>
+    </message>
+    <message>
+        <source>History</source>
+        <translation>Historial</translation>
+    </message>
+    <message>
+        <source>Open selected</source>
+        <translation>Abrir seleccionado</translation>
+    </message>
+    <message>
+        <source>Recent local paths</source>
+        <translation>Rutas locales recientes</translation>
+    </message>
+    <message>
+        <source>Recent remote paths</source>
+        <translation>Rutas remotas recientes</translation>
+    </message>
+    <message>
+        <source>Recent servers</source>
+        <translation>Servidores recientes</translation>
+    </message>
+    <message>
+        <source>Connect to a remote server to open remote path history.</source>
+        <translation>Conéctate a un servidor remoto para abrir el historial de rutas remotas.</translation>
+    </message>
+    <message>
+        <source>Disconnect the current remote session before opening another server.</source>
+        <translation>Desconecta la sesión remota actual antes de abrir otro servidor.</translation>
+    </message>
+    <message>
+        <source>No recent history</source>
+        <translation>No hay historial reciente</translation>
+    </message>
+    <message>
+        <source>Clear history</source>
+        <translation>Borrar historial</translation>
+    </message>
+    <message>
+        <source>Remove all recent paths and servers from history?</source>
+        <translation>¿Eliminar del historial todas las rutas y servidores recientes?</translation>
+    </message>
+    <message>
+        <source>History cleared</source>
+        <translation>Historial borrado</translation>
     </message>
     <message>
         <source>Full screen</source>
@@ -635,8 +839,8 @@ Coincidencias: %2</translation>
         <translation>Advertencia: almacenamiento de secretos sin cifrar activado (fallback)</translation>
     </message>
     <message>
-        <source>You are using unencrypted credentials storage enabled via environment variable. Disable OPEN_SCP_ENABLE_INSECURE_FALLBACK to hide this warning.</source>
-        <translation>Estás usando un almacenamiento de credenciales sin cifrar activado por variable de entorno. Desactiva OPEN_SCP_ENABLE_INSECURE_FALLBACK para ocultar este aviso.</translation>
+        <source>You are using unencrypted credentials storage enabled via environment variable. Disable OPENSCP_ENABLE_INSECURE_FALLBACK to hide this warning.</source>
+        <translation>Estás usando un almacenamiento de credenciales sin cifrar activado por variable de entorno. Desactiva OPENSCP_ENABLE_INSECURE_FALLBACK para ocultar este aviso.</translation>
     </message>
     <message>
         <source>Select left folder</source>
@@ -661,14 +865,6 @@ Coincidencias: %2</translation>
     <message>
         <source>Right: </source>
         <translation>Derecha: </translation>
-    </message>
-    <message>
-        <source>SFTP</source>
-        <translation>SFTP</translation>
-    </message>
-    <message>
-        <source>No active SFTP session.</source>
-        <translation>No hay sesión SFTP activa.</translation>
     </message>
     <message>
         <source>No selection available.</source>
@@ -1129,10 +1325,6 @@ Huella: %3</translation>
         <translation>Ya hay una conexión en progreso</translation>
     </message>
     <message>
-        <source>An active SFTP session already exists</source>
-        <translation>Ya existe una sesión SFTP activa</translation>
-    </message>
-    <message>
         <source>Connection canceled: no-verification policy not confirmed</source>
         <translation>Conexión cancelada: política sin verificación no confirmada</translation>
     </message>
@@ -1255,14 +1447,6 @@ Huella: %3</translation>
         <translation>No disponible en modo remoto</translation>
     </message>
     <message>
-        <source>Connected (SFTP) to </source>
-        <translation>Conectado (SFTP) a </translation>
-    </message>
-    <message>
-        <source>OpenSCP — local/remote (SFTP)</source>
-        <translation>OpenSCP — local/remoto (SFTP)</translation>
-    </message>
-    <message>
         <source>Moving selected items...</source>
         <translation>Moviendo elementos seleccionados...</translation>
     </message>
@@ -1373,6 +1557,22 @@ Elige solo un método de transporte.</translation>
         <translation>Transporte no compatible</translation>
     </message>
     <message>
+        <source>SSH jump host is not available for %1.</source>
+        <translation>El host de salto SSH no está disponible para %1.</translation>
+    </message>
+    <message>
+        <source>Connection canceled: SSH jump host is not supported for %1</source>
+        <translation>Conexión cancelada: el host de salto SSH no es compatible para %1</translation>
+    </message>
+    <message>
+        <source>Proxy settings are not available for %1.</source>
+        <translation>La configuración de proxy no está disponible para %1.</translation>
+    </message>
+    <message>
+        <source>Connection canceled: proxy is not supported for %1</source>
+        <translation>Conexión cancelada: el proxy no es compatible para %1</translation>
+    </message>
+    <message>
         <source>SSH jump host is currently unavailable on Windows.</source>
         <translation>El host de salto SSH no está disponible actualmente en Windows.</translation>
     </message>
@@ -1427,14 +1627,6 @@ Edita el sitio y deja solo un transporte.</translation>
     <message>
         <source>Recovered remote session while trying to %1</source>
         <translation>Se recuperó la sesión remota al intentar %1</translation>
-    </message>
-    <message>
-        <source>Invalid operation callback</source>
-        <translation>Callback de operación inválido</translation>
-    </message>
-    <message>
-        <source>No active remote session</source>
-        <translation>No hay sesión remota activa</translation>
     </message>
     <message>
         <source>The remote session failed while trying to %1.
@@ -1495,6 +1687,114 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
     <message>
         <source>change remote permissions</source>
         <translation>cambiar permisos remotos</translation>
+    </message>
+    <message>
+        <source>Connection lost</source>
+        <translation>Conexión perdida</translation>
+    </message>
+    <message>
+        <source>Transport error.</source>
+        <translation>Error de transporte.</translation>
+    </message>
+    <message>
+        <source>Proxy command requested without proxy settings.</source>
+        <translation>Se solicitó un comando de proxy sin configuración de proxy.</translation>
+    </message>
+    <message>
+        <source>Proxy host/port is missing for terminal command.</source>
+        <translation>Falta el host/puerto del proxy para el comando de terminal.</translation>
+    </message>
+    <message>
+        <source>Proxy authentication requires a username.</source>
+        <translation>La autenticación del proxy requiere un nombre de usuario.</translation>
+    </message>
+    <message>
+        <source>Proxy authentication in terminal mode requires &apos;ncat&apos; (with --proxy-auth support).</source>
+        <translation>La autenticación del proxy en modo terminal requiere &apos;ncat&apos; (con soporte de --proxy-auth).</translation>
+    </message>
+    <message>
+        <source>Unsupported proxy type for terminal command.</source>
+        <translation>Tipo de proxy no compatible para el comando de terminal.</translation>
+    </message>
+    <message>
+        <source>Could not find a proxy helper for terminal mode (tried: nc, ncat).</source>
+        <translation>No se encontró un helper de proxy para el modo terminal (se intentó: nc, ncat).</translation>
+    </message>
+    <message>
+        <source>Proxy and SSH jump host cannot be used together in the same terminal command.</source>
+        <translation>El proxy y el host de salto SSH no se pueden usar juntos en el mismo comando de terminal.</translation>
+    </message>
+    <message>
+        <source>Could not build proxy command for terminal mode.</source>
+        <translation>No se pudo construir el comando de proxy para el modo terminal.</translation>
+    </message>
+    <message>
+        <source>OpenSSH sftp client was not found in PATH.</source>
+        <translation>No se encontró el cliente sftp de OpenSSH en PATH.</translation>
+    </message>
+    <message>
+        <source>Unknown error.</source>
+        <translation>Error desconocido.</translation>
+    </message>
+    <message>
+        <source>Remote</source>
+        <translation>Remoto</translation>
+    </message>
+    <message>
+        <source>No active remote session.</source>
+        <translation>No hay sesión remota activa.</translation>
+    </message>
+    <message>
+        <source>An active remote session already exists</source>
+        <translation>Ya existe una sesión remota activa</translation>
+    </message>
+    <message>
+        <source>Protocol not available</source>
+        <translation>Protocolo no disponible</translation>
+    </message>
+    <message>
+        <source>%1 support is not implemented yet.</source>
+        <translation>El soporte para %1 aún no está implementado.</translation>
+    </message>
+    <message>
+        <source>Connection canceled: unsupported protocol %1</source>
+        <translation>Conexión cancelada: protocolo no compatible %1</translation>
+    </message>
+    <message>
+        <source>Connected (%1) to %2</source>
+        <translation>Conectado (%1) a %2</translation>
+    </message>
+    <message>
+        <source>OpenSCP — local/remote (%1)</source>
+        <translation>OpenSCP — local/remoto (%1)</translation>
+    </message>
+    <message>
+        <source>Upload local files…</source>
+        <translation>Subir archivos locales…</translation>
+    </message>
+    <message>
+        <source>Download remote file…</source>
+        <translation>Descargar archivo remoto…</translation>
+    </message>
+    <message>
+        <source>/remote/folder</source>
+        <translation>/remoto/carpeta</translation>
+    </message>
+    <message>
+        <source>Remote path: %1</source>
+        <translation>Ruta remota: %1</translation>
+    </message>
+    <message>
+        <source>Remote file path (absolute or relative to %1):</source>
+        <translation>Ruta del archivo remoto (absoluta o relativa a %1):</translation>
+    </message>
+    <message>
+        <source>Enter a valid remote file path.</source>
+        <translation>Introduce una ruta de archivo remoto válida.</translation>
+    </message>
+    <message>
+        <source>Select files to upload</source>
+        <translation>Selecciona archivos para subir</translation>
     </message>
 </context>
 <context>
@@ -1676,12 +1976,12 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
         <translation>Enumeración parcial con errores</translation>
     </message>
     <message>
-        <source>No SFTP client available</source>
-        <translation>No hay cliente SFTP disponible</translation>
-    </message>
-    <message>
         <source>Missing session options for remote listing</source>
         <translation>Faltan opciones de sesión para el listado remoto</translation>
+    </message>
+    <message>
+        <source>No remote client available</source>
+        <translation>No hay cliente remoto disponible</translation>
     </message>
 </context>
 <context>
@@ -1693,6 +1993,14 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
     <message>
         <source>General</source>
         <translation>General</translation>
+    </message>
+    <message>
+        <source>Shortcuts</source>
+        <translation>Atajos</translation>
+    </message>
+    <message>
+        <source>Select an action and press the new key combination directly in the field.</source>
+        <translation>Selecciona una acción y presiona la nueva combinación de teclas directamente en el campo.</translation>
     </message>
     <message>
         <source>Language:</source>
@@ -1751,6 +2059,14 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
         <translation>Abrir cola al encolar transferencias</translation>
     </message>
     <message>
+        <source>Transfers shortcut:</source>
+        <translation>Atajo de Transferencias:</translation>
+    </message>
+    <message>
+        <source>History shortcut:</source>
+        <translation>Atajo de Historial:</translation>
+    </message>
+    <message>
         <source>Choose…</source>
         <translation>Elegir…</translation>
     </message>
@@ -1787,10 +2103,6 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
         <translation>El diseño predeterminado se usará la próxima vez que se inicie la app.</translation>
     </message>
     <message>
-        <source>Advanced</source>
-        <translation>Avanzado</translation>
-    </message>
-    <message>
         <source>Transfers</source>
         <translation>Transferencias</translation>
     </message>
@@ -1811,16 +2123,116 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
         <translation>Límite global por defecto:</translation>
     </message>
     <message>
+        <source>Off</source>
+        <translation>Desactivado</translation>
+    </message>
+    <message>
+        <source>Completed</source>
+        <translation>Completadas</translation>
+    </message>
+    <message>
+        <source>Failed/Canceled</source>
+        <translation>Fallidas/Canceladas</translation>
+    </message>
+    <message>
+        <source>All finished</source>
+        <translation>Todas finalizadas</translation>
+    </message>
+    <message>
+        <source>Queue auto-clear default:</source>
+        <translation>Auto-limpieza de cola por defecto:</translation>
+    </message>
+    <message>
+        <source>Queue auto-clear after:</source>
+        <translation>Auto-limpiar cola después de:</translation>
+    </message>
+    <message>
         <source>Sites</source>
         <translation>Sitios</translation>
+    </message>
+    <message>
+        <source>SFTP</source>
+        <translation>SFTP</translation>
+    </message>
+    <message>
+        <source>SCP</source>
+        <translation>SCP</translation>
+    </message>
+    <message>
+        <source>FTP</source>
+        <translation>FTP</translation>
+    </message>
+    <message>
+        <source>Default protocol:</source>
+        <translation>Protocolo predeterminado:</translation>
     </message>
     <message>
         <source>When deleting a site, also remove its stored credentials.</source>
         <translation>Al eliminar un sitio, borrar también sus credenciales guardadas.</translation>
     </message>
     <message>
+        <source>Default SCP mode:</source>
+        <translation>Modo SCP predeterminado:</translation>
+    </message>
+    <message>
+        <source>Automatic (SCP with SFTP fallback)</source>
+        <translation>Automático (SCP con fallback a SFTP)</translation>
+    </message>
+    <message>
+        <source>SCP only (disable SFTP fallback)</source>
+        <translation>Solo SCP (desactivar fallback a SFTP)</translation>
+    </message>
+    <message>
         <source>Security</source>
         <translation>Seguridad</translation>
+    </message>
+    <message>
+        <source>Strict</source>
+        <translation>Estricta</translation>
+    </message>
+    <message>
+        <source>Accept new (TOFU)</source>
+        <translation>Aceptar nuevas (TOFU)</translation>
+    </message>
+    <message>
+        <source>No verification (double confirmation, expires in 15 min)</source>
+        <translation>Sin verificación (doble confirmación, expira en 15 min)</translation>
+    </message>
+    <message>
+        <source>Default known_hosts policy:</source>
+        <translation>Política known_hosts predeterminada:</translation>
+    </message>
+    <message>
+        <source>Optional (recommended)</source>
+        <translation>Opcional (recomendado)</translation>
+    </message>
+    <message>
+        <source>Required (strict)</source>
+        <translation>Requerida (estricta)</translation>
+    </message>
+    <message>
+        <source>Off (not recommended)</source>
+        <translation>Desactivada (no recomendado)</translation>
+    </message>
+    <message>
+        <source>Default integrity policy:</source>
+        <translation>Política de integridad predeterminada:</translation>
+    </message>
+    <message>
+        <source>Verify FTPS server certificate by default (recommended).</source>
+        <translation>Verificar por defecto el certificado del servidor FTPS (recomendado).</translation>
+    </message>
+    <message>
+        <source>System CA bundle</source>
+        <translation>Bundle de CA del sistema</translation>
+    </message>
+    <message>
+        <source>Default FTPS CA bundle:</source>
+        <translation>Bundle CA FTPS predeterminado:</translation>
+    </message>
+    <message>
+        <source>Select FTPS CA bundle</source>
+        <translation>Selecciona bundle CA para FTPS</translation>
     </message>
     <message>
         <source>Hash hostnames in known_hosts (recommended).</source>
@@ -1829,6 +2241,14 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
     <message>
         <source>Show fingerprint in HEX (colon) format (visual only).</source>
         <translation>Mostrar huella en HEX colonado (solo visual).</translation>
+    </message>
+    <message>
+        <source>Force interactive login when using Open in terminal (disable key/agent auth).</source>
+        <translation>Forzar inicio de sesión interactivo al usar Open in terminal (desactiva autenticación por clave/agente).</translation>
+    </message>
+    <message>
+        <source>Enable automatic SFTP CLI fallback when using Open in terminal.</source>
+        <translation>Activar fallback automático a CLI SFTP al usar Open in terminal.</translation>
     </message>
     <message>
         <source>Use stricter Keychain accessibility (this device only).</source>
@@ -1851,6 +2271,22 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
         <translation>TTL sin verificación:</translation>
     </message>
     <message>
+        <source>Network</source>
+        <translation>Red</translation>
+    </message>
+    <message>
+        <source> s</source>
+        <translation> s</translation>
+    </message>
+    <message>
+        <source>Session health check interval:</source>
+        <translation>Intervalo de verificación de sesión:</translation>
+    </message>
+    <message>
+        <source>Remote writeability cache TTL:</source>
+        <translation>TTL de caché de escritura remota:</translation>
+    </message>
+    <message>
         <source>Staging and drag-out</source>
         <translation>Staging y arrastre</translation>
     </message>
@@ -1865,6 +2301,14 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
     <message>
         <source>Auto-clean staging after successful drag-out (recommended).</source>
         <translation>Eliminar automáticamente la carpeta staging tras completar el arrastre (recomendado).</translation>
+    </message>
+    <message>
+        <source> days</source>
+        <translation> días</translation>
+    </message>
+    <message>
+        <source>Startup cleanup retention:</source>
+        <translation>Retención de limpieza al iniciar:</translation>
     </message>
     <message>
         <source> ms</source>
@@ -1941,8 +2385,16 @@ En Linux, se recomienda instalar y usar libsecret/Secret Service para mayor segu
         <translation>El cambio de idioma se aplicará al reiniciar.</translation>
     </message>
     <message>
+        <source>French</source>
+        <translation>Francés</translation>
+    </message>
+    <message>
         <source>Portuguese</source>
         <translation>Portugués</translation>
+    </message>
+    <message>
+        <source>FTPS</source>
+        <translation>FTPS</translation>
     </message>
 </context>
 <context>
@@ -2002,6 +2454,10 @@ En Linux, se recomienda instalar y usar libsecret/Secret Service para mayor segu
     <message>
         <source>Proxy password</source>
         <translation>Contraseña del proxy</translation>
+    </message>
+    <message>
+        <source>Protocol</source>
+        <translation>Protocolo</translation>
     </message>
 </context>
 <context>

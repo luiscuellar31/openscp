@@ -3,7 +3,7 @@
 #include "ConnectionDialog.hpp"
 #include "SecretStore.hpp"
 #include "UiAlerts.hpp"
-#include "openscp/Libssh2SftpClient.hpp"
+#include "openscp/KnownHostsUtils.hpp"
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
@@ -102,18 +102,22 @@ static QString siteSecretKey(const SiteEntry &e, const QString &item) {
 }
 
 static std::uint16_t defaultProxyPort(openscp::ProxyType type) {
-    switch (type) {
-    case openscp::ProxyType::Socks5:
-        return 1080;
-    case openscp::ProxyType::HttpConnect:
-        return 8080;
-    case openscp::ProxyType::None:
-        break;
-    }
-    return 0;
+    return openscp::defaultPortForProxyType(type);
 }
 
 static std::uint16_t defaultJumpPort() { return 22; }
+
+static openscp::ScpTransferMode
+loadDefaultScpTransferModeFromSettings(const QSettings &s) {
+    return openscp::scpTransferModeFromStorageName(
+        s.value("Protocol/scpTransferModeDefault",
+                QString::fromLatin1(openscp::scpTransferModeStorageName(
+                    openscp::ScpTransferMode::Auto)))
+            .toString()
+            .trimmed()
+            .toLower()
+            .toStdString());
+}
 
 static void removeLegacyNameSecrets(SecretStore &store,
                                     const QString &siteName) {
@@ -132,14 +136,16 @@ SiteManagerDialog::SiteManagerDialog(QWidget *parent) : QDialog(parent) {
     resize(720, 480); // compact default; view will elide/scroll as needed
     auto *lay = new QVBoxLayout(this);
     table_ = new QTableWidget(this);
-    table_->setColumnCount(3);
-    table_->setHorizontalHeaderLabels({tr("Name"), tr("Host"), tr("User")});
+    table_->setColumnCount(4);
+    table_->setHorizontalHeaderLabels(
+        {tr("Name"), tr("Protocol"), tr("Host"), tr("User")});
     table_->verticalHeader()->setVisible(false);
     // Column sizing: stretch to fill and adapt on resize
     table_->horizontalHeader()->setStretchLastSection(true);
     table_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     table_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     table_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    table_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
     table_->horizontalHeader()->setMinimumSectionSize(80);
     // Elide long text on the right to avoid oversized cells
     table_->setTextElideMode(Qt::ElideRight);
@@ -191,6 +197,13 @@ void SiteManagerDialog::reloadFromSettings() {
 void SiteManagerDialog::loadSites() {
     sites_.clear();
     QSettings s("OpenSCP", "OpenSCP");
+    const auto defaultScpMode = loadDefaultScpTransferModeFromSettings(s);
+    const bool defaultFtpsVerifyPeer =
+        s.value("Security/ftpsVerifyPeerDefault", true).toBool();
+    const QString defaultFtpsCaPath =
+        s.value("Security/ftpsCaCertPathDefault", QString())
+            .toString()
+            .trimmed();
     int n = s.beginReadArray("sites");
     bool needsSave = false;
     QSet<QString> usedIds;
@@ -204,8 +217,48 @@ void SiteManagerDialog::loadSites() {
         }
         usedIds.insert(e.id);
         e.name = s.value("name").toString();
+        e.opt.protocol = openscp::protocolFromStorageName(
+            s.value("protocol",
+                    QString::fromLatin1(
+                        openscp::protocolStorageName(openscp::Protocol::Sftp)))
+                .toString()
+                .trimmed()
+                .toLower()
+                .toStdString());
+        const bool hasScpTransferModeKey = s.contains("scpTransferMode");
+        e.opt.scp_transfer_mode = openscp::scpTransferModeFromStorageName(
+            s.value("scpTransferMode",
+                    QString::fromLatin1(openscp::scpTransferModeStorageName(
+                        defaultScpMode)))
+                .toString()
+                .trimmed()
+                .toLower()
+                .toStdString());
+        if (!hasScpTransferModeKey)
+            needsSave = true;
         e.opt.host = s.value("host").toString().toStdString();
-        e.opt.port = (std::uint16_t)s.value("port", 22).toUInt();
+        e.opt.port = static_cast<std::uint16_t>(
+            s.value("port",
+                    static_cast<int>(
+                        openscp::defaultPortForProtocol(e.opt.protocol)))
+                .toUInt());
+        const bool hasWebDavSchemeKey = s.contains("webdavScheme");
+        if (hasWebDavSchemeKey) {
+            e.opt.webdav_scheme = openscp::webDavSchemeFromStorageName(
+                s.value("webdavScheme",
+                        QString::fromLatin1(openscp::webDavSchemeStorageName(
+                            openscp::WebDavScheme::Https)))
+                    .toString()
+                    .trimmed()
+                    .toLower()
+                    .toStdString());
+        } else if (e.opt.protocol == openscp::Protocol::WebDav &&
+                   e.opt.port ==
+                       openscp::defaultPortForWebDavScheme(
+                           openscp::WebDavScheme::Http)) {
+            e.opt.webdav_scheme = openscp::WebDavScheme::Http;
+            needsSave = true;
+        }
         e.opt.username = s.value("user").toString().toStdString();
         // Password and passphrase are no longer read from QSettings; they will
         // be fetched from SecretStore when connecting
@@ -213,7 +266,7 @@ void SiteManagerDialog::loadSites() {
         if (!kp.isEmpty())
             e.opt.private_key_path = kp.toStdString();
         // keyPass will be retrieved dynamically
-        e.opt.proxy_type = static_cast<openscp::ProxyType>(
+        e.opt.proxy_type = openscp::proxyTypeFromStorageValue(
             s.value("proxyType", static_cast<int>(openscp::ProxyType::None))
                 .toInt());
         e.opt.proxy_host = s.value("proxyHost").toString().trimmed().toStdString();
@@ -246,6 +299,23 @@ void SiteManagerDialog::loadSites() {
                 .value("integrityPolicy",
                        (int)openscp::TransferIntegrityPolicy::Optional)
                 .toInt();
+        e.opt.ftps_verify_peer =
+            s.value("ftpsVerifyPeer", defaultFtpsVerifyPeer).toBool();
+        const QString ftpsCaPath =
+            s.value("ftpsCaCertPath", defaultFtpsCaPath).toString().trimmed();
+        if (!ftpsCaPath.isEmpty())
+            e.opt.ftps_ca_cert_path = ftpsCaPath.toStdString();
+        e.opt.webdav_verify_peer =
+            s.value("webdavVerifyPeer", true).toBool();
+        const QString webDavCaPath =
+            s.value("webdavCaCertPath", QString()).toString().trimmed();
+        if (!webDavCaPath.isEmpty())
+            e.opt.webdav_ca_cert_path = webDavCaPath.toStdString();
+        if (e.opt.protocol == openscp::Protocol::WebDav &&
+            e.opt.webdav_scheme == openscp::WebDavScheme::Http) {
+            e.opt.webdav_verify_peer = false;
+            e.opt.webdav_ca_cert_path.reset();
+        }
         sites_.push_back(e);
     }
     s.endArray();
@@ -264,8 +334,17 @@ void SiteManagerDialog::saveSites() {
         const auto &e = sites_[i];
         s.setValue("id", e.id);
         s.setValue("name", e.name);
+        s.setValue("protocol",
+                   QString::fromLatin1(
+                       openscp::protocolStorageName(e.opt.protocol)));
+        s.setValue("scpTransferMode",
+                   QString::fromLatin1(openscp::scpTransferModeStorageName(
+                       e.opt.scp_transfer_mode)));
         s.setValue("host", QString::fromStdString(e.opt.host));
         s.setValue("port", (int)e.opt.port);
+        s.setValue("webdavScheme",
+                   QString::fromLatin1(openscp::webDavSchemeStorageName(
+                       e.opt.webdav_scheme)));
         s.setValue("user", QString::fromStdString(e.opt.username));
         // Password and passphrase are stored in SecretStore under keys derived
         // from stable site UUID.
@@ -298,6 +377,16 @@ void SiteManagerDialog::saveSites() {
                        : QString());
         s.setValue("khPolicy", (int)e.opt.known_hosts_policy);
         s.setValue("integrityPolicy", (int)e.opt.transfer_integrity_policy);
+        s.setValue("ftpsVerifyPeer", e.opt.ftps_verify_peer);
+        s.setValue("ftpsCaCertPath",
+                   e.opt.ftps_ca_cert_path
+                       ? QString::fromStdString(*e.opt.ftps_ca_cert_path)
+                       : QString());
+        s.setValue("webdavVerifyPeer", e.opt.webdav_verify_peer);
+        s.setValue("webdavCaCertPath",
+                   e.opt.webdav_ca_cert_path
+                       ? QString::fromStdString(*e.opt.webdav_ca_cert_path)
+                       : QString());
     }
     s.endArray();
 }
@@ -318,17 +407,24 @@ void SiteManagerDialog::refresh() {
         auto *itHost = new QTableWidgetItem(fullHost);
         itHost->setToolTip(fullHost);
         itHost->setData(Qt::UserRole + 1, fullHost);
+        const QString fullProtocol = QString::fromLatin1(
+            openscp::protocolDisplayName(sites_[i].opt.protocol));
+        auto *itProtocol = new QTableWidgetItem(fullProtocol);
+        itProtocol->setToolTip(fullProtocol);
+        itProtocol->setData(Qt::UserRole + 1, fullProtocol);
         const QString fullUser = QString::fromStdString(sites_[i].opt.username);
         auto *itUser = new QTableWidgetItem(fullUser);
         itUser->setToolTip(fullUser);
         itUser->setData(Qt::UserRole + 1, fullUser);
         // Store original index so selection works even when the view is sorted
         itName->setData(Qt::UserRole, i);
+        itProtocol->setData(Qt::UserRole, i);
         itHost->setData(Qt::UserRole, i);
         itUser->setData(Qt::UserRole, i);
         table_->setItem(i, 0, itName);
-        table_->setItem(i, 1, itHost);
-        table_->setItem(i, 2, itUser);
+        table_->setItem(i, 1, itProtocol);
+        table_->setItem(i, 2, itHost);
+        table_->setItem(i, 3, itUser);
     }
     if (wasSorting)
         table_->setSortingEnabled(true);

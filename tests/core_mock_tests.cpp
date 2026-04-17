@@ -1,6 +1,10 @@
 // Core unit tests without external framework (run via CTest).
+#include "openscp/ClientFactory.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
 #include "openscp/MockSftpClient.hpp"
+#if OPENSCP_HAS_CURL_FTP
+#include "openscp/CurlFtpClient.hpp"
+#endif
 
 #include <chrono>
 #include <cstdlib>
@@ -61,7 +65,12 @@ bool readTextFile(const fs::path &path, std::string &out) {
 
 void test_session_defaults(TestContext &t) {
     openscp::SessionOptions o;
-    t.check(o.port == 22, "default port should be 22");
+    t.check(o.protocol == openscp::Protocol::Sftp,
+            "default protocol should be SFTP");
+    t.check(o.scp_transfer_mode == openscp::ScpTransferMode::Auto,
+            "default SCP transfer mode should be Auto");
+    t.check(o.port == openscp::defaultPortForProtocol(openscp::Protocol::Sftp),
+            "default port should match the SFTP default");
     t.check(o.known_hosts_policy == openscp::KnownHostsPolicy::Strict,
             "default known_hosts_policy should be Strict");
     t.check(o.known_hosts_hash_names,
@@ -73,7 +82,175 @@ void test_session_defaults(TestContext &t) {
     t.check(!o.password.has_value(), "password should be empty by default");
     t.check(!o.private_key_path.has_value(),
             "private_key_path should be empty by default");
+    t.check(o.webdav_scheme == openscp::WebDavScheme::Https,
+            "default WebDAV scheme should be HTTPS");
+    t.check(o.webdav_verify_peer,
+            "WebDAV TLS verification should default to enabled");
 }
+
+void test_protocol_helpers(TestContext &t) {
+    t.check(openscp::protocolFromStorageName("sftp") ==
+                openscp::Protocol::Sftp,
+            "protocolFromStorageName should parse sftp");
+    t.check(openscp::protocolFromStorageName("SCP") == openscp::Protocol::Scp,
+            "protocolFromStorageName should parse scp case-insensitively");
+    t.check(openscp::protocolFromStorageName("FTPS") ==
+                openscp::Protocol::Ftps,
+            "protocolFromStorageName should parse ftps case-insensitively");
+    t.check(openscp::protocolFromStorageName("unknown") ==
+                openscp::Protocol::Sftp,
+            "protocolFromStorageName should fallback to sftp");
+    t.check(std::string(openscp::protocolStorageName(openscp::Protocol::Scp)) ==
+                "scp",
+            "protocolStorageName should serialize SCP");
+    t.check(std::string(openscp::protocolDisplayName(openscp::Protocol::Scp)) ==
+                "SCP",
+            "protocolDisplayName should expose SCP label");
+    t.check(openscp::scpTransferModeFromStorageName("auto") ==
+                openscp::ScpTransferMode::Auto,
+            "scpTransferModeFromStorageName should parse auto");
+    t.check(openscp::scpTransferModeFromStorageName("SCP-ONLY") ==
+                openscp::ScpTransferMode::ScpOnly,
+            "scpTransferModeFromStorageName should parse scp-only");
+    t.check(
+        std::string(openscp::scpTransferModeStorageName(
+            openscp::ScpTransferMode::ScpOnly)) == "scp-only",
+        "scpTransferModeStorageName should serialize scp-only");
+    t.check(openscp::proxyTypeFromStorageValue(
+                static_cast<int>(openscp::ProxyType::Socks5)) ==
+                openscp::ProxyType::Socks5,
+            "proxyTypeFromStorageValue should parse SOCKS5");
+    t.check(openscp::proxyTypeFromStorageValue(
+                static_cast<int>(openscp::ProxyType::HttpConnect)) ==
+                openscp::ProxyType::HttpConnect,
+            "proxyTypeFromStorageValue should parse HTTP CONNECT");
+    t.check(openscp::proxyTypeFromStorageValue(999) ==
+                openscp::ProxyType::None,
+            "proxyTypeFromStorageValue should fallback invalid values to None");
+    t.check(openscp::defaultPortForProxyType(openscp::ProxyType::Socks5) ==
+                1080,
+            "default SOCKS5 proxy port should be 1080");
+    t.check(openscp::defaultPortForProxyType(openscp::ProxyType::HttpConnect) ==
+                8080,
+            "default HTTP CONNECT proxy port should be 8080");
+    t.check(openscp::webDavSchemeFromStorageName("http") ==
+                openscp::WebDavScheme::Http,
+            "webDavSchemeFromStorageName should parse http");
+    t.check(openscp::webDavSchemeFromStorageName("HTTPS") ==
+                openscp::WebDavScheme::Https,
+            "webDavSchemeFromStorageName should parse https case-insensitively");
+    t.check(std::string(
+                openscp::webDavSchemeStorageName(openscp::WebDavScheme::Http)) ==
+                "http",
+            "webDavSchemeStorageName should serialize http");
+    t.check(openscp::defaultPortForWebDavScheme(openscp::WebDavScheme::Http) ==
+                80,
+            "default HTTP WebDAV port should be 80");
+    t.check(openscp::defaultPortForWebDavScheme(openscp::WebDavScheme::Https) ==
+                443,
+            "default HTTPS WebDAV port should be 443");
+
+    const auto sftpCaps =
+        openscp::capabilitiesForProtocol(openscp::Protocol::Sftp);
+    t.check(sftpCaps.implemented, "SFTP capabilities should be implemented");
+    t.check(sftpCaps.supports_listing,
+            "SFTP capabilities should include listing");
+
+    const auto scpCaps =
+        openscp::capabilitiesForProtocol(openscp::Protocol::Scp);
+    t.check(scpCaps.implemented, "SCP capabilities should be implemented");
+    t.check(scpCaps.supports_file_transfers,
+            "SCP capabilities should include file transfers");
+    t.check(!scpCaps.supports_listing,
+            "SCP capabilities should not include listing");
+    t.check(!scpCaps.supports_resume,
+            "SCP capabilities should not include resume");
+    t.check(!scpCaps.supports_permissions,
+            "SCP capabilities should not include chmod/chown metadata edits");
+    t.check(scpCaps.supports_known_hosts,
+            "SCP capabilities should include known_hosts verification");
+
+    const auto webdavCaps =
+        openscp::capabilitiesForProtocol(openscp::Protocol::WebDav);
+#if OPENSCP_HAS_CURL_WEBDAV
+    t.check(webdavCaps.implemented,
+            "WebDAV capabilities should be implemented");
+    t.check(webdavCaps.supports_listing,
+            "WebDAV capabilities should include listing");
+    t.check(webdavCaps.supports_file_transfers,
+            "WebDAV capabilities should include file transfers");
+    t.check(webdavCaps.supports_metadata,
+            "WebDAV capabilities should include metadata");
+    t.check(webdavCaps.supports_proxy,
+            "WebDAV capabilities should include proxy support");
+#else
+    t.check(!webdavCaps.implemented,
+            "WebDAV capabilities should report not implemented");
+    t.check(!webdavCaps.supports_listing,
+            "WebDAV capabilities should not advertise listing when backend is "
+            "disabled");
+    t.check(!webdavCaps.supports_file_transfers,
+            "WebDAV capabilities should not advertise transfers when backend "
+            "is disabled");
+#endif
+
+    const auto ftpCaps =
+        openscp::capabilitiesForProtocol(openscp::Protocol::Ftp);
+    const auto ftpsCaps =
+        openscp::capabilitiesForProtocol(openscp::Protocol::Ftps);
+#if OPENSCP_HAS_CURL_FTP
+    t.check(ftpCaps.implemented, "FTP capabilities should be implemented");
+    t.check(ftpCaps.supports_file_transfers,
+            "FTP capabilities should include file transfers");
+    t.check(ftpCaps.supports_listing,
+            "FTP capabilities should include directory listing support");
+    t.check(ftpsCaps.implemented, "FTPS capabilities should be implemented");
+    t.check(ftpsCaps.supports_file_transfers,
+            "FTPS capabilities should include file transfers");
+    t.check(ftpsCaps.supports_listing,
+            "FTPS capabilities should include directory listing support");
+#else
+    t.check(!ftpCaps.implemented,
+            "FTP capabilities should report not implemented when backend is "
+            "disabled");
+    t.check(!ftpCaps.supports_file_transfers,
+            "FTP capabilities should not advertise transfers when backend is "
+            "disabled");
+    t.check(!ftpCaps.supports_listing,
+            "FTP capabilities should not advertise listing when backend is "
+            "disabled");
+    t.check(!ftpsCaps.implemented,
+            "FTPS capabilities should report not implemented when backend is "
+            "disabled");
+    t.check(!ftpsCaps.supports_file_transfers,
+            "FTPS capabilities should not advertise transfers when backend is "
+            "disabled");
+    t.check(!ftpsCaps.supports_listing,
+            "FTPS capabilities should not advertise listing when backend is "
+            "disabled");
+#endif
+}
+
+#if OPENSCP_HAS_CURL_FTP
+void test_curlftp_rejects_unsupported_proxy_type(TestContext &t) {
+    openscp::CurlFtpClient client(openscp::Protocol::Ftp);
+    openscp::SessionOptions opt;
+    opt.protocol = openscp::Protocol::Ftp;
+    opt.host = "127.0.0.1";
+    opt.port = openscp::defaultPortForProtocol(openscp::Protocol::Ftp);
+    opt.username = "alice";
+    opt.proxy_type = static_cast<openscp::ProxyType>(999);
+    opt.proxy_host = "127.0.0.1";
+    opt.proxy_port = 8080;
+
+    std::string err;
+    const bool ok = client.connect(opt, err);
+    t.check(!ok, "FTP connect should reject unsupported proxy enum values");
+    t.checkContains(
+        err, "Unsupported proxy type",
+        "FTP connect should explain unsupported proxy enum values");
+}
+#endif
 
 void test_connect_validation(TestContext &t) {
     openscp::MockSftpClient c;
@@ -262,6 +439,59 @@ void test_new_connection_like_validation(TestContext &t) {
     t.check(!err.empty(), "newConnectionLike should report validation errors");
 }
 
+void test_client_factory(TestContext &t) {
+    auto sftp = openscp::CreateClientForProtocol(openscp::Protocol::Sftp);
+    t.check(static_cast<bool>(sftp),
+            "factory should create SFTP backend instance");
+    if (sftp) {
+        t.check(sftp->protocol() == openscp::Protocol::Sftp,
+                "SFTP backend should report SFTP protocol");
+    }
+
+    auto scp = openscp::CreateClientForProtocol(openscp::Protocol::Scp);
+    t.check(static_cast<bool>(scp),
+            "factory should create SCP backend instance");
+    if (scp) {
+        t.check(scp->protocol() == openscp::Protocol::Scp,
+                "SCP backend should report SCP protocol");
+    }
+
+    auto ftp = openscp::CreateClientForProtocol(openscp::Protocol::Ftp);
+    auto ftps = openscp::CreateClientForProtocol(openscp::Protocol::Ftps);
+    auto webdav =
+        openscp::CreateClientForProtocol(openscp::Protocol::WebDav);
+#if OPENSCP_HAS_CURL_FTP
+    t.check(static_cast<bool>(ftp),
+            "factory should create FTP backend instance");
+    if (ftp) {
+        t.check(ftp->protocol() == openscp::Protocol::Ftp,
+                "FTP backend should report FTP protocol");
+    }
+    t.check(static_cast<bool>(ftps),
+            "factory should create FTPS backend instance");
+    if (ftps) {
+        t.check(ftps->protocol() == openscp::Protocol::Ftps,
+                "FTPS backend should report FTPS protocol");
+    }
+#else
+    t.check(!ftp,
+            "factory should return null for FTP when backend is disabled");
+    t.check(!ftps,
+            "factory should return null for FTPS when backend is disabled");
+#endif
+#if OPENSCP_HAS_CURL_WEBDAV
+    t.check(static_cast<bool>(webdav),
+            "factory should create WebDAV backend instance");
+    if (webdav) {
+        t.check(webdav->protocol() == openscp::Protocol::WebDav,
+                "WebDAV backend should report WebDAV protocol");
+    }
+#else
+    t.check(!webdav,
+            "factory should return null for WebDAV when backend is disabled");
+#endif
+}
+
 void test_set_times(TestContext &t) {
     openscp::MockSftpClient c;
     std::string err;
@@ -377,6 +607,7 @@ void test_remove_known_hosts_entry_non_default_port(TestContext &t) {
 int main() {
     TestContext t;
     test_session_defaults(t);
+    test_protocol_helpers(t);
     test_connect_validation(t);
     test_disconnect_changes_state(t);
     test_list_requires_connection(t);
@@ -386,8 +617,12 @@ int main() {
     test_unsupported_methods_report_error(t);
     test_new_connection_like(t);
     test_new_connection_like_validation(t);
+    test_client_factory(t);
     test_set_times(t);
     test_libssh2_rejects_conflicting_proxy_and_jump(t);
+#if OPENSCP_HAS_CURL_FTP
+    test_curlftp_rejects_unsupported_proxy_type(t);
+#endif
 #ifdef _WIN32
     test_libssh2_rejects_jump_on_windows(t);
 #endif

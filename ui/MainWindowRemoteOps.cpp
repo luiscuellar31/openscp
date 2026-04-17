@@ -1,10 +1,10 @@
-// MainWindow remote-side operations, SFTP actions, and writeability state.
+// MainWindow remote-side operations and writeability state.
 #include "MainWindow.hpp"
 #include "PermissionsDialog.hpp"
 #include "RemoteModel.hpp"
 #include "TransferManager.hpp"
 #include "UiAlerts.hpp"
-#include "openscp/Libssh2SftpClient.hpp"
+#include "openscp/ClientFactory.hpp"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -19,7 +19,9 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPointer>
+#include <QProcess>
 #include <QSet>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTemporaryFile>
@@ -143,11 +145,584 @@ static QString joinRemotePath(const QString &base, const QString &name) {
     return base.endsWith('/') ? base + name : base + "/" + name;
 }
 
+static QString trimOptionalString(const std::optional<std::string> &v) {
+    if (!v || v->empty())
+        return {};
+    return QString::fromStdString(*v).trimmed();
+}
+
+static QString normalizeRemotePath(const QString &rawPath) {
+    QString normalized = rawPath.trimmed();
+    if (normalized.isEmpty())
+        normalized = QStringLiteral("/");
+    if (!normalized.startsWith('/'))
+        normalized.prepend('/');
+    while (normalized.contains(QStringLiteral("//")))
+        normalized.replace(QStringLiteral("//"), QStringLiteral("/"));
+    if (normalized.size() > 1 && normalized.endsWith('/'))
+        normalized.chop(1);
+    return normalized;
+}
+
+static QString shellSingleQuote(const QString &value) {
+    QString escaped = value;
+    escaped.replace(QStringLiteral("'"), QStringLiteral("'\"'\"'"));
+    return QStringLiteral("'") + escaped + QStringLiteral("'");
+}
+
+static QString shellJoinQuoted(const QStringList &args) {
+    QStringList quoted;
+    quoted.reserve(args.size());
+    for (const QString &arg : args)
+        quoted.push_back(shellSingleQuote(arg));
+    return quoted.join(QLatin1Char(' '));
+}
+
+static QString defaultKnownHostsPath() {
+    const QString home = QDir::homePath();
+    if (home.isEmpty())
+        return {};
+    return QDir(home).filePath(QStringLiteral(".ssh/known_hosts"));
+}
+
+static bool buildOpenSshProxyCommand(const openscp::SessionOptions &opt,
+                                     QString *proxyCommandOut,
+                                     QString *errorOut) {
+    if (proxyCommandOut)
+        proxyCommandOut->clear();
+    if (errorOut)
+        errorOut->clear();
+
+    if (!proxyCommandOut)
+        return false;
+
+    if (opt.proxy_type == openscp::ProxyType::None) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow", "Proxy command requested without proxy settings.");
+        }
+        return false;
+    }
+
+    const QString proxyHost = QString::fromStdString(opt.proxy_host).trimmed();
+    const std::uint16_t proxyPort = opt.proxy_port;
+    if (proxyHost.isEmpty() || proxyPort == 0) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow",
+                "Proxy host/port is missing for terminal command.");
+        }
+        return false;
+    }
+
+    const QString proxyUser = trimOptionalString(opt.proxy_username);
+    const QString proxyPass = trimOptionalString(opt.proxy_password);
+    const bool wantsProxyAuth = !proxyUser.isEmpty() || !proxyPass.isEmpty();
+    if (wantsProxyAuth && proxyUser.isEmpty()) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow", "Proxy authentication requires a username.");
+        }
+        return false;
+    }
+
+    auto ncatTypeForProxy = [&]() -> QString {
+        if (opt.proxy_type == openscp::ProxyType::Socks5)
+            return QStringLiteral("socks5");
+        if (opt.proxy_type == openscp::ProxyType::HttpConnect)
+            return QStringLiteral("http");
+        return {};
+    };
+
+    if (wantsProxyAuth) {
+        const QString ncatExe =
+            QStandardPaths::findExecutable(QStringLiteral("ncat"));
+        if (ncatExe.isEmpty()) {
+            if (errorOut) {
+                *errorOut = QCoreApplication::translate(
+                    "MainWindow",
+                    "Proxy authentication in terminal mode requires 'ncat' "
+                    "(with --proxy-auth support).");
+            }
+            return false;
+        }
+        const QString ncatProxyType = ncatTypeForProxy();
+        if (ncatProxyType.isEmpty()) {
+            if (errorOut) {
+                *errorOut = QCoreApplication::translate(
+                    "MainWindow",
+                    "Unsupported proxy type for terminal command.");
+            }
+            return false;
+        }
+        QStringList ncatArgs;
+        ncatArgs << ncatExe << QStringLiteral("--proxy")
+                 << QStringLiteral("%1:%2").arg(proxyHost).arg(proxyPort)
+                 << QStringLiteral("--proxy-type") << ncatProxyType
+                 << QStringLiteral("--proxy-auth")
+                 << QStringLiteral("%1:%2").arg(proxyUser, proxyPass)
+                 << QStringLiteral("%h") << QStringLiteral("%p");
+        *proxyCommandOut = shellJoinQuoted(ncatArgs);
+        return true;
+    }
+
+    const QString ncExe = QStandardPaths::findExecutable(QStringLiteral("nc"));
+    if (!ncExe.isEmpty()) {
+        QStringList ncArgs;
+        ncArgs << ncExe << QStringLiteral("-x")
+               << QStringLiteral("%1:%2").arg(proxyHost).arg(proxyPort);
+        if (opt.proxy_type == openscp::ProxyType::Socks5) {
+            ncArgs << QStringLiteral("-X") << QStringLiteral("5");
+        } else if (opt.proxy_type == openscp::ProxyType::HttpConnect) {
+            ncArgs << QStringLiteral("-X") << QStringLiteral("connect");
+        } else {
+            if (errorOut) {
+                *errorOut = QCoreApplication::translate(
+                    "MainWindow",
+                    "Unsupported proxy type for terminal command.");
+            }
+            return false;
+        }
+        ncArgs << QStringLiteral("%h") << QStringLiteral("%p");
+        *proxyCommandOut = shellJoinQuoted(ncArgs);
+        return true;
+    }
+
+    const QString ncatExe = QStandardPaths::findExecutable(QStringLiteral("ncat"));
+    if (!ncatExe.isEmpty()) {
+        const QString ncatProxyType = ncatTypeForProxy();
+        if (ncatProxyType.isEmpty()) {
+            if (errorOut) {
+                *errorOut = QCoreApplication::translate(
+                    "MainWindow",
+                    "Unsupported proxy type for terminal command.");
+            }
+            return false;
+        }
+        QStringList ncatArgs;
+        ncatArgs << ncatExe << QStringLiteral("--proxy")
+                 << QStringLiteral("%1:%2").arg(proxyHost).arg(proxyPort)
+                 << QStringLiteral("--proxy-type") << ncatProxyType
+                 << QStringLiteral("%h") << QStringLiteral("%p");
+        *proxyCommandOut = shellJoinQuoted(ncatArgs);
+        return true;
+    }
+
+    if (errorOut) {
+        *errorOut = QCoreApplication::translate(
+            "MainWindow",
+            "Could not find a proxy helper for terminal mode (tried: nc, ncat).");
+    }
+    return false;
+}
+
+static bool buildRemoteTerminalSshCommand(const openscp::SessionOptions &opt,
+                                          const QString &remotePath,
+                                          bool forceInteractiveLogin,
+                                          QString *commandOut,
+                                          QString *errorOut) {
+    if (commandOut)
+        commandOut->clear();
+    if (errorOut)
+        errorOut->clear();
+
+    if (!commandOut)
+        return false;
+
+    const QString sshExe = QStandardPaths::findExecutable(QStringLiteral("ssh"));
+    if (sshExe.isEmpty()) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow", "OpenSSH client was not found in PATH.");
+        }
+        return false;
+    }
+
+    const QString host = QString::fromStdString(opt.host).trimmed();
+    const QString user = QString::fromStdString(opt.username).trimmed();
+    if (host.isEmpty() || user.isEmpty()) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow",
+                "Session is missing host or username information.");
+        }
+        return false;
+    }
+
+    QStringList args;
+    args << sshExe << QStringLiteral("-tt");
+    args << QStringLiteral("-p") << QString::number(opt.port);
+
+    if (opt.known_hosts_policy == openscp::KnownHostsPolicy::Off) {
+        args << QStringLiteral("-o") << QStringLiteral("StrictHostKeyChecking=no");
+        args << QStringLiteral("-o")
+             << QStringLiteral("UserKnownHostsFile=/dev/null");
+    } else {
+        const QString strictValue =
+            (opt.known_hosts_policy == openscp::KnownHostsPolicy::AcceptNew)
+                ? QStringLiteral("accept-new")
+                : QStringLiteral("yes");
+        args << QStringLiteral("-o")
+             << QStringLiteral("StrictHostKeyChecking=%1").arg(strictValue);
+
+        QString khPath = trimOptionalString(opt.known_hosts_path);
+        if (khPath.isEmpty())
+            khPath = defaultKnownHostsPath();
+        if (!khPath.isEmpty()) {
+            const QString normalizedKh =
+                QDir::fromNativeSeparators(QDir::cleanPath(khPath));
+            args << QStringLiteral("-o")
+                 << QStringLiteral("UserKnownHostsFile=%1").arg(normalizedKh);
+        }
+    }
+
+    if (forceInteractiveLogin) {
+        args << QStringLiteral("-o") << QStringLiteral("PubkeyAuthentication=no");
+        args << QStringLiteral("-o")
+             << QStringLiteral(
+                    "PreferredAuthentications=keyboard-interactive,password");
+    } else {
+        const QString keyPath = trimOptionalString(opt.private_key_path);
+        if (!keyPath.isEmpty()) {
+            const QString normalizedKey =
+                QDir::fromNativeSeparators(QDir::cleanPath(keyPath));
+            args << QStringLiteral("-i") << normalizedKey;
+            args << QStringLiteral("-o") << QStringLiteral("IdentitiesOnly=yes");
+        }
+    }
+
+    const QString jumpHost = trimOptionalString(opt.jump_host);
+    const bool useJump = !jumpHost.isEmpty();
+    const bool useProxy = (opt.proxy_type != openscp::ProxyType::None);
+    if (useJump && useProxy) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow",
+                "Proxy and SSH jump host cannot be used together in the same "
+                "terminal command.");
+        }
+        return false;
+    }
+
+    if (useJump) {
+        const QString jumpUser = trimOptionalString(opt.jump_username);
+        const QString jumpKeyPath = trimOptionalString(opt.jump_private_key_path);
+        const std::uint16_t jumpPort = (opt.jump_port == 0) ? 22 : opt.jump_port;
+
+        if (jumpKeyPath.isEmpty()) {
+            QString jumpSpec = jumpHost;
+            if (!jumpUser.isEmpty())
+                jumpSpec = jumpUser + QStringLiteral("@") + jumpSpec;
+            if (jumpPort != 22)
+                jumpSpec += QStringLiteral(":") + QString::number(jumpPort);
+            args << QStringLiteral("-J") << jumpSpec;
+        } else {
+            QStringList jumpCmd;
+            jumpCmd << QStringLiteral("ssh");
+            jumpCmd << QStringLiteral("-W") << QStringLiteral("%h:%p");
+            jumpCmd << QStringLiteral("-p") << QString::number(jumpPort);
+            if (!jumpUser.isEmpty())
+                jumpCmd << QStringLiteral("-l") << jumpUser;
+            jumpCmd << QStringLiteral("-i")
+                    << QDir::fromNativeSeparators(
+                           QDir::cleanPath(jumpKeyPath));
+            jumpCmd << QStringLiteral("-o")
+                    << QStringLiteral("IdentitiesOnly=yes");
+            jumpCmd << jumpHost;
+            args << QStringLiteral("-o")
+                 << QStringLiteral("ProxyCommand=%1").arg(shellJoinQuoted(jumpCmd));
+        }
+    } else if (useProxy) {
+        QString proxyCommand;
+        QString proxyErr;
+        if (!buildOpenSshProxyCommand(opt, &proxyCommand, &proxyErr)) {
+            if (errorOut) {
+                *errorOut = proxyErr.isEmpty()
+                                ? QCoreApplication::translate(
+                                      "MainWindow",
+                                      "Could not build proxy command for "
+                                      "terminal mode.")
+                                : proxyErr;
+            }
+            return false;
+        }
+        args << QStringLiteral("-o")
+             << QStringLiteral("ProxyCommand=%1").arg(proxyCommand);
+    }
+
+    args << QStringLiteral("%1@%2").arg(user, host);
+    const QString remoteInit =
+        QStringLiteral(
+            "cd -- %1 2>/dev/null || cd /; exec ${SHELL:-/bin/sh} -l")
+            .arg(shellSingleQuote(normalizeRemotePath(remotePath)));
+    args << remoteInit;
+
+    *commandOut = shellJoinQuoted(args);
+    return true;
+}
+
+static bool buildRemoteSftpCliCommand(const openscp::SessionOptions &opt,
+                                      const QString &remotePath,
+                                      bool forceInteractiveLogin,
+                                      QString *commandOut,
+                                      QString *errorOut) {
+    if (commandOut)
+        commandOut->clear();
+    if (errorOut)
+        errorOut->clear();
+
+    if (!commandOut)
+        return false;
+
+    const QString sftpExe = QStandardPaths::findExecutable(QStringLiteral("sftp"));
+    if (sftpExe.isEmpty()) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow", "OpenSSH sftp client was not found in PATH.");
+        }
+        return false;
+    }
+
+    const QString host = QString::fromStdString(opt.host).trimmed();
+    const QString user = QString::fromStdString(opt.username).trimmed();
+    if (host.isEmpty() || user.isEmpty()) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow",
+                "Session is missing host or username information.");
+        }
+        return false;
+    }
+
+    QStringList args;
+    args << sftpExe;
+    args << QStringLiteral("-P") << QString::number(opt.port);
+
+    if (opt.known_hosts_policy == openscp::KnownHostsPolicy::Off) {
+        args << QStringLiteral("-o") << QStringLiteral("StrictHostKeyChecking=no");
+        args << QStringLiteral("-o")
+             << QStringLiteral("UserKnownHostsFile=/dev/null");
+    } else {
+        const QString strictValue =
+            (opt.known_hosts_policy == openscp::KnownHostsPolicy::AcceptNew)
+                ? QStringLiteral("accept-new")
+                : QStringLiteral("yes");
+        args << QStringLiteral("-o")
+             << QStringLiteral("StrictHostKeyChecking=%1").arg(strictValue);
+
+        QString khPath = trimOptionalString(opt.known_hosts_path);
+        if (khPath.isEmpty())
+            khPath = defaultKnownHostsPath();
+        if (!khPath.isEmpty()) {
+            const QString normalizedKh =
+                QDir::fromNativeSeparators(QDir::cleanPath(khPath));
+            args << QStringLiteral("-o")
+                 << QStringLiteral("UserKnownHostsFile=%1").arg(normalizedKh);
+        }
+    }
+
+    if (forceInteractiveLogin) {
+        args << QStringLiteral("-o") << QStringLiteral("PubkeyAuthentication=no");
+        args << QStringLiteral("-o")
+             << QStringLiteral(
+                    "PreferredAuthentications=keyboard-interactive,password");
+    } else {
+        const QString keyPath = trimOptionalString(opt.private_key_path);
+        if (!keyPath.isEmpty()) {
+            const QString normalizedKey =
+                QDir::fromNativeSeparators(QDir::cleanPath(keyPath));
+            args << QStringLiteral("-i") << normalizedKey;
+            args << QStringLiteral("-o") << QStringLiteral("IdentitiesOnly=yes");
+        }
+    }
+
+    const QString jumpHost = trimOptionalString(opt.jump_host);
+    const bool useJump = !jumpHost.isEmpty();
+    const bool useProxy = (opt.proxy_type != openscp::ProxyType::None);
+    if (useJump && useProxy) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow",
+                "Proxy and SSH jump host cannot be used together in the same "
+                "terminal command.");
+        }
+        return false;
+    }
+
+    if (useJump) {
+        const QString jumpUser = trimOptionalString(opt.jump_username);
+        const QString jumpKeyPath = trimOptionalString(opt.jump_private_key_path);
+        const std::uint16_t jumpPort = (opt.jump_port == 0) ? 22 : opt.jump_port;
+
+        if (jumpKeyPath.isEmpty()) {
+            QString jumpSpec = jumpHost;
+            if (!jumpUser.isEmpty())
+                jumpSpec = jumpUser + QStringLiteral("@") + jumpSpec;
+            if (jumpPort != 22)
+                jumpSpec += QStringLiteral(":") + QString::number(jumpPort);
+            args << QStringLiteral("-J") << jumpSpec;
+        } else {
+            QStringList jumpCmd;
+            jumpCmd << QStringLiteral("ssh");
+            jumpCmd << QStringLiteral("-W") << QStringLiteral("%h:%p");
+            jumpCmd << QStringLiteral("-p") << QString::number(jumpPort);
+            if (!jumpUser.isEmpty())
+                jumpCmd << QStringLiteral("-l") << jumpUser;
+            jumpCmd << QStringLiteral("-i")
+                    << QDir::fromNativeSeparators(
+                           QDir::cleanPath(jumpKeyPath));
+            jumpCmd << QStringLiteral("-o")
+                    << QStringLiteral("IdentitiesOnly=yes");
+            jumpCmd << jumpHost;
+            args << QStringLiteral("-o")
+                 << QStringLiteral("ProxyCommand=%1").arg(shellJoinQuoted(jumpCmd));
+        }
+    } else if (useProxy) {
+        QString proxyCommand;
+        QString proxyErr;
+        if (!buildOpenSshProxyCommand(opt, &proxyCommand, &proxyErr)) {
+            if (errorOut) {
+                *errorOut = proxyErr.isEmpty()
+                                ? QCoreApplication::translate(
+                                      "MainWindow",
+                                      "Could not build proxy command for "
+                                      "terminal mode.")
+                                : proxyErr;
+            }
+            return false;
+        }
+        args << QStringLiteral("-o")
+             << QStringLiteral("ProxyCommand=%1").arg(proxyCommand);
+    }
+
+    const QString target =
+        QStringLiteral("%1@%2:%3")
+            .arg(user, host, normalizeRemotePath(remotePath));
+    args << target;
+    *commandOut = shellJoinQuoted(args);
+    return true;
+}
+
+static QString buildSshWithSftpFallbackCommand(const QString &sshCommand,
+                                               const QString &sftpCommand) {
+    if (sftpCommand.trimmed().isEmpty())
+        return sshCommand;
+
+    // OpenSSH returns 255 for transport/session errors (for example PTY denied).
+    return QStringLiteral(
+               "%1; _openscp_ssh_status=$?; "
+               "if [ \"$_openscp_ssh_status\" -eq 255 ]; then "
+               "printf '%s\\n' %2; "
+               "%3; "
+               "fi")
+        .arg(sshCommand,
+             shellSingleQuote(QCoreApplication::translate(
+                 "MainWindow",
+                 "OpenSCP: SSH shell was not available. Falling back to SFTP "
+                 "CLI.")),
+             sftpCommand);
+}
+
+static QString appleScriptStringLiteral(const QString &raw) {
+    QString escaped = raw;
+    escaped.replace(QStringLiteral("\\"), QStringLiteral("\\\\"));
+    escaped.replace(QStringLiteral("\""), QStringLiteral("\\\""));
+    return QStringLiteral("\"") + escaped + QStringLiteral("\"");
+}
+
+static bool launchShellCommandInSystemTerminal(const QString &shellCommand,
+                                               QString *errorOut) {
+    if (errorOut)
+        errorOut->clear();
+
+#ifdef Q_OS_MAC
+    const QString osaExe =
+        QStandardPaths::findExecutable(QStringLiteral("osascript"));
+    if (osaExe.isEmpty()) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow", "Could not locate osascript.");
+        }
+        return false;
+    }
+    const QString line1 = QStringLiteral("tell application \"Terminal\" to activate");
+    const QString line2 =
+        QStringLiteral("tell application \"Terminal\" to do script %1")
+            .arg(appleScriptStringLiteral(shellCommand));
+    if (!QProcess::startDetached(osaExe,
+                                 {QStringLiteral("-e"), line1,
+                                  QStringLiteral("-e"), line2})) {
+        if (errorOut) {
+            *errorOut = QCoreApplication::translate(
+                "MainWindow", "Could not launch Terminal.app.");
+        }
+        return false;
+    }
+    return true;
+#elif defined(Q_OS_LINUX)
+    auto tryLaunch = [&](const QString &program,
+                         const QStringList &args) -> bool {
+        const QString exe = QStandardPaths::findExecutable(program);
+        return !exe.isEmpty() && QProcess::startDetached(exe, args);
+    };
+    if (tryLaunch(QStringLiteral("x-terminal-emulator"),
+                  {QStringLiteral("-e"), QStringLiteral("sh"),
+                   QStringLiteral("-lc"), shellCommand})) {
+        return true;
+    }
+    if (tryLaunch(QStringLiteral("gnome-terminal"),
+                  {QStringLiteral("--"), QStringLiteral("sh"),
+                   QStringLiteral("-lc"), shellCommand})) {
+        return true;
+    }
+    if (tryLaunch(QStringLiteral("konsole"),
+                  {QStringLiteral("-e"), QStringLiteral("sh"),
+                   QStringLiteral("-lc"), shellCommand})) {
+        return true;
+    }
+    if (tryLaunch(QStringLiteral("xfce4-terminal"),
+                  {QStringLiteral("--command"),
+                   QStringLiteral("sh -lc %1").arg(shellSingleQuote(shellCommand))})) {
+        return true;
+    }
+    if (tryLaunch(QStringLiteral("xterm"),
+                  {QStringLiteral("-e"), QStringLiteral("sh"),
+                   QStringLiteral("-lc"), shellCommand})) {
+        return true;
+    }
+    if (tryLaunch(QStringLiteral("alacritty"),
+                  {QStringLiteral("-e"), QStringLiteral("sh"),
+                   QStringLiteral("-lc"), shellCommand})) {
+        return true;
+    }
+    if (tryLaunch(QStringLiteral("kitty"),
+                  {QStringLiteral("sh"), QStringLiteral("-lc"),
+                   shellCommand})) {
+        return true;
+    }
+
+    if (errorOut) {
+        *errorOut = QCoreApplication::translate(
+            "MainWindow",
+            "No compatible terminal emulator was found.");
+    }
+    return false;
+#else
+    if (errorOut) {
+        *errorOut = QCoreApplication::translate(
+            "MainWindow",
+            "Open in terminal action is not supported on this platform.");
+    }
+    return false;
+#endif
+}
+
 void MainWindow::goUpRight() {
     if (rightIsRemote_) {
-        if (!rightRemoteModel_)
-            return;
-        QString cur = rightRemoteModel_->rootPath();
+        QString cur = rightRemoteModel_ ? rightRemoteModel_->rootPath()
+                                        : (rightPath_ ? rightPath_->text()
+                                                      : QString());
+        cur = normalizeRemotePath(cur);
         if (cur == "/" || cur.isEmpty())
             return;
         if (cur.endsWith('/'))
@@ -165,9 +740,98 @@ void MainWindow::goUpRight() {
     }
 }
 
-void MainWindow::setRightRemoteRoot(const QString &path) {
-    if (!rightIsRemote_ || !rightRemoteModel_)
+void MainWindow::goHomeRight() {
+    if (rightIsRemote_) {
+        // SFTP does not provide a portable remote HOME query; use root fallback.
+        setRightRemoteRoot(QStringLiteral("/"));
+    } else {
+        setRightRoot(preferredLocalHomePath());
+        updateDeleteShortcutEnables();
+    }
+}
+
+void MainWindow::openRightRemoteTerminal() {
+    if (!rightIsRemote_ || !m_activeSessionOptions_.has_value()) {
+        UiAlerts::information(this, tr("Open in terminal"),
+                              tr("The right panel must be connected as remote."));
         return;
+    }
+
+    const openscp::SessionOptions &opt = *m_activeSessionOptions_;
+    const QString remotePath = normalizeRemotePath(
+        rightRemoteModel_ ? rightRemoteModel_->rootPath()
+                          : (rightPath_ ? rightPath_->text() : QString()));
+    QSettings s("OpenSCP", "OpenSCP");
+    const bool forceInteractiveLogin =
+        s.value("Terminal/forceInteractiveLogin", false).toBool();
+    const bool enableSftpCliFallback =
+        s.value("Terminal/enableSftpCliFallback", true).toBool();
+
+    QString command;
+    QString prepareError;
+    if (!buildRemoteTerminalSshCommand(opt, remotePath, forceInteractiveLogin,
+                                       &command, &prepareError)) {
+        UiAlerts::warning(
+            this, tr("Open in terminal"),
+            tr("Could not prepare the terminal command.\n%1")
+                .arg(prepareError.isEmpty() ? tr("Unknown error.")
+                                            : prepareError));
+        return;
+    }
+
+    QString sftpFallbackCommand;
+    bool hasSftpFallback = false;
+    if (enableSftpCliFallback) {
+        hasSftpFallback =
+            buildRemoteSftpCliCommand(opt, remotePath, forceInteractiveLogin,
+                                      &sftpFallbackCommand, nullptr);
+        if (!hasSftpFallback)
+            sftpFallbackCommand.clear();
+    }
+
+    const QString launchCommand = hasSftpFallback
+                                      ? buildSshWithSftpFallbackCommand(
+                                            command, sftpFallbackCommand)
+                                      : command;
+
+    QString launchError;
+    if (!launchShellCommandInSystemTerminal(launchCommand, &launchError)) {
+        UiAlerts::warning(
+            this, tr("Open in terminal"),
+            tr("Could not open a remote terminal.\n%1")
+                .arg(launchError.isEmpty() ? tr("Unknown error.")
+                                           : launchError));
+        return;
+    }
+
+    const bool hasSavedPassword = opt.password.has_value() &&
+                                  !opt.password->empty() &&
+                                  trimOptionalString(opt.private_key_path)
+                                      .isEmpty();
+    QString statusMsg = tr("Opening remote terminal at %1").arg(remotePath);
+    if (forceInteractiveLogin) {
+        statusMsg += tr(" (interactive login required)");
+    } else if (hasSavedPassword) {
+        statusMsg += tr(" (password may be requested by OpenSSH for security)");
+    }
+    if (hasSftpFallback) {
+        statusMsg += tr(" (auto-fallback to SFTP CLI enabled)");
+    }
+    statusBar()->showMessage(statusMsg, 6000);
+}
+
+void MainWindow::setRightRemoteRoot(const QString &path) {
+    if (!rightIsRemote_)
+        return;
+    if (!rightRemoteModel_) {
+        const QString normalized = normalizeRemotePath(path);
+        rightPath_->setText(normalized);
+        addRecentRemotePath(normalized);
+        refreshRightBreadcrumbs();
+        updateDeleteShortcutEnables();
+        statusBar()->showMessage(tr("Remote path: %1").arg(normalized), 3000);
+        return;
+    }
     QString e;
     if (!rightRemoteModel_->setRootPath(path, &e)) {
         UiAlerts::warning(
@@ -180,8 +844,13 @@ void MainWindow::setRightRemoteRoot(const QString &path) {
 }
 
 void MainWindow::refreshRightRemotePanel() {
-    if (!rightIsRemote_ || !rightRemoteModel_)
+    if (!rightIsRemote_)
         return;
+    if (!rightRemoteModel_) {
+        statusBar()->showMessage(
+            tr("Refresh is not available in transfer-only mode."), 3000);
+        return;
+    }
 
     QString e;
     if (!rightRemoteModel_->setRootPath(rightRemoteModel_->rootPath(), &e,
@@ -300,8 +969,8 @@ void MainWindow::downloadRightToLeft() {
                                  tr("The right panel is not remote."));
         return;
     }
-    if (!sftp_ || !rightRemoteModel_) {
-        UiAlerts::warning(this, tr("SFTP"), tr("No active SFTP session."));
+    if (!sftp_) {
+        UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
     const QString picked = QFileDialog::getExistingDirectory(
@@ -314,6 +983,44 @@ void MainWindow::downloadRightToLeft() {
     if (!dst.exists()) {
         UiAlerts::warning(this, tr("Invalid destination"),
                              tr("Destination folder does not exist."));
+        return;
+    }
+    if (isScpTransferMode()) {
+        const QString baseRemote = normalizeRemotePath(
+            rightPath_ ? rightPath_->text() : QStringLiteral("/"));
+        bool ok = false;
+        QString remoteInput = QInputDialog::getText(
+            this, tr("Download"),
+            tr("Remote file path (absolute or relative to %1):")
+                .arg(baseRemote),
+            QLineEdit::Normal, baseRemote, &ok);
+        if (!ok)
+            return;
+        remoteInput = remoteInput.trimmed();
+        if (remoteInput.isEmpty())
+            return;
+        QString remotePath = remoteInput;
+        if (!remotePath.startsWith('/'))
+            remotePath = joinRemotePath(baseRemote, remotePath);
+        remotePath = normalizeRemotePath(remotePath);
+        const QString name = QFileInfo(remotePath).fileName();
+        if (name.isEmpty()) {
+            UiAlerts::warning(this, tr("Download"),
+                              tr("Enter a valid remote file path."));
+            return;
+        }
+        transferMgr_->enqueueDownload(remotePath, dst.filePath(name));
+        statusBar()->showMessage(QString(tr("Queued: %1 downloads")).arg(1),
+                                 4000);
+        maybeShowTransferQueue();
+        const int slash = remotePath.lastIndexOf('/');
+        const QString parent = (slash <= 0) ? QStringLiteral("/")
+                                            : remotePath.left(slash);
+        setRightRemoteRoot(parent);
+        return;
+    }
+    if (!rightRemoteModel_) {
+        UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
     auto sel = rightView_->selectionModel();
@@ -458,7 +1165,7 @@ void MainWindow::copyRightToLeft() {
 
     // Remote -> Local: enqueue downloads
     if (!sftp_ || !rightRemoteModel_) {
-        UiAlerts::warning(this, tr("SFTP"), tr("No active SFTP session."));
+        UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
     int bad = 0;
@@ -544,7 +1251,7 @@ void MainWindow::moveRightToLeft() {
 
     // Remote -> Local: enqueue downloads and delete remote on completion
     if (!sftp_ || !rightRemoteModel_) {
-        UiAlerts::warning(this, tr("SFTP"), tr("No active SFTP session."));
+        UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
     const auto rows = sel->selectedRows(NAME_COL);
@@ -768,14 +1475,43 @@ void MainWindow::moveRightToLeft() {
 
 
 void MainWindow::uploadViaDialog() {
-    if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_) {
+    if (!rightIsRemote_ || !sftp_) {
         UiAlerts::information(
             this, tr("Upload"),
             tr("The right panel is not remote or there is no active session."));
         return;
     }
+    const bool scpMode = isScpTransferMode();
+    if (!scpMode && !rightRemoteModel_) {
+        UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
+        return;
+    }
     const QString startDir =
         uploadDir_.isEmpty() ? QDir::homePath() : uploadDir_;
+    if (scpMode) {
+        const QStringList picks = QFileDialog::getOpenFileNames(
+            this, tr("Select files to upload"), startDir);
+        if (picks.isEmpty())
+            return;
+        uploadDir_ = QFileInfo(picks.first()).dir().absolutePath();
+        const QString remoteBase = normalizeRemotePath(
+            rightPath_ ? rightPath_->text() : QStringLiteral("/"));
+        int enq = 0;
+        for (const QString &localPath : picks) {
+            const QFileInfo fi(localPath);
+            if (!fi.isFile())
+                continue;
+            transferMgr_->enqueueUpload(
+                fi.absoluteFilePath(), joinRemotePath(remoteBase, fi.fileName()));
+            ++enq;
+        }
+        if (enq > 0) {
+            statusBar()->showMessage(QString(tr("Queued: %1 uploads")).arg(enq),
+                                     4000);
+            maybeShowTransferQueue();
+        }
+        return;
+    }
     QFileDialog dlg(this, tr("Select files or folders to upload"), startDir);
     dlg.setFileMode(QFileDialog::ExistingFiles);
     dlg.setOption(QFileDialog::DontUseNativeDialog, true);
@@ -867,7 +1603,7 @@ void MainWindow::newDirRight() {
         if (!okMkdir) {
             invalidateRemoteWriteabilityFromError(QString::fromStdString(err));
             UiAlerts::critical(
-                this, tr("SFTP"),
+                this, tr("Remote"),
                 tr("Could not create the remote folder.\n%1")
                     .arg(shortRemoteError(err, tr("Remote error"))));
             return;
@@ -918,7 +1654,7 @@ void MainWindow::newFileRight() {
             e);
         if (!existsCheckOk) {
             UiAlerts::critical(
-                this, tr("SFTP"),
+                this, tr("Remote"),
                 tr("Could not check whether the remote file already "
                    "exists.\n%1")
                     .arg(shortRemoteError(e, tr("Remote error"))));
@@ -951,7 +1687,7 @@ void MainWindow::newFileRight() {
         if (!okPut) {
             invalidateRemoteWriteabilityFromError(QString::fromStdString(err));
             UiAlerts::critical(
-                this, tr("SFTP"),
+                this, tr("Remote"),
                 tr("Could not upload the temporary file to the server.\n%1")
                     .arg(shortRemoteError(err, tr("Remote error"))));
             return;
@@ -1018,7 +1754,7 @@ void MainWindow::renameRightSelected() {
         if (!okRename) {
             invalidateRemoteWriteabilityFromError(QString::fromStdString(err));
             UiAlerts::critical(
-                this, tr("SFTP"),
+                this, tr("Remote"),
                 tr("Could not rename the remote item.\n%1")
                     .arg(shortRemoteError(err, tr("Remote error"))));
             return;
@@ -1198,7 +1934,8 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
     bool canGoUp = false;
     if (rightIsRemote_) {
         QString cur =
-            rightRemoteModel_ ? rightRemoteModel_->rootPath() : QString();
+            rightRemoteModel_ ? rightRemoteModel_->rootPath()
+                              : (rightPath_ ? rightPath_->text() : QString());
         if (cur.endsWith('/'))
             cur.chop(1);
         canGoUp = (!cur.isEmpty() && cur != "/");
@@ -1207,7 +1944,24 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
         canGoUp = d.cdUp();
     }
 
+    if (isScpTransferMode()) {
+        if (canGoUp && actUpRight_)
+            rightContextMenu_->addAction(actUpRight_);
+        if (actUploadRight_)
+            rightContextMenu_->addAction(actUploadRight_);
+        if (actDownloadF7_)
+            rightContextMenu_->addAction(actDownloadF7_);
+        if (actOpenTerminalRight_)
+            rightContextMenu_->addAction(actOpenTerminalRight_);
+        rightContextMenu_->popup(rightView_->viewport()->mapToGlobal(pos));
+        return;
+    }
+
     if (rightIsRemote_) {
+        const bool supportsRemotePermissions =
+            m_activeSessionOptions_.has_value() &&
+            openscp::capabilitiesForProtocol(m_activeSessionOptions_->protocol)
+                .supports_permissions;
         // Up option (if applicable)
         if (canGoUp && actUpRight_)
             rightContextMenu_->addAction(actUpRight_);
@@ -1242,10 +1996,12 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
                     rightContextMenu_->addAction(actDeleteRight_);
                 if (actMoveRight_)
                     rightContextMenu_->addAction(actMoveRight_);
-                rightContextMenu_->addSeparator();
-                rightContextMenu_->addAction(
-                    tr("Change permissions…"), this,
-                    &MainWindow::changeRemotePermissions);
+                if (supportsRemotePermissions) {
+                    rightContextMenu_->addSeparator();
+                    rightContextMenu_->addAction(
+                        tr("Change permissions…"), this,
+                        &MainWindow::changeRemotePermissions);
+                }
             }
         }
     } else {
@@ -1282,6 +2038,14 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
 void MainWindow::changeRemotePermissions() {
     if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_)
         return;
+    if (!m_activeSessionOptions_.has_value() ||
+        !openscp::capabilitiesForProtocol(m_activeSessionOptions_->protocol)
+             .supports_permissions) {
+        UiAlerts::information(
+            this, tr("Permissions"),
+            tr("Permissions are not supported for the active protocol."));
+        return;
+    }
     auto sel = rightView_->selectionModel();
     if (!sel)
         return;
@@ -1467,9 +2231,9 @@ void MainWindow::updateRemoteWriteability() {
         bool probeFinished = false;
         bool writable = false;
 
-        openscp::Libssh2SftpClient probe;
         std::string connErr;
-        if (probe.connect(opt, connErr)) {
+        auto probe = openscp::CreateConnectedClient(opt, connErr);
+        if (probe) {
             probeFinished = true;
             const qint64 ts = QDateTime::currentMSecsSinceEpoch();
             const QString testName =
@@ -1477,15 +2241,16 @@ void MainWindow::updateRemoteWriteability() {
             const QString testPath =
                 base.endsWith('/') ? base + testName : base + "/" + testName;
             std::string err;
-            const bool created = probe.mkdir(testPath.toStdString(), err, 0755);
+            const bool created =
+                probe->mkdir(testPath.toStdString(), err, 0755);
             if (created) {
                 std::string derr;
-                (void)probe.removeDir(testPath.toStdString(), derr);
+                (void)probe->removeDir(testPath.toStdString(), derr);
                 writable = true;
             } else {
                 writable = false;
             }
-            probe.disconnect();
+            probe->disconnect();
         }
 
         QObject *app = QCoreApplication::instance();

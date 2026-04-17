@@ -13,7 +13,7 @@ OpenSCP is dual-licensed:
 ---
 
 ## Third-party notices (pointer)
-Full attributions and license texts for bundled/linked third-party components (Qt, libssh2, OpenSSL, zlib, etc.) are provided in:
+Full attributions and license texts for bundled/linked third-party components (Qt, libssh2, libcurl, OpenSSL, zlib, etc.) are provided in:
 - `docs/credits/CREDITS.md`
 - `docs/credits/LICENSES/`
 - `docs/credits/LGPL_COMPLIANCE.md` (Qt LGPLv3 source offer & relinking notes)

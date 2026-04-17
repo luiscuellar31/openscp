@@ -25,8 +25,10 @@ class QEvent;      // fwd for eventFilter
 class QCloseEvent; // fwd for closeEvent
 class QDialog;     // fwd
 class QLabel;      // fwd
+class QStackedWidget; // fwd
 class QTimer;      // fwd
 class QSplitter;   // fwd
+class QPushButton; // fwd
 namespace openscp {
 class SftpClient;
 struct SessionOptions;
@@ -64,7 +66,11 @@ class MainWindow : public QMainWindow {
     void deleteFromLeft();  // Delete
     void goUpRight();       // Go up one level (right)
     void goUpLeft();        // Go up one level (left)
+    void goHomeRight();     // Go to home/root (right)
+    void goHomeLeft();      // Go to local home (left)
+    void openRightRemoteTerminal(); // Open SSH terminal at current right path
     void refreshRightRemotePanel(); // Refresh current remote folder (right)
+    void showHistoryMenu();         // Show recent routes/servers
 
     void connectSftp();
     void disconnectSftp();
@@ -96,6 +102,8 @@ class MainWindow : public QMainWindow {
     };
 
     void updateDeleteShortcutEnables();
+    bool isScpTransferMode() const;
+    void activateScpTransferModeUi(bool enabled);
     void applyPreferences();
     // Remote state (a single active session)
     std::unique_ptr<openscp::SftpClient> sftp_;
@@ -113,6 +121,11 @@ class MainWindow : public QMainWindow {
     // Views and path inputs
     QTreeView *leftView_ = nullptr;
     QTreeView *rightView_ = nullptr;
+    QStackedWidget *rightContentStack_ = nullptr;
+    QWidget *scpTransferPanel_ = nullptr;
+    QLabel *scpModeHintLabel_ = nullptr;
+    QPushButton *scpQuickUploadBtn_ = nullptr;
+    QPushButton *scpQuickDownloadBtn_ = nullptr;
 
     QLineEdit *leftPath_ = nullptr;
     QLineEdit *rightPath_ = nullptr;
@@ -133,6 +146,7 @@ class MainWindow : public QMainWindow {
     QAction *actDownloadF7_ = nullptr;
     QAction *actUploadRight_ = nullptr;
     QAction *actRefreshRight_ = nullptr;
+    QAction *actOpenTerminalRight_ = nullptr;
     QAction *actSearchLeft_ = nullptr;
     QAction *actSearchRight_ = nullptr;
     QAction *actNewDirRight_ = nullptr;
@@ -147,7 +161,9 @@ class MainWindow : public QMainWindow {
 
     // Sub-toolbar actions
     QAction *actUpLeft_ = nullptr;  // back left
+    QAction *actHomeLeft_ = nullptr;
     QAction *actUpRight_ = nullptr; // back right
+    QAction *actHomeRight_ = nullptr;
 
     // Sub-toolbars
     QToolBar *leftPaneBar_ = nullptr;
@@ -159,6 +175,7 @@ class MainWindow : public QMainWindow {
     class TransferManager *transferMgr_ = nullptr;
     class TransferQueueDialog *transferDlg_ = nullptr;
     QAction *actShowQueue_ = nullptr;
+    QAction *actShowHistory_ = nullptr;
     QAction *actSites_ = nullptr;        // site manager
     QAction *actPrefsToolbar_ = nullptr; // settings button (right toolbar)
     QAction *actAboutToolbar_ = nullptr; // about button (right toolbar)
@@ -198,6 +215,11 @@ class MainWindow : public QMainWindow {
     void showTransferQueue();
     void maybeShowTransferQueue();
     void openLocalPathWithPreference(const QString &localPath);
+    void openConnectDialogWithPreset(
+        const std::optional<openscp::SessionOptions> &preset);
+    void addRecentLocalPath(const QString &path);
+    void addRecentRemotePath(const QString &path);
+    void addRecentServer(const openscp::SessionOptions &opt);
     void applyTransferPreferences();
     static QString defaultDownloadDirFromSettings(const class QSettings &s);
 
@@ -254,6 +276,7 @@ class MainWindow : public QMainWindow {
     void stopRemoteSessionHealthMonitoring();
     void runRemoteSessionHealthCheck(const QString &reason,
                                      bool force = false);
+    QString preferredLocalHomePath() const;
 
     // Writable state of the current remote directory
     bool rightRemoteWritable_ = false;

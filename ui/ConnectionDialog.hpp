@@ -1,4 +1,4 @@
-// Dialog to capture SFTP connection options (host/port/user/key/known_hosts).
+// Dialog to capture remote connection options (protocol/host/auth/security).
 #pragma once
 #include "openscp/SftpTypes.hpp"
 #include <QDialog>
@@ -10,6 +10,7 @@ class QSpinBox;
 class QComboBox;
 class QToolButton;
 class QCheckBox;
+class QFormLayout;
 
 class ConnectionDialog : public QDialog {
     Q_OBJECT
@@ -25,7 +26,12 @@ class ConnectionDialog : public QDialog {
     bool saveCredentialsRequested() const;
 
     private:
+    void updateProtocolUi(openscp::Protocol protocol, bool resetPort = true);
+
     bool quickConnectSaveOptionsVisible_ = false;
+    QFormLayout *formLayout_ = nullptr;
+    QComboBox *protocol_ = nullptr;
+    QComboBox *scpMode_ = nullptr;
     QLineEdit *siteName_ = nullptr;
     QWidget *siteNameLabel_ = nullptr;
     QCheckBox *saveSite_ = nullptr;
@@ -36,12 +42,24 @@ class ConnectionDialog : public QDialog {
     QLineEdit *pass_ = nullptr;
     QLineEdit *keyPath_ = nullptr; // path to ~/.ssh/id_ed25519 or similar
     QLineEdit *keyPass_ = nullptr; // key passphrase (if any)
+    QWidget *keyPathRow_ = nullptr;
+    QWidget *keyPassRow_ = nullptr;
 
     // known_hosts
     QLineEdit *khPath_ = nullptr;
     QToolButton *khBrowse_ = nullptr;
     QComboBox *khPolicy_ = nullptr;
     QComboBox *integrityPolicy_ = nullptr;
+    QWidget *khPathRow_ = nullptr;
+    QCheckBox *ftpsVerifyPeer_ = nullptr;
+    QLineEdit *ftpsCaPath_ = nullptr;
+    QToolButton *ftpsCaBrowse_ = nullptr;
+    QWidget *ftpsCaPathRow_ = nullptr;
+    QComboBox *webDavScheme_ = nullptr;
+    QCheckBox *webDavVerifyPeer_ = nullptr;
+    QLineEdit *webDavCaPath_ = nullptr;
+    QToolButton *webDavCaBrowse_ = nullptr;
+    QWidget *webDavCaPathRow_ = nullptr;
 
     // proxy
     QComboBox *proxyType_ = nullptr;
@@ -49,16 +67,22 @@ class ConnectionDialog : public QDialog {
     QSpinBox *proxyPort_ = nullptr;
     QLineEdit *proxyUser_ = nullptr;
     QLineEdit *proxyPass_ = nullptr;
+    QWidget *proxyHostPortRow_ = nullptr;
+    QWidget *proxyPassRow_ = nullptr;
     QCheckBox *jumpEnabled_ = nullptr;
     QLineEdit *jumpHost_ = nullptr;
     QSpinBox *jumpPort_ = nullptr;
     QLineEdit *jumpUser_ = nullptr;
     QLineEdit *jumpKeyPath_ = nullptr;
     QToolButton *jumpKeyBrowse_ = nullptr;
+    QWidget *jumpHostPortRow_ = nullptr;
+    QWidget *jumpKeyPathRow_ = nullptr;
 
     // Keep the compact dialog size when proxy rows are hidden (Direct mode).
     QSize directModeSize_;
     bool hasDirectModeSize_ = false;
     bool proxyRowsVisible_ = false;
+    openscp::ProxyType lastProxyType_ = openscp::ProxyType::None;
+    openscp::WebDavScheme lastWebDavScheme_ = openscp::WebDavScheme::Https;
     bool jumpRowsVisible_ = false;
 };

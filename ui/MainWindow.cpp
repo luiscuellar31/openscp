@@ -11,7 +11,6 @@
 #include "SiteManagerDialog.hpp"
 #include "TransferManager.hpp"
 #include "TransferQueueDialog.hpp"
-#include "openscp/Libssh2SftpClient.hpp"
 #include <QAbstractButton>
 #include <QApplication>
 #include <QCheckBox>
@@ -62,11 +61,14 @@
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QStyle>
+#include <QStackedWidget>
 #include <QTemporaryFile>
+#include <QTabWidget>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QUuid>
 #include <QVBoxLayout>
 #include <atomic>
@@ -118,6 +120,132 @@ static QString formatConnectionElapsed(qint64 totalSeconds) {
         .arg(hours, 2, 10, QLatin1Char('0'))
         .arg(minutes, 2, 10, QLatin1Char('0'))
         .arg(seconds, 2, 10, QLatin1Char('0'));
+}
+
+constexpr int kRecentHistoryMaxEntries = 20;
+constexpr const char *kRecentLocalPathsKey = "History/recentLocalPaths";
+constexpr const char *kRecentRemotePathsKey = "History/recentRemotePaths";
+constexpr const char *kRecentServersKey = "History/recentServers";
+constexpr const char *kShortcutTransfersKey = "Shortcuts/openTransfers";
+constexpr const char *kShortcutHistoryKey = "Shortcuts/openHistory";
+
+static QString trimHistoryLabel(const QString &raw, int maxLen = 96) {
+    QString out = raw.simplified();
+    if (out.size() <= maxLen)
+        return out;
+    if (maxLen <= 3)
+        return out.left(maxLen);
+    return out.left(maxLen - 3) + QStringLiteral("...");
+}
+
+static void prependRecentValue(QStringList *list, const QString &value,
+                               int maxEntries = kRecentHistoryMaxEntries) {
+    if (!list)
+        return;
+    const QString trimmed = value.trimmed();
+    if (trimmed.isEmpty())
+        return;
+    list->removeAll(trimmed);
+    list->prepend(trimmed);
+    while (list->size() > maxEntries)
+        list->removeLast();
+}
+
+static QString normalizedLocalHistoryPath(const QString &raw) {
+    QString normalized = QDir::fromNativeSeparators(raw.trimmed());
+    if (normalized.isEmpty())
+        return {};
+    normalized = QDir::cleanPath(normalized);
+    if (!QFileInfo(normalized).isAbsolute())
+        normalized = QDir::current().absoluteFilePath(normalized);
+    return QDir(normalized).absolutePath();
+}
+
+static QString encodeRecentServerEntry(const openscp::SessionOptions &opt) {
+    QUrlQuery query;
+    query.addQueryItem(
+        QStringLiteral("protocol"),
+        QString::fromLatin1(openscp::protocolStorageName(opt.protocol)));
+    query.addQueryItem(QStringLiteral("host"),
+                       QString::fromStdString(opt.host).trimmed().toLower());
+    query.addQueryItem(QStringLiteral("port"), QString::number(opt.port));
+    query.addQueryItem(QStringLiteral("user"),
+                       QString::fromStdString(opt.username).trimmed());
+    if (opt.protocol == openscp::Protocol::WebDav) {
+        query.addQueryItem(
+            QStringLiteral("webdavScheme"),
+            QString::fromLatin1(openscp::webDavSchemeStorageName(
+                openscp::normalizeWebDavScheme(opt.webdav_scheme))));
+    }
+    return query.toString(QUrl::FullyEncoded);
+}
+
+static bool decodeRecentServerEntry(const QString &encoded,
+                                    openscp::SessionOptions *optOut,
+                                    QString *labelOut) {
+    const QUrlQuery query(encoded);
+    const QString host = query.queryItemValue(QStringLiteral("host"))
+                             .trimmed()
+                             .toLower();
+    if (host.isEmpty())
+        return false;
+    const QString protocolStorage =
+        query.queryItemValue(QStringLiteral("protocol"))
+            .trimmed()
+            .toLower();
+    const openscp::Protocol protocol = openscp::protocolFromStorageName(
+        protocolStorage.toStdString());
+    bool portOk = false;
+    int portRaw =
+        query.queryItemValue(QStringLiteral("port")).trimmed().toInt(&portOk);
+    if (!portOk || portRaw <= 0 || portRaw > 65535) {
+        portRaw = static_cast<int>(openscp::defaultPortForProtocol(protocol));
+    }
+    const QString user =
+        query.queryItemValue(QStringLiteral("user")).trimmed();
+
+    if (optOut) {
+        openscp::SessionOptions opt{};
+        opt.protocol = protocol;
+        opt.host = host.toStdString();
+        opt.port = static_cast<std::uint16_t>(portRaw);
+        opt.username = user.toStdString();
+        if (protocol == openscp::Protocol::WebDav) {
+            const QString rawScheme =
+                query.queryItemValue(QStringLiteral("webdavScheme"))
+                    .trimmed()
+                    .toLower();
+            if (!rawScheme.isEmpty()) {
+                opt.webdav_scheme = openscp::webDavSchemeFromStorageName(
+                    rawScheme.toStdString());
+            } else if (opt.port ==
+                       openscp::defaultPortForWebDavScheme(
+                           openscp::WebDavScheme::Http)) {
+                opt.webdav_scheme = openscp::WebDavScheme::Http;
+            }
+            if (opt.webdav_scheme == openscp::WebDavScheme::Http) {
+                opt.webdav_verify_peer = false;
+                opt.webdav_ca_cert_path.reset();
+            }
+        }
+        *optOut = opt;
+    }
+    if (labelOut) {
+        QString endpoint = host;
+        if (static_cast<std::uint16_t>(portRaw) !=
+            openscp::defaultPortForProtocol(protocol)) {
+            endpoint += QStringLiteral(":%1").arg(portRaw);
+        }
+        if (!user.isEmpty())
+            endpoint = QStringLiteral("%1@%2").arg(user, endpoint);
+        *labelOut = QStringLiteral("%1  %2")
+                        .arg(
+                            QString::fromLatin1(
+                                openscp::protocolDisplayName(protocol))
+                                .toUpper(),
+                            endpoint);
+    }
+    return true;
 }
 
 static bool hasRegexMetaBeyondWildcards(const QString &pattern) {
@@ -323,8 +451,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     rightLocalModel_->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot |
                                 QDir::AllDirs);
 
-    // Initial paths: HOME
-    const QString home = QDir::homePath();
+    // Initial paths: local home (fallback to root if HOME is unavailable)
+    const QString home = preferredLocalHomePath();
     leftModel_->setRootPath(home);
     rightLocalModel_->setRootPath(home);
 
@@ -387,6 +515,35 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     leftLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->setContentsMargins(0, 0, 0, 0);
 
+    // Right content stack:
+    // - index 0: standard file tree view (local/SFTP)
+    // - index 1: SCP transfer-only panel (no remote listing)
+    rightContentStack_ = new QStackedWidget(rightPane);
+    rightContentStack_->addWidget(rightView_);
+    scpTransferPanel_ = new QWidget(rightPane);
+    auto *scpLay = new QVBoxLayout(scpTransferPanel_);
+    scpLay->setContentsMargins(12, 12, 12, 12);
+    scpLay->setSpacing(8);
+    scpModeHintLabel_ = new QLabel(
+        tr("This protocol works in transfer-only mode.\nUse the remote path "
+           "above as the target folder for uploads.\nFor downloads, choose a "
+           "remote file path explicitly."),
+        scpTransferPanel_);
+    scpModeHintLabel_->setWordWrap(true);
+    scpQuickUploadBtn_ = new QPushButton(tr("Upload local files…"), scpTransferPanel_);
+    scpQuickDownloadBtn_ =
+        new QPushButton(tr("Download remote file…"), scpTransferPanel_);
+    scpLay->addWidget(scpModeHintLabel_);
+    scpLay->addWidget(scpQuickUploadBtn_);
+    scpLay->addWidget(scpQuickDownloadBtn_);
+    scpLay->addStretch(1);
+    connect(scpQuickUploadBtn_, &QPushButton::clicked, this,
+            &MainWindow::uploadViaDialog);
+    connect(scpQuickDownloadBtn_, &QPushButton::clicked, this,
+            &MainWindow::downloadRightToLeft);
+    rightContentStack_->addWidget(scpTransferPanel_);
+    rightContentStack_->setCurrentWidget(rightView_);
+
     // Left pane sub‑toolbar
     leftPaneBar_ = new QToolBar("LeftBar", leftPane);
     leftPaneBar_->setIconSize(QSize(18, 18));
@@ -408,7 +565,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         return rightIsRemote_ ? tr("Remote panel")
                               : tr("Local panel - right");
     };
-    // Left sub‑toolbar: Up, Copy, Move, Delete, Rename, New folder
+    // Left sub‑toolbar: Up, Open, Home, Search, Copy/Move/Delete, Rename/New
     actUpLeft_ = leftPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpLeft);
     actUpLeft_->setIcon(resIcon("action-go-up.svg"));
     actUpLeft_->setToolTip(actUpLeft_->text());
@@ -417,6 +574,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                                              &MainWindow::chooseLeftDir);
     actChooseLeft_->setIcon(resIcon("action-open-folder.svg"));
     actChooseLeft_->setToolTip(actChooseLeft_->text());
+    actHomeLeft_ =
+        leftPaneBar_->addAction(tr("Home"), this, &MainWindow::goHomeLeft);
+    actHomeLeft_->setIcon(resIcon("action-go-home.svg"));
+    actHomeLeft_->setToolTip(actHomeLeft_->text());
     actSearchLeft_ =
         leftPaneBar_->addAction(tr("Search items"), this,
                                 [this, leftSearchLabel] {
@@ -521,6 +682,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                                                &MainWindow::chooseRightDir);
     actChooseRight_->setIcon(resIcon("action-open-folder.svg"));
     actChooseRight_->setToolTip(actChooseRight_->text());
+    actHomeRight_ =
+        rightPaneBar_->addAction(tr("Home"), this, &MainWindow::goHomeRight);
+    actHomeRight_->setIcon(resIcon("action-go-home.svg"));
+    actHomeRight_->setToolTip(actHomeRight_->text());
     actSearchRight_ =
         rightPaneBar_->addAction(tr("Search items"), this,
                                  [this, rightSearchLabel] {
@@ -554,6 +719,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
             &MainWindow::refreshRightRemotePanel);
     actRefreshRight_->setIcon(resIcon("action-refresh.svg"));
     actRefreshRight_->setToolTip(actRefreshRight_->text());
+
+    actOpenTerminalRight_ = new QAction(tr("Open in terminal"), this);
+    connect(actOpenTerminalRight_, &QAction::triggered, this,
+            &MainWindow::openRightRemoteTerminal);
+    actOpenTerminalRight_->setIcon(resIcon("action-open-terminal.svg"));
+    actOpenTerminalRight_->setToolTip(actOpenTerminalRight_->text());
 
     actNewDirRight_ = new QAction(tr("New folder"), this);
     connect(actNewDirRight_, &QAction::triggered, this,
@@ -623,6 +794,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     rightPaneBar_->addAction(actUploadRight_);
     rightPaneBar_->addSeparator();
     rightPaneBar_->addAction(actRefreshRight_);
+    rightPaneBar_->addAction(actOpenTerminalRight_);
     // Delete shortcut also on right panel (limited to right panel widget)
     if (actDeleteRight_) {
         actDeleteRight_->setShortcut(QKeySequence(Qt::Key_Delete));
@@ -683,6 +855,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     actUploadRight_->setEnabled(false);
     if (actRefreshRight_)
         actRefreshRight_->setEnabled(false);
+    if (actOpenTerminalRight_)
+        actOpenTerminalRight_->setEnabled(false);
     if (actNewFileRight_)
         actNewFileRight_->setEnabled(false);
 
@@ -690,7 +864,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     rightLayout->addWidget(rightPaneBar_);
     rightLayout->addWidget(rightBreadcrumbsBar_);
     rightLayout->addWidget(rightPath_);
-    rightLayout->addWidget(rightView_);
+    rightLayout->addWidget(rightContentStack_);
 
     // Mount panes into the splitter
     mainSplitter_->addWidget(leftPane);
@@ -712,7 +886,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     rightPaneBar_->setIconSize(QSize(subIconPx, subIconPx));
     // Copy/move/delete actions now live in the left sub‑toolbar
     actConnect_ =
-        tb->addAction(tr("Connect (SFTP)"), this, &MainWindow::connectSftp);
+        tb->addAction(tr("Connect"), this, &MainWindow::connectSftp);
     actConnect_->setIcon(resIcon("action-connect.svg"));
     actConnect_->setToolTip(actConnect_->text());
     tb->addSeparator();
@@ -752,6 +926,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         tb->addAction(tr("Transfers"), [this] { showTransferQueue(); });
     actShowQueue_->setIcon(resIcon("action-open-transfer-queue.svg"));
     actShowQueue_->setToolTip(actShowQueue_->text());
+    tb->addSeparator();
+    actShowHistory_ =
+        tb->addAction(tr("History"), this, &MainWindow::showHistoryMenu);
+    actShowHistory_->setIcon(resIcon("action-open-history.svg"));
+    actShowHistory_->setToolTip(actShowHistory_->text());
     // Show text beside icon for Sites and Queue too
     if (QWidget *w = tb->widgetForAction(actSites_)) {
         if (auto *b = qobject_cast<QToolButton *>(w)) {
@@ -765,10 +944,22 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
             b->setText(tr("Transfers"));
         }
     }
+    if (QWidget *w = tb->widgetForAction(actShowHistory_)) {
+        if (auto *b = qobject_cast<QToolButton *>(w)) {
+            b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+            b->setText(tr("History"));
+        }
+    }
     // Global shortcut to open the transfer queue
     actShowQueue_->setShortcut(QKeySequence(Qt::Key_F12));
     actShowQueue_->setShortcutContext(Qt::ApplicationShortcut);
     this->addAction(actShowQueue_);
+    // Global shortcut to open recent history
+    actShowHistory_->setShortcut(
+        QKeySequence::fromString(QStringLiteral("Ctrl+Shift+H"),
+                                 QKeySequence::PortableText));
+    actShowHistory_->setShortcutContext(Qt::ApplicationShortcut);
+    this->addAction(actShowHistory_);
 
     // Global fullscreen toggle (standard platform shortcut)
     // macOS: Ctrl+Cmd+F, Linux: F11
@@ -785,7 +976,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         });
         this->addAction(actToggleFs);
     }
-    // Separator to the right of the queue button
+    // Separator to the right of the history button
     tb->addSeparator();
     // Queue is always enabled by default; no toggle
 
@@ -837,6 +1028,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     fileMenu_->addAction(actDisconnect_);
     fileMenu_->addAction(actSites_);
     fileMenu_->addAction(actShowQueue_);
+    fileMenu_->addAction(actShowHistory_);
     // On non‑macOS platforms, also show Preferences and Quit under "File"
     // to provide a familiar UX on Linux/Windows while keeping the "OpenSCP" app
     // menu.
@@ -949,7 +1141,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         if (!r.exists())
             return;
         const QDateTime now = QDateTime::currentDateTimeUtc();
-        const qint64 maxAgeMs = qint64(7) * 24 * 60 * 60 * 1000; // 7 days
+        const int retentionDays =
+            qBound(1, s.value("Advanced/stagingRetentionDays", 7).toInt(),
+                   365);
+        const qint64 maxAgeMs = qint64(retentionDays) * 24 * 60 * 60 * 1000;
         // Match timestamp batches: yyyyMMdd-HHmmss
         QRegularExpression re("^\\d{8}-\\d{6}$");
         const auto entries = r.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot |
@@ -976,7 +1171,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         warn->setToolTip(
             tr("You are using unencrypted credentials storage enabled via "
                "environment variable. Disable "
-               "OPEN_SCP_ENABLE_INSECURE_FALLBACK to hide this warning."));
+               "OPENSCP_ENABLE_INSECURE_FALLBACK to hide this warning."));
         statusBar()->addPermanentWidget(warn, 0);
     }
 
@@ -1101,6 +1296,8 @@ void MainWindow::showAboutDialog() {
 // Open the Settings dialog and apply changes when accepted.
 void MainWindow::showSettingsDialog() {
     SettingsDialog dlg(this);
+    connect(&dlg, &SettingsDialog::settingsApplied, this,
+            &MainWindow::applyPreferences);
     dlg.exec();
     // Reflect any applied changes in the running UI
     applyPreferences();
@@ -1424,8 +1621,8 @@ void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
     bool truncated = false;
 
     if (view == rightView_ && rightIsRemote_ && (!rightRemoteModel_ || !sftp_)) {
-        QMessageBox::warning(this, tr("SFTP"),
-                             tr("No active SFTP session."));
+        QMessageBox::warning(this, tr("Remote"),
+                             tr("No active remote session."));
         return;
     }
 
@@ -1733,6 +1930,38 @@ void MainWindow::maybeNotifyCompletedTransfers() {
     statusBar()->showMessage(message, 5000);
 }
 
+bool MainWindow::isScpTransferMode() const {
+    if (!rightIsRemote_ || !m_activeSessionOptions_.has_value())
+        return false;
+    const openscp::ProtocolCapabilities caps =
+        openscp::capabilitiesForProtocol(m_activeSessionOptions_->protocol);
+    return caps.supports_file_transfers && !caps.supports_listing;
+}
+
+void MainWindow::activateScpTransferModeUi(bool enabled) {
+    if (!rightContentStack_ || !rightView_)
+        return;
+    if (enabled && scpTransferPanel_) {
+        rightContentStack_->setCurrentWidget(scpTransferPanel_);
+        if (rightPath_) {
+            rightPath_->setPlaceholderText(tr("/remote/folder"));
+            if (rightPath_->text().trimmed().isEmpty())
+                rightPath_->setText(QStringLiteral("/"));
+        }
+        if (scpModeHintLabel_) {
+            scpModeHintLabel_->setText(
+                tr("This protocol works in transfer-only mode.\n"
+                   "Uploads use the remote folder path above.\n"
+                   "Downloads require entering a remote file path."));
+        }
+        return;
+    }
+
+    rightContentStack_->setCurrentWidget(rightView_);
+    if (rightPath_)
+        rightPath_->setPlaceholderText(QString());
+}
+
 void MainWindow::applyPreferences() {
     QSettings s("OpenSCP", "OpenSCP");
     const bool showHidden = s.value("UI/showHidden", false).toBool();
@@ -1754,8 +1983,38 @@ void MainWindow::applyPreferences() {
     prefShowQueueOnEnqueue_ = s.value("UI/showQueueOnEnqueue", true).toBool();
     prefNoHostVerificationTtlMin_ = qBound(
         1, s.value("Security/noHostVerificationTtlMin", 15).toInt(), 120);
+    m_remoteSessionHealthIntervalMs_ =
+        qBound(60, s.value("Network/sessionHealthIntervalSec", 600).toInt(),
+               86400) *
+        1000;
+    m_remoteWriteabilityTtlMs_ = qBound(
+        1000, s.value("Network/remoteWriteabilityTtlMs", 15000).toInt(),
+        120000);
+    if (m_remoteSessionHealthTimer_) {
+        m_remoteSessionHealthTimer_->setInterval(m_remoteSessionHealthIntervalMs_);
+    }
     downloadDir_ = defaultDownloadDirFromSettings(s);
     QDir().mkpath(downloadDir_);
+    if (actShowQueue_) {
+        const QString queueShortcutText =
+            s.value(kShortcutTransfersKey, QStringLiteral("F12"))
+                .toString()
+                .trimmed();
+        actShowQueue_->setShortcut(
+            QKeySequence::fromString(queueShortcutText,
+                                     QKeySequence::PortableText));
+        actShowQueue_->setShortcutContext(Qt::ApplicationShortcut);
+    }
+    if (actShowHistory_) {
+        const QString historyShortcutText =
+            s.value(kShortcutHistoryKey, QStringLiteral("Ctrl+Shift+H"))
+                .toString()
+                .trimmed();
+        actShowHistory_->setShortcut(
+            QKeySequence::fromString(historyShortcutText,
+                                     QKeySequence::PortableText));
+        actShowHistory_->setShortcutContext(Qt::ApplicationShortcut);
+    }
     // Keep Site Manager auto-open preference up to date
     m_openSiteManagerOnDisconnect =
         s.value("UI/openSiteManagerOnDisconnect", true).toBool();
@@ -1820,6 +2079,258 @@ void MainWindow::applyTransferPreferences() {
                                   Qt::QueuedConnection);
 }
 
+void MainWindow::addRecentLocalPath(const QString &path) {
+    const QString normalized = normalizedLocalHistoryPath(path);
+    if (normalized.isEmpty())
+        return;
+    QSettings s("OpenSCP", "OpenSCP");
+    QStringList recent = s.value(kRecentLocalPathsKey).toStringList();
+    prependRecentValue(&recent, normalized);
+    s.setValue(kRecentLocalPathsKey, recent);
+}
+
+void MainWindow::addRecentRemotePath(const QString &path) {
+    const QString normalized = normalizeRemotePathForMatch(path);
+    if (normalized.isEmpty())
+        return;
+    QSettings s("OpenSCP", "OpenSCP");
+    QStringList recent = s.value(kRecentRemotePathsKey).toStringList();
+    prependRecentValue(&recent, normalized);
+    s.setValue(kRecentRemotePathsKey, recent);
+}
+
+void MainWindow::addRecentServer(const openscp::SessionOptions &opt) {
+    const QString host = QString::fromStdString(opt.host).trimmed().toLower();
+    if (host.isEmpty())
+        return;
+    const QString encoded = encodeRecentServerEntry(opt);
+    if (encoded.isEmpty())
+        return;
+    QSettings s("OpenSCP", "OpenSCP");
+    QStringList recent = s.value(kRecentServersKey).toStringList();
+    prependRecentValue(&recent, encoded);
+    s.setValue(kRecentServersKey, recent);
+}
+
+void MainWindow::showHistoryMenu() {
+    QWidget *focusBeforeDialog = QApplication::focusWidget();
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("History"));
+    dlg.resize(720, 460);
+    dlg.setMinimumSize(560, 360);
+
+    auto *layout = new QVBoxLayout(&dlg);
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(8);
+
+    auto *tabs = new QTabWidget(&dlg);
+    layout->addWidget(tabs, 1);
+
+    auto *localList = new QListWidget(tabs);
+    localList->setSelectionMode(QAbstractItemView::SingleSelection);
+    localList->setAlternatingRowColors(true);
+    localList->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    tabs->addTab(localList, tr("Recent local paths"));
+
+    auto *remoteList = new QListWidget(tabs);
+    remoteList->setSelectionMode(QAbstractItemView::SingleSelection);
+    remoteList->setAlternatingRowColors(true);
+    remoteList->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    tabs->addTab(remoteList, tr("Recent remote paths"));
+
+    auto *serverList = new QListWidget(tabs);
+    serverList->setSelectionMode(QAbstractItemView::SingleSelection);
+    serverList->setAlternatingRowColors(true);
+    serverList->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    tabs->addTab(serverList, tr("Recent servers"));
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
+    auto *openBtn =
+        buttons->addButton(tr("Open selected"), QDialogButtonBox::ActionRole);
+    auto *clearBtn =
+        buttons->addButton(tr("Clear history"), QDialogButtonBox::ActionRole);
+    layout->addWidget(buttons);
+
+    auto addEmptyPlaceholder = [](QListWidget *list, const QString &text) {
+        if (!list)
+            return;
+        auto *item = new QListWidgetItem(text, list);
+        item->setFlags(Qt::NoItemFlags);
+    };
+
+    auto activeList = [tabs, localList, remoteList,
+                       serverList]() -> QListWidget * {
+        switch (tabs->currentIndex()) {
+        case 0:
+            return localList;
+        case 1:
+            return remoteList;
+        case 2:
+            return serverList;
+        default:
+            return nullptr;
+        }
+    };
+
+    auto updateOpenEnabled = [activeList, openBtn]() {
+        if (!openBtn)
+            return;
+        QListWidget *list = activeList();
+        if (!list || !list->currentItem()) {
+            openBtn->setEnabled(false);
+            return;
+        }
+        const QString value = list->currentItem()->data(Qt::UserRole).toString();
+        openBtn->setEnabled(!value.trimmed().isEmpty());
+    };
+
+    auto populate = [=]() {
+        localList->clear();
+        remoteList->clear();
+        serverList->clear();
+
+        QSettings s("OpenSCP", "OpenSCP");
+        const QStringList localPaths = s.value(kRecentLocalPathsKey).toStringList();
+        const QStringList remotePaths =
+            s.value(kRecentRemotePathsKey).toStringList();
+        const QStringList recentServers = s.value(kRecentServersKey).toStringList();
+
+        bool hasEntries = false;
+
+        for (const QString &rawPath : localPaths) {
+            const QString normalized = normalizedLocalHistoryPath(rawPath);
+            if (normalized.isEmpty())
+                continue;
+            auto *item = new QListWidgetItem(
+                trimHistoryLabel(QDir::toNativeSeparators(normalized)), localList);
+            item->setToolTip(normalized);
+            item->setData(Qt::UserRole, normalized);
+            hasEntries = true;
+        }
+        if (localList->count() == 0)
+            addEmptyPlaceholder(localList, tr("No recent history"));
+
+        for (const QString &rawPath : remotePaths) {
+            const QString normalized = normalizeRemotePathForMatch(rawPath);
+            if (normalized.isEmpty())
+                continue;
+            auto *item =
+                new QListWidgetItem(trimHistoryLabel(normalized), remoteList);
+            item->setToolTip(normalized);
+            item->setData(Qt::UserRole, normalized);
+            hasEntries = true;
+        }
+        if (remoteList->count() == 0)
+            addEmptyPlaceholder(remoteList, tr("No recent history"));
+
+        for (const QString &encoded : recentServers) {
+            openscp::SessionOptions preset;
+            QString label;
+            if (!decodeRecentServerEntry(encoded, &preset, &label))
+                continue;
+            auto *item = new QListWidgetItem(trimHistoryLabel(label), serverList);
+            item->setToolTip(label);
+            item->setData(Qt::UserRole, encoded);
+            hasEntries = true;
+        }
+        if (serverList->count() == 0)
+            addEmptyPlaceholder(serverList, tr("No recent history"));
+
+        if (clearBtn)
+            clearBtn->setEnabled(hasEntries);
+        updateOpenEnabled();
+    };
+
+    auto openSelected = [&, focusBeforeDialog]() {
+        QListWidget *list = activeList();
+        if (!list || !list->currentItem())
+            return;
+        const QString value = list->currentItem()->data(Qt::UserRole).toString();
+        if (value.trimmed().isEmpty())
+            return;
+
+        switch (tabs->currentIndex()) {
+        case 0: {
+            const bool inRightPanel =
+                focusWithinWidget(focusBeforeDialog, rightView_) ||
+                focusWithinWidget(focusBeforeDialog, rightPath_) ||
+                focusWithinWidget(focusBeforeDialog, rightPaneBar_) ||
+                focusWithinWidget(focusBeforeDialog, rightBreadcrumbsBar_);
+            if (!rightIsRemote_ && inRightPanel)
+                setRightRoot(value);
+            else
+                setLeftRoot(value);
+            dlg.accept();
+            break;
+        }
+        case 1:
+            if (!rightIsRemote_) {
+                statusBar()->showMessage(
+                    tr("Connect to a remote server to open remote path history."),
+                    3500);
+                return;
+            }
+            setRightRemoteRoot(value);
+            dlg.accept();
+            break;
+        case 2: {
+            if (rightIsRemote_) {
+                statusBar()->showMessage(
+                    tr("Disconnect the current remote session before opening "
+                       "another server."),
+                    4000);
+                return;
+            }
+            openscp::SessionOptions preset;
+            if (!decodeRecentServerEntry(value, &preset, nullptr))
+                return;
+            dlg.accept();
+            openConnectDialogWithPreset(preset);
+            break;
+        }
+        default:
+            break;
+        }
+    };
+
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    connect(openBtn, &QPushButton::clicked, &dlg, openSelected);
+    connect(clearBtn, &QPushButton::clicked, &dlg, [=, this]() {
+        const auto ret = QMessageBox::question(
+            this, tr("Clear history"),
+            tr("Remove all recent paths and servers from history?"),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (ret != QMessageBox::Yes)
+            return;
+        QSettings s("OpenSCP", "OpenSCP");
+        s.remove(kRecentLocalPathsKey);
+        s.remove(kRecentRemotePathsKey);
+        s.remove(kRecentServersKey);
+        statusBar()->showMessage(tr("History cleared"), 3000);
+        populate();
+    });
+
+    connect(localList, &QListWidget::itemDoubleClicked, &dlg,
+            [openSelected](QListWidgetItem *) { openSelected(); });
+    connect(remoteList, &QListWidget::itemDoubleClicked, &dlg,
+            [openSelected](QListWidgetItem *) { openSelected(); });
+    connect(serverList, &QListWidget::itemDoubleClicked, &dlg,
+            [openSelected](QListWidgetItem *) { openSelected(); });
+
+    connect(localList, &QListWidget::currentRowChanged, &dlg,
+            [updateOpenEnabled](int) { updateOpenEnabled(); });
+    connect(remoteList, &QListWidget::currentRowChanged, &dlg,
+            [updateOpenEnabled](int) { updateOpenEnabled(); });
+    connect(serverList, &QListWidget::currentRowChanged, &dlg,
+            [updateOpenEnabled](int) { updateOpenEnabled(); });
+    connect(tabs, &QTabWidget::currentChanged, &dlg,
+            [updateOpenEnabled](int) { updateOpenEnabled(); });
+
+    populate();
+    dlg.exec();
+}
+
 void MainWindow::updateDeleteShortcutEnables() {
     auto hasColSel = [&](QTreeView *v) -> bool {
         if (!v || !v->selectionModel())
@@ -1828,6 +2339,7 @@ void MainWindow::updateDeleteShortcutEnables() {
     };
     const bool leftHasSel = hasColSel(leftView_);
     const bool rightHasSel = hasColSel(rightView_);
+    const bool scpMode = isScpTransferMode();
     const bool rightWrite =
         (!rightIsRemote_) || (rightIsRemote_ && rightRemoteWritable_);
 
@@ -1835,7 +2347,7 @@ void MainWindow::updateDeleteShortcutEnables() {
     if (actCopyF5_)
         actCopyF5_->setEnabled(leftHasSel);
     if (actMoveF6_)
-        actMoveF6_->setEnabled(leftHasSel);
+        actMoveF6_->setEnabled(leftHasSel && !scpMode);
     if (actDelete_)
         actDelete_->setEnabled(leftHasSel);
     if (actRenameLeft_)
@@ -1852,6 +2364,44 @@ void MainWindow::updateDeleteShortcutEnables() {
 
     // Right: enable according to selection + permissions (exceptions: Up,
     // Upload, Download)
+    if (scpMode) {
+        if (actCopyRightTb_)
+            actCopyRightTb_->setEnabled(false);
+        if (actMoveRightTb_)
+            actMoveRightTb_->setEnabled(false);
+        if (actDeleteRight_)
+            actDeleteRight_->setEnabled(false);
+        if (actRenameRight_)
+            actRenameRight_->setEnabled(false);
+        if (actNewDirRight_)
+            actNewDirRight_->setEnabled(false);
+        if (actNewFileRight_)
+            actNewFileRight_->setEnabled(false);
+        if (actUploadRight_)
+            actUploadRight_->setEnabled(true);
+        if (actDownloadF7_)
+            actDownloadF7_->setEnabled(true);
+        if (actRefreshRight_)
+            actRefreshRight_->setEnabled(false);
+        if (actOpenTerminalRight_)
+            actOpenTerminalRight_->setEnabled(true);
+        if (actSearchRight_)
+            actSearchRight_->setEnabled(false);
+        if (actMoveRight_)
+            actMoveRight_->setEnabled(false);
+        if (actCopyRight_)
+            actCopyRight_->setEnabled(false);
+        if (actUpRight_) {
+            QString cur = rightPath_ ? rightPath_->text().trimmed() : QString();
+            if (cur.isEmpty())
+                cur = QStringLiteral("/");
+            if (cur.endsWith('/') && cur.size() > 1)
+                cur.chop(1);
+            actUpRight_->setEnabled(cur != "/");
+        }
+        return;
+    }
+
     if (actCopyRightTb_)
         actCopyRightTb_->setEnabled(rightHasSel);
     if (actMoveRightTb_)
@@ -1874,6 +2424,11 @@ void MainWindow::updateDeleteShortcutEnables() {
     if (actRefreshRight_)
         actRefreshRight_->setEnabled(
             rightIsRemote_); // exception: enabled without selection
+    if (actOpenTerminalRight_)
+        actOpenTerminalRight_->setEnabled(
+            rightIsRemote_ && m_activeSessionOptions_.has_value());
+    if (actSearchRight_)
+        actSearchRight_->setEnabled(true);
     if (actUpRight_) {
         QString cur = rightRemoteModel_ ? rightRemoteModel_->rootPath()
                                         : rightPath_->text();

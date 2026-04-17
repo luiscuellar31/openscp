@@ -15,6 +15,20 @@ Librerías de terceros utilizadas por OpenSCP
   Texto de licencia: docs/credits/LICENSES/libssh2-BSD-3-Clause.txt
   Copyright: The libssh2 Project
 
+- libcurl
+  Descripción: librería de transferencia usada por los backends FTP/FTPS y WebDAV.
+  Licencia: curl
+  Sitio: https://curl.se/libcurl/
+  Texto de licencia: docs/credits/LICENSES/libcurl-curl-license.txt
+  Copyright: Daniel Stenberg y contribuidores
+
+- tinyxml2
+  Descripción: parser XML ligero usado en respuestas PROPFIND de WebDAV.
+  Licencia: zlib
+  Sitio: https://github.com/leethomason/tinyxml2
+  Texto de licencia: docs/credits/LICENSES/tinyxml2-zlib-license.txt
+  Copyright: Lee Thomason y contribuidores
+
 - OpenSSL 3 (libssl, libcrypto)
   Descripción: toolkit criptográfico y de TLS/SSL utilizado por libssh2.
   Licencia: Apache-2.0

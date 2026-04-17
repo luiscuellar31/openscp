@@ -1,6 +1,7 @@
 // SftpClient implementation using libssh2 for SSH/SFTP.
 // Encapsulates the SSH session, SFTP channel, and TCP socket.
 #pragma once
+#include "KnownHostsUtils.hpp"
 #include "SftpClient.hpp"
 #include <mutex>
 #include <string>
@@ -18,7 +19,15 @@ class Libssh2SftpClient : public SftpClient {
     Libssh2SftpClient();
     ~Libssh2SftpClient() override;
 
+    Protocol protocol() const override { return Protocol::Sftp; }
+    ProtocolCapabilities capabilities() const override {
+        return capabilitiesForProtocol(Protocol::Sftp);
+    }
+
     bool connect(const SessionOptions &opt, std::string &err) override;
+    // Internal entry point used by protocol adapters (e.g. SCP) that need a
+    // raw authenticated SSH transport without opening the SFTP subsystem.
+    bool connectTransportOnly(const SessionOptions &opt, std::string &err);
     void disconnect() override;
     void interrupt() override;
     bool isConnected() const override { return connected_; }
@@ -64,6 +73,10 @@ class Libssh2SftpClient : public SftpClient {
     std::unique_ptr<SftpClient> newConnectionLike(const SessionOptions &opt,
                                                   std::string &err) override;
 
+    // Exposed for protocol adapters that share the authenticated SSH transport
+    // (for example, SCP channel operations).
+    _LIBSSH2_SESSION *sessionHandle() const { return session_; }
+
     private:
     bool connected_ = false;
     int sock_ = -1;
@@ -79,15 +92,13 @@ class Libssh2SftpClient : public SftpClient {
 
     // TCP connection + SSH handshake and authentication.
     bool tcpConnect(const SessionOptions &opt, std::string &err);
-    bool sshHandshakeAuth(const SessionOptions &opt, std::string &err);
+    bool sshHandshakeAuth(const SessionOptions &opt, std::string &err,
+                          bool initializeSftpSubsystem);
+    bool connectInternal(const SessionOptions &opt, std::string &err,
+                         bool initializeSftpSubsystem);
 #ifndef _WIN32
     bool describeJumpTunnelFailure(std::string &err);
 #endif
 };
-
-// Utility: remove a known_hosts entry for host:port and rewrite the file
-// atomically.
-bool RemoveKnownHostEntry(const std::string &khPath, const std::string &host,
-                          std::uint16_t port, std::string &err);
 
 } // namespace openscp

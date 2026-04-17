@@ -2,11 +2,21 @@
 // Keeping these structures simple and serializable makes them easy to use in
 // the UI.
 #pragma once
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
 #include <vector>
+
+#ifndef OPENSCP_HAS_CURL_FTP
+#define OPENSCP_HAS_CURL_FTP 1
+#endif
+
+#ifndef OPENSCP_HAS_CURL_WEBDAV
+#define OPENSCP_HAS_CURL_WEBDAV 0
+#endif
 
 namespace openscp {
 
@@ -24,6 +34,247 @@ enum class KnownHostsPolicy {
 // completed.
 enum class TransferIntegrityPolicy { Off, Optional, Required };
 enum class ProxyType { None, Socks5, HttpConnect };
+enum class Protocol { Sftp, Scp, Ftp, Ftps, WebDav };
+enum class WebDavScheme { Https, Http };
+enum class ScpTransferMode {
+    Auto,    // Try native SCP first and fallback to SFTP transfers if needed.
+    ScpOnly, // Enforce classic SCP transfers only (no SFTP fallback).
+};
+
+inline constexpr bool isValidProxyType(ProxyType type) {
+    switch (type) {
+    case ProxyType::None:
+    case ProxyType::Socks5:
+    case ProxyType::HttpConnect:
+        return true;
+    }
+    return false;
+}
+
+inline constexpr ProxyType normalizeProxyType(ProxyType type) {
+    return isValidProxyType(type) ? type : ProxyType::None;
+}
+
+inline constexpr bool isValidWebDavScheme(WebDavScheme scheme) {
+    switch (scheme) {
+    case WebDavScheme::Https:
+    case WebDavScheme::Http:
+        return true;
+    }
+    return false;
+}
+
+inline constexpr WebDavScheme normalizeWebDavScheme(WebDavScheme scheme) {
+    return isValidWebDavScheme(scheme) ? scheme : WebDavScheme::Https;
+}
+
+inline ProxyType proxyTypeFromStorageValue(int raw) {
+    const auto candidate = static_cast<ProxyType>(raw);
+    return normalizeProxyType(candidate);
+}
+
+inline constexpr std::uint16_t defaultPortForProxyType(ProxyType type) {
+    switch (type) {
+    case ProxyType::Socks5:
+        return 1080;
+    case ProxyType::HttpConnect:
+        return 8080;
+    case ProxyType::None:
+        break;
+    }
+    return 0;
+}
+
+inline constexpr std::uint16_t
+defaultPortForWebDavScheme(WebDavScheme scheme) {
+    switch (normalizeWebDavScheme(scheme)) {
+    case WebDavScheme::Http:
+        return 80;
+    case WebDavScheme::Https:
+        return 443;
+    }
+    return 443;
+}
+
+inline constexpr const char *webDavSchemeStorageName(WebDavScheme scheme) {
+    switch (normalizeWebDavScheme(scheme)) {
+    case WebDavScheme::Http:
+        return "http";
+    case WebDavScheme::Https:
+        return "https";
+    }
+    return "https";
+}
+
+inline WebDavScheme webDavSchemeFromStorageName(const std::string &raw) {
+    if (raw.empty())
+        return WebDavScheme::Https;
+    std::string normalized = raw;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char c) -> char {
+                       return static_cast<char>(std::tolower(c));
+                   });
+    if (normalized == "http")
+        return WebDavScheme::Http;
+    return WebDavScheme::Https;
+}
+
+struct ProtocolCapabilities {
+    bool implemented = false;
+    bool supports_listing = false;
+    bool supports_file_transfers = false;
+    bool supports_resume = false;
+    bool supports_metadata = false;
+    bool supports_permissions = false;
+    bool supports_ownership = false;
+    bool supports_timestamps = false;
+    bool supports_proxy = false;
+    bool supports_jump_host = false;
+    bool supports_known_hosts = false;
+    bool supports_transfer_integrity = false;
+};
+
+inline constexpr std::uint16_t defaultPortForProtocol(Protocol protocol) {
+    switch (protocol) {
+    case Protocol::Sftp:
+    case Protocol::Scp:
+        return 22;
+    case Protocol::Ftp:
+        return 21;
+    case Protocol::Ftps:
+        return 990;
+    case Protocol::WebDav:
+        return 443;
+    }
+    return 22;
+}
+
+inline constexpr const char *protocolStorageName(Protocol protocol) {
+    switch (protocol) {
+    case Protocol::Sftp:
+        return "sftp";
+    case Protocol::Scp:
+        return "scp";
+    case Protocol::Ftp:
+        return "ftp";
+    case Protocol::Ftps:
+        return "ftps";
+    case Protocol::WebDav:
+        return "webdav";
+    }
+    return "sftp";
+}
+
+inline constexpr const char *protocolDisplayName(Protocol protocol) {
+    switch (protocol) {
+    case Protocol::Sftp:
+        return "SFTP";
+    case Protocol::Scp:
+        return "SCP";
+    case Protocol::Ftp:
+        return "FTP";
+    case Protocol::Ftps:
+        return "FTPS";
+    case Protocol::WebDav:
+        return "WebDAV";
+    }
+    return "SFTP";
+}
+
+inline Protocol protocolFromStorageName(const std::string &raw) {
+    if (raw.empty())
+        return Protocol::Sftp;
+    std::string normalized = raw;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char c) -> char {
+                       return static_cast<char>(std::tolower(c));
+                   });
+    if (normalized == "scp")
+        return Protocol::Scp;
+    if (normalized == "ftp")
+        return Protocol::Ftp;
+    if (normalized == "ftps")
+        return Protocol::Ftps;
+    if (normalized == "webdav")
+        return Protocol::WebDav;
+    return Protocol::Sftp;
+}
+
+inline constexpr const char *scpTransferModeStorageName(ScpTransferMode mode) {
+    switch (mode) {
+    case ScpTransferMode::Auto:
+        return "auto";
+    case ScpTransferMode::ScpOnly:
+        return "scp-only";
+    }
+    return "auto";
+}
+
+inline ScpTransferMode scpTransferModeFromStorageName(const std::string &raw) {
+    if (raw.empty())
+        return ScpTransferMode::Auto;
+    std::string normalized = raw;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char c) -> char {
+                       return static_cast<char>(std::tolower(c));
+                   });
+    if (normalized == "scp-only")
+        return ScpTransferMode::ScpOnly;
+    return ScpTransferMode::Auto;
+}
+
+inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
+    ProtocolCapabilities caps{};
+    switch (protocol) {
+    case Protocol::Sftp:
+        caps.implemented = true;
+        caps.supports_listing = true;
+        caps.supports_file_transfers = true;
+        caps.supports_resume = true;
+        caps.supports_metadata = true;
+        caps.supports_permissions = true;
+        caps.supports_ownership = true;
+        caps.supports_timestamps = true;
+        caps.supports_proxy = true;
+        caps.supports_jump_host = true;
+        caps.supports_known_hosts = true;
+        caps.supports_transfer_integrity = true;
+        return caps;
+    case Protocol::Scp:
+        caps.implemented = true;
+        caps.supports_file_transfers = true;
+        caps.supports_proxy = true;
+        caps.supports_jump_host = true;
+        caps.supports_known_hosts = true;
+        return caps;
+    case Protocol::Ftp:
+#if OPENSCP_HAS_CURL_FTP
+        caps.implemented = true;
+        caps.supports_listing = true;
+        caps.supports_file_transfers = true;
+        caps.supports_proxy = true;
+#endif
+        return caps;
+    case Protocol::Ftps:
+#if OPENSCP_HAS_CURL_FTP
+        caps.implemented = true;
+        caps.supports_listing = true;
+        caps.supports_file_transfers = true;
+        caps.supports_proxy = true;
+#endif
+        return caps;
+    case Protocol::WebDav:
+#if OPENSCP_HAS_CURL_WEBDAV
+        caps.implemented = true;
+        caps.supports_listing = true;
+        caps.supports_file_transfers = true;
+        caps.supports_metadata = true;
+        caps.supports_proxy = true;
+#endif
+        return caps;
+    }
+    return caps;
+}
 
 struct FileInfo {
     std::string name; // base name
@@ -49,8 +300,10 @@ using KbdIntPromptsCB = std::function<KbdIntPromptResult(
     std::vector<std::string> &responses)>;
 
 struct SessionOptions {
+    Protocol protocol = Protocol::Sftp;
+    ScpTransferMode scp_transfer_mode = ScpTransferMode::Auto;
     std::string host;
-    std::uint16_t port = 22;
+    std::uint16_t port = defaultPortForProtocol(Protocol::Sftp);
     std::string username;
 
     std::optional<std::string> password;
@@ -68,6 +321,15 @@ struct SessionOptions {
     // Transfer integrity checks for resume and final content verification.
     TransferIntegrityPolicy transfer_integrity_policy =
         TransferIntegrityPolicy::Optional;
+
+    // FTPS security
+    bool ftps_verify_peer = true;
+    std::optional<std::string> ftps_ca_cert_path;
+
+    // WebDAV HTTP/TLS transport settings
+    WebDavScheme webdav_scheme = WebDavScheme::Https;
+    bool webdav_verify_peer = true;
+    std::optional<std::string> webdav_ca_cert_path;
 
     // Optional TCP proxy tunnel for SSH transport.
     ProxyType proxy_type = ProxyType::None;

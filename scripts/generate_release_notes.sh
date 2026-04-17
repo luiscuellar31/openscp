@@ -8,7 +8,7 @@ Usage:
   scripts/generate_release_notes.sh --tag <tag> [options]
 
 Options:
-  --tag <tag>          Tag to generate notes for (e.g. v0.8.1). Required.
+  --tag <tag>          Tag to generate notes for (e.g. v0.9.0). Required.
   --version <version>  Version label to show in notes (default: tag without leading v).
   --repo <owner/repo>  GitHub repository for compare links (optional).
   --range <A..B>       Explicit git range. If omitted, uses previous tag..tag.

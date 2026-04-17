@@ -1,24 +1,24 @@
 cmake_minimum_required(VERSION 3.22)
-project(OpenSCP_hello LANGUAGES CXX VERSION 0.8.1)
+project(OpenSCP_hello LANGUAGES CXX VERSION 0.9.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(OPEN_SCP_AUTHOR_NAME "luiscuellar31" CACHE STRING "Author display name")
-set(OPEN_SCP_AUTHOR_URL "https://github.com/luiscuellar31" CACHE STRING
+set(OPENSCP_AUTHOR_NAME "luiscuellar31" CACHE STRING "Author display name")
+set(OPENSCP_AUTHOR_URL "https://github.com/luiscuellar31" CACHE STRING
     "Author profile URL")
-set(OPEN_SCP_REPOSITORY_URL "https://github.com/luiscuellar31/openscp" CACHE STRING
+set(OPENSCP_REPOSITORY_URL "https://github.com/luiscuellar31/openscp" CACHE STRING
     "Project repository URL")
-set(OPEN_SCP_ISSUES_URL "${OPEN_SCP_REPOSITORY_URL}/issues" CACHE STRING
+set(OPENSCP_ISSUES_URL "${OPENSCP_REPOSITORY_URL}/issues" CACHE STRING
     "Project issues URL")
 
 if(CMAKE_BUILD_TYPE)
-    set(OPEN_SCP_BUILD_TYPE_STR "${CMAKE_BUILD_TYPE}")
+    set(OPENSCP_BUILD_TYPE_STR "${CMAKE_BUILD_TYPE}")
 else()
-    set(OPEN_SCP_BUILD_TYPE_STR "Multi-config")
+    set(OPENSCP_BUILD_TYPE_STR "Multi-config")
 endif()
 
-set(OPEN_SCP_GIT_COMMIT "unknown")
+set(OPENSCP_GIT_COMMIT "unknown")
 find_package(Git QUIET)
 if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
     execute_process(
@@ -28,7 +28,7 @@ if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
         ERROR_QUIET
     )
     if(_git_commit)
-        set(OPEN_SCP_GIT_COMMIT "${_git_commit}")
+        set(OPENSCP_GIT_COMMIT "${_git_commit}")
     endif()
 endif()
 
@@ -37,7 +37,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-option(OPEN_SCP_BUILD_TESTS "Build and run automated tests (CTest)" OFF)
+option(OPENSCP_BUILD_TESTS "Build and run automated tests (CTest)" OFF)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Svg LinguistTools)
 include(GNUInstallDirs)
@@ -60,11 +60,11 @@ if (APPLE AND TARGET WrapOpenGL::WrapOpenGL)
     endif()
 endif()
 
-option(OPEN_SCP_BUILD_SECURE_ONLY "Disable insecure fallback for secrets storage" ON)
+option(OPENSCP_BUILD_SECURE_ONLY "Disable insecure fallback for secrets storage" ON)
 
-if (OPEN_SCP_BUILD_TESTS)
+if (OPENSCP_BUILD_TESTS)
     # Tests exercise MockSftpClient and require mock sources in openscp_core.
-    set(OPEN_SCP_ENABLE_MOCK ON CACHE BOOL "Build mock SFTP client" FORCE)
+    set(OPENSCP_ENABLE_MOCK ON CACHE BOOL "Build mock SFTP client" FORCE)
 endif()
 
 add_subdirectory(core)
@@ -112,7 +112,7 @@ if (PkgConfig_FOUND)
     endif()
 endif()
 
-if (OPEN_SCP_BUILD_TESTS)
+if (OPENSCP_BUILD_TESTS)
     include(CTest)
     enable_testing()
     add_subdirectory(tests)
@@ -199,14 +199,15 @@ if(APPLE)
     # which runs scripts/package_mac.sh (macdeployqt + signing/notarization flow).
 endif()
 
-if (OPEN_SCP_BUILD_SECURE_ONLY)
-    target_compile_definitions(openscp_hello PRIVATE OPEN_SCP_BUILD_SECURE_ONLY=1)
+if (OPENSCP_BUILD_SECURE_ONLY)
+    target_compile_definitions(openscp_hello PRIVATE OPENSCP_BUILD_SECURE_ONLY=1)
 endif()
 
 # Translations: compile TS catalogs to QM and embed as resources.
 # .ts files live in the top-level 'translations/' folder.
 qt_add_translation(QM_FILES
     translations/openscp_es.ts
+    translations/openscp_fr.ts
     translations/openscp_pt.ts
 )
 # Set relative aliases for resources to avoid absolute paths in the qrc.
@@ -226,6 +227,7 @@ set(ICON_FILES
     assets/icons/action-delete.svg
     assets/icons/action-disconnect.svg
     assets/icons/action-download.svg
+    assets/icons/action-go-home.svg
     assets/icons/action-go-up.svg
     assets/icons/action-open-about-us.svg
     assets/icons/action-move-to-left.svg
@@ -234,7 +236,9 @@ set(ICON_FILES
     assets/icons/action-new-folder.svg
     assets/icons/action-open-folder.svg
     assets/icons/action-open-folder-remote.svg
+    assets/icons/action-open-history.svg
     assets/icons/action-open-saved-sites.svg
+    assets/icons/action-open-terminal.svg
     assets/icons/action-open-transfer-queue.svg
     assets/icons/action-open-settings.svg
     assets/icons/action-refresh.svg

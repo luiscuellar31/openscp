@@ -145,6 +145,29 @@ static QString joinRemotePath(const QString &base, const QString &name) {
     return base.endsWith('/') ? base + name : base + "/" + name;
 }
 
+static QString normalizeRemotePath(const QString &rawPath) {
+    QString normalized = rawPath.trimmed();
+    if (normalized.isEmpty())
+        normalized = QStringLiteral("/");
+    if (!normalized.startsWith('/'))
+        normalized.prepend('/');
+    while (normalized.contains(QStringLiteral("//")))
+        normalized.replace(QStringLiteral("//"), QStringLiteral("/"));
+    if (normalized.size() > 1 && normalized.endsWith('/'))
+        normalized.chop(1);
+    return normalized;
+}
+
+QString MainWindow::preferredLocalHomePath() const {
+    const QString home = QDir::homePath();
+    if (!home.isEmpty()) {
+        const QString absoluteHome = QDir(home).absolutePath();
+        if (QDir(absoluteHome).exists())
+            return absoluteHome;
+    }
+    return QDir::rootPath();
+}
+
 void MainWindow::chooseLeftDir() {
     const QString dir = QFileDialog::getExistingDirectory(
         this, tr("Select left folder"), leftPath_->text());
@@ -177,6 +200,7 @@ void MainWindow::setLeftRoot(const QString &path) {
         const QString normalized = QDir(path).absolutePath();
         leftPath_->setText(normalized);
         leftView_->setRootIndex(leftModel_->index(normalized));
+        addRecentLocalPath(normalized);
         refreshLeftBreadcrumbs();
         statusBar()->showMessage(tr("Left: ") + normalized, 3000);
         updateDeleteShortcutEnables();
@@ -193,6 +217,7 @@ void MainWindow::setRightRoot(const QString &path) {
         rightPath_->setText(normalized);
         rightView_->setRootIndex(
             rightLocalModel_->index(normalized)); // <-- here
+        addRecentLocalPath(normalized);
         refreshRightBreadcrumbs();
         statusBar()->showMessage(tr("Right: ") + normalized, 3000);
         updateDeleteShortcutEnables();
@@ -321,9 +346,15 @@ void MainWindow::copyLeftToRight() {
     if (rightIsRemote_) {
         // ---- REMOTE branch: upload files (PUT) to the current remote
         // directory ----
-        if (!sftp_ || !rightRemoteModel_) {
-            UiAlerts::warning(this, tr("SFTP"),
-                                 tr("No active SFTP session."));
+        if (!sftp_) {
+            UiAlerts::warning(this, tr("Remote"),
+                                 tr("No active remote session."));
+            return;
+        }
+        const bool scpMode = isScpTransferMode();
+        if (!scpMode && !rightRemoteModel_) {
+            UiAlerts::warning(this, tr("Remote"),
+                              tr("No active remote session."));
             return;
         }
 
@@ -342,11 +373,19 @@ void MainWindow::copyLeftToRight() {
         }
 
         // Always enqueue uploads
-        const QString remoteBase = rightRemoteModel_->rootPath();
+        const QString remoteBase =
+            scpMode ? normalizeRemotePath(
+                          rightPath_ ? rightPath_->text() : QString())
+                    : rightRemoteModel_->rootPath();
         int enq = 0;
+        int skippedDirs = 0;
         for (const QModelIndex &idx : rows) {
             const QFileInfo fi = leftModel_->fileInfo(idx);
             if (fi.isDir()) {
+                if (scpMode) {
+                    ++skippedDirs;
+                    continue;
+                }
                 const QString remoteDirBase =
                     joinRemotePath(remoteBase, fi.fileName());
                 QDirIterator it(fi.absoluteFilePath(),
@@ -373,9 +412,19 @@ void MainWindow::copyLeftToRight() {
             }
         }
         if (enq > 0) {
-            statusBar()->showMessage(QString(tr("Queued: %1 uploads")).arg(enq),
-                                     4000);
+            QString msg = QString(tr("Queued: %1 uploads")).arg(enq);
+            if (skippedDirs > 0) {
+                msg += QStringLiteral("  |  ") +
+                       tr("Skipped folders in transfer-only mode: %1")
+                           .arg(skippedDirs);
+            }
+            statusBar()->showMessage(msg, 4000);
             maybeShowTransferQueue();
+        } else if (skippedDirs > 0) {
+            UiAlerts::information(
+                this, tr("Upload"),
+                tr("Transfer-only mode currently supports uploading files "
+                   "only."));
         }
         return;
     }
@@ -445,8 +494,8 @@ void MainWindow::copyLeftToRight() {
 void MainWindow::moveLeftToRight() {
     if (rightIsRemote_) {
         if (!sftp_ || !rightRemoteModel_) {
-            UiAlerts::warning(this, tr("SFTP"),
-                                 tr("No active SFTP session."));
+            UiAlerts::warning(this, tr("Remote"),
+                                 tr("No active remote session."));
             return;
         }
         const auto rows = leftView_->selectionModel()->selectedRows(NAME_COL);
@@ -797,6 +846,11 @@ void MainWindow::goUpLeft() {
     if (!d.cdUp())
         return;
     setLeftRoot(d.absolutePath());
+    updateDeleteShortcutEnables();
+}
+
+void MainWindow::goHomeLeft() {
+    setLeftRoot(preferredLocalHomePath());
     updateDeleteShortcutEnables();
 }
 

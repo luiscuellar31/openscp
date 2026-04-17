@@ -146,10 +146,12 @@ Notes:
 Before opening a PR, run at least the same baseline checks executed in CI:
 
 ```bash
-cmake -S . -B build -DOPEN_SCP_BUILD_TESTS=ON
+cmake -S . -B build -DOPENSCP_BUILD_TESTS=ON
 cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
+
+Shortcut script available: `./scripts/check_ci_local.sh --clean` (script: [scripts/check_ci_local.sh](scripts/check_ci_local.sh), usage details: [README.md#testing-locally](README.md#testing-locally), script index: [scripts/README.md](scripts/README.md))
 
 If your change is platform-specific (e.g., macOS packaging), validate on that platform too.
 
@@ -157,16 +159,16 @@ If your change is platform-specific (e.g., macOS packaging), validate on that pl
 
 `openscp_sftp_integration_tests` runs against a real SFTP server and is enabled in Linux/macOS CI.
 Locally, it is skipped unless these variables are set.
-You can authenticate with password (`OPEN_SCP_IT_SFTP_PASS`) or private key (`OPEN_SCP_IT_SFTP_KEY`):
+You can authenticate with password (`OPENSCP_IT_SFTP_PASS`) or private key (`OPENSCP_IT_SFTP_KEY`):
 
 ```bash
-export OPEN_SCP_IT_SFTP_HOST=127.0.0.1
-export OPEN_SCP_IT_SFTP_PORT=2222
-export OPEN_SCP_IT_SFTP_USER=openscp_it
-export OPEN_SCP_IT_SFTP_PASS=<test-password>
-# or: export OPEN_SCP_IT_SFTP_KEY=/path/to/private_key
-# optional: export OPEN_SCP_IT_SFTP_KEY_PASSPHRASE=...
-export OPEN_SCP_IT_REMOTE_BASE=/home/openscp_it/upload
+export OPENSCP_IT_SFTP_HOST=127.0.0.1
+export OPENSCP_IT_SFTP_PORT=2222
+export OPENSCP_IT_SFTP_USER=openscp_it
+export OPENSCP_IT_SFTP_PASS=<test-password>
+# or: export OPENSCP_IT_SFTP_KEY=/path/to/private_key
+# optional: export OPENSCP_IT_SFTP_KEY_PASSPHRASE=...
+export OPENSCP_IT_REMOTE_BASE=/home/openscp_it/upload
 ctest --test-dir build --output-on-failure
 ```
 

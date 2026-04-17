@@ -12,6 +12,8 @@ set -euo pipefail
 #   - cmake, g++, make
 #   - Qt 6 dev libs/tools (Qt Widgets)
 #   - libssh2-dev, openssl (libssl) dev
+#   - libcurl dev (FTP/FTPS/WebDAV backends)
+#   - tinyxml2 dev (WebDAV backend)
 #   - linuxdeploy and linuxdeploy-plugin-qt available in PATH
 #   - appimagetool available in PATH
 #

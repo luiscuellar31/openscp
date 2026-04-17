@@ -14,7 +14,7 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setApplicationName("OpenSCP");
     QCoreApplication::setOrganizationName("OpenSCP");
     QCoreApplication::setApplicationVersion(
-        QStringLiteral(OPEN_SCP_APP_VERSION));
+        QStringLiteral(OPENSCP_APP_VERSION));
 
     // Theme: use system default (no overrides)
 

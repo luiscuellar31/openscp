@@ -60,7 +60,7 @@ enum class CoreLogLevel : int {
 
 static CoreLogLevel core_log_level() {
     static const CoreLogLevel level = []() {
-        const char *raw = std::getenv("OPEN_SCP_LOG_LEVEL");
+        const char *raw = std::getenv("OPENSCP_LOG_LEVEL");
         if (!raw || !*raw)
             return CoreLogLevel::Off;
         std::string v(raw);
@@ -249,7 +249,7 @@ using Sha256Digest = std::array<unsigned char, SHA256_DIGEST_LENGTH>;
 
 static TransferIntegrityPolicy
 integrity_policy_from_env(TransferIntegrityPolicy fallback) {
-    const char *raw = std::getenv("OPEN_SCP_TRANSFER_INTEGRITY");
+    const char *raw = std::getenv("OPENSCP_TRANSFER_INTEGRITY");
     if (!raw || !*raw)
         return fallback;
     std::string v(raw);
@@ -1095,7 +1095,7 @@ static bool line_matches_site_host(const std::string &line,
 // Preference: write hashed hostnames to known_hosts (OpenSSH style) unless
 // disabled via env
 static bool useHashedKnownHosts() {
-    const char *v = std::getenv("OPEN_SCP_KNOWNHOSTS_PLAIN");
+    const char *v = std::getenv("OPENSCP_KNOWNHOSTS_PLAIN");
     // If env var is set to '1', force PLAIN; otherwise prefer hashed
     return !(v && *v == '1');
 }
@@ -1927,7 +1927,8 @@ bool Libssh2SftpClient::tcpConnect(const SessionOptions &opt,
 }
 
 bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
-                                         std::string &err) {
+                                         std::string &err,
+                                         bool initializeSftpSubsystem) {
     session_ = libssh2_session_init();
     if (!session_) {
         err = "libssh2_session_init failed";
@@ -2158,8 +2159,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                 // Strip padding '=' to match OpenSSH presentation
                 while (!fpB64.empty() && fpB64.back() == '=')
                     fpB64.pop_back();
-                bool hexOnly = (std::getenv("OPEN_SCP_FP_HEX_ONLY") &&
-                                *std::getenv("OPEN_SCP_FP_HEX_ONLY") == '1');
+                bool hexOnly = (std::getenv("OPENSCP_FP_HEX_ONLY") &&
+                                *std::getenv("OPENSCP_FP_HEX_ONLY") == '1');
                 if (!hexOnly)
                     hexOnly = opt.show_fp_hex;
                 if (hexOnly) {
@@ -2257,7 +2258,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                 bool saved = false;
                 // Prepare add/typemask
                 bool preferHashed = opt.known_hosts_hash_names;
-                if (const char *ev = std::getenv("OPEN_SCP_KNOWNHOSTS_PLAIN")) {
+                if (const char *ev = std::getenv("OPENSCP_KNOWNHOSTS_PLAIN")) {
                     if (*ev == '1')
                         preferHashed = false;
                     else if (*ev == '0')
@@ -2312,8 +2313,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                         core_logf(CoreLogLevel::Debug,
                                   "Manual known_hosts write for ssh-ed25519 "
                                   "fallback; key material redacted (set "
-                                  "OPEN_SCP_ENV=dev and "
-                                  "OPEN_SCP_LOG_SENSITIVE=1 to include)");
+                                  "OPENSCP_ENV=dev and "
+                                  "OPENSCP_LOG_SENSITIVE=1 to include)");
                     }
                     // Fallback: write OpenSSH line atomically (hashed or plain)
 #ifndef _WIN32
@@ -2672,17 +2673,22 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
         }
     }
 
-    // Inicializar SFTP
-    sftp_ = libssh2_sftp_init(session_);
-    if (!sftp_) {
-        err = "Could not initialize SFTP";
-        return false;
+    if (initializeSftpSubsystem) {
+        // Initialize SFTP only for backends that require directory/metadata
+        // operations. SCP may reuse this transport without SFTP.
+        sftp_ = libssh2_sftp_init(session_);
+        if (!sftp_) {
+            err = "Could not initialize SFTP";
+            return false;
+        }
     }
 
     return true;
 }
 
-bool Libssh2SftpClient::connect(const SessionOptions &opt, std::string &err) {
+bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
+                                        std::string &err,
+                                        bool initializeSftpSubsystem) {
     if (connected_) {
         err = "Already connected";
         return false;
@@ -2696,13 +2702,22 @@ bool Libssh2SftpClient::connect(const SessionOptions &opt, std::string &err) {
 
     if (!tcpConnect(opt, err))
         return false;
-    if (!sshHandshakeAuth(opt, err)) {
+    if (!sshHandshakeAuth(opt, err, initializeSftpSubsystem)) {
         disconnect();
         return false;
     }
 
     connected_ = true;
     return true;
+}
+
+bool Libssh2SftpClient::connect(const SessionOptions &opt, std::string &err) {
+    return connectInternal(opt, err, true);
+}
+
+bool Libssh2SftpClient::connectTransportOnly(const SessionOptions &opt,
+                                             std::string &err) {
+    return connectInternal(opt, err, false);
 }
 
 void Libssh2SftpClient::disconnect() {

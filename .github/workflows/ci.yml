@@ -32,7 +32,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             cmake ninja-build pkg-config \
-            libssh2-1-dev libssl-dev \
+            libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev \
             qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools \
             libgl1-mesa-dev
 
@@ -40,7 +40,7 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DOPEN_SCP_BUILD_TESTS=ON
+            -DOPENSCP_BUILD_TESTS=ON
 
       - name: Build
         run: cmake --build build --parallel
@@ -67,7 +67,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             cmake ninja-build pkg-config \
-            libssh2-1-dev libssl-dev \
+            libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev \
             qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools \
             libgl1-mesa-dev
 
@@ -75,7 +75,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install qt libssh2 openssl@3 pkg-config
+          brew install qt libssh2 openssl@3 tinyxml2 pkg-config
           echo "$(brew --prefix qt)/bin" >> "$GITHUB_PATH"
           echo "CMAKE_PREFIX_PATH=$(brew --prefix qt)" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$(brew --prefix libssh2)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig:${PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
@@ -214,7 +214,7 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DOPEN_SCP_BUILD_TESTS=ON
+            -DOPENSCP_BUILD_TESTS=ON
 
       - name: Build
         run: cmake --build build --parallel
@@ -344,21 +344,21 @@ jobs:
       - name: Test (Linux, with SFTP integration)
         if: runner.os == 'Linux'
         env:
-          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
-          OPEN_SCP_IT_SFTP_PORT: "2222"
-          OPEN_SCP_IT_SFTP_USER: openscp_it
-          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
-          OPEN_SCP_IT_REMOTE_BASE: /home/openscp_it/upload
+          OPENSCP_IT_SFTP_HOST: 127.0.0.1
+          OPENSCP_IT_SFTP_PORT: "2222"
+          OPENSCP_IT_SFTP_USER: openscp_it
+          OPENSCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
+          OPENSCP_IT_REMOTE_BASE: /home/openscp_it/upload
         run: ctest --test-dir build --output-on-failure
 
       - name: Test (Linux, with SOCKS5 proxy integration)
         if: runner.os == 'Linux'
         env:
-          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
-          OPEN_SCP_IT_SFTP_PORT: "2222"
-          OPEN_SCP_IT_SFTP_USER: openscp_it
-          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
-          OPEN_SCP_IT_REMOTE_BASE: /home/openscp_it/upload
+          OPENSCP_IT_SFTP_HOST: 127.0.0.1
+          OPENSCP_IT_SFTP_PORT: "2222"
+          OPENSCP_IT_SFTP_USER: openscp_it
+          OPENSCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
+          OPENSCP_IT_REMOTE_BASE: /home/openscp_it/upload
         run: |
           set -euo pipefail
 
@@ -385,19 +385,19 @@ jobs:
             exit 1
           fi
 
-          OPEN_SCP_IT_PROXY_TYPE=socks5 \
-          OPEN_SCP_IT_PROXY_HOST=127.0.0.1 \
-          OPEN_SCP_IT_PROXY_PORT=1081 \
+          OPENSCP_IT_PROXY_TYPE=socks5 \
+          OPENSCP_IT_PROXY_HOST=127.0.0.1 \
+          OPENSCP_IT_PROXY_PORT=1081 \
           ./build/tests/openscp_sftp_integration_tests
 
       - name: Test (Linux, with HTTP CONNECT proxy integration)
         if: runner.os == 'Linux'
         env:
-          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
-          OPEN_SCP_IT_SFTP_PORT: "2222"
-          OPEN_SCP_IT_SFTP_USER: openscp_it
-          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
-          OPEN_SCP_IT_REMOTE_BASE: /home/openscp_it/upload
+          OPENSCP_IT_SFTP_HOST: 127.0.0.1
+          OPENSCP_IT_SFTP_PORT: "2222"
+          OPENSCP_IT_SFTP_USER: openscp_it
+          OPENSCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
+          OPENSCP_IT_REMOTE_BASE: /home/openscp_it/upload
         run: |
           set -euo pipefail
           PROXY_PORT=18081
@@ -422,21 +422,21 @@ jobs:
             exit 1
           fi
 
-          OPEN_SCP_IT_PROXY_TYPE=http \
-          OPEN_SCP_IT_PROXY_HOST=127.0.0.1 \
-          OPEN_SCP_IT_PROXY_PORT="${PROXY_PORT}" \
-          OPEN_SCP_IT_PROXY_USER="${PROXY_USER}" \
-          OPEN_SCP_IT_PROXY_PASS="${PROXY_PASS}" \
+          OPENSCP_IT_PROXY_TYPE=http \
+          OPENSCP_IT_PROXY_HOST=127.0.0.1 \
+          OPENSCP_IT_PROXY_PORT="${PROXY_PORT}" \
+          OPENSCP_IT_PROXY_USER="${PROXY_USER}" \
+          OPENSCP_IT_PROXY_PASS="${PROXY_PASS}" \
           ./build/tests/openscp_sftp_integration_tests
 
       - name: Test (Linux, with SSH jump integration)
         if: runner.os == 'Linux'
         env:
-          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
-          OPEN_SCP_IT_SFTP_PORT: "2222"
-          OPEN_SCP_IT_SFTP_USER: openscp_it
-          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
-          OPEN_SCP_IT_REMOTE_BASE: /home/openscp_it/upload
+          OPENSCP_IT_SFTP_HOST: 127.0.0.1
+          OPENSCP_IT_SFTP_PORT: "2222"
+          OPENSCP_IT_SFTP_USER: openscp_it
+          OPENSCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
+          OPENSCP_IT_REMOTE_BASE: /home/openscp_it/upload
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.ssh"
@@ -444,30 +444,30 @@ jobs:
           ssh-keyscan -p 2222 127.0.0.1 >> "$HOME/.ssh/known_hosts" 2>/dev/null
           chmod 600 "$HOME/.ssh/known_hosts"
 
-          OPEN_SCP_IT_JUMP_HOST=127.0.0.1 \
-          OPEN_SCP_IT_JUMP_PORT=2222 \
-          OPEN_SCP_IT_JUMP_USER=openscp_it \
-          OPEN_SCP_IT_JUMP_KEY=/tmp/openscp_it_linux_ed25519 \
+          OPENSCP_IT_JUMP_HOST=127.0.0.1 \
+          OPENSCP_IT_JUMP_PORT=2222 \
+          OPENSCP_IT_JUMP_USER=openscp_it \
+          OPENSCP_IT_JUMP_KEY=/tmp/openscp_it_linux_ed25519 \
           ./build/tests/openscp_sftp_integration_tests
 
       - name: Test (macOS, with SFTP integration)
         if: runner.os == 'macOS'
         env:
-          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
-          OPEN_SCP_IT_SFTP_PORT: "2222"
-          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_ed25519
-          OPEN_SCP_IT_REMOTE_BASE: /tmp/openscp-it-upload
+          OPENSCP_IT_SFTP_HOST: 127.0.0.1
+          OPENSCP_IT_SFTP_PORT: "2222"
+          OPENSCP_IT_SFTP_KEY: /tmp/openscp_it_ed25519
+          OPENSCP_IT_REMOTE_BASE: /tmp/openscp-it-upload
         run: |
-          OPEN_SCP_IT_SFTP_USER="$(whoami)" \
+          OPENSCP_IT_SFTP_USER="$(whoami)" \
           ctest --test-dir build --output-on-failure
 
       - name: Test (macOS, with SOCKS5 proxy integration)
         if: runner.os == 'macOS'
         env:
-          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
-          OPEN_SCP_IT_SFTP_PORT: "2222"
-          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_ed25519
-          OPEN_SCP_IT_REMOTE_BASE: /tmp/openscp-it-upload
+          OPENSCP_IT_SFTP_HOST: 127.0.0.1
+          OPENSCP_IT_SFTP_PORT: "2222"
+          OPENSCP_IT_SFTP_KEY: /tmp/openscp_it_ed25519
+          OPENSCP_IT_REMOTE_BASE: /tmp/openscp-it-upload
         run: |
           set -euo pipefail
           RUNNER_USER="$(whoami)"
@@ -495,19 +495,19 @@ jobs:
             exit 1
           fi
 
-          OPEN_SCP_IT_SFTP_USER="${RUNNER_USER}" \
-          OPEN_SCP_IT_PROXY_TYPE=socks5 \
-          OPEN_SCP_IT_PROXY_HOST=127.0.0.1 \
-          OPEN_SCP_IT_PROXY_PORT=1081 \
+          OPENSCP_IT_SFTP_USER="${RUNNER_USER}" \
+          OPENSCP_IT_PROXY_TYPE=socks5 \
+          OPENSCP_IT_PROXY_HOST=127.0.0.1 \
+          OPENSCP_IT_PROXY_PORT=1081 \
           ./build/tests/openscp_sftp_integration_tests
 
       - name: Test (macOS, with HTTP CONNECT proxy integration)
         if: runner.os == 'macOS'
         env:
-          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
-          OPEN_SCP_IT_SFTP_PORT: "2222"
-          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_ed25519
-          OPEN_SCP_IT_REMOTE_BASE: /tmp/openscp-it-upload
+          OPENSCP_IT_SFTP_HOST: 127.0.0.1
+          OPENSCP_IT_SFTP_PORT: "2222"
+          OPENSCP_IT_SFTP_KEY: /tmp/openscp_it_ed25519
+          OPENSCP_IT_REMOTE_BASE: /tmp/openscp-it-upload
         run: |
           set -euo pipefail
           RUNNER_USER="$(whoami)"
@@ -533,21 +533,21 @@ jobs:
             exit 1
           fi
 
-          OPEN_SCP_IT_SFTP_USER="${RUNNER_USER}" \
-          OPEN_SCP_IT_PROXY_TYPE=http \
-          OPEN_SCP_IT_PROXY_HOST=127.0.0.1 \
-          OPEN_SCP_IT_PROXY_PORT="${PROXY_PORT}" \
-          OPEN_SCP_IT_PROXY_USER="${PROXY_USER}" \
-          OPEN_SCP_IT_PROXY_PASS="${PROXY_PASS}" \
+          OPENSCP_IT_SFTP_USER="${RUNNER_USER}" \
+          OPENSCP_IT_PROXY_TYPE=http \
+          OPENSCP_IT_PROXY_HOST=127.0.0.1 \
+          OPENSCP_IT_PROXY_PORT="${PROXY_PORT}" \
+          OPENSCP_IT_PROXY_USER="${PROXY_USER}" \
+          OPENSCP_IT_PROXY_PASS="${PROXY_PASS}" \
           ./build/tests/openscp_sftp_integration_tests
 
       - name: Test (macOS, with SSH jump integration)
         if: runner.os == 'macOS'
         env:
-          OPEN_SCP_IT_SFTP_HOST: 127.0.0.1
-          OPEN_SCP_IT_SFTP_PORT: "2222"
-          OPEN_SCP_IT_SFTP_KEY: /tmp/openscp_it_ed25519
-          OPEN_SCP_IT_REMOTE_BASE: /tmp/openscp-it-upload
+          OPENSCP_IT_SFTP_HOST: 127.0.0.1
+          OPENSCP_IT_SFTP_PORT: "2222"
+          OPENSCP_IT_SFTP_KEY: /tmp/openscp_it_ed25519
+          OPENSCP_IT_REMOTE_BASE: /tmp/openscp-it-upload
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.ssh"
@@ -555,9 +555,9 @@ jobs:
           ssh-keyscan -p 2222 127.0.0.1 >> "$HOME/.ssh/known_hosts" 2>/dev/null
           chmod 600 "$HOME/.ssh/known_hosts"
 
-          OPEN_SCP_IT_SFTP_USER="$(whoami)" \
-          OPEN_SCP_IT_JUMP_HOST=127.0.0.1 \
-          OPEN_SCP_IT_JUMP_PORT=2222 \
-          OPEN_SCP_IT_JUMP_USER="$(whoami)" \
-          OPEN_SCP_IT_JUMP_KEY=/tmp/openscp_it_ed25519 \
+          OPENSCP_IT_SFTP_USER="$(whoami)" \
+          OPENSCP_IT_JUMP_HOST=127.0.0.1 \
+          OPENSCP_IT_JUMP_PORT=2222 \
+          OPENSCP_IT_JUMP_USER="$(whoami)" \
+          OPENSCP_IT_JUMP_KEY=/tmp/openscp_it_ed25519 \
           ./build/tests/openscp_sftp_integration_tests

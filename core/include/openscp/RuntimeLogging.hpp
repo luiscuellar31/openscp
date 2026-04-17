@@ -36,13 +36,13 @@ inline bool envFlagEnabled(const char *name) {
 }
 
 inline bool isDevEnvironment() {
-    const std::string env = normalizedEnv("OPEN_SCP_ENV");
+    const std::string env = normalizedEnv("OPENSCP_ENV");
     return env == "dev" || env == "development" || env == "local" ||
            env == "debug";
 }
 
 inline bool sensitiveLoggingEnabled() {
-    return isDevEnvironment() && envFlagEnabled("OPEN_SCP_LOG_SENSITIVE");
+    return isDevEnvironment() && envFlagEnabled("OPENSCP_LOG_SENSITIVE");
 }
 
 } // namespace openscp

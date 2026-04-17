@@ -18,7 +18,7 @@ This guide explains how to build the `.app` and create unsigned macOS artifacts 
     - `QT_PREFIX=/path/to/Qt/<version>/macos`
     - or `Qt6_DIR=/path/to/Qt/<version>/macos/lib/cmake/Qt6`
 - Homebrew libraries for build/runtime (copied into the bundle and rewritten):
-    - `brew install libssh2 openssl@3`
+    - `brew install libssh2 openssl@3 tinyxml2`
 - CMake 3.22+, a C++20 compiler.
 
 Tip: The script clears env vars like `QT_PLUGIN_PATH` and `DYLD_*` to avoid pulling plugins from Conda/Homebrew.
@@ -53,7 +53,7 @@ Use `scripts/macos.sh` for a consistent local loop:
 What it does:
 - Builds Release with CMake and produces `build/OpenSCP.app`.
 - Runs `macdeployqt` to bundle Qt frameworks/plugins.
-- Bundles non‑Qt deps (`libssh2`, `libcrypto`) into `Contents/Frameworks` and fixes `install_name_tool` + `@rpath`.
+- Bundles non‑Qt deps (`libssh2`, `libcrypto`, `tinyxml2`) into `Contents/Frameworks` and fixes `install_name_tool` + `@rpath`.
 - Creates the selected artifact(s) under `dist/` plus `*.sha256`.
 - Prints release notes snippet when DMG is generated.
 
@@ -100,7 +100,7 @@ The script also validates and corrects linkage, but you can check manually:
 
 ```bash
 otool -L build/OpenSCP.app/Contents/MacOS/OpenSCP | \
-    grep -E 'libssh2|libcrypto|libssl|@executable_path'
+    grep -E 'libssh2|libcrypto|libssl|tinyxml2|@executable_path'
 ```
 
 Expect library references to be `@executable_path/../Frameworks/...`.
@@ -109,8 +109,8 @@ Expect library references to be `@executable_path/../Frameworks/...`.
 
 - Script refuses `macdeployqt` from Conda:
     - Set `Qt6_DIR=$HOME/Qt/<version>/macos/lib/cmake/Qt6` or set `QT_PREFIX=$HOME/Qt/<version>/macos`.
-- Missing `libssh2`/`openssl@3`:
-    - `brew install libssh2 openssl@3`
+- Missing `libssh2`/`openssl@3`/`tinyxml2`:
+    - `brew install libssh2 openssl@3 tinyxml2`
 - Still seeing Homebrew/Conda absolute paths in the binary:
     - Re‑run the script; it rewrites to `@executable_path/../Frameworks` where possible.
 
