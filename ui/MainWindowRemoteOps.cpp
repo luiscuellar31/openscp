@@ -1958,6 +1958,10 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
     }
 
     if (rightIsRemote_) {
+        const bool supportsRemotePermissions =
+            m_activeSessionOptions_.has_value() &&
+            openscp::capabilitiesForProtocol(m_activeSessionOptions_->protocol)
+                .supports_permissions;
         // Up option (if applicable)
         if (canGoUp && actUpRight_)
             rightContextMenu_->addAction(actUpRight_);
@@ -1992,10 +1996,12 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
                     rightContextMenu_->addAction(actDeleteRight_);
                 if (actMoveRight_)
                     rightContextMenu_->addAction(actMoveRight_);
-                rightContextMenu_->addSeparator();
-                rightContextMenu_->addAction(
-                    tr("Change permissions…"), this,
-                    &MainWindow::changeRemotePermissions);
+                if (supportsRemotePermissions) {
+                    rightContextMenu_->addSeparator();
+                    rightContextMenu_->addAction(
+                        tr("Change permissions…"), this,
+                        &MainWindow::changeRemotePermissions);
+                }
             }
         }
     } else {
@@ -2032,6 +2038,14 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
 void MainWindow::changeRemotePermissions() {
     if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_)
         return;
+    if (!m_activeSessionOptions_.has_value() ||
+        !openscp::capabilitiesForProtocol(m_activeSessionOptions_->protocol)
+             .supports_permissions) {
+        UiAlerts::information(
+            this, tr("Permissions"),
+            tr("Permissions are not supported for the active protocol."));
+        return;
+    }
     auto sel = rightView_->selectionModel();
     if (!sel)
         return;
