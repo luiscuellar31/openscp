@@ -711,6 +711,50 @@ Coincidencias: %2</translation>
         <translation>Transferencias</translation>
     </message>
     <message>
+        <source>History</source>
+        <translation>Historial</translation>
+    </message>
+    <message>
+        <source>Open selected</source>
+        <translation>Abrir seleccionado</translation>
+    </message>
+    <message>
+        <source>Recent local paths</source>
+        <translation>Rutas locales recientes</translation>
+    </message>
+    <message>
+        <source>Recent remote paths</source>
+        <translation>Rutas remotas recientes</translation>
+    </message>
+    <message>
+        <source>Recent servers</source>
+        <translation>Servidores recientes</translation>
+    </message>
+    <message>
+        <source>Connect to a remote server to open remote path history.</source>
+        <translation>Conéctate a un servidor remoto para abrir el historial de rutas remotas.</translation>
+    </message>
+    <message>
+        <source>Disconnect the current remote session before opening another server.</source>
+        <translation>Desconecta la sesión remota actual antes de abrir otro servidor.</translation>
+    </message>
+    <message>
+        <source>No recent history</source>
+        <translation>No hay historial reciente</translation>
+    </message>
+    <message>
+        <source>Clear history</source>
+        <translation>Borrar historial</translation>
+    </message>
+    <message>
+        <source>Remove all recent paths and servers from history?</source>
+        <translation>¿Eliminar del historial todas las rutas y servidores recientes?</translation>
+    </message>
+    <message>
+        <source>History cleared</source>
+        <translation>Historial borrado</translation>
+    </message>
+    <message>
         <source>Full screen</source>
         <translation>Pantalla completa</translation>
     </message>
@@ -1951,6 +1995,14 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
         <translation>General</translation>
     </message>
     <message>
+        <source>Shortcuts</source>
+        <translation>Atajos</translation>
+    </message>
+    <message>
+        <source>Select an action and press the new key combination directly in the field.</source>
+        <translation>Selecciona una acción y presiona la nueva combinación de teclas directamente en el campo.</translation>
+    </message>
+    <message>
         <source>Language:</source>
         <translation>Idioma:</translation>
     </message>
@@ -2005,6 +2057,14 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
     <message>
         <source>Open queue when enqueuing transfers</source>
         <translation>Abrir cola al encolar transferencias</translation>
+    </message>
+    <message>
+        <source>Transfers shortcut:</source>
+        <translation>Atajo de Transferencias:</translation>
+    </message>
+    <message>
+        <source>History shortcut:</source>
+        <translation>Atajo de Historial:</translation>
     </message>
     <message>
         <source>Choose…</source>
