@@ -82,6 +82,10 @@ void test_session_defaults(TestContext &t) {
     t.check(!o.password.has_value(), "password should be empty by default");
     t.check(!o.private_key_path.has_value(),
             "private_key_path should be empty by default");
+    t.check(o.webdav_scheme == openscp::WebDavScheme::Https,
+            "default WebDAV scheme should be HTTPS");
+    t.check(o.webdav_verify_peer,
+            "WebDAV TLS verification should default to enabled");
 }
 
 void test_protocol_helpers(TestContext &t) {
@@ -129,6 +133,22 @@ void test_protocol_helpers(TestContext &t) {
     t.check(openscp::defaultPortForProxyType(openscp::ProxyType::HttpConnect) ==
                 8080,
             "default HTTP CONNECT proxy port should be 8080");
+    t.check(openscp::webDavSchemeFromStorageName("http") ==
+                openscp::WebDavScheme::Http,
+            "webDavSchemeFromStorageName should parse http");
+    t.check(openscp::webDavSchemeFromStorageName("HTTPS") ==
+                openscp::WebDavScheme::Https,
+            "webDavSchemeFromStorageName should parse https case-insensitively");
+    t.check(std::string(
+                openscp::webDavSchemeStorageName(openscp::WebDavScheme::Http)) ==
+                "http",
+            "webDavSchemeStorageName should serialize http");
+    t.check(openscp::defaultPortForWebDavScheme(openscp::WebDavScheme::Http) ==
+                80,
+            "default HTTP WebDAV port should be 80");
+    t.check(openscp::defaultPortForWebDavScheme(openscp::WebDavScheme::Https) ==
+                443,
+            "default HTTPS WebDAV port should be 443");
 
     const auto sftpCaps =
         openscp::capabilitiesForProtocol(openscp::Protocol::Sftp);

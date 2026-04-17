@@ -91,3 +91,28 @@ if (_OPENSCP_CORE_HAS_CURL_FTP)
 else()
     message(STATUS "OpenSCP tests: skipping FTP/FTPS integration tests (FTP/FTPS backend disabled)")
 endif()
+
+get_target_property(_OPENSCP_CORE_HAS_CURL_WEBDAV
+                    openscp_core OPENSCP_HAS_CURL_WEBDAV)
+if (_OPENSCP_CORE_HAS_CURL_WEBDAV)
+    add_executable(openscp_webdav_integration_tests
+        curl_webdav_integration_tests.cpp
+    )
+
+    target_include_directories(openscp_webdav_integration_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/include
+    )
+
+    target_link_libraries(openscp_webdav_integration_tests PRIVATE
+        openscp_core
+    )
+
+    add_test(NAME openscp_webdav_integration_tests
+             COMMAND openscp_webdav_integration_tests)
+    set_tests_properties(openscp_webdav_integration_tests PROPERTIES
+        LABELS "integration;webdav"
+        SKIP_RETURN_CODE 77
+    )
+else()
+    message(STATUS "OpenSCP tests: skipping WebDAV integration tests (WebDAV backend disabled)")
+endif()
