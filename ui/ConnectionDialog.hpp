@@ -26,7 +26,7 @@ class ConnectionDialog : public QDialog {
     bool saveCredentialsRequested() const;
 
     private:
-    void updateProtocolUi(openscp::Protocol protocol);
+    void updateProtocolUi(openscp::Protocol protocol, bool resetPort = true);
 
     bool quickConnectSaveOptionsVisible_ = false;
     QFormLayout *formLayout_ = nullptr;
@@ -55,6 +55,11 @@ class ConnectionDialog : public QDialog {
     QLineEdit *ftpsCaPath_ = nullptr;
     QToolButton *ftpsCaBrowse_ = nullptr;
     QWidget *ftpsCaPathRow_ = nullptr;
+    QComboBox *webDavScheme_ = nullptr;
+    QCheckBox *webDavVerifyPeer_ = nullptr;
+    QLineEdit *webDavCaPath_ = nullptr;
+    QToolButton *webDavCaBrowse_ = nullptr;
+    QWidget *webDavCaPathRow_ = nullptr;
 
     // proxy
     QComboBox *proxyType_ = nullptr;
@@ -78,5 +83,6 @@ class ConnectionDialog : public QDialog {
     bool hasDirectModeSize_ = false;
     bool proxyRowsVisible_ = false;
     openscp::ProxyType lastProxyType_ = openscp::ProxyType::None;
+    openscp::WebDavScheme lastWebDavScheme_ = openscp::WebDavScheme::Https;
     bool jumpRowsVisible_ = false;
 };

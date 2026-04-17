@@ -171,6 +171,12 @@ static QString encodeRecentServerEntry(const openscp::SessionOptions &opt) {
     query.addQueryItem(QStringLiteral("port"), QString::number(opt.port));
     query.addQueryItem(QStringLiteral("user"),
                        QString::fromStdString(opt.username).trimmed());
+    if (opt.protocol == openscp::Protocol::WebDav) {
+        query.addQueryItem(
+            QStringLiteral("webdavScheme"),
+            QString::fromLatin1(openscp::webDavSchemeStorageName(
+                openscp::normalizeWebDavScheme(opt.webdav_scheme))));
+    }
     return query.toString(QUrl::FullyEncoded);
 }
 
@@ -204,6 +210,24 @@ static bool decodeRecentServerEntry(const QString &encoded,
         opt.host = host.toStdString();
         opt.port = static_cast<std::uint16_t>(portRaw);
         opt.username = user.toStdString();
+        if (protocol == openscp::Protocol::WebDav) {
+            const QString rawScheme =
+                query.queryItemValue(QStringLiteral("webdavScheme"))
+                    .trimmed()
+                    .toLower();
+            if (!rawScheme.isEmpty()) {
+                opt.webdav_scheme = openscp::webDavSchemeFromStorageName(
+                    rawScheme.toStdString());
+            } else if (opt.port ==
+                       openscp::defaultPortForWebDavScheme(
+                           openscp::WebDavScheme::Http)) {
+                opt.webdav_scheme = openscp::WebDavScheme::Http;
+            }
+            if (opt.webdav_scheme == openscp::WebDavScheme::Http) {
+                opt.webdav_verify_peer = false;
+                opt.webdav_ca_cert_path.reset();
+            }
+        }
         *optOut = opt;
     }
     if (labelOut) {

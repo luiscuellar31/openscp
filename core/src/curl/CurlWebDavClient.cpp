@@ -119,10 +119,6 @@ std::string normalizeHostAuthority(const std::string &host) {
     return host;
 }
 
-const char *webDavScheme(std::uint16_t port) {
-    return (port == 80) ? "http" : "https";
-}
-
 bool isUnreservedUriChar(unsigned char c) {
     return std::isalnum(c) != 0 || c == '-' || c == '.' || c == '_' ||
            c == '~' || c == '/';
@@ -146,8 +142,9 @@ std::string buildWebDavUrl(const SessionOptions &opt,
                            const std::string &remotePath) {
     const std::string host = normalizeHostAuthority(opt.host);
     const std::string path = encodePathForUrl(normalizeRemotePath(remotePath));
-    return std::string(webDavScheme(opt.port)) + "://" + host + ":" +
-           std::to_string(opt.port) + path;
+    return std::string(webDavSchemeStorageName(
+               normalizeWebDavScheme(opt.webdav_scheme))) +
+           "://" + host + ":" + std::to_string(opt.port) + path;
 }
 
 std::string formatHttpFailure(const char *what, long statusCode) {
@@ -184,6 +181,25 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
             CURLE_OK) {
             err = "Could not configure WebDAV authentication password.";
             return false;
+        }
+    }
+
+    if (normalizeWebDavScheme(opt.webdav_scheme) == WebDavScheme::Https) {
+        const long verifyPeer = opt.webdav_verify_peer ? 1L : 0L;
+        const long verifyHost = opt.webdav_verify_peer ? 2L : 0L;
+        if (curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, verifyPeer) !=
+                CURLE_OK ||
+            curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, verifyHost) !=
+                CURLE_OK) {
+            err = "Could not configure WebDAV TLS verification policy.";
+            return false;
+        }
+        if (opt.webdav_ca_cert_path && !opt.webdav_ca_cert_path->empty()) {
+            if (curl_easy_setopt(curl, CURLOPT_CAINFO,
+                                 opt.webdav_ca_cert_path->c_str()) != CURLE_OK) {
+                err = "Could not configure WebDAV TLS CA bundle.";
+                return false;
+            }
         }
     }
 
@@ -702,8 +718,9 @@ bool CurlWebDavClient::connect(const SessionOptions &opt, std::string &err) {
         return false;
 
     SessionOptions normalized = opt;
+    normalized.webdav_scheme = normalizeWebDavScheme(normalized.webdav_scheme);
     if (normalized.port == 0)
-        normalized.port = defaultPortForProtocol(Protocol::WebDav);
+        normalized.port = defaultPortForWebDavScheme(normalized.webdav_scheme);
     normalized.protocol = Protocol::WebDav;
 
     WebDavResponse probe;
@@ -728,7 +745,8 @@ void CurlWebDavClient::disconnect() {
     connected_ = false;
     options_ = SessionOptions{};
     options_.protocol = Protocol::WebDav;
-    options_.port = defaultPortForProtocol(Protocol::WebDav);
+    options_.webdav_scheme = WebDavScheme::Https;
+    options_.port = defaultPortForWebDavScheme(options_.webdav_scheme);
 }
 
 void CurlWebDavClient::interrupt() { interrupted_.store(true); }

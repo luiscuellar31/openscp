@@ -209,6 +209,12 @@ static bool hasTransportSelectionConflict(const openscp::SessionOptions &opt) {
 
 static bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
                                   const openscp::SessionOptions &b) {
+    const bool compareWebDavTls =
+        (a.protocol != openscp::Protocol::WebDav) ||
+        (a.webdav_scheme == b.webdav_scheme &&
+         a.webdav_verify_peer == b.webdav_verify_peer &&
+         normalizedIdentityKeyPath(a.webdav_ca_cert_path) ==
+             normalizedIdentityKeyPath(b.webdav_ca_cert_path));
     return normalizedIdentityProtocol(a.protocol) ==
                normalizedIdentityProtocol(b.protocol) &&
            normalizedIdentityScpMode(a) == normalizedIdentityScpMode(b) &&
@@ -233,7 +239,8 @@ static bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
                normalizedIdentityKeyPath(b.private_key_path) &&
            a.ftps_verify_peer == b.ftps_verify_peer &&
            normalizedIdentityKeyPath(a.ftps_ca_cert_path) ==
-               normalizedIdentityKeyPath(b.ftps_ca_cert_path);
+               normalizedIdentityKeyPath(b.ftps_ca_cert_path) &&
+           compareWebDavTls;
 }
 
 static QString quickSiteSecretKey(const SiteEntry &e, const QString &item) {
@@ -290,6 +297,23 @@ static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool *needsSave) {
                     static_cast<int>(
                         openscp::defaultPortForProtocol(e.opt.protocol)))
                 .toUInt());
+        const bool hasWebDavSchemeKey = s.contains("webdavScheme");
+        if (hasWebDavSchemeKey) {
+            e.opt.webdav_scheme = openscp::webDavSchemeFromStorageName(
+                s.value("webdavScheme",
+                        QString::fromLatin1(openscp::webDavSchemeStorageName(
+                            openscp::WebDavScheme::Https)))
+                    .toString()
+                    .trimmed()
+                    .toLower()
+                    .toStdString());
+        } else if (e.opt.protocol == openscp::Protocol::WebDav &&
+                   e.opt.port ==
+                       openscp::defaultPortForWebDavScheme(
+                           openscp::WebDavScheme::Http)) {
+            e.opt.webdav_scheme = openscp::WebDavScheme::Http;
+            shouldSave = true;
+        }
         e.opt.username = s.value("user").toString().toStdString();
         const QString kp = s.value("keyPath").toString();
         if (!kp.isEmpty())
@@ -334,6 +358,17 @@ static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool *needsSave) {
             s.value("ftpsCaCertPath", defaultFtpsCaPath).toString().trimmed();
         if (!ftpsCaPath.isEmpty())
             e.opt.ftps_ca_cert_path = ftpsCaPath.toStdString();
+        e.opt.webdav_verify_peer =
+            s.value("webdavVerifyPeer", true).toBool();
+        const QString webDavCaPath =
+            s.value("webdavCaCertPath", QString()).toString().trimmed();
+        if (!webDavCaPath.isEmpty())
+            e.opt.webdav_ca_cert_path = webDavCaPath.toStdString();
+        if (e.opt.protocol == openscp::Protocol::WebDav &&
+            e.opt.webdav_scheme == openscp::WebDavScheme::Http) {
+            e.opt.webdav_verify_peer = false;
+            e.opt.webdav_ca_cert_path.reset();
+        }
         sites.push_back(e);
     }
     s.endArray();
@@ -359,6 +394,9 @@ static void saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
                        e.opt.scp_transfer_mode)));
         s.setValue("host", QString::fromStdString(e.opt.host));
         s.setValue("port", static_cast<int>(e.opt.port));
+        s.setValue("webdavScheme",
+                   QString::fromLatin1(openscp::webDavSchemeStorageName(
+                       e.opt.webdav_scheme)));
         s.setValue("user", QString::fromStdString(e.opt.username));
         s.setValue("keyPath",
                    e.opt.private_key_path
@@ -394,6 +432,11 @@ static void saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
         s.setValue("ftpsCaCertPath",
                    e.opt.ftps_ca_cert_path
                        ? QString::fromStdString(*e.opt.ftps_ca_cert_path)
+                       : QString());
+        s.setValue("webdavVerifyPeer", e.opt.webdav_verify_peer);
+        s.setValue("webdavCaCertPath",
+                   e.opt.webdav_ca_cert_path
+                       ? QString::fromStdString(*e.opt.webdav_ca_cert_path)
                        : QString());
     }
     s.endArray();

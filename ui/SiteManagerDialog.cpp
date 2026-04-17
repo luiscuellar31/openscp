@@ -242,6 +242,23 @@ void SiteManagerDialog::loadSites() {
                     static_cast<int>(
                         openscp::defaultPortForProtocol(e.opt.protocol)))
                 .toUInt());
+        const bool hasWebDavSchemeKey = s.contains("webdavScheme");
+        if (hasWebDavSchemeKey) {
+            e.opt.webdav_scheme = openscp::webDavSchemeFromStorageName(
+                s.value("webdavScheme",
+                        QString::fromLatin1(openscp::webDavSchemeStorageName(
+                            openscp::WebDavScheme::Https)))
+                    .toString()
+                    .trimmed()
+                    .toLower()
+                    .toStdString());
+        } else if (e.opt.protocol == openscp::Protocol::WebDav &&
+                   e.opt.port ==
+                       openscp::defaultPortForWebDavScheme(
+                           openscp::WebDavScheme::Http)) {
+            e.opt.webdav_scheme = openscp::WebDavScheme::Http;
+            needsSave = true;
+        }
         e.opt.username = s.value("user").toString().toStdString();
         // Password and passphrase are no longer read from QSettings; they will
         // be fetched from SecretStore when connecting
@@ -288,6 +305,17 @@ void SiteManagerDialog::loadSites() {
             s.value("ftpsCaCertPath", defaultFtpsCaPath).toString().trimmed();
         if (!ftpsCaPath.isEmpty())
             e.opt.ftps_ca_cert_path = ftpsCaPath.toStdString();
+        e.opt.webdav_verify_peer =
+            s.value("webdavVerifyPeer", true).toBool();
+        const QString webDavCaPath =
+            s.value("webdavCaCertPath", QString()).toString().trimmed();
+        if (!webDavCaPath.isEmpty())
+            e.opt.webdav_ca_cert_path = webDavCaPath.toStdString();
+        if (e.opt.protocol == openscp::Protocol::WebDav &&
+            e.opt.webdav_scheme == openscp::WebDavScheme::Http) {
+            e.opt.webdav_verify_peer = false;
+            e.opt.webdav_ca_cert_path.reset();
+        }
         sites_.push_back(e);
     }
     s.endArray();
@@ -314,6 +342,9 @@ void SiteManagerDialog::saveSites() {
                        e.opt.scp_transfer_mode)));
         s.setValue("host", QString::fromStdString(e.opt.host));
         s.setValue("port", (int)e.opt.port);
+        s.setValue("webdavScheme",
+                   QString::fromLatin1(openscp::webDavSchemeStorageName(
+                       e.opt.webdav_scheme)));
         s.setValue("user", QString::fromStdString(e.opt.username));
         // Password and passphrase are stored in SecretStore under keys derived
         // from stable site UUID.
@@ -350,6 +381,11 @@ void SiteManagerDialog::saveSites() {
         s.setValue("ftpsCaCertPath",
                    e.opt.ftps_ca_cert_path
                        ? QString::fromStdString(*e.opt.ftps_ca_cert_path)
+                       : QString());
+        s.setValue("webdavVerifyPeer", e.opt.webdav_verify_peer);
+        s.setValue("webdavCaCertPath",
+                   e.opt.webdav_ca_cert_path
+                       ? QString::fromStdString(*e.opt.webdav_ca_cert_path)
                        : QString());
     }
     s.endArray();

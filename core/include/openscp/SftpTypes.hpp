@@ -35,6 +35,7 @@ enum class KnownHostsPolicy {
 enum class TransferIntegrityPolicy { Off, Optional, Required };
 enum class ProxyType { None, Socks5, HttpConnect };
 enum class Protocol { Sftp, Scp, Ftp, Ftps, WebDav };
+enum class WebDavScheme { Https, Http };
 enum class ScpTransferMode {
     Auto,    // Try native SCP first and fallback to SFTP transfers if needed.
     ScpOnly, // Enforce classic SCP transfers only (no SFTP fallback).
@@ -54,6 +55,19 @@ inline constexpr ProxyType normalizeProxyType(ProxyType type) {
     return isValidProxyType(type) ? type : ProxyType::None;
 }
 
+inline constexpr bool isValidWebDavScheme(WebDavScheme scheme) {
+    switch (scheme) {
+    case WebDavScheme::Https:
+    case WebDavScheme::Http:
+        return true;
+    }
+    return false;
+}
+
+inline constexpr WebDavScheme normalizeWebDavScheme(WebDavScheme scheme) {
+    return isValidWebDavScheme(scheme) ? scheme : WebDavScheme::Https;
+}
+
 inline ProxyType proxyTypeFromStorageValue(int raw) {
     const auto candidate = static_cast<ProxyType>(raw);
     return normalizeProxyType(candidate);
@@ -69,6 +83,40 @@ inline constexpr std::uint16_t defaultPortForProxyType(ProxyType type) {
         break;
     }
     return 0;
+}
+
+inline constexpr std::uint16_t
+defaultPortForWebDavScheme(WebDavScheme scheme) {
+    switch (normalizeWebDavScheme(scheme)) {
+    case WebDavScheme::Http:
+        return 80;
+    case WebDavScheme::Https:
+        return 443;
+    }
+    return 443;
+}
+
+inline constexpr const char *webDavSchemeStorageName(WebDavScheme scheme) {
+    switch (normalizeWebDavScheme(scheme)) {
+    case WebDavScheme::Http:
+        return "http";
+    case WebDavScheme::Https:
+        return "https";
+    }
+    return "https";
+}
+
+inline WebDavScheme webDavSchemeFromStorageName(const std::string &raw) {
+    if (raw.empty())
+        return WebDavScheme::Https;
+    std::string normalized = raw;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char c) -> char {
+                       return static_cast<char>(std::tolower(c));
+                   });
+    if (normalized == "http")
+        return WebDavScheme::Http;
+    return WebDavScheme::Https;
 }
 
 struct ProtocolCapabilities {
@@ -277,6 +325,11 @@ struct SessionOptions {
     // FTPS security
     bool ftps_verify_peer = true;
     std::optional<std::string> ftps_ca_cert_path;
+
+    // WebDAV HTTP/TLS transport settings
+    WebDavScheme webdav_scheme = WebDavScheme::Https;
+    bool webdav_verify_peer = true;
+    std::optional<std::string> webdav_ca_cert_path;
 
     // Optional TCP proxy tunnel for SSH transport.
     ProxyType proxy_type = ProxyType::None;

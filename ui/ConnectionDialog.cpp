@@ -330,6 +330,25 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     ftpsCaRowLayout->setSpacing(6);
     ftpsCaRowLayout->addWidget(ftpsCaPath_);
     ftpsCaRowLayout->addWidget(ftpsCaBrowse_);
+
+    webDavScheme_ = new QComboBox(this);
+    webDavScheme_->addItem(tr("HTTPS (recommended)"),
+                           static_cast<int>(openscp::WebDavScheme::Https));
+    webDavScheme_->addItem(tr("HTTP (insecure)"),
+                           static_cast<int>(openscp::WebDavScheme::Http));
+    webDavVerifyPeer_ =
+        new QCheckBox(tr("Verify WebDAV server certificate (recommended)"), this);
+    webDavCaPath_ = new QLineEdit(this);
+    webDavCaPath_->setPlaceholderText(tr("System CA bundle"));
+    webDavCaPath_->setMinimumWidth(kInputMinWidth);
+    webDavCaBrowse_ = new QToolButton(this);
+    webDavCaBrowse_->setText(tr("Choose…"));
+    webDavCaPathRow_ = new QWidget(this);
+    auto *webDavCaRowLayout = new QHBoxLayout(webDavCaPathRow_);
+    webDavCaRowLayout->setContentsMargins(0, 0, 0, 0);
+    webDavCaRowLayout->setSpacing(6);
+    webDavCaRowLayout->addWidget(webDavCaPath_);
+    webDavCaRowLayout->addWidget(webDavCaBrowse_);
     {
         QSettings s("OpenSCP", "OpenSCP");
         int khPolicyIdx = khPolicy_->findData(
@@ -365,6 +384,16 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
                     .toString()
                     .trimmed());
         }
+        if (webDavVerifyPeer_) {
+            webDavVerifyPeer_->setChecked(
+                s.value("Security/webdavVerifyPeerDefault", true).toBool());
+        }
+        if (webDavCaPath_) {
+            webDavCaPath_->setText(
+                s.value("Security/webdavCaCertPathDefault", QString())
+                    .toString()
+                    .trimmed());
+        }
     }
 
     lay->addRow(tr("known_hosts:"), khPathRow_);
@@ -372,6 +401,9 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     lay->addRow(tr("Integrity:"), integrityPolicy_);
     lay->addRow(QString(), ftpsVerifyPeer_);
     lay->addRow(tr("FTPS CA bundle:"), ftpsCaPathRow_);
+    lay->addRow(tr("WebDAV scheme:"), webDavScheme_);
+    lay->addRow(QString(), webDavVerifyPeer_);
+    lay->addRow(tr("WebDAV CA bundle:"), webDavCaPathRow_);
 
     auto updateProxyFields = [this, lay]() {
         const auto type = openscp::normalizeProxyType(
@@ -474,6 +506,27 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
                 }
                 updateJumpFields();
             });
+    connect(webDavScheme_, &QComboBox::currentIndexChanged, this,
+            [this](int) {
+                if (!protocol_ || !port_ || !webDavScheme_)
+                    return;
+                const auto protocol = static_cast<openscp::Protocol>(
+                    protocol_->currentData().toInt());
+                const auto selectedScheme = openscp::normalizeWebDavScheme(
+                    static_cast<openscp::WebDavScheme>(
+                        webDavScheme_->currentData().toInt()));
+                const int previousDefaultPort = static_cast<int>(
+                    openscp::defaultPortForWebDavScheme(lastWebDavScheme_));
+                const int selectedDefaultPort = static_cast<int>(
+                    openscp::defaultPortForWebDavScheme(selectedScheme));
+                if (protocol == openscp::Protocol::WebDav &&
+                    port_->value() == previousDefaultPort &&
+                    previousDefaultPort != selectedDefaultPort) {
+                    port_->setValue(selectedDefaultPort);
+                }
+                lastWebDavScheme_ = selectedScheme;
+                updateProtocolUi(protocol, false);
+            });
 
     connect(protocol_, &QComboBox::currentIndexChanged, this,
             [this, updateProxyFields, updateJumpFields](int) {
@@ -511,6 +564,12 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
             this, tr("Select FTPS CA bundle"), QDir::homePath());
         if (!f.isEmpty())
             ftpsCaPath_->setText(f);
+    });
+    connect(webDavCaBrowse_, &QToolButton::clicked, this, [this] {
+        const QString f = QFileDialog::getOpenFileName(
+            this, tr("Select WebDAV CA bundle"), QDir::homePath());
+        if (!f.isEmpty())
+            webDavCaPath_->setText(f);
     });
 
     connect(keyBrowseBtn, &QToolButton::clicked, this, [this] {
@@ -591,6 +650,11 @@ openscp::SessionOptions ConnectionDialog::options() const {
     }
     if (o.protocol != openscp::Protocol::Scp)
         o.scp_transfer_mode = openscp::ScpTransferMode::Auto;
+    if (webDavScheme_) {
+        o.webdav_scheme = openscp::normalizeWebDavScheme(
+            static_cast<openscp::WebDavScheme>(
+                webDavScheme_->currentData().toInt()));
+    }
     o.host = host_->text().toStdString();
     o.port = static_cast<std::uint16_t>(port_->value());
     o.username = user_->text().toStdString();
@@ -622,6 +686,12 @@ openscp::SessionOptions ConnectionDialog::options() const {
     }
     if (ftpsCaPath_ && !ftpsCaPath_->text().trimmed().isEmpty()) {
         o.ftps_ca_cert_path = ftpsCaPath_->text().trimmed().toStdString();
+    }
+    if (webDavVerifyPeer_) {
+        o.webdav_verify_peer = webDavVerifyPeer_->isChecked();
+    }
+    if (webDavCaPath_ && !webDavCaPath_->text().trimmed().isEmpty()) {
+        o.webdav_ca_cert_path = webDavCaPath_->text().trimmed().toStdString();
     }
     if (proxyType_) {
         o.proxy_type = openscp::normalizeProxyType(
@@ -669,6 +739,14 @@ openscp::SessionOptions ConnectionDialog::options() const {
     if (o.protocol != openscp::Protocol::Ftps) {
         o.ftps_verify_peer = true;
         o.ftps_ca_cert_path.reset();
+    }
+    if (o.protocol != openscp::Protocol::WebDav) {
+        o.webdav_scheme = openscp::WebDavScheme::Https;
+        o.webdav_verify_peer = true;
+        o.webdav_ca_cert_path.reset();
+    } else if (o.webdav_scheme == openscp::WebDavScheme::Http) {
+        o.webdav_verify_peer = false;
+        o.webdav_ca_cert_path.reset();
     }
 
     return o;
@@ -725,6 +803,23 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &o) {
             ftpsCaPath_->clear();
         }
     }
+    if (webDavScheme_) {
+        const int i = webDavScheme_->findData(
+            static_cast<int>(openscp::normalizeWebDavScheme(o.webdav_scheme)));
+        if (i >= 0)
+            webDavScheme_->setCurrentIndex(i);
+        lastWebDavScheme_ = openscp::normalizeWebDavScheme(o.webdav_scheme);
+    }
+    if (webDavVerifyPeer_)
+        webDavVerifyPeer_->setChecked(o.webdav_verify_peer);
+    if (webDavCaPath_) {
+        if (o.webdav_ca_cert_path && !o.webdav_ca_cert_path->empty()) {
+            webDavCaPath_->setText(
+                QString::fromStdString(*o.webdav_ca_cert_path));
+        } else {
+            webDavCaPath_->clear();
+        }
+    }
 
     const auto caps = openscp::capabilitiesForProtocol(effectiveProtocol);
     bool jumpSupportedInUi = caps.supports_jump_host;
@@ -771,9 +866,16 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &o) {
         jumpKeyPath_->setText(QString::fromStdString(*o.jump_private_key_path));
 }
 
-void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol) {
+void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol,
+                                        bool resetPort) {
     if (!host_ || !port_)
         return;
+    const bool isWebDavProtocol = (protocol == openscp::Protocol::WebDav);
+    const auto selectedWebDavScheme =
+        webDavScheme_
+            ? openscp::normalizeWebDavScheme(static_cast<openscp::WebDavScheme>(
+                  webDavScheme_->currentData().toInt()))
+            : openscp::WebDavScheme::Https;
     if (formLayout_ && scpMode_) {
         const bool isScpProtocol = (protocol == openscp::Protocol::Scp);
         setFormRowVisible(formLayout_, scpMode_, isScpProtocol);
@@ -785,6 +887,18 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol) {
         }
         if (ftpsCaPathRow_) {
             setFormRowVisible(formLayout_, ftpsCaPathRow_, isFtpsProtocol);
+        }
+        if (webDavScheme_) {
+            setFormRowVisible(formLayout_, webDavScheme_, isWebDavProtocol);
+        }
+        const bool showWebDavTlsRows =
+            isWebDavProtocol &&
+            (selectedWebDavScheme == openscp::WebDavScheme::Https);
+        if (webDavVerifyPeer_) {
+            setFormRowVisible(formLayout_, webDavVerifyPeer_, showWebDavTlsRows);
+        }
+        if (webDavCaPathRow_) {
+            setFormRowVisible(formLayout_, webDavCaPathRow_, showWebDavTlsRows);
         }
     }
     const openscp::ProtocolCapabilities caps =
@@ -806,7 +920,15 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol) {
         host_->setPlaceholderText(tr("webdav.example.com"));
         break;
     }
-    port_->setValue(static_cast<int>(openscp::defaultPortForProtocol(protocol)));
+    if (resetPort) {
+        std::uint16_t protocolDefaultPort =
+            openscp::defaultPortForProtocol(protocol);
+        if (isWebDavProtocol) {
+            protocolDefaultPort =
+                openscp::defaultPortForWebDavScheme(selectedWebDavScheme);
+        }
+        port_->setValue(static_cast<int>(protocolDefaultPort));
+    }
 
     const bool sshAuthSupported =
         (protocol == openscp::Protocol::Sftp ||
