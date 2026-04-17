@@ -10,6 +10,8 @@
 #include <QFormLayout>
 #include <QFontMetrics>
 #include <QHBoxLayout>
+#include <QKeySequence>
+#include <QKeySequenceEdit>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -37,6 +39,8 @@ constexpr int kQueueAutoClearOff = 0;
 constexpr int kQueueAutoClearCompleted = 1;
 constexpr int kQueueAutoClearFailedCanceled = 2;
 constexpr int kQueueAutoClearFinished = 3;
+constexpr const char *kShortcutTransfersKey = "Shortcuts/openTransfers";
+constexpr const char *kShortcutHistoryKey = "Shortcuts/openHistory";
 
 QString SettingsDialog::wrapTextToWidth(const QString &text,
                                         const QFontMetrics &fm,
@@ -315,6 +319,28 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                          "starts."));
         });
     }
+
+    QFormLayout *shortcutsForm = nullptr;
+    QWidget *shortcutsPage = createFormPage(tr("Shortcuts"), shortcutsForm);
+    shortcutsForm->setVerticalSpacing(8);
+    {
+        auto *shortcutsHint = new QLabel(
+            tr("Select an action and press the new key combination directly in "
+               "the field."),
+            shortcutsPage);
+        shortcutsHint->setWordWrap(true);
+        shortcutsForm->addRow(QString(), shortcutsHint);
+    }
+    queueShortcutEdit_ = new QKeySequenceEdit(shortcutsPage);
+    queueShortcutEdit_->setMinimumWidth(kFieldMinWidth);
+    queueShortcutEdit_->setMaximumWidth(kFieldMaxWidth);
+    addLabeledRow(shortcutsForm, shortcutsPage, tr("Transfers shortcut:"),
+                  queueShortcutEdit_);
+    historyShortcutEdit_ = new QKeySequenceEdit(shortcutsPage);
+    historyShortcutEdit_->setMinimumWidth(kFieldMinWidth);
+    historyShortcutEdit_->setMaximumWidth(kFieldMaxWidth);
+    addLabeledRow(shortcutsForm, shortcutsPage, tr("History shortcut:"),
+                  historyShortcutEdit_);
 
     QFormLayout *transfersForm = nullptr;
     QWidget *transfersPage = createFormPage(tr("Transfers"), transfersForm);
@@ -687,6 +713,17 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     if (showQueueOnEnqueue_)
         showQueueOnEnqueue_->setChecked(
             s.value("UI/showQueueOnEnqueue", true).toBool());
+    if (queueShortcutEdit_) {
+        queueShortcutEdit_->setKeySequence(QKeySequence::fromString(
+            s.value(kShortcutTransfersKey, QStringLiteral("F12")).toString(),
+            QKeySequence::PortableText));
+    }
+    if (historyShortcutEdit_) {
+        historyShortcutEdit_->setKeySequence(QKeySequence::fromString(
+            s.value(kShortcutHistoryKey, QStringLiteral("Ctrl+Shift+H"))
+                .toString(),
+            QKeySequence::PortableText));
+    }
     if (defaultDownloadDirEdit_)
         defaultDownloadDirEdit_->setText(
             s.value("UI/defaultDownloadDir", defaultDownloadDirPath())
@@ -856,6 +893,14 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     bindDirtyFlag(openBehaviorMode_,
                   qOverload<int>(&QComboBox::currentIndexChanged));
     bindDirtyFlag(showQueueOnEnqueue_, &QCheckBox::toggled);
+    if (queueShortcutEdit_) {
+        connect(queueShortcutEdit_, &QKeySequenceEdit::keySequenceChanged, this,
+                &SettingsDialog::updateApplyFromControls);
+    }
+    if (historyShortcutEdit_) {
+        connect(historyShortcutEdit_, &QKeySequenceEdit::keySequenceChanged,
+                this, &SettingsDialog::updateApplyFromControls);
+    }
     bindDirtyFlag(defaultDownloadDirEdit_, &QLineEdit::textChanged);
     bindDirtyFlag(deleteSecretsOnRemove_, &QCheckBox::toggled);
     bindDirtyFlag(defaultProtocol_,
@@ -972,6 +1017,16 @@ void SettingsDialog::onApply() {
     }
     if (showQueueOnEnqueue_)
         s.setValue("UI/showQueueOnEnqueue", showQueueOnEnqueue_->isChecked());
+    if (queueShortcutEdit_) {
+        s.setValue(kShortcutTransfersKey,
+                   queueShortcutEdit_->keySequence().toString(
+                       QKeySequence::PortableText));
+    }
+    if (historyShortcutEdit_) {
+        s.setValue(kShortcutHistoryKey,
+                   historyShortcutEdit_->keySequence().toString(
+                       QKeySequence::PortableText));
+    }
     if (defaultDownloadDirEdit_) {
         QString path = defaultDownloadDirEdit_->text().trimmed();
         if (path.isEmpty())
@@ -1085,6 +1140,7 @@ void SettingsDialog::onApply() {
         applyBtn_->setEnabled(false);
         applyBtn_->setDefault(false);
     }
+    emit settingsApplied();
 }
 
 void SettingsDialog::updateApplyFromControls() {
@@ -1104,6 +1160,14 @@ void SettingsDialog::updateApplyFromControls() {
             revealLegacy ? QStringLiteral("reveal") : QStringLiteral("ask");
     }
     const bool showQueue = s.value("UI/showQueueOnEnqueue", true).toBool();
+    const QString queueShortcut =
+        s.value(kShortcutTransfersKey, QStringLiteral("F12"))
+            .toString()
+            .trimmed();
+    const QString historyShortcut =
+        s.value(kShortcutHistoryKey, QStringLiteral("Ctrl+Shift+H"))
+            .toString()
+            .trimmed();
     QString defaultDownload =
         s.value("UI/defaultDownloadDir", defaultDownloadDirPath())
             .toString()
@@ -1202,6 +1266,18 @@ void SettingsDialog::updateApplyFromControls() {
                           : openMode;
     const bool curShowQueue =
         showQueueOnEnqueue_ && showQueueOnEnqueue_->isChecked();
+    const QString curQueueShortcut = queueShortcutEdit_
+                                         ? queueShortcutEdit_->keySequence()
+                                               .toString(
+                                                   QKeySequence::PortableText)
+                                               .trimmed()
+                                         : queueShortcut;
+    const QString curHistoryShortcut = historyShortcutEdit_
+                                           ? historyShortcutEdit_->keySequence()
+                                                 .toString(
+                                                     QKeySequence::PortableText)
+                                                 .trimmed()
+                                           : historyShortcut;
     QString curDefaultDownload = defaultDownloadDirEdit_
                                      ? defaultDownloadDirEdit_->text().trimmed()
                                      : defaultDownload;
@@ -1296,6 +1372,8 @@ void SettingsDialog::updateApplyFromControls() {
         (curShowConn != showConnOnStart) || (curShowConnDisc != onDisc) ||
         (curSingleClick != singleClick) || (curOpenMode != openMode) ||
         (curShowQueue != showQueue) ||
+        (curQueueShortcut != queueShortcut) ||
+        (curHistoryShortcut != historyShortcut) ||
         (curDefaultDownload != defaultDownload) ||
         (curDeleteSecrets != deleteSecrets) ||
         (curDefaultProtocol != defaultProtocol) ||

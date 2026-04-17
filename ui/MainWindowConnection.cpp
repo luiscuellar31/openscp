@@ -736,9 +736,12 @@ void MainWindow::runRemoteSessionHealthCheck(const QString &reason, bool force) 
     disconnectSftp();
 }
 
-void MainWindow::connectSftp() {
+void MainWindow::openConnectDialogWithPreset(
+    const std::optional<openscp::SessionOptions> &preset) {
     ConnectionDialog dlg(this);
     dlg.setQuickConnectSaveOptionsVisible(true);
+    if (preset.has_value())
+        dlg.setOptions(*preset);
     if (dlg.exec() != QDialog::Accepted)
         return;
     auto opt = dlg.options();
@@ -785,6 +788,8 @@ void MainWindow::connectSftp() {
     }
     startSftpConnect(opt, saveRequest);
 }
+
+void MainWindow::connectSftp() { openConnectDialogWithPreset(std::nullopt); }
 
 // Tear down the current remote session and restore local mode.
 void MainWindow::disconnectSftp() {
@@ -1782,6 +1787,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
                         return;
                     }
                     rightPath_->setText(path);
+                    addRecentRemotePath(path);
                     refreshRightBreadcrumbs();
                     if (rightIsRemote_) {
                         updateRemoteWriteability();
@@ -1921,6 +1927,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
             tr("Connected (%1) to %2")
                 .arg(activeProtocol, QString::fromStdString(opt.host)),
             4000);
+        addRecentServer(opt);
         setWindowTitle(tr("OpenSCP — local/remote (%1)").arg(activeProtocol));
         updateHostPolicyRiskBanner();
         startRemoteSessionHealthMonitoring();
@@ -1931,6 +1938,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
 
     rightView_->setModel(rightLocalModel_);
     rightPath_->setText(QStringLiteral("/"));
+    addRecentRemotePath(QStringLiteral("/"));
     rightIsRemote_ = true;
     activateScpTransferModeUi(true);
     m_pendingRemoteRefreshFromUpload_ = false;
@@ -1985,6 +1993,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         tr("Connected (%1) to %2")
             .arg(activeProtocol, QString::fromStdString(opt.host)),
         4000);
+    addRecentServer(opt);
     setWindowTitle(tr("OpenSCP — local/remote (%1)").arg(activeProtocol));
     updateHostPolicyRiskBanner();
     startRemoteSessionHealthMonitoring();

@@ -70,6 +70,7 @@ class MainWindow : public QMainWindow {
     void goHomeLeft();      // Go to local home (left)
     void openRightRemoteTerminal(); // Open SSH terminal at current right path
     void refreshRightRemotePanel(); // Refresh current remote folder (right)
+    void showHistoryMenu();         // Show recent routes/servers
 
     void connectSftp();
     void disconnectSftp();
@@ -174,6 +175,7 @@ class MainWindow : public QMainWindow {
     class TransferManager *transferMgr_ = nullptr;
     class TransferQueueDialog *transferDlg_ = nullptr;
     QAction *actShowQueue_ = nullptr;
+    QAction *actShowHistory_ = nullptr;
     QAction *actSites_ = nullptr;        // site manager
     QAction *actPrefsToolbar_ = nullptr; // settings button (right toolbar)
     QAction *actAboutToolbar_ = nullptr; // about button (right toolbar)
@@ -213,6 +215,11 @@ class MainWindow : public QMainWindow {
     void showTransferQueue();
     void maybeShowTransferQueue();
     void openLocalPathWithPreference(const QString &localPath);
+    void openConnectDialogWithPreset(
+        const std::optional<openscp::SessionOptions> &preset);
+    void addRecentLocalPath(const QString &path);
+    void addRecentRemotePath(const QString &path);
+    void addRecentServer(const openscp::SessionOptions &opt);
     void applyTransferPreferences();
     static QString defaultDownloadDirFromSettings(const class QSettings &s);
 

@@ -236,6 +236,7 @@ set(ICON_FILES
     assets/icons/action-new-folder.svg
     assets/icons/action-open-folder.svg
     assets/icons/action-open-folder-remote.svg
+    assets/icons/action-open-history.svg
     assets/icons/action-open-saved-sites.svg
     assets/icons/action-open-terminal.svg
     assets/icons/action-open-transfer-queue.svg

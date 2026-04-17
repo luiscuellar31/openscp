@@ -826,6 +826,7 @@ void MainWindow::setRightRemoteRoot(const QString &path) {
     if (!rightRemoteModel_) {
         const QString normalized = normalizeRemotePath(path);
         rightPath_->setText(normalized);
+        addRecentRemotePath(normalized);
         refreshRightBreadcrumbs();
         updateDeleteShortcutEnables();
         statusBar()->showMessage(tr("Remote path: %1").arg(normalized), 3000);

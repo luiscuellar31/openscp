@@ -63,10 +63,12 @@
 #include <QStyle>
 #include <QStackedWidget>
 #include <QTemporaryFile>
+#include <QTabWidget>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QUuid>
 #include <QVBoxLayout>
 #include <atomic>
@@ -118,6 +120,108 @@ static QString formatConnectionElapsed(qint64 totalSeconds) {
         .arg(hours, 2, 10, QLatin1Char('0'))
         .arg(minutes, 2, 10, QLatin1Char('0'))
         .arg(seconds, 2, 10, QLatin1Char('0'));
+}
+
+constexpr int kRecentHistoryMaxEntries = 20;
+constexpr const char *kRecentLocalPathsKey = "History/recentLocalPaths";
+constexpr const char *kRecentRemotePathsKey = "History/recentRemotePaths";
+constexpr const char *kRecentServersKey = "History/recentServers";
+constexpr const char *kShortcutTransfersKey = "Shortcuts/openTransfers";
+constexpr const char *kShortcutHistoryKey = "Shortcuts/openHistory";
+
+static QString trimHistoryLabel(const QString &raw, int maxLen = 96) {
+    QString out = raw.simplified();
+    if (out.size() <= maxLen)
+        return out;
+    if (maxLen <= 3)
+        return out.left(maxLen);
+    return out.left(maxLen - 3) + QStringLiteral("...");
+}
+
+static void prependRecentValue(QStringList *list, const QString &value,
+                               int maxEntries = kRecentHistoryMaxEntries) {
+    if (!list)
+        return;
+    const QString trimmed = value.trimmed();
+    if (trimmed.isEmpty())
+        return;
+    list->removeAll(trimmed);
+    list->prepend(trimmed);
+    while (list->size() > maxEntries)
+        list->removeLast();
+}
+
+static QString normalizedLocalHistoryPath(const QString &raw) {
+    QString normalized = QDir::fromNativeSeparators(raw.trimmed());
+    if (normalized.isEmpty())
+        return {};
+    normalized = QDir::cleanPath(normalized);
+    if (!QFileInfo(normalized).isAbsolute())
+        normalized = QDir::current().absoluteFilePath(normalized);
+    return QDir(normalized).absolutePath();
+}
+
+static QString encodeRecentServerEntry(const openscp::SessionOptions &opt) {
+    QUrlQuery query;
+    query.addQueryItem(
+        QStringLiteral("protocol"),
+        QString::fromLatin1(openscp::protocolStorageName(opt.protocol)));
+    query.addQueryItem(QStringLiteral("host"),
+                       QString::fromStdString(opt.host).trimmed().toLower());
+    query.addQueryItem(QStringLiteral("port"), QString::number(opt.port));
+    query.addQueryItem(QStringLiteral("user"),
+                       QString::fromStdString(opt.username).trimmed());
+    return query.toString(QUrl::FullyEncoded);
+}
+
+static bool decodeRecentServerEntry(const QString &encoded,
+                                    openscp::SessionOptions *optOut,
+                                    QString *labelOut) {
+    const QUrlQuery query(encoded);
+    const QString host = query.queryItemValue(QStringLiteral("host"))
+                             .trimmed()
+                             .toLower();
+    if (host.isEmpty())
+        return false;
+    const QString protocolStorage =
+        query.queryItemValue(QStringLiteral("protocol"))
+            .trimmed()
+            .toLower();
+    const openscp::Protocol protocol = openscp::protocolFromStorageName(
+        protocolStorage.toStdString());
+    bool portOk = false;
+    int portRaw =
+        query.queryItemValue(QStringLiteral("port")).trimmed().toInt(&portOk);
+    if (!portOk || portRaw <= 0 || portRaw > 65535) {
+        portRaw = static_cast<int>(openscp::defaultPortForProtocol(protocol));
+    }
+    const QString user =
+        query.queryItemValue(QStringLiteral("user")).trimmed();
+
+    if (optOut) {
+        openscp::SessionOptions opt{};
+        opt.protocol = protocol;
+        opt.host = host.toStdString();
+        opt.port = static_cast<std::uint16_t>(portRaw);
+        opt.username = user.toStdString();
+        *optOut = opt;
+    }
+    if (labelOut) {
+        QString endpoint = host;
+        if (static_cast<std::uint16_t>(portRaw) !=
+            openscp::defaultPortForProtocol(protocol)) {
+            endpoint += QStringLiteral(":%1").arg(portRaw);
+        }
+        if (!user.isEmpty())
+            endpoint = QStringLiteral("%1@%2").arg(user, endpoint);
+        *labelOut = QStringLiteral("%1  %2")
+                        .arg(
+                            QString::fromLatin1(
+                                openscp::protocolDisplayName(protocol))
+                                .toUpper(),
+                            endpoint);
+    }
+    return true;
 }
 
 static bool hasRegexMetaBeyondWildcards(const QString &pattern) {
@@ -798,6 +902,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         tb->addAction(tr("Transfers"), [this] { showTransferQueue(); });
     actShowQueue_->setIcon(resIcon("action-open-transfer-queue.svg"));
     actShowQueue_->setToolTip(actShowQueue_->text());
+    tb->addSeparator();
+    actShowHistory_ =
+        tb->addAction(tr("History"), this, &MainWindow::showHistoryMenu);
+    actShowHistory_->setIcon(resIcon("action-open-history.svg"));
+    actShowHistory_->setToolTip(actShowHistory_->text());
     // Show text beside icon for Sites and Queue too
     if (QWidget *w = tb->widgetForAction(actSites_)) {
         if (auto *b = qobject_cast<QToolButton *>(w)) {
@@ -811,10 +920,22 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
             b->setText(tr("Transfers"));
         }
     }
+    if (QWidget *w = tb->widgetForAction(actShowHistory_)) {
+        if (auto *b = qobject_cast<QToolButton *>(w)) {
+            b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+            b->setText(tr("History"));
+        }
+    }
     // Global shortcut to open the transfer queue
     actShowQueue_->setShortcut(QKeySequence(Qt::Key_F12));
     actShowQueue_->setShortcutContext(Qt::ApplicationShortcut);
     this->addAction(actShowQueue_);
+    // Global shortcut to open recent history
+    actShowHistory_->setShortcut(
+        QKeySequence::fromString(QStringLiteral("Ctrl+Shift+H"),
+                                 QKeySequence::PortableText));
+    actShowHistory_->setShortcutContext(Qt::ApplicationShortcut);
+    this->addAction(actShowHistory_);
 
     // Global fullscreen toggle (standard platform shortcut)
     // macOS: Ctrl+Cmd+F, Linux: F11
@@ -831,7 +952,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         });
         this->addAction(actToggleFs);
     }
-    // Separator to the right of the queue button
+    // Separator to the right of the history button
     tb->addSeparator();
     // Queue is always enabled by default; no toggle
 
@@ -883,6 +1004,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     fileMenu_->addAction(actDisconnect_);
     fileMenu_->addAction(actSites_);
     fileMenu_->addAction(actShowQueue_);
+    fileMenu_->addAction(actShowHistory_);
     // On non‑macOS platforms, also show Preferences and Quit under "File"
     // to provide a familiar UX on Linux/Windows while keeping the "OpenSCP" app
     // menu.
@@ -1150,6 +1272,8 @@ void MainWindow::showAboutDialog() {
 // Open the Settings dialog and apply changes when accepted.
 void MainWindow::showSettingsDialog() {
     SettingsDialog dlg(this);
+    connect(&dlg, &SettingsDialog::settingsApplied, this,
+            &MainWindow::applyPreferences);
     dlg.exec();
     // Reflect any applied changes in the running UI
     applyPreferences();
@@ -1847,6 +1971,26 @@ void MainWindow::applyPreferences() {
     }
     downloadDir_ = defaultDownloadDirFromSettings(s);
     QDir().mkpath(downloadDir_);
+    if (actShowQueue_) {
+        const QString queueShortcutText =
+            s.value(kShortcutTransfersKey, QStringLiteral("F12"))
+                .toString()
+                .trimmed();
+        actShowQueue_->setShortcut(
+            QKeySequence::fromString(queueShortcutText,
+                                     QKeySequence::PortableText));
+        actShowQueue_->setShortcutContext(Qt::ApplicationShortcut);
+    }
+    if (actShowHistory_) {
+        const QString historyShortcutText =
+            s.value(kShortcutHistoryKey, QStringLiteral("Ctrl+Shift+H"))
+                .toString()
+                .trimmed();
+        actShowHistory_->setShortcut(
+            QKeySequence::fromString(historyShortcutText,
+                                     QKeySequence::PortableText));
+        actShowHistory_->setShortcutContext(Qt::ApplicationShortcut);
+    }
     // Keep Site Manager auto-open preference up to date
     m_openSiteManagerOnDisconnect =
         s.value("UI/openSiteManagerOnDisconnect", true).toBool();
@@ -1909,6 +2053,258 @@ void MainWindow::applyTransferPreferences() {
     if (transferDlg_)
         QMetaObject::invokeMethod(transferDlg_, "refresh",
                                   Qt::QueuedConnection);
+}
+
+void MainWindow::addRecentLocalPath(const QString &path) {
+    const QString normalized = normalizedLocalHistoryPath(path);
+    if (normalized.isEmpty())
+        return;
+    QSettings s("OpenSCP", "OpenSCP");
+    QStringList recent = s.value(kRecentLocalPathsKey).toStringList();
+    prependRecentValue(&recent, normalized);
+    s.setValue(kRecentLocalPathsKey, recent);
+}
+
+void MainWindow::addRecentRemotePath(const QString &path) {
+    const QString normalized = normalizeRemotePathForMatch(path);
+    if (normalized.isEmpty())
+        return;
+    QSettings s("OpenSCP", "OpenSCP");
+    QStringList recent = s.value(kRecentRemotePathsKey).toStringList();
+    prependRecentValue(&recent, normalized);
+    s.setValue(kRecentRemotePathsKey, recent);
+}
+
+void MainWindow::addRecentServer(const openscp::SessionOptions &opt) {
+    const QString host = QString::fromStdString(opt.host).trimmed().toLower();
+    if (host.isEmpty())
+        return;
+    const QString encoded = encodeRecentServerEntry(opt);
+    if (encoded.isEmpty())
+        return;
+    QSettings s("OpenSCP", "OpenSCP");
+    QStringList recent = s.value(kRecentServersKey).toStringList();
+    prependRecentValue(&recent, encoded);
+    s.setValue(kRecentServersKey, recent);
+}
+
+void MainWindow::showHistoryMenu() {
+    QWidget *focusBeforeDialog = QApplication::focusWidget();
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("History"));
+    dlg.resize(720, 460);
+    dlg.setMinimumSize(560, 360);
+
+    auto *layout = new QVBoxLayout(&dlg);
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(8);
+
+    auto *tabs = new QTabWidget(&dlg);
+    layout->addWidget(tabs, 1);
+
+    auto *localList = new QListWidget(tabs);
+    localList->setSelectionMode(QAbstractItemView::SingleSelection);
+    localList->setAlternatingRowColors(true);
+    localList->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    tabs->addTab(localList, tr("Recent local paths"));
+
+    auto *remoteList = new QListWidget(tabs);
+    remoteList->setSelectionMode(QAbstractItemView::SingleSelection);
+    remoteList->setAlternatingRowColors(true);
+    remoteList->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    tabs->addTab(remoteList, tr("Recent remote paths"));
+
+    auto *serverList = new QListWidget(tabs);
+    serverList->setSelectionMode(QAbstractItemView::SingleSelection);
+    serverList->setAlternatingRowColors(true);
+    serverList->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    tabs->addTab(serverList, tr("Recent servers"));
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
+    auto *openBtn =
+        buttons->addButton(tr("Open selected"), QDialogButtonBox::ActionRole);
+    auto *clearBtn =
+        buttons->addButton(tr("Clear history"), QDialogButtonBox::ActionRole);
+    layout->addWidget(buttons);
+
+    auto addEmptyPlaceholder = [](QListWidget *list, const QString &text) {
+        if (!list)
+            return;
+        auto *item = new QListWidgetItem(text, list);
+        item->setFlags(Qt::NoItemFlags);
+    };
+
+    auto activeList = [tabs, localList, remoteList,
+                       serverList]() -> QListWidget * {
+        switch (tabs->currentIndex()) {
+        case 0:
+            return localList;
+        case 1:
+            return remoteList;
+        case 2:
+            return serverList;
+        default:
+            return nullptr;
+        }
+    };
+
+    auto updateOpenEnabled = [activeList, openBtn]() {
+        if (!openBtn)
+            return;
+        QListWidget *list = activeList();
+        if (!list || !list->currentItem()) {
+            openBtn->setEnabled(false);
+            return;
+        }
+        const QString value = list->currentItem()->data(Qt::UserRole).toString();
+        openBtn->setEnabled(!value.trimmed().isEmpty());
+    };
+
+    auto populate = [=]() {
+        localList->clear();
+        remoteList->clear();
+        serverList->clear();
+
+        QSettings s("OpenSCP", "OpenSCP");
+        const QStringList localPaths = s.value(kRecentLocalPathsKey).toStringList();
+        const QStringList remotePaths =
+            s.value(kRecentRemotePathsKey).toStringList();
+        const QStringList recentServers = s.value(kRecentServersKey).toStringList();
+
+        bool hasEntries = false;
+
+        for (const QString &rawPath : localPaths) {
+            const QString normalized = normalizedLocalHistoryPath(rawPath);
+            if (normalized.isEmpty())
+                continue;
+            auto *item = new QListWidgetItem(
+                trimHistoryLabel(QDir::toNativeSeparators(normalized)), localList);
+            item->setToolTip(normalized);
+            item->setData(Qt::UserRole, normalized);
+            hasEntries = true;
+        }
+        if (localList->count() == 0)
+            addEmptyPlaceholder(localList, tr("No recent history"));
+
+        for (const QString &rawPath : remotePaths) {
+            const QString normalized = normalizeRemotePathForMatch(rawPath);
+            if (normalized.isEmpty())
+                continue;
+            auto *item =
+                new QListWidgetItem(trimHistoryLabel(normalized), remoteList);
+            item->setToolTip(normalized);
+            item->setData(Qt::UserRole, normalized);
+            hasEntries = true;
+        }
+        if (remoteList->count() == 0)
+            addEmptyPlaceholder(remoteList, tr("No recent history"));
+
+        for (const QString &encoded : recentServers) {
+            openscp::SessionOptions preset;
+            QString label;
+            if (!decodeRecentServerEntry(encoded, &preset, &label))
+                continue;
+            auto *item = new QListWidgetItem(trimHistoryLabel(label), serverList);
+            item->setToolTip(label);
+            item->setData(Qt::UserRole, encoded);
+            hasEntries = true;
+        }
+        if (serverList->count() == 0)
+            addEmptyPlaceholder(serverList, tr("No recent history"));
+
+        if (clearBtn)
+            clearBtn->setEnabled(hasEntries);
+        updateOpenEnabled();
+    };
+
+    auto openSelected = [&, focusBeforeDialog]() {
+        QListWidget *list = activeList();
+        if (!list || !list->currentItem())
+            return;
+        const QString value = list->currentItem()->data(Qt::UserRole).toString();
+        if (value.trimmed().isEmpty())
+            return;
+
+        switch (tabs->currentIndex()) {
+        case 0: {
+            const bool inRightPanel =
+                focusWithinWidget(focusBeforeDialog, rightView_) ||
+                focusWithinWidget(focusBeforeDialog, rightPath_) ||
+                focusWithinWidget(focusBeforeDialog, rightPaneBar_) ||
+                focusWithinWidget(focusBeforeDialog, rightBreadcrumbsBar_);
+            if (!rightIsRemote_ && inRightPanel)
+                setRightRoot(value);
+            else
+                setLeftRoot(value);
+            dlg.accept();
+            break;
+        }
+        case 1:
+            if (!rightIsRemote_) {
+                statusBar()->showMessage(
+                    tr("Connect to a remote server to open remote path history."),
+                    3500);
+                return;
+            }
+            setRightRemoteRoot(value);
+            dlg.accept();
+            break;
+        case 2: {
+            if (rightIsRemote_) {
+                statusBar()->showMessage(
+                    tr("Disconnect the current remote session before opening "
+                       "another server."),
+                    4000);
+                return;
+            }
+            openscp::SessionOptions preset;
+            if (!decodeRecentServerEntry(value, &preset, nullptr))
+                return;
+            dlg.accept();
+            openConnectDialogWithPreset(preset);
+            break;
+        }
+        default:
+            break;
+        }
+    };
+
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    connect(openBtn, &QPushButton::clicked, &dlg, openSelected);
+    connect(clearBtn, &QPushButton::clicked, &dlg, [=, this]() {
+        const auto ret = QMessageBox::question(
+            this, tr("Clear history"),
+            tr("Remove all recent paths and servers from history?"),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (ret != QMessageBox::Yes)
+            return;
+        QSettings s("OpenSCP", "OpenSCP");
+        s.remove(kRecentLocalPathsKey);
+        s.remove(kRecentRemotePathsKey);
+        s.remove(kRecentServersKey);
+        statusBar()->showMessage(tr("History cleared"), 3000);
+        populate();
+    });
+
+    connect(localList, &QListWidget::itemDoubleClicked, &dlg,
+            [openSelected](QListWidgetItem *) { openSelected(); });
+    connect(remoteList, &QListWidget::itemDoubleClicked, &dlg,
+            [openSelected](QListWidgetItem *) { openSelected(); });
+    connect(serverList, &QListWidget::itemDoubleClicked, &dlg,
+            [openSelected](QListWidgetItem *) { openSelected(); });
+
+    connect(localList, &QListWidget::currentRowChanged, &dlg,
+            [updateOpenEnabled](int) { updateOpenEnabled(); });
+    connect(remoteList, &QListWidget::currentRowChanged, &dlg,
+            [updateOpenEnabled](int) { updateOpenEnabled(); });
+    connect(serverList, &QListWidget::currentRowChanged, &dlg,
+            [updateOpenEnabled](int) { updateOpenEnabled(); });
+    connect(tabs, &QTabWidget::currentChanged, &dlg,
+            [updateOpenEnabled](int) { updateOpenEnabled(); });
+
+    populate();
+    dlg.exec();
 }
 
 void MainWindow::updateDeleteShortcutEnables() {

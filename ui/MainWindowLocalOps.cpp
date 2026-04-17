@@ -200,6 +200,7 @@ void MainWindow::setLeftRoot(const QString &path) {
         const QString normalized = QDir(path).absolutePath();
         leftPath_->setText(normalized);
         leftView_->setRootIndex(leftModel_->index(normalized));
+        addRecentLocalPath(normalized);
         refreshLeftBreadcrumbs();
         statusBar()->showMessage(tr("Left: ") + normalized, 3000);
         updateDeleteShortcutEnables();
@@ -216,6 +217,7 @@ void MainWindow::setRightRoot(const QString &path) {
         rightPath_->setText(normalized);
         rightView_->setRootIndex(
             rightLocalModel_->index(normalized)); // <-- here
+        addRecentLocalPath(normalized);
         refreshRightBreadcrumbs();
         statusBar()->showMessage(tr("Right: ") + normalized, 3000);
         updateDeleteShortcutEnables();

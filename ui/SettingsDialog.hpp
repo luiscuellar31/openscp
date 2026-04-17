@@ -8,11 +8,15 @@ class QPushButton;
 class QCheckBox;
 class QResizeEvent;
 class QFontMetrics;
+class QKeySequenceEdit;
 
 class SettingsDialog : public QDialog {
     Q_OBJECT
   public:
     explicit SettingsDialog(QWidget *parent = nullptr);
+
+  signals:
+    void settingsApplied();
 
   protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -32,6 +36,10 @@ class SettingsDialog : public QDialog {
     QCheckBox *showHidden_ = nullptr;       // show hidden files
     QComboBox *clickMode_ = nullptr;        // single click vs double click
     QComboBox *openBehaviorMode_ = nullptr; // ask/reveal/open downloaded files
+    QKeySequenceEdit *queueShortcutEdit_ =
+        nullptr; // shortcut to open transfer queue
+    QKeySequenceEdit *historyShortcutEdit_ =
+        nullptr; // shortcut to open history menu
     QCheckBox *showQueueOnEnqueue_ =
         nullptr; // auto-open transfer queue after enqueue
     class QLineEdit *defaultDownloadDirEdit_ =
