@@ -169,21 +169,29 @@ configure_project() {
 
 build_targets() {
   local -a build_args
+  local -a targets
   build_args=(--build "$BUILD_DIR")
   if [[ -n "$JOBS" ]]; then
     build_args+=(--parallel "$JOBS")
   else
     build_args+=(--parallel)
   fi
+  targets=(
+    openscp_core
+    openscp_core_tests
+    openscp_sftp_integration_tests
+    openscp_scp_integration_tests
+    openscp_ftp_integration_tests
+    openscp_ftps_integration_tests
+  )
+
+  if cmake "${build_args[@]}" --target openscp_webdav_integration_tests \
+      >/dev/null 2>&1; then
+    targets+=(openscp_webdav_integration_tests)
+  fi
 
   log "Building core + test targets"
-  cmake "${build_args[@]}" --target \
-    openscp_core \
-    openscp_core_tests \
-    openscp_sftp_integration_tests \
-    openscp_scp_integration_tests \
-    openscp_ftp_integration_tests \
-    openscp_ftps_integration_tests
+  cmake "${build_args[@]}" --target "${targets[@]}"
 
   if [[ "$RUN_FULL" -eq 1 ]]; then
     log "Building GUI app target (openscp_hello)"
