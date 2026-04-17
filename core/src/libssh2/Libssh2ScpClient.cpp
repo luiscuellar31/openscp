@@ -150,10 +150,27 @@ bool Libssh2ScpClient::get(
             continue;
         }
         if (n < 0) {
-            err = "SCP read failed";
             std::fclose(localFile);
             (void)std::remove(local.c_str());
             closeScpChannel(channel, false);
+            std::string scpErr = "SCP read failed";
+            appendSessionErrorDetail(session, scpErr);
+            if (!sftpFallbackEnabled()) {
+                scpErr +=
+                    " (SFTP fallback is disabled by the selected SCP mode)";
+                err = std::move(scpErr);
+                return false;
+            }
+            std::string fallbackErr;
+            if (transferViaSftpFallbackGet(remote, local, fallbackErr, progress,
+                                           shouldCancel)) {
+                return true;
+            }
+            if (!fallbackErr.empty()) {
+                scpErr += " | SFTP fallback failed: ";
+                scpErr += fallbackErr;
+            }
+            err = std::move(scpErr);
             return false;
         }
         if (n == 0) {
@@ -278,9 +295,26 @@ bool Libssh2ScpClient::put(
                 continue;
             }
             if (wr < 0) {
-                err = "SCP write failed";
                 std::fclose(localFile);
                 closeScpChannel(channel, false);
+                std::string scpErr = "SCP write failed";
+                appendSessionErrorDetail(session, scpErr);
+                if (!sftpFallbackEnabled()) {
+                    scpErr +=
+                        " (SFTP fallback is disabled by the selected SCP mode)";
+                    err = std::move(scpErr);
+                    return false;
+                }
+                std::string fallbackErr;
+                if (transferViaSftpFallbackPut(local, remote, fallbackErr,
+                                               progress, shouldCancel)) {
+                    return true;
+                }
+                if (!fallbackErr.empty()) {
+                    scpErr += " | SFTP fallback failed: ";
+                    scpErr += fallbackErr;
+                }
+                err = std::move(scpErr);
                 return false;
             }
             ptr += wr;
