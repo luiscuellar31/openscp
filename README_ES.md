@@ -276,6 +276,9 @@ Detalles de build y empaquetado Linux (AppImage, Snap, Flatpak): [assets/linux/R
     <img src="assets/screenshots/screenshot-site-manager.png" alt="Gestor de sitios con servidores guardados" width="32%">
     <img src="assets/screenshots/screenshot-connect.png" alt="Dialogo de conexion con opciones de autenticacion" width="32%">
     <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Cola de transferencias con progreso, filtros y acciones" width="32%">
+    <br>
+    <img src="assets/screenshots/screenshot-history.png" alt="Panel de historial de conexiones con sitios recientes" width="32%">
+    <img src="assets/screenshots/screenshot-settings.png" alt="Dialogo de ajustes con opciones de seguridad y transferencias" width="32%">
 </p>
 
 ## Roadmap
