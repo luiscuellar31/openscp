@@ -275,6 +275,9 @@ Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/READM
     <img src="assets/screenshots/screenshot-site-manager.png" alt="Site Manager with saved servers" width="32%">
     <img src="assets/screenshots/screenshot-connect.png" alt="Connect dialog with authentication options" width="32%">
     <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Transfer queue with progress, filters, and actions" width="32%">
+    <br>
+    <img src="assets/screenshots/screenshot-history.png" alt="Connection history panel with recent sites" width="32%">
+    <img src="assets/screenshots/screenshot-settings.png" alt="Settings dialog with security and transfer options" width="32%">
 </p>
 
 ## Roadmap
