@@ -42,6 +42,506 @@ constexpr int kQueueAutoClearFinished = 3;
 constexpr const char *kShortcutTransfersKey = "Shortcuts/openTransfers";
 constexpr const char *kShortcutHistoryKey = "Shortcuts/openHistory";
 
+QVector<SettingsDialog::SettingBinding>
+SettingsDialog::buildSettingBindings() const {
+    QVector<SettingBinding> bindings;
+    bindings.reserve(40);
+
+    using StringNormalizer = std::function<QString(const QString &)>;
+    using IntNormalizer = std::function<int(int)>;
+
+    auto makeBoolCheckBinding = [](const QString &key, bool defaultValue,
+                                   QCheckBox *check) {
+        return SettingBinding{
+            key,
+            [key, defaultValue](const QSettings &settings) {
+                return settings.value(key, defaultValue).toBool();
+            },
+            [check, defaultValue] {
+                return check ? QVariant(check->isChecked())
+                             : QVariant(defaultValue);
+            },
+            [check](const QVariant &value) {
+                if (check)
+                    check->setChecked(value.toBool());
+            },
+            [key](QSettings &settings, const QVariant &value) {
+                settings.setValue(key, value.toBool());
+            },
+        };
+    };
+
+    auto makeSpinBinding = [](const QString &key, int defaultValue,
+                              QSpinBox *spin, int minValue = 1,
+                              int maxValue = 0) {
+        return SettingBinding{
+            key,
+            [key, defaultValue, minValue, maxValue](const QSettings &settings) {
+                int value = settings.value(key, defaultValue).toInt();
+                if (minValue <= maxValue)
+                    value = qBound(minValue, value, maxValue);
+                return value;
+            },
+            [spin, defaultValue] {
+                return spin ? QVariant(spin->value()) : QVariant(defaultValue);
+            },
+            [spin](const QVariant &value) {
+                if (spin)
+                    spin->setValue(value.toInt());
+            },
+            [key](QSettings &settings, const QVariant &value) {
+                settings.setValue(key, value.toInt());
+            },
+        };
+    };
+
+    auto makeLineEditBinding = [](const QString &key, const QString &defaultValue,
+                                  QLineEdit *edit,
+                                  const StringNormalizer &normalize = {}) {
+        return SettingBinding{
+            key,
+            [key, defaultValue, normalize](const QSettings &settings) {
+                QString value =
+                    settings.value(key, defaultValue).toString();
+                return normalize ? normalize(value) : value;
+            },
+            [edit, defaultValue, normalize] {
+                QString value = edit ? edit->text() : defaultValue;
+                return normalize ? normalize(value) : value;
+            },
+            [edit](const QVariant &value) {
+                if (edit)
+                    edit->setText(value.toString());
+            },
+            [key](QSettings &settings, const QVariant &value) {
+                settings.setValue(key, value);
+            },
+        };
+    };
+
+    auto makeShortcutBinding = [](const QString &key,
+                                  const QString &defaultValue,
+                                  QKeySequenceEdit *editor) {
+        return SettingBinding{
+            key,
+            [key, defaultValue](const QSettings &settings) {
+                return settings.value(key, defaultValue).toString().trimmed();
+            },
+            [editor, defaultValue] {
+                return editor
+                           ? editor->keySequence()
+                                 .toString(QKeySequence::PortableText)
+                                 .trimmed()
+                           : defaultValue;
+            },
+            [editor](const QVariant &value) {
+                if (editor) {
+                    editor->setKeySequence(QKeySequence::fromString(
+                        value.toString(), QKeySequence::PortableText));
+                }
+            },
+            [key](QSettings &settings, const QVariant &value) {
+                settings.setValue(key, value.toString());
+            },
+        };
+    };
+
+    auto makeIntComboBinding = [](const QString &key, int defaultValue,
+                                  QComboBox *combo,
+                                  const IntNormalizer &normalize = {}) {
+        return SettingBinding{
+            key,
+            [key, defaultValue, combo, normalize](const QSettings &settings) {
+                int value = settings.value(key, defaultValue).toInt();
+                if (normalize)
+                    value = normalize(value);
+                if (combo && combo->findData(value) < 0)
+                    value = defaultValue;
+                return value;
+            },
+            [combo, defaultValue] {
+                return combo ? QVariant(combo->currentData().toInt())
+                             : QVariant(defaultValue);
+            },
+            [combo, defaultValue](const QVariant &value) {
+                if (!combo)
+                    return;
+                int index = combo->findData(value.toInt());
+                if (index < 0)
+                    index = combo->findData(defaultValue);
+                if (index >= 0)
+                    combo->setCurrentIndex(index);
+            },
+            [key](QSettings &settings, const QVariant &value) {
+                settings.setValue(key, value.toInt());
+            },
+        };
+    };
+
+    auto makeStringComboBinding = [](const QString &key,
+                                     const QString &defaultValue,
+                                     QComboBox *combo,
+                                     const StringNormalizer &normalize = {}) {
+        return SettingBinding{
+            key,
+            [key, defaultValue, combo, normalize](const QSettings &settings) {
+                QString value = settings.value(key, defaultValue).toString();
+                if (normalize)
+                    value = normalize(value);
+                if (combo && combo->findData(value) < 0)
+                    value = defaultValue;
+                return value;
+            },
+            [combo, defaultValue] {
+                return combo ? QVariant(combo->currentData().toString())
+                             : QVariant(defaultValue);
+            },
+            [combo, defaultValue](const QVariant &value) {
+                if (!combo)
+                    return;
+                int index = combo->findData(value.toString());
+                if (index < 0)
+                    index = combo->findData(defaultValue);
+                if (index >= 0)
+                    combo->setCurrentIndex(index);
+            },
+            [key](QSettings &settings, const QVariant &value) {
+                settings.setValue(key, value.toString());
+            },
+        };
+    };
+
+    auto addBool = [&](const char *key, bool defaultValue, QCheckBox *check) {
+        bindings.push_back(makeBoolCheckBinding(QString::fromLatin1(key),
+                                                defaultValue, check));
+    };
+    auto addSpin = [&](const char *key, int defaultValue, QSpinBox *spin,
+                       int minValue = 1, int maxValue = 0) {
+        bindings.push_back(makeSpinBinding(QString::fromLatin1(key), defaultValue,
+                                           spin, minValue, maxValue));
+    };
+    auto addLineEdit = [&](const char *key, const QString &defaultValue,
+                           QLineEdit *edit,
+                           const StringNormalizer &normalize = {}) {
+        bindings.push_back(makeLineEditBinding(QString::fromLatin1(key),
+                                               defaultValue, edit, normalize));
+    };
+    auto addShortcut = [&](const char *key, const QString &defaultValue,
+                           QKeySequenceEdit *editor) {
+        bindings.push_back(makeShortcutBinding(QString::fromLatin1(key),
+                                               defaultValue, editor));
+    };
+    auto addIntCombo = [&](const char *key, int defaultValue, QComboBox *combo,
+                           const IntNormalizer &normalize = {}) {
+        bindings.push_back(makeIntComboBinding(QString::fromLatin1(key),
+                                               defaultValue, combo, normalize));
+    };
+    auto addStringCombo = [&](const char *key, const QString &defaultValue,
+                              QComboBox *combo,
+                              const StringNormalizer &normalize = {}) {
+        bindings.push_back(makeStringComboBinding(QString::fromLatin1(key),
+                                                  defaultValue, combo,
+                                                  normalize));
+    };
+
+    struct BoolBindingSpec {
+        const char *key;
+        bool defaultValue;
+        QCheckBox *check;
+    };
+    const BoolBindingSpec generalBoolBindings[] = {
+        {"UI/showHidden", false, showHidden_},
+        {"UI/showConnOnStart", true, showConnOnStart_},
+        {"UI/openSiteManagerOnDisconnect", true, showConnOnDisconnect_},
+    };
+
+    addStringCombo("UI/language", QStringLiteral("en"), langCombo_);
+    for (const BoolBindingSpec &spec : generalBoolBindings)
+        addBool(spec.key, spec.defaultValue, spec.check);
+
+    addBool("UI/singleClick", false, nullptr);
+    bindings.back().readCurrent = [this] {
+        return clickMode_ && clickMode_->currentData().toInt() == 1;
+    };
+    bindings.back().applyToControl = [this](const QVariant &value) {
+        if (clickMode_)
+            clickMode_->setCurrentIndex(value.toBool() ? 1 : 0);
+    };
+
+    bindings.push_back({
+        QStringLiteral("UI/openBehaviorMode"),
+        [](const QSettings &settings) {
+            QString mode = settings
+                               .value("UI/openBehaviorMode")
+                               .toString()
+                               .trimmed()
+                               .toLower();
+            if (mode.isEmpty()) {
+                const bool revealLegacy =
+                    settings.value("UI/openRevealInFolder", false).toBool();
+                mode = revealLegacy ? QStringLiteral("reveal")
+                                    : QStringLiteral("ask");
+            }
+            return mode;
+        },
+        [this] {
+            return openBehaviorMode_
+                       ? openBehaviorMode_->currentData().toString()
+                       : QStringLiteral("ask");
+        },
+        [this](const QVariant &value) {
+            if (!openBehaviorMode_)
+                return;
+            int modeIdx = openBehaviorMode_->findData(value.toString());
+            if (modeIdx < 0)
+                modeIdx = openBehaviorMode_->findData(QStringLiteral("ask"));
+            if (modeIdx >= 0)
+                openBehaviorMode_->setCurrentIndex(modeIdx);
+        },
+        [](QSettings &settings, const QVariant &value) {
+            const QString openMode = value.toString();
+            settings.setValue("UI/openBehaviorMode", openMode);
+            if (openMode == QStringLiteral("reveal")) {
+                settings.setValue("UI/openRevealInFolder", true);
+                settings.setValue("UI/openBehaviorChosen", true);
+            } else if (openMode == QStringLiteral("open")) {
+                settings.setValue("UI/openRevealInFolder", false);
+                settings.setValue("UI/openBehaviorChosen", true);
+            } else {
+                settings.setValue("UI/openBehaviorChosen", false);
+            }
+        },
+    });
+
+    addBool("UI/showQueueOnEnqueue", true, showQueueOnEnqueue_);
+    addShortcut(kShortcutTransfersKey, QStringLiteral("F12"),
+                queueShortcutEdit_);
+    addShortcut(kShortcutHistoryKey, QStringLiteral("Ctrl+Shift+H"),
+                historyShortcutEdit_);
+    addLineEdit("UI/defaultDownloadDir", defaultDownloadDirPath(),
+                defaultDownloadDirEdit_, [](const QString &raw) {
+            QString path = raw.trimmed();
+            if (path.isEmpty())
+                path = defaultDownloadDirPath();
+            return QDir::cleanPath(path);
+        });
+    addBool("Sites/deleteSecretsOnRemove", false, deleteSecretsOnRemove_);
+
+    bindings.push_back({
+        QStringLiteral("Protocol/defaultProtocol"),
+        [](const QSettings &settings) {
+            const auto protocol = openscp::protocolFromStorageName(
+                settings
+                    .value("Protocol/defaultProtocol",
+                           QString::fromLatin1(openscp::protocolStorageName(
+                               openscp::Protocol::Sftp)))
+                    .toString()
+                    .trimmed()
+                    .toLower()
+                    .toStdString());
+            return static_cast<int>(protocol);
+        },
+        [this] {
+            return defaultProtocol_
+                       ? defaultProtocol_->currentData().toInt()
+                       : static_cast<int>(openscp::Protocol::Sftp);
+        },
+        [this](const QVariant &value) {
+            if (!defaultProtocol_)
+                return;
+            const int index = defaultProtocol_->findData(value.toInt());
+            if (index >= 0)
+                defaultProtocol_->setCurrentIndex(index);
+        },
+        [](QSettings &settings, const QVariant &value) {
+            const auto protocol =
+                static_cast<openscp::Protocol>(value.toInt());
+            settings.setValue("Protocol/defaultProtocol",
+                              QString::fromLatin1(
+                                  openscp::protocolStorageName(protocol)));
+        },
+    });
+    bindings.push_back({
+        QStringLiteral("Protocol/scpTransferModeDefault"),
+        [](const QSettings &settings) {
+            const auto mode = openscp::scpTransferModeFromStorageName(
+                settings
+                    .value("Protocol/scpTransferModeDefault",
+                           QString::fromLatin1(
+                               openscp::scpTransferModeStorageName(
+                                   openscp::ScpTransferMode::Auto)))
+                    .toString()
+                    .trimmed()
+                    .toLower()
+                    .toStdString());
+            return static_cast<int>(mode);
+        },
+        [this] {
+            return scpModeDefault_
+                       ? scpModeDefault_->currentData().toInt()
+                       : static_cast<int>(openscp::ScpTransferMode::Auto);
+        },
+        [this](const QVariant &value) {
+            if (!scpModeDefault_)
+                return;
+            const int index = scpModeDefault_->findData(value.toInt());
+            if (index >= 0)
+                scpModeDefault_->setCurrentIndex(index);
+        },
+        [](QSettings &settings, const QVariant &value) {
+            const auto mode =
+                static_cast<openscp::ScpTransferMode>(value.toInt());
+            settings.setValue(
+                "Protocol/scpTransferModeDefault",
+                QString::fromLatin1(openscp::scpTransferModeStorageName(mode)));
+        },
+    });
+
+    const int strictKhPolicy =
+        static_cast<int>(openscp::KnownHostsPolicy::Strict);
+    const int optionalIntegrity =
+        static_cast<int>(openscp::TransferIntegrityPolicy::Optional);
+    addIntCombo("Security/defaultKnownHostsPolicy", strictKhPolicy,
+                defaultKnownHostsPolicy_, [strictKhPolicy](int value) {
+            const int acceptNew =
+                static_cast<int>(openscp::KnownHostsPolicy::AcceptNew);
+            const int off =
+                static_cast<int>(openscp::KnownHostsPolicy::Off);
+            return (value == strictKhPolicy || value == acceptNew ||
+                    value == off)
+                       ? value
+                       : strictKhPolicy;
+        });
+    addIntCombo("Security/defaultTransferIntegrityPolicy", optionalIntegrity,
+                defaultIntegrityPolicy_, [optionalIntegrity](int value) {
+            const int required =
+                static_cast<int>(openscp::TransferIntegrityPolicy::Required);
+            const int off =
+                static_cast<int>(openscp::TransferIntegrityPolicy::Off);
+            return (value == optionalIntegrity || value == required ||
+                    value == off)
+                       ? value
+                       : optionalIntegrity;
+        });
+
+    const BoolBindingSpec securityBoolBindings[] = {
+        {"Security/ftpsVerifyPeerDefault", true, ftpsVerifyPeerDefault_},
+        {"Security/knownHostsHashed", true, knownHostsHashed_},
+        {"Security/fpHex", false, fpHex_},
+        {"Terminal/forceInteractiveLogin", false,
+         terminalForceInteractiveLogin_},
+        {"Terminal/enableSftpCliFallback", true,
+         terminalEnableSftpCliFallback_},
+    };
+    for (const BoolBindingSpec &spec : securityBoolBindings)
+        addBool(spec.key, spec.defaultValue, spec.check);
+
+    addLineEdit("Security/ftpsCaCertPathDefault", QString(),
+                ftpsCaCertPathDefaultEdit_,
+                [](const QString &raw) { return raw.trimmed(); });
+    addSpin("Security/noHostVerificationTtlMin", 15, noHostVerifyTtlMinSpin_);
+
+#if defined(Q_OS_MAC) || defined(Q_OS_MACOS) || defined(__APPLE__)
+    addBool("Security/macKeychainRestrictive", false, macKeychainRestrictive_);
+#endif
+
+#if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) &&       \
+    !defined(HAVE_LIBSECRET) && !defined(OPENSCP_BUILD_SECURE_ONLY)
+    addBool("Security/enableInsecureSecretFallback", false, insecureFallback_);
+#endif
+
+    struct SpinBindingSpec {
+        const char *key;
+        int defaultValue;
+        QSpinBox *spin;
+    };
+    const SpinBindingSpec plainSpinBindings[] = {
+        {"Transfer/maxConcurrent", 2, maxConcurrentSpin_},
+        {"Transfer/globalSpeedKBps", 0, globalSpeedDefaultSpin_},
+        {"Advanced/stagingPrepTimeoutMs", 2000, stagingPrepTimeoutMsSpin_},
+        {"Advanced/stagingConfirmItems", 500, stagingConfirmItemsSpin_},
+        {"Advanced/stagingConfirmMiB", 1024, stagingConfirmMiBSpin_},
+        {"Advanced/maxFolderDepth", 32, maxDepthSpin_},
+    };
+    for (const SpinBindingSpec &spec : plainSpinBindings)
+        addSpin(spec.key, spec.defaultValue, spec.spin);
+
+    addIntCombo("Transfer/defaultQueueAutoClearMode", kQueueAutoClearOff,
+                queueAutoClearModeDefault_, [](int value) {
+                    return qBound(kQueueAutoClearOff, value,
+                                  kQueueAutoClearFinished);
+                });
+
+    struct BoundedSpinBindingSpec {
+        const char *key;
+        int defaultValue;
+        QSpinBox *spin;
+        int minValue;
+        int maxValue;
+    };
+    const BoundedSpinBindingSpec boundedSpinBindings[] = {
+        {"Transfer/defaultQueueAutoClearMinutes", 15,
+         queueAutoClearMinutesDefaultSpin_, 1, 1440},
+        {"Network/sessionHealthIntervalSec", 600, sessionHealthIntervalSecSpin_,
+         60, 86400},
+        {"Network/remoteWriteabilityTtlMs", 15000, remoteWriteabilityTtlMsSpin_,
+         1000, 120000},
+        {"Advanced/stagingRetentionDays", 7, stagingRetentionDaysSpin_, 1, 365},
+    };
+    for (const BoundedSpinBindingSpec &spec : boundedSpinBindings) {
+        addSpin(spec.key, spec.defaultValue, spec.spin, spec.minValue,
+                spec.maxValue);
+    }
+
+    addLineEdit("Advanced/stagingRoot",
+                QDir::homePath() + "/Downloads/OpenSCP-Dragged",
+                stagingRootEdit_);
+    addBool("Advanced/autoCleanStaging", true, autoCleanStaging_);
+
+    return bindings;
+}
+
+QVariantMap SettingsDialog::readPersistedSnapshot(
+    const QSettings &settings, const QVector<SettingBinding> &bindings) const {
+    QVariantMap snapshot;
+    for (const auto &binding : bindings) {
+        if (!binding.readPersisted)
+            continue;
+        snapshot.insert(binding.id, binding.readPersisted(settings));
+    }
+    return snapshot;
+}
+
+QVariantMap
+SettingsDialog::readCurrentSnapshot(const QVector<SettingBinding> &bindings) const {
+    QVariantMap snapshot;
+    for (const auto &binding : bindings) {
+        if (!binding.readCurrent)
+            continue;
+        snapshot.insert(binding.id, binding.readCurrent());
+    }
+    return snapshot;
+}
+
+void SettingsDialog::applySnapshotToControls(
+    const QVariantMap &snapshot, const QVector<SettingBinding> &bindings) {
+    for (const auto &binding : bindings) {
+        if (!binding.applyToControl)
+            continue;
+        binding.applyToControl(snapshot.value(binding.id));
+    }
+}
+
+void SettingsDialog::writeSnapshot(
+    QSettings &settings, const QVariantMap &snapshot,
+    const QVector<SettingBinding> &bindings) const {
+    for (const auto &binding : bindings) {
+        if (!binding.writePersisted)
+            continue;
+        binding.writePersisted(settings, snapshot.value(binding.id));
+    }
+}
+
 QString SettingsDialog::wrapTextToWidth(const QString &text,
                                         const QFontMetrics &fm,
                                         int maxWidth) {
@@ -679,204 +1179,12 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     connect(applyBtn_, &QPushButton::clicked, this, &SettingsDialog::onApply);
     connect(closeBtn_, &QPushButton::clicked, this, &SettingsDialog::reject);
 
-    // Load from QSettings
+    // Load from QSettings through declarative bindings
     QSettings s("OpenSCP", "OpenSCP");
-    const QString lang = s.value("UI/language", "en").toString();
-    const int li = langCombo_->findData(lang);
-    if (li >= 0)
-        langCombo_->setCurrentIndex(li);
-    if (showHidden_)
-        showHidden_->setChecked(s.value("UI/showHidden", false).toBool());
-    if (showConnOnStart_)
-        showConnOnStart_->setChecked(
-            s.value("UI/showConnOnStart", true).toBool());
-    if (showConnOnDisconnect_)
-        showConnOnDisconnect_->setChecked(
-            s.value("UI/openSiteManagerOnDisconnect", true).toBool());
-    clickMode_->setCurrentIndex(s.value("UI/singleClick", false).toBool() ? 1
-                                                                          : 0);
-    QString openBehaviorMode =
-        s.value("UI/openBehaviorMode").toString().trimmed().toLower();
-    if (openBehaviorMode.isEmpty()) {
-        const bool revealLegacy =
-            s.value("UI/openRevealInFolder", false).toBool();
-        openBehaviorMode =
-            revealLegacy ? QStringLiteral("reveal") : QStringLiteral("ask");
-    }
-    if (openBehaviorMode_) {
-        int modeIdx = openBehaviorMode_->findData(openBehaviorMode);
-        if (modeIdx < 0)
-            modeIdx = openBehaviorMode_->findData(QStringLiteral("ask"));
-        if (modeIdx >= 0)
-            openBehaviorMode_->setCurrentIndex(modeIdx);
-    }
-    if (showQueueOnEnqueue_)
-        showQueueOnEnqueue_->setChecked(
-            s.value("UI/showQueueOnEnqueue", true).toBool());
-    if (queueShortcutEdit_) {
-        queueShortcutEdit_->setKeySequence(QKeySequence::fromString(
-            s.value(kShortcutTransfersKey, QStringLiteral("F12")).toString(),
-            QKeySequence::PortableText));
-    }
-    if (historyShortcutEdit_) {
-        historyShortcutEdit_->setKeySequence(QKeySequence::fromString(
-            s.value(kShortcutHistoryKey, QStringLiteral("Ctrl+Shift+H"))
-                .toString(),
-            QKeySequence::PortableText));
-    }
-    if (defaultDownloadDirEdit_)
-        defaultDownloadDirEdit_->setText(
-            s.value("UI/defaultDownloadDir", defaultDownloadDirPath())
-                .toString());
-    if (deleteSecretsOnRemove_)
-        deleteSecretsOnRemove_->setChecked(
-            s.value("Sites/deleteSecretsOnRemove", false).toBool());
-    if (defaultProtocol_) {
-        const auto defaultProtocol = openscp::protocolFromStorageName(
-            s.value("Protocol/defaultProtocol",
-                    QString::fromLatin1(openscp::protocolStorageName(
-                        openscp::Protocol::Sftp)))
-                .toString()
-                .trimmed()
-                .toLower()
-                .toStdString());
-        const int protocolIdx =
-            defaultProtocol_->findData(static_cast<int>(defaultProtocol));
-        if (protocolIdx >= 0)
-            defaultProtocol_->setCurrentIndex(protocolIdx);
-    }
-    if (scpModeDefault_) {
-        const auto scpMode = openscp::scpTransferModeFromStorageName(
-            s.value("Protocol/scpTransferModeDefault",
-                    QString::fromLatin1(openscp::scpTransferModeStorageName(
-                        openscp::ScpTransferMode::Auto)))
-                .toString()
-                .trimmed()
-                .toLower()
-                .toStdString());
-        const int scpModeIdx =
-            scpModeDefault_->findData(static_cast<int>(scpMode));
-        if (scpModeIdx >= 0)
-            scpModeDefault_->setCurrentIndex(scpModeIdx);
-    }
-    if (defaultKnownHostsPolicy_) {
-        int policyIdx = defaultKnownHostsPolicy_->findData(
-            s.value("Security/defaultKnownHostsPolicy",
-                    static_cast<int>(openscp::KnownHostsPolicy::Strict))
-                .toInt());
-        if (policyIdx < 0) {
-            policyIdx = defaultKnownHostsPolicy_->findData(
-                static_cast<int>(openscp::KnownHostsPolicy::Strict));
-        }
-        if (policyIdx >= 0)
-            defaultKnownHostsPolicy_->setCurrentIndex(policyIdx);
-    }
-    if (defaultIntegrityPolicy_) {
-        int integrityIdx = defaultIntegrityPolicy_->findData(
-            s.value("Security/defaultTransferIntegrityPolicy",
-                    static_cast<int>(openscp::TransferIntegrityPolicy::Optional))
-                .toInt());
-        if (integrityIdx < 0) {
-            integrityIdx = defaultIntegrityPolicy_->findData(
-                static_cast<int>(openscp::TransferIntegrityPolicy::Optional));
-        }
-        if (integrityIdx >= 0)
-            defaultIntegrityPolicy_->setCurrentIndex(integrityIdx);
-    }
-    if (ftpsVerifyPeerDefault_) {
-        ftpsVerifyPeerDefault_->setChecked(
-            s.value("Security/ftpsVerifyPeerDefault", true).toBool());
-    }
-    if (ftpsCaCertPathDefaultEdit_) {
-        ftpsCaCertPathDefaultEdit_->setText(
-            s.value("Security/ftpsCaCertPathDefault", QString())
-                .toString()
-                .trimmed());
-    }
-    if (knownHostsHashed_)
-        knownHostsHashed_->setChecked(
-            s.value("Security/knownHostsHashed", true).toBool());
-    if (fpHex_)
-        fpHex_->setChecked(s.value("Security/fpHex", false).toBool());
-    if (terminalForceInteractiveLogin_) {
-        terminalForceInteractiveLogin_->setChecked(
-            s.value("Terminal/forceInteractiveLogin", false).toBool());
-    }
-    if (terminalEnableSftpCliFallback_) {
-        terminalEnableSftpCliFallback_->setChecked(
-            s.value("Terminal/enableSftpCliFallback", true).toBool());
-    }
-    if (noHostVerifyTtlMinSpin_)
-        noHostVerifyTtlMinSpin_->setValue(
-            s.value("Security/noHostVerificationTtlMin", 15).toInt());
-#if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) &&       \
-    !defined(HAVE_LIBSECRET) && !defined(OPENSCP_BUILD_SECURE_ONLY)
-    if (insecureFallback_)
-        insecureFallback_->setChecked(
-            s.value("Security/enableInsecureSecretFallback", false).toBool());
-#endif
-    if (maxConcurrentSpin_)
-        maxConcurrentSpin_->setValue(
-            s.value("Transfer/maxConcurrent", 2).toInt());
-    if (globalSpeedDefaultSpin_)
-        globalSpeedDefaultSpin_->setValue(
-            s.value("Transfer/globalSpeedKBps", 0).toInt());
-    if (queueAutoClearModeDefault_) {
-        int queueMode = s.value("Transfer/defaultQueueAutoClearMode",
-                                kQueueAutoClearOff)
-                            .toInt();
-        queueMode = qBound(kQueueAutoClearOff, queueMode,
-                           kQueueAutoClearFinished);
-        int modeIdx = queueAutoClearModeDefault_->findData(queueMode);
-        if (modeIdx < 0)
-            modeIdx = queueAutoClearModeDefault_->findData(kQueueAutoClearOff);
-        if (modeIdx >= 0)
-            queueAutoClearModeDefault_->setCurrentIndex(modeIdx);
-    }
-    if (queueAutoClearMinutesDefaultSpin_) {
-        queueAutoClearMinutesDefaultSpin_->setValue(qBound(
-            1, s.value("Transfer/defaultQueueAutoClearMinutes", 15).toInt(),
-            1440));
-    }
-    if (sessionHealthIntervalSecSpin_) {
-        sessionHealthIntervalSecSpin_->setValue(
-            qBound(60, s.value("Network/sessionHealthIntervalSec", 600).toInt(),
-                   86400));
-    }
-    if (remoteWriteabilityTtlMsSpin_) {
-        remoteWriteabilityTtlMsSpin_->setValue(
-            qBound(1000,
-                   s.value("Network/remoteWriteabilityTtlMs", 15000).toInt(),
-                   120000));
-    }
-    if (stagingRootEdit_)
-        stagingRootEdit_->setText(
-            s.value("Advanced/stagingRoot",
-                    QDir::homePath() + "/Downloads/OpenSCP-Dragged")
-                .toString());
-    if (autoCleanStaging_)
-        autoCleanStaging_->setChecked(
-            s.value("Advanced/autoCleanStaging", true).toBool());
-    if (stagingRetentionDaysSpin_)
-        stagingRetentionDaysSpin_->setValue(
-            qBound(1, s.value("Advanced/stagingRetentionDays", 7).toInt(),
-                   365));
-    if (stagingPrepTimeoutMsSpin_)
-        stagingPrepTimeoutMsSpin_->setValue(
-            s.value("Advanced/stagingPrepTimeoutMs", 2000).toInt());
-    if (stagingConfirmItemsSpin_)
-        stagingConfirmItemsSpin_->setValue(
-            s.value("Advanced/stagingConfirmItems", 500).toInt());
-    if (stagingConfirmMiBSpin_)
-        stagingConfirmMiBSpin_->setValue(
-            s.value("Advanced/stagingConfirmMiB", 1024).toInt());
-    if (maxDepthSpin_)
-        maxDepthSpin_->setValue(s.value("Advanced/maxFolderDepth", 32).toInt());
-#if defined(Q_OS_MAC) || defined(Q_OS_MACOS) || defined(__APPLE__)
-    if (macKeychainRestrictive_)
-        macKeychainRestrictive_->setChecked(
-            s.value("Security/macKeychainRestrictive", false).toBool());
-#endif
+    const auto bindings = buildSettingBindings();
+    const QVariantMap persistedSnapshot =
+        readPersistedSnapshot(s, bindings);
+    applySnapshotToControls(persistedSnapshot, bindings);
     if (queueAutoClearModeDefault_ && queueAutoClearMinutesDefaultSpin_) {
         const bool queueMinutesEnabled =
             queueAutoClearModeDefault_->currentData().toInt() !=
@@ -988,149 +1296,19 @@ void SettingsDialog::resizeEvent(QResizeEvent *event) {
 }
 
 void SettingsDialog::onApply() {
-    const QString chosenLang = langCombo_->currentData().toString();
-
     QSettings s("OpenSCP", "OpenSCP");
-    const QString prevLang = s.value("UI/language", "en").toString();
-    s.setValue("UI/language", chosenLang);
-    s.setValue("UI/showHidden", showHidden_ && showHidden_->isChecked());
-    s.setValue("UI/showConnOnStart",
-               showConnOnStart_ && showConnOnStart_->isChecked());
-    if (showConnOnDisconnect_)
-        s.setValue("UI/openSiteManagerOnDisconnect",
-                   showConnOnDisconnect_->isChecked());
-    const bool singleClick =
-        (clickMode_ && clickMode_->currentData().toInt() == 1);
-    s.setValue("UI/singleClick", singleClick);
-    const QString openMode = openBehaviorMode_
-                                 ? openBehaviorMode_->currentData().toString()
-                                 : QStringLiteral("ask");
-    s.setValue("UI/openBehaviorMode", openMode);
-    if (openMode == QStringLiteral("reveal")) {
-        s.setValue("UI/openRevealInFolder", true);
-        s.setValue("UI/openBehaviorChosen", true);
-    } else if (openMode == QStringLiteral("open")) {
-        s.setValue("UI/openRevealInFolder", false);
-        s.setValue("UI/openBehaviorChosen", true);
-    } else {
-        s.setValue("UI/openBehaviorChosen", false);
-    }
-    if (showQueueOnEnqueue_)
-        s.setValue("UI/showQueueOnEnqueue", showQueueOnEnqueue_->isChecked());
-    if (queueShortcutEdit_) {
-        s.setValue(kShortcutTransfersKey,
-                   queueShortcutEdit_->keySequence().toString(
-                       QKeySequence::PortableText));
-    }
-    if (historyShortcutEdit_) {
-        s.setValue(kShortcutHistoryKey,
-                   historyShortcutEdit_->keySequence().toString(
-                       QKeySequence::PortableText));
-    }
-    if (defaultDownloadDirEdit_) {
-        QString path = defaultDownloadDirEdit_->text().trimmed();
-        if (path.isEmpty())
-            path = defaultDownloadDirPath();
-        s.setValue("UI/defaultDownloadDir", QDir::cleanPath(path));
-    }
-    if (deleteSecretsOnRemove_)
-        s.setValue("Sites/deleteSecretsOnRemove",
-                   deleteSecretsOnRemove_->isChecked());
-    if (defaultProtocol_) {
-        const auto protocol = static_cast<openscp::Protocol>(
-            defaultProtocol_->currentData().toInt());
-        s.setValue("Protocol/defaultProtocol",
-                   QString::fromLatin1(openscp::protocolStorageName(protocol)));
-    }
-    if (scpModeDefault_) {
-        const auto mode = static_cast<openscp::ScpTransferMode>(
-            scpModeDefault_->currentData().toInt());
-        s.setValue("Protocol/scpTransferModeDefault",
-                   QString::fromLatin1(
-                       openscp::scpTransferModeStorageName(mode)));
-    }
-    if (defaultKnownHostsPolicy_) {
-        s.setValue("Security/defaultKnownHostsPolicy",
-                   defaultKnownHostsPolicy_->currentData().toInt());
-    }
-    if (defaultIntegrityPolicy_) {
-        s.setValue("Security/defaultTransferIntegrityPolicy",
-                   defaultIntegrityPolicy_->currentData().toInt());
-    }
-    if (ftpsVerifyPeerDefault_) {
-        s.setValue("Security/ftpsVerifyPeerDefault",
-                   ftpsVerifyPeerDefault_->isChecked());
-    }
-    if (ftpsCaCertPathDefaultEdit_) {
-        s.setValue("Security/ftpsCaCertPathDefault",
-                   ftpsCaCertPathDefaultEdit_->text().trimmed());
-    }
-    if (knownHostsHashed_)
-        s.setValue("Security/knownHostsHashed", knownHostsHashed_->isChecked());
-    if (fpHex_)
-        s.setValue("Security/fpHex", fpHex_->isChecked());
-    if (terminalForceInteractiveLogin_) {
-        s.setValue("Terminal/forceInteractiveLogin",
-                   terminalForceInteractiveLogin_->isChecked());
-    }
-    if (terminalEnableSftpCliFallback_) {
-        s.setValue("Terminal/enableSftpCliFallback",
-                   terminalEnableSftpCliFallback_->isChecked());
-    }
-    if (noHostVerifyTtlMinSpin_)
-        s.setValue("Security/noHostVerificationTtlMin",
-                   noHostVerifyTtlMinSpin_->value());
-#if defined(Q_OS_MAC) || defined(Q_OS_MACOS) || defined(__APPLE__)
-    if (macKeychainRestrictive_)
-        s.setValue("Security/macKeychainRestrictive",
-                   macKeychainRestrictive_->isChecked());
-#endif
-    if (insecureFallback_)
-        s.setValue("Security/enableInsecureSecretFallback",
-                   insecureFallback_->isChecked());
-    if (maxConcurrentSpin_)
-        s.setValue("Transfer/maxConcurrent", maxConcurrentSpin_->value());
-    if (globalSpeedDefaultSpin_)
-        s.setValue("Transfer/globalSpeedKBps",
-                   globalSpeedDefaultSpin_->value());
-    if (queueAutoClearModeDefault_) {
-        s.setValue("Transfer/defaultQueueAutoClearMode",
-                   queueAutoClearModeDefault_->currentData().toInt());
-    }
-    if (queueAutoClearMinutesDefaultSpin_) {
-        s.setValue("Transfer/defaultQueueAutoClearMinutes",
-                   queueAutoClearMinutesDefaultSpin_->value());
-    }
-    if (sessionHealthIntervalSecSpin_) {
-        s.setValue("Network/sessionHealthIntervalSec",
-                   sessionHealthIntervalSecSpin_->value());
-    }
-    if (remoteWriteabilityTtlMsSpin_) {
-        s.setValue("Network/remoteWriteabilityTtlMs",
-                   remoteWriteabilityTtlMsSpin_->value());
-    }
-    if (stagingRootEdit_)
-        s.setValue("Advanced/stagingRoot", stagingRootEdit_->text());
-    if (autoCleanStaging_)
-        s.setValue("Advanced/autoCleanStaging", autoCleanStaging_->isChecked());
-    if (stagingRetentionDaysSpin_) {
-        s.setValue("Advanced/stagingRetentionDays",
-                   stagingRetentionDaysSpin_->value());
-    }
-    if (stagingPrepTimeoutMsSpin_)
-        s.setValue("Advanced/stagingPrepTimeoutMs",
-                   stagingPrepTimeoutMsSpin_->value());
-    if (stagingConfirmItemsSpin_)
-        s.setValue("Advanced/stagingConfirmItems",
-                   stagingConfirmItemsSpin_->value());
-    if (stagingConfirmMiBSpin_)
-        s.setValue("Advanced/stagingConfirmMiB",
-                   stagingConfirmMiBSpin_->value());
-    if (maxDepthSpin_)
-        s.setValue("Advanced/maxFolderDepth", maxDepthSpin_->value());
+    const auto bindings = buildSettingBindings();
+    const QVariantMap persistedSnapshot = readPersistedSnapshot(s, bindings);
+    const QVariantMap currentSnapshot = readCurrentSnapshot(bindings);
+    const QString prevLang =
+        persistedSnapshot.value(QStringLiteral("UI/language")).toString();
+
+    writeSnapshot(s, currentSnapshot, bindings);
     s.sync();
 
     // Only notify if language actually changed
+    const QString chosenLang =
+        currentSnapshot.value(QStringLiteral("UI/language")).toString();
     if (prevLang != chosenLang) {
         UiAlerts::information(
             this, tr("Language"),
@@ -1145,263 +1323,19 @@ void SettingsDialog::onApply() {
 
 void SettingsDialog::updateApplyFromControls() {
     QSettings s("OpenSCP", "OpenSCP");
-    const QString prevLang = s.value("UI/language", "en").toString();
-    const bool showHidden = s.value("UI/showHidden", false).toBool();
-    const bool showConnOnStart = s.value("UI/showConnOnStart", true).toBool();
-    const bool onDisc =
-        s.value("UI/openSiteManagerOnDisconnect", true).toBool();
-    const bool singleClick = s.value("UI/singleClick", false).toBool();
-    QString openMode =
-        s.value("UI/openBehaviorMode").toString().trimmed().toLower();
-    if (openMode.isEmpty()) {
-        const bool revealLegacy =
-            s.value("UI/openRevealInFolder", false).toBool();
-        openMode =
-            revealLegacy ? QStringLiteral("reveal") : QStringLiteral("ask");
+    const auto bindings = buildSettingBindings();
+    const QVariantMap persistedSnapshot = readPersistedSnapshot(s, bindings);
+    const QVariantMap currentSnapshot = readCurrentSnapshot(bindings);
+
+    bool modified = false;
+    for (const auto &binding : bindings) {
+        if (currentSnapshot.value(binding.id) !=
+            persistedSnapshot.value(binding.id)) {
+            modified = true;
+            break;
+        }
     }
-    const bool showQueue = s.value("UI/showQueueOnEnqueue", true).toBool();
-    const QString queueShortcut =
-        s.value(kShortcutTransfersKey, QStringLiteral("F12"))
-            .toString()
-            .trimmed();
-    const QString historyShortcut =
-        s.value(kShortcutHistoryKey, QStringLiteral("Ctrl+Shift+H"))
-            .toString()
-            .trimmed();
-    QString defaultDownload =
-        s.value("UI/defaultDownloadDir", defaultDownloadDirPath())
-            .toString()
-            .trimmed();
-    if (defaultDownload.isEmpty())
-        defaultDownload = defaultDownloadDirPath();
-    defaultDownload = QDir::cleanPath(defaultDownload);
-    const bool deleteSecrets =
-        s.value("Sites/deleteSecretsOnRemove", false).toBool();
-    const auto defaultProtocol = openscp::protocolFromStorageName(
-        s.value("Protocol/defaultProtocol",
-                QString::fromLatin1(
-                    openscp::protocolStorageName(openscp::Protocol::Sftp)))
-            .toString()
-            .trimmed()
-            .toLower()
-            .toStdString());
-    const auto scpModeDefault = openscp::scpTransferModeFromStorageName(
-        s.value("Protocol/scpTransferModeDefault",
-                QString::fromLatin1(openscp::scpTransferModeStorageName(
-                    openscp::ScpTransferMode::Auto)))
-            .toString()
-            .trimmed()
-            .toLower()
-            .toStdString());
-    const int defaultKnownHostsPolicy =
-        s.value("Security/defaultKnownHostsPolicy",
-                static_cast<int>(openscp::KnownHostsPolicy::Strict))
-            .toInt();
-    const int defaultIntegrityPolicy =
-        s.value("Security/defaultTransferIntegrityPolicy",
-                static_cast<int>(openscp::TransferIntegrityPolicy::Optional))
-            .toInt();
-    const bool ftpsVerifyPeerDefault =
-        s.value("Security/ftpsVerifyPeerDefault", true).toBool();
-    const QString ftpsCaCertPathDefault =
-        s.value("Security/ftpsCaCertPathDefault", QString())
-            .toString()
-            .trimmed();
-    const bool knownHashed =
-        s.value("Security/knownHostsHashed", true).toBool();
-    const bool fpHex = s.value("Security/fpHex", false).toBool();
-    const bool terminalForceInteractiveLogin =
-        s.value("Terminal/forceInteractiveLogin", false).toBool();
-    const bool terminalEnableSftpCliFallback =
-        s.value("Terminal/enableSftpCliFallback", true).toBool();
-    const int noHostVerifyTtlMin =
-        s.value("Security/noHostVerificationTtlMin", 15).toInt();
-// Only compare insecure fallback when available in this build/platform
-#if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) &&       \
-    !defined(HAVE_LIBSECRET) && !defined(OPENSCP_BUILD_SECURE_ONLY)
-    const bool insecureFb =
-        s.value("Security/enableInsecureSecretFallback", false).toBool();
-#endif
-    const int maxConcurrent = s.value("Transfer/maxConcurrent", 2).toInt();
-    const int globalSpeedDefault =
-        s.value("Transfer/globalSpeedKBps", 0).toInt();
-    const int queueAutoClearModeDefault =
-        qBound(kQueueAutoClearOff,
-               s.value("Transfer/defaultQueueAutoClearMode", kQueueAutoClearOff)
-                   .toInt(),
-               kQueueAutoClearFinished);
-    const int queueAutoClearMinutesDefault = qBound(
-        1, s.value("Transfer/defaultQueueAutoClearMinutes", 15).toInt(), 1440);
-    const int sessionHealthIntervalSec = qBound(
-        60, s.value("Network/sessionHealthIntervalSec", 600).toInt(), 86400);
-    const int remoteWriteabilityTtlMs = qBound(
-        1000, s.value("Network/remoteWriteabilityTtlMs", 15000).toInt(),
-        120000);
-    const QString stagingRoot =
-        s.value("Advanced/stagingRoot",
-                QDir::homePath() + "/Downloads/OpenSCP-Dragged")
-            .toString();
-    const bool autoCleanSt =
-        s.value("Advanced/autoCleanStaging", true).toBool();
-    const int stagingRetentionDays = qBound(
-        1, s.value("Advanced/stagingRetentionDays", 7).toInt(), 365);
-    const int stagingPrepTimeoutMs =
-        s.value("Advanced/stagingPrepTimeoutMs", 2000).toInt();
-    const int stagingConfirmItems =
-        s.value("Advanced/stagingConfirmItems", 500).toInt();
-    const int stagingConfirmMiB =
-        s.value("Advanced/stagingConfirmMiB", 1024).toInt();
-    const int maxDepthPrev = s.value("Advanced/maxFolderDepth", 32).toInt();
 
-    const QString curLang =
-        langCombo_ ? langCombo_->currentData().toString() : prevLang;
-    const bool curShowHidden = showHidden_ && showHidden_->isChecked();
-    const bool curShowConn = showConnOnStart_ && showConnOnStart_->isChecked();
-    const bool curShowConnDisc =
-        showConnOnDisconnect_ && showConnOnDisconnect_->isChecked();
-    const bool curSingleClick =
-        (clickMode_ && clickMode_->currentData().toInt() == 1);
-    const QString curOpenMode =
-        openBehaviorMode_ ? openBehaviorMode_->currentData().toString()
-                          : openMode;
-    const bool curShowQueue =
-        showQueueOnEnqueue_ && showQueueOnEnqueue_->isChecked();
-    const QString curQueueShortcut = queueShortcutEdit_
-                                         ? queueShortcutEdit_->keySequence()
-                                               .toString(
-                                                   QKeySequence::PortableText)
-                                               .trimmed()
-                                         : queueShortcut;
-    const QString curHistoryShortcut = historyShortcutEdit_
-                                           ? historyShortcutEdit_->keySequence()
-                                                 .toString(
-                                                     QKeySequence::PortableText)
-                                                 .trimmed()
-                                           : historyShortcut;
-    QString curDefaultDownload = defaultDownloadDirEdit_
-                                     ? defaultDownloadDirEdit_->text().trimmed()
-                                     : defaultDownload;
-    if (curDefaultDownload.isEmpty())
-        curDefaultDownload = defaultDownloadDirPath();
-    curDefaultDownload = QDir::cleanPath(curDefaultDownload);
-    const bool curDeleteSecrets =
-        deleteSecretsOnRemove_ && deleteSecretsOnRemove_->isChecked();
-    const auto curDefaultProtocol =
-        defaultProtocol_
-            ? static_cast<openscp::Protocol>(
-                  defaultProtocol_->currentData().toInt())
-            : defaultProtocol;
-    const auto curScpModeDefault =
-        scpModeDefault_
-            ? static_cast<openscp::ScpTransferMode>(
-                  scpModeDefault_->currentData().toInt())
-            : scpModeDefault;
-    const int curDefaultKnownHostsPolicy =
-        defaultKnownHostsPolicy_
-            ? defaultKnownHostsPolicy_->currentData().toInt()
-            : defaultKnownHostsPolicy;
-    const int curDefaultIntegrityPolicy =
-        defaultIntegrityPolicy_ ? defaultIntegrityPolicy_->currentData().toInt()
-                                : defaultIntegrityPolicy;
-    const bool curFtpsVerifyPeerDefault =
-        ftpsVerifyPeerDefault_ ? ftpsVerifyPeerDefault_->isChecked()
-                               : ftpsVerifyPeerDefault;
-    const QString curFtpsCaCertPathDefault =
-        ftpsCaCertPathDefaultEdit_ ? ftpsCaCertPathDefaultEdit_->text().trimmed()
-                                   : ftpsCaCertPathDefault;
-    const bool curKnownHashed =
-        knownHostsHashed_ && knownHostsHashed_->isChecked();
-    const bool curFpHex = fpHex_ && fpHex_->isChecked();
-    const bool curTerminalForceInteractiveLogin =
-        terminalForceInteractiveLogin_ &&
-        terminalForceInteractiveLogin_->isChecked();
-    const bool curTerminalEnableSftpCliFallback =
-        terminalEnableSftpCliFallback_ &&
-        terminalEnableSftpCliFallback_->isChecked();
-    const int curNoHostVerifyTtlMin = noHostVerifyTtlMinSpin_
-                                          ? noHostVerifyTtlMinSpin_->value()
-                                          : noHostVerifyTtlMin;
-// Current value only when applicable
-#if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) &&       \
-    !defined(HAVE_LIBSECRET) && !defined(OPENSCP_BUILD_SECURE_ONLY)
-    const bool curInsecureFb =
-        insecureFallback_ && insecureFallback_->isChecked();
-#endif
-    const int curMaxConcurrent =
-        maxConcurrentSpin_ ? maxConcurrentSpin_->value() : maxConcurrent;
-    const int curGlobalSpeedDefault = globalSpeedDefaultSpin_
-                                          ? globalSpeedDefaultSpin_->value()
-                                          : globalSpeedDefault;
-    const int curQueueAutoClearModeDefault =
-        queueAutoClearModeDefault_
-            ? queueAutoClearModeDefault_->currentData().toInt()
-            : queueAutoClearModeDefault;
-    const int curQueueAutoClearMinutesDefault =
-        queueAutoClearMinutesDefaultSpin_
-            ? queueAutoClearMinutesDefaultSpin_->value()
-            : queueAutoClearMinutesDefault;
-    const int curSessionHealthIntervalSec = sessionHealthIntervalSecSpin_
-                                                ? sessionHealthIntervalSecSpin_
-                                                      ->value()
-                                                : sessionHealthIntervalSec;
-    const int curRemoteWriteabilityTtlMs = remoteWriteabilityTtlMsSpin_
-                                               ? remoteWriteabilityTtlMsSpin_
-                                                     ->value()
-                                               : remoteWriteabilityTtlMs;
-    const QString curStagingRoot =
-        stagingRootEdit_ ? stagingRootEdit_->text() : stagingRoot;
-    const bool curAutoCleanSt =
-        autoCleanStaging_ && autoCleanStaging_->isChecked();
-    const int curStagingRetentionDays =
-        stagingRetentionDaysSpin_ ? stagingRetentionDaysSpin_->value()
-                                  : stagingRetentionDays;
-    const int curStagingPrepTimeoutMs = stagingPrepTimeoutMsSpin_
-                                            ? stagingPrepTimeoutMsSpin_->value()
-                                            : stagingPrepTimeoutMs;
-    const int curStagingConfirmItems = stagingConfirmItemsSpin_
-                                           ? stagingConfirmItemsSpin_->value()
-                                           : stagingConfirmItems;
-    const int curStagingConfirmMiB = stagingConfirmMiBSpin_
-                                         ? stagingConfirmMiBSpin_->value()
-                                         : stagingConfirmMiB;
-    const int curMaxDepth =
-        maxDepthSpin_ ? maxDepthSpin_->value() : maxDepthPrev;
-
-    const bool modified =
-        (curLang != prevLang) || (curShowHidden != showHidden) ||
-        (curShowConn != showConnOnStart) || (curShowConnDisc != onDisc) ||
-        (curSingleClick != singleClick) || (curOpenMode != openMode) ||
-        (curShowQueue != showQueue) ||
-        (curQueueShortcut != queueShortcut) ||
-        (curHistoryShortcut != historyShortcut) ||
-        (curDefaultDownload != defaultDownload) ||
-        (curDeleteSecrets != deleteSecrets) ||
-        (curDefaultProtocol != defaultProtocol) ||
-        (curScpModeDefault != scpModeDefault) ||
-        (curDefaultKnownHostsPolicy != defaultKnownHostsPolicy) ||
-        (curDefaultIntegrityPolicy != defaultIntegrityPolicy) ||
-        (curFtpsVerifyPeerDefault != ftpsVerifyPeerDefault) ||
-        (curFtpsCaCertPathDefault != ftpsCaCertPathDefault) ||
-        (curKnownHashed != knownHashed) || (curFpHex != fpHex) ||
-        (curTerminalForceInteractiveLogin != terminalForceInteractiveLogin) ||
-        (curTerminalEnableSftpCliFallback != terminalEnableSftpCliFallback) ||
-        (curNoHostVerifyTtlMin != noHostVerifyTtlMin)
-#if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) &&       \
-    !defined(HAVE_LIBSECRET) && !defined(OPENSCP_BUILD_SECURE_ONLY)
-        || (curInsecureFb != insecureFb)
-#endif
-        || (curMaxConcurrent != maxConcurrent) ||
-        (curGlobalSpeedDefault != globalSpeedDefault) ||
-        (curQueueAutoClearModeDefault != queueAutoClearModeDefault) ||
-        (curQueueAutoClearMinutesDefault != queueAutoClearMinutesDefault) ||
-        (curSessionHealthIntervalSec != sessionHealthIntervalSec) ||
-        (curRemoteWriteabilityTtlMs != remoteWriteabilityTtlMs) ||
-        (curStagingRoot != stagingRoot) || (curAutoCleanSt != autoCleanSt) ||
-        (curStagingRetentionDays != stagingRetentionDays) ||
-        (curStagingPrepTimeoutMs != stagingPrepTimeoutMs) ||
-        (curStagingConfirmItems != stagingConfirmItems) ||
-        (curStagingConfirmMiB != stagingConfirmMiB) ||
-        (curMaxDepth != maxDepthPrev);
     if (applyBtn_) {
         applyBtn_->setEnabled(modified);
         applyBtn_->setDefault(modified);

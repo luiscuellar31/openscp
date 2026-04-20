@@ -1,7 +1,11 @@
 // Settings dialog: language, hidden files, click mode, and startup behavior.
 #pragma once
 #include <QDialog>
+#include <QVariant>
+#include <QVariantMap>
 #include <QVector>
+
+#include <functional>
 
 class QComboBox;
 class QPushButton;
@@ -9,6 +13,7 @@ class QCheckBox;
 class QResizeEvent;
 class QFontMetrics;
 class QKeySequenceEdit;
+class QSettings;
 
 class SettingsDialog : public QDialog {
     Q_OBJECT
@@ -27,6 +32,25 @@ class SettingsDialog : public QDialog {
                                     // persisted
 
   private:
+    struct SettingBinding {
+        QString id;
+        std::function<QVariant(const QSettings &)> readPersisted;
+        std::function<QVariant()> readCurrent;
+        std::function<void(const QVariant &)> applyToControl;
+        std::function<void(QSettings &, const QVariant &)> writePersisted;
+    };
+
+    QVector<SettingBinding> buildSettingBindings() const;
+    QVariantMap
+    readPersistedSnapshot(const QSettings &settings,
+                          const QVector<SettingBinding> &bindings) const;
+    QVariantMap
+    readCurrentSnapshot(const QVector<SettingBinding> &bindings) const;
+    void applySnapshotToControls(const QVariantMap &snapshot,
+                                 const QVector<SettingBinding> &bindings);
+    void writeSnapshot(QSettings &settings, const QVariantMap &snapshot,
+                       const QVector<SettingBinding> &bindings) const;
+
     static QString wrapTextToWidth(const QString &text, const QFontMetrics &fm,
                                    int maxWidth);
     void refreshWrappedCheckTexts();
