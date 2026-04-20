@@ -1,5 +1,7 @@
 // MainWindow transfer queue UI, remote prescan, and drag-and-drop handling.
 #include "MainWindow.hpp"
+#include "MainWindowSharedUtils.hpp"
+#include "RemoteWalker.hpp"
 #include "RemoteModel.hpp"
 #include "TransferQueueDialog.hpp"
 #include "UiAlerts.hpp"
@@ -23,45 +25,13 @@
 #include <QTimer>
 
 #include <atomic>
+#include <limits>
 #include <memory>
 #include <thread>
 
 static constexpr int NAME_COL = 0;
 static const char *kStagingBatchMime =
     "application/x-openscp-staging-batch";
-
-static bool isValidEntryName(const QString &name, QString *why = nullptr) {
-    if (name == "." || name == "..") {
-        if (why)
-            *why = QCoreApplication::translate(
-                "MainWindow", "Invalid name: cannot be '.' or '..'.");
-        return false;
-    }
-    if (name.contains('/') || name.contains('\\')) {
-        if (why)
-            *why = QCoreApplication::translate(
-                "MainWindow",
-                "Invalid name: cannot contain separators ('/' or '\\\\').");
-        return false;
-    }
-    for (const QChar &ch : name) {
-        ushort u = ch.unicode();
-        if (u < 0x20u || u == 0x7Fu) { // ASCII control characters
-            if (why)
-                *why = QCoreApplication::translate(
-                    "MainWindow",
-                    "Invalid name: cannot contain control characters.");
-            return false;
-        }
-    }
-    return true;
-}
-
-static QString joinRemotePath(const QString &base, const QString &name) {
-    if (base == "/")
-        return "/" + name;
-    return base.endsWith('/') ? base + name : base + "/" + name;
-}
 
 static QRect centeredQueueRect(QWidget *dialog, QWidget *mainWindow) {
     if (!dialog)
@@ -165,21 +135,10 @@ void MainWindow::runRemoteDownloadPrescan(
     std::thread([self, seeds, initialSkipped, dragAndDrop, cancelRequested,
                  scanClient = std::move(scanClient)]() mutable {
         QVector<QPair<QString, QString>> queuedPairs;
-        QVector<QPair<QString, QString>> stack;
         int skipped = initialSkipped;
         int scannedDirs = 0;
         int listFailures = 0;
         QString lastError;
-
-        for (const auto &seed : seeds) {
-            if (cancelRequested->load())
-                break;
-            if (seed.isDir) {
-                stack.push_back({seed.remotePath, seed.localPath});
-            } else {
-                queuedPairs.push_back({seed.remotePath, seed.localPath});
-            }
-        }
 
         auto postProgress = [&](int dirs, int files) {
             QObject *app = QCoreApplication::instance();
@@ -201,43 +160,60 @@ void MainWindow::runRemoteDownloadPrescan(
                 Qt::QueuedConnection);
         };
 
-        while (!stack.isEmpty() && !cancelRequested->load()) {
-            const auto pair = stack.back();
-            stack.pop_back();
-            const QString curR = pair.first;
-            const QString curL = pair.second;
-            QDir().mkpath(curL);
-            ++scannedDirs;
-            if ((scannedDirs % 25) == 0)
-                postProgress(scannedDirs, queuedPairs.size());
-
-            std::vector<openscp::FileInfo> out;
-            std::string lerr;
-            if (!scanClient->list(curR.toStdString(), out, lerr)) {
-                ++listFailures;
-                if (!lerr.empty())
-                    lastError = QString::fromStdString(lerr);
+        for (const auto &seed : seeds) {
+            if (cancelRequested->load())
+                break;
+            if (!seed.isDir) {
+                queuedPairs.push_back({seed.remotePath, seed.localPath});
                 continue;
             }
+            const QString seedLocalPath = seed.localPath;
 
-            for (const auto &e : out) {
-                if (cancelRequested->load())
-                    break;
-                const QString ename = QString::fromStdString(e.name);
-                QString why;
-                if (!isValidEntryName(ename, &why)) {
-                    ++skipped;
-                    continue;
-                }
-                const QString childR =
-                    (curR.endsWith('/') ? curR + ename : curR + "/" + ename);
-                const QString childL = QDir(curL).filePath(ename);
-                if (e.is_dir) {
-                    stack.push_back({childR, childL});
-                } else {
-                    queuedPairs.push_back({childR, childL});
-                }
+            RemoteWalker::Options walkOptions;
+            walkOptions.includeHidden = true;
+            walkOptions.skipSymlinks = false;
+            walkOptions.sanitizeRelativePath = false;
+            walkOptions.maxDepth = std::numeric_limits<int>::max();
+            walkOptions.cancel = cancelRequested.get();
+            walkOptions.validateName = [](const QString &name, QString *why) {
+                return isValidEntryName(name, why);
+            };
+            walkOptions.onDirectoryEnter = [&](const QString &remotePath,
+                                               const QString &relativePath,
+                                               int depth) {
+                Q_UNUSED(remotePath);
+                Q_UNUSED(depth);
+                const QString localDir = relativePath.isEmpty()
+                                             ? seedLocalPath
+                                             : QDir(seedLocalPath)
+                                                   .filePath(relativePath);
+                QDir().mkpath(localDir);
+                ++scannedDirs;
+                if ((scannedDirs % 25) == 0)
+                    postProgress(scannedDirs, queuedPairs.size());
+            };
+            walkOptions.onListError = [&](const QString &remotePath,
+                                          const QString &errorText) {
+                Q_UNUSED(remotePath);
+                ++listFailures;
+                if (!errorText.isEmpty())
+                    lastError = errorText;
+            };
+
+            RemoteWalker::Stats walkStats;
+            const bool walkOk = RemoteWalker::walk(
+                scanClient.get(), seed.remotePath, walkOptions,
+                [&](const RemoteWalker::Entry &entry) {
+                    const QString localPath =
+                        QDir(seedLocalPath).filePath(entry.relativePath);
+                    queuedPairs.push_back({entry.remotePath, localPath});
+                },
+                &walkStats);
+            if (!walkOk && lastError.isEmpty()) {
+                lastError = QCoreApplication::translate(
+                    "MainWindow", "Remote scan failed.");
             }
+            skipped += static_cast<int>(walkStats.skippedInvalidNameCount);
         }
 
         const bool canceled = cancelRequested->load();
@@ -600,10 +576,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
                             continue;
                         }
                     }
-                    QString rpath = remoteBase;
-                    if (!rpath.endsWith('/'))
-                        rpath += '/';
-                    rpath += name;
+                    const QString rpath = joinRemotePath(remoteBase, name);
                     const QString lpath = dst.filePath(name);
                     seeds.push_back(
                         {rpath, lpath, rightRemoteModel_->isDir(idx)});

@@ -1,5 +1,7 @@
 // Remote model implementation (table: Name, Size, Date, Permissions).
 #include "RemoteModel.hpp"
+#include "MainWindowSharedUtils.hpp"
+#include "RemoteWalker.hpp"
 #include "TimeUtils.hpp"
 #include "openscp/RuntimeLogging.hpp"
 #include <QApplication>
@@ -225,13 +227,7 @@ bool RemoteModel::setRootPath(const QString &path, QString *errorOut,
         return false;
     }
 
-    QString normalized = path.trimmed();
-    if (normalized.isEmpty())
-        normalized = QStringLiteral("/");
-    if (!normalized.startsWith('/'))
-        normalized.prepend('/');
-    if (normalized.size() > 1 && normalized.endsWith('/'))
-        normalized.chop(1);
+    const QString normalized = normalizeRemotePath(path);
 
     const quint64 reqId = ++listRequestSeq_;
     const bool showHiddenNow = showHidden_;
@@ -433,46 +429,6 @@ QMimeData *RemoteModel::mimeData(const QModelIndexList &indexes) const {
     return new QMimeData();
 }
 
-static QString normalizeRemotePath(const QString &p) {
-    if (p.isEmpty())
-        return QStringLiteral("/");
-    QString q = p;
-    if (!q.startsWith('/'))
-        q.prepend('/');
-    // remove trailing slash except root
-    if (q.size() > 1 && q.endsWith('/'))
-        q.chop(1);
-    return q;
-}
-
-static QString sanitizeRelative(const QString &rel) {
-    // Remove control chars and forbid ".." segments
-    QString out;
-    out.reserve(rel.size());
-    for (QChar ch : rel) {
-        if (ch.unicode() < 0x20)
-            continue; // skip control chars
-#ifdef Q_OS_WIN
-        if (ch == ':')
-            continue; // avoid colon on Windows
-#endif
-        QChar c = ch;
-        if (c == '\\')
-            c = '/';
-        out.append(c);
-    }
-    QStringList parts = out.split('/', Qt::SkipEmptyParts);
-    QStringList safe;
-    for (const QString &part : parts) {
-        if (part == ".")
-            continue;
-        if (part == "..")
-            return QString(); // invalid
-        safe.append(part);
-    }
-    return safe.join('/');
-}
-
 bool RemoteModel::enumerateFilesUnderEx(
     const QString &baseRemote, std::vector<EnumeratedFile> &out,
     const EnumOptions &opt, bool *partialErrorOut, bool *someSizeUnknownOut,
@@ -486,13 +442,6 @@ bool RemoteModel::enumerateFilesUnderEx(
         return false;
     }
 
-    auto joinRemote = [](const QString &base, const QString &name) {
-        if (base == "/")
-            return QStringLiteral("/") + name;
-        return base.endsWith('/') ? base + name : base + "/" + name;
-    };
-    const QString base = normalizeRemotePath(baseRemote);
-    QSet<QString> visited;
     // Resolve max depth from settings if not provided or invalid
     int configuredMaxDepth = opt.maxDepth;
     if (configuredMaxDepth <= 0) {
@@ -502,77 +451,47 @@ bool RemoteModel::enumerateFilesUnderEx(
             configuredMaxDepth = 32;
     }
 
-    std::function<void(const QString &, const QString &, int)> walk;
-    walk = [&](const QString &cur, const QString &rel, int depth) {
-        if (opt.cancel && opt.cancel->load(std::memory_order_relaxed))
-            return;
-        if (depth > configuredMaxDepth) {
-            if (openscp::sensitiveLoggingEnabled()) {
-                qWarning(ocEnum) << "max depth reached at" << cur;
-            } else {
-                qWarning(ocEnum)
-                    << "max depth reached during remote enumeration";
-            }
-            return;
-        }
-        const QString normCur = normalizeRemotePath(cur);
-        if (visited.contains(normCur))
-            return; // prevent cycles
-        visited.insert(normCur);
-        if (dirCountOut)
-            (*dirCountOut)++;
-
-        std::vector<openscp::FileInfo> children;
-        std::string err;
-        if (!client_->list(normCur.toStdString(), children, err)) {
-            if (openscp::sensitiveLoggingEnabled()) {
-                qWarning(ocEnum) << "enumeration error at" << normCur << ":"
-                                 << QString::fromStdString(err);
-            } else {
-                qWarning(ocEnum) << "enumeration error during remote listing";
-            }
-            if (partialErrorOut)
-                *partialErrorOut = true;
-            if (deniedCountOut)
-                (*deniedCountOut)++;
-            return;
-        }
-        for (const auto &e : children) {
-            if (opt.cancel && opt.cancel->load(std::memory_order_relaxed))
-                return;
-            const QString name = QString::fromStdString(e.name);
-            if (!showHidden_ && name.startsWith('.'))
-                continue;
-            bool isSymlink = (e.mode & 0120000u) == 0120000u;
-            if (isSymlink && opt.skipSymlinks) {
-                if (symlinkSkippedOut)
-                    (*symlinkSkippedOut)++;
-                continue;
-            }
-            const QString childRemote = joinRemote(normCur, name);
-            const QString childRel0 = rel.isEmpty() ? name : (rel + "/" + name);
-            const QString childRel = sanitizeRelative(childRel0);
-            if (childRel.isEmpty())
-                continue;
-            if (e.is_dir) {
-                walk(childRemote, childRel, depth + 1);
-                if (opt.cancel && opt.cancel->load(std::memory_order_relaxed))
-                    return;
-            } else {
-                quint64 sz = (quint64)e.size;
-                const bool hsz = e.has_size;
-                if (!hsz) {
-                    if (someSizeUnknownOut)
-                        *someSizeUnknownOut = true;
-                    if (unknownSizeCountOut)
-                        (*unknownSizeCountOut)++;
-                }
-                out.push_back(EnumeratedFile{childRemote, childRel, sz, hsz});
-            }
+    RemoteWalker::Options walkerOptions;
+    walkerOptions.includeHidden = showHidden_;
+    walkerOptions.skipSymlinks = opt.skipSymlinks;
+    walkerOptions.sanitizeRelativePath = true;
+    walkerOptions.maxDepth = configuredMaxDepth;
+    walkerOptions.cancel = opt.cancel;
+    walkerOptions.onListError = [](const QString &remotePath,
+                                   const QString &errorText) {
+        if (openscp::sensitiveLoggingEnabled()) {
+            qWarning(ocEnum) << "enumeration error at" << remotePath << ":"
+                             << errorText;
+        } else {
+            qWarning(ocEnum) << "enumeration error during remote listing";
         }
     };
-    walk(base, QString(), 0);
-    return true;
+
+    RemoteWalker::Stats walkerStats;
+    const bool walkOk = RemoteWalker::walk(
+        client_, baseRemote, walkerOptions,
+        [&out](const RemoteWalker::Entry &entry) {
+            out.push_back(EnumeratedFile{entry.remotePath, entry.relativePath,
+                                         static_cast<quint64>(
+                                             entry.fileInfo.size),
+                                         entry.fileInfo.has_size});
+        },
+        &walkerStats);
+
+    if (partialErrorOut)
+        *partialErrorOut = walkerStats.partialError;
+    if (someSizeUnknownOut)
+        *someSizeUnknownOut = walkerStats.unknownSizeCount > 0;
+    if (dirCountOut)
+        *dirCountOut = walkerStats.visitedDirectoryCount;
+    if (symlinkSkippedOut)
+        *symlinkSkippedOut = walkerStats.skippedSymlinkCount;
+    if (deniedCountOut)
+        *deniedCountOut = walkerStats.listFailureCount;
+    if (unknownSizeCountOut)
+        *unknownSizeCountOut = walkerStats.unknownSizeCount;
+
+    return walkOk;
 }
 
 bool RemoteModel::enumerateFilesUnder(const QString &baseRemote,

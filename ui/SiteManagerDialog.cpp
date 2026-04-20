@@ -1,6 +1,7 @@
 // Manages saved sites with QSettings and SecretStore for credentials.
 #include "SiteManagerDialog.hpp"
 #include "ConnectionDialog.hpp"
+#include "SavedSitesPersistence.hpp"
 #include "SecretStore.hpp"
 #include "UiAlerts.hpp"
 #include "openscp/KnownHostsUtils.hpp"
@@ -11,7 +12,6 @@
 #include <QHeaderView>
 #include <QPushButton>
 #include <QSaveFile>
-#include <QSet>
 #include <QSettings>
 #include <QTableWidget>
 #include <QUuid>
@@ -101,24 +101,6 @@ static QString siteSecretKey(const SiteEntry &e, const QString &item) {
     return legacyNameSecretKey(e.name, item);
 }
 
-static std::uint16_t defaultProxyPort(openscp::ProxyType type) {
-    return openscp::defaultPortForProxyType(type);
-}
-
-static std::uint16_t defaultJumpPort() { return 22; }
-
-static openscp::ScpTransferMode
-loadDefaultScpTransferModeFromSettings(const QSettings &s) {
-    return openscp::scpTransferModeFromStorageName(
-        s.value("Protocol/scpTransferModeDefault",
-                QString::fromLatin1(openscp::scpTransferModeStorageName(
-                    openscp::ScpTransferMode::Auto)))
-            .toString()
-            .trimmed()
-            .toLower()
-            .toStdString());
-}
-
 static void removeLegacyNameSecrets(SecretStore &store,
                                     const QString &siteName) {
     if (siteName.isEmpty())
@@ -195,200 +177,19 @@ void SiteManagerDialog::reloadFromSettings() {
 }
 
 void SiteManagerDialog::loadSites() {
-    sites_.clear();
-    QSettings s("OpenSCP", "OpenSCP");
-    const auto defaultScpMode = loadDefaultScpTransferModeFromSettings(s);
-    const bool defaultFtpsVerifyPeer =
-        s.value("Security/ftpsVerifyPeerDefault", true).toBool();
-    const QString defaultFtpsCaPath =
-        s.value("Security/ftpsCaCertPathDefault", QString())
-            .toString()
-            .trimmed();
-    int n = s.beginReadArray("sites");
-    bool needsSave = false;
-    QSet<QString> usedIds;
-    for (int i = 0; i < n; ++i) {
-        s.setArrayIndex(i);
-        SiteEntry e;
-        e.id = s.value("id").toString().trimmed();
-        if (e.id.isEmpty() || usedIds.contains(e.id)) {
-            e.id = newSiteId();
-            needsSave = true;
-        }
-        usedIds.insert(e.id);
-        e.name = s.value("name").toString();
-        e.opt.protocol = openscp::protocolFromStorageName(
-            s.value("protocol",
-                    QString::fromLatin1(
-                        openscp::protocolStorageName(openscp::Protocol::Sftp)))
-                .toString()
-                .trimmed()
-                .toLower()
-                .toStdString());
-        const bool hasScpTransferModeKey = s.contains("scpTransferMode");
-        e.opt.scp_transfer_mode = openscp::scpTransferModeFromStorageName(
-            s.value("scpTransferMode",
-                    QString::fromLatin1(openscp::scpTransferModeStorageName(
-                        defaultScpMode)))
-                .toString()
-                .trimmed()
-                .toLower()
-                .toStdString());
-        if (!hasScpTransferModeKey)
-            needsSave = true;
-        e.opt.host = s.value("host").toString().toStdString();
-        e.opt.port = static_cast<std::uint16_t>(
-            s.value("port",
-                    static_cast<int>(
-                        openscp::defaultPortForProtocol(e.opt.protocol)))
-                .toUInt());
-        const bool hasWebDavSchemeKey = s.contains("webdavScheme");
-        if (hasWebDavSchemeKey) {
-            e.opt.webdav_scheme = openscp::webDavSchemeFromStorageName(
-                s.value("webdavScheme",
-                        QString::fromLatin1(openscp::webDavSchemeStorageName(
-                            openscp::WebDavScheme::Https)))
-                    .toString()
-                    .trimmed()
-                    .toLower()
-                    .toStdString());
-        } else if (e.opt.protocol == openscp::Protocol::WebDav &&
-                   e.opt.port ==
-                       openscp::defaultPortForWebDavScheme(
-                           openscp::WebDavScheme::Http)) {
-            e.opt.webdav_scheme = openscp::WebDavScheme::Http;
-            needsSave = true;
-        }
-        e.opt.username = s.value("user").toString().toStdString();
-        // Password and passphrase are no longer read from QSettings; they will
-        // be fetched from SecretStore when connecting
-        const QString kp = s.value("keyPath").toString();
-        if (!kp.isEmpty())
-            e.opt.private_key_path = kp.toStdString();
-        // keyPass will be retrieved dynamically
-        e.opt.proxy_type = openscp::proxyTypeFromStorageValue(
-            s.value("proxyType", static_cast<int>(openscp::ProxyType::None))
-                .toInt());
-        e.opt.proxy_host = s.value("proxyHost").toString().trimmed().toStdString();
-        e.opt.proxy_port = static_cast<std::uint16_t>(
-            s.value("proxyPort", static_cast<int>(defaultProxyPort(e.opt.proxy_type)))
-                .toUInt());
-        const QString proxyUser = s.value("proxyUser").toString().trimmed();
-        if (!proxyUser.isEmpty())
-            e.opt.proxy_username = proxyUser.toStdString();
-        const QString jumpHost = s.value("jumpHost").toString().trimmed();
-        if (!jumpHost.isEmpty())
-            e.opt.jump_host = jumpHost.toStdString();
-        e.opt.jump_port = static_cast<std::uint16_t>(
-            s.value("jumpPort", static_cast<int>(defaultJumpPort())).toUInt());
-        const QString jumpUser = s.value("jumpUser").toString().trimmed();
-        if (!jumpUser.isEmpty())
-            e.opt.jump_username = jumpUser.toStdString();
-        const QString jumpKeyPath = s.value("jumpKeyPath").toString();
-        if (!jumpKeyPath.isEmpty())
-            e.opt.jump_private_key_path = jumpKeyPath.toStdString();
-        const QString kh = s.value("knownHosts").toString();
-        if (!kh.isEmpty())
-            e.opt.known_hosts_path = kh.toStdString();
-        e.opt.known_hosts_policy =
-            (openscp::KnownHostsPolicy)s
-                .value("khPolicy", (int)openscp::KnownHostsPolicy::Strict)
-                .toInt();
-        e.opt.transfer_integrity_policy =
-            (openscp::TransferIntegrityPolicy)s
-                .value("integrityPolicy",
-                       (int)openscp::TransferIntegrityPolicy::Optional)
-                .toInt();
-        e.opt.ftps_verify_peer =
-            s.value("ftpsVerifyPeer", defaultFtpsVerifyPeer).toBool();
-        const QString ftpsCaPath =
-            s.value("ftpsCaCertPath", defaultFtpsCaPath).toString().trimmed();
-        if (!ftpsCaPath.isEmpty())
-            e.opt.ftps_ca_cert_path = ftpsCaPath.toStdString();
-        e.opt.webdav_verify_peer =
-            s.value("webdavVerifyPeer", true).toBool();
-        const QString webDavCaPath =
-            s.value("webdavCaCertPath", QString()).toString().trimmed();
-        if (!webDavCaPath.isEmpty())
-            e.opt.webdav_ca_cert_path = webDavCaPath.toStdString();
-        if (e.opt.protocol == openscp::Protocol::WebDav &&
-            e.opt.webdav_scheme == openscp::WebDavScheme::Http) {
-            e.opt.webdav_verify_peer = false;
-            e.opt.webdav_ca_cert_path.reset();
-        }
-        sites_.push_back(e);
-    }
-    s.endArray();
-    s.sync();
-    if (needsSave)
+    const SavedSitesPersistence::LoadResult loaded =
+        SavedSitesPersistence::loadSites({
+            .trimSiteNames = false,
+            .createNewId = [] { return newSiteId(); },
+        });
+    sites_ = loaded.sites;
+    if (loaded.needsSave)
         saveSites();
 }
 
 void SiteManagerDialog::saveSites() {
-    QSettings s("OpenSCP", "OpenSCP");
-    // Clear previous array to avoid stale entries after deletions
-    s.remove("sites");
-    s.beginWriteArray("sites");
-    for (int i = 0; i < sites_.size(); ++i) {
-        s.setArrayIndex(i);
-        const auto &e = sites_[i];
-        s.setValue("id", e.id);
-        s.setValue("name", e.name);
-        s.setValue("protocol",
-                   QString::fromLatin1(
-                       openscp::protocolStorageName(e.opt.protocol)));
-        s.setValue("scpTransferMode",
-                   QString::fromLatin1(openscp::scpTransferModeStorageName(
-                       e.opt.scp_transfer_mode)));
-        s.setValue("host", QString::fromStdString(e.opt.host));
-        s.setValue("port", (int)e.opt.port);
-        s.setValue("webdavScheme",
-                   QString::fromLatin1(openscp::webDavSchemeStorageName(
-                       e.opt.webdav_scheme)));
-        s.setValue("user", QString::fromStdString(e.opt.username));
-        // Password and passphrase are stored in SecretStore under keys derived
-        // from stable site UUID.
-        s.setValue("keyPath",
-                   e.opt.private_key_path
-                       ? QString::fromStdString(*e.opt.private_key_path)
-                       : QString());
-        s.setValue("proxyType", static_cast<int>(e.opt.proxy_type));
-        s.setValue("proxyHost", QString::fromStdString(e.opt.proxy_host));
-        s.setValue("proxyPort", static_cast<int>(e.opt.proxy_port));
-        s.setValue("proxyUser",
-                   e.opt.proxy_username
-                       ? QString::fromStdString(*e.opt.proxy_username)
-                       : QString());
-        s.setValue("jumpHost",
-                   e.opt.jump_host ? QString::fromStdString(*e.opt.jump_host)
-                                   : QString());
-        s.setValue("jumpPort", static_cast<int>(e.opt.jump_port));
-        s.setValue("jumpUser",
-                   e.opt.jump_username
-                       ? QString::fromStdString(*e.opt.jump_username)
-                       : QString());
-        s.setValue("jumpKeyPath",
-                   e.opt.jump_private_key_path
-                       ? QString::fromStdString(*e.opt.jump_private_key_path)
-                       : QString());
-        s.setValue("knownHosts",
-                   e.opt.known_hosts_path
-                       ? QString::fromStdString(*e.opt.known_hosts_path)
-                       : QString());
-        s.setValue("khPolicy", (int)e.opt.known_hosts_policy);
-        s.setValue("integrityPolicy", (int)e.opt.transfer_integrity_policy);
-        s.setValue("ftpsVerifyPeer", e.opt.ftps_verify_peer);
-        s.setValue("ftpsCaCertPath",
-                   e.opt.ftps_ca_cert_path
-                       ? QString::fromStdString(*e.opt.ftps_ca_cert_path)
-                       : QString());
-        s.setValue("webdavVerifyPeer", e.opt.webdav_verify_peer);
-        s.setValue("webdavCaCertPath",
-                   e.opt.webdav_ca_cert_path
-                       ? QString::fromStdString(*e.opt.webdav_ca_cert_path)
-                       : QString());
-    }
-    s.endArray();
+    // Keep Site Manager save semantics (no forced sync).
+    SavedSitesPersistence::saveSites(sites_, false);
 }
 
 void SiteManagerDialog::refresh() {

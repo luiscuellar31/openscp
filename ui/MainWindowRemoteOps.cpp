@@ -1,6 +1,8 @@
 // MainWindow remote-side operations and writeability state.
 #include "MainWindow.hpp"
+#include "MainWindowSharedUtils.hpp"
 #include "PermissionsDialog.hpp"
+#include "RemoteWalker.hpp"
 #include "RemoteModel.hpp"
 #include "TransferManager.hpp"
 #include "UiAlerts.hpp"
@@ -28,6 +30,7 @@
 #include <QTreeView>
 
 #include <functional>
+#include <limits>
 #include <string>
 #include <thread>
 #include <vector>
@@ -45,89 +48,6 @@ static QString tempDownloadPathFor(const QString &remoteName) {
 
 // Reveal a file in the system file manager (select/highlight when possible),
 
-static bool isValidEntryName(const QString &name, QString *why = nullptr) {
-    if (name == "." || name == "..") {
-        if (why)
-            *why = QCoreApplication::translate(
-                "MainWindow", "Invalid name: cannot be '.' or '..'.");
-        return false;
-    }
-    if (name.contains('/') || name.contains('\\')) {
-        if (why)
-            *why = QCoreApplication::translate(
-                "MainWindow",
-                "Invalid name: cannot contain separators ('/' or '\\\\').");
-        return false;
-    }
-    for (const QChar &ch : name) {
-        ushort u = ch.unicode();
-        if (u < 0x20u || u == 0x7Fu) { // ASCII control characters
-            if (why)
-                *why = QCoreApplication::translate(
-                    "MainWindow",
-                    "Invalid name: cannot contain control characters.");
-            return false;
-        }
-    }
-    return true;
-}
-
-static QString shortRemoteError(const QString &raw, const QString &fallback) {
-    QString msg = raw.trimmed();
-    if (msg.isEmpty())
-        return fallback;
-
-    const QString lower = msg.toLower();
-    if (lower.contains("permission denied")) {
-        return QCoreApplication::translate("MainWindow", "Permission denied.");
-    }
-    if (lower.contains("read-only")) {
-        return QCoreApplication::translate("MainWindow",
-                                           "Location is read-only.");
-    }
-    if (lower.contains("no such file") || lower.contains("not found")) {
-        return QCoreApplication::translate("MainWindow",
-                                           "File or folder does not exist.");
-    }
-    if (lower.contains("timed out") || lower.contains("timeout")) {
-        return QCoreApplication::translate("MainWindow",
-                                           "Connection timed out.");
-    }
-    if (lower.contains("could not resolve") ||
-        lower.contains("name or service not known") ||
-        lower.contains("nodename nor servname")) {
-        return QCoreApplication::translate(
-            "MainWindow", "Could not resolve the server hostname.");
-    }
-    if (lower.contains("connection refused")) {
-        return QCoreApplication::translate("MainWindow",
-                                           "Connection refused by the server.");
-    }
-    if (lower.contains("network is unreachable") ||
-        lower.contains("host is unreachable")) {
-        return QCoreApplication::translate(
-            "MainWindow", "Network unavailable or host unreachable.");
-    }
-    if (lower.contains("authentication failed") ||
-        lower.contains("auth fail")) {
-        return QCoreApplication::translate("MainWindow",
-                                           "Authentication failed.");
-    }
-
-    const int nl = msg.indexOf('\n');
-    if (nl > 0)
-        msg = msg.left(nl);
-    msg = msg.simplified();
-    if (msg.size() > 96)
-        msg = msg.left(93) + "...";
-    return msg;
-}
-
-static QString shortRemoteError(const std::string &raw,
-                                const QString &fallback) {
-    return shortRemoteError(QString::fromStdString(raw), fallback);
-}
-
 static bool indicatesRemoteWriteabilityDenied(const QString &raw) {
     const QString lower = raw.trimmed().toLower();
     if (lower.isEmpty())
@@ -139,29 +59,10 @@ static bool indicatesRemoteWriteabilityDenied(const QString &raw) {
            lower.contains("sftp protocol error 3");
 }
 
-static QString joinRemotePath(const QString &base, const QString &name) {
-    if (base == "/")
-        return "/" + name;
-    return base.endsWith('/') ? base + name : base + "/" + name;
-}
-
 static QString trimOptionalString(const std::optional<std::string> &v) {
     if (!v || v->empty())
         return {};
     return QString::fromStdString(*v).trimmed();
-}
-
-static QString normalizeRemotePath(const QString &rawPath) {
-    QString normalized = rawPath.trimmed();
-    if (normalized.isEmpty())
-        normalized = QStringLiteral("/");
-    if (!normalized.startsWith('/'))
-        normalized.prepend('/');
-    while (normalized.contains(QStringLiteral("//")))
-        normalized.replace(QStringLiteral("//"), QStringLiteral("/"));
-    if (normalized.size() > 1 && normalized.endsWith('/'))
-        normalized.chop(1);
-    return normalized;
 }
 
 static QString shellSingleQuote(const QString &value) {
@@ -882,10 +783,7 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
         return;
     if (rightRemoteModel_->isDir(idx)) {
         const QString name = rightRemoteModel_->nameAt(idx);
-        QString next = rightRemoteModel_->rootPath();
-        if (!next.endsWith('/'))
-            next += '/';
-        next += name;
+        const QString next = joinRemotePath(rightRemoteModel_->rootPath(), name);
         setRightRemoteRoot(next);
         return;
     }
@@ -897,10 +795,8 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
             return;
         }
     }
-    QString remotePath = rightRemoteModel_->rootPath();
-    if (!remotePath.endsWith('/'))
-        remotePath += '/';
-    remotePath += name;
+    const QString remotePath =
+        joinRemotePath(rightRemoteModel_->rootPath(), name);
     const QString localPath = tempDownloadPathFor(name);
     // Avoid duplicates: if there is already an active download with same
     // src/dst, do not enqueue again
@@ -1050,43 +946,39 @@ void MainWindow::downloadRightToLeft() {
                 continue;
             }
         }
-        QString rpath = remoteBase;
-        if (!rpath.endsWith('/'))
-            rpath += '/';
-        rpath += name;
+        const QString rpath = joinRemotePath(remoteBase, name);
         const QString lpath = dst.filePath(name);
         if (rightRemoteModel_->isDir(idx)) {
-            QVector<QPair<QString, QString>> stack;
-            stack.push_back({rpath, lpath});
-            while (!stack.isEmpty()) {
-                auto pair = stack.back();
-                stack.pop_back();
-                const QString curR = pair.first;
-                const QString curL = pair.second;
-                QDir().mkpath(curL);
-                std::vector<openscp::FileInfo> out;
-                std::string lerr;
-                if (!sftp_->list(curR.toStdString(), out, lerr))
-                    continue;
-                for (const auto &e : out) {
-                    const QString ename = QString::fromStdString(e.name);
-                    QString why;
-                    if (!isValidEntryName(ename, &why)) {
-                        ++bad;
-                        continue;
-                    }
-                    const QString childR =
-                        (curR.endsWith('/') ? curR + ename
-                                            : curR + "/" + ename);
-                    const QString childL = QDir(curL).filePath(ename);
-                    if (e.is_dir)
-                        stack.push_back({childR, childL});
-                    else {
-                        transferMgr_->enqueueDownload(childR, childL);
-                        ++enq;
-                    }
-                }
-            }
+            QDir().mkpath(lpath);
+            RemoteWalker::Options walkOptions;
+            walkOptions.includeHidden = true;
+            walkOptions.skipSymlinks = false;
+            walkOptions.sanitizeRelativePath = false;
+            walkOptions.maxDepth = std::numeric_limits<int>::max();
+            walkOptions.validateName = [](const QString &entryName, QString *why) {
+                return isValidEntryName(entryName, why);
+            };
+            walkOptions.onDirectoryEnter = [lpath](const QString &remotePath,
+                                                   const QString &relativePath,
+                                                   int depth) {
+                Q_UNUSED(remotePath);
+                Q_UNUSED(depth);
+                const QString localDir = relativePath.isEmpty()
+                                             ? lpath
+                                             : QDir(lpath).filePath(relativePath);
+                QDir().mkpath(localDir);
+            };
+            RemoteWalker::Stats walkStats;
+            (void)RemoteWalker::walk(
+                sftp_.get(), rpath, walkOptions,
+                [&](const RemoteWalker::Entry &entry) {
+                    const QString childLocal =
+                        QDir(lpath).filePath(entry.relativePath);
+                    transferMgr_->enqueueDownload(entry.remotePath, childLocal);
+                    ++enq;
+                },
+                &walkStats);
+            bad += static_cast<int>(walkStats.skippedInvalidNameCount);
         } else {
             transferMgr_->enqueueDownload(rpath, lpath);
             ++enq;
@@ -1181,10 +1073,7 @@ void MainWindow::copyRightToLeft() {
                 continue;
             }
         }
-        QString rpath = remoteBase;
-        if (!rpath.endsWith('/'))
-            rpath += '/';
-        rpath += name;
+        const QString rpath = joinRemotePath(remoteBase, name);
         const QString lpath = dst.filePath(name);
         seeds.push_back({rpath, lpath, rightRemoteModel_->isDir(idx)});
     }
@@ -1273,45 +1162,41 @@ void MainWindow::moveRightToLeft() {
                 continue;
             }
         }
-        QString rpath = remoteBase;
-        if (!rpath.endsWith('/'))
-            rpath += '/';
-        rpath += name;
+        const QString rpath = joinRemotePath(remoteBase, name);
         const QString lpath = dst.filePath(name);
         const bool isDir = rightRemoteModel_->isDir(idx);
         top.push_back({rpath, isDir});
         if (isDir) {
-            QVector<QPair<QString, QString>> stack;
-            stack.push_back({rpath, lpath});
-            while (!stack.isEmpty()) {
-                auto pair = stack.back();
-                stack.pop_back();
-                const QString curR = pair.first;
-                const QString curL = pair.second;
-                QDir().mkpath(curL);
-                std::vector<openscp::FileInfo> out;
-                std::string lerr;
-                if (!sftp_->list(curR.toStdString(), out, lerr))
-                    continue;
-                for (const auto &e : out) {
-                    const QString ename = QString::fromStdString(e.name);
-                    QString why;
-                    if (!isValidEntryName(ename, &why)) {
-                        ++bad;
-                        continue;
-                    }
-                    const QString childR =
-                        (curR.endsWith('/') ? curR + ename
-                                            : curR + "/" + ename);
-                    const QString childL = QDir(curL).filePath(ename);
-                    if (e.is_dir) {
-                        stack.push_back({childR, childL});
-                    } else {
-                        QDir().mkpath(QFileInfo(childL).dir().absolutePath());
-                        pairs.push_back({childR, childL});
-                    }
-                }
-            }
+            QDir().mkpath(lpath);
+            RemoteWalker::Options walkOptions;
+            walkOptions.includeHidden = true;
+            walkOptions.skipSymlinks = false;
+            walkOptions.sanitizeRelativePath = false;
+            walkOptions.maxDepth = std::numeric_limits<int>::max();
+            walkOptions.validateName = [](const QString &entryName, QString *why) {
+                return isValidEntryName(entryName, why);
+            };
+            walkOptions.onDirectoryEnter = [lpath](const QString &remotePath,
+                                                   const QString &relativePath,
+                                                   int depth) {
+                Q_UNUSED(remotePath);
+                Q_UNUSED(depth);
+                const QString localDir = relativePath.isEmpty()
+                                             ? lpath
+                                             : QDir(lpath).filePath(relativePath);
+                QDir().mkpath(localDir);
+            };
+            RemoteWalker::Stats walkStats;
+            (void)RemoteWalker::walk(
+                sftp_.get(), rpath, walkOptions,
+                [&](const RemoteWalker::Entry &entry) {
+                    const QString childLocal =
+                        QDir(lpath).filePath(entry.relativePath);
+                    QDir().mkpath(QFileInfo(childLocal).dir().absolutePath());
+                    pairs.push_back({entry.remotePath, childLocal});
+                },
+                &walkStats);
+            bad += static_cast<int>(walkStats.skippedInvalidNameCount);
         } else {
             QDir().mkpath(QFileInfo(lpath).dir().absolutePath());
             pairs.push_back({rpath, lpath});
@@ -1923,7 +1808,6 @@ void MainWindow::deleteRightSelected() {
 void MainWindow::showRightContextMenu(const QPoint &pos) {
     if (!rightContextMenu_)
         rightContextMenu_ = new QMenu(this);
-    rightContextMenu_->clear();
 
     // Selection state and ability to go up
     bool hasSel = false;
@@ -1933,11 +1817,9 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
     // Is there a parent directory?
     bool canGoUp = false;
     if (rightIsRemote_) {
-        QString cur =
+        const QString cur = normalizeRemotePath(
             rightRemoteModel_ ? rightRemoteModel_->rootPath()
-                              : (rightPath_ ? rightPath_->text() : QString());
-        if (cur.endsWith('/'))
-            cur.chop(1);
+                              : (rightPath_ ? rightPath_->text() : QString()));
         canGoUp = (!cur.isEmpty() && cur != "/");
     } else {
         QDir d(rightPath_ ? rightPath_->text() : QString());
@@ -1945,93 +1827,78 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
     }
 
     if (isScpTransferMode()) {
-        if (canGoUp && actUpRight_)
-            rightContextMenu_->addAction(actUpRight_);
-        if (actUploadRight_)
-            rightContextMenu_->addAction(actUploadRight_);
-        if (actDownloadF7_)
-            rightContextMenu_->addAction(actDownloadF7_);
-        if (actOpenTerminalRight_)
-            rightContextMenu_->addAction(actOpenTerminalRight_);
+        QVector<QAction *> entries;
+        if (canGoUp)
+            entries.push_back(actUpRight_);
+        entries.push_back(actUploadRight_);
+        entries.push_back(actDownloadF7_);
+        entries.push_back(actOpenTerminalRight_);
+        rebuildContextMenu(rightContextMenu_, entries);
         rightContextMenu_->popup(rightView_->viewport()->mapToGlobal(pos));
         return;
     }
 
+    QVector<QAction *> entries;
     if (rightIsRemote_) {
         const bool supportsRemotePermissions =
             m_activeSessionOptions_.has_value() &&
             openscp::capabilitiesForProtocol(m_activeSessionOptions_->protocol)
                 .supports_permissions;
         // Up option (if applicable)
-        if (canGoUp && actUpRight_)
-            rightContextMenu_->addAction(actUpRight_);
+        if (canGoUp)
+            entries.push_back(actUpRight_);
 
         // Always show "Download" on remote, regardless of selection
-        if (actDownloadF7_)
-            rightContextMenu_->addAction(actDownloadF7_);
+        entries.push_back(actDownloadF7_);
 
         if (!hasSel) {
             // No selection: creation and navigation
             if (rightRemoteWritable_) {
-                if (actNewFileRight_)
-                    rightContextMenu_->addAction(actNewFileRight_);
-                if (actNewDirRight_)
-                    rightContextMenu_->addAction(actNewDirRight_);
+                entries.push_back(actNewFileRight_);
+                entries.push_back(actNewDirRight_);
             }
         } else {
             // With selection on remote
-            if (actCopyRight_)
-                rightContextMenu_->addAction(actCopyRight_);
+            entries.push_back(actCopyRight_);
             if (rightRemoteWritable_) {
-                rightContextMenu_->addSeparator();
-                if (actUploadRight_)
-                    rightContextMenu_->addAction(actUploadRight_);
-                if (actNewFileRight_)
-                    rightContextMenu_->addAction(actNewFileRight_);
-                if (actNewDirRight_)
-                    rightContextMenu_->addAction(actNewDirRight_);
-                if (actRenameRight_)
-                    rightContextMenu_->addAction(actRenameRight_);
-                if (actDeleteRight_)
-                    rightContextMenu_->addAction(actDeleteRight_);
-                if (actMoveRight_)
-                    rightContextMenu_->addAction(actMoveRight_);
+                entries.push_back(nullptr);
+                entries.push_back(actUploadRight_);
+                entries.push_back(actNewFileRight_);
+                entries.push_back(actNewDirRight_);
+                entries.push_back(actRenameRight_);
+                entries.push_back(actDeleteRight_);
+                entries.push_back(actMoveRight_);
                 if (supportsRemotePermissions) {
-                    rightContextMenu_->addSeparator();
-                    rightContextMenu_->addAction(
-                        tr("Change permissions…"), this,
-                        &MainWindow::changeRemotePermissions);
+                    entries.push_back(nullptr);
+                    auto *changePerms = new QAction(tr("Change permissions…"),
+                                                    rightContextMenu_);
+                    connect(changePerms, &QAction::triggered, this,
+                            &MainWindow::changeRemotePermissions);
+                    entries.push_back(changePerms);
                 }
             }
         }
     } else {
         // Local: Up option if applicable
-        if (canGoUp && actUpRight_)
-            rightContextMenu_->addAction(actUpRight_);
+        if (canGoUp)
+            entries.push_back(actUpRight_);
         if (!hasSel) {
             // No selection: creation
-            if (actNewFileRight_)
-                rightContextMenu_->addAction(actNewFileRight_);
-            if (actNewDirRight_)
-                rightContextMenu_->addAction(actNewDirRight_);
+            entries.push_back(actNewFileRight_);
+            entries.push_back(actNewDirRight_);
         } else {
             // With selection: local operations + copy/move from left
-            if (actNewFileRight_)
-                rightContextMenu_->addAction(actNewFileRight_);
-            if (actNewDirRight_)
-                rightContextMenu_->addAction(actNewDirRight_);
-            if (actRenameRight_)
-                rightContextMenu_->addAction(actRenameRight_);
-            if (actDeleteRight_)
-                rightContextMenu_->addAction(actDeleteRight_);
-            rightContextMenu_->addSeparator();
+            entries.push_back(actNewFileRight_);
+            entries.push_back(actNewDirRight_);
+            entries.push_back(actRenameRight_);
+            entries.push_back(actDeleteRight_);
+            entries.push_back(nullptr);
             // Copy/move the selection from the right panel to the left
-            if (actCopyRight_)
-                rightContextMenu_->addAction(actCopyRight_);
-            if (actMoveRight_)
-                rightContextMenu_->addAction(actMoveRight_);
+            entries.push_back(actCopyRight_);
+            entries.push_back(actMoveRight_);
         }
     }
+    rebuildContextMenu(rightContextMenu_, entries);
     rightContextMenu_->popup(rightView_->viewport()->mapToGlobal(pos));
 }
 
@@ -2238,8 +2105,7 @@ void MainWindow::updateRemoteWriteability() {
             const qint64 ts = QDateTime::currentMSecsSinceEpoch();
             const QString testName =
                 ".openscp-write-test-" + QString::number(ts);
-            const QString testPath =
-                base.endsWith('/') ? base + testName : base + "/" + testName;
+            const QString testPath = joinRemotePath(base, testName);
             std::string err;
             const bool created =
                 probe->mkdir(testPath.toStdString(), err, 0755);

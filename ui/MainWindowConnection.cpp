@@ -1,7 +1,9 @@
 // MainWindow connection/session/security and saved-site persistence logic.
 #include "MainWindow.hpp"
 #include "ConnectionDialog.hpp"
+#include "MainWindowSharedUtils.hpp"
 #include "RemoteModel.hpp"
+#include "SavedSitesPersistence.hpp"
 #include "SecretStore.hpp"
 #include "SiteManagerDialog.hpp"
 #include "TransferManager.hpp"
@@ -22,7 +24,6 @@
 #include <QLocale>
 #include <QMessageBox>
 #include <QProgressDialog>
-#include <QSet>
 #include <QSettings>
 #include <QStringList>
 #include <QStandardPaths>
@@ -51,62 +52,6 @@ static inline void secureClear(QByteArray &b) {
     b.clear();
     b.squeeze();
 }
-
-static QString shortRemoteError(const QString &raw, const QString &fallback) {
-    QString msg = raw.trimmed();
-    if (msg.isEmpty())
-        return fallback;
-
-    const QString lower = msg.toLower();
-    if (lower.contains("permission denied")) {
-        return QCoreApplication::translate("MainWindow", "Permission denied.");
-    }
-    if (lower.contains("read-only")) {
-        return QCoreApplication::translate("MainWindow",
-                                           "Location is read-only.");
-    }
-    if (lower.contains("no such file") || lower.contains("not found")) {
-        return QCoreApplication::translate("MainWindow",
-                                           "File or folder does not exist.");
-    }
-    if (lower.contains("timed out") || lower.contains("timeout")) {
-        return QCoreApplication::translate("MainWindow",
-                                           "Connection timed out.");
-    }
-    if (lower.contains("could not resolve") ||
-        lower.contains("name or service not known") ||
-        lower.contains("nodename nor servname")) {
-        return QCoreApplication::translate(
-            "MainWindow", "Could not resolve the server hostname.");
-    }
-    if (lower.contains("connection refused")) {
-        return QCoreApplication::translate("MainWindow",
-                                           "Connection refused by the server.");
-    }
-    if (lower.contains("network is unreachable") ||
-        lower.contains("host is unreachable")) {
-        return QCoreApplication::translate(
-            "MainWindow", "Network unavailable or host unreachable.");
-    }
-    if (lower.contains("authentication failed") ||
-        lower.contains("auth fail")) {
-        return QCoreApplication::translate("MainWindow",
-                                           "Authentication failed.");
-    }
-
-    const int nl = msg.indexOf('\n');
-    if (nl > 0)
-        msg = msg.left(nl);
-    msg = msg.simplified();
-    if (msg.size() > 96)
-        msg = msg.left(93) + "...";
-    return msg;
-}
-
-static QString shortRemoteError(const std::string &raw,
-                                const QString &fallback) {
-    return shortRemoteError(QString::fromStdString(raw), fallback);
-}
 static QString newQuickSiteId() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
@@ -128,18 +73,6 @@ static openscp::ScpTransferMode normalizedIdentityScpMode(
     if (opt.protocol != openscp::Protocol::Scp)
         return openscp::ScpTransferMode::Auto;
     return opt.scp_transfer_mode;
-}
-
-static openscp::ScpTransferMode
-loadDefaultScpTransferModeFromSettings(const QSettings &s) {
-    return openscp::scpTransferModeFromStorageName(
-        s.value("Protocol/scpTransferModeDefault",
-                QString::fromLatin1(openscp::scpTransferModeStorageName(
-                    openscp::ScpTransferMode::Auto)))
-            .toString()
-            .trimmed()
-            .toLower()
-            .toStdString());
 }
 
 static QString normalizedIdentityProxyHost(const std::string &host) {
@@ -167,27 +100,12 @@ static QString normalizedIdentityJumpUser(
     return QString::fromStdString(*user).trimmed();
 }
 
-static std::uint16_t defaultJumpPort() { return 22; }
-
-static std::uint16_t defaultProxyPort(openscp::ProxyType type) {
-    return openscp::defaultPortForProxyType(type);
-}
-
 static QString protocolDisplayLabel(openscp::Protocol protocol) {
     return QString::fromLatin1(openscp::protocolDisplayName(protocol));
 }
 
 static QString normalizeRemotePanelPath(const QString &rawPath) {
-    QString normalized = rawPath.trimmed();
-    if (normalized.isEmpty())
-        normalized = QStringLiteral("/");
-    if (!normalized.startsWith('/'))
-        normalized.prepend('/');
-    while (normalized.contains(QStringLiteral("//")))
-        normalized.replace(QStringLiteral("//"), QStringLiteral("/"));
-    if (normalized.size() > 1 && normalized.endsWith('/'))
-        normalized.chop(1);
-    return normalized;
+    return normalizeRemotePath(rawPath);
 }
 
 static QString
@@ -250,197 +168,18 @@ static QString quickSiteSecretKey(const SiteEntry &e, const QString &item) {
 }
 
 static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool *needsSave) {
-    QVector<SiteEntry> sites;
-    bool shouldSave = false;
-    QSettings s("OpenSCP", "OpenSCP");
-    const auto defaultScpMode = loadDefaultScpTransferModeFromSettings(s);
-    const bool defaultFtpsVerifyPeer =
-        s.value("Security/ftpsVerifyPeerDefault", true).toBool();
-    const QString defaultFtpsCaPath =
-        s.value("Security/ftpsCaCertPathDefault", QString())
-            .toString()
-            .trimmed();
-    const int n = s.beginReadArray("sites");
-    QSet<QString> usedIds;
-    for (int i = 0; i < n; ++i) {
-        s.setArrayIndex(i);
-        SiteEntry e;
-        e.id = s.value("id").toString().trimmed();
-        if (e.id.isEmpty() || usedIds.contains(e.id)) {
-            e.id = newQuickSiteId();
-            shouldSave = true;
-        }
-        usedIds.insert(e.id);
-        e.name = s.value("name").toString().trimmed();
-        e.opt.protocol = openscp::protocolFromStorageName(
-            s.value("protocol",
-                    QString::fromLatin1(
-                        openscp::protocolStorageName(openscp::Protocol::Sftp)))
-                .toString()
-                .trimmed()
-                .toLower()
-                .toStdString());
-        const bool hasScpTransferModeKey = s.contains("scpTransferMode");
-        e.opt.scp_transfer_mode = openscp::scpTransferModeFromStorageName(
-            s.value("scpTransferMode",
-                    QString::fromLatin1(openscp::scpTransferModeStorageName(
-                        defaultScpMode)))
-                .toString()
-                .trimmed()
-                .toLower()
-                .toStdString());
-        if (!hasScpTransferModeKey)
-            shouldSave = true;
-        e.opt.host = s.value("host").toString().toStdString();
-        e.opt.port = static_cast<std::uint16_t>(
-            s.value("port",
-                    static_cast<int>(
-                        openscp::defaultPortForProtocol(e.opt.protocol)))
-                .toUInt());
-        const bool hasWebDavSchemeKey = s.contains("webdavScheme");
-        if (hasWebDavSchemeKey) {
-            e.opt.webdav_scheme = openscp::webDavSchemeFromStorageName(
-                s.value("webdavScheme",
-                        QString::fromLatin1(openscp::webDavSchemeStorageName(
-                            openscp::WebDavScheme::Https)))
-                    .toString()
-                    .trimmed()
-                    .toLower()
-                    .toStdString());
-        } else if (e.opt.protocol == openscp::Protocol::WebDav &&
-                   e.opt.port ==
-                       openscp::defaultPortForWebDavScheme(
-                           openscp::WebDavScheme::Http)) {
-            e.opt.webdav_scheme = openscp::WebDavScheme::Http;
-            shouldSave = true;
-        }
-        e.opt.username = s.value("user").toString().toStdString();
-        const QString kp = s.value("keyPath").toString();
-        if (!kp.isEmpty())
-            e.opt.private_key_path = kp.toStdString();
-        e.opt.proxy_type = openscp::proxyTypeFromStorageValue(
-            s.value("proxyType", static_cast<int>(openscp::ProxyType::None))
-                .toInt());
-        e.opt.proxy_host = s.value("proxyHost").toString().trimmed().toStdString();
-        e.opt.proxy_port = static_cast<std::uint16_t>(
-            s.value("proxyPort", static_cast<int>(defaultProxyPort(e.opt.proxy_type)))
-                .toUInt());
-        const QString proxyUser = s.value("proxyUser").toString().trimmed();
-        if (!proxyUser.isEmpty())
-            e.opt.proxy_username = proxyUser.toStdString();
-        const QString jumpHost = s.value("jumpHost").toString().trimmed();
-        if (!jumpHost.isEmpty())
-            e.opt.jump_host = jumpHost.toStdString();
-        e.opt.jump_port = static_cast<std::uint16_t>(
-            s.value("jumpPort", static_cast<int>(defaultJumpPort())).toUInt());
-        const QString jumpUser = s.value("jumpUser").toString().trimmed();
-        if (!jumpUser.isEmpty())
-            e.opt.jump_username = jumpUser.toStdString();
-        const QString jumpKeyPath = s.value("jumpKeyPath").toString();
-        if (!jumpKeyPath.isEmpty())
-            e.opt.jump_private_key_path = jumpKeyPath.toStdString();
-        const QString kh = s.value("knownHosts").toString();
-        if (!kh.isEmpty())
-            e.opt.known_hosts_path = kh.toStdString();
-        e.opt.known_hosts_policy = static_cast<openscp::KnownHostsPolicy>(
-            s.value("khPolicy",
-                    static_cast<int>(openscp::KnownHostsPolicy::Strict))
-                .toInt());
-        e.opt.transfer_integrity_policy =
-            static_cast<openscp::TransferIntegrityPolicy>(
-                s.value("integrityPolicy",
-                        static_cast<int>(
-                            openscp::TransferIntegrityPolicy::Optional))
-                    .toInt());
-        e.opt.ftps_verify_peer =
-            s.value("ftpsVerifyPeer", defaultFtpsVerifyPeer).toBool();
-        const QString ftpsCaPath =
-            s.value("ftpsCaCertPath", defaultFtpsCaPath).toString().trimmed();
-        if (!ftpsCaPath.isEmpty())
-            e.opt.ftps_ca_cert_path = ftpsCaPath.toStdString();
-        e.opt.webdav_verify_peer =
-            s.value("webdavVerifyPeer", true).toBool();
-        const QString webDavCaPath =
-            s.value("webdavCaCertPath", QString()).toString().trimmed();
-        if (!webDavCaPath.isEmpty())
-            e.opt.webdav_ca_cert_path = webDavCaPath.toStdString();
-        if (e.opt.protocol == openscp::Protocol::WebDav &&
-            e.opt.webdav_scheme == openscp::WebDavScheme::Http) {
-            e.opt.webdav_verify_peer = false;
-            e.opt.webdav_ca_cert_path.reset();
-        }
-        sites.push_back(e);
-    }
-    s.endArray();
+    const SavedSitesPersistence::LoadResult loaded =
+        SavedSitesPersistence::loadSites({
+            .trimSiteNames = true,
+            .createNewId = [] { return newQuickSiteId(); },
+        });
     if (needsSave)
-        *needsSave = shouldSave;
-    return sites;
+        *needsSave = loaded.needsSave;
+    return loaded.sites;
 }
 
 static void saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
-    QSettings s("OpenSCP", "OpenSCP");
-    s.remove("sites");
-    s.beginWriteArray("sites");
-    for (int i = 0; i < sites.size(); ++i) {
-        s.setArrayIndex(i);
-        const SiteEntry &e = sites[i];
-        s.setValue("id", e.id);
-        s.setValue("name", e.name);
-        s.setValue("protocol",
-                   QString::fromLatin1(
-                       openscp::protocolStorageName(e.opt.protocol)));
-        s.setValue("scpTransferMode",
-                   QString::fromLatin1(openscp::scpTransferModeStorageName(
-                       e.opt.scp_transfer_mode)));
-        s.setValue("host", QString::fromStdString(e.opt.host));
-        s.setValue("port", static_cast<int>(e.opt.port));
-        s.setValue("webdavScheme",
-                   QString::fromLatin1(openscp::webDavSchemeStorageName(
-                       e.opt.webdav_scheme)));
-        s.setValue("user", QString::fromStdString(e.opt.username));
-        s.setValue("keyPath",
-                   e.opt.private_key_path
-                       ? QString::fromStdString(*e.opt.private_key_path)
-                       : QString());
-        s.setValue("proxyType", static_cast<int>(e.opt.proxy_type));
-        s.setValue("proxyHost", QString::fromStdString(e.opt.proxy_host));
-        s.setValue("proxyPort", static_cast<int>(e.opt.proxy_port));
-        s.setValue("proxyUser",
-                   e.opt.proxy_username
-                       ? QString::fromStdString(*e.opt.proxy_username)
-                       : QString());
-        s.setValue("jumpHost",
-                   e.opt.jump_host ? QString::fromStdString(*e.opt.jump_host)
-                                   : QString());
-        s.setValue("jumpPort", static_cast<int>(e.opt.jump_port));
-        s.setValue("jumpUser",
-                   e.opt.jump_username
-                       ? QString::fromStdString(*e.opt.jump_username)
-                       : QString());
-        s.setValue("jumpKeyPath",
-                   e.opt.jump_private_key_path
-                       ? QString::fromStdString(*e.opt.jump_private_key_path)
-                       : QString());
-        s.setValue("knownHosts",
-                   e.opt.known_hosts_path
-                       ? QString::fromStdString(*e.opt.known_hosts_path)
-                       : QString());
-        s.setValue("khPolicy", static_cast<int>(e.opt.known_hosts_policy));
-        s.setValue("integrityPolicy",
-                   static_cast<int>(e.opt.transfer_integrity_policy));
-        s.setValue("ftpsVerifyPeer", e.opt.ftps_verify_peer);
-        s.setValue("ftpsCaCertPath",
-                   e.opt.ftps_ca_cert_path
-                       ? QString::fromStdString(*e.opt.ftps_ca_cert_path)
-                       : QString());
-        s.setValue("webdavVerifyPeer", e.opt.webdav_verify_peer);
-        s.setValue("webdavCaCertPath",
-                   e.opt.webdav_ca_cert_path
-                       ? QString::fromStdString(*e.opt.webdav_ca_cert_path)
-                       : QString());
-    }
-    s.endArray();
-    s.sync();
+    SavedSitesPersistence::saveSites(sites, true);
 }
 
 static QString defaultQuickSiteName(const openscp::SessionOptions &opt) {

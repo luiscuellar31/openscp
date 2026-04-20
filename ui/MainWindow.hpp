@@ -102,6 +102,11 @@ class MainWindow : public QMainWindow {
     };
 
     void updateDeleteShortcutEnables();
+    void initializePanels(const QString &homePath);
+    void initializeMainToolbar();
+    void initializeMenuBarActions();
+    void initializePanelInteractions();
+    void initializeRuntimeState();
     bool isScpTransferMode() const;
     void activateScpTransferModeUi(bool enabled);
     void applyPreferences();
@@ -251,6 +256,8 @@ class MainWindow : public QMainWindow {
                                   int initialSkipped, bool dragAndDrop);
     void searchItemsInCurrentFolder(QTreeView *view,
                                     const QString &panelLabel);
+    void rebuildContextMenu(QMenu *menu,
+                            const QVector<QAction *> &entries) const;
     void refreshLeftBreadcrumbs();
     void refreshRightBreadcrumbs();
     void rebuildLocalBreadcrumbs(QToolBar *bar, const QString &path,

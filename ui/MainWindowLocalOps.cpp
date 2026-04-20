@@ -1,5 +1,6 @@
 // MainWindow local-side filesystem operations and local navigation.
 #include "MainWindow.hpp"
+#include "MainWindowSharedUtils.hpp"
 #include "RemoteModel.hpp"
 #include "TransferManager.hpp"
 #include "UiAlerts.hpp"
@@ -109,53 +110,6 @@ static void revealInFolder(const QString &filePath) {
     const QString dir = QFileInfo(filePath).dir().absolutePath();
     QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
 #endif
-}
-
-// Validate simple file/folder names (no paths)
-static bool isValidEntryName(const QString &name, QString *why = nullptr) {
-    if (name == "." || name == "..") {
-        if (why)
-            *why = QCoreApplication::translate(
-                "MainWindow", "Invalid name: cannot be '.' or '..'.");
-        return false;
-    }
-    if (name.contains('/') || name.contains('\\')) {
-        if (why)
-            *why = QCoreApplication::translate(
-                "MainWindow",
-                "Invalid name: cannot contain separators ('/' or '\\\\').");
-        return false;
-    }
-    for (const QChar &ch : name) {
-        ushort u = ch.unicode();
-        if (u < 0x20u || u == 0x7Fu) { // ASCII control characters
-            if (why)
-                *why = QCoreApplication::translate(
-                    "MainWindow",
-                    "Invalid name: cannot contain control characters.");
-            return false;
-        }
-    }
-    return true;
-}
-
-static QString joinRemotePath(const QString &base, const QString &name) {
-    if (base == "/")
-        return "/" + name;
-    return base.endsWith('/') ? base + name : base + "/" + name;
-}
-
-static QString normalizeRemotePath(const QString &rawPath) {
-    QString normalized = rawPath.trimmed();
-    if (normalized.isEmpty())
-        normalized = QStringLiteral("/");
-    if (!normalized.startsWith('/'))
-        normalized.prepend('/');
-    while (normalized.contains(QStringLiteral("//")))
-        normalized.replace(QStringLiteral("//"), QStringLiteral("/"));
-    if (normalized.size() > 1 && normalized.endsWith('/'))
-        normalized.chop(1);
-    return normalized;
 }
 
 QString MainWindow::preferredLocalHomePath() const {
@@ -527,8 +481,7 @@ void MainWindow::moveLeftToRight() {
             QString cur = "/";
             const QStringList parts = dir.split('/', Qt::SkipEmptyParts);
             for (const QString &part : parts) {
-                const QString next =
-                    (cur == "/") ? ("/" + part) : (cur + "/" + part);
+                const QString next = joinRemotePath(cur, part);
                 bool isD = false;
                 std::string e;
                 const bool ex = sftp_->exists(next.toStdString(), isD, e);
@@ -977,7 +930,6 @@ void MainWindow::newFileLeft() {
 void MainWindow::showLeftContextMenu(const QPoint &pos) {
     if (!leftContextMenu_)
         leftContextMenu_ = new QMenu(this);
-    leftContextMenu_->clear();
     // Selection and ability to go up
     bool hasSel = false;
     if (auto sel = leftView_->selectionModel()) {
@@ -986,29 +938,30 @@ void MainWindow::showLeftContextMenu(const QPoint &pos) {
     QDir d(leftPath_ ? leftPath_->text() : QString());
     bool canGoUp = d.cdUp();
 
-    // Local actions on the left panel
-    if (canGoUp && actUpLeft_)
-        leftContextMenu_->addAction(actUpLeft_);
-    if (!hasSel) {
-        if (actNewFileLeft_)
-            leftContextMenu_->addAction(actNewFileLeft_);
-        if (actNewDirLeft_)
-            leftContextMenu_->addAction(actNewDirLeft_);
-    } else {
-        if (actNewFileLeft_)
-            leftContextMenu_->addAction(actNewFileLeft_);
-        if (actNewDirLeft_)
-            leftContextMenu_->addAction(actNewDirLeft_);
-        if (actRenameLeft_)
-            leftContextMenu_->addAction(actRenameLeft_);
-        leftContextMenu_->addSeparator();
-        // Directional labels in the menu, wired to existing actions
-        leftContextMenu_->addAction(tr("Copy to right panel"), this,
-                                    &MainWindow::copyLeftToRight);
-        leftContextMenu_->addAction(tr("Move to right panel"), this,
-                                    &MainWindow::moveLeftToRight);
-        if (actDelete_)
-            leftContextMenu_->addAction(actDelete_);
+    QAction *copyToRight = nullptr;
+    QAction *moveToRight = nullptr;
+    if (hasSel) {
+        copyToRight = new QAction(tr("Copy to right panel"), leftContextMenu_);
+        connect(copyToRight, &QAction::triggered, this,
+                &MainWindow::copyLeftToRight);
+        moveToRight = new QAction(tr("Move to right panel"), leftContextMenu_);
+        connect(moveToRight, &QAction::triggered, this,
+                &MainWindow::moveLeftToRight);
     }
+
+    QVector<QAction *> entries;
+    if (canGoUp)
+        entries.push_back(actUpLeft_);
+    entries.push_back(actNewFileLeft_);
+    entries.push_back(actNewDirLeft_);
+    if (hasSel) {
+        entries.push_back(actRenameLeft_);
+        entries.push_back(nullptr);
+        entries.push_back(copyToRight);
+        entries.push_back(moveToRight);
+        entries.push_back(actDelete_);
+    }
+    rebuildContextMenu(leftContextMenu_, entries);
+
     leftContextMenu_->popup(leftView_->viewport()->mapToGlobal(pos));
 }

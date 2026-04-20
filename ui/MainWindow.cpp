@@ -4,6 +4,7 @@
 #include "AboutDialog.hpp"
 #include "ConnectionDialog.hpp"
 #include "DragAwareTreeView.hpp"
+#include "MainWindowSharedUtils.hpp"
 #include "PermissionsDialog.hpp"
 #include "RemoteModel.hpp"
 #include "SecretStore.hpp"
@@ -79,16 +80,11 @@
 static constexpr int NAME_COL = 0;
 
 static QString normalizeRemotePathForMatch(const QString &rawPath) {
-    QString normalized = rawPath.trimmed();
-    if (normalized.isEmpty())
-        normalized = QStringLiteral("/");
-    if (!normalized.startsWith('/'))
-        normalized.prepend('/');
-    while (normalized.contains(QStringLiteral("//")))
-        normalized.replace(QStringLiteral("//"), QStringLiteral("/"));
-    if (normalized.size() > 1 && normalized.endsWith('/'))
-        normalized.chop(1);
-    return normalized;
+    return normalizeRemotePath(rawPath);
+}
+
+static QIcon mainWindowActionIcon(const char *name) {
+    return QIcon(QStringLiteral(":/assets/icons/") + QLatin1String(name));
 }
 
 static bool remotePathIsInsideRoot(const QString &candidatePath,
@@ -442,6 +438,15 @@ static void showRecursiveSearchResultsDialog(
 MainWindow::~MainWindow() = default; // define the destructor here
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
+    const QString home = preferredLocalHomePath();
+    initializePanels(home);
+    initializeMainToolbar();
+    initializeMenuBarActions();
+    initializePanelInteractions();
+    initializeRuntimeState();
+}
+
+void MainWindow::initializePanels(const QString &home) {
     // Models
     leftModel_ = new QFileSystemModel(this);
     rightLocalModel_ = new QFileSystemModel(this);
@@ -452,7 +457,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                                 QDir::AllDirs);
 
     // Initial paths: local home (fallback to root if HOME is unavailable)
-    const QString home = preferredLocalHomePath();
     leftModel_->setRootPath(home);
     rightLocalModel_->setRootPath(home);
 
@@ -871,7 +875,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     mainSplitter_->addWidget(rightPane);
     setCentralWidget(mainSplitter_);
 
-    // Main toolbar (top)
+}
+
+void MainWindow::initializeMainToolbar() {
     auto *tb = addToolBar("Main");
     tb->setObjectName("mainToolbar");
     tb->setToolButtonStyle(Qt::ToolButtonIconOnly);
@@ -887,12 +893,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     // Copy/move/delete actions now live in the left sub‑toolbar
     actConnect_ =
         tb->addAction(tr("Connect"), this, &MainWindow::connectSftp);
-    actConnect_->setIcon(resIcon("action-connect.svg"));
+    actConnect_->setIcon(mainWindowActionIcon("action-connect.svg"));
     actConnect_->setToolTip(actConnect_->text());
     tb->addSeparator();
     actDisconnect_ =
         tb->addAction(tr("Disconnect"), this, &MainWindow::disconnectSftp);
-    actDisconnect_->setIcon(resIcon("action-disconnect.svg"));
+    actDisconnect_->setIcon(mainWindowActionIcon("action-disconnect.svg"));
     actDisconnect_->setToolTip(actDisconnect_->text());
     actDisconnect_->setEnabled(false);
 
@@ -919,18 +925,20 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
             }
         }
     });
-    actSites_->setIcon(resIcon("action-open-saved-sites.svg"));
+    actSites_->setIcon(mainWindowActionIcon("action-open-saved-sites.svg"));
     actSites_->setToolTip(actSites_->text());
     tb->addSeparator();
     actShowQueue_ =
         tb->addAction(tr("Transfers"), [this] { showTransferQueue(); });
-    actShowQueue_->setIcon(resIcon("action-open-transfer-queue.svg"));
+    actShowQueue_->setIcon(
+        mainWindowActionIcon("action-open-transfer-queue.svg"));
     actShowQueue_->setToolTip(actShowQueue_->text());
     tb->addSeparator();
     actShowHistory_ =
         tb->addAction(tr("History"), this, &MainWindow::showHistoryMenu);
-    actShowHistory_->setIcon(resIcon("action-open-history.svg"));
+    actShowHistory_->setIcon(mainWindowActionIcon("action-open-history.svg"));
     actShowHistory_->setToolTip(actShowHistory_->text());
+
     // Show text beside icon for Sites and Queue too
     if (QWidget *w = tb->widgetForAction(actSites_)) {
         if (auto *b = qobject_cast<QToolButton *>(w)) {
@@ -950,6 +958,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
             b->setText(tr("History"));
         }
     }
+
     // Global shortcut to open the transfer queue
     actShowQueue_->setShortcut(QKeySequence(Qt::Key_F12));
     actShowQueue_->setShortcutContext(Qt::ApplicationShortcut);
@@ -976,9 +985,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         });
         this->addAction(actToggleFs);
     }
+
     // Separator to the right of the history button
     tb->addSeparator();
-    // Queue is always enabled by default; no toggle
 
     // Spacer to push next action to the far right
     {
@@ -986,22 +995,23 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         tb->addWidget(spacer);
     }
+
     // Visual separator before the right-side buttons
     tb->addSeparator();
     // About button (to the left of Settings)
-    actAboutToolbar_ =
-        tb->addAction(resIcon("action-open-about-us.svg"), tr("About OpenSCP"),
-                      this, &MainWindow::showAboutDialog);
+    actAboutToolbar_ = tb->addAction(mainWindowActionIcon("action-open-about-us.svg"),
+                                     tr("About OpenSCP"), this,
+                                     &MainWindow::showAboutDialog);
     if (actAboutToolbar_)
         actAboutToolbar_->setToolTip(actAboutToolbar_->text());
     // Settings button (far right)
-    actPrefsToolbar_ =
-        tb->addAction(resIcon("action-open-settings.svg"), tr("Settings"), this,
-                      &MainWindow::showSettingsDialog);
+    actPrefsToolbar_ = tb->addAction(mainWindowActionIcon("action-open-settings.svg"),
+                                     tr("Settings"), this,
+                                     &MainWindow::showSettingsDialog);
     actPrefsToolbar_->setToolTip(actPrefsToolbar_->text());
+}
 
-    // Global shortcuts were already added to their respective actions
-
+void MainWindow::initializeMenuBarActions() {
     // Menu bar (native on macOS)
     // Duplicate actions so users who prefer the classic menu can use it.
     appMenu_ = menuBar()->addMenu(tr("OpenSCP"));
@@ -1070,7 +1080,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         });
         helpMenu->addAction(reportAct);
     }
+}
 
+void MainWindow::initializePanelInteractions() {
     // Double click/Enter navigation on both panes
     connect(rightView_, &QTreeView::activated, this,
             &MainWindow::rightItemActivated);
@@ -1098,7 +1110,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                 &QItemSelectionModel::selectionChanged, this,
                 [this] { updateDeleteShortcutEnables(); });
     }
+}
 
+void MainWindow::initializeRuntimeState() {
     {
         QSettings s("OpenSCP", "OpenSCP");
         downloadDir_ = defaultDownloadDirFromSettings(s);
@@ -1199,6 +1213,30 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
             QTimer::singleShot(0, this, [this] { showSiteManagerNonModal(); });
         }
     }
+}
+
+void MainWindow::rebuildContextMenu(QMenu *menu,
+                                    const QVector<QAction *> &entries) const {
+    if (!menu)
+        return;
+
+    menu->clear();
+    bool lastWasSeparator = true;
+    for (QAction *entry : entries) {
+        if (!entry) {
+            if (!lastWasSeparator && !menu->actions().isEmpty()) {
+                menu->addSeparator();
+                lastWasSeparator = true;
+            }
+            continue;
+        }
+        menu->addAction(entry);
+        lastWasSeparator = false;
+    }
+
+    const QList<QAction *> actions = menu->actions();
+    if (!actions.isEmpty() && actions.back()->isSeparator())
+        menu->removeAction(actions.back());
 }
 
 void MainWindow::initializeConnectionSessionIndicators() {
@@ -1505,13 +1543,7 @@ void MainWindow::rebuildRemoteBreadcrumbs(const QString &path) {
         return;
     rightBreadcrumbsBar_->clear();
 
-    QString normalized = path.trimmed();
-    if (normalized.isEmpty())
-        normalized = QStringLiteral("/");
-    if (!normalized.startsWith('/'))
-        normalized.prepend('/');
-    if (normalized.size() > 1 && normalized.endsWith('/'))
-        normalized.chop(1);
+    const QString normalized = normalizeRemotePath(path);
 
     QVector<QPair<QString, QString>> crumbs;
     QString acc = QStringLiteral("/");
@@ -2392,11 +2424,8 @@ void MainWindow::updateDeleteShortcutEnables() {
         if (actCopyRight_)
             actCopyRight_->setEnabled(false);
         if (actUpRight_) {
-            QString cur = rightPath_ ? rightPath_->text().trimmed() : QString();
-            if (cur.isEmpty())
-                cur = QStringLiteral("/");
-            if (cur.endsWith('/') && cur.size() > 1)
-                cur.chop(1);
+            const QString cur =
+                normalizeRemotePath(rightPath_ ? rightPath_->text() : QString());
             actUpRight_->setEnabled(cur != "/");
         }
         return;
@@ -2433,8 +2462,7 @@ void MainWindow::updateDeleteShortcutEnables() {
         QString cur = rightRemoteModel_ ? rightRemoteModel_->rootPath()
                                         : rightPath_->text();
         if (rightIsRemote_) {
-            if (cur.endsWith('/'))
-                cur.chop(1);
+            cur = normalizeRemotePath(cur);
             actUpRight_->setEnabled(!cur.isEmpty() && cur != "/");
         } else {
             QDir d(cur);
