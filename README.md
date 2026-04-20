@@ -44,7 +44,7 @@ cmake --build build -j
 open build/OpenSCP.app
 ```
 
-## What OpenSCP Offers (v0.9.0)
+## What OpenSCP Offers (v1.0.0)
 
 ### 1. Dual-panel workflow
 

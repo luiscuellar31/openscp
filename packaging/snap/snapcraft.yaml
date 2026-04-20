@@ -1,6 +1,6 @@
 name: openscp
 base: core24
-version: "0.9.0"
+version: "1.0.0"
 summary: Two-panel SFTP client focused on simplicity and security
 description: |
   Two-panel SFTP client focused on simplicity and security

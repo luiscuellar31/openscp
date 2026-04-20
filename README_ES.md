@@ -44,7 +44,7 @@ cmake --build build -j
 open build/OpenSCP.app
 ```
 
-## Lo que Ofrece OpenSCP (v0.9.0)
+## Lo que Ofrece OpenSCP (v1.0.0)
 
 ### 1. Flujo de doble panel
 
