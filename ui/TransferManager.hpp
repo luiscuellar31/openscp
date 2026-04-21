@@ -158,6 +158,16 @@ class TransferManager : public QObject {
     void recordCompletionMetrics(quint64 taskId, TransferTask::Status status,
                                  quint64 bytesDone, qint64 queueLatencyMs,
                                  qint64 precheckMs, qint64 transferMs);
+    void transitionTaskToRunning(TransferTask &task, qint64 nowMs);
+    void transitionTaskToQueued(TransferTask &task, qint64 nowMs,
+                                bool resumeHint);
+    void transitionTaskToPaused(TransferTask &task);
+    void transitionTaskToCanceled(TransferTask &task, qint64 nowMs);
+    void transitionTaskToError(TransferTask &task, const std::string &rawErr,
+                               qint64 nowMs);
+    void transitionTaskToDone(TransferTask &task, qint64 nowMs,
+                              bool preserveProgress = false);
+    void resetTaskForRetry(TransferTask &task, qint64 nowMs);
     struct SchedulePickResult {
         enum class Outcome { NoClient, NoQueuedTask, Ready };
         Outcome outcome = Outcome::NoQueuedTask;

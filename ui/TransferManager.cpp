@@ -73,42 +73,6 @@ static QString transferErrorForUi(const std::string &rawError) {
     return msg;
 }
 
-static void applyCanceledOrPausedState(TransferTask &task, bool canceled,
-                                       qint64 nowMs) {
-    task.status =
-        canceled ? TransferTask::Status::Canceled : TransferTask::Status::Paused;
-    task.error.clear();
-    task.currentSpeedKBps = 0.0;
-    task.etaSeconds = -1;
-    task.finishedAtMs = canceled ? nowMs : 0;
-}
-
-static void applyErrorState(TransferTask &task, const QString &errorMessage,
-                            qint64 nowMs) {
-    task.status = TransferTask::Status::Error;
-    task.error = errorMessage;
-    task.currentSpeedKBps = 0.0;
-    task.etaSeconds = -1;
-    task.finishedAtMs = nowMs;
-}
-
-static void applyDoneState(TransferTask &task, qint64 nowMs) {
-    task.progress = 100;
-    if (task.bytesTotal > 0)
-        task.bytesDone = task.bytesTotal;
-    task.status = TransferTask::Status::Done;
-    task.currentSpeedKBps = 0.0;
-    task.etaSeconds = 0;
-    task.finishedAtMs = nowMs;
-}
-
-static void applySkippedState(TransferTask &task, qint64 nowMs) {
-    task.status = TransferTask::Status::Done;
-    task.currentSpeedKBps = 0.0;
-    task.etaSeconds = 0;
-    task.finishedAtMs = nowMs;
-}
-
 static int askOverwriteConflictOnUi(QObject *uiContext, const QString &name,
                                     const QString &srcInfo,
                                     const QString &dstInfo,
@@ -205,10 +169,7 @@ TransferManager::~TransferManager() {
             if (t.status == TransferTask::Status::Queued ||
                 t.status == TransferTask::Status::Running ||
                 t.status == TransferTask::Status::Paused) {
-                t.status = TransferTask::Status::Canceled;
-                t.currentSpeedKBps = 0.0;
-                t.etaSeconds = -1;
-                t.finishedAtMs = nowMs;
+                transitionTaskToCanceled(t, nowMs);
             }
         }
     }
@@ -271,10 +232,7 @@ void TransferManager::clearClient() {
             if (t.status == TransferTask::Status::Queued ||
                 t.status == TransferTask::Status::Running ||
                 t.status == TransferTask::Status::Paused) {
-                t.status = TransferTask::Status::Canceled;
-                t.currentSpeedKBps = 0.0;
-                t.etaSeconds = -1;
-                t.finishedAtMs = nowMs;
+                transitionTaskToCanceled(t, nowMs);
                 changed = true;
             }
         }
@@ -402,10 +360,7 @@ void TransferManager::pauseAll() {
         for (auto &t : tasks_) {
             if (t.status == TransferTask::Status::Running) {
                 pausedTasks_.insert(t.id);
-                t.status = TransferTask::Status::Paused;
-                t.currentSpeedKBps = 0.0;
-                t.etaSeconds = -1;
-                t.finishedAtMs = 0;
+                transitionTaskToPaused(t);
             }
         }
     }
@@ -436,11 +391,7 @@ void TransferManager::resumeAll() {
                     // until it fully exits.
                     resumeRequestedTasks_.insert(t.id);
                 } else {
-                    t.status = TransferTask::Status::Queued;
-                    t.resumeHint = true;
-                    t.queuedAtMs = nowMs;
-                    t.startedAtMs = 0;
-                    t.finishedAtMs = 0;
+                    transitionTaskToQueued(t, nowMs, true);
                     pausedTasks_.erase(t.id);
                     resumeRequestedTasks_.erase(t.id);
                     changed = true;
@@ -469,10 +420,7 @@ void TransferManager::cancelAll() {
                 ++affected;
                 if (t.status == TransferTask::Status::Running)
                     ++runningNow;
-                t.status = TransferTask::Status::Canceled;
-                t.currentSpeedKBps = 0.0;
-                t.etaSeconds = -1;
-                t.finishedAtMs = nowMs;
+                transitionTaskToCanceled(t, nowMs);
             }
         }
     }
@@ -490,17 +438,7 @@ void TransferManager::retryFailed() {
         for (auto &t : tasks_) {
             if (t.status == TransferTask::Status::Error ||
                 t.status == TransferTask::Status::Canceled) {
-                t.status = TransferTask::Status::Queued;
-                t.attempts = 0;
-                t.progress = 0;
-                t.bytesDone = 0;
-                t.bytesTotal = 0;
-                t.currentSpeedKBps = 0.0;
-                t.etaSeconds = -1;
-                t.error.clear();
-                t.queuedAtMs = nowMs;
-                t.startedAtMs = 0;
-                t.finishedAtMs = 0;
+                resetTaskForRetry(t, nowMs);
                 canceledTasks_.erase(t.id);
                 pausedTasks_.erase(t.id);
             }
@@ -519,17 +457,7 @@ void TransferManager::retryTask(quint64 id) {
                        tasks_[i].status == TransferTask::Status::Canceled)) {
             auto &t = tasks_[i];
             const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-            t.status = TransferTask::Status::Queued;
-            t.attempts = 0;
-            t.progress = 0;
-            t.bytesDone = 0;
-            t.bytesTotal = 0;
-            t.currentSpeedKBps = 0.0;
-            t.etaSeconds = -1;
-            t.error.clear();
-            t.queuedAtMs = nowMs;
-            t.startedAtMs = 0;
-            t.finishedAtMs = 0;
+            resetTaskForRetry(t, nowMs);
             canceledTasks_.erase(t.id);
             pausedTasks_.erase(t.id);
             changed = true;
@@ -737,6 +665,79 @@ void TransferManager::recordCompletionMetrics(quint64 taskId,
                    << "runningCounter=" << running_.load();
 }
 
+void TransferManager::transitionTaskToRunning(TransferTask &task, qint64 nowMs) {
+    task.status = TransferTask::Status::Running;
+    task.progress = 0;
+    task.bytesDone = 0;
+    task.bytesTotal = 0;
+    task.currentSpeedKBps = 0.0;
+    task.etaSeconds = -1;
+    task.error.clear();
+    task.startedAtMs = nowMs;
+    task.finishedAtMs = 0;
+}
+
+void TransferManager::transitionTaskToQueued(TransferTask &task, qint64 nowMs,
+                                             bool resumeHint) {
+    task.status = TransferTask::Status::Queued;
+    task.resumeHint = resumeHint;
+    task.queuedAtMs = nowMs;
+    task.startedAtMs = 0;
+    task.finishedAtMs = 0;
+}
+
+void TransferManager::transitionTaskToPaused(TransferTask &task) {
+    task.status = TransferTask::Status::Paused;
+    task.error.clear();
+    task.currentSpeedKBps = 0.0;
+    task.etaSeconds = -1;
+    task.finishedAtMs = 0;
+}
+
+void TransferManager::transitionTaskToCanceled(TransferTask &task,
+                                               qint64 nowMs) {
+    task.status = TransferTask::Status::Canceled;
+    task.error.clear();
+    task.currentSpeedKBps = 0.0;
+    task.etaSeconds = -1;
+    task.finishedAtMs = nowMs;
+}
+
+void TransferManager::transitionTaskToError(TransferTask &task,
+                                            const std::string &rawErr,
+                                            qint64 nowMs) {
+    task.status = TransferTask::Status::Error;
+    task.error = transferErrorForUi(rawErr);
+    task.currentSpeedKBps = 0.0;
+    task.etaSeconds = -1;
+    task.finishedAtMs = nowMs;
+}
+
+void TransferManager::transitionTaskToDone(TransferTask &task, qint64 nowMs,
+                                           bool preserveProgress) {
+    if (!preserveProgress) {
+        task.progress = 100;
+        if (task.bytesTotal > 0)
+            task.bytesDone = task.bytesTotal;
+    }
+    task.status = TransferTask::Status::Done;
+    task.currentSpeedKBps = 0.0;
+    task.etaSeconds = 0;
+    task.finishedAtMs = nowMs;
+}
+
+void TransferManager::resetTaskForRetry(TransferTask &task, qint64 nowMs) {
+    const bool previousResumeHint = task.resumeHint;
+    task.attempts = 0;
+    task.progress = 0;
+    task.bytesDone = 0;
+    task.bytesTotal = 0;
+    task.currentSpeedKBps = 0.0;
+    task.etaSeconds = -1;
+    task.error.clear();
+    transitionTaskToQueued(task, nowMs, previousResumeHint);
+}
+
 TransferManager::SchedulePickResult TransferManager::pickTaskForSchedule() {
     SchedulePickResult result;
     std::lock_guard<std::mutex> lk(mtx_);
@@ -753,15 +754,7 @@ TransferManager::SchedulePickResult TransferManager::pickTaskForSchedule() {
 
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     result.task = tasks_[idx];
-    tasks_[idx].status = TransferTask::Status::Running;
-    tasks_[idx].progress = 0;
-    tasks_[idx].bytesDone = 0;
-    tasks_[idx].bytesTotal = 0;
-    tasks_[idx].currentSpeedKBps = 0.0;
-    tasks_[idx].etaSeconds = -1;
-    tasks_[idx].error.clear();
-    tasks_[idx].startedAtMs = nowMs;
-    tasks_[idx].finishedAtMs = 0;
+    transitionTaskToRunning(tasks_[idx], nowMs);
     result.outcome = SchedulePickResult::Outcome::Ready;
     return result;
 }
@@ -777,10 +770,7 @@ bool TransferManager::validateWorkerLaunch(quint64 taskId) {
             std::lock_guard<std::mutex> lk(mtx_);
             const int i = indexForId(taskId);
             if (i >= 0) {
-                tasks_[i].status = TransferTask::Status::Paused;
-                tasks_[i].currentSpeedKBps = 0.0;
-                tasks_[i].etaSeconds = -1;
-                tasks_[i].finishedAtMs = 0;
+                transitionTaskToPaused(tasks_[i]);
                 pausedTasks_.insert(taskId);
                 resumeRequestedTasks_.insert(taskId);
             }
@@ -855,7 +845,10 @@ void TransferManager::markTaskCanceledOrPausedFromWorker(quint64 taskId,
     if (i < 0)
         return;
     const bool canceled = canceledTasks_.count(taskId) > 0;
-    applyCanceledOrPausedState(tasks_[i], canceled, nowMs);
+    if (canceled)
+        transitionTaskToCanceled(tasks_[i], nowMs);
+    else
+        transitionTaskToPaused(tasks_[i]);
 }
 
 void TransferManager::markTaskErrorFromWorker(quint64 taskId,
@@ -865,7 +858,7 @@ void TransferManager::markTaskErrorFromWorker(quint64 taskId,
     const int i = indexForId(taskId);
     if (i < 0)
         return;
-    applyErrorState(tasks_[i], transferErrorForUi(rawErr), nowMs);
+    transitionTaskToError(tasks_[i], rawErr, nowMs);
 }
 
 void TransferManager::markTaskDoneFromWorker(quint64 taskId, qint64 nowMs) {
@@ -873,7 +866,7 @@ void TransferManager::markTaskDoneFromWorker(quint64 taskId, qint64 nowMs) {
     const int i = indexForId(taskId);
     if (i < 0)
         return;
-    applyDoneState(tasks_[i], nowMs);
+    transitionTaskToDone(tasks_[i], nowMs);
 }
 
 bool TransferManager::runWorkerPrecheckStage(WorkerPipelineContext &ctx) {
@@ -900,7 +893,8 @@ bool TransferManager::runWorkerPrecheckStage(WorkerPipelineContext &ctx) {
             std::lock_guard<std::mutex> lk(mtx_);
             const int i = indexForId(ctx.taskId);
             if (i >= 0)
-                applySkippedState(tasks_[i], ctx.precheckDoneMs);
+                transitionTaskToDone(tasks_[i], ctx.precheckDoneMs,
+                                     /*preserveProgress=*/true);
         }
         ctx.workerClient->disconnect();
         finalizeEarly();
@@ -1197,11 +1191,7 @@ void TransferManager::runWorkerPostStage(WorkerPipelineContext &ctx) {
     const int i = indexForId(ctx.taskId);
     if (i >= 0 && tasks_[i].status == TransferTask::Status::Paused) {
         const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-        tasks_[i].status = TransferTask::Status::Queued;
-        tasks_[i].resumeHint = true;
-        tasks_[i].queuedAtMs = nowMs;
-        tasks_[i].startedAtMs = 0;
-        tasks_[i].finishedAtMs = 0;
+        transitionTaskToQueued(tasks_[i], nowMs, true);
         pausedTasks_.erase(ctx.taskId);
     }
     resumeRequestedTasks_.erase(itResume);
@@ -1448,10 +1438,7 @@ void TransferManager::pauseTask(quint64 id) {
                 tasks_[i].status == TransferTask::Status::Running) {
                 resumeRequestedTasks_.erase(id);
                 pausedTasks_.insert(id);
-                tasks_[i].status = TransferTask::Status::Paused;
-                tasks_[i].currentSpeedKBps = 0.0;
-                tasks_[i].etaSeconds = -1;
-                tasks_[i].finishedAtMs = 0;
+                transitionTaskToPaused(tasks_[i]);
                 changed = true;
                 shouldInterrupt =
                     (previousStatus == TransferTask::Status::Running);
@@ -1484,11 +1471,7 @@ void TransferManager::resumeTask(quint64 id) {
             } else {
                 const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
                 pausedTasks_.erase(id);
-                tasks_[i].status = TransferTask::Status::Queued;
-                tasks_[i].resumeHint = true;
-                tasks_[i].queuedAtMs = nowMs;
-                tasks_[i].startedAtMs = 0;
-                tasks_[i].finishedAtMs = 0;
+                transitionTaskToQueued(tasks_[i], nowMs, true);
                 resumeRequestedTasks_.erase(id);
                 changed = true;
                 queueNow = true;
@@ -1537,10 +1520,7 @@ void TransferManager::cancelTask(quint64 id) {
                 resumeRequestedTasks_.erase(id);
                 canceledTasks_.insert(id);
                 pausedTasks_.erase(id);
-                tasks_[i].status = TransferTask::Status::Canceled;
-                tasks_[i].currentSpeedKBps = 0.0;
-                tasks_[i].etaSeconds = -1;
-                tasks_[i].finishedAtMs = nowMs;
+                transitionTaskToCanceled(tasks_[i], nowMs);
                 transitionedToCanceled = true;
                 shouldInterrupt =
                     (previousStatus == TransferTask::Status::Running ||
