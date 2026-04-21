@@ -1,6 +1,8 @@
 // WebDAV backend implementation based on libcurl and tinyxml2.
 #include "openscp/CurlWebDavClient.hpp"
 
+#include "CurlBackendCommon.hpp"
+
 #include <curl/curl.h>
 #include <tinyxml2.h>
 
@@ -12,11 +14,9 @@
 #include <cstring>
 #include <ctime>
 #include <filesystem>
-#include <limits>
 #include <mutex>
 #include <sstream>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace openscp {
@@ -36,58 +36,10 @@ struct WebDavResource {
     std::uint64_t mtime = 0;
 };
 
-struct ProgressContext {
-    std::function<void(std::size_t, std::size_t)> progressCb;
-    std::function<bool()> shouldCancel;
-    const std::atomic<bool> *interrupted = nullptr;
-};
-
-bool ensureCurlInitialized(std::string &err) {
-    static std::once_flag initFlag;
-    static CURLcode initResult = CURLE_OK;
-    std::call_once(initFlag, [] {
-        initResult = curl_global_init(CURL_GLOBAL_DEFAULT);
-    });
-    if (initResult != CURLE_OK) {
-        err = std::string("libcurl initialization failed: ") +
-              curl_easy_strerror(initResult);
-        return false;
-    }
-    return true;
-}
-
-std::string trimAscii(std::string s) {
-    auto isWs = [](unsigned char c) { return std::isspace(c) != 0; };
-    while (!s.empty() && isWs(static_cast<unsigned char>(s.front())))
-        s.erase(s.begin());
-    while (!s.empty() && isWs(static_cast<unsigned char>(s.back())))
-        s.pop_back();
-    return s;
-}
-
-std::string toLowerAscii(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c) -> char {
-                       return static_cast<char>(std::tolower(c));
-                   });
-    return s;
-}
-
-bool parseUnsignedDec(std::string_view token, std::uint64_t &out) {
-    if (token.empty())
-        return false;
-    std::uint64_t value = 0;
-    for (char ch : token) {
-        if (ch < '0' || ch > '9')
-            return false;
-        const std::uint64_t digit = static_cast<std::uint64_t>(ch - '0');
-        if (value > (std::numeric_limits<std::uint64_t>::max() - digit) / 10)
-            return false;
-        value = value * 10 + digit;
-    }
-    out = value;
-    return true;
-}
+using curlcommon::ensureCurlInitialized;
+using curlcommon::parseUnsignedDec;
+using curlcommon::toLowerAscii;
+using curlcommon::trimAscii;
 
 std::string normalizeRemotePath(std::string path) {
     if (path.empty())
@@ -112,13 +64,6 @@ std::string normalizeRemoteDirPath(std::string path) {
     return path;
 }
 
-std::string normalizeHostAuthority(const std::string &host) {
-    if (host.find(':') != std::string::npos && host.find(']') == std::string::npos) {
-        return "[" + host + "]";
-    }
-    return host;
-}
-
 bool isUnreservedUriChar(unsigned char c) {
     return std::isalnum(c) != 0 || c == '-' || c == '.' || c == '_' ||
            c == '~' || c == '/';
@@ -140,7 +85,7 @@ std::string encodePathForUrl(const std::string &path) {
 
 std::string buildWebDavUrl(const SessionOptions &opt,
                            const std::string &remotePath) {
-    const std::string host = normalizeHostAuthority(opt.host);
+    const std::string host = curlcommon::normalizeHostAuthorityForUrl(opt.host);
     const std::string path = encodePathForUrl(normalizeRemotePath(remotePath));
     return std::string(webDavSchemeStorageName(
                normalizeWebDavScheme(opt.webdav_scheme))) +
@@ -185,124 +130,15 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
     }
 
     if (normalizeWebDavScheme(opt.webdav_scheme) == WebDavScheme::Https) {
-        const long verifyPeer = opt.webdav_verify_peer ? 1L : 0L;
-        const long verifyHost = opt.webdav_verify_peer ? 2L : 0L;
-        if (curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, verifyPeer) !=
-                CURLE_OK ||
-            curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, verifyHost) !=
-                CURLE_OK) {
-            err = "Could not configure WebDAV TLS verification policy.";
+        if (!curlcommon::configureTlsVerification(
+                curl, opt.webdav_verify_peer, opt.webdav_ca_cert_path,
+                "Could not configure WebDAV TLS verification policy.",
+                "Could not configure WebDAV TLS CA bundle.", err)) {
             return false;
-        }
-        if (opt.webdav_ca_cert_path && !opt.webdav_ca_cert_path->empty()) {
-            if (curl_easy_setopt(curl, CURLOPT_CAINFO,
-                                 opt.webdav_ca_cert_path->c_str()) != CURLE_OK) {
-                err = "Could not configure WebDAV TLS CA bundle.";
-                return false;
-            }
         }
     }
 
-    if (opt.proxy_type != ProxyType::None) {
-        if (opt.proxy_host.empty() || opt.proxy_port == 0) {
-            err = "WebDAV proxy requires host and port.";
-            return false;
-        }
-        const std::string proxy =
-            opt.proxy_host + ":" + std::to_string(opt.proxy_port);
-        if (curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str()) != CURLE_OK) {
-            err = "Could not configure WebDAV proxy endpoint.";
-            return false;
-        }
-
-        const ProxyType normalizedProxyType = normalizeProxyType(opt.proxy_type);
-        long proxyType = 0;
-        switch (normalizedProxyType) {
-        case ProxyType::Socks5:
-            proxyType = CURLPROXY_SOCKS5_HOSTNAME;
-            break;
-        case ProxyType::HttpConnect:
-            proxyType = CURLPROXY_HTTP;
-            break;
-        case ProxyType::None:
-            err = "Unsupported proxy type for WebDAV backend.";
-            return false;
-        }
-        if (curl_easy_setopt(curl, CURLOPT_PROXYTYPE, proxyType) != CURLE_OK) {
-            err = "Could not configure WebDAV proxy type.";
-            return false;
-        }
-        if (curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL,
-                             (normalizedProxyType == ProxyType::HttpConnect)
-                                 ? 1L
-                                 : 0L) != CURLE_OK) {
-            err = "Could not configure WebDAV proxy tunnel mode.";
-            return false;
-        }
-
-        if (opt.proxy_username && !opt.proxy_username->empty()) {
-            if (curl_easy_setopt(curl, CURLOPT_PROXYUSERNAME,
-                                 opt.proxy_username->c_str()) != CURLE_OK) {
-                err = "Could not configure WebDAV proxy username.";
-                return false;
-            }
-        }
-        if (opt.proxy_password && !opt.proxy_password->empty()) {
-            if (curl_easy_setopt(curl, CURLOPT_PROXYPASSWORD,
-                                 opt.proxy_password->c_str()) != CURLE_OK) {
-                err = "Could not configure WebDAV proxy password.";
-                return false;
-            }
-        }
-    }
-
-    return true;
-}
-
-size_t appendBodyChunk(char *ptr, size_t size, size_t nmemb, void *userdata) {
-    if (!userdata)
-        return 0;
-    auto *out = static_cast<std::string *>(userdata);
-    const size_t total = size * nmemb;
-    out->append(ptr, total);
-    return total;
-}
-
-size_t writeFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
-    if (!userdata)
-        return 0;
-    return std::fwrite(ptr, size, nmemb, static_cast<std::FILE *>(userdata));
-}
-
-size_t readFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
-    if (!userdata)
-        return 0;
-    return std::fread(ptr, size, nmemb, static_cast<std::FILE *>(userdata));
-}
-
-int transferProgressCallback(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
-                             curl_off_t ultotal, curl_off_t ulnow) {
-    auto *ctx = static_cast<ProgressContext *>(clientp);
-    if (ctx) {
-        if (ctx->interrupted && ctx->interrupted->load())
-            return 1;
-        if (ctx->shouldCancel && ctx->shouldCancel())
-            return 1;
-        if (ctx->progressCb) {
-            const std::size_t total = (ultotal > 0)
-                                          ? static_cast<std::size_t>(ultotal)
-                                          : ((dltotal > 0)
-                                                 ? static_cast<std::size_t>(dltotal)
-                                                 : 0u);
-            const std::size_t done = (ulnow > 0)
-                                         ? static_cast<std::size_t>(ulnow)
-                                         : ((dlnow > 0)
-                                                ? static_cast<std::size_t>(dlnow)
-                                                : 0u);
-            ctx->progressCb(done, total);
-        }
-    }
-    return 0;
+    return curlcommon::configureProxy(curl, opt, "WebDAV", "WebDAV", err);
 }
 
 bool performTextRequest(const SessionOptions &opt, const std::string &method,
@@ -330,7 +166,8 @@ bool performTextRequest(const SessionOptions &opt, const std::string &method,
         (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str()) ==
          CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, appendBodyChunk) ==
+        (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
+                          curlcommon::appendStringCallback) ==
          CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headerList) == CURLE_OK);
@@ -368,7 +205,8 @@ bool performTextRequest(const SessionOptions &opt, const std::string &method,
 }
 
 bool performDownloadRequest(const SessionOptions &opt, const std::string &remote,
-                            std::FILE *localFile, ProgressContext &ctx,
+                            std::FILE *localFile,
+                            curlcommon::TransferProgressContext &progressContext,
                             std::string &err, long &statusCodeOut,
                             CURLcode &rcOut) {
     statusCodeOut = 0;
@@ -386,13 +224,15 @@ bool performDownloadRequest(const SessionOptions &opt, const std::string &remote
     const bool configured =
         (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeFileCallback) ==
+        (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
+                          curlcommon::writeFileCallback) ==
          CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_WRITEDATA, localFile) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, transferProgressCallback) ==
-         CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &ctx) == CURLE_OK);
+        (curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
+                          curlcommon::transferProgressCallback) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progressContext) ==
+         CURLE_OK);
     if (!configured) {
         err = "Could not configure WebDAV download.";
         curl_easy_cleanup(curl);
@@ -411,7 +251,8 @@ bool performDownloadRequest(const SessionOptions &opt, const std::string &remote
 
 bool performUploadRequest(const SessionOptions &opt, const std::string &remote,
                           std::FILE *localFile, curl_off_t fileSize,
-                          ProgressContext &ctx, std::string &err,
+                          curlcommon::TransferProgressContext &progressContext,
+                          std::string &err,
                           long &statusCodeOut, CURLcode &rcOut) {
     statusCodeOut = 0;
     rcOut = CURLE_OK;
@@ -429,14 +270,16 @@ bool performUploadRequest(const SessionOptions &opt, const std::string &remote,
         (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT") == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_READFUNCTION, readFileCallback) ==
+        (curl_easy_setopt(curl, CURLOPT_READFUNCTION,
+                          curlcommon::readFileCallback) ==
          CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_READDATA, localFile) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, fileSize) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, transferProgressCallback) ==
-         CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &ctx) == CURLE_OK);
+        (curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
+                          curlcommon::transferProgressCallback) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progressContext) ==
+         CURLE_OK);
     if (!configured) {
         err = "Could not configure WebDAV upload.";
         curl_easy_cleanup(curl);
@@ -845,11 +688,12 @@ bool CurlWebDavClient::get(
         return false;
     }
 
-    ProgressContext ctx{progress, shouldCancel, &interrupted_};
+    curlcommon::TransferProgressContext progressContext{
+        progress, shouldCancel, &interrupted_, true};
     long statusCode = 0;
     CURLcode rc = CURLE_OK;
-    const bool ok = performDownloadRequest(opt, remote, localFile, ctx, err,
-                                           statusCode, rc);
+    const bool ok = performDownloadRequest(opt, remote, localFile,
+                                           progressContext, err, statusCode, rc);
     std::fclose(localFile);
     if (!ok) {
         if (rc == CURLE_ABORTED_BY_CALLBACK) {
@@ -903,11 +747,13 @@ bool CurlWebDavClient::put(
         return false;
     }
 
-    ProgressContext ctx{progress, shouldCancel, &interrupted_};
+    curlcommon::TransferProgressContext progressContext{
+        progress, shouldCancel, &interrupted_, true};
     long statusCode = 0;
     CURLcode rc = CURLE_OK;
     const bool ok = performUploadRequest(
-        opt, remote, localFile, static_cast<curl_off_t>(total), ctx, err,
+        opt, remote, localFile, static_cast<curl_off_t>(total),
+        progressContext, err,
         statusCode, rc);
     std::fclose(localFile);
     if (!ok) {

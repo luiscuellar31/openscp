@@ -1,6 +1,8 @@
 // FTP/FTPS backend implementation based on libcurl.
 #include "openscp/CurlFtpClient.hpp"
 
+#include "CurlBackendCommon.hpp"
+
 #include <curl/curl.h>
 
 #include <algorithm>
@@ -19,20 +21,6 @@
 namespace openscp {
 namespace {
 
-bool ensureCurlInitialized(std::string &err) {
-    static std::once_flag initFlag;
-    static CURLcode initResult = CURLE_OK;
-    std::call_once(initFlag, [] {
-        initResult = curl_global_init(CURL_GLOBAL_DEFAULT);
-    });
-    if (initResult != CURLE_OK) {
-        err = std::string("libcurl initialization failed: ") +
-              curl_easy_strerror(initResult);
-        return false;
-    }
-    return true;
-}
-
 bool isFtpFamilyProtocol(Protocol protocol) {
     return protocol == Protocol::Ftp || protocol == Protocol::Ftps;
 }
@@ -46,14 +34,10 @@ bool unsupportedFtpOperation(const char *what, std::string &err) {
     return false;
 }
 
-std::string trimAscii(std::string s) {
-    auto isWs = [](unsigned char c) { return std::isspace(c) != 0; };
-    while (!s.empty() && isWs(static_cast<unsigned char>(s.front())))
-        s.erase(s.begin());
-    while (!s.empty() && isWs(static_cast<unsigned char>(s.back())))
-        s.pop_back();
-    return s;
-}
+using curlcommon::ensureCurlInitialized;
+using curlcommon::parseUnsignedDec;
+using curlcommon::toLowerAscii;
+using curlcommon::trimAscii;
 
 std::string trimAsciiLeft(std::string s) {
     auto isWs = [](unsigned char c) { return std::isspace(c) != 0; };
@@ -75,30 +59,6 @@ std::string normalizeRemoteDirPath(std::string path) {
     if (path != "/" && !path.empty() && path.back() != '/')
         path.push_back('/');
     return path;
-}
-
-bool parseUnsignedDec(std::string_view token, std::uint64_t &out) {
-    if (token.empty())
-        return false;
-    std::uint64_t value = 0;
-    for (char ch : token) {
-        if (ch < '0' || ch > '9')
-            return false;
-        const std::uint64_t digit = static_cast<std::uint64_t>(ch - '0');
-        if (value > (std::numeric_limits<std::uint64_t>::max() - digit) / 10)
-            return false;
-        value = value * 10 + digit;
-    }
-    out = value;
-    return true;
-}
-
-std::string toLowerAscii(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c) -> char {
-                       return static_cast<char>(std::tolower(c));
-                   });
-    return s;
 }
 
 std::uint32_t parseUnixPermBits(const std::string &perm) {
@@ -161,14 +121,6 @@ bool parseMlsdUtcTimestamp(const std::string &raw, std::uint64_t &outEpoch) {
     return true;
 }
 
-std::string normalizeFtpHostAuthority(const std::string &host) {
-    if (host.find(':') != std::string::npos &&
-        host.find(']') == std::string::npos) {
-        return "[" + host + "]";
-    }
-    return host;
-}
-
 bool useImplicitFtps(const SessionOptions &opt) {
     return opt.protocol == Protocol::Ftps &&
            opt.port == defaultPortForProtocol(Protocol::Ftps);
@@ -182,7 +134,7 @@ const char *ftpUrlScheme(const SessionOptions &opt) {
 
 std::string buildFtpUrl(const SessionOptions &opt,
                         const std::string &remotePath) {
-    const std::string host = normalizeFtpHostAuthority(opt.host);
+    const std::string host = curlcommon::normalizeHostAuthorityForUrl(opt.host);
     const std::string path = normalizeRemotePath(remotePath);
     return std::string(ftpUrlScheme(opt)) + "://" + host + ":" +
            std::to_string(opt.port) +
@@ -234,21 +186,11 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
             err = "Could not configure FTPS TLS mode.";
             return false;
         }
-        const long verifyPeer = opt.ftps_verify_peer ? 1L : 0L;
-        const long verifyHost = opt.ftps_verify_peer ? 2L : 0L;
-        if (curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, verifyPeer) !=
-                CURLE_OK ||
-            curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, verifyHost) !=
-                CURLE_OK) {
-            err = "Could not configure FTPS certificate verification.";
+        if (!curlcommon::configureTlsVerification(
+                curl, opt.ftps_verify_peer, opt.ftps_ca_cert_path,
+                "Could not configure FTPS certificate verification.",
+                "Could not configure FTPS CA certificate path.", err)) {
             return false;
-        }
-        if (opt.ftps_ca_cert_path && !opt.ftps_ca_cert_path->empty()) {
-            if (curl_easy_setopt(curl, CURLOPT_CAINFO,
-                                 opt.ftps_ca_cert_path->c_str()) != CURLE_OK) {
-                err = "Could not configure FTPS CA certificate path.";
-                return false;
-            }
         }
     } else {
         if (curl_easy_setopt(curl, CURLOPT_USE_SSL, CURLUSESSL_NONE) !=
@@ -258,70 +200,7 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
         }
     }
 
-    if (opt.proxy_type != ProxyType::None) {
-        if (opt.proxy_host.empty() || opt.proxy_port == 0) {
-            err = "FTP proxy requires host and port.";
-            return false;
-        }
-        const std::string proxy =
-            opt.proxy_host + ":" + std::to_string(opt.proxy_port);
-        if (curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str()) != CURLE_OK) {
-            err = "Could not configure FTP proxy endpoint.";
-            return false;
-        }
-
-        const ProxyType normalizedProxyType = normalizeProxyType(opt.proxy_type);
-        long proxyType = 0;
-        switch (normalizedProxyType) {
-        case ProxyType::Socks5:
-            proxyType = CURLPROXY_SOCKS5_HOSTNAME;
-            break;
-        case ProxyType::HttpConnect:
-            proxyType = CURLPROXY_HTTP;
-            break;
-        case ProxyType::None:
-            err = "Unsupported proxy type for FTP/FTPS backend.";
-            return false;
-        }
-        if (curl_easy_setopt(curl, CURLOPT_PROXYTYPE, proxyType) != CURLE_OK) {
-            err = "Could not configure FTP proxy type.";
-            return false;
-        }
-        if (curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL,
-                             (normalizedProxyType == ProxyType::HttpConnect)
-                                 ? 1L
-                                 : 0L) != CURLE_OK) {
-            err = "Could not configure FTP proxy tunnel mode.";
-            return false;
-        }
-
-        if (opt.proxy_username && !opt.proxy_username->empty()) {
-            if (curl_easy_setopt(curl, CURLOPT_PROXYUSERNAME,
-                                 opt.proxy_username->c_str()) != CURLE_OK) {
-                err = "Could not configure FTP proxy username.";
-                return false;
-            }
-        }
-        if (opt.proxy_password && !opt.proxy_password->empty()) {
-            if (curl_easy_setopt(curl, CURLOPT_PROXYPASSWORD,
-                                 opt.proxy_password->c_str()) != CURLE_OK) {
-                err = "Could not configure FTP proxy password.";
-                return false;
-            }
-        }
-    }
-
-    return true;
-}
-
-// cppcheck-suppress constParameterCallback
-size_t appendListingChunk(char *ptr, size_t size, size_t nmemb, void *userdata) {
-    if (!userdata)
-        return 0;
-    std::string *buffer = static_cast<std::string *>(userdata);
-    const size_t total = size * nmemb;
-    buffer->append(ptr, total);
-    return total;
+    return curlcommon::configureProxy(curl, opt, "FTP", "FTP/FTPS", err);
 }
 
 bool runDirectoryListingCommand(const SessionOptions &opt,
@@ -344,7 +223,8 @@ bool runDirectoryListingCommand(const SessionOptions &opt,
         (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_DIRLISTONLY, 0L) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, command) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, appendListingChunk) ==
+        (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
+                          curlcommon::appendStringCallback) ==
          CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_WRITEDATA, &payload) == CURLE_OK);
     if (!configured) {
@@ -593,52 +473,6 @@ bool parseListListing(const std::string &payload, std::vector<FileInfo> &out) {
     return parsedAny || !sawUnparsedLine;
 }
 
-// cppcheck-suppress constParameterCallback
-size_t writeFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
-    if (!userdata)
-        return 0;
-    std::FILE *file = static_cast<std::FILE *>(userdata);
-    const size_t total = size * nmemb;
-    return std::fwrite(ptr, 1, total, file);
-}
-
-size_t readFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
-    if (!userdata)
-        return 0;
-    std::FILE *file = static_cast<std::FILE *>(userdata);
-    const size_t total = size * nmemb;
-    return std::fread(ptr, 1, total, file);
-}
-
-struct ProgressContext {
-    std::function<void(std::size_t, std::size_t)> progress;
-    std::function<bool()> shouldCancel;
-    std::atomic<bool> *interrupted = nullptr;
-};
-
-int transferProgressCallback(void *userdata, curl_off_t dltotal, curl_off_t dlnow,
-                             curl_off_t ultotal, curl_off_t ulnow) {
-    ProgressContext *ctx = static_cast<ProgressContext *>(userdata);
-    if (!ctx)
-        return 0;
-    if (ctx->interrupted && ctx->interrupted->load())
-        return 1;
-    if (ctx->shouldCancel && ctx->shouldCancel())
-        return 1;
-
-    const std::size_t total = (dltotal > 0)
-                                  ? static_cast<std::size_t>(dltotal)
-                                  : ((ultotal > 0) ? static_cast<std::size_t>(ultotal)
-                                                   : 0u);
-    const std::size_t done = (dlnow > 0)
-                                 ? static_cast<std::size_t>(dlnow)
-                                 : ((ulnow > 0) ? static_cast<std::size_t>(ulnow)
-                                                : 0u);
-    if (ctx->progress)
-        ctx->progress(done, total);
-    return 0;
-}
-
 } // namespace
 
 CurlFtpClient::CurlFtpClient(Protocol protocol) : protocol_(protocol) {
@@ -692,14 +526,7 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
     if (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) != CURLE_OK ||
         curl_easy_setopt(curl, CURLOPT_DIRLISTONLY, 1L) != CURLE_OK ||
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
-                         +[](char *ptr, size_t size, size_t nmemb,
-                             void *userdata) -> size_t {
-                             if (!userdata)
-                                 return 0;
-                             std::string *out = static_cast<std::string *>(userdata);
-                             out->append(ptr, size * nmemb);
-                             return size * nmemb;
-                         }) != CURLE_OK ||
+                         curlcommon::appendStringCallback) != CURLE_OK ||
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sink) != CURLE_OK) {
         err = "Could not configure FTP connection probe.";
         curl_easy_cleanup(curl);
@@ -830,17 +657,20 @@ bool CurlFtpClient::get(
         return false;
     }
 
-    ProgressContext ctx{progress, shouldCancel, &interrupted_};
+    curlcommon::TransferProgressContext progressContext{
+        progress, shouldCancel, &interrupted_, false};
     const std::string url = buildFtpUrl(opt, remote);
     const bool configured =
         (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeFileCallback) ==
+        (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
+                          curlcommon::writeFileCallback) ==
          CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_WRITEDATA, localFile) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
-                          transferProgressCallback) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &ctx) == CURLE_OK);
+                          curlcommon::transferProgressCallback) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progressContext) ==
+         CURLE_OK);
     if (!configured) {
         std::fclose(localFile);
         curl_easy_cleanup(curl);
@@ -917,12 +747,14 @@ bool CurlFtpClient::put(
         return false;
     }
 
-    ProgressContext ctx{progress, shouldCancel, &interrupted_};
+    curlcommon::TransferProgressContext progressContext{
+        progress, shouldCancel, &interrupted_, false};
     const std::string url = buildFtpUrl(opt, remote);
     const bool configured =
         (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_READFUNCTION, readFileCallback) ==
+        (curl_easy_setopt(curl, CURLOPT_READFUNCTION,
+                          curlcommon::readFileCallback) ==
          CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_READDATA, localFile) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE,
@@ -931,8 +763,9 @@ bool CurlFtpClient::put(
                           CURLFTP_CREATE_DIR_RETRY) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
-                          transferProgressCallback) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &ctx) == CURLE_OK);
+                          curlcommon::transferProgressCallback) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progressContext) ==
+         CURLE_OK);
     if (!configured) {
         std::fclose(localFile);
         curl_easy_cleanup(curl);
