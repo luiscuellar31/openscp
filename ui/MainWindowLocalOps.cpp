@@ -404,44 +404,19 @@ void MainWindow::copyLeftToRight() {
         return;
     }
 
-    enum class OverwritePolicy { Ask, OverwriteAll, SkipAll };
-    OverwritePolicy policy = OverwritePolicy::Ask;
+    QVector<QFileInfo> sources;
+    sources.reserve(rows.size());
+    for (const QModelIndex &idx : rows)
+        sources.push_back(leftModel_->fileInfo(idx));
 
     int skipped = 0;
+    const QVector<QPair<QString, QString>> selectedPairs =
+        buildLocalDestinationPairsWithOverwritePrompt(this, sources, dstDir,
+                                                      &skipped);
     QVector<LocalFsPair> pairs;
-
-    for (const QModelIndex &idx : rows) {
-        const QFileInfo fi = leftModel_->fileInfo(idx);
-        const QString target = dstDir.filePath(fi.fileName());
-
-        if (QFileInfo::exists(target)) {
-            if (policy == OverwritePolicy::Ask) {
-                auto ret = UiAlerts::question(
-                    this, tr("Conflict"),
-                    QString(
-                        tr("“%1” already exists at destination.\nOverwrite?"))
-                        .arg(fi.fileName()),
-                    QMessageBox::Yes | QMessageBox::No | QMessageBox::YesToAll |
-                        QMessageBox::NoToAll);
-                if (ret == QMessageBox::YesToAll)
-                    policy = OverwritePolicy::OverwriteAll;
-                else if (ret == QMessageBox::NoToAll)
-                    policy = OverwritePolicy::SkipAll;
-
-                if (ret == QMessageBox::No ||
-                    policy == OverwritePolicy::SkipAll) {
-                    ++skipped;
-                    continue;
-                }
-            }
-            QFileInfo tfi(target);
-            if (tfi.isDir())
-                QDir(target).removeRecursively();
-            else
-                QFile::remove(target);
-        }
-        pairs.push_back({fi.absoluteFilePath(), target});
-    }
+    pairs.reserve(selectedPairs.size());
+    for (const auto &pair : selectedPairs)
+        pairs.push_back({pair.first, pair.second});
     runLocalFsOperation(pairs, false, skipped);
 }
 
@@ -579,6 +554,11 @@ void MainWindow::moveLeftToRight() {
 
         // Local cleanup on successful upload, without blocking UI.
         if (!pairs.isEmpty()) {
+            QVector<QPair<QString, QString>> transferPairs;
+            transferPairs.reserve(pairs.size());
+            for (const auto &p : pairs)
+                transferPairs.push_back({p.localPath, p.remotePath});
+
             struct MoveUploadState {
                 QSet<QString> pendingLocalFiles;
                 QSet<QString> processedLocalFiles;
@@ -607,7 +587,7 @@ void MainWindow::moveLeftToRight() {
             auto connPtr = std::make_shared<QMetaObject::Connection>();
             *connPtr = connect(
                 transferMgr_, &TransferManager::tasksChanged, this,
-                [this, state, remoteBase, connPtr, pairs]() {
+                [this, state, remoteBase, connPtr, transferPairs]() {
                     const auto tasks = transferMgr_->tasksSnapshot();
 
                     for (const auto &t : tasks) {
@@ -665,28 +645,8 @@ void MainWindow::moveLeftToRight() {
                         }
                     }
 
-                    bool allFinal = true;
-                    for (const auto &p : pairs) {
-                        bool found = false;
-                        bool final = false;
-                        for (const auto &t : tasks) {
-                            if (t.type == TransferTask::Type::Upload &&
-                                t.src == p.localPath && t.dst == p.remotePath) {
-                                found = true;
-                                if (t.status == TransferTask::Status::Done ||
-                                    t.status == TransferTask::Status::Error ||
-                                    t.status ==
-                                        TransferTask::Status::Canceled) {
-                                    final = true;
-                                }
-                                break;
-                            }
-                        }
-                        if (!found || !final) {
-                            allFinal = false;
-                            break;
-                        }
-                    }
+                    const bool allFinal = areTransferPairsFinal(
+                        tasks, TransferTask::Type::Upload, transferPairs);
 
                     if (allFinal) {
                         QString msg = QString(tr("Moved OK: %1  |  Failed: %2  "
@@ -728,40 +688,19 @@ void MainWindow::moveLeftToRight() {
             tr("This will copy and then delete the source.\nContinue?")) !=
         QMessageBox::Yes)
         return;
-    enum class OverwritePolicy { Ask, OverwriteAll, SkipAll };
-    OverwritePolicy policy = OverwritePolicy::Ask;
+    QVector<QFileInfo> sources;
+    sources.reserve(rows.size());
+    for (const QModelIndex &idx : rows)
+        sources.push_back(leftModel_->fileInfo(idx));
+
     int skipped = 0;
+    const QVector<QPair<QString, QString>> selectedPairs =
+        buildLocalDestinationPairsWithOverwritePrompt(this, sources, dstDir,
+                                                      &skipped);
     QVector<LocalFsPair> pairs;
-    for (const QModelIndex &idx : rows) {
-        const QFileInfo fi = leftModel_->fileInfo(idx);
-        const QString target = dstDir.filePath(fi.fileName());
-        if (QFileInfo::exists(target)) {
-            if (policy == OverwritePolicy::Ask) {
-                const auto ret = UiAlerts::question(
-                    this, tr("Conflict"),
-                    QString(
-                        tr("“%1” already exists at destination.\nOverwrite?"))
-                        .arg(fi.fileName()),
-                    QMessageBox::Yes | QMessageBox::No |
-                        QMessageBox::YesToAll | QMessageBox::NoToAll);
-                if (ret == QMessageBox::YesToAll)
-                    policy = OverwritePolicy::OverwriteAll;
-                else if (ret == QMessageBox::NoToAll)
-                    policy = OverwritePolicy::SkipAll;
-                if (ret == QMessageBox::No ||
-                    policy == OverwritePolicy::SkipAll) {
-                    ++skipped;
-                    continue;
-                }
-            }
-            QFileInfo tfi(target);
-            if (tfi.isDir())
-                QDir(target).removeRecursively();
-            else
-                QFile::remove(target);
-        }
-        pairs.push_back({fi.absoluteFilePath(), target});
-    }
+    pairs.reserve(selectedPairs.size());
+    for (const auto &pair : selectedPairs)
+        pairs.push_back({pair.first, pair.second});
     runLocalFsOperation(pairs, true, skipped);
 }
 

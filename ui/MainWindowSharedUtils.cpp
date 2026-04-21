@@ -1,7 +1,11 @@
 // Shared helper utilities for MainWindow split implementation files.
 #include "MainWindowSharedUtils.hpp"
+#include "UiAlerts.hpp"
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QMessageBox>
 
 bool isValidEntryName(const QString &name, QString *why) {
     if (name == "." || name == "..") {
@@ -109,4 +113,96 @@ QString normalizeRemotePath(const QString &rawPath) {
     if (normalized.size() > 1 && normalized.endsWith(QLatin1Char('/')))
         normalized.chop(1);
     return normalized;
+}
+
+QVector<QPair<QString, QString>> buildLocalDestinationPairsWithOverwritePrompt(
+    QWidget *parent, const QVector<QFileInfo> &sources,
+    const QDir &destinationDir, int *skippedCount) {
+    enum class OverwritePolicy { Ask, OverwriteAll, SkipAll };
+    OverwritePolicy policy = OverwritePolicy::Ask;
+
+    int skipped = 0;
+    QVector<QPair<QString, QString>> pairs;
+    pairs.reserve(sources.size());
+
+    for (const QFileInfo &sourceInfo : sources) {
+        const QString targetPath = destinationDir.filePath(sourceInfo.fileName());
+        if (QFileInfo::exists(targetPath)) {
+            if (policy == OverwritePolicy::Ask) {
+                const auto decision = UiAlerts::question(
+                    parent, QCoreApplication::translate("MainWindow", "Conflict"),
+                    QCoreApplication::translate(
+                        "MainWindow",
+                        "“%1” already exists at destination.\nOverwrite?")
+                        .arg(sourceInfo.fileName()),
+                    QMessageBox::Yes | QMessageBox::No | QMessageBox::YesToAll |
+                        QMessageBox::NoToAll);
+                if (decision == QMessageBox::YesToAll)
+                    policy = OverwritePolicy::OverwriteAll;
+                else if (decision == QMessageBox::NoToAll)
+                    policy = OverwritePolicy::SkipAll;
+
+                if (decision == QMessageBox::No ||
+                    policy == OverwritePolicy::SkipAll) {
+                    ++skipped;
+                    continue;
+                }
+            } else if (policy == OverwritePolicy::SkipAll) {
+                ++skipped;
+                continue;
+            }
+
+            const QFileInfo targetInfo(targetPath);
+            if (targetInfo.isDir())
+                QDir(targetPath).removeRecursively();
+            else
+                QFile::remove(targetPath);
+        }
+        pairs.push_back({sourceInfo.absoluteFilePath(), targetPath});
+    }
+
+    if (skippedCount)
+        *skippedCount = skipped;
+    return pairs;
+}
+
+bool isTransferTaskActiveStatus(TransferTask::Status status) {
+    return status == TransferTask::Status::Queued ||
+           status == TransferTask::Status::Running ||
+           status == TransferTask::Status::Paused;
+}
+
+bool isTransferTaskFinalStatus(TransferTask::Status status) {
+    return status == TransferTask::Status::Done ||
+           status == TransferTask::Status::Error ||
+           status == TransferTask::Status::Canceled;
+}
+
+const TransferTask *findTransferTask(const QVector<TransferTask> &tasks,
+                                     TransferTask::Type type,
+                                     const QString &src, const QString &dst) {
+    for (const auto &task : tasks) {
+        if (task.type == type && task.src == src && task.dst == dst)
+            return &task;
+    }
+    return nullptr;
+}
+
+bool hasActiveTransferTask(const QVector<TransferTask> &tasks,
+                           TransferTask::Type type, const QString &src,
+                           const QString &dst) {
+    const TransferTask *task = findTransferTask(tasks, type, src, dst);
+    return task && isTransferTaskActiveStatus(task->status);
+}
+
+bool areTransferPairsFinal(const QVector<TransferTask> &tasks,
+                           TransferTask::Type type,
+                           const QVector<QPair<QString, QString>> &pairs) {
+    for (const auto &pair : pairs) {
+        const TransferTask *task = findTransferTask(tasks, type, pair.first,
+                                                    pair.second);
+        if (!task || !isTransferTaskFinalStatus(task->status))
+            return false;
+    }
+    return true;
 }
