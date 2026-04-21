@@ -22,6 +22,11 @@ endif()
 
 if (_openscp_need_curl)
     find_package(CURL QUIET)
+    if (CURL_FOUND)
+        list(APPEND OPENSCP_CORE_SRCS
+            src/curl/CurlBackendCommon.cpp
+        )
+    endif()
 endif()
 
 if (OPENSCP_ENABLE_FTP_BACKEND)
