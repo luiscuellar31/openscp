@@ -14,6 +14,7 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QHash>
 #include <QInputDialog>
 #include <QLabel>
 #include <QMenu>
@@ -133,29 +134,45 @@ struct SelectedActionsState {
     bool canOpenDestination = false;
 };
 
+using TaskIndexById = QHash<quint64, const TransferTask *>;
+
+static TaskIndexById buildTaskIndexById(const QVector<TransferTask> &snapshot) {
+    TaskIndexById index;
+    index.reserve(snapshot.size());
+    for (const auto &task : snapshot)
+        index.insert(task.id, &task);
+    return index;
+}
+
+template <typename Callback>
+static void forEachSelectedTask(const QVector<quint64> &ids,
+                                const TaskIndexById &taskIndex,
+                                Callback &&callback) {
+    for (quint64 id : ids) {
+        const auto it = taskIndex.constFind(id);
+        if (it == taskIndex.cend())
+            continue;
+        callback(id, *it.value());
+    }
+}
+
 static SelectedActionsState
 buildSelectedActionsState(const QVector<quint64> &ids,
-                          const QVector<TransferTask> &snapshot) {
+                          const TaskIndexById &taskIndex) {
     SelectedActionsState out;
     out.hasSelection = !ids.isEmpty();
     if (!out.hasSelection)
         return out;
 
-    for (quint64 id : ids) {
-        for (const auto &t : snapshot) {
-            if (t.id != id)
-                continue;
-            out.canPause = out.canPause || canPauseStatus(t.status);
-            out.canResume = out.canResume || canResumeStatus(t.status);
-            out.canLimit = out.canLimit || canLimitStatus(t.status);
-            out.canCancel = out.canCancel || canCancelStatus(t.status);
-            out.canRetry = out.canRetry || canRetryStatus(t.status);
-            out.canOpenDestination =
-                out.canOpenDestination ||
-                (t.type == TransferTask::Type::Download);
-            break;
-        }
-    }
+    forEachSelectedTask(ids, taskIndex, [&](quint64, const TransferTask &task) {
+        out.canPause = out.canPause || canPauseStatus(task.status);
+        out.canResume = out.canResume || canResumeStatus(task.status);
+        out.canLimit = out.canLimit || canLimitStatus(task.status);
+        out.canCancel = out.canCancel || canCancelStatus(task.status);
+        out.canRetry = out.canRetry || canRetryStatus(task.status);
+        out.canOpenDestination =
+            out.canOpenDestination || (task.type == TransferTask::Type::Download);
+    });
     return out;
 }
 
@@ -691,32 +708,22 @@ void TransferQueueDialog::onPauseSelected() {
     const auto ids = selectedTaskIds();
     if (ids.isEmpty())
         return;
-    const auto snapshot = mgr_->tasksSnapshot();
-    for (quint64 id : ids) {
-        for (const auto &t : snapshot) {
-            if (t.id != id)
-                continue;
-            if (canPauseStatus(t.status))
-                mgr_->pauseTask(id);
-            break;
-        }
-    }
+    const auto taskIndex = buildTaskIndexById(mgr_->tasksSnapshot());
+    forEachSelectedTask(ids, taskIndex, [this](quint64 id, const TransferTask &t) {
+        if (canPauseStatus(t.status))
+            mgr_->pauseTask(id);
+    });
 }
 
 void TransferQueueDialog::onResumeSelected() {
     const auto ids = selectedTaskIds();
     if (ids.isEmpty())
         return;
-    const auto snapshot = mgr_->tasksSnapshot();
-    for (quint64 id : ids) {
-        for (const auto &t : snapshot) {
-            if (t.id != id)
-                continue;
-            if (canResumeStatus(t.status))
-                mgr_->resumeTask(id);
-            break;
-        }
-    }
+    const auto taskIndex = buildTaskIndexById(mgr_->tasksSnapshot());
+    forEachSelectedTask(ids, taskIndex, [this](quint64 id, const TransferTask &t) {
+        if (canResumeStatus(t.status))
+            mgr_->resumeTask(id);
+    });
 }
 
 void TransferQueueDialog::onApplyGlobalSpeed() {
@@ -728,18 +735,13 @@ void TransferQueueDialog::onLimitSelected() {
     const auto ids = selectedTaskIds();
     if (ids.isEmpty())
         return;
-    const auto snapshot = mgr_->tasksSnapshot();
+    const auto taskIndex = buildTaskIndexById(mgr_->tasksSnapshot());
     QVector<quint64> eligible;
     eligible.reserve(ids.size());
-    for (quint64 id : ids) {
-        for (const auto &t : snapshot) {
-            if (t.id != id)
-                continue;
-            if (canLimitStatus(t.status))
-                eligible.push_back(id);
-            break;
-        }
-    }
+    forEachSelectedTask(ids, taskIndex, [&](quint64 id, const TransferTask &t) {
+        if (canLimitStatus(t.status))
+            eligible.push_back(id);
+    });
     if (eligible.isEmpty())
         return;
 
@@ -757,16 +759,11 @@ void TransferQueueDialog::onStopSelected() {
     const auto ids = selectedTaskIds();
     if (ids.isEmpty())
         return;
-    const auto snapshot = mgr_->tasksSnapshot();
-    for (quint64 id : ids) {
-        for (const auto &t : snapshot) {
-            if (t.id != id)
-                continue;
-            if (canCancelStatus(t.status))
-                mgr_->cancelTask(id);
-            break;
-        }
-    }
+    const auto taskIndex = buildTaskIndexById(mgr_->tasksSnapshot());
+    forEachSelectedTask(ids, taskIndex, [this](quint64 id, const TransferTask &t) {
+        if (canCancelStatus(t.status))
+            mgr_->cancelTask(id);
+    });
 }
 
 void TransferQueueDialog::onStopAll() { mgr_->cancelAll(); }
@@ -785,16 +782,11 @@ void TransferQueueDialog::onRetrySelected() {
     const auto ids = selectedTaskIds();
     if (ids.isEmpty())
         return;
-    const auto snapshot = mgr_->tasksSnapshot();
-    for (quint64 id : ids) {
-        for (const auto &t : snapshot) {
-            if (t.id != id)
-                continue;
-            if (canRetryStatus(t.status))
-                mgr_->retryTask(id);
-            break;
-        }
-    }
+    const auto taskIndex = buildTaskIndexById(mgr_->tasksSnapshot());
+    forEachSelectedTask(ids, taskIndex, [this](quint64 id, const TransferTask &t) {
+        if (canRetryStatus(t.status))
+            mgr_->retryTask(id);
+    });
 }
 
 void TransferQueueDialog::onOpenDestination() {
@@ -802,47 +794,35 @@ void TransferQueueDialog::onOpenDestination() {
     if (ids.isEmpty())
         return;
 
-    const auto snapshot = mgr_->tasksSnapshot();
+    const auto taskIndex = buildTaskIndexById(mgr_->tasksSnapshot());
     QSet<QString> opened;
-    for (quint64 id : ids) {
-        for (const auto &t : snapshot) {
-            if (t.id != id)
-                continue;
-            if (t.type != TransferTask::Type::Download)
-                break;
+    forEachSelectedTask(ids, taskIndex, [&](quint64, const TransferTask &t) {
+        if (t.type != TransferTask::Type::Download)
+            return;
 
-            QString path = t.dst;
-            QFileInfo fi(path);
-            if (!fi.exists()) {
-                const QString parent = fi.dir().absolutePath();
-                if (!parent.isEmpty() && QDir(parent).exists())
-                    path = parent;
-            }
-            const QString normalized = QFileInfo(path).absoluteFilePath();
-            if (normalized.isEmpty() || opened.contains(normalized))
-                break;
-            opened.insert(normalized);
-            QDesktopServices::openUrl(QUrl::fromLocalFile(normalized));
-            break;
+        QString path = t.dst;
+        QFileInfo fi(path);
+        if (!fi.exists()) {
+            const QString parent = fi.dir().absolutePath();
+            if (!parent.isEmpty() && QDir(parent).exists())
+                path = parent;
         }
-    }
+        const QString normalized = QFileInfo(path).absoluteFilePath();
+        if (normalized.isEmpty() || opened.contains(normalized))
+            return;
+        opened.insert(normalized);
+        QDesktopServices::openUrl(QUrl::fromLocalFile(normalized));
+    });
 }
 
 void TransferQueueDialog::onCopySourcePath() {
     const auto ids = selectedTaskIds();
     if (ids.isEmpty())
         return;
-    const auto snapshot = mgr_->tasksSnapshot();
-
+    const auto taskIndex = buildTaskIndexById(mgr_->tasksSnapshot());
     QStringList lines;
-    for (quint64 id : ids) {
-        for (const auto &t : snapshot) {
-            if (t.id == id) {
-                lines << t.src;
-                break;
-            }
-        }
-    }
+    forEachSelectedTask(ids, taskIndex,
+                        [&](quint64, const TransferTask &t) { lines << t.src; });
     if (!lines.isEmpty())
         QGuiApplication::clipboard()->setText(lines.join("\n"));
 }
@@ -851,17 +831,10 @@ void TransferQueueDialog::onCopyDestinationPath() {
     const auto ids = selectedTaskIds();
     if (ids.isEmpty())
         return;
-    const auto snapshot = mgr_->tasksSnapshot();
-
+    const auto taskIndex = buildTaskIndexById(mgr_->tasksSnapshot());
     QStringList lines;
-    for (quint64 id : ids) {
-        for (const auto &t : snapshot) {
-            if (t.id == id) {
-                lines << t.dst;
-                break;
-            }
-        }
-    }
+    forEachSelectedTask(ids, taskIndex,
+                        [&](quint64, const TransferTask &t) { lines << t.dst; });
     if (!lines.isEmpty())
         QGuiApplication::clipboard()->setText(lines.join("\n"));
 }
@@ -942,7 +915,7 @@ void TransferQueueDialog::updateSummary() {
     const bool canClearFailed = (error + canceled) > 0;
     const bool canCancelAll = active > 0;
     const auto selectedState =
-        buildSelectedActionsState(selectedTaskIds(), tasks);
+        buildSelectedActionsState(selectedTaskIds(), buildTaskIndexById(tasks));
 
     if (pauseBtn_)
         pauseBtn_->setEnabled(hasAny && canPause);
@@ -1001,7 +974,8 @@ void TransferQueueDialog::showContextMenu(const QPoint &pos) {
 
     const auto ids = selectedTaskIds();
     const auto snapshot = mgr_->tasksSnapshot();
-    const auto selectedState = buildSelectedActionsState(ids, snapshot);
+    const auto selectedState =
+        buildSelectedActionsState(ids, buildTaskIndexById(snapshot));
 
     QMenu menu(this);
     QAction *actPauseSel = menu.addAction(tr("Pause selected"));
