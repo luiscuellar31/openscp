@@ -2,9 +2,13 @@
 #pragma once
 #include <QElapsedTimer>
 #include <QMetaObject>
+#include <QPair>
 #include <QTreeView>
+#include <QVector>
 #include <atomic>
 #include <memory>
+
+class RemoteModel;
 
 class DragAwareTreeView : public QTreeView {
     Q_OBJECT
@@ -27,6 +31,27 @@ class DragAwareTreeView : public QTreeView {
     void scheduleAutoCleanup(const QString &batchDir, int initialDelayMs = 500);
     // Remote -> system drag-out: prepare asynchronously using TransferManager
     void startRemoteDragAsync(class RemoteModel *rm);
+    using RemoteDragTarget = QPair<QString, QString>; // remote, local
+    struct RemoteDragBatchStats {
+        quint64 totalBytes = 0;
+        quint64 totalItems = 0;
+        quint64 totalDirs = 0;
+        quint64 unknownSizeCount = 0;
+        bool anySizeUnknown = false;
+    };
+    QModelIndexList collectRemoteSelectedRows() const;
+    bool buildRemoteDragTargets(RemoteModel *rm, const QModelIndexList &rows,
+                                const QString &stagingDir,
+                                QVector<RemoteDragTarget> &targets,
+                                RemoteDragBatchStats &stats);
+    bool confirmRemoteDragThreshold(const RemoteDragBatchStats &stats);
+    void enqueueRemoteDragTargets(QVector<RemoteDragTarget> &targets);
+    void beginRemoteDragMonitoring(const QVector<RemoteDragTarget> &targets,
+                                   const RemoteDragBatchStats &stats);
+    QString formatRemoteDragMetrics(const QString &result,
+                                    const RemoteDragBatchStats &stats,
+                                    qint64 stagingMs) const;
+    void resetRemoteDragState();
 
     // Lightweight overlay while preparing staging
     void showPrepOverlay(const QString &text);

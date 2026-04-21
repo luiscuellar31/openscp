@@ -23,7 +23,6 @@
 #include <QPushButton>
 #include <QSet>
 #include <QSettings>
-#include <QSharedPointer>
 #include <QShortcut>
 #include <QStatusBar>
 #include <QTimer>
@@ -40,6 +39,32 @@ static QString stagingRootFromSettings() {
         root = QDir::homePath() + "/Downloads/OpenSCP-Dragged";
     }
     return root;
+}
+
+static QString normalizeStagingName(const QString &value) {
+#if defined(Q_OS_MAC)
+    return value.normalized(QString::NormalizationForm_C);
+#else
+    return value;
+#endif
+}
+
+static QPair<QString, QString> splitNameMultiExt(const QString &fileName) {
+    const int firstDot = fileName.indexOf('.', 1);
+    if (firstDot <= 0)
+        return qMakePair(fileName, QString());
+    return qMakePair(fileName.left(firstDot), fileName.mid(firstDot));
+}
+
+static QPair<int, quint64> loadStagingConfirmThresholds() {
+    QSettings settings("OpenSCP", "OpenSCP");
+    int itemThreshold = settings.value("Advanced/stagingConfirmItems", 500).toInt();
+    if (itemThreshold < 1)
+        itemThreshold = 500;
+    int mibThreshold = settings.value("Advanced/stagingConfirmMiB", 1024).toInt();
+    if (mibThreshold < 1)
+        mibThreshold = 1024;
+    return qMakePair(itemThreshold, quint64(mibThreshold) * 1024ull * 1024ull);
 }
 
 DragAwareTreeView::DragAwareTreeView(QWidget *parent) : QTreeView(parent) {}
@@ -252,80 +277,51 @@ void DragAwareTreeView::updateOverlayGeometry() {
     }
 }
 
-void DragAwareTreeView::startRemoteDragAsync(RemoteModel *rm) {
-    if (!rm || !transferMgr_) {
-        QTreeView::startDrag(Qt::CopyAction);
-        return;
-    }
-    if (dragInProgress_)
-        return;
-    dragInProgress_ = true;
-
-    // Collect selected rows (name column only)
-    auto sel = selectionModel();
+QModelIndexList DragAwareTreeView::collectRemoteSelectedRows() const {
+    auto *sel = selectionModel();
     QModelIndexList rows = sel ? sel->selectedRows(0) : QModelIndexList{};
-    if (rows.isEmpty() && sel) {
-        // Fallback: when selection behavior is not row-based yet, infer unique
-        // rows from any selected column to keep drag responsive.
-        const auto selected = sel->selectedIndexes();
-        QSet<int> seenRows;
-        for (const QModelIndex &idx : selected) {
-            if (!idx.isValid() || seenRows.contains(idx.row()))
-                continue;
-            const QModelIndex row0 = idx.sibling(idx.row(), 0);
-            if (row0.isValid()) {
-                rows.push_back(row0);
-                seenRows.insert(idx.row());
-            }
-        }
-    }
-    if (rows.isEmpty()) {
-        dragInProgress_ = false;
-        return;
-    }
+    if (!rows.isEmpty() || !sel)
+        return rows;
 
-    // Compute staging directory
-    const QString root = buildStagingRoot();
-    const QString stamp =
-        QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss");
-    const QString staging = QDir(root).filePath(stamp);
-    currentBatchDir_ = staging;
-    currentBatchId_ = stamp;
-    batchLogged_ = false;
-    QDir().mkpath(staging);
+    // Fallback: when selection behavior is not row-based yet, infer unique rows
+    // from any selected column to keep drag responsive.
+    const auto selected = sel->selectedIndexes();
+    QSet<int> seenRows;
+    for (const QModelIndex &idx : selected) {
+        if (!idx.isValid() || seenRows.contains(idx.row()))
+            continue;
+        const QModelIndex row0 = idx.sibling(idx.row(), 0);
+        if (!row0.isValid())
+            continue;
+        rows.push_back(row0);
+        seenRows.insert(idx.row());
+    }
+    return rows;
+}
 
-    // Build unique local path helper (for top-level files; folders preserve
-    // structure) Normalize to NFC so names are stable across APFS/HFS+
-    // normalization differences (macOS filesystems may store NFD; we normalize
-    // for consistent collision checks).
-    auto nfc = [](const QString &s) {
-#if defined(Q_OS_MAC)
-        return s.normalized(QString::NormalizationForm_C);
-#else
-        return s;
-#endif
-    };
-    // Insert suffix before the first extension to keep multi-extensions intact
-    // Example: "archive.tar.gz" -> base "archive" + extSuffix ".tar.gz".
-    auto splitNameMultiExt = [](const QString &fname) {
-        // Place suffix before the first dot after leading char
-        int firstDot = fname.indexOf('.', 1);
-        if (firstDot <= 0)
-            return qMakePair(fname, QString());
-        return qMakePair(
-            fname.left(firstDot),
-            fname.mid(firstDot)); // base, extSuffix including dot(s)
-    };
+bool DragAwareTreeView::buildRemoteDragTargets(
+    RemoteModel *rm, const QModelIndexList &rows, const QString &stagingDir,
+    QVector<RemoteDragTarget> &targets, RemoteDragBatchStats &stats) {
+    targets.clear();
+    targets.reserve(rows.size());
+    stats = RemoteDragBatchStats{};
+
+    enumCancelFlag_ = std::make_shared<std::atomic_bool>(false);
+    enumSymlinksSkipped_ = 0;
+    enumDenied_ = 0;
+    enumMs_ = -1;
+    prepTimer_.restart();
+
     auto uniquePath = [&](const QString &dir, const QString &name) {
-        const QString nName = nfc(name);
-        auto parts = splitNameMultiExt(nName);
-        QString baseName = parts.first;
-        QString extSuffix = parts.second; // includes leading dot(s) or empty
-        QString candidate = QDir(dir).filePath(nName);
-        int i = 1;
+        const QString normalizedName = normalizeStagingName(name);
+        const auto parts = splitNameMultiExt(normalizedName);
+        const QString baseName = parts.first;
+        const QString extSuffix = parts.second;
+        QString candidate = QDir(dir).filePath(normalizedName);
+        int suffix = 1;
         while (QFileInfo::exists(candidate)) {
             candidate = QDir(dir).filePath(
-                QString("%1 (%2)%3").arg(baseName).arg(i++).arg(extSuffix));
+                QString("%1 (%2)%3").arg(baseName).arg(suffix++).arg(extSuffix));
         }
         return candidate;
     };
@@ -335,257 +331,249 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *rm) {
         return base.endsWith('/') ? base + name : base + "/" + name;
     };
 
-    // Show overlay early to cover potentially heavy folder enumeration
-    showPrepOverlay(tr("Preparing files…"));
-
-    // Prepare list of downloads (support files and directories)
-    struct Pair {
-        QString remote;
-        QString local;
-        quint64 size = 0;
-    };
-    QVector<Pair> targets;
-    targets.reserve(rows.size());
-    quint64 totalBytes = 0;
-    quint64 totalItems = 0;
-    quint64 totalDirs = 0;
-    enumCancelFlag_ = std::make_shared<std::atomic_bool>(false);
-    enumSymlinksSkipped_ = 0;
-    enumDenied_ = 0;
-    quint64 unknownSizeCount = 0;
-    prepTimer_.restart();
-    bool anySizeUnknown = false;
     for (const QModelIndex &idx : rows) {
-        if (enumCancelFlag_ &&
-            enumCancelFlag_->load(std::memory_order_relaxed)) {
-            dragInProgress_ = false;
-            return;
-        }
+        if (enumCancelFlag_ && enumCancelFlag_->load(std::memory_order_relaxed))
+            return false;
         if (!idx.isValid())
             continue;
+
         const QString name = rm->nameAt(idx);
-        const QString rpath = joinRemote(rm->rootPath(), name);
+        const QString remotePath = joinRemote(rm->rootPath(), name);
         if (rm->isDir(idx)) {
-            // Enumerate directory recursively
             std::vector<RemoteModel::EnumeratedFile> files;
-            QString e;
-            RemoteModel::EnumOptions opt;
-            QSettings s("OpenSCP", "OpenSCP");
-            opt.maxDepth = s.value("Advanced/maxFolderDepth", 32).toInt();
-            if (opt.maxDepth < 1)
-                opt.maxDepth = 32;
-            opt.skipSymlinks =
-                true; // per requirements: skip symlinks by default
-            opt.cancel = enumCancelFlag_.get();
+            RemoteModel::EnumOptions options;
+            QSettings settings("OpenSCP", "OpenSCP");
+            options.maxDepth = settings.value("Advanced/maxFolderDepth", 32).toInt();
+            if (options.maxDepth < 1)
+                options.maxDepth = 32;
+            options.skipSymlinks = true;
+            options.cancel = enumCancelFlag_.get();
+
             bool partial = false;
             bool someUnknown = false;
             quint64 dirCount = 0;
-            quint64 syms = 0;
-            quint64 denied = 0;
-            quint64 unkCountPart = 0;
-            rm->enumerateFilesUnderEx(rpath, files, opt, &partial, &someUnknown,
-                                      &dirCount, &syms, &denied, &unkCountPart);
-            if (someUnknown)
-                anySizeUnknown = true;
-            totalDirs += dirCount;
-            enumSymlinksSkipped_ += syms;
-            enumDenied_ += denied;
-            unknownSizeCount += unkCountPart;
-            // Map to local targets under staging/name/relative
-            // Map to local targets under staging/name/relative
-            for (const auto &f : files) {
+            quint64 symlinkCount = 0;
+            quint64 deniedCount = 0;
+            quint64 unknownCountPart = 0;
+            rm->enumerateFilesUnderEx(remotePath, files, options, &partial,
+                                      &someUnknown, &dirCount, &symlinkCount,
+                                      &deniedCount, &unknownCountPart);
+
+            stats.anySizeUnknown = stats.anySizeUnknown || someUnknown;
+            stats.totalDirs += dirCount;
+            enumSymlinksSkipped_ += symlinkCount;
+            enumDenied_ += deniedCount;
+            stats.unknownSizeCount += unknownCountPart;
+
+            for (const auto &file : files) {
                 if (enumCancelFlag_ &&
                     enumCancelFlag_->load(std::memory_order_relaxed)) {
-                    dragInProgress_ = false;
-                    return;
+                    return false;
                 }
-                const QString local = QDir(QDir(staging).filePath(nfc(name)))
-                                          .filePath(nfc(f.relativePath));
-                QDir().mkpath(QFileInfo(local).dir().absolutePath());
-                targets.push_back(
-                    {f.remotePath, local, f.hasSize ? f.size : 0});
-                if (f.hasSize)
-                    totalBytes += f.size; // unknown sizes not counted
+                const QString localPath =
+                    QDir(QDir(stagingDir).filePath(normalizeStagingName(name)))
+                        .filePath(normalizeStagingName(file.relativePath));
+                QDir().mkpath(QFileInfo(localPath).dir().absolutePath());
+                targets.push_back({file.remotePath, localPath});
+                if (file.hasSize)
+                    stats.totalBytes += file.size;
             }
-            totalItems += (int)files.size();
-        } else {
-            const QString lpath = uniquePath(staging, name);
-            // Pick up size info (if available) from the model for single files
-            quint64 sz = 0;
-            bool hsz = false;
-            if (rm->hasSize(idx)) {
-                hsz = true;
-                sz = rm->sizeAt(idx);
-            }
-            if (hsz)
-                totalBytes += sz;
-            else {
-                anySizeUnknown = true;
-                unknownSizeCount += 1;
-            }
-            targets.push_back({rpath, lpath, sz});
-            totalItems += 1;
+            stats.totalItems += static_cast<quint64>(files.size());
+            continue;
         }
-    }
-    if (enumCancelFlag_ && enumCancelFlag_->load(std::memory_order_relaxed)) {
-        dragInProgress_ = false;
-        return;
-    }
-    if (targets.isEmpty()) {
-        dragInProgress_ = false;
-        return;
-    }
-    currentBatchTotal_ = targets.size();
 
-    // Confirmation for very large batches
-    QSettings dragSettings("OpenSCP", "OpenSCP");
-    int confirmItemsThreshold =
-        dragSettings.value("Advanced/stagingConfirmItems", 500).toInt();
-    if (confirmItemsThreshold < 1)
-        confirmItemsThreshold = 500;
-    int confirmMiBThreshold =
-        dragSettings.value("Advanced/stagingConfirmMiB", 1024).toInt();
-    if (confirmMiBThreshold < 1)
-        confirmMiBThreshold = 1024;
-    const quint64 confirmBytesThreshold =
-        quint64(confirmMiBThreshold) * 1024ull * 1024ull;
-    const bool tooMany = totalItems > confirmItemsThreshold;
-    const bool tooBig = totalBytes > confirmBytesThreshold;
-    const qint64 enumMs = prepTimer_.elapsed();
-    enumMs_ = enumMs;
-    // Log enumeration summary (openscp.enum)
-    QString bytesText = QLocale().formattedDataSize((qint64)totalBytes, 1,
-                                                    QLocale::DataSizeIecFormat);
-    if (anySizeUnknown)
+        const QString localPath = uniquePath(stagingDir, name);
+        if (rm->hasSize(idx)) {
+            stats.totalBytes += rm->sizeAt(idx);
+        } else {
+            stats.anySizeUnknown = true;
+            stats.unknownSizeCount += 1;
+        }
+        targets.push_back({remotePath, localPath});
+        stats.totalItems += 1;
+    }
+
+    if (enumCancelFlag_ && enumCancelFlag_->load(std::memory_order_relaxed))
+        return false;
+    if (targets.isEmpty())
+        return false;
+
+    currentBatchTotal_ = targets.size();
+    enumMs_ = prepTimer_.elapsed();
+
+    QString bytesText = QLocale().formattedDataSize(
+        static_cast<qint64>(stats.totalBytes), 1, QLocale::DataSizeIecFormat);
+    if (stats.anySizeUnknown) {
         bytesText = QString("~%1 (%2)")
                         .arg(bytesText)
-                        .arg(QLocale().toString((qulonglong)unknownSizeCount));
-    qInfo(ocEnum) << "enum batch" << currentBatchId_ << "dirs"
-                  << QLocale().toString((qulonglong)totalDirs) << "files"
-                  << QLocale().toString((qulonglong)totalItems) << "bytes"
-                  << bytesText << "enumMs" << enumMs_ << "threshold"
-                  << ((tooMany || tooBig) ? "yes" : "no") << "symlinkSkipped"
-                  << QLocale().toString((qulonglong)enumSymlinksSkipped_)
-                  << "denied" << QLocale().toString((qulonglong)enumDenied_);
-    if (tooMany || tooBig) {
-        auto *mw = qobject_cast<QMainWindow *>(window());
-        QWidget *parent =
-            mw ? static_cast<QWidget *>(mw) : static_cast<QWidget *>(this);
-        QMessageBox box(parent);
-        UiAlerts::configure(box);
-        box.setIcon(QMessageBox::Question);
-        box.setWindowTitle(tr("Confirm staging"));
-        QString sizePart;
-        if (tooBig) {
-            sizePart =
-                anySizeUnknown
-                    ? QString(" (%1)").arg(tr("~%1 (some unknown)")
-                                               .arg(QLocale().formattedDataSize(
-                                                   (qint64)totalBytes, 1,
-                                                   QLocale::DataSizeIecFormat)))
-                    : QString(" (%1)").arg(QLocale().formattedDataSize(
-                          (qint64)totalBytes, 1, QLocale::DataSizeIecFormat));
-        }
-        QString detail = tr("You are about to prepare %1 items%2. Continue?")
-                             .arg(QLocale().toString((qulonglong)totalItems))
-                             .arg(sizePart);
-        box.setText(detail);
-        auto *yesBtn = box.addButton(tr("Continue"), QMessageBox::AcceptRole);
-        auto *cancelBtn = box.addButton(tr("Cancel"), QMessageBox::RejectRole);
-        box.exec();
-        if (box.clickedButton() != yesBtn) {
-            cancelCurrentBatch(QStringLiteral("threshold"));
-            return;
-        }
+                        .arg(QLocale().toString(
+                            static_cast<qulonglong>(stats.unknownSizeCount)));
     }
 
-    // Resolve collisions before enqueueing and ensure directories exist
-    // Per-batch reservation to avoid intra-batch races. O(1) QSet with
-    // NFC+case-fold keys on macOS/Windows to mimic case-insensitive semantics.
+    const auto thresholds = loadStagingConfirmThresholds();
+    const bool exceedsThreshold =
+        stats.totalItems > static_cast<quint64>(thresholds.first) ||
+        stats.totalBytes > thresholds.second;
+
+    qInfo(ocEnum) << "enum batch" << currentBatchId_ << "dirs"
+                  << QLocale().toString(static_cast<qulonglong>(stats.totalDirs))
+                  << "files"
+                  << QLocale().toString(static_cast<qulonglong>(stats.totalItems))
+                  << "bytes" << bytesText << "enumMs" << enumMs_ << "threshold"
+                  << (exceedsThreshold ? "yes" : "no") << "symlinkSkipped"
+                  << QLocale().toString(
+                         static_cast<qulonglong>(enumSymlinksSkipped_))
+                  << "denied"
+                  << QLocale().toString(static_cast<qulonglong>(enumDenied_));
+    return true;
+}
+
+bool DragAwareTreeView::confirmRemoteDragThreshold(
+    const RemoteDragBatchStats &stats) {
+    const auto thresholds = loadStagingConfirmThresholds();
+    const bool tooMany =
+        stats.totalItems > static_cast<quint64>(thresholds.first);
+    const bool tooBig = stats.totalBytes > thresholds.second;
+    if (!tooMany && !tooBig)
+        return true;
+
+    auto *mw = qobject_cast<QMainWindow *>(window());
+    QWidget *parent =
+        mw ? static_cast<QWidget *>(mw) : static_cast<QWidget *>(this);
+    QMessageBox box(parent);
+    UiAlerts::configure(box);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle(tr("Confirm staging"));
+
+    QString sizePart;
+    if (tooBig) {
+        sizePart = stats.anySizeUnknown
+                       ? QString(" (%1)")
+                             .arg(tr("~%1 (some unknown)")
+                                      .arg(QLocale().formattedDataSize(
+                                          static_cast<qint64>(stats.totalBytes),
+                                          1, QLocale::DataSizeIecFormat)))
+                       : QString(" (%1)")
+                             .arg(QLocale().formattedDataSize(
+                                 static_cast<qint64>(stats.totalBytes), 1,
+                                 QLocale::DataSizeIecFormat));
+    }
+    box.setText(tr("You are about to prepare %1 items%2. Continue?")
+                    .arg(QLocale().toString(
+                        static_cast<qulonglong>(stats.totalItems)))
+                    .arg(sizePart));
+    auto *yesButton = box.addButton(tr("Continue"), QMessageBox::AcceptRole);
+    box.addButton(tr("Cancel"), QMessageBox::RejectRole);
+    box.exec();
+    return box.clickedButton() == yesButton;
+}
+
+void DragAwareTreeView::enqueueRemoteDragTargets(
+    QVector<RemoteDragTarget> &targets) {
     QSet<QString> reserved;
-    auto keyFor = [&](const QString &abs) {
-        QString k = nfc(QDir::cleanPath(abs)); // canonicalized path string
+    auto keyFor = [&](const QString &absPath) {
+        QString key = normalizeStagingName(QDir::cleanPath(absPath));
 #if defined(Q_OS_MAC) || defined(Q_OS_WIN)
-        k = k.toLower(); // case-insensitive match on these platforms
+        key = key.toLower();
 #endif
-        return k;
+        return key;
     };
-    auto uniqueFullPath = [&](const QString &full) {
-        QFileInfo fi(full);
-        const QString dir = fi.dir().absolutePath();
-        const QString origName = fi.fileName();
-        const QString nName = nfc(origName);
-        auto parts = splitNameMultiExt(nName);
-        QString base = parts.first;
-        QString extSuffix = parts.second;
+    auto uniqueFullPath = [&](const QString &fullPath) {
+        const QFileInfo fileInfo(fullPath);
+        const QString dirPath = fileInfo.dir().absolutePath();
+        const QString normalizedName = normalizeStagingName(fileInfo.fileName());
+        const auto parts = splitNameMultiExt(normalizedName);
+        const QString baseName = parts.first;
+        const QString extSuffix = parts.second;
+
+        auto buildName = [&](int suffix) {
+            if (suffix == 0)
+                return normalizedName;
+            return QString("%1 (%2)%3").arg(baseName).arg(suffix).arg(extSuffix);
+        };
 
 #if defined(Q_OS_MAC) || defined(Q_OS_WIN)
-        // On macOS (APFS/HFS+) and Windows (NTFS) user-facing semantics are
-        // often case-insensitive. Build a lowercase set so that "File.txt" and
-        // "file.txt" collide predictably.
-        QDir d(dir);
+        QSet<QString> lowerExisting;
+        QDir directory(dirPath);
         const auto entries =
-            d.entryList(QDir::NoDotAndDotDot | QDir::AllEntries);
-        QSet<QString> lower;
-        for (const QString &n : entries)
-            lower.insert(nfc(n).toLower());
-        auto buildName = [&](int idx) -> QString {
-            if (idx == 0)
-                return nName;
-            return QString("%1 (%2)%3").arg(base).arg(idx).arg(extSuffix);
-        };
-        int i = 0;
-        QString name = buildName(i);
-        QString abs = QDir(dir).filePath(name);
-        QString key = keyFor(abs);
-        while (lower.contains(nfc(name).toLower()) || reserved.contains(key) ||
-               QFileInfo::exists(abs)) {
-            name = buildName(++i);
-            abs = QDir(dir).filePath(name);
-            key = keyFor(abs);
-        }
-        reserved.insert(key);
-        return abs;
-#else
-        auto buildName = [&](int idx) -> QString {
-            if (idx == 0)
-                return nName;
-            return QString("%1 (%2)%3").arg(base).arg(idx).arg(extSuffix);
-        };
-        int i = 0;
-        QString name = buildName(i);
-        QString abs = QDir(dir).filePath(name);
-        QString key = keyFor(abs);
-        while (reserved.contains(key) || QFileInfo::exists(abs)) {
-            name = buildName(++i);
-            abs = QDir(dir).filePath(name);
-            key = keyFor(abs);
-        }
-        reserved.insert(key);
-        return abs;
+            directory.entryList(QDir::NoDotAndDotDot | QDir::AllEntries);
+        for (const QString &entryName : entries)
+            lowerExisting.insert(normalizeStagingName(entryName).toLower());
 #endif
+
+        int suffix = 0;
+        QString candidateName = buildName(suffix);
+        QString candidatePath = QDir(dirPath).filePath(candidateName);
+        QString candidateKey = keyFor(candidatePath);
+        while (
+#if defined(Q_OS_MAC) || defined(Q_OS_WIN)
+            lowerExisting.contains(normalizeStagingName(candidateName).toLower()) ||
+#endif
+            reserved.contains(candidateKey) || QFileInfo::exists(candidatePath)) {
+            candidateName = buildName(++suffix);
+            candidatePath = QDir(dirPath).filePath(candidateName);
+            candidateKey = keyFor(candidatePath);
+        }
+        reserved.insert(candidateKey);
+        return candidatePath;
     };
-    for (auto &p : targets) {
-        QDir().mkpath(QFileInfo(p.local).dir().absolutePath());
-        p.local = uniqueFullPath(p.local);
-        transferMgr_->enqueueDownload(p.remote, p.local);
+
+    for (auto &target : targets) {
+        QDir().mkpath(QFileInfo(target.second).dir().absolutePath());
+        target.second = uniqueFullPath(target.second);
+        transferMgr_->enqueueDownload(target.first, target.second);
     }
     transferMgr_->resumeAll();
-    overlayProgress_->setValue(0);
+    if (overlayProgress_)
+        overlayProgress_->setValue(0);
     stagingTimer_.restart();
+}
 
-    // Track progress of our batch (identified by local dst prefix = staging)
-    QPointer<DragAwareTreeView> self(this);
-    // Cancel button handler: cancel only our tasks
-    QObject::connect(overlayCancel_, &QPushButton::clicked, this,
-                     [this] { cancelCurrentBatch(QStringLiteral("button")); });
+QString DragAwareTreeView::formatRemoteDragMetrics(
+    const QString &result, const RemoteDragBatchStats &stats,
+    qint64 stagingMs) const {
+    return QString("result=%1 enumDirs=%2 files=%3 enumMs=%4 stagingMs=%5 "
+                   "symlinkSkipped=%6 denied=%7")
+        .arg(result)
+        .arg(QLocale().toString(static_cast<qulonglong>(stats.totalDirs)))
+        .arg(QLocale().toString(static_cast<qulonglong>(stats.totalItems)))
+        .arg(enumMs_)
+        .arg(stagingMs)
+        .arg(QLocale().toString(static_cast<qulonglong>(enumSymlinksSkipped_)))
+        .arg(QLocale().toString(static_cast<qulonglong>(enumDenied_)));
+}
 
-    // If preparation takes more than 2s, offer Wait/Cancel dialog once
+void DragAwareTreeView::resetRemoteDragState() {
+    if (waitTimer_)
+        waitTimer_->stop();
+    dragInProgress_ = false;
+    currentBatchDir_.clear();
+    currentBatchId_.clear();
+    currentBatchTotal_ = 0;
+    enumCancelFlag_.reset();
+    if (quitConn_) {
+        QObject::disconnect(quitConn_);
+        quitConn_ = QMetaObject::Connection();
+    }
+}
+
+void DragAwareTreeView::beginRemoteDragMonitoring(
+    const QVector<RemoteDragTarget> &targets, const RemoteDragBatchStats &stats) {
+    if (overlayCancel_) {
+        QObject::disconnect(overlayCancel_, nullptr, this, nullptr);
+        QObject::connect(overlayCancel_, &QPushButton::clicked, this, [this] {
+            cancelCurrentBatch(QStringLiteral("button"));
+        });
+    }
+
     if (!waitTimer_)
         waitTimer_ = new QTimer(this);
     waitTimer_->setSingleShot(true);
-    QSettings s("OpenSCP", "OpenSCP");
-    int timeoutMs = s.value("Advanced/stagingPrepTimeoutMs", 2000).toInt();
+    waitTimer_->stop();
+    QObject::disconnect(waitTimer_, nullptr, this, nullptr);
+
+    QSettings settings("OpenSCP", "OpenSCP");
+    int timeoutMs = settings.value("Advanced/stagingPrepTimeoutMs", 2000).toInt();
     timeoutMs = qBound(250, timeoutMs, 60000);
     waitTimer_->setInterval(timeoutMs);
     QObject::connect(waitTimer_, &QTimer::timeout, this, [this]() {
@@ -597,204 +585,167 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *rm) {
         box.setIcon(QMessageBox::Information);
         box.setWindowTitle(tr("Preparing files…"));
         box.setText(tr("Still preparing files for drag-out. Wait or cancel?"));
-        auto *waitBtn = box.addButton(tr("Wait"), QMessageBox::AcceptRole);
-        auto *cancelBtn = box.addButton(tr("Cancel"), QMessageBox::RejectRole);
+        box.addButton(tr("Wait"), QMessageBox::AcceptRole);
+        auto *cancelButton = box.addButton(tr("Cancel"), QMessageBox::RejectRole);
         box.exec();
-        if (box.clickedButton() == cancelBtn) {
+        if (box.clickedButton() == cancelButton)
             cancelCurrentBatch(QStringLiteral("dialog"));
-        }
     });
     waitTimer_->start();
 
-    // Connect to tasksChanged to monitor our batch
+    QPointer<DragAwareTreeView> self(this);
     stagingConn_ = QObject::connect(
         transferMgr_, &TransferManager::tasksChanged, this,
-        [this, self, targets, totalDirs, totalItems]() mutable {
-            if (!self)
+        [this, self, targets, stats]() {
+            if (!self || !transferMgr_)
                 return;
-            if (!transferMgr_)
-                return;
-            int total = targets.size();
+
+            const auto tasks = transferMgr_->tasksSnapshot();
+            const int total = targets.size();
             int done = 0;
             int failed = 0;
-            const auto tasks = transferMgr_->tasksSnapshot();
-            for (const auto &p : targets) {
-                bool matched = false;
-                for (const auto &t : tasks) {
-                    if (t.type == TransferTask::Type::Download &&
-                        t.dst == p.local) {
-                        matched = true;
-                        if (t.status == TransferTask::Status::Done)
-                            done++;
-                        else if (t.status == TransferTask::Status::Error ||
-                                 t.status == TransferTask::Status::Canceled)
-                            failed++;
-                        break;
+            for (const auto &target : targets) {
+                for (const auto &task : tasks) {
+                    if (task.type != TransferTask::Type::Download ||
+                        task.dst != target.second) {
+                        continue;
                     }
-                }
-                if (!matched) {
-                    // still queued but not yet visible; treat as pending
+                    if (task.status == TransferTask::Status::Done)
+                        ++done;
+                    else if (task.status == TransferTask::Status::Error ||
+                             task.status == TransferTask::Status::Canceled) {
+                        ++failed;
+                    }
+                    break;
                 }
             }
-            int pct = (total > 0) ? int((done * 100) / total) : 0;
-            if (overlayProgress_)
-                overlayProgress_->setValue(pct);
 
-            if ((done + failed) >= total) {
-                // Finished staging
-                if (stagingConn_) {
-                    QObject::disconnect(stagingConn_);
-                    stagingConn_ = QMetaObject::Connection();
-                }
-                hidePrepOverlay();
-
-                if (failed > 0) {
-                    // Keep staging and show clickable status-bar message with
-                    // counts
-                    QString prefix = tr("%1 of %2 files failed. Staging at:")
-                                         .arg(failed)
-                                         .arg(total);
-                    showKeepMessageWithPrefix(prefix, currentBatchDir_);
-                    const qint64 stagingMs =
-                        stagingTimer_.isValid() ? stagingTimer_.elapsed() : -1;
-                    logBatchResult(
-                        currentBatchId_, total, failed,
-                        QString("result=partial-fail enumDirs=%1 files=%2 "
-                                "bytes=%3 enumMs=%4 stagingMs=%5 "
-                                "symlinkSkipped=%6 denied=%7")
-                            .arg(QLocale().toString((qulonglong)totalDirs))
-                            .arg(QLocale().toString((qulonglong)totalItems))
-                            .arg(QLocale().toString((qulonglong)0))
-                            .arg(enumMs_)
-                            .arg(stagingMs)
-                            .arg(QLocale().toString(
-                                (qulonglong)enumSymlinksSkipped_))
-                            .arg(QLocale().toString((qulonglong)enumDenied_)));
-                    dragInProgress_ = false;
-                    currentBatchDir_.clear();
-                    currentBatchId_.clear();
-                    currentBatchTotal_ = 0;
-                    return;
-                }
-
-                // Build MIME and start the actual drag now that files are ready
-                QList<QUrl> urls;
-                urls.reserve(targets.size());
-                for (const auto &p : targets)
-                    urls << QUrl::fromLocalFile(p.local);
-                auto *md = new QMimeData();
-                md->setUrls(urls);
-                md->setData("application/x-openscp-staging-batch",
-                            currentBatchDir_.toUtf8());
-
-                auto *drag = new QDrag(self);
-                drag->setMimeData(md);
-                const auto res = drag->exec(Qt::CopyAction);
-                const QObject *dropTarget = drag->target();
-                bool droppedInsideThisWindow = false;
-                if (dropTarget) {
-                    const QWidget *targetWidget =
-                        qobject_cast<const QWidget *>(dropTarget);
-                    QWidget *const sourceWindow = self->window();
-                    if (targetWidget && sourceWindow &&
-                        targetWidget->window() == sourceWindow) {
-                        droppedInsideThisWindow = true;
-                    }
-                }
-
-                // Post-drag behavior: cleanup or keep
-                QSettings s("OpenSCP", "OpenSCP");
-                const bool autoClean =
-                    s.value("Advanced/autoCleanStaging", true).toBool();
-                if (res == Qt::IgnoreAction) {
-                    showKeepMessage(currentBatchDir_);
-                    const qint64 stagingMs =
-                        stagingTimer_.isValid() ? stagingTimer_.elapsed() : -1;
-                    logBatchResult(
-                        currentBatchId_, total, 0,
-                        QString(
-                            "result=canceled enumDirs=%1 files=%2 enumMs=%3 "
-                            "stagingMs=%4 symlinkSkipped=%5 denied=%6")
-                            .arg(QLocale().toString((qulonglong)totalDirs))
-                            .arg(QLocale().toString((qulonglong)totalItems))
-                            .arg(enumMs_)
-                            .arg(stagingMs)
-                            .arg(QLocale().toString(
-                                (qulonglong)enumSymlinksSkipped_))
-                            .arg(QLocale().toString((qulonglong)enumDenied_)));
-                    dragInProgress_ = false;
-                    currentBatchDir_.clear();
-                    currentBatchId_.clear();
-                    currentBatchTotal_ = 0;
-                    if (quitConn_) {
-                        QObject::disconnect(quitConn_);
-                        quitConn_ = QMetaObject::Connection();
-                    }
-                    return;
-                }
-                if (!autoClean) {
-                    showKeepMessage(currentBatchDir_);
-                    const qint64 stagingMs =
-                        stagingTimer_.isValid() ? stagingTimer_.elapsed() : -1;
-                    logBatchResult(
-                        currentBatchId_, total, 0,
-                        QString(
-                            "result=accepted enumDirs=%1 files=%2 enumMs=%3 "
-                            "stagingMs=%4 symlinkSkipped=%5 denied=%6")
-                            .arg(QLocale().toString((qulonglong)totalDirs))
-                            .arg(QLocale().toString((qulonglong)totalItems))
-                            .arg(enumMs_)
-                            .arg(stagingMs)
-                            .arg(QLocale().toString(
-                                (qulonglong)enumSymlinksSkipped_))
-                            .arg(QLocale().toString((qulonglong)enumDenied_)));
-                    dragInProgress_ = false;
-                    currentBatchDir_.clear();
-                    currentBatchId_.clear();
-                    currentBatchTotal_ = 0;
-                    if (quitConn_) {
-                        QObject::disconnect(quitConn_);
-                        quitConn_ = QMetaObject::Connection();
-                    }
-                    return;
-                }
-                // Internal drops may still be copying staged files in the
-                // target panel. Give them extra time; the drop target also
-                // performs explicit cleanup after local copy/move completion.
-                const int cleanupDelayMs = droppedInsideThisWindow ? 10000 : 500;
-                scheduleAutoCleanup(currentBatchDir_, cleanupDelayMs);
-                {
-                    const qint64 stagingMs =
-                        stagingTimer_.isValid() ? stagingTimer_.elapsed() : -1;
-                    logBatchResult(
-                        currentBatchId_, total, 0,
-                        QString(
-                            "result=accepted enumDirs=%1 files=%2 enumMs=%3 "
-                            "stagingMs=%4 symlinkSkipped=%5 denied=%6")
-                            .arg(QLocale().toString((qulonglong)totalDirs))
-                            .arg(QLocale().toString((qulonglong)totalItems))
-                            .arg(enumMs_)
-                            .arg(stagingMs)
-                            .arg(QLocale().toString(
-                                (qulonglong)enumSymlinksSkipped_))
-                            .arg(QLocale().toString((qulonglong)enumDenied_)));
-                }
-                dragInProgress_ = false;
-                currentBatchDir_.clear();
-                currentBatchId_.clear();
-                currentBatchTotal_ = 0;
-                if (quitConn_) {
-                    QObject::disconnect(quitConn_);
-                    quitConn_ = QMetaObject::Connection();
-                }
+            if (overlayProgress_) {
+                const int progressPct =
+                    (total > 0) ? int((done * 100) / total) : 0;
+                overlayProgress_->setValue(progressPct);
             }
+
+            if ((done + failed) < total)
+                return;
+
+            if (stagingConn_) {
+                QObject::disconnect(stagingConn_);
+                stagingConn_ = QMetaObject::Connection();
+            }
+            hidePrepOverlay();
+
+            auto finishBatch = [this, total, stats](const QString &result,
+                                                    int failedItems) {
+                const qint64 stagingMs =
+                    stagingTimer_.isValid() ? stagingTimer_.elapsed() : -1;
+                logBatchResult(currentBatchId_, total, failedItems,
+                               formatRemoteDragMetrics(result, stats, stagingMs));
+                resetRemoteDragState();
+            };
+
+            if (failed > 0) {
+                const QString prefix =
+                    tr("%1 of %2 files failed. Staging at:")
+                        .arg(failed)
+                        .arg(total);
+                showKeepMessageWithPrefix(prefix, currentBatchDir_);
+                finishBatch(QStringLiteral("partial-fail"), failed);
+                return;
+            }
+
+            QList<QUrl> urls;
+            urls.reserve(targets.size());
+            for (const auto &target : targets)
+                urls << QUrl::fromLocalFile(target.second);
+            auto *mimeData = new QMimeData();
+            mimeData->setUrls(urls);
+            mimeData->setData("application/x-openscp-staging-batch",
+                              currentBatchDir_.toUtf8());
+
+            auto *drag = new QDrag(self);
+            drag->setMimeData(mimeData);
+            const Qt::DropAction result = drag->exec(Qt::CopyAction);
+
+            bool droppedInsideThisWindow = false;
+            if (const QObject *dropTarget = drag->target()) {
+                const QWidget *targetWidget =
+                    qobject_cast<const QWidget *>(dropTarget);
+                QWidget *const sourceWindow = self->window();
+                droppedInsideThisWindow =
+                    targetWidget && sourceWindow &&
+                    targetWidget->window() == sourceWindow;
+            }
+
+            QSettings dragSettings("OpenSCP", "OpenSCP");
+            const bool autoClean =
+                dragSettings.value("Advanced/autoCleanStaging", true).toBool();
+            if (result == Qt::IgnoreAction) {
+                showKeepMessage(currentBatchDir_);
+                finishBatch(QStringLiteral("canceled"), 0);
+                return;
+            }
+            if (!autoClean) {
+                showKeepMessage(currentBatchDir_);
+                finishBatch(QStringLiteral("accepted"), 0);
+                return;
+            }
+
+            // Internal drops may still be copying staged files in the target
+            // panel. Give them extra time; the drop target also performs
+            // explicit cleanup after local copy/move completion.
+            const int cleanupDelayMs = droppedInsideThisWindow ? 10000 : 500;
+            scheduleAutoCleanup(currentBatchDir_, cleanupDelayMs);
+            finishBatch(QStringLiteral("accepted"), 0);
         });
+}
+
+void DragAwareTreeView::startRemoteDragAsync(RemoteModel *rm) {
+    if (!rm || !transferMgr_) {
+        QTreeView::startDrag(Qt::CopyAction);
+        return;
+    }
+    if (dragInProgress_)
+        return;
+
+    dragInProgress_ = true;
+    const QModelIndexList rows = collectRemoteSelectedRows();
+    if (rows.isEmpty()) {
+        resetRemoteDragState();
+        return;
+    }
+
+    const QString root = buildStagingRoot();
+    const QString stamp =
+        QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss");
+    const QString stagingDir = QDir(root).filePath(stamp);
+    currentBatchDir_ = stagingDir;
+    currentBatchId_ = stamp;
+    batchLogged_ = false;
+    QDir().mkpath(stagingDir);
+
+    showPrepOverlay(tr("Preparing files…"));
+
+    QVector<RemoteDragTarget> targets;
+    RemoteDragBatchStats stats;
+    if (!buildRemoteDragTargets(rm, rows, stagingDir, targets, stats)) {
+        hidePrepOverlay();
+        resetRemoteDragState();
+        return;
+    }
+    if (!confirmRemoteDragThreshold(stats)) {
+        cancelCurrentBatch(QStringLiteral("threshold"));
+        return;
+    }
+
+    enqueueRemoteDragTargets(targets);
+    beginRemoteDragMonitoring(targets, stats);
 }
 
 void DragAwareTreeView::cancelCurrentBatch(const QString &reason) {
     if (currentBatchDir_.isEmpty()) {
         hidePrepOverlay();
-        dragInProgress_ = false;
+        resetRemoteDragState();
         return;
     }
     if (stagingConn_) {
@@ -829,14 +780,7 @@ void DragAwareTreeView::cancelCurrentBatch(const QString &reason) {
             .arg(QLocale().toString((qulonglong)enumSymlinksSkipped_))
             .arg(QLocale().toString((qulonglong)enumDenied_))
             .arg(reason));
-    dragInProgress_ = false;
-    currentBatchDir_.clear();
-    currentBatchId_.clear();
-    currentBatchTotal_ = 0;
-    if (quitConn_) {
-        QObject::disconnect(quitConn_);
-        quitConn_ = QMetaObject::Connection();
-    }
+    resetRemoteDragState();
 }
 
 void DragAwareTreeView::logBatchResult(const QString &batchId, int totalItems,
