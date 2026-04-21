@@ -158,4 +158,34 @@ class TransferManager : public QObject {
     void recordCompletionMetrics(quint64 taskId, TransferTask::Status status,
                                  quint64 bytesDone, qint64 queueLatencyMs,
                                  qint64 precheckMs, qint64 transferMs);
+    struct SchedulePickResult {
+        enum class Outcome { NoClient, NoQueuedTask, Ready };
+        Outcome outcome = Outcome::NoQueuedTask;
+        TransferTask task{};
+    };
+    SchedulePickResult pickTaskForSchedule();
+    bool validateWorkerLaunch(quint64 taskId);
+    void startTaskWorker(const TransferTask &task);
+    void finalizeDeferredRelaunch(quint64 taskId);
+    void runTaskWorkerPipeline(TransferTask task);
+    void finalizeWorkerRun(quint64 taskId, qint64 precheckMs,
+                           qint64 transferStartMs);
+    struct WorkerPipelineContext {
+        TransferTask task{};
+        quint64 taskId = 0;
+        std::shared_ptr<openscp::SftpClient> workerClient;
+        openscp::ProtocolCapabilities workerCaps{};
+        bool resume = false;
+        qint64 precheckStartedMs = 0;
+        qint64 precheckDoneMs = 0;
+        qint64 transferStartedMs = 0;
+    };
+    bool shouldCancelWorkerTask(quint64 taskId);
+    void markTaskCanceledOrPausedFromWorker(quint64 taskId, qint64 nowMs);
+    void markTaskErrorFromWorker(quint64 taskId, const std::string &rawErr,
+                                 qint64 nowMs);
+    void markTaskDoneFromWorker(quint64 taskId, qint64 nowMs);
+    bool runWorkerPrecheckStage(WorkerPipelineContext &ctx);
+    void runWorkerTransferStage(WorkerPipelineContext &ctx);
+    void runWorkerPostStage(WorkerPipelineContext &ctx);
 };

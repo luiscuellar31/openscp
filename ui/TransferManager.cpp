@@ -73,6 +73,42 @@ static QString transferErrorForUi(const std::string &rawError) {
     return msg;
 }
 
+static void applyCanceledOrPausedState(TransferTask &task, bool canceled,
+                                       qint64 nowMs) {
+    task.status =
+        canceled ? TransferTask::Status::Canceled : TransferTask::Status::Paused;
+    task.error.clear();
+    task.currentSpeedKBps = 0.0;
+    task.etaSeconds = -1;
+    task.finishedAtMs = canceled ? nowMs : 0;
+}
+
+static void applyErrorState(TransferTask &task, const QString &errorMessage,
+                            qint64 nowMs) {
+    task.status = TransferTask::Status::Error;
+    task.error = errorMessage;
+    task.currentSpeedKBps = 0.0;
+    task.etaSeconds = -1;
+    task.finishedAtMs = nowMs;
+}
+
+static void applyDoneState(TransferTask &task, qint64 nowMs) {
+    task.progress = 100;
+    if (task.bytesTotal > 0)
+        task.bytesDone = task.bytesTotal;
+    task.status = TransferTask::Status::Done;
+    task.currentSpeedKBps = 0.0;
+    task.etaSeconds = 0;
+    task.finishedAtMs = nowMs;
+}
+
+static void applySkippedState(TransferTask &task, qint64 nowMs) {
+    task.status = TransferTask::Status::Done;
+    task.currentSpeedKBps = 0.0;
+    task.etaSeconds = 0;
+    task.finishedAtMs = nowMs;
+}
+
 static int askOverwriteConflictOnUi(QObject *uiContext, const QString &name,
                                     const QString &srcInfo,
                                     const QString &dstInfo,
@@ -701,682 +737,589 @@ void TransferManager::recordCompletionMetrics(quint64 taskId,
                    << "runningCounter=" << running_.load();
 }
 
+TransferManager::SchedulePickResult TransferManager::pickTaskForSchedule() {
+    SchedulePickResult result;
+    std::lock_guard<std::mutex> lk(mtx_);
+    if (!client_) {
+        result.outcome = SchedulePickResult::Outcome::NoClient;
+        return result;
+    }
+
+    const int idx = nextQueuedTaskIndexLocked();
+    if (idx < 0) {
+        result.outcome = SchedulePickResult::Outcome::NoQueuedTask;
+        return result;
+    }
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    result.task = tasks_[idx];
+    tasks_[idx].status = TransferTask::Status::Running;
+    tasks_[idx].progress = 0;
+    tasks_[idx].bytesDone = 0;
+    tasks_[idx].bytesTotal = 0;
+    tasks_[idx].currentSpeedKBps = 0.0;
+    tasks_[idx].etaSeconds = -1;
+    tasks_[idx].error.clear();
+    tasks_[idx].startedAtMs = nowMs;
+    tasks_[idx].finishedAtMs = 0;
+    result.outcome = SchedulePickResult::Outcome::Ready;
+    return result;
+}
+
+bool TransferManager::validateWorkerLaunch(quint64 taskId) {
+    const bool workerActiveNow = isWorkerActive(taskId);
+    std::lock_guard<std::mutex> wl(workersMutex_);
+    auto it = workers_.find(taskId);
+    if (it != workers_.end() && it->second.joinable()) {
+        if (workerActiveNow) {
+            // Do not block UI by joining an active worker; defer this relaunch
+            // until the existing worker fully exits.
+            std::lock_guard<std::mutex> lk(mtx_);
+            const int i = indexForId(taskId);
+            if (i >= 0) {
+                tasks_[i].status = TransferTask::Status::Paused;
+                tasks_[i].currentSpeedKBps = 0.0;
+                tasks_[i].etaSeconds = -1;
+                tasks_[i].finishedAtMs = 0;
+                pausedTasks_.insert(taskId);
+                resumeRequestedTasks_.insert(taskId);
+            }
+            return false;
+        }
+        qCInfo(ocXfer) << "schedule joining finished worker thread"
+                       << "taskId=" << taskId;
+        it->second.join();
+    }
+    return true;
+}
+
+void TransferManager::startTaskWorker(const TransferTask &task) {
+    std::lock_guard<std::mutex> wl(workersMutex_);
+    auto &workerSlot = workers_[task.id];
+    if (workerSlot.joinable()) {
+        qCWarning(ocXfer) << "startTaskWorker found stale joinable worker"
+                          << "taskId=" << task.id;
+        workerSlot.join();
+    }
+    workerSlot = std::thread(&TransferManager::runTaskWorkerPipeline, this, task);
+}
+
+void TransferManager::finalizeDeferredRelaunch(quint64 taskId) {
+    emit tasksChanged();
+    qCInfo(ocXfer) << "schedule deferred relaunch; worker still active"
+                   << "taskId=" << taskId;
+    decrementRunningCounter();
+}
+
+void TransferManager::finalizeWorkerRun(quint64 taskId, qint64 precheckMs,
+                                        qint64 transferStartMs) {
+    qint64 transferMs = 0;
+    if (transferStartMs > 0) {
+        transferMs = QDateTime::currentMSecsSinceEpoch() - transferStartMs;
+    }
+
+    TransferTask::Status finalStatus = TransferTask::Status::Error;
+    quint64 bytesDone = 0;
+    qint64 queueLatencyMs = 0;
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        const int i = indexForId(taskId);
+        if (i >= 0) {
+            finalStatus = tasks_[i].status;
+            bytesDone = tasks_[i].bytesDone;
+            if (tasks_[i].queuedAtMs > 0 &&
+                tasks_[i].startedAtMs >= tasks_[i].queuedAtMs) {
+                queueLatencyMs = tasks_[i].startedAtMs - tasks_[i].queuedAtMs;
+            }
+        }
+    }
+    emit tasksChanged();
+    recordCompletionMetrics(taskId, finalStatus, bytesDone, queueLatencyMs,
+                            precheckMs, transferMs);
+
+    decrementRunningCounter();
+    QMetaObject::invokeMethod(this, "schedule", Qt::QueuedConnection);
+}
+
+bool TransferManager::shouldCancelWorkerTask(quint64 taskId) {
+    if (paused_.load())
+        return true;
+    std::lock_guard<std::mutex> lk(mtx_);
+    return canceledTasks_.count(taskId) > 0 || pausedTasks_.count(taskId) > 0;
+}
+
+void TransferManager::markTaskCanceledOrPausedFromWorker(quint64 taskId,
+                                                         qint64 nowMs) {
+    std::lock_guard<std::mutex> lk(mtx_);
+    const int i = indexForId(taskId);
+    if (i < 0)
+        return;
+    const bool canceled = canceledTasks_.count(taskId) > 0;
+    applyCanceledOrPausedState(tasks_[i], canceled, nowMs);
+}
+
+void TransferManager::markTaskErrorFromWorker(quint64 taskId,
+                                              const std::string &rawErr,
+                                              qint64 nowMs) {
+    std::lock_guard<std::mutex> lk(mtx_);
+    const int i = indexForId(taskId);
+    if (i < 0)
+        return;
+    applyErrorState(tasks_[i], transferErrorForUi(rawErr), nowMs);
+}
+
+void TransferManager::markTaskDoneFromWorker(quint64 taskId, qint64 nowMs) {
+    std::lock_guard<std::mutex> lk(mtx_);
+    const int i = indexForId(taskId);
+    if (i < 0)
+        return;
+    applyDoneState(tasks_[i], nowMs);
+}
+
+bool TransferManager::runWorkerPrecheckStage(WorkerPipelineContext &ctx) {
+    ctx.resume = ctx.task.resumeHint;
+    ctx.precheckStartedMs = QDateTime::currentMSecsSinceEpoch();
+    ctx.precheckDoneMs = ctx.precheckStartedMs;
+
+    auto finalizeEarly = [this, &ctx]() {
+        finalizeWorkerRun(ctx.taskId, ctx.precheckDoneMs - ctx.precheckStartedMs,
+                          0);
+    };
+    auto failPrecheck = [this, &ctx, &finalizeEarly](const std::string &rawErr) {
+        ctx.precheckDoneMs = QDateTime::currentMSecsSinceEpoch();
+        if (shouldCancelWorkerTask(ctx.taskId))
+            markTaskCanceledOrPausedFromWorker(ctx.taskId, ctx.precheckDoneMs);
+        else
+            markTaskErrorFromWorker(ctx.taskId, rawErr, ctx.precheckDoneMs);
+        ctx.workerClient->disconnect();
+        finalizeEarly();
+    };
+    auto skipTransfer = [this, &ctx, &finalizeEarly]() {
+        ctx.precheckDoneMs = QDateTime::currentMSecsSinceEpoch();
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            const int i = indexForId(ctx.taskId);
+            if (i >= 0)
+                applySkippedState(tasks_[i], ctx.precheckDoneMs);
+        }
+        ctx.workerClient->disconnect();
+        finalizeEarly();
+    };
+
+    if (ctx.task.type == TransferTask::Type::Upload) {
+        if (ctx.workerCaps.supports_metadata) {
+            bool isDir = false;
+            std::string existsErr;
+            const bool existsRemote = ctx.workerClient->exists(
+                ctx.task.dst.toStdString(), isDir, existsErr);
+            if (!existsErr.empty()) {
+                failPrecheck(existsErr);
+                return false;
+            }
+
+            if (existsRemote) {
+                openscp::FileInfo rinfo{};
+                std::string statErr;
+                (void)ctx.workerClient->stat(ctx.task.dst.toStdString(), rinfo,
+                                             statErr);
+                const QString srcInfo =
+                    QString("%1 bytes, %2")
+                        .arg(QFileInfo(ctx.task.src).size())
+                        .arg(openscpui::localShortTime(
+                            QFileInfo(ctx.task.src).lastModified()));
+                const QString dstInfo =
+                    QString("%1 bytes, %2")
+                        .arg(rinfo.size)
+                        .arg(rinfo.mtime
+                                 ? openscpui::localShortTime((quint64)rinfo.mtime)
+                                 : QStringLiteral("?"));
+                int choice = askOverwriteConflictOnUi(
+                    this, QFileInfo(ctx.task.src).fileName(), srcInfo, dstInfo,
+                    [this, &ctx]() { return shouldCancelWorkerTask(ctx.taskId); });
+                if (choice < 0 || shouldCancelWorkerTask(ctx.taskId)) {
+                    ctx.precheckDoneMs = QDateTime::currentMSecsSinceEpoch();
+                    markTaskCanceledOrPausedFromWorker(ctx.taskId,
+                                                       ctx.precheckDoneMs);
+                    ctx.workerClient->disconnect();
+                    finalizeEarly();
+                    return false;
+                }
+                if (choice == 0) {
+                    skipTransfer();
+                    return false;
+                }
+                if (choice == 2 && !ctx.workerCaps.supports_resume)
+                    choice = 1;
+                ctx.resume = (choice == 2);
+            }
+        }
+
+        if (ctx.workerCaps.supports_metadata) {
+            auto ensureRemoteDir = [&](const QString &dir,
+                                       std::string &ensureErr) -> bool {
+                if (dir.isEmpty())
+                    return true;
+                QString currentPath = "/";
+                const QStringList parts = dir.split('/', Qt::SkipEmptyParts);
+                for (const QString &part : parts) {
+                    const QString nextPath = (currentPath == "/")
+                                                 ? ("/" + part)
+                                                 : (currentPath + "/" + part);
+                    bool isDirectory = false;
+                    std::string existsErr;
+                    const bool exists = ctx.workerClient->exists(
+                        nextPath.toStdString(), isDirectory, existsErr);
+                    if (!existsErr.empty()) {
+                        ensureErr = existsErr;
+                        return false;
+                    }
+                    if (!exists) {
+                        std::string mkdirErr;
+                        if (!ctx.workerClient->mkdir(nextPath.toStdString(),
+                                                     mkdirErr, 0755)) {
+                            ensureErr = mkdirErr.empty()
+                                            ? ("Could not create remote "
+                                               "directory: " +
+                                               nextPath.toStdString())
+                                            : mkdirErr;
+                            return false;
+                        }
+                    } else if (!isDirectory) {
+                        ensureErr = "Remote path component is not a directory: " +
+                                    nextPath.toStdString();
+                        return false;
+                    }
+                    currentPath = nextPath;
+                }
+                return true;
+            };
+
+            const QString parentDir = QFileInfo(ctx.task.dst).path();
+            if (!parentDir.isEmpty()) {
+                std::string ensureErr;
+                if (!ensureRemoteDir(parentDir, ensureErr)) {
+                    failPrecheck(ensureErr);
+                    return false;
+                }
+            }
+        }
+    } else {
+        const QFileInfo localDestinationInfo(ctx.task.dst);
+        if (localDestinationInfo.exists()) {
+            QString srcInfo = QStringLiteral("? bytes, ?");
+            if (ctx.workerCaps.supports_metadata) {
+                openscp::FileInfo remoteInfo{};
+                std::string statErr;
+                (void)ctx.workerClient->stat(ctx.task.src.toStdString(),
+                                             remoteInfo, statErr);
+                srcInfo = QString("%1 bytes, %2")
+                              .arg(remoteInfo.size)
+                              .arg(remoteInfo.mtime
+                                       ? openscpui::localShortTime(
+                                             (quint64)remoteInfo.mtime)
+                                       : QStringLiteral("?"));
+            }
+            const QString dstInfo =
+                QString("%1 bytes, %2")
+                    .arg(localDestinationInfo.size())
+                    .arg(openscpui::localShortTime(
+                        localDestinationInfo.lastModified()));
+            int choice = askOverwriteConflictOnUi(
+                this, localDestinationInfo.fileName(), srcInfo, dstInfo,
+                [this, &ctx]() { return shouldCancelWorkerTask(ctx.taskId); });
+            if (choice < 0 || shouldCancelWorkerTask(ctx.taskId)) {
+                ctx.precheckDoneMs = QDateTime::currentMSecsSinceEpoch();
+                markTaskCanceledOrPausedFromWorker(ctx.taskId, ctx.precheckDoneMs);
+                ctx.workerClient->disconnect();
+                finalizeEarly();
+                return false;
+            }
+            if (choice == 0) {
+                skipTransfer();
+                return false;
+            }
+            if (choice == 2 && !ctx.workerCaps.supports_resume)
+                choice = 1;
+            ctx.resume = (choice == 2);
+        }
+        if (!QDir().mkpath(QFileInfo(ctx.task.dst).dir().absolutePath())) {
+            failPrecheck("Could not create local destination directory");
+            return false;
+        }
+    }
+
+    if (ctx.resume && !ctx.workerCaps.supports_resume)
+        ctx.resume = false;
+    ctx.precheckDoneMs = QDateTime::currentMSecsSinceEpoch();
+    return true;
+}
+
+void TransferManager::runWorkerTransferStage(WorkerPipelineContext &ctx) {
+    using clock = std::chrono::steady_clock;
+    static constexpr double KIB = 1024.0;
+    std::size_t lastDone = 0;
+    auto lastTick = clock::now();
+    auto progress = [this, &ctx, lastTick, lastDone](std::size_t done,
+                                                      std::size_t total) mutable {
+        int pct = (total > 0) ? int((done * 100) / total) : 0;
+        const auto now = clock::now();
+        const double elapsedSec =
+            std::chrono::duration_cast<std::chrono::duration<double>>(now -
+                                                                       lastTick)
+                .count();
+        const double deltaBytes =
+            (done > lastDone) ? double(done - lastDone) : 0.0;
+        double measuredKBps = 0.0;
+        if (elapsedSec > 0.000001 && deltaBytes > 0.0)
+            measuredKBps = (deltaBytes / KIB) / elapsedSec;
+        int etaSec = -1;
+        if (total > done && measuredKBps > 0.0)
+            etaSec = int((double(total - done) / KIB) / measuredKBps);
+        else if (total > 0 && done >= total)
+            etaSec = 0;
+
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            const int i = indexForId(ctx.taskId);
+            if (i >= 0) {
+                tasks_[i].progress = pct;
+                tasks_[i].bytesDone = done;
+                tasks_[i].bytesTotal = total;
+                if (measuredKBps > 0.0)
+                    tasks_[i].currentSpeedKBps = measuredKBps;
+                tasks_[i].etaSeconds = etaSec;
+            }
+        }
+        emit tasksChanged();
+
+        int taskLimit = 0; // KB/s (0 = unlimited)
+        const int globalLimit = globalSpeedKBps_.load();
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            const int i = indexForId(ctx.taskId);
+            if (i >= 0)
+                taskLimit = tasks_[i].speedLimitKBps;
+        }
+        int effectiveKBps = 0;
+        if (taskLimit > 0 && globalLimit > 0)
+            effectiveKBps = std::min(taskLimit, globalLimit);
+        else
+            effectiveKBps =
+                (taskLimit > 0 ? taskLimit : (globalLimit > 0 ? globalLimit : 0));
+        if (effectiveKBps > 0 && done > lastDone) {
+            const auto now2 = clock::now();
+            const double deltaBytes2 = double(done - lastDone);
+            const double expectedSec = deltaBytes2 / (effectiveKBps * KIB);
+            const double elapsedSec2 =
+                std::chrono::duration_cast<std::chrono::duration<double>>(now2 -
+                                                                           lastTick)
+                    .count();
+            if (elapsedSec2 < expectedSec) {
+                const double sleepSec = expectedSec - elapsedSec2;
+                if (sleepSec > 0.0005)
+                    std::this_thread::sleep_for(
+                        std::chrono::duration<double>(sleepSec));
+            }
+            lastTick = clock::now();
+            lastDone = done;
+        }
+    };
+
+    ctx.transferStartedMs = QDateTime::currentMSecsSinceEpoch();
+    if (ctx.task.type == TransferTask::Type::Upload) {
+        std::string putError;
+        const bool ok = ctx.workerClient->put(ctx.task.src.toStdString(),
+                                              ctx.task.dst.toStdString(),
+                                              putError, progress,
+                                              [this, &ctx]() {
+                                                  return shouldCancelWorkerTask(
+                                                      ctx.taskId);
+                                              },
+                                              ctx.resume);
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        if (!ok && shouldCancelWorkerTask(ctx.taskId))
+            markTaskCanceledOrPausedFromWorker(ctx.taskId, nowMs);
+        else if (!ok)
+            markTaskErrorFromWorker(ctx.taskId, putError, nowMs);
+        else
+            markTaskDoneFromWorker(ctx.taskId, nowMs);
+        return;
+    }
+
+    std::string getError;
+    const bool ok = ctx.workerClient->get(ctx.task.src.toStdString(),
+                                          ctx.task.dst.toStdString(), getError,
+                                          progress,
+                                          [this, &ctx]() {
+                                              return shouldCancelWorkerTask(
+                                                  ctx.taskId);
+                                          },
+                                          ctx.resume);
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (!ok && shouldCancelWorkerTask(ctx.taskId)) {
+        markTaskCanceledOrPausedFromWorker(ctx.taskId, nowMs);
+        return;
+    }
+    if (!ok) {
+        markTaskErrorFromWorker(ctx.taskId, getError, nowMs);
+        return;
+    }
+
+    openscp::FileInfo remoteInfo{};
+    std::string statErr;
+    (void)ctx.workerClient->stat(ctx.task.src.toStdString(), remoteInfo, statErr);
+    if (remoteInfo.mtime > 0) {
+        QFile localFile(ctx.task.dst);
+        if (localFile.exists()) {
+            const QDateTime tsUtc = QDateTime::fromSecsSinceEpoch(
+                (qint64)remoteInfo.mtime, QTimeZone::utc());
+            if (!localFile.setFileTime(tsUtc,
+                                       QFileDevice::FileModificationTime)) {
+                if (openscp::sensitiveLoggingEnabled()) {
+                    qWarning(ocXfer) << "Failed to set mtime for" << ctx.task.dst
+                                     << "to" << tsUtc;
+                } else {
+                    qWarning(ocXfer) << "Failed to set local file mtime";
+                }
+            }
+        }
+    }
+    markTaskDoneFromWorker(ctx.taskId, nowMs);
+}
+
+void TransferManager::runWorkerPostStage(WorkerPipelineContext &ctx) {
+    ctx.workerClient->disconnect();
+    std::lock_guard<std::mutex> lk(mtx_);
+    auto itResume = resumeRequestedTasks_.find(ctx.taskId);
+    if (itResume == resumeRequestedTasks_.end())
+        return;
+
+    const int i = indexForId(ctx.taskId);
+    if (i >= 0 && tasks_[i].status == TransferTask::Status::Paused) {
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        tasks_[i].status = TransferTask::Status::Queued;
+        tasks_[i].resumeHint = true;
+        tasks_[i].queuedAtMs = nowMs;
+        tasks_[i].startedAtMs = 0;
+        tasks_[i].finishedAtMs = 0;
+        pausedTasks_.erase(ctx.taskId);
+    }
+    resumeRequestedTasks_.erase(itResume);
+    qCInfo(ocXfer) << "Deferred resume armed after worker unwind"
+                   << "taskId=" << ctx.taskId;
+}
+
+void TransferManager::runTaskWorkerPipeline(TransferTask task) {
+    WorkerPipelineContext ctx;
+    ctx.task = std::move(task);
+    ctx.taskId = ctx.task.id;
+
+    struct ActiveWorkerGuard {
+        TransferManager *self = nullptr;
+        quint64 id = 0;
+        ~ActiveWorkerGuard() {
+            if (!self)
+                return;
+            std::lock_guard<std::mutex> lk(self->activeWorkersMutex_);
+            const std::size_t prevCount = self->activeWorkerTaskIds_.size();
+            self->activeWorkerClients_.erase(id);
+            self->activeWorkerTaskIds_.erase(id);
+            self->pendingInterruptTasks_.erase(id);
+            qCInfo(ocXfer) << "worker active cleared"
+                           << "taskId=" << id
+                           << "prevActiveCount=" << prevCount
+                           << "activeCount="
+                           << self->activeWorkerTaskIds_.size();
+        }
+    };
+
+    std::string createError;
+    {
+        std::lock_guard<std::mutex> lk(activeWorkersMutex_);
+        activeWorkerTaskIds_.insert(ctx.taskId);
+        qCInfo(ocXfer) << "worker active registered"
+                       << "taskId=" << ctx.taskId
+                       << "activeCount=" << activeWorkerTaskIds_.size();
+    }
+
+    auto workerClientUnique = createWorkerClient(ctx.taskId, createError);
+    if (!workerClientUnique) {
+        {
+            std::lock_guard<std::mutex> lk(activeWorkersMutex_);
+            activeWorkerTaskIds_.erase(ctx.taskId);
+            pendingInterruptTasks_.erase(ctx.taskId);
+        }
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        if (shouldCancelWorkerTask(ctx.taskId))
+            markTaskCanceledOrPausedFromWorker(ctx.taskId, nowMs);
+        else
+            markTaskErrorFromWorker(ctx.taskId, createError, nowMs);
+        finalizeWorkerRun(ctx.taskId, 0, 0);
+        return;
+    }
+    ctx.workerClient = std::move(workerClientUnique);
+
+    std::optional<ActiveWorkerGuard> activeGuard;
+    bool applyDeferredInterrupt = false;
+    {
+        std::lock_guard<std::mutex> lk(activeWorkersMutex_);
+        activeWorkerClients_[ctx.taskId] = ctx.workerClient;
+        applyDeferredInterrupt = pendingInterruptTasks_.erase(ctx.taskId) > 0;
+    }
+    if (applyDeferredInterrupt) {
+        qCInfo(ocXfer) << "Applying deferred interrupt to worker"
+                       << "taskId=" << ctx.taskId;
+        ctx.workerClient->interrupt();
+    }
+
+    // Construct in-place to avoid a temporary guard whose destructor would
+    // clear active state immediately.
+    activeGuard.emplace();
+    activeGuard->self = this;
+    activeGuard->id = ctx.taskId;
+    ctx.workerCaps = ctx.workerClient->capabilities();
+
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        const int i = indexForId(ctx.taskId);
+        if (i >= 0)
+            tasks_[i].attempts += 1;
+    }
+    emit tasksChanged();
+
+    if (!runWorkerPrecheckStage(ctx))
+        return;
+    runWorkerTransferStage(ctx);
+    runWorkerPostStage(ctx);
+    finalizeWorkerRun(ctx.taskId, ctx.precheckDoneMs - ctx.precheckStartedMs,
+                      ctx.transferStartedMs);
+}
+
 void TransferManager::schedule() {
     if (paused_)
         return;
 
     while (running_.load() < maxConcurrent_) {
-        TransferTask t;
-        int idx = -1;
-        {
-            std::lock_guard<std::mutex> lk(mtx_);
-            if (!client_)
-                return;
-            idx = nextQueuedTaskIndexLocked();
-            if (idx >= 0) {
-                const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-                t = tasks_[idx];
-                tasks_[idx].status = TransferTask::Status::Running;
-                tasks_[idx].progress = 0;
-                tasks_[idx].bytesDone = 0;
-                tasks_[idx].bytesTotal = 0;
-                tasks_[idx].currentSpeedKBps = 0.0;
-                tasks_[idx].etaSeconds = -1;
-                tasks_[idx].error.clear();
-                tasks_[idx].startedAtMs = nowMs;
-                tasks_[idx].finishedAtMs = 0;
-            }
-        }
-        if (idx < 0)
+        // Stage 1: pick the next queued task and mark it as running.
+        const SchedulePickResult picked = pickTaskForSchedule();
+        if (picked.outcome == SchedulePickResult::Outcome::NoClient)
+            return;
+        if (picked.outcome == SchedulePickResult::Outcome::NoQueuedTask)
             break;
+
+        // Stage 2: publish the running transition and reserve a worker slot.
         emit tasksChanged();
-
         running_.fetch_add(1);
-        const quint64 taskId = t.id;
-        const bool workerActiveNow = isWorkerActive(taskId);
-        bool deferredRelaunch = false;
-        {
-            std::lock_guard<std::mutex> wl(workersMutex_);
-            auto it = workers_.find(taskId);
-            if (it != workers_.end() && it->second.joinable()) {
-                if (workerActiveNow) {
-                    // Do not block UI by joining an active worker; defer this
-                    // relaunch until the existing worker fully exits.
-                    {
-                        std::lock_guard<std::mutex> lk(mtx_);
-                        int i = indexForId(taskId);
-                        if (i >= 0) {
-                            tasks_[i].status = TransferTask::Status::Paused;
-                            tasks_[i].currentSpeedKBps = 0.0;
-                            tasks_[i].etaSeconds = -1;
-                            tasks_[i].finishedAtMs = 0;
-                            pausedTasks_.insert(taskId);
-                            resumeRequestedTasks_.insert(taskId);
-                        }
-                    }
-                    deferredRelaunch = true;
-                } else {
-                    qCInfo(ocXfer) << "schedule joining finished worker thread"
-                                   << "taskId=" << taskId;
-                    it->second.join();
-                }
-            }
-            if (!deferredRelaunch) {
-                workers_[taskId] =
-                std::thread([this, t, taskId]() mutable {
-                    auto finalize = [this]() {
-                        decrementRunningCounter();
-                        QMetaObject::invokeMethod(this, "schedule",
-                                                  Qt::QueuedConnection);
-                    };
-                    auto emitAndFinalize = [this, taskId, &finalize](
-                                               qint64 precheckMs,
-                                               qint64 transferStartMs) {
-                        qint64 transferMs = 0;
-                        if (transferStartMs > 0) {
-                            transferMs = QDateTime::currentMSecsSinceEpoch() -
-                                         transferStartMs;
-                        }
 
-                        TransferTask::Status finalStatus =
-                            TransferTask::Status::Error;
-                        quint64 bytesDone = 0;
-                        qint64 queueLatencyMs = 0;
-                        {
-                            std::lock_guard<std::mutex> lk(mtx_);
-                            const int i = indexForId(taskId);
-                            if (i >= 0) {
-                                finalStatus = tasks_[i].status;
-                                bytesDone = tasks_[i].bytesDone;
-                                if (tasks_[i].queuedAtMs > 0 &&
-                                    tasks_[i].startedAtMs >=
-                                        tasks_[i].queuedAtMs) {
-                                    queueLatencyMs = tasks_[i].startedAtMs -
-                                                     tasks_[i].queuedAtMs;
-                                }
-                            }
-                        }
-                        emit tasksChanged();
-                        recordCompletionMetrics(taskId, finalStatus, bytesDone,
-                                                queueLatencyMs, precheckMs,
-                                                transferMs);
-                        finalize();
-                    };
-
-                    struct ActiveWorkerGuard {
-                        TransferManager *self = nullptr;
-                        quint64 id = 0;
-                        ~ActiveWorkerGuard() {
-                            if (!self)
-                                return;
-                            std::lock_guard<std::mutex> lk(
-                                self->activeWorkersMutex_);
-                            const std::size_t prevCount =
-                                self->activeWorkerTaskIds_.size();
-                            self->activeWorkerClients_.erase(id);
-                            self->activeWorkerTaskIds_.erase(id);
-                            self->pendingInterruptTasks_.erase(id);
-                            qCInfo(ocXfer) << "worker active cleared"
-                                           << "taskId=" << id
-                                           << "prevActiveCount=" << prevCount
-                                           << "activeCount="
-                                           << self->activeWorkerTaskIds_.size();
-                        }
-                    };
-                    std::string err;
-                    {
-                        std::lock_guard<std::mutex> lk(activeWorkersMutex_);
-                        activeWorkerTaskIds_.insert(taskId);
-                        qCInfo(ocXfer) << "worker active registered"
-                                       << "taskId=" << taskId
-                                       << "activeCount="
-                                       << activeWorkerTaskIds_.size();
-                    }
-                    auto workerClientUnique = createWorkerClient(taskId, err);
-                    if (!workerClientUnique) {
-                        {
-                            std::lock_guard<std::mutex> lk(activeWorkersMutex_);
-                            activeWorkerTaskIds_.erase(taskId);
-                            pendingInterruptTasks_.erase(taskId);
-                        }
-                        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-                        {
-                            std::lock_guard<std::mutex> lk(mtx_);
-                            int i = indexForId(taskId);
-                            if (i >= 0) {
-                                const bool explicitlyCanceled =
-                                    canceledTasks_.count(taskId) > 0;
-                                const bool pausedTask =
-                                    !explicitlyCanceled &&
-                                    (pausedTasks_.count(taskId) > 0 ||
-                                     paused_.load());
-                                if (explicitlyCanceled || pausedTask) {
-                                    tasks_[i].status =
-                                        explicitlyCanceled
-                                            ? TransferTask::Status::Canceled
-                                            : TransferTask::Status::Paused;
-                                    tasks_[i].error.clear();
-                                    tasks_[i].currentSpeedKBps = 0.0;
-                                    tasks_[i].etaSeconds = -1;
-                                    tasks_[i].finishedAtMs =
-                                        explicitlyCanceled ? nowMs : 0;
-                                } else {
-                                    tasks_[i].status = TransferTask::Status::Error;
-                                    tasks_[i].error = transferErrorForUi(err);
-                                    tasks_[i].currentSpeedKBps = 0.0;
-                                    tasks_[i].etaSeconds = -1;
-                                    tasks_[i].finishedAtMs = nowMs;
-                                }
-                            }
-                        }
-                        emitAndFinalize(0, 0);
-                        return;
-                    }
-                    std::shared_ptr<openscp::SftpClient> workerClient =
-                        std::move(workerClientUnique);
-                    std::optional<ActiveWorkerGuard> activeGuard;
-                    bool applyDeferredInterrupt = false;
-                    {
-                        std::lock_guard<std::mutex> lk(activeWorkersMutex_);
-                        activeWorkerClients_[taskId] = workerClient;
-                        applyDeferredInterrupt =
-                            pendingInterruptTasks_.erase(taskId) > 0;
-                    }
-                    if (applyDeferredInterrupt) {
-                        qCInfo(ocXfer) << "Applying deferred interrupt to worker"
-                                       << "taskId=" << taskId;
-                        workerClient->interrupt();
-                    }
-                    // Construct in-place to avoid a temporary guard whose
-                    // destructor would clear active state immediately.
-                    activeGuard.emplace();
-                    activeGuard->self = this;
-                    activeGuard->id = taskId;
-                    const openscp::ProtocolCapabilities workerCaps =
-                        workerClient->capabilities();
-
-                    // Mark attempt
-                    {
-                        std::lock_guard<std::mutex> lk(mtx_);
-                        int i = indexForId(taskId);
-                        if (i >= 0)
-                            tasks_[i].attempts += 1;
-                    }
-                    emit tasksChanged();
-
-                    auto isCanceled = [this, taskId]() -> bool {
-                        std::lock_guard<std::mutex> lk(mtx_);
-                        return canceledTasks_.count(taskId) > 0;
-                    };
-                    auto isPausedTask = [this, taskId]() -> bool {
-                        std::lock_guard<std::mutex> lk(mtx_);
-                        return pausedTasks_.count(taskId) > 0;
-                    };
-                    auto shouldCancel = [this, isCanceled, isPausedTask]() -> bool {
-                        if (paused_.load())
-                            return true;
-                        if (isCanceled())
-                            return true;
-                        if (isPausedTask())
-                            return true;
-                        return false;
-                    };
-
-                    auto markCanceledOrPaused = [this, taskId](qint64 nowMs) {
-                        std::lock_guard<std::mutex> lk(mtx_);
-                        const int i = indexForId(taskId);
-                        if (i < 0)
-                            return;
-                        const bool canceled = canceledTasks_.count(taskId) > 0;
-                        tasks_[i].status = canceled
-                                               ? TransferTask::Status::Canceled
-                                               : TransferTask::Status::Paused;
-                        tasks_[i].error.clear();
-                        tasks_[i].currentSpeedKBps = 0.0;
-                        tasks_[i].etaSeconds = -1;
-                        tasks_[i].finishedAtMs = canceled ? nowMs : 0;
-                    };
-
-                    bool resume = t.resumeHint;
-                    const qint64 precheckStartedMs =
-                        QDateTime::currentMSecsSinceEpoch();
-                    auto precheckDoneMs = precheckStartedMs;
-                    auto failPrecheck = [this, taskId, &shouldCancel,
-                                         &markCanceledOrPaused,
-                                         &emitAndFinalize, &workerClient,
-                                         &precheckStartedMs, &precheckDoneMs](
-                                            const std::string &rawErr) {
-                        precheckDoneMs = QDateTime::currentMSecsSinceEpoch();
-                        const qint64 nowMs = precheckDoneMs;
-                        if (shouldCancel()) {
-                            markCanceledOrPaused(nowMs);
-                        } else {
-                            std::lock_guard<std::mutex> lk(mtx_);
-                            const int i = indexForId(taskId);
-                            if (i >= 0) {
-                                tasks_[i].status = TransferTask::Status::Error;
-                                tasks_[i].error = transferErrorForUi(rawErr);
-                                tasks_[i].currentSpeedKBps = 0.0;
-                                tasks_[i].etaSeconds = -1;
-                                tasks_[i].finishedAtMs = nowMs;
-                            }
-                        }
-                        workerClient->disconnect();
-                        emitAndFinalize(precheckDoneMs - precheckStartedMs, 0);
-                    };
-                    auto skipTransfer = [this, taskId, &emitAndFinalize,
-                                         &workerClient, &precheckStartedMs,
-                                         &precheckDoneMs]() {
-                        precheckDoneMs = QDateTime::currentMSecsSinceEpoch();
-                        {
-                            std::lock_guard<std::mutex> lk(mtx_);
-                            const int i = indexForId(taskId);
-                            if (i >= 0) {
-                                tasks_[i].status = TransferTask::Status::Done;
-                                tasks_[i].currentSpeedKBps = 0.0;
-                                tasks_[i].etaSeconds = 0;
-                                tasks_[i].finishedAtMs = precheckDoneMs;
-                            }
-                        }
-                        workerClient->disconnect();
-                        emitAndFinalize(precheckDoneMs - precheckStartedMs, 0);
-                    };
-
-                    if (t.type == TransferTask::Type::Upload) {
-                        if (workerCaps.supports_metadata) {
-                            bool isDir = false;
-                            std::string existsErr;
-                            const bool existsRemote = workerClient->exists(
-                                t.dst.toStdString(), isDir, existsErr);
-                            if (!existsErr.empty()) {
-                                failPrecheck(existsErr);
-                                return;
-                            }
-
-                            if (existsRemote) {
-                                openscp::FileInfo rinfo{};
-                                std::string stErr;
-                                (void)workerClient->stat(
-                                    t.dst.toStdString(), rinfo, stErr);
-                                const QString srcInfo =
-                                    QString("%1 bytes, %2")
-                                        .arg(QFileInfo(t.src).size())
-                                        .arg(openscpui::localShortTime(
-                                            QFileInfo(t.src).lastModified()));
-                                const QString dstInfo =
-                                    QString("%1 bytes, %2")
-                                        .arg(rinfo.size)
-                                        .arg(rinfo.mtime
-                                                 ? openscpui::localShortTime(
-                                                       (quint64)rinfo.mtime)
-                                                 : QStringLiteral("?"));
-                                int choice = askOverwriteConflictOnUi(
-                                    this, QFileInfo(t.src).fileName(), srcInfo,
-                                    dstInfo, shouldCancel);
-                                if (choice < 0 || shouldCancel()) {
-                                    precheckDoneMs =
-                                        QDateTime::currentMSecsSinceEpoch();
-                                    markCanceledOrPaused(precheckDoneMs);
-                                    workerClient->disconnect();
-                                    emitAndFinalize(precheckDoneMs -
-                                                        precheckStartedMs,
-                                                    0);
-                                    return;
-                                }
-                                if (choice == 0) {
-                                    skipTransfer();
-                                    return;
-                                }
-                                if (choice == 2 &&
-                                    !workerCaps.supports_resume) {
-                                    choice = 1;
-                                }
-                                resume = (choice == 2);
-                            }
-                        }
-
-                        if (resume && !workerCaps.supports_resume)
-                            resume = false;
-
-                        if (workerCaps.supports_metadata) {
-                            auto ensureRemoteDir =
-                                [&](const QString &dir,
-                                    std::string &ensureErr) -> bool {
-                                if (dir.isEmpty())
-                                    return true;
-                                QString cur = "/";
-                                const QStringList parts =
-                                    dir.split('/', Qt::SkipEmptyParts);
-                                for (const QString &part : parts) {
-                                    const QString next =
-                                        (cur == "/") ? ("/" + part)
-                                                     : (cur + "/" + part);
-                                    bool isD = false;
-                                    std::string e;
-                                    const bool exs = workerClient->exists(
-                                        next.toStdString(), isD, e);
-                                    if (!e.empty()) {
-                                        ensureErr = e;
-                                        return false;
-                                    }
-                                    if (!exs) {
-                                        std::string me;
-                                        if (!workerClient->mkdir(
-                                                next.toStdString(), me, 0755)) {
-                                            ensureErr = me.empty()
-                                                            ? ("Could not "
-                                                               "create remote "
-                                                               "directory: " +
-                                                               next.toStdString())
-                                                            : me;
-                                            return false;
-                                        }
-                                    } else if (!isD) {
-                                        ensureErr =
-                                            "Remote path component is not a "
-                                            "directory: " +
-                                            next.toStdString();
-                                        return false;
-                                    }
-                                    cur = next;
-                                }
-                                return true;
-                            };
-
-                            const QString parentDir = QFileInfo(t.dst).path();
-                            if (!parentDir.isEmpty()) {
-                                std::string ensureErr;
-                                if (!ensureRemoteDir(parentDir, ensureErr)) {
-                                    failPrecheck(ensureErr);
-                                    return;
-                                }
-                            }
-                        }
-                    } else {
-                        const QFileInfo lfi(t.dst);
-                        if (lfi.exists()) {
-                            QString srcInfo = QStringLiteral("? bytes, ?");
-                            if (workerCaps.supports_metadata) {
-                                openscp::FileInfo rinfo{};
-                                std::string stErr;
-                                (void)workerClient->stat(t.src.toStdString(),
-                                                         rinfo, stErr);
-                                srcInfo = QString("%1 bytes, %2")
-                                              .arg(rinfo.size)
-                                              .arg(rinfo.mtime
-                                                       ? openscpui::localShortTime(
-                                                             (quint64)rinfo.mtime)
-                                                       : QStringLiteral("?"));
-                            }
-                            const QString dstInfo =
-                                QString("%1 bytes, %2")
-                                    .arg(lfi.size())
-                                    .arg(openscpui::localShortTime(
-                                        lfi.lastModified()));
-                            int choice = askOverwriteConflictOnUi(
-                                this, lfi.fileName(), srcInfo, dstInfo,
-                                shouldCancel);
-                            if (choice < 0 || shouldCancel()) {
-                                precheckDoneMs =
-                                    QDateTime::currentMSecsSinceEpoch();
-                                markCanceledOrPaused(precheckDoneMs);
-                                workerClient->disconnect();
-                                emitAndFinalize(precheckDoneMs -
-                                                    precheckStartedMs,
-                                                0);
-                                return;
-                            }
-                            if (choice == 0) {
-                                skipTransfer();
-                                return;
-                            }
-                            if (choice == 2 && !workerCaps.supports_resume)
-                                choice = 1;
-                            resume = (choice == 2);
-                        }
-                        if (!QDir().mkpath(QFileInfo(t.dst).dir().absolutePath())) {
-                            failPrecheck("Could not create local destination "
-                                         "directory");
-                            return;
-                        }
-                    }
-
-                    if (resume && !workerCaps.supports_resume)
-                        resume = false;
-
-                    precheckDoneMs = QDateTime::currentMSecsSinceEpoch();
-
-                    // Speed control (per task and global): simple bucket-based
-                    // throttling
-                    using clock = std::chrono::steady_clock;
-                    static constexpr double KIB = 1024.0;
-                    std::size_t lastDone = 0;
-                    auto lastTick = clock::now();
-                    auto progress = [this, taskId, lastTick, lastDone](
-                                        std::size_t done,
-                                        std::size_t total) mutable {
-                        int pct = (total > 0) ? int((done * 100) / total) : 0;
-                        const auto now = clock::now();
-                        const double elapsedSec =
-                            std::chrono::duration_cast<
-                                std::chrono::duration<double>>(now - lastTick)
-                                .count();
-                        const double deltaBytes =
-                            (done > lastDone) ? double(done - lastDone) : 0.0;
-                        double measuredKBps = 0.0;
-                        if (elapsedSec > 0.000001 && deltaBytes > 0.0) {
-                            measuredKBps = (deltaBytes / KIB) / elapsedSec;
-                        }
-                        int etaSec = -1;
-                        if (total > done && measuredKBps > 0.0) {
-                            etaSec =
-                                int((double(total - done) / KIB) / measuredKBps);
-                        } else if (total > 0 && done >= total) {
-                            etaSec = 0;
-                        }
-                        {
-                            std::lock_guard<std::mutex> lk(mtx_);
-                            int i = indexForId(taskId);
-                            if (i >= 0) {
-                                tasks_[i].progress = pct;
-                                tasks_[i].bytesDone = done;
-                                tasks_[i].bytesTotal = total;
-                                if (measuredKBps > 0.0)
-                                    tasks_[i].currentSpeedKBps = measuredKBps;
-                                tasks_[i].etaSeconds = etaSec;
-                            }
-                        }
-                        emit tasksChanged();
-
-                        int taskLimit = 0; // KB/s (0 = unlimited)
-                        int globalLimit = globalSpeedKBps_.load();
-                        {
-                            std::lock_guard<std::mutex> lk(mtx_);
-                            int i = indexForId(taskId);
-                            if (i >= 0)
-                                taskLimit = tasks_[i].speedLimitKBps;
-                        }
-                        int effKBps = 0;
-                        if (taskLimit > 0 && globalLimit > 0)
-                            effKBps = std::min(taskLimit, globalLimit);
-                        else
-                            effKBps = (taskLimit > 0
-                                           ? taskLimit
-                                           : (globalLimit > 0 ? globalLimit : 0));
-                        if (effKBps > 0 && done > lastDone) {
-                            const auto now2 = clock::now();
-                            const double deltaBytes2 = double(done - lastDone);
-                            const double expectedSec = deltaBytes2 / (effKBps * KIB);
-                            const double elapsedSec2 =
-                                std::chrono::duration_cast<
-                                    std::chrono::duration<double>>(now2 - lastTick)
-                                    .count();
-                            if (elapsedSec2 < expectedSec) {
-                                const double sleepSec = expectedSec - elapsedSec2;
-                                if (sleepSec > 0.0005) {
-                                    std::this_thread::sleep_for(
-                                        std::chrono::duration<double>(sleepSec));
-                                }
-                            }
-                            lastTick = clock::now();
-                            lastDone = done;
-                        }
-                    };
-
-                    const qint64 transferStartedMs =
-                        QDateTime::currentMSecsSinceEpoch();
-                    bool ok = false;
-                    if (t.type == TransferTask::Type::Upload) {
-                        std::string perr;
-                        ok = workerClient->put(t.src.toStdString(),
-                                               t.dst.toStdString(), perr, progress,
-                                               shouldCancel, resume);
-                        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-                        if (!ok && shouldCancel()) {
-                            std::lock_guard<std::mutex> lk(mtx_);
-                            int i = indexForId(taskId);
-                            if (i >= 0) {
-                                // Avoid re-locking mtx_ via isCanceled() while
-                                // already holding this mutex (self-deadlock).
-                                const bool canceled =
-                                    canceledTasks_.count(taskId) > 0;
-                                tasks_[i].status = canceled
-                                                       ? TransferTask::Status::Canceled
-                                                       : TransferTask::Status::Paused;
-                                tasks_[i].currentSpeedKBps = 0.0;
-                                tasks_[i].etaSeconds = -1;
-                                tasks_[i].finishedAtMs = canceled ? nowMs : 0;
-                            }
-                        } else if (!ok) {
-                            std::lock_guard<std::mutex> lk(mtx_);
-                            int i = indexForId(taskId);
-                            if (i >= 0) {
-                                tasks_[i].status = TransferTask::Status::Error;
-                                tasks_[i].error = transferErrorForUi(perr);
-                                tasks_[i].currentSpeedKBps = 0.0;
-                                tasks_[i].etaSeconds = -1;
-                                tasks_[i].finishedAtMs = nowMs;
-                            }
-                        } else {
-                            std::lock_guard<std::mutex> lk(mtx_);
-                            int i = indexForId(taskId);
-                            if (i >= 0) {
-                                tasks_[i].progress = 100;
-                                if (tasks_[i].bytesTotal > 0)
-                                    tasks_[i].bytesDone = tasks_[i].bytesTotal;
-                                tasks_[i].status = TransferTask::Status::Done;
-                                tasks_[i].currentSpeedKBps = 0.0;
-                                tasks_[i].etaSeconds = 0;
-                                tasks_[i].finishedAtMs = nowMs;
-                            }
-                        }
-                    } else {
-                        std::string gerr;
-                        ok = workerClient->get(t.src.toStdString(),
-                                               t.dst.toStdString(), gerr, progress,
-                                               shouldCancel, resume);
-                        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-                        if (!ok && shouldCancel()) {
-                            std::lock_guard<std::mutex> lk(mtx_);
-                            int i = indexForId(taskId);
-                            if (i >= 0) {
-                                // Avoid re-locking mtx_ via isCanceled() while
-                                // already holding this mutex (self-deadlock).
-                                const bool canceled =
-                                    canceledTasks_.count(taskId) > 0;
-                                tasks_[i].status = canceled
-                                                       ? TransferTask::Status::Canceled
-                                                       : TransferTask::Status::Paused;
-                                tasks_[i].currentSpeedKBps = 0.0;
-                                tasks_[i].etaSeconds = -1;
-                                tasks_[i].finishedAtMs = canceled ? nowMs : 0;
-                            }
-                        } else if (!ok) {
-                            std::lock_guard<std::mutex> lk(mtx_);
-                            int i = indexForId(taskId);
-                            if (i >= 0) {
-                                tasks_[i].status = TransferTask::Status::Error;
-                                tasks_[i].error = transferErrorForUi(gerr);
-                                tasks_[i].currentSpeedKBps = 0.0;
-                                tasks_[i].etaSeconds = -1;
-                                tasks_[i].finishedAtMs = nowMs;
-                            }
-                        } else {
-                            openscp::FileInfo rinfo{};
-                            std::string stErr;
-                            (void)workerClient->stat(t.src.toStdString(), rinfo,
-                                                     stErr);
-                            if (rinfo.mtime > 0) {
-                                QFile f(t.dst);
-                                if (f.exists()) {
-                                    const QDateTime tsUtc =
-                                        QDateTime::fromSecsSinceEpoch(
-                                            (qint64)rinfo.mtime,
-                                            QTimeZone::utc());
-                                    if (!f.setFileTime(
-                                            tsUtc,
-                                            QFileDevice::FileModificationTime)) {
-                                        if (openscp::sensitiveLoggingEnabled()) {
-                                            qWarning(ocXfer)
-                                                << "Failed to set mtime for"
-                                                << t.dst << "to" << tsUtc;
-                                        } else {
-                                            qWarning(ocXfer)
-                                                << "Failed to set local file "
-                                                   "mtime";
-                                        }
-                                    }
-                                }
-                            }
-                            std::lock_guard<std::mutex> lk(mtx_);
-                            int i = indexForId(taskId);
-                            if (i >= 0) {
-                                tasks_[i].progress = 100;
-                                if (tasks_[i].bytesTotal > 0)
-                                    tasks_[i].bytesDone = tasks_[i].bytesTotal;
-                                tasks_[i].status = TransferTask::Status::Done;
-                                tasks_[i].currentSpeedKBps = 0.0;
-                                tasks_[i].etaSeconds = 0;
-                                tasks_[i].finishedAtMs = nowMs;
-                            }
-                        }
-                    }
-
-                    workerClient->disconnect();
-                    {
-                        std::lock_guard<std::mutex> lk(mtx_);
-                        auto itResume = resumeRequestedTasks_.find(taskId);
-                        if (itResume != resumeRequestedTasks_.end()) {
-                            int i = indexForId(taskId);
-                            if (i >= 0 &&
-                                tasks_[i].status == TransferTask::Status::Paused) {
-                                const qint64 nowMs =
-                                    QDateTime::currentMSecsSinceEpoch();
-                                tasks_[i].status = TransferTask::Status::Queued;
-                                tasks_[i].resumeHint = true;
-                                tasks_[i].queuedAtMs = nowMs;
-                                tasks_[i].startedAtMs = 0;
-                                tasks_[i].finishedAtMs = 0;
-                                pausedTasks_.erase(taskId);
-                            }
-                            resumeRequestedTasks_.erase(itResume);
-                            qCInfo(ocXfer)
-                                << "Deferred resume armed after worker unwind"
-                                << "taskId=" << taskId;
-                        }
-                    }
-                    emitAndFinalize(precheckDoneMs - precheckStartedMs,
-                                    transferStartedMs);
-                });
-            }
-        }
-        if (deferredRelaunch) {
-            emit tasksChanged();
-            qCInfo(ocXfer) << "schedule deferred relaunch; worker still active"
-                           << "taskId=" << taskId;
-            decrementRunningCounter();
+        const quint64 taskId = picked.task.id;
+        // Stage 3: validate relaunch constraints for the selected task.
+        if (!validateWorkerLaunch(taskId)) {
+            // Stage 4 (deferred path): finalize this scheduling attempt.
+            finalizeDeferredRelaunch(taskId);
             continue;
         }
+        // Stage 4 (run path): launch the worker pipeline.
+        startTaskWorker(picked.task);
     }
 }
 
