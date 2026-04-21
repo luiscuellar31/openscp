@@ -208,6 +208,8 @@ class MainWindow : public QMainWindow {
     void showOneTimeDialog(const QString &host, const QString &alg,
                            const QString &fp);
     void onOneTimeFinished(int r);
+    bool consumeTofuDialogDecision(int result);
+    void publishTofuDecision(bool accept);
     void showSiteManagerNonModal();
     void maybeOpenSiteManagerAfterModal();
     bool
@@ -232,11 +234,23 @@ class MainWindow : public QMainWindow {
     void startSftpConnect(
         openscp::SessionOptions opt,
         std::optional<PendingSiteSaveRequest> saveRequest = std::nullopt);
+    bool validateSftpConnectStart(const openscp::SessionOptions &opt);
+    void initializeSftpConnectUiState(
+        const std::shared_ptr<std::atomic<bool>> &cancelFlag);
+    void configureSftpConnectCallbacks(openscp::SessionOptions &opt);
+    void launchSftpConnectWorker(
+        openscp::SessionOptions opt, const openscp::SessionOptions &uiOpt,
+        std::optional<PendingSiteSaveRequest> saveRequest,
+        const std::shared_ptr<std::atomic<bool>> &cancelFlag);
     void finalizeSftpConnect(bool okConn, const QString &err,
                              openscp::SftpClient *connectedClient,
                              const openscp::SessionOptions &uiOpt,
                              std::optional<PendingSiteSaveRequest> saveRequest,
                              bool canceledByUser);
+    quint64 beginDisconnectFlow();
+    void applyDisconnectLocalUiState();
+    bool runDisconnectTransferCleanupAsync(quint64 disconnectSeq);
+    void scheduleDisconnectWatchdog(quint64 disconnectSeq);
     void applyRemoteConnectedUI(const openscp::SessionOptions &opt);
     void maybePersistQuickConnectSite(const openscp::SessionOptions &opt,
                                       const PendingSiteSaveRequest &req,

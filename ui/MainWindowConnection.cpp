@@ -574,9 +574,7 @@ void MainWindow::openConnectDialogWithPreset(
 void MainWindow::connectSftp() { openConnectDialogWithPreset(std::nullopt); }
 
 // Tear down the current remote session and restore local mode.
-void MainWindow::disconnectSftp() {
-    if (m_isDisconnecting)
-        return;
+quint64 MainWindow::beginDisconnectFlow() {
     m_isDisconnecting = true;
     stopRemoteSessionHealthMonitoring();
     const quint64 disconnectSeq = ++m_disconnectSeq_;
@@ -600,7 +598,17 @@ void MainWindow::disconnectSftp() {
         m_remoteScanProgress_.clear();
     }
     m_remoteScanInProgress_ = false;
+    applyDisconnectLocalUiState();
+    statusBar()->showMessage(
+        tr("Disconnecting… waiting for active transfers to stop"), 0);
+    return disconnectSeq;
+}
 
+void MainWindow::applyDisconnectLocalUiState() {
+    auto setActionEnabled = [](QAction *action, bool enabled) {
+        if (action)
+            action->setEnabled(enabled);
+    };
     // Switch UI immediately to local/local so the app remains usable while
     // transfer workers unwind in the background.
     if (rightRemoteModel_) {
@@ -630,29 +638,18 @@ void MainWindow::disconnectSftp() {
     m_activeSessionOptions_.reset();
     m_sessionNoHostVerification_ = false;
     updateHostPolicyRiskBanner();
-    if (actDownloadF7_)
-        actDownloadF7_->setEnabled(false);
-    if (actUploadRight_)
-        actUploadRight_->setEnabled(false);
-    if (actRefreshRight_)
-        actRefreshRight_->setEnabled(false);
-    if (actOpenTerminalRight_)
-        actOpenTerminalRight_->setEnabled(false);
+    setActionEnabled(actDownloadF7_, false);
+    setActionEnabled(actUploadRight_, false);
+    setActionEnabled(actRefreshRight_, false);
+    setActionEnabled(actOpenTerminalRight_, false);
     // Local mode: re-enable local actions on the right panel
-    if (actNewDirRight_)
-        actNewDirRight_->setEnabled(true);
-    if (actNewFileRight_)
-        actNewFileRight_->setEnabled(true);
-    if (actRenameRight_)
-        actRenameRight_->setEnabled(true);
-    if (actDeleteRight_)
-        actDeleteRight_->setEnabled(true);
-    if (actMoveRight_)
-        actMoveRight_->setEnabled(true);
-    if (actMoveRightTb_)
-        actMoveRightTb_->setEnabled(true);
-    if (actCopyRightTb_)
-        actCopyRightTb_->setEnabled(true);
+    setActionEnabled(actNewDirRight_, true);
+    setActionEnabled(actNewFileRight_, true);
+    setActionEnabled(actRenameRight_, true);
+    setActionEnabled(actDeleteRight_, true);
+    setActionEnabled(actMoveRight_, true);
+    setActionEnabled(actMoveRightTb_, true);
+    setActionEnabled(actCopyRightTb_, true);
     if (actChooseRight_) {
         actChooseRight_->setIcon(
             QIcon(QLatin1String(":/assets/icons/action-open-folder.svg")));
@@ -663,8 +660,9 @@ void MainWindow::disconnectSftp() {
         rightView_->setEnabled(true);
     setWindowTitle(tr("OpenSCP — local/local"));
     updateDeleteShortcutEnables();
-    statusBar()->showMessage(
-        tr("Disconnecting… waiting for active transfers to stop"), 0);
+}
+
+void MainWindow::scheduleDisconnectWatchdog(quint64 disconnectSeq) {
     constexpr int kDisconnectWatchdogMs = 25000;
     QTimer::singleShot(kDisconnectWatchdogMs, this, [this, disconnectSeq]() {
         if (!m_isDisconnecting || disconnectSeq != m_disconnectSeq_)
@@ -675,46 +673,57 @@ void MainWindow::disconnectSftp() {
             5000);
         completeDisconnectSftp(disconnectSeq, true);
     });
+}
 
+bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
     // Stop transfer workers off the UI thread; clearClient() may need to join
     // active workers and can block while they unwind.
-    if (transferMgr_) {
-        QPointer<MainWindow> self(this);
-        TransferManager *mgr = transferMgr_;
-        std::thread([self, mgr, disconnectSeq]() {
-            try {
-                mgr->clearClient();
-            } catch (...) {
-                // Best effort: continue UI teardown even if queue cleanup
-                // throws unexpectedly.
-            }
-            QObject *app = QCoreApplication::instance();
-            if (!app)
-                return;
-            QMetaObject::invokeMethod(
-                app,
-                [self, disconnectSeq]() {
-                    if (!self)
-                        return;
-                    if (disconnectSeq == self->m_disconnectSeq_ &&
-                        self->m_transferCleanupInProgress_) {
-                        self->m_transferCleanupInProgress_ = false;
-                        self->m_transferCleanupStartedAtMs_ = 0;
-                        if (!self->m_isDisconnecting && !self->rightIsRemote_) {
-                            if (self->actConnect_)
-                                self->actConnect_->setToolTip(
-                                    self->actConnect_->text());
-                            self->statusBar()->showMessage(
-                                tr("Background transfer cleanup finished"),
-                                3000);
-                        }
+    if (!transferMgr_)
+        return false;
+    QPointer<MainWindow> self(this);
+    TransferManager *mgr = transferMgr_;
+    std::thread([self, mgr, disconnectSeq]() {
+        try {
+            mgr->clearClient();
+        } catch (...) {
+            // Best effort: continue UI teardown even if queue cleanup
+            // throws unexpectedly.
+        }
+        QObject *app = QCoreApplication::instance();
+        if (!app)
+            return;
+        QMetaObject::invokeMethod(
+            app,
+            [self, disconnectSeq]() {
+                if (!self)
+                    return;
+                if (disconnectSeq == self->m_disconnectSeq_ &&
+                    self->m_transferCleanupInProgress_) {
+                    self->m_transferCleanupInProgress_ = false;
+                    self->m_transferCleanupStartedAtMs_ = 0;
+                    if (!self->m_isDisconnecting && !self->rightIsRemote_) {
+                        if (self->actConnect_)
+                            self->actConnect_->setToolTip(
+                                self->actConnect_->text());
+                        self->statusBar()->showMessage(
+                            tr("Background transfer cleanup finished"), 3000);
                     }
-                    self->completeDisconnectSftp(disconnectSeq, false);
-                },
-                Qt::QueuedConnection);
-        }).detach();
+                }
+                self->completeDisconnectSftp(disconnectSeq, false);
+            },
+            Qt::QueuedConnection);
+    }).detach();
+    return true;
+}
+
+void MainWindow::disconnectSftp() {
+    if (m_isDisconnecting)
         return;
-    }
+    const quint64 disconnectSeq = beginDisconnectFlow();
+    scheduleDisconnectWatchdog(disconnectSeq);
+
+    if (runDisconnectTransferCleanupAsync(disconnectSeq))
+        return;
 
     m_transferCleanupInProgress_ = false;
     m_transferCleanupStartedAtMs_ = 0;
@@ -978,18 +987,33 @@ void MainWindow::showTOfuDialog(const QString &host, const QString &alg,
     });
 }
 
-void MainWindow::onTofuFinished(int r) {
-    bool accept = (r == QDialog::Accepted || r == QMessageBox::Yes);
-    if (m_tofuBox) {
-        const auto *clicked = m_tofuBox->clickedButton();
-        if (clicked) {
-            auto role = m_tofuBox->buttonRole((QAbstractButton *)clicked);
-            accept = (role == QMessageBox::YesRole ||
-                      role == QMessageBox::AcceptRole);
-        }
-        m_tofuBox->deleteLater();
-        m_tofuBox.clear();
+bool MainWindow::consumeTofuDialogDecision(int result) {
+    bool accept = (result == QDialog::Accepted || result == QMessageBox::Yes);
+    if (!m_tofuBox)
+        return accept;
+    const auto *clicked = m_tofuBox->clickedButton();
+    if (clicked) {
+        const auto role =
+            m_tofuBox->buttonRole(const_cast<QAbstractButton *>(clicked));
+        accept = (role == QMessageBox::YesRole ||
+                  role == QMessageBox::AcceptRole);
     }
+    m_tofuBox->deleteLater();
+    m_tofuBox.clear();
+    return accept;
+}
+
+void MainWindow::publishTofuDecision(bool accept) {
+    {
+        std::unique_lock<std::mutex> lk(m_tofuMutex_);
+        m_tofuAccepted_ = accept;
+        m_tofuDecided_ = true;
+    }
+    m_tofuCv_.notify_one();
+}
+
+void MainWindow::onTofuFinished(int r) {
+    const bool accept = consumeTofuDialogDecision(r);
     if (!m_tofuCanSave_ && accept) {
         statusBar()->showMessage(
             tr("Could not save fingerprint; allowing one-time connection"),
@@ -998,26 +1022,15 @@ void MainWindow::onTofuFinished(int r) {
         statusBar()->showMessage(
             tr("Connection cancelled: fingerprint not accepted"), 5000);
     }
-    // Re-enable progress if it was dimmed
-    if (m_connectProgressDimmed_ && m_connectProgress_) {
+    const bool resumedProgress = (m_connectProgressDimmed_ && m_connectProgress_);
+    if (resumedProgress) {
         m_connectProgress_->setEnabled(true);
         m_connectProgressDimmed_ = false;
-        if (openscp::sensitiveLoggingEnabled()) {
-            std::fprintf(stderr,
-                         "[OpenSCP] TOFU closed; progress resumed=true\n");
-        }
-    } else {
-        if (openscp::sensitiveLoggingEnabled()) {
-            std::fprintf(stderr,
-                         "[OpenSCP] TOFU closed; progress resumed=false\n");
-        }
     }
-    {
-        std::unique_lock<std::mutex> lk(m_tofuMutex_);
-        m_tofuAccepted_ = accept;
-        m_tofuDecided_ = true;
-    }
-    m_tofuCv_.notify_one();
+    if (openscp::sensitiveLoggingEnabled())
+        std::fprintf(stderr, "[OpenSCP] TOFU closed; progress resumed=%s\n",
+                     resumedProgress ? "true" : "false");
+    publishTofuDecision(accept);
 }
 
 // Secondary non‑modal dialog for one‑time connection without saving
@@ -1047,33 +1060,17 @@ void MainWindow::showOneTimeDialog(const QString &host, const QString &alg,
 }
 
 void MainWindow::onOneTimeFinished(int r) {
-    bool accept = (r == QDialog::Accepted || r == QMessageBox::Yes);
-    if (m_tofuBox) {
-        const auto *clicked = m_tofuBox->clickedButton();
-        if (clicked) {
-            auto role = m_tofuBox->buttonRole((QAbstractButton *)clicked);
-            accept = (role == QMessageBox::YesRole ||
-                      role == QMessageBox::AcceptRole);
-        }
-        m_tofuBox->deleteLater();
-        m_tofuBox.clear();
-    }
+    const bool accept = consumeTofuDialogDecision(r);
     if (accept)
         statusBar()->showMessage(
             tr("One-time connection without saving confirmed by user"), 5000);
     else
         statusBar()->showMessage(tr("Connection cancelled after save failure"),
                                  5000);
-    {
-        std::unique_lock<std::mutex> lk(m_tofuMutex_);
-        m_tofuAccepted_ = accept;
-        m_tofuDecided_ = true;
-    }
-    m_tofuCv_.notify_one();
+    publishTofuDecision(accept);
 }
-void MainWindow::startSftpConnect(
-    openscp::SessionOptions opt,
-    std::optional<PendingSiteSaveRequest> saveRequest) {
+bool MainWindow::validateSftpConnectStart(
+    const openscp::SessionOptions &opt) {
     if (m_transferCleanupInProgress_) {
         const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
         const int elapsedSec =
@@ -1084,51 +1081,47 @@ void MainWindow::startSftpConnect(
             tr("Please wait: previous transfer cleanup is still running (%1s)")
                 .arg(elapsedSec),
             4000);
-        return;
+        return false;
     }
     if (m_connectInProgress_) {
         statusBar()->showMessage(tr("A connection is already in progress"),
                                  3000);
-        return;
+        return false;
     }
     if (rightIsRemote_ || sftp_) {
         statusBar()->showMessage(tr("An active remote session already exists"),
                                  3000);
-        return;
+        return false;
     }
+    const QString protocol = protocolDisplayLabel(opt.protocol);
     const openscp::ProtocolCapabilities caps =
         openscp::capabilitiesForProtocol(opt.protocol);
+    auto cancelWithWarning = [this](const QString &message,
+                                    const QString &statusMessage) {
+        UiAlerts::warning(this, tr("Unsupported transport"), message);
+        statusBar()->showMessage(statusMessage, 5000);
+        return false;
+    };
     if (!caps.implemented || !caps.supports_file_transfers) {
-        const QString protocol = protocolDisplayLabel(opt.protocol);
         UiAlerts::information(
             this, tr("Protocol not available"),
             tr("%1 support is not implemented yet.").arg(protocol));
         statusBar()->showMessage(
             tr("Connection canceled: unsupported protocol %1").arg(protocol),
             5000);
-        return;
+        return false;
     }
     if (hasConfiguredJumpHost(opt) && !caps.supports_jump_host) {
-        UiAlerts::warning(
-            this, tr("Unsupported transport"),
-            tr("SSH jump host is not available for %1.")
-                .arg(protocolDisplayLabel(opt.protocol)));
-        statusBar()->showMessage(
+        return cancelWithWarning(
+            tr("SSH jump host is not available for %1.").arg(protocol),
             tr("Connection canceled: SSH jump host is not supported for %1")
-                .arg(protocolDisplayLabel(opt.protocol)),
-            5000);
-        return;
+                .arg(protocol));
     }
     if (opt.proxy_type != openscp::ProxyType::None && !caps.supports_proxy) {
-        UiAlerts::warning(
-            this, tr("Unsupported transport"),
-            tr("Proxy settings are not available for %1.")
-                .arg(protocolDisplayLabel(opt.protocol)));
-        statusBar()->showMessage(
+        return cancelWithWarning(
+            tr("Proxy settings are not available for %1.").arg(protocol),
             tr("Connection canceled: proxy is not supported for %1")
-                .arg(protocolDisplayLabel(opt.protocol)),
-            5000);
-        return;
+                .arg(protocol));
     }
     if (hasTransportSelectionConflict(opt)) {
         UiAlerts::warning(
@@ -1137,7 +1130,7 @@ void MainWindow::startSftpConnect(
                "connection.\nEdit the site and keep only one transport."));
         statusBar()->showMessage(
             tr("Connection canceled: invalid transport configuration"), 5000);
-        return;
+        return false;
     }
 #ifdef Q_OS_WIN
     if (hasConfiguredJumpHost(opt)) {
@@ -1147,19 +1140,20 @@ void MainWindow::startSftpConnect(
         statusBar()->showMessage(
             tr("Connection canceled: SSH jump host is unsupported on Windows"),
             5000);
-        return;
+        return false;
     }
 #endif
     if (!confirmInsecureHostPolicyForSession(opt)) {
         statusBar()->showMessage(
             tr("Connection canceled: no-verification policy not confirmed"),
             5000);
-        return;
+        return false;
     }
+    return true;
+}
 
-    const openscp::SessionOptions uiOpt = opt;
-    QPointer<MainWindow> self(this);
-    auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
+void MainWindow::initializeSftpConnectUiState(
+    const std::shared_ptr<std::atomic<bool>> &cancelFlag) {
     m_connectCancelRequested_ = cancelFlag;
     m_connectInProgress_ = true;
 
@@ -1184,7 +1178,10 @@ void MainWindow::startSftpConnect(
     progress->raise();
     m_connectProgress_ = progress;
     m_connectProgressDimmed_ = false;
+}
 
+void MainWindow::configureSftpConnectCallbacks(openscp::SessionOptions &opt) {
+    QPointer<MainWindow> self(this);
     // Inject host key confirmation (TOFU) via UI
     opt.hostkey_confirm_cb = [self](const std::string &h, std::uint16_t p,
                                     const std::string &alg,
@@ -1223,6 +1220,33 @@ void MainWindow::startSftpConnect(
             return openscp::KbdIntPromptResult::Cancelled;
         responses.clear();
         responses.reserve(prompts.size());
+        auto promptForInput = [self](const QString &title,
+                                     const QString &promptText,
+                                     QLineEdit::EchoMode echoMode,
+                                     QString &answer) {
+            bool accepted = false;
+            QMetaObject::invokeMethod(
+                self,
+                [&] {
+                    if (!self)
+                        return;
+                    answer = QInputDialog::getText(
+                        self, title, promptText, echoMode, QString(), &accepted);
+                },
+                Qt::BlockingQueuedConnection);
+            return accepted;
+        };
+        auto appendUtf8Response = [&responses](QString &answer) {
+            QByteArray bytes = answer.toUtf8();
+            responses.emplace_back(bytes.constData(), (size_t)bytes.size());
+            secureClear(bytes);
+            secureClear(answer);
+        };
+        const QString instructionSuffix =
+            instruction.empty()
+                ? QString()
+                : QStringLiteral(" — ") + QString::fromStdString(instruction);
+
         // Resolve each prompt: auto-fill user/pass and ask for OTP/codes if
         // present
         for (const std::string &p : prompts) {
@@ -1240,90 +1264,45 @@ void MainWindow::startSftpConnect(
                     responses.emplace_back(savedPass);
                     continue;
                 }
-                // Ask for password if we did not have it
-                QString ans;
-                bool ok = false;
-                QMetaObject::invokeMethod(
-                    self,
-                    [&] {
-                        if (!self)
-                            return;
-                        ans = QInputDialog::getText(
-                            self, tr("Password required"), qprompt,
-                            QLineEdit::Password, QString(), &ok);
-                    },
-                    Qt::BlockingQueuedConnection);
-                if (!ok)
+                QString answer;
+                if (!promptForInput(tr("Password required"), qprompt,
+                                    QLineEdit::Password, answer)) {
                     return openscp::KbdIntPromptResult::Cancelled;
-                {
-                    QByteArray bytes = ans.toUtf8();
-                    responses.emplace_back(bytes.constData(),
-                                           (size_t)bytes.size());
-                    secureClear(bytes);
                 }
-                secureClear(ans);
+                appendUtf8Response(answer);
                 continue;
             }
             // OTP / Verification code / Token
+            QString answer;
             if (lower.contains("verification") || lower.contains("verify") ||
                 lower.contains("otp") || lower.contains("code") ||
                 lower.contains("token")) {
-                QString title = tr("Verification code required");
-                if (!instruction.empty())
-                    title += " — " + QString::fromStdString(instruction);
-                QString ans;
-                bool ok = false;
-                QMetaObject::invokeMethod(
-                    self,
-                    [&] {
-                        if (!self)
-                            return;
-                        ans = QInputDialog::getText(self, title, qprompt,
-                                                    QLineEdit::Password,
-                                                    QString(), &ok);
-                    },
-                    Qt::BlockingQueuedConnection);
-                if (!ok)
+                const QString title =
+                    tr("Verification code required") + instructionSuffix;
+                if (!promptForInput(title, qprompt, QLineEdit::Password,
+                                    answer)) {
                     return openscp::KbdIntPromptResult::Cancelled;
-                {
-                    QByteArray bytes = ans.toUtf8();
-                    responses.emplace_back(bytes.constData(),
-                                           (size_t)bytes.size());
-                    secureClear(bytes);
                 }
-                secureClear(ans);
+                appendUtf8Response(answer);
                 continue;
             }
             // Generic case: ask for text (not hidden)
-            QString title = tr("Information required");
-            if (!instruction.empty())
-                title += " — " + QString::fromStdString(instruction);
-            QString ans;
-            bool ok = false;
-            QMetaObject::invokeMethod(
-                self,
-                [&] {
-                    if (!self)
-                        return;
-                    ans = QInputDialog::getText(self, title, qprompt,
-                                                QLineEdit::Normal, QString(),
-                                                &ok);
-                },
-                Qt::BlockingQueuedConnection);
-            if (!ok)
+            const QString title = tr("Information required") + instructionSuffix;
+            if (!promptForInput(title, qprompt, QLineEdit::Normal, answer))
                 return openscp::KbdIntPromptResult::Cancelled;
-            {
-                QByteArray bytes = ans.toUtf8();
-                responses.emplace_back(bytes.constData(), (size_t)bytes.size());
-                secureClear(bytes);
-            }
-            secureClear(ans);
+            appendUtf8Response(answer);
         }
         return (responses.size() == prompts.size())
                    ? openscp::KbdIntPromptResult::Handled
                    : openscp::KbdIntPromptResult::Unhandled;
     };
+}
 
+void MainWindow::launchSftpConnectWorker(
+    openscp::SessionOptions opt, const openscp::SessionOptions &uiOpt,
+    std::optional<PendingSiteSaveRequest> saveRequest,
+    const std::shared_ptr<std::atomic<bool>> &cancelFlag) {
+    QPointer<MainWindow> self(this);
     std::thread([self, opt = std::move(opt), uiOpt, saveRequest,
                  cancelFlag]() mutable {
         bool okConn = false;
@@ -1377,6 +1356,21 @@ void MainWindow::startSftpConnect(
             delete connectedClient;
         }
     }).detach();
+}
+
+void MainWindow::startSftpConnect(
+    openscp::SessionOptions opt,
+    std::optional<PendingSiteSaveRequest> saveRequest) {
+    if (!validateSftpConnectStart(opt))
+        return;
+
+    const openscp::SessionOptions uiOpt = opt;
+    auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
+    initializeSftpConnectUiState(cancelFlag);
+
+    configureSftpConnectCallbacks(opt);
+    launchSftpConnectWorker(std::move(opt), uiOpt, std::move(saveRequest),
+                            cancelFlag);
 }
 
 void MainWindow::finalizeSftpConnect(
