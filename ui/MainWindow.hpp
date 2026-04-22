@@ -204,10 +204,10 @@ class MainWindow : public QMainWindow {
     // Explicit non‑modal TOFU dialog API per spec
     void showTOfuDialog(const QString &host, const QString &alg,
                         const QString &fp);
-    void onTofuFinished(int r);
+    void onTofuFinished(int dialogResult);
     void showOneTimeDialog(const QString &host, const QString &alg,
                            const QString &fp);
-    void onOneTimeFinished(int r);
+    void onOneTimeFinished(int dialogResult);
     bool consumeTofuDialogDecision(int result);
     void publishTofuDecision(bool accept);
     void showSiteManagerNonModal();
@@ -259,6 +259,8 @@ class MainWindow : public QMainWindow {
         QString sourcePath;
         QString targetPath;
     };
+    static QVector<LocalFsPair>
+    toLocalFsPairs(const QVector<QPair<QString, QString>> &pairs);
     void runLocalFsOperation(const QVector<LocalFsPair> &pairs,
                              bool deleteSource, int skippedCount = 0);
     struct RemoteDownloadSeed {

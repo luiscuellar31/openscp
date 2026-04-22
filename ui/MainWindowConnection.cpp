@@ -39,16 +39,18 @@
 
 // Best-effort memory scrubbing helpers for sensitive data
 static inline void secureClear(QString &s) {
-    for (int i = 0, n = s.size(); i < n; ++i)
-        s[i] = QChar(u'\0');
+    const int charCount = s.size();
+    for (int charIndex = 0; charIndex < charCount; ++charIndex)
+        s[charIndex] = QChar(u'\0');
     s.clear();
 }
 static inline void secureClear(QByteArray &b) {
     if (b.isEmpty())
         return;
     volatile char *p = reinterpret_cast<volatile char *>(b.data());
-    for (int i = 0; i < b.size(); ++i)
-        p[i] = 0;
+    const int byteCount = b.size();
+    for (int byteIndex = 0; byteIndex < byteCount; ++byteIndex)
+        p[byteIndex] = 0;
     b.clear();
     b.squeeze();
 }
@@ -217,8 +219,9 @@ static QString ensureUniqueQuickSiteName(const QVector<SiteEntry> &sites,
     };
     if (!exists(base))
         return base;
-    for (int i = 2; i < 10000; ++i) {
-        const QString candidate = QString("%1 (%2)").arg(base).arg(i);
+    for (int suffixNumber = 2; suffixNumber < 10000; ++suffixNumber) {
+        const QString candidate =
+            QString("%1 (%2)").arg(base).arg(suffixNumber);
         if (!exists(candidate))
             return candidate;
     }
@@ -482,20 +485,22 @@ void MainWindow::runRemoteSessionHealthCheck(const QString &reason, bool force) 
         (rightRemoteModel_ && !rightRemoteModel_->rootPath().isEmpty())
             ? rightRemoteModel_->rootPath()
             : QStringLiteral("/");
-    std::string err;
-    bool isDir = false;
-    const bool ok = executeCriticalRemoteOperation(
+    std::string healthCheckError;
+    bool pathIsDirectory = false;
+    const bool probeSucceeded = executeCriticalRemoteOperation(
         tr("validate the remote session"),
-        [probePath, &isDir](openscp::SftpClient *client, std::string &opErr) {
+        [probePath, &pathIsDirectory](openscp::SftpClient *client,
+                                      std::string &opErr) {
             bool exists = false;
-            exists = client->exists(probePath.toStdString(), isDir, opErr);
+            exists =
+                client->exists(probePath.toStdString(), pathIsDirectory, opErr);
             if (exists)
                 return true;
             return opErr.empty();
         },
-        err);
+        healthCheckError);
     m_remoteSessionHealthProbeInFlight_.store(false);
-    if (ok) {
+    if (probeSucceeded) {
         if (force && !reason.isEmpty()) {
             statusBar()->showMessage(tr("Remote session validated (%1)")
                                          .arg(reason),
@@ -506,7 +511,7 @@ void MainWindow::runRemoteSessionHealthCheck(const QString &reason, bool force) 
     if (!rightIsRemote_ || !sftp_ || m_isDisconnecting)
         return;
 
-    const QString rawErr = QString::fromStdString(err);
+    const QString rawErr = QString::fromStdString(healthCheckError);
     if (!isLikelyRemoteTransportError(rawErr))
         return;
 
@@ -526,7 +531,7 @@ void MainWindow::openConnectDialogWithPreset(
         dlg.setOptions(*preset);
     if (dlg.exec() != QDialog::Accepted)
         return;
-    auto opt = dlg.options();
+    auto sessionOptions = dlg.options();
     std::optional<PendingSiteSaveRequest> saveRequest = std::nullopt;
     if (dlg.saveSiteRequested()) {
         PendingSiteSaveRequest req;
@@ -537,12 +542,13 @@ void MainWindow::openConnectDialogWithPreset(
     // Apply global security preferences also for ad‑hoc connections (Advanced
     // settings)
     {
-        QSettings s("OpenSCP", "OpenSCP");
-        opt.known_hosts_hash_names =
-            s.value("Security/knownHostsHashed", true).toBool();
-        opt.show_fp_hex = s.value("Security/fpHex", false).toBool();
+        QSettings securitySettings("OpenSCP", "OpenSCP");
+        sessionOptions.known_hosts_hash_names =
+            securitySettings.value("Security/knownHostsHashed", true).toBool();
+        sessionOptions.show_fp_hex =
+            securitySettings.value("Security/fpHex", false).toBool();
     }
-    if (hasTransportSelectionConflict(opt)) {
+    if (hasTransportSelectionConflict(sessionOptions)) {
         UiAlerts::warning(
             this, tr("Invalid transport configuration"),
             tr("Proxy and SSH jump host cannot be used together in the same "
@@ -552,7 +558,7 @@ void MainWindow::openConnectDialogWithPreset(
         return;
     }
 #ifdef Q_OS_WIN
-    if (hasConfiguredJumpHost(opt)) {
+    if (hasConfiguredJumpHost(sessionOptions)) {
         UiAlerts::warning(
             this, tr("Unsupported transport"),
             tr("SSH jump host is currently unavailable on Windows."));
@@ -563,12 +569,12 @@ void MainWindow::openConnectDialogWithPreset(
     }
 #endif
     if (saveRequest.has_value()) {
-        maybePersistQuickConnectSite(opt, *saveRequest, false);
+        maybePersistQuickConnectSite(sessionOptions, *saveRequest, false);
         // Already persisted on request; connection lifecycle no longer needs to
         // do it.
         saveRequest.reset();
     }
-    startSftpConnect(opt, saveRequest);
+    startSftpConnect(sessionOptions, saveRequest);
 }
 
 void MainWindow::connectSftp() { openConnectDialogWithPreset(std::nullopt); }
@@ -766,9 +772,9 @@ void MainWindow::setOpenSiteManagerOnDisconnect(bool on) {
     if (m_openSiteManagerOnDisconnect == on)
         return;
     m_openSiteManagerOnDisconnect = on;
-    QSettings s("OpenSCP", "OpenSCP");
-    s.setValue("UI/openSiteManagerOnDisconnect", on);
-    s.sync();
+    QSettings settings("OpenSCP", "OpenSCP");
+    settings.setValue("UI/openSiteManagerOnDisconnect", on);
+    settings.sync();
 }
 
 void MainWindow::showSiteManagerNonModal() {
@@ -791,8 +797,8 @@ void MainWindow::showSiteManagerNonModal() {
     m_siteManager = dlg;
     dlg->setAttribute(Qt::WA_DeleteOnClose, true);
     connect(dlg, &QObject::destroyed, this, [this] { m_siteManager.clear(); });
-    connect(dlg, &QDialog::finished, this, [this, dlg](int res) {
-        if (res == QDialog::Accepted && dlg) {
+    connect(dlg, &QDialog::finished, this, [this, dlg](int dialogResult) {
+        if (dialogResult == QDialog::Accepted && dlg) {
             openscp::SessionOptions opt{};
             if (dlg->selectedOptions(opt)) {
                 startSftpConnect(opt);
@@ -810,9 +816,9 @@ void MainWindow::setOpenSiteManagerOnStartup(bool on) {
     if (m_openSiteManagerOnStartup == on)
         return;
     m_openSiteManagerOnStartup = on;
-    QSettings s("OpenSCP", "OpenSCP");
-    s.setValue("UI/showConnOnStart", on);
-    s.sync();
+    QSettings settings("OpenSCP", "OpenSCP");
+    settings.setValue("UI/showConnOnStart", on);
+    settings.sync();
 }
 
 void MainWindow::maybeOpenSiteManagerAfterModal() {
@@ -834,8 +840,8 @@ bool MainWindow::confirmInsecureHostPolicyForSession(
             .arg(hostKey)
             .arg((int)opt.port);
     const qint64 now = QDateTime::currentSecsSinceEpoch();
-    QSettings s("OpenSCP", "OpenSCP");
-    const qint64 allowedUntil = s.value(allowKey, 0).toLongLong();
+    QSettings settings("OpenSCP", "OpenSCP");
+    const qint64 allowedUntil = settings.value(allowKey, 0).toLongLong();
     if (allowedUntil > now)
         return true;
 
@@ -849,13 +855,13 @@ bool MainWindow::confirmInsecureHostPolicyForSession(
         return false;
 
     const QString token = QStringLiteral("UNSAFE");
-    bool ok = false;
+    bool inputAccepted = false;
     const QString entered =
         QInputDialog::getText(this, tr("Additional confirmation required"),
                               tr("To confirm, type exactly %1").arg(token),
-                              QLineEdit::Normal, QString(), &ok)
+                              QLineEdit::Normal, QString(), &inputAccepted)
             .trimmed();
-    if (!ok || entered != token) {
+    if (!inputAccepted || entered != token) {
         UiAlerts::information(
             this, tr("Connection canceled"),
             tr("Risk confirmation was not completed correctly."));
@@ -865,8 +871,8 @@ bool MainWindow::confirmInsecureHostPolicyForSession(
     // Temporary exception per host:port to avoid persistent bypasses.
     const int ttlMin = qBound(1, prefNoHostVerificationTtlMin_, 120);
     const qint64 newUntil = now + qint64(ttlMin) * 60;
-    s.setValue(allowKey, newUntil);
-    s.sync();
+    settings.setValue(allowKey, newUntil);
+    settings.sync();
     const QDateTime expLocal =
         QDateTime::fromSecsSinceEpoch(newUntil).toLocalTime();
     statusBar()->showMessage(
@@ -1012,8 +1018,8 @@ void MainWindow::publishTofuDecision(bool accept) {
     m_tofuCv_.notify_one();
 }
 
-void MainWindow::onTofuFinished(int r) {
-    const bool accept = consumeTofuDialogDecision(r);
+void MainWindow::onTofuFinished(int dialogResult) {
+    const bool accept = consumeTofuDialogDecision(dialogResult);
     if (!m_tofuCanSave_ && accept) {
         statusBar()->showMessage(
             tr("Could not save fingerprint; allowing one-time connection"),
@@ -1059,8 +1065,8 @@ void MainWindow::showOneTimeDialog(const QString &host, const QString &alg,
     QTimer::singleShot(0, box, [box] { box->open(); });
 }
 
-void MainWindow::onOneTimeFinished(int r) {
-    const bool accept = consumeTofuDialogDecision(r);
+void MainWindow::onOneTimeFinished(int dialogResult) {
+    const bool accept = consumeTofuDialogDecision(dialogResult);
     if (accept)
         statusBar()->showMessage(
             tr("One-time connection without saving confirmed by user"), 5000);
@@ -1305,40 +1311,43 @@ void MainWindow::launchSftpConnectWorker(
     QPointer<MainWindow> self(this);
     std::thread([self, opt = std::move(opt), uiOpt, saveRequest,
                  cancelFlag]() mutable {
-        bool okConn = false;
+        bool connectionSucceeded = false;
         bool canceledByUser = false;
-        std::string err;
+        std::string connectionError;
         openscp::SftpClient *connectedClient = nullptr;
         try {
             if (cancelFlag && cancelFlag->load()) {
                 canceledByUser = true;
-                err = "Connection canceled by user";
+                connectionError = "Connection canceled by user";
             } else {
-                auto tmp = openscp::CreateConnectedClient(opt, err);
-                okConn = static_cast<bool>(tmp);
+                auto connectedCandidate =
+                    openscp::CreateConnectedClient(opt, connectionError);
+                connectionSucceeded = static_cast<bool>(connectedCandidate);
                 if (cancelFlag && cancelFlag->load()) {
                     canceledByUser = true;
-                    if (okConn)
-                        tmp->disconnect();
-                    okConn = false;
-                    if (err.empty())
-                        err = "Connection canceled by user";
+                    if (connectionSucceeded)
+                        connectedCandidate->disconnect();
+                    connectionSucceeded = false;
+                    if (connectionError.empty())
+                        connectionError = "Connection canceled by user";
                 }
-                if (okConn)
-                    connectedClient = tmp.release();
+                if (connectionSucceeded)
+                    connectedClient = connectedCandidate.release();
             }
         } catch (const std::exception &ex) {
-            err = std::string("Connection exception: ") + ex.what();
-            okConn = false;
+            connectionError = std::string("Connection exception: ") + ex.what();
+            connectionSucceeded = false;
         } catch (...) {
-            err = "Unknown connection exception";
-            okConn = false;
+            connectionError = "Unknown connection exception";
+            connectionSucceeded = false;
         }
 
-        const QString qerr = QString::fromStdString(err);
+        const QString connectionErrorText =
+            QString::fromStdString(connectionError);
         const bool queued = QMetaObject::invokeMethod(
             qApp,
-            [self, okConn, qerr, connectedClient, uiOpt, saveRequest,
+            [self, connectionSucceeded, connectionErrorText, connectedClient,
+             uiOpt, saveRequest,
              canceledByUser]() {
                 if (!self) {
                     if (connectedClient) {
@@ -1347,8 +1356,9 @@ void MainWindow::launchSftpConnectWorker(
                     }
                     return;
                 }
-                self->finalizeSftpConnect(okConn, qerr, connectedClient, uiOpt,
-                                          saveRequest, canceledByUser);
+                self->finalizeSftpConnect(connectionSucceeded, connectionErrorText,
+                                          connectedClient, uiOpt, saveRequest,
+                                          canceledByUser);
             },
             Qt::QueuedConnection);
         if (!queued && connectedClient) {
@@ -1419,9 +1429,9 @@ void MainWindow::maybePersistQuickConnectSite(
     QVector<SiteEntry> sites = loadSavedSitesForQuickConnect(&regeneratedIds);
 
     int matchIndex = -1;
-    for (int i = 0; i < sites.size(); ++i) {
-        if (sameSavedSiteIdentity(sites[i].opt, opt)) {
-            matchIndex = i;
+    for (int siteIndex = 0; siteIndex < sites.size(); ++siteIndex) {
+        if (sameSavedSiteIdentity(sites[siteIndex].opt, opt)) {
+            matchIndex = siteIndex;
             break;
         }
     }
@@ -1448,18 +1458,12 @@ void MainWindow::maybePersistQuickConnectSite(
     }
 
     if (!req.saveCredentials) {
-        if (connectionEstablished) {
-            if (created)
-                statusBar()->showMessage(tr("Connected. Site saved."), 5000);
-            else
-                statusBar()->showMessage(tr("Connected. Site already exists."),
-                                         5000);
-        } else {
-            if (created)
-                statusBar()->showMessage(tr("Site saved."), 5000);
-            else
-                statusBar()->showMessage(tr("Site already exists."), 5000);
-        }
+        const QString statusMessage =
+            connectionEstablished
+                ? (created ? tr("Connected. Site saved.")
+                           : tr("Connected. Site already exists."))
+                : (created ? tr("Site saved.") : tr("Site already exists."));
+        statusBar()->showMessage(statusMessage, 5000);
         return;
     }
 
@@ -1468,36 +1472,27 @@ void MainWindow::maybePersistQuickConnectSite(
     bool anyCredentialStored = false;
     const SiteEntry &target = sites[matchIndex];
 
-    if (opt.password && !opt.password->empty()) {
-        const auto r = store.setSecret(
-            quickSiteSecretKey(target, QStringLiteral("password")),
-            QString::fromStdString(*opt.password));
-        if (r.ok())
+    auto storeCredential = [&](const QString &label, const QString &secretKey,
+                               const std::optional<std::string> &value) {
+        if (!value || value->empty())
+            return;
+        const auto saveResult = store.setSecret(
+            quickSiteSecretKey(target, secretKey),
+            QString::fromStdString(*value));
+        if (saveResult.ok())
             anyCredentialStored = true;
         else
-            issues << tr("Password: %1").arg(quickPersistStatusShort(r.status));
-    }
-    if (opt.private_key_passphrase && !opt.private_key_passphrase->empty()) {
-        const auto r = store.setSecret(
-            quickSiteSecretKey(target, QStringLiteral("keypass")),
-            QString::fromStdString(*opt.private_key_passphrase));
-        if (r.ok())
-            anyCredentialStored = true;
-        else
-            issues
-                << tr("Passphrase: %1").arg(quickPersistStatusShort(r.status));
-    }
-    if (opt.proxy_type != openscp::ProxyType::None && opt.proxy_password &&
-        !opt.proxy_password->empty()) {
-        const auto r = store.setSecret(
-            quickSiteSecretKey(target, QStringLiteral("proxypass")),
-            QString::fromStdString(*opt.proxy_password));
-        if (r.ok())
-            anyCredentialStored = true;
-        else
-            issues << tr("Proxy password: %1")
-                          .arg(quickPersistStatusShort(r.status));
-    } else if (opt.proxy_type == openscp::ProxyType::None) {
+            issues << tr("%1: %2")
+                          .arg(label, quickPersistStatusShort(saveResult.status));
+    };
+
+    storeCredential(tr("Password"), QStringLiteral("password"), opt.password);
+    storeCredential(tr("Passphrase"), QStringLiteral("keypass"),
+                    opt.private_key_passphrase);
+    if (opt.proxy_type != openscp::ProxyType::None) {
+        storeCredential(tr("Proxy password"), QStringLiteral("proxypass"),
+                        opt.proxy_password);
+    } else {
         store.removeSecret(quickSiteSecretKey(target, QStringLiteral("proxypass")));
     }
 
@@ -1508,28 +1503,20 @@ void MainWindow::maybePersistQuickConnectSite(
                                  .arg(issues.join("\n")));
     }
 
-    if (connectionEstablished) {
-        if (created && anyCredentialStored)
-            statusBar()->showMessage(
-                tr("Connected. Site and credentials saved."), 5000);
-        else if (created)
-            statusBar()->showMessage(tr("Connected. Site saved."), 5000);
-        else if (anyCredentialStored)
-            statusBar()->showMessage(tr("Connected. Credentials updated."),
-                                     5000);
-        else
-            statusBar()->showMessage(tr("Connected. Site already exists."),
-                                     5000);
-    } else {
-        if (created && anyCredentialStored)
-            statusBar()->showMessage(tr("Site and credentials saved."), 5000);
-        else if (created)
-            statusBar()->showMessage(tr("Site saved."), 5000);
-        else if (anyCredentialStored)
-            statusBar()->showMessage(tr("Credentials updated."), 5000);
-        else
-            statusBar()->showMessage(tr("Site already exists."), 5000);
-    }
+    const QString statusMessage =
+        connectionEstablished
+            ? (created
+                   ? (anyCredentialStored
+                          ? tr("Connected. Site and credentials saved.")
+                          : tr("Connected. Site saved."))
+                   : (anyCredentialStored
+                          ? tr("Connected. Credentials updated.")
+                          : tr("Connected. Site already exists.")))
+            : (created ? (anyCredentialStored ? tr("Site and credentials saved.")
+                                              : tr("Site saved."))
+                       : (anyCredentialStored ? tr("Credentials updated.")
+                                              : tr("Site already exists.")));
+    statusBar()->showMessage(statusMessage, 5000);
 }
 
 // Switch UI into remote mode and wire models/actions for the right pane.
@@ -1550,10 +1537,11 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         rightRemoteModel_->setSessionOptions(opt);
         rightRemoteModel_->setShowHidden(prefShowHidden_);
         connect(rightRemoteModel_, &RemoteModel::rootPathLoaded, this,
-                [this](const QString &path, bool ok, const QString &error) {
+                [this](const QString &path, bool loadOk,
+                       const QString &error) {
                     if (!rightRemoteModel_)
                         return;
-                    if (!ok) {
+                    if (!loadOk) {
                         UiAlerts::warning(
                             this, tr("Remote error"),
                             tr("Could not open the remote folder.\n%1")
@@ -1570,13 +1558,14 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
                         updateDeleteShortcutEnables();
                     }
                 });
-        QString e;
-        if (!rightRemoteModel_->setRootPath("/", &e, false)) {
+        QString initialRootLoadError;
+        if (!rightRemoteModel_->setRootPath("/", &initialRootLoadError, false)) {
             UiAlerts::critical(
                 this, tr("Error listing remote"),
                 tr("Could not open the initial remote folder.\n%1")
                     .arg(shortRemoteError(
-                        e, tr("Failed to read remote contents."))));
+                        initialRootLoadError,
+                        tr("Failed to read remote contents."))));
             sftp_.reset();
             rightView_->setModel(rightLocalModel_);
             activateScpTransferModeUi(false);

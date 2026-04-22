@@ -5,6 +5,8 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QInputDialog>
+#include <QLineEdit>
 #include <QMessageBox>
 
 bool isValidEntryName(const QString &name, QString *why) {
@@ -34,6 +36,27 @@ bool isValidEntryName(const QString &name, QString *why) {
             return false;
         }
     }
+    return true;
+}
+
+bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
+                          const QString &labelText,
+                          const QString &initialValue, QString &nameOut) {
+    bool inputAccepted = false;
+    const QString candidateName =
+        QInputDialog::getText(parent, dialogTitle, labelText, QLineEdit::Normal,
+                              initialValue, &inputAccepted);
+    if (!inputAccepted || candidateName.isEmpty())
+        return false;
+
+    QString invalidReason;
+    if (!isValidEntryName(candidateName, &invalidReason)) {
+        UiAlerts::warning(
+            parent, QCoreApplication::translate("MainWindow", "Invalid name"),
+            invalidReason);
+        return false;
+    }
+    nameOut = candidateName;
     return true;
 }
 
