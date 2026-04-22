@@ -87,6 +87,112 @@ static QIcon mainWindowActionIcon(const char *name) {
     return QIcon(QStringLiteral(":/assets/icons/") + QLatin1String(name));
 }
 
+static void setActionIconAndTooltip(QAction *action, const QIcon &icon) {
+    if (!action)
+        return;
+    action->setIcon(icon);
+    action->setToolTip(action->text());
+}
+
+static void bindActionToPanelShortcut(QAction *action, QWidget *panel,
+                                      const QKeySequence &shortcut) {
+    if (!action)
+        return;
+    action->setShortcut(shortcut);
+    action->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    if (panel)
+        panel->addAction(action);
+}
+
+static QListWidget *createHistoryTabList(QTabWidget *tabs,
+                                         const QString &title) {
+    if (!tabs)
+        return nullptr;
+    auto *list = new QListWidget(tabs);
+    list->setSelectionMode(QAbstractItemView::SingleSelection);
+    list->setAlternatingRowColors(true);
+    list->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    tabs->addTab(list, title);
+    return list;
+}
+
+static int selectRowsMatchingPattern(
+    QTreeView *view, QAbstractItemModel *model, const QModelIndex &root,
+    const QRegularExpression &regex,
+    const std::function<QString(const QModelIndex &)> &nameForIndex) {
+    if (!view || !model || !view->selectionModel())
+        return 0;
+
+    QItemSelectionModel *selection = view->selectionModel();
+    selection->clearSelection();
+    QModelIndex firstMatch;
+    int matches = 0;
+
+    const int rows = model->rowCount(root);
+    for (int row = 0; row < rows; ++row) {
+        const QModelIndex idx = model->index(row, NAME_COL, root);
+        const QString itemName = nameForIndex ? nameForIndex(idx) : QString();
+        if (!regex.match(itemName).hasMatch())
+            continue;
+
+        selection->select(idx,
+                          QItemSelectionModel::Select |
+                              QItemSelectionModel::Rows);
+        if (!firstMatch.isValid())
+            firstMatch = idx;
+        ++matches;
+    }
+
+    if (firstMatch.isValid()) {
+        selection->setCurrentIndex(firstMatch, QItemSelectionModel::NoUpdate);
+        view->scrollTo(firstMatch, QAbstractItemView::PositionAtCenter);
+    }
+    return matches;
+}
+
+static void configurePanelTreeView(QTreeView *view, QAbstractItemModel *model,
+                                   const QModelIndex &rootIndex) {
+    if (!view || !model)
+        return;
+    view->setModel(model);
+    view->setExpandsOnDoubleClick(false);
+    view->setRootIndex(rootIndex);
+    view->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    view->setSelectionBehavior(QAbstractItemView::SelectRows);
+    view->setSortingEnabled(true);
+    view->sortByColumn(0, Qt::AscendingOrder);
+    view->header()->setStretchLastSection(true);
+    view->setColumnWidth(0, 280);
+    view->setDragEnabled(true);
+}
+
+static void configurePanelDropTarget(QTreeView *view, QObject *eventFilterOwner) {
+    if (!view)
+        return;
+    view->setAcceptDrops(true);
+    view->setDragDropMode(QAbstractItemView::DragDrop);
+    view->viewport()->setAcceptDrops(true);
+    view->setDefaultDropAction(Qt::CopyAction);
+    if (eventFilterOwner)
+        view->viewport()->installEventFilter(eventFilterOwner);
+}
+
+static QToolBar *createPaneIconToolbar(const QString &title, QWidget *parent) {
+    auto *bar = new QToolBar(title, parent);
+    bar->setIconSize(QSize(18, 18));
+    bar->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    return bar;
+}
+
+static QToolBar *createBreadcrumbToolbar(const QString &title, QWidget *parent) {
+    auto *bar = new QToolBar(title, parent);
+    bar->setMovable(false);
+    bar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    bar->setIconSize(QSize(14, 14));
+    bar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    return bar;
+}
+
 static bool remotePathIsInsideRoot(const QString &candidatePath,
                                    const QString &rootPath) {
     const QString candidate = normalizeRemotePathForMatch(candidatePath);
@@ -464,40 +570,11 @@ void MainWindow::initializePanels(const QString &home) {
     leftView_ = new DragAwareTreeView(this);
     rightView_ = new DragAwareTreeView(this);
 
-    leftView_->setModel(leftModel_);
-    rightView_->setModel(rightLocalModel_);
-    // Avoid expanding subtrees on double‑click; navigate by changing root
-    leftView_->setExpandsOnDoubleClick(false);
-    rightView_->setExpandsOnDoubleClick(false);
-    leftView_->setRootIndex(leftModel_->index(home));
-    rightView_->setRootIndex(rightLocalModel_->index(home));
-
-    // Basic view tuning
-    auto tuneView = [](QTreeView *v) {
-        v->setSelectionMode(QAbstractItemView::ExtendedSelection);
-        v->setSelectionBehavior(QAbstractItemView::SelectRows);
-        v->setSortingEnabled(true);
-        v->sortByColumn(0, Qt::AscendingOrder);
-        v->header()->setStretchLastSection(true);
-        v->setColumnWidth(0, 280);
-    };
-    tuneView(leftView_);
-    tuneView(rightView_);
-    leftView_->setDragEnabled(true);
-    rightView_->setDragEnabled(true); // allow starting drags from right pane
-
-    // Accept drops on both panes
-    rightView_->setAcceptDrops(true);
-    rightView_->setDragDropMode(QAbstractItemView::DragDrop);
-    rightView_->viewport()->setAcceptDrops(true);
-    rightView_->setDefaultDropAction(Qt::CopyAction);
-    leftView_->setAcceptDrops(true);
-    leftView_->setDragDropMode(QAbstractItemView::DragDrop);
-    leftView_->viewport()->setAcceptDrops(true);
-    leftView_->setDefaultDropAction(Qt::CopyAction);
-    // Install event filters on viewports to receive drag/drop
-    rightView_->viewport()->installEventFilter(this);
-    leftView_->viewport()->installEventFilter(this);
+    configurePanelTreeView(leftView_, leftModel_, leftModel_->index(home));
+    configurePanelTreeView(rightView_, rightLocalModel_,
+                           rightLocalModel_->index(home));
+    configurePanelDropTarget(rightView_, this);
+    configurePanelDropTarget(leftView_, this);
 
     // Path entries (top)
     leftPath_ = new QLineEdit(home, this);
@@ -549,15 +626,9 @@ void MainWindow::initializePanels(const QString &home) {
     rightContentStack_->setCurrentWidget(rightView_);
 
     // Left pane sub‑toolbar
-    leftPaneBar_ = new QToolBar("LeftBar", leftPane);
-    leftPaneBar_->setIconSize(QSize(18, 18));
-    leftPaneBar_->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    leftBreadcrumbsBar_ = new QToolBar("LeftBreadcrumbs", leftPane);
-    leftBreadcrumbsBar_->setMovable(false);
-    leftBreadcrumbsBar_->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    leftBreadcrumbsBar_->setIconSize(QSize(14, 14));
-    leftBreadcrumbsBar_->setSizePolicy(QSizePolicy::Expanding,
-                                       QSizePolicy::Fixed);
+    leftPaneBar_ = createPaneIconToolbar(QStringLiteral("LeftBar"), leftPane);
+    leftBreadcrumbsBar_ =
+        createBreadcrumbToolbar(QStringLiteral("LeftBreadcrumbs"), leftPane);
     // Helper for icons from local resources
     auto resIcon = [](const char *fname) -> QIcon {
         return QIcon(QStringLiteral(":/assets/icons/") + QLatin1String(fname));
@@ -571,63 +642,48 @@ void MainWindow::initializePanels(const QString &home) {
     };
     // Left sub‑toolbar: Up, Open, Home, Search, Copy/Move/Delete, Rename/New
     actUpLeft_ = leftPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpLeft);
-    actUpLeft_->setIcon(resIcon("action-go-up.svg"));
-    actUpLeft_->setToolTip(actUpLeft_->text());
+    setActionIconAndTooltip(actUpLeft_, resIcon("action-go-up.svg"));
     // Button "Open left folder" next to Up
     actChooseLeft_ = leftPaneBar_->addAction(tr("Open left folder"), this,
                                              &MainWindow::chooseLeftDir);
-    actChooseLeft_->setIcon(resIcon("action-open-folder.svg"));
-    actChooseLeft_->setToolTip(actChooseLeft_->text());
+    setActionIconAndTooltip(actChooseLeft_, resIcon("action-open-folder.svg"));
     actHomeLeft_ =
         leftPaneBar_->addAction(tr("Home"), this, &MainWindow::goHomeLeft);
-    actHomeLeft_->setIcon(resIcon("action-go-home.svg"));
-    actHomeLeft_->setToolTip(actHomeLeft_->text());
+    setActionIconAndTooltip(actHomeLeft_, resIcon("action-go-home.svg"));
     actSearchLeft_ =
         leftPaneBar_->addAction(tr("Search items"), this,
                                 [this, leftSearchLabel] {
                                     searchItemsInCurrentFolder(
                                         leftView_, leftSearchLabel());
                                 });
-    actSearchLeft_->setIcon(resIcon("action-search-item.svg"));
-    actSearchLeft_->setToolTip(actSearchLeft_->text());
+    setActionIconAndTooltip(actSearchLeft_, resIcon("action-search-item.svg"));
     leftPaneBar_->addSeparator();
     actCopyF5_ =
         leftPaneBar_->addAction(tr("Copy"), this, &MainWindow::copyLeftToRight);
-    actCopyF5_->setIcon(resIcon("action-copy.svg"));
-    actCopyF5_->setToolTip(actCopyF5_->text());
+    setActionIconAndTooltip(actCopyF5_, resIcon("action-copy.svg"));
     // Shortcut F5 on left panel (scope: left view and its children)
-    actCopyF5_->setShortcut(QKeySequence(Qt::Key_F5));
-    actCopyF5_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (leftView_)
-        leftView_->addAction(actCopyF5_);
+    bindActionToPanelShortcut(actCopyF5_, leftView_, QKeySequence(Qt::Key_F5));
     actMoveF6_ =
         leftPaneBar_->addAction(tr("Move"), this, &MainWindow::moveLeftToRight);
-    actMoveF6_->setIcon(resIcon("action-move-to-right.svg"));
-    actMoveF6_->setToolTip(actMoveF6_->text());
+    setActionIconAndTooltip(actMoveF6_, resIcon("action-move-to-right.svg"));
     // Shortcut F6 on left panel
-    actMoveF6_->setShortcut(QKeySequence(Qt::Key_F6));
-    actMoveF6_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (leftView_)
-        leftView_->addAction(actMoveF6_);
+    bindActionToPanelShortcut(actMoveF6_, leftView_, QKeySequence(Qt::Key_F6));
     actDelete_ = leftPaneBar_->addAction(tr("Delete"), this,
                                          &MainWindow::deleteFromLeft);
-    actDelete_->setIcon(resIcon("action-delete.svg"));
-    actDelete_->setToolTip(actDelete_->text());
-    actDelete_->setShortcut(QKeySequence(Qt::Key_Delete));
-    actDelete_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (leftView_)
-        leftView_->addAction(actDelete_);
+    setActionIconAndTooltip(actDelete_, resIcon("action-delete.svg"));
+    bindActionToPanelShortcut(actDelete_, leftView_, QKeySequence(Qt::Key_Delete));
     // Action: copy from right panel to left (remote/local -> left)
     actCopyRight_ = new QAction(tr("Copy to left panel"), this);
     connect(actCopyRight_, &QAction::triggered, this,
             &MainWindow::copyRightToLeft);
-    actCopyRight_->setIcon(
-        QIcon(QLatin1String(":/assets/icons/action-copy.svg")));
+    setActionIconAndTooltip(
+        actCopyRight_, QIcon(QLatin1String(":/assets/icons/action-copy.svg")));
     // Action: move from right panel to left
     actMoveRight_ = new QAction(tr("Move to left panel"), this);
     connect(actMoveRight_, &QAction::triggered, this,
             &MainWindow::moveRightToLeft);
-    actMoveRight_->setIcon(
+    setActionIconAndTooltip(
+        actMoveRight_,
         QIcon(QLatin1String(":/assets/icons/action-move-to-left.svg")));
     // Additional local actions (also in toolbar)
     actNewDirLeft_ = new QAction(tr("New folder"), this);
@@ -638,25 +694,14 @@ void MainWindow::initializePanels(const QString &home) {
     actNewFileLeft_ = new QAction(tr("New file"), this);
     connect(actNewFileLeft_, &QAction::triggered, this,
             &MainWindow::newFileLeft);
-    actRenameLeft_->setIcon(resIcon("action-rename.svg"));
-    actRenameLeft_->setToolTip(actRenameLeft_->text());
-    actNewDirLeft_->setIcon(resIcon("action-new-folder.svg"));
-    actNewDirLeft_->setToolTip(actNewDirLeft_->text());
-    actNewFileLeft_->setIcon(resIcon("action-new-file.svg"));
-    actNewFileLeft_->setToolTip(actNewFileLeft_->text());
+    setActionIconAndTooltip(actRenameLeft_, resIcon("action-rename.svg"));
+    setActionIconAndTooltip(actNewDirLeft_, resIcon("action-new-folder.svg"));
+    setActionIconAndTooltip(actNewFileLeft_, resIcon("action-new-file.svg"));
     // Shortcuts (left panel scope)
-    actRenameLeft_->setShortcut(QKeySequence(Qt::Key_F2));
-    actRenameLeft_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (leftView_)
-        leftView_->addAction(actRenameLeft_);
-    actNewDirLeft_->setShortcut(QKeySequence(Qt::Key_F9));
-    actNewDirLeft_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (leftView_)
-        leftView_->addAction(actNewDirLeft_);
-    actNewFileLeft_->setShortcut(QKeySequence(Qt::Key_F10));
-    actNewFileLeft_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (leftView_)
-        leftView_->addAction(actNewFileLeft_);
+    bindActionToPanelShortcut(actRenameLeft_, leftView_, QKeySequence(Qt::Key_F2));
+    bindActionToPanelShortcut(actNewDirLeft_, leftView_, QKeySequence(Qt::Key_F9));
+    bindActionToPanelShortcut(actNewFileLeft_, leftView_,
+                              QKeySequence(Qt::Key_F10));
     leftPaneBar_->addAction(actRenameLeft_);
     leftPaneBar_->addAction(actNewFileLeft_);
     leftPaneBar_->addAction(actNewDirLeft_);
@@ -668,67 +713,52 @@ void MainWindow::initializePanels(const QString &home) {
     leftLayout->addWidget(leftView_);
 
     // Right pane sub‑toolbar
-    rightPaneBar_ = new QToolBar("RightBar", rightPane);
-    rightPaneBar_->setIconSize(QSize(18, 18));
-    rightPaneBar_->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    rightBreadcrumbsBar_ = new QToolBar("RightBreadcrumbs", rightPane);
-    rightBreadcrumbsBar_->setMovable(false);
-    rightBreadcrumbsBar_->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    rightBreadcrumbsBar_->setIconSize(QSize(14, 14));
-    rightBreadcrumbsBar_->setSizePolicy(QSizePolicy::Expanding,
-                                        QSizePolicy::Fixed);
+    rightPaneBar_ = createPaneIconToolbar(QStringLiteral("RightBar"), rightPane);
+    rightBreadcrumbsBar_ =
+        createBreadcrumbToolbar(QStringLiteral("RightBreadcrumbs"), rightPane);
     actUpRight_ =
         rightPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpRight);
-    actUpRight_->setIcon(resIcon("action-go-up.svg"));
-    actUpRight_->setToolTip(actUpRight_->text());
+    setActionIconAndTooltip(actUpRight_, resIcon("action-go-up.svg"));
     // Button "Open right folder" next to Up
     actChooseRight_ = rightPaneBar_->addAction(tr("Open right folder"), this,
                                                &MainWindow::chooseRightDir);
-    actChooseRight_->setIcon(resIcon("action-open-folder.svg"));
-    actChooseRight_->setToolTip(actChooseRight_->text());
+    setActionIconAndTooltip(actChooseRight_, resIcon("action-open-folder.svg"));
     actHomeRight_ =
         rightPaneBar_->addAction(tr("Home"), this, &MainWindow::goHomeRight);
-    actHomeRight_->setIcon(resIcon("action-go-home.svg"));
-    actHomeRight_->setToolTip(actHomeRight_->text());
+    setActionIconAndTooltip(actHomeRight_, resIcon("action-go-home.svg"));
     actSearchRight_ =
         rightPaneBar_->addAction(tr("Search items"), this,
                                  [this, rightSearchLabel] {
                                      searchItemsInCurrentFolder(
                                          rightView_, rightSearchLabel());
                                  });
-    actSearchRight_->setIcon(resIcon("action-search-item.svg"));
-    actSearchRight_->setToolTip(actSearchRight_->text());
+    setActionIconAndTooltip(actSearchRight_, resIcon("action-search-item.svg"));
 
     // Right panel actions (create first, then add in requested order)
     actDownloadF7_ = new QAction(tr("Download"), this);
     connect(actDownloadF7_, &QAction::triggered, this,
             &MainWindow::downloadRightToLeft);
     actDownloadF7_->setEnabled(false); // starts disabled on local
-    actDownloadF7_->setIcon(resIcon("action-download.svg"));
-    actDownloadF7_->setToolTip(actDownloadF7_->text());
+    setActionIconAndTooltip(actDownloadF7_, resIcon("action-download.svg"));
 
     actUploadRight_ = new QAction(tr("Upload…"), this);
     connect(actUploadRight_, &QAction::triggered, this,
             &MainWindow::uploadViaDialog);
-    actUploadRight_->setIcon(resIcon("action-upload.svg"));
-    actUploadRight_->setToolTip(actUploadRight_->text());
+    setActionIconAndTooltip(actUploadRight_, resIcon("action-upload.svg"));
     // Shortcut F8 on right panel to upload via dialog (remote only)
-    actUploadRight_->setShortcut(QKeySequence(Qt::Key_F8));
-    actUploadRight_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (rightView_)
-        rightView_->addAction(actUploadRight_);
+    bindActionToPanelShortcut(actUploadRight_, rightView_,
+                              QKeySequence(Qt::Key_F8));
 
     actRefreshRight_ = new QAction(tr("Refresh"), this);
     connect(actRefreshRight_, &QAction::triggered, this,
             &MainWindow::refreshRightRemotePanel);
-    actRefreshRight_->setIcon(resIcon("action-refresh.svg"));
-    actRefreshRight_->setToolTip(actRefreshRight_->text());
+    setActionIconAndTooltip(actRefreshRight_, resIcon("action-refresh.svg"));
 
     actOpenTerminalRight_ = new QAction(tr("Open in terminal"), this);
     connect(actOpenTerminalRight_, &QAction::triggered, this,
             &MainWindow::openRightRemoteTerminal);
-    actOpenTerminalRight_->setIcon(resIcon("action-open-terminal.svg"));
-    actOpenTerminalRight_->setToolTip(actOpenTerminalRight_->text());
+    setActionIconAndTooltip(actOpenTerminalRight_,
+                            resIcon("action-open-terminal.svg"));
 
     actNewDirRight_ = new QAction(tr("New folder"), this);
     connect(actNewDirRight_, &QAction::triggered, this,
@@ -742,27 +772,17 @@ void MainWindow::initializePanels(const QString &home) {
     actNewFileRight_ = new QAction(tr("New file"), this);
     connect(actNewFileRight_, &QAction::triggered, this,
             &MainWindow::newFileRight);
-    actNewDirRight_->setIcon(resIcon("action-new-folder.svg"));
-    actNewDirRight_->setToolTip(actNewDirRight_->text());
-    actRenameRight_->setIcon(resIcon("action-rename.svg"));
-    actRenameRight_->setToolTip(actRenameRight_->text());
-    actDeleteRight_->setIcon(resIcon("action-delete.svg"));
-    actDeleteRight_->setToolTip(actDeleteRight_->text());
-    actNewFileRight_->setIcon(resIcon("action-new-file.svg"));
-    actNewFileRight_->setToolTip(actNewFileRight_->text());
+    setActionIconAndTooltip(actNewDirRight_, resIcon("action-new-folder.svg"));
+    setActionIconAndTooltip(actRenameRight_, resIcon("action-rename.svg"));
+    setActionIconAndTooltip(actDeleteRight_, resIcon("action-delete.svg"));
+    setActionIconAndTooltip(actNewFileRight_, resIcon("action-new-file.svg"));
     // Shortcuts (right panel scope)
-    actRenameRight_->setShortcut(QKeySequence(Qt::Key_F2));
-    actRenameRight_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (rightView_)
-        rightView_->addAction(actRenameRight_);
-    actNewDirRight_->setShortcut(QKeySequence(Qt::Key_F9));
-    actNewDirRight_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (rightView_)
-        rightView_->addAction(actNewDirRight_);
-    actNewFileRight_->setShortcut(QKeySequence(Qt::Key_F10));
-    actNewFileRight_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (rightView_)
-        rightView_->addAction(actNewFileRight_);
+    bindActionToPanelShortcut(actRenameRight_, rightView_,
+                              QKeySequence(Qt::Key_F2));
+    bindActionToPanelShortcut(actNewDirRight_, rightView_,
+                              QKeySequence(Qt::Key_F9));
+    bindActionToPanelShortcut(actNewFileRight_, rightView_,
+                              QKeySequence(Qt::Key_F10));
 
     // Order: Copy, Move, Delete, Rename, New folder, then
     // Download/Upload/Refresh
@@ -774,19 +794,13 @@ void MainWindow::initializePanels(const QString &home) {
     actMoveRightTb_ = new QAction(tr("Move"), this);
     connect(actMoveRightTb_, &QAction::triggered, this,
             &MainWindow::moveRightToLeft);
-    actCopyRightTb_->setIcon(resIcon("action-copy.svg"));
-    actCopyRightTb_->setToolTip(actCopyRightTb_->text());
-    actMoveRightTb_->setIcon(resIcon("action-move-to-left.svg"));
-    actMoveRightTb_->setToolTip(actMoveRightTb_->text());
+    setActionIconAndTooltip(actCopyRightTb_, resIcon("action-copy.svg"));
+    setActionIconAndTooltip(actMoveRightTb_, resIcon("action-move-to-left.svg"));
     // Shortcuts F5/F6 on right panel (scope: right view)
-    actCopyRightTb_->setShortcut(QKeySequence(Qt::Key_F5));
-    actCopyRightTb_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (rightView_)
-        rightView_->addAction(actCopyRightTb_);
-    actMoveRightTb_->setShortcut(QKeySequence(Qt::Key_F6));
-    actMoveRightTb_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    if (rightView_)
-        rightView_->addAction(actMoveRightTb_);
+    bindActionToPanelShortcut(actCopyRightTb_, rightView_,
+                              QKeySequence(Qt::Key_F5));
+    bindActionToPanelShortcut(actMoveRightTb_, rightView_,
+                              QKeySequence(Qt::Key_F6));
     rightPaneBar_->addAction(actCopyRightTb_);
     rightPaneBar_->addAction(actMoveRightTb_);
     rightPaneBar_->addAction(actDeleteRight_);
@@ -801,10 +815,8 @@ void MainWindow::initializePanels(const QString &home) {
     rightPaneBar_->addAction(actOpenTerminalRight_);
     // Delete shortcut also on right panel (limited to right panel widget)
     if (actDeleteRight_) {
-        actDeleteRight_->setShortcut(QKeySequence(Qt::Key_Delete));
-        actDeleteRight_->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-        if (rightView_)
-            rightView_->addAction(actDeleteRight_);
+        bindActionToPanelShortcut(actDeleteRight_, rightView_,
+                                  QKeySequence(Qt::Key_Delete));
     }
     // Keyboard shortcut F7 on right panel: only acts when remote and with
     // selection
@@ -878,34 +890,36 @@ void MainWindow::initializePanels(const QString &home) {
 }
 
 void MainWindow::initializeMainToolbar() {
-    auto *tb = addToolBar("Main");
-    tb->setObjectName("mainToolbar");
-    tb->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    tb->setMovable(false);
+    auto *mainToolbar = addToolBar("Main");
+    mainToolbar->setObjectName("mainToolbar");
+    mainToolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    mainToolbar->setMovable(false);
     // Keep the system default size for the main toolbar and make sub‑toolbars
     // slightly smaller
     const int mainIconPx =
-        tb->style()->pixelMetric(QStyle::PM_ToolBarIconSize, nullptr, tb);
+        mainToolbar->style()->pixelMetric(QStyle::PM_ToolBarIconSize, nullptr,
+                                          mainToolbar);
     const int subIconPx =
         qMax(16, mainIconPx - 4); // sub‑toolbars slightly smaller
     leftPaneBar_->setIconSize(QSize(subIconPx, subIconPx));
     rightPaneBar_->setIconSize(QSize(subIconPx, subIconPx));
     // Copy/move/delete actions now live in the left sub‑toolbar
     actConnect_ =
-        tb->addAction(tr("Connect"), this, &MainWindow::connectSftp);
+        mainToolbar->addAction(tr("Connect"), this, &MainWindow::connectSftp);
     actConnect_->setIcon(mainWindowActionIcon("action-connect.svg"));
     actConnect_->setToolTip(actConnect_->text());
-    tb->addSeparator();
+    mainToolbar->addSeparator();
     actDisconnect_ =
-        tb->addAction(tr("Disconnect"), this, &MainWindow::disconnectSftp);
+        mainToolbar->addAction(tr("Disconnect"), this,
+                               &MainWindow::disconnectSftp);
     actDisconnect_->setIcon(mainWindowActionIcon("action-disconnect.svg"));
     actDisconnect_->setToolTip(actDisconnect_->text());
     actDisconnect_->setEnabled(false);
 
-    auto setTextBesideIcon = [tb](QAction *action, const QString &text) {
-        if (!tb || !action)
+    auto setTextBesideIcon = [mainToolbar](QAction *action, const QString &text) {
+        if (!mainToolbar || !action)
             return;
-        if (QWidget *widget = tb->widgetForAction(action)) {
+        if (QWidget *widget = mainToolbar->widgetForAction(action)) {
             if (auto *button = qobject_cast<QToolButton *>(widget)) {
                 button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
                 button->setText(text);
@@ -915,8 +929,8 @@ void MainWindow::initializeMainToolbar() {
     // Show text to the LEFT of the icon for Connect/Disconnect buttons only
     setTextBesideIcon(actConnect_, tr("Connect"));
     setTextBesideIcon(actDisconnect_, tr("Disconnect"));
-    tb->addSeparator();
-    actSites_ = tb->addAction(tr("Saved sites"), [this] {
+    mainToolbar->addSeparator();
+    actSites_ = mainToolbar->addAction(tr("Saved sites"), [this] {
         SiteManagerDialog dlg(this);
         if (dlg.exec() == QDialog::Accepted) {
             openscp::SessionOptions opt{};
@@ -927,15 +941,16 @@ void MainWindow::initializeMainToolbar() {
     });
     actSites_->setIcon(mainWindowActionIcon("action-open-saved-sites.svg"));
     actSites_->setToolTip(actSites_->text());
-    tb->addSeparator();
+    mainToolbar->addSeparator();
     actShowQueue_ =
-        tb->addAction(tr("Transfers"), [this] { showTransferQueue(); });
+        mainToolbar->addAction(tr("Transfers"),
+                               [this] { showTransferQueue(); });
     actShowQueue_->setIcon(
         mainWindowActionIcon("action-open-transfer-queue.svg"));
     actShowQueue_->setToolTip(actShowQueue_->text());
-    tb->addSeparator();
+    mainToolbar->addSeparator();
     actShowHistory_ =
-        tb->addAction(tr("History"), this, &MainWindow::showHistoryMenu);
+        mainToolbar->addAction(tr("History"), this, &MainWindow::showHistoryMenu);
     actShowHistory_->setIcon(mainWindowActionIcon("action-open-history.svg"));
     actShowHistory_->setToolTip(actShowHistory_->text());
 
@@ -962,8 +977,8 @@ void MainWindow::initializeMainToolbar() {
         actToggleFs->setShortcut(QKeySequence::FullScreen);
         actToggleFs->setShortcutContext(Qt::ApplicationShortcut);
         connect(actToggleFs, &QAction::triggered, this, [this] {
-            const bool fs = (windowState() & Qt::WindowFullScreen);
-            if (fs)
+            const bool isFullScreen = (windowState() & Qt::WindowFullScreen);
+            if (isFullScreen)
                 setWindowState(windowState() & ~Qt::WindowFullScreen);
             else
                 setWindowState(windowState() | Qt::WindowFullScreen);
@@ -972,27 +987,27 @@ void MainWindow::initializeMainToolbar() {
     }
 
     // Separator to the right of the history button
-    tb->addSeparator();
+    mainToolbar->addSeparator();
 
     // Spacer to push next action to the far right
     {
         QWidget *spacer = new QWidget(this);
         spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-        tb->addWidget(spacer);
+        mainToolbar->addWidget(spacer);
     }
 
     // Visual separator before the right-side buttons
-    tb->addSeparator();
+    mainToolbar->addSeparator();
     // About button (to the left of Settings)
-    actAboutToolbar_ = tb->addAction(mainWindowActionIcon("action-open-about-us.svg"),
-                                     tr("About OpenSCP"), this,
-                                     &MainWindow::showAboutDialog);
+    actAboutToolbar_ = mainToolbar->addAction(
+        mainWindowActionIcon("action-open-about-us.svg"), tr("About OpenSCP"),
+        this, &MainWindow::showAboutDialog);
     if (actAboutToolbar_)
         actAboutToolbar_->setToolTip(actAboutToolbar_->text());
     // Settings button (far right)
-    actPrefsToolbar_ = tb->addAction(mainWindowActionIcon("action-open-settings.svg"),
-                                     tr("Settings"), this,
-                                     &MainWindow::showSettingsDialog);
+    actPrefsToolbar_ = mainToolbar->addAction(
+        mainWindowActionIcon("action-open-settings.svg"), tr("Settings"), this,
+        &MainWindow::showSettingsDialog);
     actPrefsToolbar_->setToolTip(actPrefsToolbar_->text());
 }
 
@@ -1040,8 +1055,9 @@ void MainWindow::initializeMenuBarActions() {
     // space.
 #ifdef Q_OS_MAC
     {
-        const QString t = helpMenu->title();
-        if (t.compare(QStringLiteral("Help"), Qt::CaseInsensitive) == 0) {
+        const QString helpMenuTitle = helpMenu->title();
+        if (helpMenuTitle.compare(QStringLiteral("Help"),
+                                  Qt::CaseInsensitive) == 0) {
             helpMenu->setTitle(QStringLiteral("Hel") + QChar(0x200B) +
                                QStringLiteral("p"));
         }
@@ -1099,8 +1115,8 @@ void MainWindow::initializePanelInteractions() {
 
 void MainWindow::initializeRuntimeState() {
     {
-        QSettings s("OpenSCP", "OpenSCP");
-        downloadDir_ = defaultDownloadDirFromSettings(s);
+        QSettings settings("OpenSCP", "OpenSCP");
+        downloadDir_ = defaultDownloadDirFromSettings(settings);
     }
     QDir().mkpath(downloadDir_);
 
@@ -1120,42 +1136,44 @@ void MainWindow::initializeRuntimeState() {
                 maybeNotifyCompletedTransfers();
             });
     // Provide transfer manager to views (for async remote drag-out staging)
-    if (auto *lv = qobject_cast<DragAwareTreeView *>(leftView_))
-        lv->setTransferManager(transferMgr_);
-    if (auto *rv = qobject_cast<DragAwareTreeView *>(rightView_))
-        rv->setTransferManager(transferMgr_);
+    if (auto *leftDragView = qobject_cast<DragAwareTreeView *>(leftView_))
+        leftDragView->setTransferManager(transferMgr_);
+    if (auto *rightDragView = qobject_cast<DragAwareTreeView *>(rightView_))
+        rightDragView->setTransferManager(transferMgr_);
 
     // Startup cleanup (deferred): remove old staging batches if
     // autoCleanStaging is enabled
     QTimer::singleShot(0, this, [this] {
-        QSettings s("OpenSCP", "OpenSCP");
+        QSettings settings("OpenSCP", "OpenSCP");
         const bool autoClean =
-            s.value("Advanced/autoCleanStaging", true).toBool();
+            settings.value("Advanced/autoCleanStaging", true).toBool();
         if (!autoClean)
             return;
-        QString root = s.value("Advanced/stagingRoot").toString();
+        QString root = settings.value("Advanced/stagingRoot").toString();
         if (root.isEmpty())
             root = QDir::homePath() + "/Downloads/OpenSCP-Dragged";
-        QDir r(root);
-        if (!r.exists())
+        QDir stagingRootDir(root);
+        if (!stagingRootDir.exists())
             return;
         const QDateTime now = QDateTime::currentDateTimeUtc();
         const int retentionDays =
-            qBound(1, s.value("Advanced/stagingRetentionDays", 7).toInt(),
+            qBound(1, settings.value("Advanced/stagingRetentionDays", 7).toInt(),
                    365);
         const qint64 maxAgeMs = qint64(retentionDays) * 24 * 60 * 60 * 1000;
         // Match timestamp batches: yyyyMMdd-HHmmss
         QRegularExpression re("^\\d{8}-\\d{6}$");
-        const auto entries = r.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot |
-                                             QDir::NoSymLinks);
-        for (const QFileInfo &fi : entries) {
-            if (fi.isSymLink())
+        const auto entries =
+            stagingRootDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot |
+                                         QDir::NoSymLinks);
+        for (const QFileInfo &entryInfo : entries) {
+            if (entryInfo.isSymLink())
                 continue; // do not follow symlinks
-            if (!re.match(fi.fileName()).hasMatch())
+            if (!re.match(entryInfo.fileName()).hasMatch())
                 continue; // only batches
-            const QDateTime m = fi.lastModified().toUTC();
-            if (m.isValid() && m.msecsTo(now) > maxAgeMs) {
-                QDir(fi.absoluteFilePath()).removeRecursively();
+            const QDateTime lastModifiedUtc = entryInfo.lastModified().toUTC();
+            if (lastModifiedUtc.isValid() &&
+                lastModifiedUtc.msecsTo(now) > maxAgeMs) {
+                QDir(entryInfo.absoluteFilePath()).removeRecursively();
             }
         }
     });
@@ -1180,19 +1198,21 @@ void MainWindow::initializeRuntimeState() {
 
     // Startup preferences and migration
     {
-        QSettings s("OpenSCP", "OpenSCP");
+        QSettings settings("OpenSCP", "OpenSCP");
         // One-shot migration: if only showConnOnStart exists, copy to
         // openSiteManagerOnDisconnect
-        if (!s.contains("UI/openSiteManagerOnDisconnect") &&
-            s.contains("UI/showConnOnStart")) {
-            const bool v = s.value("UI/showConnOnStart", true).toBool();
-            s.setValue("UI/openSiteManagerOnDisconnect", v);
-            s.sync();
+        if (!settings.contains("UI/openSiteManagerOnDisconnect") &&
+            settings.contains("UI/showConnOnStart")) {
+            const bool showSiteManagerOnStart =
+                settings.value("UI/showConnOnStart", true).toBool();
+            settings.setValue("UI/openSiteManagerOnDisconnect",
+                              showSiteManagerOnStart);
+            settings.sync();
         }
         m_openSiteManagerOnStartup =
-            s.value("UI/showConnOnStart", true).toBool();
+            settings.value("UI/showConnOnStart", true).toBool();
         m_openSiteManagerOnDisconnect =
-            s.value("UI/openSiteManagerOnDisconnect", true).toBool();
+            settings.value("UI/openSiteManagerOnDisconnect", true).toBool();
         if (m_openSiteManagerOnStartup && !QCoreApplication::closingDown() &&
             !sftp_) {
             QTimer::singleShot(0, this, [this] { showSiteManagerNonModal(); });
@@ -1335,13 +1355,13 @@ void MainWindow::showEvent(QShowEvent *e) {
         QRect avail;
         if (this->screen())
             avail = this->screen()->availableGeometry();
-        else if (auto ps = QGuiApplication::primaryScreen())
-            avail = ps->availableGeometry();
+        else if (auto primaryScreen = QGuiApplication::primaryScreen())
+            avail = primaryScreen->availableGeometry();
         if (avail.isValid()) {
             const QSize sz = size();
-            const int x = avail.center().x() - sz.width() / 2;
-            const int y = avail.center().y() - sz.height() / 2;
-            move(x, y);
+            const int centeredX = avail.center().x() - sz.width() / 2;
+            const int centeredY = avail.center().y() - sz.height() / 2;
+            move(centeredX, centeredY);
         }
     }
 }
@@ -1364,14 +1384,14 @@ void MainWindow::closeEvent(QCloseEvent *e) {
 
 void MainWindow::resetMainWindowLayoutToDefaults() {
     {
-        QSettings s("OpenSCP", "OpenSCP");
-        s.remove("UI/mainWindow/geometry");
-        s.remove("UI/mainWindow/windowState");
-        s.remove("UI/mainWindow/splitterState");
-        s.remove("UI/mainWindow/leftHeaderState");
-        s.remove("UI/mainWindow/rightHeaderLocal");
-        s.remove("UI/mainWindow/rightHeaderRemote");
-        s.sync();
+        QSettings settings("OpenSCP", "OpenSCP");
+        settings.remove("UI/mainWindow/geometry");
+        settings.remove("UI/mainWindow/windowState");
+        settings.remove("UI/mainWindow/splitterState");
+        settings.remove("UI/mainWindow/leftHeaderState");
+        settings.remove("UI/mainWindow/rightHeaderLocal");
+        settings.remove("UI/mainWindow/rightHeaderRemote");
+        settings.sync();
     }
 
     m_restoredWindowGeometry_ = false;
@@ -1408,57 +1428,58 @@ void MainWindow::resetMainWindowLayoutToDefaults() {
 void MainWindow::saveRightHeaderState(bool remoteMode) const {
     if (!rightView_ || !rightView_->header())
         return;
-    QSettings s("OpenSCP", "OpenSCP");
+    QSettings settings("OpenSCP", "OpenSCP");
     const QString key = remoteMode ? QStringLiteral("UI/mainWindow/rightHeaderRemote")
                                    : QStringLiteral("UI/mainWindow/rightHeaderLocal");
-    s.setValue(key, rightView_->header()->saveState());
+    settings.setValue(key, rightView_->header()->saveState());
 }
 
 bool MainWindow::restoreRightHeaderState(bool remoteMode) {
     if (!rightView_ || !rightView_->header())
         return false;
-    QSettings s("OpenSCP", "OpenSCP");
+    QSettings settings("OpenSCP", "OpenSCP");
     const QString key = remoteMode ? QStringLiteral("UI/mainWindow/rightHeaderRemote")
                                    : QStringLiteral("UI/mainWindow/rightHeaderLocal");
-    const QByteArray state = s.value(key).toByteArray();
+    const QByteArray state = settings.value(key).toByteArray();
     if (state.isEmpty())
         return false;
     return rightView_->header()->restoreState(state);
 }
 
 void MainWindow::saveMainWindowUiState() const {
-    QSettings s("OpenSCP", "OpenSCP");
-    s.setValue("UI/mainWindow/geometry", saveGeometry());
-    s.setValue("UI/mainWindow/windowState", saveState());
+    QSettings settings("OpenSCP", "OpenSCP");
+    settings.setValue("UI/mainWindow/geometry", saveGeometry());
+    settings.setValue("UI/mainWindow/windowState", saveState());
     if (mainSplitter_)
-        s.setValue("UI/mainWindow/splitterState", mainSplitter_->saveState());
+        settings.setValue("UI/mainWindow/splitterState", mainSplitter_->saveState());
     if (leftView_ && leftView_->header())
-        s.setValue("UI/mainWindow/leftHeaderState",
-                   leftView_->header()->saveState());
+        settings.setValue("UI/mainWindow/leftHeaderState",
+                          leftView_->header()->saveState());
     saveRightHeaderState(rightIsRemote_);
-    s.sync();
+    settings.sync();
 }
 
 void MainWindow::restoreMainWindowUiState() {
-    QSettings s("OpenSCP", "OpenSCP");
-    const QByteArray geometry = s.value("UI/mainWindow/geometry").toByteArray();
+    QSettings settings("OpenSCP", "OpenSCP");
+    const QByteArray geometry =
+        settings.value("UI/mainWindow/geometry").toByteArray();
     if (!geometry.isEmpty()) {
         restoreGeometry(geometry);
         m_restoredWindowGeometry_ = true;
     }
     const QByteArray winState =
-        s.value("UI/mainWindow/windowState").toByteArray();
+        settings.value("UI/mainWindow/windowState").toByteArray();
     if (!winState.isEmpty())
         restoreState(winState);
     if (mainSplitter_) {
         const QByteArray splitterState =
-            s.value("UI/mainWindow/splitterState").toByteArray();
+            settings.value("UI/mainWindow/splitterState").toByteArray();
         if (!splitterState.isEmpty())
             mainSplitter_->restoreState(splitterState);
     }
     if (leftView_ && leftView_->header()) {
         const QByteArray leftHeader =
-            s.value("UI/mainWindow/leftHeaderState").toByteArray();
+            settings.value("UI/mainWindow/leftHeaderState").toByteArray();
         if (!leftHeader.isEmpty())
             leftView_->header()->restoreState(leftHeader);
     }
@@ -1507,9 +1528,9 @@ void MainWindow::rebuildLocalBreadcrumbs(QToolBar *bar, const QString &path,
         }
     }
 
-    for (int i = 0; i < crumbs.size(); ++i) {
-        const QString label = crumbs[i].first;
-        const QString target = crumbs[i].second;
+    for (int crumbIndex = 0; crumbIndex < crumbs.size(); ++crumbIndex) {
+        const QString label = crumbs[crumbIndex].first;
+        const QString target = crumbs[crumbIndex].second;
         QAction *act = bar->addAction(label);
         act->setToolTip(target);
         connect(act, &QAction::triggered, this, [this, rightPane, target] {
@@ -1518,7 +1539,7 @@ void MainWindow::rebuildLocalBreadcrumbs(QToolBar *bar, const QString &path,
             else
                 setLeftRoot(target);
         });
-        if (i + 1 < crumbs.size())
+        if (crumbIndex + 1 < crumbs.size())
             bar->addSeparator();
     }
 }
@@ -1541,14 +1562,14 @@ void MainWindow::rebuildRemoteBreadcrumbs(const QString &path) {
         crumbs.push_back({part, acc});
     }
 
-    for (int i = 0; i < crumbs.size(); ++i) {
-        const QString label = crumbs[i].first;
-        const QString target = crumbs[i].second;
+    for (int crumbIndex = 0; crumbIndex < crumbs.size(); ++crumbIndex) {
+        const QString label = crumbs[crumbIndex].first;
+        const QString target = crumbs[crumbIndex].second;
         QAction *act = rightBreadcrumbsBar_->addAction(label);
         act->setToolTip(target);
         connect(act, &QAction::triggered, this,
                 [this, target] { setRightRemoteRoot(target); });
-        if (i + 1 < crumbs.size())
+        if (crumbIndex + 1 < crumbs.size())
             rightBreadcrumbsBar_->addSeparator();
     }
 }
@@ -1587,38 +1608,21 @@ void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
     }
 
     QAbstractItemModel *model = view->model();
-    QItemSelectionModel *selection = view->selectionModel();
 
     if (!req.recursive) {
         const QModelIndex root = view->rootIndex();
-        const int rows = model->rowCount(root);
+        const int matches = selectRowsMatchingPattern(
+            view, model, root, regex, [&](const QModelIndex &idx) {
+                QString itemName = model->data(idx, Qt::DisplayRole).toString();
+                if (view == rightView_ && rightIsRemote_ && rightRemoteModel_) {
+                    itemName = rightRemoteModel_->nameAt(idx);
+                } else if (itemName.endsWith('/')) {
+                    itemName.chop(1);
+                }
+                return itemName;
+            });
 
-        selection->clearSelection();
-        QModelIndex firstMatch;
-        int matches = 0;
-
-        for (int row = 0; row < rows; ++row) {
-            const QModelIndex idx = model->index(row, NAME_COL, root);
-            QString itemName = model->data(idx, Qt::DisplayRole).toString();
-            if (view == rightView_ && rightIsRemote_ && rightRemoteModel_) {
-                itemName = rightRemoteModel_->nameAt(idx);
-            } else if (itemName.endsWith('/')) {
-                itemName.chop(1);
-            }
-            if (!regex.match(itemName).hasMatch())
-                continue;
-
-            selection->select(idx,
-                              QItemSelectionModel::Select |
-                                  QItemSelectionModel::Rows);
-            if (!firstMatch.isValid())
-                firstMatch = idx;
-            ++matches;
-        }
-
-        if (firstMatch.isValid()) {
-            selection->setCurrentIndex(firstMatch, QItemSelectionModel::NoUpdate);
-            view->scrollTo(firstMatch, QAbstractItemView::PositionAtCenter);
+        if (matches > 0) {
             statusBar()->showMessage(
                 tr("Found %1 match(es) in %2.")
                     .arg(QString::number(matches), panelLabel),
@@ -1768,17 +1772,17 @@ void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
         progress.setWindowModality(Qt::WindowModal);
         progress.setMinimumDuration(0);
 
-        QDirIterator it(baseLocal, filters, QDirIterator::Subdirectories);
+        QDirIterator dirIterator(baseLocal, filters, QDirIterator::Subdirectories);
         qint64 pumped = 0;
-        while (it.hasNext()) {
+        while (dirIterator.hasNext()) {
             if (progress.wasCanceled()) {
                 canceled = true;
                 break;
             }
 
-            const QString absPath = it.next();
-            const QFileInfo fi = it.fileInfo();
-            const QString name = fi.fileName();
+            const QString absPath = dirIterator.next();
+            const QFileInfo fileInfo = dirIterator.fileInfo();
+            const QString name = fileInfo.fileName();
             if (name.isEmpty() || name == QStringLiteral(".") ||
                 name == QStringLiteral("..")) {
                 continue;
@@ -1789,7 +1793,7 @@ void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
                     baseDir.relativeFilePath(absPath));
                 if (rel.isEmpty())
                     rel = name;
-                recursiveMatches.push_back({rel, fi.isDir()});
+                recursiveMatches.push_back({rel, fileInfo.isDir()});
                 if (recursiveMatches.size() >= kRecursiveSearchMaxMatches) {
                     truncated = true;
                     break;
@@ -1798,10 +1802,10 @@ void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
 
             ++pumped;
             if ((pumped % kRecursiveSearchPumpEvery) == 0) {
-                progress.setLabelText(tr("Scanning %1")
+                    progress.setLabelText(tr("Scanning %1")
                                           .arg(QDir::fromNativeSeparators(
                                               baseDir.relativeFilePath(
-                                                  fi.absoluteFilePath()))));
+                                                  fileInfo.absoluteFilePath()))));
                 QCoreApplication::processEvents();
                 if (progress.wasCanceled()) {
                     canceled = true;
@@ -1859,29 +1863,29 @@ void MainWindow::maybeRefreshRemoteAfterCompletedUploads() {
     const QString currentRoot =
         rightRemoteModel_ ? rightRemoteModel_->rootPath() : QString();
 
-    for (const auto &t : tasks) {
-        if (t.type != TransferTask::Type::Upload)
+    for (const auto &task : tasks) {
+        if (task.type != TransferTask::Type::Upload)
             continue;
 
-        activeUploadIds.insert(t.id);
-        if (t.status != TransferTask::Status::Done)
+        activeUploadIds.insert(task.taskId);
+        if (task.status != TransferTask::Status::Done)
             continue;
-        if (m_seenCompletedUploadTaskIds_.contains(t.id))
+        if (m_seenCompletedUploadTaskIds_.contains(task.taskId))
             continue;
 
-        m_seenCompletedUploadTaskIds_.insert(t.id);
+        m_seenCompletedUploadTaskIds_.insert(task.taskId);
         if (rightIsRemote_ && rightRemoteModel_ &&
-            remotePathIsInsideRoot(t.dst, currentRoot)) {
+            remotePathIsInsideRoot(task.dst, currentRoot)) {
             shouldRefresh = true;
         }
     }
 
-    for (auto it = m_seenCompletedUploadTaskIds_.begin();
-         it != m_seenCompletedUploadTaskIds_.end();) {
-        if (!activeUploadIds.contains(*it))
-            it = m_seenCompletedUploadTaskIds_.erase(it);
+    for (auto completedIdIt = m_seenCompletedUploadTaskIds_.begin();
+         completedIdIt != m_seenCompletedUploadTaskIds_.end();) {
+        if (!activeUploadIds.contains(*completedIdIt))
+            completedIdIt = m_seenCompletedUploadTaskIds_.erase(completedIdIt);
         else
-            ++it;
+            ++completedIdIt;
     }
 
     if (!shouldRefresh || m_pendingRemoteRefreshFromUpload_ || !rightIsRemote_ ||
@@ -1912,18 +1916,18 @@ void MainWindow::maybeNotifyCompletedTransfers() {
 
     QString message;
     int newlyCompleted = 0;
-    for (const auto &t : tasks) {
-        activeTaskIds.insert(t.id);
-        if (t.status != TransferTask::Status::Done)
+    for (const auto &task : tasks) {
+        activeTaskIds.insert(task.taskId);
+        if (task.status != TransferTask::Status::Done)
             continue;
-        if (m_seenCompletedTransferNoticeTaskIds_.contains(t.id))
+        if (m_seenCompletedTransferNoticeTaskIds_.contains(task.taskId))
             continue;
 
-        m_seenCompletedTransferNoticeTaskIds_.insert(t.id);
+        m_seenCompletedTransferNoticeTaskIds_.insert(task.taskId);
         ++newlyCompleted;
         if (newlyCompleted == 1) {
-            const bool upload = (t.type == TransferTask::Type::Upload);
-            const QString path = upload ? t.src : t.dst;
+            const bool upload = (task.type == TransferTask::Type::Upload);
+            const QString path = upload ? task.src : task.dst;
             QString name = QFileInfo(path).fileName();
             if (name.isEmpty())
                 name = path;
@@ -1932,12 +1936,13 @@ void MainWindow::maybeNotifyCompletedTransfers() {
         }
     }
 
-    for (auto it = m_seenCompletedTransferNoticeTaskIds_.begin();
-         it != m_seenCompletedTransferNoticeTaskIds_.end();) {
-        if (!activeTaskIds.contains(*it))
-            it = m_seenCompletedTransferNoticeTaskIds_.erase(it);
+    for (auto completedIdIt = m_seenCompletedTransferNoticeTaskIds_.begin();
+         completedIdIt != m_seenCompletedTransferNoticeTaskIds_.end();) {
+        if (!activeTaskIds.contains(*completedIdIt))
+            completedIdIt =
+                m_seenCompletedTransferNoticeTaskIds_.erase(completedIdIt);
         else
-            ++it;
+            ++completedIdIt;
     }
 
     if (newlyCompleted == 0)
@@ -1980,14 +1985,14 @@ void MainWindow::activateScpTransferModeUi(bool enabled) {
 }
 
 void MainWindow::applyPreferences() {
-    QSettings s("OpenSCP", "OpenSCP");
-    const bool showHidden = s.value("UI/showHidden", false).toBool();
-    const bool singleClick = s.value("UI/singleClick", false).toBool();
+    QSettings settings("OpenSCP", "OpenSCP");
+    const bool showHidden = settings.value("UI/showHidden", false).toBool();
+    const bool singleClick = settings.value("UI/singleClick", false).toBool();
     QString openBehaviorMode =
-        s.value("UI/openBehaviorMode").toString().trimmed().toLower();
+        settings.value("UI/openBehaviorMode").toString().trimmed().toLower();
     if (openBehaviorMode.isEmpty()) {
         const bool revealLegacy =
-            s.value("UI/openRevealInFolder", false).toBool();
+            settings.value("UI/openRevealInFolder", false).toBool();
         openBehaviorMode =
             revealLegacy ? QStringLiteral("reveal") : QStringLiteral("ask");
     }
@@ -1997,24 +2002,25 @@ void MainWindow::applyPreferences() {
         openBehaviorMode = QStringLiteral("ask");
     }
     prefOpenBehaviorMode_ = openBehaviorMode;
-    prefShowQueueOnEnqueue_ = s.value("UI/showQueueOnEnqueue", true).toBool();
+    prefShowQueueOnEnqueue_ =
+        settings.value("UI/showQueueOnEnqueue", true).toBool();
     prefNoHostVerificationTtlMin_ = qBound(
-        1, s.value("Security/noHostVerificationTtlMin", 15).toInt(), 120);
+        1, settings.value("Security/noHostVerificationTtlMin", 15).toInt(), 120);
     m_remoteSessionHealthIntervalMs_ =
-        qBound(60, s.value("Network/sessionHealthIntervalSec", 600).toInt(),
+        qBound(60, settings.value("Network/sessionHealthIntervalSec", 600).toInt(),
                86400) *
         1000;
     m_remoteWriteabilityTtlMs_ = qBound(
-        1000, s.value("Network/remoteWriteabilityTtlMs", 15000).toInt(),
+        1000, settings.value("Network/remoteWriteabilityTtlMs", 15000).toInt(),
         120000);
     if (m_remoteSessionHealthTimer_) {
         m_remoteSessionHealthTimer_->setInterval(m_remoteSessionHealthIntervalMs_);
     }
-    downloadDir_ = defaultDownloadDirFromSettings(s);
+    downloadDir_ = defaultDownloadDirFromSettings(settings);
     QDir().mkpath(downloadDir_);
     if (actShowQueue_) {
         const QString queueShortcutText =
-            s.value(kShortcutTransfersKey, QStringLiteral("F12"))
+            settings.value(kShortcutTransfersKey, QStringLiteral("F12"))
                 .toString()
                 .trimmed();
         actShowQueue_->setShortcut(
@@ -2024,7 +2030,7 @@ void MainWindow::applyPreferences() {
     }
     if (actShowHistory_) {
         const QString historyShortcutText =
-            s.value(kShortcutHistoryKey, QStringLiteral("Ctrl+Shift+H"))
+            settings.value(kShortcutHistoryKey, QStringLiteral("Ctrl+Shift+H"))
                 .toString()
                 .trimmed();
         actShowHistory_->setShortcut(
@@ -2034,18 +2040,18 @@ void MainWindow::applyPreferences() {
     }
     // Keep Site Manager auto-open preference up to date
     m_openSiteManagerOnDisconnect =
-        s.value("UI/openSiteManagerOnDisconnect", true).toBool();
+        settings.value("UI/openSiteManagerOnDisconnect", true).toBool();
     applyTransferPreferences();
 
     // Local: model filters (hidden on/off)
-    auto applyLocalFilters = [&](QFileSystemModel *m) {
-        if (!m)
+    auto applyLocalFilters = [&](QFileSystemModel *fileModel) {
+        if (!fileModel)
             return;
-        QDir::Filters f =
+        QDir::Filters filters =
             QDir::AllEntries | QDir::NoDotAndDotDot | QDir::AllDirs;
         if (showHidden)
-            f = f | QDir::Hidden | QDir::System;
-        m->setFilter(f);
+            filters = filters | QDir::Hidden | QDir::System;
+        fileModel->setFilter(filters);
     };
     applyLocalFilters(leftModel_);
     applyLocalFilters(rightLocalModel_);
@@ -2084,11 +2090,11 @@ void MainWindow::applyPreferences() {
 void MainWindow::applyTransferPreferences() {
     if (!transferMgr_)
         return;
-    QSettings s("OpenSCP", "OpenSCP");
+    QSettings settings("OpenSCP", "OpenSCP");
     const int maxConcurrent =
-        qBound(1, s.value("Transfer/maxConcurrent", 2).toInt(), 8);
+        qBound(1, settings.value("Transfer/maxConcurrent", 2).toInt(), 8);
     const int globalSpeed =
-        qMax(0, s.value("Transfer/globalSpeedKBps", 0).toInt());
+        qMax(0, settings.value("Transfer/globalSpeedKBps", 0).toInt());
     transferMgr_->setMaxConcurrent(maxConcurrent);
     transferMgr_->setGlobalSpeedLimitKBps(globalSpeed);
     if (transferDlg_)
@@ -2100,20 +2106,20 @@ void MainWindow::addRecentLocalPath(const QString &path) {
     const QString normalized = normalizedLocalHistoryPath(path);
     if (normalized.isEmpty())
         return;
-    QSettings s("OpenSCP", "OpenSCP");
-    QStringList recent = s.value(kRecentLocalPathsKey).toStringList();
+    QSettings settings("OpenSCP", "OpenSCP");
+    QStringList recent = settings.value(kRecentLocalPathsKey).toStringList();
     prependRecentValue(&recent, normalized);
-    s.setValue(kRecentLocalPathsKey, recent);
+    settings.setValue(kRecentLocalPathsKey, recent);
 }
 
 void MainWindow::addRecentRemotePath(const QString &path) {
     const QString normalized = normalizeRemotePathForMatch(path);
     if (normalized.isEmpty())
         return;
-    QSettings s("OpenSCP", "OpenSCP");
-    QStringList recent = s.value(kRecentRemotePathsKey).toStringList();
+    QSettings settings("OpenSCP", "OpenSCP");
+    QStringList recent = settings.value(kRecentRemotePathsKey).toStringList();
     prependRecentValue(&recent, normalized);
-    s.setValue(kRecentRemotePathsKey, recent);
+    settings.setValue(kRecentRemotePathsKey, recent);
 }
 
 void MainWindow::addRecentServer(const openscp::SessionOptions &opt) {
@@ -2123,10 +2129,10 @@ void MainWindow::addRecentServer(const openscp::SessionOptions &opt) {
     const QString encoded = encodeRecentServerEntry(opt);
     if (encoded.isEmpty())
         return;
-    QSettings s("OpenSCP", "OpenSCP");
-    QStringList recent = s.value(kRecentServersKey).toStringList();
+    QSettings settings("OpenSCP", "OpenSCP");
+    QStringList recent = settings.value(kRecentServersKey).toStringList();
     prependRecentValue(&recent, encoded);
-    s.setValue(kRecentServersKey, recent);
+    settings.setValue(kRecentServersKey, recent);
 }
 
 void MainWindow::showHistoryMenu() {
@@ -2144,17 +2150,9 @@ void MainWindow::showHistoryMenu() {
     auto *tabs = new QTabWidget(&dlg);
     layout->addWidget(tabs, 1);
 
-    auto createHistoryTab = [tabs](const QString &title) {
-        auto *list = new QListWidget(tabs);
-        list->setSelectionMode(QAbstractItemView::SingleSelection);
-        list->setAlternatingRowColors(true);
-        list->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
-        tabs->addTab(list, title);
-        return list;
-    };
-    auto *localList = createHistoryTab(tr("Recent local paths"));
-    auto *remoteList = createHistoryTab(tr("Recent remote paths"));
-    auto *serverList = createHistoryTab(tr("Recent servers"));
+    auto *localList = createHistoryTabList(tabs, tr("Recent local paths"));
+    auto *remoteList = createHistoryTabList(tabs, tr("Recent remote paths"));
+    auto *serverList = createHistoryTabList(tabs, tr("Recent servers"));
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
     auto *openBtn =
@@ -2201,11 +2199,13 @@ void MainWindow::showHistoryMenu() {
         remoteList->clear();
         serverList->clear();
 
-        QSettings s("OpenSCP", "OpenSCP");
-        const QStringList localPaths = s.value(kRecentLocalPathsKey).toStringList();
+        QSettings settings("OpenSCP", "OpenSCP");
+        const QStringList localPaths =
+            settings.value(kRecentLocalPathsKey).toStringList();
         const QStringList remotePaths =
-            s.value(kRecentRemotePathsKey).toStringList();
-        const QStringList recentServers = s.value(kRecentServersKey).toStringList();
+            settings.value(kRecentRemotePathsKey).toStringList();
+        const QStringList recentServers =
+            settings.value(kRecentServersKey).toStringList();
 
         bool hasEntries = false;
 
@@ -2314,10 +2314,10 @@ void MainWindow::showHistoryMenu() {
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
         if (ret != QMessageBox::Yes)
             return;
-        QSettings s("OpenSCP", "OpenSCP");
-        s.remove(kRecentLocalPathsKey);
-        s.remove(kRecentRemotePathsKey);
-        s.remove(kRecentServersKey);
+        QSettings settings("OpenSCP", "OpenSCP");
+        settings.remove(kRecentLocalPathsKey);
+        settings.remove(kRecentRemotePathsKey);
+        settings.remove(kRecentServersKey);
         statusBar()->showMessage(tr("History cleared"), 3000);
         populate();
     });
@@ -2336,10 +2336,10 @@ void MainWindow::showHistoryMenu() {
 }
 
 void MainWindow::updateDeleteShortcutEnables() {
-    auto hasColSel = [&](QTreeView *v) -> bool {
-        if (!v || !v->selectionModel())
+    auto hasColSel = [&](QTreeView *treeView) -> bool {
+        if (!treeView || !treeView->selectionModel())
             return false;
-        return !v->selectionModel()->selectedRows(NAME_COL).isEmpty();
+        return !treeView->selectionModel()->selectedRows(NAME_COL).isEmpty();
     };
     const bool leftHasSel = hasColSel(leftView_);
     const bool rightHasSel = hasColSel(rightView_);
@@ -2361,8 +2361,8 @@ void MainWindow::updateDeleteShortcutEnables() {
     if (actNewFileLeft_)
         actNewFileLeft_->setEnabled(true); // always enabled on local
     if (actUpLeft_) {
-        QDir d(leftPath_ ? leftPath_->text() : QString());
-        bool canUp = d.cdUp();
+        QDir leftDir(leftPath_ ? leftPath_->text() : QString());
+        bool canUp = leftDir.cdUp();
         actUpLeft_->setEnabled(canUp);
     }
 
@@ -2437,8 +2437,8 @@ void MainWindow::updateDeleteShortcutEnables() {
             cur = normalizeRemotePath(cur);
             actUpRight_->setEnabled(!cur.isEmpty() && cur != "/");
         } else {
-            QDir d(cur);
-            actUpRight_->setEnabled(d.cdUp());
+            QDir currentDir(cur);
+            actUpRight_->setEnabled(currentDir.cdUp());
         }
     }
 }

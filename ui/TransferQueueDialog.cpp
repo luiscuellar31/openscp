@@ -144,7 +144,7 @@ static TaskIndexById buildTaskIndexById(const QVector<TransferTask> &snapshot) {
     TaskIndexById index;
     index.reserve(snapshot.size());
     for (const auto &task : snapshot)
-        index.insert(task.id, &task);
+        index.insert(task.taskId, &task);
     return index;
 }
 
@@ -152,11 +152,11 @@ template <typename Callback>
 static void forEachSelectedTask(const QVector<quint64> &ids,
                                 const TaskIndexById &taskIndex,
                                 Callback &&callback) {
-    for (quint64 id : ids) {
-        const auto taskIt = taskIndex.constFind(id);
+    for (quint64 taskId : ids) {
+        const auto taskIt = taskIndex.constFind(taskId);
         if (taskIt == taskIndex.cend())
             continue;
-        callback(id, *taskIt.value());
+        callback(taskId, *taskIt.value());
     }
 }
 
@@ -274,20 +274,20 @@ class TransferTaskTableModel final : public QAbstractTableModel {
             return {};
         if (index.row() < 0 || index.row() >= tasks_.size())
             return {};
-        const auto &t = tasks_[index.row()];
+        const auto &task = tasks_[index.row()];
 
         if (role == StatusRole)
-            return static_cast<int>(t.status);
+            return static_cast<int>(task.status);
         if (role == TaskIdRole)
-            return static_cast<qulonglong>(t.id);
+            return static_cast<qulonglong>(task.taskId);
         if (role == ProgressRole)
-            return t.progress;
+            return task.progress;
         if (role == TypeRole)
-            return static_cast<int>(t.type);
+            return static_cast<int>(task.type);
         if (role == SourceRole)
-            return t.src;
+            return task.src;
         if (role == DestinationRole)
-            return t.dst;
+            return task.dst;
 
         if (role == Qt::TextAlignmentRole) {
             if (index.column() == ColStatus || index.column() == ColProgress ||
@@ -302,13 +302,13 @@ class TransferTaskTableModel final : public QAbstractTableModel {
 
         if (role == Qt::ToolTipRole) {
             if (index.column() == ColSource)
-                return t.src;
+                return task.src;
             if (index.column() == ColDestination)
-                return t.dst;
-            if (index.column() == ColError && !t.error.isEmpty())
-                return t.error;
+                return task.dst;
+            if (index.column() == ColError && !task.error.isEmpty())
+                return task.error;
             if (index.column() == ColName)
-                return displayNameForTask(t);
+                return displayNameForTask(task);
         }
 
         if (role != Qt::DisplayRole)
@@ -316,32 +316,32 @@ class TransferTaskTableModel final : public QAbstractTableModel {
 
         switch (index.column()) {
         case ColName:
-            return displayNameForTask(t);
+            return displayNameForTask(task);
         case ColStatus:
-            return statusText(t.status);
+            return statusText(task.status);
         case ColProgress:
-            return QString::number(t.progress) + "%";
+            return QString::number(task.progress) + "%";
         case ColTransferred:
-            if (t.bytesTotal > 0)
-                return QString("%1 / %2").arg(formatBytes(t.bytesDone),
-                                              formatBytes(t.bytesTotal));
-            return formatBytes(t.bytesDone);
+            if (task.bytesTotal > 0)
+                return QString("%1 / %2").arg(formatBytes(task.bytesDone),
+                                              formatBytes(task.bytesTotal));
+            return formatBytes(task.bytesDone);
         case ColSpeed:
-            return formatSpeed(t.currentSpeedKBps);
+            return formatSpeed(task.currentSpeedKBps);
         case ColEta:
-            return formatEta(t.etaSeconds);
+            return formatEta(task.etaSeconds);
         case ColType:
-            return t.type == TransferTask::Type::Upload
+            return task.type == TransferTask::Type::Upload
                        ? TransferQueueDialog::tr("Upload")
                        : TransferQueueDialog::tr("Download");
         case ColSource:
-            return t.src;
+            return task.src;
         case ColDestination:
-            return t.dst;
+            return task.dst;
         case ColAttempts:
-            return QString("%1/%2").arg(t.attempts).arg(t.maxAttempts);
+            return QString("%1/%2").arg(task.attempts).arg(task.maxAttempts);
         case ColError:
-            return t.error;
+            return task.error;
         default:
             return {};
         }
@@ -357,7 +357,7 @@ class TransferTaskTableModel final : public QAbstractTableModel {
 
         bool orderChanged = false;
         for (int rowIndex = 0; rowIndex < tasks_.size(); ++rowIndex) {
-            if (tasks_[rowIndex].id != incoming[rowIndex].id) {
+            if (tasks_[rowIndex].taskId != incoming[rowIndex].taskId) {
                 orderChanged = true;
                 break;
             }
@@ -459,16 +459,16 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
 
     // Row 1: quick filters
     auto *filters = new QWidget(this);
-    auto *hf = new QHBoxLayout(filters);
-    hf->setContentsMargins(0, 0, 0, 0);
-    hf->setSpacing(6);
-    hf->addWidget(new QLabel(tr("Show:"), filters));
+    auto *filterLayout = new QHBoxLayout(filters);
+    filterLayout->setContentsMargins(0, 0, 0, 0);
+    filterLayout->setSpacing(6);
+    filterLayout->addWidget(new QLabel(tr("Show:"), filters));
     auto makeChip = [filters](const QString &text) {
-        auto *b = new QToolButton(filters);
-        b->setText(text);
-        b->setCheckable(true);
-        b->setToolButtonStyle(Qt::ToolButtonTextOnly);
-        return b;
+        auto *chipButton = new QToolButton(filters);
+        chipButton->setText(text);
+        chipButton->setCheckable(true);
+        chipButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        return chipButton;
     };
     filterAllBtn_ = makeChip(tr("All"));
     filterActiveBtn_ = makeChip(tr("Active"));
@@ -483,12 +483,12 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     filterGroup_->addButton(filterCompletedBtn_, FilterCompleted);
     filterGroup_->addButton(filterCanceledBtn_, FilterCanceled);
     filterAllBtn_->setChecked(true);
-    hf->addWidget(filterAllBtn_);
-    hf->addWidget(filterActiveBtn_);
-    hf->addWidget(filterErrorsBtn_);
-    hf->addWidget(filterCompletedBtn_);
-    hf->addWidget(filterCanceledBtn_);
-    hf->addStretch();
+    filterLayout->addWidget(filterAllBtn_);
+    filterLayout->addWidget(filterActiveBtn_);
+    filterLayout->addWidget(filterErrorsBtn_);
+    filterLayout->addWidget(filterCompletedBtn_);
+    filterLayout->addWidget(filterCanceledBtn_);
+    filterLayout->addStretch();
     lay->addWidget(filters);
 
     // Row 2: table
@@ -562,12 +562,12 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     hbBadges->setContentsMargins(0, 0, 0, 0);
     hbBadges->setSpacing(6);
     auto makeBadge = [badges](const QString &text, const QString &color) {
-        auto *lb = new QLabel(text, badges);
-        lb->setStyleSheet(
+        auto *badgeLabel = new QLabel(text, badges);
+        badgeLabel->setStyleSheet(
             QString("QLabel{border:1px solid %1;border-radius:10px;padding:3px "
                     "8px;background:palette(base);}")
                 .arg(color));
-        return lb;
+        return badgeLabel;
     };
     badgeTotal_ = makeBadge(tr("Total: 0"), "#607D8B");
     badgeActive_ = makeBadge(tr("Active: 0"), "#2E7D32");
@@ -590,8 +590,8 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
 
     // Row 4: controls
     auto *controls = new QWidget(this);
-    auto *hb = new QHBoxLayout(controls);
-    hb->setContentsMargins(0, 0, 0, 0);
+    auto *controlsLayout = new QHBoxLayout(controls);
+    controlsLayout->setContentsMargins(0, 0, 0, 0);
 
     pauseBtn_ = new QPushButton(tr("Pause"), controls);
     resumeBtn_ = new QPushButton(tr("Resume"), controls);
@@ -616,17 +616,17 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     clearFailedBtn_->setToolTip(
         tr("Remove failed and canceled transfers from the list"));
 
-    hb->addWidget(pauseBtn_);
-    hb->addWidget(resumeBtn_);
-    hb->addWidget(pauseSelBtn_);
-    hb->addWidget(resumeSelBtn_);
-    hb->addWidget(stopAllBtn_);
-    hb->addWidget(stopSelBtn_);
-    hb->addWidget(retryBtn_);
-    hb->addWidget(clearBtn_);
-    hb->addWidget(clearFailedBtn_);
-    hb->addWidget(closeBtn_);
-    hb->addStretch();
+    controlsLayout->addWidget(pauseBtn_);
+    controlsLayout->addWidget(resumeBtn_);
+    controlsLayout->addWidget(pauseSelBtn_);
+    controlsLayout->addWidget(resumeSelBtn_);
+    controlsLayout->addWidget(stopAllBtn_);
+    controlsLayout->addWidget(stopSelBtn_);
+    controlsLayout->addWidget(retryBtn_);
+    controlsLayout->addWidget(clearBtn_);
+    controlsLayout->addWidget(clearFailedBtn_);
+    controlsLayout->addWidget(closeBtn_);
+    controlsLayout->addStretch();
     lay->addWidget(controls);
 
     // Row 5: limits + auto clear
@@ -722,17 +722,19 @@ void TransferQueueDialog::onClearDone() { mgr_->clearCompleted(); }
 
 void TransferQueueDialog::onPauseSelected() {
     const auto ids = selectedTaskIds();
-    withSelectedTasks(mgr_, ids, [this](quint64 id, const TransferTask &task) {
+    withSelectedTasks(mgr_, ids,
+                      [this](quint64 taskId, const TransferTask &task) {
         if (canPauseStatus(task.status))
-            mgr_->pauseTask(id);
+            mgr_->pauseTask(taskId);
     });
 }
 
 void TransferQueueDialog::onResumeSelected() {
     const auto ids = selectedTaskIds();
-    withSelectedTasks(mgr_, ids, [this](quint64 id, const TransferTask &task) {
+    withSelectedTasks(mgr_, ids,
+                      [this](quint64 taskId, const TransferTask &task) {
         if (canResumeStatus(task.status))
-            mgr_->resumeTask(id);
+            mgr_->resumeTask(taskId);
     });
 }
 
@@ -747,9 +749,9 @@ void TransferQueueDialog::onLimitSelected() {
         return;
     QVector<quint64> eligible;
     eligible.reserve(ids.size());
-    withSelectedTasks(mgr_, ids, [&](quint64 id, const TransferTask &task) {
+    withSelectedTasks(mgr_, ids, [&](quint64 taskId, const TransferTask &task) {
         if (canLimitStatus(task.status))
-            eligible.push_back(id);
+            eligible.push_back(taskId);
     });
     if (eligible.isEmpty())
         return;
@@ -760,24 +762,25 @@ void TransferQueueDialog::onLimitSelected() {
         1'000'000, 1, &inputAccepted);
     if (!inputAccepted)
         return;
-    for (quint64 id : eligible)
-        mgr_->setTaskSpeedLimit(id, speedLimitKbps);
+    for (quint64 taskId : eligible)
+        mgr_->setTaskSpeedLimit(taskId, speedLimitKbps);
 }
 
 void TransferQueueDialog::onStopSelected() {
     const auto ids = selectedTaskIds();
-    withSelectedTasks(mgr_, ids, [this](quint64 id, const TransferTask &task) {
+    withSelectedTasks(mgr_, ids,
+                      [this](quint64 taskId, const TransferTask &task) {
         if (canCancelStatus(task.status))
-            mgr_->cancelTask(id);
+            mgr_->cancelTask(taskId);
     });
 }
 
 void TransferQueueDialog::onStopAll() { mgr_->cancelAll(); }
 
-void TransferQueueDialog::onFilterChanged(int id) {
+void TransferQueueDialog::onFilterChanged(int filterId) {
     if (!proxy_)
         return;
-    proxy_->setFilterMode(id);
+    proxy_->setFilterMode(filterId);
     if (table_)
         table_->clearSelection();
     updateSummary();
@@ -786,9 +789,10 @@ void TransferQueueDialog::onFilterChanged(int id) {
 
 void TransferQueueDialog::onRetrySelected() {
     const auto ids = selectedTaskIds();
-    withSelectedTasks(mgr_, ids, [this](quint64 id, const TransferTask &task) {
+    withSelectedTasks(mgr_, ids,
+                      [this](quint64 taskId, const TransferTask &task) {
         if (canRetryStatus(task.status))
-            mgr_->retryTask(id);
+            mgr_->retryTask(taskId);
     });
 }
 
@@ -862,8 +866,8 @@ void TransferQueueDialog::updateSummary() {
     // Summary counts drive both badges and action enablement.
     const auto &tasks = model_->tasks();
     int queued = 0, running = 0, paused = 0, done = 0, error = 0, canceled = 0;
-    for (const auto &t : tasks) {
-        switch (t.status) {
+    for (const auto &task : tasks) {
+        switch (task.status) {
         case TransferTask::Status::Queued:
             ++queued;
             break;
@@ -956,9 +960,9 @@ QVector<quint64> TransferQueueDialog::selectedTaskIds() const {
     for (const QModelIndex &idx : rows) {
         const QVariant raw = idx.data(TransferTaskTableModel::TaskIdRole);
         bool conversionOk = false;
-        const quint64 id = raw.toULongLong(&conversionOk);
+        const quint64 taskId = raw.toULongLong(&conversionOk);
         if (conversionOk)
-            ids.push_back(id);
+            ids.push_back(taskId);
     }
     return ids;
 }
@@ -1120,10 +1124,10 @@ void TransferQueueDialog::maybeAutoClear(
         QDateTime::currentMSecsSinceEpoch() - qint64(minutes) * 60 * 1000;
     bool needsCleanup = false;
     // Quick pre-scan avoids manager calls when nothing is eligible yet.
-    for (const auto &t : snapshot) {
-        const bool isDone = t.status == TransferTask::Status::Done;
-        const bool isFailed = (t.status == TransferTask::Status::Error ||
-                               t.status == TransferTask::Status::Canceled);
+    for (const auto &task : snapshot) {
+        const bool isDone = task.status == TransferTask::Status::Done;
+        const bool isFailed = (task.status == TransferTask::Status::Error ||
+                               task.status == TransferTask::Status::Canceled);
         bool candidate = false;
         if (mode == AutoClearCompleted)
             candidate = isDone;
@@ -1132,7 +1136,8 @@ void TransferQueueDialog::maybeAutoClear(
         else if (mode == AutoClearFinished)
             candidate = (isDone || isFailed);
 
-        if (candidate && t.finishedAtMs > 0 && t.finishedAtMs <= cutoff) {
+        if (candidate && task.finishedAtMs > 0 &&
+            task.finishedAtMs <= cutoff) {
             needsCleanup = true;
             break;
         }

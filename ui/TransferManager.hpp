@@ -20,7 +20,7 @@ class SftpClient;
 // Represents an upload or download operation with its state and options.
 struct TransferTask {
     enum class Type { Upload, Download } type;
-    quint64 id = 0;                // stable identifier for cross-thread updates
+    quint64 taskId = 0;            // stable identifier for cross-thread updates
     QString src;                   // local for uploads, remote for downloads
     QString dst;                   // remote for uploads, local for downloads
     bool resumeHint = false;       // if true, try to resume on next attempt
@@ -60,15 +60,15 @@ class TransferManager : public QObject {
     ~TransferManager();
 
     // Inject the SFTP client to use (not owned by the manager)
-    void setClient(openscp::SftpClient *c);
+    void setClient(openscp::SftpClient *client);
     void clearClient();
     // Session options used to create independent worker connections.
     void setSessionOptions(const openscp::SessionOptions &opt);
     // Concurrency: maximum number of simultaneous tasks
-    void setMaxConcurrent(int n) {
-        if (n < 1)
-            n = 1;
-        maxConcurrent_ = n;
+    void setMaxConcurrent(int maxConcurrent) {
+        if (maxConcurrent < 1)
+            maxConcurrent = 1;
+        maxConcurrent_ = maxConcurrent;
     }
     int maxConcurrent() const { return maxConcurrent_; }
     // Global speed limit (KB/s). 0 = unlimited
@@ -77,14 +77,14 @@ class TransferManager : public QObject {
     bool isQueuePaused() const { return paused_.load(); }
 
     // Pause/Resume per task
-    void pauseTask(quint64 id);
-    void resumeTask(quint64 id);
+    void pauseTask(quint64 taskId);
+    void resumeTask(quint64 taskId);
     // Cancel a task (transitions to Canceled)
-    void cancelTask(quint64 id);
+    void cancelTask(quint64 taskId);
     // Cancel all active or queued tasks
     void cancelAll();
     // Adjust per-task speed limit (KB/s). 0 = unlimited
-    void setTaskSpeedLimit(quint64 id, int kbps);
+    void setTaskSpeedLimit(quint64 taskId, int kbps);
 
     void enqueueUpload(const QString &local, const QString &remote);
     void enqueueDownload(const QString &remote, const QString &local);
@@ -96,7 +96,7 @@ class TransferManager : public QObject {
     void pauseAll();
     void resumeAll();
     void retryFailed();
-    void retryTask(quint64 id);
+    void retryTask(quint64 taskId);
     void clearCompleted();
     void clearFailedCanceled();
     void clearFinishedOlderThan(int minutes, bool clearDone,
@@ -130,11 +130,11 @@ class TransferManager : public QObject {
     std::mutex connFactoryMutex_; // serializes creation of worker SFTP clients
     quint64 nextId_ = 1;
 
-    int indexForId(quint64 id) const;
+    int indexForId(quint64 taskId) const;
     void decrementRunningCounter();
-    void interruptActiveWorker(quint64 id);
+    void interruptActiveWorker(quint64 taskId);
     void interruptActiveWorkers();
-    bool isWorkerActive(quint64 id);
+    bool isWorkerActive(quint64 taskId);
     // Build an isolated SFTP client for one worker task.
     std::unique_ptr<openscp::SftpClient> createWorkerClient(quint64 taskId,
                                                             std::string &err);

@@ -33,7 +33,7 @@ class TransferQueueDialog : public QDialog {
     void onLimitSelected();    // limit selected tasks
     void onStopSelected();     // cancel selected tasks
     void onStopAll();          // cancel the whole queue in progress
-    void onFilterChanged(int id);
+    void onFilterChanged(int filterId);
     void onRetrySelected();
     void onOpenDestination();
     void onCopySourcePath();
@@ -67,7 +67,7 @@ class TransferQueueDialog : public QDialog {
 
     TransferManager *mgr_;                    // source of truth for the queue
     QTableView *table_ = nullptr;             // view of tasks
-    TransferTaskTableModel *model_ = nullptr; // task model (id-based updates)
+    TransferTaskTableModel *model_ = nullptr; // task model (taskId-based updates)
     TransferTaskFilterProxyModel *proxy_ = nullptr; // status filter proxy
     QLabel *badgeTotal_ = nullptr;
     QLabel *badgeActive_ = nullptr;

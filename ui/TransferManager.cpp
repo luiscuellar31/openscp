@@ -124,7 +124,7 @@ static int askOverwriteConflictOnUi(QObject *uiContext, const QString &name,
         [state, showPrompt]() mutable {
             if (!state || state->canceled.load()) {
                 if (state) {
-                    std::lock_guard<std::mutex> lk(state->m);
+                    std::lock_guard<std::mutex> lock(state->m);
                     state->done = true;
                     state->cv.notify_one();
                 }
@@ -133,7 +133,7 @@ static int askOverwriteConflictOnUi(QObject *uiContext, const QString &name,
 
             const int localChoice = showPrompt();
             {
-                std::lock_guard<std::mutex> lk(state->m);
+                std::lock_guard<std::mutex> lock(state->m);
                 state->choice = localChoice;
                 state->done = true;
             }
@@ -143,10 +143,10 @@ static int askOverwriteConflictOnUi(QObject *uiContext, const QString &name,
     if (!invoked)
         return 0;
 
-    std::unique_lock<std::mutex> lk(state->m);
+    std::unique_lock<std::mutex> stateLock(state->m);
     using namespace std::chrono_literals;
     while (!state->done) {
-        if (state->cv.wait_for(lk, 50ms) == std::cv_status::timeout) {
+        if (state->cv.wait_for(stateLock, 50ms) == std::cv_status::timeout) {
             if (shouldAbort && shouldAbort()) {
                 state->canceled.store(true);
                 return -1;
@@ -159,11 +159,11 @@ static int askOverwriteConflictOnUi(QObject *uiContext, const QString &name,
 template <typename IdSet>
 static void eraseMissingIds(IdSet &ids,
                             const std::unordered_set<quint64> &remainingIds) {
-    for (auto it = ids.begin(); it != ids.end();) {
-        if (!remainingIds.count(*it))
-            it = ids.erase(it);
+    for (auto idIt = ids.begin(); idIt != ids.end();) {
+        if (!remainingIds.count(*idIt))
+            idIt = ids.erase(idIt);
         else
-            ++it;
+            ++idIt;
     }
 }
 
@@ -173,7 +173,7 @@ static void pruneTrackingSets(const QVector<TransferTask> &tasks,
     std::unordered_set<quint64> remainingIds;
     remainingIds.reserve(tasks.size());
     for (const auto &task : tasks)
-        remainingIds.insert(task.id);
+        remainingIds.insert(task.taskId);
     eraseMissingIds(canceledTasks, remainingIds);
     eraseMissingIds(pausedTasks, remainingIds);
 }
@@ -196,36 +196,36 @@ TransferManager::~TransferManager() {
     paused_ = true;
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     {
-        std::lock_guard<std::mutex> lk(mtx_);
+        std::lock_guard<std::mutex> tasksLock(mtx_);
         resumeRequestedTasks_.clear();
-        for (auto &t : tasks_) {
-            canceledTasks_.insert(t.id);
-            if (t.status == TransferTask::Status::Queued ||
-                t.status == TransferTask::Status::Running ||
-                t.status == TransferTask::Status::Paused) {
-                transitionTaskToCanceled(t, nowMs);
+        for (auto &task : tasks_) {
+            canceledTasks_.insert(task.taskId);
+            if (task.status == TransferTask::Status::Queued ||
+                task.status == TransferTask::Status::Running ||
+                task.status == TransferTask::Status::Paused) {
+                transitionTaskToCanceled(task, nowMs);
             }
         }
     }
     interruptActiveWorkers();
     std::unordered_map<quint64, std::thread> workersToJoin;
     {
-        std::lock_guard<std::mutex> wl(workersMutex_);
+        std::lock_guard<std::mutex> workersLock(workersMutex_);
         workersToJoin.swap(workers_);
     }
-    for (auto &kv : workersToJoin) {
-        if (kv.second.joinable())
-            kv.second.join();
+    for (auto &workerEntry : workersToJoin) {
+        if (workerEntry.second.joinable())
+            workerEntry.second.join();
     }
     running_ = 0;
 }
 
-void TransferManager::setClient(openscp::SftpClient *c) {
+void TransferManager::setClient(openscp::SftpClient *client) {
     {
-        std::lock_guard<std::mutex> lk(mtx_);
-        client_ = c;
+        std::lock_guard<std::mutex> lock(mtx_);
+        client_ = client;
     }
-    if (c) {
+    if (client) {
         // Re-enable queue execution after a disconnect/clearClient cycle.
         paused_ = false;
         // Reset stale running count from a previous session cleanup so new
@@ -236,7 +236,7 @@ void TransferManager::setClient(openscp::SftpClient *c) {
 }
 
 void TransferManager::setSessionOptions(const openscp::SessionOptions &opt) {
-    std::lock_guard<std::mutex> lk(mtx_);
+    std::lock_guard<std::mutex> lock(mtx_);
     sessionOpt_ = opt;
 }
 
@@ -244,7 +244,7 @@ void TransferManager::clearClient() {
     const qint64 startedAtMs = QDateTime::currentMSecsSinceEpoch();
     std::size_t activeWorkers = 0;
     {
-        std::lock_guard<std::mutex> lk(activeWorkersMutex_);
+        std::lock_guard<std::mutex> lock(activeWorkersMutex_);
         activeWorkers = activeWorkerClients_.size();
     }
     qCInfo(ocXfer) << "clearClient begin"
@@ -255,18 +255,18 @@ void TransferManager::clearClient() {
     bool changed = false;
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     {
-        std::lock_guard<std::mutex> lk(mtx_);
+        std::lock_guard<std::mutex> tasksLock(mtx_);
         // Clear connection inputs up-front so a delayed clearClient() cannot
         // wipe a newer session set by a subsequent reconnect.
         client_ = nullptr;
         sessionOpt_.reset();
         resumeRequestedTasks_.clear();
-        for (auto &t : tasks_) {
-            canceledTasks_.insert(t.id);
-            if (t.status == TransferTask::Status::Queued ||
-                t.status == TransferTask::Status::Running ||
-                t.status == TransferTask::Status::Paused) {
-                transitionTaskToCanceled(t, nowMs);
+        for (auto &task : tasks_) {
+            canceledTasks_.insert(task.taskId);
+            if (task.status == TransferTask::Status::Queued ||
+                task.status == TransferTask::Status::Running ||
+                task.status == TransferTask::Status::Paused) {
+                transitionTaskToCanceled(task, nowMs);
                 changed = true;
             }
         }
@@ -279,12 +279,12 @@ void TransferManager::clearClient() {
 
     std::unordered_map<quint64, std::thread> workersToJoin;
     {
-        std::lock_guard<std::mutex> wl(workersMutex_);
+        std::lock_guard<std::mutex> workersLock(workersMutex_);
         workersToJoin.swap(workers_);
     }
-    for (auto &kv : workersToJoin) {
-        if (kv.second.joinable())
-            kv.second.join();
+    for (auto &workerEntry : workersToJoin) {
+        if (workerEntry.second.joinable())
+            workerEntry.second.join();
     }
     qCInfo(ocXfer) << "clearClient finished"
                    << "elapsedMs="
@@ -293,7 +293,7 @@ void TransferManager::clearClient() {
 }
 
 QVector<TransferTask> TransferManager::tasksSnapshot() const {
-    std::lock_guard<std::mutex> lk(mtx_);
+    std::lock_guard<std::mutex> lock(mtx_);
     return tasks_;
 }
 
@@ -302,7 +302,7 @@ TransferManager::createWorkerClient(quint64 taskId, std::string &err) {
     openscp::SftpClient *base = nullptr;
     std::optional<openscp::SessionOptions> opt;
     {
-        std::lock_guard<std::mutex> lk(mtx_);
+        std::lock_guard<std::mutex> lock(mtx_);
         base = client_;
         opt = sessionOpt_;
     }
@@ -319,7 +319,7 @@ TransferManager::createWorkerClient(quint64 taskId, std::string &err) {
     std::string lastErr;
     for (int attempt = 0; attempt < 3; ++attempt) {
         {
-            std::lock_guard<std::mutex> lk(mtx_);
+            std::lock_guard<std::mutex> lock(mtx_);
             if (paused_.load() || canceledTasks_.count(taskId) > 0 ||
                 pausedTasks_.count(taskId) > 0) {
                 err = "Transfer queue paused/canceled";
@@ -331,14 +331,14 @@ TransferManager::createWorkerClient(quint64 taskId, std::string &err) {
             // Creating libssh2 clients/sessions from a single entry point
             // avoids cross-thread initialization hazards and keeps connection
             // setup deterministic.
-            std::lock_guard<std::mutex> lk(connFactoryMutex_);
+            std::lock_guard<std::mutex> lock(connFactoryMutex_);
             conn = base->newConnectionLike(*opt, lastErr);
         }
         if (conn)
             return conn;
         if (attempt < 2) {
             {
-                std::lock_guard<std::mutex> lk(mtx_);
+                std::lock_guard<std::mutex> lock(mtx_);
                 if (paused_.load() || canceledTasks_.count(taskId) > 0 ||
                     pausedTasks_.count(taskId) > 0) {
                     err = "Transfer queue paused/canceled";
@@ -355,7 +355,7 @@ TransferManager::createWorkerClient(quint64 taskId, std::string &err) {
 void TransferManager::enqueueUpload(const QString &local,
                                     const QString &remote) {
     TransferTask task{TransferTask::Type::Upload};
-    task.id = nextId_++;
+    task.taskId = nextId_++;
     task.src = local;
     task.dst = remote;
     task.queuedAtMs = QDateTime::currentMSecsSinceEpoch();
@@ -363,7 +363,7 @@ void TransferManager::enqueueUpload(const QString &local,
         // Protect the structure
         // (other functions will access concurrently)
         // mtx_ protects tasks_
-        std::lock_guard<std::mutex> lk(mtx_);
+        std::lock_guard<std::mutex> lock(mtx_);
         tasks_.push_back(task);
     }
     emit tasksChanged();
@@ -374,12 +374,12 @@ void TransferManager::enqueueUpload(const QString &local,
 void TransferManager::enqueueDownload(const QString &remote,
                                       const QString &local) {
     TransferTask task{TransferTask::Type::Download};
-    task.id = nextId_++;
+    task.taskId = nextId_++;
     task.src = remote;
     task.dst = local;
     task.queuedAtMs = QDateTime::currentMSecsSinceEpoch();
     {
-        std::lock_guard<std::mutex> lk(mtx_);
+        std::lock_guard<std::mutex> lock(mtx_);
         tasks_.push_back(task);
     }
     emit tasksChanged();
@@ -390,11 +390,11 @@ void TransferManager::enqueueDownload(const QString &remote,
 void TransferManager::pauseAll() {
     paused_ = true;
     {
-        std::lock_guard<std::mutex> lk(mtx_);
-        for (auto &t : tasks_) {
-            if (t.status == TransferTask::Status::Running) {
-                pausedTasks_.insert(t.id);
-                transitionTaskToPaused(t);
+        std::lock_guard<std::mutex> tasksLock(mtx_);
+        for (auto &task : tasks_) {
+            if (task.status == TransferTask::Status::Running) {
+                pausedTasks_.insert(task.taskId);
+                transitionTaskToPaused(task);
             }
         }
     }
@@ -410,24 +410,24 @@ void TransferManager::resumeAll() {
     }
     std::unordered_set<quint64> activeNow;
     {
-        std::lock_guard<std::mutex> lk(activeWorkersMutex_);
+        std::lock_guard<std::mutex> activeWorkersLock(activeWorkersMutex_);
         activeNow.reserve(activeWorkerClients_.size());
-        for (const auto &kv : activeWorkerClients_)
-            activeNow.insert(kv.first);
+        for (const auto &activeWorker : activeWorkerClients_)
+            activeNow.insert(activeWorker.first);
     }
     {
-        std::lock_guard<std::mutex> lk(mtx_);
+        std::lock_guard<std::mutex> tasksLock(mtx_);
         const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-        for (auto &t : tasks_) {
-            if (t.status == TransferTask::Status::Paused) {
-                if (activeNow.count(t.id) > 0) {
+        for (auto &task : tasks_) {
+            if (task.status == TransferTask::Status::Paused) {
+                if (activeNow.count(task.taskId) > 0) {
                     // Worker is still unwinding from pause; defer relaunch
                     // until it fully exits.
-                    resumeRequestedTasks_.insert(t.id);
+                    resumeRequestedTasks_.insert(task.taskId);
                 } else {
-                    transitionTaskToQueued(t, nowMs, true);
-                    pausedTasks_.erase(t.id);
-                    resumeRequestedTasks_.erase(t.id);
+                    transitionTaskToQueued(task, nowMs, true);
+                    pausedTasks_.erase(task.taskId);
+                    resumeRequestedTasks_.erase(task.taskId);
                     changed = true;
                 }
             }
@@ -444,17 +444,17 @@ void TransferManager::cancelAll() {
     int affected = 0;
     int runningNow = 0;
     {
-        std::lock_guard<std::mutex> lk(mtx_);
+        std::lock_guard<std::mutex> tasksLock(mtx_);
         resumeRequestedTasks_.clear();
-        for (auto &t : tasks_) {
-            canceledTasks_.insert(t.id);
-            if (t.status == TransferTask::Status::Queued ||
-                t.status == TransferTask::Status::Running ||
-                t.status == TransferTask::Status::Paused) {
+        for (auto &task : tasks_) {
+            canceledTasks_.insert(task.taskId);
+            if (task.status == TransferTask::Status::Queued ||
+                task.status == TransferTask::Status::Running ||
+                task.status == TransferTask::Status::Paused) {
                 ++affected;
-                if (t.status == TransferTask::Status::Running)
+                if (task.status == TransferTask::Status::Running)
                     ++runningNow;
-                transitionTaskToCanceled(t, nowMs);
+                transitionTaskToCanceled(task, nowMs);
             }
         }
     }
@@ -467,14 +467,14 @@ void TransferManager::cancelAll() {
 
 void TransferManager::retryFailed() {
     {
-        std::lock_guard<std::mutex> lk(mtx_);
+        std::lock_guard<std::mutex> tasksLock(mtx_);
         const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-        for (auto &t : tasks_) {
-            if (t.status == TransferTask::Status::Error ||
-                t.status == TransferTask::Status::Canceled) {
-                resetTaskForRetry(t, nowMs);
-                canceledTasks_.erase(t.id);
-                pausedTasks_.erase(t.id);
+        for (auto &task : tasks_) {
+            if (task.status == TransferTask::Status::Error ||
+                task.status == TransferTask::Status::Canceled) {
+                resetTaskForRetry(task, nowMs);
+                canceledTasks_.erase(task.taskId);
+                pausedTasks_.erase(task.taskId);
             }
         }
     }
@@ -482,19 +482,19 @@ void TransferManager::retryFailed() {
     schedule();
 }
 
-void TransferManager::retryTask(quint64 id) {
+void TransferManager::retryTask(quint64 taskId) {
     bool changed = false;
     {
-        std::lock_guard<std::mutex> lk(mtx_);
-        int taskIndex = indexForId(id);
+        std::lock_guard<std::mutex> lock(mtx_);
+        int taskIndex = indexForId(taskId);
         if (taskIndex >= 0 &&
             (tasks_[taskIndex].status == TransferTask::Status::Error ||
              tasks_[taskIndex].status == TransferTask::Status::Canceled)) {
             auto &task = tasks_[taskIndex];
             const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
             resetTaskForRetry(task, nowMs);
-            canceledTasks_.erase(task.id);
-            pausedTasks_.erase(task.id);
+            canceledTasks_.erase(task.taskId);
+            pausedTasks_.erase(task.taskId);
             changed = true;
         }
     }
@@ -506,12 +506,12 @@ void TransferManager::retryTask(quint64 id) {
 
 void TransferManager::clearCompleted() {
     {
-        std::lock_guard<std::mutex> lk(mtx_);
+        std::lock_guard<std::mutex> tasksLock(mtx_);
         QVector<TransferTask> next;
         next.reserve(tasks_.size());
-        for (const auto &t : tasks_) {
-            if (t.status != TransferTask::Status::Done)
-                next.push_back(t);
+        for (const auto &task : tasks_) {
+            if (task.status != TransferTask::Status::Done)
+                next.push_back(task);
         }
         tasks_.swap(next);
         pruneTrackingSets(tasks_, canceledTasks_, pausedTasks_);
@@ -521,13 +521,13 @@ void TransferManager::clearCompleted() {
 
 void TransferManager::clearFailedCanceled() {
     {
-        std::lock_guard<std::mutex> lk(mtx_);
+        std::lock_guard<std::mutex> tasksLock(mtx_);
         QVector<TransferTask> next;
         next.reserve(tasks_.size());
-        for (const auto &t : tasks_) {
-            if (t.status != TransferTask::Status::Error &&
-                t.status != TransferTask::Status::Canceled)
-                next.push_back(t);
+        for (const auto &task : tasks_) {
+            if (task.status != TransferTask::Status::Error &&
+                task.status != TransferTask::Status::Canceled)
+                next.push_back(task);
         }
         tasks_.swap(next);
         pruneTrackingSets(tasks_, canceledTasks_, pausedTasks_);
@@ -543,22 +543,23 @@ void TransferManager::clearFinishedOlderThan(int minutes, bool clearDone,
         QDateTime::currentMSecsSinceEpoch() - qint64(minutes) * 60 * 1000;
     bool changed = false;
     {
-        std::lock_guard<std::mutex> lk(mtx_);
+        std::lock_guard<std::mutex> tasksLock(mtx_);
         QVector<TransferTask> next;
         next.reserve(tasks_.size());
-        for (const auto &t : tasks_) {
-            const bool isDone = (t.status == TransferTask::Status::Done);
-            const bool isFailed = (t.status == TransferTask::Status::Error ||
-                                   t.status == TransferTask::Status::Canceled);
+        for (const auto &task : tasks_) {
+            const bool isDone = (task.status == TransferTask::Status::Done);
+            const bool isFailed =
+                (task.status == TransferTask::Status::Error ||
+                 task.status == TransferTask::Status::Canceled);
             const bool candidate =
                 (clearDone && isDone) || (clearFailedCanceled && isFailed);
             const bool oldEnough =
-                (t.finishedAtMs > 0 && t.finishedAtMs <= cutoff);
+                (task.finishedAtMs > 0 && task.finishedAtMs <= cutoff);
             if (candidate && oldEnough) {
                 changed = true;
                 continue;
             }
-            next.push_back(t);
+            next.push_back(task);
         }
         tasks_.swap(next);
         if (changed)
@@ -621,7 +622,7 @@ void TransferManager::recordCompletionMetrics(quint64 taskId,
                    << "throughputKBps=" << throughputKBps;
 
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-    std::lock_guard<std::mutex> lk(perfMtx_);
+    std::lock_guard<std::mutex> lock(perfMtx_);
     perfCompletedTasks_ += 1;
     perfCompletedBytes_ += bytesDone;
     perfTotalQueueLatencyMs_ += queueLatencyMs;
@@ -728,7 +729,7 @@ void TransferManager::resetTaskForRetry(TransferTask &task, qint64 nowMs) {
 
 TransferManager::SchedulePickResult TransferManager::pickTaskForSchedule() {
     SchedulePickResult result;
-    std::lock_guard<std::mutex> lk(mtx_);
+    std::lock_guard<std::mutex> lock(mtx_);
     if (!client_) {
         result.outcome = SchedulePickResult::Outcome::NoClient;
         return result;
@@ -749,13 +750,13 @@ TransferManager::SchedulePickResult TransferManager::pickTaskForSchedule() {
 
 bool TransferManager::validateWorkerLaunch(quint64 taskId) {
     const bool workerActiveNow = isWorkerActive(taskId);
-    std::lock_guard<std::mutex> wl(workersMutex_);
+    std::lock_guard<std::mutex> workersLock(workersMutex_);
     auto workerIt = workers_.find(taskId);
     if (workerIt != workers_.end() && workerIt->second.joinable()) {
         if (workerActiveNow) {
             // Do not block UI by joining an active worker; defer this relaunch
             // until the existing worker fully exits.
-            std::lock_guard<std::mutex> lk(mtx_);
+            std::lock_guard<std::mutex> lock(mtx_);
             const int taskIndex = indexForId(taskId);
             if (taskIndex >= 0) {
                 transitionTaskToPaused(tasks_[taskIndex]);
@@ -772,11 +773,11 @@ bool TransferManager::validateWorkerLaunch(quint64 taskId) {
 }
 
 void TransferManager::startTaskWorker(const TransferTask &task) {
-    std::lock_guard<std::mutex> wl(workersMutex_);
-    auto &workerSlot = workers_[task.id];
+    std::lock_guard<std::mutex> workersLock(workersMutex_);
+    auto &workerSlot = workers_[task.taskId];
     if (workerSlot.joinable()) {
         qCWarning(ocXfer) << "startTaskWorker found stale joinable worker"
-                          << "taskId=" << task.id;
+                          << "taskId=" << task.taskId;
         workerSlot.join();
     }
     workerSlot = std::thread(&TransferManager::runTaskWorkerPipeline, this, task);
@@ -800,7 +801,7 @@ void TransferManager::finalizeWorkerRun(quint64 taskId, qint64 precheckMs,
     quint64 bytesDone = 0;
     qint64 queueLatencyMs = 0;
     {
-        std::lock_guard<std::mutex> lk(mtx_);
+        std::lock_guard<std::mutex> lock(mtx_);
         const int taskIndex = indexForId(taskId);
         if (taskIndex >= 0) {
             finalStatus = tasks_[taskIndex].status;
@@ -823,13 +824,13 @@ void TransferManager::finalizeWorkerRun(quint64 taskId, qint64 precheckMs,
 bool TransferManager::shouldCancelWorkerTask(quint64 taskId) {
     if (paused_.load())
         return true;
-    std::lock_guard<std::mutex> lk(mtx_);
+    std::lock_guard<std::mutex> lock(mtx_);
     return canceledTasks_.count(taskId) > 0 || pausedTasks_.count(taskId) > 0;
 }
 
 void TransferManager::markTaskCanceledOrPausedFromWorker(quint64 taskId,
                                                          qint64 nowMs) {
-    std::lock_guard<std::mutex> lk(mtx_);
+    std::lock_guard<std::mutex> lock(mtx_);
     const int taskIndex = indexForId(taskId);
     if (taskIndex < 0)
         return;
@@ -843,7 +844,7 @@ void TransferManager::markTaskCanceledOrPausedFromWorker(quint64 taskId,
 void TransferManager::markTaskErrorFromWorker(quint64 taskId,
                                               const std::string &rawErr,
                                               qint64 nowMs) {
-    std::lock_guard<std::mutex> lk(mtx_);
+    std::lock_guard<std::mutex> lock(mtx_);
     const int taskIndex = indexForId(taskId);
     if (taskIndex < 0)
         return;
@@ -851,7 +852,7 @@ void TransferManager::markTaskErrorFromWorker(quint64 taskId,
 }
 
 void TransferManager::markTaskDoneFromWorker(quint64 taskId, qint64 nowMs) {
-    std::lock_guard<std::mutex> lk(mtx_);
+    std::lock_guard<std::mutex> lock(mtx_);
     const int taskIndex = indexForId(taskId);
     if (taskIndex < 0)
         return;
@@ -879,7 +880,7 @@ bool TransferManager::runWorkerPrecheckStage(WorkerPipelineContext &ctx) {
     auto skipTransfer = [this, &ctx, &finalizeEarly]() {
         ctx.precheckDoneMs = QDateTime::currentMSecsSinceEpoch();
         {
-            std::lock_guard<std::mutex> lk(mtx_);
+            std::lock_guard<std::mutex> lock(mtx_);
             const int taskIndex = indexForId(ctx.taskId);
             if (taskIndex >= 0)
                 transitionTaskToDone(tasks_[taskIndex], ctx.precheckDoneMs,
@@ -1062,7 +1063,7 @@ void TransferManager::runWorkerTransferStage(WorkerPipelineContext &ctx) {
             etaSec = 0;
 
         {
-            std::lock_guard<std::mutex> lk(mtx_);
+            std::lock_guard<std::mutex> lock(mtx_);
             const int taskIndex = indexForId(ctx.taskId);
             if (taskIndex >= 0) {
                 tasks_[taskIndex].progress = pct;
@@ -1078,7 +1079,7 @@ void TransferManager::runWorkerTransferStage(WorkerPipelineContext &ctx) {
         int taskLimit = 0; // KB/s (0 = unlimited)
         const int globalLimit = globalSpeedKBps_.load();
         {
-            std::lock_guard<std::mutex> lk(mtx_);
+            std::lock_guard<std::mutex> lock(mtx_);
             const int taskIndex = indexForId(ctx.taskId);
             if (taskIndex >= 0)
                 taskLimit = tasks_[taskIndex].speedLimitKBps;
@@ -1170,7 +1171,7 @@ void TransferManager::runWorkerTransferStage(WorkerPipelineContext &ctx) {
 
 void TransferManager::runWorkerPostStage(WorkerPipelineContext &ctx) {
     ctx.workerClient->disconnect();
-    std::lock_guard<std::mutex> lk(mtx_);
+    std::lock_guard<std::mutex> lock(mtx_);
     auto itResume = resumeRequestedTasks_.find(ctx.taskId);
     if (itResume == resumeRequestedTasks_.end())
         return;
@@ -1189,21 +1190,21 @@ void TransferManager::runWorkerPostStage(WorkerPipelineContext &ctx) {
 void TransferManager::runTaskWorkerPipeline(TransferTask task) {
     WorkerPipelineContext ctx;
     ctx.task = std::move(task);
-    ctx.taskId = ctx.task.id;
+    ctx.taskId = ctx.task.taskId;
 
     struct ActiveWorkerGuard {
         TransferManager *self = nullptr;
-        quint64 id = 0;
+        quint64 taskId = 0;
         ~ActiveWorkerGuard() {
             if (!self)
                 return;
-            std::lock_guard<std::mutex> lk(self->activeWorkersMutex_);
+            std::lock_guard<std::mutex> lock(self->activeWorkersMutex_);
             const std::size_t prevCount = self->activeWorkerTaskIds_.size();
-            self->activeWorkerClients_.erase(id);
-            self->activeWorkerTaskIds_.erase(id);
-            self->pendingInterruptTasks_.erase(id);
+            self->activeWorkerClients_.erase(taskId);
+            self->activeWorkerTaskIds_.erase(taskId);
+            self->pendingInterruptTasks_.erase(taskId);
             qCInfo(ocXfer) << "worker active cleared"
-                           << "taskId=" << id
+                           << "taskId=" << taskId
                            << "prevActiveCount=" << prevCount
                            << "activeCount="
                            << self->activeWorkerTaskIds_.size();
@@ -1212,7 +1213,7 @@ void TransferManager::runTaskWorkerPipeline(TransferTask task) {
 
     std::string createError;
     {
-        std::lock_guard<std::mutex> lk(activeWorkersMutex_);
+        std::lock_guard<std::mutex> lock(activeWorkersMutex_);
         activeWorkerTaskIds_.insert(ctx.taskId);
         qCInfo(ocXfer) << "worker active registered"
                        << "taskId=" << ctx.taskId
@@ -1222,7 +1223,7 @@ void TransferManager::runTaskWorkerPipeline(TransferTask task) {
     auto workerClientUnique = createWorkerClient(ctx.taskId, createError);
     if (!workerClientUnique) {
         {
-            std::lock_guard<std::mutex> lk(activeWorkersMutex_);
+            std::lock_guard<std::mutex> lock(activeWorkersMutex_);
             activeWorkerTaskIds_.erase(ctx.taskId);
             pendingInterruptTasks_.erase(ctx.taskId);
         }
@@ -1239,7 +1240,7 @@ void TransferManager::runTaskWorkerPipeline(TransferTask task) {
     std::optional<ActiveWorkerGuard> activeGuard;
     bool applyDeferredInterrupt = false;
     {
-        std::lock_guard<std::mutex> lk(activeWorkersMutex_);
+        std::lock_guard<std::mutex> lock(activeWorkersMutex_);
         activeWorkerClients_[ctx.taskId] = ctx.workerClient;
         applyDeferredInterrupt = pendingInterruptTasks_.erase(ctx.taskId) > 0;
     }
@@ -1253,11 +1254,11 @@ void TransferManager::runTaskWorkerPipeline(TransferTask task) {
     // clear active state immediately.
     activeGuard.emplace();
     activeGuard->self = this;
-    activeGuard->id = ctx.taskId;
+    activeGuard->taskId = ctx.taskId;
     ctx.workerCaps = ctx.workerClient->capabilities();
 
     {
-        std::lock_guard<std::mutex> lk(mtx_);
+        std::lock_guard<std::mutex> lock(mtx_);
         const int taskIndex = indexForId(ctx.taskId);
         if (taskIndex >= 0)
             tasks_[taskIndex].attempts += 1;
@@ -1288,7 +1289,7 @@ void TransferManager::schedule() {
         emit tasksChanged();
         running_.fetch_add(1);
 
-        const quint64 taskId = picked.task.id;
+        const quint64 taskId = picked.task.taskId;
         // Stage 3: validate relaunch constraints for the selected task.
         if (!validateWorkerLaunch(taskId)) {
             // Stage 4 (deferred path): finalize this scheduling attempt.
@@ -1300,9 +1301,9 @@ void TransferManager::schedule() {
     }
 }
 
-int TransferManager::indexForId(quint64 id) const {
+int TransferManager::indexForId(quint64 taskId) const {
     for (int taskIndex = 0; taskIndex < tasks_.size(); ++taskIndex)
-        if (tasks_[taskIndex].id == id)
+        if (tasks_[taskIndex].taskId == taskId)
             return taskIndex;
     return -1;
 }
@@ -1316,46 +1317,51 @@ void TransferManager::decrementRunningCounter() {
         running_.store(0);
 }
 
-void TransferManager::interruptActiveWorker(quint64 id) {
-    qCInfo(ocXfer) << "interruptActiveWorker requested" << "taskId=" << id;
-    std::unique_lock<std::mutex> lk(activeWorkersMutex_, std::defer_lock);
-    if (!tryLockWithRetries(lk)) {
+void TransferManager::interruptActiveWorker(quint64 taskId) {
+    qCInfo(ocXfer) << "interruptActiveWorker requested" << "taskId=" << taskId;
+    std::unique_lock<std::mutex> activeWorkersLock(activeWorkersMutex_,
+                                                   std::defer_lock);
+    if (!tryLockWithRetries(activeWorkersLock)) {
         qWarning(ocXfer)
             << "interruptActiveWorker lock timeout; cooperative cancel only"
-            << "taskId=" << id;
+            << "taskId=" << taskId;
         return;
     }
-    qCInfo(ocXfer) << "interruptActiveWorker lock acquired" << "taskId=" << id;
+    qCInfo(ocXfer) << "interruptActiveWorker lock acquired"
+                   << "taskId=" << taskId;
     std::shared_ptr<openscp::SftpClient> clientToInterrupt;
     bool deferred = false;
-    const bool active = activeWorkerTaskIds_.count(id) > 0;
+    const bool active = activeWorkerTaskIds_.count(taskId) > 0;
     qCInfo(ocXfer) << "interruptActiveWorker state"
-                   << "taskId=" << id
+                   << "taskId=" << taskId
                    << "active=" << active
                    << "activeCount=" << activeWorkerTaskIds_.size()
                    << "clientsCount=" << activeWorkerClients_.size();
-    auto clientIt = activeWorkerClients_.find(id);
+    auto clientIt = activeWorkerClients_.find(taskId);
     if (clientIt != activeWorkerClients_.end())
         clientToInterrupt = clientIt->second.lock();
     if (!active || !clientToInterrupt) {
-        pendingInterruptTasks_.insert(id);
+        pendingInterruptTasks_.insert(taskId);
         deferred = true;
         qCInfo(ocXfer) << "interruptActiveWorker pending set"
-                       << "taskId=" << id;
+                       << "taskId=" << taskId;
     }
-    lk.unlock();
+    activeWorkersLock.unlock();
     if (clientToInterrupt) {
-        qCInfo(ocXfer) << "interruptActiveWorker immediate" << "taskId=" << id;
+        qCInfo(ocXfer) << "interruptActiveWorker immediate"
+                       << "taskId=" << taskId;
         clientToInterrupt->interrupt();
     } else if (deferred) {
-        qCInfo(ocXfer) << "interruptActiveWorker deferred" << "taskId=" << id;
+        qCInfo(ocXfer) << "interruptActiveWorker deferred"
+                       << "taskId=" << taskId;
     }
 }
 
 void TransferManager::interruptActiveWorkers() {
     qCInfo(ocXfer) << "interruptActiveWorkers requested";
-    std::unique_lock<std::mutex> lk(activeWorkersMutex_, std::defer_lock);
-    if (!tryLockWithRetries(lk)) {
+    std::unique_lock<std::mutex> activeWorkersLock(activeWorkersMutex_,
+                                                   std::defer_lock);
+    if (!tryLockWithRetries(activeWorkersLock)) {
         qWarning(ocXfer)
             << "interruptActiveWorkers lock timeout; cooperative cancel only";
         return;
@@ -1380,7 +1386,7 @@ void TransferManager::interruptActiveWorkers() {
             deferred.push_back(taskId);
         }
     }
-    lk.unlock();
+    activeWorkersLock.unlock();
     for (const auto &entry : immediate) {
         qCInfo(ocXfer) << "interruptActiveWorkers immediate taskId="
                        << entry.first;
@@ -1391,24 +1397,24 @@ void TransferManager::interruptActiveWorkers() {
     }
 }
 
-bool TransferManager::isWorkerActive(quint64 id) {
-    std::lock_guard<std::mutex> lk(activeWorkersMutex_);
-    return activeWorkerTaskIds_.count(id) > 0;
+bool TransferManager::isWorkerActive(quint64 taskId) {
+    std::lock_guard<std::mutex> lock(activeWorkersMutex_);
+    return activeWorkerTaskIds_.count(taskId) > 0;
 }
 
-void TransferManager::pauseTask(quint64 id) {
+void TransferManager::pauseTask(quint64 taskId) {
     bool changed = false;
     bool shouldInterrupt = false;
     TransferTask::Status previousStatus = TransferTask::Status::Queued;
     {
-        std::lock_guard<std::mutex> lk(mtx_);
-        int taskIndex = indexForId(id);
+        std::lock_guard<std::mutex> lock(mtx_);
+        int taskIndex = indexForId(taskId);
         if (taskIndex >= 0) {
             previousStatus = tasks_[taskIndex].status;
             if (tasks_[taskIndex].status == TransferTask::Status::Queued ||
                 tasks_[taskIndex].status == TransferTask::Status::Running) {
-                resumeRequestedTasks_.erase(id);
-                pausedTasks_.insert(id);
+                resumeRequestedTasks_.erase(taskId);
+                pausedTasks_.insert(taskId);
                 transitionTaskToPaused(tasks_[taskIndex]);
                 changed = true;
                 shouldInterrupt =
@@ -1420,31 +1426,31 @@ void TransferManager::pauseTask(quint64 id) {
         return;
     emit tasksChanged();
     qCInfo(ocXfer) << "Pause requested"
-                   << "taskId=" << id
+                   << "taskId=" << taskId
                    << "prevStatus=" << transferStatusName(previousStatus);
     if (shouldInterrupt)
-        interruptActiveWorker(id);
+        interruptActiveWorker(taskId);
 }
 
-void TransferManager::resumeTask(quint64 id) {
-    const bool active = isWorkerActive(id);
+void TransferManager::resumeTask(quint64 taskId) {
+    const bool active = isWorkerActive(taskId);
     bool changed = false;
     bool queueNow = false;
     bool deferred = false;
     {
-        std::lock_guard<std::mutex> lk(mtx_);
-        int taskIndex = indexForId(id);
+        std::lock_guard<std::mutex> lock(mtx_);
+        int taskIndex = indexForId(taskId);
         if (taskIndex >= 0 &&
             tasks_[taskIndex].status == TransferTask::Status::Paused) {
             if (active) {
                 // Still finishing pause teardown; relaunch when worker exits.
-                resumeRequestedTasks_.insert(id);
+                resumeRequestedTasks_.insert(taskId);
                 deferred = true;
             } else {
                 const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-                pausedTasks_.erase(id);
+                pausedTasks_.erase(taskId);
                 transitionTaskToQueued(tasks_[taskIndex], nowMs, true);
-                resumeRequestedTasks_.erase(id);
+                resumeRequestedTasks_.erase(taskId);
                 changed = true;
                 queueNow = true;
             }
@@ -1454,44 +1460,44 @@ void TransferManager::resumeTask(quint64 id) {
         return;
     if (deferred) {
         qCInfo(ocXfer) << "Resume deferred; worker still active"
-                       << "taskId=" << id;
+                       << "taskId=" << taskId;
     } else {
-        qCInfo(ocXfer) << "Resume queued immediately" << "taskId=" << id;
+        qCInfo(ocXfer) << "Resume queued immediately" << "taskId=" << taskId;
     }
     emit tasksChanged();
     if (queueNow)
         schedule();
 }
 
-void TransferManager::setTaskSpeedLimit(quint64 id, int kbps) {
+void TransferManager::setTaskSpeedLimit(quint64 taskId, int kbps) {
     {
-        std::lock_guard<std::mutex> lk(mtx_);
-        int taskIndex = indexForId(id);
+        std::lock_guard<std::mutex> lock(mtx_);
+        int taskIndex = indexForId(taskId);
         if (taskIndex >= 0)
             tasks_[taskIndex].speedLimitKBps = kbps;
     }
     emit tasksChanged();
 }
 
-void TransferManager::cancelTask(quint64 id) {
+void TransferManager::cancelTask(quint64 taskId) {
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-    const bool activeWorker = isWorkerActive(id);
+    const bool activeWorker = isWorkerActive(taskId);
     bool found = false;
     bool transitionedToCanceled = false;
     bool shouldInterrupt = false;
     TransferTask::Status previousStatus = TransferTask::Status::Queued;
     {
-        std::lock_guard<std::mutex> lk(mtx_);
-        int taskIndex = indexForId(id);
+        std::lock_guard<std::mutex> lock(mtx_);
+        int taskIndex = indexForId(taskId);
         if (taskIndex >= 0) {
             found = true;
             previousStatus = tasks_[taskIndex].status;
             if (tasks_[taskIndex].status == TransferTask::Status::Queued ||
                 tasks_[taskIndex].status == TransferTask::Status::Running ||
                 tasks_[taskIndex].status == TransferTask::Status::Paused) {
-                resumeRequestedTasks_.erase(id);
-                canceledTasks_.insert(id);
-                pausedTasks_.erase(id);
+                resumeRequestedTasks_.erase(taskId);
+                canceledTasks_.insert(taskId);
+                pausedTasks_.erase(taskId);
                 transitionTaskToCanceled(tasks_[taskIndex], nowMs);
                 transitionedToCanceled = true;
                 shouldInterrupt =
@@ -1503,11 +1509,11 @@ void TransferManager::cancelTask(quint64 id) {
     if (transitionedToCanceled)
         emit tasksChanged();
     qCInfo(ocXfer) << "cancelTask requested"
-                   << "taskId=" << id
+                   << "taskId=" << taskId
                    << "found=" << found
                    << "prevStatus=" << transferStatusName(previousStatus)
                    << "activeWorker=" << activeWorker
                    << "transitionedToCanceled=" << transitionedToCanceled;
     if (shouldInterrupt)
-        interruptActiveWorker(id);
+        interruptActiveWorker(taskId);
 }
