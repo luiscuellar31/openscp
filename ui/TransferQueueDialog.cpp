@@ -166,6 +166,7 @@ static void withSelectedTasks(TransferManager *manager,
                               Callback callback) {
     if (ids.isEmpty())
         return;
+    // Use one immutable snapshot so all selected operations see the same state.
     const auto taskIndex = buildTaskIndexById(manager->tasksSnapshot());
     forEachSelectedTask(ids, taskIndex, callback);
 }
@@ -707,6 +708,7 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
 void TransferQueueDialog::refresh() {
     if (!model_)
         return;
+    // Refresh always works from manager snapshot to avoid stale view state.
     const auto snapshot = mgr_->tasksSnapshot();
     model_->sync(snapshot);
     maybeAutoClear(snapshot);
@@ -857,6 +859,7 @@ void TransferQueueDialog::updateSummary() {
     if (!model_)
         return;
 
+    // Summary counts drive both badges and action enablement.
     const auto &tasks = model_->tasks();
     int queued = 0, running = 0, paused = 0, done = 0, error = 0, canceled = 0;
     for (const auto &t : tasks) {
@@ -1116,6 +1119,7 @@ void TransferQueueDialog::maybeAutoClear(
     const qint64 cutoff =
         QDateTime::currentMSecsSinceEpoch() - qint64(minutes) * 60 * 1000;
     bool needsCleanup = false;
+    // Quick pre-scan avoids manager calls when nothing is eligible yet.
     for (const auto &t : snapshot) {
         const bool isDone = t.status == TransferTask::Status::Done;
         const bool isFailed = (t.status == TransferTask::Status::Error ||

@@ -66,6 +66,7 @@ bool RemoteWalker::walk(openscp::SftpClient *client, const QString &baseRemotePa
         int depth = 0;
     };
 
+    // Iterative DFS avoids recursion limits on deep directory trees.
     QVector<Node> stack;
     stack.push_back({normalizeRemotePath(baseRemotePath), QString(), 0});
     QSet<QString> visited;
@@ -85,6 +86,7 @@ bool RemoteWalker::walk(openscp::SftpClient *client, const QString &baseRemotePa
         const QString normalizedDir = normalizeRemotePath(node.remotePath);
         if (visited.contains(normalizedDir))
             continue;
+        // Track visited directories to prevent loops on buggy/aliased servers.
         visited.insert(normalizedDir);
         ++stats.visitedDirectoryCount;
 
@@ -130,6 +132,7 @@ bool RemoteWalker::walk(openscp::SftpClient *client, const QString &baseRemotePa
                                             : node.relativePath +
                                                   QStringLiteral("/") + name;
             if (options.sanitizeRelativePath) {
+                // Keep generated local-relative paths safe for staging/output.
                 childRelativePath = sanitizeRelativePath(childRelativePath);
                 if (childRelativePath.isEmpty()) {
                     ++stats.skippedInvalidNameCount;
@@ -164,4 +167,3 @@ bool RemoteWalker::walk(openscp::SftpClient *client, const QString &baseRemotePa
         *statsOut = stats;
     return true;
 }
-

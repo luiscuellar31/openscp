@@ -111,6 +111,7 @@ bool parseMlsdUtcTimestamp(const std::string &raw, std::uint64_t &outEpoch) {
     tm.tm_isdst = 0;
     std::tm localCopy = tm;
 #ifdef _WIN32
+    // MLSD timestamps are UTC; _mkgmtime/timegm convert tm as UTC.
     const std::time_t tt = _mkgmtime(&localCopy);
 #else
     const std::time_t tt = timegm(&localCopy);
@@ -207,6 +208,7 @@ bool runDirectoryListingCommand(const SessionOptions &opt,
                                 const std::string &remotePath,
                                 const char *command, std::string &payload,
                                 std::string &err) {
+    // Shared wire call for MLSD/LIST; parser choice is made by callers.
     payload.clear();
     CURL *curl = curl_easy_init();
     if (!curl) {
@@ -277,6 +279,7 @@ bool parseMlsdLine(const std::string &raw, FileInfo &info, bool &emit) {
     std::string type;
 
     std::size_t start = 0;
+    // Parse MLSD "facts" section: key=value;key=value;...
     while (start < factsPart.size()) {
         const std::size_t end = factsPart.find(';', start);
         const std::string fact = (end == std::string::npos)
@@ -451,6 +454,7 @@ bool parseListListing(const std::string &payload, std::vector<FileInfo> &out) {
         FileInfo info{};
         bool emit = false;
         bool ok = false;
+        // Try UNIX style first, then DOS style as compatibility fallback.
         if (normalized.front() == 'd' || normalized.front() == '-' ||
             normalized.front() == 'l' || normalized.front() == 'c' ||
             normalized.front() == 'b' || normalized.front() == 's' ||
@@ -523,6 +527,7 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
 
     const std::string url = buildFtpUrl(normalized, "/");
     std::string sink;
+    // Probe with lightweight directory listing to validate credentials/session.
     if (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) != CURLE_OK ||
         curl_easy_setopt(curl, CURLOPT_DIRLISTONLY, 1L) != CURLE_OK ||
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
@@ -585,6 +590,7 @@ bool CurlFtpClient::list(const std::string &remote_path,
 
     std::string mlsdPayload;
     std::string mlsdErr;
+    // Prefer MLSD (structured), then fallback to LIST (text parsing).
     const bool mlsdOk =
         runDirectoryListingCommand(opt, remote_path, "MLSD", mlsdPayload, mlsdErr);
     if (mlsdOk && parseMlsdListing(mlsdPayload, out))
@@ -597,6 +603,7 @@ bool CurlFtpClient::list(const std::string &remote_path,
     if (listOk && parseListListing(listPayload, out))
         return true;
 
+    // Surface both command/parsing outcomes so diagnosis is actionable.
     if (!mlsdOk && !listOk) {
         err = std::string(protocolLabel(opt.protocol)) +
               " directory listing failed. MLSD: " + mlsdErr +
@@ -681,6 +688,7 @@ bool CurlFtpClient::get(
     const CURLcode rc = curl_easy_perform(curl);
     std::fclose(localFile);
     curl_easy_cleanup(curl);
+    // Progress callback returns CURLE_ABORTED_BY_CALLBACK on cancel/interrupt.
     if (rc == CURLE_ABORTED_BY_CALLBACK && (shouldCancel && shouldCancel())) {
         err = "Canceled by user";
         return false;
@@ -776,6 +784,7 @@ bool CurlFtpClient::put(
     const CURLcode rc = curl_easy_perform(curl);
     std::fclose(localFile);
     curl_easy_cleanup(curl);
+    // Match get() semantics so UI can treat cancellation uniformly.
     if (rc == CURLE_ABORTED_BY_CALLBACK && (shouldCancel && shouldCancel())) {
         err = "Canceled by user";
         return false;

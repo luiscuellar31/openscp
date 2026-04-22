@@ -43,6 +43,7 @@ QString newSiteId(const SavedSitesPersistence::LoadOptions &options) {
 
 QString uniqueSiteId(const SavedSitesPersistence::LoadOptions &options,
                      const QSet<QString> &usedIds) {
+    // Keep deterministic behavior for custom generators, then fallback to UUID.
     for (int attempt = 0; attempt < 16; ++attempt) {
         const QString candidate = newSiteId(options);
         if (!candidate.isEmpty() && !usedIds.contains(candidate))
@@ -76,6 +77,7 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
         settings.setArrayIndex(i);
         SiteEntry site;
 
+        // Repair missing/duplicate IDs on read to keep each site addressable.
         site.id = settings.value("id").toString().trimmed();
         if (site.id.isEmpty() || usedIds.contains(site.id)) {
             site.id = uniqueSiteId(options, usedIds);
@@ -107,6 +109,7 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
                 .trimmed()
                 .toLower()
                 .toStdString());
+        // Persist legacy entries with explicit mode so later reads are stable.
         if (!hasScpTransferModeKey)
             result.needsSave = true;
 
@@ -132,6 +135,7 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
             site.opt.protocol == openscp::Protocol::WebDav &&
             site.opt.port == openscp::defaultPortForWebDavScheme(
                                  openscp::WebDavScheme::Http)) {
+            // Legacy WebDAV entries with port 80 are normalized to HTTP.
             site.opt.webdav_scheme = openscp::WebDavScheme::Http;
             result.needsSave = true;
         }
@@ -211,6 +215,7 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
 
         if (site.opt.protocol == openscp::Protocol::WebDav &&
             site.opt.webdav_scheme == openscp::WebDavScheme::Http) {
+            // HTTP mode never uses TLS verification fields.
             site.opt.webdav_verify_peer = false;
             site.opt.webdav_ca_cert_path.reset();
         }

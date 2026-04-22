@@ -42,6 +42,7 @@ using curlcommon::toLowerAscii;
 using curlcommon::trimAscii;
 
 std::string normalizeRemotePath(std::string path) {
+    // Canonicalize to absolute POSIX-like form used by WebDAV operations.
     if (path.empty())
         return "/";
     for (char &c : path) {
@@ -146,6 +147,7 @@ bool performTextRequest(const SessionOptions &opt, const std::string &method,
                         const std::string *requestBody,
                         const std::vector<std::string> &headers,
                         WebDavResponse &response, std::string &err) {
+    // Generic request helper for WebDAV verbs with text/XML payloads.
     response = WebDavResponse{};
     CURL *curl = curl_easy_init();
     if (!curl) {
@@ -365,6 +367,7 @@ std::string decodePercent(std::string raw) {
 void parsePropElement(const tinyxml2::XMLElement *prop, WebDavResource &out) {
     if (!prop)
         return;
+    // Parse a minimal DAV property set used by listing/stat.
     if (const tinyxml2::XMLElement *resType =
             firstChildByLocal(prop, "resourcetype")) {
         for (const tinyxml2::XMLElement *child = resType->FirstChildElement();
@@ -419,6 +422,7 @@ bool parsePropfindResponse(const std::string &xml,
     std::vector<const tinyxml2::XMLElement *> stack;
     stack.push_back(root);
 
+    // Walk the whole XML tree so namespace/prefix variations are tolerated.
     while (!stack.empty()) {
         const tinyxml2::XMLElement *elem = stack.back();
         stack.pop_back();
@@ -526,6 +530,7 @@ const std::string &propfindBody() {
 
 bool performPropfind(const SessionOptions &opt, const std::string &remotePath,
                      int depth, WebDavResponse &response, std::string &err) {
+    // PROPFIND drives both stat(depth=0) and list(depth=1).
     const std::string body = propfindBody();
     std::vector<std::string> headers = {
         "Depth: " + std::to_string(depth),
@@ -633,6 +638,7 @@ bool CurlWebDavClient::list(const std::string &remote_path,
     if (!parsePropfindResponse(response.body, resources, err))
         return false;
 
+    // Convert PROPFIND output to immediate children only.
     for (const WebDavResource &r : resources) {
         std::string childName;
         if (!isDirectChildPath(basePath, r.path, childName))
@@ -822,6 +828,7 @@ bool CurlWebDavClient::stat(const std::string &remote_path, FileInfo &info,
     if (!parsePropfindResponse(response.body, resources, err))
         return false;
 
+    // Some servers return only one resource; accept it as target fallback.
     auto it = std::find_if(resources.begin(), resources.end(),
                            [&target](const WebDavResource &r) {
                                return r.path == target;
@@ -888,6 +895,7 @@ bool CurlWebDavClient::mkdir(const std::string &remote_dir, std::string &err,
     WebDavResponse response;
     if (!performTextRequest(opt, "MKCOL", remote_dir, nullptr, {}, response, err))
         return false;
+    // Some servers return 405 when the collection already exists.
     if (response.statusCode == 200 || response.statusCode == 201 ||
         response.statusCode == 204 || response.statusCode == 405) {
         return true;
@@ -935,6 +943,7 @@ bool CurlWebDavClient::rename(const std::string &from, const std::string &to,
         opt = options_;
     }
     const std::string destination = buildWebDavUrl(opt, to);
+    // RFC 4918 MOVE requires absolute Destination URL.
     std::vector<std::string> headers = {
         "Destination: " + destination,
         std::string("Overwrite: ") + (overwrite ? "T" : "F"),

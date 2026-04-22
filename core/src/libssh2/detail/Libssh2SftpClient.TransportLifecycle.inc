@@ -109,6 +109,7 @@ bool Libssh2SftpClient::describeJumpTunnelFailure(std::string &err) {
         return false;
 
     bool exited = false;
+    // Poll child state without blocking; handshake path remains responsive.
     if (jumpPid > 0) {
         int status = 0;
         const pid_t wr = ::waitpid(static_cast<pid_t>(jumpPid), &status, WNOHANG);

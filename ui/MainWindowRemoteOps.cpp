@@ -1288,7 +1288,8 @@ void MainWindow::moveRightToLeft() {
                 const bool allFinal = areTransferPairsFinal(
                     tasks, TransferTask::Type::Download, pairs);
                 if (allFinal) {
-                    // Refrescar vista remota una vez al final
+                    // Refresh remote listing once after all move-related tasks
+                    // settle.
                     QString refreshError;
                     if (rightRemoteModel_)
                         rightRemoteModel_->setRootPath(remoteBase, &refreshError);

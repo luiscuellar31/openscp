@@ -44,12 +44,14 @@ constexpr const char *kShortcutHistoryKey = "Shortcuts/openHistory";
 
 QVector<SettingsDialog::SettingBinding>
 SettingsDialog::buildSettingBindings() const {
+    // Build a single source of truth for settings I/O and control sync.
     QVector<SettingBinding> bindings;
     bindings.reserve(40);
 
     using StringNormalizer = std::function<QString(const QString &)>;
     using IntNormalizer = std::function<int(int)>;
 
+    // Factory helpers keep each binding consistent (read current/apply/write).
     auto makeBoolCheckBinding = [](const QString &key, bool defaultValue,
                                    QCheckBox *check) {
         return SettingBinding{
@@ -675,6 +677,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
 
     constexpr int kFieldMinWidth = 320;
     constexpr int kFieldMaxWidth = 520;
+    // Keep field widths aligned across pages for predictable wrapping.
     auto setFieldWidth = [kFieldMinWidth, kFieldMaxWidth](QWidget *field) {
         if (!field)
             return;
@@ -735,6 +738,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                         bool pickFile, QLineEdit *&editOut,
                         QPushButton *&browseButtonOut,
                         const QString &placeholder = QString()) {
+            // Reuse the same "path + choose button" row pattern.
             auto *rowWidget = new QWidget(parent);
             auto *row = new QHBoxLayout(rowWidget);
             row->setContentsMargins(0, 0, 0, 0);
@@ -1169,6 +1173,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     }
 
     // Bind controls to dirty flag
+    // Grouping by widget type keeps this block compact and easy to audit.
     for (QComboBox *combo : {
              langCombo_,        clickMode_,           openBehaviorMode_,
              defaultProtocol_,  scpModeDefault_,      defaultKnownHostsPolicy_,

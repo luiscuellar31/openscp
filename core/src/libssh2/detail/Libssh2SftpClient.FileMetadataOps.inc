@@ -44,7 +44,7 @@ bool Libssh2SftpClient::stat(const std::string &remote_path, FileInfo &info,
         if (sftp_err == LIBSSH2_FX_NO_SUCH_FILE ||
             sftp_err == LIBSSH2_FX_FAILURE) {
             err.clear();
-            return false; // no existe
+            return false; // missing path
         }
         err = "remote stat failed";
         return false;
@@ -76,7 +76,7 @@ bool Libssh2SftpClient::chmod(const std::string &remote_path,
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
 #ifdef LIBSSH2_SFTP
-    // For compatibility, via SETSTAT
+    // libssh2 exposes chmod through SETSTAT.
     LIBSSH2_SFTP_ATTRIBUTES a{};
     a.flags = LIBSSH2_SFTP_ATTR_PERMISSIONS;
     a.permissions = mode;
@@ -91,7 +91,7 @@ bool Libssh2SftpClient::chmod(const std::string &remote_path,
 #else
     (void)remote_path;
     (void)mode;
-    err = "chmod no soportado";
+    err = "chmod not supported";
     return false;
 #endif
 }
@@ -130,6 +130,7 @@ bool Libssh2SftpClient::chown(const std::string &remote_path, std::uint32_t uid,
         a.gid = gid;
     }
     if (a.flags == 0) {
+        // Nothing requested to change.
         err.clear();
         return true;
     }

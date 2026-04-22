@@ -13,6 +13,7 @@ namespace openscp::curlcommon {
 bool ensureCurlInitialized(std::string &err) {
     static std::once_flag initFlag;
     static CURLcode initResult = CURLE_OK;
+    // libcurl global init is process-wide and must run exactly once.
     std::call_once(initFlag, [] {
         initResult = curl_global_init(CURL_GLOBAL_DEFAULT);
     });
@@ -83,6 +84,7 @@ bool configureProxy(CURL *curl, const SessionOptions &opt,
     }
 
     const ProxyType normalizedProxyType = normalizeProxyType(opt.proxy_type);
+    // Map app-level proxy enum to libcurl proxy transport.
     long proxyType = 0;
     switch (normalizedProxyType) {
     case ProxyType::Socks5:
@@ -191,6 +193,8 @@ int transferProgressCallback(void *userdata, curl_off_t dltotal, curl_off_t dlno
         return 0;
 
     const bool preferUpload = ctx->preferUploadCounters;
+    // Some protocols only report one side reliably; pick preferred counters
+    // and fallback to the opposite side when needed.
     const curl_off_t totalRaw =
         preferUpload ? ((ultotal > 0) ? ultotal : dltotal)
                      : ((dltotal > 0) ? dltotal : ultotal);

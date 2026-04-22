@@ -55,6 +55,7 @@ void appendSessionErrorDetail(_LIBSSH2_SESSION *session, std::string &msg) {
 bool Libssh2ScpClient::connect(const SessionOptions &opt, std::string &err) {
     sessionOptions_.reset();
     SessionOptions copy = opt;
+    // Force protocol marker so downstream fallback builds the right client.
     copy.protocol = Protocol::Scp;
     if (!delegate_.connectTransportOnly(copy, err))
         return false;
@@ -102,6 +103,8 @@ bool Libssh2ScpClient::get(
     if (!channel) {
         std::string scpErr = "Could not open remote file for SCP download";
         appendSessionErrorDetail(session, scpErr);
+        // SCP could be blocked by server policy/path rules; try SFTP fallback
+        // only when the selected mode allows it.
         if (!sftpFallbackEnabled()) {
             scpErr +=
                 " (SFTP fallback is disabled by the selected SCP mode)";
@@ -134,6 +137,7 @@ bool Libssh2ScpClient::get(
     std::vector<char> buffer(kScpChunkSize);
     std::size_t done = 0;
 
+    // Pull from remote channel until EOF; libssh2 is polled in non-blocking mode.
     while (true) {
         if (shouldCancel && shouldCancel()) {
             err = "Canceled by user";
@@ -155,6 +159,7 @@ bool Libssh2ScpClient::get(
             closeScpChannel(channel, false);
             std::string scpErr = "SCP read failed";
             appendSessionErrorDetail(session, scpErr);
+            // Retry through SFTP only when SCP mode is "Auto".
             if (!sftpFallbackEnabled()) {
                 scpErr +=
                     " (SFTP fallback is disabled by the selected SCP mode)";
@@ -245,6 +250,7 @@ bool Libssh2ScpClient::put(
         std::string scpErr = "Could not open remote file for SCP upload";
         appendSessionErrorDetail(session, scpErr);
         std::fclose(localFile);
+        // Mirror download behavior: optional fallback to SFTP upload.
         if (!sftpFallbackEnabled()) {
             scpErr +=
                 " (SFTP fallback is disabled by the selected SCP mode)";
@@ -282,6 +288,7 @@ bool Libssh2ScpClient::put(
 
         char *ptr = buffer.data();
         std::size_t remaining = nread;
+        // libssh2_channel_write may write fewer bytes than requested.
         while (remaining > 0) {
             if (shouldCancel && shouldCancel()) {
                 err = "Canceled by user";
@@ -299,6 +306,8 @@ bool Libssh2ScpClient::put(
                 closeScpChannel(channel, false);
                 std::string scpErr = "SCP write failed";
                 appendSessionErrorDetail(session, scpErr);
+                // Fallback keeps transfer features available when SCP write
+                // path is rejected by the server.
                 if (!sftpFallbackEnabled()) {
                     scpErr +=
                         " (SFTP fallback is disabled by the selected SCP mode)";

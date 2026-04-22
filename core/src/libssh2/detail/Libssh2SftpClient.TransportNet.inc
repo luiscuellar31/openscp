@@ -42,6 +42,7 @@ static bool set_socket_timeout_ms(int sock, int timeoutMs) {
 static bool socket_send_all(int sock, const unsigned char *data,
                             std::size_t len, const char *stage,
                             std::string &err) {
+    // send(2) may write partially; loop until the full buffer is sent.
     std::size_t off = 0;
     while (off < len) {
         const ssize_t w =
@@ -64,6 +65,7 @@ static bool socket_send_all(int sock, const unsigned char *data,
 
 static bool socket_recv_exact(int sock, unsigned char *buf, std::size_t len,
                               const char *stage, std::string &err) {
+    // recv(2) may return partial data; loop until we fill the requested bytes.
     std::size_t off = 0;
     while (off < len) {
         const ssize_t r =
@@ -134,6 +136,7 @@ static bool connect_tcp_endpoint(const std::string &host, uint16_t port,
     }
 
     std::string lastConnectErr;
+    // Try all resolved addresses (IPv4/IPv6) until one succeeds.
     for (auto rp = res; rp != nullptr; rp = rp->ai_next) {
         int s = ::socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (s == -1)
@@ -659,4 +662,3 @@ bool Libssh2SftpClient::tcpConnect(const SessionOptions &opt,
     sock_ = socketFd;
     return true;
 }
-
