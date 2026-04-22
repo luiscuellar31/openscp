@@ -38,21 +38,21 @@
 #include <thread>
 
 // Best-effort memory scrubbing helpers for sensitive data
-static inline void secureClear(QString &s) {
-    const int charCount = s.size();
+static inline void secureClear(QString &text) {
+    const int charCount = text.size();
     for (int charIndex = 0; charIndex < charCount; ++charIndex)
-        s[charIndex] = QChar(u'\0');
-    s.clear();
+        text[charIndex] = QChar(u'\0');
+    text.clear();
 }
-static inline void secureClear(QByteArray &b) {
-    if (b.isEmpty())
+static inline void secureClear(QByteArray &bytes) {
+    if (bytes.isEmpty())
         return;
-    volatile char *p = reinterpret_cast<volatile char *>(b.data());
-    const int byteCount = b.size();
+    volatile char *bytePtr = reinterpret_cast<volatile char *>(bytes.data());
+    const int byteCount = bytes.size();
     for (int byteIndex = 0; byteIndex < byteCount; ++byteIndex)
-        p[byteIndex] = 0;
-    b.clear();
-    b.squeeze();
+        bytePtr[byteIndex] = 0;
+    bytes.clear();
+    bytes.squeeze();
 }
 static QString newQuickSiteId() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -163,10 +163,10 @@ static bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
            compareWebDavTls;
 }
 
-static QString quickSiteSecretKey(const SiteEntry &e, const QString &item) {
-    if (!e.id.isEmpty())
-        return QString("site-id:%1:%2").arg(e.id, item);
-    return QString("site:%1:%2").arg(e.name, item);
+static QString quickSiteSecretKey(const SiteEntry &entry, const QString &item) {
+    if (!entry.siteId.isEmpty())
+        return QString("site-id:%1:%2").arg(entry.siteId, item);
+    return QString("site:%1:%2").arg(entry.name, item);
 }
 
 static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool *needsSave) {
@@ -211,8 +211,8 @@ static QString ensureUniqueQuickSiteName(const QVector<SiteEntry> &sites,
     if (base.isEmpty())
         base = QObject::tr("New site");
     auto exists = [&](const QString &candidate) {
-        for (const auto &s : sites) {
-            if (s.name.compare(candidate, Qt::CaseInsensitive) == 0)
+        for (const auto &site : sites) {
+            if (site.name.compare(candidate, Qt::CaseInsensitive) == 0)
                 return true;
         }
         return false;
@@ -230,8 +230,8 @@ static QString ensureUniqueQuickSiteName(const QVector<SiteEntry> &sites,
                QUuid::createUuid().toString(QUuid::WithoutBraces).left(6));
 }
 
-static QString quickPersistStatusShort(SecretStore::PersistStatus st) {
-    switch (st) {
+static QString quickPersistStatusShort(SecretStore::PersistStatus status) {
+    switch (status) {
     case SecretStore::PersistStatus::Stored:
         return QObject::tr("stored");
     case SecretStore::PersistStatus::Unavailable:
@@ -768,12 +768,12 @@ void MainWindow::completeDisconnectSftp(quint64 disconnectSeq, bool forced) {
     }
 }
 
-void MainWindow::setOpenSiteManagerOnDisconnect(bool on) {
-    if (m_openSiteManagerOnDisconnect == on)
+void MainWindow::setOpenSiteManagerOnDisconnect(bool enabled) {
+    if (m_openSiteManagerOnDisconnect == enabled)
         return;
-    m_openSiteManagerOnDisconnect = on;
+    m_openSiteManagerOnDisconnect = enabled;
     QSettings settings("OpenSCP", "OpenSCP");
-    settings.setValue("UI/openSiteManagerOnDisconnect", on);
+    settings.setValue("UI/openSiteManagerOnDisconnect", enabled);
     settings.sync();
 }
 
@@ -812,12 +812,12 @@ void MainWindow::showSiteManagerNonModal() {
     });
 }
 
-void MainWindow::setOpenSiteManagerOnStartup(bool on) {
-    if (m_openSiteManagerOnStartup == on)
+void MainWindow::setOpenSiteManagerOnStartup(bool enabled) {
+    if (m_openSiteManagerOnStartup == enabled)
         return;
-    m_openSiteManagerOnStartup = on;
+    m_openSiteManagerOnStartup = enabled;
     QSettings settings("OpenSCP", "OpenSCP");
-    settings.setValue("UI/showConnOnStart", on);
+    settings.setValue("UI/showConnOnStart", enabled);
     settings.sync();
 }
 
@@ -902,13 +902,13 @@ void MainWindow::updateHostPolicyRiskBanner() {
     m_hostPolicyRiskLabel_->show();
 }
 
-QString MainWindow::defaultDownloadDirFromSettings(const QSettings &s) {
+QString MainWindow::defaultDownloadDirFromSettings(const QSettings &settings) {
     QString fallback =
         QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
     if (fallback.isEmpty())
         fallback = QDir::homePath() + "/Downloads";
     QString configured = QDir::cleanPath(
-        s.value("UI/defaultDownloadDir", fallback).toString().trimmed());
+        settings.value("UI/defaultDownloadDir", fallback).toString().trimmed());
     if (configured.isEmpty())
         configured = fallback;
     return configured;
@@ -922,7 +922,7 @@ bool MainWindow::confirmHostKeyUI(const QString &host, quint16 port,
     m_tofuFp_ = fingerprint;
     m_tofuCanSave_ = canSave;
     {
-        std::unique_lock<std::mutex> lk(m_tofuMutex_);
+        std::unique_lock<std::mutex> tofuLock(m_tofuMutex_);
         m_tofuDecided_ = false;
         m_tofuAccepted_ = false;
     }
@@ -932,14 +932,14 @@ bool MainWindow::confirmHostKeyUI(const QString &host, quint16 port,
             showTOfuDialog(host, algorithm, fingerprint);
         },
         Qt::QueuedConnection);
-    std::unique_lock<std::mutex> lk(m_tofuMutex_);
-    m_tofuCv_.wait(lk, [&] { return m_tofuDecided_; });
+    std::unique_lock<std::mutex> tofuLock(m_tofuMutex_);
+    m_tofuCv_.wait(tofuLock, [&] { return m_tofuDecided_; });
     return m_tofuAccepted_;
 }
 
 // Explicit non‑modal TOFU dialog per spec: open() + finished -> onTofuFinished
-void MainWindow::showTOfuDialog(const QString &host, const QString &alg,
-                                const QString &fp) {
+void MainWindow::showTOfuDialog(const QString &host, const QString &algorithm,
+                                const QString &fingerprint) {
     if (m_tofuBox) {
         m_tofuBox->raise();
         m_tofuBox->activateWindow();
@@ -970,15 +970,15 @@ void MainWindow::showTOfuDialog(const QString &host, const QString &alg,
     QString text = QString(tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
                               "%3\n\nTrust and save to known_hosts?"))
                        .arg(host)
-                       .arg(alg)
-                       .arg(fp);
+                       .arg(algorithm)
+                       .arg(fingerprint);
     if (!m_tofuCanSave_) {
         text = QString(tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
                           "%3\n\nFingerprint cannot be saved. Connection "
                           "allowed only this time."))
                    .arg(host)
-                   .arg(alg)
-                   .arg(fp);
+                   .arg(algorithm)
+                   .arg(fingerprint);
     }
     box->setText(text);
     box->addButton(m_tofuCanSave_ ? tr("Trust") : tr("Connect without saving"),
@@ -1011,7 +1011,7 @@ bool MainWindow::consumeTofuDialogDecision(int result) {
 
 void MainWindow::publishTofuDecision(bool accept) {
     {
-        std::unique_lock<std::mutex> lk(m_tofuMutex_);
+        std::unique_lock<std::mutex> tofuLock(m_tofuMutex_);
         m_tofuAccepted_ = accept;
         m_tofuDecided_ = true;
     }
@@ -1040,8 +1040,9 @@ void MainWindow::onTofuFinished(int dialogResult) {
 }
 
 // Secondary non‑modal dialog for one‑time connection without saving
-void MainWindow::showOneTimeDialog(const QString &host, const QString &alg,
-                                   const QString &fp) {
+void MainWindow::showOneTimeDialog(const QString &host,
+                                   const QString &algorithm,
+                                   const QString &fingerprint) {
     if (m_tofuBox) {
         m_tofuBox->raise();
         m_tofuBox->activateWindow();
@@ -1058,7 +1059,7 @@ void MainWindow::showOneTimeDialog(const QString &host, const QString &alg,
         QString(
             tr("Could not save the fingerprint. Connect only this time without "
                "saving?\n\nHost: %1\nAlgorithm: %2\nFingerprint: %3"))
-            .arg(host, alg, fp));
+            .arg(host, algorithm, fingerprint));
     box->addButton(tr("Connect without saving"), QMessageBox::YesRole);
     box->addButton(tr("Cancel"), QMessageBox::RejectRole);
     connect(box, &QMessageBox::finished, this, &MainWindow::onOneTimeFinished);
@@ -1189,24 +1190,27 @@ void MainWindow::initializeSftpConnectUiState(
 void MainWindow::configureSftpConnectCallbacks(openscp::SessionOptions &opt) {
     QPointer<MainWindow> self(this);
     // Inject host key confirmation (TOFU) via UI
-    opt.hostkey_confirm_cb = [self](const std::string &h, std::uint16_t p,
-                                    const std::string &alg,
-                                    const std::string &fp, bool canSave) {
+    opt.hostkey_confirm_cb = [self](const std::string &host,
+                                    std::uint16_t port,
+                                    const std::string &algorithm,
+                                    const std::string &fingerprint,
+                                    bool canSave) {
         if (!self)
             return false;
-        return self->confirmHostKeyUI(QString::fromStdString(h), (quint16)p,
-                                      QString::fromStdString(alg),
-                                      QString::fromStdString(fp), canSave);
+        return self->confirmHostKeyUI(
+            QString::fromStdString(host), static_cast<quint16>(port),
+            QString::fromStdString(algorithm),
+            QString::fromStdString(fingerprint), canSave);
     };
     opt.hostkey_status_cb = [self](const std::string &msg) {
         if (!self)
             return;
-        const QString q = QString::fromStdString(msg);
+        const QString statusMessage = QString::fromStdString(msg);
         QMetaObject::invokeMethod(
             self,
-            [self, q] {
+            [self, statusMessage] {
                 if (self)
-                    self->statusBar()->showMessage(q, 5000);
+                    self->statusBar()->showMessage(statusMessage, 5000);
             },
             Qt::QueuedConnection);
     };
@@ -1255,23 +1259,25 @@ void MainWindow::configureSftpConnectCallbacks(openscp::SessionOptions &opt) {
 
         // Resolve each prompt: auto-fill user/pass and ask for OTP/codes if
         // present
-        for (const std::string &p : prompts) {
-            QString qprompt = QString::fromStdString(p);
-            QString lower = qprompt.toLower();
+        for (const std::string &promptTextUtf8 : prompts) {
+            QString promptText = QString::fromStdString(promptTextUtf8);
+            QString promptTextLower = promptText.toLower();
             // Username
-            if (lower.contains("user") || lower.contains("name:")) {
+            if (promptTextLower.contains("user") ||
+                promptTextLower.contains("name:")) {
                 responses.emplace_back(savedUser);
                 continue;
             }
             // Password
-            if (lower.contains("password") || lower.contains("passphrase") ||
-                lower.contains("passcode")) {
+            if (promptTextLower.contains("password") ||
+                promptTextLower.contains("passphrase") ||
+                promptTextLower.contains("passcode")) {
                 if (!savedPass.empty()) {
                     responses.emplace_back(savedPass);
                     continue;
                 }
                 QString answer;
-                if (!promptForInput(tr("Password required"), qprompt,
+                if (!promptForInput(tr("Password required"), promptText,
                                     QLineEdit::Password, answer)) {
                     return openscp::KbdIntPromptResult::Cancelled;
                 }
@@ -1280,12 +1286,14 @@ void MainWindow::configureSftpConnectCallbacks(openscp::SessionOptions &opt) {
             }
             // OTP / Verification code / Token
             QString answer;
-            if (lower.contains("verification") || lower.contains("verify") ||
-                lower.contains("otp") || lower.contains("code") ||
-                lower.contains("token")) {
+            if (promptTextLower.contains("verification") ||
+                promptTextLower.contains("verify") ||
+                promptTextLower.contains("otp") ||
+                promptTextLower.contains("code") ||
+                promptTextLower.contains("token")) {
                 const QString title =
                     tr("Verification code required") + instructionSuffix;
-                if (!promptForInput(title, qprompt, QLineEdit::Password,
+                if (!promptForInput(title, promptText, QLineEdit::Password,
                                     answer)) {
                     return openscp::KbdIntPromptResult::Cancelled;
                 }
@@ -1294,7 +1302,7 @@ void MainWindow::configureSftpConnectCallbacks(openscp::SessionOptions &opt) {
             }
             // Generic case: ask for text (not hidden)
             const QString title = tr("Information required") + instructionSuffix;
-            if (!promptForInput(title, qprompt, QLineEdit::Normal, answer))
+            if (!promptForInput(title, promptText, QLineEdit::Normal, answer))
                 return openscp::KbdIntPromptResult::Cancelled;
             appendUtf8Response(answer);
         }
@@ -1384,7 +1392,8 @@ void MainWindow::startSftpConnect(
 }
 
 void MainWindow::finalizeSftpConnect(
-    bool okConn, const QString &err, openscp::SftpClient *connectedClient,
+    bool connectionOk, const QString &errorText,
+    openscp::SftpClient *connectedClient,
     const openscp::SessionOptions &uiOpt,
     std::optional<PendingSiteSaveRequest> saveRequest, bool canceledByUser) {
     std::unique_ptr<openscp::SftpClient> guard(connectedClient);
@@ -1398,7 +1407,7 @@ void MainWindow::finalizeSftpConnect(
     if (actSites_)
         actSites_->setEnabled(true);
 
-    if (!okConn) {
+    if (!connectionOk) {
         if (actConnect_ && !rightIsRemote_)
             actConnect_->setEnabled(true);
         if (canceledByUser)
@@ -1408,7 +1417,7 @@ void MainWindow::finalizeSftpConnect(
                 this, tr("Connection error"),
                 tr("Could not connect to the server.\n%1")
                     .arg(shortRemoteError(
-                        err, tr("Check host, port, and credentials."))));
+                        errorText, tr("Check host, port, and credentials."))));
         }
         return;
     }
@@ -1438,16 +1447,16 @@ void MainWindow::maybePersistQuickConnectSite(
 
     bool created = false;
     if (matchIndex < 0) {
-        SiteEntry e;
-        e.id = newQuickSiteId();
-        e.name = ensureUniqueQuickSiteName(
+        SiteEntry newEntry;
+        newEntry.siteId = newQuickSiteId();
+        newEntry.name = ensureUniqueQuickSiteName(
             sites, req.siteName.trimmed().isEmpty() ? defaultQuickSiteName(opt)
                                                     : req.siteName.trimmed());
-        e.opt = opt;
-        e.opt.password.reset();
-        e.opt.private_key_passphrase.reset();
-        e.opt.proxy_password.reset();
-        sites.push_back(e);
+        newEntry.opt = opt;
+        newEntry.opt.password.reset();
+        newEntry.opt.private_key_passphrase.reset();
+        newEntry.opt.proxy_password.reset();
+        sites.push_back(newEntry);
         matchIndex = sites.size() - 1;
         created = true;
     }
@@ -1479,7 +1488,7 @@ void MainWindow::maybePersistQuickConnectSite(
         const auto saveResult = store.setSecret(
             quickSiteSecretKey(target, secretKey),
             QString::fromStdString(*value));
-        if (saveResult.ok())
+        if (saveResult.isStored())
             anyCredentialStored = true;
         else
             issues << tr("%1: %2")

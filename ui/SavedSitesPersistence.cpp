@@ -73,17 +73,17 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
 
     const int siteCount = settings.beginReadArray("sites");
     QSet<QString> usedIds;
-    for (int i = 0; i < siteCount; ++i) {
-        settings.setArrayIndex(i);
+    for (int siteIndex = 0; siteIndex < siteCount; ++siteIndex) {
+        settings.setArrayIndex(siteIndex);
         SiteEntry site;
 
         // Repair missing/duplicate IDs on read to keep each site addressable.
-        site.id = settings.value("id").toString().trimmed();
-        if (site.id.isEmpty() || usedIds.contains(site.id)) {
-            site.id = uniqueSiteId(options, usedIds);
+        site.siteId = settings.value("id").toString().trimmed();
+        if (site.siteId.isEmpty() || usedIds.contains(site.siteId)) {
+            site.siteId = uniqueSiteId(options, usedIds);
             result.needsSave = true;
         }
-        usedIds.insert(site.id);
+        usedIds.insert(site.siteId);
 
         site.name = settings.value("name").toString();
         if (options.trimSiteNames)
@@ -232,10 +232,10 @@ void SavedSitesPersistence::saveSites(const QVector<SiteEntry> &sites,
     QSettings settings("OpenSCP", "OpenSCP");
     settings.remove("sites");
     settings.beginWriteArray("sites");
-    for (int i = 0; i < sites.size(); ++i) {
-        settings.setArrayIndex(i);
-        const SiteEntry &site = sites[i];
-        settings.setValue("id", site.id);
+    for (int siteIndex = 0; siteIndex < sites.size(); ++siteIndex) {
+        settings.setArrayIndex(siteIndex);
+        const SiteEntry &site = sites[siteIndex];
+        settings.setValue("id", site.siteId);
         settings.setValue("name", site.name);
         settings.setValue(
             "protocol",

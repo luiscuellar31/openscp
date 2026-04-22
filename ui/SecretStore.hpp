@@ -20,7 +20,7 @@ class SecretStore {
     struct PersistResult {
         PersistStatus status = PersistStatus::Stored;
         QString detail;
-        bool ok() const { return status == PersistStatus::Stored; }
+        bool isStored() const { return status == PersistStatus::Stored; }
     };
 
     // Store a secret under a logical key (e.g. "site-id:<uuid>:password").

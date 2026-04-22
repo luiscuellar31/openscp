@@ -28,11 +28,11 @@
 #include <QVBoxLayout>
 
 static QString defaultDownloadDirPath() {
-    QString p =
+    QString downloadPath =
         QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
-    if (p.isEmpty())
-        p = QDir::homePath() + "/Downloads";
-    return p;
+    if (downloadPath.isEmpty())
+        downloadPath = QDir::homePath() + "/Downloads";
+    return downloadPath;
 }
 
 constexpr int kQueueAutoClearOff = 0;
@@ -41,6 +41,26 @@ constexpr int kQueueAutoClearFailedCanceled = 2;
 constexpr int kQueueAutoClearFinished = 3;
 constexpr const char *kShortcutTransfersKey = "Shortcuts/openTransfers";
 constexpr const char *kShortcutHistoryKey = "Shortcuts/openHistory";
+constexpr int kFieldMinWidth = 320;
+constexpr int kFieldMaxWidth = 520;
+
+using ComboItem = QPair<QString, QVariant>;
+
+static void addComboItems(QComboBox *combo,
+                          std::initializer_list<ComboItem> items) {
+    if (!combo)
+        return;
+    for (const auto &item : items)
+        combo->addItem(item.first, item.second);
+}
+
+static void removeSettingsKeys(QSettings *settings,
+                               std::initializer_list<const char *> keys) {
+    if (!settings)
+        return;
+    for (const char *key : keys)
+        settings->remove(QString::fromLatin1(key));
+}
 
 QVector<SettingsDialog::SettingBinding>
 SettingsDialog::buildSettingBindings() const {
@@ -509,7 +529,7 @@ QVariantMap SettingsDialog::readPersistedSnapshot(
     for (const auto &binding : bindings) {
         if (!binding.readPersisted)
             continue;
-        snapshot.insert(binding.id, binding.readPersisted(settings));
+        snapshot.insert(binding.bindingKey, binding.readPersisted(settings));
     }
     return snapshot;
 }
@@ -520,7 +540,7 @@ SettingsDialog::readCurrentSnapshot(const QVector<SettingBinding> &bindings) con
     for (const auto &binding : bindings) {
         if (!binding.readCurrent)
             continue;
-        snapshot.insert(binding.id, binding.readCurrent());
+        snapshot.insert(binding.bindingKey, binding.readCurrent());
     }
     return snapshot;
 }
@@ -530,7 +550,7 @@ void SettingsDialog::applySnapshotToControls(
     for (const auto &binding : bindings) {
         if (!binding.applyToControl)
             continue;
-        binding.applyToControl(snapshot.value(binding.id));
+        binding.applyToControl(snapshot.value(binding.bindingKey));
     }
 }
 
@@ -540,12 +560,12 @@ void SettingsDialog::writeSnapshot(
     for (const auto &binding : bindings) {
         if (!binding.writePersisted)
             continue;
-        binding.writePersisted(settings, snapshot.value(binding.id));
+        binding.writePersisted(settings, snapshot.value(binding.bindingKey));
     }
 }
 
 QString SettingsDialog::wrapTextToWidth(const QString &text,
-                                        const QFontMetrics &fm,
+                                        const QFontMetrics &fontMetrics,
                                         int maxWidth) {
     if (text.isEmpty() || maxWidth <= 0)
         return text;
@@ -565,7 +585,8 @@ QString SettingsDialog::wrapTextToWidth(const QString &text,
         for (const QString &word : words) {
             const QString candidate =
                 current.isEmpty() ? word : (current + QStringLiteral(" ") + word);
-            if (current.isEmpty() || fm.horizontalAdvance(candidate) <= maxWidth) {
+            if (current.isEmpty() ||
+                fontMetrics.horizontalAdvance(candidate) <= maxWidth) {
                 current = candidate;
                 continue;
             }
@@ -579,32 +600,34 @@ QString SettingsDialog::wrapTextToWidth(const QString &text,
     return wrappedParagraphs.join('\n');
 }
 
-void SettingsDialog::trackWrappedCheck(QCheckBox *cb) {
-    if (!cb)
+void SettingsDialog::trackWrappedCheck(QCheckBox *checkBox) {
+    if (!checkBox)
         return;
-    cb->setProperty("rawText", cb->text());
-    cb->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    wrappedChecks_.push_back(cb);
+    checkBox->setProperty("rawText", checkBox->text());
+    checkBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    wrappedChecks_.push_back(checkBox);
 }
 
 void SettingsDialog::refreshWrappedCheckTexts() {
-    for (QCheckBox *cb : wrappedChecks_) {
-        if (!cb)
+    for (QCheckBox *checkBox : wrappedChecks_) {
+        if (!checkBox)
             continue;
-        const QString raw = cb->property("rawText").toString();
+        const QString raw = checkBox->property("rawText").toString();
         if (raw.isEmpty())
             continue;
 
-        int widgetWidth = cb->width();
+        int widgetWidth = checkBox->width();
         if (widgetWidth <= 0)
-            widgetWidth = cb->contentsRect().width();
+            widgetWidth = checkBox->contentsRect().width();
         if (widgetWidth <= 0) {
             int viewportWidth = 0;
-            for (QWidget *p = cb->parentWidget(); p; p = p->parentWidget()) {
-                if (auto *scroll = qobject_cast<QScrollArea *>(p)) {
-                    viewportWidth = scroll->viewport()
-                                        ? scroll->viewport()->width()
-                                        : scroll->width();
+            for (QWidget *ancestorWidget = checkBox->parentWidget();
+                 ancestorWidget; ancestorWidget = ancestorWidget->parentWidget()) {
+                if (auto *scrollArea =
+                        qobject_cast<QScrollArea *>(ancestorWidget)) {
+                    viewportWidth = scrollArea->viewport()
+                                        ? scrollArea->viewport()->width()
+                                        : scrollArea->width();
                     break;
                 }
             }
@@ -612,41 +635,32 @@ void SettingsDialog::refreshWrappedCheckTexts() {
         }
 
         const int indicatorW =
-            cb->style()->pixelMetric(QStyle::PM_IndicatorWidth, nullptr, cb);
+            checkBox->style()->pixelMetric(QStyle::PM_IndicatorWidth, nullptr,
+                                           checkBox);
         const int indicatorH =
-            cb->style()->pixelMetric(QStyle::PM_IndicatorHeight, nullptr, cb);
-        const int spacingW = cb->style()->pixelMetric(
-            QStyle::PM_CheckBoxLabelSpacing, nullptr, cb);
+            checkBox->style()->pixelMetric(QStyle::PM_IndicatorHeight, nullptr,
+                                           checkBox);
+        const int spacingW = checkBox->style()->pixelMetric(
+            QStyle::PM_CheckBoxLabelSpacing, nullptr, checkBox);
         const int textWidth = qMax(100, widgetWidth - indicatorW - spacingW - 10);
-        const QString wrapped = wrapTextToWidth(raw, QFontMetrics(cb->font()),
+        const QString wrapped = wrapTextToWidth(raw, QFontMetrics(checkBox->font()),
                                                 textWidth);
-        if (cb->text() != wrapped) {
-            cb->setText(wrapped);
-            cb->updateGeometry();
+        if (checkBox->text() != wrapped) {
+            checkBox->setText(wrapped);
+            checkBox->updateGeometry();
         }
         const int lineCount = wrapped.count('\n') + 1;
-        const int textHeight = lineCount * QFontMetrics(cb->font()).lineSpacing();
+        const int textHeight =
+            lineCount * QFontMetrics(checkBox->font()).lineSpacing();
         const int minHeight = qMax(indicatorH, textHeight) + 6;
-        if (cb->minimumHeight() != minHeight)
-            cb->setMinimumHeight(minHeight);
+        if (checkBox->minimumHeight() != minHeight)
+            checkBox->setMinimumHeight(minHeight);
     }
 }
 
-SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
-    setWindowTitle(tr("Settings"));
-    resize(860, 620);
-    setMinimumSize(760, 560);
-
-    auto *root = new QVBoxLayout(this);
-    root->setContentsMargins(12, 12, 12, 12);
-    root->setSpacing(10);
-
-    auto *contentRow = new QHBoxLayout();
-    contentRow->setContentsMargins(0, 0, 0, 0);
-    contentRow->setSpacing(10);
-    root->addLayout(contentRow, 1);
-
-    auto *sectionList = new QListWidget(this);
+void SettingsDialog::setupSectionList(QListWidget *sectionList) const {
+    if (!sectionList)
+        return;
     sectionList->setSelectionMode(QAbstractItemView::SingleSelection);
     sectionList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     sectionList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
@@ -658,208 +672,219 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         "1px 0; }"
         "QListWidget::item:selected { background: palette(highlight); color: "
         "palette(highlighted-text); }");
-    contentRow->addWidget(sectionList);
+}
 
-    auto *pages = new QStackedWidget(this);
-    contentRow->addWidget(pages, 1);
-    auto recalcSectionListWidth = [sectionList]() {
-        const QFontMetrics fm(sectionList->font());
-        int maxTextWidth = 0;
-        for (int i = 0; i < sectionList->count(); ++i) {
-            if (auto *item = sectionList->item(i)) {
-                maxTextWidth = qMax(maxTextWidth, fm.horizontalAdvance(item->text()));
-            }
-        }
-        // Padding/frame/margins for the list plus translated label width.
-        const int width = qBound(150, maxTextWidth + 48, 260);
-        sectionList->setFixedWidth(width);
-    };
+void SettingsDialog::recalcSectionListWidth(QListWidget *sectionList) const {
+    if (!sectionList)
+        return;
+    const QFontMetrics fm(sectionList->font());
+    int maxTextWidth = 0;
+    for (int rowIndex = 0; rowIndex < sectionList->count(); ++rowIndex) {
+        if (auto *item = sectionList->item(rowIndex))
+            maxTextWidth = qMax(maxTextWidth, fm.horizontalAdvance(item->text()));
+    }
+    const int width = qBound(150, maxTextWidth + 48, 260);
+    sectionList->setFixedWidth(width);
+}
 
-    constexpr int kFieldMinWidth = 320;
-    constexpr int kFieldMaxWidth = 520;
-    // Keep field widths aligned across pages for predictable wrapping.
-    auto setFieldWidth = [kFieldMinWidth, kFieldMaxWidth](QWidget *field) {
-        if (!field)
-            return;
-        field->setMinimumWidth(kFieldMinWidth);
-        field->setMaximumWidth(kFieldMaxWidth);
-    };
-    auto addLabeledRow = [](QFormLayout *target, QWidget *parent,
-                            const QString &labelText, QWidget *field) {
-        auto *label = new QLabel(labelText, parent);
-        label->setWordWrap(true);
-        label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
-        target->addRow(label, field);
-    };
-    auto createFormPage = [pages, sectionList, recalcSectionListWidth](
-                              const QString &title,
-                              QFormLayout *&outForm) -> QWidget * {
-        auto *scroll = new QScrollArea(pages);
-        scroll->setWidgetResizable(true);
-        scroll->setFrameShape(QFrame::NoFrame);
-        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        auto *page = new QWidget(scroll);
-        auto *pageLay = new QVBoxLayout(page);
-        pageLay->setContentsMargins(12, 12, 12, 12);
-        pageLay->setSpacing(8);
-        auto *form = new QFormLayout();
-        form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-        form->setRowWrapPolicy(QFormLayout::WrapLongRows);
-        form->setHorizontalSpacing(8);
-        form->setVerticalSpacing(8);
-        pageLay->addLayout(form);
-        pageLay->addStretch(1);
-        scroll->setWidget(page);
-        pages->addWidget(scroll);
-        sectionList->addItem(title);
-        recalcSectionListWidth();
-        outForm = form;
-        return page;
-    };
-    auto addCheckRow = [this](QFormLayout *target, QWidget *parent,
-                              const QString &text) {
-        auto *cb = new QCheckBox(text, parent);
-        trackWrappedCheck(cb);
-        target->addRow(QString(), cb);
-        return cb;
-    };
-    auto addComboRow = [setFieldWidth, addLabeledRow](
-                           QFormLayout *target, QWidget *parent,
-                           const QString &labelText) {
-        auto *combo = new QComboBox(parent);
-        setFieldWidth(combo);
-        addLabeledRow(target, parent, labelText, combo);
-        return combo;
-    };
-    auto addBrowsePathRow =
-        [this, setFieldWidth,
-         addLabeledRow](QFormLayout *target, QWidget *parent,
-                        const QString &labelText, const QString &dialogTitle,
-                        bool pickFile, QLineEdit *&editOut,
-                        QPushButton *&browseButtonOut,
-                        const QString &placeholder = QString()) {
-            // Reuse the same "path + choose button" row pattern.
-            auto *rowWidget = new QWidget(parent);
-            auto *row = new QHBoxLayout(rowWidget);
-            row->setContentsMargins(0, 0, 0, 0);
-            row->setSpacing(6);
+QWidget *SettingsDialog::createFormPage(const PageBuildContext &ctx,
+                                        const QString &title,
+                                        QFormLayout *&outForm) const {
+    auto *scroll = new QScrollArea(ctx.pages);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    auto *page = new QWidget(scroll);
+    auto *pageLay = new QVBoxLayout(page);
+    pageLay->setContentsMargins(12, 12, 12, 12);
+    pageLay->setSpacing(8);
 
-            auto *edit = new QLineEdit(parent);
-            setFieldWidth(edit);
-            if (!placeholder.isEmpty())
-                edit->setPlaceholderText(placeholder);
+    auto *form = new QFormLayout();
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+    form->setHorizontalSpacing(8);
+    form->setVerticalSpacing(8);
+    pageLay->addLayout(form);
+    pageLay->addStretch(1);
 
-            auto *browseButton = new QPushButton(tr("Choose…"), parent);
-            row->addWidget(edit, 1);
-            row->addWidget(browseButton);
-            addLabeledRow(target, parent, labelText, rowWidget);
+    scroll->setWidget(page);
+    if (ctx.pages)
+        ctx.pages->addWidget(scroll);
+    if (ctx.sectionList)
+        ctx.sectionList->addItem(title);
+    recalcSectionListWidth(ctx.sectionList);
 
-            connect(browseButton, &QPushButton::clicked, this,
-                    [this, edit, dialogTitle, pickFile] {
-                        const QString currentPath =
-                            edit ? edit->text() : QString();
-                        const QString basePath = currentPath.isEmpty()
-                                                     ? QDir::homePath()
-                                                     : currentPath;
-                        const QString pickedPath =
-                            pickFile
-                                ? QFileDialog::getOpenFileName(
-                                      this, dialogTitle, basePath)
-                                : QFileDialog::getExistingDirectory(
-                                      this, dialogTitle, basePath);
-                        if (!pickedPath.isEmpty() && edit)
-                            edit->setText(pickedPath);
-                    });
+    outForm = form;
+    return page;
+}
 
-            editOut = edit;
-            browseButtonOut = browseButton;
-        };
-    auto bindDirtyFlag = [this]<typename Sender, typename Signal>(
-                             Sender *sender, Signal signal) {
-        if (sender)
-            connect(sender, signal, this,
-                    &SettingsDialog::updateApplyFromControls);
-    };
+void SettingsDialog::setFieldWidth(QWidget *field) const {
+    if (!field)
+        return;
+    field->setMinimumWidth(kFieldMinWidth);
+    field->setMaximumWidth(kFieldMaxWidth);
+}
 
+void SettingsDialog::addLabeledRow(QFormLayout *target, QWidget *parent,
+                                   const QString &labelText,
+                                   QWidget *field) const {
+    auto *label = new QLabel(labelText, parent);
+    label->setWordWrap(true);
+    label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+    target->addRow(label, field);
+}
+
+void SettingsDialog::addTrackedCheckRows(
+    QFormLayout *target, QWidget *parent,
+    std::initializer_list<QPair<QCheckBox **, QString>> rows) {
+    for (const auto &row : rows) {
+        if (!row.first)
+            continue;
+        auto *check = new QCheckBox(row.second, parent);
+        trackWrappedCheck(check);
+        target->addRow(QString(), check);
+        *row.first = check;
+    }
+}
+
+QComboBox *SettingsDialog::addComboRow(QFormLayout *target, QWidget *parent,
+                                       const QString &labelText) const {
+    auto *combo = new QComboBox(parent);
+    setFieldWidth(combo);
+    addLabeledRow(target, parent, labelText, combo);
+    return combo;
+}
+
+QSpinBox *SettingsDialog::addSpinRow(QFormLayout *target, QWidget *parent,
+                                     const QString &labelText, int minValue,
+                                     int maxValue, int defaultValue,
+                                     const QString &suffix, int minWidth,
+                                     int step,
+                                     const QString &toolTip) const {
+    auto *spin = new QSpinBox(parent);
+    spin->setRange(minValue, maxValue);
+    spin->setValue(defaultValue);
+    if (!suffix.isEmpty())
+        spin->setSuffix(suffix);
+    spin->setMinimumWidth(minWidth);
+    if (step > 1)
+        spin->setSingleStep(step);
+    if (!toolTip.isEmpty())
+        spin->setToolTip(toolTip);
+    addLabeledRow(target, parent, labelText, spin);
+    return spin;
+}
+
+void SettingsDialog::addBrowsePathRow(QFormLayout *target, QWidget *parent,
+                                      const QString &labelText,
+                                      const QString &dialogTitle, bool pickFile,
+                                      QLineEdit *&editOut,
+                                      QPushButton *&browseButtonOut,
+                                      const QString &placeholder) {
+    auto *rowWidget = new QWidget(parent);
+    auto *row = new QHBoxLayout(rowWidget);
+    row->setContentsMargins(0, 0, 0, 0);
+    row->setSpacing(6);
+
+    auto *edit = new QLineEdit(parent);
+    setFieldWidth(edit);
+    if (!placeholder.isEmpty())
+        edit->setPlaceholderText(placeholder);
+
+    auto *browseButton = new QPushButton(tr("Choose…"), parent);
+    row->addWidget(edit, 1);
+    row->addWidget(browseButton);
+    addLabeledRow(target, parent, labelText, rowWidget);
+
+    connect(browseButton, &QPushButton::clicked, this,
+            [this, edit, dialogTitle, pickFile] {
+                const QString currentPath = edit ? edit->text() : QString();
+                const QString basePath =
+                    currentPath.isEmpty() ? QDir::homePath() : currentPath;
+                const QString pickedPath =
+                    pickFile
+                        ? QFileDialog::getOpenFileName(this, dialogTitle, basePath)
+                        : QFileDialog::getExistingDirectory(this, dialogTitle,
+                                                            basePath);
+                if (!pickedPath.isEmpty() && edit)
+                    edit->setText(pickedPath);
+            });
+
+    editOut = edit;
+    browseButtonOut = browseButton;
+}
+
+void SettingsDialog::buildGeneralPage(const PageBuildContext &ctx) {
     QFormLayout *generalForm = nullptr;
-    QWidget *generalPage = createFormPage(tr("General"), generalForm);
-
-    // General settings
+    QWidget *generalPage = createFormPage(ctx, tr("General"), generalForm);
     langCombo_ = addComboRow(generalForm, generalPage, tr("Language:"));
-    langCombo_->addItem(tr("Spanish"), "es");
-    langCombo_->addItem(tr("English"), "en");
-    langCombo_->addItem(tr("French"), "fr");
-    langCombo_->addItem(tr("Portuguese"), "pt");
+    addComboItems(langCombo_, {{tr("Spanish"), QStringLiteral("es")},
+                               {tr("English"), QStringLiteral("en")},
+                               {tr("French"), QStringLiteral("fr")},
+                               {tr("Portuguese"), QStringLiteral("pt")}});
     clickMode_ = addComboRow(generalForm, generalPage, tr("Open with:"));
-    clickMode_->addItem(tr("Double click"), 2);
-    clickMode_->addItem(tr("Single click"), 1);
+    addComboItems(clickMode_, {{tr("Double click"), 2},
+                               {tr("Single click"), 1}});
     openBehaviorMode_ =
         addComboRow(generalForm, generalPage, tr("On file open:"));
-    openBehaviorMode_->addItem(tr("Always ask"), QStringLiteral("ask"));
-    openBehaviorMode_->addItem(tr("Show folder"), QStringLiteral("reveal"));
-    openBehaviorMode_->addItem(tr("Open file"), QStringLiteral("open"));
-
-    showHidden_ =
-        addCheckRow(generalForm, generalPage, tr("Show hidden files"));
-    showConnOnStart_ = addCheckRow(generalForm, generalPage,
-                                   tr("Open Site Manager on startup"));
-    showConnOnDisconnect_ = addCheckRow(generalForm, generalPage,
-                                        tr("Open Site Manager on disconnect"));
-    showQueueOnEnqueue_ = addCheckRow(
-        generalForm, generalPage, tr("Open queue when enqueuing transfers"));
+    addComboItems(openBehaviorMode_, {{tr("Always ask"), QStringLiteral("ask")},
+                                      {tr("Show folder"),
+                                       QStringLiteral("reveal")},
+                                      {tr("Open file"), QStringLiteral("open")}});
+    addTrackedCheckRows(
+        generalForm, generalPage,
+        {{&showHidden_, tr("Show hidden files")},
+         {&showConnOnStart_, tr("Open Site Manager on startup")},
+         {&showConnOnDisconnect_, tr("Open Site Manager on disconnect")},
+         {&showQueueOnEnqueue_, tr("Open queue when enqueuing transfers")}});
     addBrowsePathRow(generalForm, generalPage, tr("Download folder:"),
                      tr("Select download folder"), false,
                      defaultDownloadDirEdit_, defaultDownloadBrowseBtn_);
-    {
-        resetMainLayoutBtn_ =
-            new QPushButton(tr("Restore default sizes"), generalPage);
-        addLabeledRow(generalForm, generalPage, tr("Window layout:"),
-                      resetMainLayoutBtn_);
-        connect(resetMainLayoutBtn_, &QPushButton::clicked, this, [this] {
-            const auto ret = UiAlerts::question(
-                this, tr("Restore layout"),
-                tr("Restore the main window layout and column sizes to "
-                   "their defaults?"),
-                QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-            if (ret != QMessageBox::Yes)
-                return;
 
-            QSettings s("OpenSCP", "OpenSCP");
-            s.remove("UI/mainWindow/geometry");
-            s.remove("UI/mainWindow/windowState");
-            s.remove("UI/mainWindow/splitterState");
-            s.remove("UI/mainWindow/leftHeaderState");
-            s.remove("UI/mainWindow/rightHeaderLocal");
-            s.remove("UI/mainWindow/rightHeaderRemote");
-            s.sync();
+    resetMainLayoutBtn_ = new QPushButton(tr("Restore default sizes"), generalPage);
+    addLabeledRow(generalForm, generalPage, tr("Window layout:"),
+                  resetMainLayoutBtn_);
+    connect(resetMainLayoutBtn_, &QPushButton::clicked, this, [this] {
+        const auto ret = UiAlerts::question(
+            this, tr("Restore layout"),
+            tr("Restore the main window layout and column sizes to their "
+               "defaults?"),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (ret != QMessageBox::Yes)
+            return;
 
-            bool appliedNow = false;
-            if (QWidget *w = parentWidget()) {
-                appliedNow = QMetaObject::invokeMethod(
-                    w, "resetMainWindowLayoutToDefaults",
-                    Qt::DirectConnection);
-            }
+        QSettings settings("OpenSCP", "OpenSCP");
+        removeSettingsKeys(&settings, {"UI/mainWindow/geometry",
+                                       "UI/mainWindow/windowState",
+                                       "UI/mainWindow/splitterState",
+                                       "UI/mainWindow/leftHeaderState",
+                                       "UI/mainWindow/rightHeaderLocal",
+                                       "UI/mainWindow/rightHeaderRemote"});
+        settings.sync();
+        bool appliedNow = false;
+        if (QWidget *parentWindow = parentWidget()) {
+            appliedNow = QMetaObject::invokeMethod(
+                parentWindow, "resetMainWindowLayoutToDefaults",
+                Qt::DirectConnection);
+        }
+        UiAlerts::information(
+            this, tr("Restore layout"),
+            appliedNow ? tr("Default layout restored.")
+                       : tr("Default layout will be used the next time the app "
+                            "starts."));
+    });
+}
 
-            UiAlerts::information(
-                this, tr("Restore layout"),
-                appliedNow
-                    ? tr("Default layout restored.")
-                    : tr("Default layout will be used the next time the app "
-                         "starts."));
-        });
-    }
-
+void SettingsDialog::buildShortcutsPage(const PageBuildContext &ctx) {
     QFormLayout *shortcutsForm = nullptr;
-    QWidget *shortcutsPage = createFormPage(tr("Shortcuts"), shortcutsForm);
+    QWidget *shortcutsPage = createFormPage(ctx, tr("Shortcuts"), shortcutsForm);
     shortcutsForm->setVerticalSpacing(8);
-    {
-        auto *shortcutsHint = new QLabel(
-            tr("Select an action and press the new key combination directly in "
-               "the field."),
-            shortcutsPage);
-        shortcutsHint->setWordWrap(true);
-        shortcutsForm->addRow(QString(), shortcutsHint);
-    }
+    auto *shortcutsHint = new QLabel(
+        tr("Select an action and press the new key combination directly in the "
+           "field."),
+        shortcutsPage);
+    shortcutsHint->setWordWrap(true);
+    shortcutsForm->addRow(QString(), shortcutsHint);
     queueShortcutEdit_ = new QKeySequenceEdit(shortcutsPage);
     setFieldWidth(queueShortcutEdit_);
     addLabeledRow(shortcutsForm, shortcutsPage, tr("Transfers shortcut:"),
@@ -868,289 +893,211 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     setFieldWidth(historyShortcutEdit_);
     addLabeledRow(shortcutsForm, shortcutsPage, tr("History shortcut:"),
                   historyShortcutEdit_);
+}
 
+void SettingsDialog::buildTransfersPage(const PageBuildContext &ctx) {
     QFormLayout *transfersForm = nullptr;
-    QWidget *transfersPage = createFormPage(tr("Transfers"), transfersForm);
+    QWidget *transfersPage = createFormPage(ctx, tr("Transfers"), transfersForm);
     transfersForm->setVerticalSpacing(10);
-    maxConcurrentSpin_ = new QSpinBox(transfersPage);
-    maxConcurrentSpin_->setRange(1, 8);
-    maxConcurrentSpin_->setValue(2);
-    maxConcurrentSpin_->setMinimumWidth(90);
-    maxConcurrentSpin_->setToolTip(
-        tr("Maximum number of concurrent transfers."));
-    addLabeledRow(transfersForm, transfersPage, tr("Parallel tasks:"),
-                  maxConcurrentSpin_);
-    globalSpeedDefaultSpin_ = new QSpinBox(transfersPage);
-    globalSpeedDefaultSpin_->setRange(0, 1'000'000);
-    globalSpeedDefaultSpin_->setValue(0);
-    globalSpeedDefaultSpin_->setSuffix(" KB/s");
-    globalSpeedDefaultSpin_->setMinimumWidth(120);
-    globalSpeedDefaultSpin_->setToolTip(tr("0 = no global speed limit."));
-    addLabeledRow(transfersForm, transfersPage, tr("Default global limit:"),
-                  globalSpeedDefaultSpin_);
+    maxConcurrentSpin_ = addSpinRow(
+        transfersForm, transfersPage, tr("Parallel tasks:"), 1, 8, 2,
+        QString(), 90, 1, tr("Maximum number of concurrent transfers."));
+    globalSpeedDefaultSpin_ = addSpinRow(
+        transfersForm, transfersPage, tr("Default global limit:"), 0, 1'000'000,
+        0, tr(" KB/s"), 120, 1, tr("0 = no global speed limit."));
     queueAutoClearModeDefault_ = new QComboBox(transfersPage);
     setFieldWidth(queueAutoClearModeDefault_);
-    queueAutoClearModeDefault_->addItem(tr("Off"), kQueueAutoClearOff);
-    queueAutoClearModeDefault_->addItem(tr("Completed"),
-                                        kQueueAutoClearCompleted);
-    queueAutoClearModeDefault_->addItem(tr("Failed/Canceled"),
-                                        kQueueAutoClearFailedCanceled);
-    queueAutoClearModeDefault_->addItem(tr("All finished"),
-                                        kQueueAutoClearFinished);
+    addComboItems(queueAutoClearModeDefault_,
+                  {{tr("Off"), kQueueAutoClearOff},
+                   {tr("Completed"), kQueueAutoClearCompleted},
+                   {tr("Failed/Canceled"), kQueueAutoClearFailedCanceled},
+                   {tr("All finished"), kQueueAutoClearFinished}});
     addLabeledRow(transfersForm, transfersPage, tr("Queue auto-clear default:"),
                   queueAutoClearModeDefault_);
-    queueAutoClearMinutesDefaultSpin_ = new QSpinBox(transfersPage);
-    queueAutoClearMinutesDefaultSpin_->setRange(1, 1440);
-    queueAutoClearMinutesDefaultSpin_->setValue(15);
-    queueAutoClearMinutesDefaultSpin_->setSuffix(tr(" min"));
-    queueAutoClearMinutesDefaultSpin_->setMinimumWidth(100);
-    addLabeledRow(transfersForm, transfersPage, tr("Queue auto-clear after:"),
-                  queueAutoClearMinutesDefaultSpin_);
-    auto updateQueueAutoClearDefaultsUi = [this]() {
-        if (!queueAutoClearModeDefault_ || !queueAutoClearMinutesDefaultSpin_)
-            return;
-        const bool enabled =
-            queueAutoClearModeDefault_->currentData().toInt() !=
-            kQueueAutoClearOff;
-        queueAutoClearMinutesDefaultSpin_->setEnabled(enabled);
-    };
+    queueAutoClearMinutesDefaultSpin_ = addSpinRow(
+        transfersForm, transfersPage, tr("Queue auto-clear after:"), 1, 1440, 15,
+        tr(" min"));
     connect(queueAutoClearModeDefault_, &QComboBox::currentIndexChanged, this,
-            [this, updateQueueAutoClearDefaultsUi](int) {
+            [this](int) {
                 updateQueueAutoClearDefaultsUi();
                 updateApplyFromControls();
             });
+}
 
+void SettingsDialog::buildSitesPage(const PageBuildContext &ctx) {
     QFormLayout *sitesForm = nullptr;
-    QWidget *sitesPage = createFormPage(tr("Sites"), sitesForm);
+    QWidget *sitesPage = createFormPage(ctx, tr("Sites"), sitesForm);
     sitesForm->setVerticalSpacing(8);
     defaultProtocol_ = new QComboBox(sitesPage);
     setFieldWidth(defaultProtocol_);
-    defaultProtocol_->addItem(tr("SFTP"),
-                              static_cast<int>(openscp::Protocol::Sftp));
-    defaultProtocol_->addItem(tr("SCP"),
-                              static_cast<int>(openscp::Protocol::Scp));
-    defaultProtocol_->addItem(tr("FTP"),
-                              static_cast<int>(openscp::Protocol::Ftp));
-    defaultProtocol_->addItem(tr("FTPS"),
-                              static_cast<int>(openscp::Protocol::Ftps));
-    defaultProtocol_->addItem(tr("WebDAV"),
-                              static_cast<int>(openscp::Protocol::WebDav));
-    addLabeledRow(sitesForm, sitesPage, tr("Default protocol:"),
-                  defaultProtocol_);
+    addComboItems(defaultProtocol_,
+                  {{tr("SFTP"), static_cast<int>(openscp::Protocol::Sftp)},
+                   {tr("SCP"), static_cast<int>(openscp::Protocol::Scp)},
+                   {tr("FTP"), static_cast<int>(openscp::Protocol::Ftp)},
+                   {tr("FTPS"), static_cast<int>(openscp::Protocol::Ftps)},
+                   {tr("WebDAV"), static_cast<int>(openscp::Protocol::WebDav)}});
+    addLabeledRow(sitesForm, sitesPage, tr("Default protocol:"), defaultProtocol_);
     scpModeDefault_ = new QComboBox(sitesPage);
     setFieldWidth(scpModeDefault_);
-    scpModeDefault_->addItem(
-        tr("Automatic (SCP with SFTP fallback)"),
-        static_cast<int>(openscp::ScpTransferMode::Auto));
-    scpModeDefault_->addItem(
-        tr("SCP only (disable SFTP fallback)"),
-        static_cast<int>(openscp::ScpTransferMode::ScpOnly));
-    addLabeledRow(sitesForm, sitesPage, tr("Default SCP mode:"),
-                  scpModeDefault_);
-    deleteSecretsOnRemove_ = addCheckRow(
+    addComboItems(scpModeDefault_,
+                  {{tr("Automatic (SCP with SFTP fallback)"),
+                    static_cast<int>(openscp::ScpTransferMode::Auto)},
+                   {tr("SCP only (disable SFTP fallback)"),
+                    static_cast<int>(openscp::ScpTransferMode::ScpOnly)}});
+    addLabeledRow(sitesForm, sitesPage, tr("Default SCP mode:"), scpModeDefault_);
+    addTrackedCheckRows(
         sitesForm, sitesPage,
-        tr("When deleting a site, also remove its stored credentials."));
+        {{&deleteSecretsOnRemove_,
+          tr("When deleting a site, also remove its stored credentials.")}});
+}
 
+void SettingsDialog::buildSecurityPage(const PageBuildContext &ctx) {
     QFormLayout *securityForm = nullptr;
-    QWidget *securityPage = createFormPage(tr("Security"), securityForm);
+    QWidget *securityPage = createFormPage(ctx, tr("Security"), securityForm);
     securityForm->setVerticalSpacing(8);
     defaultKnownHostsPolicy_ = new QComboBox(securityPage);
     setFieldWidth(defaultKnownHostsPolicy_);
-    defaultKnownHostsPolicy_->addItem(
-        tr("Strict"), static_cast<int>(openscp::KnownHostsPolicy::Strict));
-    defaultKnownHostsPolicy_->addItem(
-        tr("Accept new (TOFU)"),
-        static_cast<int>(openscp::KnownHostsPolicy::AcceptNew));
-    defaultKnownHostsPolicy_->addItem(
-        tr("No verification (double confirmation, expires in 15 min)"),
-        static_cast<int>(openscp::KnownHostsPolicy::Off));
+    addComboItems(defaultKnownHostsPolicy_,
+                  {{tr("Strict"),
+                    static_cast<int>(openscp::KnownHostsPolicy::Strict)},
+                   {tr("Accept new (TOFU)"),
+                    static_cast<int>(openscp::KnownHostsPolicy::AcceptNew)},
+                   {tr("No verification (double confirmation, expires in 15 min)"),
+                    static_cast<int>(openscp::KnownHostsPolicy::Off)}});
     addLabeledRow(securityForm, securityPage, tr("Default known_hosts policy:"),
                   defaultKnownHostsPolicy_);
     defaultIntegrityPolicy_ = new QComboBox(securityPage);
     setFieldWidth(defaultIntegrityPolicy_);
-    defaultIntegrityPolicy_->addItem(
-        tr("Optional (recommended)"),
-        static_cast<int>(openscp::TransferIntegrityPolicy::Optional));
-    defaultIntegrityPolicy_->addItem(
-        tr("Required (strict)"),
-        static_cast<int>(openscp::TransferIntegrityPolicy::Required));
-    defaultIntegrityPolicy_->addItem(
-        tr("Off (not recommended)"),
-        static_cast<int>(openscp::TransferIntegrityPolicy::Off));
+    addComboItems(defaultIntegrityPolicy_,
+                  {{tr("Optional (recommended)"),
+                    static_cast<int>(
+                        openscp::TransferIntegrityPolicy::Optional)},
+                   {tr("Required (strict)"),
+                    static_cast<int>(
+                        openscp::TransferIntegrityPolicy::Required)},
+                   {tr("Off (not recommended)"),
+                    static_cast<int>(openscp::TransferIntegrityPolicy::Off)}});
     addLabeledRow(securityForm, securityPage, tr("Default integrity policy:"),
                   defaultIntegrityPolicy_);
-    ftpsVerifyPeerDefault_ = new QCheckBox(
-        tr("Verify FTPS server certificate by default (recommended)."),
-        securityPage);
-    trackWrappedCheck(ftpsVerifyPeerDefault_);
-    securityForm->addRow(QString(), ftpsVerifyPeerDefault_);
+    addTrackedCheckRows(
+        securityForm, securityPage,
+        {{&ftpsVerifyPeerDefault_,
+          tr("Verify FTPS server certificate by default (recommended).")}});
     addBrowsePathRow(securityForm, securityPage, tr("Default FTPS CA bundle:"),
                      tr("Select FTPS CA bundle"), true,
                      ftpsCaCertPathDefaultEdit_,
                      ftpsCaCertPathDefaultBrowseBtn_,
                      tr("System CA bundle"));
-    knownHostsHashed_ = new QCheckBox(
-        tr("Hash hostnames in known_hosts (recommended)."), securityPage);
-    fpHex_ = new QCheckBox(
-        tr("Show fingerprint in HEX (colon) format (visual only)."),
-        securityPage);
-    terminalForceInteractiveLogin_ = new QCheckBox(
-        tr("Force interactive login when using Open in terminal "
-           "(disable key/agent auth)."),
-        securityPage);
-    terminalEnableSftpCliFallback_ = new QCheckBox(
-        tr("Enable automatic SFTP CLI fallback when using Open in terminal."),
-        securityPage);
-    trackWrappedCheck(knownHostsHashed_);
-    trackWrappedCheck(fpHex_);
-    trackWrappedCheck(terminalForceInteractiveLogin_);
-    trackWrappedCheck(terminalEnableSftpCliFallback_);
-    securityForm->addRow(QString(), knownHostsHashed_);
-    securityForm->addRow(QString(), fpHex_);
-    securityForm->addRow(QString(), terminalForceInteractiveLogin_);
-    securityForm->addRow(QString(), terminalEnableSftpCliFallback_);
+    addTrackedCheckRows(
+        securityForm, securityPage,
+        {{&knownHostsHashed_, tr("Hash hostnames in known_hosts (recommended).")},
+         {&fpHex_, tr("Show fingerprint in HEX (colon) format (visual only).")},
+         {&terminalForceInteractiveLogin_,
+          tr("Force interactive login when using Open in terminal "
+             "(disable key/agent auth).")},
+         {&terminalEnableSftpCliFallback_,
+          tr("Enable automatic SFTP CLI fallback when using Open in terminal.")}});
 #if defined(Q_OS_MAC) || defined(Q_OS_MACOS) || defined(__APPLE__)
-    macKeychainRestrictive_ = new QCheckBox(
-        tr("Use stricter Keychain accessibility (this device only)."),
-        securityPage);
-    trackWrappedCheck(macKeychainRestrictive_);
-    securityForm->addRow(QString(), macKeychainRestrictive_);
+    addTrackedCheckRows(
+        securityForm, securityPage,
+        {{&macKeychainRestrictive_,
+          tr("Use stricter Keychain accessibility (this device only).")}});
 #endif
 #if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) &&       \
     !defined(HAVE_LIBSECRET) && !defined(OPENSCP_BUILD_SECURE_ONLY)
-    insecureFallback_ = new QCheckBox(
-        tr("Allow insecure credentials fallback (not recommended)."),
-        securityPage);
-    trackWrappedCheck(insecureFallback_);
-    securityForm->addRow(QString(), insecureFallback_);
+    addTrackedCheckRows(
+        securityForm, securityPage,
+        {{&insecureFallback_,
+          tr("Allow insecure credentials fallback (not recommended).")}});
 #endif
-    {
-        auto *ttlRow = new QWidget(securityPage);
-        auto *ttlLay = new QHBoxLayout(ttlRow);
-        ttlLay->setContentsMargins(0, 0, 0, 0);
-        ttlLay->setSpacing(6);
-        noHostVerifyTtlMinSpin_ = new QSpinBox(securityPage);
-        noHostVerifyTtlMinSpin_->setRange(1, 120);
-        noHostVerifyTtlMinSpin_->setValue(15);
-        noHostVerifyTtlMinSpin_->setSuffix(tr(" min"));
-        noHostVerifyTtlMinSpin_->setMinimumWidth(100);
-        noHostVerifyTtlMinSpin_->setToolTip(
-            tr("Duration of the temporary exception for no host-key "
-               "verification policy."));
-        ttlLay->addWidget(noHostVerifyTtlMinSpin_);
-        ttlLay->addStretch(1);
-        addLabeledRow(securityForm, securityPage, tr("No-verification TTL:"),
-                      ttlRow);
-    }
+    noHostVerifyTtlMinSpin_ = addSpinRow(
+        securityForm, securityPage, tr("No-verification TTL:"), 1, 120, 15,
+        tr(" min"), 100, 1,
+        tr("Duration of the temporary exception for no host-key verification "
+           "policy."));
+}
 
+void SettingsDialog::buildNetworkPage(const PageBuildContext &ctx) {
     QFormLayout *networkForm = nullptr;
-    QWidget *networkPage = createFormPage(tr("Network"), networkForm);
+    QWidget *networkPage = createFormPage(ctx, tr("Network"), networkForm);
     networkForm->setVerticalSpacing(8);
-    sessionHealthIntervalSecSpin_ = new QSpinBox(networkPage);
-    sessionHealthIntervalSecSpin_->setRange(60, 86400);
-    sessionHealthIntervalSecSpin_->setValue(600);
-    sessionHealthIntervalSecSpin_->setSuffix(tr(" s"));
-    sessionHealthIntervalSecSpin_->setMinimumWidth(100);
-    addLabeledRow(networkForm, networkPage, tr("Session health check interval:"),
-                  sessionHealthIntervalSecSpin_);
-    remoteWriteabilityTtlMsSpin_ = new QSpinBox(networkPage);
-    remoteWriteabilityTtlMsSpin_->setRange(1000, 120000);
-    remoteWriteabilityTtlMsSpin_->setValue(15000);
-    remoteWriteabilityTtlMsSpin_->setSuffix(tr(" ms"));
-    remoteWriteabilityTtlMsSpin_->setSingleStep(500);
-    remoteWriteabilityTtlMsSpin_->setMinimumWidth(110);
-    addLabeledRow(networkForm, networkPage, tr("Remote writeability cache TTL:"),
-                  remoteWriteabilityTtlMsSpin_);
+    sessionHealthIntervalSecSpin_ = addSpinRow(
+        networkForm, networkPage, tr("Session health check interval:"), 60, 86400,
+        600, tr(" s"));
+    remoteWriteabilityTtlMsSpin_ = addSpinRow(
+        networkForm, networkPage, tr("Remote writeability cache TTL:"), 1000,
+        120000, 15000, tr(" ms"), 110, 500);
+}
 
+void SettingsDialog::buildStagingPage(const PageBuildContext &ctx) {
     QFormLayout *stagingForm = nullptr;
     QWidget *stagingPage =
-        createFormPage(tr("Staging and drag-out"), stagingForm);
+        createFormPage(ctx, tr("Staging and drag-out"), stagingForm);
     stagingForm->setVerticalSpacing(8);
     addBrowsePathRow(stagingForm, stagingPage, tr("Staging folder:"),
                      tr("Select staging folder"), false, stagingRootEdit_,
                      stagingBrowseBtn_);
-    autoCleanStaging_ = new QCheckBox(
-        tr("Auto-clean staging after successful drag-out (recommended)."),
-        stagingPage);
-    trackWrappedCheck(autoCleanStaging_);
-    stagingForm->addRow(QString(), autoCleanStaging_);
-    stagingRetentionDaysSpin_ = new QSpinBox(stagingPage);
-    stagingRetentionDaysSpin_->setRange(1, 365);
-    stagingRetentionDaysSpin_->setValue(7);
-    stagingRetentionDaysSpin_->setSuffix(tr(" days"));
-    stagingRetentionDaysSpin_->setMinimumWidth(110);
-    addLabeledRow(stagingForm, stagingPage, tr("Startup cleanup retention:"),
-                  stagingRetentionDaysSpin_);
-    stagingPrepTimeoutMsSpin_ = new QSpinBox(stagingPage);
-    stagingPrepTimeoutMsSpin_->setRange(250, 60000);
-    stagingPrepTimeoutMsSpin_->setSingleStep(250);
-    stagingPrepTimeoutMsSpin_->setValue(2000);
-    stagingPrepTimeoutMsSpin_->setSuffix(tr(" ms"));
-    stagingPrepTimeoutMsSpin_->setMinimumWidth(110);
-    stagingPrepTimeoutMsSpin_->setToolTip(
+    addTrackedCheckRows(
+        stagingForm, stagingPage,
+        {{&autoCleanStaging_,
+          tr("Auto-clean staging after successful drag-out (recommended).")}});
+    stagingRetentionDaysSpin_ = addSpinRow(
+        stagingForm, stagingPage, tr("Startup cleanup retention:"), 1, 365, 7,
+        tr(" days"), 110);
+    stagingPrepTimeoutMsSpin_ = addSpinRow(
+        stagingForm, stagingPage, tr("Preparation timeout:"), 250, 60000, 2000,
+        tr(" ms"), 110, 250,
         tr("Time before showing the Wait/Cancel dialog."));
-    addLabeledRow(stagingForm, stagingPage, tr("Preparation timeout:"),
-                  stagingPrepTimeoutMsSpin_);
-    stagingConfirmItemsSpin_ = new QSpinBox(stagingPage);
-    stagingConfirmItemsSpin_->setRange(50, 100000);
-    stagingConfirmItemsSpin_->setValue(500);
-    stagingConfirmItemsSpin_->setMinimumWidth(110);
-    stagingConfirmItemsSpin_->setToolTip(
+    stagingConfirmItemsSpin_ = addSpinRow(
+        stagingForm, stagingPage, tr("Confirm from items:"), 50, 100000, 500,
+        QString(), 110, 1,
         tr("Item count threshold to request confirmation for large batches."));
-    addLabeledRow(stagingForm, stagingPage, tr("Confirm from items:"),
-                  stagingConfirmItemsSpin_);
-    stagingConfirmMiBSpin_ = new QSpinBox(stagingPage);
-    stagingConfirmMiBSpin_->setRange(128, 65536);
-    stagingConfirmMiBSpin_->setValue(1024);
-    stagingConfirmMiBSpin_->setSuffix(tr(" MiB"));
-    stagingConfirmMiBSpin_->setMinimumWidth(120);
-    stagingConfirmMiBSpin_->setToolTip(tr(
-        "Estimated size threshold to request confirmation for large batches."));
-    addLabeledRow(stagingForm, stagingPage, tr("Confirm from size:"),
-                  stagingConfirmMiBSpin_);
+    stagingConfirmMiBSpin_ = addSpinRow(
+        stagingForm, stagingPage, tr("Confirm from size:"), 128, 65536, 1024,
+        tr(" MiB"), 120, 1,
+        tr("Estimated size threshold to request confirmation for large "
+           "batches."));
+    auto *rowWidget = new QWidget(stagingPage);
+    auto *row = new QHBoxLayout(rowWidget);
+    row->setContentsMargins(0, 0, 0, 0);
+    row->setSpacing(6);
+    maxDepthSpin_ = new QSpinBox(stagingPage);
+    maxDepthSpin_->setRange(4, 256);
+    maxDepthSpin_->setValue(32);
+    maxDepthSpin_->setMinimumWidth(90);
+    maxDepthSpin_->setToolTip(
+        tr("Limit for recursive folder drag-out to avoid deep trees and loops."));
+    auto *hint = new QLabel(tr("Recommended: 32"), stagingPage);
+    hint->setStyleSheet("color: palette(window-text);");
+    row->addWidget(maxDepthSpin_);
+    row->addWidget(hint);
+    row->addStretch(1);
+    addLabeledRow(stagingForm, stagingPage, tr("Maximum depth:"), rowWidget);
+}
 
-    // Maximum folder recursion depth
-    {
-        auto *rowWidget = new QWidget(stagingPage);
-        auto *row = new QHBoxLayout(rowWidget);
-        row->setContentsMargins(0, 0, 0, 0);
-        row->setSpacing(6);
-        maxDepthSpin_ = new QSpinBox(stagingPage);
-        maxDepthSpin_->setRange(4, 256);
-        maxDepthSpin_->setValue(32);
-        maxDepthSpin_->setMinimumWidth(90);
-        maxDepthSpin_->setToolTip(tr("Limit for recursive folder drag-out to "
-                                     "avoid deep trees and loops."));
-        auto *hint = new QLabel(tr("Recommended: 32"), stagingPage);
-        hint->setStyleSheet("color: palette(window-text);");
-        row->addWidget(maxDepthSpin_);
-        row->addWidget(hint);
-        row->addStretch(1);
-        addLabeledRow(stagingForm, stagingPage, tr("Maximum depth:"),
-                      rowWidget);
-    }
-    connect(sectionList, &QListWidget::currentRowChanged, pages,
+void SettingsDialog::setupSectionNavigation(const PageBuildContext &ctx) {
+    if (!ctx.sectionList || !ctx.pages)
+        return;
+    connect(ctx.sectionList, &QListWidget::currentRowChanged, ctx.pages,
             &QStackedWidget::setCurrentIndex);
-    connect(sectionList, &QListWidget::currentRowChanged, this,
-            [this](int) {
-                refreshWrappedCheckTexts();
-                QTimer::singleShot(0, this,
-                                   [this] { refreshWrappedCheckTexts(); });
-            });
-    sectionList->setCurrentRow(0);
+    connect(ctx.sectionList, &QListWidget::currentRowChanged, this, [this](int) {
+        refreshWrappedCheckTexts();
+        QTimer::singleShot(0, this, [this] { refreshWrappedCheckTexts(); });
+    });
+    ctx.sectionList->setCurrentRow(0);
+}
 
-    // Buttons row: align to right, order: Close (left) then Apply (right)
+void SettingsDialog::buildBottomButtons(QVBoxLayout *root) {
     auto *btnRow = new QWidget(this);
-    auto *hb = new QHBoxLayout(btnRow);
-    hb->setContentsMargins(0, 0, 0, 0);
-    hb->addStretch();
+    auto *buttonLayout = new QHBoxLayout(btnRow);
+    buttonLayout->setContentsMargins(0, 0, 0, 0);
+    buttonLayout->addStretch();
     closeBtn_ = new QPushButton(tr("Close"), btnRow);
     applyBtn_ = new QPushButton(tr("Apply"), btnRow);
-    hb->addWidget(closeBtn_);
-    hb->addWidget(applyBtn_);
+    buttonLayout->addWidget(closeBtn_);
+    buttonLayout->addWidget(applyBtn_);
     root->addWidget(btnRow);
 
-    // Visual priority: Apply is the primary (default) only when enabled.
     applyBtn_->setEnabled(false);
     applyBtn_->setAutoDefault(true);
     applyBtn_->setDefault(false);
@@ -1158,26 +1105,37 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     closeBtn_->setDefault(false);
     connect(applyBtn_, &QPushButton::clicked, this, &SettingsDialog::onApply);
     connect(closeBtn_, &QPushButton::clicked, this, &SettingsDialog::reject);
+}
 
-    // Load from QSettings through declarative bindings
-    QSettings s("OpenSCP", "OpenSCP");
+void SettingsDialog::loadPersistedSettings() {
+    QSettings settings("OpenSCP", "OpenSCP");
     const auto bindings = buildSettingBindings();
     const QVariantMap persistedSnapshot =
-        readPersistedSnapshot(s, bindings);
+        readPersistedSnapshot(settings, bindings);
     applySnapshotToControls(persistedSnapshot, bindings);
-    if (queueAutoClearModeDefault_ && queueAutoClearMinutesDefaultSpin_) {
-        const bool queueMinutesEnabled =
-            queueAutoClearModeDefault_->currentData().toInt() !=
-            kQueueAutoClearOff;
-        queueAutoClearMinutesDefaultSpin_->setEnabled(queueMinutesEnabled);
-    }
+    updateQueueAutoClearDefaultsUi();
+}
 
-    // Bind controls to dirty flag
-    // Grouping by widget type keeps this block compact and easy to audit.
-    for (QComboBox *combo : {
-             langCombo_,        clickMode_,           openBehaviorMode_,
-             defaultProtocol_,  scpModeDefault_,      defaultKnownHostsPolicy_,
-             defaultIntegrityPolicy_, queueAutoClearModeDefault_}) {
+void SettingsDialog::updateQueueAutoClearDefaultsUi() {
+    if (!queueAutoClearModeDefault_ || !queueAutoClearMinutesDefaultSpin_)
+        return;
+    const bool enabled =
+        queueAutoClearModeDefault_->currentData().toInt() != kQueueAutoClearOff;
+    queueAutoClearMinutesDefaultSpin_->setEnabled(enabled);
+}
+
+void SettingsDialog::connectDirtyTracking() {
+    auto bindDirtyFlag = [this]<typename Sender, typename Signal>(
+                             Sender *sender, Signal signal) {
+        if (sender)
+            connect(sender, signal, this,
+                    &SettingsDialog::updateApplyFromControls);
+    };
+
+    for (QComboBox *combo :
+         {langCombo_, clickMode_, openBehaviorMode_, defaultProtocol_,
+          scpModeDefault_, defaultKnownHostsPolicy_, defaultIntegrityPolicy_,
+          queueAutoClearModeDefault_}) {
         bindDirtyFlag(combo, qOverload<int>(&QComboBox::currentIndexChanged));
     }
     for (QCheckBox *check : {showHidden_,
@@ -1219,39 +1177,78 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
 #if defined(Q_OS_MAC) || defined(Q_OS_MACOS) || defined(__APPLE__)
     bindDirtyFlag(macKeychainRestrictive_, &QCheckBox::toggled);
 #endif
+}
 
-    if (insecureFallback_) {
-        connect(insecureFallback_, &QCheckBox::toggled, this, [this](bool on) {
-            if (on) {
-                bool prevAutoDefault = false;
-                bool prevDefault = false;
-                if (applyBtn_) {
-                    prevAutoDefault = applyBtn_->autoDefault();
-                    prevDefault = applyBtn_->isDefault();
-                    applyBtn_->setAutoDefault(false);
-                    applyBtn_->setDefault(false);
-                }
-                const auto ret = UiAlerts::warning(
-                    this, tr("Enable insecure fallback"),
-                    tr("This stores credentials unencrypted on disk using "
-                       "QSettings.\n"
-                       "On Linux, it is recommended to install and use "
-                       "libsecret/Secret Service for better security.\n\n"
-                       "Do you still want to enable insecure fallback?"),
-                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-                if (applyBtn_) {
-                    applyBtn_->setAutoDefault(prevAutoDefault);
-                    applyBtn_->setDefault(prevDefault);
-                }
-                if (ret != QMessageBox::Yes) {
-                    insecureFallback_->blockSignals(true);
-                    insecureFallback_->setChecked(false);
-                    insecureFallback_->blockSignals(false);
-                }
+void SettingsDialog::connectInsecureFallbackGuard() {
+    if (!insecureFallback_)
+        return;
+    connect(insecureFallback_, &QCheckBox::toggled, this,
+            [this](bool enabled) {
+        if (enabled) {
+            bool prevAutoDefault = false;
+            bool prevDefault = false;
+            if (applyBtn_) {
+                prevAutoDefault = applyBtn_->autoDefault();
+                prevDefault = applyBtn_->isDefault();
+                applyBtn_->setAutoDefault(false);
+                applyBtn_->setDefault(false);
             }
-            updateApplyFromControls();
-        });
-    }
+            const auto ret = UiAlerts::warning(
+                this, tr("Enable insecure fallback"),
+                tr("This stores credentials unencrypted on disk using "
+                   "QSettings.\n"
+                   "On Linux, it is recommended to install and use "
+                   "libsecret/Secret Service for better security.\n\n"
+                   "Do you still want to enable insecure fallback?"),
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+            if (applyBtn_) {
+                applyBtn_->setAutoDefault(prevAutoDefault);
+                applyBtn_->setDefault(prevDefault);
+            }
+            if (ret != QMessageBox::Yes) {
+                insecureFallback_->blockSignals(true);
+                insecureFallback_->setChecked(false);
+                insecureFallback_->blockSignals(false);
+            }
+        }
+        updateApplyFromControls();
+    });
+}
+
+SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
+    setWindowTitle(tr("Settings"));
+    resize(860, 620);
+    setMinimumSize(760, 560);
+
+    auto *root = new QVBoxLayout(this);
+    root->setContentsMargins(12, 12, 12, 12);
+    root->setSpacing(10);
+
+    auto *contentRow = new QHBoxLayout();
+    contentRow->setContentsMargins(0, 0, 0, 0);
+    contentRow->setSpacing(10);
+    root->addLayout(contentRow, 1);
+
+    auto *sectionList = new QListWidget(this);
+    setupSectionList(sectionList);
+    contentRow->addWidget(sectionList);
+
+    auto *pages = new QStackedWidget(this);
+    contentRow->addWidget(pages, 1);
+    const PageBuildContext ctx{sectionList, pages};
+
+    buildGeneralPage(ctx);
+    buildShortcutsPage(ctx);
+    buildTransfersPage(ctx);
+    buildSitesPage(ctx);
+    buildSecurityPage(ctx);
+    buildNetworkPage(ctx);
+    buildStagingPage(ctx);
+    setupSectionNavigation(ctx);
+    buildBottomButtons(root);
+    loadPersistedSettings();
+    connectDirtyTracking();
+    connectInsecureFallbackGuard();
 
     updateApplyFromControls();
     QTimer::singleShot(0, this, [this] { refreshWrappedCheckTexts(); });
@@ -1263,15 +1260,16 @@ void SettingsDialog::resizeEvent(QResizeEvent *event) {
 }
 
 void SettingsDialog::onApply() {
-    QSettings s("OpenSCP", "OpenSCP");
+    QSettings settings("OpenSCP", "OpenSCP");
     const auto bindings = buildSettingBindings();
-    const QVariantMap persistedSnapshot = readPersistedSnapshot(s, bindings);
+    const QVariantMap persistedSnapshot =
+        readPersistedSnapshot(settings, bindings);
     const QVariantMap currentSnapshot = readCurrentSnapshot(bindings);
     const QString prevLang =
         persistedSnapshot.value(QStringLiteral("UI/language")).toString();
 
-    writeSnapshot(s, currentSnapshot, bindings);
-    s.sync();
+    writeSnapshot(settings, currentSnapshot, bindings);
+    settings.sync();
 
     // Only notify if language actually changed
     const QString chosenLang =
@@ -1289,15 +1287,16 @@ void SettingsDialog::onApply() {
 }
 
 void SettingsDialog::updateApplyFromControls() {
-    QSettings s("OpenSCP", "OpenSCP");
+    QSettings settings("OpenSCP", "OpenSCP");
     const auto bindings = buildSettingBindings();
-    const QVariantMap persistedSnapshot = readPersistedSnapshot(s, bindings);
+    const QVariantMap persistedSnapshot =
+        readPersistedSnapshot(settings, bindings);
     const QVariantMap currentSnapshot = readCurrentSnapshot(bindings);
 
     bool modified = false;
     for (const auto &binding : bindings) {
-        if (currentSnapshot.value(binding.id) !=
-            persistedSnapshot.value(binding.id)) {
+        if (currentSnapshot.value(binding.bindingKey) !=
+            persistedSnapshot.value(binding.bindingKey)) {
             modified = true;
             break;
         }

@@ -6,6 +6,7 @@
 #include <QVector>
 
 #include <functional>
+#include <initializer_list>
 
 class QComboBox;
 class QPushButton;
@@ -32,8 +33,13 @@ class SettingsDialog : public QDialog {
                                     // persisted
 
   private:
+    struct PageBuildContext {
+        class QListWidget *sectionList = nullptr;
+        class QStackedWidget *pages = nullptr;
+    };
+
     struct SettingBinding {
-        QString id;
+        QString bindingKey;
         std::function<QVariant(const QSettings &)> readPersisted;
         std::function<QVariant()> readCurrent;
         std::function<void(const QVariant &)> applyToControl;
@@ -51,10 +57,48 @@ class SettingsDialog : public QDialog {
     void writeSnapshot(QSettings &settings, const QVariantMap &snapshot,
                        const QVector<SettingBinding> &bindings) const;
 
-    static QString wrapTextToWidth(const QString &text, const QFontMetrics &fm,
+    void setupSectionList(class QListWidget *sectionList) const;
+    void recalcSectionListWidth(class QListWidget *sectionList) const;
+    QWidget *createFormPage(const PageBuildContext &ctx, const QString &title,
+                            class QFormLayout *&outForm) const;
+    void setFieldWidth(QWidget *field) const;
+    void addLabeledRow(class QFormLayout *target, QWidget *parent,
+                       const QString &labelText, QWidget *field) const;
+    void addTrackedCheckRows(
+        class QFormLayout *target, QWidget *parent,
+        std::initializer_list<QPair<QCheckBox **, QString>> rows);
+    QComboBox *addComboRow(class QFormLayout *target, QWidget *parent,
+                           const QString &labelText) const;
+    class QSpinBox *addSpinRow(class QFormLayout *target, QWidget *parent,
+                               const QString &labelText, int minValue,
+                               int maxValue, int defaultValue,
+                               const QString &suffix = QString(),
+                               int minWidth = 100, int step = 1,
+                               const QString &toolTip = QString()) const;
+    void addBrowsePathRow(class QFormLayout *target, QWidget *parent,
+                          const QString &labelText, const QString &dialogTitle,
+                          bool pickFile, class QLineEdit *&editOut,
+                          QPushButton *&browseButtonOut,
+                          const QString &placeholder = QString());
+    void buildGeneralPage(const PageBuildContext &ctx);
+    void buildShortcutsPage(const PageBuildContext &ctx);
+    void buildTransfersPage(const PageBuildContext &ctx);
+    void buildSitesPage(const PageBuildContext &ctx);
+    void buildSecurityPage(const PageBuildContext &ctx);
+    void buildNetworkPage(const PageBuildContext &ctx);
+    void buildStagingPage(const PageBuildContext &ctx);
+    void setupSectionNavigation(const PageBuildContext &ctx);
+    void buildBottomButtons(class QVBoxLayout *root);
+    void loadPersistedSettings();
+    void updateQueueAutoClearDefaultsUi();
+    void connectDirtyTracking();
+    void connectInsecureFallbackGuard();
+
+    static QString wrapTextToWidth(const QString &text,
+                                   const QFontMetrics &fontMetrics,
                                    int maxWidth);
     void refreshWrappedCheckTexts();
-    void trackWrappedCheck(QCheckBox *cb);
+    void trackWrappedCheck(QCheckBox *checkBox);
 
     QComboBox *langCombo_ = nullptr;        // es/en/fr/pt
     QCheckBox *showHidden_ = nullptr;       // show hidden files

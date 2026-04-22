@@ -176,12 +176,12 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
         return {PersistStatus::BackendError,
                 QStringLiteral("Secret key is empty")};
     }
-    QByteArray k = key.toUtf8();
+    QByteArray keyUtf8 = key.toUtf8();
     QByteArray secretValueUtf8 = value.toUtf8();
     GError *gerr = nullptr;
     const gboolean ok = secret_password_store_sync(
         openscp_schema(), SECRET_COLLECTION_DEFAULT, "OpenSCP secret",
-        secretValueUtf8.constData(), nullptr, &gerr, "key", k.constData(),
+        secretValueUtf8.constData(), nullptr, &gerr, "key", keyUtf8.constData(),
         nullptr);
     if (ok)
         return {PersistStatus::Stored, QString()};
@@ -193,10 +193,11 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
 }
 
 std::optional<QString> SecretStore::getSecret(const QString &key) const {
-    QByteArray k = key.toUtf8();
+    QByteArray keyUtf8 = key.toUtf8();
     GError *gerr = nullptr;
     gchar *pw = secret_password_lookup_sync(openscp_schema(), nullptr, &gerr,
-                                            "key", k.constData(), nullptr);
+                                            "key", keyUtf8.constData(),
+                                            nullptr);
     if (!pw) {
         if (gerr)
             g_error_free(gerr);
@@ -210,10 +211,10 @@ std::optional<QString> SecretStore::getSecret(const QString &key) const {
 }
 
 void SecretStore::removeSecret(const QString &key) {
-    QByteArray k = key.toUtf8();
+    QByteArray keyUtf8 = key.toUtf8();
     GError *gerr = nullptr;
     (void)secret_password_clear_sync(openscp_schema(), nullptr, &gerr, "key",
-                                     k.constData(), nullptr);
+                                     keyUtf8.constData(), nullptr);
     if (gerr)
         g_error_free(gerr);
 }
