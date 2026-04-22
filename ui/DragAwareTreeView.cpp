@@ -33,8 +33,8 @@ Q_DECLARE_LOGGING_CATEGORY(ocEnum)
 Q_LOGGING_CATEGORY(ocDrag, "openscp.drag")
 
 static QString stagingRootFromSettings() {
-    QSettings s("OpenSCP", "OpenSCP");
-    QString root = s.value("Advanced/stagingRoot").toString();
+    QSettings settings("OpenSCP", "OpenSCP");
+    QString root = settings.value("Advanced/stagingRoot").toString();
     if (root.isEmpty()) {
         root = QDir::homePath() + "/Downloads/OpenSCP-Dragged";
     }
@@ -118,8 +118,9 @@ void DragAwareTreeView::startDrag(Qt::DropActions supportedActions) {
     if (batchDir.isEmpty())
         return;
 
-    QSettings s("OpenSCP", "OpenSCP");
-    const bool autoClean = s.value("Advanced/autoCleanStaging", true).toBool();
+    QSettings settings("OpenSCP", "OpenSCP");
+    const bool autoClean =
+        settings.value("Advanced/autoCleanStaging", true).toBool();
 
     if (res == Qt::IgnoreAction) {
         // Drag canceled: keep staging and notify with clickable link
@@ -177,11 +178,11 @@ void DragAwareTreeView::showKeepMessageWithPrefix(const QString &prefix,
 void DragAwareTreeView::scheduleAutoCleanup(const QString &batchDir,
                                             int initialDelayMs) {
     auto tryDelete = [this](const QString &dir) -> bool {
-        QDir d(dir);
-        if (!d.exists())
+        QDir targetDir(dir);
+        if (!targetDir.exists())
             return true;
-        bool ok = d.removeRecursively();
-        if (!ok)
+        bool removed = targetDir.removeRecursively();
+        if (!removed)
             return false;
         // If root empty, remove it
         QString root = stagingRootFromSettings();
@@ -215,8 +216,8 @@ void DragAwareTreeView::scheduleAutoCleanup(const QString &batchDir,
 }
 
 QString DragAwareTreeView::buildStagingRoot() const {
-    QSettings s("OpenSCP", "OpenSCP");
-    QString root = s.value("Advanced/stagingRoot").toString();
+    QSettings settings("OpenSCP", "OpenSCP");
+    QString root = settings.value("Advanced/stagingRoot").toString();
     if (root.isEmpty())
         root = QDir::homePath() + "/Downloads/OpenSCP-Dragged";
     return root;

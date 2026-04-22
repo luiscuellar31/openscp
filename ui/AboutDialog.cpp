@@ -37,10 +37,10 @@ QStringList aboutSearchBases() {
 QString findFromCandidates(const QStringList &relativeCandidates,
                            bool wantDirectory) {
     for (const QString &base : aboutSearchBases()) {
-        QDir dir(base);
-        for (int i = 0; i < 5; ++i) { // search up to 5 levels up
+        QDir candidateBaseDir(base);
+        for (int depth = 0; depth < 5; ++depth) { // search up to 5 levels up
             for (const QString &rel : relativeCandidates) {
-                const QString candidate = dir.filePath(rel);
+                const QString candidate = candidateBaseDir.filePath(rel);
                 const QFileInfo info(candidate);
                 if (!info.exists()) {
                     continue;
@@ -54,7 +54,7 @@ QString findFromCandidates(const QStringList &relativeCandidates,
                 return wantDirectory ? QDir(candidate).absolutePath()
                                      : info.absoluteFilePath();
             }
-            if (!dir.cdUp()) {
+            if (!candidateBaseDir.cdUp()) {
                 break;
             }
         }
@@ -162,8 +162,10 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     libsText->setMinimumHeight(180);
 
     // Decide which file to load based on UI language (settings: UI/language)
-    QSettings s("OpenSCP", "OpenSCP");
-    const QString lang = s.value("UI/language", "en").toString().toLower();
+    QSettings settings("OpenSCP", "OpenSCP");
+    const QString lang = settings.value("UI/language", "en")
+                             .toString()
+                             .toLower();
     QString suffix = QStringLiteral("EN");
     if (lang.startsWith("es")) {
         suffix = QStringLiteral("ES");
