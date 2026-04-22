@@ -63,17 +63,17 @@ static QRect centeredQueueRect(QWidget *dialog, QWidget *mainWindow) {
     if (!avail.isValid())
         return rect;
 
-    int x = rect.x();
-    int y = rect.y();
+    int boundedX = rect.x();
+    int boundedY = rect.y();
     const int minX = avail.left();
     const int minY = avail.top();
     const int maxX = avail.right() - rect.width() + 1;
     const int maxY = avail.bottom() - rect.height() + 1;
     if (maxX >= minX)
-        x = qBound(minX, x, maxX);
+        boundedX = qBound(minX, boundedX, maxX);
     if (maxY >= minY)
-        y = qBound(minY, y, maxY);
-    rect.moveTopLeft(QPoint(x, y));
+        boundedY = qBound(minY, boundedY, maxY);
+    rect.moveTopLeft(QPoint(boundedX, boundedY));
     return rect;
 }
 
@@ -257,10 +257,11 @@ void MainWindow::runRemoteDownloadPrescan(
                     return;
                 }
 
-                int enq = 0;
-                for (const auto &p : queuedPairs) {
-                    self->transferMgr_->enqueueDownload(p.first, p.second);
-                    ++enq;
+                int enqueuedCount = 0;
+                for (const auto &queuedPair : queuedPairs) {
+                    self->transferMgr_->enqueueDownload(queuedPair.first,
+                                                        queuedPair.second);
+                    ++enqueuedCount;
                 }
 
                 QString msg =
@@ -269,7 +270,7 @@ void MainWindow::runRemoteDownloadPrescan(
                               "MainWindow", "Queued: %1 downloads (DND)")
                         : QCoreApplication::translate("MainWindow",
                                                       "Queued: %1 downloads");
-                msg = msg.arg(enq);
+                msg = msg.arg(enqueuedCount);
                 if (skipped > 0)
                     msg += QString("  |  ") +
                            QCoreApplication::translate(
@@ -286,7 +287,7 @@ void MainWindow::runRemoteDownloadPrescan(
                                                        "Last error: ") +
                            lastError;
                 self->statusBar()->showMessage(msg, 6000);
-                if (enq > 0)
+                if (enqueuedCount > 0)
                     self->maybeShowTransferQueue();
             },
             Qt::QueuedConnection);
@@ -351,11 +352,11 @@ void MainWindow::maybeShowTransferQueue() {
         showTransferQueue();
 }
 
-bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
+bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
     QObject *const rightViewport = rightView_ ? rightView_->viewport() : nullptr;
     QObject *const leftViewport = leftView_ ? leftView_->viewport() : nullptr;
-    if (obj != rightViewport && obj != leftViewport)
-        return QMainWindow::eventFilter(obj, ev);
+    if (eventSource != rightViewport && eventSource != leftViewport)
+        return QMainWindow::eventFilter(eventSource, event);
 
     auto extractStagingBatchDir = [](const QMimeData *md) -> QString {
         if (!md || !md->hasFormat(kStagingBatchMime))
@@ -397,31 +398,32 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
     };
 
     // Drag-and-drop over the right panel (local or remote)
-    if (obj == rightViewport) {
-        if (ev->type() == QEvent::DragEnter) {
-            auto *de = static_cast<QDragEnterEvent *>(ev);
+    if (eventSource == rightViewport) {
+        if (event->type() == QEvent::DragEnter) {
+            auto *dragEnterEvent = static_cast<QDragEnterEvent *>(event);
             if (rightIsRemote_ && !rightRemoteWritable_) {
-                de->ignore();
+                dragEnterEvent->ignore();
                 return true;
             }
-            de->acceptProposedAction();
+            dragEnterEvent->acceptProposedAction();
             return true;
-        } else if (ev->type() == QEvent::DragMove) {
-            auto *dm = static_cast<QDragMoveEvent *>(ev);
+        } else if (event->type() == QEvent::DragMove) {
+            auto *dragMoveEvent = static_cast<QDragMoveEvent *>(event);
             if (rightIsRemote_ && !rightRemoteWritable_) {
-                dm->ignore();
+                dragMoveEvent->ignore();
                 return true;
             }
-            dm->acceptProposedAction();
+            dragMoveEvent->acceptProposedAction();
             return true;
-        } else if (ev->type() == QEvent::Drop) {
-            auto *dd = static_cast<QDropEvent *>(ev);
+        } else if (event->type() == QEvent::Drop) {
+            auto *dropEvent = static_cast<QDropEvent *>(event);
             const QString stagingBatchDir =
-                extractStagingBatchDir(dd->mimeData());
+                extractStagingBatchDir(dropEvent->mimeData());
             const auto urls =
-                dd->mimeData() ? dd->mimeData()->urls() : QList<QUrl>{};
+                dropEvent->mimeData() ? dropEvent->mimeData()->urls()
+                                      : QList<QUrl>{};
             if (urls.isEmpty()) {
-                dd->acceptProposedAction();
+                dropEvent->acceptProposedAction();
                 return true;
             }
             if (rightIsRemote_) {
@@ -430,7 +432,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
                         tr("Drop ignored: remote-origin drag cannot be dropped "
                            "back into the same remote panel"),
                         5000);
-                    dd->ignore();
+                    dropEvent->ignore();
                     return true;
                 }
                 // Block upload if remote is read-only
@@ -438,73 +440,79 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
                     statusBar()->showMessage(
                         tr("Remote directory is read-only; cannot upload here"),
                         5000);
-                    dd->ignore();
+                    dropEvent->ignore();
                     return true;
                 }
                 // Upload to remote
                 if (!sftp_ || !rightRemoteModel_) {
-                    dd->acceptProposedAction();
+                    dropEvent->acceptProposedAction();
                     return true;
                 }
                 const QString remoteBase = rightRemoteModel_->rootPath();
-                int enq = 0;
-                for (const QUrl &u : urls) {
-                    const QString p = u.toLocalFile();
-                    if (p.isEmpty())
+                int enqueuedCount = 0;
+                for (const QUrl &url : urls) {
+                    const QString localPath = url.toLocalFile();
+                    if (localPath.isEmpty())
                         continue;
-                    QFileInfo fi(p);
-                    if (fi.isDir()) {
-                        QDirIterator it(p,
-                                        QDir::NoDotAndDotDot | QDir::AllEntries,
-                                        QDirIterator::Subdirectories);
-                        while (it.hasNext()) {
-                            it.next();
-                            if (!it.fileInfo().isFile())
+                    QFileInfo localFileInfo(localPath);
+                    if (localFileInfo.isDir()) {
+                        QDirIterator dirIterator(
+                            localPath, QDir::NoDotAndDotDot | QDir::AllEntries,
+                            QDirIterator::Subdirectories);
+                        while (dirIterator.hasNext()) {
+                            dirIterator.next();
+                            if (!dirIterator.fileInfo().isFile())
                                 continue;
-                            const QString rel =
-                                QDir(p).relativeFilePath(it.filePath());
-                            const QString rTarget =
-                                joinRemotePath(remoteBase, rel);
-                            transferMgr_->enqueueUpload(it.filePath(), rTarget);
-                            ++enq;
+                            const QString relativePath =
+                                QDir(localPath).relativeFilePath(
+                                    dirIterator.filePath());
+                            const QString remoteTargetPath =
+                                joinRemotePath(remoteBase, relativePath);
+                            transferMgr_->enqueueUpload(
+                                dirIterator.filePath(), remoteTargetPath);
+                            ++enqueuedCount;
                         }
-                    } else if (fi.isFile()) {
-                        const QString rTarget =
-                            joinRemotePath(remoteBase, fi.fileName());
-                        transferMgr_->enqueueUpload(fi.absoluteFilePath(),
-                                                    rTarget);
-                        ++enq;
+                    } else if (localFileInfo.isFile()) {
+                        const QString remoteTargetPath =
+                            joinRemotePath(remoteBase, localFileInfo.fileName());
+                        transferMgr_->enqueueUpload(
+                            localFileInfo.absoluteFilePath(),
+                            remoteTargetPath);
+                        ++enqueuedCount;
                     }
                 }
-                if (enq > 0) {
+                if (enqueuedCount > 0) {
                     statusBar()->showMessage(
-                        QString(tr("Queued: %1 uploads (DND)")).arg(enq), 4000);
+                        QString(tr("Queued: %1 uploads (DND)"))
+                            .arg(enqueuedCount),
+                        4000);
                     maybeShowTransferQueue();
                 }
-                dd->acceptProposedAction();
+                dropEvent->acceptProposedAction();
                 return true;
             } else {
                 // Local copy to the right panel directory
                 QDir dst(rightPath_->text());
                 if (!dst.exists()) {
-                    dd->acceptProposedAction();
+                    dropEvent->acceptProposedAction();
                     return true;
                 }
                 QVector<LocalFsPair> pairs;
-                for (const QUrl &u : urls) {
-                    const QString p = u.toLocalFile();
-                    if (p.isEmpty())
+                for (const QUrl &url : urls) {
+                    const QString localPath = url.toLocalFile();
+                    if (localPath.isEmpty())
                         continue;
-                    QFileInfo fi(p);
-                    const QString target = dst.filePath(fi.fileName());
+                    QFileInfo localFileInfo(localPath);
+                    const QString target =
+                        dst.filePath(localFileInfo.fileName());
                     // Avoid copying onto itself if same directory/file
-                    if (fi.absoluteFilePath() == target) {
+                    if (localFileInfo.absoluteFilePath() == target) {
                         continue;
                     }
-                    pairs.push_back({fi.absoluteFilePath(), target});
+                    pairs.push_back({localFileInfo.absoluteFilePath(), target});
                 }
                 runLocalFsOperation(pairs, false, 0);
-                dd->acceptProposedAction();
+                dropEvent->acceptProposedAction();
                 return true;
             }
         }
@@ -512,56 +520,59 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
     // Drag-and-drop over the left panel (local): copy/download
     // Update delete shortcut enablement if selection changes due to DnD or
     // click
-    if (obj == leftViewport) {
-        if (ev->type() == QEvent::DragEnter) {
-            auto *de = static_cast<QDragEnterEvent *>(ev);
-            de->acceptProposedAction();
+    if (eventSource == leftViewport) {
+        if (event->type() == QEvent::DragEnter) {
+            auto *dragEnterEvent = static_cast<QDragEnterEvent *>(event);
+            dragEnterEvent->acceptProposedAction();
             return true;
-        } else if (ev->type() == QEvent::DragMove) {
-            auto *dm = static_cast<QDragMoveEvent *>(ev);
-            dm->acceptProposedAction();
+        } else if (event->type() == QEvent::DragMove) {
+            auto *dragMoveEvent = static_cast<QDragMoveEvent *>(event);
+            dragMoveEvent->acceptProposedAction();
             return true;
-        } else if (ev->type() == QEvent::Drop) {
-            auto *dd = static_cast<QDropEvent *>(ev);
+        } else if (event->type() == QEvent::Drop) {
+            auto *dropEvent = static_cast<QDropEvent *>(event);
             const QString stagingBatchDir =
-                extractStagingBatchDir(dd->mimeData());
+                extractStagingBatchDir(dropEvent->mimeData());
             const auto urls =
-                dd->mimeData() ? dd->mimeData()->urls() : QList<QUrl>{};
+                dropEvent->mimeData() ? dropEvent->mimeData()->urls()
+                                      : QList<QUrl>{};
             if (!urls.isEmpty()) {
                 // Local copy towards the left panel
                 QDir dst(leftPath_->text());
                 if (!dst.exists()) {
-                    dd->acceptProposedAction();
+                    dropEvent->acceptProposedAction();
                     return true;
                 }
                 QVector<LocalFsPair> pairs;
-                for (const QUrl &u : urls) {
-                    const QString p = u.toLocalFile();
-                    if (p.isEmpty())
+                for (const QUrl &url : urls) {
+                    const QString localPath = url.toLocalFile();
+                    if (localPath.isEmpty())
                         continue;
-                    QFileInfo fi(p);
-                    const QString target = dst.filePath(fi.fileName());
+                    QFileInfo localFileInfo(localPath);
+                    const QString target =
+                        dst.filePath(localFileInfo.fileName());
                     // Avoid self-drop: same file/folder and same destination
-                    if (fi.absoluteFilePath() == target) {
+                    if (localFileInfo.absoluteFilePath() == target) {
                         continue;
                     }
-                    pairs.push_back({fi.absoluteFilePath(), target});
+                    pairs.push_back({localFileInfo.absoluteFilePath(), target});
                 }
                 runLocalFsOperation(pairs, false, 0);
                 if (!stagingBatchDir.isEmpty())
                     scheduleStagingCleanupAfterLocalJobs(stagingBatchDir);
-                dd->acceptProposedAction();
+                dropEvent->acceptProposedAction();
                 updateDeleteShortcutEnables();
                 return true;
             }
             // Download from remote (based on right panel selection)
             if (rightIsRemote_ == true && rightView_ && rightRemoteModel_) {
-                auto sel = rightView_->selectionModel();
-                if (!sel || sel->selectedRows(NAME_COL).isEmpty()) {
-                    dd->acceptProposedAction();
+                auto selectionModel = rightView_->selectionModel();
+                if (!selectionModel ||
+                    selectionModel->selectedRows(NAME_COL).isEmpty()) {
+                    dropEvent->acceptProposedAction();
                     return true;
                 }
-                const auto rows = sel->selectedRows(NAME_COL);
+                const auto rows = selectionModel->selectedRows(NAME_COL);
                 int bad = 0;
                 QVector<RemoteDownloadSeed> seeds;
                 seeds.reserve(rows.size());
@@ -582,11 +593,11 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
                         {rpath, lpath, rightRemoteModel_->isDir(idx)});
                 }
                 runRemoteDownloadPrescan(seeds, bad, true);
-                dd->acceptProposedAction();
+                dropEvent->acceptProposedAction();
                 updateDeleteShortcutEnables();
                 return true;
             }
         }
     }
-    return QMainWindow::eventFilter(obj, ev);
+    return QMainWindow::eventFilter(eventSource, event);
 }

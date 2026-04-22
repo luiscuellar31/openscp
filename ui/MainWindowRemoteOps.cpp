@@ -69,6 +69,209 @@ buildDownloadWalkOptions(const QString &localRootPath) {
     return walkOptions;
 }
 
+struct RemoteMoveTopSelection {
+    QString remotePath;
+    bool isDir = false;
+};
+
+struct RemoteMoveDownloadPlan {
+    QVector<QPair<QString, QString>> transferPairs;
+    QVector<RemoteMoveTopSelection> topSelections;
+    int skippedInvalidCount = 0;
+};
+
+static RemoteMoveDownloadPlan
+buildRemoteMoveDownloadPlan(openscp::SftpClient *client,
+                            RemoteModel *remoteModel,
+                            const QModelIndexList &rows,
+                            const QString &remoteBase,
+                            const QDir &destinationDir) {
+    RemoteMoveDownloadPlan plan;
+    if (!client || !remoteModel)
+        return plan;
+
+    plan.topSelections.reserve(rows.size());
+    for (const QModelIndex &idx : rows) {
+        const QString name = remoteModel->nameAt(idx);
+        QString why;
+        if (!isValidEntryName(name, &why)) {
+            ++plan.skippedInvalidCount;
+            continue;
+        }
+
+        const QString remotePath = joinRemotePath(remoteBase, name);
+        const QString localPath = destinationDir.filePath(name);
+        const bool isDir = remoteModel->isDir(idx);
+        plan.topSelections.push_back({remotePath, isDir});
+
+        if (isDir) {
+            QDir().mkpath(localPath);
+            RemoteWalker::Options walkOptions = buildDownloadWalkOptions(localPath);
+            RemoteWalker::Stats walkStats;
+            (void)RemoteWalker::walk(
+                client, remotePath, walkOptions,
+                [&](const RemoteWalker::Entry &entry) {
+                    const QString childLocal =
+                        QDir(localPath).filePath(entry.relativePath);
+                    QDir().mkpath(QFileInfo(childLocal).dir().absolutePath());
+                    plan.transferPairs.push_back({entry.remotePath, childLocal});
+                },
+                &walkStats);
+            plan.skippedInvalidCount +=
+                static_cast<int>(walkStats.skippedInvalidNameCount);
+            continue;
+        }
+
+        QDir().mkpath(QFileInfo(localPath).dir().absolutePath());
+        plan.transferPairs.push_back({remotePath, localPath});
+    }
+    return plan;
+}
+
+static int enqueueDownloadPairs(TransferManager *manager,
+                                const QVector<QPair<QString, QString>> &pairs) {
+    if (!manager)
+        return 0;
+    int enqueuedCount = 0;
+    for (const auto &pair : pairs) {
+        manager->enqueueDownload(pair.first, pair.second);
+        ++enqueuedCount;
+    }
+    return enqueuedCount;
+}
+
+static void attachRemoteMoveCleanup(
+    QObject *owner, TransferManager *manager,
+    const std::function<openscp::SftpClient *()> &clientAccessor,
+    RemoteModel *remoteModel, const QString &remoteBase,
+    const QVector<QPair<QString, QString>> &pairs,
+    const QVector<RemoteMoveTopSelection> &topSelections) {
+    if (!owner || !manager || pairs.isEmpty())
+        return;
+
+    struct MoveState {
+        QSet<QString> filesPending;   // remote files pending deletion
+        QSet<QString> filesProcessed; // remote files already processed
+                                      // (avoid duplicates)
+        QHash<QString, QString> fileToTopDir; // remote file -> top dir path
+        QHash<QString, int> remainingInTopDir; // top dir -> pending files
+        QSet<QString> topDirs;                // top entries that are directories
+        QSet<QString> deletedDirs;            // top dirs already deleted
+    };
+    auto state = std::make_shared<MoveState>();
+    for (const auto &topSelection : topSelections) {
+        if (!topSelection.isDir)
+            continue;
+        state->topDirs.insert(topSelection.remotePath);
+        state->remainingInTopDir.insert(topSelection.remotePath, 0);
+    }
+    for (const auto &pair : pairs) {
+        state->filesPending.insert(pair.first);
+        QString foundTop;
+        for (const auto &topSelection : topSelections) {
+            if (!topSelection.isDir)
+                continue;
+            const QString prefix =
+                topSelection.remotePath.endsWith('/')
+                    ? topSelection.remotePath
+                    : (topSelection.remotePath + '/');
+            if (pair.first == topSelection.remotePath ||
+                pair.first.startsWith(prefix)) {
+                foundTop = topSelection.remotePath;
+                break;
+            }
+        }
+        if (!foundTop.isEmpty()) {
+            state->fileToTopDir.insert(pair.first, foundTop);
+            state->remainingInTopDir[foundTop] =
+                state->remainingInTopDir.value(foundTop) + 1;
+        }
+    }
+
+    // If there are directories with no queued files, remove them only if empty.
+    openscp::SftpClient *client = clientAccessor ? clientAccessor() : nullptr;
+    for (auto remainingIt = state->remainingInTopDir.begin();
+         remainingIt != state->remainingInTopDir.end(); ++remainingIt) {
+        if (remainingIt.value() != 0 || !client)
+            continue;
+
+        std::vector<openscp::FileInfo> listedEntries;
+        std::string listError;
+        if (client->list(remainingIt.key().toStdString(), listedEntries, listError) &&
+            listedEntries.empty()) {
+            std::string removeError;
+            if (client->removeDir(remainingIt.key().toStdString(), removeError))
+                state->deletedDirs.insert(remainingIt.key());
+        }
+    }
+
+    auto connPtr = std::make_shared<QMetaObject::Connection>();
+    *connPtr = QObject::connect(
+        manager, &TransferManager::tasksChanged, owner,
+        [state, remoteBase, connPtr, pairs, remoteModel, clientAccessor,
+         manager]() {
+            const auto tasks = manager->tasksSnapshot();
+            for (const auto &task : tasks) {
+                if (task.type != TransferTask::Type::Download ||
+                    task.status != TransferTask::Status::Done) {
+                    continue;
+                }
+
+                const QString remotePath = task.src;
+                if (!state->filesPending.contains(remotePath) ||
+                    state->filesProcessed.contains(remotePath)) {
+                    continue;
+                }
+
+                openscp::SftpClient *client =
+                    clientAccessor ? clientAccessor() : nullptr;
+                bool deletedRemoteFile = false;
+                if (client) {
+                    std::string removeFileError;
+                    deletedRemoteFile =
+                        client->removeFile(remotePath.toStdString(), removeFileError);
+                }
+                state->filesProcessed.insert(remotePath);
+                state->filesPending.remove(remotePath);
+                if (!deletedRemoteFile)
+                    continue;
+
+                const QString topDir = state->fileToTopDir.value(remotePath);
+                if (topDir.isEmpty())
+                    continue;
+
+                const int remainingCount =
+                    state->remainingInTopDir.value(topDir) - 1;
+                state->remainingInTopDir[topDir] = remainingCount;
+                if (remainingCount != 0 || state->deletedDirs.contains(topDir))
+                    continue;
+
+                openscp::SftpClient *activeClient =
+                    clientAccessor ? clientAccessor() : nullptr;
+                if (!activeClient)
+                    continue;
+                std::vector<openscp::FileInfo> listedEntries;
+                std::string listError;
+                if (activeClient->list(topDir.toStdString(), listedEntries, listError) &&
+                    listedEntries.empty()) {
+                    std::string removeDirError;
+                    if (activeClient->removeDir(topDir.toStdString(), removeDirError))
+                        state->deletedDirs.insert(topDir);
+                }
+            }
+
+            const bool allFinal =
+                areTransferPairsFinal(tasks, TransferTask::Type::Download, pairs);
+            if (!allFinal)
+                return;
+
+            QString refreshError;
+            if (remoteModel)
+                remoteModel->setRootPath(remoteBase, &refreshError);
+            QObject::disconnect(*connPtr);
+        });
+}
+
 // Reveal a file in the system file manager (select/highlight when possible),
 
 static bool indicatesRemoteWriteabilityDenied(const QString &raw) {
@@ -857,16 +1060,16 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
             transferMgr_, &TransferManager::tasksChanged, this,
             [this, remotePath, localPath, key, connPtr]() {
                 const auto tasks = transferMgr_->tasksSnapshot();
-                for (const auto &t : tasks) {
-                    if (t.type == TransferTask::Type::Download &&
-                        t.src == remotePath && t.dst == localPath) {
-                        if (t.status == TransferTask::Status::Done) {
+                for (const auto &task : tasks) {
+                    if (task.type == TransferTask::Type::Download &&
+                        task.src == remotePath && task.dst == localPath) {
+                        if (task.status == TransferTask::Status::Done) {
                             openLocalPathWithPreference(localPath);
                             statusBar()->showMessage(
                                 tr("Downloaded: ") + localPath, 5000);
                             QObject::disconnect(*connPtr);
                             sOpenListeners.remove(key);
-                        } else if (isTransferTaskFinalStatus(t.status)) {
+                        } else if (isTransferTaskFinalStatus(task.status)) {
                             QObject::disconnect(*connPtr);
                             sOpenListeners.remove(key);
                         }
@@ -1104,199 +1307,28 @@ void MainWindow::moveRightToLeft() {
     }
     const auto rows = selectionModel->selectedRows(NAME_COL);
     const QString remoteBase = rightRemoteModel_->rootPath();
-    QVector<QPair<QString, QString>> pairs; // (remote, local) files to download
-    int skippedInvalidCount = 0;
-    struct TopSel {
-        QString remotePath;
-        bool isDir;
-    };
-    QVector<TopSel> topSelections;
-    int enqueuedCount = 0;
-    for (const QModelIndex &idx : rows) {
-        const QString name = rightRemoteModel_->nameAt(idx);
-        {
-            QString why;
-            if (!isValidEntryName(name, &why)) {
-                ++skippedInvalidCount;
-                continue;
-            }
-        }
-        const QString remotePath = joinRemotePath(remoteBase, name);
-        const QString localPath = dst.filePath(name);
-        const bool isDir = rightRemoteModel_->isDir(idx);
-        topSelections.push_back({remotePath, isDir});
-        if (isDir) {
-            QDir().mkpath(localPath);
-            RemoteWalker::Options walkOptions =
-                buildDownloadWalkOptions(localPath);
-            RemoteWalker::Stats walkStats;
-            (void)RemoteWalker::walk(
-                sftp_.get(), remotePath, walkOptions,
-                [&](const RemoteWalker::Entry &entry) {
-                    const QString childLocal =
-                        QDir(localPath).filePath(entry.relativePath);
-                    QDir().mkpath(QFileInfo(childLocal).dir().absolutePath());
-                    pairs.push_back({entry.remotePath, childLocal});
-                },
-                &walkStats);
-            skippedInvalidCount +=
-                static_cast<int>(walkStats.skippedInvalidNameCount);
-        } else {
-            QDir().mkpath(QFileInfo(localPath).dir().absolutePath());
-            pairs.push_back({remotePath, localPath});
-        }
-    }
-    for (const auto &pair : pairs) {
-        transferMgr_->enqueueDownload(pair.first, pair.second);
-        ++enqueuedCount;
-    }
+    const RemoteMoveDownloadPlan movePlan = buildRemoteMoveDownloadPlan(
+        sftp_.get(), rightRemoteModel_, rows, remoteBase, dst);
+    const int enqueuedCount =
+        enqueueDownloadPairs(transferMgr_, movePlan.transferPairs);
     if (enqueuedCount > 0) {
         QString statusMessage =
             QString(tr("Queued: %1 downloads (move)")).arg(enqueuedCount);
-        if (skippedInvalidCount > 0) {
+        if (movePlan.skippedInvalidCount > 0) {
             statusMessage +=
                 QString("  |  ") +
-                tr("Skipped invalid: %1").arg(skippedInvalidCount);
+                tr("Skipped invalid: %1").arg(movePlan.skippedInvalidCount);
         }
         statusBar()->showMessage(statusMessage, 4000);
         maybeShowTransferQueue();
     }
     // Per-item deletion: as each download finishes OK, delete that remote file;
     // when a folder has no pending files left, delete the folder.
-    if (enqueuedCount > 0) {
-        struct MoveState {
-            QSet<QString> filesPending;   // remote files pending deletion
-            QSet<QString> filesProcessed; // remote files already processed
-                                          // (avoid duplicates)
-            QHash<QString, QString>
-                fileToTopDir; // remote file -> top dir rpath
-            QHash<QString, int> remainingInTopDir; // top dir -> count of
-                                                   // pending successful files
-            QSet<QString> topDirs; // rpaths of top entries that are directories
-            QSet<QString> deletedDirs; // top dirs already deleted
-        };
-        auto state = std::make_shared<MoveState>();
-        // Initialize top dir mapping and counters
-        for (const auto &topSelection : topSelections)
-            if (topSelection.isDir) {
-                state->topDirs.insert(topSelection.remotePath);
-                state->remainingInTopDir.insert(topSelection.remotePath, 0);
-            }
-        for (const auto &pair : pairs) {
-            state->filesPending.insert(pair.first);
-            // Locate containing top directory
-            QString foundTop;
-            for (const auto &topSelection : topSelections) {
-                if (!topSelection.isDir)
-                    continue;
-                const QString prefix =
-                    topSelection.remotePath.endsWith('/')
-                        ? topSelection.remotePath
-                        : (topSelection.remotePath + '/');
-                if (pair.first == topSelection.remotePath ||
-                    pair.first.startsWith(prefix)) {
-                    foundTop = topSelection.remotePath;
-                    break;
-                }
-            }
-            if (!foundTop.isEmpty()) {
-                state->fileToTopDir.insert(pair.first, foundTop);
-                state->remainingInTopDir[foundTop] =
-                    state->remainingInTopDir.value(foundTop) + 1;
-            }
-        }
-        // If there are directories with 0 files, try to delete them only if
-        // empty
-        for (auto remainingIt = state->remainingInTopDir.begin();
-             remainingIt != state->remainingInTopDir.end(); ++remainingIt) {
-            if (remainingIt.value() == 0) {
-                std::vector<openscp::FileInfo> listedEntries;
-                std::string listError;
-                if (sftp_ &&
-                    sftp_->list(remainingIt.key().toStdString(), listedEntries,
-                                listError) &&
-                    listedEntries.empty()) {
-                    std::string removeError;
-                    if (sftp_->removeDir(remainingIt.key().toStdString(),
-                                         removeError)) {
-                        state->deletedDirs.insert(remainingIt.key());
-                    }
-                }
-            }
-        }
-        auto connPtr = std::make_shared<QMetaObject::Connection>();
-        *connPtr = connect(
-            transferMgr_, &TransferManager::tasksChanged, this,
-            [this, state, remoteBase, connPtr, pairs]() {
-                const auto tasks = transferMgr_->tasksSnapshot();
-                // 1) For each successfully completed task, delete the
-                // corresponding remote file (once)
-                for (const auto &t : tasks) {
-                    if (t.type != TransferTask::Type::Download)
-                        continue;
-                    if (t.status != TransferTask::Status::Done)
-                        continue;
-                    const QString remotePath = t.src;
-                    if (!state->filesPending.contains(remotePath))
-                        continue; // does not belong to this move or already
-                                  // deleted
-                    if (state->filesProcessed.contains(remotePath))
-                        continue;
-                    // Try to delete the remote file
-                    std::string removeFileError;
-                    bool deletedRemoteFile = sftp_ &&
-                                             sftp_->removeFile(
-                                                 remotePath.toStdString(),
-                                                 removeFileError);
-                    state->filesProcessed.insert(remotePath);
-                    if (deletedRemoteFile) {
-                        state->filesPending.remove(remotePath);
-                        // Decrement counter for the top directory it belongs to
-                        const QString topDir =
-                            state->fileToTopDir.value(remotePath);
-                        if (!topDir.isEmpty()) {
-                            int remainingCount =
-                                state->remainingInTopDir.value(topDir) - 1;
-                            state->remainingInTopDir[topDir] = remainingCount;
-                            if (remainingCount == 0 &&
-                                !state->deletedDirs.contains(topDir)) {
-                                // All files under this top dir were moved:
-                                // delete folder only if empty
-                                std::vector<openscp::FileInfo> listedEntries;
-                                std::string listError;
-                                if (sftp_ &&
-                                    sftp_->list(topDir.toStdString(),
-                                                listedEntries, listError) &&
-                                    listedEntries.empty()) {
-                                    std::string removeDirError;
-                                    if (sftp_->removeDir(topDir.toStdString(),
-                                                         removeDirError)) {
-                                        state->deletedDirs.insert(topDir);
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        // Not deleted: keep it out to avoid endless retries;
-                        // could retry if desired
-                        state->filesPending.remove(remotePath);
-                    }
-                }
-
-                // 2) Disconnect when all related tasks have reached a final
-                // state
-                const bool allFinal = areTransferPairsFinal(
-                    tasks, TransferTask::Type::Download, pairs);
-                if (allFinal) {
-                    // Refresh remote listing once after all move-related tasks
-                    // settle.
-                    QString refreshError;
-                    if (rightRemoteModel_)
-                        rightRemoteModel_->setRootPath(remoteBase, &refreshError);
-                    QObject::disconnect(*connPtr);
-                }
-            });
-    }
+    attachRemoteMoveCleanup(
+        this, transferMgr_,
+        [this]() -> openscp::SftpClient * { return sftp_.get(); },
+        rightRemoteModel_, remoteBase, movePlan.transferPairs,
+        movePlan.topSelections);
 }
 
 
@@ -1343,10 +1375,10 @@ void MainWindow::uploadViaDialog() {
     dlg.setFileMode(QFileDialog::ExistingFiles);
     dlg.setOption(QFileDialog::DontUseNativeDialog, true);
     dlg.setViewMode(QFileDialog::Detail);
-    if (auto *lv = dlg.findChild<QListView *>("listView"))
-        lv->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    if (auto *tv = dlg.findChild<QTreeView *>())
-        tv->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    if (auto *listView = dlg.findChild<QListView *>("listView"))
+        listView->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    if (auto *treeView = dlg.findChild<QTreeView *>())
+        treeView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     if (dlg.exec() != QDialog::Accepted)
         return;
     const QStringList picks = dlg.selectedFiles();
@@ -1357,12 +1389,13 @@ void MainWindow::uploadViaDialog() {
     for (const QString &pickedPath : picks) {
         QFileInfo selectedPathInfo(pickedPath);
         if (selectedPathInfo.isDir()) {
-            QDirIterator it(pickedPath, QDir::NoDotAndDotDot | QDir::AllEntries,
-                            QDirIterator::Subdirectories);
-            while (it.hasNext()) {
-                it.next();
-                if (it.fileInfo().isFile())
-                    files << it.filePath();
+            QDirIterator dirIterator(pickedPath,
+                                     QDir::NoDotAndDotDot | QDir::AllEntries,
+                                     QDirIterator::Subdirectories);
+            while (dirIterator.hasNext()) {
+                dirIterator.next();
+                if (dirIterator.fileInfo().isFile())
+                    files << dirIterator.filePath();
             }
         } else if (selectedPathInfo.isFile()) {
             files << selectedPathInfo.absoluteFilePath();
@@ -1526,13 +1559,13 @@ void MainWindow::newFileRight() {
                     QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
                 return;
         }
-        QFile f(path);
-        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        QFile newFile(path);
+        if (!newFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             UiAlerts::critical(this, tr("Local"),
                                   tr("Could not create file."));
             return;
         }
-        f.close();
+        newFile.close();
         setRightRoot(base.absolutePath());
         statusBar()->showMessage(tr("File created: ") + path, 4000);
     }
@@ -1561,13 +1594,15 @@ void MainWindow::renameRightSelected() {
         if (!inputAccepted || newName.isEmpty() || newName == oldName)
             return;
         const QString base = rightRemoteModel_->rootPath();
-        const QString from = joinRemotePath(base, oldName);
-        const QString to = joinRemotePath(base, newName);
+        const QString sourcePath = joinRemotePath(base, oldName);
+        const QString targetPath = joinRemotePath(base, newName);
         std::string renameError;
         const bool okRename = executeCriticalRemoteOperation(
             tr("rename a remote item"),
-            [from, to](openscp::SftpClient *client, std::string &opErr) {
-                return client->rename(from.toStdString(), to.toStdString(),
+            [sourcePath, targetPath](openscp::SftpClient *client,
+                                     std::string &opErr) {
+                return client->rename(sourcePath.toStdString(),
+                                      targetPath.toStdString(),
                                       opErr, false);
             },
             renameError);
@@ -2064,9 +2099,9 @@ void MainWindow::updateRemoteWriteability() {
         auto probe = openscp::CreateConnectedClient(opt, connErr);
         if (probe) {
             probeFinished = true;
-            const qint64 ts = QDateTime::currentMSecsSinceEpoch();
+            const qint64 timestampMs = QDateTime::currentMSecsSinceEpoch();
             const QString testName =
-                ".openscp-write-test-" + QString::number(ts);
+                ".openscp-write-test-" + QString::number(timestampMs);
             const QString testPath = joinRemotePath(base, testName);
             std::string mkdirError;
             const bool created =

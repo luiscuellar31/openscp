@@ -58,11 +58,11 @@ PermissionsDialog::PermissionsDialog(QWidget *parent)
     recursive_ = new QCheckBox(tr("Apply recursively to subfolders"), this);
     lay->addWidget(recursive_, 6, 0, 1, 4);
 
-    auto *bb = new QDialogButtonBox(
+    auto *dialogButtons = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    lay->addWidget(bb, 7, 0, 1, 4);
-    connect(bb, &QDialogButtonBox::accepted, this, &QDialog::accept);
-    connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    lay->addWidget(dialogButtons, 7, 0, 1, 4);
+    connect(dialogButtons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(dialogButtons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
     auto onFlagsChanged = [this](bool) { updateOctalPreviewAndPreset(); };
     connect(ur_, &QCheckBox::toggled, this, onFlagsChanged);
@@ -88,56 +88,56 @@ PermissionsDialog::PermissionsDialog(QWidget *parent)
     updateOctalPreviewAndPreset();
 }
 
-void PermissionsDialog::setMode(unsigned int m) {
+void PermissionsDialog::setMode(unsigned int modeValue) {
     const QSignalBlocker b1(ur_), b2(uw_), b3(ux_), b4(gr_), b5(gw_), b6(gx_),
         b7(or_), b8(ow_), b9(ox_);
-    ur_->setChecked(m & 0400);
-    uw_->setChecked(m & 0200);
-    ux_->setChecked(m & 0100);
-    gr_->setChecked(m & 0040);
-    gw_->setChecked(m & 0020);
-    gx_->setChecked(m & 0010);
-    or_->setChecked(m & 0004);
-    ow_->setChecked(m & 0002);
-    ox_->setChecked(m & 0001);
+    ur_->setChecked(modeValue & 0400);
+    uw_->setChecked(modeValue & 0200);
+    ux_->setChecked(modeValue & 0100);
+    gr_->setChecked(modeValue & 0040);
+    gw_->setChecked(modeValue & 0020);
+    gx_->setChecked(modeValue & 0010);
+    or_->setChecked(modeValue & 0004);
+    ow_->setChecked(modeValue & 0002);
+    ox_->setChecked(modeValue & 0001);
     updateOctalPreviewAndPreset();
 }
 
 unsigned int PermissionsDialog::mode() const {
-    unsigned int m = 0;
+    unsigned int modeValue = 0;
     if (ur_->isChecked())
-        m |= 0400;
+        modeValue |= 0400;
     if (uw_->isChecked())
-        m |= 0200;
+        modeValue |= 0200;
     if (ux_->isChecked())
-        m |= 0100;
+        modeValue |= 0100;
     if (gr_->isChecked())
-        m |= 0040;
+        modeValue |= 0040;
     if (gw_->isChecked())
-        m |= 0020;
+        modeValue |= 0020;
     if (gx_->isChecked())
-        m |= 0010;
+        modeValue |= 0010;
     if (or_->isChecked())
-        m |= 0004;
+        modeValue |= 0004;
     if (ow_->isChecked())
-        m |= 0002;
+        modeValue |= 0002;
     if (ox_->isChecked())
-        m |= 0001;
-    return m;
+        modeValue |= 0001;
+    return modeValue;
 }
 
 bool PermissionsDialog::recursive() const { return recursive_->isChecked(); }
 
 void PermissionsDialog::updateOctalPreviewAndPreset() {
-    const unsigned int m = mode() & 0777;
+    const unsigned int modeValue = mode() & 0777;
     if (octalPreview_) {
         octalPreview_->setText(
             tr("Octal mode: %1")
-                .arg(QString("%1").arg(m, 3, 8, QLatin1Char('0'))));
+                .arg(QString("%1").arg(modeValue, 3, 8, QLatin1Char('0'))));
     }
     if (presets_) {
-        const int idx = presets_->findData(static_cast<int>(m));
+        const int presetIndex = presets_->findData(static_cast<int>(modeValue));
         const QSignalBlocker guard(presets_);
-        presets_->setCurrentIndex(idx >= 0 ? idx : 0);
+        presets_->setCurrentIndex(presetIndex >= 0 ? presetIndex : 0);
     }
 }

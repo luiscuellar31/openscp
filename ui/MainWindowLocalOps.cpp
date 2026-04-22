@@ -57,14 +57,15 @@ static bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
             return false;
         }
         // Iterate recursively
-        QDirIterator it(srcPath, QDir::NoDotAndDotDot | QDir::AllEntries,
-                        QDirIterator::Subdirectories);
-        while (it.hasNext()) {
-            it.next();
-            const QFileInfo entryFileInfo = it.fileInfo();
-            const QString rel =
+        QDirIterator dirIterator(srcPath,
+                                 QDir::NoDotAndDotDot | QDir::AllEntries,
+                                 QDirIterator::Subdirectories);
+        while (dirIterator.hasNext()) {
+            dirIterator.next();
+            const QFileInfo entryFileInfo = dirIterator.fileInfo();
+            const QString relativePath =
                 QDir(srcPath).relativeFilePath(entryFileInfo.absoluteFilePath());
-            const QString target = QDir(dstPath).filePath(rel);
+            const QString target = QDir(dstPath).filePath(relativePath);
 
             if (entryFileInfo.isDir()) {
                 if (!QDir().mkpath(target)) {
@@ -342,27 +343,29 @@ void MainWindow::copyLeftToRight() {
                 }
                 const QString remoteDirBase =
                     joinRemotePath(remoteBase, sourceFileInfo.fileName());
-                QDirIterator it(sourceFileInfo.absoluteFilePath(),
-                                QDir::NoDotAndDotDot | QDir::AllEntries,
-                                QDirIterator::Subdirectories);
-                while (it.hasNext()) {
-                    it.next();
-                    const QFileInfo childFileInfo = it.fileInfo();
+                QDirIterator dirIterator(sourceFileInfo.absoluteFilePath(),
+                                         QDir::NoDotAndDotDot |
+                                             QDir::AllEntries,
+                                         QDirIterator::Subdirectories);
+                while (dirIterator.hasNext()) {
+                    dirIterator.next();
+                    const QFileInfo childFileInfo = dirIterator.fileInfo();
                     if (!childFileInfo.isFile())
                         continue;
-                    const QString rel =
+                    const QString relativePath =
                         QDir(sourceFileInfo.absoluteFilePath())
                             .relativeFilePath(childFileInfo.absoluteFilePath());
-                    const QString rTarget = joinRemotePath(remoteDirBase, rel);
+                    const QString remoteTargetPath =
+                        joinRemotePath(remoteDirBase, relativePath);
                     transferMgr_->enqueueUpload(childFileInfo.absoluteFilePath(),
-                                                rTarget);
+                                                remoteTargetPath);
                     ++enqueuedCount;
                 }
             } else {
-                const QString rTarget =
+                const QString remoteTargetPath =
                     joinRemotePath(remoteBase, sourceFileInfo.fileName());
                 transferMgr_->enqueueUpload(sourceFileInfo.absoluteFilePath(),
-                                            rTarget);
+                                            remoteTargetPath);
                 ++enqueuedCount;
             }
         }
@@ -492,18 +495,20 @@ void MainWindow::moveLeftToRight() {
                 const int pairStart = pairs.size();
                 bool dirPrepFailed = false;
                 int filesInDir = 0;
-                QDirIterator it(topLocalDir,
-                                QDir::NoDotAndDotDot | QDir::AllEntries,
-                                QDirIterator::Subdirectories);
-                while (it.hasNext()) {
-                    it.next();
-                    const QFileInfo childFileInfo = it.fileInfo();
-                    const QString rel =
+                QDirIterator dirIterator(topLocalDir,
+                                         QDir::NoDotAndDotDot |
+                                             QDir::AllEntries,
+                                         QDirIterator::Subdirectories);
+                while (dirIterator.hasNext()) {
+                    dirIterator.next();
+                    const QFileInfo childFileInfo = dirIterator.fileInfo();
+                    const QString relativePath =
                         QDir(topLocalDir)
                             .relativeFilePath(childFileInfo.absoluteFilePath());
-                    const QString rTarget = joinRemotePath(baseRemoteDir, rel);
+                    const QString remoteTargetPath =
+                        joinRemotePath(baseRemoteDir, relativePath);
                     if (childFileInfo.isDir()) {
-                        if (!ensureRemoteDir(rTarget)) {
+                        if (!ensureRemoteDir(remoteTargetPath)) {
                             dirPrepFailed = true;
                             break;
                         }
@@ -512,7 +517,8 @@ void MainWindow::moveLeftToRight() {
                     if (!childFileInfo.isFile())
                         continue;
                     pairs.push_back(
-                        {childFileInfo.absoluteFilePath(), rTarget, topLocalDir});
+                        {childFileInfo.absoluteFilePath(), remoteTargetPath,
+                         topLocalDir});
                     ++filesInDir;
                 }
                 if (dirPrepFailed) {
@@ -530,15 +536,16 @@ void MainWindow::moveLeftToRight() {
                     }
                 }
             } else if (sourceFileInfo.isFile()) {
-                const QString rTarget =
+                const QString remoteTargetPath =
                     joinRemotePath(remoteBase, sourceFileInfo.fileName());
                 pairs.push_back(
-                    {sourceFileInfo.absoluteFilePath(), rTarget, QString()});
+                    {sourceFileInfo.absoluteFilePath(), remoteTargetPath,
+                     QString()});
             }
         }
 
-        for (const auto &p : pairs)
-            transferMgr_->enqueueUpload(p.localPath, p.remotePath);
+        for (const auto &pair : pairs)
+            transferMgr_->enqueueUpload(pair.localPath, pair.remotePath);
         if (!pairs.isEmpty()) {
             statusBar()->showMessage(
                 QString(tr("Queued: %1 uploads (move)")).arg(pairs.size()),
@@ -561,8 +568,8 @@ void MainWindow::moveLeftToRight() {
         if (!pairs.isEmpty()) {
             QVector<QPair<QString, QString>> transferPairs;
             transferPairs.reserve(pairs.size());
-            for (const auto &p : pairs)
-                transferPairs.push_back({p.localPath, p.remotePath});
+            for (const auto &pair : pairs)
+                transferPairs.push_back({pair.localPath, pair.remotePath});
 
             struct MoveUploadState {
                 QSet<QString> pendingLocalFiles;
@@ -580,12 +587,12 @@ void MainWindow::moveLeftToRight() {
             state->skipped = skippedPrep;
             state->lastError = prepError;
 
-            for (const auto &p : pairs) {
-                state->pendingLocalFiles.insert(p.localPath);
-                if (!p.topLocalDir.isEmpty()) {
-                    state->fileToTopDir.insert(p.localPath, p.topLocalDir);
-                    state->remainingInTopDir[p.topLocalDir] =
-                        state->remainingInTopDir.value(p.topLocalDir) + 1;
+            for (const auto &pair : pairs) {
+                state->pendingLocalFiles.insert(pair.localPath);
+                if (!pair.topLocalDir.isEmpty()) {
+                    state->fileToTopDir.insert(pair.localPath, pair.topLocalDir);
+                    state->remainingInTopDir[pair.topLocalDir] =
+                        state->remainingInTopDir.value(pair.topLocalDir) + 1;
                 }
             }
 
@@ -595,24 +602,24 @@ void MainWindow::moveLeftToRight() {
                 [this, state, remoteBase, connPtr, transferPairs]() {
                     const auto tasks = transferMgr_->tasksSnapshot();
 
-                    for (const auto &t : tasks) {
-                        if (t.type != TransferTask::Type::Upload)
+                    for (const auto &task : tasks) {
+                        if (task.type != TransferTask::Type::Upload)
                             continue;
-                        const QString local = t.src;
+                        const QString local = task.src;
                         if (!state->pendingLocalFiles.contains(local))
                             continue;
                         if (state->processedLocalFiles.contains(local))
                             continue;
-                        if (t.status != TransferTask::Status::Done &&
-                            t.status != TransferTask::Status::Error &&
-                            t.status != TransferTask::Status::Canceled) {
+                        if (task.status != TransferTask::Status::Done &&
+                            task.status != TransferTask::Status::Error &&
+                            task.status != TransferTask::Status::Canceled) {
                             continue;
                         }
 
                         state->processedLocalFiles.insert(local);
                         const QString topDir = state->fileToTopDir.value(local);
                         const bool uploadDone =
-                            (t.status == TransferTask::Status::Done);
+                            (task.status == TransferTask::Status::Done);
                         if (uploadDone) {
                             const bool removed = !QFileInfo::exists(local) ||
                                                  QFile::remove(local);
@@ -627,8 +634,8 @@ void MainWindow::moveLeftToRight() {
                             }
                         } else {
                             ++state->failed;
-                            if (!t.error.isEmpty())
-                                state->lastError = t.error;
+                            if (!task.error.isEmpty())
+                                state->lastError = task.error;
                             if (!topDir.isEmpty())
                                 state->failedTopDirs.insert(topDir);
                         }
@@ -852,12 +859,12 @@ void MainWindow::newFileLeft() {
                 QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
             return;
     }
-    QFile f(path);
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    QFile newFile(path);
+    if (!newFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         UiAlerts::critical(this, tr("Local"), tr("Could not create file."));
         return;
     }
-    f.close();
+    newFile.close();
     setLeftRoot(base.absolutePath());
     statusBar()->showMessage(tr("File created: ") + path, 4000);
 }

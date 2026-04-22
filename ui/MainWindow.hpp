@@ -41,16 +41,16 @@ class MainWindow : public QMainWindow {
     ~MainWindow();
     Q_INVOKABLE void resetMainWindowLayoutToDefaults();
     // Preference: open Site Manager automatically on disconnect (non‑modal)
-    void setOpenSiteManagerOnDisconnect(bool on);
+    void setOpenSiteManagerOnDisconnect(bool enabled);
     bool openSiteManagerOnDisconnect() const {
         return m_openSiteManagerOnDisconnect;
     }
     // Preference: open Site Manager automatically on startup (non‑modal)
-    void setOpenSiteManagerOnStartup(bool on);
+    void setOpenSiteManagerOnStartup(bool enabled);
     bool openSiteManagerOnStartup() const { return m_openSiteManagerOnStartup; }
 
     protected:
-    bool eventFilter(QObject *obj, QEvent *ev) override;
+    bool eventFilter(QObject *eventSource, QEvent *event) override;
     void showEvent(QShowEvent *e) override;
     void closeEvent(QCloseEvent *e) override;
 
@@ -202,11 +202,11 @@ class MainWindow : public QMainWindow {
                           bool canSave);
 
     // Explicit non‑modal TOFU dialog API per spec
-    void showTOfuDialog(const QString &host, const QString &alg,
-                        const QString &fp);
+    void showTOfuDialog(const QString &host, const QString &algorithm,
+                        const QString &fingerprint);
     void onTofuFinished(int dialogResult);
-    void showOneTimeDialog(const QString &host, const QString &alg,
-                           const QString &fp);
+    void showOneTimeDialog(const QString &host, const QString &algorithm,
+                           const QString &fingerprint);
     void onOneTimeFinished(int dialogResult);
     bool consumeTofuDialogDecision(int result);
     void publishTofuDecision(bool accept);
@@ -228,7 +228,8 @@ class MainWindow : public QMainWindow {
     void addRecentRemotePath(const QString &path);
     void addRecentServer(const openscp::SessionOptions &opt);
     void applyTransferPreferences();
-    static QString defaultDownloadDirFromSettings(const class QSettings &s);
+    static QString
+    defaultDownloadDirFromSettings(const class QSettings &settings);
 
     // Helpers for connecting and wiring up the remote UI
     void startSftpConnect(
@@ -242,7 +243,7 @@ class MainWindow : public QMainWindow {
         openscp::SessionOptions opt, const openscp::SessionOptions &uiOpt,
         std::optional<PendingSiteSaveRequest> saveRequest,
         const std::shared_ptr<std::atomic<bool>> &cancelFlag);
-    void finalizeSftpConnect(bool okConn, const QString &err,
+    void finalizeSftpConnect(bool connectionOk, const QString &errorText,
                              openscp::SftpClient *connectedClient,
                              const openscp::SessionOptions &uiOpt,
                              std::optional<PendingSiteSaveRequest> saveRequest,

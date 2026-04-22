@@ -21,8 +21,8 @@ class DragAwareTreeView : public QTreeView {
 
     protected:
     void startDrag(Qt::DropActions supportedActions) override;
-    void resizeEvent(QResizeEvent *e) override;
-    void closeEvent(QCloseEvent *e) override;
+    void resizeEvent(QResizeEvent *resizeEventArg) override;
+    void closeEvent(QCloseEvent *closeEventArg) override;
 
     private:
     void showKeepMessage(const QString &batchDir);
@@ -30,7 +30,7 @@ class DragAwareTreeView : public QTreeView {
                                    const QString &batchDir);
     void scheduleAutoCleanup(const QString &batchDir, int initialDelayMs = 500);
     // Remote -> system drag-out: prepare asynchronously using TransferManager
-    void startRemoteDragAsync(class RemoteModel *rm);
+    void startRemoteDragAsync(class RemoteModel *remoteModel);
     using RemoteDragTarget = QPair<QString, QString>; // remote, local
     struct RemoteDragBatchStats {
         quint64 totalBytes = 0;
@@ -40,7 +40,8 @@ class DragAwareTreeView : public QTreeView {
         bool anySizeUnknown = false;
     };
     QModelIndexList collectRemoteSelectedRows() const;
-    bool buildRemoteDragTargets(RemoteModel *rm, const QModelIndexList &rows,
+    bool buildRemoteDragTargets(RemoteModel *remoteModel,
+                                const QModelIndexList &rows,
                                 const QString &stagingDir,
                                 QVector<RemoteDragTarget> &targets,
                                 RemoteDragBatchStats &stats);

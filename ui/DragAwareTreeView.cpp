@@ -75,22 +75,22 @@ DragAwareTreeView::~DragAwareTreeView() {
     }
 }
 
-void DragAwareTreeView::resizeEvent(QResizeEvent *e) {
-    QTreeView::resizeEvent(e);
+void DragAwareTreeView::resizeEvent(QResizeEvent *resizeEventArg) {
+    QTreeView::resizeEvent(resizeEventArg);
     updateOverlayGeometry();
 }
 
 void DragAwareTreeView::startDrag(Qt::DropActions supportedActions) {
     if (dragInProgress_) {
-        if (auto *mw = qobject_cast<QMainWindow *>(window())) {
-            mw->statusBar()->showMessage(
+        if (auto *mainWindow = qobject_cast<QMainWindow *>(window())) {
+            mainWindow->statusBar()->showMessage(
                 tr("Preparation in progress; please wait."), 3000);
         }
         return;
     }
     // If this is a remote model, run asynchronous staging flow
-    if (auto *rm = qobject_cast<RemoteModel *>(model())) {
-        startRemoteDragAsync(rm);
+    if (auto *remoteModel = qobject_cast<RemoteModel *>(model())) {
+        startRemoteDragAsync(remoteModel);
         return;
     }
 
@@ -100,21 +100,22 @@ void DragAwareTreeView::startDrag(Qt::DropActions supportedActions) {
         QTreeView::startDrag(supportedActions);
         return;
     }
-    QMimeData *md = model()->mimeData(indexes);
-    if (!md) {
+    QMimeData *mimeData = model()->mimeData(indexes);
+    if (!mimeData) {
         QTreeView::startDrag(supportedActions);
         return;
     }
     auto drag = new QDrag(this);
-    drag->setMimeData(md);
-    const auto res = drag->exec(Qt::CopyAction);
+    drag->setMimeData(mimeData);
+    const auto dragResult = drag->exec(Qt::CopyAction);
 
     // Custom payload from RemoteModel when dragging out from remote
-    const QByteArray k =
+    const QByteArray stagingBatchMimeType =
         QByteArrayLiteral("application/x-openscp-staging-batch");
-    if (!md->hasFormat(k))
+    if (!mimeData->hasFormat(stagingBatchMimeType))
         return; // nothing to do
-    const QString batchDir = QString::fromUtf8(md->data(k));
+    const QString batchDir =
+        QString::fromUtf8(mimeData->data(stagingBatchMimeType));
     if (batchDir.isEmpty())
         return;
 
@@ -122,7 +123,7 @@ void DragAwareTreeView::startDrag(Qt::DropActions supportedActions) {
     const bool autoClean =
         settings.value("Advanced/autoCleanStaging", true).toBool();
 
-    if (res == Qt::IgnoreAction) {
+    if (dragResult == Qt::IgnoreAction) {
         // Drag canceled: keep staging and notify with clickable link
         showKeepMessage(batchDir);
         return;
@@ -138,40 +139,40 @@ void DragAwareTreeView::startDrag(Qt::DropActions supportedActions) {
 }
 
 void DragAwareTreeView::showKeepMessage(const QString &batchDir) {
-    auto *mw = qobject_cast<QMainWindow *>(window());
-    if (!mw)
+    auto *mainWindow = qobject_cast<QMainWindow *>(window());
+    if (!mainWindow)
         return;
-    auto *lbl = new QLabel(mw);
-    lbl->setTextFormat(Qt::RichText);
+    auto *statusLabel = new QLabel(mainWindow);
+    statusLabel->setTextFormat(Qt::RichText);
     const QString url = QUrl::fromLocalFile(batchDir).toString();
-    lbl->setText(
+    statusLabel->setText(
         tr("Staging kept at: <a href=\"%1\">%2</a>").arg(url, batchDir));
-    lbl->setOpenExternalLinks(true);
-    lbl->setCursor(Qt::PointingHandCursor);
-    mw->statusBar()->addPermanentWidget(lbl, 0);
-    QTimer::singleShot(10000, lbl, [mw, lbl] {
-        mw->statusBar()->removeWidget(lbl);
-        lbl->deleteLater();
+    statusLabel->setOpenExternalLinks(true);
+    statusLabel->setCursor(Qt::PointingHandCursor);
+    mainWindow->statusBar()->addPermanentWidget(statusLabel, 0);
+    QTimer::singleShot(10000, statusLabel, [mainWindow, statusLabel] {
+        mainWindow->statusBar()->removeWidget(statusLabel);
+        statusLabel->deleteLater();
     });
 }
 
 void DragAwareTreeView::showKeepMessageWithPrefix(const QString &prefix,
                                                   const QString &batchDir) {
-    auto *mw = qobject_cast<QMainWindow *>(window());
-    if (!mw)
+    auto *mainWindow = qobject_cast<QMainWindow *>(window());
+    if (!mainWindow)
         return;
-    auto *lbl = new QLabel(mw);
-    lbl->setTextFormat(Qt::RichText);
+    auto *statusLabel = new QLabel(mainWindow);
+    statusLabel->setTextFormat(Qt::RichText);
     const QString url = QUrl::fromLocalFile(batchDir).toString();
-    const QString txt =
+    const QString statusText =
         QString("%1 <a href=\"%2\">%3</a>").arg(prefix, url, batchDir);
-    lbl->setText(txt);
-    lbl->setOpenExternalLinks(true);
-    lbl->setCursor(Qt::PointingHandCursor);
-    mw->statusBar()->addPermanentWidget(lbl, 0);
-    QTimer::singleShot(12000, lbl, [mw, lbl] {
-        mw->statusBar()->removeWidget(lbl);
-        lbl->deleteLater();
+    statusLabel->setText(statusText);
+    statusLabel->setOpenExternalLinks(true);
+    statusLabel->setCursor(Qt::PointingHandCursor);
+    mainWindow->statusBar()->addPermanentWidget(statusLabel, 0);
+    QTimer::singleShot(12000, statusLabel, [mainWindow, statusLabel] {
+        mainWindow->statusBar()->removeWidget(statusLabel);
+        statusLabel->deleteLater();
     });
 }
 
@@ -186,10 +187,12 @@ void DragAwareTreeView::scheduleAutoCleanup(const QString &batchDir,
             return false;
         // If root empty, remove it
         QString root = stagingRootFromSettings();
-        QDir rt(root);
-        if (rt.exists() &&
-            rt.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty()) {
-            rt.rmdir(".");
+        QDir rootDir(root);
+        if (rootDir.exists() &&
+            rootDir
+                .entryList(QDir::NoDotAndDotDot | QDir::AllEntries)
+                .isEmpty()) {
+            rootDir.rmdir(".");
         }
         return true;
     };
@@ -267,26 +270,27 @@ void DragAwareTreeView::updateOverlayGeometry() {
                                      -r.width() / 6, -r.height() / 3));
     // Place controls vertically: label, progress, cancel
     if (overlayLabel_ && overlayProgress_ && overlayCancel_) {
-        int w = overlay_->width();
-        int x = 16;
-        int y = 16;
-        overlayLabel_->setGeometry(x, y, w - 32, 28);
-        y += 34;
-        overlayProgress_->setGeometry(x, y, w - 32, 22);
-        y += 30;
-        overlayCancel_->setGeometry(x, y, 120, 28);
+        int overlayWidth = overlay_->width();
+        int offsetX = 16;
+        int offsetY = 16;
+        overlayLabel_->setGeometry(offsetX, offsetY, overlayWidth - 32, 28);
+        offsetY += 34;
+        overlayProgress_->setGeometry(offsetX, offsetY, overlayWidth - 32, 22);
+        offsetY += 30;
+        overlayCancel_->setGeometry(offsetX, offsetY, 120, 28);
     }
 }
 
 QModelIndexList DragAwareTreeView::collectRemoteSelectedRows() const {
-    auto *sel = selectionModel();
-    QModelIndexList rows = sel ? sel->selectedRows(0) : QModelIndexList{};
-    if (!rows.isEmpty() || !sel)
+    auto *selection = selectionModel();
+    QModelIndexList rows =
+        selection ? selection->selectedRows(0) : QModelIndexList{};
+    if (!rows.isEmpty() || !selection)
         return rows;
 
     // Fallback: when selection behavior is not row-based yet, infer unique rows
     // from any selected column to keep drag responsive.
-    const auto selected = sel->selectedIndexes();
+    const auto selected = selection->selectedIndexes();
     QSet<int> seenRows;
     for (const QModelIndex &idx : selected) {
         if (!idx.isValid() || seenRows.contains(idx.row()))
@@ -301,8 +305,9 @@ QModelIndexList DragAwareTreeView::collectRemoteSelectedRows() const {
 }
 
 bool DragAwareTreeView::buildRemoteDragTargets(
-    RemoteModel *rm, const QModelIndexList &rows, const QString &stagingDir,
-    QVector<RemoteDragTarget> &targets, RemoteDragBatchStats &stats) {
+    RemoteModel *remoteModel, const QModelIndexList &rows,
+    const QString &stagingDir, QVector<RemoteDragTarget> &targets,
+    RemoteDragBatchStats &stats) {
     targets.clear();
     targets.reserve(rows.size());
     stats = RemoteDragBatchStats{};
@@ -338,9 +343,9 @@ bool DragAwareTreeView::buildRemoteDragTargets(
         if (!idx.isValid())
             continue;
 
-        const QString name = rm->nameAt(idx);
-        const QString remotePath = joinRemote(rm->rootPath(), name);
-        if (rm->isDir(idx)) {
+        const QString name = remoteModel->nameAt(idx);
+        const QString remotePath = joinRemote(remoteModel->rootPath(), name);
+        if (remoteModel->isDir(idx)) {
             std::vector<RemoteModel::EnumeratedFile> files;
             RemoteModel::EnumOptions options;
             QSettings settings("OpenSCP", "OpenSCP");
@@ -356,9 +361,9 @@ bool DragAwareTreeView::buildRemoteDragTargets(
             quint64 symlinkCount = 0;
             quint64 deniedCount = 0;
             quint64 unknownCountPart = 0;
-            rm->enumerateFilesUnderEx(remotePath, files, options, &partial,
-                                      &someUnknown, &dirCount, &symlinkCount,
-                                      &deniedCount, &unknownCountPart);
+            remoteModel->enumerateFilesUnderEx(
+                remotePath, files, options, &partial, &someUnknown, &dirCount,
+                &symlinkCount, &deniedCount, &unknownCountPart);
 
             stats.anySizeUnknown = stats.anySizeUnknown || someUnknown;
             stats.totalDirs += dirCount;
@@ -384,8 +389,8 @@ bool DragAwareTreeView::buildRemoteDragTargets(
         }
 
         const QString localPath = uniquePath(stagingDir, name);
-        if (rm->hasSize(idx)) {
-            stats.totalBytes += rm->sizeAt(idx);
+        if (remoteModel->hasSize(idx)) {
+            stats.totalBytes += remoteModel->sizeAt(idx);
         } else {
             stats.anySizeUnknown = true;
             stats.unknownSizeCount += 1;
@@ -438,9 +443,10 @@ bool DragAwareTreeView::confirmRemoteDragThreshold(
     if (!tooMany && !tooBig)
         return true;
 
-    auto *mw = qobject_cast<QMainWindow *>(window());
+    auto *mainWindow = qobject_cast<QMainWindow *>(window());
     QWidget *parent =
-        mw ? static_cast<QWidget *>(mw) : static_cast<QWidget *>(this);
+        mainWindow ? static_cast<QWidget *>(mainWindow)
+                   : static_cast<QWidget *>(this);
     QMessageBox box(parent);
     UiAlerts::configure(box);
     box.setIcon(QMessageBox::Question);
@@ -578,10 +584,10 @@ void DragAwareTreeView::beginRemoteDragMonitoring(
     timeoutMs = qBound(250, timeoutMs, 60000);
     waitTimer_->setInterval(timeoutMs);
     QObject::connect(waitTimer_, &QTimer::timeout, this, [this]() {
-        auto *mw = qobject_cast<QMainWindow *>(window());
-        if (!mw)
+        auto *mainWindow = qobject_cast<QMainWindow *>(window());
+        if (!mainWindow)
             return;
-        QMessageBox box(mw);
+        QMessageBox box(mainWindow);
         UiAlerts::configure(box);
         box.setIcon(QMessageBox::Information);
         box.setWindowTitle(tr("Preparing files…"));
@@ -701,8 +707,8 @@ void DragAwareTreeView::beginRemoteDragMonitoring(
         });
 }
 
-void DragAwareTreeView::startRemoteDragAsync(RemoteModel *rm) {
-    if (!rm || !transferMgr_) {
+void DragAwareTreeView::startRemoteDragAsync(RemoteModel *remoteModel) {
+    if (!remoteModel || !transferMgr_) {
         QTreeView::startDrag(Qt::CopyAction);
         return;
     }
@@ -729,7 +735,7 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *rm) {
 
     QVector<RemoteDragTarget> targets;
     RemoteDragBatchStats stats;
-    if (!buildRemoteDragTargets(rm, rows, stagingDir, targets, stats)) {
+    if (!buildRemoteDragTargets(remoteModel, rows, stagingDir, targets, stats)) {
         hidePrepOverlay();
         resetRemoteDragState();
         return;
@@ -760,10 +766,10 @@ void DragAwareTreeView::cancelCurrentBatch(const QString &reason) {
     hidePrepOverlay();
     if (transferMgr_) {
         const auto tasks = transferMgr_->tasksSnapshot();
-        for (const auto &t : tasks) {
-            if (t.type == TransferTask::Type::Download &&
-                t.dst.startsWith(currentBatchDir_)) {
-                transferMgr_->cancelTask(t.id);
+        for (const auto &task : tasks) {
+            if (task.type == TransferTask::Type::Download &&
+                task.dst.startsWith(currentBatchDir_)) {
+                transferMgr_->cancelTask(task.taskId);
             }
         }
     }
@@ -793,9 +799,9 @@ void DragAwareTreeView::logBatchResult(const QString &batchId, int totalItems,
                   << failedItems << result;
 }
 
-void DragAwareTreeView::closeEvent(QCloseEvent *e) {
+void DragAwareTreeView::closeEvent(QCloseEvent *closeEventArg) {
     if (overlay_ && overlay_->isVisible()) {
         cancelCurrentBatch(QStringLiteral("close"));
     }
-    QTreeView::closeEvent(e);
+    QTreeView::closeEvent(closeEventArg);
 }

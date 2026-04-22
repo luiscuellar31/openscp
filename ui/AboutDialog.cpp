@@ -163,15 +163,14 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
 
     // Decide which file to load based on UI language (settings: UI/language)
     QSettings settings("OpenSCP", "OpenSCP");
-    const QString lang = settings.value("UI/language", "en")
-                             .toString()
-                             .toLower();
+    const QString languageCode =
+        settings.value("UI/language", "en").toString().toLower();
     QString suffix = QStringLiteral("EN");
-    if (lang.startsWith("es")) {
+    if (languageCode.startsWith("es")) {
         suffix = QStringLiteral("ES");
-    } else if (lang.startsWith("fr")) {
+    } else if (languageCode.startsWith("fr")) {
         suffix = QStringLiteral("FR");
-    } else if (lang.startsWith("pt")) {
+    } else if (languageCode.startsWith("pt")) {
         suffix = QStringLiteral("PT");
     }
 
@@ -183,11 +182,11 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     const QString path = findDocsFile(candidates);
     QString content;
     if (!path.isEmpty()) {
-        QFile f(path);
-        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            QTextStream ts(&f);
-            ts.setEncoding(QStringConverter::Utf8);
-            content = ts.readAll();
+        QFile licenseFile(path);
+        if (licenseFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QTextStream licenseStream(&licenseFile);
+            licenseStream.setEncoding(QStringConverter::Utf8);
+            content = licenseStream.readAll();
         }
     }
     if (content.isEmpty()) {

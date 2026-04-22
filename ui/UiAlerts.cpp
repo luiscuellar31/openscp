@@ -45,8 +45,8 @@ show(QWidget *parent, QMessageBox::Icon icon, const QString &title,
     if (resolvedDefault != QMessageBox::NoButton)
         box.setDefaultButton(resolvedDefault);
 
-    const int rc = box.exec();
-    return static_cast<QMessageBox::StandardButton>(rc);
+    const int dialogResult = box.exec();
+    return static_cast<QMessageBox::StandardButton>(dialogResult);
 }
 
 QMessageBox::StandardButton

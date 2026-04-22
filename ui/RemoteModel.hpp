@@ -42,7 +42,9 @@ class RemoteModel : public QAbstractTableModel {
     QString nameAt(const QModelIndex &idx) const;
     bool hasSize(const QModelIndex &idx) const;
     quint64 sizeAt(const QModelIndex &idx) const;
-    void setShowHidden(bool v) { showHidden_ = v; }
+    void setShowHidden(bool showHiddenEnabled) {
+        showHidden_ = showHiddenEnabled;
+    }
     bool showHidden() const { return showHidden_; }
 
     // Enumeration support for staging folders
@@ -74,7 +76,8 @@ class RemoteModel : public QAbstractTableModel {
                              QString *errorOut = nullptr) const;
 
     signals:
-    void rootPathLoaded(const QString &path, bool ok, const QString &error);
+    void rootPathLoaded(const QString &path, bool loadOk,
+                        const QString &error);
 
     private:
     openscp::SftpClient *client_ = nullptr; // no owned
