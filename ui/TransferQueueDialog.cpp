@@ -48,14 +48,16 @@ static QString statusText(TransferTask::Status s) {
     return {};
 }
 
-static QString displayNameForTask(const TransferTask &t) {
-    const QString path = (t.type == TransferTask::Type::Upload) ? t.src : t.dst;
-    QFileInfo fi(path);
-    if (!fi.fileName().isEmpty())
-        return fi.fileName();
+static QString displayNameForTask(const TransferTask &task) {
+    const QString path =
+        (task.type == TransferTask::Type::Upload) ? task.src : task.dst;
+    QFileInfo taskFileInfo(path);
+    if (!taskFileInfo.fileName().isEmpty())
+        return taskFileInfo.fileName();
 
-    const QString alt = (t.type == TransferTask::Type::Upload) ? t.dst : t.src;
-    QString trimmed = alt;
+    const QString alternatePath =
+        (task.type == TransferTask::Type::Upload) ? task.dst : task.src;
+    QString trimmed = alternatePath;
     while (trimmed.endsWith('/'))
         trimmed.chop(1);
     const int slash = trimmed.lastIndexOf('/');
@@ -88,14 +90,16 @@ static QString formatSpeed(double kbps) {
 static QString formatEta(int sec) {
     if (sec < 0)
         return QString::fromUtf8("—");
-    const int h = sec / 3600;
-    const int m = (sec % 3600) / 60;
-    const int s = sec % 60;
-    if (h > 0)
-        return QString("%1h %2m").arg(h).arg(m, 2, 10, QChar('0'));
-    if (m > 0)
-        return QString("%1m %2s").arg(m).arg(s, 2, 10, QChar('0'));
-    return QString("%1s").arg(s);
+    const int hours = sec / 3600;
+    const int minutes = (sec % 3600) / 60;
+    const int seconds = sec % 60;
+    if (hours > 0)
+        return QString("%1h %2m").arg(hours).arg(minutes, 2, 10, QChar('0'));
+    if (minutes > 0)
+        return QString("%1m %2s")
+            .arg(minutes)
+            .arg(seconds, 2, 10, QChar('0'));
+    return QString("%1s").arg(seconds);
 }
 
 static bool canPauseStatus(TransferTask::Status s) {
@@ -149,11 +153,21 @@ static void forEachSelectedTask(const QVector<quint64> &ids,
                                 const TaskIndexById &taskIndex,
                                 Callback &&callback) {
     for (quint64 id : ids) {
-        const auto it = taskIndex.constFind(id);
-        if (it == taskIndex.cend())
+        const auto taskIt = taskIndex.constFind(id);
+        if (taskIt == taskIndex.cend())
             continue;
-        callback(id, *it.value());
+        callback(id, *taskIt.value());
     }
+}
+
+template <typename Callback>
+static void withSelectedTasks(TransferManager *manager,
+                              const QVector<quint64> &ids,
+                              Callback callback) {
+    if (ids.isEmpty())
+        return;
+    const auto taskIndex = buildTaskIndexById(manager->tasksSnapshot());
+    forEachSelectedTask(ids, taskIndex, callback);
 }
 
 static SelectedActionsState
@@ -341,8 +355,8 @@ class TransferTaskTableModel final : public QAbstractTableModel {
         }
 
         bool orderChanged = false;
-        for (int i = 0; i < tasks_.size(); ++i) {
-            if (tasks_[i].id != incoming[i].id) {
+        for (int rowIndex = 0; rowIndex < tasks_.size(); ++rowIndex) {
+            if (tasks_[rowIndex].id != incoming[rowIndex].id) {
                 orderChanged = true;
                 break;
             }
@@ -706,22 +720,16 @@ void TransferQueueDialog::onClearDone() { mgr_->clearCompleted(); }
 
 void TransferQueueDialog::onPauseSelected() {
     const auto ids = selectedTaskIds();
-    if (ids.isEmpty())
-        return;
-    const auto taskIndex = buildTaskIndexById(mgr_->tasksSnapshot());
-    forEachSelectedTask(ids, taskIndex, [this](quint64 id, const TransferTask &t) {
-        if (canPauseStatus(t.status))
+    withSelectedTasks(mgr_, ids, [this](quint64 id, const TransferTask &task) {
+        if (canPauseStatus(task.status))
             mgr_->pauseTask(id);
     });
 }
 
 void TransferQueueDialog::onResumeSelected() {
     const auto ids = selectedTaskIds();
-    if (ids.isEmpty())
-        return;
-    const auto taskIndex = buildTaskIndexById(mgr_->tasksSnapshot());
-    forEachSelectedTask(ids, taskIndex, [this](quint64 id, const TransferTask &t) {
-        if (canResumeStatus(t.status))
+    withSelectedTasks(mgr_, ids, [this](quint64 id, const TransferTask &task) {
+        if (canResumeStatus(task.status))
             mgr_->resumeTask(id);
     });
 }
@@ -735,33 +743,29 @@ void TransferQueueDialog::onLimitSelected() {
     const auto ids = selectedTaskIds();
     if (ids.isEmpty())
         return;
-    const auto taskIndex = buildTaskIndexById(mgr_->tasksSnapshot());
     QVector<quint64> eligible;
     eligible.reserve(ids.size());
-    forEachSelectedTask(ids, taskIndex, [&](quint64 id, const TransferTask &t) {
-        if (canLimitStatus(t.status))
+    withSelectedTasks(mgr_, ids, [&](quint64 id, const TransferTask &task) {
+        if (canLimitStatus(task.status))
             eligible.push_back(id);
     });
     if (eligible.isEmpty())
         return;
 
-    bool ok = false;
-    const int v = QInputDialog::getInt(this, tr("Limit for task(s)"),
-                                       tr("KB/s (0 = no limit)"), 0, 0,
-                                       1'000'000, 1, &ok);
-    if (!ok)
+    bool inputAccepted = false;
+    const int speedLimitKbps = QInputDialog::getInt(
+        this, tr("Limit for task(s)"), tr("KB/s (0 = no limit)"), 0, 0,
+        1'000'000, 1, &inputAccepted);
+    if (!inputAccepted)
         return;
     for (quint64 id : eligible)
-        mgr_->setTaskSpeedLimit(id, v);
+        mgr_->setTaskSpeedLimit(id, speedLimitKbps);
 }
 
 void TransferQueueDialog::onStopSelected() {
     const auto ids = selectedTaskIds();
-    if (ids.isEmpty())
-        return;
-    const auto taskIndex = buildTaskIndexById(mgr_->tasksSnapshot());
-    forEachSelectedTask(ids, taskIndex, [this](quint64 id, const TransferTask &t) {
-        if (canCancelStatus(t.status))
+    withSelectedTasks(mgr_, ids, [this](quint64 id, const TransferTask &task) {
+        if (canCancelStatus(task.status))
             mgr_->cancelTask(id);
     });
 }
@@ -780,11 +784,8 @@ void TransferQueueDialog::onFilterChanged(int id) {
 
 void TransferQueueDialog::onRetrySelected() {
     const auto ids = selectedTaskIds();
-    if (ids.isEmpty())
-        return;
-    const auto taskIndex = buildTaskIndexById(mgr_->tasksSnapshot());
-    forEachSelectedTask(ids, taskIndex, [this](quint64 id, const TransferTask &t) {
-        if (canRetryStatus(t.status))
+    withSelectedTasks(mgr_, ids, [this](quint64 id, const TransferTask &task) {
+        if (canRetryStatus(task.status))
             mgr_->retryTask(id);
     });
 }
@@ -794,20 +795,19 @@ void TransferQueueDialog::onOpenDestination() {
     if (ids.isEmpty())
         return;
 
-    const auto taskIndex = buildTaskIndexById(mgr_->tasksSnapshot());
     QSet<QString> opened;
-    forEachSelectedTask(ids, taskIndex, [&](quint64, const TransferTask &t) {
-        if (t.type != TransferTask::Type::Download)
+    withSelectedTasks(mgr_, ids, [&](quint64, const TransferTask &task) {
+        if (task.type != TransferTask::Type::Download)
             return;
 
-        QString path = t.dst;
-        QFileInfo fi(path);
-        if (!fi.exists()) {
-            const QString parent = fi.dir().absolutePath();
+        QString destinationPath = task.dst;
+        QFileInfo destinationInfo(destinationPath);
+        if (!destinationInfo.exists()) {
+            const QString parent = destinationInfo.dir().absolutePath();
             if (!parent.isEmpty() && QDir(parent).exists())
-                path = parent;
+                destinationPath = parent;
         }
-        const QString normalized = QFileInfo(path).absoluteFilePath();
+        const QString normalized = QFileInfo(destinationPath).absoluteFilePath();
         if (normalized.isEmpty() || opened.contains(normalized))
             return;
         opened.insert(normalized);
@@ -819,10 +819,9 @@ void TransferQueueDialog::onCopySourcePath() {
     const auto ids = selectedTaskIds();
     if (ids.isEmpty())
         return;
-    const auto taskIndex = buildTaskIndexById(mgr_->tasksSnapshot());
     QStringList lines;
-    forEachSelectedTask(ids, taskIndex,
-                        [&](quint64, const TransferTask &t) { lines << t.src; });
+    withSelectedTasks(mgr_, ids,
+                      [&](quint64, const TransferTask &task) { lines << task.src; });
     if (!lines.isEmpty())
         QGuiApplication::clipboard()->setText(lines.join("\n"));
 }
@@ -831,10 +830,9 @@ void TransferQueueDialog::onCopyDestinationPath() {
     const auto ids = selectedTaskIds();
     if (ids.isEmpty())
         return;
-    const auto taskIndex = buildTaskIndexById(mgr_->tasksSnapshot());
     QStringList lines;
-    forEachSelectedTask(ids, taskIndex,
-                        [&](quint64, const TransferTask &t) { lines << t.dst; });
+    withSelectedTasks(mgr_, ids,
+                      [&](quint64, const TransferTask &task) { lines << task.dst; });
     if (!lines.isEmpty())
         QGuiApplication::clipboard()->setText(lines.join("\n"));
 }
@@ -954,22 +952,22 @@ QVector<quint64> TransferQueueDialog::selectedTaskIds() const {
     ids.reserve(rows.size());
     for (const QModelIndex &idx : rows) {
         const QVariant raw = idx.data(TransferTaskTableModel::TaskIdRole);
-        bool ok = false;
-        const quint64 id = raw.toULongLong(&ok);
-        if (ok)
+        bool conversionOk = false;
+        const quint64 id = raw.toULongLong(&conversionOk);
+        if (conversionOk)
             ids.push_back(id);
     }
     return ids;
 }
 
 void TransferQueueDialog::showContextMenu(const QPoint &pos) {
-    const QModelIndex idx = table_->indexAt(pos);
-    if (!idx.isValid())
+    const QModelIndex clickedIndex = table_->indexAt(pos);
+    if (!clickedIndex.isValid())
         return;
 
-    if (!table_->selectionModel()->isSelected(idx)) {
+    if (!table_->selectionModel()->isSelected(clickedIndex)) {
         table_->clearSelection();
-        table_->selectRow(idx.row());
+        table_->selectRow(clickedIndex.row());
     }
 
     const auto ids = selectedTaskIds();
@@ -1024,15 +1022,16 @@ void TransferQueueDialog::showContextMenu(const QPoint &pos) {
 }
 
 void TransferQueueDialog::loadUiState() {
-    QSettings s("OpenSCP", "OpenSCP");
+    QSettings settings("OpenSCP", "OpenSCP");
 
-    const QByteArray geom = s.value("UI/transferQueue/geometry").toByteArray();
+    const QByteArray geom =
+        settings.value("UI/transferQueue/geometry").toByteArray();
     if (!geom.isEmpty())
         restoreGeometry(geom);
 
     if (table_ && table_->horizontalHeader()) {
         const QByteArray header =
-            s.value("UI/transferQueue/headerStateV4").toByteArray();
+            settings.value("UI/transferQueue/headerStateV4").toByteArray();
         if (!header.isEmpty())
             table_->horizontalHeader()->restoreState(header);
         table_->horizontalHeader()->setSectionResizeMode(
@@ -1042,7 +1041,7 @@ void TransferQueueDialog::loadUiState() {
     }
 
     const int filter =
-        s.value("UI/transferQueue/filterMode", FilterAll).toInt();
+        settings.value("UI/transferQueue/filterMode", FilterAll).toInt();
     if (filterGroup_ && filterGroup_->button(filter)) {
         filterGroup_->button(filter)->setChecked(true);
         if (proxy_)
@@ -1052,21 +1051,24 @@ void TransferQueueDialog::loadUiState() {
     suppressAutoClearSignal_ = true;
     const int defaultAutoMode = qBound(
         static_cast<int>(AutoClearOff),
-        s.value("Transfer/defaultQueueAutoClearMode",
-                static_cast<int>(AutoClearOff))
+        settings
+            .value("Transfer/defaultQueueAutoClearMode",
+                   static_cast<int>(AutoClearOff))
             .toInt(),
         static_cast<int>(AutoClearFinished));
     const int defaultAutoMin = qBound(
-        1, s.value("Transfer/defaultQueueAutoClearMinutes", 15).toInt(), 1440);
+        1, settings.value("Transfer/defaultQueueAutoClearMinutes", 15).toInt(),
+        1440);
     const int autoMode =
-        s.value("UI/transferQueue/autoClearMode", defaultAutoMode).toInt();
+        settings.value("UI/transferQueue/autoClearMode", defaultAutoMode).toInt();
     const int autoMin =
-        s.value("UI/transferQueue/autoClearMinutes", defaultAutoMin).toInt();
+        settings.value("UI/transferQueue/autoClearMinutes", defaultAutoMin)
+            .toInt();
     if (autoClearModeCombo_) {
-        int idx = autoClearModeCombo_->findData(autoMode);
-        if (idx < 0)
-            idx = autoClearModeCombo_->findData(AutoClearOff);
-        autoClearModeCombo_->setCurrentIndex(idx);
+        int modeIndex = autoClearModeCombo_->findData(autoMode);
+        if (modeIndex < 0)
+            modeIndex = autoClearModeCombo_->findData(AutoClearOff);
+        autoClearModeCombo_->setCurrentIndex(modeIndex);
     }
     if (autoClearMinutesSpin_)
         autoClearMinutesSpin_->setValue(qBound(1, autoMin, 1440));
@@ -1074,28 +1076,28 @@ void TransferQueueDialog::loadUiState() {
 }
 
 void TransferQueueDialog::saveUiState() const {
-    QSettings s("OpenSCP", "OpenSCP");
-    s.setValue("UI/transferQueue/geometry", saveGeometry());
+    QSettings settings("OpenSCP", "OpenSCP");
+    settings.setValue("UI/transferQueue/geometry", saveGeometry());
 
     if (table_ && table_->horizontalHeader()) {
-        s.setValue("UI/transferQueue/headerStateV4",
-                   table_->horizontalHeader()->saveState());
+        settings.setValue("UI/transferQueue/headerStateV4",
+                          table_->horizontalHeader()->saveState());
     }
 
     int filterMode = FilterAll;
     if (filterGroup_ && filterGroup_->checkedButton()) {
         filterMode = filterGroup_->id(filterGroup_->checkedButton());
     }
-    s.setValue("UI/transferQueue/filterMode", filterMode);
+    settings.setValue("UI/transferQueue/filterMode", filterMode);
 
     const int autoMode = autoClearModeCombo_
                              ? autoClearModeCombo_->currentData().toInt()
                              : AutoClearOff;
     const int autoMin =
         autoClearMinutesSpin_ ? autoClearMinutesSpin_->value() : 15;
-    s.setValue("UI/transferQueue/autoClearMode", autoMode);
-    s.setValue("UI/transferQueue/autoClearMinutes", autoMin);
-    s.sync();
+    settings.setValue("UI/transferQueue/autoClearMode", autoMode);
+    settings.setValue("UI/transferQueue/autoClearMinutes", autoMin);
+    settings.sync();
 }
 
 void TransferQueueDialog::maybeAutoClear(
