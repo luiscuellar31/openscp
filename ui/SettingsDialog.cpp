@@ -675,6 +675,12 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
 
     constexpr int kFieldMinWidth = 320;
     constexpr int kFieldMaxWidth = 520;
+    auto setFieldWidth = [kFieldMinWidth, kFieldMaxWidth](QWidget *field) {
+        if (!field)
+            return;
+        field->setMinimumWidth(kFieldMinWidth);
+        field->setMaximumWidth(kFieldMaxWidth);
+    };
     auto addLabeledRow = [](QFormLayout *target, QWidget *parent,
                             const QString &labelText, QWidget *field) {
         auto *label = new QLabel(labelText, parent);
@@ -714,16 +720,56 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         target->addRow(QString(), cb);
         return cb;
     };
-    auto addComboRow = [kFieldMinWidth,
-                        kFieldMaxWidth,
-                        addLabeledRow](QFormLayout *target, QWidget *parent,
-                                        const QString &labelText) {
+    auto addComboRow = [setFieldWidth, addLabeledRow](
+                           QFormLayout *target, QWidget *parent,
+                           const QString &labelText) {
         auto *combo = new QComboBox(parent);
-        combo->setMinimumWidth(kFieldMinWidth);
-        combo->setMaximumWidth(kFieldMaxWidth);
+        setFieldWidth(combo);
         addLabeledRow(target, parent, labelText, combo);
         return combo;
     };
+    auto addBrowsePathRow =
+        [this, setFieldWidth,
+         addLabeledRow](QFormLayout *target, QWidget *parent,
+                        const QString &labelText, const QString &dialogTitle,
+                        bool pickFile, QLineEdit *&editOut,
+                        QPushButton *&browseButtonOut,
+                        const QString &placeholder = QString()) {
+            auto *rowWidget = new QWidget(parent);
+            auto *row = new QHBoxLayout(rowWidget);
+            row->setContentsMargins(0, 0, 0, 0);
+            row->setSpacing(6);
+
+            auto *edit = new QLineEdit(parent);
+            setFieldWidth(edit);
+            if (!placeholder.isEmpty())
+                edit->setPlaceholderText(placeholder);
+
+            auto *browseButton = new QPushButton(tr("Choose…"), parent);
+            row->addWidget(edit, 1);
+            row->addWidget(browseButton);
+            addLabeledRow(target, parent, labelText, rowWidget);
+
+            connect(browseButton, &QPushButton::clicked, this,
+                    [this, edit, dialogTitle, pickFile] {
+                        const QString currentPath =
+                            edit ? edit->text() : QString();
+                        const QString basePath = currentPath.isEmpty()
+                                                     ? QDir::homePath()
+                                                     : currentPath;
+                        const QString pickedPath =
+                            pickFile
+                                ? QFileDialog::getOpenFileName(
+                                      this, dialogTitle, basePath)
+                                : QFileDialog::getExistingDirectory(
+                                      this, dialogTitle, basePath);
+                        if (!pickedPath.isEmpty() && edit)
+                            edit->setText(pickedPath);
+                    });
+
+            editOut = edit;
+            browseButtonOut = browseButton;
+        };
     auto bindDirtyFlag = [this]<typename Sender, typename Signal>(
                              Sender *sender, Signal signal) {
         if (sender)
@@ -757,30 +803,9 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                                         tr("Open Site Manager on disconnect"));
     showQueueOnEnqueue_ = addCheckRow(
         generalForm, generalPage, tr("Open queue when enqueuing transfers"));
-    {
-        auto *rowWidget = new QWidget(generalPage);
-        auto *row = new QHBoxLayout(rowWidget);
-        row->setContentsMargins(0, 0, 0, 0);
-        row->setSpacing(6);
-        defaultDownloadDirEdit_ = new QLineEdit(generalPage);
-        defaultDownloadDirEdit_->setMinimumWidth(kFieldMinWidth);
-        defaultDownloadDirEdit_->setMaximumWidth(kFieldMaxWidth);
-        defaultDownloadBrowseBtn_ = new QPushButton(tr("Choose…"), generalPage);
-        row->addWidget(defaultDownloadDirEdit_, 1);
-        row->addWidget(defaultDownloadBrowseBtn_);
-        addLabeledRow(generalForm, generalPage, tr("Download folder:"),
-                      rowWidget);
-        connect(defaultDownloadBrowseBtn_, &QPushButton::clicked, this, [this] {
-            const QString cur = defaultDownloadDirEdit_
-                                    ? defaultDownloadDirEdit_->text()
-                                    : QString();
-            const QString pick = QFileDialog::getExistingDirectory(
-                this, tr("Select download folder"),
-                cur.isEmpty() ? QDir::homePath() : cur);
-            if (!pick.isEmpty() && defaultDownloadDirEdit_)
-                defaultDownloadDirEdit_->setText(pick);
-        });
-    }
+    addBrowsePathRow(generalForm, generalPage, tr("Download folder:"),
+                     tr("Select download folder"), false,
+                     defaultDownloadDirEdit_, defaultDownloadBrowseBtn_);
     {
         resetMainLayoutBtn_ =
             new QPushButton(tr("Restore default sizes"), generalPage);
@@ -832,13 +857,11 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         shortcutsForm->addRow(QString(), shortcutsHint);
     }
     queueShortcutEdit_ = new QKeySequenceEdit(shortcutsPage);
-    queueShortcutEdit_->setMinimumWidth(kFieldMinWidth);
-    queueShortcutEdit_->setMaximumWidth(kFieldMaxWidth);
+    setFieldWidth(queueShortcutEdit_);
     addLabeledRow(shortcutsForm, shortcutsPage, tr("Transfers shortcut:"),
                   queueShortcutEdit_);
     historyShortcutEdit_ = new QKeySequenceEdit(shortcutsPage);
-    historyShortcutEdit_->setMinimumWidth(kFieldMinWidth);
-    historyShortcutEdit_->setMaximumWidth(kFieldMaxWidth);
+    setFieldWidth(historyShortcutEdit_);
     addLabeledRow(shortcutsForm, shortcutsPage, tr("History shortcut:"),
                   historyShortcutEdit_);
 
@@ -862,8 +885,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     addLabeledRow(transfersForm, transfersPage, tr("Default global limit:"),
                   globalSpeedDefaultSpin_);
     queueAutoClearModeDefault_ = new QComboBox(transfersPage);
-    queueAutoClearModeDefault_->setMinimumWidth(kFieldMinWidth);
-    queueAutoClearModeDefault_->setMaximumWidth(kFieldMaxWidth);
+    setFieldWidth(queueAutoClearModeDefault_);
     queueAutoClearModeDefault_->addItem(tr("Off"), kQueueAutoClearOff);
     queueAutoClearModeDefault_->addItem(tr("Completed"),
                                         kQueueAutoClearCompleted);
@@ -898,8 +920,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     QWidget *sitesPage = createFormPage(tr("Sites"), sitesForm);
     sitesForm->setVerticalSpacing(8);
     defaultProtocol_ = new QComboBox(sitesPage);
-    defaultProtocol_->setMinimumWidth(kFieldMinWidth);
-    defaultProtocol_->setMaximumWidth(kFieldMaxWidth);
+    setFieldWidth(defaultProtocol_);
     defaultProtocol_->addItem(tr("SFTP"),
                               static_cast<int>(openscp::Protocol::Sftp));
     defaultProtocol_->addItem(tr("SCP"),
@@ -913,8 +934,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     addLabeledRow(sitesForm, sitesPage, tr("Default protocol:"),
                   defaultProtocol_);
     scpModeDefault_ = new QComboBox(sitesPage);
-    scpModeDefault_->setMinimumWidth(kFieldMinWidth);
-    scpModeDefault_->setMaximumWidth(kFieldMaxWidth);
+    setFieldWidth(scpModeDefault_);
     scpModeDefault_->addItem(
         tr("Automatic (SCP with SFTP fallback)"),
         static_cast<int>(openscp::ScpTransferMode::Auto));
@@ -931,8 +951,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     QWidget *securityPage = createFormPage(tr("Security"), securityForm);
     securityForm->setVerticalSpacing(8);
     defaultKnownHostsPolicy_ = new QComboBox(securityPage);
-    defaultKnownHostsPolicy_->setMinimumWidth(kFieldMinWidth);
-    defaultKnownHostsPolicy_->setMaximumWidth(kFieldMaxWidth);
+    setFieldWidth(defaultKnownHostsPolicy_);
     defaultKnownHostsPolicy_->addItem(
         tr("Strict"), static_cast<int>(openscp::KnownHostsPolicy::Strict));
     defaultKnownHostsPolicy_->addItem(
@@ -944,8 +963,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     addLabeledRow(securityForm, securityPage, tr("Default known_hosts policy:"),
                   defaultKnownHostsPolicy_);
     defaultIntegrityPolicy_ = new QComboBox(securityPage);
-    defaultIntegrityPolicy_->setMinimumWidth(kFieldMinWidth);
-    defaultIntegrityPolicy_->setMaximumWidth(kFieldMaxWidth);
+    setFieldWidth(defaultIntegrityPolicy_);
     defaultIntegrityPolicy_->addItem(
         tr("Optional (recommended)"),
         static_cast<int>(openscp::TransferIntegrityPolicy::Optional));
@@ -962,33 +980,11 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         securityPage);
     trackWrappedCheck(ftpsVerifyPeerDefault_);
     securityForm->addRow(QString(), ftpsVerifyPeerDefault_);
-    {
-        auto *rowWidget = new QWidget(securityPage);
-        auto *row = new QHBoxLayout(rowWidget);
-        row->setContentsMargins(0, 0, 0, 0);
-        row->setSpacing(6);
-        ftpsCaCertPathDefaultEdit_ = new QLineEdit(securityPage);
-        ftpsCaCertPathDefaultEdit_->setMinimumWidth(kFieldMinWidth);
-        ftpsCaCertPathDefaultEdit_->setMaximumWidth(kFieldMaxWidth);
-        ftpsCaCertPathDefaultEdit_->setPlaceholderText(tr("System CA bundle"));
-        ftpsCaCertPathDefaultBrowseBtn_ =
-            new QPushButton(tr("Choose…"), securityPage);
-        row->addWidget(ftpsCaCertPathDefaultEdit_, 1);
-        row->addWidget(ftpsCaCertPathDefaultBrowseBtn_);
-        addLabeledRow(securityForm, securityPage, tr("Default FTPS CA bundle:"),
-                      rowWidget);
-        connect(ftpsCaCertPathDefaultBrowseBtn_, &QPushButton::clicked, this,
-                [this] {
-                    const QString cur = ftpsCaCertPathDefaultEdit_
-                                            ? ftpsCaCertPathDefaultEdit_->text()
-                                            : QString();
-                    const QString pick = QFileDialog::getOpenFileName(
-                        this, tr("Select FTPS CA bundle"),
-                        cur.isEmpty() ? QDir::homePath() : cur);
-                    if (!pick.isEmpty() && ftpsCaCertPathDefaultEdit_)
-                        ftpsCaCertPathDefaultEdit_->setText(pick);
-                });
-    }
+    addBrowsePathRow(securityForm, securityPage, tr("Default FTPS CA bundle:"),
+                     tr("Select FTPS CA bundle"), true,
+                     ftpsCaCertPathDefaultEdit_,
+                     ftpsCaCertPathDefaultBrowseBtn_,
+                     tr("System CA bundle"));
     knownHostsHashed_ = new QCheckBox(
         tr("Hash hostnames in known_hosts (recommended)."), securityPage);
     fpHex_ = new QCheckBox(
@@ -1066,29 +1062,9 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     QWidget *stagingPage =
         createFormPage(tr("Staging and drag-out"), stagingForm);
     stagingForm->setVerticalSpacing(8);
-    {
-        auto *rowWidget = new QWidget(stagingPage);
-        auto *row = new QHBoxLayout(rowWidget);
-        row->setContentsMargins(0, 0, 0, 0);
-        row->setSpacing(6);
-        stagingRootEdit_ = new QLineEdit(stagingPage);
-        stagingRootEdit_->setMinimumWidth(kFieldMinWidth);
-        stagingRootEdit_->setMaximumWidth(kFieldMaxWidth);
-        stagingBrowseBtn_ = new QPushButton(tr("Choose…"), stagingPage);
-        row->addWidget(stagingRootEdit_, 1);
-        row->addWidget(stagingBrowseBtn_);
-        addLabeledRow(stagingForm, stagingPage, tr("Staging folder:"),
-                      rowWidget);
-        connect(stagingBrowseBtn_, &QPushButton::clicked, this, [this] {
-            const QString cur =
-                stagingRootEdit_ ? stagingRootEdit_->text() : QString();
-            const QString pick = QFileDialog::getExistingDirectory(
-                this, tr("Select staging folder"),
-                cur.isEmpty() ? QDir::homePath() : cur);
-            if (!pick.isEmpty() && stagingRootEdit_)
-                stagingRootEdit_->setText(pick);
-        });
-    }
+    addBrowsePathRow(stagingForm, stagingPage, tr("Staging folder:"),
+                     tr("Select staging folder"), false, stagingRootEdit_,
+                     stagingBrowseBtn_);
     autoCleanStaging_ = new QCheckBox(
         tr("Auto-clean staging after successful drag-out (recommended)."),
         stagingPage);
@@ -1193,62 +1169,48 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     }
 
     // Bind controls to dirty flag
-    bindDirtyFlag(langCombo_, qOverload<int>(&QComboBox::currentIndexChanged));
-    bindDirtyFlag(clickMode_, qOverload<int>(&QComboBox::currentIndexChanged));
-    bindDirtyFlag(showHidden_, &QCheckBox::toggled);
-    bindDirtyFlag(showConnOnStart_, &QCheckBox::toggled);
-    bindDirtyFlag(showConnOnDisconnect_, &QCheckBox::toggled);
-    bindDirtyFlag(openBehaviorMode_,
-                  qOverload<int>(&QComboBox::currentIndexChanged));
-    bindDirtyFlag(showQueueOnEnqueue_, &QCheckBox::toggled);
-    if (queueShortcutEdit_) {
-        connect(queueShortcutEdit_, &QKeySequenceEdit::keySequenceChanged, this,
-                &SettingsDialog::updateApplyFromControls);
+    for (QComboBox *combo : {
+             langCombo_,        clickMode_,           openBehaviorMode_,
+             defaultProtocol_,  scpModeDefault_,      defaultKnownHostsPolicy_,
+             defaultIntegrityPolicy_, queueAutoClearModeDefault_}) {
+        bindDirtyFlag(combo, qOverload<int>(&QComboBox::currentIndexChanged));
     }
-    if (historyShortcutEdit_) {
-        connect(historyShortcutEdit_, &QKeySequenceEdit::keySequenceChanged,
-                this, &SettingsDialog::updateApplyFromControls);
+    for (QCheckBox *check : {showHidden_,
+                             showConnOnStart_,
+                             showConnOnDisconnect_,
+                             showQueueOnEnqueue_,
+                             deleteSecretsOnRemove_,
+                             ftpsVerifyPeerDefault_,
+                             knownHostsHashed_,
+                             fpHex_,
+                             terminalForceInteractiveLogin_,
+                             terminalEnableSftpCliFallback_,
+                             autoCleanStaging_}) {
+        bindDirtyFlag(check, &QCheckBox::toggled);
     }
-    bindDirtyFlag(defaultDownloadDirEdit_, &QLineEdit::textChanged);
-    bindDirtyFlag(deleteSecretsOnRemove_, &QCheckBox::toggled);
-    bindDirtyFlag(defaultProtocol_,
-                  qOverload<int>(&QComboBox::currentIndexChanged));
-    bindDirtyFlag(scpModeDefault_,
-                  qOverload<int>(&QComboBox::currentIndexChanged));
-    bindDirtyFlag(defaultKnownHostsPolicy_,
-                  qOverload<int>(&QComboBox::currentIndexChanged));
-    bindDirtyFlag(defaultIntegrityPolicy_,
-                  qOverload<int>(&QComboBox::currentIndexChanged));
-    bindDirtyFlag(ftpsVerifyPeerDefault_, &QCheckBox::toggled);
-    bindDirtyFlag(ftpsCaCertPathDefaultEdit_, &QLineEdit::textChanged);
-    bindDirtyFlag(knownHostsHashed_, &QCheckBox::toggled);
-    bindDirtyFlag(fpHex_, &QCheckBox::toggled);
-    bindDirtyFlag(terminalForceInteractiveLogin_, &QCheckBox::toggled);
-    bindDirtyFlag(terminalEnableSftpCliFallback_, &QCheckBox::toggled);
-    bindDirtyFlag(noHostVerifyTtlMinSpin_,
-                  qOverload<int>(&QSpinBox::valueChanged));
-    bindDirtyFlag(maxConcurrentSpin_, qOverload<int>(&QSpinBox::valueChanged));
-    bindDirtyFlag(globalSpeedDefaultSpin_,
-                  qOverload<int>(&QSpinBox::valueChanged));
-    bindDirtyFlag(queueAutoClearModeDefault_,
-                  qOverload<int>(&QComboBox::currentIndexChanged));
-    bindDirtyFlag(queueAutoClearMinutesDefaultSpin_,
-                  qOverload<int>(&QSpinBox::valueChanged));
-    bindDirtyFlag(sessionHealthIntervalSecSpin_,
-                  qOverload<int>(&QSpinBox::valueChanged));
-    bindDirtyFlag(remoteWriteabilityTtlMsSpin_,
-                  qOverload<int>(&QSpinBox::valueChanged));
-    bindDirtyFlag(stagingRootEdit_, &QLineEdit::textChanged);
-    bindDirtyFlag(autoCleanStaging_, &QCheckBox::toggled);
-    bindDirtyFlag(stagingRetentionDaysSpin_,
-                  qOverload<int>(&QSpinBox::valueChanged));
-    bindDirtyFlag(stagingPrepTimeoutMsSpin_,
-                  qOverload<int>(&QSpinBox::valueChanged));
-    bindDirtyFlag(stagingConfirmItemsSpin_,
-                  qOverload<int>(&QSpinBox::valueChanged));
-    bindDirtyFlag(stagingConfirmMiBSpin_,
-                  qOverload<int>(&QSpinBox::valueChanged));
-    bindDirtyFlag(maxDepthSpin_, qOverload<int>(&QSpinBox::valueChanged));
+    for (QLineEdit *edit :
+         {defaultDownloadDirEdit_, ftpsCaCertPathDefaultEdit_, stagingRootEdit_}) {
+        bindDirtyFlag(edit, &QLineEdit::textChanged);
+    }
+    for (QSpinBox *spin : {noHostVerifyTtlMinSpin_,
+                           maxConcurrentSpin_,
+                           globalSpeedDefaultSpin_,
+                           queueAutoClearMinutesDefaultSpin_,
+                           sessionHealthIntervalSecSpin_,
+                           remoteWriteabilityTtlMsSpin_,
+                           stagingRetentionDaysSpin_,
+                           stagingPrepTimeoutMsSpin_,
+                           stagingConfirmItemsSpin_,
+                           stagingConfirmMiBSpin_,
+                           maxDepthSpin_}) {
+        bindDirtyFlag(spin, qOverload<int>(&QSpinBox::valueChanged));
+    }
+    for (QKeySequenceEdit *editor : {queueShortcutEdit_, historyShortcutEdit_}) {
+        if (editor) {
+            connect(editor, &QKeySequenceEdit::keySequenceChanged, this,
+                    &SettingsDialog::updateApplyFromControls);
+        }
+    }
 #if defined(Q_OS_MAC) || defined(Q_OS_MACOS) || defined(__APPLE__)
     bindDirtyFlag(macKeychainRestrictive_, &QCheckBox::toggled);
 #endif

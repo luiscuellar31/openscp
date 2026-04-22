@@ -902,19 +902,19 @@ void MainWindow::initializeMainToolbar() {
     actDisconnect_->setToolTip(actDisconnect_->text());
     actDisconnect_->setEnabled(false);
 
+    auto setTextBesideIcon = [tb](QAction *action, const QString &text) {
+        if (!tb || !action)
+            return;
+        if (QWidget *widget = tb->widgetForAction(action)) {
+            if (auto *button = qobject_cast<QToolButton *>(widget)) {
+                button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+                button->setText(text);
+            }
+        }
+    };
     // Show text to the LEFT of the icon for Connect/Disconnect buttons only
-    if (QWidget *w = tb->widgetForAction(actConnect_)) {
-        if (auto *b = qobject_cast<QToolButton *>(w)) {
-            b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-            b->setText(tr("Connect"));
-        }
-    }
-    if (QWidget *w = tb->widgetForAction(actDisconnect_)) {
-        if (auto *b = qobject_cast<QToolButton *>(w)) {
-            b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-            b->setText(tr("Disconnect"));
-        }
-    }
+    setTextBesideIcon(actConnect_, tr("Connect"));
+    setTextBesideIcon(actDisconnect_, tr("Disconnect"));
     tb->addSeparator();
     actSites_ = tb->addAction(tr("Saved sites"), [this] {
         SiteManagerDialog dlg(this);
@@ -940,24 +940,9 @@ void MainWindow::initializeMainToolbar() {
     actShowHistory_->setToolTip(actShowHistory_->text());
 
     // Show text beside icon for Sites and Queue too
-    if (QWidget *w = tb->widgetForAction(actSites_)) {
-        if (auto *b = qobject_cast<QToolButton *>(w)) {
-            b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-            b->setText(tr("Saved sites"));
-        }
-    }
-    if (QWidget *w = tb->widgetForAction(actShowQueue_)) {
-        if (auto *b = qobject_cast<QToolButton *>(w)) {
-            b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-            b->setText(tr("Transfers"));
-        }
-    }
-    if (QWidget *w = tb->widgetForAction(actShowHistory_)) {
-        if (auto *b = qobject_cast<QToolButton *>(w)) {
-            b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-            b->setText(tr("History"));
-        }
-    }
+    setTextBesideIcon(actSites_, tr("Saved sites"));
+    setTextBesideIcon(actShowQueue_, tr("Transfers"));
+    setTextBesideIcon(actShowHistory_, tr("History"));
 
     // Global shortcut to open the transfer queue
     actShowQueue_->setShortcut(QKeySequence(Qt::Key_F12));
@@ -2159,23 +2144,17 @@ void MainWindow::showHistoryMenu() {
     auto *tabs = new QTabWidget(&dlg);
     layout->addWidget(tabs, 1);
 
-    auto *localList = new QListWidget(tabs);
-    localList->setSelectionMode(QAbstractItemView::SingleSelection);
-    localList->setAlternatingRowColors(true);
-    localList->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
-    tabs->addTab(localList, tr("Recent local paths"));
-
-    auto *remoteList = new QListWidget(tabs);
-    remoteList->setSelectionMode(QAbstractItemView::SingleSelection);
-    remoteList->setAlternatingRowColors(true);
-    remoteList->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
-    tabs->addTab(remoteList, tr("Recent remote paths"));
-
-    auto *serverList = new QListWidget(tabs);
-    serverList->setSelectionMode(QAbstractItemView::SingleSelection);
-    serverList->setAlternatingRowColors(true);
-    serverList->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
-    tabs->addTab(serverList, tr("Recent servers"));
+    auto createHistoryTab = [tabs](const QString &title) {
+        auto *list = new QListWidget(tabs);
+        list->setSelectionMode(QAbstractItemView::SingleSelection);
+        list->setAlternatingRowColors(true);
+        list->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+        tabs->addTab(list, title);
+        return list;
+    };
+    auto *localList = createHistoryTab(tr("Recent local paths"));
+    auto *remoteList = createHistoryTab(tr("Recent remote paths"));
+    auto *serverList = createHistoryTab(tr("Recent servers"));
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
     auto *openBtn =
@@ -2343,19 +2322,12 @@ void MainWindow::showHistoryMenu() {
         populate();
     });
 
-    connect(localList, &QListWidget::itemDoubleClicked, &dlg,
-            [openSelected](QListWidgetItem *) { openSelected(); });
-    connect(remoteList, &QListWidget::itemDoubleClicked, &dlg,
-            [openSelected](QListWidgetItem *) { openSelected(); });
-    connect(serverList, &QListWidget::itemDoubleClicked, &dlg,
-            [openSelected](QListWidgetItem *) { openSelected(); });
-
-    connect(localList, &QListWidget::currentRowChanged, &dlg,
-            [updateOpenEnabled](int) { updateOpenEnabled(); });
-    connect(remoteList, &QListWidget::currentRowChanged, &dlg,
-            [updateOpenEnabled](int) { updateOpenEnabled(); });
-    connect(serverList, &QListWidget::currentRowChanged, &dlg,
-            [updateOpenEnabled](int) { updateOpenEnabled(); });
+    for (QListWidget *list : {localList, remoteList, serverList}) {
+        connect(list, &QListWidget::itemDoubleClicked, &dlg,
+                [openSelected](QListWidgetItem *) { openSelected(); });
+        connect(list, &QListWidget::currentRowChanged, &dlg,
+                [updateOpenEnabled](int) { updateOpenEnabled(); });
+    }
     connect(tabs, &QTabWidget::currentChanged, &dlg,
             [updateOpenEnabled](int) { updateOpenEnabled(); });
 
