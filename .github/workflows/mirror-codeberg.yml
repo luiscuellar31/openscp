@@ -104,5 +104,20 @@ jobs:
 
           export GIT_SSH_COMMAND='ssh -i ~/.ssh/codeberg -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes'
 
-          git push --force --prune codeberg 'refs/heads/*:refs/heads/*'
-          git push --force --prune codeberg 'refs/tags/*:refs/tags/*'
+          retry_push() {
+            local max_attempts="$1"
+            shift
+            local attempt=1
+            until "$@"; do
+              if (( attempt >= max_attempts )); then
+                echo "Command failed after ${attempt} attempts: $*"
+                return 1
+              fi
+              echo "Attempt ${attempt}/${max_attempts} failed. Retrying in 30s..."
+              sleep 30
+              attempt=$((attempt + 1))
+            done
+          }
+
+          retry_push 3 git push --force --prune codeberg 'refs/heads/*:refs/heads/*'
+          retry_push 3 git push --force --prune codeberg 'refs/tags/*:refs/tags/*'
