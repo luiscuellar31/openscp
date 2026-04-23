@@ -1,0 +1,74 @@
+name: Mirror to Codeberg
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - '**'
+  delete:
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-codeberg
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    name: Mirror Git refs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate required secrets
+        env:
+          CODEBERG_REPO_SSH: ${{ secrets.CODEBERG_REPO_SSH }}
+          CODEBERG_SSH_PRIVATE_KEY: ${{ secrets.CODEBERG_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CODEBERG_REPO_SSH}" ]]; then
+            echo "Missing secret: CODEBERG_REPO_SSH"
+            exit 1
+          fi
+          if [[ -z "${CODEBERG_SSH_PRIVATE_KEY}" ]]; then
+            echo "Missing secret: CODEBERG_SSH_PRIVATE_KEY"
+            exit 1
+          fi
+
+      - name: Setup SSH key
+        env:
+          CODEBERG_SSH_PRIVATE_KEY: ${{ secrets.CODEBERG_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${CODEBERG_SSH_PRIVATE_KEY}" > ~/.ssh/codeberg
+          chmod 600 ~/.ssh/codeberg
+          ssh-keyscan -H codeberg.org >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Sync branches and tags from origin
+        run: |
+          set -euo pipefail
+          git fetch --prune origin \
+            '+refs/heads/*:refs/heads/*' \
+            '+refs/tags/*:refs/tags/*'
+
+      - name: Push mirror to Codeberg
+        env:
+          CODEBERG_REPO_SSH: ${{ secrets.CODEBERG_REPO_SSH }}
+        run: |
+          set -euo pipefail
+          git remote add codeberg "${CODEBERG_REPO_SSH}" || git remote set-url codeberg "${CODEBERG_REPO_SSH}"
+
+          export GIT_SSH_COMMAND='ssh -i ~/.ssh/codeberg -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes'
+
+          git push --force --prune codeberg 'refs/heads/*:refs/heads/*'
+          git push --force --prune codeberg 'refs/tags/*:refs/tags/*'
