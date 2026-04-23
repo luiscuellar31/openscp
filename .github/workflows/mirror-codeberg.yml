@@ -54,6 +54,9 @@ jobs:
           ssh-keyscan -H codeberg.org >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
+      - name: Detach HEAD to allow ref sync
+        run: git checkout --detach
+
       - name: Sync branches and tags from origin
         run: |
           set -euo pipefail
