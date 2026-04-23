@@ -41,6 +41,10 @@ jobs:
             echo "Missing secret: CODEBERG_SSH_PRIVATE_KEY"
             exit 1
           fi
+          if [[ ! "${CODEBERG_REPO_SSH}" =~ ^(ssh://)?git@codeberg\.org[:/][^/]+/[^/]+(\.git)?$ ]]; then
+            echo "Invalid CODEBERG_REPO_SSH format: expected git@codeberg.org:owner/repo.git"
+            exit 1
+          fi
 
       - name: Setup SSH key
         env:
@@ -54,6 +58,25 @@ jobs:
           ssh-keyscan -H codeberg.org >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
+      - name: Validate private key format
+        run: |
+          set -euo pipefail
+          ssh-keygen -y -f ~/.ssh/codeberg >/dev/null
+
+      - name: Verify SSH authentication to Codeberg
+        run: |
+          set -euo pipefail
+          auth_output="$(ssh -T \
+            -i ~/.ssh/codeberg \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            git@codeberg.org 2>&1 || true)"
+          echo "${auth_output}"
+          if ! echo "${auth_output}" | grep -qi "successfully authenticated"; then
+            echo "SSH auth failed. Check the public key in Codeberg and CODEBERG_SSH_PRIVATE_KEY in GitHub Secrets."
+            exit 1
+          fi
+
       - name: Detach HEAD to allow ref sync
         run: git checkout --detach
 
@@ -63,6 +86,14 @@ jobs:
           git fetch --prune origin \
             '+refs/heads/*:refs/heads/*' \
             '+refs/tags/*:refs/tags/*'
+
+      - name: Verify repository access on Codeberg
+        env:
+          CODEBERG_REPO_SSH: ${{ secrets.CODEBERG_REPO_SSH }}
+        run: |
+          set -euo pipefail
+          export GIT_SSH_COMMAND='ssh -i ~/.ssh/codeberg -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes'
+          git ls-remote "${CODEBERG_REPO_SSH}" >/dev/null
 
       - name: Push mirror to Codeberg
         env:
