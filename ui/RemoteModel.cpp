@@ -140,10 +140,10 @@ static QIcon iconForRemoteEntry(const QString &name, bool isDir, bool isLink) {
 }
 
 QVariant RemoteModel::data(const QModelIndex &index, int role) const {
-    if (!index.isValid() || index.row() < 0 ||
-        index.row() >= (int)items_.size())
+    const Item *entry = itemForIndex(index);
+    if (!entry)
         return {};
-    const auto &item = items_[index.row()];
+    const Item &item = *entry;
     const bool isLink = (item.mode & 0120000u) == 0120000u; // S_IFLNK
     if (role == Qt::DecorationRole && index.column() == 0) {
         return iconForRemoteEntry(item.name, item.isDir, isLink);
@@ -196,7 +196,6 @@ QVariant RemoteModel::data(const QModelIndex &index, int role) const {
         }
     }
     if (role == Qt::ToolTipRole) {
-        const auto &item = items_[index.row()];
         if (item.isDir)
             return tr("Folder");
         if (!item.hasSize) {
@@ -385,28 +384,34 @@ void RemoteModel::sortItemsVector(std::vector<Item> &items, int column,
     std::sort(items.begin(), items.end(), compareItems);
 }
 
-bool RemoteModel::isDir(const QModelIndex &idx) const {
-    if (!idx.isValid())
-        return false;
-    return items_[idx.row()].isDir;
+const RemoteModel::Item *RemoteModel::itemForIndex(
+    const QModelIndex &index) const {
+    if (!index.isValid() || index.model() != this)
+        return nullptr;
+    const int row = index.row();
+    if (row < 0 || row >= static_cast<int>(items_.size()))
+        return nullptr;
+    return &items_[row];
 }
 
-QString RemoteModel::nameAt(const QModelIndex &idx) const {
-    if (!idx.isValid())
-        return {};
-    return items_[idx.row()].name;
+bool RemoteModel::isDir(const QModelIndex &index) const {
+    const Item *item = itemForIndex(index);
+    return item ? item->isDir : false;
 }
 
-bool RemoteModel::hasSize(const QModelIndex &idx) const {
-    if (!idx.isValid())
-        return false;
-    return items_[idx.row()].hasSize;
+QString RemoteModel::nameAt(const QModelIndex &index) const {
+    const Item *item = itemForIndex(index);
+    return item ? item->name : QString();
 }
 
-quint64 RemoteModel::sizeAt(const QModelIndex &idx) const {
-    if (!idx.isValid())
-        return 0;
-    return items_[idx.row()].size;
+bool RemoteModel::hasSize(const QModelIndex &index) const {
+    const Item *item = itemForIndex(index);
+    return item ? item->hasSize : false;
+}
+
+quint64 RemoteModel::sizeAt(const QModelIndex &index) const {
+    const Item *item = itemForIndex(index);
+    return item ? item->size : 0;
 }
 
 QVariant RemoteModel::headerData(int section, Qt::Orientation orientation,

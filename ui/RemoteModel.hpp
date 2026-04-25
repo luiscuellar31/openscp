@@ -38,10 +38,10 @@ class RemoteModel : public QAbstractTableModel {
         sessionOpt_ = opt;
     }
 
-    bool isDir(const QModelIndex &idx) const;
-    QString nameAt(const QModelIndex &idx) const;
-    bool hasSize(const QModelIndex &idx) const;
-    quint64 sizeAt(const QModelIndex &idx) const;
+    bool isDir(const QModelIndex &index) const;
+    QString nameAt(const QModelIndex &index) const;
+    bool hasSize(const QModelIndex &index) const;
+    quint64 sizeAt(const QModelIndex &index) const;
     void setShowHidden(bool showHiddenEnabled) {
         showHidden_ = showHiddenEnabled;
     }
@@ -99,6 +99,7 @@ class RemoteModel : public QAbstractTableModel {
     std::optional<openscp::SessionOptions> sessionOpt_;
     std::atomic<quint64> listRequestSeq_{0};
 
+    const Item *itemForIndex(const QModelIndex &index) const;
     void replaceItems(std::vector<Item> &&nextItems, const QString &path);
     void sortItemsVector(std::vector<Item> &items, int column,
                          Qt::SortOrder order) const;
