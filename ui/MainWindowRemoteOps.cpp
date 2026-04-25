@@ -878,13 +878,13 @@ void MainWindow::goHomeRight() {
 }
 
 void MainWindow::openRightRemoteTerminal() {
-    if (!rightIsRemote_ || !m_activeSessionOptions_.has_value()) {
+    if (!rightIsRemote_ || !activeSessionOptions_.has_value()) {
         UiAlerts::information(this, tr("Open in terminal"),
                               tr("The right panel must be connected as remote."));
         return;
     }
 
-    const openscp::SessionOptions &sessionOptions = *m_activeSessionOptions_;
+    const openscp::SessionOptions &sessionOptions = *activeSessionOptions_;
     const QString remotePath = normalizeRemotePath(
         rightRemoteModel_ ? rightRemoteModel_->rootPath()
                           : (rightPath_ ? rightPath_->text() : QString()));
@@ -1831,8 +1831,8 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
     QVector<QAction *> entries;
     if (rightIsRemote_) {
         const bool supportsRemotePermissions =
-            m_activeSessionOptions_.has_value() &&
-            openscp::capabilitiesForProtocol(m_activeSessionOptions_->protocol)
+            activeSessionOptions_.has_value() &&
+            openscp::capabilitiesForProtocol(activeSessionOptions_->protocol)
                 .supports_permissions;
         // Up option (if applicable)
         if (canGoUp)
@@ -1895,8 +1895,8 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
 void MainWindow::changeRemotePermissions() {
     if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_)
         return;
-    if (!m_activeSessionOptions_.has_value() ||
-        !openscp::capabilitiesForProtocol(m_activeSessionOptions_->protocol)
+    if (!activeSessionOptions_.has_value() ||
+        !openscp::capabilitiesForProtocol(activeSessionOptions_->protocol)
              .supports_permissions) {
         UiAlerts::information(
             this, tr("Permissions"),
@@ -2032,17 +2032,17 @@ void MainWindow::applyRemoteWriteabilityActions() {
 void MainWindow::cacheCurrentRemoteWriteability(bool writable) {
     if (!rightIsRemote_ || !rightRemoteModel_) {
         rightRemoteWritable_ = false;
-        m_remoteWriteabilityCache_.clear();
+        remoteWriteabilityCache_.clear();
         applyRemoteWriteabilityActions();
         return;
     }
     const QString base = rightRemoteModel_->rootPath();
     rightRemoteWritable_ = writable;
-    m_remoteWriteabilityCache_.insert(
+    remoteWriteabilityCache_.insert(
         base, RemoteWriteabilityCacheEntry{writable,
                                            QDateTime::currentMSecsSinceEpoch()});
-    if (m_remoteWriteabilityCache_.size() > 256)
-        m_remoteWriteabilityCache_.clear();
+    if (remoteWriteabilityCache_.size() > 256)
+        remoteWriteabilityCache_.clear();
     applyRemoteWriteabilityActions();
 }
 
@@ -2058,25 +2058,25 @@ void MainWindow::invalidateRemoteWriteabilityFromError(
 // Check if the current remote directory is writable and update enables.
 void MainWindow::updateRemoteWriteability() {
     if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_) {
-        ++m_remoteWriteabilityProbeSeq_;
+        ++remoteWriteabilityProbeSeq_;
         rightRemoteWritable_ = false;
-        m_remoteWriteabilityCache_.clear();
+        remoteWriteabilityCache_.clear();
         applyRemoteWriteabilityActions();
         return;
     }
 
     const QString base = rightRemoteModel_->rootPath();
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-    auto cacheIt = m_remoteWriteabilityCache_.constFind(base);
-    if (cacheIt != m_remoteWriteabilityCache_.cend()) {
-        if ((nowMs - cacheIt->checkedAtMs) <= m_remoteWriteabilityTtlMs_) {
+    auto cacheIt = remoteWriteabilityCache_.constFind(base);
+    if (cacheIt != remoteWriteabilityCache_.cend()) {
+        if ((nowMs - cacheIt->checkedAtMs) <= remoteWriteabilityTtlMs_) {
             rightRemoteWritable_ = cacheIt->writable;
             applyRemoteWriteabilityActions();
             return;
         }
     }
 
-    if (!m_activeSessionOptions_.has_value()) {
+    if (!activeSessionOptions_.has_value()) {
         // Without session options we cannot probe off-thread safely.
         applyRemoteWriteabilityActions();
         return;
@@ -2084,12 +2084,12 @@ void MainWindow::updateRemoteWriteability() {
 
     // Keep UI responsive: optimistic state while background probe runs.
     rightRemoteWritable_ =
-        (cacheIt != m_remoteWriteabilityCache_.cend()) ? cacheIt->writable
+        (cacheIt != remoteWriteabilityCache_.cend()) ? cacheIt->writable
                                                        : true;
     applyRemoteWriteabilityActions();
 
-    const quint64 reqId = ++m_remoteWriteabilityProbeSeq_;
-    const openscp::SessionOptions opt = *m_activeSessionOptions_;
+    const quint64 reqId = ++remoteWriteabilityProbeSeq_;
+    const openscp::SessionOptions opt = *activeSessionOptions_;
     QPointer<MainWindow> self(this);
     std::thread([self, reqId, base, opt]() mutable {
         bool probeFinished = false;
@@ -2124,7 +2124,7 @@ void MainWindow::updateRemoteWriteability() {
             [self, reqId, base, probeFinished, writable]() {
                 if (!self || !probeFinished)
                     return;
-                if (reqId != self->m_remoteWriteabilityProbeSeq_.load())
+                if (reqId != self->remoteWriteabilityProbeSeq_.load())
                     return;
                 if (!self->rightIsRemote_ || !self->rightRemoteModel_)
                     return;
@@ -2133,10 +2133,10 @@ void MainWindow::updateRemoteWriteability() {
 
                 const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
                 self->rightRemoteWritable_ = writable;
-                self->m_remoteWriteabilityCache_.insert(
+                self->remoteWriteabilityCache_.insert(
                     base, RemoteWriteabilityCacheEntry{writable, nowMs});
-                if (self->m_remoteWriteabilityCache_.size() > 256)
-                    self->m_remoteWriteabilityCache_.clear();
+                if (self->remoteWriteabilityCache_.size() > 256)
+                    self->remoteWriteabilityCache_.clear();
                 self->applyRemoteWriteabilityActions();
             },
             Qt::QueuedConnection);

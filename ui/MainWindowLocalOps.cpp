@@ -224,7 +224,7 @@ void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
         return;
     }
 
-    ++m_localFsJobsInFlight_;
+    ++localFsJobsInFlight_;
     statusBar()->showMessage(
         deleteSource ? tr("Moving selected items...")
                      : tr("Copying selected items..."),
@@ -274,7 +274,7 @@ void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
                 if (!self)
                     return;
 
-                --self->m_localFsJobsInFlight_;
+                --self->localFsJobsInFlight_;
 
                 QString statusMessage = buildLocalFsSummaryMessage(
                     deleteSource, successCount, failureCount, skippedCount);

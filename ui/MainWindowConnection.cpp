@@ -293,17 +293,17 @@ bool MainWindow::isLikelyRemoteTransportError(const QString &rawError) const {
 bool MainWindow::reconnectActiveRemoteSession(QString *errorOut) {
     if (errorOut)
         errorOut->clear();
-    if (!rightIsRemote_ || !sftp_ || !m_activeSessionOptions_.has_value()) {
+    if (!rightIsRemote_ || !sftp_ || !activeSessionOptions_.has_value()) {
         if (errorOut)
             *errorOut = tr("No active remote session to reconnect.");
         return false;
     }
-    if (m_isDisconnecting || m_connectInProgress_) {
+    if (isDisconnecting_ || connectInProgress_) {
         if (errorOut)
             *errorOut = tr("Connection state is changing; reconnect skipped.");
         return false;
     }
-    if (m_remoteSessionReconnectInFlight_.exchange(true)) {
+    if (remoteSessionReconnectInFlight_.exchange(true)) {
         if (errorOut)
             *errorOut = tr("Reconnect already in progress.");
         return false;
@@ -320,9 +320,9 @@ bool MainWindow::reconnectActiveRemoteSession(QString *errorOut) {
                              0);
 
     std::string connErr;
-    auto replacement = sftp_->newConnectionLike(*m_activeSessionOptions_, connErr);
+    auto replacement = sftp_->newConnectionLike(*activeSessionOptions_, connErr);
     if (!replacement) {
-        m_remoteSessionReconnectInFlight_.store(false);
+        remoteSessionReconnectInFlight_.store(false);
         if (errorOut)
             *errorOut = QString::fromStdString(connErr);
         return false;
@@ -330,9 +330,9 @@ bool MainWindow::reconnectActiveRemoteSession(QString *errorOut) {
 
     sftp_->disconnect();
     sftp_ = std::move(replacement);
-    applyRemoteConnectedUI(*m_activeSessionOptions_);
+    applyRemoteConnectedUI(*activeSessionOptions_);
     if (!sftp_ || (!isScpTransferMode() && !rightRemoteModel_)) {
-        m_remoteSessionReconnectInFlight_.store(false);
+        remoteSessionReconnectInFlight_.store(false);
         if (errorOut) {
             *errorOut = tr("Reconnected transport, but remote panel restore "
                            "failed.");
@@ -345,12 +345,12 @@ bool MainWindow::reconnectActiveRemoteSession(QString *errorOut) {
 
     if (transferMgr_) {
         transferMgr_->setClient(sftp_.get());
-        transferMgr_->setSessionOptions(*m_activeSessionOptions_);
+        transferMgr_->setSessionOptions(*activeSessionOptions_);
     }
 
     startRemoteSessionHealthMonitoring();
     statusBar()->showMessage(tr("Remote session reconnected"), 4000);
-    m_remoteSessionReconnectInFlight_.store(false);
+    remoteSessionReconnectInFlight_.store(false);
     return true;
 }
 
@@ -391,7 +391,7 @@ bool MainWindow::executeCriticalRemoteOperation(
     const QString firstError = QString::fromStdString(err);
     if (!maybeRecoverRemoteSession(operationLabel, firstError)) {
         if (isLikelyRemoteTransportError(firstError) && rightIsRemote_ &&
-            sftp_ && !m_isDisconnecting) {
+            sftp_ && !isDisconnecting_) {
             UiAlerts::warning(
                 this, tr("Connection lost"),
                 tr("The remote session failed while trying to %1.\n"
@@ -412,13 +412,13 @@ bool MainWindow::executeCriticalRemoteOperation(
 }
 
 void MainWindow::ensureRemoteSessionHealthMonitoring() {
-    if (m_remoteSessionHealthTimer_)
+    if (remoteSessionHealthTimer_)
         return;
 
-    m_remoteSessionHealthTimer_ = new QTimer(this);
-    m_remoteSessionHealthTimer_->setSingleShot(false);
-    m_remoteSessionHealthTimer_->setInterval(m_remoteSessionHealthIntervalMs_);
-    connect(m_remoteSessionHealthTimer_, &QTimer::timeout, this, [this] {
+    remoteSessionHealthTimer_ = new QTimer(this);
+    remoteSessionHealthTimer_->setSingleShot(false);
+    remoteSessionHealthTimer_->setInterval(remoteSessionHealthIntervalMs_);
+    connect(remoteSessionHealthTimer_, &QTimer::timeout, this, [this] {
         runRemoteSessionHealthCheck(tr("periodic"), false);
     });
 
@@ -429,12 +429,12 @@ void MainWindow::ensureRemoteSessionHealthMonitoring() {
             [this](Qt::ApplicationState state) {
                 const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
                 if (state == Qt::ApplicationActive) {
-                    if (m_lastAppInactiveAtMs_ <= 0) {
-                        m_lastAppInactiveAtMs_ = 0;
+                    if (lastAppInactiveAtMs_ <= 0) {
+                        lastAppInactiveAtMs_ = 0;
                         return;
                     }
-                    const qint64 inactiveMs = nowMs - m_lastAppInactiveAtMs_;
-                    m_lastAppInactiveAtMs_ = 0;
+                    const qint64 inactiveMs = nowMs - lastAppInactiveAtMs_;
+                    lastAppInactiveAtMs_ = 0;
                     constexpr qint64 kResumeProbeThresholdMs = 60 * 1000;
                     if (inactiveMs >= kResumeProbeThresholdMs && rightIsRemote_ &&
                         sftp_) {
@@ -443,7 +443,7 @@ void MainWindow::ensureRemoteSessionHealthMonitoring() {
                     }
                     return;
                 }
-                m_lastAppInactiveAtMs_ = nowMs;
+                lastAppInactiveAtMs_ = nowMs;
             });
 }
 
@@ -451,32 +451,32 @@ void MainWindow::startRemoteSessionHealthMonitoring() {
     if (!rightIsRemote_ || !sftp_)
         return;
     ensureRemoteSessionHealthMonitoring();
-    if (!m_remoteSessionHealthTimer_)
+    if (!remoteSessionHealthTimer_)
         return;
-    if (m_remoteSessionHealthIntervalMs_ < 60000)
-        m_remoteSessionHealthIntervalMs_ = 60000;
-    m_remoteSessionHealthTimer_->setInterval(m_remoteSessionHealthIntervalMs_);
-    m_remoteSessionHealthProbeInFlight_.store(false);
-    m_lastAppInactiveAtMs_ = 0;
-    if (!m_remoteSessionHealthTimer_->isActive())
-        m_remoteSessionHealthTimer_->start();
+    if (remoteSessionHealthIntervalMs_ < 60000)
+        remoteSessionHealthIntervalMs_ = 60000;
+    remoteSessionHealthTimer_->setInterval(remoteSessionHealthIntervalMs_);
+    remoteSessionHealthProbeInFlight_.store(false);
+    lastAppInactiveAtMs_ = 0;
+    if (!remoteSessionHealthTimer_->isActive())
+        remoteSessionHealthTimer_->start();
 }
 
 void MainWindow::stopRemoteSessionHealthMonitoring() {
-    if (m_remoteSessionHealthTimer_)
-        m_remoteSessionHealthTimer_->stop();
-    m_remoteSessionHealthProbeInFlight_.store(false);
-    m_remoteSessionReconnectInFlight_.store(false);
-    m_lastAppInactiveAtMs_ = 0;
+    if (remoteSessionHealthTimer_)
+        remoteSessionHealthTimer_->stop();
+    remoteSessionHealthProbeInFlight_.store(false);
+    remoteSessionReconnectInFlight_.store(false);
+    lastAppInactiveAtMs_ = 0;
 }
 
 void MainWindow::runRemoteSessionHealthCheck(const QString &reason, bool force) {
-    if (!rightIsRemote_ || !sftp_ || !m_activeSessionOptions_.has_value())
+    if (!rightIsRemote_ || !sftp_ || !activeSessionOptions_.has_value())
         return;
-    if (m_isDisconnecting || m_connectInProgress_)
+    if (isDisconnecting_ || connectInProgress_)
         return;
     bool expected = false;
-    if (!m_remoteSessionHealthProbeInFlight_.compare_exchange_strong(expected,
+    if (!remoteSessionHealthProbeInFlight_.compare_exchange_strong(expected,
                                                                      true)) {
         return;
     }
@@ -499,7 +499,7 @@ void MainWindow::runRemoteSessionHealthCheck(const QString &reason, bool force) 
             return opErr.empty();
         },
         healthCheckError);
-    m_remoteSessionHealthProbeInFlight_.store(false);
+    remoteSessionHealthProbeInFlight_.store(false);
     if (probeSucceeded) {
         if (force && !reason.isEmpty()) {
             statusBar()->showMessage(tr("Remote session validated (%1)")
@@ -508,7 +508,7 @@ void MainWindow::runRemoteSessionHealthCheck(const QString &reason, bool force) 
         }
         return;
     }
-    if (!rightIsRemote_ || !sftp_ || m_isDisconnecting)
+    if (!rightIsRemote_ || !sftp_ || isDisconnecting_)
         return;
 
     const QString rawErr = QString::fromStdString(healthCheckError);
@@ -581,12 +581,12 @@ void MainWindow::connectSftp() { openConnectDialogWithPreset(std::nullopt); }
 
 // Tear down the current remote session and restore local mode.
 quint64 MainWindow::beginDisconnectFlow() {
-    m_isDisconnecting = true;
+    isDisconnecting_ = true;
     stopRemoteSessionHealthMonitoring();
-    const quint64 disconnectSeq = ++m_disconnectSeq_;
-    m_transferCleanupInProgress_ = (transferMgr_ != nullptr);
-    m_transferCleanupStartedAtMs_ =
-        m_transferCleanupInProgress_ ? QDateTime::currentMSecsSinceEpoch() : 0;
+    const quint64 disconnectSeq = ++disconnectSeq_;
+    transferCleanupInProgress_ = (transferMgr_ != nullptr);
+    transferCleanupStartedAtMs_ =
+        transferCleanupInProgress_ ? QDateTime::currentMSecsSinceEpoch() : 0;
     saveRightHeaderState(true);
     if (actDisconnect_)
         actDisconnect_->setEnabled(false);
@@ -596,14 +596,14 @@ quint64 MainWindow::beginDisconnectFlow() {
             tr("Please wait while active transfers are canceled"));
     }
 
-    if (m_remoteScanCancelRequested_)
-        m_remoteScanCancelRequested_->store(true);
-    if (m_remoteScanProgress_) {
-        m_remoteScanProgress_->hide();
-        m_remoteScanProgress_->deleteLater();
-        m_remoteScanProgress_.clear();
+    if (remoteScanCancelRequested_)
+        remoteScanCancelRequested_->store(true);
+    if (remoteScanProgress_) {
+        remoteScanProgress_->hide();
+        remoteScanProgress_->deleteLater();
+        remoteScanProgress_.clear();
     }
-    m_remoteScanInProgress_ = false;
+    remoteScanInProgress_ = false;
     applyDisconnectLocalUiState();
     statusBar()->showMessage(
         tr("Disconnecting… waiting for active transfers to stop"), 0);
@@ -629,9 +629,9 @@ void MainWindow::applyDisconnectLocalUiState() {
     }
     rightIsRemote_ = false;
     activateScpTransferModeUi(false);
-    m_pendingRemoteRefreshFromUpload_ = false;
-    m_seenCompletedUploadTaskIds_.clear();
-    m_seenCompletedTransferNoticeTaskIds_.clear();
+    pendingRemoteRefreshFromUpload_ = false;
+    seenCompletedUploadTaskIds_.clear();
+    seenCompletedTransferNoticeTaskIds_.clear();
     restoreRightHeaderState(false);
     if (QDir(rightPath_->text()).exists()) {
         setRightRoot(rightPath_->text());
@@ -639,10 +639,10 @@ void MainWindow::applyDisconnectLocalUiState() {
         setRightRoot(QDir::homePath());
     }
     rightRemoteWritable_ = false;
-    m_remoteWriteabilityCache_.clear();
-    ++m_remoteWriteabilityProbeSeq_;
-    m_activeSessionOptions_.reset();
-    m_sessionNoHostVerification_ = false;
+    remoteWriteabilityCache_.clear();
+    ++remoteWriteabilityProbeSeq_;
+    activeSessionOptions_.reset();
+    sessionNoHostVerification_ = false;
     updateHostPolicyRiskBanner();
     setActionEnabled(actDownloadF7_, false);
     setActionEnabled(actUploadRight_, false);
@@ -671,7 +671,7 @@ void MainWindow::applyDisconnectLocalUiState() {
 void MainWindow::scheduleDisconnectWatchdog(quint64 disconnectSeq) {
     constexpr int kDisconnectWatchdogMs = 25000;
     QTimer::singleShot(kDisconnectWatchdogMs, this, [this, disconnectSeq]() {
-        if (!m_isDisconnecting || disconnectSeq != m_disconnectSeq_)
+        if (!isDisconnecting_ || disconnectSeq != disconnectSeq_)
             return;
         statusBar()->showMessage(
             tr("Disconnect timeout reached; forcing local mode while cleanup "
@@ -703,11 +703,11 @@ bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
             [self, disconnectSeq]() {
                 if (!self)
                     return;
-                if (disconnectSeq == self->m_disconnectSeq_ &&
-                    self->m_transferCleanupInProgress_) {
-                    self->m_transferCleanupInProgress_ = false;
-                    self->m_transferCleanupStartedAtMs_ = 0;
-                    if (!self->m_isDisconnecting && !self->rightIsRemote_) {
+                if (disconnectSeq == self->disconnectSeq_ &&
+                    self->transferCleanupInProgress_) {
+                    self->transferCleanupInProgress_ = false;
+                    self->transferCleanupStartedAtMs_ = 0;
+                    if (!self->isDisconnecting_ && !self->rightIsRemote_) {
                         if (self->actConnect_)
                             self->actConnect_->setToolTip(
                                 self->actConnect_->text());
@@ -723,7 +723,7 @@ bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
 }
 
 void MainWindow::disconnectSftp() {
-    if (m_isDisconnecting)
+    if (isDisconnecting_)
         return;
     const quint64 disconnectSeq = beginDisconnectFlow();
     scheduleDisconnectWatchdog(disconnectSeq);
@@ -731,13 +731,13 @@ void MainWindow::disconnectSftp() {
     if (runDisconnectTransferCleanupAsync(disconnectSeq))
         return;
 
-    m_transferCleanupInProgress_ = false;
-    m_transferCleanupStartedAtMs_ = 0;
+    transferCleanupInProgress_ = false;
+    transferCleanupStartedAtMs_ = 0;
     completeDisconnectSftp(disconnectSeq, false);
 }
 
 void MainWindow::completeDisconnectSftp(quint64 disconnectSeq, bool forced) {
-    if (!m_isDisconnecting || disconnectSeq != m_disconnectSeq_)
+    if (!isDisconnecting_ || disconnectSeq != disconnectSeq_)
         return;
     if (sftp_)
         sftp_->disconnect();
@@ -750,7 +750,7 @@ void MainWindow::completeDisconnectSftp(quint64 disconnectSeq, bool forced) {
 
     // Per spec: non‑modal Site Manager after disconnect (if enabled), without
     // blocking UI
-    m_isDisconnecting = false;
+    isDisconnecting_ = false;
     if (forced) {
         statusBar()->showMessage(
             tr("Disconnected (transfer cleanup still finishing in background)"),
@@ -758,20 +758,20 @@ void MainWindow::completeDisconnectSftp(quint64 disconnectSeq, bool forced) {
     } else {
         statusBar()->showMessage(tr("Disconnected"), 3000);
     }
-    if (m_pendingCloseAfterDisconnect_) {
-        m_pendingCloseAfterDisconnect_ = false;
+    if (pendingCloseAfterDisconnect_) {
+        pendingCloseAfterDisconnect_ = false;
         QTimer::singleShot(0, this, [this] { close(); });
         return;
     }
-    if (!QCoreApplication::closingDown() && m_openSiteManagerOnDisconnect) {
+    if (!QCoreApplication::closingDown() && openSiteManagerOnDisconnect_) {
         QTimer::singleShot(0, this, [this] { showSiteManagerNonModal(); });
     }
 }
 
 void MainWindow::setOpenSiteManagerOnDisconnect(bool enabled) {
-    if (m_openSiteManagerOnDisconnect == enabled)
+    if (openSiteManagerOnDisconnect_ == enabled)
         return;
-    m_openSiteManagerOnDisconnect = enabled;
+    openSiteManagerOnDisconnect_ = enabled;
     QSettings settings("OpenSCP", "OpenSCP");
     settings.setValue("UI/openSiteManagerOnDisconnect", enabled);
     settings.sync();
@@ -779,7 +779,7 @@ void MainWindow::setOpenSiteManagerOnDisconnect(bool enabled) {
 
 void MainWindow::showSiteManagerNonModal() {
     if (QApplication::activeModalWidget()) {
-        m_pendingOpenSiteManager = true;
+        pendingOpenSiteManager_ = true;
         QObject *modal = QApplication::activeModalWidget();
         if (modal)
             connect(modal, &QObject::destroyed, this,
@@ -787,16 +787,16 @@ void MainWindow::showSiteManagerNonModal() {
                     Qt::UniqueConnection);
         return; // don't open underneath a modal
     }
-    if (m_siteManager) {
-        m_siteManager->show();
-        m_siteManager->raise();
-        m_siteManager->activateWindow();
+    if (siteManager_) {
+        siteManager_->show();
+        siteManager_->raise();
+        siteManager_->activateWindow();
         return;
     }
     auto *dlg = new SiteManagerDialog(this);
-    m_siteManager = dlg;
+    siteManager_ = dlg;
     dlg->setAttribute(Qt::WA_DeleteOnClose, true);
-    connect(dlg, &QObject::destroyed, this, [this] { m_siteManager.clear(); });
+    connect(dlg, &QObject::destroyed, this, [this] { siteManager_.clear(); });
     connect(dlg, &QDialog::finished, this, [this, dlg](int dialogResult) {
         if (dialogResult == QDialog::Accepted && dlg) {
             openscp::SessionOptions opt{};
@@ -813,17 +813,17 @@ void MainWindow::showSiteManagerNonModal() {
 }
 
 void MainWindow::setOpenSiteManagerOnStartup(bool enabled) {
-    if (m_openSiteManagerOnStartup == enabled)
+    if (openSiteManagerOnStartup_ == enabled)
         return;
-    m_openSiteManagerOnStartup = enabled;
+    openSiteManagerOnStartup_ = enabled;
     QSettings settings("OpenSCP", "OpenSCP");
     settings.setValue("UI/showConnOnStart", enabled);
     settings.sync();
 }
 
 void MainWindow::maybeOpenSiteManagerAfterModal() {
-    if (!QApplication::activeModalWidget() && m_pendingOpenSiteManager) {
-        m_pendingOpenSiteManager = false;
+    if (!QApplication::activeModalWidget() && pendingOpenSiteManager_) {
+        pendingOpenSiteManager_ = false;
         QTimer::singleShot(0, this, [this] { showSiteManagerNonModal(); });
     }
 }
@@ -883,23 +883,23 @@ bool MainWindow::confirmInsecureHostPolicyForSession(
 }
 
 void MainWindow::updateHostPolicyRiskBanner() {
-    const bool show = rightIsRemote_ && m_sessionNoHostVerification_;
+    const bool show = rightIsRemote_ && sessionNoHostVerification_;
     if (!show) {
-        if (m_hostPolicyRiskLabel_)
-            m_hostPolicyRiskLabel_->hide();
+        if (hostPolicyRiskLabel_)
+            hostPolicyRiskLabel_->hide();
         return;
     }
-    if (!m_hostPolicyRiskLabel_) {
-        m_hostPolicyRiskLabel_ = new QLabel(this);
-        m_hostPolicyRiskLabel_->setStyleSheet(
+    if (!hostPolicyRiskLabel_) {
+        hostPolicyRiskLabel_ = new QLabel(this);
+        hostPolicyRiskLabel_->setStyleSheet(
             "QLabel { color: #B00020; font-weight: 600; }");
-        statusBar()->addPermanentWidget(m_hostPolicyRiskLabel_);
+        statusBar()->addPermanentWidget(hostPolicyRiskLabel_);
     }
-    m_hostPolicyRiskLabel_->setText(
+    hostPolicyRiskLabel_->setText(
         tr("Risk: host key not verified in this session"));
-    m_hostPolicyRiskLabel_->setToolTip(tr(
+    hostPolicyRiskLabel_->setToolTip(tr(
         "The current session does not validate host key; MITM risk exists."));
-    m_hostPolicyRiskLabel_->show();
+    hostPolicyRiskLabel_->show();
 }
 
 QString MainWindow::defaultDownloadDirFromSettings(const QSettings &settings) {
@@ -917,14 +917,14 @@ QString MainWindow::defaultDownloadDirFromSettings(const QSettings &settings) {
 bool MainWindow::confirmHostKeyUI(const QString &host, quint16 port,
                                   const QString &algorithm,
                                   const QString &fingerprint, bool canSave) {
-    m_tofuHost_ = host + ":" + QString::number(port);
-    m_tofuAlg_ = algorithm;
-    m_tofuFp_ = fingerprint;
-    m_tofuCanSave_ = canSave;
+    tofuHost_ = host + ":" + QString::number(port);
+    tofuAlg_ = algorithm;
+    tofuFp_ = fingerprint;
+    tofuCanSave_ = canSave;
     {
-        std::unique_lock<std::mutex> tofuLock(m_tofuMutex_);
-        m_tofuDecided_ = false;
-        m_tofuAccepted_ = false;
+        std::unique_lock<std::mutex> tofuLock(tofuMutex_);
+        tofuDecided_ = false;
+        tofuAccepted_ = false;
     }
     QMetaObject::invokeMethod(
         this,
@@ -932,24 +932,24 @@ bool MainWindow::confirmHostKeyUI(const QString &host, quint16 port,
             showTOfuDialog(host, algorithm, fingerprint);
         },
         Qt::QueuedConnection);
-    std::unique_lock<std::mutex> tofuLock(m_tofuMutex_);
-    m_tofuCv_.wait(tofuLock, [&] { return m_tofuDecided_; });
-    return m_tofuAccepted_;
+    std::unique_lock<std::mutex> tofuLock(tofuMutex_);
+    tofuCv_.wait(tofuLock, [&] { return tofuDecided_; });
+    return tofuAccepted_;
 }
 
 // Explicit non‑modal TOFU dialog per spec: open() + finished -> onTofuFinished
 void MainWindow::showTOfuDialog(const QString &host, const QString &algorithm,
                                 const QString &fingerprint) {
-    if (m_tofuBox) {
-        m_tofuBox->raise();
-        m_tofuBox->activateWindow();
+    if (tofuBox_) {
+        tofuBox_->raise();
+        tofuBox_->activateWindow();
         return;
     }
     // If a connection progress dialog is visible, disable it so it does not
     // capture input
-    if (m_connectProgress_ && m_connectProgress_->isVisible()) {
-        m_connectProgress_->setEnabled(false);
-        m_connectProgressDimmed_ = true;
+    if (connectProgress_ && connectProgress_->isVisible()) {
+        connectProgress_->setEnabled(false);
+        connectProgressDimmed_ = true;
         if (openscp::sensitiveLoggingEnabled()) {
             std::fprintf(stderr,
                          "[OpenSCP] TOFU shown; progress paused=true\n");
@@ -962,7 +962,7 @@ void MainWindow::showTOfuDialog(const QString &host, const QString &algorithm,
     }
     auto *box = new QMessageBox(this);
     UiAlerts::configure(*box);
-    m_tofuBox = box;
+    tofuBox_ = box;
     box->setAttribute(Qt::WA_DeleteOnClose, true);
     box->setWindowModality(Qt::WindowModal);
     box->setIcon(QMessageBox::Question);
@@ -972,7 +972,7 @@ void MainWindow::showTOfuDialog(const QString &host, const QString &algorithm,
                        .arg(host)
                        .arg(algorithm)
                        .arg(fingerprint);
-    if (!m_tofuCanSave_) {
+    if (!tofuCanSave_) {
         text = QString(tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
                           "%3\n\nFingerprint cannot be saved. Connection "
                           "allowed only this time."))
@@ -981,7 +981,7 @@ void MainWindow::showTOfuDialog(const QString &host, const QString &algorithm,
                    .arg(fingerprint);
     }
     box->setText(text);
-    box->addButton(m_tofuCanSave_ ? tr("Trust") : tr("Connect without saving"),
+    box->addButton(tofuCanSave_ ? tr("Trust") : tr("Connect without saving"),
                    QMessageBox::YesRole);
     box->addButton(tr("Cancel"), QMessageBox::RejectRole);
     connect(box, &QMessageBox::finished, this, &MainWindow::onTofuFinished);
@@ -995,32 +995,32 @@ void MainWindow::showTOfuDialog(const QString &host, const QString &algorithm,
 
 bool MainWindow::consumeTofuDialogDecision(int result) {
     bool accept = (result == QDialog::Accepted || result == QMessageBox::Yes);
-    if (!m_tofuBox)
+    if (!tofuBox_)
         return accept;
-    const auto *clicked = m_tofuBox->clickedButton();
+    const auto *clicked = tofuBox_->clickedButton();
     if (clicked) {
         const auto role =
-            m_tofuBox->buttonRole(const_cast<QAbstractButton *>(clicked));
+            tofuBox_->buttonRole(const_cast<QAbstractButton *>(clicked));
         accept = (role == QMessageBox::YesRole ||
                   role == QMessageBox::AcceptRole);
     }
-    m_tofuBox->deleteLater();
-    m_tofuBox.clear();
+    tofuBox_->deleteLater();
+    tofuBox_.clear();
     return accept;
 }
 
 void MainWindow::publishTofuDecision(bool accept) {
     {
-        std::unique_lock<std::mutex> tofuLock(m_tofuMutex_);
-        m_tofuAccepted_ = accept;
-        m_tofuDecided_ = true;
+        std::unique_lock<std::mutex> tofuLock(tofuMutex_);
+        tofuAccepted_ = accept;
+        tofuDecided_ = true;
     }
-    m_tofuCv_.notify_one();
+    tofuCv_.notify_one();
 }
 
 void MainWindow::onTofuFinished(int dialogResult) {
     const bool accept = consumeTofuDialogDecision(dialogResult);
-    if (!m_tofuCanSave_ && accept) {
+    if (!tofuCanSave_ && accept) {
         statusBar()->showMessage(
             tr("Could not save fingerprint; allowing one-time connection"),
             5000);
@@ -1028,10 +1028,10 @@ void MainWindow::onTofuFinished(int dialogResult) {
         statusBar()->showMessage(
             tr("Connection cancelled: fingerprint not accepted"), 5000);
     }
-    const bool resumedProgress = (m_connectProgressDimmed_ && m_connectProgress_);
+    const bool resumedProgress = (connectProgressDimmed_ && connectProgress_);
     if (resumedProgress) {
-        m_connectProgress_->setEnabled(true);
-        m_connectProgressDimmed_ = false;
+        connectProgress_->setEnabled(true);
+        connectProgressDimmed_ = false;
     }
     if (openscp::sensitiveLoggingEnabled())
         std::fprintf(stderr, "[OpenSCP] TOFU closed; progress resumed=%s\n",
@@ -1043,14 +1043,14 @@ void MainWindow::onTofuFinished(int dialogResult) {
 void MainWindow::showOneTimeDialog(const QString &host,
                                    const QString &algorithm,
                                    const QString &fingerprint) {
-    if (m_tofuBox) {
-        m_tofuBox->raise();
-        m_tofuBox->activateWindow();
+    if (tofuBox_) {
+        tofuBox_->raise();
+        tofuBox_->activateWindow();
         return;
     }
     auto *box = new QMessageBox(this);
     UiAlerts::configure(*box);
-    m_tofuBox = box;
+    tofuBox_ = box;
     box->setAttribute(Qt::WA_DeleteOnClose, true);
     box->setWindowModality(Qt::WindowModal);
     box->setIcon(QMessageBox::Warning);
@@ -1078,11 +1078,11 @@ void MainWindow::onOneTimeFinished(int dialogResult) {
 }
 bool MainWindow::validateSftpConnectStart(
     const openscp::SessionOptions &opt) {
-    if (m_transferCleanupInProgress_) {
+    if (transferCleanupInProgress_) {
         const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
         const int elapsedSec =
-            (m_transferCleanupStartedAtMs_ > 0)
-                ? int((nowMs - m_transferCleanupStartedAtMs_) / 1000)
+            (transferCleanupStartedAtMs_ > 0)
+                ? int((nowMs - transferCleanupStartedAtMs_) / 1000)
                 : 0;
         statusBar()->showMessage(
             tr("Please wait: previous transfer cleanup is still running (%1s)")
@@ -1090,7 +1090,7 @@ bool MainWindow::validateSftpConnectStart(
             4000);
         return false;
     }
-    if (m_connectInProgress_) {
+    if (connectInProgress_) {
         statusBar()->showMessage(tr("A connection is already in progress"),
                                  3000);
         return false;
@@ -1161,8 +1161,8 @@ bool MainWindow::validateSftpConnectStart(
 
 void MainWindow::initializeSftpConnectUiState(
     const std::shared_ptr<std::atomic<bool>> &cancelFlag) {
-    m_connectCancelRequested_ = cancelFlag;
-    m_connectInProgress_ = true;
+    connectCancelRequested_ = cancelFlag;
+    connectInProgress_ = true;
 
     if (actConnect_)
         actConnect_->setEnabled(false);
@@ -1176,15 +1176,15 @@ void MainWindow::initializeSftpConnectUiState(
     progress->setAutoClose(false);
     progress->setAutoReset(false);
     connect(progress, &QProgressDialog::canceled, this, [this] {
-        if (m_connectCancelRequested_) {
-            m_connectCancelRequested_->store(true);
+        if (connectCancelRequested_) {
+            connectCancelRequested_->store(true);
             statusBar()->showMessage(tr("Canceling connection…"), 3000);
         }
     });
     progress->show();
     progress->raise();
-    m_connectProgress_ = progress;
-    m_connectProgressDimmed_ = false;
+    connectProgress_ = progress;
+    connectProgressDimmed_ = false;
 }
 
 void MainWindow::configureSftpConnectCallbacks(openscp::SessionOptions &opt) {
@@ -1397,13 +1397,13 @@ void MainWindow::finalizeSftpConnect(
     const openscp::SessionOptions &uiOpt,
     std::optional<PendingSiteSaveRequest> saveRequest, bool canceledByUser) {
     std::unique_ptr<openscp::SftpClient> guard(connectedClient);
-    if (m_connectProgress_) {
-        m_connectProgress_->close();
-        m_connectProgress_.clear();
+    if (connectProgress_) {
+        connectProgress_->close();
+        connectProgress_.clear();
     }
-    m_connectProgressDimmed_ = false;
-    m_connectCancelRequested_.reset();
-    m_connectInProgress_ = false;
+    connectProgressDimmed_ = false;
+    connectCancelRequested_.reset();
+    connectInProgress_ = false;
     if (actSites_)
         actSites_->setEnabled(true);
 
@@ -1422,7 +1422,7 @@ void MainWindow::finalizeSftpConnect(
         return;
     }
 
-    m_sessionNoHostVerification_ =
+    sessionNoHostVerification_ =
         (uiOpt.known_hosts_policy == openscp::KnownHostsPolicy::Off);
     sftp_ = std::move(guard);
     applyRemoteConnectedUI(uiOpt);
@@ -1463,7 +1463,7 @@ void MainWindow::maybePersistQuickConnectSite(
 
     if (created || regeneratedIds) {
         saveSavedSitesForQuickConnect(sites);
-        refreshOpenSiteManagerWidget(m_siteManager);
+        refreshOpenSiteManagerWidget(siteManager_);
     }
 
     if (!req.saveCredentials) {
@@ -1578,9 +1578,9 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
             sftp_.reset();
             rightView_->setModel(rightLocalModel_);
             activateScpTransferModeUi(false);
-            m_remoteWriteabilityCache_.clear();
-            m_activeSessionOptions_.reset();
-            m_sessionNoHostVerification_ = false;
+            remoteWriteabilityCache_.clear();
+            activeSessionOptions_.reset();
+            sessionNoHostVerification_ = false;
             rightIsRemote_ = false;
             stopRemoteSessionHealthMonitoring();
             if (transferMgr_)
@@ -1654,12 +1654,12 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         rightView_->sortByColumn(0, Qt::AscendingOrder);
         rightPath_->setText(rightRemoteModel_->rootPath());
         rightIsRemote_ = true;
-        m_pendingRemoteRefreshFromUpload_ = false;
-        m_seenCompletedUploadTaskIds_.clear();
-        m_seenCompletedTransferNoticeTaskIds_.clear();
+        pendingRemoteRefreshFromUpload_ = false;
+        seenCompletedUploadTaskIds_.clear();
+        seenCompletedTransferNoticeTaskIds_.clear();
         refreshRightBreadcrumbs();
-        m_activeSessionOptions_ = opt;
-        m_remoteWriteabilityCache_.clear();
+        activeSessionOptions_ = opt;
+        remoteWriteabilityCache_.clear();
         if (transferMgr_) {
             transferMgr_->setClient(sftp_.get());
             transferMgr_->setSessionOptions(opt);
@@ -1715,13 +1715,13 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     addRecentRemotePath(QStringLiteral("/"));
     rightIsRemote_ = true;
     activateScpTransferModeUi(true);
-    m_pendingRemoteRefreshFromUpload_ = false;
-    m_seenCompletedUploadTaskIds_.clear();
-    m_seenCompletedTransferNoticeTaskIds_.clear();
+    pendingRemoteRefreshFromUpload_ = false;
+    seenCompletedUploadTaskIds_.clear();
+    seenCompletedTransferNoticeTaskIds_.clear();
     refreshRightBreadcrumbs();
-    m_activeSessionOptions_ = opt;
-    m_remoteWriteabilityCache_.clear();
-    ++m_remoteWriteabilityProbeSeq_;
+    activeSessionOptions_ = opt;
+    remoteWriteabilityCache_.clear();
+    ++remoteWriteabilityProbeSeq_;
     rightRemoteWritable_ = false;
     if (transferMgr_) {
         transferMgr_->setClient(sftp_.get());

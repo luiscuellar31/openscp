@@ -43,11 +43,11 @@ class MainWindow : public QMainWindow {
     // Preference: open Site Manager automatically on disconnect (non‑modal)
     void setOpenSiteManagerOnDisconnect(bool enabled);
     bool openSiteManagerOnDisconnect() const {
-        return m_openSiteManagerOnDisconnect;
+        return openSiteManagerOnDisconnect_;
     }
     // Preference: open Site Manager automatically on startup (non‑modal)
     void setOpenSiteManagerOnStartup(bool enabled);
-    bool openSiteManagerOnStartup() const { return m_openSiteManagerOnStartup; }
+    bool openSiteManagerOnStartup() const { return openSiteManagerOnStartup_; }
 
     protected:
     bool eventFilter(QObject *eventSource, QEvent *event) override;
@@ -314,15 +314,15 @@ class MainWindow : public QMainWindow {
     void applyRemoteWriteabilityActions();
     void cacheCurrentRemoteWriteability(bool writable);
     void invalidateRemoteWriteabilityFromError(const QString &rawError);
-    QHash<QString, RemoteWriteabilityCacheEntry> m_remoteWriteabilityCache_;
-    int m_remoteWriteabilityTtlMs_ = 15000;
-    std::atomic<quint64> m_remoteWriteabilityProbeSeq_{0};
+    QHash<QString, RemoteWriteabilityCacheEntry> remoteWriteabilityCache_;
+    int remoteWriteabilityTtlMs_ = 15000;
+    std::atomic<quint64> remoteWriteabilityProbeSeq_{0};
 
     bool firstShow_ = true;
-    bool m_restoredWindowGeometry_ = false;
-    bool m_pendingRemoteRefreshFromUpload_ = false;
-    QSet<quint64> m_seenCompletedUploadTaskIds_;
-    QSet<quint64> m_seenCompletedTransferNoticeTaskIds_;
+    bool restoredWindowGeometry_ = false;
+    bool pendingRemoteRefreshFromUpload_ = false;
+    QSet<quint64> seenCompletedUploadTaskIds_;
+    QSet<quint64> seenCompletedTransferNoticeTaskIds_;
 
     // User preferences
     bool prefShowHidden_ = false;
@@ -334,45 +334,45 @@ class MainWindow : public QMainWindow {
     QMetaObject::Connection rightClickConn_;
 
     // Reentrancy guards and dialog pointers
-    bool m_isDisconnecting = false;
-    quint64 m_disconnectSeq_ = 0;
-    bool m_transferCleanupInProgress_ = false;
-    qint64 m_transferCleanupStartedAtMs_ = 0;
-    QPointer<class QMessageBox> m_tofuBox;
-    QPointer<class QWidget> m_siteManager;
-    bool m_openSiteManagerOnDisconnect = true;
-    bool m_openSiteManagerOnStartup = true;
-    bool m_pendingOpenSiteManager = false;
-    bool m_pendingCloseAfterDisconnect_ = false;
-    bool m_sessionNoHostVerification_ = false;
-    QLabel *m_hostPolicyRiskLabel_ = nullptr;
-    QLabel *m_connectionTypeLabel_ = nullptr;
-    QLabel *m_connectionElapsedLabel_ = nullptr;
-    QTimer *m_connectionElapsedTimer_ = nullptr;
-    QTimer *m_remoteSessionHealthTimer_ = nullptr;
-    qint64 m_connectionStartedAtMs_ = 0;
-    QString m_activeConnectionType_;
-    qint64 m_lastAppInactiveAtMs_ = 0;
-    std::atomic<bool> m_remoteSessionHealthProbeInFlight_{false};
-    std::atomic<bool> m_remoteSessionReconnectInFlight_{false};
-    int m_remoteSessionHealthIntervalMs_ = 10 * 60 * 1000;
+    bool isDisconnecting_ = false;
+    quint64 disconnectSeq_ = 0;
+    bool transferCleanupInProgress_ = false;
+    qint64 transferCleanupStartedAtMs_ = 0;
+    QPointer<class QMessageBox> tofuBox_;
+    QPointer<class QWidget> siteManager_;
+    bool openSiteManagerOnDisconnect_ = true;
+    bool openSiteManagerOnStartup_ = true;
+    bool pendingOpenSiteManager_ = false;
+    bool pendingCloseAfterDisconnect_ = false;
+    bool sessionNoHostVerification_ = false;
+    QLabel *hostPolicyRiskLabel_ = nullptr;
+    QLabel *connectionTypeLabel_ = nullptr;
+    QLabel *connectionElapsedLabel_ = nullptr;
+    QTimer *connectionElapsedTimer_ = nullptr;
+    QTimer *remoteSessionHealthTimer_ = nullptr;
+    qint64 connectionStartedAtMs_ = 0;
+    QString activeConnectionType_;
+    qint64 lastAppInactiveAtMs_ = 0;
+    std::atomic<bool> remoteSessionHealthProbeInFlight_{false};
+    std::atomic<bool> remoteSessionReconnectInFlight_{false};
+    int remoteSessionHealthIntervalMs_ = 10 * 60 * 1000;
     // Connection progress dialog (non-modal), to avoid blocking TOFU
-    QPointer<class QProgressDialog> m_connectProgress_;
-    bool m_connectProgressDimmed_ = false;
-    bool m_connectInProgress_ = false;
-    std::shared_ptr<std::atomic<bool>> m_connectCancelRequested_;
-    std::atomic<int> m_localFsJobsInFlight_{0};
-    std::optional<openscp::SessionOptions> m_activeSessionOptions_;
-    QPointer<class QProgressDialog> m_remoteScanProgress_;
-    std::shared_ptr<std::atomic<bool>> m_remoteScanCancelRequested_;
-    std::atomic<bool> m_remoteScanInProgress_{false};
+    QPointer<class QProgressDialog> connectProgress_;
+    bool connectProgressDimmed_ = false;
+    bool connectInProgress_ = false;
+    std::shared_ptr<std::atomic<bool>> connectCancelRequested_;
+    std::atomic<int> localFsJobsInFlight_{0};
+    std::optional<openscp::SessionOptions> activeSessionOptions_;
+    QPointer<class QProgressDialog> remoteScanProgress_;
+    std::shared_ptr<std::atomic<bool>> remoteScanCancelRequested_;
+    std::atomic<bool> remoteScanInProgress_{false};
     // TOFU wait state
-    std::mutex m_tofuMutex_;
-    std::condition_variable m_tofuCv_;
-    bool m_tofuDecided_ = false;
-    bool m_tofuAccepted_ = false;
-    bool m_tofuCanSave_ = false;
-    QString m_tofuHost_;
-    QString m_tofuAlg_;
-    QString m_tofuFp_;
+    std::mutex tofuMutex_;
+    std::condition_variable tofuCv_;
+    bool tofuDecided_ = false;
+    bool tofuAccepted_ = false;
+    bool tofuCanSave_ = false;
+    QString tofuHost_;
+    QString tofuAlg_;
+    QString tofuFp_;
 };

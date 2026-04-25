@@ -85,18 +85,18 @@ void MainWindow::runRemoteDownloadPrescan(
                           tr("No active remote session."));
         return;
     }
-    if (!m_activeSessionOptions_.has_value()) {
+    if (!activeSessionOptions_.has_value()) {
         UiAlerts::warning(this, tr("Remote"),
                              tr("Missing session options for remote scan."));
         return;
     }
-    if (m_remoteScanInProgress_.exchange(true)) {
+    if (remoteScanInProgress_.exchange(true)) {
         statusBar()->showMessage(tr("A remote scan is already in progress"),
                                  3000);
         return;
     }
     if (seeds.isEmpty()) {
-        m_remoteScanInProgress_ = false;
+        remoteScanInProgress_ = false;
         if (initialSkipped > 0) {
             statusBar()->showMessage(
                 tr("Nothing queued. Skipped invalid: %1").arg(initialSkipped),
@@ -107,9 +107,9 @@ void MainWindow::runRemoteDownloadPrescan(
 
     std::string connErr;
     auto scanClient =
-        sftp_->newConnectionLike(*m_activeSessionOptions_, connErr);
+        sftp_->newConnectionLike(*activeSessionOptions_, connErr);
     if (!scanClient) {
-        m_remoteScanInProgress_ = false;
+        remoteScanInProgress_ = false;
         UiAlerts::warning(
             this, tr("Remote"),
             tr("Could not start remote scan.\n%1")
@@ -118,7 +118,7 @@ void MainWindow::runRemoteDownloadPrescan(
     }
 
     auto cancelRequested = std::make_shared<std::atomic<bool>>(false);
-    m_remoteScanCancelRequested_ = cancelRequested;
+    remoteScanCancelRequested_ = cancelRequested;
     auto *scanProgress = new QProgressDialog(
         tr("Preparing remote download queue..."), tr("Cancel"), 0, 0, this);
     scanProgress->setWindowTitle(tr("Preparing queue"));
@@ -128,7 +128,7 @@ void MainWindow::runRemoteDownloadPrescan(
     scanProgress->setMinimumDuration(0);
     connect(scanProgress, &QProgressDialog::canceled, this,
             [cancelRequested] { cancelRequested->store(true); });
-    m_remoteScanProgress_ = scanProgress;
+    remoteScanProgress_ = scanProgress;
     scanProgress->show();
 
     QPointer<MainWindow> self(this);
@@ -147,9 +147,9 @@ void MainWindow::runRemoteDownloadPrescan(
             QMetaObject::invokeMethod(
                 app,
                 [self, dirs, files]() {
-                    if (!self || !self->m_remoteScanProgress_)
+                    if (!self || !self->remoteScanProgress_)
                         return;
-                    self->m_remoteScanProgress_->setLabelText(
+                    self->remoteScanProgress_->setLabelText(
                         QCoreApplication::translate(
                             "MainWindow",
                             "Scanning remote folders... %1 folders, %2 "
@@ -230,12 +230,12 @@ void MainWindow::runRemoteDownloadPrescan(
                 if (!self)
                     return;
 
-                self->m_remoteScanInProgress_ = false;
-                self->m_remoteScanCancelRequested_.reset();
-                if (self->m_remoteScanProgress_) {
-                    self->m_remoteScanProgress_->hide();
-                    self->m_remoteScanProgress_->deleteLater();
-                    self->m_remoteScanProgress_.clear();
+                self->remoteScanInProgress_ = false;
+                self->remoteScanCancelRequested_.reset();
+                if (self->remoteScanProgress_) {
+                    self->remoteScanProgress_->hide();
+                    self->remoteScanProgress_->deleteLater();
+                    self->remoteScanProgress_.clear();
                 }
 
                 if (canceled) {
@@ -375,7 +375,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
         connect(timer, &QTimer::timeout, this, [this, timer, attempts, batchDir] {
             ++(*attempts);
             const bool giveUp = (*attempts >= 300); // ~105s max wait
-            if (!giveUp && m_localFsJobsInFlight_.load() > 0)
+            if (!giveUp && localFsJobsInFlight_.load() > 0)
                 return;
 
             timer->stop();

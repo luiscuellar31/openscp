@@ -1209,11 +1209,11 @@ void MainWindow::initializeRuntimeState() {
                               showSiteManagerOnStart);
             settings.sync();
         }
-        m_openSiteManagerOnStartup =
+        openSiteManagerOnStartup_ =
             settings.value("UI/showConnOnStart", true).toBool();
-        m_openSiteManagerOnDisconnect =
+        openSiteManagerOnDisconnect_ =
             settings.value("UI/openSiteManagerOnDisconnect", true).toBool();
-        if (m_openSiteManagerOnStartup && !QCoreApplication::closingDown() &&
+        if (openSiteManagerOnStartup_ && !QCoreApplication::closingDown() &&
             !sftp_) {
             QTimer::singleShot(0, this, [this] { showSiteManagerNonModal(); });
         }
@@ -1248,35 +1248,35 @@ void MainWindow::initializeConnectionSessionIndicators() {
     if (!statusBar())
         return;
 
-    if (!m_connectionTypeLabel_) {
-        m_connectionTypeLabel_ = new QLabel(this);
-        m_connectionTypeLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        m_connectionTypeLabel_->setMinimumWidth(
-            m_connectionTypeLabel_->fontMetrics().horizontalAdvance(
+    if (!connectionTypeLabel_) {
+        connectionTypeLabel_ = new QLabel(this);
+        connectionTypeLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        connectionTypeLabel_->setMinimumWidth(
+            connectionTypeLabel_->fontMetrics().horizontalAdvance(
                 tr("Type: HttpConnect")) +
             12);
-        m_connectionTypeLabel_->setToolTip(
+        connectionTypeLabel_->setToolTip(
             tr("Active connection method for this session"));
-        statusBar()->addPermanentWidget(m_connectionTypeLabel_);
+        statusBar()->addPermanentWidget(connectionTypeLabel_);
     }
 
-    if (!m_connectionElapsedLabel_) {
-        m_connectionElapsedLabel_ = new QLabel(this);
-        m_connectionElapsedLabel_->setAlignment(Qt::AlignRight |
+    if (!connectionElapsedLabel_) {
+        connectionElapsedLabel_ = new QLabel(this);
+        connectionElapsedLabel_->setAlignment(Qt::AlignRight |
                                                 Qt::AlignVCenter);
-        m_connectionElapsedLabel_->setMinimumWidth(
-            m_connectionElapsedLabel_->fontMetrics().horizontalAdvance(
+        connectionElapsedLabel_->setMinimumWidth(
+            connectionElapsedLabel_->fontMetrics().horizontalAdvance(
                 tr("Session: 000:00:00")) +
             12);
-        m_connectionElapsedLabel_->setToolTip(
+        connectionElapsedLabel_->setToolTip(
             tr("Elapsed time for the current connection session"));
-        statusBar()->addPermanentWidget(m_connectionElapsedLabel_);
+        statusBar()->addPermanentWidget(connectionElapsedLabel_);
     }
 
-    if (!m_connectionElapsedTimer_) {
-        m_connectionElapsedTimer_ = new QTimer(this);
-        m_connectionElapsedTimer_->setInterval(1000);
-        connect(m_connectionElapsedTimer_, &QTimer::timeout, this,
+    if (!connectionElapsedTimer_) {
+        connectionElapsedTimer_ = new QTimer(this);
+        connectionElapsedTimer_->setInterval(1000);
+        connect(connectionElapsedTimer_, &QTimer::timeout, this,
                 &MainWindow::updateConnectionSessionIndicators);
     }
 
@@ -1285,45 +1285,45 @@ void MainWindow::initializeConnectionSessionIndicators() {
 
 void MainWindow::startConnectionSessionIndicators(
     const QString &connectionType) {
-    if (!m_connectionTypeLabel_ || !m_connectionElapsedLabel_ ||
-        !m_connectionElapsedTimer_) {
+    if (!connectionTypeLabel_ || !connectionElapsedLabel_ ||
+        !connectionElapsedTimer_) {
         initializeConnectionSessionIndicators();
     }
 
     const QString normalizedType = connectionType.trimmed();
-    m_activeConnectionType_ =
+    activeConnectionType_ =
         normalizedType.isEmpty() ? tr("Unknown") : normalizedType;
-    m_connectionStartedAtMs_ = QDateTime::currentMSecsSinceEpoch();
-    if (m_connectionElapsedTimer_)
-        m_connectionElapsedTimer_->start();
+    connectionStartedAtMs_ = QDateTime::currentMSecsSinceEpoch();
+    if (connectionElapsedTimer_)
+        connectionElapsedTimer_->start();
     updateConnectionSessionIndicators();
 }
 
 void MainWindow::resetConnectionSessionIndicators() {
-    m_activeConnectionType_.clear();
-    m_connectionStartedAtMs_ = 0;
-    if (m_connectionElapsedTimer_)
-        m_connectionElapsedTimer_->stop();
+    activeConnectionType_.clear();
+    connectionStartedAtMs_ = 0;
+    if (connectionElapsedTimer_)
+        connectionElapsedTimer_->stop();
     updateConnectionSessionIndicators();
 }
 
 void MainWindow::updateConnectionSessionIndicators() {
-    if (m_connectionTypeLabel_) {
+    if (connectionTypeLabel_) {
         const QString typeLabel =
-            m_activeConnectionType_.isEmpty() ? tr("None")
-                                              : m_activeConnectionType_;
-        m_connectionTypeLabel_->setText(tr("Type: %1").arg(typeLabel));
+            activeConnectionType_.isEmpty() ? tr("None")
+                                              : activeConnectionType_;
+        connectionTypeLabel_->setText(tr("Type: %1").arg(typeLabel));
     }
 
-    if (m_connectionElapsedLabel_) {
-        if (m_connectionStartedAtMs_ <= 0) {
-            m_connectionElapsedLabel_->setText(tr("Session: --:--:--"));
+    if (connectionElapsedLabel_) {
+        if (connectionStartedAtMs_ <= 0) {
+            connectionElapsedLabel_->setText(tr("Session: --:--:--"));
         } else {
             const qint64 elapsedSeconds =
                 qMax<qint64>(0, (QDateTime::currentMSecsSinceEpoch() -
-                                 m_connectionStartedAtMs_) /
+                                 connectionStartedAtMs_) /
                                     1000);
-            m_connectionElapsedLabel_->setText(
+            connectionElapsedLabel_->setText(
                 tr("Session: %1")
                     .arg(formatConnectionElapsed(elapsedSeconds)));
         }
@@ -1350,7 +1350,7 @@ void MainWindow::showEvent(QShowEvent *e) {
     QMainWindow::showEvent(e);
     if (firstShow_) {
         firstShow_ = false;
-        if (m_restoredWindowGeometry_)
+        if (restoredWindowGeometry_)
             return;
         QRect avail;
         if (this->screen())
@@ -1367,13 +1367,13 @@ void MainWindow::showEvent(QShowEvent *e) {
 }
 
 void MainWindow::closeEvent(QCloseEvent *e) {
-    if (m_isDisconnecting) {
-        m_pendingCloseAfterDisconnect_ = true;
+    if (isDisconnecting_) {
+        pendingCloseAfterDisconnect_ = true;
         e->ignore();
         return;
     }
     if (rightIsRemote_) {
-        m_pendingCloseAfterDisconnect_ = true;
+        pendingCloseAfterDisconnect_ = true;
         disconnectSftp();
         e->ignore();
         return;
@@ -1394,7 +1394,7 @@ void MainWindow::resetMainWindowLayoutToDefaults() {
         settings.sync();
     }
 
-    m_restoredWindowGeometry_ = false;
+    restoredWindowGeometry_ = false;
 
     resize(1100, 650);
     if (mainSplitter_) {
@@ -1465,7 +1465,7 @@ void MainWindow::restoreMainWindowUiState() {
         settings.value("UI/mainWindow/geometry").toByteArray();
     if (!geometry.isEmpty()) {
         restoreGeometry(geometry);
-        m_restoredWindowGeometry_ = true;
+        restoredWindowGeometry_ = true;
     }
     const QByteArray winState =
         settings.value("UI/mainWindow/windowState").toByteArray();
@@ -1850,8 +1850,8 @@ void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
 
 void MainWindow::maybeRefreshRemoteAfterCompletedUploads() {
     if (!transferMgr_) {
-        m_seenCompletedUploadTaskIds_.clear();
-        m_pendingRemoteRefreshFromUpload_ = false;
+        seenCompletedUploadTaskIds_.clear();
+        pendingRemoteRefreshFromUpload_ = false;
         return;
     }
 
@@ -1870,32 +1870,32 @@ void MainWindow::maybeRefreshRemoteAfterCompletedUploads() {
         activeUploadIds.insert(task.taskId);
         if (task.status != TransferTask::Status::Done)
             continue;
-        if (m_seenCompletedUploadTaskIds_.contains(task.taskId))
+        if (seenCompletedUploadTaskIds_.contains(task.taskId))
             continue;
 
-        m_seenCompletedUploadTaskIds_.insert(task.taskId);
+        seenCompletedUploadTaskIds_.insert(task.taskId);
         if (rightIsRemote_ && rightRemoteModel_ &&
             remotePathIsInsideRoot(task.dst, currentRoot)) {
             shouldRefresh = true;
         }
     }
 
-    for (auto completedIdIt = m_seenCompletedUploadTaskIds_.begin();
-         completedIdIt != m_seenCompletedUploadTaskIds_.end();) {
+    for (auto completedIdIt = seenCompletedUploadTaskIds_.begin();
+         completedIdIt != seenCompletedUploadTaskIds_.end();) {
         if (!activeUploadIds.contains(*completedIdIt))
-            completedIdIt = m_seenCompletedUploadTaskIds_.erase(completedIdIt);
+            completedIdIt = seenCompletedUploadTaskIds_.erase(completedIdIt);
         else
             ++completedIdIt;
     }
 
-    if (!shouldRefresh || m_pendingRemoteRefreshFromUpload_ || !rightIsRemote_ ||
+    if (!shouldRefresh || pendingRemoteRefreshFromUpload_ || !rightIsRemote_ ||
         !rightRemoteModel_) {
         return;
     }
 
-    m_pendingRemoteRefreshFromUpload_ = true;
+    pendingRemoteRefreshFromUpload_ = true;
     QTimer::singleShot(150, this, [this] {
-        m_pendingRemoteRefreshFromUpload_ = false;
+        pendingRemoteRefreshFromUpload_ = false;
         if (!rightIsRemote_ || !rightRemoteModel_)
             return;
         QString err;
@@ -1906,7 +1906,7 @@ void MainWindow::maybeRefreshRemoteAfterCompletedUploads() {
 
 void MainWindow::maybeNotifyCompletedTransfers() {
     if (!transferMgr_) {
-        m_seenCompletedTransferNoticeTaskIds_.clear();
+        seenCompletedTransferNoticeTaskIds_.clear();
         return;
     }
 
@@ -1920,10 +1920,10 @@ void MainWindow::maybeNotifyCompletedTransfers() {
         activeTaskIds.insert(task.taskId);
         if (task.status != TransferTask::Status::Done)
             continue;
-        if (m_seenCompletedTransferNoticeTaskIds_.contains(task.taskId))
+        if (seenCompletedTransferNoticeTaskIds_.contains(task.taskId))
             continue;
 
-        m_seenCompletedTransferNoticeTaskIds_.insert(task.taskId);
+        seenCompletedTransferNoticeTaskIds_.insert(task.taskId);
         ++newlyCompleted;
         if (newlyCompleted == 1) {
             const bool upload = (task.type == TransferTask::Type::Upload);
@@ -1936,11 +1936,11 @@ void MainWindow::maybeNotifyCompletedTransfers() {
         }
     }
 
-    for (auto completedIdIt = m_seenCompletedTransferNoticeTaskIds_.begin();
-         completedIdIt != m_seenCompletedTransferNoticeTaskIds_.end();) {
+    for (auto completedIdIt = seenCompletedTransferNoticeTaskIds_.begin();
+         completedIdIt != seenCompletedTransferNoticeTaskIds_.end();) {
         if (!activeTaskIds.contains(*completedIdIt))
             completedIdIt =
-                m_seenCompletedTransferNoticeTaskIds_.erase(completedIdIt);
+                seenCompletedTransferNoticeTaskIds_.erase(completedIdIt);
         else
             ++completedIdIt;
     }
@@ -1953,10 +1953,10 @@ void MainWindow::maybeNotifyCompletedTransfers() {
 }
 
 bool MainWindow::isScpTransferMode() const {
-    if (!rightIsRemote_ || !m_activeSessionOptions_.has_value())
+    if (!rightIsRemote_ || !activeSessionOptions_.has_value())
         return false;
     const openscp::ProtocolCapabilities caps =
-        openscp::capabilitiesForProtocol(m_activeSessionOptions_->protocol);
+        openscp::capabilitiesForProtocol(activeSessionOptions_->protocol);
     return caps.supports_file_transfers && !caps.supports_listing;
 }
 
@@ -2006,15 +2006,15 @@ void MainWindow::applyPreferences() {
         settings.value("UI/showQueueOnEnqueue", true).toBool();
     prefNoHostVerificationTtlMin_ = qBound(
         1, settings.value("Security/noHostVerificationTtlMin", 15).toInt(), 120);
-    m_remoteSessionHealthIntervalMs_ =
+    remoteSessionHealthIntervalMs_ =
         qBound(60, settings.value("Network/sessionHealthIntervalSec", 600).toInt(),
                86400) *
         1000;
-    m_remoteWriteabilityTtlMs_ = qBound(
+    remoteWriteabilityTtlMs_ = qBound(
         1000, settings.value("Network/remoteWriteabilityTtlMs", 15000).toInt(),
         120000);
-    if (m_remoteSessionHealthTimer_) {
-        m_remoteSessionHealthTimer_->setInterval(m_remoteSessionHealthIntervalMs_);
+    if (remoteSessionHealthTimer_) {
+        remoteSessionHealthTimer_->setInterval(remoteSessionHealthIntervalMs_);
     }
     downloadDir_ = defaultDownloadDirFromSettings(settings);
     QDir().mkpath(downloadDir_);
@@ -2039,7 +2039,7 @@ void MainWindow::applyPreferences() {
         actShowHistory_->setShortcutContext(Qt::ApplicationShortcut);
     }
     // Keep Site Manager auto-open preference up to date
-    m_openSiteManagerOnDisconnect =
+    openSiteManagerOnDisconnect_ =
         settings.value("UI/openSiteManagerOnDisconnect", true).toBool();
     applyTransferPreferences();
 
@@ -2427,7 +2427,7 @@ void MainWindow::updateDeleteShortcutEnables() {
             rightIsRemote_); // exception: enabled without selection
     if (actOpenTerminalRight_)
         actOpenTerminalRight_->setEnabled(
-            rightIsRemote_ && m_activeSessionOptions_.has_value());
+            rightIsRemote_ && activeSessionOptions_.has_value());
     if (actSearchRight_)
         actSearchRight_->setEnabled(true);
     if (actUpRight_) {
