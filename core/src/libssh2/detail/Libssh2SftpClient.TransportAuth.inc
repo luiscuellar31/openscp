@@ -757,4 +757,3 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
 
     return true;
 }
-

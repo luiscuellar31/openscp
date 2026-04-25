@@ -51,4 +51,3 @@ bool walk(openscp::SftpClient *client, const QString &baseRemotePath,
           Stats *statsOut = nullptr);
 
 } // namespace RemoteWalker
-

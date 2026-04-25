@@ -25,4 +25,3 @@ LoadResult loadSites(const LoadOptions &options = {});
 void saveSites(const QVector<SiteEntry> &sites, bool syncToDisk);
 
 } // namespace SavedSitesPersistence
-
