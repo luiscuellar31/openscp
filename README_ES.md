@@ -58,7 +58,8 @@ open build/OpenSCP.app
 
 ### 2. Motor de transferencias y cola
 
-- Transferencias paralelas reales con conexiones aisladas por worker.
+- Transferencias paralelas reales con conexiones aisladas por worker (2 por
+  defecto, configurables de 1 a 8 en `Ajustes > Transferencias > Simultáneas`).
 - Los prechecks costosos de cola se ejecutan fuera del hilo UI; fairness de scheduling y metricas de cola reducen starvation en alta concurrencia.
 - Pausar/reanudar/cancelar/reintentar, limites por tarea/global y soporte de resume.
 - Acciones de cola segun estado: los controles solo se habilitan cuando la seleccion/tarea permite la accion (por ejemplo, reintentar en `Error`/`Canceled`, reanudar en `Paused`).

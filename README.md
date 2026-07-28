@@ -58,7 +58,8 @@ open build/OpenSCP.app
 
 ### 2. Transfer engine and queue
 
-- Real parallel transfers with isolated worker connections.
+- Real parallel transfers with isolated worker connections (2 by default,
+  configurable from 1 to 8 in `Settings > Transfers > Parallel tasks`).
 - Expensive queue prechecks run off the UI thread; scheduling fairness and queue metrics reduce starvation under high concurrency.
 - Pause/resume/cancel/retry, per-task/global limits, and resume support.
 - Status-aware queue actions: controls are enabled only when the selected task state allows that action (for example, retry for `Error`/`Canceled`, resume for `Paused`).
