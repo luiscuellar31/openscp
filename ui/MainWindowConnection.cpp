@@ -830,6 +830,10 @@ void MainWindow::maybeOpenSiteManagerAfterModal() {
 
 bool MainWindow::confirmInsecureHostPolicyForSession(
     const openscp::SessionOptions &opt) {
+    // FTP/FTPS/WebDAV do not use SSH host keys. FTPS/WebDAV certificate
+    // verification is controlled by their dedicated TLS settings.
+    if (!openscp::capabilitiesForProtocol(opt.protocol).supports_known_hosts)
+        return true;
     if (opt.known_hosts_policy != openscp::KnownHostsPolicy::Off)
         return true;
 
@@ -1386,7 +1390,8 @@ void MainWindow::startSftpConnect(
     auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
     initializeSftpConnectUiState(cancelFlag);
 
-    configureSftpConnectCallbacks(opt);
+    if (openscp::capabilitiesForProtocol(opt.protocol).supports_known_hosts)
+        configureSftpConnectCallbacks(opt);
     launchSftpConnectWorker(std::move(opt), uiOpt, std::move(saveRequest),
                             cancelFlag);
 }
@@ -1423,6 +1428,7 @@ void MainWindow::finalizeSftpConnect(
     }
 
     sessionNoHostVerification_ =
+        openscp::capabilitiesForProtocol(uiOpt.protocol).supports_known_hosts &&
         (uiOpt.known_hosts_policy == openscp::KnownHostsPolicy::Off);
     sftp_ = std::move(guard);
     applyRemoteConnectedUI(uiOpt);

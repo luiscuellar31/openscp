@@ -204,11 +204,15 @@ void test_protocol_helpers(TestContext &t) {
             "FTP capabilities should include file transfers");
     t.check(ftpCaps.supports_listing,
             "FTP capabilities should include directory listing support");
+    t.check(!ftpCaps.supports_known_hosts,
+            "FTP should not advertise SSH known_hosts verification");
     t.check(ftpsCaps.implemented, "FTPS capabilities should be implemented");
     t.check(ftpsCaps.supports_file_transfers,
             "FTPS capabilities should include file transfers");
     t.check(ftpsCaps.supports_listing,
             "FTPS capabilities should include directory listing support");
+    t.check(!ftpsCaps.supports_known_hosts,
+            "FTPS should use TLS certificates, not SSH known_hosts");
 #else
     t.check(!ftpCaps.implemented,
             "FTP capabilities should report not implemented when backend is "
