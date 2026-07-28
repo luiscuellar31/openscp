@@ -2658,6 +2658,10 @@ Remoto: %3</translation>
         <translation>Canceladas: 0</translation>
     </message>
     <message>
+        <source>Parallel: %1</source>
+        <translation>Simultâneas: %1</translation>
+    </message>
+    <message>
         <source>Global limit: off</source>
         <translation>Limite global: sem limite</translation>
     </message>

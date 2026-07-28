@@ -576,6 +576,8 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     badgeErrors_ = makeBadge(tr("Errors: 0"), "#C62828");
     badgeCompleted_ = makeBadge(tr("Completed: 0"), "#2E7D32");
     badgeCanceled_ = makeBadge(tr("Canceled: 0"), "#5D4037");
+    badgeParallel_ = makeBadge(tr("Parallel: %1").arg(mgr_->maxConcurrent()),
+                               "#455A64");
     badgeLimit_ = makeBadge(tr("Global limit: off"), "#616161");
     hbBadges->addWidget(badgeTotal_);
     hbBadges->addWidget(badgeActive_);
@@ -585,6 +587,7 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     hbBadges->addWidget(badgeCompleted_);
     hbBadges->addWidget(badgeCanceled_);
     hbBadges->addStretch();
+    hbBadges->addWidget(badgeParallel_);
     hbBadges->addWidget(badgeLimit_);
     lay->addWidget(badges);
 
@@ -904,6 +907,9 @@ void TransferQueueDialog::updateSummary() {
         badgeCompleted_->setText(tr("Completed: %1").arg(done));
     if (badgeCanceled_)
         badgeCanceled_->setText(tr("Canceled: %1").arg(canceled));
+    if (badgeParallel_)
+        badgeParallel_->setText(
+            tr("Parallel: %1").arg(mgr_->maxConcurrent()));
 
     const int gkb = mgr_->globalSpeedLimitKBps();
     if (badgeLimit_) {

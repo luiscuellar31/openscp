@@ -132,12 +132,7 @@ static int enqueueDownloadPairs(TransferManager *manager,
                                 const QVector<QPair<QString, QString>> &pairs) {
     if (!manager)
         return 0;
-    int enqueuedCount = 0;
-    for (const auto &pair : pairs) {
-        manager->enqueueDownload(pair.first, pair.second);
-        ++enqueuedCount;
-    }
-    return enqueuedCount;
+    return manager->enqueueDownloads(pairs);
 }
 
 static void attachRemoteMoveCleanup(
@@ -1155,8 +1150,9 @@ void MainWindow::downloadRightToLeft() {
             return;
         }
     }
-    int enqueuedCount = 0;
     int skippedInvalidCount = 0;
+    QVector<RemoteDownloadSeed> seeds;
+    seeds.reserve(rows.size());
     const QString remoteBase = rightRemoteModel_->rootPath();
     for (const QModelIndex &idx : rows) {
         const QString name = rightRemoteModel_->nameAt(idx);
@@ -1169,38 +1165,10 @@ void MainWindow::downloadRightToLeft() {
         }
         const QString remotePath = joinRemotePath(remoteBase, name);
         const QString localPath = dst.filePath(name);
-        if (rightRemoteModel_->isDir(idx)) {
-            QDir().mkpath(localPath);
-            RemoteWalker::Options walkOptions =
-                buildDownloadWalkOptions(localPath);
-            RemoteWalker::Stats walkStats;
-            (void)RemoteWalker::walk(
-                sftp_.get(), remotePath, walkOptions,
-                [&](const RemoteWalker::Entry &entry) {
-                    const QString childLocal =
-                        QDir(localPath).filePath(entry.relativePath);
-                    transferMgr_->enqueueDownload(entry.remotePath, childLocal);
-                    ++enqueuedCount;
-                },
-                &walkStats);
-            skippedInvalidCount +=
-                static_cast<int>(walkStats.skippedInvalidNameCount);
-        } else {
-            transferMgr_->enqueueDownload(remotePath, localPath);
-            ++enqueuedCount;
-        }
+        seeds.push_back(
+            {remotePath, localPath, rightRemoteModel_->isDir(idx)});
     }
-    if (enqueuedCount > 0) {
-        QString statusMessage =
-            QString(tr("Queued: %1 downloads")).arg(enqueuedCount);
-        if (skippedInvalidCount > 0) {
-            statusMessage +=
-                QString("  |  ") +
-                tr("Skipped invalid: %1").arg(skippedInvalidCount);
-        }
-        statusBar()->showMessage(statusMessage, 4000);
-        maybeShowTransferQueue();
-    }
+    runRemoteDownloadPrescan(seeds, skippedInvalidCount, false);
 }
 
 // Copy the selection from the right panel to the left.

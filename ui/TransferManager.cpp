@@ -20,6 +20,7 @@
 #include <QPushButton>
 #include <QThread>
 #include <QTimeZone>
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <thread>
@@ -192,6 +193,18 @@ static bool tryLockWithRetries(std::unique_lock<MutexType> &lock,
 
 TransferManager::TransferManager(QObject *parent) : QObject(parent) {}
 
+void TransferManager::setMaxConcurrent(int maxConcurrent) {
+    const int boundedMaxConcurrent = std::max(1, maxConcurrent);
+    if (maxConcurrent_.exchange(boundedMaxConcurrent) == boundedMaxConcurrent)
+        return;
+
+    emit tasksChanged();
+    if (!paused_) {
+        // Apply increases immediately even when every current worker is busy.
+        QMetaObject::invokeMethod(this, "schedule", Qt::QueuedConnection);
+    }
+}
+
 TransferManager::~TransferManager() {
     paused_ = true;
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
@@ -355,7 +368,6 @@ TransferManager::createWorkerClient(quint64 taskId, std::string &err) {
 void TransferManager::enqueueUpload(const QString &local,
                                     const QString &remote) {
     TransferTask task{TransferTask::Type::Upload};
-    task.taskId = nextId_++;
     task.src = local;
     task.dst = remote;
     task.queuedAtMs = QDateTime::currentMSecsSinceEpoch();
@@ -364,6 +376,7 @@ void TransferManager::enqueueUpload(const QString &local,
         // (other functions will access concurrently)
         // mtx_ protects tasks_
         std::lock_guard<std::mutex> lock(mtx_);
+        task.taskId = nextId_++;
         tasks_.push_back(task);
     }
     emit tasksChanged();
@@ -374,17 +387,42 @@ void TransferManager::enqueueUpload(const QString &local,
 void TransferManager::enqueueDownload(const QString &remote,
                                       const QString &local) {
     TransferTask task{TransferTask::Type::Download};
-    task.taskId = nextId_++;
     task.src = remote;
     task.dst = local;
     task.queuedAtMs = QDateTime::currentMSecsSinceEpoch();
     {
         std::lock_guard<std::mutex> lock(mtx_);
+        task.taskId = nextId_++;
         tasks_.push_back(task);
     }
     emit tasksChanged();
     if (!paused_)
         schedule();
+}
+
+int TransferManager::enqueueDownloads(
+    const QVector<QPair<QString, QString>> &remoteLocalPairs) {
+    if (remoteLocalPairs.isEmpty())
+        return 0;
+
+    const qint64 queuedAtMs = QDateTime::currentMSecsSinceEpoch();
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        tasks_.reserve(tasks_.size() + remoteLocalPairs.size());
+        for (const auto &remoteLocalPair : remoteLocalPairs) {
+            TransferTask task{TransferTask::Type::Download};
+            task.taskId = nextId_++;
+            task.src = remoteLocalPair.first;
+            task.dst = remoteLocalPair.second;
+            task.queuedAtMs = queuedAtMs;
+            tasks_.push_back(std::move(task));
+        }
+    }
+
+    emit tasksChanged();
+    if (!paused_)
+        schedule();
+    return remoteLocalPairs.size();
 }
 
 void TransferManager::pauseAll() {
@@ -1040,11 +1078,13 @@ bool TransferManager::runWorkerPrecheckStage(WorkerPipelineContext &ctx) {
 
 void TransferManager::runWorkerTransferStage(WorkerPipelineContext &ctx) {
     using clock = std::chrono::steady_clock;
+    using namespace std::chrono_literals;
     static constexpr double KIB = 1024.0;
     std::size_t lastDone = 0;
     auto lastTick = clock::now();
-    auto progress = [this, &ctx, lastTick, lastDone](std::size_t done,
-                                                      std::size_t total) mutable {
+    auto lastUiNotification = lastTick - 100ms;
+    auto progress = [this, &ctx, lastTick, lastDone, lastUiNotification](
+                        std::size_t done, std::size_t total) mutable {
         int pct = (total > 0) ? int((done * 100) / total) : 0;
         const auto now = clock::now();
         const double elapsedSec =
@@ -1074,7 +1114,14 @@ void TransferManager::runWorkerTransferStage(WorkerPipelineContext &ctx) {
                 tasks_[taskIndex].etaSeconds = etaSec;
             }
         }
-        emit tasksChanged();
+        // libcurl/libssh2 may report progress for every small I/O chunk.
+        // Coalesce those updates so a large queue does not flood the UI event
+        // loop with full queue snapshots.
+        if ((now - lastUiNotification) >= 100ms ||
+            (total > 0 && done >= total)) {
+            lastUiNotification = now;
+            emit tasksChanged();
+        }
 
         int taskLimit = 0; // KB/s (0 = unlimited)
         const int globalLimit = globalSpeedKBps_.load();
@@ -1104,9 +1151,9 @@ void TransferManager::runWorkerTransferStage(WorkerPipelineContext &ctx) {
                     std::this_thread::sleep_for(
                         std::chrono::duration<double>(sleepSec));
             }
-            lastTick = clock::now();
-            lastDone = done;
         }
+        lastTick = clock::now();
+        lastDone = done;
     };
 
     ctx.transferStartedMs = QDateTime::currentMSecsSinceEpoch();
@@ -1277,7 +1324,7 @@ void TransferManager::schedule() {
     if (paused_)
         return;
 
-    while (running_.load() < maxConcurrent_) {
+    while (running_.load() < maxConcurrent_.load()) {
         // Stage 1: pick the next queued task and mark it as running.
         const SchedulePickResult picked = pickTaskForSchedule();
         if (picked.outcome == SchedulePickResult::Outcome::NoClient)

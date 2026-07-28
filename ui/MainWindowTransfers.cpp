@@ -5,6 +5,7 @@
 #include "RemoteModel.hpp"
 #include "TransferQueueDialog.hpp"
 #include "UiAlerts.hpp"
+#include "openscp/ClientFactory.hpp"
 
 #include <QAbstractAnimation>
 #include <QCoreApplication>
@@ -24,6 +25,7 @@
 #include <QStatusBar>
 #include <QTimer>
 
+#include <algorithm>
 #include <atomic>
 #include <limits>
 #include <memory>
@@ -105,18 +107,32 @@ void MainWindow::runRemoteDownloadPrescan(
         return;
     }
 
-    std::string connErr;
-    auto scanClient =
-        sftp_->newConnectionLike(*activeSessionOptions_, connErr);
-    if (!scanClient) {
+    const bool needsDirectoryScan =
+        std::any_of(seeds.cbegin(), seeds.cend(),
+                    [](const RemoteDownloadSeed &seed) { return seed.isDir; });
+    if (!needsDirectoryScan) {
         remoteScanInProgress_ = false;
-        UiAlerts::warning(
-            this, tr("Remote"),
-            tr("Could not start remote scan.\n%1")
-                .arg(QString::fromStdString(connErr)));
+        QVector<QPair<QString, QString>> queuedPairs;
+        queuedPairs.reserve(seeds.size());
+        for (const auto &seed : seeds)
+            queuedPairs.push_back({seed.remotePath, seed.localPath});
+        const int enqueuedCount =
+            transferMgr_->enqueueDownloads(queuedPairs);
+        QString message =
+            dragAndDrop ? tr("Queued: %1 downloads (DND)")
+                        : tr("Queued: %1 downloads");
+        message = message.arg(enqueuedCount);
+        if (initialSkipped > 0) {
+            message += QStringLiteral("  |  ") +
+                       tr("Skipped invalid: %1").arg(initialSkipped);
+        }
+        statusBar()->showMessage(message, 6000);
+        if (enqueuedCount > 0)
+            maybeShowTransferQueue();
         return;
     }
 
+    const openscp::SessionOptions scanSessionOptions = *activeSessionOptions_;
     auto cancelRequested = std::make_shared<std::atomic<bool>>(false);
     remoteScanCancelRequested_ = cancelRequested;
     auto *scanProgress = new QProgressDialog(
@@ -133,12 +149,18 @@ void MainWindow::runRemoteDownloadPrescan(
 
     QPointer<MainWindow> self(this);
     std::thread([self, seeds, initialSkipped, dragAndDrop, cancelRequested,
-                 scanClient = std::move(scanClient)]() mutable {
+                 scanSessionOptions]() mutable {
         QVector<QPair<QString, QString>> queuedPairs;
         int skipped = initialSkipped;
         int scannedDirs = 0;
         int listFailures = 0;
         QString lastError;
+        std::string connectionError;
+        auto scanClient = openscp::CreateConnectedClient(scanSessionOptions,
+                                                         connectionError);
+        const bool connectionFailed = !scanClient;
+        if (connectionFailed)
+            lastError = QString::fromStdString(connectionError);
 
         auto postProgress = [&](int dirs, int files) {
             QObject *app = QCoreApplication::instance();
@@ -161,6 +183,8 @@ void MainWindow::runRemoteDownloadPrescan(
         };
 
         for (const auto &seed : seeds) {
+            if (connectionFailed)
+                break;
             if (cancelRequested->load())
                 break;
             if (!seed.isDir) {
@@ -226,7 +250,8 @@ void MainWindow::runRemoteDownloadPrescan(
         QMetaObject::invokeMethod(
             app,
             [self, queuedPairs = std::move(queuedPairs), skipped, canceled,
-             dragAndDrop, listFailures, lastError]() mutable {
+             dragAndDrop, listFailures, lastError,
+             connectionFailed]() mutable {
                 if (!self)
                     return;
 
@@ -246,6 +271,17 @@ void MainWindow::runRemoteDownloadPrescan(
                     return;
                 }
 
+                if (connectionFailed) {
+                    UiAlerts::warning(
+                        self, QCoreApplication::translate("MainWindow",
+                                                          "Remote"),
+                        QCoreApplication::translate(
+                            "MainWindow",
+                            "Could not start remote scan.\n%1")
+                            .arg(lastError));
+                    return;
+                }
+
                 if (!self->rightIsRemote_ || !self->sftp_ ||
                     !self->transferMgr_) {
                     self->statusBar()->showMessage(
@@ -257,12 +293,8 @@ void MainWindow::runRemoteDownloadPrescan(
                     return;
                 }
 
-                int enqueuedCount = 0;
-                for (const auto &queuedPair : queuedPairs) {
-                    self->transferMgr_->enqueueDownload(queuedPair.first,
-                                                        queuedPair.second);
-                    ++enqueuedCount;
-                }
+                const int enqueuedCount =
+                    self->transferMgr_->enqueueDownloads(queuedPairs);
 
                 QString msg =
                     dragAndDrop

@@ -76,6 +76,7 @@ class TransferQueueDialog : public QDialog {
     QLabel *badgeErrors_ = nullptr;
     QLabel *badgeCompleted_ = nullptr;
     QLabel *badgeCanceled_ = nullptr;
+    QLabel *badgeParallel_ = nullptr;
     QLabel *badgeLimit_ = nullptr;
     QPushButton *pauseBtn_ = nullptr;       // global pause
     QPushButton *resumeBtn_ = nullptr;      // global resume

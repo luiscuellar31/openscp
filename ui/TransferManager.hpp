@@ -2,6 +2,7 @@
 #pragma once
 #include "openscp/SftpTypes.hpp"
 #include <QObject>
+#include <QPair>
 #include <QString>
 #include <QVector>
 #include <atomic>
@@ -65,12 +66,8 @@ class TransferManager : public QObject {
     // Session options used to create independent worker connections.
     void setSessionOptions(const openscp::SessionOptions &opt);
     // Concurrency: maximum number of simultaneous tasks
-    void setMaxConcurrent(int maxConcurrent) {
-        if (maxConcurrent < 1)
-            maxConcurrent = 1;
-        maxConcurrent_ = maxConcurrent;
-    }
-    int maxConcurrent() const { return maxConcurrent_; }
+    void setMaxConcurrent(int maxConcurrent);
+    int maxConcurrent() const { return maxConcurrent_.load(); }
     // Global speed limit (KB/s). 0 = unlimited
     void setGlobalSpeedLimitKBps(int kbps) { globalSpeedKBps_.store(kbps); }
     int globalSpeedLimitKBps() const { return globalSpeedKBps_.load(); }
@@ -88,6 +85,10 @@ class TransferManager : public QObject {
 
     void enqueueUpload(const QString &local, const QString &remote);
     void enqueueDownload(const QString &remote, const QString &local);
+    // Add a complete download tree with one queue notification/schedule pass.
+    // This avoids an O(n²)-like UI refresh pattern for large directory trees.
+    int enqueueDownloads(
+        const QVector<QPair<QString, QString>> &remoteLocalPairs);
 
     // Thread-safe copy of the current task list.
     QVector<TransferTask> tasksSnapshot() const;
@@ -115,7 +116,7 @@ class TransferManager : public QObject {
     QVector<TransferTask> tasks_;
     std::atomic<bool> paused_{false};
     std::atomic<int> running_{0};
-    int maxConcurrent_ = 2;
+    std::atomic<int> maxConcurrent_{2};
     std::atomic<int> globalSpeedKBps_{0};
 
     // Worker threads per task

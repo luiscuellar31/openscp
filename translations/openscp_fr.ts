@@ -2658,6 +2658,10 @@ Distant : %3</translation>
         <translation>Annulé: 0</translation>
     </message>
     <message>
+        <source>Parallel: %1</source>
+        <translation>Parallèles : %1</translation>
+    </message>
+    <message>
         <source>Global limit: off</source>
         <translation>Limite globale : désactivée</translation>
     </message>
