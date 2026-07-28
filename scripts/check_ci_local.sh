@@ -179,6 +179,7 @@ build_targets() {
   targets=(
     openscp_core
     openscp_core_tests
+    openscp_transfer_manager_tests
     openscp_sftp_integration_tests
     openscp_scp_integration_tests
     openscp_ftp_integration_tests

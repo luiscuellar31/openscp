@@ -12,6 +12,27 @@ target_link_libraries(openscp_core_tests PRIVATE
 
 add_test(NAME openscp_core_tests COMMAND openscp_core_tests)
 
+add_executable(openscp_transfer_manager_tests
+    transfer_manager_tests.cpp
+    ${CMAKE_SOURCE_DIR}/ui/TransferManager.cpp
+    ${CMAKE_SOURCE_DIR}/ui/TransferManager.hpp
+    ${CMAKE_SOURCE_DIR}/ui/UiAlerts.cpp
+    ${CMAKE_SOURCE_DIR}/ui/UiAlerts.hpp
+)
+
+target_include_directories(openscp_transfer_manager_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/include
+    ${CMAKE_SOURCE_DIR}/ui
+)
+
+target_link_libraries(openscp_transfer_manager_tests PRIVATE
+    Qt6::Widgets
+    openscp_core
+)
+
+add_test(NAME openscp_transfer_manager_tests
+         COMMAND openscp_transfer_manager_tests)
+
 add_executable(openscp_sftp_integration_tests
     libssh2_integration_tests.cpp
 )
