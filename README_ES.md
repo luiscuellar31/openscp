@@ -54,6 +54,10 @@ cmake --build build -j
 - Copia y movimiento entre paneles con drag-and-drop.
 - Operaciones remotas de contexto: descargar, subir, renombrar, eliminar, nueva carpeta/archivo y permisos.
 - Breadcrumbs clicables y busqueda por panel (boton de barra o `Ctrl/Cmd+F`) con patrones wildcard/regex y modo recursivo opcional.
+- Cada barra de panel incluye un menu `Favoritos` de apertura inmediata. En
+  modo local/local ambos paneles comparten los favoritos locales globales; al
+  conectar, el panel derecho cambia a los favoritos remotos del sitio o
+  endpoint.
 - El panel remoto usa deteccion de iconos por MIME (y proveedor nativo en macOS) para mayor paridad con iconos locales.
 
 ### 2. Motor de transferencias y cola
@@ -148,9 +152,9 @@ cmake --build build -j
 - Dialogo Acerca de con copia de diagnostico y mensajes fallback mas amigables.
 - La ventana de cola de transferencias abre centrada respecto a la ventana principal.
 - La barra de estado muestra el tipo de conexion activa y el tiempo transcurrido por sesion.
-- `Comparar` escanea las raices local y remota actuales sin bloquear la UI y
-  muestra una vista previa de sincronizacion unidireccional Local→Remoto o
-  Remoto→Local por ruta relativa, tipo, tamano y fecha.
+- `Sincronizar` escanea las raices local y remota actuales sin bloquear la UI,
+  muestra una vista previa unidireccional Local→Remoto o Remoto→Local y solo
+  encola las operaciones seleccionadas explicitamente en esa vista previa.
 - La sincronizacion soporta filtros glob y presets reutilizables, conserva por
   defecto los archivos que solo existen en destino y separa el modo espejo
   como una opcion con vista previa y confirmacion explicita de borrados.

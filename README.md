@@ -54,6 +54,9 @@ cmake --build build -j
 - Drag-and-drop copy/move between panels.
 - Remote context operations: download, upload, rename, delete, new folder/file, permissions.
 - Clickable breadcrumbs and per-panel search (toolbar button or `Ctrl/Cmd+F`) with wildcard/regex patterns and optional recursive mode.
+- Each panel toolbar has a one-click `Favorites` menu. Both panels share global
+  local favorites in local/local mode; while connected, the right panel
+  switches to remote favorites scoped to the saved site or endpoint.
 - Remote panel icons use MIME-based detection (plus native provider on macOS) for closer parity with local icons.
 
 ### 2. Transfer engine and queue
@@ -145,9 +148,9 @@ cmake --build build -j
 - About dialog includes diagnostics copy support and friendlier fallback messaging.
 - Transfer queue dialog opens centered relative to the main window.
 - Status bar shows connection type and per-session elapsed connection time.
-- `Compare` scans the current local and remote roots without blocking the UI
-  and previews one-way Local→Remote or Remote→Local synchronization by
-  relative path, type, size, and timestamp.
+- `Sync` scans the current local and remote roots without blocking the UI,
+  previews one-way Local→Remote or Remote→Local synchronization, and only
+  queues the operations explicitly selected in the preview.
 - Synchronization supports glob filters and reusable presets, keeps
   destination-only files by default, and exposes mirror deletion as a
   separately previewed, explicitly confirmed option.
