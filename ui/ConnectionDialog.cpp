@@ -44,11 +44,21 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
                        static_cast<int>(openscp::Protocol::WebDav));
     scpMode_ = new QComboBox(this);
     scpMode_->addItem(
-        tr("Automatic (SCP with SFTP fallback)"),
+        tr("Automatic (safe SFTP uploads)"),
         static_cast<int>(openscp::ScpTransferMode::Auto));
     scpMode_->addItem(
-        tr("SCP only (disable SFTP fallback)"),
+        tr("SCP only (uploads are non-atomic)"),
         static_cast<int>(openscp::ScpTransferMode::ScpOnly));
+    scpMode_->setItemData(
+        0,
+        tr("Uploads use a temporary remote file and atomic rename through "
+           "SFTP."),
+        Qt::ToolTipRole);
+    scpMode_->setItemData(
+        1,
+        tr("Classic SCP writes directly to the final remote path. A canceled "
+           "or failed upload may leave a partial destination."),
+        Qt::ToolTipRole);
     {
         QSettings settings("OpenSCP", "OpenSCP");
         const auto defaultProtocol = openscp::protocolFromStorageName(

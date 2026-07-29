@@ -940,10 +940,20 @@ void SettingsDialog::buildSitesPage(const PageBuildContext &ctx) {
     scpModeDefault_ = new QComboBox(sitesPage);
     setFieldWidth(scpModeDefault_);
     addComboItems(scpModeDefault_,
-                  {{tr("Automatic (SCP with SFTP fallback)"),
+                  {{tr("Automatic (safe SFTP uploads)"),
                     static_cast<int>(openscp::ScpTransferMode::Auto)},
-                   {tr("SCP only (disable SFTP fallback)"),
+                   {tr("SCP only (uploads are non-atomic)"),
                     static_cast<int>(openscp::ScpTransferMode::ScpOnly)}});
+    scpModeDefault_->setItemData(
+        0,
+        tr("Uploads use a temporary remote file and atomic rename through "
+           "SFTP."),
+        Qt::ToolTipRole);
+    scpModeDefault_->setItemData(
+        1,
+        tr("Classic SCP writes directly to the final remote path. A canceled "
+           "or failed upload may leave a partial destination."),
+        Qt::ToolTipRole);
     addLabeledRow(sitesForm, sitesPage, tr("Default SCP mode:"), scpModeDefault_);
     addTrackedCheckRows(
         sitesForm, sitesPage,

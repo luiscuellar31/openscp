@@ -388,13 +388,23 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <location filename="../ui/ConnectionDialog.cpp" line="47"/>
-        <source>Automatic (SCP with SFTP fallback)</source>
-        <translation>Automático (SCP con fallback a SFTP)</translation>
+        <source>Automatic (safe SFTP uploads)</source>
+        <translation>Automático (subidas SFTP seguras)</translation>
     </message>
     <message>
         <location filename="../ui/ConnectionDialog.cpp" line="50"/>
-        <source>SCP only (disable SFTP fallback)</source>
-        <translation>Solo SCP (desactivar fallback a SFTP)</translation>
+        <source>SCP only (uploads are non-atomic)</source>
+        <translation>Solo SCP (subidas no atómicas)</translation>
+    </message>
+    <message>
+        <location filename="../ui/ConnectionDialog.cpp" line="54"/>
+        <source>Uploads use a temporary remote file and atomic rename through SFTP.</source>
+        <translation>Las subidas usan un archivo remoto temporal y un renombrado atómico mediante SFTP.</translation>
+    </message>
+    <message>
+        <location filename="../ui/ConnectionDialog.cpp" line="59"/>
+        <source>Classic SCP writes directly to the final remote path. A canceled or failed upload may leave a partial destination.</source>
+        <translation>SCP clásico escribe directamente en la ruta remota final. Una subida cancelada o fallida puede dejar un destino parcial.</translation>
     </message>
     <message>
         <location filename="../ui/ConnectionDialog.cpp" line="1075"/>
@@ -596,6 +606,26 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
 </context>
 <context>
     <name>MainWindow</name>
+    <message>
+        <location filename="../ui/MainWindowRemoteOps.cpp" line="121"/>
+        <source>Open in terminal is unavailable for authenticated proxies because terminal command arguments could expose the proxy password.</source>
+        <translation>Abrir en terminal no está disponible con proxies autenticados porque los argumentos del comando podrían exponer la contraseña del proxy.</translation>
+    </message>
+    <message>
+        <location filename="../ui/MainWindowLocalOps.cpp" line="154"/>
+        <source>Could not preserve existing destination: %1</source>
+        <translation>No se pudo conservar el destino existente: %1</translation>
+    </message>
+    <message>
+        <location filename="../ui/MainWindowLocalOps.cpp" line="168"/>
+        <source>Could not publish completed copy: %1</source>
+        <translation>No se pudo publicar la copia completada: %1</translation>
+    </message>
+    <message>
+        <location filename="../ui/MainWindowLocalOps.cpp" line="173"/>
+        <source>Could not publish completed copy or restore the previous destination. Recovery copy: %1</source>
+        <translation>No se pudo publicar la copia completada ni restaurar el destino anterior. Copia de recuperación: %1</translation>
+    </message>
     <message>
         <location filename="../ui/MainWindowLocalOps.cpp" line="47"/>
         <source>Could not copy file: %1</source>
@@ -3876,13 +3906,23 @@ Scan them again without this limit?</source>
     </message>
     <message>
         <location filename="../ui/SettingsDialog.cpp" line="943"/>
-        <source>Automatic (SCP with SFTP fallback)</source>
-        <translation>Automático (SCP con fallback a SFTP)</translation>
+        <source>Automatic (safe SFTP uploads)</source>
+        <translation>Automático (subidas SFTP seguras)</translation>
     </message>
     <message>
         <location filename="../ui/SettingsDialog.cpp" line="945"/>
-        <source>SCP only (disable SFTP fallback)</source>
-        <translation>Solo SCP (desactivar fallback a SFTP)</translation>
+        <source>SCP only (uploads are non-atomic)</source>
+        <translation>Solo SCP (subidas no atómicas)</translation>
+    </message>
+    <message>
+        <location filename="../ui/SettingsDialog.cpp" line="949"/>
+        <source>Uploads use a temporary remote file and atomic rename through SFTP.</source>
+        <translation>Las subidas usan un archivo remoto temporal y un renombrado atómico mediante SFTP.</translation>
+    </message>
+    <message>
+        <location filename="../ui/SettingsDialog.cpp" line="954"/>
+        <source>Classic SCP writes directly to the final remote path. A canceled or failed upload may leave a partial destination.</source>
+        <translation>SCP clásico escribe directamente en la ruta remota final. Una subida cancelada o fallida puede dejar un destino parcial.</translation>
     </message>
     <message>
         <location filename="../ui/SettingsDialog.cpp" line="956"/>

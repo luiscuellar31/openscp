@@ -93,8 +93,9 @@ cmake --build build -j
 - FTPS supports automatic, explicit TLS, and implicit TLS modes.
 - WebDAV support includes remote listing (`PROPFIND`), a confined configurable
   base path, and file operations (`GET`, `PUT`, `MKCOL`, `DELETE`, `MOVE`).
-- SCP mode policy per site/session: `Automatic (SCP + SFTP fallback)` or
-  `SCP only` (disable fallback), plus a global default for new connections.
+- SCP mode policy per site/session: `Automatic` uses safe SFTP temporary
+  uploads with atomic rename; `SCP only` is available for legacy servers but
+  writes directly to the final remote path and is therefore non-atomic.
 - FTPS certificate verification (peer+host) is enabled by default, with optional custom CA bundle per site/session.
 - FTP and HTTP WebDAV require a temporary insecure-transport confirmation;
   disabling TLS verification requires an additional `UNSAFE` confirmation and

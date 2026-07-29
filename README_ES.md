@@ -96,8 +96,10 @@ cmake --build build -j
 - WebDAV incluye listado remoto (`PROPFIND`), ruta base configurable y
   confinada, y operaciones de archivos (`GET`, `PUT`, `MKCOL`, `DELETE`,
   `MOVE`).
-- Politica de modo SCP por sitio/sesion: `Automatico (SCP + fallback SFTP)` o
-  `Solo SCP` (sin fallback), con valor global por defecto para conexiones nuevas.
+- Politica de modo SCP por sitio/sesion: `Automatico` usa subidas SFTP
+  temporales seguras con renombrado atomico; `Solo SCP` sigue disponible para
+  servidores antiguos, pero escribe directamente en la ruta remota final y,
+  por lo tanto, no es atomico.
 - La verificacion de certificado FTPS (peer+host) viene activa por defecto, con CA bundle personalizado opcional por sitio/sesion.
 - FTP y WebDAV HTTP requieren confirmacion temporal de transporte inseguro;
   desactivar la verificacion TLS exige una confirmacion adicional escribiendo
