@@ -11,7 +11,7 @@
 </p>
 
 <p>
-    <strong>OpenSCP</strong> es un explorador de archivos estilo two-panel commander escrito en <strong>C++/Qt</strong>, con soporte <strong>SFTP</strong>, soporte inicial para <strong>SCP</strong>, soporte inicial para <strong>FTP/FTPS</strong> y soporte inicial para <strong>WebDAV</strong>. Busca ser una alternativa ligera a herramientas como WinSCP, enfocada en <strong>seguridad</strong>, <strong>claridad</strong> y <strong>extensibilidad</strong>.
+    <strong>OpenSCP</strong> es un explorador de archivos estilo two-panel commander escrito en <strong>C++/Qt</strong>, con soporte <strong>SFTP</strong>, soporte inicial para <strong>SCP</strong>, <strong>FTP/FTPS</strong> y <strong>WebDAV</strong>. Busca ser una alternativa ligera a herramientas como WinSCP, enfocada en <strong>seguridad</strong>, <strong>claridad</strong> y <strong>extensibilidad</strong>.
 </p>
 
 <br>
@@ -40,8 +40,8 @@ cmake --build build -j
 # Linux
 ./build/openscp_hello
 
-# macOS
-open build/OpenSCP.app
+# macOS (flujo recomendado de configurar + compilar + abrir)
+./scripts/macos.sh dev
 ```
 
 ## Lo que Ofrece OpenSCP (v1.0.0)
@@ -67,20 +67,37 @@ open build/OpenSCP.app
 - Acciones de contexto como reintentar seleccionadas, abrir destino, copiar rutas y politicas de limpieza.
 - Persistencia de ventana/layout/filtro de la cola.
 - La barra de estado principal muestra avisos de transferencias completadas (subidas/descargas exitosas).
+- Las tareas no terminales se persisten sin credenciales y se restauran
+  pausadas al reiniciar; las de otro sitio esperan hasta reconectar esa sesion.
+- Los lotes recursivos descubren en bloques acotados, aplican backpressure,
+  representan carpetas vacias y piden confirmacion al alcanzar los umbrales de
+  arboles muy grandes.
+- Los conflictos se serializan por lote y permiten preguntar, sobrescribir,
+  omitir, reanudar, renombrar o copiar solo si el origen es mas nuevo.
+- Descargas y subidas usan archivos `.part` deterministas y finalizacion
+  atomica cuando el servidor la soporta; cancelar conserva los datos parciales
+  para decidir explicitamente si se reanudan o eliminan.
 - Las transferencias usan sesiones de worker interrumpibles y tiempos de espera acotados de lectura/escritura en socket para evitar bloqueos indefinidos cuando la red se estanca.
 - El flujo de finalizacion de subidas esta endurecido y las vistas remotas se refrescan de forma confiable al terminar uploads.
-- Las operaciones remotas criticas ahora intentan una recuperacion automatica de sesion stale (reconexion + reintento) antes de fallar.
 - La sesion remota principal se valida de forma periodica y al volver de suspension/bloqueo; si el transporte ya no es valido, OpenSCP se desconecta de forma segura con aviso claro.
 
-### 3. Endurecimiento de seguridad de transporte SSH
+### 3. Endurecimiento de seguridad del transporte remoto
 
 - Auth: contrasena, clave privada (+passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
 - Selector de protocolo por sitio/sesion (`SFTP`, `SCP`, `FTP`, `FTPS`, `WebDAV`).
-- FTP/FTPS soportan listado remoto de directorios (MLSD con fallback a LIST).
-- WebDAV incluye listado remoto (`PROPFIND`) y operaciones basicas de archivos (`GET`, `PUT`, `MKCOL`, `DELETE`, `MOVE`).
+- FTP/FTPS soportan listado, fallback de metadata, creacion de carpetas,
+  borrado y renombrado, incluidas rutas con espacios y rechazo de inyeccion de
+  comandos.
+- FTPS soporta modos automatico, TLS explicito y TLS implicito.
+- WebDAV incluye listado remoto (`PROPFIND`), ruta base configurable y
+  confinada, y operaciones de archivos (`GET`, `PUT`, `MKCOL`, `DELETE`,
+  `MOVE`).
 - Politica de modo SCP por sitio/sesion: `Automatico (SCP + fallback SFTP)` o
   `Solo SCP` (sin fallback), con valor global por defecto para conexiones nuevas.
 - La verificacion de certificado FTPS (peer+host) viene activa por defecto, con CA bundle personalizado opcional por sitio/sesion.
+- FTP y WebDAV HTTP requieren confirmacion temporal de transporte inseguro;
+  desactivar la verificacion TLS exige una confirmacion adicional escribiendo
+  `UNSAFE` y deja un aviso visible durante la sesion.
 - Politicas de host-key: `Strict`, `Accept new (TOFU)`, `No verification` (endurecida).
 - El transporte por sitio puede usar TCP directo, proxy `SOCKS5` o tunel `HTTP CONNECT`.
 - Se soporta tunel por sitio via SSH jump host (`ProxyJump`/bastion).
@@ -99,6 +116,11 @@ open build/OpenSCP.app
 - Los sitios guardados persisten por sitio configuracion de jump host SSH (host/puerto/usuario/ruta de llave).
 - Los sitios guardados persisten por sitio la politica de modo SCP.
 - Los sitios guardados persisten por sitio la configuracion FTPS de certificado (toggle de verificacion y ruta de CA bundle opcional).
+- Los sitios pueden definir rutas local/remota iniciales y recordar
+  opcionalmente las ultimas rutas tras una desconexion correcta.
+- El administrador de sitios permite buscar por nombre, protocolo, host o
+  usuario y duplicar con un UUID nuevo; copiar credenciales seguras es opcional
+  y viene desactivado por defecto.
 - Bloqueo de nombres de sitio duplicados.
 - Flujos de renombrar/eliminar limpian secretos legacy o huerfanos.
 - Eliminacion opcional de credenciales guardadas y entradas relacionadas en `known_hosts` al borrar sitios.
@@ -108,6 +130,9 @@ open build/OpenSCP.app
 - Las contrasenas de proxy se guardan en backend seguro (nunca en texto plano en ajustes del sitio).
 - Feedback claro de persistencia en builds secure-only.
 - Quick Connect puede guardar/actualizar datos del sitio sin duplicados.
+- Los favoritos locales son globales; favoritos e historial remotos se aislan
+  por UUID de sitio o identidad de endpoint. El historial legacy sin alcance
+  queda separado y exige confirmacion.
 
 ### 5. Calidad de UX/UI
 
@@ -123,18 +148,41 @@ open build/OpenSCP.app
 - Dialogo Acerca de con copia de diagnostico y mensajes fallback mas amigables.
 - La ventana de cola de transferencias abre centrada respecto a la ventana principal.
 - La barra de estado muestra el tipo de conexion activa y el tiempo transcurrido por sesion.
+- `Comparar` escanea las raices local y remota actuales sin bloquear la UI y
+  muestra una vista previa de sincronizacion unidireccional Local→Remoto o
+  Remoto→Local por ruta relativa, tipo, tamano y fecha.
+- La sincronizacion soporta filtros glob y presets reutilizables, conserva por
+  defecto los archivos que solo existen en destino y separa el modo espejo
+  como una opcion con vista previa y confirmacion explicita de borrados.
+- Cuando el backend lo soporta, los pares de archivos seleccionados se pueden
+  comparar bajo demanda con SHA-256 sin modificar ninguno de los dos lados.
 - El flujo de desconexion se mantiene responsivo: la UI vuelve de inmediato a modo local mientras la limpieza de transferencias puede continuar en segundo plano con watchdog/feedback.
 - El reconectar se bloquea mientras la limpieza previa de transferencias siga en curso, evitando solapamientos de sesion.
 
 ### 6. Linea base de calidad (CI y tests)
 
 - CI dividido por intencion:
-    - push a `dev`: build rapido Linux + tests no integracion
-    - PR a `main`: compuerta de integracion Linux y macOS
-- En integracion CI se levanta un servidor SFTP temporal para pruebas end-to-end.
+    - push a `dev`: linea base rapida Linux sin integracion, mas el workflow
+      dedicado de protocolos reales y sanitizadores
+    - PR a `main`: compuertas de integracion Linux/macOS, mas el workflow
+      dedicado de protocolos reales y sanitizadores
+- Los workflows de integracion levantan servidores temporales SFTP, FTP, FTPS
+  explicito, FTPS implicito y WebDAV HTTPS para pruebas end-to-end.
+- La compuerta de protocolos curl usa una CA temporal con SAN para
+  localhost/127.0.0.1 y sirve WebDAV bajo la ruta base no raiz
+  `/openscp-dav`.
+- Los binarios de integracion FTP, ambos modos FTPS y WebDAV se ejecutan
+  directamente, por lo que un servicio ausente o inaccesible hace fallar CI en
+  vez de aparecer como un CTest omitido.
 - La cobertura de integracion en PR valida variantes de transporte en CI: directo, tunel proxy `SOCKS5`, tunel proxy `HTTP CONNECT` (con auth) y tunel SSH jump host.
 - El workflow de release por tag genera automaticamente notas de draft release desde Conventional Commits (`feat`, `fix`, `BREAKING CHANGE`, etc.).
-- Workflow nocturno con `ASan`, `UBSan`, `TSan` y `cppcheck`.
+- Las compuertas de calidad Linux ejecutan los tests no integracion del core y
+  del event loop Qt bajo `ASan`+`UBSan` y `TSan`; el workflow nocturno tambien
+  ejecuta `cppcheck`.
+- TSan instrumenta OpenSCP y sus tests, pero las bibliotecas Qt precompiladas
+  de Ubuntu no vienen instrumentadas con TSan. El job cubre carreras del lado
+  de la aplicacion ejercitadas mediante Qt, no carreras completamente internas
+  de Qt.
 
 ## Requisitos
 
@@ -217,14 +265,38 @@ Indice de scripts: [scripts/README.md](scripts/README.md)
 - `OPENSCP_IT_FTPS_USER` (opcional)
 - `OPENSCP_IT_FTPS_PASS` (opcional)
 - `OPENSCP_IT_FTPS_REMOTE_BASE`
+- `OPENSCP_IT_FTPS_MODE` (`auto`, `explicit` o `implicit`; opcional)
 - `OPENSCP_IT_FTPS_VERIFY_PEER` (`1`/`0`, opcional; por defecto `1`)
 - `OPENSCP_IT_FTPS_CA_CERT` (opcional)
+
+`openscp_webdav_integration_tests` se omite si no defines variables de
+integracion:
+
+- `OPENSCP_IT_WEBDAV_HOST`
+- `OPENSCP_IT_WEBDAV_PORT` (opcional; por defecto `443`)
+- `OPENSCP_IT_WEBDAV_USER` (opcional)
+- `OPENSCP_IT_WEBDAV_PASS` (opcional)
+- `OPENSCP_IT_WEBDAV_REMOTE_BASE`
+- `OPENSCP_IT_WEBDAV_SCHEME` (`http` o `https`; opcional)
+- `OPENSCP_IT_WEBDAV_BASE_PATH` (opcional; por defecto `/`)
+- `OPENSCP_IT_WEBDAV_VERIFY_PEER` (`1`/`0`, opcional; por defecto `1`)
+- `OPENSCP_IT_WEBDAV_CA_CERT` (opcional)
+
+La preparacion de servicios Ubuntu para CI y el ejecutor directo estan en
+[`scripts/ci`](scripts/ci). Se mantienen separados del manejo de omisiones de
+CTest:
+
+```bash
+./scripts/ci/setup_protocol_services.sh
+./scripts/ci/run_protocol_integration.sh build
+```
 
 ## Flujos por Plataforma
 
 ### macOS
 
-Bucle diario recomendado:
+Bucle diario recomendado (tambien es la forma recomendada de abrir un build
+local):
 
 ```bash
 ./scripts/macos.sh dev
@@ -242,10 +314,19 @@ Empaquetado local sin firma:
 
 ```bash
 ./scripts/macos.sh app
+./scripts/verify_macos_bundle.sh build/OpenSCP.app
+
+# Otros formatos de artefacto
 ./scripts/macos.sh pkg
 ./scripts/macos.sh dmg
 ./scripts/macos.sh dist
 ```
+
+El comando `dev` puede abrir la app usando el runtime de desarrollo Qt
+detectado. El verificador es para la app ya empaquetada: comprueba que esten los
+frameworks Qt y el plugin de plataforma `qcocoa`, y que el enlazado no conserve
+rutas de Homebrew, temporales o especificas de la maquina. Este flujo local no
+requiere firma ni notarizacion de Apple.
 
 Si Qt esta fuera de la ruta por defecto (`$HOME/Qt/<version>/macos`):
 
@@ -287,9 +368,7 @@ Detalles de build y empaquetado Linux (AppImage, Snap, Flatpak): [assets/linux/R
 - El soporte para Windows esta planeado para futuras versiones.
 - Protocolos: ampliar cobertura de interoperabilidad WebDAV.
 - Flujos de autenticacion enterprise mas amplios para proxy/jump (por ejemplo, autenticacion jump interactiva fuera de modo batch).
-- Flujos de sincronizacion: comparar/sincronizar y keep-up-to-date con filtros/ignorados.
-- Persistencia de cola entre reinicios.
-- Mas UX: marcadores, historial, command palette y temas.
+- Mas UX: command palette y temas.
 
 ## Creditos y Licencias
 
