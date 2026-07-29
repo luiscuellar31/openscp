@@ -99,6 +99,16 @@ static void setActionIconAndTooltip(QAction *action, const QIcon &icon) {
     action->setToolTip(action->text());
 }
 
+static void setInstantPopup(QToolBar *bar, QAction *action) {
+    if (!bar || !action)
+        return;
+    auto *button = qobject_cast<QToolButton *>(bar->widgetForAction(action));
+    if (!button)
+        return;
+    button->setPopupMode(QToolButton::InstantPopup);
+    button->setAccessibleName(action->text());
+}
+
 static void bindActionToPanelShortcut(QAction *action, QWidget *panel,
                                       const QKeySequence &shortcut) {
     if (!action)
@@ -667,7 +677,7 @@ void MainWindow::initializePanels(const QString &home) {
         return rightIsRemote_ ? tr("Remote panel")
                               : tr("Local panel - right");
     };
-    // Left sub‑toolbar: Up, Open, Home, Search, Copy/Move/Delete, Rename/New
+    // Left sub-toolbar: navigation/favorites, then file operations.
     actUpLeft_ = leftPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpLeft);
     setActionIconAndTooltip(actUpLeft_, resIcon("action-go-up.svg"));
     // Button "Open left folder" next to Up
@@ -677,6 +687,13 @@ void MainWindow::initializePanels(const QString &home) {
     actHomeLeft_ =
         leftPaneBar_->addAction(tr("Home"), this, &MainWindow::goHomeLeft);
     setActionIconAndTooltip(actHomeLeft_, resIcon("action-go-home.svg"));
+    actFavoritesLeft_ = new QAction(tr("Favorites"), this);
+    actFavoritesLeft_->setObjectName(QStringLiteral("leftFavoritesAction"));
+    actFavoritesLeft_->setMenu(new QMenu(leftPaneBar_));
+    setActionIconAndTooltip(actFavoritesLeft_,
+                            resIcon("action-favorites.svg"));
+    leftPaneBar_->addAction(actFavoritesLeft_);
+    setInstantPopup(leftPaneBar_, actFavoritesLeft_);
     actSearchLeft_ =
         leftPaneBar_->addAction(tr("Search items"), this,
                                 [this, leftSearchLabel] {
@@ -753,6 +770,13 @@ void MainWindow::initializePanels(const QString &home) {
     actHomeRight_ =
         rightPaneBar_->addAction(tr("Home"), this, &MainWindow::goHomeRight);
     setActionIconAndTooltip(actHomeRight_, resIcon("action-go-home.svg"));
+    actFavoritesRight_ = new QAction(tr("Favorites"), this);
+    actFavoritesRight_->setObjectName(QStringLiteral("rightFavoritesAction"));
+    actFavoritesRight_->setMenu(new QMenu(rightPaneBar_));
+    setActionIconAndTooltip(actFavoritesRight_,
+                            resIcon("action-favorites.svg"));
+    rightPaneBar_->addAction(actFavoritesRight_);
+    setInstantPopup(rightPaneBar_, actFavoritesRight_);
     actSearchRight_ =
         rightPaneBar_->addAction(tr("Search items"), this,
                                  [this, rightSearchLabel] {
@@ -761,6 +785,8 @@ void MainWindow::initializePanels(const QString &home) {
                                  });
     setActionIconAndTooltip(actSearchRight_, resIcon("action-search-item.svg"));
 
+    // Right navigation also exposes global local favorites until a remote
+    // session switches this panel to its connection-scoped favorites.
     // Right panel actions (create first, then add in requested order)
     actDownloadF7_ = new QAction(tr("Download"), this);
     connect(actDownloadF7_, &QAction::triggered, this,
@@ -1725,7 +1751,6 @@ void MainWindow::rebuildLocalBreadcrumbs(QToolBar *bar, const QString &path,
         if (crumbIndex + 1 < crumbs.size())
             bar->addSeparator();
     }
-    appendFavoritesMenu(bar, normalized, false, rightPane);
 }
 
 void MainWindow::rebuildRemoteBreadcrumbs(const QString &path) {
@@ -1756,12 +1781,12 @@ void MainWindow::rebuildRemoteBreadcrumbs(const QString &path) {
         if (crumbIndex + 1 < crumbs.size())
             rightBreadcrumbsBar_->addSeparator();
     }
-    appendFavoritesMenu(rightBreadcrumbsBar_, normalized, true, true);
 }
 
 void MainWindow::refreshLeftBreadcrumbs() {
-    rebuildLocalBreadcrumbs(leftBreadcrumbsBar_,
-                            leftPath_ ? leftPath_->text() : QString(), false);
+    const QString path = leftPath_ ? leftPath_->text() : QString();
+    rebuildLocalBreadcrumbs(leftBreadcrumbsBar_, path, false);
+    refreshFavoritesAction(actFavoritesLeft_, path, false, false);
 }
 
 void MainWindow::refreshRightBreadcrumbs() {
@@ -1770,6 +1795,7 @@ void MainWindow::refreshRightBreadcrumbs() {
         rebuildRemoteBreadcrumbs(path);
     else
         rebuildLocalBreadcrumbs(rightBreadcrumbsBar_, path, true);
+    refreshFavoritesAction(actFavoritesRight_, path, rightIsRemote_, true);
 }
 
 void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
@@ -2381,22 +2407,25 @@ QString MainWindow::scopedRemoteFavoritesKey() const {
                : QStringLiteral("Favorites/remoteScopes/%1/paths").arg(scope);
 }
 
-void MainWindow::appendFavoritesMenu(QToolBar *bar,
-                                     const QString &currentPath, bool remote,
-                                     bool rightPane) {
-    if (!bar)
+void MainWindow::refreshFavoritesAction(QAction *favoritesAction,
+                                        const QString &currentPath,
+                                        bool remote, bool rightPane) {
+    if (!favoritesAction)
         return;
-    bar->addSeparator();
-    QAction *favoritesAction = bar->addAction(QStringLiteral("★"));
+    QMenu *menu = favoritesAction->menu();
+    if (!menu)
+        return;
+    menu->clear();
+    favoritesAction->setText(tr("Favorites"));
     favoritesAction->setToolTip(tr("Favorites"));
-    auto *menu = new QMenu(bar);
-    favoritesAction->setMenu(menu);
 
     const QString settingsKey =
         remote ? scopedRemoteFavoritesKey()
                : QString::fromLatin1(kLocalFavoritesKey);
     if (settingsKey.isEmpty()) {
         favoritesAction->setEnabled(false);
+        favoritesAction->setIcon(
+            mainWindowActionIcon("action-favorites.svg"));
         favoritesAction->setToolTip(
             tr("Connect to a remote server to use remote favorites"));
         return;
@@ -2409,12 +2438,15 @@ void MainWindow::appendFavoritesMenu(QToolBar *bar,
                : normalizedLocalHistoryPath(currentPath);
     const bool currentIsFavorite = paths.contains(
         normalizedCurrent, remote ? Qt::CaseSensitive : Qt::CaseInsensitive);
+    favoritesAction->setEnabled(true);
+    favoritesAction->setIcon(mainWindowActionIcon(
+        currentIsFavorite ? "action-favorite-active.svg"
+                          : "action-favorites.svg"));
     QAction *toggleCurrent = menu->addAction(
         currentIsFavorite ? tr("Remove current path from favorites")
                           : tr("Add current path to favorites"));
     connect(toggleCurrent, &QAction::triggered, this,
-            [this, settingsKey, normalizedCurrent, currentIsFavorite, remote,
-             rightPane] {
+            [this, settingsKey, normalizedCurrent, currentIsFavorite, remote] {
                 if (normalizedCurrent.isEmpty())
                     return;
                 QSettings writeSettings("OpenSCP", "OpenSCP");
@@ -2428,10 +2460,8 @@ void MainWindow::appendFavoritesMenu(QToolBar *bar,
                 if (!currentIsFavorite)
                     values.prepend(normalizedCurrent);
                 writeSettings.setValue(settingsKey, values);
-                if (rightPane)
-                    refreshRightBreadcrumbs();
-                else
-                    refreshLeftBreadcrumbs();
+                QTimer::singleShot(
+                    0, this, [this] { refreshFavoritesActions(); });
             });
 
     menu->addSeparator();
@@ -2447,12 +2477,15 @@ void MainWindow::appendFavoritesMenu(QToolBar *bar,
         openFavorite->setToolTip(path);
         connect(openFavorite, &QAction::triggered, this,
                 [this, path, remote, rightPane] {
-                    if (remote)
-                        setRightRemoteRoot(path);
-                    else if (rightPane)
-                        setRightRoot(path);
-                    else
-                        setLeftRoot(path);
+                    QTimer::singleShot(0, this,
+                                       [this, path, remote, rightPane] {
+                                           if (remote)
+                                               setRightRemoteRoot(path);
+                                           else if (rightPane)
+                                               setRightRoot(path);
+                                           else
+                                               setLeftRoot(path);
+                                       });
                 });
     }
     if (paths.isEmpty()) {
@@ -2461,8 +2494,7 @@ void MainWindow::appendFavoritesMenu(QToolBar *bar,
     } else {
         menu->addSeparator();
         QAction *clear = menu->addAction(tr("Clear favorites"));
-        connect(clear, &QAction::triggered, this, [this, settingsKey,
-                                                   rightPane] {
+        connect(clear, &QAction::triggered, this, [this, settingsKey] {
             if (UiAlerts::question(
                     this, tr("Clear favorites"),
                     tr("Remove all favorites in this section?"),
@@ -2472,12 +2504,19 @@ void MainWindow::appendFavoritesMenu(QToolBar *bar,
             }
             QSettings writeSettings("OpenSCP", "OpenSCP");
             writeSettings.remove(settingsKey);
-            if (rightPane)
-                refreshRightBreadcrumbs();
-            else
-                refreshLeftBreadcrumbs();
+            QTimer::singleShot(
+                0, this, [this] { refreshFavoritesActions(); });
         });
     }
+}
+
+void MainWindow::refreshFavoritesActions() {
+    refreshFavoritesAction(
+        actFavoritesLeft_, leftPath_ ? leftPath_->text() : QString(), false,
+        false);
+    refreshFavoritesAction(
+        actFavoritesRight_, rightPath_ ? rightPath_->text() : QString(),
+        rightIsRemote_, true);
 }
 
 void MainWindow::addRecentRemotePath(const QString &path) {
@@ -2793,10 +2832,7 @@ void MainWindow::showHistoryMenu() {
         if (!removed)
             favorites.prepend(normalized);
         settings.setValue(settingsKey, favorites);
-        if (remotePath)
-            refreshRightBreadcrumbs();
-        else
-            refreshLeftBreadcrumbs();
+        refreshFavoritesActions();
         statusBar()->showMessage(
             removed ? tr("Favorite removed") : tr("Favorite added"), 2500);
         updateActions();

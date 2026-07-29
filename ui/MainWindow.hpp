@@ -175,6 +175,8 @@ class MainWindow : public QMainWindow {
     QAction *actOpenTerminalRight_ = nullptr;
     QAction *actSearchLeft_ = nullptr;
     QAction *actSearchRight_ = nullptr;
+    QAction *actFavoritesLeft_ = nullptr;
+    QAction *actFavoritesRight_ = nullptr;
     QAction *actNewDirRight_ = nullptr;
     QAction *actNewFileRight_ = nullptr;
     QAction *actRenameRight_ = nullptr;
@@ -252,8 +254,9 @@ class MainWindow : public QMainWindow {
     QString remoteNavigationScope() const;
     QString scopedRemoteHistoryKey() const;
     QString scopedRemoteFavoritesKey() const;
-    void appendFavoritesMenu(QToolBar *bar, const QString &currentPath,
-                             bool remote, bool rightPane);
+    void refreshFavoritesAction(QAction *action, const QString &currentPath,
+                                bool remote, bool rightPane);
+    void refreshFavoritesActions();
     void applyTransferPreferences();
     static QString
     defaultDownloadDirFromSettings(const class QSettings &settings);

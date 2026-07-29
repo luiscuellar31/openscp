@@ -285,6 +285,8 @@ set(ICON_FILES
     assets/icons/action-delete.svg
     assets/icons/action-disconnect.svg
     assets/icons/action-download.svg
+    assets/icons/action-favorite-active.svg
+    assets/icons/action-favorites.svg
     assets/icons/action-go-home.svg
     assets/icons/action-go-up.svg
     assets/icons/action-open-about-us.svg
