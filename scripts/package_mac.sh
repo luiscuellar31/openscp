@@ -78,6 +78,9 @@ INFO_PLIST_OUT="${CONTENTS_DIR}/Info.plist"
 QTPREFIX=""
 QT_HOST_WRAP_DIR=""
 
+source "${REPO_DIR}/scripts/macos/package_signing.sh"
+source "${REPO_DIR}/scripts/macos/package_artifacts.sh"
+
 # Helpers
 log() { printf "\033[1;34m[pack]\033[0m %s\n" "$*"; }
 warn() { printf "\033[1;33m[warn]\033[0m %s\n" "$*"; }
@@ -400,59 +403,6 @@ rewrite_external_refs_to_bundle() {
         ;;
     esac
   done < <(list_deps "$bin")
-}
-
-sign_item() {
-  local path="$1"
-  [[ "${SKIP_CODESIGN:-0}" == "1" ]] && { warn "Skipping codesign: $path"; return; }
-  [[ -z "${APPLE_IDENTITY:-}" ]] && die "APPLE_IDENTITY is not set"
-  codesign --force --timestamp --options runtime \
-    --entitlements "$ENTITLEMENTS_FILE" \
-    --sign "${APPLE_IDENTITY}" "$path"
-}
-
-sign_app_bundle() {
-  # Sign nested content first: dylibs, frameworks, plugins, then the app
-  shopt -s nullglob
-  local items=()
-  items+=("${FRAMEWORKS_DIR}"/*.dylib)
-  items+=("${FRAMEWORKS_DIR}"/*.framework)
-  items+=("${PLUGINS_DIR}"/**/*)
-  for i in "${items[@]}"; do
-    if [[ -e "$i" ]]; then sign_item "$i"; fi
-  done
-  sign_item "$APP_DIR"
-}
-
-# Ad‑hoc sign everything to purge invalid upstream signatures (no cert required).
-adhoc_sign_item() {
-  local path="$1"
-  codesign --force -s - --timestamp=none "$path" 2>/dev/null || true
-}
-
-adhoc_sign_bundle() {
-  log "Ad‑hoc signing bundle (no Developer ID)"
-  shopt -s nullglob
-  # Framework inner binaries (Versions/A/<Name>) first
-  local fwbin
-  for fw in "${FRAMEWORKS_DIR}"/*.framework; do
-    [[ -d "$fw" ]] || continue
-    local name; name="$(basename "$fw" .framework)"
-    if [[ -f "$fw/Versions/A/$name" ]]; then fwbin="$fw/Versions/A/$name"; else fwbin="$fw/$name"; fi
-    adhoc_sign_item "$fwbin"
-    adhoc_sign_item "$fw"
-  done
-  # Plain dylibs
-  for dyl in "${FRAMEWORKS_DIR}"/*.dylib; do
-    [[ -e "$dyl" ]] && adhoc_sign_item "$dyl"
-  done
-  # Plugins
-  for p in "${PLUGINS_DIR}"/**/*; do
-    [[ -f "$p" ]] && adhoc_sign_item "$p"
-  done
-  # App binary and container
-  adhoc_sign_item "$MACOS_DIR/${APP_NAME}"
-  adhoc_sign_item "$APP_DIR"
 }
 
 bundle_non_qt_deps() {
@@ -858,94 +808,6 @@ sanitize_qt_plugins_linkage() {
 
   # Best-effort cleanup for empty plugin directories after pruning.
   find "$PLUGINS_DIR" -type d -empty -delete 2>/dev/null || true
-}
-
-create_dmg() {
-  local dmg_path="$1"; local volname="$2"; local src_app="$3"
-  local staging
-  staging="$(mktemp -d)"
-  rm -f "$dmg_path"
-  mkdir -p "$staging"
-  cp -R "$src_app" "$staging/"
-  ln -s /Applications "$staging/Applications"
-  ensure_cmd hdiutil
-  local attempt=1
-  local max_attempts=3
-  while (( attempt <= max_attempts )); do
-    if hdiutil create -ov -fs HFS+ -volname "$volname" -srcfolder "$staging" -format UDZO -imagekey zlib-level=9 "$dmg_path"; then
-      break
-    fi
-    warn "hdiutil create failed (attempt ${attempt}/${max_attempts})"
-    rm -f "$dmg_path"
-    if (( attempt == max_attempts )); then
-      rm -rf "$staging"
-      die "Unable to create DMG after ${max_attempts} attempts"
-    fi
-    sleep 2
-    ((attempt++))
-  done
-  rm -rf "$staging"
-}
-
-create_app_zip() {
-  local zip_path="$1"; local src_app="$2"
-  rm -f "$zip_path"
-  # keepParent preserves "OpenSCP.app" as top-level entry in zip
-  ditto -c -k --sequesterRsrc --keepParent "$src_app" "$zip_path"
-}
-
-create_pkg() {
-  local pkg_path="$1"; local src_app="$2"; local pkg_version="$3"
-  ensure_cmd pkgbuild
-  rm -f "$pkg_path"
-  # Build from a raw root payload instead of --component to avoid relocatable
-  # bundle/version checks that can skip install on dev machines with a local
-  # build/OpenSCP.app present.
-  local staging component_pkg pkg_id
-  local component_plist
-  staging="$(mktemp -d)"
-  component_pkg="${staging}/component.pkg"
-  component_plist="${staging}/components.plist"
-  pkg_id="${PKG_IDENTIFIER:-com.luiscuellar.openscp}"
-  cp -R "$src_app" "$staging/"
-  pkgbuild --analyze --root "$staging" "$component_plist" >/dev/null
-  # Disable bundle relocation/version checks for the main app so local dev
-  # copies (e.g., build/OpenSCP.app) do not cause Installer to skip payload.
-  if [[ -x /usr/libexec/PlistBuddy ]]; then
-    /usr/libexec/PlistBuddy -c 'Set :0:BundleIsVersionChecked false' "$component_plist" || true
-    /usr/libexec/PlistBuddy -c 'Set :0:BundleIsRelocatable false' "$component_plist" || true
-  fi
-  pkgbuild \
-    --root "$staging" \
-    --component-plist "$component_plist" \
-    --identifier "$pkg_id" \
-    --version "$pkg_version" \
-    --install-location /Applications \
-    "$component_pkg"
-  mv "$component_pkg" "$pkg_path"
-  rm -rf "$staging"
-}
-
-notarize_and_staple() {
-  local dmg="$1"
-  [[ "${SKIP_NOTARIZATION:-0}" == "1" ]] && { warn "Skipping notarization"; return; }
-  for v in APPLE_TEAM_ID APPLE_API_KEY_ID APPLE_API_ISSUER_ID APPLE_API_KEY_P8; do
-    [[ -n "${!v:-}" ]] || die "Missing $v for notarization"
-  done
-  ensure_cmd xcrun
-  local keyfile; keyfile="$(mktemp -t AuthKey).p8"
-  chmod 600 "$keyfile"
-  printf "%s" "${APPLE_API_KEY_P8}" > "$keyfile"
-  log "Submitting for notarization (this may take a few minutes)"
-  xcrun notarytool submit "$dmg" \
-    --key "$keyfile" \
-    --key-id "${APPLE_API_KEY_ID}" \
-    --issuer "${APPLE_API_ISSUER_ID}" \
-    --team-id "${APPLE_TEAM_ID}" \
-    --wait
-  rm -f "$keyfile"
-  log "Stapling notarization ticket"
-  xcrun stapler staple "$dmg"
 }
 
 main() {
