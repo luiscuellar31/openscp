@@ -1,0 +1,20 @@
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-macro-parentheses,
+  -bugprone-narrowing-conversions,
+  -bugprone-signed-char-misuse,
+  concurrency-mt-unsafe,
+  concurrency-thread-canceltype-asynchronous,
+  performance-*,
+  readability-function-size
+WarningsAsErrors: ''
+HeaderFilterRegex: '(^|/)(core|ui)/'
+FormatStyle: file
+CheckOptions:
+  readability-function-size.LineThreshold: '120'
+  readability-function-size.StatementThreshold: '120'
+  readability-function-size.BranchThreshold: '30'
+  readability-function-size.ParameterThreshold: '8'

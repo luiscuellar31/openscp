@@ -66,7 +66,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
   static-analysis:
-    name: Static Analysis (cppcheck)
+    name: Static Analysis
     runs-on: ubuntu-latest
 
     steps:
@@ -75,10 +75,36 @@ jobs:
         with:
           ref: dev
 
-      - name: Install cppcheck
+      - name: Install analysis tools and dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cppcheck
+          sudo apt-get install -y \
+            clang-format clang-tidy cmake ninja-build pkg-config cppcheck \
+            libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev \
+            qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools \
+            qt6-l10n-tools libgl1-mesa-dev
+
+      - name: Check C++ formatting
+        run: |
+          xargs --no-run-if-empty \
+            clang-format --dry-run --Werror < .clang-format-files
+
+      - name: Configure compilation database
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build-analysis -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DOPENSCP_BUILD_TESTS=ON
+
+      - name: Run conservative clang-tidy checks
+        run: |
+          run-clang-tidy \
+            -p build-analysis \
+            -quiet \
+            '.*/(core/src|ui)/.*\.cpp$'
 
       - name: Run cppcheck
         run: |
