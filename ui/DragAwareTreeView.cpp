@@ -247,7 +247,7 @@ void DragAwareTreeView::scheduleAutoCleanup(const QString &batchDir,
         if (tryDelete(batchDir))
             return;
         // Retry up to 3 times at 1s intervals
-        auto retries = new int(3);
+        auto retries = std::make_shared<int>(3);
         auto timer = new QTimer(this);
         timer->setInterval(1000);
         connect(timer, &QTimer::timeout, this,
@@ -255,7 +255,6 @@ void DragAwareTreeView::scheduleAutoCleanup(const QString &batchDir,
                     if (tryDelete(batchDir) || --(*retries) <= 0) {
                         timer->stop();
                         timer->deleteLater();
-                        delete retries;
                     }
                 });
         timer->start();

@@ -186,11 +186,6 @@ QVector<QPair<QString, QString>> buildLocalDestinationPairsWithOverwritePrompt(
                 continue;
             }
 
-            const QFileInfo targetInfo(targetPath);
-            if (targetInfo.isDir())
-                QDir(targetPath).removeRecursively();
-            else
-                QFile::remove(targetPath);
         }
         pairs.push_back({sourceInfo.absoluteFilePath(), targetPath});
     }

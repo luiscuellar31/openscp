@@ -26,6 +26,7 @@
 #include <QTemporaryFile>
 #include <QThreadPool>
 #include <QTreeView>
+#include <QUuid>
 #include <QUrl>
 
 #include <algorithm>
@@ -34,15 +35,34 @@
 
 static constexpr int NAME_COL = 0;
 
-static bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
-                                 QString &error) {
+static bool entryExists(const QString &path) {
+    const QFileInfo info(path);
+    return info.exists() || info.isSymLink();
+}
+
+static bool removeEntry(const QString &path) {
+    const QFileInfo info(path);
+    if (!info.exists() && !info.isSymLink())
+        return true;
+    if (info.isDir() && !info.isSymLink())
+        return QDir(path).removeRecursively();
+    return QFile::remove(path);
+}
+
+static bool renameEntry(const QString &from, const QString &to) {
+    const QFileInfo info(from);
+    if (info.isDir() && !info.isSymLink())
+        return QDir().rename(from, to);
+    return QFile::rename(from, to);
+}
+
+static bool copyEntryToEmptyDestination(const QString &srcPath,
+                                        const QString &dstPath,
+                                        QString &error) {
     QFileInfo srcInfo(srcPath);
 
     if (srcInfo.isFile()) {
-        // Ensure destination directory
         QDir().mkpath(QFileInfo(dstPath).dir().absolutePath());
-        if (QFile::exists(dstPath))
-            QFile::remove(dstPath);
         if (!QFile::copy(srcPath, dstPath)) {
             error = QString(QCoreApplication::translate(
                                 "MainWindow", "Could not copy file: %1"))
@@ -83,10 +103,7 @@ static bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
                     return false;
                 }
             } else {
-                // Ensure parent directory exists
                 QDir().mkpath(QFileInfo(target).dir().absolutePath());
-                if (QFile::exists(target))
-                    QFile::remove(target);
                 if (!QFile::copy(entryFileInfo.absoluteFilePath(), target)) {
                     error = QString(QCoreApplication::translate(
                                         "MainWindow", "Failed to copy: %1"))
@@ -101,6 +118,65 @@ static bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
     error = QCoreApplication::translate(
         "MainWindow", "Source entry is neither file nor folder.");
     return false;
+}
+
+static bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
+                                 QString &error) {
+    const QString destinationParent =
+        QFileInfo(dstPath).dir().absolutePath();
+    if (!QDir().mkpath(destinationParent)) {
+        error = QString(QCoreApplication::translate(
+                            "MainWindow",
+                            "Could not create destination folder: %1"))
+                    .arg(destinationParent);
+        return false;
+    }
+
+    const QString token =
+        QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString stagedPath =
+        QDir(destinationParent)
+            .filePath(QStringLiteral(".openscp-stage-") + token);
+    const QString backupPath =
+        QDir(destinationParent)
+            .filePath(QStringLiteral(".openscp-backup-") + token);
+
+    if (!copyEntryToEmptyDestination(srcPath, stagedPath, error)) {
+        (void)removeEntry(stagedPath);
+        return false;
+    }
+
+    const bool hadDestination = entryExists(dstPath);
+    if (hadDestination && !renameEntry(dstPath, backupPath)) {
+        (void)removeEntry(stagedPath);
+        error = QString(QCoreApplication::translate(
+                            "MainWindow",
+                            "Could not preserve existing destination: %1"))
+                    .arg(dstPath);
+        return false;
+    }
+
+    if (!renameEntry(stagedPath, dstPath)) {
+        (void)removeEntry(stagedPath);
+        const bool restored =
+            !hadDestination || renameEntry(backupPath, dstPath);
+        error =
+            restored
+                ? QString(QCoreApplication::translate(
+                              "MainWindow",
+                              "Could not publish completed copy: %1"))
+                      .arg(dstPath)
+                : QString(QCoreApplication::translate(
+                              "MainWindow",
+                              "Could not publish completed copy or restore the "
+                              "previous destination. Recovery copy: %1"))
+                      .arg(backupPath);
+        return false;
+    }
+
+    if (hadDestination)
+        (void)removeEntry(backupPath);
+    return true;
 }
 
 static void revealInFolder(const QString &filePath) {

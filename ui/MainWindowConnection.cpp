@@ -1370,44 +1370,39 @@ void MainWindow::launchSftpConnectWorker(
         bool connectionSucceeded = false;
         bool canceledByUser = false;
         std::string connectionError;
-        openscp::RemoteClient *connectedClient = nullptr;
-        openscp::RemoteClient *remoteControlClient = nullptr;
+        std::unique_ptr<openscp::RemoteClient> connectedOwner;
+        std::unique_ptr<openscp::RemoteClient> remoteControlOwner;
         try {
             if (cancelFlag && cancelFlag->load()) {
                 canceledByUser = true;
                 connectionError = "Connection canceled by user";
             } else {
-                auto connectedCandidate =
+                connectedOwner =
                     openscp::CreateConnectedClient(opt, connectionError);
-                connectionSucceeded = static_cast<bool>(connectedCandidate);
+                connectionSucceeded = static_cast<bool>(connectedOwner);
                 if (cancelFlag && cancelFlag->load()) {
                     canceledByUser = true;
                     if (connectionSucceeded)
-                        connectedCandidate->disconnect();
+                        connectedOwner->disconnect();
                     connectionSucceeded = false;
                     if (connectionError.empty())
                         connectionError = "Connection canceled by user";
                 }
                 if (connectionSucceeded) {
-                    connectedClient = connectedCandidate.release();
                     if (openscp::capabilitiesForProtocol(uiOpt.protocol)
                             .can_list) {
                         std::string controlError;
-                        auto controlCandidate = connectedClient->newConnectionLike(
+                        remoteControlOwner = connectedOwner->newConnectionLike(
                             opt, controlError);
-                        if (controlCandidate) {
-                            remoteControlClient =
-                                controlCandidate.release();
-                        } else {
+                        if (!remoteControlOwner) {
                             connectionSucceeded = false;
                             connectionError =
                                 controlError.empty()
                                     ? "Could not create the remote control "
                                       "connection"
                                     : controlError;
-                            connectedClient->disconnect();
-                            delete connectedClient;
-                            connectedClient = nullptr;
+                            connectedOwner->disconnect();
+                            connectedOwner.reset();
                         }
                     }
                 }
@@ -1420,8 +1415,18 @@ void MainWindow::launchSftpConnectWorker(
             connectionSucceeded = false;
         }
 
+        if (!connectionSucceeded) {
+            if (remoteControlOwner)
+                remoteControlOwner->disconnect();
+            remoteControlOwner.reset();
+            if (connectedOwner)
+                connectedOwner->disconnect();
+            connectedOwner.reset();
+        }
         const QString connectionErrorText =
             QString::fromStdString(connectionError);
+        openscp::RemoteClient *connectedClient = connectedOwner.get();
+        openscp::RemoteClient *remoteControlClient = remoteControlOwner.get();
         const bool queued = QMetaObject::invokeMethod(
             qApp,
             [self, connectionSucceeded, connectionErrorText, connectedClient,
@@ -1443,15 +1448,9 @@ void MainWindow::launchSftpConnectWorker(
                                           uiOpt, saveRequest, canceledByUser);
             },
             Qt::QueuedConnection);
-        if (!queued) {
-            if (connectedClient) {
-                connectedClient->disconnect();
-                delete connectedClient;
-            }
-            if (remoteControlClient) {
-                remoteControlClient->disconnect();
-                delete remoteControlClient;
-            }
+        if (queued) {
+            (void)connectedOwner.release();
+            (void)remoteControlOwner.release();
         }
         });
 }

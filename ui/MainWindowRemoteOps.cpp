@@ -111,55 +111,18 @@ static bool buildOpenSshProxyCommand(const openscp::SessionOptions &opt,
         return false;
     }
 
-    const QString proxyUser = trimOptionalString(opt.proxy_username);
-    const QString proxyPass = trimOptionalString(opt.proxy_password);
-    const bool wantsProxyAuth = !proxyUser.isEmpty() || !proxyPass.isEmpty();
-    if (wantsProxyAuth && proxyUser.isEmpty()) {
+    const bool wantsProxyAuth =
+        (opt.proxy_username && !opt.proxy_username->empty()) ||
+        (opt.proxy_password && !opt.proxy_password->empty());
+    if (wantsProxyAuth) {
         if (errorOut) {
             *errorOut = QCoreApplication::translate(
-                "MainWindow", "Proxy authentication requires a username.");
+                "MainWindow",
+                "Open in terminal is unavailable for authenticated proxies "
+                "because terminal command arguments could expose the proxy "
+                "password.");
         }
         return false;
-    }
-
-    auto ncatTypeForProxy = [&]() -> QString {
-        if (opt.proxy_type == openscp::ProxyType::Socks5)
-            return QStringLiteral("socks5");
-        if (opt.proxy_type == openscp::ProxyType::HttpConnect)
-            return QStringLiteral("http");
-        return {};
-    };
-
-    if (wantsProxyAuth) {
-        const QString ncatExe =
-            QStandardPaths::findExecutable(QStringLiteral("ncat"));
-        if (ncatExe.isEmpty()) {
-            if (errorOut) {
-                *errorOut = QCoreApplication::translate(
-                    "MainWindow",
-                    "Proxy authentication in terminal mode requires 'ncat' "
-                    "(with --proxy-auth support).");
-            }
-            return false;
-        }
-        const QString ncatProxyType = ncatTypeForProxy();
-        if (ncatProxyType.isEmpty()) {
-            if (errorOut) {
-                *errorOut = QCoreApplication::translate(
-                    "MainWindow",
-                    "Unsupported proxy type for terminal command.");
-            }
-            return false;
-        }
-        QStringList ncatArgs;
-        ncatArgs << ncatExe << QStringLiteral("--proxy")
-                 << QStringLiteral("%1:%2").arg(proxyHost).arg(proxyPort)
-                 << QStringLiteral("--proxy-type") << ncatProxyType
-                 << QStringLiteral("--proxy-auth")
-                 << QStringLiteral("%1:%2").arg(proxyUser, proxyPass)
-                 << QStringLiteral("%h") << QStringLiteral("%p");
-        *proxyCommandOut = shellJoinQuoted(ncatArgs);
-        return true;
     }
 
     const QString ncExe = QStandardPaths::findExecutable(QStringLiteral("nc"));
@@ -186,7 +149,11 @@ static bool buildOpenSshProxyCommand(const openscp::SessionOptions &opt,
 
     const QString ncatExe = QStandardPaths::findExecutable(QStringLiteral("ncat"));
     if (!ncatExe.isEmpty()) {
-        const QString ncatProxyType = ncatTypeForProxy();
+        QString ncatProxyType;
+        if (opt.proxy_type == openscp::ProxyType::Socks5)
+            ncatProxyType = QStringLiteral("socks5");
+        else if (opt.proxy_type == openscp::ProxyType::HttpConnect)
+            ncatProxyType = QStringLiteral("http");
         if (ncatProxyType.isEmpty()) {
             if (errorOut) {
                 *errorOut = QCoreApplication::translate(

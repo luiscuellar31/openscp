@@ -10,6 +10,7 @@
 #include <QString>
 #include <QVariant>
 #include <cstdlib>
+#include <limits>
 
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
@@ -57,6 +58,7 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
                      reinterpret_cast<const UInt8 *>(dataBytes.constData()),
                      dataBytes.size());
     if (!account || !data) {
+        dataBytes.fill('\0');
         if (data)
             CFRelease(data);
         if (account)
@@ -78,6 +80,13 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
     CFMutableDictionaryRef query = CFDictionaryCreateMutable(
         kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
         &kCFTypeDictionaryValueCallBacks);
+    if (!query) {
+        dataBytes.fill('\0');
+        CFRelease(data);
+        CFRelease(account);
+        return {PersistStatus::BackendError,
+                QStringLiteral("Could not allocate Keychain query")};
+    }
     CFDictionarySetValue(query, kSecClass, kSecClassGenericPassword);
     CFDictionarySetValue(query, kSecAttrService, kServiceNameCF());
     CFDictionarySetValue(query, kSecAttrAccount, account);
@@ -86,6 +95,14 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
     CFMutableDictionaryRef attrs = CFDictionaryCreateMutable(
         kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
         &kCFTypeDictionaryValueCallBacks);
+    if (!attrs) {
+        dataBytes.fill('\0');
+        CFRelease(query);
+        CFRelease(data);
+        CFRelease(account);
+        return {PersistStatus::BackendError,
+                QStringLiteral("Could not allocate Keychain attributes")};
+    }
     CFDictionarySetValue(attrs, kSecValueData, data);
     CFDictionarySetValue(attrs, kSecAttrAccessible, chosenAttr);
     OSStatus st = SecItemUpdate(query, attrs);
@@ -107,15 +124,24 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
         CFRelease(data);
     if (account)
         CFRelease(account);
+    dataBytes.fill('\0');
 
     return mapApplePersistStatus(finalStatus);
 }
 
 std::optional<QString> SecretStore::getSecret(const QString &key) const {
+    if (key.isEmpty())
+        return std::nullopt;
     CFStringRef account = cfAccount(key);
+    if (!account)
+        return std::nullopt;
     CFMutableDictionaryRef query = CFDictionaryCreateMutable(
         kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
         &kCFTypeDictionaryValueCallBacks);
+    if (!query) {
+        CFRelease(account);
+        return std::nullopt;
+    }
     CFDictionarySetValue(query, kSecClass, kSecClassGenericPassword);
     CFDictionarySetValue(query, kSecAttrService, kServiceNameCF());
     CFDictionarySetValue(query, kSecAttrAccount, account);
@@ -136,18 +162,30 @@ std::optional<QString> SecretStore::getSecret(const QString &key) const {
     if (CFGetTypeID(data) == CFDataGetTypeID()) {
         const UInt8 *bytes = CFDataGetBytePtr(data);
         CFIndex len = CFDataGetLength(data);
-        out =
-            QString::fromUtf8(reinterpret_cast<const char *>(bytes), (int)len);
+        if (len >= 0 &&
+            len <= static_cast<CFIndex>(std::numeric_limits<int>::max()) &&
+            (len == 0 || bytes)) {
+            out = QString::fromUtf8(reinterpret_cast<const char *>(bytes),
+                                    static_cast<int>(len));
+        }
     }
     CFRelease(result);
     return out.isEmpty() ? std::nullopt : std::optional<QString>(out);
 }
 
 void SecretStore::removeSecret(const QString &key) {
+    if (key.isEmpty())
+        return;
     CFStringRef account = cfAccount(key);
+    if (!account)
+        return;
     CFMutableDictionaryRef query = CFDictionaryCreateMutable(
         kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
         &kCFTypeDictionaryValueCallBacks);
+    if (!query) {
+        CFRelease(account);
+        return;
+    }
     CFDictionarySetValue(query, kSecClass, kSecClassGenericPassword);
     CFDictionarySetValue(query, kSecAttrService, kServiceNameCF());
     CFDictionarySetValue(query, kSecAttrAccount, account);

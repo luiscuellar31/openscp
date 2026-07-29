@@ -1055,7 +1055,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
         auto *timer = new QTimer(this);
         timer->setInterval(350);
         timer->setSingleShot(false);
-        auto *attempts = new int(0);
+        auto attempts = std::make_shared<int>(0);
         connect(timer, &QTimer::timeout, this, [this, timer, attempts, batchDir] {
             ++(*attempts);
             const bool giveUp = (*attempts >= 300); // ~105s max wait
@@ -1064,8 +1064,6 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
 
             timer->stop();
             timer->deleteLater();
-            delete attempts;
-
             QDir batch(batchDir);
             if (batch.exists())
                 (void)batch.removeRecursively();
