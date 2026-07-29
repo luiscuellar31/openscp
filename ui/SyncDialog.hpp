@@ -1,14 +1,12 @@
 // One-way directory comparison and synchronization preview.
 #pragma once
 
-#include <QByteArray>
-#include <QDialog>
-#include <QMetaType>
-#include <QString>
-#include <QStringList>
-#include <QVector>
+#include "SyncComparisonEngine.hpp"
+#include "SyncTypes.hpp"
 
-#include <optional>
+#include <QDialog>
+#include <QString>
+#include <QVector>
 
 class QCheckBox;
 class QComboBox;
@@ -21,117 +19,6 @@ class QSortFilterProxyModel;
 class QTableView;
 class QTimer;
 class SyncComparisonTableModel;
-
-enum class SyncDirection {
-    LocalToRemote = 0,
-    RemoteToLocal = 1,
-};
-
-enum class SyncEntryType {
-    File = 0,
-    Directory = 1,
-    SymbolicLink = 2,
-    Other = 3,
-};
-
-// A caller-provided, root-relative snapshot entry. modifiedMs is expressed in
-// milliseconds since the Unix epoch. File size and mtime may be absent when a
-// backend could not retrieve trustworthy metadata.
-struct SyncSnapshotEntry {
-    QString relativePath;
-    SyncEntryType type = SyncEntryType::File;
-    std::optional<quint64> size;
-    std::optional<qint64> modifiedMs;
-    bool metadataReliable = true;
-
-    // Optional, on-demand checksum metadata. It is only compared when both
-    // sides provide the same non-empty algorithm name.
-    QString checksumAlgorithm;
-    QByteArray checksum;
-};
-
-enum class SyncAction {
-    Keep = 0,
-    Copy = 1,
-    CreateDirectory = 2,
-    DeleteFile = 3,
-    DeleteDirectory = 4,
-    Conflict = 5,
-    Unknown = 6,
-};
-
-struct SyncComparisonOptions {
-    SyncDirection direction = SyncDirection::LocalToRemote;
-    QStringList includePatterns{QStringLiteral("**")};
-    QStringList excludePatterns;
-    bool includeHidden = false;
-    bool mirror = false;
-    qint64 modifiedToleranceMs = 2000;
-};
-
-struct SyncComparisonItem {
-    QString relativePath;
-    std::optional<SyncSnapshotEntry> source;
-    std::optional<SyncSnapshotEntry> destination;
-    SyncAction action = SyncAction::Keep;
-    QString reason;
-    bool selected = false;
-};
-
-struct SyncCopyOperation {
-    QString relativePath;
-    std::optional<quint64> size;
-    bool overwritesExisting = false;
-};
-
-struct SyncDeleteOperation {
-    QString relativePath;
-    SyncEntryType type = SyncEntryType::File;
-};
-
-// This plan deliberately contains root-relative operations only. The caller
-// resolves them against the roots tied to the current session, then enqueues
-// them as one persistent transfer batch.
-struct SyncExecutionPlan {
-    SyncDirection direction = SyncDirection::LocalToRemote;
-    bool mirror = false;
-    // Execute in field order. Folder creation is shallow-first and deletions
-    // are already sorted in postorder (children before parent directories).
-    QVector<QString> directoriesToCreate;
-    QVector<SyncCopyOperation> copies;
-    QVector<SyncDeleteOperation> deletes;
-    quint64 knownCopyBytes = 0;
-    qsizetype unknownSizeCopies = 0;
-    bool requiresMirrorConfirmation = false;
-    QStringList warnings;
-
-    [[nodiscard]] bool empty() const {
-        return directoriesToCreate.isEmpty() && copies.isEmpty() &&
-               deletes.isEmpty();
-    }
-};
-
-Q_DECLARE_METATYPE(SyncExecutionPlan)
-
-// UI-independent comparison helpers. Keeping this logic separate lets tests
-// cover filtering and planning without creating a QApplication.
-class SyncComparisonEngine {
-    public:
-    [[nodiscard]] static QVector<SyncComparisonItem>
-    compare(const QVector<SyncSnapshotEntry> &localSnapshot,
-            const QVector<SyncSnapshotEntry> &remoteSnapshot,
-            const SyncComparisonOptions &options = {});
-
-    [[nodiscard]] static SyncExecutionPlan
-    makeExecutionPlan(const QVector<SyncComparisonItem> &items,
-                      const SyncComparisonOptions &options);
-
-    [[nodiscard]] static QString
-    normalizeRelativePath(const QString &relativePath);
-    [[nodiscard]] static QStringList parsePatterns(const QString &text);
-    [[nodiscard]] static bool globMatches(const QString &relativePath,
-                                          const QString &pattern);
-};
 
 class SyncDialog final : public QDialog {
     Q_OBJECT

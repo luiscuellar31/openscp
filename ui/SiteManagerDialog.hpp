@@ -1,6 +1,6 @@
 // Site manager: list, add/edit/remove, and select to connect.
 #pragma once
-#include "openscp/SftpTypes.hpp"
+#include "SiteEntry.hpp"
 #include <QDialog>
 #include <QString>
 #include <QVector>
@@ -10,17 +10,6 @@ class QPushButton;
 class QSortFilterProxyModel;
 class QTableView;
 class SiteListModel;
-
-struct SiteEntry {
-    QString siteId;
-    QString name;
-    openscp::SessionOptions opt;
-    // An empty local path means the platform home/current directory.
-    QString initialLocalPath;
-    // The remote namespace is always rooted; legacy entries migrate to "/".
-    QString initialRemotePath = QStringLiteral("/");
-    bool rememberLastPaths = false;
-};
 
 class SiteManagerDialog : public QDialog {
     Q_OBJECT

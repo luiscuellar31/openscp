@@ -118,37 +118,6 @@ QString shortRemoteError(const std::string &raw, const QString &fallback) {
     return shortRemoteError(QString::fromStdString(raw), fallback);
 }
 
-QString joinRemotePath(const QString &base, const QString &name) {
-    if (base == QStringLiteral("/"))
-        return QStringLiteral("/") + name;
-    return base.endsWith(QLatin1Char('/')) ? base + name
-                                           : base + QLatin1Char('/') + name;
-}
-
-QString normalizeRemotePath(const QString &rawPath) {
-    const QString trimmed = rawPath.trimmed();
-    const QStringList rawSegments =
-        trimmed.split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    QStringList segments;
-    segments.reserve(rawSegments.size());
-    for (const QString &segment : rawSegments) {
-        if (segment == QStringLiteral("."))
-            continue;
-        if (segment == QStringLiteral("..")) {
-            // Remote navigation is confined to its logical root. Attempts to
-            // walk above it are clamped instead of preserving unsafe dot
-            // segments for a backend to interpret differently.
-            if (!segments.isEmpty())
-                segments.removeLast();
-            continue;
-        }
-        segments.push_back(segment);
-    }
-    return segments.isEmpty()
-               ? QStringLiteral("/")
-               : QStringLiteral("/") + segments.join(QLatin1Char('/'));
-}
-
 QVector<QPair<QString, QString>> buildLocalDestinationPairsWithOverwritePrompt(
     QWidget *parent, const QVector<QFileInfo> &sources,
     const QDir &destinationDir, int *skippedCount) {

@@ -1,6 +1,7 @@
 // MainWindow local-side filesystem operations and local navigation.
 #include "MainWindow.hpp"
 #include "MainWindowSharedUtils.hpp"
+#include "SessionController.hpp"
 #include "RemoteModel.hpp"
 #include "RemoteOperationController.hpp"
 #include "TransferManager.hpp"
@@ -383,7 +384,7 @@ void MainWindow::copyLeftToRight() {
     if (rightIsRemote_) {
         // ---- REMOTE branch: upload files (PUT) to the current remote
         // directory ----
-        if (!sftp_) {
+        if (!sessionController_->client()) {
             UiAlerts::warning(this, tr("Remote"),
                                  tr("No active remote session."));
             return;
@@ -484,7 +485,7 @@ void MainWindow::copyLeftToRight() {
 
 void MainWindow::moveLeftToRight() {
     if (rightIsRemote_) {
-        if (!rightRemoteModel_ || !transferMgr_ || !sftp_) {
+        if (!rightRemoteModel_ || !transferMgr_ || !sessionController_->client()) {
             UiAlerts::warning(this, tr("Remote"),
                               tr("No active remote session."));
             return;

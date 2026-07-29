@@ -1,5 +1,6 @@
 // Table with per-task state and actions (pause/resume/retry/clear).
 #include "TransferQueueDialog.hpp"
+#include "UiFormatters.hpp"
 #include <QAbstractItemView>
 #include <QAbstractTableModel>
 #include <QApplication>
@@ -77,25 +78,6 @@ static QString displayNameForTask(const TransferTask &task) {
     if (!trimmed.isEmpty())
         return trimmed;
     return TransferQueueDialog::tr("(unnamed)");
-}
-
-static QString formatBytes(quint64 bytes) {
-    static const char *units[] = {"B", "KB", "MB", "GB", "TB"};
-    double value = static_cast<double>(bytes);
-    int unit = 0;
-    while (value >= 1024.0 && unit < 4) {
-        value /= 1024.0;
-        ++unit;
-    }
-    const int precision = (value < 10.0 && unit > 0) ? 1 : 0;
-    return QString::number(value, 'f', precision) + " " + units[unit];
-}
-
-static QString formatSpeed(double kbps) {
-    if (kbps <= 0.0)
-        return QString::fromUtf8("—");
-    const double bps = kbps * 1024.0;
-    return formatBytes(static_cast<quint64>(bps)) + "/s";
 }
 
 static QString formatEta(int sec) {
@@ -345,11 +327,11 @@ class TransferTaskTableModel final : public QAbstractTableModel {
             return QString::number(task.progress) + "%";
         case ColTransferred:
             if (task.bytesTotal > 0)
-                return QString("%1 / %2").arg(formatBytes(task.bytesDone),
-                                              formatBytes(task.bytesTotal));
-            return formatBytes(task.bytesDone);
+                return QString("%1 / %2").arg(formatByteSize(task.bytesDone),
+                                              formatByteSize(task.bytesTotal));
+            return formatByteSize(task.bytesDone);
         case ColSpeed:
-            return formatSpeed(task.currentSpeedKBps);
+            return formatTransferRate(task.currentSpeedKBps);
         case ColEta:
             return formatEta(task.etaSeconds);
         case ColType:

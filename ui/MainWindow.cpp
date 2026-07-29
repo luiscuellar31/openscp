@@ -6,10 +6,13 @@
 #include "DragAwareTreeView.hpp"
 #include "MainWindowSharedUtils.hpp"
 #include "NavigationScope.hpp"
+#include "PaneController.hpp"
 #include "PermissionsDialog.hpp"
+#include "RemoteActionController.hpp"
 #include "RemoteModel.hpp"
 #include "RemoteOperationController.hpp"
 #include "SecretStore.hpp"
+#include "SessionController.hpp"
 #include "SettingsDialog.hpp"
 #include "SiteManagerDialog.hpp"
 #include "TransferManager.hpp"
@@ -35,7 +38,6 @@
 #include <QFileInfo>
 #include <QFrame>
 #include <QGuiApplication>
-#include <QHash>
 #include <QHeaderView>
 #include <QIcon>
 #include <QItemSelectionModel>
@@ -73,7 +75,6 @@
 #include <QToolBar>
 #include <QToolButton>
 #include <QUrl>
-#include <QUrlQuery>
 #include <QUuid>
 #include <QVBoxLayout>
 #include <algorithm>
@@ -131,40 +132,6 @@ static QListWidget *createHistoryTabList(QTabWidget *tabs,
     return list;
 }
 
-static int selectRowsMatchingPattern(
-    QTreeView *view, QAbstractItemModel *model, const QModelIndex &root,
-    const QRegularExpression &regex,
-    const std::function<QString(const QModelIndex &)> &nameForIndex) {
-    if (!view || !model || !view->selectionModel())
-        return 0;
-
-    QItemSelectionModel *selection = view->selectionModel();
-    selection->clearSelection();
-    QModelIndex firstMatch;
-    int matches = 0;
-
-    const int rows = model->rowCount(root);
-    for (int row = 0; row < rows; ++row) {
-        const QModelIndex idx = model->index(row, NAME_COL, root);
-        const QString itemName = nameForIndex ? nameForIndex(idx) : QString();
-        if (!regex.match(itemName).hasMatch())
-            continue;
-
-        selection->select(idx,
-                          QItemSelectionModel::Select |
-                              QItemSelectionModel::Rows);
-        if (!firstMatch.isValid())
-            firstMatch = idx;
-        ++matches;
-    }
-
-    if (firstMatch.isValid()) {
-        selection->setCurrentIndex(firstMatch, QItemSelectionModel::NoUpdate);
-        view->scrollTo(firstMatch, QAbstractItemView::PositionAtCenter);
-    }
-    return matches;
-}
-
 static void configurePanelTreeView(QTreeView *view, QAbstractItemModel *model,
                                    const QModelIndex &rootIndex) {
     if (!view || !model)
@@ -208,15 +175,6 @@ static QToolBar *createBreadcrumbToolbar(const QString &title, QWidget *parent) 
     return bar;
 }
 
-static bool remotePathIsInsideRoot(const QString &candidatePath,
-                                   const QString &rootPath) {
-    const QString candidate = normalizeRemotePathForMatch(candidatePath);
-    const QString root = normalizeRemotePathForMatch(rootPath);
-    if (root == QStringLiteral("/"))
-        return candidate.startsWith('/');
-    return candidate == root || candidate.startsWith(root + QStringLiteral("/"));
-}
-
 static bool focusWithinWidget(QWidget *focus, QWidget *root) {
     if (!focus || !root)
         return false;
@@ -239,11 +197,6 @@ static QString formatConnectionElapsed(qint64 totalSeconds) {
         .arg(seconds, 2, 10, QLatin1Char('0'));
 }
 
-constexpr int kRecentHistoryMaxEntries = 20;
-constexpr const char *kRecentLocalPathsKey = "History/recentLocalPaths";
-constexpr const char *kRecentRemotePathsKey = "History/recentRemotePaths";
-constexpr const char *kRecentServersKey = "History/recentServers";
-constexpr const char *kLocalFavoritesKey = "Favorites/localPaths";
 constexpr const char *kShortcutTransfersKey = "Shortcuts/openTransfers";
 constexpr const char *kShortcutHistoryKey = "Shortcuts/openHistory";
 
@@ -256,331 +209,11 @@ static QString trimHistoryLabel(const QString &raw, int maxLen = 96) {
     return out.left(maxLen - 3) + QStringLiteral("...");
 }
 
-static void prependRecentValue(QStringList *list, const QString &value,
-                               int maxEntries = kRecentHistoryMaxEntries) {
-    if (!list)
-        return;
-    const QString trimmed = value.trimmed();
-    if (trimmed.isEmpty())
-        return;
-    list->removeAll(trimmed);
-    list->prepend(trimmed);
-    while (list->size() > maxEntries)
-        list->removeLast();
-}
-
-static QString normalizedLocalHistoryPath(const QString &raw) {
-    QString normalized = QDir::fromNativeSeparators(raw.trimmed());
-    if (normalized.isEmpty())
-        return {};
-    normalized = QDir::cleanPath(normalized);
-    if (!QFileInfo(normalized).isAbsolute())
-        normalized = QDir::current().absoluteFilePath(normalized);
-    return QDir(normalized).absolutePath();
-}
-
-static QString encodeRecentServerEntry(const openscp::SessionOptions &opt) {
-    QUrlQuery query;
-    query.addQueryItem(
-        QStringLiteral("protocol"),
-        QString::fromLatin1(openscp::protocolStorageName(opt.protocol)));
-    query.addQueryItem(QStringLiteral("host"),
-                       QString::fromStdString(opt.host).trimmed().toLower());
-    query.addQueryItem(QStringLiteral("port"), QString::number(opt.port));
-    query.addQueryItem(QStringLiteral("user"),
-                       QString::fromStdString(opt.username).trimmed());
-    if (opt.protocol == openscp::Protocol::Ftps) {
-        query.addQueryItem(
-            QStringLiteral("ftpsMode"),
-            QString::fromLatin1(openscp::ftpsModeStorageName(
-                openscp::normalizeFtpsMode(opt.ftps_mode))));
-    }
-    if (opt.protocol == openscp::Protocol::WebDav) {
-        query.addQueryItem(
-            QStringLiteral("webdavScheme"),
-            QString::fromLatin1(openscp::webDavSchemeStorageName(
-                openscp::normalizeWebDavScheme(opt.webdav_scheme))));
-        query.addQueryItem(
-            QStringLiteral("webdavBasePath"),
-            QString::fromStdString(openscp::normalizeWebDavBasePath(
-                opt.webdav_base_path)));
-    }
-    return query.toString(QUrl::FullyEncoded);
-}
-
-static bool decodeRecentServerEntry(const QString &encoded,
-                                    openscp::SessionOptions *optOut,
-                                    QString *labelOut) {
-    const QUrlQuery query(encoded);
-    const QString host = query.queryItemValue(QStringLiteral("host"))
-                             .trimmed()
-                             .toLower();
-    if (host.isEmpty())
-        return false;
-    const QString protocolStorage =
-        query.queryItemValue(QStringLiteral("protocol"))
-            .trimmed()
-            .toLower();
-    const openscp::Protocol protocol = openscp::protocolFromStorageName(
-        protocolStorage.toStdString());
-    bool portOk = false;
-    int portRaw =
-        query.queryItemValue(QStringLiteral("port")).trimmed().toInt(&portOk);
-    if (!portOk || portRaw <= 0 || portRaw > 65535) {
-        portRaw = static_cast<int>(openscp::defaultPortForProtocol(protocol));
-    }
-    const QString user =
-        query.queryItemValue(QStringLiteral("user")).trimmed();
-
-    if (optOut) {
-        openscp::SessionOptions opt{};
-        opt.protocol = protocol;
-        opt.host = host.toStdString();
-        opt.port = static_cast<std::uint16_t>(portRaw);
-        opt.username = user.toStdString();
-        if (protocol == openscp::Protocol::Ftps) {
-            opt.ftps_mode = openscp::ftpsModeFromStorageName(
-                query.queryItemValue(QStringLiteral("ftpsMode"))
-                    .trimmed()
-                    .toLower()
-                    .toStdString());
-        }
-        if (protocol == openscp::Protocol::WebDav) {
-            const QString rawScheme =
-                query.queryItemValue(QStringLiteral("webdavScheme"))
-                    .trimmed()
-                    .toLower();
-            if (!rawScheme.isEmpty()) {
-                opt.webdav_scheme = openscp::webDavSchemeFromStorageName(
-                    rawScheme.toStdString());
-            } else if (opt.port ==
-                       openscp::defaultPortForWebDavScheme(
-                           openscp::WebDavScheme::Http)) {
-                opt.webdav_scheme = openscp::WebDavScheme::Http;
-            }
-            if (opt.webdav_scheme == openscp::WebDavScheme::Http) {
-                opt.webdav_verify_peer = false;
-                opt.webdav_ca_cert_path.reset();
-            }
-            opt.webdav_base_path = openscp::normalizeWebDavBasePath(
-                query.queryItemValue(QStringLiteral("webdavBasePath"))
-                    .trimmed()
-                    .toStdString());
-        }
-        *optOut = opt;
-    }
-    if (labelOut) {
-        QString endpoint = host;
-        if (static_cast<std::uint16_t>(portRaw) !=
-            openscp::defaultPortForProtocol(protocol)) {
-            endpoint += QStringLiteral(":%1").arg(portRaw);
-        }
-        if (!user.isEmpty())
-            endpoint = QStringLiteral("%1@%2").arg(user, endpoint);
-        *labelOut = QStringLiteral("%1  %2")
-                        .arg(
-                            QString::fromLatin1(
-                                openscp::protocolDisplayName(protocol))
-                                .toUpper(),
-                            endpoint);
-    }
-    return true;
-}
-
-static bool hasRegexMetaBeyondWildcards(const QString &pattern) {
-    static const QString kRegexMeta = QStringLiteral("\\.^$+()[]{}|");
-    for (const QChar ch : pattern) {
-        if (kRegexMeta.contains(ch))
-            return true;
-    }
-    return false;
-}
-
-static QString wildcardPatternToRegex(const QString &wildcard) {
-    QString regex;
-    regex.reserve((wildcard.size() * 2) + 4);
-    regex += QLatin1Char('^');
-    for (const QChar ch : wildcard) {
-        if (ch == QLatin1Char('*')) {
-            regex += QStringLiteral(".*");
-        } else if (ch == QLatin1Char('?')) {
-            regex += QLatin1Char('.');
-        } else {
-            regex += QRegularExpression::escape(QString(ch));
-        }
-    }
-    regex += QLatin1Char('$');
-    return regex;
-}
-
-static QRegularExpression compilePanelSearchRegex(const QString &rawPattern,
-                                                  QString *errorOut) {
-    if (errorOut)
-        errorOut->clear();
-    const QString pattern = rawPattern.trimmed();
-    if (pattern.isEmpty())
-        return QRegularExpression();
-
-    QString regexPattern;
-    if (hasRegexMetaBeyondWildcards(pattern)) {
-        regexPattern = pattern;
-    } else if (pattern.contains(QLatin1Char('*')) ||
-               pattern.contains(QLatin1Char('?'))) {
-        regexPattern = wildcardPatternToRegex(pattern);
-    } else {
-        regexPattern = QStringLiteral(".*%1.*")
-                           .arg(QRegularExpression::escape(pattern));
-    }
-
-    QRegularExpression regex(regexPattern,
-                             QRegularExpression::CaseInsensitiveOption);
-    if (!regex.isValid() && errorOut)
-        *errorOut = regex.errorString();
-    return regex;
-}
-
-struct PanelSearchPromptResult {
-    QString pattern;
-    bool recursive = false;
-};
-
-static bool promptPanelSearch(QWidget *parent, const QString &panelLabel,
-                              PanelSearchPromptResult *out) {
-    if (!out)
-        return false;
-
-    QDialog dlg(parent);
-    dlg.setWindowTitle(
-        QCoreApplication::translate("MainWindow", "Search items (%1)")
-            .arg(panelLabel));
-    auto *layout = new QVBoxLayout(&dlg);
-    layout->setContentsMargins(12, 12, 12, 12);
-    layout->setSpacing(8);
-
-    auto *help = new QLabel(
-        QCoreApplication::translate(
-            "MainWindow",
-            "Pattern accepts wildcard (*, ?) or regex.\nExamples: *report*, "
-            "report, ^report_.*\\.pdf$"),
-        &dlg);
-    help->setWordWrap(true);
-    layout->addWidget(help);
-
-    auto *patternEdit = new QLineEdit(&dlg);
-    patternEdit->setPlaceholderText(
-        QCoreApplication::translate("MainWindow", "e.g. *report*"));
-    patternEdit->setClearButtonEnabled(true);
-    layout->addWidget(patternEdit);
-
-    auto *recursiveCheck = new QCheckBox(
-        QCoreApplication::translate(
-            "MainWindow", "Search recursively in subfolders"),
-        &dlg);
-    recursiveCheck->setChecked(false);
-    layout->addWidget(recursiveCheck);
-
-    auto *box = new QDialogButtonBox(QDialogButtonBox::Ok |
-                                         QDialogButtonBox::Cancel,
-                                     &dlg);
-    QObject::connect(box, &QDialogButtonBox::accepted, &dlg,
-                     &QDialog::accept);
-    QObject::connect(box, &QDialogButtonBox::rejected, &dlg,
-                     &QDialog::reject);
-    layout->addWidget(box);
-
-    if (QAbstractButton *okBtn = box->button(QDialogButtonBox::Ok))
-        okBtn->setEnabled(false);
-    QObject::connect(patternEdit, &QLineEdit::textChanged, &dlg,
-                     [box](const QString &text) {
-                         if (QAbstractButton *okBtn =
-                                 box->button(QDialogButtonBox::Ok)) {
-                             okBtn->setEnabled(!text.trimmed().isEmpty());
-                         }
-                     });
-
-    patternEdit->setFocus();
-    dlg.adjustSize();
-    const QSize minSearchSize = dlg.sizeHint();
-    dlg.setMinimumSize(minSearchSize);
-    dlg.resize(minSearchSize);
-    if (dlg.exec() != QDialog::Accepted)
-        return false;
-
-    out->pattern = patternEdit->text().trimmed();
-    out->recursive = recursiveCheck->isChecked();
-    return !out->pattern.isEmpty();
-}
-
-static void showRecursiveSearchResultsDialog(
-    QWidget *parent, const QString &panelLabel, const QString &basePath,
-    const QVector<QPair<QString, bool>> &rows, int scanErrors, bool canceled,
-    bool truncated) {
-    QDialog dlg(parent);
-    dlg.setWindowTitle(
-        QCoreApplication::translate("MainWindow", "Search results (%1)")
-            .arg(panelLabel));
-
-    auto *layout = new QVBoxLayout(&dlg);
-    layout->setContentsMargins(12, 12, 12, 12);
-    layout->setSpacing(8);
-
-    QString summary =
-        QCoreApplication::translate("MainWindow",
-                                    "Base: %1\nMatches: %2")
-            .arg(basePath, QString::number(rows.size()));
-    if (scanErrors > 0) {
-        summary += QStringLiteral("\n") +
-                   QCoreApplication::translate("MainWindow",
-                                               "Scan errors: %1")
-                       .arg(QString::number(scanErrors));
-    }
-    if (canceled) {
-        summary += QStringLiteral("\n") +
-                   QCoreApplication::translate("MainWindow",
-                                               "Search canceled by user.");
-    }
-    if (truncated) {
-        summary += QStringLiteral("\n") +
-                   QCoreApplication::translate(
-                       "MainWindow", "Results truncated to safety limit.");
-    }
-    auto *summaryLabel = new QLabel(summary, &dlg);
-    summaryLabel->setWordWrap(true);
-    summaryLabel->setFrameStyle(QFrame::StyledPanel | QFrame::Plain);
-    summaryLabel->setMargin(8);
-    layout->addWidget(summaryLabel);
-
-    auto *list = new QListWidget(&dlg);
-    list->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    list->setSelectionBehavior(QAbstractItemView::SelectRows);
-    list->setAlternatingRowColors(true);
-    list->setUniformItemSizes(true);
-    list->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
-    for (const auto &row : rows) {
-        QString label = row.first;
-        if (row.second && !label.endsWith('/'))
-            label += QLatin1Char('/');
-        list->addItem(label);
-    }
-    layout->addWidget(list, 1);
-
-    auto *box = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
-    QObject::connect(box, &QDialogButtonBox::rejected, &dlg,
-                     &QDialog::reject);
-    QObject::connect(box, &QDialogButtonBox::accepted, &dlg,
-                     &QDialog::accept);
-    layout->addWidget(box);
-
-    dlg.adjustSize();
-    const QSize minResultsSize = dlg.sizeHint();
-    dlg.setMinimumSize(minResultsSize);
-    dlg.resize(minResultsSize);
-    dlg.exec();
-}
-
 MainWindow::~MainWindow() = default; // define the destructor here
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
+    sessionController_ = new openscpui::SessionController(this);
+    paneController_ = new openscpui::PaneController(this);
     const QString home = preferredLocalHomePath();
     initializePanels(home);
     initializeMainToolbar();
@@ -1191,6 +824,38 @@ void MainWindow::initializeRuntimeState() {
     restoreMainWindowUiState();
 
     remoteOps_ = new RemoteOperationController(this);
+    remoteActionController_ =
+        new openscpui::RemoteActionController(this);
+    openscpui::RemoteActionController::Context remoteActionContext;
+    remoteActionContext.dialogParent = this;
+    remoteActionContext.statusBar = statusBar();
+    remoteActionContext.operations = remoteOps_;
+    remoteActionContext.isSessionActive = [this] {
+        return rightIsRemote_;
+    };
+    remoteActionContext.refreshPath = [this](const QString &path) {
+        requestRemoteListing(path, true);
+    };
+    remoteActionContext.remoteActivitySucceeded = [this] {
+        lastSuccessfulRemoteActivityAtMs_ =
+            QDateTime::currentMSecsSinceEpoch();
+    };
+    remoteActionContext.requestPermissions =
+        [this](std::uint32_t currentMode, bool isDirectory)
+        -> std::optional<
+            openscpui::RemoteActionController::PermissionSelection> {
+        PermissionsDialog dialog(this);
+        dialog.setMode(currentMode);
+        if (dialog.exec() != QDialog::Accepted)
+            return std::nullopt;
+        openscpui::RemoteActionController::PermissionSelection
+            selection;
+        selection.mode = dialog.mode();
+        selection.recursive = dialog.recursive() && isDirectory;
+        return selection;
+    };
+    remoteActionController_->setContext(
+        std::move(remoteActionContext));
     connect(remoteOps_, &RemoteOperationController::listCompleted, this,
             [this](const RemoteOperationController::ListResult &result) {
                 if (result.result.job.id != activeRemoteListJob_ ||
@@ -1288,7 +953,8 @@ void MainWindow::initializeRuntimeState() {
                     }
                     return;
                 }
-                if (!rightIsRemote_ || !sftp_ || isDisconnecting_ ||
+                if (!rightIsRemote_ || !sessionController_->client() ||
+                    sessionController_->isDisconnecting() ||
                     result.result.outcome ==
                         RemoteOperationController::Outcome::Canceled ||
                     result.result.outcome ==
@@ -1312,8 +978,7 @@ void MainWindow::initializeRuntimeState() {
     transferMgr_ = new TransferManager(this);
     connect(transferMgr_, &TransferManager::tasksUpdated, this,
             [this](const QVector<quint64> &) {
-                maybeRefreshRemoteAfterCompletedUploads();
-                maybeNotifyCompletedTransfers();
+                handleTransferUiUpdate();
             });
     connect(transferMgr_, &TransferManager::persistenceWarning, this,
             [this](const QString &warning) {
@@ -1405,7 +1070,7 @@ void MainWindow::initializeRuntimeState() {
         openSiteManagerOnDisconnect_ =
             settings.value("UI/openSiteManagerOnDisconnect", true).toBool();
         if (openSiteManagerOnStartup_ && !QCoreApplication::closingDown() &&
-            !sftp_) {
+            !sessionController_->client()) {
             QTimer::singleShot(0, this, [this] { showSiteManagerNonModal(); });
         }
     }
@@ -1576,7 +1241,7 @@ void MainWindow::closeEvent(QCloseEvent *e) {
         e->ignore();
         return;
     }
-    if (isDisconnecting_) {
+    if (sessionController_->isDisconnecting()) {
         pendingCloseAfterDisconnect_ = true;
         e->ignore();
         return;
@@ -1800,433 +1465,55 @@ void MainWindow::refreshRightBreadcrumbs() {
 
 void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
                                             const QString &panelLabel) {
-    if (!view || !view->model() || !view->selectionModel())
+    if (!paneController_)
         return;
-
-    PanelSearchPromptResult req;
-    if (!promptPanelSearch(this, panelLabel, &req))
-        return;
-
-    QString regexError;
-    const QRegularExpression regex = compilePanelSearchRegex(req.pattern, &regexError);
-    if (!regex.isValid()) {
-        QMessageBox::warning(
-            this, tr("Invalid pattern"),
-            tr("The pattern is not valid.\n%1")
-                .arg(regexError.isEmpty() ? tr("Unknown regex error.")
-                                          : regexError));
-        return;
-    }
-
-    QAbstractItemModel *model = view->model();
-
-    if (!req.recursive) {
-        const QModelIndex root = view->rootIndex();
-        const int matches = selectRowsMatchingPattern(
-            view, model, root, regex, [&](const QModelIndex &idx) {
-                QString itemName = model->data(idx, Qt::DisplayRole).toString();
-                if (view == rightView_ && rightIsRemote_ && rightRemoteModel_) {
-                    itemName = rightRemoteModel_->nameAt(idx);
-                } else if (itemName.endsWith('/')) {
-                    itemName.chop(1);
-                }
-                return itemName;
-            });
-
-        if (matches > 0) {
-            statusBar()->showMessage(
-                tr("Found %1 match(es) in %2.")
-                    .arg(QString::number(matches), panelLabel),
-                4000);
-        } else {
-            statusBar()->showMessage(
-                tr("No matches found in %1.").arg(panelLabel), 4000);
-        }
-        return;
-    }
-
-    static constexpr int kRecursiveSearchMaxMatches = 5000;
-    static constexpr int kRecursiveSearchPumpEvery = 128;
-    QVector<QPair<QString, bool>> recursiveMatches; // path, isDir
-    int scanErrors = 0;
-    bool canceled = false;
-    bool truncated = false;
-
-    if (view == rightView_ && rightIsRemote_ &&
-        (!rightRemoteModel_ || !remoteOps_ ||
-         !remoteOps_->hasRequestedSession())) {
-        QMessageBox::warning(this, tr("Remote"),
-                             tr("No active remote session."));
-        return;
-    }
-
-    const bool isRemotePanelSearch =
-        (view == rightView_ && rightIsRemote_ && rightRemoteModel_ &&
-         remoteOps_ && remoteOps_->hasRequestedSession());
-    QString basePathForSummary;
-
-    if (isRemotePanelSearch) {
-        QString baseRemote = rightRemoteModel_->rootPath().trimmed();
-        if (baseRemote.isEmpty())
-            baseRemote = QStringLiteral("/");
-        baseRemote = normalizeRemotePathForMatch(baseRemote);
-        basePathForSummary = baseRemote;
-        struct RemoteSearchState {
-            RemoteOperationController::JobId jobId = 0;
-            QVector<QPair<QString, bool>> matches;
-            QRegularExpression regex;
-            QString panelLabel;
-            QString basePath;
-            bool canceledByUser = false;
-            bool truncated = false;
-            QPointer<QProgressDialog> progress;
-            QMetaObject::Connection batchConnection;
-            QMetaObject::Connection progressConnection;
-            QMetaObject::Connection completionConnection;
-        };
-        auto state = std::make_shared<RemoteSearchState>();
-        state->regex = regex;
-        state->panelLabel = panelLabel;
-        state->basePath = baseRemote;
-        state->matches.reserve(kRecursiveSearchMaxMatches);
-        state->progress = new QProgressDialog(
-            tr("Searching recursively in %1...").arg(panelLabel),
-            tr("Cancel"), 0, 0, this);
-        state->progress->setWindowModality(Qt::NonModal);
-        state->progress->setMinimumDuration(0);
-        state->progress->setAutoClose(false);
-        state->progress->show();
-
-        state->batchConnection = connect(
-            remoteOps_, &RemoteOperationController::entriesBatchReady, this,
-            [this, state](
-                const RemoteOperationController::EntryBatch &batch) {
-                if (batch.job.id != state->jobId || state->truncated)
-                    return;
-                for (const auto &entry : batch.entries) {
-                    const QString name =
-                        QString::fromStdString(entry.info.name);
-                    if (!state->regex.match(name).hasMatch())
-                        continue;
-                    state->matches.push_back(
-                        {entry.relativePath, entry.info.is_dir});
-                    if (state->matches.size() >=
-                        kRecursiveSearchMaxMatches) {
-                        state->truncated = true;
-                        if (remoteOps_)
-                            remoteOps_->cancel(state->jobId);
-                        break;
-                    }
-                }
-            });
-        state->progressConnection = connect(
-            remoteOps_, &RemoteOperationController::jobProgress, this,
-            [state](
-                const RemoteOperationController::Progress &update) {
-                if (update.job.id != state->jobId || !state->progress)
-                    return;
-                state->progress->setLabelText(
-                    QCoreApplication::translate(
-                        "MainWindow",
-                        "Scanning %1\nVisited: %2  |  Matches: %3")
-                        .arg(update.currentPath)
-                        .arg(update.visitedEntries)
-                        .arg(state->matches.size()));
-            });
-        state->completionConnection = connect(
-            remoteOps_, &RemoteOperationController::jobFinished, this,
-            [this, state](
-                const RemoteOperationController::Completion &completion) {
-                if (completion.result.job.id != state->jobId)
-                    return;
-                QObject::disconnect(state->batchConnection);
-                QObject::disconnect(state->progressConnection);
-                QObject::disconnect(state->completionConnection);
-                if (state->progress) {
-                    state->progress->hide();
-                    state->progress->deleteLater();
-                    state->progress.clear();
-                }
-                const bool canceled =
-                    state->canceledByUser ||
-                    (completion.result.outcome ==
-                         RemoteOperationController::Outcome::Canceled &&
-                     !state->truncated);
-                int scanErrors =
-                    static_cast<int>(completion.failedEntries);
-                if (completion.result.outcome ==
-                        RemoteOperationController::Outcome::Failed &&
-                    scanErrors == 0) {
-                    ++scanErrors;
-                }
-                if (completion.result.outcome ==
-                    RemoteOperationController::Outcome::Succeeded) {
-                    lastSuccessfulRemoteActivityAtMs_ =
-                        QDateTime::currentMSecsSinceEpoch();
-                }
-
-                if (state->matches.isEmpty()) {
-                    QString message =
-                        canceled
-                            ? tr("Search canceled in %1.")
-                                  .arg(state->panelLabel)
-                            : tr("No recursive matches found in %1.")
-                                  .arg(state->panelLabel);
-                    if (scanErrors > 0) {
-                        message +=
-                            QStringLiteral("  ") +
-                            tr("Folders with errors: %1").arg(scanErrors);
-                    }
-                    statusBar()->showMessage(message, 5000);
-                    return;
-                }
-
-                showRecursiveSearchResultsDialog(
-                    this, state->panelLabel, state->basePath,
-                    state->matches, scanErrors, canceled,
-                    state->truncated);
-                QString message =
-                    tr("Found %1 recursive match(es) in %2.")
-                        .arg(state->matches.size())
-                        .arg(state->panelLabel);
-                if (state->truncated) {
-                    message +=
-                        QStringLiteral("  ") +
-                        tr("Results limited to %1.")
-                            .arg(kRecursiveSearchMaxMatches);
-                }
-                if (scanErrors > 0) {
-                    message +=
-                        QStringLiteral("  ") +
-                        tr("Folders with errors: %1").arg(scanErrors);
-                }
-                if (canceled)
-                    message += QStringLiteral("  ") + tr("(Canceled)");
-                statusBar()->showMessage(message, 6000);
-            });
-        connect(state->progress, &QProgressDialog::canceled, this,
-                [this, state] {
-                    state->canceledByUser = true;
-                    if (remoteOps_ && state->jobId != 0)
-                        remoteOps_->cancel(state->jobId);
-                });
-
-        RemoteOperationController::TraverseRequest request;
-        request.rootPath = baseRemote;
-        request.includeDirectories = true;
-        request.traversal.includeHidden = prefShowHidden_;
-        request.traversal.skipSymlinks = true;
-        request.traversal.maxDepth = 32;
-        request.traversal.batchSize = 250;
-        state->jobId = remoteOps_->submit(request);
-        return;
-    } else {
-        QString baseLocal =
-            (view == leftView_) ? (leftPath_ ? leftPath_->text() : QString())
-                                : (rightPath_ ? rightPath_->text() : QString());
-        baseLocal = QDir::cleanPath(baseLocal.trimmed());
-        if (baseLocal.isEmpty() || !QDir(baseLocal).exists()) {
-            QMessageBox::warning(this, tr("Invalid folder"),
-                                 tr("The current folder does not exist."));
-            return;
-        }
-        basePathForSummary = baseLocal;
-        QDir baseDir(baseLocal);
-
-        QDir::Filters filters =
-            QDir::AllEntries | QDir::NoDotAndDotDot | QDir::System;
-        if (prefShowHidden_)
-            filters |= QDir::Hidden;
-
-        QProgressDialog progress(
-            tr("Searching recursively in %1...").arg(panelLabel), tr("Cancel"),
-            0, 0, this);
-        progress.setWindowModality(Qt::WindowModal);
-        progress.setMinimumDuration(0);
-
-        QDirIterator dirIterator(baseLocal, filters, QDirIterator::Subdirectories);
-        qint64 pumped = 0;
-        while (dirIterator.hasNext()) {
-            if (progress.wasCanceled()) {
-                canceled = true;
-                break;
-            }
-
-            const QString absPath = dirIterator.next();
-            const QFileInfo fileInfo = dirIterator.fileInfo();
-            const QString name = fileInfo.fileName();
-            if (name.isEmpty() || name == QStringLiteral(".") ||
-                name == QStringLiteral("..")) {
-                continue;
-            }
-
-            if (regex.match(name).hasMatch()) {
-                QString rel = QDir::fromNativeSeparators(
-                    baseDir.relativeFilePath(absPath));
-                if (rel.isEmpty())
-                    rel = name;
-                recursiveMatches.push_back({rel, fileInfo.isDir()});
-                if (recursiveMatches.size() >= kRecursiveSearchMaxMatches) {
-                    truncated = true;
-                    break;
-                }
-            }
-
-            ++pumped;
-            if ((pumped % kRecursiveSearchPumpEvery) == 0) {
-                    progress.setLabelText(tr("Scanning %1")
-                                          .arg(QDir::fromNativeSeparators(
-                                              baseDir.relativeFilePath(
-                                                  fileInfo.absoluteFilePath()))));
-                QCoreApplication::processEvents();
-                if (progress.wasCanceled()) {
-                    canceled = true;
-                    break;
-                }
-            }
-        }
-    }
-
-    if (recursiveMatches.isEmpty()) {
-        QString msg = canceled ? tr("Search canceled in %1.").arg(panelLabel)
-                               : tr("No recursive matches found in %1.")
-                                     .arg(panelLabel);
-        if (scanErrors > 0) {
-            msg += QStringLiteral("  ") +
-                   tr("Folders with errors: %1")
-                       .arg(QString::number(scanErrors));
-        }
-        statusBar()->showMessage(msg, 5000);
-        return;
-    }
-
-    showRecursiveSearchResultsDialog(this, panelLabel, basePathForSummary,
-                                     recursiveMatches, scanErrors, canceled,
-                                     truncated);
-
-    QString msg = tr("Found %1 recursive match(es) in %2.")
-                      .arg(QString::number(recursiveMatches.size()), panelLabel);
-    if (truncated) {
-        msg += QStringLiteral("  ") +
-               tr("Results limited to %1.")
-                   .arg(QString::number(kRecursiveSearchMaxMatches));
-    }
-    if (scanErrors > 0) {
-        msg += QStringLiteral("  ") +
-               tr("Folders with errors: %1").arg(QString::number(scanErrors));
-    }
-    if (canceled)
-        msg += QStringLiteral("  ") + tr("(Canceled)");
-    statusBar()->showMessage(msg, 6000);
+    openscpui::PaneController::SearchContext context;
+    context.dialogParent = this;
+    context.statusBar = statusBar();
+    context.view = view;
+    context.remoteModel = rightRemoteModel_;
+    context.remoteOperations = remoteOps_;
+    context.panelLabel = panelLabel;
+    context.localBasePath =
+        view == leftView_ ? (leftPath_ ? leftPath_->text() : QString())
+                          : (rightPath_ ? rightPath_->text() : QString());
+    context.isRemote = view == rightView_ && rightIsRemote_;
+    context.includeHidden = prefShowHidden_;
+    context.remoteActivitySucceeded = [this] {
+        lastSuccessfulRemoteActivityAtMs_ = QDateTime::currentMSecsSinceEpoch();
+    };
+    paneController_->search(context);
 }
 
-void MainWindow::maybeRefreshRemoteAfterCompletedUploads() {
+void MainWindow::handleTransferUiUpdate() {
     if (!transferMgr_) {
-        seenCompletedUploadTaskIds_.clear();
-        pendingRemoteRefreshFromUpload_ = false;
+        transferUiController_.reset();
         return;
     }
-
-    const auto tasks = transferMgr_->tasksSnapshot();
-    QSet<quint64> activeUploadIds;
-    activeUploadIds.reserve(tasks.size());
-
-    bool shouldRefresh = false;
-    const QString currentRoot =
+    const QString remoteRoot =
         rightRemoteModel_ ? rightRemoteModel_->rootPath() : QString();
-
-    for (const auto &task : tasks) {
-        if (task.type != TransferTask::Type::Upload)
-            continue;
-
-        activeUploadIds.insert(task.taskId);
-        if (task.status != TransferTask::Status::Done)
-            continue;
-        if (seenCompletedUploadTaskIds_.contains(task.taskId))
-            continue;
-
-        seenCompletedUploadTaskIds_.insert(task.taskId);
-        if (rightIsRemote_ && rightRemoteModel_ &&
-            remotePathIsInsideRoot(task.dst, currentRoot)) {
-            shouldRefresh = true;
-        }
-    }
-
-    for (auto completedIdIt = seenCompletedUploadTaskIds_.begin();
-         completedIdIt != seenCompletedUploadTaskIds_.end();) {
-        if (!activeUploadIds.contains(*completedIdIt))
-            completedIdIt = seenCompletedUploadTaskIds_.erase(completedIdIt);
-        else
-            ++completedIdIt;
-    }
-
-    if (!shouldRefresh || pendingRemoteRefreshFromUpload_ || !rightIsRemote_ ||
-        !rightRemoteModel_) {
+    const openscpui::TransferUiUpdate update =
+        transferUiController_.observe(transferMgr_->tasksSnapshot(),
+                                      rightIsRemote_ && rightRemoteModel_,
+                                      remoteRoot);
+    if (!update.completionMessage.isEmpty())
+        statusBar()->showMessage(update.completionMessage, 5000);
+    if (!update.scheduleRemoteRefresh)
         return;
-    }
 
-    pendingRemoteRefreshFromUpload_ = true;
     QTimer::singleShot(150, this, [this] {
-        pendingRemoteRefreshFromUpload_ = false;
+        transferUiController_.completeScheduledRefresh();
         if (!rightIsRemote_ || !rightRemoteModel_)
             return;
         requestRemoteListing(rightRemoteModel_->rootPath(), true);
     });
 }
 
-void MainWindow::maybeNotifyCompletedTransfers() {
-    if (!transferMgr_) {
-        seenCompletedTransferNoticeTaskIds_.clear();
-        return;
-    }
-
-    const auto tasks = transferMgr_->tasksSnapshot();
-    QSet<quint64> activeTaskIds;
-    activeTaskIds.reserve(tasks.size());
-
-    QString message;
-    int newlyCompleted = 0;
-    for (const auto &task : tasks) {
-        activeTaskIds.insert(task.taskId);
-        if (task.status != TransferTask::Status::Done)
-            continue;
-        if (seenCompletedTransferNoticeTaskIds_.contains(task.taskId))
-            continue;
-
-        seenCompletedTransferNoticeTaskIds_.insert(task.taskId);
-        ++newlyCompleted;
-        if (newlyCompleted == 1) {
-            const bool upload = (task.type == TransferTask::Type::Upload);
-            const QString path = upload ? task.src : task.dst;
-            QString name = QFileInfo(path).fileName();
-            if (name.isEmpty())
-                name = path;
-            message = upload ? tr("Upload completed: %1").arg(name)
-                             : tr("Download completed: %1").arg(name);
-        }
-    }
-
-    for (auto completedIdIt = seenCompletedTransferNoticeTaskIds_.begin();
-         completedIdIt != seenCompletedTransferNoticeTaskIds_.end();) {
-        if (!activeTaskIds.contains(*completedIdIt))
-            completedIdIt =
-                seenCompletedTransferNoticeTaskIds_.erase(completedIdIt);
-        else
-            ++completedIdIt;
-    }
-
-    if (newlyCompleted == 0)
-        return;
-    if (newlyCompleted > 1)
-        message = tr("%1 transfers completed").arg(newlyCompleted);
-    statusBar()->showMessage(message, 5000);
-}
-
 bool MainWindow::isScpTransferMode() const {
-    if (!rightIsRemote_ || !activeSessionOptions_.has_value())
+    if (!rightIsRemote_ || !sessionController_->options().has_value())
         return false;
     const openscp::ProtocolCapabilities caps =
-        openscp::capabilitiesForProtocol(activeSessionOptions_->protocol);
+        openscp::capabilitiesForProtocol(sessionController_->options()->protocol);
     return (caps.can_upload || caps.can_download) && !caps.can_list;
 }
 
@@ -2280,9 +1567,6 @@ void MainWindow::applyPreferences() {
         qBound(60, settings.value("Network/sessionHealthIntervalSec", 600).toInt(),
                86400) *
         1000;
-    remoteWriteabilityTtlMs_ = qBound(
-        1000, settings.value("Network/remoteWriteabilityTtlMs", 15000).toInt(),
-        120000);
     if (remoteSessionHealthTimer_) {
         remoteSessionHealthTimer_->setInterval(remoteSessionHealthIntervalMs_);
     }
@@ -2372,13 +1656,7 @@ void MainWindow::applyTransferPreferences() {
 }
 
 void MainWindow::addRecentLocalPath(const QString &path) {
-    const QString normalized = normalizedLocalHistoryPath(path);
-    if (normalized.isEmpty())
-        return;
-    QSettings settings("OpenSCP", "OpenSCP");
-    QStringList recent = settings.value(kRecentLocalPathsKey).toStringList();
-    prependRecentValue(&recent, normalized);
-    settings.setValue(kRecentLocalPathsKey, recent);
+    navigationStore_.addRecentLocalPath(path);
 }
 
 QString MainWindow::remoteNavigationScope() const {
@@ -2387,24 +1665,9 @@ QString MainWindow::remoteNavigationScope() const {
         return openscpui::savedSiteNavigationScope(
             activeSavedSiteContext_->siteId);
     }
-    if (!activeSessionOptions_)
+    if (!sessionController_->options())
         return {};
-    return openscpui::remoteEndpointScope(*activeSessionOptions_);
-}
-
-QString MainWindow::scopedRemoteHistoryKey() const {
-    const QString scope = remoteNavigationScope();
-    return scope.isEmpty()
-               ? QString()
-               : QStringLiteral("History/remoteScopes/%1/recentPaths")
-                     .arg(scope);
-}
-
-QString MainWindow::scopedRemoteFavoritesKey() const {
-    const QString scope = remoteNavigationScope();
-    return scope.isEmpty()
-               ? QString()
-               : QStringLiteral("Favorites/remoteScopes/%1/paths").arg(scope);
+    return openscpui::remoteEndpointScope(*sessionController_->options());
 }
 
 void MainWindow::refreshFavoritesAction(QAction *favoritesAction,
@@ -2419,10 +1682,11 @@ void MainWindow::refreshFavoritesAction(QAction *favoritesAction,
     favoritesAction->setText(tr("Favorites"));
     favoritesAction->setToolTip(tr("Favorites"));
 
-    const QString settingsKey =
-        remote ? scopedRemoteFavoritesKey()
-               : QString::fromLatin1(kLocalFavoritesKey);
-    if (settingsKey.isEmpty()) {
+    const auto location =
+        remote ? openscpui::NavigationStore::Location::Remote
+               : openscpui::NavigationStore::Location::Local;
+    const QString remoteScope = remote ? remoteNavigationScope() : QString();
+    if (remote && remoteScope.isEmpty()) {
         favoritesAction->setEnabled(false);
         favoritesAction->setIcon(
             mainWindowActionIcon("action-favorites.svg"));
@@ -2431,13 +1695,13 @@ void MainWindow::refreshFavoritesAction(QAction *favoritesAction,
         return;
     }
 
-    QSettings settings("OpenSCP", "OpenSCP");
-    QStringList paths = settings.value(settingsKey).toStringList();
+    const QStringList paths =
+        navigationStore_.favorites(location, remoteScope);
     const QString normalizedCurrent =
-        remote ? normalizeRemotePathForMatch(currentPath)
-               : normalizedLocalHistoryPath(currentPath);
-    const bool currentIsFavorite = paths.contains(
-        normalizedCurrent, remote ? Qt::CaseSensitive : Qt::CaseInsensitive);
+        remote ? openscpui::NavigationStore::normalizeRemotePath(currentPath)
+               : openscpui::NavigationStore::normalizeLocalPath(currentPath);
+    const bool currentIsFavorite =
+        navigationStore_.isFavorite(location, normalizedCurrent, remoteScope);
     favoritesAction->setEnabled(true);
     favoritesAction->setIcon(mainWindowActionIcon(
         currentIsFavorite ? "action-favorite-active.svg"
@@ -2446,20 +1710,11 @@ void MainWindow::refreshFavoritesAction(QAction *favoritesAction,
         currentIsFavorite ? tr("Remove current path from favorites")
                           : tr("Add current path to favorites"));
     connect(toggleCurrent, &QAction::triggered, this,
-            [this, settingsKey, normalizedCurrent, currentIsFavorite, remote] {
+            [this, location, remoteScope, normalizedCurrent] {
                 if (normalizedCurrent.isEmpty())
                     return;
-                QSettings writeSettings("OpenSCP", "OpenSCP");
-                QStringList values =
-                    writeSettings.value(settingsKey).toStringList();
-                const Qt::CaseSensitivity sensitivity =
-                    remote ? Qt::CaseSensitive : Qt::CaseInsensitive;
-                values.removeIf([&](const QString &value) {
-                    return value.compare(normalizedCurrent, sensitivity) == 0;
-                });
-                if (!currentIsFavorite)
-                    values.prepend(normalizedCurrent);
-                writeSettings.setValue(settingsKey, values);
+                navigationStore_.toggleFavorite(
+                    location, normalizedCurrent, remoteScope);
                 QTimer::singleShot(
                     0, this, [this] { refreshFavoritesActions(); });
             });
@@ -2467,8 +1722,9 @@ void MainWindow::refreshFavoritesAction(QAction *favoritesAction,
     menu->addSeparator();
     for (const QString &rawPath : paths) {
         const QString path =
-            remote ? normalizeRemotePathForMatch(rawPath)
-                   : normalizedLocalHistoryPath(rawPath);
+            remote
+                ? openscpui::NavigationStore::normalizeRemotePath(rawPath)
+                : openscpui::NavigationStore::normalizeLocalPath(rawPath);
         if (path.isEmpty())
             continue;
         QAction *openFavorite =
@@ -2494,7 +1750,8 @@ void MainWindow::refreshFavoritesAction(QAction *favoritesAction,
     } else {
         menu->addSeparator();
         QAction *clear = menu->addAction(tr("Clear favorites"));
-        connect(clear, &QAction::triggered, this, [this, settingsKey] {
+        connect(clear, &QAction::triggered, this,
+                [this, location, remoteScope] {
             if (UiAlerts::question(
                     this, tr("Clear favorites"),
                     tr("Remove all favorites in this section?"),
@@ -2502,8 +1759,7 @@ void MainWindow::refreshFavoritesAction(QAction *favoritesAction,
                     QMessageBox::No) != QMessageBox::Yes) {
                 return;
             }
-            QSettings writeSettings("OpenSCP", "OpenSCP");
-            writeSettings.remove(settingsKey);
+            navigationStore_.clearFavorites(location, remoteScope);
             QTimer::singleShot(
                 0, this, [this] { refreshFavoritesActions(); });
         });
@@ -2520,29 +1776,11 @@ void MainWindow::refreshFavoritesActions() {
 }
 
 void MainWindow::addRecentRemotePath(const QString &path) {
-    const QString normalized = normalizeRemotePathForMatch(path);
-    if (normalized.isEmpty())
-        return;
-    const QString historyKey = scopedRemoteHistoryKey();
-    if (historyKey.isEmpty())
-        return;
-    QSettings settings("OpenSCP", "OpenSCP");
-    QStringList recent = settings.value(historyKey).toStringList();
-    prependRecentValue(&recent, normalized);
-    settings.setValue(historyKey, recent);
+    navigationStore_.addRecentRemotePath(remoteNavigationScope(), path);
 }
 
 void MainWindow::addRecentServer(const openscp::SessionOptions &opt) {
-    const QString host = QString::fromStdString(opt.host).trimmed().toLower();
-    if (host.isEmpty())
-        return;
-    const QString encoded = encodeRecentServerEntry(opt);
-    if (encoded.isEmpty())
-        return;
-    QSettings settings("OpenSCP", "OpenSCP");
-    QStringList recent = settings.value(kRecentServersKey).toStringList();
-    prependRecentValue(&recent, encoded);
-    settings.setValue(kRecentServersKey, recent);
+    navigationStore_.addRecentServer(opt);
 }
 
 void MainWindow::showHistoryMenu() {
@@ -2618,30 +1856,26 @@ void MainWindow::showHistoryMenu() {
 
         const bool localPath = tabs->currentIndex() == 0;
         const bool remotePath = tabs->currentIndex() == 1;
-        const QString settingsKey =
-            localPath ? QString::fromLatin1(kLocalFavoritesKey)
-                      : (remotePath ? scopedRemoteFavoritesKey() : QString());
+        const auto location =
+            localPath ? openscpui::NavigationStore::Location::Local
+                      : openscpui::NavigationStore::Location::Remote;
+        const QString remoteScope =
+            remotePath ? remoteNavigationScope() : QString();
         const QString normalized =
-            localPath ? normalizedLocalHistoryPath(value)
-                      : (remotePath ? normalizeRemotePathForMatch(value)
-                                    : QString());
-        if (settingsKey.isEmpty() || normalized.isEmpty()) {
+            localPath
+                ? openscpui::NavigationStore::normalizeLocalPath(value)
+                : (remotePath
+                       ? openscpui::NavigationStore::normalizeRemotePath(value)
+                       : QString());
+        if ((!localPath && (!remotePath || remoteScope.isEmpty())) ||
+            normalized.isEmpty()) {
             favoriteBtn->setEnabled(false);
             favoriteBtn->setText(tr("Add to favorites"));
             return;
         }
 
-        QSettings settings("OpenSCP", "OpenSCP");
-        const QStringList favorites =
-            settings.value(settingsKey).toStringList();
-        const Qt::CaseSensitivity sensitivity =
-            localPath ? Qt::CaseInsensitive : Qt::CaseSensitive;
         const bool alreadyFavorite =
-            std::any_of(favorites.cbegin(), favorites.cend(),
-                        [&](const QString &favorite) {
-                            return favorite.compare(normalized, sensitivity) ==
-                                   0;
-                        });
+            navigationStore_.isFavorite(location, normalized, remoteScope);
         favoriteBtn->setEnabled(true);
         favoriteBtn->setText(alreadyFavorite
                                  ? tr("Remove from favorites")
@@ -2654,23 +1888,18 @@ void MainWindow::showHistoryMenu() {
         legacyRemoteList->clear();
         serverList->clear();
 
-        QSettings settings("OpenSCP", "OpenSCP");
-        const QStringList localPaths =
-            settings.value(kRecentLocalPathsKey).toStringList();
-        const QString remoteHistoryKey = scopedRemoteHistoryKey();
+        const QStringList localPaths = navigationStore_.recentLocalPaths();
         const QStringList remotePaths =
-            remoteHistoryKey.isEmpty()
-                ? QStringList()
-                : settings.value(remoteHistoryKey).toStringList();
+            navigationStore_.recentRemotePaths(remoteNavigationScope());
         const QStringList legacyRemotePaths =
-            settings.value(kRecentRemotePathsKey).toStringList();
-        const QStringList recentServers =
-            settings.value(kRecentServersKey).toStringList();
+            navigationStore_.legacyRemotePaths();
+        const QStringList recentServers = navigationStore_.recentServers();
 
         bool hasEntries = false;
 
         for (const QString &rawPath : localPaths) {
-            const QString normalized = normalizedLocalHistoryPath(rawPath);
+            const QString normalized =
+                openscpui::NavigationStore::normalizeLocalPath(rawPath);
             if (normalized.isEmpty())
                 continue;
             auto *item = new QListWidgetItem(
@@ -2683,7 +1912,8 @@ void MainWindow::showHistoryMenu() {
             addEmptyPlaceholder(localList, tr("No recent history"));
 
         for (const QString &rawPath : remotePaths) {
-            const QString normalized = normalizeRemotePathForMatch(rawPath);
+            const QString normalized =
+                openscpui::NavigationStore::normalizeRemotePath(rawPath);
             if (normalized.isEmpty())
                 continue;
             auto *item =
@@ -2696,7 +1926,8 @@ void MainWindow::showHistoryMenu() {
             addEmptyPlaceholder(remoteList, tr("No recent history"));
 
         for (const QString &rawPath : legacyRemotePaths) {
-            const QString normalized = normalizeRemotePathForMatch(rawPath);
+            const QString normalized =
+                openscpui::NavigationStore::normalizeRemotePath(rawPath);
             if (normalized.isEmpty())
                 continue;
             auto *item = new QListWidgetItem(trimHistoryLabel(normalized),
@@ -2712,8 +1943,10 @@ void MainWindow::showHistoryMenu() {
         for (const QString &encoded : recentServers) {
             openscp::SessionOptions preset;
             QString label;
-            if (!decodeRecentServerEntry(encoded, &preset, &label))
+            if (!openscpui::NavigationStore::decodeRecentServer(
+                    encoded, &preset, &label)) {
                 continue;
+            }
             auto *item = new QListWidgetItem(trimHistoryLabel(label), serverList);
             item->setToolTip(label);
             item->setData(Qt::UserRole, encoded);
@@ -2788,8 +2021,10 @@ void MainWindow::showHistoryMenu() {
                 return;
             }
             openscp::SessionOptions preset;
-            if (!decodeRecentServerEntry(value, &preset, nullptr))
+            if (!openscpui::NavigationStore::decodeRecentServer(
+                    value, &preset, nullptr)) {
                 return;
+            }
             dlg.accept();
             openConnectDialogWithPreset(preset);
             break;
@@ -2808,33 +2043,27 @@ void MainWindow::showHistoryMenu() {
         const QString value = list->currentItem()->data(Qt::UserRole).toString();
         const bool localPath = tabs->currentIndex() == 0;
         const bool remotePath = tabs->currentIndex() == 1;
-        const QString settingsKey =
-            localPath ? QString::fromLatin1(kLocalFavoritesKey)
-                      : (remotePath ? scopedRemoteFavoritesKey() : QString());
+        const auto location =
+            localPath ? openscpui::NavigationStore::Location::Local
+                      : openscpui::NavigationStore::Location::Remote;
+        const QString remoteScope =
+            remotePath ? remoteNavigationScope() : QString();
         const QString normalized =
-            localPath ? normalizedLocalHistoryPath(value)
-                      : (remotePath ? normalizeRemotePathForMatch(value)
-                                    : QString());
-        if (settingsKey.isEmpty() || normalized.isEmpty())
+            localPath
+                ? openscpui::NavigationStore::normalizeLocalPath(value)
+                : (remotePath
+                       ? openscpui::NavigationStore::normalizeRemotePath(value)
+                       : QString());
+        if ((!localPath && (!remotePath || remoteScope.isEmpty())) ||
+            normalized.isEmpty()) {
             return;
+        }
 
-        QSettings settings("OpenSCP", "OpenSCP");
-        QStringList favorites = settings.value(settingsKey).toStringList();
-        const Qt::CaseSensitivity sensitivity =
-            localPath ? Qt::CaseInsensitive : Qt::CaseSensitive;
-        bool removed = false;
-        favorites.removeIf([&](const QString &favorite) {
-            const bool matches =
-                favorite.compare(normalized, sensitivity) == 0;
-            removed = removed || matches;
-            return matches;
-        });
-        if (!removed)
-            favorites.prepend(normalized);
-        settings.setValue(settingsKey, favorites);
+        const bool added =
+            navigationStore_.toggleFavorite(location, normalized, remoteScope);
         refreshFavoritesActions();
         statusBar()->showMessage(
-            removed ? tr("Favorite removed") : tr("Favorite added"), 2500);
+            added ? tr("Favorite added") : tr("Favorite removed"), 2500);
         updateActions();
     });
     connect(clearBtn, &QPushButton::clicked, &dlg, [=, this]() {
@@ -2844,13 +2073,7 @@ void MainWindow::showHistoryMenu() {
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
         if (ret != QMessageBox::Yes)
             return;
-        QSettings settings("OpenSCP", "OpenSCP");
-        settings.remove(kRecentLocalPathsKey);
-        // "Clear history" is global: scoped histories for inactive servers are
-        // otherwise invisible here and would silently survive the operation.
-        settings.remove(QStringLiteral("History/remoteScopes"));
-        settings.remove(kRecentRemotePathsKey);
-        settings.remove(kRecentServersKey);
+        navigationStore_.clearAllHistory();
         statusBar()->showMessage(tr("History cleared"), 3000);
         populate();
     });
@@ -2879,7 +2102,7 @@ void MainWindow::updateDeleteShortcutEnables() {
     const bool rightHasSel = hasColSel(rightView_);
     const bool scpMode = isScpTransferMode();
     const bool rightWrite =
-        (!rightIsRemote_) || (rightIsRemote_ && rightRemoteWritable_);
+        (!rightIsRemote_) || (rightIsRemote_ && rightRemoteMutationsSupported_);
 
     // Left: enable according to selection (exception: Up)
     if (actCopyF5_)
@@ -2952,7 +2175,7 @@ void MainWindow::updateDeleteShortcutEnables() {
         actNewFileRight_->setEnabled(rightWrite);
     if (actUploadRight_)
         actUploadRight_->setEnabled(rightIsRemote_ &&
-                                    rightRemoteWritable_); // exception
+                                    rightRemoteMutationsSupported_); // exception
     if (actDownloadF7_)
         actDownloadF7_->setEnabled(
             rightIsRemote_); // exception: enabled without selection
@@ -2961,7 +2184,7 @@ void MainWindow::updateDeleteShortcutEnables() {
             rightIsRemote_); // exception: enabled without selection
     if (actOpenTerminalRight_)
         actOpenTerminalRight_->setEnabled(
-            rightIsRemote_ && activeSessionOptions_.has_value());
+            rightIsRemote_ && sessionController_->options().has_value());
     if (actSearchRight_)
         actSearchRight_->setEnabled(true);
     if (actUpRight_) {

@@ -12,11 +12,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
-#include <QFileDevice>
 #include <QFileInfo>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QLoggingCategory>
 #include <QMessageBox>
 #include <QMetaObject>
@@ -24,12 +20,10 @@
 #include <QPushButton>
 #include <QRandomGenerator>
 #include <QRegularExpression>
-#include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
 #include <QThread>
 #include <QTimer>
-#include <QTimeZone>
 
 #include <algorithm>
 #include <cmath>
@@ -44,16 +38,6 @@ namespace {
 using Status = TransferTask::Status;
 using Policy = TransferConflictPolicy;
 using Clock = std::chrono::steady_clock;
-
-constexpr double kKiB = 1024.0;
-constexpr quint64 kRateChunkBytes = 16 * 1024;
-constexpr qint64 kUiProgressIntervalMs = 100;
-
-bool isTerminal(Status status) {
-    return status == Status::Done || status == Status::Error ||
-           status == Status::Canceled || status == Status::Skipped ||
-           status == Status::Warning;
-}
 
 bool canRetry(Status status) {
     return status == Status::Error || status == Status::Canceled ||
@@ -113,87 +97,6 @@ QString errorForUi(const std::string &rawError) {
                "\n" + message;
     }
     return message;
-}
-
-QString policyName(Policy policy) {
-    switch (policy) {
-    case Policy::Ask:
-        return QStringLiteral("ask");
-    case Policy::Overwrite:
-        return QStringLiteral("overwrite");
-    case Policy::Skip:
-        return QStringLiteral("skip");
-    case Policy::Resume:
-        return QStringLiteral("resume");
-    case Policy::Rename:
-        return QStringLiteral("rename");
-    case Policy::NewerOnly:
-        return QStringLiteral("newer-only");
-    }
-    return QStringLiteral("ask");
-}
-
-Policy policyFromName(const QString &name) {
-    if (name == QStringLiteral("overwrite"))
-        return Policy::Overwrite;
-    if (name == QStringLiteral("skip"))
-        return Policy::Skip;
-    if (name == QStringLiteral("resume"))
-        return Policy::Resume;
-    if (name == QStringLiteral("rename"))
-        return Policy::Rename;
-    if (name == QStringLiteral("newer-only"))
-        return Policy::NewerOnly;
-    return Policy::Ask;
-}
-
-QString operationName(TransferOperation operation) {
-    return operation == TransferOperation::Move ? QStringLiteral("move")
-                                                : QStringLiteral("copy");
-}
-
-TransferOperation operationFromName(const QString &name) {
-    return name == QStringLiteral("move") ? TransferOperation::Move
-                                          : TransferOperation::Copy;
-}
-
-QString phaseName(TransferPhase phase) {
-    switch (phase) {
-    case TransferPhase::Transfer:
-        return QStringLiteral("transfer");
-    case TransferPhase::DeleteSource:
-        return QStringLiteral("delete-source");
-    case TransferPhase::Finished:
-        return QStringLiteral("finished");
-    }
-    return QStringLiteral("transfer");
-}
-
-TransferPhase phaseFromName(const QString &name) {
-    if (name == QStringLiteral("delete-source"))
-        return TransferPhase::DeleteSource;
-    if (name == QStringLiteral("finished"))
-        return TransferPhase::Finished;
-    return TransferPhase::Transfer;
-}
-
-QString taskIdString(quint64 id) { return QString::number(id); }
-
-std::optional<quint64> parseTaskId(const QJsonValue &value) {
-    bool ok = false;
-    quint64 parsed = 0;
-    if (value.isString())
-        parsed = value.toString().toULongLong(&ok);
-    else if (value.isDouble()) {
-        const double number = value.toDouble(-1);
-        if (number >= 0 && number <= double(std::numeric_limits<qint64>::max())) {
-            parsed = static_cast<quint64>(number);
-            ok = true;
-        }
-    }
-    if (!ok || parsed == 0)
-        return std::nullopt;
-    return parsed;
 }
 
 QString numberedPath(const QString &path, int suffix) {
@@ -279,7 +182,8 @@ TransferManager::~TransferManager() {
     for (auto &slot : workerSlots_)
         slot->thread.request_stop();
     workCv_.notify_all();
-    rateCv_.notify_all();
+    retryCv_.notify_all();
+    bandwidthLimiter_.wakeAll();
 
     // Destroying jthread joins it. Do this while every manager member used by a
     // worker is still alive.
@@ -316,9 +220,9 @@ void TransferManager::setSessionIdentity(const QString &sessionKey) {
             return;
         currentSessionKey_ = sessionKey;
         ++sessionGeneration_;
-        for (auto &taskNode : tasks_) {
+        for (auto &taskNode : queueStore_.nodes()) {
             auto &task = *taskNode;
-            if (isTerminal(task.status) || task.sessionKey.isEmpty())
+            if (isTerminalTransferStatus(task.status) || task.sessionKey.isEmpty())
                 continue;
             if (task.sessionKey != currentSessionKey_) {
                 if (task.status == Status::Queued ||
@@ -361,7 +265,7 @@ void TransferManager::clearClient() {
         client_ = nullptr;
         sessionOpt_.reset();
         ++sessionGeneration_;
-        for (auto &taskNode : tasks_) {
+        for (auto &taskNode : queueStore_.nodes()) {
             auto &task = *taskNode;
             if (task.status == Status::Running ||
                 task.status == Status::RetryWaiting ||
@@ -379,7 +283,8 @@ void TransferManager::clearClient() {
         publishUpdated(changed);
     interruptAllActive();
     workCv_.notify_all();
-    rateCv_.notify_all();
+    retryCv_.notify_all();
+    bandwidthLimiter_.wakeAll();
 
     {
         std::unique_lock<std::mutex> lock(mtx_);
@@ -404,63 +309,40 @@ void TransferManager::setMaxConcurrent(int maxConcurrent) {
 
 void TransferManager::setGlobalSpeedLimitKBps(int kbps) {
     const int bounded = std::max(0, kbps);
-    if (globalSpeedKBps_.exchange(bounded) == bounded)
+    if (bandwidthLimiter_.limitKBps() == bounded)
         return;
-    {
-        std::lock_guard<std::mutex> lock(rateMutex_);
-        rateConfiguredKBps_ = bounded;
-        rateLastRefill_ = Clock::now();
-        rateTokens_ =
-            bounded > 0 ? double(bounded) * kKiB * 0.25 : 0.0;
-    }
-    rateCv_.notify_all();
+    bandwidthLimiter_.setLimitKBps(bounded);
     emit queueSettingsChanged();
     emit tasksChanged();
     schedulePersistence();
 }
 
 TransferTask *TransferManager::taskForIdLocked(quint64 taskId) {
-    const auto found = tasksById_.find(taskId);
-    return found == tasksById_.end() ? nullptr : found->second;
+    return queueStore_.find(taskId);
 }
 
 const TransferTask *TransferManager::taskForIdLocked(quint64 taskId) const {
-    const auto found = tasksById_.find(taskId);
-    return found == tasksById_.end() ? nullptr : found->second;
+    return queueStore_.find(taskId);
 }
 
 void TransferManager::appendTaskLocked(TransferTask task) {
-    auto node = std::make_unique<TransferTask>(std::move(task));
-    const quint64 taskId = node->taskId;
-    TransferTask *taskPointer = node.get();
-    tasks_.push_back(std::move(node));
-    try {
-        tasksById_[taskId] = taskPointer;
-    } catch (...) {
-        tasks_.pop_back();
-        throw;
-    }
+    queueStore_.append(std::move(task));
 }
 
 void TransferManager::rebuildTaskLookupLocked() {
-    tasksById_.clear();
-    tasksById_.reserve(tasks_.size());
+    queueStore_.rebuildIndex();
     terminalTaskCount_ = 0;
-    for (const auto &taskNode : tasks_) {
-        TransferTask &task = *taskNode;
-        tasksById_[task.taskId] = &task;
-        if (isTerminal(task.status))
+    for (const auto &taskNode : queueStore_.nodes()) {
+        const TransferTask &task = *taskNode;
+        if (isTerminalTransferStatus(task.status))
             ++terminalTaskCount_;
     }
-    if (tasks_.empty())
-        schedulingCursor_ = 0;
-    else
-        schedulingCursor_ %= static_cast<int>(tasks_.size());
+    scheduler_.normalizeForSize(queueStore_.nodes().size());
 }
 
 void TransferManager::forgetBatchPolicyIfUnusedLocked(quint64 batchId) {
     const bool stillUsed =
-        std::any_of(tasks_.cbegin(), tasks_.cend(),
+        std::any_of(queueStore_.nodes().cbegin(), queueStore_.nodes().cend(),
                     [batchId](const auto &taskNode) {
                         return taskNode->batchId == batchId;
                     });
@@ -712,9 +594,9 @@ void TransferManager::cancelBatch(quint64 batchId) {
     {
         std::lock_guard<std::mutex> lock(mtx_);
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        for (auto &taskNode : tasks_) {
+        for (auto &taskNode : queueStore_.nodes()) {
             auto &task = *taskNode;
-            if (task.batchId != batchId || isTerminal(task.status))
+            if (task.batchId != batchId || isTerminalTransferStatus(task.status))
                 continue;
             canceledTasks_.insert(task.taskId);
             pausedTasks_.erase(task.taskId);
@@ -758,7 +640,7 @@ int TransferManager::enqueueDownloads(
                                                options.conflictPolicy);
         const Policy batchPolicy = conflictCoordinator_.batchPolicy(
             batchId, options.conflictPolicy);
-        tasks_.reserve(tasks_.size() + remoteLocalPairs.size());
+        queueStore_.nodes().reserve(queueStore_.nodes().size() + remoteLocalPairs.size());
         for (const auto &pair : remoteLocalPairs) {
             TransferTask task{TransferTask::Type::Download};
             task.taskId = nextId_++;
@@ -789,9 +671,9 @@ void TransferManager::setBatchConflictPolicy(quint64 batchId,
     {
         std::lock_guard<std::mutex> lock(mtx_);
         conflictCoordinator_.setBatchPolicy(batchId, policy);
-        for (auto &taskNode : tasks_) {
+        for (auto &taskNode : queueStore_.nodes()) {
             auto &task = *taskNode;
-            if (task.batchId == batchId && !isTerminal(task.status)) {
+            if (task.batchId == batchId && !isTerminalTransferStatus(task.status)) {
                 task.conflictPolicy = policy;
                 changed.push_back(task.taskId);
             }
@@ -804,8 +686,8 @@ void TransferManager::setBatchConflictPolicy(quint64 batchId,
 QVector<TransferTask> TransferManager::tasksSnapshot() const {
     QVector<TransferTask> result;
     std::lock_guard<std::mutex> lock(mtx_);
-    result.reserve(static_cast<qsizetype>(tasks_.size()));
-    for (const auto &taskNode : tasks_)
+    result.reserve(static_cast<qsizetype>(queueStore_.nodes().size()));
+    for (const auto &taskNode : queueStore_.nodes())
         result.push_back(*taskNode);
     return result;
 }
@@ -835,10 +717,10 @@ TransferManager::taskSnapshot(quint64 taskId) const {
 bool TransferManager::hasRunnableTaskLocked(std::size_t slotIndex) {
     if (shuttingDown_.load() || paused_.load() ||
         slotIndex >= static_cast<std::size_t>(maxConcurrent_.load()) ||
-        !client_ || !sessionOpt_.has_value() || tasks_.empty()) {
+        !client_ || !sessionOpt_.has_value() || queueStore_.nodes().empty()) {
         return false;
     }
-    for (const auto &taskNode : tasks_) {
+    for (const auto &taskNode : queueStore_.nodes()) {
         const auto &task = *taskNode;
         if (task.status != Status::Queued)
             continue;
@@ -858,38 +740,32 @@ std::optional<TransferTask>
 TransferManager::pickRunnableTaskLocked(std::size_t slotIndex) {
     if (!hasRunnableTaskLocked(slotIndex))
         return std::nullopt;
-    if (schedulingCursor_ < 0 ||
-        schedulingCursor_ >= static_cast<int>(tasks_.size()))
-        schedulingCursor_ = 0;
+    const auto taskIndex = scheduler_.nextRunnable(
+        queueStore_.nodes(), [this](TransferTask &task) {
+            if (task.status != Status::Queued ||
+                !dependencySatisfiedLocked(task)) {
+                return false;
+            }
+            if (!task.sessionKey.isEmpty() &&
+                task.sessionKey != currentSessionKey_) {
+                task.status = Status::WaitingForConnection;
+                return false;
+            }
+            return reserveDestinationLocked(task);
+        });
+    if (!taskIndex)
+        return std::nullopt;
 
-    const int count = static_cast<int>(tasks_.size());
-    for (int offset = 0; offset < count; ++offset) {
-        const int index = (schedulingCursor_ + offset) % count;
-        auto &task = *tasks_[index];
-        if (task.status != Status::Queued)
-            continue;
-        if (!dependencySatisfiedLocked(task))
-            continue;
-        if (!task.sessionKey.isEmpty() &&
-            task.sessionKey != currentSessionKey_) {
-            task.status = Status::WaitingForConnection;
-            continue;
-        }
-        if (!reserveDestinationLocked(task))
-            continue;
-
-        schedulingCursor_ = (index + 1) % count;
-        const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        task.status = Status::Running;
-        task.error.clear();
-        task.startedAtMs = now;
-        task.finishedAtMs = 0;
-        task.nextRetryAtMs = 0;
-        activeTaskIds_.insert(task.taskId);
-        running_.fetch_add(1);
-        return task;
-    }
-    return std::nullopt;
+    TransferTask &task = *queueStore_.nodes()[*taskIndex];
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    task.status = Status::Running;
+    task.error.clear();
+    task.startedAtMs = now;
+    task.finishedAtMs = 0;
+    task.nextRetryAtMs = 0;
+    activeTaskIds_.insert(task.taskId);
+    running_.fetch_add(1);
+    return task;
 }
 
 void TransferManager::workerLoop(std::size_t slotIndex,
@@ -998,7 +874,8 @@ void TransferManager::interruptTask(quint64 taskId) {
         if (active)
             active->interrupt();
     }
-    rateCv_.notify_all();
+    retryCv_.notify_all();
+    bandwidthLimiter_.wakeAll();
     workCv_.notify_all();
 }
 
@@ -1014,7 +891,8 @@ void TransferManager::interruptAllActive() {
         if (active)
             active->interrupt();
     }
-    rateCv_.notify_all();
+    retryCv_.notify_all();
+    bandwidthLimiter_.wakeAll();
     workCv_.notify_all();
 }
 
@@ -1047,7 +925,7 @@ void TransferManager::transitionToPaused(TransferTask &task) {
 }
 
 void TransferManager::transitionToCanceled(TransferTask &task, qint64 nowMs) {
-    const bool wasTerminal = isTerminal(task.status);
+    const bool wasTerminal = isTerminalTransferStatus(task.status);
     task.status = Status::Canceled;
     task.error.clear();
     task.currentSpeedKBps = 0;
@@ -1061,7 +939,7 @@ void TransferManager::transitionToCanceled(TransferTask &task, qint64 nowMs) {
 void TransferManager::transitionToError(TransferTask &task,
                                         const std::string &rawError,
                                         qint64 nowMs) {
-    const bool wasTerminal = isTerminal(task.status);
+    const bool wasTerminal = isTerminalTransferStatus(task.status);
     task.status = Status::Error;
     task.error = errorForUi(rawError);
     task.currentSpeedKBps = 0;
@@ -1073,7 +951,7 @@ void TransferManager::transitionToError(TransferTask &task,
 }
 
 void TransferManager::transitionToDone(TransferTask &task, qint64 nowMs) {
-    const bool wasTerminal = isTerminal(task.status);
+    const bool wasTerminal = isTerminalTransferStatus(task.status);
     task.status = Status::Done;
     task.phase = TransferPhase::Finished;
     task.progress = 100;
@@ -1088,7 +966,7 @@ void TransferManager::transitionToDone(TransferTask &task, qint64 nowMs) {
 }
 
 void TransferManager::resetForRetry(TransferTask &task, qint64 nowMs) {
-    if (isTerminal(task.status) && terminalTaskCount_ > 0)
+    if (isTerminalTransferStatus(task.status) && terminalTaskCount_ > 0)
         --terminalTaskCount_;
     task.attempts = 0;
     task.error.clear();
@@ -1107,7 +985,7 @@ void TransferManager::pauseAll() {
     QVector<quint64> changed;
     {
         std::lock_guard<std::mutex> lock(mtx_);
-        for (auto &taskNode : tasks_) {
+        for (auto &taskNode : queueStore_.nodes()) {
             auto &task = *taskNode;
             if (task.status == Status::Queued ||
                 task.status == Status::Running ||
@@ -1133,7 +1011,7 @@ void TransferManager::resumeAll() {
     {
         std::lock_guard<std::mutex> lock(mtx_);
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        for (auto &taskNode : tasks_) {
+        for (auto &taskNode : queueStore_.nodes()) {
             auto &task = *taskNode;
             if (task.status != Status::Paused &&
                 task.status != Status::WaitingForConnection) {
@@ -1220,7 +1098,7 @@ void TransferManager::cancelTask(quint64 taskId) {
     {
         std::lock_guard<std::mutex> lock(mtx_);
         TransferTask *task = taskForIdLocked(taskId);
-        if (task && !isTerminal(task->status)) {
+        if (task && !isTerminalTransferStatus(task->status)) {
             active = activeTaskIds_.count(taskId);
             canceledTasks_.insert(taskId);
             pausedTasks_.erase(taskId);
@@ -1246,9 +1124,9 @@ void TransferManager::cancelAll() {
         std::lock_guard<std::mutex> lock(mtx_);
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         resumeRequestedTasks_.clear();
-        for (auto &taskNode : tasks_) {
+        for (auto &taskNode : queueStore_.nodes()) {
             auto &task = *taskNode;
-            if (isTerminal(task.status))
+            if (isTerminalTransferStatus(task.status))
                 continue;
             canceledTasks_.insert(task.taskId);
             pausedTasks_.erase(task.taskId);
@@ -1284,7 +1162,7 @@ void TransferManager::retryFailed() {
     {
         std::lock_guard<std::mutex> lock(mtx_);
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        for (auto &taskNode : tasks_) {
+        for (auto &taskNode : queueStore_.nodes()) {
             auto &task = *taskNode;
             if (!canRetry(task.status) || task.commitUncertain ||
                 activeTaskIds_.count(task.taskId))
@@ -1331,13 +1209,13 @@ void TransferManager::removeTask(quint64 taskId, bool removePartialData) {
             return;
         removed = *task;
         const auto position =
-            std::find_if(tasks_.begin(), tasks_.end(),
+            std::find_if(queueStore_.nodes().begin(), queueStore_.nodes().end(),
                          [task](const auto &node) {
                              return node.get() == task;
                          });
-        if (position == tasks_.end())
+        if (position == queueStore_.nodes().end())
             return;
-        tasks_.erase(position);
+        queueStore_.nodes().erase(position);
         canceledTasks_.erase(taskId);
         pausedTasks_.erase(taskId);
         resumeRequestedTasks_.erase(taskId);
@@ -1369,8 +1247,8 @@ void TransferManager::clearCompleted() {
     {
         std::lock_guard<std::mutex> lock(mtx_);
         std::vector<std::unique_ptr<TransferTask>> kept;
-        kept.reserve(tasks_.size());
-        for (auto &taskNode : tasks_) {
+        kept.reserve(queueStore_.nodes().size());
+        for (auto &taskNode : queueStore_.nodes()) {
             const auto &task = *taskNode;
             if ((task.status == Status::Done ||
                  task.status == Status::Skipped) &&
@@ -1381,7 +1259,7 @@ void TransferManager::clearCompleted() {
                 kept.push_back(std::move(taskNode));
             }
         }
-        tasks_.swap(kept);
+        queueStore_.nodes().swap(kept);
         rebuildTaskLookupLocked();
         for (quint64 batchId : removedBatches)
             forgetBatchPolicyIfUnusedLocked(batchId);
@@ -1396,8 +1274,8 @@ void TransferManager::clearFailedCanceled() {
     {
         std::lock_guard<std::mutex> lock(mtx_);
         std::vector<std::unique_ptr<TransferTask>> kept;
-        kept.reserve(tasks_.size());
-        for (auto &taskNode : tasks_) {
+        kept.reserve(queueStore_.nodes().size());
+        for (auto &taskNode : queueStore_.nodes()) {
             const auto &task = *taskNode;
             const bool removable =
                 task.status == Status::Error ||
@@ -1411,7 +1289,7 @@ void TransferManager::clearFailedCanceled() {
                 kept.push_back(std::move(taskNode));
             }
         }
-        tasks_.swap(kept);
+        queueStore_.nodes().swap(kept);
         rebuildTaskLookupLocked();
         for (quint64 batchId : removedBatches)
             forgetBatchPolicyIfUnusedLocked(batchId);
@@ -1431,8 +1309,8 @@ void TransferManager::clearFinishedOlderThan(int minutes, bool clearDone,
     {
         std::lock_guard<std::mutex> lock(mtx_);
         std::vector<std::unique_ptr<TransferTask>> kept;
-        kept.reserve(tasks_.size());
-        for (auto &taskNode : tasks_) {
+        kept.reserve(queueStore_.nodes().size());
+        for (auto &taskNode : queueStore_.nodes()) {
             const auto &task = *taskNode;
             const bool selected =
                 (clearDone && task.status == Status::Done) ||
@@ -1450,7 +1328,7 @@ void TransferManager::clearFinishedOlderThan(int minutes, bool clearDone,
                 kept.push_back(std::move(taskNode));
             }
         }
-        tasks_.swap(kept);
+        queueStore_.nodes().swap(kept);
         rebuildTaskLookupLocked();
         for (quint64 batchId : removedBatches)
             forgetBatchPolicyIfUnusedLocked(batchId);
@@ -1475,8 +1353,9 @@ bool TransferManager::waitForRetry(quint64 taskId, int delayMs,
         const auto remaining =
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 deadline - Clock::now());
-        std::unique_lock<std::mutex> lock(rateMutex_);
-        rateCv_.wait_for(lock, std::min(remaining, std::chrono::milliseconds(50)));
+        std::unique_lock<std::mutex> lock(retryMutex_);
+        retryCv_.wait_for(lock,
+                          std::min(remaining, std::chrono::milliseconds(50)));
     }
     return !stopToken.stop_requested() && !shouldCancel(taskId);
 }
@@ -1765,10 +1644,10 @@ ConflictResolution TransferManager::resolveConflict(
     {
         std::lock_guard<std::mutex> lock(mtx_);
         if (decision.applyToRemaining && !decision.canceled) {
-            for (auto &queuedNode : tasks_) {
+            for (auto &queuedNode : queueStore_.nodes()) {
                 auto &queued = *queuedNode;
                 if (queued.batchId == task.batchId &&
-                    !isTerminal(queued.status)) {
+                    !isTerminalTransferStatus(queued.status)) {
                     queued.conflictPolicy = stored;
                 }
             }
@@ -1987,88 +1866,6 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
     return PrecheckOutcome::Continue;
 }
 
-bool TransferManager::throttleGlobal(quint64 taskId, quint64 bytes) {
-    quint64 remaining = bytes;
-    while (remaining > 0) {
-        const int configured = globalSpeedKBps_.load();
-        if (configured <= 0)
-            return !shouldCancel(taskId);
-        const quint64 burstBytes = std::max<quint64>(
-            1, static_cast<quint64>(configured * kKiB * 0.25));
-        RateWaiter waiter{taskId,
-                          std::min({remaining, kRateChunkBytes, burstBytes})};
-        std::unique_lock<std::mutex> lock(rateMutex_);
-        rateWaiters_.push_back(&waiter);
-        auto removeWaiter = [&]() {
-            const auto found =
-                std::find(rateWaiters_.begin(), rateWaiters_.end(), &waiter);
-            if (found != rateWaiters_.end())
-                rateWaiters_.erase(found);
-            rateCv_.notify_all();
-        };
-        while (true) {
-            if (shouldCancel(taskId)) {
-                removeWaiter();
-                return false;
-            }
-            const int rate = globalSpeedKBps_.load();
-            if (rate <= 0) {
-                removeWaiter();
-                return true;
-            }
-            const auto now = Clock::now();
-            if (rateConfiguredKBps_ != rate) {
-                rateConfiguredKBps_ = rate;
-                rateTokens_ = std::min(
-                    rateTokens_, double(rate) * kKiB * 0.25);
-                rateLastRefill_ = now;
-            }
-            if (rateLastRefill_.time_since_epoch().count() == 0)
-                rateLastRefill_ = now;
-            const double elapsed =
-                std::chrono::duration<double>(now - rateLastRefill_).count();
-            const double capacity =
-                std::max(double(waiter.bytes), double(rate) * kKiB * 0.25);
-            rateTokens_ = std::min(
-                capacity, rateTokens_ + elapsed * double(rate) * kKiB);
-            rateLastRefill_ = now;
-
-            if (!rateWaiters_.empty() &&
-                rateWaiters_.front() == &waiter &&
-                rateTokens_ >= double(waiter.bytes)) {
-                rateTokens_ -= double(waiter.bytes);
-                rateWaiters_.pop_front();
-                rateCv_.notify_all();
-                break;
-            }
-            rateCv_.wait_for(lock, std::chrono::milliseconds(20));
-        }
-        remaining -= waiter.bytes;
-    }
-    return true;
-}
-
-bool TransferManager::throttleTask(
-    quint64 taskId, quint64 bytes, int taskLimitKBps,
-    Clock::time_point &windowStart) {
-    if (taskLimitKBps <= 0 || bytes == 0)
-        return !shouldCancel(taskId);
-    const double expected =
-        double(bytes) / (double(taskLimitKBps) * kKiB);
-    const double elapsed =
-        std::chrono::duration<double>(Clock::now() - windowStart).count();
-    double remaining = expected - elapsed;
-    while (remaining > 0.0005) {
-        if (shouldCancel(taskId))
-            return false;
-        const double slice = std::min(remaining, 0.05);
-        std::this_thread::sleep_for(std::chrono::duration<double>(slice));
-        remaining -= slice;
-    }
-    windowStart = Clock::now();
-    return !shouldCancel(taskId);
-}
-
 void TransferManager::updateProgress(quint64 taskId, std::size_t done,
                                      std::size_t total,
                                      double measuredKBps, int etaSeconds) {
@@ -2088,210 +1885,38 @@ bool TransferManager::runTransferAttempt(
     TransferTask &task,
     const std::shared_ptr<openscp::RemoteClient> &workerClient, bool resume,
     std::string &err) {
-    if (task.type == TransferTask::Type::CreateLocalDirectory) {
-        if (!QDir().mkpath(task.dst)) {
-            err =
-                QCoreApplication::translate(
-                    "TransferManager", "Could not create local directory")
-                    .toUtf8()
-                    .toStdString();
-            return false;
-        }
-        updateProgress(task.taskId, 1, 1, 0, 0);
-        publishUpdated({task.taskId});
-        return true;
-    }
-    if (task.type == TransferTask::Type::CreateRemoteDirectory) {
-        bool isDirectory = false;
-        std::string existsError;
-        const bool exists = workerClient->exists(
-            task.dst.toStdString(), isDirectory, existsError);
-        if (!existsError.empty()) {
-            err = existsError;
-            return false;
-        }
-        if (exists) {
-            if (!isDirectory) {
-                err =
-                    QCoreApplication::translate(
-                        "TransferManager",
-                        "Remote path exists and is not a directory")
-                        .toUtf8()
-                        .toStdString();
-                return false;
-            }
-        } else if (!workerClient->mkdir(task.dst.toStdString(), err, 0755)) {
-            return false;
-        }
-        updateProgress(task.taskId, 1, 1, 0, 0);
-        publishUpdated({task.taskId});
-        return true;
-    }
-    if (task.type == TransferTask::Type::DeleteLocalFile) {
-        if (!QFileInfo::exists(task.dst) || QFile::remove(task.dst)) {
-            updateProgress(task.taskId, 1, 1, 0, 0);
-            publishUpdated({task.taskId});
-            return true;
-        }
-        err =
-            QCoreApplication::translate("TransferManager",
-                                        "Could not delete local file")
-                .toUtf8()
-                .toStdString();
-        return false;
-    }
-    if (task.type == TransferTask::Type::DeleteLocalDirectory) {
-        if (!QFileInfo::exists(task.dst) || QDir().rmdir(task.dst)) {
-            updateProgress(task.taskId, 1, 1, 0, 0);
-            publishUpdated({task.taskId});
-            return true;
-        }
-        err =
-            QCoreApplication::translate(
-                "TransferManager",
-                "Could not delete local directory (it may not be empty)")
-                .toUtf8()
-                .toStdString();
-        return false;
-    }
-    if (task.type == TransferTask::Type::DeleteRemoteFile ||
-        task.type == TransferTask::Type::DeleteRemoteDirectory) {
-        const bool deleted =
-            task.type == TransferTask::Type::DeleteRemoteDirectory
-                ? workerClient->removeDir(task.dst.toStdString(), err)
-                : workerClient->removeFile(task.dst.toStdString(), err);
-        if (!deleted) {
-            const openscp::RemoteError remoteError =
-                workerClient->lastOperationError();
-            if (remoteError.kind == openscp::RemoteErrorKind::NotFound) {
-                err.clear();
-            } else {
-                return false;
-            }
-        }
-        updateProgress(task.taskId, 1, 1, 0, 0);
-        publishUpdated({task.taskId});
-        return true;
-    }
-
-    std::size_t lastDone = 0;
-    auto lastTick = Clock::now();
-    auto taskWindowStart = lastTick;
-    qint64 lastNotification = 0;
-
-    auto progress = [this, &task, &lastDone, &lastTick, &taskWindowStart,
-                     &lastNotification](std::size_t done,
-                                        std::size_t total) mutable {
-        const quint64 delta = done >= lastDone ? done - lastDone : done;
-        if (delta > 0 && !throttleGlobal(task.taskId, delta))
-            return;
-
-        int taskLimit = 0;
-        {
-            std::lock_guard<std::mutex> lock(mtx_);
-            const TransferTask *storedTask =
-                taskForIdLocked(task.taskId);
-            if (storedTask)
-                taskLimit = storedTask->speedLimitKBps;
-        }
-        if (!throttleTask(task.taskId, delta, taskLimit, taskWindowStart))
-            return;
-
-        const auto now = Clock::now();
-        const double elapsed =
-            std::chrono::duration<double>(now - lastTick).count();
-        const double speed =
-            elapsed > 0.000001 && delta > 0
-                ? (double(delta) / kKiB) / elapsed
-                : 0.0;
-        int eta = -1;
-        if (total > done && speed > 0)
-            eta = int((double(total - done) / kKiB) / speed);
-        else if (total > 0 && done >= total)
-            eta = 0;
-        updateProgress(task.taskId, done, total, speed, eta);
-
-        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-        if (nowMs - lastNotification >= kUiProgressIntervalMs ||
-            (total > 0 && done >= total)) {
-            lastNotification = nowMs;
-            publishUpdated({task.taskId});
-        }
-        lastDone = done;
-        lastTick = Clock::now();
+    TransferExecutor::Callbacks callbacks;
+    callbacks.shouldCancel = [this, taskId = task.taskId] {
+        return shouldCancel(taskId);
     };
-
-    const auto cancel = [this, id = task.taskId] {
-        return shouldCancel(id);
+    callbacks.acquireGlobalBandwidth = [this, taskId = task.taskId](
+                                               quint64 bytes) {
+        return bandwidthLimiter_.acquire(
+            taskId, bytes, [this](std::uint64_t candidateTaskId) {
+                return shouldCancel(candidateTaskId);
+            });
     };
-    bool success = false;
-    if (task.type == TransferTask::Type::Upload) {
-        success = workerClient->put(task.src.toStdString(),
-                                    task.dst.toStdString(), err, progress,
-                                    cancel, resume);
-    } else {
-        success = workerClient->get(task.src.toStdString(),
-                                    task.dst.toStdString(), err, progress,
-                                    cancel, resume);
-    }
-    if (!success)
-        return false;
-
-    if (task.type == TransferTask::Type::Download) {
-        openscp::FileInfo remoteInfo{};
-        std::string statError;
-        (void)workerClient->stat(task.src.toStdString(), remoteInfo,
-                                 statError);
-        if (remoteInfo.mtime > 0) {
-            QFile localFile(task.dst);
-            const QDateTime timestamp = QDateTime::fromSecsSinceEpoch(
-                qint64(remoteInfo.mtime), QTimeZone::utc());
-            if (localFile.exists() &&
-                !localFile.setFileTime(timestamp,
-                                       QFileDevice::FileModificationTime)) {
-                qCWarning(ocXfer) << "Could not preserve downloaded mtime";
-            }
-        }
-    }
-    return true;
+    callbacks.taskSpeedLimitKBps = [this, taskId = task.taskId] {
+        std::lock_guard<std::mutex> lock(mtx_);
+        const TransferTask *storedTask = taskForIdLocked(taskId);
+        return storedTask ? storedTask->speedLimitKBps : 0;
+    };
+    callbacks.progress =
+        [this, taskId = task.taskId](std::size_t done, std::size_t total,
+                                    double measuredKBps, int etaSeconds,
+                                    bool publishNow) {
+            updateProgress(taskId, done, total, measuredKBps, etaSeconds);
+            if (publishNow)
+                publishUpdated({taskId});
+        };
+    return TransferExecutor::run(task, workerClient, resume, err, callbacks);
 }
 
 bool TransferManager::runPostAction(
     TransferTask &task,
     const std::shared_ptr<openscp::RemoteClient> &workerClient,
     std::string &err) {
-    if (task.postAction != TransferPostAction::DeleteSource)
-        return true;
-    if (task.type == TransferTask::Type::Upload) {
-        if (!QFileInfo::exists(task.src) || QFile::remove(task.src))
-            return true;
-        err =
-            QCoreApplication::translate(
-                "TransferManager",
-                "Transfer completed, but the local source could not be removed")
-                .toUtf8()
-                .toStdString();
-        return false;
-    }
-    if (workerClient &&
-        workerClient->removeFile(task.src.toStdString(), err)) {
-        return true;
-    }
-    if (workerClient &&
-        workerClient->lastOperationError().kind ==
-            openscp::RemoteErrorKind::NotFound) {
-        err.clear();
-        return true;
-    }
-    if (err.empty())
-        err =
-            QCoreApplication::translate(
-                "TransferManager",
-                "Transfer completed, but the remote source could not be "
-                "removed")
-                .toUtf8()
-                .toStdString();
-    return false;
+    return TransferExecutor::runPostAction(task, workerClient, err);
 }
 
 void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
@@ -2399,7 +2024,7 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
                     TransferTask *storedTask =
                         taskForIdLocked(task.taskId);
                     if (storedTask) {
-                        if (!isTerminal(storedTask->status))
+                        if (!isTerminalTransferStatus(storedTask->status))
                             ++terminalTaskCount_;
                         storedTask->status = Status::Skipped;
                         storedTask->phase = TransferPhase::Finished;
@@ -2463,7 +2088,7 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
                     TransferTask *storedTask =
                         taskForIdLocked(task.taskId);
                     if (storedTask) {
-                        if (!isTerminal(storedTask->status))
+                        if (!isTerminalTransferStatus(storedTask->status))
                             ++terminalTaskCount_;
                         storedTask->status = Status::Warning;
                         storedTask->phase = TransferPhase::DeleteSource;
@@ -2538,7 +2163,7 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
                 TransferTask *storedTask =
                     taskForIdLocked(task.taskId);
                 if (storedTask) {
-                    if (!isTerminal(storedTask->status))
+                    if (!isTerminalTransferStatus(storedTask->status))
                         ++terminalTaskCount_;
                     storedTask->status = Status::Warning;
                     storedTask->commitUncertain = true;
@@ -2638,10 +2263,10 @@ QVector<quint64> TransferManager::pruneTerminalHistoryLocked() {
     QVector<quint64> removed;
     QSet<quint64> removedBatches;
     std::vector<std::unique_ptr<TransferTask>> kept;
-    kept.reserve(tasks_.size() - toRemove);
-    for (auto &taskNode : tasks_) {
+    kept.reserve(queueStore_.nodes().size() - toRemove);
+    for (auto &taskNode : queueStore_.nodes()) {
         const auto &task = *taskNode;
-        if (toRemove > 0 && isTerminal(task.status) &&
+        if (toRemove > 0 && isTerminalTransferStatus(task.status) &&
             !activeTaskIds_.count(task.taskId)) {
             removed.push_back(task.taskId);
             removedBatches.insert(task.batchId);
@@ -2650,7 +2275,7 @@ QVector<quint64> TransferManager::pruneTerminalHistoryLocked() {
             kept.push_back(std::move(taskNode));
         }
     }
-    tasks_.swap(kept);
+    queueStore_.nodes().swap(kept);
     rebuildTaskLookupLocked();
     for (quint64 batchId : removedBatches)
         forgetBatchPolicyIfUnusedLocked(batchId);
@@ -2693,9 +2318,9 @@ void TransferManager::finishWorkerTask(quint64 taskId, qint64 precheckMs,
             const qint64 now = QDateTime::currentMSecsSinceEpoch();
             while (foundDependent) {
                 foundDependent = false;
-                for (auto &candidateNode : tasks_) {
+                for (auto &candidateNode : queueStore_.nodes()) {
                     auto &candidate = *candidateNode;
-                    if (isTerminal(candidate.status) ||
+                    if (isTerminalTransferStatus(candidate.status) ||
                         !failedPrerequisites.contains(
                             candidate.dependsOnTaskId)) {
                         continue;
@@ -2883,131 +2508,29 @@ bool TransferManager::restorePersistenceFile(QString &warning) {
         std::lock_guard<std::mutex> lock(persistenceMutex_);
         path = persistencePath_;
     }
-    QFile file(path);
-    if (!file.exists())
-        return true;
-    if (!file.open(QIODevice::ReadOnly)) {
-        warning = tr("The saved transfer queue could not be read: %1")
-                      .arg(file.errorString());
+    auto result =
+        TransferQueuePersistence::load(path, sessionIdentity());
+    if (result.shouldBlockWrites()) {
+        std::lock_guard<std::mutex> lock(persistenceMutex_);
+        persistenceBlocked_ = true;
+    }
+    warning = result.warning;
+    if (!result.succeeded())
         return false;
-    }
-    QJsonParseError parseError;
-    const QJsonDocument document =
-        QJsonDocument::fromJson(file.readAll(), &parseError);
-    if (parseError.error != QJsonParseError::NoError ||
-        !document.isObject()) {
-        {
-            std::lock_guard<std::mutex> lock(persistenceMutex_);
-            persistenceBlocked_ = true;
-        }
-        warning = tr("The saved transfer queue is corrupt and was preserved "
-                     "without changes.");
-        return false;
-    }
-    const QJsonObject root = document.object();
-    if (root.value(QStringLiteral("schemaVersion")).toInt(-1) != 1) {
-        {
-            std::lock_guard<std::mutex> lock(persistenceMutex_);
-            persistenceBlocked_ = true;
-        }
-        warning = tr("The saved transfer queue uses a newer format and was "
-                     "preserved without changes.");
-        return false;
-    }
-
-    QVector<TransferTask> restored;
-    const QJsonArray array = root.value(QStringLiteral("tasks")).toArray();
-    restored.reserve(array.size());
-    for (const QJsonValue &value : array) {
-        if (!value.isObject())
-            continue;
-        const QJsonObject object = value.toObject();
-        const auto id = parseTaskId(object.value(QStringLiteral("id")));
-        const QString type = object.value(QStringLiteral("type")).toString();
-        TransferTask::Type taskType = TransferTask::Type::Download;
-        if (type == QStringLiteral("upload"))
-            taskType = TransferTask::Type::Upload;
-        else if (type == QStringLiteral("local-directory"))
-            taskType = TransferTask::Type::CreateLocalDirectory;
-        else if (type == QStringLiteral("remote-directory"))
-            taskType = TransferTask::Type::CreateRemoteDirectory;
-        else if (type == QStringLiteral("delete-local-file"))
-            taskType = TransferTask::Type::DeleteLocalFile;
-        else if (type == QStringLiteral("delete-local-directory"))
-            taskType = TransferTask::Type::DeleteLocalDirectory;
-        else if (type == QStringLiteral("delete-remote-file"))
-            taskType = TransferTask::Type::DeleteRemoteFile;
-        else if (type == QStringLiteral("delete-remote-directory"))
-            taskType = TransferTask::Type::DeleteRemoteDirectory;
-        const QString source = object.value(QStringLiteral("source")).toString();
-        const QString destination =
-            object.value(QStringLiteral("destination")).toString();
-        const bool requiresSource =
-            taskType == TransferTask::Type::Upload ||
-            taskType == TransferTask::Type::Download;
-        if (!id.has_value() || destination.isEmpty() ||
-            (requiresSource && source.isEmpty())) {
-            continue;
-        }
-        TransferTask task{taskType};
-        task.taskId = *id;
-        task.batchId =
-            parseTaskId(object.value(QStringLiteral("batchId"))).value_or(*id);
-        task.dependsOnTaskId =
-            parseTaskId(object.value(QStringLiteral("dependsOnTaskId")))
-                .value_or(0);
-        task.sessionKey =
-            object.value(QStringLiteral("sessionKey")).toString();
-        task.src = source;
-        task.dst = destination;
-        task.resumeHint =
-            object.value(QStringLiteral("resumeHint")).toBool(false);
-        task.speedLimitKBps =
-            std::max(0, object.value(QStringLiteral("speedLimitKBps")).toInt());
-        task.attempts = std::clamp(
-            object.value(QStringLiteral("attempts")).toInt(), 0, 3);
-        // Version 1 defines exactly three attempts including the initial one.
-        // Ignore older/tampered per-task values to keep retry behavior stable.
-        task.maxAttempts = 3;
-        task.batchId = task.batchId == 0 ? task.taskId : task.batchId;
-        task.operation = operationFromName(
-            object.value(QStringLiteral("operation")).toString());
-        task.conflictPolicy = policyFromName(
-            object.value(QStringLiteral("conflictPolicy")).toString());
-        task.postAction =
-            task.operation == TransferOperation::Move
-                ? TransferPostAction::DeleteSource
-                : TransferPostAction::None;
-        task.phase = phaseFromName(
-            object.value(QStringLiteral("phase")).toString());
-        task.commitUncertain =
-            object.value(QStringLiteral("commitUncertain")).toBool(false);
-        task.queuedAtMs =
-            object.value(QStringLiteral("queuedAtMs")).toVariant().toLongLong();
-        if (task.queuedAtMs <= 0)
-            task.queuedAtMs = QDateTime::currentMSecsSinceEpoch();
-        task.restored = true;
-        task.status =
-            !currentSessionKey_.isEmpty() && !task.sessionKey.isEmpty() &&
-                    task.sessionKey != currentSessionKey_
-                ? Status::WaitingForConnection
-                : Status::Paused;
-        restored.push_back(std::move(task));
-    }
 
     QVector<quint64> ids;
     {
         std::lock_guard<std::mutex> lock(mtx_);
-        if (!tasks_.empty()) {
+        if (!queueStore_.nodes().empty()) {
             warning = tr("The saved transfer queue was not restored because "
                          "the current queue is not empty.");
             return false;
         }
-        tasks_.reserve(static_cast<std::size_t>(restored.size()));
-        for (auto &task : restored)
+        queueStore_.nodes().reserve(static_cast<std::size_t>(result.tasks.size()));
+        for (auto &task : result.tasks)
             appendTaskLocked(std::move(task));
-        for (const auto &taskNode : tasks_) {
-            const auto &task = *taskNode;
+        for (const auto &taskNode : queueStore_.nodes()) {
+            const TransferTask &task = *taskNode;
             ids.push_back(task.taskId);
             nextId_ = std::max(nextId_, task.taskId + 1);
             nextBatchId_ = std::max(nextBatchId_, task.batchId + 1);
@@ -3031,89 +2554,16 @@ bool TransferManager::writePersistenceFile(QString &warning) {
         path = persistencePath_;
     }
 
-    QJsonArray serialized;
+    QVector<TransferTask> snapshot;
     {
         std::lock_guard<std::mutex> lock(mtx_);
-        for (const auto &taskNode : tasks_) {
-            const auto &task = *taskNode;
-            const bool cleanupPending =
-                task.status == Status::Warning &&
-                task.phase == TransferPhase::DeleteSource;
-            if (isTerminal(task.status) && !cleanupPending)
-                continue;
-            QJsonObject object;
-            object.insert(QStringLiteral("id"), taskIdString(task.taskId));
-            object.insert(QStringLiteral("batchId"),
-                          taskIdString(task.batchId));
-            if (task.dependsOnTaskId != 0) {
-                object.insert(QStringLiteral("dependsOnTaskId"),
-                              taskIdString(task.dependsOnTaskId));
-            }
-            QString type = QStringLiteral("download");
-            if (task.type == TransferTask::Type::Upload)
-                type = QStringLiteral("upload");
-            else if (task.type ==
-                     TransferTask::Type::CreateLocalDirectory)
-                type = QStringLiteral("local-directory");
-            else if (task.type ==
-                     TransferTask::Type::CreateRemoteDirectory)
-                type = QStringLiteral("remote-directory");
-            else if (task.type == TransferTask::Type::DeleteLocalFile)
-                type = QStringLiteral("delete-local-file");
-            else if (task.type == TransferTask::Type::DeleteLocalDirectory)
-                type = QStringLiteral("delete-local-directory");
-            else if (task.type == TransferTask::Type::DeleteRemoteFile)
-                type = QStringLiteral("delete-remote-file");
-            else if (task.type == TransferTask::Type::DeleteRemoteDirectory)
-                type = QStringLiteral("delete-remote-directory");
-            object.insert(QStringLiteral("type"), type);
-            object.insert(QStringLiteral("sessionKey"), task.sessionKey);
-            object.insert(QStringLiteral("source"), task.src);
-            object.insert(QStringLiteral("destination"), task.dst);
-            object.insert(QStringLiteral("resumeHint"), task.resumeHint);
-            object.insert(QStringLiteral("speedLimitKBps"),
-                          task.speedLimitKBps);
-            object.insert(QStringLiteral("attempts"), task.attempts);
-            object.insert(QStringLiteral("maxAttempts"), task.maxAttempts);
-            object.insert(QStringLiteral("operation"),
-                          operationName(task.operation));
-            object.insert(QStringLiteral("conflictPolicy"),
-                          policyName(task.conflictPolicy));
-            object.insert(QStringLiteral("phase"), phaseName(task.phase));
-            object.insert(QStringLiteral("commitUncertain"),
-                          task.commitUncertain);
-            object.insert(QStringLiteral("queuedAtMs"),
-                          QString::number(task.queuedAtMs));
-            serialized.append(object);
-        }
+        snapshot.reserve(static_cast<qsizetype>(queueStore_.nodes().size()));
+        for (const auto &taskNode : queueStore_.nodes())
+            snapshot.push_back(*taskNode);
     }
-
-    const QFileInfo info(path);
-    if (!QDir().mkpath(info.dir().absolutePath())) {
-        warning = tr("The transfer queue storage directory could not be "
-                     "created.");
-        return false;
-    }
-    QSaveFile save(path);
-    save.setDirectWriteFallback(false);
-    if (!save.open(QIODevice::WriteOnly)) {
-        warning = tr("The transfer queue could not be saved: %1")
-                      .arg(save.errorString());
-        return false;
-    }
-    save.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    QJsonObject root;
-    root.insert(QStringLiteral("schemaVersion"), 1);
-    root.insert(QStringLiteral("tasks"), serialized);
-    const QByteArray data = QJsonDocument(root).toJson(QJsonDocument::Compact);
-    if (save.write(data) != data.size() || !save.commit()) {
-        warning = tr("The transfer queue could not be saved: %1")
-                      .arg(save.errorString());
-        return false;
-    }
-    QFile::setPermissions(path, QFileDevice::ReadOwner |
-                                   QFileDevice::WriteOwner);
-    return true;
+    const auto result = TransferQueuePersistence::save(path, snapshot);
+    warning = result.warning;
+    return result.succeeded;
 }
 
 void TransferManager::persistNow() {

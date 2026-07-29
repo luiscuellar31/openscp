@@ -169,8 +169,6 @@ class SettingsDialog : public QDialog {
     class QSpinBox *maxDepthSpin_ = nullptr; // Advanced/maxFolderDepth
     class QSpinBox *sessionHealthIntervalSecSpin_ =
         nullptr; // remote session health probe interval
-    class QSpinBox *remoteWriteabilityTtlMsSpin_ =
-        nullptr; // cache ttl for remote writeability checks
     QPushButton *applyBtn_ =
         nullptr; // Apply button (enabled only when modified)
     QPushButton *closeBtn_ = nullptr; // Close button (never primary/default)

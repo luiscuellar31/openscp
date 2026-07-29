@@ -1,7 +1,12 @@
 // Persistent, concurrent transfer queue manager.
 #pragma once
 
-#include "ConflictCoordinator.hpp"
+#include "BandwidthLimiter.hpp"
+#include "TransferExecutor.hpp"
+#include "TransferQueuePersistence.hpp"
+#include "TransferQueueStore.hpp"
+#include "TransferScheduler.hpp"
+#include "TransferTypes.hpp"
 #include "openscp/SftpTypes.hpp"
 
 #include <QObject>
@@ -12,7 +17,6 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <deque>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -28,74 +32,6 @@ struct TransferManagerTestAccess;
 namespace openscp {
 class RemoteClient;
 }
-
-enum class TransferOperation { Copy, Move };
-enum class TransferPostAction { None, DeleteSource };
-enum class TransferPhase { Transfer, DeleteSource, Finished };
-
-struct TransferBatchOptions {
-    quint64 batchId = 0;
-    QString sessionKey;
-    TransferOperation operation = TransferOperation::Copy;
-    TransferConflictPolicy conflictPolicy = TransferConflictPolicy::Ask;
-    // Optional persistent prerequisite. Used by ordered synchronization plans;
-    // the task becomes runnable only after this task completes successfully.
-    quint64 dependsOnTaskId = 0;
-};
-
-// Transfer queue item. The structure intentionally remains a value type so
-// views and persistence can consume immutable snapshots safely.
-struct TransferTask {
-    enum class Type {
-        Upload,
-        Download,
-        CreateLocalDirectory,
-        CreateRemoteDirectory,
-        DeleteLocalFile,
-        DeleteLocalDirectory,
-        DeleteRemoteFile,
-        DeleteRemoteDirectory
-    } type;
-    quint64 taskId = 0;
-    quint64 batchId = 0;
-    quint64 dependsOnTaskId = 0;
-    QString sessionKey;
-    QString src; // local for uploads, remote for downloads
-    QString dst; // remote for uploads, local for downloads
-    bool resumeHint = false;
-    int speedLimitKBps = 0;
-    int progress = 0;
-    quint64 bytesDone = 0;
-    quint64 bytesTotal = 0;
-    double currentSpeedKBps = 0.0;
-    int etaSeconds = -1;
-    int attempts = 0;
-    int maxAttempts = 3; // includes the initial attempt
-    qint64 queuedAtMs = 0;
-    qint64 startedAtMs = 0;
-    qint64 nextRetryAtMs = 0;
-    qint64 finishedAtMs = 0;
-    TransferOperation operation = TransferOperation::Copy;
-    TransferConflictPolicy conflictPolicy = TransferConflictPolicy::Ask;
-    TransferPostAction postAction = TransferPostAction::None;
-    TransferPhase phase = TransferPhase::Transfer;
-    bool restored = false;
-    bool commitUncertain = false;
-
-    enum class Status {
-        Queued,
-        Running,
-        Paused,
-        Done,
-        Error,
-        Canceled,
-        WaitingForConnection,
-        RetryWaiting,
-        Skipped,
-        Warning
-    } status = Status::Queued;
-    QString error;
-};
 
 class TransferManager : public QObject {
     Q_OBJECT
@@ -115,7 +51,9 @@ class TransferManager : public QObject {
     void setMaxConcurrent(int maxConcurrent);
     int maxConcurrent() const { return maxConcurrent_.load(); }
     void setGlobalSpeedLimitKBps(int kbps);
-    int globalSpeedLimitKBps() const { return globalSpeedKBps_.load(); }
+    int globalSpeedLimitKBps() const {
+        return bandwidthLimiter_.limitKBps();
+    }
     bool isQueuePaused() const { return paused_.load(); }
 
     void pauseTask(quint64 taskId);
@@ -201,26 +139,23 @@ class TransferManager : public QObject {
     QString currentSessionKey_;
     quint64 sessionGeneration_ = 1;
 
-    // The vector provides cache-friendly scheduling by index while each task
-    // lives in its own node. Growing or compacting the vector therefore never
-    // invalidates pointers held by the O(1) lookup table.
-    std::vector<std::unique_ptr<TransferTask>> tasks_;
-    std::unordered_map<quint64, TransferTask *> tasksById_;
+    TransferQueueStore queueStore_;
     quint64 nextId_ = 1;
     quint64 nextBatchId_ = 1;
-    int schedulingCursor_ = 0;
     int terminalTaskCount_ = 0;
+    TransferScheduler scheduler_;
 
     std::atomic<bool> paused_{false};
     std::atomic<bool> shuttingDown_{false};
     std::atomic<int> running_{0};
     std::atomic<int> maxConcurrent_{2};
-    std::atomic<int> globalSpeedKBps_{0};
     std::atomic<bool> compatibilityChangePending_{false};
 
     mutable std::mutex mtx_;
     std::condition_variable workCv_;
     std::condition_variable idleCv_;
+    std::mutex retryMutex_;
+    std::condition_variable retryCv_;
     std::mutex connFactoryMutex_;
     std::vector<std::unique_ptr<WorkerSlot>> workerSlots_;
 
@@ -232,18 +167,7 @@ class TransferManager : public QObject {
     std::unordered_map<quint64, std::string> reservationByTask_;
     ConflictCoordinator conflictCoordinator_;
 
-    // Shared token bucket. Waiters are queued explicitly to keep concurrent
-    // workers fair instead of allowing a fast callback to monopolize tokens.
-    struct RateWaiter {
-        quint64 taskId = 0;
-        quint64 bytes = 0;
-    };
-    std::mutex rateMutex_;
-    std::condition_variable rateCv_;
-    std::deque<RateWaiter *> rateWaiters_;
-    double rateTokens_ = 0.0;
-    std::chrono::steady_clock::time_point rateLastRefill_{};
-    int rateConfiguredKBps_ = 0;
+    BandwidthLimiter bandwidthLimiter_;
 
     QTimer *persistenceTimer_ = nullptr;
     QTimer *compatibilityTimer_ = nullptr;
@@ -319,10 +243,6 @@ class TransferManager : public QObject {
 
     void updateProgress(quint64 taskId, std::size_t done, std::size_t total,
                         double measuredKBps, int etaSeconds);
-    bool throttleGlobal(quint64 taskId, quint64 bytes);
-    bool throttleTask(quint64 taskId, quint64 bytes, int taskLimitKBps,
-                      std::chrono::steady_clock::time_point &windowStart);
-
     void finishWorkerTask(quint64 taskId, qint64 precheckMs,
                           qint64 transferStartedMs);
     void transitionToQueued(TransferTask &task, qint64 nowMs, bool resume);

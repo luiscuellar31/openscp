@@ -2,8 +2,11 @@
 #include "MainWindow.hpp"
 #include "MainWindowSharedUtils.hpp"
 #include "PermissionsDialog.hpp"
+#include "RemoteActionController.hpp"
 #include "RemoteModel.hpp"
 #include "RemoteOperationController.hpp"
+#include "SessionController.hpp"
+#include "TerminalCommandBuilder.hpp"
 #include "TransferManager.hpp"
 #include "UiAlerts.hpp"
 
@@ -19,7 +22,6 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPointer>
-#include <QProcess>
 #include <QProgressDialog>
 #include <QScrollBar>
 #include <QSet>
@@ -27,8 +29,6 @@
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTreeView>
-
-#include <string>
 
 static constexpr int NAME_COL = 0;
 
@@ -42,543 +42,6 @@ static QString tempDownloadPathFor(const QString &remoteName) {
 }
 
 // Reveal a file in the system file manager (select/highlight when possible),
-
-static bool indicatesRemoteWriteabilityDenied(const QString &raw) {
-    const QString lower = raw.trimmed().toLower();
-    if (lower.isEmpty())
-        return false;
-    return lower.contains("permission denied") ||
-           lower.contains("read-only") ||
-           lower.contains("operation not permitted") ||
-           lower.contains("access denied") ||
-           lower.contains("sftp protocol error 3");
-}
-
-static QString trimOptionalString(const std::optional<std::string> &v) {
-    if (!v || v->empty())
-        return {};
-    return QString::fromStdString(*v).trimmed();
-}
-
-static QString shellSingleQuote(const QString &value) {
-    QString escaped = value;
-    escaped.replace(QStringLiteral("'"), QStringLiteral("'\"'\"'"));
-    return QStringLiteral("'") + escaped + QStringLiteral("'");
-}
-
-static QString shellJoinQuoted(const QStringList &args) {
-    QStringList quoted;
-    quoted.reserve(args.size());
-    for (const QString &arg : args)
-        quoted.push_back(shellSingleQuote(arg));
-    return quoted.join(QLatin1Char(' '));
-}
-
-static QString defaultKnownHostsPath() {
-    const QString home = QDir::homePath();
-    if (home.isEmpty())
-        return {};
-    return QDir(home).filePath(QStringLiteral(".ssh/known_hosts"));
-}
-
-static bool buildOpenSshProxyCommand(const openscp::SessionOptions &opt,
-                                     QString *proxyCommandOut,
-                                     QString *errorOut) {
-    if (proxyCommandOut)
-        proxyCommandOut->clear();
-    if (errorOut)
-        errorOut->clear();
-
-    if (!proxyCommandOut)
-        return false;
-
-    if (opt.proxy_type == openscp::ProxyType::None) {
-        if (errorOut) {
-            *errorOut = QCoreApplication::translate(
-                "MainWindow", "Proxy command requested without proxy settings.");
-        }
-        return false;
-    }
-
-    const QString proxyHost = QString::fromStdString(opt.proxy_host).trimmed();
-    const std::uint16_t proxyPort = opt.proxy_port;
-    if (proxyHost.isEmpty() || proxyPort == 0) {
-        if (errorOut) {
-            *errorOut = QCoreApplication::translate(
-                "MainWindow",
-                "Proxy host/port is missing for terminal command.");
-        }
-        return false;
-    }
-
-    const bool wantsProxyAuth =
-        (opt.proxy_username && !opt.proxy_username->empty()) ||
-        (opt.proxy_password && !opt.proxy_password->empty());
-    if (wantsProxyAuth) {
-        if (errorOut) {
-            *errorOut = QCoreApplication::translate(
-                "MainWindow",
-                "Open in terminal is unavailable for authenticated proxies "
-                "because terminal command arguments could expose the proxy "
-                "password.");
-        }
-        return false;
-    }
-
-    const QString ncExe = QStandardPaths::findExecutable(QStringLiteral("nc"));
-    if (!ncExe.isEmpty()) {
-        QStringList ncArgs;
-        ncArgs << ncExe << QStringLiteral("-x")
-               << QStringLiteral("%1:%2").arg(proxyHost).arg(proxyPort);
-        if (opt.proxy_type == openscp::ProxyType::Socks5) {
-            ncArgs << QStringLiteral("-X") << QStringLiteral("5");
-        } else if (opt.proxy_type == openscp::ProxyType::HttpConnect) {
-            ncArgs << QStringLiteral("-X") << QStringLiteral("connect");
-        } else {
-            if (errorOut) {
-                *errorOut = QCoreApplication::translate(
-                    "MainWindow",
-                    "Unsupported proxy type for terminal command.");
-            }
-            return false;
-        }
-        ncArgs << QStringLiteral("%h") << QStringLiteral("%p");
-        *proxyCommandOut = shellJoinQuoted(ncArgs);
-        return true;
-    }
-
-    const QString ncatExe = QStandardPaths::findExecutable(QStringLiteral("ncat"));
-    if (!ncatExe.isEmpty()) {
-        QString ncatProxyType;
-        if (opt.proxy_type == openscp::ProxyType::Socks5)
-            ncatProxyType = QStringLiteral("socks5");
-        else if (opt.proxy_type == openscp::ProxyType::HttpConnect)
-            ncatProxyType = QStringLiteral("http");
-        if (ncatProxyType.isEmpty()) {
-            if (errorOut) {
-                *errorOut = QCoreApplication::translate(
-                    "MainWindow",
-                    "Unsupported proxy type for terminal command.");
-            }
-            return false;
-        }
-        QStringList ncatArgs;
-        ncatArgs << ncatExe << QStringLiteral("--proxy")
-                 << QStringLiteral("%1:%2").arg(proxyHost).arg(proxyPort)
-                 << QStringLiteral("--proxy-type") << ncatProxyType
-                 << QStringLiteral("%h") << QStringLiteral("%p");
-        *proxyCommandOut = shellJoinQuoted(ncatArgs);
-        return true;
-    }
-
-    if (errorOut) {
-        *errorOut = QCoreApplication::translate(
-            "MainWindow",
-            "Could not find a proxy helper for terminal mode (tried: nc, ncat).");
-    }
-    return false;
-}
-
-static bool buildRemoteTerminalSshCommand(const openscp::SessionOptions &opt,
-                                          const QString &remotePath,
-                                          bool forceInteractiveLogin,
-                                          QString *commandOut,
-                                          QString *errorOut) {
-    if (commandOut)
-        commandOut->clear();
-    if (errorOut)
-        errorOut->clear();
-
-    if (!commandOut)
-        return false;
-
-    const QString sshExe = QStandardPaths::findExecutable(QStringLiteral("ssh"));
-    if (sshExe.isEmpty()) {
-        if (errorOut) {
-            *errorOut = QCoreApplication::translate(
-                "MainWindow", "OpenSSH client was not found in PATH.");
-        }
-        return false;
-    }
-
-    const QString host = QString::fromStdString(opt.host).trimmed();
-    const QString user = QString::fromStdString(opt.username).trimmed();
-    if (host.isEmpty() || user.isEmpty()) {
-        if (errorOut) {
-            *errorOut = QCoreApplication::translate(
-                "MainWindow",
-                "Session is missing host or username information.");
-        }
-        return false;
-    }
-
-    QStringList args;
-    args << sshExe << QStringLiteral("-tt");
-    args << QStringLiteral("-p") << QString::number(opt.port);
-
-    if (opt.known_hosts_policy == openscp::KnownHostsPolicy::Off) {
-        args << QStringLiteral("-o") << QStringLiteral("StrictHostKeyChecking=no");
-        args << QStringLiteral("-o")
-             << QStringLiteral("UserKnownHostsFile=/dev/null");
-    } else {
-        const QString strictValue =
-            (opt.known_hosts_policy == openscp::KnownHostsPolicy::AcceptNew)
-                ? QStringLiteral("accept-new")
-                : QStringLiteral("yes");
-        args << QStringLiteral("-o")
-             << QStringLiteral("StrictHostKeyChecking=%1").arg(strictValue);
-
-        QString khPath = trimOptionalString(opt.known_hosts_path);
-        if (khPath.isEmpty())
-            khPath = defaultKnownHostsPath();
-        if (!khPath.isEmpty()) {
-            const QString normalizedKh =
-                QDir::fromNativeSeparators(QDir::cleanPath(khPath));
-            args << QStringLiteral("-o")
-                 << QStringLiteral("UserKnownHostsFile=%1").arg(normalizedKh);
-        }
-    }
-
-    if (forceInteractiveLogin) {
-        args << QStringLiteral("-o") << QStringLiteral("PubkeyAuthentication=no");
-        args << QStringLiteral("-o")
-             << QStringLiteral(
-                    "PreferredAuthentications=keyboard-interactive,password");
-    } else {
-        const QString keyPath = trimOptionalString(opt.private_key_path);
-        if (!keyPath.isEmpty()) {
-            const QString normalizedKey =
-                QDir::fromNativeSeparators(QDir::cleanPath(keyPath));
-            args << QStringLiteral("-i") << normalizedKey;
-            args << QStringLiteral("-o") << QStringLiteral("IdentitiesOnly=yes");
-        }
-    }
-
-    const QString jumpHost = trimOptionalString(opt.jump_host);
-    const bool useJump = !jumpHost.isEmpty();
-    const bool useProxy = (opt.proxy_type != openscp::ProxyType::None);
-    if (useJump && useProxy) {
-        if (errorOut) {
-            *errorOut = QCoreApplication::translate(
-                "MainWindow",
-                "Proxy and SSH jump host cannot be used together in the same "
-                "terminal command.");
-        }
-        return false;
-    }
-
-    if (useJump) {
-        const QString jumpUser = trimOptionalString(opt.jump_username);
-        const QString jumpKeyPath = trimOptionalString(opt.jump_private_key_path);
-        const std::uint16_t jumpPort = (opt.jump_port == 0) ? 22 : opt.jump_port;
-
-        if (jumpKeyPath.isEmpty()) {
-            QString jumpSpec = jumpHost;
-            if (!jumpUser.isEmpty())
-                jumpSpec = jumpUser + QStringLiteral("@") + jumpSpec;
-            if (jumpPort != 22)
-                jumpSpec += QStringLiteral(":") + QString::number(jumpPort);
-            args << QStringLiteral("-J") << jumpSpec;
-        } else {
-            QStringList jumpCmd;
-            jumpCmd << QStringLiteral("ssh");
-            jumpCmd << QStringLiteral("-W") << QStringLiteral("%h:%p");
-            jumpCmd << QStringLiteral("-p") << QString::number(jumpPort);
-            if (!jumpUser.isEmpty())
-                jumpCmd << QStringLiteral("-l") << jumpUser;
-            jumpCmd << QStringLiteral("-i")
-                    << QDir::fromNativeSeparators(
-                           QDir::cleanPath(jumpKeyPath));
-            jumpCmd << QStringLiteral("-o")
-                    << QStringLiteral("IdentitiesOnly=yes");
-            jumpCmd << jumpHost;
-            args << QStringLiteral("-o")
-                 << QStringLiteral("ProxyCommand=%1").arg(shellJoinQuoted(jumpCmd));
-        }
-    } else if (useProxy) {
-        QString proxyCommand;
-        QString proxyErr;
-        if (!buildOpenSshProxyCommand(opt, &proxyCommand, &proxyErr)) {
-            if (errorOut) {
-                *errorOut = proxyErr.isEmpty()
-                                ? QCoreApplication::translate(
-                                      "MainWindow",
-                                      "Could not build proxy command for "
-                                      "terminal mode.")
-                                : proxyErr;
-            }
-            return false;
-        }
-        args << QStringLiteral("-o")
-             << QStringLiteral("ProxyCommand=%1").arg(proxyCommand);
-    }
-
-    args << QStringLiteral("%1@%2").arg(user, host);
-    const QString remoteInit =
-        QStringLiteral(
-            "cd -- %1 2>/dev/null || cd /; exec ${SHELL:-/bin/sh} -l")
-            .arg(shellSingleQuote(normalizeRemotePath(remotePath)));
-    args << remoteInit;
-
-    *commandOut = shellJoinQuoted(args);
-    return true;
-}
-
-static bool buildRemoteSftpCliCommand(const openscp::SessionOptions &opt,
-                                      const QString &remotePath,
-                                      bool forceInteractiveLogin,
-                                      QString *commandOut,
-                                      QString *errorOut) {
-    if (commandOut)
-        commandOut->clear();
-    if (errorOut)
-        errorOut->clear();
-
-    if (!commandOut)
-        return false;
-
-    const QString sftpExe = QStandardPaths::findExecutable(QStringLiteral("sftp"));
-    if (sftpExe.isEmpty()) {
-        if (errorOut) {
-            *errorOut = QCoreApplication::translate(
-                "MainWindow", "OpenSSH sftp client was not found in PATH.");
-        }
-        return false;
-    }
-
-    const QString host = QString::fromStdString(opt.host).trimmed();
-    const QString user = QString::fromStdString(opt.username).trimmed();
-    if (host.isEmpty() || user.isEmpty()) {
-        if (errorOut) {
-            *errorOut = QCoreApplication::translate(
-                "MainWindow",
-                "Session is missing host or username information.");
-        }
-        return false;
-    }
-
-    QStringList args;
-    args << sftpExe;
-    args << QStringLiteral("-P") << QString::number(opt.port);
-
-    if (opt.known_hosts_policy == openscp::KnownHostsPolicy::Off) {
-        args << QStringLiteral("-o") << QStringLiteral("StrictHostKeyChecking=no");
-        args << QStringLiteral("-o")
-             << QStringLiteral("UserKnownHostsFile=/dev/null");
-    } else {
-        const QString strictValue =
-            (opt.known_hosts_policy == openscp::KnownHostsPolicy::AcceptNew)
-                ? QStringLiteral("accept-new")
-                : QStringLiteral("yes");
-        args << QStringLiteral("-o")
-             << QStringLiteral("StrictHostKeyChecking=%1").arg(strictValue);
-
-        QString khPath = trimOptionalString(opt.known_hosts_path);
-        if (khPath.isEmpty())
-            khPath = defaultKnownHostsPath();
-        if (!khPath.isEmpty()) {
-            const QString normalizedKh =
-                QDir::fromNativeSeparators(QDir::cleanPath(khPath));
-            args << QStringLiteral("-o")
-                 << QStringLiteral("UserKnownHostsFile=%1").arg(normalizedKh);
-        }
-    }
-
-    if (forceInteractiveLogin) {
-        args << QStringLiteral("-o") << QStringLiteral("PubkeyAuthentication=no");
-        args << QStringLiteral("-o")
-             << QStringLiteral(
-                    "PreferredAuthentications=keyboard-interactive,password");
-    } else {
-        const QString keyPath = trimOptionalString(opt.private_key_path);
-        if (!keyPath.isEmpty()) {
-            const QString normalizedKey =
-                QDir::fromNativeSeparators(QDir::cleanPath(keyPath));
-            args << QStringLiteral("-i") << normalizedKey;
-            args << QStringLiteral("-o") << QStringLiteral("IdentitiesOnly=yes");
-        }
-    }
-
-    const QString jumpHost = trimOptionalString(opt.jump_host);
-    const bool useJump = !jumpHost.isEmpty();
-    const bool useProxy = (opt.proxy_type != openscp::ProxyType::None);
-    if (useJump && useProxy) {
-        if (errorOut) {
-            *errorOut = QCoreApplication::translate(
-                "MainWindow",
-                "Proxy and SSH jump host cannot be used together in the same "
-                "terminal command.");
-        }
-        return false;
-    }
-
-    if (useJump) {
-        const QString jumpUser = trimOptionalString(opt.jump_username);
-        const QString jumpKeyPath = trimOptionalString(opt.jump_private_key_path);
-        const std::uint16_t jumpPort = (opt.jump_port == 0) ? 22 : opt.jump_port;
-
-        if (jumpKeyPath.isEmpty()) {
-            QString jumpSpec = jumpHost;
-            if (!jumpUser.isEmpty())
-                jumpSpec = jumpUser + QStringLiteral("@") + jumpSpec;
-            if (jumpPort != 22)
-                jumpSpec += QStringLiteral(":") + QString::number(jumpPort);
-            args << QStringLiteral("-J") << jumpSpec;
-        } else {
-            QStringList jumpCmd;
-            jumpCmd << QStringLiteral("ssh");
-            jumpCmd << QStringLiteral("-W") << QStringLiteral("%h:%p");
-            jumpCmd << QStringLiteral("-p") << QString::number(jumpPort);
-            if (!jumpUser.isEmpty())
-                jumpCmd << QStringLiteral("-l") << jumpUser;
-            jumpCmd << QStringLiteral("-i")
-                    << QDir::fromNativeSeparators(
-                           QDir::cleanPath(jumpKeyPath));
-            jumpCmd << QStringLiteral("-o")
-                    << QStringLiteral("IdentitiesOnly=yes");
-            jumpCmd << jumpHost;
-            args << QStringLiteral("-o")
-                 << QStringLiteral("ProxyCommand=%1").arg(shellJoinQuoted(jumpCmd));
-        }
-    } else if (useProxy) {
-        QString proxyCommand;
-        QString proxyErr;
-        if (!buildOpenSshProxyCommand(opt, &proxyCommand, &proxyErr)) {
-            if (errorOut) {
-                *errorOut = proxyErr.isEmpty()
-                                ? QCoreApplication::translate(
-                                      "MainWindow",
-                                      "Could not build proxy command for "
-                                      "terminal mode.")
-                                : proxyErr;
-            }
-            return false;
-        }
-        args << QStringLiteral("-o")
-             << QStringLiteral("ProxyCommand=%1").arg(proxyCommand);
-    }
-
-    const QString target =
-        QStringLiteral("%1@%2:%3")
-            .arg(user, host, normalizeRemotePath(remotePath));
-    args << target;
-    *commandOut = shellJoinQuoted(args);
-    return true;
-}
-
-static QString buildSshWithSftpFallbackCommand(const QString &sshCommand,
-                                               const QString &sftpCommand) {
-    if (sftpCommand.trimmed().isEmpty())
-        return sshCommand;
-
-    // OpenSSH returns 255 for transport/session errors (for example PTY denied).
-    return QStringLiteral(
-               "%1; _openscp_ssh_status=$?; "
-               "if [ \"$_openscp_ssh_status\" -eq 255 ]; then "
-               "printf '%s\\n' %2; "
-               "%3; "
-               "fi")
-        .arg(sshCommand,
-             shellSingleQuote(QCoreApplication::translate(
-                 "MainWindow",
-                 "OpenSCP: SSH shell was not available. Falling back to SFTP "
-                 "CLI.")),
-             sftpCommand);
-}
-
-static QString appleScriptStringLiteral(const QString &raw) {
-    QString escaped = raw;
-    escaped.replace(QStringLiteral("\\"), QStringLiteral("\\\\"));
-    escaped.replace(QStringLiteral("\""), QStringLiteral("\\\""));
-    return QStringLiteral("\"") + escaped + QStringLiteral("\"");
-}
-
-static bool launchShellCommandInSystemTerminal(const QString &shellCommand,
-                                               QString *errorOut) {
-    if (errorOut)
-        errorOut->clear();
-
-#ifdef Q_OS_MAC
-    const QString osaExe =
-        QStandardPaths::findExecutable(QStringLiteral("osascript"));
-    if (osaExe.isEmpty()) {
-        if (errorOut) {
-            *errorOut = QCoreApplication::translate(
-                "MainWindow", "Could not locate osascript.");
-        }
-        return false;
-    }
-    const QString line1 = QStringLiteral("tell application \"Terminal\" to activate");
-    const QString line2 =
-        QStringLiteral("tell application \"Terminal\" to do script %1")
-            .arg(appleScriptStringLiteral(shellCommand));
-    if (!QProcess::startDetached(osaExe,
-                                 {QStringLiteral("-e"), line1,
-                                  QStringLiteral("-e"), line2})) {
-        if (errorOut) {
-            *errorOut = QCoreApplication::translate(
-                "MainWindow", "Could not launch Terminal.app.");
-        }
-        return false;
-    }
-    return true;
-#elif defined(Q_OS_LINUX)
-    auto tryLaunch = [&](const QString &program,
-                         const QStringList &args) -> bool {
-        const QString exe = QStandardPaths::findExecutable(program);
-        return !exe.isEmpty() && QProcess::startDetached(exe, args);
-    };
-    if (tryLaunch(QStringLiteral("x-terminal-emulator"),
-                  {QStringLiteral("-e"), QStringLiteral("sh"),
-                   QStringLiteral("-lc"), shellCommand})) {
-        return true;
-    }
-    if (tryLaunch(QStringLiteral("gnome-terminal"),
-                  {QStringLiteral("--"), QStringLiteral("sh"),
-                   QStringLiteral("-lc"), shellCommand})) {
-        return true;
-    }
-    if (tryLaunch(QStringLiteral("konsole"),
-                  {QStringLiteral("-e"), QStringLiteral("sh"),
-                   QStringLiteral("-lc"), shellCommand})) {
-        return true;
-    }
-    if (tryLaunch(QStringLiteral("xfce4-terminal"),
-                  {QStringLiteral("--command"),
-                   QStringLiteral("sh -lc %1").arg(shellSingleQuote(shellCommand))})) {
-        return true;
-    }
-    if (tryLaunch(QStringLiteral("xterm"),
-                  {QStringLiteral("-e"), QStringLiteral("sh"),
-                   QStringLiteral("-lc"), shellCommand})) {
-        return true;
-    }
-    if (tryLaunch(QStringLiteral("alacritty"),
-                  {QStringLiteral("-e"), QStringLiteral("sh"),
-                   QStringLiteral("-lc"), shellCommand})) {
-        return true;
-    }
-    if (tryLaunch(QStringLiteral("kitty"),
-                  {QStringLiteral("sh"), QStringLiteral("-lc"),
-                   shellCommand})) {
-        return true;
-    }
-
-    if (errorOut) {
-        *errorOut = QCoreApplication::translate(
-            "MainWindow",
-            "No compatible terminal emulator was found.");
-    }
-    return false;
-#else
-    if (errorOut) {
-        *errorOut = QCoreApplication::translate(
-            "MainWindow",
-            "Open in terminal action is not supported on this platform.");
-    }
-    return false;
-#endif
-}
 
 void MainWindow::goUpRight() {
     if (rightIsRemote_) {
@@ -614,13 +77,13 @@ void MainWindow::goHomeRight() {
 }
 
 void MainWindow::openRightRemoteTerminal() {
-    if (!rightIsRemote_ || !activeSessionOptions_.has_value()) {
+    if (!rightIsRemote_ || !sessionController_->options().has_value()) {
         UiAlerts::information(this, tr("Open in terminal"),
                               tr("The right panel must be connected as remote."));
         return;
     }
 
-    const openscp::SessionOptions &sessionOptions = *activeSessionOptions_;
+    const openscp::SessionOptions &sessionOptions = *sessionController_->options();
     const QString remotePath = normalizeRemotePath(
         rightRemoteModel_ ? rightRemoteModel_->rootPath()
                           : (rightPath_ ? rightPath_->text() : QString()));
@@ -630,36 +93,22 @@ void MainWindow::openRightRemoteTerminal() {
     const bool enableSftpCliFallback =
         settings.value("Terminal/enableSftpCliFallback", true).toBool();
 
-    QString command;
-    QString prepareError;
-    if (!buildRemoteTerminalSshCommand(sessionOptions, remotePath,
-                                       forceInteractiveLogin,
-                                       &command, &prepareError)) {
+    const openscpui::TerminalCommandBuilder terminalCommands;
+    const openscpui::TerminalCommandResult command =
+        terminalCommands.prepare(sessionOptions, remotePath,
+                                 forceInteractiveLogin,
+                                 enableSftpCliFallback);
+    if (!command.isValid()) {
         UiAlerts::warning(
             this, tr("Open in terminal"),
             tr("Could not prepare the terminal command.\n%1")
-                .arg(prepareError.isEmpty() ? tr("Unknown error.")
-                                            : prepareError));
+                .arg(command.error.isEmpty() ? tr("Unknown error.")
+                                             : command.error));
         return;
     }
 
-    QString sftpFallbackCommand;
-    bool hasSftpFallback = false;
-    if (enableSftpCliFallback) {
-        hasSftpFallback = buildRemoteSftpCliCommand(
-            sessionOptions, remotePath, forceInteractiveLogin,
-            &sftpFallbackCommand, nullptr);
-        if (!hasSftpFallback)
-            sftpFallbackCommand.clear();
-    }
-
-    const QString launchCommand = hasSftpFallback
-                                      ? buildSshWithSftpFallbackCommand(
-                                            command, sftpFallbackCommand)
-                                      : command;
-
     QString launchError;
-    if (!launchShellCommandInSystemTerminal(launchCommand, &launchError)) {
+    if (!terminalCommands.launch(command.command, &launchError)) {
         UiAlerts::warning(
             this, tr("Open in terminal"),
             tr("Could not open a remote terminal.\n%1")
@@ -668,11 +117,12 @@ void MainWindow::openRightRemoteTerminal() {
         return;
     }
 
+    const bool hasPrivateKey =
+        sessionOptions.private_key_path.has_value() &&
+        !sessionOptions.private_key_path->empty();
     const bool hasSavedPassword = sessionOptions.password.has_value() &&
                                   !sessionOptions.password->empty() &&
-                                  trimOptionalString(
-                                      sessionOptions.private_key_path)
-                                      .isEmpty();
+                                  !hasPrivateKey;
     QString statusMessage = tr("Opening remote terminal at %1").arg(remotePath);
     if (forceInteractiveLogin) {
         statusMessage += tr(" (interactive login required)");
@@ -680,7 +130,7 @@ void MainWindow::openRightRemoteTerminal() {
         statusMessage +=
             tr(" (password may be requested by OpenSSH for security)");
     }
-    if (hasSftpFallback) {
+    if (command.hasSftpFallback) {
         statusMessage += tr(" (auto-fallback to SFTP CLI enabled)");
     }
     statusBar()->showMessage(statusMessage, 6000);
@@ -855,7 +305,7 @@ void MainWindow::downloadRightToLeft() {
                                  tr("The right panel is not remote."));
         return;
     }
-    if (!sftp_) {
+    if (!sessionController_->client()) {
         UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
@@ -984,7 +434,7 @@ void MainWindow::copyRightToLeft() {
     }
 
     // Remote -> Local: enqueue downloads
-    if (!sftp_ || !rightRemoteModel_) {
+    if (!sessionController_->client() || !rightRemoteModel_) {
         UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
@@ -1328,7 +778,7 @@ void MainWindow::moveRightToLeft() {
 
 
 void MainWindow::uploadViaDialog() {
-    if (!rightIsRemote_ || !sftp_) {
+    if (!rightIsRemote_ || !sessionController_->client()) {
         UiAlerts::information(
             this, tr("Upload"),
             tr("The right panel is not remote or there is no active session."));
@@ -1404,44 +854,10 @@ void MainWindow::newDirRight() {
     if (!promptValidEntryName(this, tr("New folder"), tr("Name:"), {}, name))
         return;
     if (rightIsRemote_) {
-        if (!remoteOps_ || !remoteOps_->hasRequestedSession() ||
-            !rightRemoteModel_)
+        if (!remoteActionController_ || !rightRemoteModel_)
             return;
-        const QString remoteDirPath =
-            joinRemotePath(rightRemoteModel_->rootPath(), name);
-        const QString base = rightRemoteModel_->rootPath();
-        auto jobId =
-            std::make_shared<RemoteOperationController::JobId>(0);
-        auto connection = std::make_shared<QMetaObject::Connection>();
-        *connection = connect(
-            remoteOps_, &RemoteOperationController::mutationCompleted, this,
-            [this, jobId, connection, base](
-                const RemoteOperationController::MutationResult &result) {
-                if (result.result.job.id != *jobId)
-                    return;
-                QObject::disconnect(*connection);
-                if (!rightIsRemote_)
-                    return;
-                if (result.result.outcome !=
-                    RemoteOperationController::Outcome::Succeeded) {
-                    invalidateRemoteWriteabilityFromError(result.result.error);
-                    UiAlerts::critical(
-                        this, tr("Remote"),
-                        tr("Could not create the remote folder.\n%1")
-                            .arg(shortRemoteError(result.result.error,
-                                                  tr("Remote error"))));
-                    return;
-                }
-                lastSuccessfulRemoteActivityAtMs_ =
-                    QDateTime::currentMSecsSinceEpoch();
-                requestRemoteListing(base, true);
-                cacheCurrentRemoteWriteability(true);
-            });
-        RemoteOperationController::MkdirRequest request;
-        request.path = remoteDirPath;
-        request.mode = 0755;
-        *jobId = remoteOps_->submit(request);
-        statusBar()->showMessage(tr("Creating remote folder…"), 0);
+        remoteActionController_->createDirectory(
+            rightRemoteModel_->rootPath(), name);
     } else {
         QDir base(rightPath_->text());
         if (!base.mkpath(base.filePath(name))) {
@@ -1459,90 +875,10 @@ void MainWindow::newFileRight() {
     if (!promptValidEntryName(this, tr("New file"), tr("Name:"), {}, name))
         return;
     if (rightIsRemote_) {
-        if (!remoteOps_ || !remoteOps_->hasRequestedSession() ||
-            !rightRemoteModel_)
+        if (!remoteActionController_ || !rightRemoteModel_)
             return;
-        const QString remotePath =
-            joinRemotePath(rightRemoteModel_->rootPath(), name);
-        const QString base = rightRemoteModel_->rootPath();
-        auto submitCreate = [this, remotePath, base](bool overwrite) {
-            auto createJob =
-                std::make_shared<RemoteOperationController::JobId>(0);
-            auto createConnection =
-                std::make_shared<QMetaObject::Connection>();
-            *createConnection = connect(
-                remoteOps_,
-                &RemoteOperationController::mutationCompleted, this,
-                [this, createJob, createConnection, remotePath, base](
-                    const RemoteOperationController::MutationResult &result) {
-                    if (result.result.job.id != *createJob)
-                        return;
-                    QObject::disconnect(*createConnection);
-                    if (!rightIsRemote_)
-                        return;
-                    if (result.result.outcome !=
-                        RemoteOperationController::Outcome::Succeeded) {
-                        invalidateRemoteWriteabilityFromError(
-                            result.result.error);
-                        UiAlerts::critical(
-                            this, tr("Remote"),
-                            tr("Could not create the remote file.\n%1")
-                                .arg(shortRemoteError(result.result.error,
-                                                      tr("Remote error"))));
-                        return;
-                    }
-                    lastSuccessfulRemoteActivityAtMs_ =
-                        QDateTime::currentMSecsSinceEpoch();
-                    requestRemoteListing(base, true);
-                    cacheCurrentRemoteWriteability(true);
-                    statusBar()->showMessage(
-                        tr("File created: ") + remotePath, 4000);
-                });
-            RemoteOperationController::CreateFileRequest createRequest;
-            createRequest.path = remotePath;
-            createRequest.overwrite = overwrite;
-            *createJob = remoteOps_->submit(createRequest);
-            statusBar()->showMessage(tr("Creating remote file…"), 0);
-        };
-
-        auto statJob =
-            std::make_shared<RemoteOperationController::JobId>(0);
-        auto statConnection = std::make_shared<QMetaObject::Connection>();
-        *statConnection = connect(
-            remoteOps_, &RemoteOperationController::statCompleted, this,
-            [this, statJob, statConnection, submitCreate, name](
-                const RemoteOperationController::StatResult &result) {
-                if (result.result.job.id != *statJob)
-                    return;
-                QObject::disconnect(*statConnection);
-                if (!rightIsRemote_)
-                    return;
-                if (result.result.outcome !=
-                    RemoteOperationController::Outcome::Succeeded) {
-                    UiAlerts::critical(
-                        this, tr("Remote"),
-                        tr("Could not check whether the remote file already "
-                           "exists.\n%1")
-                            .arg(shortRemoteError(result.result.error,
-                                                  tr("Remote error"))));
-                    return;
-                }
-                lastSuccessfulRemoteActivityAtMs_ =
-                    QDateTime::currentMSecsSinceEpoch();
-                if (result.found &&
-                    UiAlerts::question(
-                        this, tr("File exists"),
-                        tr("«%1» already exists.\nOverwrite?").arg(name),
-                        QMessageBox::Yes | QMessageBox::No) !=
-                        QMessageBox::Yes) {
-                    return;
-                }
-                submitCreate(result.found);
-            });
-        RemoteOperationController::StatRequest statRequest;
-        statRequest.path = remotePath;
-        *statJob = remoteOps_->submit(statRequest);
-        statusBar()->showMessage(tr("Checking remote file…"), 0);
+        remoteActionController_->createFile(
+            rightRemoteModel_->rootPath(), name);
     } else {
         QDir base(rightPath_->text());
         const QString path = base.filePath(name);
@@ -1577,8 +913,7 @@ void MainWindow::renameRightSelected() {
         return;
     }
     if (rightIsRemote_) {
-        if (!remoteOps_ || !remoteOps_->hasRequestedSession() ||
-            !rightRemoteModel_)
+        if (!remoteActionController_ || !rightRemoteModel_)
             return;
         const QModelIndex selectedIndex = rows.first();
         const QString oldName = rightRemoteModel_->nameAt(selectedIndex);
@@ -1593,42 +928,8 @@ void MainWindow::renameRightSelected() {
             UiAlerts::warning(this, tr("Invalid name"), invalidReason);
             return;
         }
-        const QString base = rightRemoteModel_->rootPath();
-        const QString sourcePath = joinRemotePath(base, oldName);
-        const QString targetPath = joinRemotePath(base, newName);
-        auto jobId =
-            std::make_shared<RemoteOperationController::JobId>(0);
-        auto connection = std::make_shared<QMetaObject::Connection>();
-        *connection = connect(
-            remoteOps_, &RemoteOperationController::mutationCompleted, this,
-            [this, jobId, connection, base](
-                const RemoteOperationController::MutationResult &result) {
-                if (result.result.job.id != *jobId)
-                    return;
-                QObject::disconnect(*connection);
-                if (!rightIsRemote_)
-                    return;
-                if (result.result.outcome !=
-                    RemoteOperationController::Outcome::Succeeded) {
-                    invalidateRemoteWriteabilityFromError(result.result.error);
-                    UiAlerts::critical(
-                        this, tr("Remote"),
-                        tr("Could not rename the remote item.\n%1")
-                            .arg(shortRemoteError(result.result.error,
-                                                  tr("Remote error"))));
-                    return;
-                }
-                lastSuccessfulRemoteActivityAtMs_ =
-                    QDateTime::currentMSecsSinceEpoch();
-                requestRemoteListing(base, true);
-                cacheCurrentRemoteWriteability(true);
-            });
-        RemoteOperationController::RenameRequest request;
-        request.from = sourcePath;
-        request.to = targetPath;
-        request.overwrite = false;
-        *jobId = remoteOps_->submit(request);
-        statusBar()->showMessage(tr("Renaming remote item…"), 0);
+        remoteActionController_->rename(
+            rightRemoteModel_->rootPath(), oldName, newName);
     } else {
         const QModelIndex selectedIndex = rows.first();
         const QFileInfo selectedFileInfo = rightLocalModel_->fileInfo(selectedIndex);
@@ -1655,7 +956,7 @@ void MainWindow::renameRightSelected() {
 }
 
 void MainWindow::deleteRightSelected() {
-    auto selectionModel = rightView_->selectionModel();
+    auto *selectionModel = rightView_->selectionModel();
     if (!selectionModel)
         return;
     const auto rows = selectionModel->selectedRows();
@@ -1664,172 +965,41 @@ void MainWindow::deleteRightSelected() {
         return;
     }
     if (rightIsRemote_) {
-        if (!remoteOps_ || !remoteOps_->hasRequestedSession() ||
-            !rightRemoteModel_)
+        if (!remoteActionController_ || !rightRemoteModel_)
             return;
-        if (UiAlerts::warning(this, tr("Confirm delete"),
-                                 tr("This will permanently delete items on the "
-                                    "remote server.\nContinue?"),
-                                 QMessageBox::Yes | QMessageBox::No) !=
-            QMessageBox::Yes)
-            return;
-        const QString base = rightRemoteModel_->rootPath();
-        struct DeleteState {
-            QSet<RemoteOperationController::JobId> pending;
-            quint64 deletedCount = 0;
-            quint64 failedCount = 0;
-            int completedRequests = 0;
-            bool canceled = false;
-            QString lastError;
-            QString base;
-            QPointer<QProgressDialog> progress;
-            QMetaObject::Connection mutationConnection;
-            QMetaObject::Connection progressConnection;
-        };
-        auto state = std::make_shared<DeleteState>();
-        state->base = base;
-        state->progress = new QProgressDialog(
-            tr("Deleting remote items…"), tr("Cancel"), 0, rows.size(), this);
-        state->progress->setWindowTitle(tr("Delete"));
-        state->progress->setWindowModality(Qt::NonModal);
-        state->progress->setMinimumDuration(0);
-        state->progress->setAutoClose(false);
-        state->progress->show();
-
-        state->mutationConnection = connect(
-            remoteOps_, &RemoteOperationController::mutationCompleted, this,
-            [this, state](
-                const RemoteOperationController::MutationResult &result) {
-                if (!state->pending.remove(result.result.job.id))
-                    return;
-                ++state->completedRequests;
-                state->deletedCount += result.affectedEntries;
-                state->failedCount += result.failedEntries;
-                if (result.result.outcome !=
-                    RemoteOperationController::Outcome::Succeeded) {
-                    if (result.result.outcome ==
-                        RemoteOperationController::Outcome::Canceled) {
-                        state->canceled = true;
-                    } else if (result.failedEntries == 0) {
-                        ++state->failedCount;
-                    }
-                    if (!result.result.error.isEmpty())
-                        state->lastError = result.result.error;
-                }
-                if (state->progress)
-                    state->progress->setValue(state->completedRequests);
-                if (!state->pending.isEmpty())
-                    return;
-
-                QObject::disconnect(state->mutationConnection);
-                QObject::disconnect(state->progressConnection);
-                if (state->progress) {
-                    state->progress->hide();
-                    state->progress->deleteLater();
-                    state->progress.clear();
-                }
-                if (!rightIsRemote_)
-                    return;
-                QString statusMessage =
-                    tr("Deleted OK: %1  |  Failed: %2")
-                        .arg(state->deletedCount)
-                        .arg(state->failedCount);
-                if (state->canceled)
-                    statusMessage += QStringLiteral("  |  ") + tr("Canceled");
-                if (state->failedCount > 0 &&
-                    !state->lastError.isEmpty()) {
-                    statusMessage +=
-                        QStringLiteral("\n") + tr("Last error: ") +
-                        state->lastError;
-                }
-                statusBar()->showMessage(statusMessage, 6000);
-                if (state->failedCount > 0)
-                    invalidateRemoteWriteabilityFromError(state->lastError);
-                if (state->failedCount == 0 &&
-                    state->deletedCount > 0) {
-                    cacheCurrentRemoteWriteability(true);
-                    lastSuccessfulRemoteActivityAtMs_ =
-                        QDateTime::currentMSecsSinceEpoch();
-                }
-                requestRemoteListing(state->base, true);
-            });
-        state->progressConnection = connect(
-            remoteOps_, &RemoteOperationController::jobProgress, this,
-            [state](const RemoteOperationController::Progress &progress) {
-                if (!state->pending.contains(progress.job.id) ||
-                    !state->progress) {
-                    return;
-                }
-                state->progress->setLabelText(
-                    QCoreApplication::translate(
-                        "MainWindow",
-                        "Deleting %1\nRemoved: %2  |  Failed: %3")
-                        .arg(progress.currentPath)
-                        .arg(progress.affectedEntries)
-                        .arg(progress.failedEntries));
-            });
-        connect(state->progress, &QProgressDialog::canceled, this,
-                [this, state] {
-                    state->canceled = true;
-                    if (!remoteOps_)
-                        return;
-                    const auto pending = state->pending;
-                    for (const auto jobId : pending)
-                        remoteOps_->cancel(jobId);
-                });
-
+        QVector<openscpui::RemoteActionController::Entry> entries;
+        entries.reserve(rows.size());
         for (const QModelIndex &index : rows) {
-            RemoteOperationController::DeleteRequest request;
-            request.path =
-                joinRemotePath(base, rightRemoteModel_->nameAt(index));
-            request.kind =
-                rightRemoteModel_->isDir(index)
-                    ? RemoteOperationController::DeleteKind::Directory
-                    : RemoteOperationController::DeleteKind::File;
-            request.recursive =
-                request.kind ==
-                RemoteOperationController::DeleteKind::Directory;
-            request.traversal.includeHidden = true;
-            request.traversal.skipSymlinks = true;
-            request.traversal.maxDepth = 32;
-            request.traversal.batchSize = 250;
-            const auto jobId = remoteOps_->submit(request);
-            if (jobId != 0)
-                state->pending.insert(jobId);
+            entries.push_back({rightRemoteModel_->nameAt(index),
+                               rightRemoteModel_->isDir(index)});
         }
-        if (state->pending.isEmpty()) {
-            QObject::disconnect(state->mutationConnection);
-            QObject::disconnect(state->progressConnection);
-            state->progress->deleteLater();
-            UiAlerts::warning(this, tr("Remote"),
-                              tr("Could not start remote deletion."));
-        }
-    } else {
-        if (UiAlerts::warning(
-                this, tr("Confirm delete"),
-                tr("This will permanently delete on local disk.\nContinue?"),
-                QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
-            return;
-        int deletedCount = 0;
-        int failedCount = 0;
-        for (const QModelIndex &idx : rows) {
-            const QFileInfo selectedFileInfo = rightLocalModel_->fileInfo(idx);
-            bool removed =
-                selectedFileInfo.isDir()
-                    ? QDir(selectedFileInfo.absoluteFilePath()).removeRecursively()
-                    : QFile::remove(selectedFileInfo.absoluteFilePath());
-            if (removed)
-                ++deletedCount;
-            else
-                ++failedCount;
-        }
-        statusBar()->showMessage(
-            QString(tr("Deleted: %1  |  Failed: %2"))
-                .arg(deletedCount)
-                .arg(failedCount),
-            5000);
-        setRightRoot(rightPath_->text());
+        remoteActionController_->remove(rightRemoteModel_->rootPath(),
+                                        entries);
+        return;
     }
+
+    if (UiAlerts::warning(
+            this, tr("Confirm delete"),
+            tr("This will permanently delete on local disk.\nContinue?"),
+            QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
+        return;
+    }
+    int deletedCount = 0;
+    int failedCount = 0;
+    for (const QModelIndex &index : rows) {
+        const QFileInfo selectedFileInfo = rightLocalModel_->fileInfo(index);
+        const bool removed =
+            selectedFileInfo.isDir()
+                ? QDir(selectedFileInfo.absoluteFilePath()).removeRecursively()
+                : QFile::remove(selectedFileInfo.absoluteFilePath());
+        removed ? ++deletedCount : ++failedCount;
+    }
+    statusBar()->showMessage(
+        tr("Deleted: %1  |  Failed: %2")
+            .arg(deletedCount)
+            .arg(failedCount),
+        5000);
+    setRightRoot(rightPath_->text());
 }
 
 // Show context menu for the right pane based on current state.
@@ -1869,8 +1039,8 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
     QVector<QAction *> entries;
     if (rightIsRemote_) {
         const bool supportsRemotePermissions =
-            activeSessionOptions_.has_value() &&
-            openscp::capabilitiesForProtocol(activeSessionOptions_->protocol)
+            sessionController_->options().has_value() &&
+            openscp::capabilitiesForProtocol(sessionController_->options()->protocol)
                 .can_set_permissions;
         // Up option (if applicable)
         if (canGoUp)
@@ -1881,14 +1051,14 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
 
         if (!hasSel) {
             // No selection: creation and navigation
-            if (rightRemoteWritable_) {
+            if (rightRemoteMutationsSupported_) {
                 entries.push_back(actNewFileRight_);
                 entries.push_back(actNewDirRight_);
             }
         } else {
             // With selection on remote
             entries.push_back(actCopyRight_);
-            if (rightRemoteWritable_) {
+            if (rightRemoteMutationsSupported_) {
                 entries.push_back(nullptr);
                 entries.push_back(actUploadRight_);
                 entries.push_back(actNewFileRight_);
@@ -1931,225 +1101,73 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
 }
 
 void MainWindow::changeRemotePermissions() {
-    if (!rightIsRemote_ || !remoteOps_ ||
-        !remoteOps_->hasRequestedSession() || !rightRemoteModel_)
+    if (!rightIsRemote_ || !remoteActionController_ ||
+        !rightRemoteModel_) {
         return;
-    if (!activeSessionOptions_.has_value() ||
-        !openscp::capabilitiesForProtocol(activeSessionOptions_->protocol)
-             .can_set_permissions) {
+    }
+    const auto capabilities =
+        sessionController_->options().has_value()
+            ? openscp::capabilitiesForProtocol(
+                  sessionController_->options()->protocol)
+            : openscp::ProtocolCapabilities{};
+    if (!capabilities.can_set_permissions) {
         UiAlerts::information(
             this, tr("Permissions"),
             tr("Permissions are not supported for the active protocol."));
         return;
     }
-    auto selectionModel = rightView_->selectionModel();
+    auto *selectionModel = rightView_->selectionModel();
     if (!selectionModel)
         return;
     const auto rows = selectionModel->selectedRows();
     if (rows.size() != 1) {
         UiAlerts::information(this, tr("Permissions"),
-                                 tr("Select only one item."));
+                              tr("Select only one item."));
         return;
     }
-    const QModelIndex selectedIndex = rows.first();
-    const QString name = rightRemoteModel_->nameAt(selectedIndex);
-    const QString base = rightRemoteModel_->rootPath();
-    const QString path = joinRemotePath(base, name);
-    auto statJob = std::make_shared<RemoteOperationController::JobId>(0);
-    auto statConnection = std::make_shared<QMetaObject::Connection>();
-    *statConnection = connect(
-        remoteOps_, &RemoteOperationController::statCompleted, this,
-        [this, statJob, statConnection, path, base](
-            const RemoteOperationController::StatResult &result) {
-            if (result.result.job.id != *statJob)
-                return;
-            QObject::disconnect(*statConnection);
-            if (!rightIsRemote_)
-                return;
-            if (result.result.outcome !=
-                    RemoteOperationController::Outcome::Succeeded ||
-                !result.found) {
-                UiAlerts::warning(
-                    this, tr("Permissions"),
-                    tr("Could not read permissions.\n%1")
-                        .arg(shortRemoteError(
-                            result.result.error,
-                            tr("Error reading remote information."))));
-                return;
-            }
-
-            PermissionsDialog dialog(this);
-            dialog.setMode(result.info.mode & 0777);
-            if (dialog.exec() != QDialog::Accepted)
-                return;
-
-            const unsigned int newMode =
-                (result.info.mode & ~0777u) | (dialog.mode() & 0777u);
-            const bool recursive = dialog.recursive() && result.info.is_dir;
-            auto progress = QPointer<QProgressDialog>();
-            if (recursive) {
-                progress = new QProgressDialog(
-                    tr("Changing remote permissions…"), tr("Cancel"), 0, 0,
-                    this);
-                progress->setWindowTitle(tr("Permissions"));
-                progress->setWindowModality(Qt::NonModal);
-                progress->setMinimumDuration(0);
-                progress->setAutoClose(false);
-                progress->show();
-            }
-
-            auto chmodJob =
-                std::make_shared<RemoteOperationController::JobId>(0);
-            auto mutationConnection =
-                std::make_shared<QMetaObject::Connection>();
-            auto progressConnection =
-                std::make_shared<QMetaObject::Connection>();
-            *progressConnection = connect(
-                remoteOps_, &RemoteOperationController::jobProgress, this,
-                [chmodJob, progress](
-                    const RemoteOperationController::Progress &update) {
-                    if (update.job.id != *chmodJob || !progress)
-                        return;
-                    progress->setLabelText(
-                        QCoreApplication::translate(
-                            "MainWindow",
-                            "Changing permissions for %1\nUpdated: %2  |  "
-                            "Failed: %3")
-                            .arg(update.currentPath)
-                            .arg(update.affectedEntries)
-                            .arg(update.failedEntries));
-                });
-            *mutationConnection = connect(
-                remoteOps_,
-                &RemoteOperationController::mutationCompleted, this,
-                [this, chmodJob, mutationConnection, progressConnection,
-                 progress, path, base](
-                    const RemoteOperationController::MutationResult
-                        &mutation) {
-                    if (mutation.result.job.id != *chmodJob)
-                        return;
-                    QObject::disconnect(*mutationConnection);
-                    QObject::disconnect(*progressConnection);
-                    if (progress) {
-                        progress->hide();
-                        progress->deleteLater();
-                    }
-                    if (!rightIsRemote_)
-                        return;
-                    if (mutation.result.outcome !=
-                        RemoteOperationController::Outcome::Succeeded) {
-                        invalidateRemoteWriteabilityFromError(
-                            mutation.result.error);
-                        const QString item =
-                            QFileInfo(path).fileName().isEmpty()
-                                ? path
-                                : QFileInfo(path).fileName();
-                        UiAlerts::critical(
-                            this, tr("Permissions"),
-                            tr("Could not apply permissions to \"%1\".\n%2")
-                                .arg(item,
-                                     shortRemoteError(
-                                         mutation.result.error,
-                                         tr("Error applying changes."))));
-                        return;
-                    }
-                    lastSuccessfulRemoteActivityAtMs_ =
-                        QDateTime::currentMSecsSinceEpoch();
-                    requestRemoteListing(base, true);
-                    cacheCurrentRemoteWriteability(true);
-                    statusBar()->showMessage(
-                        tr("Permissions updated: %1  |  Failed: %2")
-                            .arg(mutation.affectedEntries)
-                            .arg(mutation.failedEntries),
-                        4000);
-                });
-
-            RemoteOperationController::ChmodRequest request;
-            request.path = path;
-            request.mode = newMode;
-            request.recursive = recursive;
-            request.traversal.includeHidden = true;
-            request.traversal.skipSymlinks = true;
-            request.traversal.maxDepth = 32;
-            request.traversal.batchSize = 250;
-            *chmodJob = remoteOps_->submit(request);
-            if (progress) {
-                connect(progress, &QProgressDialog::canceled, this,
-                        [this, chmodJob] {
-                            if (remoteOps_ && *chmodJob != 0)
-                                remoteOps_->cancel(*chmodJob);
-                        });
-            }
-        });
-    RemoteOperationController::StatRequest request;
-    request.path = path;
-    *statJob = remoteOps_->submit(request);
-    statusBar()->showMessage(tr("Reading remote permissions…"), 0);
+    const QModelIndex index = rows.first();
+    remoteActionController_->changePermissions(
+        rightRemoteModel_->rootPath(),
+        {rightRemoteModel_->nameAt(index),
+         rightRemoteModel_->isDir(index)});
 }
 
-void MainWindow::applyRemoteWriteabilityActions() {
+void MainWindow::applyRemoteMutationActions() {
     const openscp::ProtocolCapabilities caps =
-        sftp_ ? sftp_->capabilities() : openscp::ProtocolCapabilities{};
+        sessionController_->client() ? sessionController_->client()->capabilities() : openscp::ProtocolCapabilities{};
+    const auto availability =
+        openscpui::RemoteActionController::availability(
+            caps, rightRemoteMutationsSupported_);
     if (actUploadRight_)
-        actUploadRight_->setEnabled(rightRemoteWritable_ && caps.can_upload);
+        actUploadRight_->setEnabled(availability.canUpload);
     if (actNewDirRight_)
-        actNewDirRight_->setEnabled(rightRemoteWritable_ && caps.can_mkdir);
+        actNewDirRight_->setEnabled(
+            availability.canCreateDirectory);
     if (actNewFileRight_)
-        actNewFileRight_->setEnabled(rightRemoteWritable_ && caps.can_upload);
+        actNewFileRight_->setEnabled(availability.canCreateFile);
     if (actRenameRight_)
-        actRenameRight_->setEnabled(rightRemoteWritable_ && caps.can_rename);
+        actRenameRight_->setEnabled(availability.canRename);
     if (actDeleteRight_)
-        actDeleteRight_->setEnabled(rightRemoteWritable_ && caps.can_delete);
+        actDeleteRight_->setEnabled(availability.canDelete);
     if (actMoveRight_)
-        actMoveRight_->setEnabled(rightRemoteWritable_ && caps.can_download &&
-                                  caps.can_delete);
+        actMoveRight_->setEnabled(availability.canMoveToLocal);
     if (actMoveRightTb_)
-        actMoveRightTb_->setEnabled(rightRemoteWritable_ &&
-                                    caps.can_download && caps.can_delete);
+        actMoveRightTb_->setEnabled(availability.canMoveToLocal);
     updateDeleteShortcutEnables();
-}
-
-void MainWindow::cacheCurrentRemoteWriteability(bool writable) {
-    if (!rightIsRemote_ || !rightRemoteModel_) {
-        rightRemoteWritable_ = false;
-        remoteWriteabilityCache_.clear();
-        applyRemoteWriteabilityActions();
-        return;
-    }
-    const QString base = rightRemoteModel_->rootPath();
-    rightRemoteWritable_ = writable;
-    remoteWriteabilityCache_.insert(
-        base, RemoteWriteabilityCacheEntry{writable,
-                                           QDateTime::currentMSecsSinceEpoch()});
-    if (remoteWriteabilityCache_.size() > 256)
-        remoteWriteabilityCache_.clear();
-    applyRemoteWriteabilityActions();
-}
-
-void MainWindow::invalidateRemoteWriteabilityFromError(
-    const QString &rawError) {
-    if (!rightIsRemote_ || !rightRemoteModel_)
-        return;
-    if (!indicatesRemoteWriteabilityDenied(rawError))
-        return;
-    // Permissions are path- and operation-specific. Keep capability-based
-    // actions available and let the requested operation report its own denial.
-    updateRemoteWriteability();
 }
 
 // Enable operations from protocol capabilities. Permissions are deliberately
 // checked by the real operation; probing with a temporary directory mutates
 // the server and can be both slow and misleading.
-void MainWindow::updateRemoteWriteability() {
-    if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_) {
-        ++remoteWriteabilityProbeSeq_;
-        rightRemoteWritable_ = false;
-        remoteWriteabilityCache_.clear();
-        applyRemoteWriteabilityActions();
+void MainWindow::updateRemoteMutationCapability() {
+    if (!rightIsRemote_ || !sessionController_->client() || !rightRemoteModel_) {
+        rightRemoteMutationsSupported_ = false;
+        applyRemoteMutationActions();
         return;
     }
-    const openscp::ProtocolCapabilities caps = sftp_->capabilities();
-    rightRemoteWritable_ =
-        caps.can_upload || caps.can_mkdir || caps.can_delete || caps.can_rename;
-    applyRemoteWriteabilityActions();
+    const openscp::ProtocolCapabilities caps = sessionController_->client()->capabilities();
+    rightRemoteMutationsSupported_ =
+        openscpui::RemoteActionController::availability(caps)
+            .canMutate;
+    applyRemoteMutationActions();
 }

@@ -506,8 +506,6 @@ SettingsDialog::buildSettingBindings() const {
          queueAutoClearMinutesDefaultSpin_, 1, 1440},
         {"Network/sessionHealthIntervalSec", 600, sessionHealthIntervalSecSpin_,
          60, 86400},
-        {"Network/remoteWriteabilityTtlMs", 15000, remoteWriteabilityTtlMsSpin_,
-         1000, 120000},
         {"Advanced/stagingRetentionDays", 7, stagingRetentionDaysSpin_, 1, 365},
     };
     for (const BoundedSpinBindingSpec &spec : boundedSpinBindings) {
@@ -1034,9 +1032,6 @@ void SettingsDialog::buildNetworkPage(const PageBuildContext &ctx) {
     sessionHealthIntervalSecSpin_ = addSpinRow(
         networkForm, networkPage, tr("Session health check interval:"), 60, 86400,
         600, tr(" s"));
-    remoteWriteabilityTtlMsSpin_ = addSpinRow(
-        networkForm, networkPage, tr("Remote writeability cache TTL:"), 1000,
-        120000, 15000, tr(" ms"), 110, 500);
 }
 
 void SettingsDialog::buildStagingPage(const PageBuildContext &ctx) {
@@ -1170,7 +1165,6 @@ void SettingsDialog::connectDirtyTracking() {
                            globalSpeedDefaultSpin_,
                            queueAutoClearMinutesDefaultSpin_,
                            sessionHealthIntervalSecSpin_,
-                           remoteWriteabilityTtlMsSpin_,
                            stagingRetentionDaysSpin_,
                            stagingPrepTimeoutMsSpin_,
                            stagingConfirmItemsSpin_,

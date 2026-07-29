@@ -1,7 +1,7 @@
 // Shared persistence helpers for saved sites (QSettings array: "sites").
 #pragma once
 
-#include "SiteManagerDialog.hpp"
+#include "SiteEntry.hpp"
 
 #include <QVector>
 
@@ -11,7 +11,7 @@ namespace SavedSitesPersistence {
 
 // Plaintext credentials were used by early OpenSCP versions inside each
 // QSettings site entry. They are exposed only transiently while loading so the
-// UI can migrate them to SecretStore before rewriting the array.
+// credential repository can migrate them before rewriting the array.
 struct LegacySecret {
     int siteIndex = -1;
     QString item;

@@ -2,6 +2,7 @@
 #include "MainWindow.hpp"
 #include "LocalTreeDiscovery.hpp"
 #include "MainWindowSharedUtils.hpp"
+#include "SessionController.hpp"
 #include "RemoteModel.hpp"
 #include "RemoteOperationController.hpp"
 #include "TransferQueueDialog.hpp"
@@ -538,7 +539,7 @@ void MainWindow::runRemoteDownloadPrescan(
 void MainWindow::startLocalUploadDiscovery(
     const QVector<QPair<QString, QString>> &localRemoteRoots,
     bool moveSources, bool dragAndDrop) {
-    if (!transferMgr_ || !sftp_ || !rightIsRemote_) {
+    if (!transferMgr_ || !sessionController_->client() || !rightIsRemote_) {
         UiAlerts::warning(this, tr("Remote"),
                           tr("No active remote session."));
         return;
@@ -1083,7 +1084,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
     if (eventSource == rightViewport) {
         if (event->type() == QEvent::DragEnter) {
             auto *dragEnterEvent = static_cast<QDragEnterEvent *>(event);
-            if (rightIsRemote_ && !rightRemoteWritable_) {
+            if (rightIsRemote_ && !rightRemoteMutationsSupported_) {
                 dragEnterEvent->ignore();
                 return true;
             }
@@ -1091,7 +1092,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
             return true;
         } else if (event->type() == QEvent::DragMove) {
             auto *dragMoveEvent = static_cast<QDragMoveEvent *>(event);
-            if (rightIsRemote_ && !rightRemoteWritable_) {
+            if (rightIsRemote_ && !rightRemoteMutationsSupported_) {
                 dragMoveEvent->ignore();
                 return true;
             }
@@ -1118,7 +1119,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                     return true;
                 }
                 // Block upload if remote is read-only
-                if (!rightRemoteWritable_) {
+                if (!rightRemoteMutationsSupported_) {
                     statusBar()->showMessage(
                         tr("Remote directory is read-only; cannot upload here"),
                         5000);
@@ -1126,7 +1127,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                     return true;
                 }
                 // Upload to remote
-                if (!sftp_ || !rightRemoteModel_) {
+                if (!sessionController_->client() || !rightRemoteModel_) {
                     dropEvent->acceptProposedAction();
                     return true;
                 }

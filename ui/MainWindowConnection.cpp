@@ -4,9 +4,9 @@
 #include "MainWindowSharedUtils.hpp"
 #include "RemoteModel.hpp"
 #include "RemoteOperationController.hpp"
-#include "SavedSiteSecrets.hpp"
 #include "SavedSitesPersistence.hpp"
-#include "SecretStore.hpp"
+#include "SessionController.hpp"
+#include "SiteCredentialRepository.hpp"
 #include "SiteManagerDialog.hpp"
 #include "SyncCoordinator.hpp"
 #include "TransferManager.hpp"
@@ -174,14 +174,10 @@ static bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
            compareWebDavTls;
 }
 
-static QString quickSiteSecretKey(const SiteEntry &entry, const QString &item) {
-    return SavedSiteSecrets::stableKey(entry, item);
-}
-
 struct QuickSitesLoadResult {
     QVector<SiteEntry> sites;
     bool needsSave = false;
-    SavedSiteSecrets::MigrationResult legacyMigration;
+    SiteCredentialMigrationResult legacyMigration;
 };
 
 static QuickSitesLoadResult loadSavedSitesForQuickConnect() {
@@ -194,7 +190,7 @@ static QuickSitesLoadResult loadSavedSitesForQuickConnect() {
     result.sites = loaded.sites;
     result.needsSave = loaded.needsSave;
     result.legacyMigration =
-        SavedSiteSecrets::migrateLegacyPlaintext(loaded);
+        SiteCredentialRepository::migrateLegacyPlaintext(loaded);
     return result;
 }
 
@@ -246,20 +242,6 @@ static QString ensureUniqueQuickSiteName(const QVector<SiteEntry> &sites,
     return base +
            QString(" (%1)").arg(
                QUuid::createUuid().toString(QUuid::WithoutBraces).left(6));
-}
-
-static QString quickPersistStatusShort(SecretStore::PersistStatus status) {
-    switch (status) {
-    case SecretStore::PersistStatus::Stored:
-        return QObject::tr("stored");
-    case SecretStore::PersistStatus::Unavailable:
-        return QObject::tr("unavailable");
-    case SecretStore::PersistStatus::PermissionDenied:
-        return QObject::tr("permission denied");
-    case SecretStore::PersistStatus::BackendError:
-        return QObject::tr("backend error");
-    }
-    return QObject::tr("error");
 }
 
 static void refreshOpenSiteManagerWidget(QPointer<QWidget> siteManager) {
@@ -334,7 +316,7 @@ void MainWindow::ensureRemoteSessionHealthMonitoring() {
                     lastAppInactiveAtMs_ = 0;
                     constexpr qint64 kResumeProbeThresholdMs = 60 * 1000;
                     if (inactiveMs >= kResumeProbeThresholdMs && rightIsRemote_ &&
-                        sftp_) {
+                        sessionController_->client()) {
                         runRemoteSessionHealthCheck(
                             tr("resume (%1s)").arg(inactiveMs / 1000), true);
                     }
@@ -345,7 +327,7 @@ void MainWindow::ensureRemoteSessionHealthMonitoring() {
 }
 
 void MainWindow::startRemoteSessionHealthMonitoring() {
-    if (!rightIsRemote_ || !sftp_)
+    if (!rightIsRemote_ || !sessionController_->client())
         return;
     ensureRemoteSessionHealthMonitoring();
     if (!remoteSessionHealthTimer_)
@@ -372,11 +354,12 @@ void MainWindow::stopRemoteSessionHealthMonitoring() {
 }
 
 void MainWindow::runRemoteSessionHealthCheck(const QString &reason, bool force) {
-    if (!rightIsRemote_ || !sftp_ || !remoteOps_ ||
+    if (!rightIsRemote_ || !sessionController_->client() || !remoteOps_ ||
         !remoteOps_->hasRequestedSession() ||
-        !activeSessionOptions_.has_value())
+        !sessionController_->options().has_value())
         return;
-    if (isDisconnecting_ || connectInProgress_)
+    if (sessionController_->isDisconnecting() ||
+        sessionController_->isConnecting())
         return;
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     constexpr qint64 kRecentRemoteActivityMs = 60 * 1000;
@@ -468,9 +451,9 @@ void MainWindow::connectSftp() { openConnectDialogWithPreset(std::nullopt); }
 
 // Tear down the current remote session and restore local mode.
 quint64 MainWindow::beginDisconnectFlow() {
-    isDisconnecting_ = true;
     stopRemoteSessionHealthMonitoring();
-    const quint64 disconnectSeq = ++disconnectSeq_;
+    const quint64 disconnectSeq =
+        sessionController_->beginDisconnect();
     transferCleanupInProgress_ = (transferMgr_ != nullptr);
     transferCleanupStartedAtMs_ =
         transferCleanupInProgress_ ? QDateTime::currentMSecsSinceEpoch() : 0;
@@ -530,19 +513,15 @@ void MainWindow::applyDisconnectLocalUiState() {
     }
     rightIsRemote_ = false;
     activateScpTransferModeUi(false);
-    pendingRemoteRefreshFromUpload_ = false;
-    seenCompletedUploadTaskIds_.clear();
-    seenCompletedTransferNoticeTaskIds_.clear();
+    transferUiController_.reset();
     restoreRightHeaderState(false);
     if (QDir(rightPath_->text()).exists()) {
         setRightRoot(rightPath_->text());
     } else {
         setRightRoot(QDir::homePath());
     }
-    rightRemoteWritable_ = false;
-    remoteWriteabilityCache_.clear();
-    ++remoteWriteabilityProbeSeq_;
-    activeSessionOptions_.reset();
+    rightRemoteMutationsSupported_ = false;
+    sessionController_->clearOptions();
     sessionNoHostVerification_ = false;
     updateHostPolicyRiskBanner();
     setActionEnabled(actDownloadF7_, false);
@@ -573,7 +552,7 @@ void MainWindow::applyDisconnectLocalUiState() {
 void MainWindow::scheduleDisconnectWatchdog(quint64 disconnectSeq) {
     constexpr int kDisconnectWatchdogMs = 25000;
     QTimer::singleShot(kDisconnectWatchdogMs, this, [this, disconnectSeq]() {
-        if (!isDisconnecting_ || disconnectSeq != disconnectSeq_)
+        if (!sessionController_->isCurrentDisconnect(disconnectSeq))
             return;
         statusBar()->showMessage(
             tr("Disconnect timeout reached; forcing local mode while cleanup "
@@ -605,11 +584,13 @@ bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
             [self, disconnectSeq]() {
                 if (!self)
                     return;
-                if (disconnectSeq == self->disconnectSeq_ &&
+                if (disconnectSeq ==
+                        self->sessionController_->disconnectSequence() &&
                     self->transferCleanupInProgress_) {
                     self->transferCleanupInProgress_ = false;
                     self->transferCleanupStartedAtMs_ = 0;
-                    if (!self->isDisconnecting_ && !self->rightIsRemote_) {
+                    if (!self->sessionController_->isDisconnecting() &&
+                        !self->rightIsRemote_) {
                         if (self->actConnect_)
                             self->actConnect_->setToolTip(
                                 self->actConnect_->text());
@@ -618,7 +599,7 @@ bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
                     }
                 }
                 self->completeDisconnectSftp(disconnectSeq, false);
-                if (!self->isDisconnecting_ &&
+                if (!self->sessionController_->isDisconnecting() &&
                     !self->transferCleanupInProgress_ &&
                     self->pendingCloseAfterDisconnect_) {
                     self->pendingCloseAfterDisconnect_ = false;
@@ -635,7 +616,7 @@ bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
 }
 
 void MainWindow::disconnectSftp() {
-    if (isDisconnecting_)
+    if (sessionController_->isDisconnecting())
         return;
 
     if (transferMgr_) {
@@ -721,8 +702,8 @@ void MainWindow::persistActiveSitePaths() {
         remotePath = QStringLiteral("/");
 
     const auto loaded = SavedSitesPersistence::loadSites();
-    const SavedSiteSecrets::MigrationResult migration =
-        SavedSiteSecrets::migrateLegacyPlaintext(loaded);
+    const SiteCredentialMigrationResult migration =
+        SiteCredentialRepository::migrateLegacyPlaintext(loaded);
     if (!migration.complete) {
         UiAlerts::warning(
             this, tr("Paths not saved"),
@@ -747,13 +728,11 @@ void MainWindow::persistActiveSitePaths() {
 }
 
 void MainWindow::completeDisconnectSftp(quint64 disconnectSeq, bool forced) {
-    if (!isDisconnecting_ || disconnectSeq != disconnectSeq_)
+    if (!sessionController_->isCurrentDisconnect(disconnectSeq))
         return;
     activeSavedSiteContext_.reset();
     pendingSavedSiteContext_.reset();
-    if (sftp_)
-        sftp_->disconnect();
-    sftp_.reset();
+    sessionController_->disconnectClient();
     resetConnectionSessionIndicators();
     if (actConnect_) {
         actConnect_->setEnabled(true);
@@ -762,7 +741,7 @@ void MainWindow::completeDisconnectSftp(quint64 disconnectSeq, bool forced) {
 
     // Per spec: non‑modal Site Manager after disconnect (if enabled), without
     // blocking UI
-    isDisconnecting_ = false;
+    sessionController_->finishDisconnect(disconnectSeq);
     if (forced) {
         statusBar()->showMessage(
             tr("Disconnected (transfer cleanup still finishing in background)"),
@@ -1137,12 +1116,12 @@ bool MainWindow::validateSftpConnectStart(
             4000);
         return false;
     }
-    if (connectInProgress_) {
+    if (sessionController_->isConnecting()) {
         statusBar()->showMessage(tr("A connection is already in progress"),
                                  3000);
         return false;
     }
-    if (rightIsRemote_ || sftp_) {
+    if (rightIsRemote_ || sessionController_->client()) {
         statusBar()->showMessage(tr("An active remote session already exists"),
                                  3000);
         return false;
@@ -1208,8 +1187,8 @@ bool MainWindow::validateSftpConnectStart(
 
 void MainWindow::initializeSftpConnectUiState(
     const std::shared_ptr<std::atomic<bool>> &cancelFlag) {
-    connectCancelRequested_ = cancelFlag;
-    connectInProgress_ = true;
+    if (!sessionController_->beginConnection(cancelFlag))
+        return;
 
     if (actConnect_)
         actConnect_->setEnabled(false);
@@ -1223,8 +1202,7 @@ void MainWindow::initializeSftpConnectUiState(
     progress->setAutoClose(false);
     progress->setAutoReset(false);
     connect(progress, &QProgressDialog::canceled, this, [this] {
-        if (connectCancelRequested_) {
-            connectCancelRequested_->store(true);
+        if (sessionController_->requestConnectionCancellation()) {
             statusBar()->showMessage(tr("Canceling connection…"), 3000);
         }
     });
@@ -1498,8 +1476,7 @@ void MainWindow::finalizeSftpConnect(
         connectProgress_.clear();
     }
     connectProgressDimmed_ = false;
-    connectCancelRequested_.reset();
-    connectInProgress_ = false;
+    sessionController_->finishConnection();
     if (actSites_)
         actSites_->setEnabled(true);
 
@@ -1542,7 +1519,7 @@ void MainWindow::finalizeSftpConnect(
     } else {
         activeSecurityWarning_.clear();
     }
-    sftp_ = std::move(guard);
+    sessionController_->installClient(std::move(guard));
     if (remoteOps_) {
         if (controlGuard)
             remoteOps_->installSession(std::move(controlGuard));
@@ -1633,34 +1610,12 @@ void MainWindow::maybePersistQuickConnectSite(
         return;
     }
 
-    SecretStore store;
-    QStringList issues;
-    bool anyCredentialStored = false;
     const SiteEntry &target = sites[matchIndex];
-
-    auto storeCredential = [&](const QString &label, const QString &secretKey,
-                               const std::optional<std::string> &value) {
-        if (!value || value->empty())
-            return;
-        const auto saveResult = store.setSecret(
-            quickSiteSecretKey(target, secretKey),
-            QString::fromStdString(*value));
-        if (saveResult.isStored())
-            anyCredentialStored = true;
-        else
-            issues << tr("%1: %2")
-                          .arg(label, quickPersistStatusShort(saveResult.status));
-    };
-
-    storeCredential(tr("Password"), QStringLiteral("password"), opt.password);
-    storeCredential(tr("Passphrase"), QStringLiteral("keypass"),
-                    opt.private_key_passphrase);
-    if (opt.proxy_type != openscp::ProxyType::None) {
-        storeCredential(tr("Proxy password"), QStringLiteral("proxypass"),
-                        opt.proxy_password);
-    } else {
-        store.removeSecret(quickSiteSecretKey(target, QStringLiteral("proxypass")));
-    }
+    SiteCredentialRepository credentials;
+    const SiteCredentialOperationResult saveResult =
+        credentials.save(target, opt);
+    const QStringList issues = saveResult.issueMessages();
+    const bool anyCredentialStored = saveResult.anyCredentialHandled;
 
     if (!issues.isEmpty()) {
         UiAlerts::warning(this, tr("Saved sites"),
@@ -1699,7 +1654,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     const bool transferOnlyMode = !caps.can_list;
     // Establish navigation identity before the initial listing emits history
     // updates or builds scoped favorite menus.
-    activeSessionOptions_ = opt;
+    sessionController_->setOptions(opt);
 
     if (!transferOnlyMode) {
         rightRemoteModel_ = new RemoteModel(this);
@@ -1716,7 +1671,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
                     addRecentRemotePath(path);
                     refreshRightBreadcrumbs();
                     if (rightIsRemote_) {
-                        updateRemoteWriteability();
+                        updateRemoteMutationCapability();
                         updateDeleteShortcutEnables();
                     }
                 });
@@ -1744,14 +1699,11 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
                                 ? QStringLiteral("/")
                                 : initialRemotePath);
         rightIsRemote_ = true;
-        activeSessionOptions_ = opt;
-        pendingRemoteRefreshFromUpload_ = false;
-        seenCompletedUploadTaskIds_.clear();
-        seenCompletedTransferNoticeTaskIds_.clear();
-        remoteWriteabilityCache_.clear();
+        sessionController_->setOptions(opt);
+        transferUiController_.reset();
         if (transferMgr_) {
             transferMgr_->setSessionIdentity(remoteNavigationScope());
-            transferMgr_->setClient(sftp_.get());
+            transferMgr_->setClient(sessionController_->client());
             transferMgr_->setSessionOptions(opt);
         }
         requestRemoteListing(rightPath_->text(), false, true);
@@ -1799,7 +1751,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         setWindowTitle(tr("OpenSCP — local/remote (%1)").arg(activeProtocol));
         updateHostPolicyRiskBanner();
         startRemoteSessionHealthMonitoring();
-        updateRemoteWriteability();
+        updateRemoteMutationCapability();
         updateDeleteShortcutEnables();
         return;
     }
@@ -1807,19 +1759,15 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     rightView_->setModel(rightLocalModel_);
     rightPath_->setText(QStringLiteral("/"));
     rightIsRemote_ = true;
-    activeSessionOptions_ = opt;
+    sessionController_->setOptions(opt);
     addRecentRemotePath(QStringLiteral("/"));
     activateScpTransferModeUi(true);
-    pendingRemoteRefreshFromUpload_ = false;
-    seenCompletedUploadTaskIds_.clear();
-    seenCompletedTransferNoticeTaskIds_.clear();
+    transferUiController_.reset();
     refreshRightBreadcrumbs();
-    remoteWriteabilityCache_.clear();
-    ++remoteWriteabilityProbeSeq_;
-    rightRemoteWritable_ = false;
+    rightRemoteMutationsSupported_ = false;
     if (transferMgr_) {
         transferMgr_->setSessionIdentity(remoteNavigationScope());
-        transferMgr_->setClient(sftp_.get());
+        transferMgr_->setClient(sessionController_->client());
         transferMgr_->setSessionOptions(opt);
     }
     if (actConnect_)

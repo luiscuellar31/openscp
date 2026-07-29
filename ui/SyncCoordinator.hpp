@@ -1,7 +1,7 @@
 // Asynchronous snapshot preparation and persistent execution for one-way sync.
 #pragma once
 
-#include "SyncDialog.hpp"
+#include "SyncTypes.hpp"
 
 #include <QHash>
 #include <QObject>

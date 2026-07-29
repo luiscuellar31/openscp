@@ -1,9 +1,10 @@
 // Declaration of the main window and its state/actions.
 #pragma once
+#include "NavigationStore.hpp"
+#include "TransferUiController.hpp"
 #include "openscp/SftpTypes.hpp"
 #include <QAction>
 #include <QFileSystemModel>
-#include <QHash>
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QPointer>
@@ -23,6 +24,11 @@ class RemoteModel; // fwd
 class RemoteOperationController;
 class LocalTreeDiscovery;
 class SyncCoordinator;
+namespace openscpui {
+class PaneController;
+class RemoteActionController;
+class SessionController;
+}
 struct SiteEntry;  // fwd
 class QModelIndex; // fwd for slot signatures
 class QToolBar;    // fwd
@@ -128,10 +134,13 @@ class MainWindow : public QMainWindow {
     void activateScpTransferModeUi(bool enabled);
     void applyPreferences();
     // Remote state (a single active session)
-    std::unique_ptr<openscp::RemoteClient> sftp_;
     RemoteOperationController *remoteOps_ = nullptr;
     SyncCoordinator *syncCoordinator_ = nullptr;
+    openscpui::PaneController *paneController_ = nullptr;
+    openscpui::RemoteActionController *remoteActionController_ = nullptr;
+    openscpui::SessionController *sessionController_ = nullptr;
     bool rightIsRemote_ = false;
+    openscpui::NavigationStore navigationStore_;
 
     void setLeftRoot(const QString &path);
     void setRightRoot(const QString &path);       // local
@@ -252,8 +261,6 @@ class MainWindow : public QMainWindow {
     void addRecentRemotePath(const QString &path);
     void addRecentServer(const openscp::SessionOptions &opt);
     QString remoteNavigationScope() const;
-    QString scopedRemoteHistoryKey() const;
-    QString scopedRemoteFavoritesKey() const;
     void refreshFavoritesAction(QAction *action, const QString &currentPath,
                                 bool remote, bool rightPane);
     void refreshFavoritesActions();
@@ -321,8 +328,7 @@ class MainWindow : public QMainWindow {
     void saveMainWindowUiState() const;
     void saveRightHeaderState(bool remoteMode) const;
     bool restoreRightHeaderState(bool remoteMode);
-    void maybeRefreshRemoteAfterCompletedUploads();
-    void maybeNotifyCompletedTransfers();
+    void handleTransferUiUpdate();
     bool isLikelyRemoteTransportError(const QString &rawError) const;
     void ensureRemoteSessionHealthMonitoring();
     void startRemoteSessionHealthMonitoring();
@@ -331,27 +337,15 @@ class MainWindow : public QMainWindow {
                                      bool force = false);
     QString preferredLocalHomePath() const;
 
-    // Writable state of the current remote directory
-    bool rightRemoteWritable_ = false;
-    struct RemoteWriteabilityCacheEntry {
-        bool writable = false;
-        qint64 checkedAtMs = 0;
-    };
-    // Recompute if the current remote directory is writable (create/remove a
-    // temporary folder)
-    void updateRemoteWriteability();
-    void applyRemoteWriteabilityActions();
-    void cacheCurrentRemoteWriteability(bool writable);
-    void invalidateRemoteWriteabilityFromError(const QString &rawError);
-    QHash<QString, RemoteWriteabilityCacheEntry> remoteWriteabilityCache_;
-    int remoteWriteabilityTtlMs_ = 15000;
-    std::atomic<quint64> remoteWriteabilityProbeSeq_{0};
+    // Capability-derived mutation state. Actual path permissions are checked by
+    // the requested operation without mutating the server as a probe.
+    bool rightRemoteMutationsSupported_ = false;
+    void updateRemoteMutationCapability();
+    void applyRemoteMutationActions();
 
     bool firstShow_ = true;
     bool restoredWindowGeometry_ = false;
-    bool pendingRemoteRefreshFromUpload_ = false;
-    QSet<quint64> seenCompletedUploadTaskIds_;
-    QSet<quint64> seenCompletedTransferNoticeTaskIds_;
+    openscpui::TransferUiController transferUiController_;
 
     // User preferences
     bool prefShowHidden_ = false;
@@ -363,8 +357,6 @@ class MainWindow : public QMainWindow {
     QMetaObject::Connection rightClickConn_;
 
     // Reentrancy guards and dialog pointers
-    bool isDisconnecting_ = false;
-    quint64 disconnectSeq_ = 0;
     bool transferCleanupInProgress_ = false;
     qint64 transferCleanupStartedAtMs_ = 0;
     QPointer<class QMessageBox> tofuBox_;
@@ -392,10 +384,7 @@ class MainWindow : public QMainWindow {
     // Connection progress dialog (non-modal), to avoid blocking TOFU
     QPointer<class QProgressDialog> connectProgress_;
     bool connectProgressDimmed_ = false;
-    bool connectInProgress_ = false;
-    std::shared_ptr<std::atomic<bool>> connectCancelRequested_;
     std::atomic<int> localFsJobsInFlight_{0};
-    std::optional<openscp::SessionOptions> activeSessionOptions_;
     std::optional<SavedSiteContext> pendingSavedSiteContext_;
     std::optional<SavedSiteContext> activeSavedSiteContext_;
     QPointer<class QProgressDialog> remoteScanProgress_;

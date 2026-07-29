@@ -119,6 +119,118 @@ endif()
 
 add_subdirectory(core)
 
+add_library(openscp_sync_logic STATIC
+    ui/SyncTypes.hpp
+    ui/SyncComparisonEngine.hpp
+    ui/SyncComparisonEngine.cpp
+)
+
+target_include_directories(openscp_sync_logic
+    PUBLIC ${CMAKE_SOURCE_DIR}/ui
+)
+
+target_link_libraries(openscp_sync_logic PUBLIC Qt6::Core)
+
+add_library(openscp_ui_logic STATIC
+    ui/RemotePath.hpp
+    ui/RemotePath.cpp
+    ui/MainWindowSharedUtils.hpp
+    ui/MainWindowSharedUtils.cpp
+    ui/NavigationScope.hpp
+    ui/NavigationScope.cpp
+    ui/NavigationStore.hpp
+    ui/NavigationStore.cpp
+    ui/PaneController.hpp
+    ui/PaneController.cpp
+    ui/RemoteActionController.hpp
+    ui/RemoteActionController.cpp
+    ui/SessionController.hpp
+    ui/SessionController.cpp
+    ui/TerminalCommandBuilder.hpp
+    ui/TerminalCommandBuilder.cpp
+    ui/TransferUiController.hpp
+    ui/TransferUiController.cpp
+    ui/RemoteOperationController.hpp
+    ui/RemoteOperationController.cpp
+    ui/RemoteOperationTypes.hpp
+    ui/RemoteTreeWalker.hpp
+    ui/RemoteTreeWalker.cpp
+    ui/LocalTreeDiscovery.hpp
+    ui/LocalTreeDiscovery.cpp
+    ui/SyncCoordinator.hpp
+    ui/SyncCoordinator.cpp
+    ui/SavedSitesPersistence.hpp
+    ui/SavedSitesPersistence.cpp
+    ui/SiteCredentialRepository.hpp
+    ui/SiteCredentialRepository.cpp
+    ui/SecretStore.hpp
+    ui/SecretStore.cpp
+    ui/UiAlerts.hpp
+    ui/UiAlerts.cpp
+    ui/UiFormatters.hpp
+    ui/UiFormatters.cpp
+    ui/RemoteModel.hpp
+    ui/RemoteModel.cpp
+    ui/TransferManager.hpp
+    ui/TransferManager.cpp
+    ui/TransferTypes.hpp
+    ui/BandwidthLimiter.hpp
+    ui/BandwidthLimiter.cpp
+    ui/TransferQueuePersistence.hpp
+    ui/TransferQueuePersistence.cpp
+    ui/TransferQueueStore.hpp
+    ui/TransferQueueStore.cpp
+    ui/TransferScheduler.hpp
+    ui/TransferScheduler.cpp
+    ui/TransferExecutor.hpp
+    ui/TransferExecutor.cpp
+)
+
+target_include_directories(openscp_ui_logic
+    PUBLIC
+        ${CMAKE_SOURCE_DIR}/core/include
+        ${CMAKE_SOURCE_DIR}/ui
+)
+
+target_link_libraries(openscp_ui_logic
+    PUBLIC
+        Qt6::Widgets
+        openscp_core
+        openscp_sync_logic
+)
+
+add_library(openscp_ui_widgets STATIC
+    ui/SyncDialog.hpp
+    ui/SyncDialog.cpp
+    ui/DragAwareTreeView.hpp
+    ui/DragAwareTreeView.cpp
+    ui/ConnectionDialog.hpp
+    ui/ConnectionDialog.cpp
+    ui/PermissionsDialog.hpp
+    ui/PermissionsDialog.cpp
+    ui/TransferQueueDialog.hpp
+    ui/TransferQueueDialog.cpp
+    ui/SiteManagerDialog.hpp
+    ui/SiteManagerDialog.cpp
+    ui/SiteEntry.hpp
+    ui/SettingsDialog.hpp
+    ui/SettingsDialog.cpp
+    ui/AboutDialog.hpp
+    ui/AboutDialog.cpp
+)
+
+target_include_directories(openscp_ui_widgets
+    PUBLIC ${CMAKE_SOURCE_DIR}/ui
+    PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+target_link_libraries(openscp_ui_widgets
+    PUBLIC
+        openscp_ui_logic
+        Qt6::Widgets
+        Qt6::Svg
+)
+
 add_executable(openscp_hello
     ui/main.cpp
     ui/MainWindow.hpp
@@ -128,43 +240,6 @@ add_executable(openscp_hello
     ui/MainWindowRemoteOps.cpp
     ui/MainWindowSync.cpp
     ui/MainWindowTransfers.cpp
-    ui/MainWindowSharedUtils.hpp
-    ui/MainWindowSharedUtils.cpp
-    ui/NavigationScope.hpp
-    ui/NavigationScope.cpp
-    ui/RemoteOperationController.hpp
-    ui/RemoteOperationController.cpp
-    ui/LocalTreeDiscovery.hpp
-    ui/LocalTreeDiscovery.cpp
-    ui/SyncDialog.hpp
-    ui/SyncDialog.cpp
-    ui/SyncCoordinator.hpp
-    ui/SyncCoordinator.cpp
-    ui/SavedSitesPersistence.hpp
-    ui/SavedSitesPersistence.cpp
-    ui/SavedSiteSecrets.hpp
-    ui/UiAlerts.hpp
-    ui/UiAlerts.cpp
-    ui/DragAwareTreeView.hpp
-    ui/DragAwareTreeView.cpp
-    ui/ConnectionDialog.hpp
-    ui/ConnectionDialog.cpp
-    ui/RemoteModel.hpp
-    ui/RemoteModel.cpp
-    ui/PermissionsDialog.hpp
-    ui/PermissionsDialog.cpp
-    ui/TransferManager.hpp
-    ui/TransferManager.cpp
-    ui/TransferQueueDialog.hpp
-    ui/TransferQueueDialog.cpp
-    ui/SiteManagerDialog.hpp
-    ui/SiteManagerDialog.cpp
-    ui/SecretStore.hpp
-    ui/SecretStore.cpp
-    ui/SettingsDialog.hpp
-    ui/SettingsDialog.cpp
-    ui/AboutDialog.hpp
-    ui/AboutDialog.cpp
 )
 
 # Libsecret (Linux): link if available to store secrets securely
@@ -172,9 +247,11 @@ find_package(PkgConfig QUIET)
 if (PkgConfig_FOUND)
     pkg_check_modules(LIBSECRET QUIET libsecret-1)
     if (LIBSECRET_FOUND)
-        target_include_directories(openscp_hello PRIVATE ${LIBSECRET_INCLUDE_DIRS})
-        target_link_libraries(openscp_hello PRIVATE ${LIBSECRET_LIBRARIES})
-        target_compile_definitions(openscp_hello PRIVATE HAVE_LIBSECRET=1)
+        target_include_directories(openscp_ui_logic PRIVATE
+            ${LIBSECRET_INCLUDE_DIRS})
+        target_link_libraries(openscp_ui_logic PRIVATE
+            ${LIBSECRET_LIBRARIES})
+        target_compile_definitions(openscp_ui_logic PUBLIC HAVE_LIBSECRET=1)
     endif()
 endif()
 
@@ -193,13 +270,12 @@ target_include_directories(openscp_hello PRIVATE
 )
 
 target_link_libraries(openscp_hello PRIVATE
-    Qt6::Widgets
-    Qt6::Svg
-    openscp_core
+    openscp_ui_widgets
 )
 
 if (APPLE)
-    target_link_libraries(openscp_hello PRIVATE
+    target_link_libraries(openscp_ui_logic PRIVATE
+        "-framework CoreFoundation"
         "-framework Security"
     )
 endif()
@@ -258,7 +334,8 @@ if(APPLE)
 endif()
 
 if (OPENSCP_BUILD_SECURE_ONLY)
-    target_compile_definitions(openscp_hello PRIVATE OPENSCP_BUILD_SECURE_ONLY=1)
+    target_compile_definitions(openscp_ui_logic
+        PUBLIC OPENSCP_BUILD_SECURE_ONLY=1)
 endif()
 
 # Translations: compile TS catalogs to QM and embed as resources.

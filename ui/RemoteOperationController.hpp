@@ -1,219 +1,45 @@
 // Serialized, cancelable execution lane for remote filesystem operations.
 #pragma once
 
-#include "openscp/RemoteClient.hpp"
+#include "RemoteOperationTypes.hpp"
 
-#include <QByteArray>
 #include <QObject>
-#include <QString>
-#include <QVector>
-#include <QtGlobal>
 
-#include <cstdint>
 #include <memory>
 
 class RemoteOperationController final : public QObject {
     Q_OBJECT
 
     public:
-    using JobId = quint64;
-    using SessionGeneration = quint64;
-
-    enum class JobKind : quint8 {
-        List,
-        Stat,
-        Mkdir,
-        CreateFile,
-        Rename,
-        Delete,
-        Chmod,
-        HealthCheck,
-        Search,
-        Traverse,
-        Checksum,
-    };
-    Q_ENUM(JobKind)
-
-    enum class Outcome : quint8 {
-        Succeeded,
-        Failed,
-        Canceled,
-        Superseded,
-    };
-    Q_ENUM(Outcome)
-
-    enum class DeleteKind : quint8 {
-        File,
-        Directory,
-    };
-    Q_ENUM(DeleteKind)
-
-    struct JobKey {
-        JobId id = 0;
-        SessionGeneration generation = 0;
-        JobKind kind = JobKind::List;
-    };
-
-    struct ResultHeader {
-        JobKey job;
-        Outcome outcome = Outcome::Failed;
-        QString error;
-        openscp::RemoteError remoteError;
-        bool partial = false;
-    };
-
-    struct RemoteEntry {
-        QString path;
-        QString relativePath;
-        openscp::FileInfo info;
-        int depth = 0;
-        bool isSymlink = false;
-    };
-
-    struct TraversalOptions {
-        bool includeHidden = true;
-        bool skipSymlinks = true;
-        int maxDepth = 32;
-        int batchSize = 250;
-    };
-
-    struct ListRequest {
-        QString path = QStringLiteral("/");
-        bool includeHidden = true;
-    };
-
-    struct StatRequest {
-        QString path;
-    };
-
-    struct MkdirRequest {
-        QString path;
-        unsigned int mode = 0755;
-        bool recursive = false;
-    };
-
-    struct CreateFileRequest {
-        QString path;
-        bool overwrite = false;
-    };
-
-    struct RenameRequest {
-        QString from;
-        QString to;
-        bool overwrite = false;
-    };
-
-    struct DeleteRequest {
-        QString path;
-        DeleteKind kind = DeleteKind::File;
-        bool recursive = false;
-        TraversalOptions traversal;
-        // Cleanup mode for completed directory moves: remove directories in
-        // post-order, but never delete a file that remains on the server.
-        bool emptyDirectoriesOnly = false;
-    };
-
-    struct ChmodRequest {
-        QString path;
-        std::uint32_t mode = 0644;
-        bool recursive = false;
-        TraversalOptions traversal;
-    };
-
-    struct HealthCheckRequest {
-        QString path = QStringLiteral("/");
-    };
-
-    struct SearchRequest {
-        QString rootPath = QStringLiteral("/");
-        QString query;
-        Qt::CaseSensitivity caseSensitivity = Qt::CaseInsensitive;
-        bool includeDirectories = true;
-        TraversalOptions traversal;
-    };
-
-    struct TraverseRequest {
-        QString rootPath = QStringLiteral("/");
-        bool includeDirectories = true;
-        TraversalOptions traversal;
-    };
-
-    struct ChecksumRequest {
-        QString path;
-        QString algorithm = QStringLiteral("SHA-256");
-    };
-
-    struct SessionState {
-        SessionGeneration generation = 0;
-        bool available = false;
-        openscp::Protocol protocol = openscp::Protocol::Sftp;
-        openscp::ProtocolCapabilities capabilities;
-    };
-
-    struct Progress {
-        JobKey job;
-        QString currentPath;
-        quint64 visitedEntries = 0;
-        quint64 matchedEntries = 0;
-        quint64 affectedEntries = 0;
-        quint64 failedEntries = 0;
-        quint64 processedBytes = 0;
-        quint64 totalBytes = 0;
-    };
-
-    struct ListResult {
-        ResultHeader result;
-        QString path;
-        QVector<RemoteEntry> entries;
-    };
-
-    struct StatResult {
-        ResultHeader result;
-        QString path;
-        bool found = false;
-        openscp::FileInfo info;
-    };
-
-    struct MutationResult {
-        ResultHeader result;
-        QString sourcePath;
-        QString destinationPath;
-        quint64 affectedEntries = 0;
-        quint64 failedEntries = 0;
-    };
-
-    struct HealthResult {
-        ResultHeader result;
-        bool connected = false;
-        bool roundTripSucceeded = false;
-    };
-
-    struct ChecksumResult {
-        ResultHeader result;
-        QString path;
-        QString algorithm;
-        QByteArray digest;
-        quint64 processedBytes = 0;
-        quint64 totalBytes = 0;
-    };
-
-    struct EntryBatch {
-        JobKey job;
-        QVector<RemoteEntry> entries;
-        bool finalBatch = false;
-    };
-
-    struct Completion {
-        ResultHeader result;
-        quint64 visitedEntries = 0;
-        quint64 matchedEntries = 0;
-        quint64 affectedEntries = 0;
-        quint64 failedEntries = 0;
-        quint64 skippedSymlinks = 0;
-        quint64 depthLimits = 0;
-        quint64 invalidNames = 0;
-        quint64 unknownSizes = 0;
-    };
+    using JobId = openscp::remote_operation::JobId;
+    using SessionGeneration = openscp::remote_operation::SessionGeneration;
+    using JobKind = openscp::remote_operation::JobKind;
+    using Outcome = openscp::remote_operation::Outcome;
+    using DeleteKind = openscp::remote_operation::DeleteKind;
+    using JobKey = openscp::remote_operation::JobKey;
+    using ResultHeader = openscp::remote_operation::ResultHeader;
+    using RemoteEntry = openscp::remote_operation::RemoteEntry;
+    using TraversalOptions = openscp::remote_operation::TraversalOptions;
+    using ListRequest = openscp::remote_operation::ListRequest;
+    using StatRequest = openscp::remote_operation::StatRequest;
+    using MkdirRequest = openscp::remote_operation::MkdirRequest;
+    using CreateFileRequest = openscp::remote_operation::CreateFileRequest;
+    using RenameRequest = openscp::remote_operation::RenameRequest;
+    using DeleteRequest = openscp::remote_operation::DeleteRequest;
+    using ChmodRequest = openscp::remote_operation::ChmodRequest;
+    using HealthCheckRequest = openscp::remote_operation::HealthCheckRequest;
+    using SearchRequest = openscp::remote_operation::SearchRequest;
+    using TraverseRequest = openscp::remote_operation::TraverseRequest;
+    using ChecksumRequest = openscp::remote_operation::ChecksumRequest;
+    using SessionState = openscp::remote_operation::SessionState;
+    using Progress = openscp::remote_operation::Progress;
+    using ListResult = openscp::remote_operation::ListResult;
+    using StatResult = openscp::remote_operation::StatResult;
+    using MutationResult = openscp::remote_operation::MutationResult;
+    using HealthResult = openscp::remote_operation::HealthResult;
+    using ChecksumResult = openscp::remote_operation::ChecksumResult;
+    using EntryBatch = openscp::remote_operation::EntryBatch;
+    using Completion = openscp::remote_operation::Completion;
 
     explicit RemoteOperationController(QObject *parent = nullptr);
     ~RemoteOperationController() override;
@@ -272,16 +98,3 @@ class RemoteOperationController final : public QObject {
     class Impl;
     std::unique_ptr<Impl> impl_;
 };
-
-Q_DECLARE_METATYPE(RemoteOperationController::JobKey)
-Q_DECLARE_METATYPE(RemoteOperationController::ResultHeader)
-Q_DECLARE_METATYPE(RemoteOperationController::RemoteEntry)
-Q_DECLARE_METATYPE(RemoteOperationController::SessionState)
-Q_DECLARE_METATYPE(RemoteOperationController::Progress)
-Q_DECLARE_METATYPE(RemoteOperationController::ListResult)
-Q_DECLARE_METATYPE(RemoteOperationController::StatResult)
-Q_DECLARE_METATYPE(RemoteOperationController::MutationResult)
-Q_DECLARE_METATYPE(RemoteOperationController::HealthResult)
-Q_DECLARE_METATYPE(RemoteOperationController::ChecksumResult)
-Q_DECLARE_METATYPE(RemoteOperationController::EntryBatch)
-Q_DECLARE_METATYPE(RemoteOperationController::Completion)

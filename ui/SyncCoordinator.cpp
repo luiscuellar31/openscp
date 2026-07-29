@@ -1,6 +1,8 @@
 #include "SyncCoordinator.hpp"
 
 #include "RemoteOperationController.hpp"
+#include "RemotePath.hpp"
+#include "SyncComparisonEngine.hpp"
 #include "TransferManager.hpp"
 
 #include <QCryptographicHash>
@@ -25,28 +27,6 @@ constexpr quint64 kLargeTreeKnownBytes =
     100ULL * 1024ULL * 1024ULL * 1024ULL;
 constexpr int kMaximumDepth = 32;
 constexpr int kBatchSize = 250;
-
-QString normalizedRemoteRoot(QString path) {
-    path = QDir::fromNativeSeparators(path.trimmed());
-    if (path.isEmpty())
-        return QStringLiteral("/");
-    if (!path.startsWith(QLatin1Char('/')))
-        path.prepend(QLatin1Char('/'));
-    const QString relative =
-        SyncComparisonEngine::normalizeRelativePath(path);
-    return relative.isEmpty() ? QStringLiteral("/")
-                              : QStringLiteral("/") + relative;
-}
-
-QString joinedRemotePath(const QString &root, const QString &relativePath) {
-    const QString relative =
-        SyncComparisonEngine::normalizeRelativePath(relativePath);
-    if (relative.isEmpty())
-        return normalizedRemoteRoot(root);
-    const QString base = normalizedRemoteRoot(root);
-    return base == QStringLiteral("/") ? base + relative
-                                       : base + QStringLiteral("/") + relative;
-}
 
 QString joinedLocalPath(const QString &root, const QString &relativePath) {
     const QString relative =
@@ -355,7 +335,7 @@ void SyncCoordinator::startChecksums(
     auto state = std::make_shared<ChecksumState>();
     state->generation = checksumGeneration_;
     state->localRoot = QDir(localRootInfo.absoluteFilePath()).absolutePath();
-    state->remoteRoot = normalizedRemoteRoot(remoteRoot);
+    state->remoteRoot = normalizeRemotePath(remoteRoot);
     state->relativePaths = std::move(paths);
     checksumState_ = state;
 
@@ -515,7 +495,7 @@ void SyncCoordinator::startChecksums(
                         if (failedPaths.contains(relativePath))
                             continue;
                         RemoteOperationController::ChecksumRequest request;
-                        request.path = joinedRemotePath(
+                        request.path = joinRemotePath(
                             state->remoteRoot, relativePath);
                         const auto jobId =
                             safeThis->remoteOperations_->submit(request);
@@ -587,7 +567,7 @@ void SyncCoordinator::start(const QString &localRoot,
     auto state = std::make_shared<PreparationState>();
     state->generation = generation_;
     state->localRoot = QDir(localInfo.absoluteFilePath()).absolutePath();
-    state->remoteRoot = normalizedRemoteRoot(remoteRoot);
+    state->remoteRoot = normalizeRemotePath(remoteRoot);
     state->allowLargeTree = allowLargeTree;
     state->result.localRoot = state->localRoot;
     state->result.remoteRoot = state->remoteRoot;
@@ -862,7 +842,7 @@ quint64 SyncCoordinator::enqueuePlan(const SyncExecutionPlan &plan,
         prepareDependency();
         if (plan.direction == SyncDirection::LocalToRemote) {
             record(transfers_->enqueueRemoteDirectory(
-                joinedRemotePath(remoteRoot, relative), options));
+                joinRemotePath(remoteRoot, relative), options));
         } else {
             record(transfers_->enqueueLocalDirectory(
                 joinedLocalPath(localRoot, relative), options));
@@ -878,10 +858,10 @@ quint64 SyncCoordinator::enqueuePlan(const SyncExecutionPlan &plan,
         if (plan.direction == SyncDirection::LocalToRemote) {
             record(transfers_->enqueueUpload(
                 joinedLocalPath(localRoot, relative),
-                joinedRemotePath(remoteRoot, relative), options));
+                joinRemotePath(remoteRoot, relative), options));
         } else {
             record(transfers_->enqueueDownload(
-                joinedRemotePath(remoteRoot, relative),
+                joinRemotePath(remoteRoot, relative),
                 joinedLocalPath(localRoot, relative), options));
         }
     }
@@ -899,7 +879,7 @@ quint64 SyncCoordinator::enqueuePlan(const SyncExecutionPlan &plan,
         prepareDependency();
         if (plan.direction == SyncDirection::LocalToRemote) {
             record(transfers_->enqueueRemoteDelete(
-                joinedRemotePath(remoteRoot, relative), directory, options));
+                joinRemotePath(remoteRoot, relative), directory, options));
         } else {
             record(transfers_->enqueueLocalDelete(
                 joinedLocalPath(localRoot, relative), directory, options));

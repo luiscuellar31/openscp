@@ -1,4 +1,5 @@
 #include "MainWindow.hpp"
+#include "SessionController.hpp"
 
 #include "RemoteModel.hpp"
 #include "RemoteOperationController.hpp"
@@ -121,9 +122,9 @@ void MainWindow::initializeSyncCoordinator() {
                 dialog.setRootPaths(localRoot, remoteRoot);
                 dialog.setSnapshots(localSnapshot, remoteSnapshot);
                 const openscp::ProtocolCapabilities capabilities =
-                    activeSessionOptions_
+                    sessionController_->options()
                         ? openscp::capabilitiesForProtocol(
-                              activeSessionOptions_->protocol)
+                              sessionController_->options()->protocol)
                         : openscp::ProtocolCapabilities{};
                 dialog.setChecksumAvailable(capabilities.can_checksum);
 

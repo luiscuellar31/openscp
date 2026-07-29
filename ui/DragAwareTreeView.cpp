@@ -1179,12 +1179,6 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *remoteModel) {
             finishRemoteDragEnumeration();
         });
 
-    auto joinRemote = [](const QString &base, const QString &name) {
-        if (base == QLatin1String("/"))
-            return QStringLiteral("/") + name;
-        return base.endsWith(QLatin1Char('/')) ? base + name
-                                               : base + QLatin1Char('/') + name;
-    };
     const QString remoteRoot = remoteModel->rootPath();
     QSettings settings("OpenSCP", "OpenSCP");
     int maxDepth =
@@ -1201,7 +1195,7 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *remoteModel) {
             ++enumInvalidNames_;
             continue;
         }
-        const QString remotePath = joinRemote(remoteRoot, name);
+        const QString remotePath = joinRemotePath(remoteRoot, name);
         const QString localPath =
             QDir(stagingDir).filePath(normalizeStagingName(name));
         if (!remoteModel->isDir(index)) {

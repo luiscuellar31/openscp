@@ -1,6 +1,7 @@
 // Shared helper utilities for MainWindow split implementation files.
 #pragma once
 
+#include "RemotePath.hpp"
 #include "TransferManager.hpp"
 
 #include <QDir>
@@ -17,8 +18,6 @@ bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
                           const QString &initialValue, QString &nameOut);
 QString shortRemoteError(const QString &raw, const QString &fallback);
 QString shortRemoteError(const std::string &raw, const QString &fallback);
-QString joinRemotePath(const QString &base, const QString &name);
-QString normalizeRemotePath(const QString &rawPath);
 
 QVector<QPair<QString, QString>> buildLocalDestinationPairsWithOverwritePrompt(
     QWidget *parent, const QVector<QFileInfo> &sources,
