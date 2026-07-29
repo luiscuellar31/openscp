@@ -4,6 +4,8 @@ add_executable(openscp_core_tests
 
 target_include_directories(openscp_core_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/core/include
+    ${CMAKE_SOURCE_DIR}/core/src/common
+    ${CMAKE_SOURCE_DIR}/core/src/libssh2/detail
 )
 
 target_link_libraries(openscp_core_tests PRIVATE

@@ -3,6 +3,8 @@
 #include "openscp/Libssh2ScpClient.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
 #include "openscp/MockSftpClient.hpp"
+#include "Libssh2InputSafety.hpp"
+#include "SafeLocalFile.hpp"
 #if OPENSCP_HAS_CURL_FTP
 #include "openscp/CurlFtpClient.hpp"
 #endif
@@ -101,6 +103,117 @@ void test_session_defaults(TestContext &t) {
             "default FTPS mode should preserve legacy auto behavior");
     t.check((std::is_same_v<openscp::RemoteClient, openscp::SftpClient>),
             "RemoteClient should remain source-compatible with SftpClient");
+}
+
+void test_libssh2_input_safety(TestContext &t) {
+    using namespace openscp::libssh2detail;
+
+    const unsigned char nonTerminatedPrompt[] = {'U', 's', 'e', 'r'};
+    KeyboardInteractivePromptView prompt{};
+    prompt.text = nonTerminatedPrompt;
+    prompt.length = sizeof(nonTerminatedPrompt);
+
+    std::vector<std::string> copied;
+    std::string error;
+    t.check(copyKeyboardInteractivePrompts(&prompt, 1, copied, error),
+            "bounded keyboard-interactive prompts should be accepted");
+    t.check(copied.size() == 1 && copied.front() == "User",
+            "keyboard-interactive prompt copies must honor explicit lengths");
+    t.check(promptRequestsUsername(copied.front()),
+            "bounded prompt matching should detect username prompts");
+
+    prompt.length = kMaxKeyboardInteractivePromptBytes + 1;
+    copied.clear();
+    error.clear();
+    t.check(!copyKeyboardInteractivePrompts(&prompt, 1, copied, error),
+            "oversized keyboard-interactive prompts must be rejected");
+    t.check(!copyKeyboardInteractivePrompts(
+                &prompt, kMaxKeyboardInteractivePrompts + 1, copied, error),
+            "excessive keyboard-interactive prompt counts must be rejected");
+
+    error.clear();
+    t.check(validateEndpointHost("files.example.test", "SSH host", error),
+            "normal SSH hosts should be accepted");
+    error.clear();
+    t.check(validateEndpointHost("2001:db8::1", "SSH host", error),
+            "unbracketed IPv6 SSH hosts should be accepted");
+    error.clear();
+    t.check(!validateEndpointHost("example.test\r\nX-Test: injected",
+                                  "SSH host", error),
+            "SSH hosts must reject HTTP CONNECT header injection");
+    error.clear();
+    t.check(!validateEndpointHost("example.test:2222", "SSH host", error),
+            "SSH hosts must keep ports in the dedicated field");
+}
+
+void test_safe_local_partial_files(TestContext &t) {
+    const fs::path target = makeTempFilePath("safe-target");
+    const fs::path partial = target.string() + ".part";
+    std::error_code ec;
+    fs::create_directories(target.parent_path(), ec);
+    {
+        std::ofstream output(target, std::ios::binary | std::ios::trunc);
+        output << "preserve-me";
+    }
+
+#ifndef _WIN32
+    fs::create_symlink(target, partial, ec);
+    t.check(!ec, "symlink fixture should be created");
+    std::string symlinkError;
+    std::FILE *unsafe = openscp::localfiles::openRegularFileForWrite(
+        partial.string(), openscp::localfiles::WriteMode::Truncate,
+        symlinkError);
+    t.check(unsafe == nullptr,
+            "local partial files must reject final-component symlinks");
+    if (unsafe)
+        std::fclose(unsafe);
+    std::string preservedContents;
+    t.check(readTextFile(target, preservedContents) &&
+                preservedContents == "preserve-me",
+            "rejecting a partial symlink must preserve its target");
+    fs::remove(partial, ec);
+
+    fs::create_hard_link(target, partial, ec);
+    t.check(!ec, "hard-link fixture should be created");
+    symlinkError.clear();
+    unsafe = openscp::localfiles::openRegularFileForWrite(
+        partial.string(), openscp::localfiles::WriteMode::Truncate,
+        symlinkError);
+    t.check(unsafe == nullptr,
+            "local partial files must reject additional hard links");
+    if (unsafe)
+        std::fclose(unsafe);
+    preservedContents.clear();
+    t.check(readTextFile(target, preservedContents) &&
+                preservedContents == "preserve-me",
+            "rejecting a partial hard link must preserve its target");
+    fs::remove(partial, ec);
+#endif
+
+    std::string error;
+    std::FILE *file = openscp::localfiles::openRegularFileForWrite(
+        partial.string(), openscp::localfiles::WriteMode::Truncate, error);
+    t.check(file != nullptr,
+            std::string("regular local partial files should open: ") + error);
+    if (file) {
+        const char payload[] = "replacement";
+        t.check(std::fwrite(payload, 1, sizeof(payload) - 1, file) ==
+                    sizeof(payload) - 1,
+                "safe partial file should be writable");
+        t.check(openscp::localfiles::flushAndSync(file, error),
+                std::string("safe partial file should sync: ") + error);
+        std::fclose(file);
+        t.check(openscp::localfiles::atomicReplace(
+                    partial.string(), target.string(), error),
+                std::string("safe partial file should publish atomically: ") +
+                    error);
+    }
+    std::string targetContents;
+    t.check(readTextFile(target, targetContents) &&
+                targetContents == "replacement",
+            "atomic replacement should publish complete partial contents");
+    fs::remove(target, ec);
+    fs::remove_all(target.parent_path(), ec);
 }
 
 void test_protocol_helpers(TestContext &t) {
@@ -775,6 +888,8 @@ void test_remove_known_hosts_entry_non_default_port(TestContext &t) {
 int main() {
     TestContext t;
     test_session_defaults(t);
+    test_libssh2_input_safety(t);
+    test_safe_local_partial_files(t);
     test_protocol_helpers(t);
     test_connect_validation(t);
     test_disconnect_changes_state(t);

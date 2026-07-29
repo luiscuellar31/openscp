@@ -206,6 +206,19 @@ int main() {
             "downloaded file should be readable");
     t.check(downloaded == payload, "downloaded content should match uploaded");
 
+    const std::string preservedDestination = "preserve existing destination";
+    t.check(writeFile(localDownload, preservedDestination),
+            "should prepare an existing SCP download destination");
+    err.clear();
+    t.check(!client.get(remotePath, localDownload.string(), err, {}, [] {
+                return true;
+            }, false),
+            "canceled SCP download should not report success");
+    downloaded.clear();
+    t.check(readFile(localDownload, downloaded) &&
+                downloaded == preservedDestination,
+            "canceled SCP download must preserve the existing destination");
+
     std::vector<openscp::FileInfo> listing;
     err.clear();
     t.check(!client.list(remoteBase, listing, err),

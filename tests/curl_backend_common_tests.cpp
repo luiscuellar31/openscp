@@ -142,6 +142,21 @@ void testWebDavCompletionStatuses(TestContext &test) {
                "asynchronous or partial WebDAV writes must not be committed");
 }
 
+void testBoundedStringSink(TestContext &test) {
+    std::string output;
+    openscp::curlcommon::BoundedStringSink sink{&output, 4};
+    char first[] = {'a', 'b', 'c'};
+    test.check(openscp::curlcommon::appendStringCallback(
+                   first, 1, sizeof(first), &sink) == sizeof(first),
+               "bounded response sinks should accept data within the limit");
+    char overflow[] = {'d', 'e'};
+    test.check(openscp::curlcommon::appendStringCallback(
+                   overflow, 1, sizeof(overflow), &sink) == 0,
+               "bounded response sinks should stop oversized responses");
+    test.check(sink.limitExceeded && output == "abc",
+               "oversized response chunks must not be partially appended");
+}
+
 } // namespace
 
 int main() {
@@ -151,6 +166,7 @@ int main() {
     testClientsRejectAuthorityInjection(test);
     testFtpCommandRoot(test);
     testWebDavCompletionStatuses(test);
+    testBoundedStringSink(test);
     if (test.failures != 0) {
         std::cerr << "[FAIL] openscp_curl_backend_common_tests failures="
                   << test.failures << "\n";
