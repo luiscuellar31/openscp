@@ -3,6 +3,7 @@
 #include "openscp/Libssh2ScpClient.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
 #include "openscp/MockSftpClient.hpp"
+#include "Libssh2ErrorClassifier.hpp"
 #include "Libssh2InputSafety.hpp"
 #include "SafeLocalFile.hpp"
 #if OPENSCP_HAS_CURL_FTP
@@ -798,6 +799,30 @@ void test_libssh2_backends_expose_structured_errors(TestContext &t) {
             "error");
 }
 
+void test_shared_libssh2_error_classification(TestContext &t) {
+    const openscp::RemoteError authentication =
+        openscp::libssh2detail::classifyFailure(
+            "Private key authentication failed", nullptr);
+    t.check(authentication.kind ==
+                openscp::RemoteErrorKind::Authentication,
+            "shared libssh2 errors should classify authentication failures");
+
+    const openscp::RemoteError connection =
+        openscp::libssh2detail::classifyFailure(
+            "Connection closed while finalizing upload", nullptr, nullptr,
+            true);
+    t.check(connection.kind == openscp::RemoteErrorKind::Connection &&
+                connection.transient && connection.commit_uncertain,
+            "shared libssh2 errors should mark uncertain mutations");
+
+    const openscp::RemoteError local =
+        openscp::libssh2detail::classifyFailure(
+            "Could not finalize local .part file", nullptr);
+    t.check(local.kind == openscp::RemoteErrorKind::LocalIo ||
+                local.kind == openscp::RemoteErrorKind::InsufficientSpace,
+            "shared libssh2 errors should classify local file failures");
+}
+
 #ifdef _WIN32
 void test_libssh2_rejects_jump_on_windows(TestContext &t) {
     openscp::Libssh2SftpClient c;
@@ -904,6 +929,7 @@ int main() {
     test_set_times(t);
     test_libssh2_rejects_conflicting_proxy_and_jump(t);
     test_libssh2_backends_expose_structured_errors(t);
+    test_shared_libssh2_error_classification(t);
 #if OPENSCP_HAS_CURL_FTP
     test_curlftp_rejects_unsupported_proxy_type(t);
     test_curlftp_rejects_command_injection_paths(t);

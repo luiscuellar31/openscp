@@ -26,7 +26,7 @@ struct TransferManagerTestAccess {
 
     static std::size_t taskVectorCapacity(TransferManager &manager) {
         std::lock_guard<std::mutex> lock(manager.mtx_);
-        return manager.tasks_.capacity();
+        return manager.queueStore_.capacity();
     }
 };
 

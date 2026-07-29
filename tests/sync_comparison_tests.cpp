@@ -1,5 +1,5 @@
-// Pure comparison/filter/planning tests for SyncDialog.
-#include "SyncDialog.hpp"
+// Pure comparison/filter/planning tests.
+#include "SyncComparisonEngine.hpp"
 
 #include <QCoreApplication>
 
