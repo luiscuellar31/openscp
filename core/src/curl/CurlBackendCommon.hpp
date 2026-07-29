@@ -8,6 +8,8 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <ctime>
 #include <functional>
 #include <optional>
 #include <string>
@@ -20,7 +22,51 @@ bool ensureCurlInitialized(std::string &err);
 std::string trimAscii(std::string value);
 std::string toLowerAscii(std::string value);
 bool parseUnsignedDec(std::string_view token, std::uint64_t &out);
+bool validateUrlHost(const std::string &host, const char *fieldLabel,
+                     std::string &err);
 std::string normalizeHostAuthorityForUrl(const std::string &host);
+bool validateRemotePath(const std::string &path, const char *backendLabel,
+                        std::string &err);
+std::string ftpCommandPath(const std::string &loginRoot,
+                           const std::string &logicalPath);
+bool isCompletedWebDavGetStatus(long statusCode);
+bool isCompletedWebDavWriteStatus(long statusCode);
+std::optional<std::uint32_t>
+parseRetryAfter(std::string_view value,
+                std::time_t now = std::time(nullptr));
+std::string encodeUrlPath(const std::string &path);
+
+std::string localPartialPath(const std::string &destination);
+bool flushAndSyncFile(std::FILE *file, std::string &err);
+bool atomicReplaceLocalFile(const std::string &partial,
+                            const std::string &destination, std::string &err);
+
+RemoteError errorFromCurl(CURLcode code, std::string message,
+                          long responseCode = 0,
+                          bool commitUncertain = false);
+RemoteError errorFromHttpStatus(long statusCode, std::string message,
+                                bool commitUncertain = false,
+                                std::optional<std::uint32_t> retryAfter =
+                                    std::nullopt);
+
+// Process-local guard for deterministic .part paths. It prevents independent
+// worker clients from writing the same destination concurrently.
+class ActiveDestinationLease {
+    public:
+    explicit ActiveDestinationLease(std::string key);
+    ~ActiveDestinationLease();
+    ActiveDestinationLease(const ActiveDestinationLease &) = delete;
+    ActiveDestinationLease &
+    operator=(const ActiveDestinationLease &) = delete;
+
+    bool acquired() const noexcept { return acquired_; }
+
+    private:
+    std::string key_;
+    bool acquired_ = false;
+};
+
+std::string localDestinationKey(const std::string &path);
 
 bool configureProxy(CURL *curl, const SessionOptions &opt,
                     const char *backendLabel, const char *backendKindLabel,

@@ -1,16 +1,16 @@
 // FTP/FTPS backend using libcurl for basic file transfers.
 #pragma once
-#include "SftpClient.hpp"
+#include "RemoteClient.hpp"
 
 #include <atomic>
 #include <mutex>
 
 namespace openscp {
 
-class CurlFtpClient : public SftpClient {
+class CurlFtpClient : public RemoteClient {
     public:
     explicit CurlFtpClient(Protocol protocol = Protocol::Ftp);
-    ~CurlFtpClient() override = default;
+    ~CurlFtpClient() override;
 
     Protocol protocol() const override { return protocol_; }
     ProtocolCapabilities capabilities() const override {
@@ -60,15 +60,24 @@ class CurlFtpClient : public SftpClient {
     bool rename(const std::string &from, const std::string &to,
                 std::string &err, bool overwrite = false) override;
 
-    std::unique_ptr<SftpClient> newConnectionLike(const SessionOptions &opt,
-                                                  std::string &err) override;
+    std::unique_ptr<RemoteClient> newConnectionLike(const SessionOptions &opt,
+                                                     std::string &err) override;
 
     private:
     Protocol protocol_ = Protocol::Ftp;
     mutable std::mutex stateMutex_;
+    // One easy handle is reused serially so libcurl can retain its connection
+    // cache. Stored opaquely to keep libcurl out of the public header.
+    std::mutex operationMutex_;
+    void *easyHandle_ = nullptr;
     SessionOptions options_{};
+    // Absolute server path reported by FTP PWD immediately after login. App
+    // paths use "/" as the login directory, so quote commands are translated
+    // through this root to match libcurl URL path semantics.
+    std::string commandRoot_ = "/";
     bool connected_ = false;
     std::atomic<bool> interrupted_{false};
+    std::atomic<bool> disconnecting_{false};
 };
 
 } // namespace openscp

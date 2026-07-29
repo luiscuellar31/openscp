@@ -21,6 +21,12 @@ class ConnectionDialog : public QDialog {
     void setSiteNameVisible(bool visible);
     void setSiteName(const QString &name);
     QString siteName() const;
+    void setInitialLocalPath(const QString &path);
+    QString initialLocalPath() const;
+    void setInitialRemotePath(const QString &path);
+    QString initialRemotePath() const;
+    void setRememberLastPaths(bool remember);
+    bool rememberLastPaths() const;
     void setQuickConnectSaveOptionsVisible(bool visible);
     bool saveSiteRequested() const;
     bool saveCredentialsRequested() const;
@@ -34,6 +40,11 @@ class ConnectionDialog : public QDialog {
     QComboBox *scpMode_ = nullptr;
     QLineEdit *siteName_ = nullptr;
     QWidget *siteNameLabel_ = nullptr;
+    QLineEdit *initialLocalPath_ = nullptr;
+    QToolButton *initialLocalPathBrowse_ = nullptr;
+    QWidget *initialLocalPathRow_ = nullptr;
+    QLineEdit *initialRemotePath_ = nullptr;
+    QCheckBox *rememberLastPaths_ = nullptr;
     QCheckBox *saveSite_ = nullptr;
     QCheckBox *saveCredentials_ = nullptr;
     QLineEdit *host_ = nullptr;
@@ -51,11 +62,13 @@ class ConnectionDialog : public QDialog {
     QComboBox *khPolicy_ = nullptr;
     QComboBox *integrityPolicy_ = nullptr;
     QWidget *khPathRow_ = nullptr;
+    QComboBox *ftpsMode_ = nullptr;
     QCheckBox *ftpsVerifyPeer_ = nullptr;
     QLineEdit *ftpsCaPath_ = nullptr;
     QToolButton *ftpsCaBrowse_ = nullptr;
     QWidget *ftpsCaPathRow_ = nullptr;
     QComboBox *webDavScheme_ = nullptr;
+    QLineEdit *webDavBasePath_ = nullptr;
     QCheckBox *webDavVerifyPeer_ = nullptr;
     QLineEdit *webDavCaPath_ = nullptr;
     QToolButton *webDavCaBrowse_ = nullptr;
@@ -83,6 +96,7 @@ class ConnectionDialog : public QDialog {
     bool hasDirectModeSize_ = false;
     bool proxyRowsVisible_ = false;
     openscp::ProxyType lastProxyType_ = openscp::ProxyType::None;
+    openscp::FtpsMode lastFtpsMode_ = openscp::FtpsMode::Auto;
     openscp::WebDavScheme lastWebDavScheme_ = openscp::WebDavScheme::Https;
     bool jumpRowsVisible_ = false;
 };

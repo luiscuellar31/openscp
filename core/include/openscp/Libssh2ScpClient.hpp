@@ -6,7 +6,7 @@
 
 namespace openscp {
 
-class Libssh2ScpClient : public SftpClient {
+class Libssh2ScpClient : public RemoteClient {
     public:
     Libssh2ScpClient() = default;
     ~Libssh2ScpClient() override = default;
@@ -59,10 +59,30 @@ class Libssh2ScpClient : public SftpClient {
     bool rename(const std::string &from, const std::string &to,
                 std::string &err, bool overwrite = false) override;
 
-    std::unique_ptr<SftpClient> newConnectionLike(const SessionOptions &opt,
-                                                  std::string &err) override;
+    std::unique_ptr<RemoteClient> newConnectionLike(const SessionOptions &opt,
+                                                     std::string &err) override;
 
     private:
+    class StructuredErrorScope {
+        public:
+        StructuredErrorScope(Libssh2ScpClient &owner, std::string &error,
+                             bool mutation);
+        ~StructuredErrorScope();
+        StructuredErrorScope(const StructuredErrorScope &) = delete;
+        StructuredErrorScope &
+        operator=(const StructuredErrorScope &) = delete;
+
+        private:
+        Libssh2ScpClient &owner_;
+        std::string &error_;
+        bool mutation_ = false;
+    };
+
+    StructuredErrorScope beginStructuredOperation(std::string &err,
+                                                  bool mutation = false);
+    RemoteError classifyStructuredFailure(const std::string &message,
+                                          bool mutation) const;
+
     bool transferViaSftpFallbackGet(
         const std::string &remote, const std::string &local, std::string &err,
         std::function<void(std::size_t, std::size_t)> progress,

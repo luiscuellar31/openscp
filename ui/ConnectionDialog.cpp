@@ -80,6 +80,11 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     }
 
     siteName_ = new QLineEdit(this);
+    initialLocalPath_ = new QLineEdit(this);
+    initialLocalPathBrowse_ = new QToolButton(this);
+    initialRemotePath_ = new QLineEdit(this);
+    rememberLastPaths_ =
+        new QCheckBox(tr("Remember the last local and remote paths"), this);
     host_ = new QLineEdit(this);
     port_ = new QSpinBox(this);
     user_ = new QLineEdit(this);
@@ -102,6 +107,11 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     // Safer defaults: no implicit host/user values to avoid accidental
     // connections.
     siteName_->setPlaceholderText(tr("My server"));
+    initialLocalPath_->setPlaceholderText(
+        tr("Home/current directory when empty"));
+    initialLocalPathBrowse_->setText(tr("Choose…"));
+    initialRemotePath_->setPlaceholderText(QStringLiteral("/"));
+    initialRemotePath_->setText(QStringLiteral("/"));
     port_->setRange(1, 65535);
     port_->setFixedWidth(110);
     port_->setToolTip(tr("Server port for the selected protocol"));
@@ -133,6 +143,8 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     // Make text inputs a bit wider by default for better readability.
     const int kInputMinWidth = 360;
     siteName_->setMinimumWidth(kInputMinWidth);
+    initialLocalPath_->setMinimumWidth(kInputMinWidth);
+    initialRemotePath_->setMinimumWidth(kInputMinWidth);
     host_->setMinimumWidth(kInputMinWidth);
     user_->setMinimumWidth(kInputMinWidth);
     pass_->setMinimumWidth(kInputMinWidth);
@@ -246,9 +258,19 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     jumpKeyPathLayout->addWidget(jumpKeyPath_);
     jumpKeyPathLayout->addWidget(jumpKeyBrowse_);
 
+    initialLocalPathRow_ = new QWidget(this);
+    auto *initialLocalPathLayout = new QHBoxLayout(initialLocalPathRow_);
+    initialLocalPathLayout->setContentsMargins(0, 0, 0, 0);
+    initialLocalPathLayout->setSpacing(6);
+    initialLocalPathLayout->addWidget(initialLocalPath_);
+    initialLocalPathLayout->addWidget(initialLocalPathBrowse_);
+
     // Layout
     lay->addRow(tr("Site name:"), siteName_);
     siteNameLabel_ = lay->labelForField(siteName_);
+    lay->addRow(tr("Initial local path:"), initialLocalPathRow_);
+    lay->addRow(tr("Initial remote path:"), initialRemotePath_);
+    lay->addRow(QString(), rememberLastPaths_);
     setSiteNameVisible(false);
     saveSite_ = new QCheckBox(tr("Save to saved sites"), this);
     saveSite_->setChecked(true);
@@ -319,6 +341,13 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         static_cast<int>(openscp::TransferIntegrityPolicy::Off));
     integrityPolicy_->setToolTip(tr(
         "Checksum verification for resume and final transfer validation."));
+    ftpsMode_ = new QComboBox(this);
+    ftpsMode_->addItem(tr("Automatic (based on port)"),
+                       static_cast<int>(openscp::FtpsMode::Auto));
+    ftpsMode_->addItem(tr("Explicit TLS (AUTH TLS)"),
+                       static_cast<int>(openscp::FtpsMode::ExplicitTls));
+    ftpsMode_->addItem(tr("Implicit TLS"),
+                       static_cast<int>(openscp::FtpsMode::ImplicitTls));
     ftpsVerifyPeer_ =
         new QCheckBox(tr("Verify FTPS server certificate (recommended)"), this);
     ftpsCaPath_ = new QLineEdit(this);
@@ -338,6 +367,12 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
                            static_cast<int>(openscp::WebDavScheme::Https));
     webDavScheme_->addItem(tr("HTTP (insecure)"),
                            static_cast<int>(openscp::WebDavScheme::Http));
+    webDavBasePath_ = new QLineEdit(this);
+    webDavBasePath_->setPlaceholderText(QStringLiteral("/"));
+    webDavBasePath_->setText(QStringLiteral("/"));
+    webDavBasePath_->setMinimumWidth(kInputMinWidth);
+    webDavBasePath_->setToolTip(
+        tr("Remote paths are confined below this WebDAV collection."));
     webDavVerifyPeer_ =
         new QCheckBox(tr("Verify WebDAV server certificate (recommended)"), this);
     webDavCaPath_ = new QLineEdit(this);
@@ -406,9 +441,11 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     lay->addRow(tr("known_hosts:"), khPathRow_);
     lay->addRow(tr("Policy:"), khPolicy_);
     lay->addRow(tr("Integrity:"), integrityPolicy_);
+    lay->addRow(tr("FTPS mode:"), ftpsMode_);
     lay->addRow(QString(), ftpsVerifyPeer_);
     lay->addRow(tr("FTPS CA bundle:"), ftpsCaPathRow_);
     lay->addRow(tr("WebDAV scheme:"), webDavScheme_);
+    lay->addRow(tr("WebDAV base path:"), webDavBasePath_);
     lay->addRow(QString(), webDavVerifyPeer_);
     lay->addRow(tr("WebDAV CA bundle:"), webDavCaPathRow_);
 
@@ -513,6 +550,28 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
                 }
                 updateJumpFields();
             });
+    connect(ftpsMode_, &QComboBox::currentIndexChanged, this, [this](int) {
+        if (!protocol_ || !port_ || !ftpsMode_)
+            return;
+        const auto protocol = static_cast<openscp::Protocol>(
+            protocol_->currentData().toInt());
+        const auto selectedMode = openscp::normalizeFtpsMode(
+            static_cast<openscp::FtpsMode>(
+                ftpsMode_->currentData().toInt()));
+        if (protocol == openscp::Protocol::Ftps) {
+            if (selectedMode == openscp::FtpsMode::ExplicitTls &&
+                (lastFtpsMode_ == openscp::FtpsMode::ImplicitTls ||
+                 port_->value() == 990)) {
+                port_->setValue(21);
+            } else if (selectedMode == openscp::FtpsMode::ImplicitTls &&
+                       (lastFtpsMode_ ==
+                            openscp::FtpsMode::ExplicitTls ||
+                        port_->value() == 21)) {
+                port_->setValue(990);
+            }
+        }
+        lastFtpsMode_ = selectedMode;
+    });
     connect(webDavScheme_, &QComboBox::currentIndexChanged, this,
             [this](int) {
                 if (!protocol_ || !port_ || !webDavScheme_)
@@ -592,6 +651,17 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         if (!selectedPath.isEmpty())
             jumpKeyPath_->setText(selectedPath);
     });
+    connect(initialLocalPathBrowse_, &QToolButton::clicked, this, [this] {
+        const QString start =
+            initialLocalPath_->text().trimmed().isEmpty()
+                ? QDir::homePath()
+                : initialLocalPath_->text().trimmed();
+        const QString selectedPath =
+            QFileDialog::getExistingDirectory(this, tr("Select initial local path"),
+                                              start);
+        if (!selectedPath.isEmpty())
+            initialLocalPath_->setText(QDir::cleanPath(selectedPath));
+    });
 
     auto *dialogButtons = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
@@ -612,6 +682,9 @@ void ConnectionDialog::setSiteNameVisible(bool visible) {
         siteName_->setVisible(visible);
     if (siteNameLabel_)
         siteNameLabel_->setVisible(visible);
+    setFormRowVisible(formLayout_, initialLocalPathRow_, visible);
+    setFormRowVisible(formLayout_, initialRemotePath_, visible);
+    setFormRowVisible(formLayout_, rememberLastPaths_, visible);
 }
 
 void ConnectionDialog::setSiteName(const QString &name) {
@@ -621,6 +694,45 @@ void ConnectionDialog::setSiteName(const QString &name) {
 
 QString ConnectionDialog::siteName() const {
     return siteName_ ? siteName_->text() : QString();
+}
+
+void ConnectionDialog::setInitialLocalPath(const QString &path) {
+    if (initialLocalPath_)
+        initialLocalPath_->setText(path);
+}
+
+QString ConnectionDialog::initialLocalPath() const {
+    return initialLocalPath_ ? initialLocalPath_->text().trimmed() : QString();
+}
+
+void ConnectionDialog::setInitialRemotePath(const QString &path) {
+    if (!initialRemotePath_)
+        return;
+    QString normalized = path.trimmed();
+    if (normalized.isEmpty())
+        normalized = QStringLiteral("/");
+    if (!normalized.startsWith('/'))
+        normalized.prepend('/');
+    initialRemotePath_->setText(normalized);
+}
+
+QString ConnectionDialog::initialRemotePath() const {
+    QString path =
+        initialRemotePath_ ? initialRemotePath_->text().trimmed() : QString();
+    if (path.isEmpty())
+        path = QStringLiteral("/");
+    if (!path.startsWith('/'))
+        path.prepend('/');
+    return path;
+}
+
+void ConnectionDialog::setRememberLastPaths(bool remember) {
+    if (rememberLastPaths_)
+        rememberLastPaths_->setChecked(remember);
+}
+
+bool ConnectionDialog::rememberLastPaths() const {
+    return rememberLastPaths_ && rememberLastPaths_->isChecked();
 }
 
 void ConnectionDialog::setQuickConnectSaveOptionsVisible(bool visible) {
@@ -656,12 +768,21 @@ openscp::SessionOptions ConnectionDialog::options() const {
         sessionOptions.scp_transfer_mode = static_cast<openscp::ScpTransferMode>(
             scpMode_->currentData().toInt());
     }
+    if (ftpsMode_) {
+        sessionOptions.ftps_mode = openscp::normalizeFtpsMode(
+            static_cast<openscp::FtpsMode>(
+                ftpsMode_->currentData().toInt()));
+    }
     if (sessionOptions.protocol != openscp::Protocol::Scp)
         sessionOptions.scp_transfer_mode = openscp::ScpTransferMode::Auto;
     if (webDavScheme_) {
         sessionOptions.webdav_scheme = openscp::normalizeWebDavScheme(
             static_cast<openscp::WebDavScheme>(
                 webDavScheme_->currentData().toInt()));
+    }
+    if (webDavBasePath_) {
+        sessionOptions.webdav_base_path = openscp::normalizeWebDavBasePath(
+            webDavBasePath_->text().trimmed().toStdString());
     }
     sessionOptions.host = host_->text().toStdString();
     sessionOptions.port = static_cast<std::uint16_t>(port_->value());
@@ -750,11 +871,13 @@ openscp::SessionOptions ConnectionDialog::options() const {
         sessionOptions.proxy_password.reset();
     }
     if (sessionOptions.protocol != openscp::Protocol::Ftps) {
+        sessionOptions.ftps_mode = openscp::FtpsMode::Auto;
         sessionOptions.ftps_verify_peer = true;
         sessionOptions.ftps_ca_cert_path.reset();
     }
     if (sessionOptions.protocol != openscp::Protocol::WebDav) {
         sessionOptions.webdav_scheme = openscp::WebDavScheme::Https;
+        sessionOptions.webdav_base_path = "/";
         sessionOptions.webdav_verify_peer = true;
         sessionOptions.webdav_ca_cert_path.reset();
     } else if (sessionOptions.webdav_scheme == openscp::WebDavScheme::Http) {
@@ -808,6 +931,14 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &options) {
         if (integrityPolicyIndex >= 0)
             integrityPolicy_->setCurrentIndex(integrityPolicyIndex);
     }
+    if (ftpsMode_) {
+        const auto mode = openscp::normalizeFtpsMode(options.ftps_mode);
+        const int ftpsModeIndex =
+            ftpsMode_->findData(static_cast<int>(mode));
+        if (ftpsModeIndex >= 0)
+            ftpsMode_->setCurrentIndex(ftpsModeIndex);
+        lastFtpsMode_ = mode;
+    }
     if (ftpsVerifyPeer_)
         ftpsVerifyPeer_->setChecked(options.ftps_verify_peer);
     if (ftpsCaPath_) {
@@ -826,6 +957,10 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &options) {
             webDavScheme_->setCurrentIndex(webDavSchemeIndex);
         lastWebDavScheme_ =
             openscp::normalizeWebDavScheme(options.webdav_scheme);
+    }
+    if (webDavBasePath_) {
+        webDavBasePath_->setText(QString::fromStdString(
+            openscp::normalizeWebDavBasePath(options.webdav_base_path)));
     }
     if (webDavVerifyPeer_)
         webDavVerifyPeer_->setChecked(options.webdav_verify_peer);
@@ -904,6 +1039,9 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol,
     }
     if (formLayout_) {
         const bool isFtpsProtocol = (protocol == openscp::Protocol::Ftps);
+        if (ftpsMode_) {
+            setFormRowVisible(formLayout_, ftpsMode_, isFtpsProtocol);
+        }
         if (ftpsVerifyPeer_) {
             setFormRowVisible(formLayout_, ftpsVerifyPeer_, isFtpsProtocol);
         }
@@ -912,6 +1050,10 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol,
         }
         if (webDavScheme_) {
             setFormRowVisible(formLayout_, webDavScheme_, isWebDavProtocol);
+        }
+        if (webDavBasePath_) {
+            setFormRowVisible(formLayout_, webDavBasePath_,
+                              isWebDavProtocol);
         }
         const bool showWebDavTlsRows =
             isWebDavProtocol &&
@@ -945,6 +1087,15 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol,
     if (resetPort) {
         std::uint16_t protocolDefaultPort =
             openscp::defaultPortForProtocol(protocol);
+        if (protocol == openscp::Protocol::Ftps && ftpsMode_) {
+            const auto mode = openscp::normalizeFtpsMode(
+                static_cast<openscp::FtpsMode>(
+                    ftpsMode_->currentData().toInt()));
+            if (mode == openscp::FtpsMode::ExplicitTls)
+                protocolDefaultPort = 21;
+            else if (mode == openscp::FtpsMode::ImplicitTls)
+                protocolDefaultPort = 990;
+        }
         if (isWebDavProtocol) {
             protocolDefaultPort =
                 openscp::defaultPortForWebDavScheme(selectedWebDavScheme);
@@ -965,8 +1116,7 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol,
     if (formLayout_ && khPolicy_)
         setFormRowVisible(formLayout_, khPolicy_, caps.supports_known_hosts);
     if (formLayout_ && integrityPolicy_)
-        setFormRowVisible(formLayout_, integrityPolicy_,
-                          caps.supports_transfer_integrity);
+        setFormRowVisible(formLayout_, integrityPolicy_, caps.can_checksum);
 
     if (proxyType_) {
         if (!caps.supports_proxy) {

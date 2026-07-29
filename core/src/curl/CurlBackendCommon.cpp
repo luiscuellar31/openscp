@@ -3,12 +3,29 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cstdio>
+#include <cstring>
+#include <filesystem>
 #include <limits>
 #include <mutex>
 #include <string>
+#include <unordered_set>
+#include <utility>
+
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace openscp::curlcommon {
+namespace {
+
+std::mutex activeDestinationMutex;
+std::unordered_set<std::string> activeDestinations;
+
+} // namespace
 
 bool ensureCurlInitialized(std::string &err) {
     static std::once_flag initFlag;
@@ -58,6 +75,60 @@ bool parseUnsignedDec(std::string_view token, std::uint64_t &out) {
     return true;
 }
 
+bool validateUrlHost(const std::string &host, const char *fieldLabel,
+                     std::string &err) {
+    const std::string label =
+        (fieldLabel && *fieldLabel) ? fieldLabel : "Remote host";
+    if (host.empty()) {
+        err = label + " is required.";
+        return false;
+    }
+
+    for (const unsigned char ch : host) {
+        if (ch == 0 || ch < 0x20 || ch == 0x7f || std::isspace(ch) != 0 ||
+            ch == '/' || ch == '\\' || ch == '@' || ch == '?' || ch == '#') {
+            err = label + " contains a forbidden URL authority character.";
+            return false;
+        }
+    }
+
+    const bool bracketed = host.front() == '[' || host.back() == ']';
+    if (bracketed) {
+        if (host.size() < 4 || host.front() != '[' || host.back() != ']' ||
+            host.find('[', 1) != std::string::npos ||
+            host.find(']') != host.size() - 1) {
+            err = label + " contains malformed IPv6 brackets.";
+            return false;
+        }
+        const std::string_view literal(host.data() + 1, host.size() - 2);
+        if (literal.find(':') == std::string_view::npos) {
+            err = label + " contains brackets around a non-IPv6 host.";
+            return false;
+        }
+        return true;
+    }
+
+    if (host.find('[') != std::string::npos ||
+        host.find(']') != std::string::npos) {
+        err = label + " contains malformed IPv6 brackets.";
+        return false;
+    }
+
+    const std::size_t firstColon = host.find(':');
+    if (firstColon != std::string::npos &&
+        host.find(':', firstColon + 1) == std::string::npos) {
+        err = label +
+              " must not include a port; use the separate port setting.";
+        return false;
+    }
+    if (firstColon == std::string::npos &&
+        host.find('%') != std::string::npos) {
+        err = label + " contains an invalid percent escape.";
+        return false;
+    }
+    return true;
+}
+
 std::string normalizeHostAuthorityForUrl(const std::string &host) {
     if (host.find(':') != std::string::npos &&
         host.find(']') == std::string::npos) {
@@ -66,17 +137,287 @@ std::string normalizeHostAuthorityForUrl(const std::string &host) {
     return host;
 }
 
+bool validateRemotePath(const std::string &path, const char *backendLabel,
+                        std::string &err) {
+    if (path.find('\0') != std::string::npos ||
+        path.find('\r') != std::string::npos ||
+        path.find('\n') != std::string::npos) {
+        err = std::string(backendLabel ? backendLabel : "Remote") +
+              " path contains a forbidden control character.";
+        return false;
+    }
+    return true;
+}
+
+std::string ftpCommandPath(const std::string &loginRoot,
+                           const std::string &logicalPath) {
+    std::string root = loginRoot.empty() ? std::string("/") : loginRoot;
+    if (root.front() != '/')
+        root.insert(root.begin(), '/');
+    while (root.size() > 1 && root.back() == '/')
+        root.pop_back();
+
+    std::string logical =
+        logicalPath.empty() ? std::string("/") : logicalPath;
+    if (logical.front() != '/')
+        logical.insert(logical.begin(), '/');
+    if (root == "/")
+        return logical;
+    if (logical == "/")
+        return root;
+    return root + logical;
+}
+
+bool isCompletedWebDavGetStatus(long statusCode) {
+    return statusCode == 200;
+}
+
+bool isCompletedWebDavWriteStatus(long statusCode) {
+    return statusCode == 200 || statusCode == 201 || statusCode == 204;
+}
+
+std::optional<std::uint32_t> parseRetryAfter(std::string_view value,
+                                             std::time_t now) {
+    constexpr std::uint64_t maxRetrySeconds = 60;
+    const std::string normalized = trimAscii(std::string(value));
+    std::uint64_t seconds = 0;
+    if (parseUnsignedDec(normalized, seconds)) {
+        return static_cast<std::uint32_t>(
+            std::min<std::uint64_t>(seconds, maxRetrySeconds));
+    }
+
+    const std::time_t retryAt = curl_getdate(normalized.c_str(), nullptr);
+    if (retryAt < 0)
+        return std::nullopt;
+    if (retryAt <= now)
+        return std::uint32_t{0};
+    const auto delay = static_cast<std::uint64_t>(retryAt - now);
+    return static_cast<std::uint32_t>(
+        std::min<std::uint64_t>(delay, maxRetrySeconds));
+}
+
+std::string encodeUrlPath(const std::string &path) {
+    static constexpr char hex[] = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(path.size());
+    for (const unsigned char c : path) {
+        const bool unreserved =
+            std::isalnum(c) != 0 || c == '-' || c == '.' || c == '_' ||
+            c == '~' || c == '/';
+        if (unreserved) {
+            out.push_back(static_cast<char>(c));
+        } else {
+            out.push_back('%');
+            out.push_back(hex[(c >> 4) & 0x0f]);
+            out.push_back(hex[c & 0x0f]);
+        }
+    }
+    return out;
+}
+
+std::string localPartialPath(const std::string &destination) {
+    return destination + ".part";
+}
+
+bool flushAndSyncFile(std::FILE *file, std::string &err) {
+    if (!file) {
+        err = "Invalid local partial file handle.";
+        return false;
+    }
+    if (std::fflush(file) != 0) {
+        err = std::string("Could not flush local partial file: ") +
+              std::strerror(errno);
+        return false;
+    }
+#ifdef _WIN32
+    if (_commit(_fileno(file)) != 0) {
+#else
+    if (::fsync(::fileno(file)) != 0) {
+#endif
+        err = std::string("Could not synchronize local partial file: ") +
+              std::strerror(errno);
+        return false;
+    }
+    return true;
+}
+
+bool atomicReplaceLocalFile(const std::string &partial,
+                            const std::string &destination, std::string &err) {
+    // Both names are in the same directory, so POSIX rename is an atomic
+    // replacement. Windows support is currently out of release scope; its
+    // standard library rename may reject an existing destination safely.
+    if (std::rename(partial.c_str(), destination.c_str()) == 0)
+        return true;
+    err = std::string("Could not atomically finalize local file: ") +
+          std::strerror(errno);
+    return false;
+}
+
+RemoteError errorFromCurl(CURLcode code, std::string message,
+                          long responseCode, bool commitUncertain) {
+    RemoteError error;
+    error.message = std::move(message);
+    error.native_code =
+        responseCode > 0 ? responseCode : static_cast<std::int64_t>(code);
+    switch (code) {
+    case CURLE_OK:
+        error.kind = RemoteErrorKind::None;
+        break;
+    case CURLE_ABORTED_BY_CALLBACK:
+        error.kind = RemoteErrorKind::Canceled;
+        break;
+    case CURLE_OPERATION_TIMEDOUT:
+        error.kind = RemoteErrorKind::Timeout;
+        error.transient = true;
+        break;
+    case CURLE_COULDNT_RESOLVE_HOST:
+    case CURLE_COULDNT_RESOLVE_PROXY:
+    case CURLE_COULDNT_CONNECT:
+    case CURLE_RECV_ERROR:
+    case CURLE_SEND_ERROR:
+    case CURLE_GOT_NOTHING:
+        error.kind = RemoteErrorKind::Connection;
+        error.transient = true;
+        break;
+    case CURLE_PARTIAL_FILE:
+        error.kind = RemoteErrorKind::RemoteIo;
+        error.transient = true;
+        break;
+    case CURLE_LOGIN_DENIED:
+        error.kind = RemoteErrorKind::Authentication;
+        break;
+    case CURLE_REMOTE_ACCESS_DENIED:
+        error.kind = RemoteErrorKind::PermissionDenied;
+        break;
+    case CURLE_REMOTE_FILE_NOT_FOUND:
+        error.kind = RemoteErrorKind::NotFound;
+        break;
+    case CURLE_REMOTE_DISK_FULL:
+        error.kind = RemoteErrorKind::InsufficientSpace;
+        break;
+    case CURLE_SSL_CONNECT_ERROR:
+    case CURLE_SSL_CERTPROBLEM:
+    case CURLE_SSL_CIPHER:
+    case CURLE_PEER_FAILED_VERIFICATION:
+    case CURLE_SSL_CACERT_BADFILE:
+    case CURLE_SSL_CRL_BADFILE:
+    case CURLE_SSL_ISSUER_ERROR:
+    case CURLE_SSL_PINNEDPUBKEYNOTMATCH:
+    case CURLE_SSL_INVALIDCERTSTATUS:
+#if LIBCURL_VERSION_NUM >= 0x074d00
+    case CURLE_SSL_CLIENTCERT:
+#endif
+        error.kind = RemoteErrorKind::Certificate;
+        break;
+    case CURLE_WRITE_ERROR:
+        if (errno == ENOSPC) {
+            error.kind = RemoteErrorKind::InsufficientSpace;
+            error.native_code = ENOSPC;
+            break;
+        }
+        error.kind = RemoteErrorKind::LocalIo;
+        break;
+    case CURLE_READ_ERROR:
+        error.kind = RemoteErrorKind::LocalIo;
+        break;
+    case CURLE_QUOTE_ERROR:
+    case CURLE_WEIRD_SERVER_REPLY:
+        error.kind = RemoteErrorKind::Protocol;
+        break;
+    default:
+        error.kind = RemoteErrorKind::RemoteIo;
+        break;
+    }
+    error.commit_uncertain =
+        commitUncertain &&
+        (error.kind == RemoteErrorKind::Connection ||
+         error.kind == RemoteErrorKind::Timeout ||
+         error.kind == RemoteErrorKind::RemoteIo);
+    return error;
+}
+
+RemoteError errorFromHttpStatus(long statusCode, std::string message,
+                                bool commitUncertain,
+                                std::optional<std::uint32_t> retryAfter) {
+    RemoteError error;
+    error.message = std::move(message);
+    error.native_code = statusCode;
+    error.retry_after_seconds = retryAfter;
+    error.commit_uncertain = commitUncertain && statusCode >= 500;
+    if (statusCode == 401) {
+        error.kind = RemoteErrorKind::Authentication;
+    } else if (statusCode == 403) {
+        error.kind = RemoteErrorKind::PermissionDenied;
+    } else if (statusCode == 404 || statusCode == 410) {
+        error.kind = RemoteErrorKind::NotFound;
+    } else if (statusCode == 408 || statusCode == 504) {
+        error.kind = RemoteErrorKind::Timeout;
+        error.transient = true;
+    } else if (statusCode == 409 || statusCode == 412 ||
+               statusCode == 423) {
+        error.kind = RemoteErrorKind::Conflict;
+    } else if (statusCode == 429) {
+        error.kind = RemoteErrorKind::RateLimited;
+        error.transient = true;
+    } else if (statusCode == 507) {
+        error.kind = RemoteErrorKind::InsufficientSpace;
+        error.commit_uncertain = false;
+    } else if (statusCode >= 500 && statusCode <= 599) {
+        error.kind = RemoteErrorKind::RemoteIo;
+        error.transient = true;
+    } else {
+        error.kind = RemoteErrorKind::Protocol;
+    }
+    return error;
+}
+
+ActiveDestinationLease::ActiveDestinationLease(std::string key)
+    : key_(std::move(key)) {
+    std::lock_guard<std::mutex> lock(activeDestinationMutex);
+    acquired_ = activeDestinations.insert(key_).second;
+}
+
+ActiveDestinationLease::~ActiveDestinationLease() {
+    if (!acquired_)
+        return;
+    std::lock_guard<std::mutex> lock(activeDestinationMutex);
+    activeDestinations.erase(key_);
+}
+
+std::string localDestinationKey(const std::string &path) {
+    try {
+        return std::string("local:") +
+               std::filesystem::absolute(std::filesystem::path(path))
+                   .lexically_normal()
+                   .string();
+    } catch (...) {
+        return std::string("local:") + path;
+    }
+}
+
 bool configureProxy(CURL *curl, const SessionOptions &opt,
                     const char *backendLabel, const char *backendKindLabel,
                     std::string &err) {
-    if (opt.proxy_type == ProxyType::None)
+    if (opt.proxy_type == ProxyType::None) {
+        // An empty explicit proxy disables libcurl's implicit ALL_PROXY,
+        // http_proxy and ftp_proxy environment handling.
+        if (curl_easy_setopt(curl, CURLOPT_PROXY, "") != CURLE_OK) {
+            err = std::string("Could not disable environment proxy use for ") +
+                  backendLabel + ".";
+            return false;
+        }
         return true;
+    }
 
     if (opt.proxy_host.empty() || opt.proxy_port == 0) {
         err = std::string(backendLabel) + " proxy requires host and port.";
         return false;
     }
-    const std::string proxy = opt.proxy_host + ":" + std::to_string(opt.proxy_port);
+    if (!validateUrlHost(opt.proxy_host, "Proxy host", err))
+        return false;
+    const std::string proxy =
+        normalizeHostAuthorityForUrl(opt.proxy_host) + ":" +
+        std::to_string(opt.proxy_port);
     if (curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str()) != CURLE_OK) {
         err = std::string("Could not configure ") + backendLabel +
               " proxy endpoint.";
@@ -206,6 +547,13 @@ int transferProgressCallback(void *userdata, curl_off_t dltotal, curl_off_t dlno
     const std::size_t done =
         doneRaw > 0 ? static_cast<std::size_t>(doneRaw) : 0u;
     ctx->progressCb(done, total);
+    // A progress callback can itself publish the state that makes
+    // shouldCancel() true (for example at done == total). Observe that state
+    // before libcurl is allowed to report a successful transfer.
+    if (ctx->interrupted && ctx->interrupted->load())
+        return 1;
+    if (ctx->shouldCancel && ctx->shouldCancel())
+        return 1;
     return 0;
 }
 

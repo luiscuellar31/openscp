@@ -104,6 +104,7 @@ int main() {
     const auto pass = envValue("OPENSCP_IT_FTPS_PASS");
     const auto remoteBase = envValue("OPENSCP_IT_FTPS_REMOTE_BASE");
     const auto caCert = envValue("OPENSCP_IT_FTPS_CA_CERT");
+    const auto modeRaw = envValue("OPENSCP_IT_FTPS_MODE");
     const bool verifyPeer =
         parseBool(envValue("OPENSCP_IT_FTPS_VERIFY_PEER"), true);
 
@@ -129,6 +130,9 @@ int main() {
     opt.protocol = openscp::Protocol::Ftps;
     opt.host = *host;
     opt.port = port;
+    opt.ftps_mode =
+        modeRaw ? openscp::ftpsModeFromStorageName(*modeRaw)
+                : openscp::FtpsMode::Auto;
     opt.username = user.value_or("anonymous");
     if (pass.has_value())
         opt.password = pass;
@@ -149,6 +153,9 @@ int main() {
     t.check(caps.implemented, "FTPS should be marked implemented");
     t.check(caps.supports_file_transfers, "FTPS should support transfers");
     t.check(caps.supports_listing, "FTPS should support remote listing");
+    t.check(caps.can_stat && caps.can_mkdir && caps.can_delete &&
+                caps.can_rename,
+            "FTPS should advertise remote CRUD operations");
 
     const std::string token = uniqueToken();
     const fs::path tempDir =
@@ -161,8 +168,15 @@ int main() {
         "openscp ftps integration payload " + token + "\nline two\n";
     t.check(writeFile(localUpload, payload), "should write local upload file");
 
-    const std::string remotePath =
-        joinRemotePath(*remoteBase, "openscp_ftps_it_" + token + ".txt");
+    const std::string remoteDir =
+        joinRemotePath(*remoteBase, "openscp_ftps_it_" + token);
+    const std::string remotePath = joinRemotePath(remoteDir, "upload file.txt");
+    const std::string renamedPath =
+        joinRemotePath(remoteDir, "renamed file.txt");
+
+    err.clear();
+    t.check(client->mkdir(remoteDir, err),
+            std::string("FTPS mkdir should succeed: ") + err);
 
     bool uploadProgressCalled = false;
     err.clear();
@@ -176,9 +190,18 @@ int main() {
             std::string("FTPS upload should succeed: ") + err);
     t.check(uploadProgressCalled, "upload progress callback should be called");
 
+    bool pathIsDir = true;
+    err.clear();
+    t.check(client->exists(remotePath, pathIsDir, err),
+            std::string("FTPS exists should find uploaded file: ") + err);
+    t.check(!pathIsDir, "FTPS exists should report a file");
+    err.clear();
+    t.check(client->rename(remotePath, renamedPath, err, false),
+            std::string("FTPS rename should succeed: ") + err);
+
     bool downloadProgressCalled = false;
     err.clear();
-    t.check(client->get(remotePath, localDownload.string(), err,
+    t.check(client->get(renamedPath, localDownload.string(), err,
                         [&](std::size_t done, std::size_t total) {
                             (void)done;
                             (void)total;
@@ -196,14 +219,21 @@ int main() {
 
     std::vector<openscp::FileInfo> listing;
     err.clear();
-    t.check(client->list(*remoteBase, listing, err),
+    t.check(client->list(remoteDir, listing, err),
             std::string("FTPS listing should succeed: ") + err);
-    const std::string remoteFileName = "openscp_ftps_it_" + token + ".txt";
+    const std::string remoteFileName = "renamed file.txt";
     const auto listed = std::find_if(
         listing.begin(), listing.end(),
         [&](const openscp::FileInfo &f) { return f.name == remoteFileName; });
     t.check(listed != listing.end(),
             "FTPS listing should include the uploaded file");
+
+    err.clear();
+    t.check(client->removeFile(renamedPath, err),
+            std::string("FTPS file deletion should succeed: ") + err);
+    err.clear();
+    t.check(client->removeDir(remoteDir, err),
+            std::string("FTPS directory deletion should succeed: ") + err);
 
     client->disconnect();
     std::error_code ec;

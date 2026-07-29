@@ -166,23 +166,6 @@ static bool rename_remote_with_fallback(LIBSSH2_SFTP *sftp,
         lastAttempt = a.name;
     }
 
-    // Some servers reject RENAME flags but accept plain rename after removing
-    // destination first.
-    if (overwrite) {
-        int urc = libssh2_sftp_unlink_ex(sftp, to.c_str(), (unsigned)to.size());
-        unsigned long unlinkErr = libssh2_sftp_last_error(sftp);
-        if (urc == 0 || unlinkErr == LIBSSH2_FX_NO_SUCH_FILE) {
-            const int rc = libssh2_sftp_rename_ex(
-                sftp, from.c_str(), (unsigned)from.size(), to.c_str(),
-                (unsigned)to.size(), 0);
-            if (rc == 0)
-                return true;
-            lastRc = rc;
-            lastSftpErr = libssh2_sftp_last_error(sftp);
-            lastAttempt = "plain-after-unlink";
-        }
-    }
-
     if (why) {
         std::ostringstream oss;
         oss << "sftp_rename_ex failed after fallback (attempt=" << lastAttempt
@@ -376,6 +359,9 @@ static bool hash_remote_range(LIBSSH2_SFTP *sftp, const std::string &remote,
 static bool hash_remote_full(LIBSSH2_SFTP *sftp, const std::string &remote,
                              Sha256Digest &out, std::string *why,
                              const std::function<bool()> *shouldCancel =
+                                 nullptr,
+                             const std::function<void(std::size_t,
+                                                      std::size_t)> *progress =
                                  nullptr) {
     LIBSSH2_SFTP_HANDLE *rh =
         libssh2_sftp_open_ex(sftp, remote.c_str(), (unsigned)remote.size(),
@@ -399,6 +385,15 @@ static bool hash_remote_full(LIBSSH2_SFTP *sftp, const std::string &remote,
         libssh2_sftp_close(rh);
         return false;
     }
+    LIBSSH2_SFTP_ATTRIBUTES attributes{};
+    const bool hasTotal =
+        libssh2_sftp_fstat_ex(rh, &attributes, 0) == 0 &&
+        (attributes.flags & LIBSSH2_SFTP_ATTR_SIZE) != 0;
+    const std::size_t total =
+        hasTotal ? static_cast<std::size_t>(attributes.filesize) : 0;
+    std::size_t done = 0;
+    if (progress && *progress)
+        (*progress)(done, total);
     std::array<unsigned char, 64 * 1024> buf{};
     while (true) {
         if (transfer_cancel_requested(shouldCancel)) {
@@ -418,6 +413,9 @@ static bool hash_remote_full(LIBSSH2_SFTP *sftp, const std::string &remote,
                 libssh2_sftp_close(rh);
                 return false;
             }
+            done += static_cast<std::size_t>(n);
+            if (progress && *progress)
+                (*progress)(done, total);
             continue;
         }
         if (n == 0)

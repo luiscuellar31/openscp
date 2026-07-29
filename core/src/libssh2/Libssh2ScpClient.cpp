@@ -3,6 +3,9 @@
 #include "openscp/Libssh2ScpClient.hpp"
 #include <libssh2.h>
 
+#include <algorithm>
+#include <cctype>
+#include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -52,7 +55,185 @@ void appendSessionErrorDetail(_LIBSSH2_SESSION *session, std::string &msg) {
 
 } // namespace
 
+Libssh2ScpClient::StructuredErrorScope::StructuredErrorScope(
+    Libssh2ScpClient &owner, std::string &error, bool mutation)
+    : owner_(owner), error_(error), mutation_(mutation) {
+    error_.clear();
+    owner_.clearLastOperationError();
+}
+
+Libssh2ScpClient::StructuredErrorScope::~StructuredErrorScope() {
+    if (error_.empty() || owner_.lastOperationError())
+        return;
+    owner_.setLastOperationError(
+        owner_.classifyStructuredFailure(error_, mutation_));
+}
+
+Libssh2ScpClient::StructuredErrorScope
+Libssh2ScpClient::beginStructuredOperation(std::string &err, bool mutation) {
+    return StructuredErrorScope(*this, err, mutation);
+}
+
+RemoteError
+Libssh2ScpClient::classifyStructuredFailure(const std::string &message,
+                                            bool mutation) const {
+    RemoteError error;
+    error.message = message;
+
+    std::string lower = message;
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char ch) {
+                       return static_cast<char>(std::tolower(ch));
+                   });
+    const auto contains = [&lower](const char *needle) {
+        return lower.find(needle) != std::string::npos;
+    };
+
+    if (contains("cancel") || contains("interrupt")) {
+        error.kind = RemoteErrorKind::Canceled;
+        return error;
+    }
+    if (contains("no space") || contains("disk full") ||
+        contains("quota exceeded") || contains("enospc")) {
+        error.kind = RemoteErrorKind::InsufficientSpace;
+        error.native_code = ENOSPC;
+        return error;
+    }
+    if (contains("host key") || contains("hostkey") ||
+        contains("known_hosts") || contains("fingerprint") ||
+        contains("unknown host")) {
+        error.kind = RemoteErrorKind::Certificate;
+        return error;
+    }
+    if (contains("authentication") || contains("password") ||
+        contains("publickey") || contains("private key") ||
+        contains("sin credenciales") || contains("credential")) {
+        error.kind = RemoteErrorKind::Authentication;
+        return error;
+    }
+    if (contains("permission denied") || contains("access denied")) {
+        error.kind = RemoteErrorKind::PermissionDenied;
+        return error;
+    }
+    if (contains("not connected")) {
+        error.kind = RemoteErrorKind::Connection;
+        error.transient = true;
+        return error;
+    }
+    if (contains("does not support") || contains("not supported")) {
+        error.kind = RemoteErrorKind::Unsupported;
+        return error;
+    }
+    if (contains("integrity") || contains("checksum")) {
+        error.kind = RemoteErrorKind::Integrity;
+        return error;
+    }
+    if (contains("invalid ") || contains("missing session options") ||
+        contains(" is empty") || contains("cannot be used together")) {
+        error.kind = RemoteErrorKind::InvalidRequest;
+        return error;
+    }
+    if (contains("local file") || contains("local read") ||
+        contains("local write") || contains("finalize local")) {
+        error.kind =
+            errno == ENOSPC ? RemoteErrorKind::InsufficientSpace
+                            : RemoteErrorKind::LocalIo;
+        error.native_code = errno;
+        return error;
+    }
+
+    const RemoteError delegateError = delegate_.lastOperationError();
+    if (delegateError)
+        return delegateError;
+
+    _LIBSSH2_SESSION *session = delegate_.sessionHandle();
+    const int nativeCode =
+        session ? libssh2_session_last_errno(session) : LIBSSH2_ERROR_NONE;
+    error.native_code = nativeCode;
+    switch (nativeCode) {
+    case LIBSSH2_ERROR_AUTHENTICATION_FAILED:
+    case LIBSSH2_ERROR_PUBLICKEY_UNVERIFIED:
+    case LIBSSH2_ERROR_KEYFILE_AUTH_FAILED:
+    case LIBSSH2_ERROR_PASSWORD_EXPIRED:
+    case LIBSSH2_ERROR_PUBLICKEY_PROTOCOL:
+        error.kind = RemoteErrorKind::Authentication;
+        break;
+    case LIBSSH2_ERROR_KNOWN_HOSTS:
+    case LIBSSH2_ERROR_HOSTKEY_INIT:
+    case LIBSSH2_ERROR_HOSTKEY_SIGN:
+        error.kind = RemoteErrorKind::Certificate;
+        break;
+    case LIBSSH2_ERROR_TIMEOUT:
+    case LIBSSH2_ERROR_SOCKET_TIMEOUT:
+    case LIBSSH2_ERROR_EAGAIN:
+        error.kind = RemoteErrorKind::Timeout;
+        error.transient = true;
+        break;
+    case LIBSSH2_ERROR_SOCKET_NONE:
+    case LIBSSH2_ERROR_SOCKET_SEND:
+    case LIBSSH2_ERROR_SOCKET_DISCONNECT:
+    case LIBSSH2_ERROR_SOCKET_RECV:
+    case LIBSSH2_ERROR_BAD_SOCKET:
+    case LIBSSH2_ERROR_CHANNEL_CLOSED:
+        error.kind = RemoteErrorKind::Connection;
+        error.transient = true;
+        break;
+    case LIBSSH2_ERROR_METHOD_NOT_SUPPORTED:
+    case LIBSSH2_ERROR_ALGO_UNSUPPORTED:
+    case LIBSSH2_ERROR_KEX_FAILURE:
+    case LIBSSH2_ERROR_KEY_EXCHANGE_FAILURE:
+        error.kind = RemoteErrorKind::Unsupported;
+        break;
+    case LIBSSH2_ERROR_REQUEST_DENIED:
+    case LIBSSH2_ERROR_CHANNEL_REQUEST_DENIED:
+        error.kind = RemoteErrorKind::PermissionDenied;
+        break;
+    case LIBSSH2_ERROR_PROTO:
+    case LIBSSH2_ERROR_SCP_PROTOCOL:
+    case LIBSSH2_ERROR_SFTP_PROTOCOL:
+        error.kind = RemoteErrorKind::Protocol;
+        break;
+    case LIBSSH2_ERROR_INVAL:
+    case LIBSSH2_ERROR_BAD_USE:
+        error.kind = RemoteErrorKind::InvalidRequest;
+        break;
+    case LIBSSH2_ERROR_ALLOC:
+        error.kind = RemoteErrorKind::LocalIo;
+        break;
+    case LIBSSH2_ERROR_FILE:
+        error.kind =
+            errno == ENOSPC ? RemoteErrorKind::InsufficientSpace
+                            : RemoteErrorKind::LocalIo;
+        if (errno != 0)
+            error.native_code = errno;
+        break;
+    case LIBSSH2_ERROR_NONE:
+    default:
+        if (contains("not found") || contains("no such")) {
+            error.kind = RemoteErrorKind::NotFound;
+        } else if (contains("timeout") || contains("timed out")) {
+            error.kind = RemoteErrorKind::Timeout;
+            error.transient = true;
+        } else if (contains("connect") || contains("connection") ||
+                   contains("socket") || contains("closed")) {
+            error.kind = RemoteErrorKind::Connection;
+            error.transient = true;
+        } else if (contains("protocol") || contains("handshake")) {
+            error.kind = RemoteErrorKind::Protocol;
+        } else {
+            error.kind = RemoteErrorKind::RemoteIo;
+        }
+        break;
+    }
+    error.commit_uncertain =
+        mutation && (error.kind == RemoteErrorKind::Connection ||
+                     error.kind == RemoteErrorKind::Timeout ||
+                     error.kind == RemoteErrorKind::RemoteIo);
+    return error;
+}
+
 bool Libssh2ScpClient::connect(const SessionOptions &opt, std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err);
     sessionOptions_.reset();
     SessionOptions copy = opt;
     // Force protocol marker so downstream fallback builds the right client.
@@ -74,6 +255,7 @@ bool Libssh2ScpClient::isConnected() const { return delegate_.isConnected(); }
 
 bool Libssh2ScpClient::list(const std::string &remote_path,
                             std::vector<FileInfo> &out, std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err);
     (void)remote_path;
     out.clear();
     return unsupportedScpOperation("directory listing", err);
@@ -83,6 +265,7 @@ bool Libssh2ScpClient::get(
     const std::string &remote, const std::string &local, std::string &err,
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
+    auto structuredErrorScope = beginStructuredOperation(err);
     if (resume) {
         err = "SCP downloads do not support resume.";
         return false;
@@ -127,8 +310,10 @@ bool Libssh2ScpClient::get(
 
     std::FILE *localFile = std::fopen(local.c_str(), "wb");
     if (!localFile) {
+        const int nativeError = errno;
         err = "Could not open local file for writing";
         closeScpChannel(channel, false);
+        setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
         return false;
     }
 
@@ -187,10 +372,12 @@ bool Libssh2ScpClient::get(
 
         if (std::fwrite(buffer.data(), 1, static_cast<size_t>(n), localFile) !=
             static_cast<size_t>(n)) {
+            const int nativeError = errno;
             err = "Local write failed";
             std::fclose(localFile);
             (void)std::remove(local.c_str());
             closeScpChannel(channel, false);
+            setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
             return false;
         }
 
@@ -200,9 +387,11 @@ bool Libssh2ScpClient::get(
     }
 
     if (std::fclose(localFile) != 0) {
+        const int nativeError = errno;
         err = "Could not finalize local file";
         (void)std::remove(local.c_str());
         closeScpChannel(channel, false);
+        setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
         return false;
     }
     closeScpChannel(channel, true);
@@ -215,6 +404,7 @@ bool Libssh2ScpClient::put(
     const std::string &local, const std::string &remote, std::string &err,
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
+    auto structuredErrorScope = beginStructuredOperation(err, true);
     if (resume) {
         err = "SCP uploads do not support resume.";
         return false;
@@ -234,12 +424,14 @@ bool Libssh2ScpClient::put(
         total = std::filesystem::file_size(local);
     } catch (...) {
         err = "Could not determine local file size";
+        setLastOperationError(RemoteErrorKind::LocalIo, err);
         return false;
     }
 
     std::FILE *localFile = std::fopen(local.c_str(), "rb");
     if (!localFile) {
         err = "Could not open local file for reading";
+        setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
         return false;
     }
 
@@ -278,9 +470,12 @@ bool Libssh2ScpClient::put(
             std::fread(buffer.data(), 1, buffer.size(), localFile);
         if (nread == 0) {
             if (std::ferror(localFile)) {
+                const int nativeError = errno;
                 err = "Local read failed";
                 std::fclose(localFile);
                 closeScpChannel(channel, false);
+                setLastOperationError(RemoteErrorKind::LocalIo, err,
+                                      nativeError);
                 return false;
             }
             break; // EOF
@@ -335,8 +530,10 @@ bool Libssh2ScpClient::put(
     }
 
     if (std::fclose(localFile) != 0) {
+        const int nativeError = errno;
         err = "Could not close local file";
         closeScpChannel(channel, false);
+        setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
         return false;
     }
     closeScpChannel(channel, true);
@@ -347,6 +544,7 @@ bool Libssh2ScpClient::put(
 
 bool Libssh2ScpClient::exists(const std::string &remote_path, bool &isDir,
                               std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err);
     (void)remote_path;
     isDir = false;
     return unsupportedScpOperation("path existence checks", err);
@@ -354,6 +552,7 @@ bool Libssh2ScpClient::exists(const std::string &remote_path, bool &isDir,
 
 bool Libssh2ScpClient::stat(const std::string &remote_path, FileInfo &info,
                             std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err);
     (void)remote_path;
     info = FileInfo{};
     return unsupportedScpOperation("metadata stat", err);
@@ -361,6 +560,7 @@ bool Libssh2ScpClient::stat(const std::string &remote_path, FileInfo &info,
 
 bool Libssh2ScpClient::chmod(const std::string &remote_path, std::uint32_t mode,
                              std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err, true);
     (void)remote_path;
     (void)mode;
     return unsupportedScpOperation("chmod", err);
@@ -368,6 +568,7 @@ bool Libssh2ScpClient::chmod(const std::string &remote_path, std::uint32_t mode,
 
 bool Libssh2ScpClient::chown(const std::string &remote_path, std::uint32_t uid,
                              std::uint32_t gid, std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err, true);
     (void)remote_path;
     (void)uid;
     (void)gid;
@@ -377,6 +578,7 @@ bool Libssh2ScpClient::chown(const std::string &remote_path, std::uint32_t uid,
 bool Libssh2ScpClient::setTimes(const std::string &remote_path,
                                 std::uint64_t atime, std::uint64_t mtime,
                                 std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err, true);
     (void)remote_path;
     (void)atime;
     (void)mtime;
@@ -385,6 +587,7 @@ bool Libssh2ScpClient::setTimes(const std::string &remote_path,
 
 bool Libssh2ScpClient::mkdir(const std::string &remote_dir, std::string &err,
                              unsigned int mode) {
+    auto structuredErrorScope = beginStructuredOperation(err, true);
     (void)remote_dir;
     (void)mode;
     return unsupportedScpOperation("mkdir", err);
@@ -392,27 +595,31 @@ bool Libssh2ScpClient::mkdir(const std::string &remote_dir, std::string &err,
 
 bool Libssh2ScpClient::removeFile(const std::string &remote_path,
                                   std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err, true);
     (void)remote_path;
     return unsupportedScpOperation("file deletion", err);
 }
 
 bool Libssh2ScpClient::removeDir(const std::string &remote_dir,
                                  std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err, true);
     (void)remote_dir;
     return unsupportedScpOperation("directory deletion", err);
 }
 
 bool Libssh2ScpClient::rename(const std::string &from, const std::string &to,
                               std::string &err, bool overwrite) {
+    auto structuredErrorScope = beginStructuredOperation(err, true);
     (void)from;
     (void)to;
     (void)overwrite;
     return unsupportedScpOperation("rename", err);
 }
 
-std::unique_ptr<SftpClient>
+std::unique_ptr<RemoteClient>
 Libssh2ScpClient::newConnectionLike(const SessionOptions &opt,
                                     std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err);
     auto ptr = std::make_unique<Libssh2ScpClient>();
     if (!ptr->connect(opt, err))
         return nullptr;
@@ -435,10 +642,14 @@ bool Libssh2ScpClient::transferViaSftpFallbackGet(
     SessionOptions sftpOpt = *sessionOptions_;
     sftpOpt.protocol = Protocol::Sftp;
     Libssh2SftpClient sftpFallback;
-    if (!sftpFallback.connect(sftpOpt, err))
+    if (!sftpFallback.connect(sftpOpt, err)) {
+        setLastOperationError(sftpFallback.lastOperationError());
         return false;
+    }
     const bool ok = sftpFallback.get(remote, local, err, std::move(progress),
                                      std::move(shouldCancel), false);
+    if (!ok)
+        setLastOperationError(sftpFallback.lastOperationError());
     sftpFallback.disconnect();
     return ok;
 }
@@ -459,10 +670,14 @@ bool Libssh2ScpClient::transferViaSftpFallbackPut(
     SessionOptions sftpOpt = *sessionOptions_;
     sftpOpt.protocol = Protocol::Sftp;
     Libssh2SftpClient sftpFallback;
-    if (!sftpFallback.connect(sftpOpt, err))
+    if (!sftpFallback.connect(sftpOpt, err)) {
+        setLastOperationError(sftpFallback.lastOperationError());
         return false;
+    }
     const bool ok = sftpFallback.put(local, remote, err, std::move(progress),
                                      std::move(shouldCancel), false);
+    if (!ok)
+        setLastOperationError(sftpFallback.lastOperationError());
     sftpFallback.disconnect();
     return ok;
 }

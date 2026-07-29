@@ -24,7 +24,7 @@ bool MockSftpClient::setTimes(const std::string &remote_path,
     return true;
 }
 
-std::unique_ptr<SftpClient>
+std::unique_ptr<RemoteClient>
 MockSftpClient::newConnectionLike(const SessionOptions &opt, std::string &err) {
     auto p = std::make_unique<MockSftpClient>();
     if (!p->connect(opt, err))

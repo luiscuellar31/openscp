@@ -36,9 +36,52 @@ enum class TransferIntegrityPolicy { Off, Optional, Required };
 enum class ProxyType { None, Socks5, HttpConnect };
 enum class Protocol { Sftp, Scp, Ftp, Ftps, WebDav };
 enum class WebDavScheme { Https, Http };
+enum class FtpsMode {
+    Auto,        // Preserve legacy behavior: port 990 is implicit, others explicit.
+    ExplicitTls, // Plain FTP connection upgraded with AUTH TLS.
+    ImplicitTls, // TLS is established immediately after connecting.
+};
 enum class ScpTransferMode {
     Auto,    // Try native SCP first and fallback to SFTP transfers if needed.
     ScpOnly, // Enforce classic SCP transfers only (no SFTP fallback).
+};
+
+// Backend-independent failure information for retry policy and user messaging.
+// Existing string error outputs remain the primary source-compatible API.
+enum class RemoteErrorKind {
+    None,
+    Canceled,
+    InvalidRequest,
+    Unsupported,
+    NotFound,
+    Authentication,
+    PermissionDenied,
+    Certificate,
+    Timeout,
+    Connection,
+    RateLimited,
+    Conflict,
+    Integrity,
+    InsufficientSpace,
+    LocalIo,
+    RemoteIo,
+    Protocol,
+    Unknown,
+};
+
+struct RemoteError {
+    RemoteErrorKind kind = RemoteErrorKind::None;
+    std::string message;
+    std::int64_t native_code = 0;
+    std::optional<std::uint32_t> retry_after_seconds;
+    bool transient = false;
+    // True when the request may have reached the server but its final outcome
+    // could not be observed safely. Callers must not retry mutations blindly.
+    bool commit_uncertain = false;
+
+    explicit operator bool() const noexcept {
+        return kind != RemoteErrorKind::None;
+    }
 };
 
 inline constexpr bool isValidProxyType(ProxyType type) {
@@ -66,6 +109,20 @@ inline constexpr bool isValidWebDavScheme(WebDavScheme scheme) {
 
 inline constexpr WebDavScheme normalizeWebDavScheme(WebDavScheme scheme) {
     return isValidWebDavScheme(scheme) ? scheme : WebDavScheme::Https;
+}
+
+inline constexpr bool isValidFtpsMode(FtpsMode mode) {
+    switch (mode) {
+    case FtpsMode::Auto:
+    case FtpsMode::ExplicitTls:
+    case FtpsMode::ImplicitTls:
+        return true;
+    }
+    return false;
+}
+
+inline constexpr FtpsMode normalizeFtpsMode(FtpsMode mode) {
+    return isValidFtpsMode(mode) ? mode : FtpsMode::Auto;
 }
 
 inline ProxyType proxyTypeFromStorageValue(int raw) {
@@ -119,8 +176,88 @@ inline WebDavScheme webDavSchemeFromStorageName(const std::string &raw) {
     return WebDavScheme::Https;
 }
 
+inline constexpr const char *ftpsModeStorageName(FtpsMode mode) {
+    switch (normalizeFtpsMode(mode)) {
+    case FtpsMode::Auto:
+        return "auto";
+    case FtpsMode::ExplicitTls:
+        return "explicit";
+    case FtpsMode::ImplicitTls:
+        return "implicit";
+    }
+    return "auto";
+}
+
+inline FtpsMode ftpsModeFromStorageName(const std::string &raw) {
+    if (raw.empty())
+        return FtpsMode::Auto;
+    std::string normalized = raw;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char c) -> char {
+                       return static_cast<char>(std::tolower(c));
+                   });
+    if (normalized == "explicit" || normalized == "explicit-tls")
+        return FtpsMode::ExplicitTls;
+    if (normalized == "implicit" || normalized == "implicit-tls")
+        return FtpsMode::ImplicitTls;
+    return FtpsMode::Auto;
+}
+
+// Canonical absolute WebDAV collection path. Dot segments are resolved without
+// allowing the configured base to escape above the server root.
+inline std::string normalizeWebDavBasePath(std::string raw) {
+    for (char &c : raw) {
+        if (c == '\\')
+            c = '/';
+    }
+    std::vector<std::string> segments;
+    std::size_t pos = 0;
+    while (pos <= raw.size()) {
+        const std::size_t slash = raw.find('/', pos);
+        const std::string part =
+            raw.substr(pos, slash == std::string::npos ? std::string::npos
+                                                       : slash - pos);
+        if (!part.empty() && part != ".") {
+            if (part == "..") {
+                if (!segments.empty())
+                    segments.pop_back();
+            } else {
+                segments.push_back(part);
+            }
+        }
+        if (slash == std::string::npos)
+            break;
+        pos = slash + 1;
+    }
+    std::string normalized = "/";
+    for (std::size_t i = 0; i < segments.size(); ++i) {
+        if (i != 0)
+            normalized.push_back('/');
+        normalized += segments[i];
+    }
+    return normalized;
+}
+
 struct ProtocolCapabilities {
     bool implemented = false;
+
+    // Fine-grained operation capabilities used by new orchestration/UI code.
+    bool can_list = false;
+    bool can_upload = false;
+    bool can_download = false;
+    bool can_stat = false;
+    bool can_mkdir = false;
+    bool can_delete = false;
+    bool can_rename = false;
+    bool can_resume_download = false;
+    bool can_resume_upload = false;
+    bool can_read_metadata = false;
+    bool can_set_permissions = false;
+    bool can_set_ownership = false;
+    bool can_set_timestamps = false;
+    bool can_checksum = false;
+
+    // Legacy aggregate flags retained for source compatibility.
     bool supports_listing = false;
     bool supports_file_transfers = false;
     bool supports_resume = false;
@@ -228,6 +365,20 @@ inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
     switch (protocol) {
     case Protocol::Sftp:
         caps.implemented = true;
+        caps.can_list = true;
+        caps.can_upload = true;
+        caps.can_download = true;
+        caps.can_stat = true;
+        caps.can_mkdir = true;
+        caps.can_delete = true;
+        caps.can_rename = true;
+        caps.can_resume_download = true;
+        caps.can_resume_upload = true;
+        caps.can_read_metadata = true;
+        caps.can_set_permissions = true;
+        caps.can_set_ownership = true;
+        caps.can_set_timestamps = true;
+        caps.can_checksum = true;
         caps.supports_listing = true;
         caps.supports_file_transfers = true;
         caps.supports_resume = true;
@@ -242,6 +393,8 @@ inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
         return caps;
     case Protocol::Scp:
         caps.implemented = true;
+        caps.can_upload = true;
+        caps.can_download = true;
         caps.supports_file_transfers = true;
         caps.supports_proxy = true;
         caps.supports_jump_host = true;
@@ -250,22 +403,48 @@ inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
     case Protocol::Ftp:
 #if OPENSCP_HAS_CURL_FTP
         caps.implemented = true;
+        caps.can_list = true;
+        caps.can_upload = true;
+        caps.can_download = true;
+        caps.can_stat = true;
+        caps.can_mkdir = true;
+        caps.can_delete = true;
+        caps.can_rename = true;
+        caps.can_read_metadata = true;
         caps.supports_listing = true;
         caps.supports_file_transfers = true;
+        caps.supports_metadata = true;
         caps.supports_proxy = true;
 #endif
         return caps;
     case Protocol::Ftps:
 #if OPENSCP_HAS_CURL_FTP
         caps.implemented = true;
+        caps.can_list = true;
+        caps.can_upload = true;
+        caps.can_download = true;
+        caps.can_stat = true;
+        caps.can_mkdir = true;
+        caps.can_delete = true;
+        caps.can_rename = true;
+        caps.can_read_metadata = true;
         caps.supports_listing = true;
         caps.supports_file_transfers = true;
+        caps.supports_metadata = true;
         caps.supports_proxy = true;
 #endif
         return caps;
     case Protocol::WebDav:
 #if OPENSCP_HAS_CURL_WEBDAV
         caps.implemented = true;
+        caps.can_list = true;
+        caps.can_upload = true;
+        caps.can_download = true;
+        caps.can_stat = true;
+        caps.can_mkdir = true;
+        caps.can_delete = true;
+        caps.can_rename = true;
+        caps.can_read_metadata = true;
         caps.supports_listing = true;
         caps.supports_file_transfers = true;
         caps.supports_metadata = true;
@@ -323,11 +502,13 @@ struct SessionOptions {
         TransferIntegrityPolicy::Optional;
 
     // FTPS security
+    FtpsMode ftps_mode = FtpsMode::Auto;
     bool ftps_verify_peer = true;
     std::optional<std::string> ftps_ca_cert_path;
 
     // WebDAV HTTP/TLS transport settings
     WebDavScheme webdav_scheme = WebDavScheme::Https;
+    std::string webdav_base_path = "/";
     bool webdav_verify_peer = true;
     std::optional<std::string> webdav_ca_cert_path;
 

@@ -1,11 +1,19 @@
 // Core unit tests without external framework (run via CTest).
 #include "openscp/ClientFactory.hpp"
+#include "openscp/Libssh2ScpClient.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
 #include "openscp/MockSftpClient.hpp"
 #if OPENSCP_HAS_CURL_FTP
 #include "openscp/CurlFtpClient.hpp"
 #endif
+#if OPENSCP_HAS_CURL_WEBDAV
+#include "openscp/CurlWebDavClient.hpp"
+#endif
+#if OPENSCP_HAS_CURL_FTP || OPENSCP_HAS_CURL_WEBDAV
+#include "../core/src/curl/CurlBackendCommon.hpp"
+#endif
 
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -14,6 +22,7 @@
 #include <iterator>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -84,8 +93,14 @@ void test_session_defaults(TestContext &t) {
             "private_key_path should be empty by default");
     t.check(o.webdav_scheme == openscp::WebDavScheme::Https,
             "default WebDAV scheme should be HTTPS");
+    t.check(o.webdav_base_path == "/",
+            "default WebDAV base path should be root");
     t.check(o.webdav_verify_peer,
             "WebDAV TLS verification should default to enabled");
+    t.check(o.ftps_mode == openscp::FtpsMode::Auto,
+            "default FTPS mode should preserve legacy auto behavior");
+    t.check((std::is_same_v<openscp::RemoteClient, openscp::SftpClient>),
+            "RemoteClient should remain source-compatible with SftpClient");
 }
 
 void test_protocol_helpers(TestContext &t) {
@@ -149,12 +164,34 @@ void test_protocol_helpers(TestContext &t) {
     t.check(openscp::defaultPortForWebDavScheme(openscp::WebDavScheme::Https) ==
                 443,
             "default HTTPS WebDAV port should be 443");
+    t.check(openscp::ftpsModeFromStorageName("EXPLICIT") ==
+                openscp::FtpsMode::ExplicitTls,
+            "FTPS mode parser should accept explicit TLS");
+    t.check(openscp::ftpsModeFromStorageName("implicit-tls") ==
+                openscp::FtpsMode::ImplicitTls,
+            "FTPS mode parser should accept implicit TLS");
+    t.check(std::string(openscp::ftpsModeStorageName(
+                openscp::FtpsMode::ImplicitTls)) == "implicit",
+            "FTPS mode serializer should persist implicit mode");
+    t.check(openscp::normalizeWebDavBasePath(
+                "remote.php//dav/./files/alice/") ==
+                "/remote.php/dav/files/alice",
+            "WebDAV base paths should be canonical absolute paths");
+    t.check(openscp::normalizeWebDavBasePath("/dav/root/../files") ==
+                "/dav/files",
+            "WebDAV base paths should resolve dot segments");
 
     const auto sftpCaps =
         openscp::capabilitiesForProtocol(openscp::Protocol::Sftp);
     t.check(sftpCaps.implemented, "SFTP capabilities should be implemented");
     t.check(sftpCaps.supports_listing,
             "SFTP capabilities should include listing");
+    t.check(sftpCaps.can_upload && sftpCaps.can_download &&
+                sftpCaps.can_stat && sftpCaps.can_mkdir &&
+                sftpCaps.can_delete && sftpCaps.can_rename,
+            "SFTP should advertise fine-grained remote operations");
+    t.check(sftpCaps.can_checksum,
+            "SFTP should advertise on-demand remote checksums");
 
     const auto scpCaps =
         openscp::capabilitiesForProtocol(openscp::Protocol::Scp);
@@ -167,6 +204,10 @@ void test_protocol_helpers(TestContext &t) {
             "SCP capabilities should not include resume");
     t.check(!scpCaps.supports_permissions,
             "SCP capabilities should not include chmod/chown metadata edits");
+    t.check(scpCaps.can_upload && scpCaps.can_download && !scpCaps.can_list,
+            "SCP should advertise transfer-only fine-grained capabilities");
+    t.check(!scpCaps.can_checksum,
+            "SCP should not advertise remote checksums");
     t.check(scpCaps.supports_known_hosts,
             "SCP capabilities should include known_hosts verification");
 
@@ -183,6 +224,13 @@ void test_protocol_helpers(TestContext &t) {
             "WebDAV capabilities should include metadata");
     t.check(webdavCaps.supports_proxy,
             "WebDAV capabilities should include proxy support");
+    t.check(webdavCaps.can_list && webdavCaps.can_upload &&
+                webdavCaps.can_download && webdavCaps.can_stat &&
+                webdavCaps.can_mkdir && webdavCaps.can_delete &&
+                webdavCaps.can_rename,
+            "WebDAV should advertise supported remote operations");
+    t.check(!webdavCaps.can_checksum,
+            "WebDAV should not advertise remote checksums");
 #else
     t.check(!webdavCaps.implemented,
             "WebDAV capabilities should report not implemented");
@@ -206,6 +254,12 @@ void test_protocol_helpers(TestContext &t) {
             "FTP capabilities should include directory listing support");
     t.check(!ftpCaps.supports_known_hosts,
             "FTP should not advertise SSH known_hosts verification");
+    t.check(ftpCaps.can_list && ftpCaps.can_upload && ftpCaps.can_download &&
+                ftpCaps.can_stat && ftpCaps.can_mkdir && ftpCaps.can_delete &&
+                ftpCaps.can_rename,
+            "FTP should advertise implemented CRUD operations");
+    t.check(!ftpCaps.can_checksum && !ftpsCaps.can_checksum,
+            "FTP and FTPS should not advertise remote checksums");
     t.check(ftpsCaps.implemented, "FTPS capabilities should be implemented");
     t.check(ftpsCaps.supports_file_transfers,
             "FTPS capabilities should include file transfers");
@@ -253,6 +307,71 @@ void test_curlftp_rejects_unsupported_proxy_type(TestContext &t) {
     t.checkContains(
         err, "Unsupported proxy type",
         "FTP connect should explain unsupported proxy enum values");
+    const openscp::RemoteError detail = client.lastOperationError();
+    t.check(detail.kind == openscp::RemoteErrorKind::InvalidRequest,
+            "FTP validation failure should expose a structured error");
+}
+
+void test_curlftp_rejects_command_injection_paths(TestContext &t) {
+    openscp::CurlFtpClient client(openscp::Protocol::Ftp);
+    std::vector<openscp::FileInfo> entries;
+    std::string err;
+    const bool ok = client.list("/safe\r\nDELE /important", entries, err);
+    t.check(!ok, "FTP should reject CRLF in a remote path");
+    t.checkContains(err, "forbidden control character",
+                    "FTP path validation should explain the rejection");
+    t.check(client.lastOperationError().kind ==
+                openscp::RemoteErrorKind::InvalidRequest,
+            "FTP path injection rejection should be structured");
+}
+#endif
+
+#if OPENSCP_HAS_CURL_FTP || OPENSCP_HAS_CURL_WEBDAV
+void test_curl_structured_error_mappings(TestContext &t) {
+    const openscp::RemoteError diskFull = openscp::curlcommon::errorFromCurl(
+        CURLE_REMOTE_DISK_FULL, "remote disk full");
+    t.check(diskFull.kind == openscp::RemoteErrorKind::InsufficientSpace &&
+                !diskFull.transient,
+            "CURLE_REMOTE_DISK_FULL should be a permanent space error");
+
+    const openscp::RemoteError httpFull =
+        openscp::curlcommon::errorFromHttpStatus(
+            507, "WebDAV destination has insufficient storage", true);
+    t.check(httpFull.kind == openscp::RemoteErrorKind::InsufficientSpace &&
+                !httpFull.transient && !httpFull.commit_uncertain,
+            "HTTP 507 should be a permanent, commit-certain space error");
+
+    const openscp::RemoteError tlsFailure =
+        openscp::curlcommon::errorFromCurl(CURLE_SSL_CONNECT_ERROR,
+                                           "TLS handshake failed");
+    t.check(tlsFailure.kind == openscp::RemoteErrorKind::Certificate &&
+                !tlsFailure.transient,
+            "TLS verification/handshake failures should not be retried");
+
+    const int previousErrno = errno;
+    errno = ENOSPC;
+    const openscp::RemoteError localFull =
+        openscp::curlcommon::errorFromCurl(CURLE_WRITE_ERROR,
+                                           "local write failed");
+    errno = previousErrno;
+    t.check(localFull.kind == openscp::RemoteErrorKind::InsufficientSpace &&
+                localFull.native_code == ENOSPC,
+            "local ENOSPC during a CURL write should retain its native code");
+}
+#endif
+
+#if OPENSCP_HAS_CURL_WEBDAV
+void test_curlwebdav_rejects_control_characters(TestContext &t) {
+    openscp::CurlWebDavClient client;
+    std::vector<openscp::FileInfo> entries;
+    std::string err;
+    const bool ok = client.list("/safe\nInjected: header", entries, err);
+    t.check(!ok, "WebDAV should reject control characters in remote paths");
+    t.checkContains(err, "forbidden control character",
+                    "WebDAV path validation should explain the rejection");
+    t.check(client.lastOperationError().kind ==
+                openscp::RemoteErrorKind::InvalidRequest,
+            "WebDAV path rejection should expose a structured error");
 }
 #endif
 
@@ -419,6 +538,18 @@ void test_unsupported_methods_report_error(TestContext &t) {
             "put should be unsupported in mock");
     t.checkContains(err, "Mock no soporta",
                     "put should expose unsupported message");
+
+    std::vector<std::uint8_t> digest{1, 2, 3};
+    err.clear();
+    t.check(!c.checksum("/remote", "SHA-256", digest, err),
+            "the compatible default checksum implementation should fail");
+    t.check(digest.empty(),
+            "an unsupported checksum must clear the output digest");
+    t.check(c.lastOperationError().kind ==
+                openscp::RemoteErrorKind::Unsupported,
+            "an unsupported checksum should expose a structured error");
+    t.check(!c.capabilities().can_checksum,
+            "a mock without hashing must not advertise checksum support");
 }
 
 void test_new_connection_like(TestContext &t) {
@@ -519,6 +650,39 @@ void test_libssh2_rejects_conflicting_proxy_and_jump(TestContext &t) {
     t.checkContains(
         err, "Proxy and SSH jump host cannot be used together",
         "connect should explain proxy/jump mutual exclusion");
+    t.check(c.lastOperationError().kind ==
+                openscp::RemoteErrorKind::InvalidRequest,
+            "libssh2 validation failures should expose structured metadata");
+}
+
+void test_libssh2_backends_expose_structured_errors(TestContext &t) {
+    openscp::Libssh2SftpClient sftp;
+    std::vector<openscp::FileInfo> entries;
+    std::string err;
+    t.check(!sftp.list("/", entries, err),
+            "SFTP listing should fail while disconnected");
+    const openscp::RemoteError sftpError = sftp.lastOperationError();
+    t.check(sftpError.kind == openscp::RemoteErrorKind::Connection &&
+                sftpError.transient,
+            "disconnected SFTP operations should expose a transient "
+            "connection error");
+
+    openscp::Libssh2ScpClient scp;
+    err.clear();
+    t.check(!scp.list("/", entries, err),
+            "SCP should reject unsupported directory listing");
+    t.check(scp.lastOperationError().kind ==
+                openscp::RemoteErrorKind::Unsupported,
+            "unsupported SCP operations should expose structured metadata");
+
+    err.clear();
+    t.check(!scp.get("/remote", "/local", err, {}, {}, false),
+            "SCP download should fail while disconnected");
+    const openscp::RemoteError scpError = scp.lastOperationError();
+    t.check(scpError.kind == openscp::RemoteErrorKind::Connection &&
+                scpError.transient,
+            "disconnected SCP transfers should expose a transient connection "
+            "error");
 }
 
 #ifdef _WIN32
@@ -624,8 +788,16 @@ int main() {
     test_client_factory(t);
     test_set_times(t);
     test_libssh2_rejects_conflicting_proxy_and_jump(t);
+    test_libssh2_backends_expose_structured_errors(t);
 #if OPENSCP_HAS_CURL_FTP
     test_curlftp_rejects_unsupported_proxy_type(t);
+    test_curlftp_rejects_command_injection_paths(t);
+#endif
+#if OPENSCP_HAS_CURL_FTP || OPENSCP_HAS_CURL_WEBDAV
+    test_curl_structured_error_mappings(t);
+#endif
+#if OPENSCP_HAS_CURL_WEBDAV
+    test_curlwebdav_rejects_control_characters(t);
 #endif
 #ifdef _WIN32
     test_libssh2_rejects_jump_on_windows(t);

@@ -1,5 +1,6 @@
 bool Libssh2SftpClient::list(const std::string &remote_path,
                              std::vector<FileInfo> &out, std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
 

@@ -1,8 +1,8 @@
-// SftpClient implementation using libssh2 for SSH/SFTP.
+// RemoteClient implementation using libssh2 for SSH/SFTP.
 // Encapsulates the SSH session, SFTP channel, and TCP socket.
 #pragma once
 #include "KnownHostsUtils.hpp"
-#include "SftpClient.hpp"
+#include "RemoteClient.hpp"
 #include <mutex>
 #include <string>
 #include <vector>
@@ -14,7 +14,7 @@ struct _LIBSSH2_SFTP_HANDLE;
 
 namespace openscp {
 
-class Libssh2SftpClient : public SftpClient {
+class Libssh2SftpClient : public RemoteClient {
     public:
     Libssh2SftpClient();
     ~Libssh2SftpClient() override;
@@ -70,14 +70,40 @@ class Libssh2SftpClient : public SftpClient {
     bool rename(const std::string &from, const std::string &to,
                 std::string &err, bool overwrite = false) override;
 
-    std::unique_ptr<SftpClient> newConnectionLike(const SessionOptions &opt,
-                                                  std::string &err) override;
+    bool checksum(
+        const std::string &remote_path, const std::string &algorithm,
+        std::vector<std::uint8_t> &digest, std::string &err,
+        std::function<void(std::size_t, std::size_t)> progress = {},
+        std::function<bool()> shouldCancel = {}) override;
+
+    std::unique_ptr<RemoteClient> newConnectionLike(const SessionOptions &opt,
+                                                     std::string &err) override;
 
     // Exposed for protocol adapters that share the authenticated SSH transport
     // (for example, SCP channel operations).
     _LIBSSH2_SESSION *sessionHandle() const { return session_; }
 
     private:
+    class StructuredErrorScope {
+        public:
+        StructuredErrorScope(Libssh2SftpClient &owner, std::string &error,
+                             bool mutation);
+        ~StructuredErrorScope();
+        StructuredErrorScope(const StructuredErrorScope &) = delete;
+        StructuredErrorScope &
+        operator=(const StructuredErrorScope &) = delete;
+
+        private:
+        Libssh2SftpClient &owner_;
+        std::string &error_;
+        bool mutation_ = false;
+    };
+
+    StructuredErrorScope beginStructuredOperation(std::string &err,
+                                                  bool mutation = false);
+    RemoteError classifyStructuredFailure(const std::string &message,
+                                          bool mutation) const;
+
     bool connected_ = false;
     int sock_ = -1;
     _LIBSSH2_SESSION *session_ = nullptr; // <- uses internal libssh2 types

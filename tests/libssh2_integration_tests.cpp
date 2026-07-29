@@ -327,6 +327,10 @@ int main() {
     const std::string remoteSrc = joinRemotePath(remoteSuiteDir, "payload.txt");
     const std::string remoteMoved =
         joinRemotePath(remoteSuiteDir, "payload-moved.txt");
+    const std::string remoteProtected =
+        joinRemotePath(remoteSuiteDir, "must-survive-failed-rename.txt");
+    const std::string remoteMissing =
+        joinRemotePath(remoteSuiteDir, "missing-rename-source.txt");
     const std::string remoteResumeDownload =
         joinRemotePath(remoteSuiteDir, "resume-download.txt");
     const std::string remoteResumeUpload =
@@ -424,6 +428,60 @@ int main() {
         t.check(client.put(localSrc.string(), remoteSrc, err, {}, {}, false),
                 std::string("put should succeed: ") + err);
     }
+    // A failed overwrite rename must never delete the existing destination.
+    if (t.failures == 0) {
+        err.clear();
+        t.check(client.put(localSrc.string(), remoteProtected, err, {}, {},
+                           false),
+                std::string("protected destination upload should succeed: ") +
+                    err);
+    }
+    std::vector<std::uint8_t> sourceChecksum;
+    if (t.failures == 0) {
+        std::vector<std::uint8_t> protectedChecksum;
+        std::size_t checksumDone = 0;
+        std::size_t checksumTotal = 0;
+        err.clear();
+        t.check(client.checksum(
+                    remoteSrc, "SHA-256", sourceChecksum, err,
+                    [&](std::size_t done, std::size_t total) {
+                        checksumDone = done;
+                        checksumTotal = total;
+                    }),
+                std::string("checksum(remoteSrc) should succeed: ") + err);
+        err.clear();
+        t.check(client.checksum(remoteProtected, "sha256",
+                                protectedChecksum, err),
+                std::string("checksum(remoteProtected) should succeed: ") +
+                    err);
+        t.check(sourceChecksum.size() == 32 &&
+                    sourceChecksum == protectedChecksum,
+                "equal remote files should have equal SHA-256 checksums");
+        t.check(checksumDone == payload.size() &&
+                    (checksumTotal == 0 ||
+                     checksumTotal == payload.size()),
+                "remote checksum should report byte progress");
+
+        std::vector<std::uint8_t> canceledDigest;
+        err.clear();
+        t.check(!client.checksum(remoteSrc, "SHA-256", canceledDigest, err,
+                                 {}, [] { return true; }),
+                "a remote checksum should honor cancellation");
+        t.check(client.lastOperationError().kind ==
+                    openscp::RemoteErrorKind::Canceled,
+                "checksum cancellation should expose a structured error");
+    }
+    if (t.failures == 0) {
+        err.clear();
+        t.check(!client.rename(remoteMissing, remoteProtected, err, true),
+                "rename with a missing source should fail");
+        bool isDir = true;
+        std::string existsErr;
+        t.check(client.exists(remoteProtected, isDir, existsErr) && !isDir,
+                std::string("failed overwrite rename must preserve its "
+                            "destination: ") +
+                    existsErr);
+    }
     if (t.failures == 0) {
         bool isDir = true;
         err.clear();
@@ -487,6 +545,16 @@ int main() {
                            {}, false),
                 std::string("put(remoteResumeUploadSeed) should succeed: ") +
                     err);
+        std::vector<std::uint8_t> differentChecksum;
+        err.clear();
+        t.check(client.checksum(remoteResumeUploadSeed, "SHA-256",
+                                differentChecksum, err),
+                std::string("checksum(different remote file) should succeed: ") +
+                    err);
+        t.check(differentChecksum.size() == 32 &&
+                    differentChecksum != sourceChecksum,
+                "different remote files should have different SHA-256 "
+                "checksums");
     }
     if (t.failures == 0) {
         err.clear();
@@ -520,6 +588,10 @@ int main() {
         t.check(client.removeFile(remoteMoved, err),
                 std::string("removeFile should succeed: ") + err);
         err.clear();
+        t.check(removeRemoteFileIfExists(client, remoteProtected, err),
+                std::string("remove protected destination should succeed: ") +
+                    err);
+        err.clear();
         t.check(removeRemoteFileIfExists(client, remoteResumeDownload, err),
                 std::string("remove remoteResumeDownload should succeed: ") +
                     err);
@@ -545,6 +617,8 @@ int main() {
     (void)removeRemoteFileIfExists(client, remoteSrc, cleanupErr);
     cleanupErr.clear();
     (void)removeRemoteFileIfExists(client, remoteMoved, cleanupErr);
+    cleanupErr.clear();
+    (void)removeRemoteFileIfExists(client, remoteProtected, cleanupErr);
     cleanupErr.clear();
     (void)removeRemoteFileIfExists(client, remoteResumeDownload, cleanupErr);
     cleanupErr.clear();

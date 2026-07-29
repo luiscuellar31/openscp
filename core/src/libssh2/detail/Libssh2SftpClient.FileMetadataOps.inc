@@ -1,6 +1,7 @@
 // Lightweight existence check using sftp_stat.
 bool Libssh2SftpClient::exists(const std::string &remote_path, bool &isDir,
                                std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err);
     isDir = false;
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
@@ -19,7 +20,8 @@ bool Libssh2SftpClient::exists(const std::string &remote_path, bool &isDir,
     }
 
     unsigned long sftp_err = libssh2_sftp_last_error(sftp_);
-    if (sftp_err == LIBSSH2_FX_NO_SUCH_FILE || sftp_err == LIBSSH2_FX_FAILURE) {
+    if (sftp_err == LIBSSH2_FX_NO_SUCH_FILE ||
+        sftp_err == LIBSSH2_FX_NO_SUCH_PATH) {
         err.clear();
         return false; // does not exist
     }
@@ -32,6 +34,7 @@ bool Libssh2SftpClient::exists(const std::string &remote_path, bool &isDir,
 // exist.
 bool Libssh2SftpClient::stat(const std::string &remote_path, FileInfo &info,
                              std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
 
@@ -42,7 +45,7 @@ bool Libssh2SftpClient::stat(const std::string &remote_path, FileInfo &info,
     if (rc != 0) {
         unsigned long sftp_err = libssh2_sftp_last_error(sftp_);
         if (sftp_err == LIBSSH2_FX_NO_SUCH_FILE ||
-            sftp_err == LIBSSH2_FX_FAILURE) {
+            sftp_err == LIBSSH2_FX_NO_SUCH_PATH) {
             err.clear();
             return false; // missing path
         }
@@ -73,6 +76,7 @@ bool Libssh2SftpClient::stat(const std::string &remote_path, FileInfo &info,
 
 bool Libssh2SftpClient::chmod(const std::string &remote_path,
                               std::uint32_t mode, std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err, true);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
 #ifdef LIBSSH2_SFTP
@@ -99,6 +103,7 @@ bool Libssh2SftpClient::chmod(const std::string &remote_path,
 bool Libssh2SftpClient::setTimes(const std::string &remote_path,
                                  std::uint64_t atime, std::uint64_t mtime,
                                  std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err, true);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
     LIBSSH2_SFTP_ATTRIBUTES a{};
@@ -117,6 +122,7 @@ bool Libssh2SftpClient::setTimes(const std::string &remote_path,
 
 bool Libssh2SftpClient::chown(const std::string &remote_path, std::uint32_t uid,
                               std::uint32_t gid, std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err, true);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
     LIBSSH2_SFTP_ATTRIBUTES a{};
@@ -146,6 +152,7 @@ bool Libssh2SftpClient::chown(const std::string &remote_path, std::uint32_t uid,
 
 bool Libssh2SftpClient::mkdir(const std::string &remote_dir, std::string &err,
                               unsigned int mode) {
+    auto structuredErrorScope = beginStructuredOperation(err, true);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
     int rc = libssh2_sftp_mkdir(sftp_, remote_dir.c_str(), mode);
@@ -158,6 +165,7 @@ bool Libssh2SftpClient::mkdir(const std::string &remote_dir, std::string &err,
 
 bool Libssh2SftpClient::removeFile(const std::string &remote_path,
                                    std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err, true);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
     int rc = libssh2_sftp_unlink(sftp_, remote_path.c_str());
@@ -170,6 +178,7 @@ bool Libssh2SftpClient::removeFile(const std::string &remote_path,
 
 bool Libssh2SftpClient::removeDir(const std::string &remote_dir,
                                   std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err, true);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
     int rc = libssh2_sftp_rmdir(sftp_, remote_dir.c_str());
@@ -182,6 +191,7 @@ bool Libssh2SftpClient::removeDir(const std::string &remote_dir,
 
 bool Libssh2SftpClient::rename(const std::string &from, const std::string &to,
                                std::string &err, bool overwrite) {
+    auto structuredErrorScope = beginStructuredOperation(err, true);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
     if (!rename_remote_with_fallback(sftp_, from, to, overwrite, &err)) {
@@ -262,9 +272,10 @@ bool RemoveKnownHostEntry(const std::string &khPath, const std::string &host,
     return true;
 }
 
-std::unique_ptr<SftpClient>
+std::unique_ptr<RemoteClient>
 Libssh2SftpClient::newConnectionLike(const SessionOptions &opt,
                                      std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err);
     auto ptr = std::make_unique<Libssh2SftpClient>();
     if (!ptr->connect(opt, err))
         return nullptr;

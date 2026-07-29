@@ -15,7 +15,10 @@ bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
     if (!tcpConnect(opt, err))
         return false;
     if (!sshHandshakeAuth(opt, err, initializeSftpSubsystem)) {
+        const RemoteError structuredFailure =
+            classifyStructuredFailure(err, false);
         disconnect();
+        setLastOperationError(structuredFailure);
         return false;
     }
 
@@ -24,11 +27,13 @@ bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
 }
 
 bool Libssh2SftpClient::connect(const SessionOptions &opt, std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err);
     return connectInternal(opt, err, true);
 }
 
 bool Libssh2SftpClient::connectTransportOnly(const SessionOptions &opt,
                                              std::string &err) {
+    auto structuredErrorScope = beginStructuredOperation(err);
     return connectInternal(opt, err, false);
 }
 

@@ -1,16 +1,16 @@
 // WebDAV backend using libcurl + tinyxml2 for PROPFIND parsing.
 #pragma once
-#include "SftpClient.hpp"
+#include "RemoteClient.hpp"
 
 #include <atomic>
 #include <mutex>
 
 namespace openscp {
 
-class CurlWebDavClient : public SftpClient {
+class CurlWebDavClient : public RemoteClient {
     public:
     CurlWebDavClient() = default;
-    ~CurlWebDavClient() override = default;
+    ~CurlWebDavClient() override;
 
     Protocol protocol() const override { return Protocol::WebDav; }
     ProtocolCapabilities capabilities() const override {
@@ -60,14 +60,17 @@ class CurlWebDavClient : public SftpClient {
     bool rename(const std::string &from, const std::string &to,
                 std::string &err, bool overwrite = false) override;
 
-    std::unique_ptr<SftpClient> newConnectionLike(const SessionOptions &opt,
-                                                  std::string &err) override;
+    std::unique_ptr<RemoteClient> newConnectionLike(const SessionOptions &opt,
+                                                     std::string &err) override;
 
     private:
     mutable std::mutex stateMutex_;
+    std::mutex operationMutex_;
+    void *easyHandle_ = nullptr;
     SessionOptions options_{};
     bool connected_ = false;
     std::atomic<bool> interrupted_{false};
+    std::atomic<bool> disconnecting_{false};
 };
 
 } // namespace openscp

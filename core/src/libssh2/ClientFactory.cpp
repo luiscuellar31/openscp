@@ -11,7 +11,7 @@
 
 namespace openscp {
 
-std::unique_ptr<SftpClient> CreateClientForProtocol(Protocol protocol) {
+std::unique_ptr<RemoteClient> CreateClientForProtocol(Protocol protocol) {
     switch (protocol) {
     case Protocol::Sftp:
         return std::make_unique<Libssh2SftpClient>();
@@ -39,8 +39,8 @@ std::unique_ptr<SftpClient> CreateClientForProtocol(Protocol protocol) {
     return nullptr;
 }
 
-std::unique_ptr<SftpClient> CreateConnectedClient(const SessionOptions &opt,
-                                                  std::string &err) {
+std::unique_ptr<RemoteClient> CreateConnectedClient(const SessionOptions &opt,
+                                                     std::string &err) {
     err.clear();
     auto client = CreateClientForProtocol(opt.protocol);
     if (!client) {
