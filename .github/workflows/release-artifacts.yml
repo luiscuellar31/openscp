@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   verify-tag:
@@ -25,6 +25,7 @@ jobs:
       - name: Checkout tag
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0
           ref: ${{ github.ref_name }}
 
@@ -59,70 +60,10 @@ jobs:
           echo "tag_commit=${commit}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
-  prepare-draft-release:
-    name: Prepare Draft Release
-    needs: verify-tag
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout tag
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.verify-tag.outputs.tag_name }}
-
-      - name: Generate draft release notes
-        id: notes
-        run: |
-          set -euo pipefail
-          tag="${{ needs.verify-tag.outputs.tag_name }}"
-          version="${{ needs.verify-tag.outputs.version }}"
-          notes_file="$PWD/release-notes.md"
-          bash ./scripts/generate_release_notes.sh \
-            --tag "$tag" \
-            --version "$version" \
-            --repo "${{ github.repository }}" \
-            --output "$notes_file"
-          echo "notes_file=${notes_file}" >> "$GITHUB_OUTPUT"
-          echo "Generated release notes:"
-          sed -n '1,120p' "$notes_file"
-
-      - name: Create or reuse draft release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          tag="${{ needs.verify-tag.outputs.tag_name }}"
-          version="${{ needs.verify-tag.outputs.version }}"
-          notes_file="${{ steps.notes.outputs.notes_file }}"
-          commit="${{ needs.verify-tag.outputs.tag_commit }}"
-          title="OpenSCP v${version}"
-
-          if gh release view "$tag" >/dev/null 2>&1; then
-            is_draft="$(gh release view "$tag" --json isDraft --jq '.isDraft')"
-            if [[ "$is_draft" == "true" ]]; then
-              echo "Draft release already exists for ${tag}."
-              gh release edit "$tag" \
-                --title "$title" \
-                --notes-file "$notes_file"
-            else
-              echo "Release for ${tag} already exists and is not a draft. Reusing it for asset upload."
-            fi
-          else
-            gh release create "$tag" \
-              --target "$commit" \
-              --title "$title" \
-              --draft \
-              --notes-file "$notes_file"
-          fi
-
   build-macos:
     name: Build macOS (${{ matrix.arch }})
     needs:
       - verify-tag
-      - prepare-draft-release
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -137,6 +78,7 @@ jobs:
       - name: Checkout tag
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0
           ref: ${{ needs.verify-tag.outputs.tag_name }}
 
@@ -196,7 +138,6 @@ jobs:
     name: Build Linux (${{ matrix.arch_name }})
     needs:
       - verify-tag
-      - prepare-draft-release
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -211,6 +152,7 @@ jobs:
       - name: Checkout tag
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0
           ref: ${{ needs.verify-tag.outputs.tag_name }}
 
@@ -228,10 +170,22 @@ jobs:
       - name: Install AppImage tools
         run: |
           set -euo pipefail
+          # Digests come from GitHub's release-asset metadata and were reviewed
+          # on 2026-07-29. An upstream update must be reviewed explicitly.
           arch="$(uname -m)"
           case "$arch" in
-            x86_64) appimg_arch="x86_64" ;;
-            aarch64|arm64) appimg_arch="aarch64" ;;
+            x86_64)
+              appimg_arch="x86_64"
+              linuxdeploy_sha="e87ee0815d109282fdda73e34c2361d64d02b0ffaea3674b18f1fd1f6a687dcf"
+              qt_plugin_sha="be1b7e166bf9975cfb694ebe6759ba40502ffc6196440d3e64aa90c4dbd67e9f"
+              appimagetool_sha="a6d71e2b6cd66f8e8d16c37ad164658985e0cf5fcaa950c90a482890cb9d13e0"
+              ;;
+            aarch64|arm64)
+              appimg_arch="aarch64"
+              linuxdeploy_sha="650ed1d045a09ab87855be1963f4f56ac7cf6defb6b2e2f4af0a3225f3d2d803"
+              qt_plugin_sha="5525e6c49c3c774c02b8864d2acc2ae4c5c0ccc3327f7dce626deaa36348e5c6"
+              appimagetool_sha="1b00524ba8c6b678dc15ef88a5c25ec24def36cdfc7e3abb32ddcd068e8007fe"
+              ;;
             *)
               echo "Unsupported Linux arch for AppImage tools: $arch"
               exit 1
@@ -245,6 +199,9 @@ jobs:
             -o "$HOME/.local/bin/linuxdeploy-plugin-qt"
           curl -fL "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${appimg_arch}.AppImage" \
             -o "$HOME/.local/bin/appimagetool"
+          echo "${linuxdeploy_sha}  $HOME/.local/bin/linuxdeploy" | sha256sum --check --strict
+          echo "${qt_plugin_sha}  $HOME/.local/bin/linuxdeploy-plugin-qt" | sha256sum --check --strict
+          echo "${appimagetool_sha}  $HOME/.local/bin/appimagetool" | sha256sum --check --strict
           chmod +x "$HOME/.local/bin/linuxdeploy" \
                    "$HOME/.local/bin/linuxdeploy-plugin-qt" \
                    "$HOME/.local/bin/appimagetool"
@@ -336,6 +293,13 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ needs.verify-tag.outputs.tag_name }}
+
       - name: Download built artifacts
         uses: actions/download-artifact@v4
         with:
@@ -345,15 +309,54 @@ jobs:
         run: |
           find release-assets -type f | sort
 
+      - name: Generate draft release notes
+        run: |
+          set -euo pipefail
+          tag="${{ needs.verify-tag.outputs.tag_name }}"
+          version="${{ needs.verify-tag.outputs.version }}"
+          bash ./scripts/generate_release_notes.sh \
+            --tag "$tag" \
+            --version "$version" \
+            --repo "${{ github.repository }}" \
+            --output "$PWD/release-notes.md"
+          sed -n '1,120p' "$PWD/release-notes.md"
+
       - name: Upload artifacts to GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           tag="${{ needs.verify-tag.outputs.tag_name }}"
+          version="${{ needs.verify-tag.outputs.version }}"
+          commit="${{ needs.verify-tag.outputs.tag_commit }}"
+          title="OpenSCP v${version}"
+          notes_file="$PWD/release-notes.md"
           mapfile -t files < <(find release-assets -type f | sort)
           if [[ ${#files[@]} -eq 0 ]]; then
             echo "No files found to upload."
             exit 1
           fi
+
+          if gh release view "$tag" --repo "${{ github.repository }}" \
+              >/dev/null 2>&1; then
+            is_draft="$(gh release view "$tag" \
+              --repo "${{ github.repository }}" \
+              --json isDraft --jq '.isDraft')"
+            if [[ "$is_draft" == "true" ]]; then
+              gh release edit "$tag" \
+                --repo "${{ github.repository }}" \
+                --title "$title" \
+                --notes-file "$notes_file"
+            else
+              echo "Release for ${tag} already exists and is not a draft."
+            fi
+          else
+            gh release create "$tag" \
+              --repo "${{ github.repository }}" \
+              --target "$commit" \
+              --title "$title" \
+              --draft \
+              --notes-file "$notes_file"
+          fi
+
           gh release upload "$tag" "${files[@]}" --clobber --repo "${{ github.repository }}"

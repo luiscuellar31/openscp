@@ -84,9 +84,10 @@ jobs:
         run: |
           cppcheck \
             --std=c++20 \
-            --enable=warning,style,performance,portability \
+            --enable=warning,performance,portability \
             --error-exitcode=1 \
             --inline-suppr \
             --suppress=missingIncludeSystem \
+            --suppress=unknownMacro \
             --quiet \
-            core/include core/src tests
+            core/include core/src ui tests

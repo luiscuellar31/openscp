@@ -2,18 +2,20 @@
 
 ## Reporting a Vulnerability
 
-To keep public traceability and clear prioritization, this repository handles security reports as **GitHub issues**.
+Please report suspected vulnerabilities privately through
+[GitHub Security Advisories](https://github.com/luiscuellar31/openscp/security/advisories/new).
+Do not open a public issue until a fix has been released or the maintainers
+confirm that public discussion is safe.
 
 If you find a security problem:
 
-1. Open a new issue on GitHub.
-2. Add the `security` label (the project's custom label).
-3. Include the `[SECURITY]` prefix in the issue title.
-4. Describe impact, reproduction steps, and the affected version/commit.
+1. Open a private vulnerability report using the link above.
+2. Describe impact, reproduction steps, and the affected version/commit.
+3. Include only sanitized logs and test data.
+4. Allow the maintainers time to investigate and coordinate a release before
+   publishing details.
 
-The `security` label is the official mechanism used to prioritize and filter these reports.
-
-## What to Include in the Issue
+## What to Include in the Report
 
 - Observed behavior and expected behavior.
 - Potential risk/impact (for example: credential exposure, host-key validation bypass, etc.).
@@ -37,5 +39,6 @@ Priority is given to:
 
 ## Responsible Disclosure
 
-Do not post credentials, private keys, or sensitive data in issues.
+Do not post credentials, private keys, exploit details, or sensitive data in
+public issues.
 If secrets were accidentally shared, revoke/rotate them immediately and update the report with sanitized data.
