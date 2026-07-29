@@ -1,0 +1,154 @@
+name: Protocol Integration and Sanitizers
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: protocol-integration-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-protocol-services:
+    name: FTP, FTPS, and WebDAV
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OPENSCP_PROTOCOL_IT_STATE_DIR: /tmp/openscp-protocol-it
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build and protocol service dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            apache2 apache2-utils curl netcat-openbsd openssl shellcheck vsftpd \
+            cmake ninja-build pkg-config \
+            libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev \
+            qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools \
+            qt6-l10n-tools libgl1-mesa-dev
+
+      - name: Validate service scripts
+        run: |
+          bash -n scripts/ci/setup_protocol_services.sh
+          bash -n scripts/ci/run_protocol_integration.sh
+          shellcheck scripts/ci/setup_protocol_services.sh
+          shellcheck scripts/ci/run_protocol_integration.sh
+
+      - name: Configure protocol integration build
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOPENSCP_BUILD_TESTS=ON \
+            -DOPENSCP_ENABLE_FTP_BACKEND=ON \
+            -DOPENSCP_ENABLE_WEBDAV_BACKEND=ON
+
+      - name: Build protocol integration binaries
+        run: |
+          cmake --build build --parallel --target \
+            openscp_ftp_integration_tests \
+            openscp_ftps_integration_tests \
+            openscp_webdav_integration_tests
+
+      - name: Start real protocol services
+        run: ./scripts/ci/setup_protocol_services.sh
+
+      - name: Run protocol integration binaries directly
+        run: ./scripts/ci/run_protocol_integration.sh build
+
+      - name: Make service logs readable after failure
+        if: failure()
+        run: sudo chmod -R a+rX /tmp/openscp-protocol-it/logs || true
+
+      - name: Upload service logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: protocol-service-logs
+          path: /tmp/openscp-protocol-it/logs
+          if-no-files-found: ignore
+
+  sanitizers:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ASan + UBSan
+            id: asan-ubsan
+            flags: address,undefined
+          - name: TSan
+            id: tsan
+            flags: thread
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install sanitizer build dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev \
+            qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools \
+            qt6-l10n-tools libgl1-mesa-dev
+
+      - name: Configure instrumented build
+        env:
+          CC: clang
+          CXX: clang++
+          SANITIZERS: ${{ matrix.flags }}
+        run: |
+          SANITIZER_FLAGS="-fsanitize=${SANITIZERS} -fno-omit-frame-pointer"
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DOPENSCP_BUILD_TESTS=ON \
+            "-DCMAKE_C_FLAGS=${SANITIZER_FLAGS}" \
+            "-DCMAKE_CXX_FLAGS=${SANITIZER_FLAGS}" \
+            "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=${SANITIZERS}" \
+            "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=${SANITIZERS}"
+
+      - name: Build instrumented app and tests
+        run: cmake --build build --parallel
+
+      - name: Test with ASan and UBSan
+        if: matrix.id == 'asan-ubsan'
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_init_order=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          ctest --test-dir build --output-on-failure \
+            -LE integration --timeout 180
+
+      - name: Explain TSan coverage boundary
+        if: matrix.id == 'tsan'
+        run: |
+          echo "::notice::OpenSCP and its Qt event-loop tests are TSan-instrumented. Ubuntu's prebuilt Qt shared libraries are not rebuilt with TSan, so this job cannot diagnose races wholly internal to Qt."
+
+      - name: Test with TSan
+        if: matrix.id == 'tsan'
+        env:
+          QT_QPA_PLATFORM: offscreen
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1:history_size=7
+        run: |
+          ctest --test-dir build --output-on-failure \
+            -LE integration --timeout 180
