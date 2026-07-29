@@ -12,8 +12,8 @@ set -euo pipefail
 #
 # Configuration via environment variables (local-only usage):
 #   APP_NAME               Default: "OpenSCP"
-#   BUNDLE_ID              Default: "com.example.openscp"
-#   MINIMUM_SYSTEM_VERSION Default: "12.0" (used only for Info.plist checks)
+#   BUNDLE_ID              Default: "com.openscp.app"
+#   MINIMUM_SYSTEM_VERSION Default: "12.0" (CMake deployment target + Info.plist)
 #   CMAKE_OSX_ARCHITECTURES Default: "arm64" (or "arm64;x86_64" for universal naming)
 #   CMAKE_PREFIX_PATH      Path to your Qt 6 install root (if not in default search path)
 #   QT_PREFIX              Path to Qt install root (…/Qt/<version>/macos)
@@ -56,7 +56,7 @@ BUILD_DIR="${REPO_DIR}/build"
 DIST_DIR="${REPO_DIR}/dist"
 
 APP_NAME="${APP_NAME:-OpenSCP}"
-BUNDLE_ID="${BUNDLE_ID:-com.example.openscp}"
+BUNDLE_ID="${BUNDLE_ID:-com.openscp.app}"
 MINIMUM_SYSTEM_VERSION="${MINIMUM_SYSTEM_VERSION:-12.0}"
 ARCHS="${CMAKE_OSX_ARCHITECTURES:-arm64}"
 PACKAGE_FORMATS="${PACKAGE_FORMATS:-dmg}"
@@ -76,6 +76,7 @@ INFO_PLIST_OUT="${CONTENTS_DIR}/Info.plist"
 
 # Will be set when discovering Qt/macdeployqt to help locate frameworks
 QTPREFIX=""
+QT_HOST_WRAP_DIR=""
 
 # Helpers
 log() { printf "\033[1;34m[pack]\033[0m %s\n" "$*"; }
@@ -85,6 +86,55 @@ die() { err "$*"; exit 1; }
 
 ensure_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required tool: $1"
+}
+
+create_qt_x86_wrapper() {
+  local target="$1"
+  local real_bin="$2"
+  printf '#!/usr/bin/env bash\nexec /usr/bin/arch -x86_64 %q "$@"\n' \
+    "$real_bin" > "$target"
+  chmod +x "$target"
+}
+
+qt_tool_runs() {
+  { ( "$@" ) >/dev/null 2>&1; } 2>/dev/null
+}
+
+setup_qt_host_wrappers_if_needed() {
+  local qt_prefix="$1"
+  [[ "$(uname -s)" == "Darwin" ]] || return 0
+  [[ "$(uname -m)" == "arm64" ]] || return 0
+  [[ -n "$qt_prefix" ]] || return 0
+
+  local uic="${qt_prefix}/libexec/uic"
+  local rcc="${qt_prefix}/libexec/rcc"
+  local moc="${qt_prefix}/libexec/moc"
+  local lrelease="${qt_prefix}/libexec/lrelease"
+  if [[ ! -x "$lrelease" ]]; then
+    lrelease="${qt_prefix}/bin/lrelease"
+  fi
+  [[ -x "$uic" && -x "$rcc" && -x "$moc" && -x "$lrelease" ]] || return 0
+
+  if qt_tool_runs "$uic" -h &&
+     qt_tool_runs "$rcc" -h &&
+     qt_tool_runs "$moc" -h &&
+     qt_tool_runs "$lrelease" -version; then
+    return 0
+  fi
+  if ! qt_tool_runs /usr/bin/arch -x86_64 "$uic" -h ||
+     ! qt_tool_runs /usr/bin/arch -x86_64 "$rcc" -h ||
+     ! qt_tool_runs /usr/bin/arch -x86_64 "$moc" -h ||
+     ! qt_tool_runs /usr/bin/arch -x86_64 "$lrelease" -version; then
+    die "Qt host tools are not runnable natively or through Rosetta under ${qt_prefix}"
+  fi
+
+  QT_HOST_WRAP_DIR="${BUILD_DIR}/qt-tools-wrap"
+  mkdir -p "$QT_HOST_WRAP_DIR"
+  create_qt_x86_wrapper "${QT_HOST_WRAP_DIR}/uic" "$uic"
+  create_qt_x86_wrapper "${QT_HOST_WRAP_DIR}/rcc" "$rcc"
+  create_qt_x86_wrapper "${QT_HOST_WRAP_DIR}/moc" "$moc"
+  create_qt_x86_wrapper "${QT_HOST_WRAP_DIR}/lrelease" "$lrelease"
+  warn "Qt host tools are not runnable natively; using their x86_64 slices through Rosetta."
 }
 
 discover_macdeployqt() {
@@ -182,8 +232,10 @@ detect_version() {
           buf=buf " " $0;
         }
         if (in_project && index($0, ")") > 0) {
-          if (match(buf, /VERSION[[:space:]]*([0-9]+(\.[0-9]+)*)/, m)) {
-            print m[1];
+          if (buf ~ /VERSION[[:space:]]*[0-9]+(\.[0-9]+)*/) {
+            sub(/^.*VERSION[[:space:]]*/, "", buf);
+            sub(/[^0-9.].*$/, "", buf);
+            print buf;
             exit;
           }
           in_project=0;
@@ -246,6 +298,15 @@ generate_icns_from_png() {
   done
   iconutil -c icns "$tmp_iconset" -o "$dst_icns"
   rm -rf "$(dirname "$tmp_iconset")"
+}
+
+list_deps() {
+  local bin="$1"
+  otool -L "$bin" | awk '
+    /^[[:space:]]/ && NF > 0 {
+      if (!seen[$1]++) print $1
+    }
+  '
 }
 
 list_binary_rpaths() {
@@ -338,7 +399,7 @@ rewrite_external_refs_to_bundle() {
       *)
         ;;
     esac
-  done < <(otool -L "$bin" | awk 'NR>1 {print $1}')
+  done < <(list_deps "$bin")
 }
 
 sign_item() {
@@ -530,7 +591,7 @@ maybe_copy() {
           install_name_tool -change "$dep" "@rpath/$base" "$lib" || true
         fi
       fi
-    done < <(otool -L "$lib" | tail -n +2)
+    done < <(list_deps "$lib")
   done
 }
 
@@ -782,7 +843,7 @@ sanitize_qt_plugins_linkage() {
     ensure_loader_framework_rpath "$plugin"
 
     local bad_refs=""
-    bad_refs="$(otool -L "$plugin" | awk 'NR>1 {print $1}' | grep -E "$forbidden_regex" || true)"
+    bad_refs="$(list_deps "$plugin" | grep -E "$forbidden_regex" || true)"
     if [[ -n "$bad_refs" ]]; then
       if is_required_qt_plugin_binary "$plugin"; then
         err "Required Qt plugin has unresolved external refs: $plugin"
@@ -936,9 +997,24 @@ main() {
   if [[ -d "$qt_cfg_dir" ]]; then
     qt_prefix="$(cd "$qt_cfg_dir/../../.." && pwd)"
     log "Using Qt from: $qt_prefix"
-    cmake -S "$REPO_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_PREFIX_PATH="$qt_prefix" -DQt6_DIR="$qt_cfg_dir" \
-      -DCMAKE_OSX_ARCHITECTURES="$ARCHS"
+    setup_qt_host_wrappers_if_needed "$qt_prefix"
+    local -a cmake_args=(
+      -S "$REPO_DIR"
+      -B "$BUILD_DIR"
+      -DCMAKE_BUILD_TYPE=Release
+      "-DCMAKE_PREFIX_PATH=${qt_prefix}"
+      "-DQt6_DIR=${qt_cfg_dir}"
+      "-DBUNDLE_ID=${BUNDLE_ID}"
+      "-DCMAKE_OSX_ARCHITECTURES=${ARCHS}"
+      "-DCMAKE_OSX_DEPLOYMENT_TARGET=${MINIMUM_SYSTEM_VERSION}"
+    )
+    if [[ -n "$QT_HOST_WRAP_DIR" ]]; then
+      cmake_args+=("-DCMAKE_AUTOUIC_EXECUTABLE=${QT_HOST_WRAP_DIR}/uic")
+      cmake_args+=("-DCMAKE_AUTORCC_EXECUTABLE=${QT_HOST_WRAP_DIR}/rcc")
+      cmake_args+=("-DCMAKE_AUTOMOC_EXECUTABLE=${QT_HOST_WRAP_DIR}/moc")
+      cmake_args+=("-DOPENSCP_QT_HOST_TOOLS_DIR=${QT_HOST_WRAP_DIR}")
+    fi
+    cmake "${cmake_args[@]}"
   else
     if [[ -n "$qt_cfg_dir" ]]; then
       warn "Qt not found at $qt_cfg_dir; relying on system CMake find_package()"
@@ -946,7 +1022,9 @@ main() {
       warn "No Qt6_DIR/QT_PREFIX provided and no Qt found in \$HOME/Qt; relying on system CMake find_package()"
     fi
     cmake -S "$REPO_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_OSX_ARCHITECTURES="$ARCHS"
+      -DBUNDLE_ID="$BUNDLE_ID" \
+      -DCMAKE_OSX_ARCHITECTURES="$ARCHS" \
+      -DCMAKE_OSX_DEPLOYMENT_TARGET="$MINIMUM_SYSTEM_VERSION"
   fi
   cmake --build "$BUILD_DIR" -j
 
@@ -1089,7 +1167,7 @@ main() {
     if [[ -f "$FRAMEWORKS_DIR/$base" ]]; then
       install_name_tool -change "$dep" "@executable_path/../Frameworks/$base" "$MACOS_DIR/${APP_NAME}" || true
     fi
-  done < <(otool -L "$MACOS_DIR/${APP_NAME}" | awk 'NR>1{print $1}' | grep -E '/(opt/homebrew|usr/local|miniconda).*(lib(ssh2|crypto|ssl|tinyxml2).*)' || true)
+  done < <(list_deps "$MACOS_DIR/${APP_NAME}" | grep -E '/(opt/homebrew|usr/local|miniconda).*(lib(ssh2|crypto|ssl|tinyxml2).*)' || true)
 
   # Sign (hardened runtime) — skipped entirely when SKIP_CODESIGN=1
   if [[ "${SKIP_CODESIGN:-0}" != "1" ]]; then

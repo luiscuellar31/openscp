@@ -108,6 +108,9 @@ setup_macos_qt_wrappers_if_needed() {
   local rcc="${qt_prefix}/libexec/rcc"
   local moc="${qt_prefix}/libexec/moc"
   local lrelease="${qt_prefix}/libexec/lrelease"
+  if [[ ! -x "$lrelease" ]]; then
+    lrelease="${qt_prefix}/bin/lrelease"
+  fi
   [[ -x "$uic" && -x "$rcc" && -x "$moc" ]] || return 0
 
   if arch -x86_64 "$uic" -h >/dev/null 2>&1; then
@@ -156,10 +159,7 @@ configure_project() {
       cmake_args+=("-DCMAKE_AUTOUIC_EXECUTABLE=${QT_WRAP_DIR}/uic")
       cmake_args+=("-DCMAKE_AUTORCC_EXECUTABLE=${QT_WRAP_DIR}/rcc")
       cmake_args+=("-DCMAKE_AUTOMOC_EXECUTABLE=${QT_WRAP_DIR}/moc")
-      if [[ -x "${QT_WRAP_DIR}/lrelease" ]]; then
-        cmake_args+=("-DQt6_LRELEASE_EXECUTABLE=${QT_WRAP_DIR}/lrelease")
-        cmake_args+=("-DQT_LRELEASE_EXECUTABLE=${QT_WRAP_DIR}/lrelease")
-      fi
+      cmake_args+=("-DOPENSCP_QT_HOST_TOOLS_DIR=${QT_WRAP_DIR}")
     fi
   fi
 

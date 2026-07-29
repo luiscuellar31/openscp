@@ -11,8 +11,10 @@ usage() {
 Usage: ./scripts/verify_macos_bundle.sh <path-to-OpenSCP.app>
 
 Validates:
+- Info.plist contains a valid minimum macOS version and every bundled Mach-O
+  supports that version
 - Required Qt runtime files are present (including qcocoa platform plugin)
-- No dependencies point to Homebrew/runner/local absolute paths
+- App, plugin, and framework dependencies avoid machine-local absolute paths
 - @rpath/@loader_path/@executable_path dependencies resolve within the bundle
 EOF
 }
@@ -27,12 +29,21 @@ MACOS_DIR="${CONTENTS_DIR}/MacOS"
 FRAMEWORKS_DIR="${CONTENTS_DIR}/Frameworks"
 PLUGINS_DIR="${CONTENTS_DIR}/PlugIns"
 EXE_PATH="${MACOS_DIR}/OpenSCP"
+INFO_PLIST_PATH="${CONTENTS_DIR}/Info.plist"
 QT_CONF_PATH="${CONTENTS_DIR}/Resources/qt.conf"
 COCOA_PLUGIN="${PLUGINS_DIR}/platforms/libqcocoa.dylib"
 
 [[ -x "$EXE_PATH" ]] || die "Missing executable: $EXE_PATH"
+[[ -f "$INFO_PLIST_PATH" ]] || die "Missing Info.plist: $INFO_PLIST_PATH"
 [[ -f "$QT_CONF_PATH" ]] || die "Missing qt.conf: $QT_CONF_PATH"
 [[ -f "$COCOA_PLUGIN" ]] || die "Missing Qt cocoa platform plugin: $COCOA_PLUGIN"
+
+minimum_system_version="$(
+  /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' \
+    "$INFO_PLIST_PATH" 2>/dev/null || true
+)"
+[[ "$minimum_system_version" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] ||
+  die "Invalid LSMinimumSystemVersion in Info.plist: '${minimum_system_version}'"
 
 require_file() {
   local file="$1"
@@ -108,11 +119,14 @@ list_rpaths() {
 
 check_forbidden_rpaths() {
   local file="$1"
-  local forbidden_regex='^/(opt/homebrew|usr/local/(Cellar|opt)|Users/runner|Users/|private/tmp|tmp|var/folders|.*miniconda.*|.*anaconda.*)'
   local rpaths
   rpaths="$(list_rpaths "$file")"
   local bad_rpaths
-  bad_rpaths="$(printf "%s\n" "$rpaths" | grep -E "$forbidden_regex" || true)"
+  bad_rpaths="$(
+    printf "%s\n" "$rpaths" |
+      grep -E '^/' |
+      grep -Ev '^(/System/|/usr/lib/)' || true
+  )"
   if [[ -n "$bad_rpaths" ]]; then
     err "Forbidden absolute rpath(s) in: $file"
     printf "%s\n" "$bad_rpaths" >&2
@@ -132,9 +146,78 @@ list_deps() {
     die "otool is unavailable (Xcode license not accepted); cannot validate $file"
   fi
   local deps
-  deps="$(printf "%s\n" "$out" | awk 'NR>1 {print $1}')"
+  # Universal binaries repeat the non-indented owner header for each
+  # architecture. Dependency rows are indented; de-duplicate paths shared by
+  # multiple slices.
+  deps="$(
+    printf "%s\n" "$out" |
+      awk '/^[[:space:]]/ && NF > 0 {
+        if (!seen[$1]++) print $1
+      }'
+  )"
   [[ -n "$deps" ]] || die "No dependencies were reported by otool for: $file"
   printf "%s\n" "$deps"
+}
+
+list_minimum_macos_versions() {
+  local file="$1"
+  local out
+  if ! out="$(otool -l "$file" 2>&1)"; then
+    err "$out"
+    die "otool failed while reading deployment targets for: $file"
+  fi
+  printf "%s\n" "$out" | awk '
+    $1 == "cmd" {
+      in_build_version = ($2 == "LC_BUILD_VERSION")
+      in_legacy_version = ($2 == "LC_VERSION_MIN_MACOSX")
+      next
+    }
+    in_build_version && $1 == "minos" {
+      print $2
+      in_build_version = 0
+      next
+    }
+    in_legacy_version && $1 == "version" {
+      print $2
+      in_legacy_version = 0
+    }
+  '
+}
+
+version_is_greater() {
+  local candidate="$1"
+  local allowed="$2"
+  awk -v candidate="$candidate" -v allowed="$allowed" 'BEGIN {
+    candidate_count = split(candidate, candidate_parts, ".")
+    allowed_count = split(allowed, allowed_parts, ".")
+    count = candidate_count > allowed_count ? candidate_count : allowed_count
+    for (part_index = 1; part_index <= count; ++part_index) {
+      candidate_part = candidate_parts[part_index] + 0
+      allowed_part = allowed_parts[part_index] + 0
+      if (candidate_part > allowed_part)
+        exit 0
+      if (candidate_part < allowed_part)
+        exit 1
+    }
+    exit 1
+  }'
+}
+
+check_minimum_macos_version() {
+  local file="$1"
+  local versions
+  versions="$(list_minimum_macos_versions "$file")"
+  [[ -n "$versions" ]] ||
+    die "No minimum macOS version was reported for: $file"
+
+  local version
+  while IFS= read -r version; do
+    [[ "$version" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] ||
+      die "Invalid Mach-O minimum macOS version in $file: '${version}'"
+    if version_is_greater "$version" "$minimum_system_version"; then
+      die "$(basename "$file") requires macOS ${version}, but Info.plist advertises ${minimum_system_version}"
+    fi
+  done <<<"$versions"
 }
 
 check_linkage() {
@@ -165,6 +248,18 @@ targets=("$EXE_PATH")
 while IFS= read -r plugin_dylib; do
   targets+=("$plugin_dylib")
 done < <(find "$PLUGINS_DIR" -type f -name '*.dylib' | sort)
+
+while IFS= read -r framework_file; do
+  [[ -n "$framework_file" ]] || continue
+  if /usr/bin/file -b "$framework_file" | grep -q 'Mach-O'; then
+    targets+=("$framework_file")
+  fi
+done < <(find "$FRAMEWORKS_DIR" -type f | sort)
+
+log "Checking deployment targets for ${#targets[@]} Mach-O binaries"
+for bin in "${targets[@]}"; do
+  check_minimum_macos_version "$bin"
+done
 
 log "Checking Mach-O linkage for ${#targets[@]} binaries"
 for bin in "${targets[@]}"; do
