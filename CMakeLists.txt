@@ -1,4 +1,20 @@
 cmake_minimum_required(VERSION 3.22)
+
+# These values influence compiler and SDK selection, so establish them before
+# project() enables CXX. CMake may create empty cache entries for both variables;
+# testing only DEFINED would therefore leave an invalid empty deployment target
+# in the generated Info.plist.
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+    if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING
+            "Minimum macOS version" FORCE)
+    endif()
+    if(NOT CMAKE_OSX_ARCHITECTURES)
+        set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING
+            "Target architectures" FORCE)
+    endif()
+endif()
+
 project(OpenSCP_hello LANGUAGES CXX VERSION 1.0.0)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -42,6 +58,40 @@ option(OPENSCP_BUILD_TESTS "Build and run automated tests (CTest)" OFF)
 find_package(Qt6 REQUIRED COMPONENTS Widgets Svg LinguistTools)
 include(GNUInstallDirs)
 
+# Some universal Qt SDKs cannot execute their arm64 host-tool slice on every
+# supported development Mac even though the generated application is valid for
+# arm64. The macOS helper scripts can provide Rosetta wrappers without changing
+# the target architecture. Override Qt's imported tool targets so this also
+# covers qt_add_translation() and qt_add_resources(), which do not consult the
+# CMAKE_AUTO* executable variables.
+set(OPENSCP_QT_HOST_TOOLS_DIR "" CACHE PATH
+    "Optional directory containing runnable moc, uic, rcc, and lrelease wrappers")
+if(OPENSCP_QT_HOST_TOOLS_DIR)
+    foreach(_qt_host_tool IN ITEMS moc uic rcc lrelease)
+        set(_qt_host_tool_path
+            "${OPENSCP_QT_HOST_TOOLS_DIR}/${_qt_host_tool}")
+        if(NOT EXISTS "${_qt_host_tool_path}")
+            message(FATAL_ERROR
+                "Missing Qt host-tool wrapper: ${_qt_host_tool_path}")
+        endif()
+        if(NOT TARGET "Qt6::${_qt_host_tool}")
+            message(FATAL_ERROR
+                "Qt host-tool target is unavailable: Qt6::${_qt_host_tool}")
+        endif()
+        foreach(_qt_imported_property IN ITEMS
+                IMPORTED_LOCATION
+                IMPORTED_LOCATION_DEBUG
+                IMPORTED_LOCATION_RELEASE
+                IMPORTED_LOCATION_RELWITHDEBINFO
+                IMPORTED_LOCATION_MINSIZEREL)
+            set_property(TARGET "Qt6::${_qt_host_tool}"
+                PROPERTY "${_qt_imported_property}" "${_qt_host_tool_path}")
+        endforeach()
+    endforeach()
+    message(STATUS
+        "OpenSCP: using Qt host-tool wrappers from ${OPENSCP_QT_HOST_TOOLS_DIR}")
+endif()
+
 # Qt 6.8.x on recent macOS SDKs may expose legacy AGL through WrapOpenGL.
 # AGL no longer ships a linkable binary, so strip it to avoid link errors.
 if (APPLE AND TARGET WrapOpenGL::WrapOpenGL)
@@ -76,13 +126,23 @@ add_executable(openscp_hello
     ui/MainWindowConnection.cpp
     ui/MainWindowLocalOps.cpp
     ui/MainWindowRemoteOps.cpp
+    ui/MainWindowSync.cpp
     ui/MainWindowTransfers.cpp
     ui/MainWindowSharedUtils.hpp
     ui/MainWindowSharedUtils.cpp
-    ui/RemoteWalker.hpp
-    ui/RemoteWalker.cpp
+    ui/NavigationScope.hpp
+    ui/NavigationScope.cpp
+    ui/RemoteOperationController.hpp
+    ui/RemoteOperationController.cpp
+    ui/LocalTreeDiscovery.hpp
+    ui/LocalTreeDiscovery.cpp
+    ui/SyncDialog.hpp
+    ui/SyncDialog.cpp
+    ui/SyncCoordinator.hpp
+    ui/SyncCoordinator.cpp
     ui/SavedSitesPersistence.hpp
     ui/SavedSitesPersistence.cpp
+    ui/SavedSiteSecrets.hpp
     ui/UiAlerts.hpp
     ui/UiAlerts.cpp
     ui/DragAwareTreeView.hpp
@@ -151,14 +211,6 @@ endif()
 # - Set RPATH so dylibs are resolved from @executable_path/../Frameworks
 ###############################################################################
 if(APPLE)
-    # Reproducible defaults (override via -D on the CMake command line if needed)
-    if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
-        set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version" FORCE)
-    endif()
-    if(NOT DEFINED CMAKE_OSX_ARCHITECTURES)
-        set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Target architectures" FORCE)
-    endif()
-
     # Bundle identifier propagated into Info.plist
     set(BUNDLE_ID "com.openscp.app" CACHE STRING "macOS bundle identifier")
 

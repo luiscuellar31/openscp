@@ -1,41 +1,28 @@
 // Remote model implementation (table: Name, Size, Date, Permissions).
 #include "RemoteModel.hpp"
 #include "MainWindowSharedUtils.hpp"
-#include "RemoteWalker.hpp"
 #include "TimeUtils.hpp"
-#include "openscp/RuntimeLogging.hpp"
 #include <QApplication>
-#include <QCoreApplication>
 #include <QDateTime>
 #include <QFileIconProvider>
 #include <QFileInfo>
 #include <QIcon>
-#include <QLoggingCategory>
-#include <QMetaObject>
 #include <QMimeDatabase>
 #include <QMimeType>
-#include <QPointer>
-#include <QSet>
 #include <QStyle>
 #include <QVariant>
 #include <algorithm>
-#include <functional>
-#include <thread>
-
-Q_LOGGING_CATEGORY(ocEnum, "openscp.enum")
-#include <QDir>
 #include <QLocale>
 #include <QMimeData>
-#include <QSettings>
-#include <QStandardPaths>
-#include <QUrl>
 
-RemoteModel::RemoteModel(openscp::SftpClient *client, QObject *parent)
-    : QAbstractTableModel(parent), client_(client) {}
+RemoteModel::RemoteModel(QObject *parent)
+    : QAbstractTableModel(parent) {}
 
 int RemoteModel::rowCount(const QModelIndex &parent) const {
     if (parent.isValid())
         return 0;
+    if (loading_)
+        return 1;
     return static_cast<int>(items_.size());
 }
 
@@ -140,6 +127,13 @@ static QIcon iconForRemoteEntry(const QString &name, bool isDir, bool isLink) {
 }
 
 QVariant RemoteModel::data(const QModelIndex &index, int role) const {
+    if (loading_) {
+        if (index.isValid() && index.row() == 0 && index.column() == 0 &&
+            role == Qt::DisplayRole) {
+            return tr("Loading…");
+        }
+        return {};
+    }
     const Item *entry = itemForIndex(index);
     if (!entry)
         return {};
@@ -216,127 +210,52 @@ QVariant RemoteModel::data(const QModelIndex &index, int role) const {
 Qt::ItemFlags RemoteModel::flags(const QModelIndex &index) const {
     if (!index.isValid())
         return Qt::NoItemFlags;
+    if (loading_)
+        return Qt::ItemIsEnabled;
     return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled;
 }
 
-bool RemoteModel::setRootPath(const QString &path, QString *errorOut,
-                              bool async) {
-    if (!client_) {
-        if (errorOut)
-            *errorOut = tr("No remote client available");
-        return false;
+void RemoteModel::setLoading(const QString &path) {
+    beginResetModel();
+    items_.clear();
+    currentPath_ = normalizeRemotePath(path);
+    loading_ = true;
+    endResetModel();
+}
+
+void RemoteModel::clearLoading() {
+    if (!loading_)
+        return;
+    beginResetModel();
+    loading_ = false;
+    endResetModel();
+}
+
+void RemoteModel::setEntries(
+    const QString &path,
+    const std::vector<openscp::FileInfo> &entries) {
+    std::vector<Item> nextItems;
+    nextItems.reserve(entries.size());
+    for (const auto &fileInfo : entries) {
+        const QString name = QString::fromStdString(fileInfo.name);
+        if (!showHidden_ && name.startsWith('.'))
+            continue;
+        nextItems.push_back(
+            {name, fileInfo.is_dir, fileInfo.size, fileInfo.has_size,
+             fileInfo.mtime, fileInfo.mode, fileInfo.uid, fileInfo.gid});
     }
-
-    const QString normalized = normalizeRemotePath(path);
-
-    const quint64 reqId = ++listRequestSeq_;
-    const bool showHiddenNow = showHidden_;
-    const int sortColNow = sortColumn_;
-    const Qt::SortOrder sortOrdNow = sortOrder_;
-
-    if (!async) {
-        std::vector<openscp::FileInfo> remoteEntries;
-        std::string listError;
-        if (!client_->list(normalized.toStdString(), remoteEntries, listError)) {
-            const QString listErrorText = QString::fromStdString(listError);
-            if (errorOut)
-                *errorOut = listErrorText;
-            return false;
-        }
-
-        std::vector<Item> nextItems;
-        nextItems.reserve(remoteEntries.size());
-        for (const auto &fileInfo : remoteEntries) {
-            const QString name = QString::fromStdString(fileInfo.name);
-            if (!showHiddenNow && name.startsWith('.'))
-                continue;
-            nextItems.push_back(
-                {name, fileInfo.is_dir, fileInfo.size, fileInfo.has_size,
-                 fileInfo.mtime, fileInfo.mode, fileInfo.uid, fileInfo.gid});
-        }
-        sortItemsVector(nextItems, sortColNow, sortOrdNow);
-        replaceItems(std::move(nextItems), normalized);
-        return true;
-    }
-
-    if (!sessionOpt_.has_value()) {
-        if (errorOut)
-            *errorOut = tr("Missing session options for remote listing");
-        return false;
-    }
-
-    openscp::SftpClient *baseClient = client_;
-    const openscp::SessionOptions sessionOptions = *sessionOpt_;
-    QPointer<RemoteModel> self(this);
-    std::thread([self, reqId, normalized, showHiddenNow, sortColNow,
-                 sortOrdNow, baseClient, sessionOptions]() mutable {
-        std::vector<openscp::FileInfo> remoteEntries;
-        std::string listError;
-        bool listOk = false;
-        QString listErrorText;
-
-        std::unique_ptr<openscp::SftpClient> listClient;
-        std::string connErr;
-        if (!self || !baseClient) {
-            listErrorText = QStringLiteral("Remote model is no longer available");
-        } else {
-            listClient = baseClient->newConnectionLike(sessionOptions, connErr);
-            if (!listClient) {
-                listErrorText = connErr.empty()
-                                    ? QStringLiteral(
-                                          "Could not start remote listing")
-                                    : QString::fromStdString(connErr);
-            } else {
-                listOk =
-                    listClient->list(normalized.toStdString(), remoteEntries,
-                                     listError);
-                if (!listOk)
-                    listErrorText = QString::fromStdString(listError);
-            }
-        }
-        if (listClient)
-            listClient->disconnect();
-
-        if (!self)
-            return;
-        QObject *app = QCoreApplication::instance();
-        if (!app)
-            return;
-        QMetaObject::invokeMethod(
-            app,
-            [self, reqId, normalized, listOk, listErrorText,
-             remoteEntries = std::move(remoteEntries),
-             showHiddenNow, sortColNow, sortOrdNow]() mutable {
-                if (!self)
-                    return;
-                if (reqId != self->listRequestSeq_.load())
-                    return;
-                if (!listOk) {
-                    emit self->rootPathLoaded(normalized, false, listErrorText);
-                    return;
-                }
-                std::vector<Item> nextItems;
-                nextItems.reserve(remoteEntries.size());
-                for (const auto &fileInfo : remoteEntries) {
-                    const QString name = QString::fromStdString(fileInfo.name);
-                    if (!showHiddenNow && name.startsWith('.'))
-                        continue;
-                    nextItems.push_back({name, fileInfo.is_dir, fileInfo.size,
-                                         fileInfo.has_size, fileInfo.mtime,
-                                         fileInfo.mode, fileInfo.uid,
-                                         fileInfo.gid});
-                }
-                self->sortItemsVector(nextItems, sortColNow, sortOrdNow);
-                self->replaceItems(std::move(nextItems), normalized);
-                emit self->rootPathLoaded(normalized, true, QString());
-            },
-            Qt::QueuedConnection);
-    }).detach();
-    return true;
+    sortItemsVector(nextItems, sortColumn_, sortOrder_);
+    beginResetModel();
+    loading_ = false;
+    items_ = std::move(nextItems);
+    currentPath_ = normalizeRemotePath(path);
+    endResetModel();
+    emit rootPathLoaded(currentPath_, true, QString());
 }
 
 void RemoteModel::replaceItems(std::vector<Item> &&nextItems,
                                const QString &path) {
+    loading_ = false;
     const int oldCount = static_cast<int>(items_.size());
     if (oldCount > 0) {
         beginRemoveRows(QModelIndex(), 0, oldCount - 1);
@@ -443,87 +362,6 @@ QMimeData *RemoteModel::mimeData(const QModelIndexList &indexes) const {
     // Return an empty QMimeData so default drag handlers can still proceed
     // (they won't be used for remote model in our customized view).
     return new QMimeData();
-}
-
-bool RemoteModel::enumerateFilesUnderEx(
-    const QString &baseRemote, std::vector<EnumeratedFile> &out,
-    const EnumOptions &opt, bool *partialErrorOut, bool *someSizeUnknownOut,
-    quint64 *dirCountOut, quint64 *symlinkSkippedOut, quint64 *deniedCountOut,
-    quint64 *unknownSizeCountOut) const {
-    if (partialErrorOut)
-        *partialErrorOut = false;
-    if (someSizeUnknownOut)
-        *someSizeUnknownOut = false;
-    if (!client_) {
-        return false;
-    }
-
-    // Resolve max depth from settings if not provided or invalid
-    int configuredMaxDepth = opt.maxDepth;
-    if (configuredMaxDepth <= 0) {
-        QSettings settings("OpenSCP", "OpenSCP");
-        configuredMaxDepth = settings.value("Advanced/maxFolderDepth", 32).toInt();
-        if (configuredMaxDepth < 1)
-            configuredMaxDepth = 32;
-    }
-
-    RemoteWalker::Options walkerOptions;
-    walkerOptions.includeHidden = showHidden_;
-    walkerOptions.skipSymlinks = opt.skipSymlinks;
-    walkerOptions.sanitizeRelativePath = true;
-    walkerOptions.maxDepth = configuredMaxDepth;
-    walkerOptions.cancel = opt.cancel;
-    walkerOptions.onListError = [](const QString &remotePath,
-                                   const QString &errorText) {
-        if (openscp::sensitiveLoggingEnabled()) {
-            qWarning(ocEnum) << "enumeration error at" << remotePath << ":"
-                             << errorText;
-        } else {
-            qWarning(ocEnum) << "enumeration error during remote listing";
-        }
-    };
-
-    RemoteWalker::Stats walkerStats;
-    const bool walkOk = RemoteWalker::walk(
-        client_, baseRemote, walkerOptions,
-        [&out](const RemoteWalker::Entry &entry) {
-            out.push_back(EnumeratedFile{entry.remotePath, entry.relativePath,
-                                         static_cast<quint64>(
-                                             entry.fileInfo.size),
-                                         entry.fileInfo.has_size});
-        },
-        &walkerStats);
-
-    if (partialErrorOut)
-        *partialErrorOut = walkerStats.partialError;
-    if (someSizeUnknownOut)
-        *someSizeUnknownOut = walkerStats.unknownSizeCount > 0;
-    if (dirCountOut)
-        *dirCountOut = walkerStats.visitedDirectoryCount;
-    if (symlinkSkippedOut)
-        *symlinkSkippedOut = walkerStats.skippedSymlinkCount;
-    if (deniedCountOut)
-        *deniedCountOut = walkerStats.listFailureCount;
-    if (unknownSizeCountOut)
-        *unknownSizeCountOut = walkerStats.unknownSizeCount;
-
-    return walkOk;
-}
-
-bool RemoteModel::enumerateFilesUnder(const QString &baseRemote,
-                                      std::vector<EnumeratedFile> &out,
-                                      QString *errorOut) const {
-    bool hasPartialErrors = false;
-    bool hasUnknownSizes = false;
-    EnumOptions options; // defaults
-    bool enumerationOk = enumerateFilesUnderEx(baseRemote, out, options,
-                                               &hasPartialErrors,
-                                               &hasUnknownSizes);
-    if (!enumerationOk && errorOut)
-        *errorOut = tr("Enumeration error");
-    if (hasPartialErrors && errorOut)
-        *errorOut = tr("Partial enumeration with errors");
-    return enumerationOk && !hasPartialErrors;
 }
 
 void RemoteModel::sort(int column, Qt::SortOrder order) {

@@ -1,6 +1,8 @@
 // Implementation of DragAwareTreeView
 #include "DragAwareTreeView.hpp"
+#include "MainWindowSharedUtils.hpp"
 #include "RemoteModel.hpp"
+#include "RemoteOperationController.hpp"
 #include "TransferManager.hpp"
 #include "UiAlerts.hpp"
 #include <QApplication>
@@ -27,9 +29,15 @@
 #include <QStatusBar>
 #include <QTimer>
 #include <QUrl>
+#include <QUuid>
 #include <QVector>
-Q_DECLARE_LOGGING_CATEGORY(ocEnum)
 
+#include <algorithm>
+#include <functional>
+#include <limits>
+#include <memory>
+
+Q_LOGGING_CATEGORY(ocEnum, "openscp.enum")
 Q_LOGGING_CATEGORY(ocDrag, "openscp.drag")
 
 static QString stagingRootFromSettings() {
@@ -58,16 +66,52 @@ static QPair<QString, QString> splitNameMultiExt(const QString &fileName) {
 
 static QPair<int, quint64> loadStagingConfirmThresholds() {
     QSettings settings("OpenSCP", "OpenSCP");
-    int itemThreshold = settings.value("Advanced/stagingConfirmItems", 500).toInt();
+    int itemThreshold =
+        settings.value("Advanced/stagingConfirmItems", 100000).toInt();
     if (itemThreshold < 1)
-        itemThreshold = 500;
-    int mibThreshold = settings.value("Advanced/stagingConfirmMiB", 1024).toInt();
+        itemThreshold = 100000;
+    int mibThreshold =
+        settings.value("Advanced/stagingConfirmMiB", 100 * 1024).toInt();
     if (mibThreshold < 1)
-        mibThreshold = 1024;
+        mibThreshold = 100 * 1024;
     return qMakePair(itemThreshold, quint64(mibThreshold) * 1024ull * 1024ull);
 }
 
+struct DragAwareTreeView::RemoteDragStagingState {
+    QVector<RemoteDragTarget> targets;
+    QStringList orderedDirectories;
+    QStringList dragRoots;
+    QHash<QString, QVector<int>> dragRootIndexes;
+    QHash<QString, quint64> directoryTaskIds;
+    QHash<QString, int> nextCollisionSuffix;
+    QSet<QString> reservedPaths;
+    QSet<quint64> allTaskIds;
+    QSet<quint64> pendingTaskIds;
+    TransferBatchOptions batchOptions;
+    RemoteDragBatchStats stats;
+    qsizetype nextDirectory = 0;
+    qsizetype nextTarget = 0;
+    int succeeded = 0;
+    int failed = 0;
+    bool enqueueComplete = false;
+    bool backpressurePaused = false;
+    bool pumpScheduled = false;
+    bool finished = false;
+    QMetaObject::Connection addedConnection;
+    QMetaObject::Connection updatedConnection;
+    QMetaObject::Connection removedConnection;
+};
+
 DragAwareTreeView::DragAwareTreeView(QWidget *parent) : QTreeView(parent) {}
+
+void DragAwareTreeView::setTransferManager(TransferManager *mgr) {
+    transferMgr_ = mgr;
+}
+
+void DragAwareTreeView::setRemoteOperationController(
+    RemoteOperationController *controller) {
+    remoteOps_ = controller;
+}
 
 DragAwareTreeView::~DragAwareTreeView() {
     if (!currentBatchDir_.isEmpty() || (overlay_ && overlay_->isVisible())) {
@@ -304,141 +348,112 @@ QModelIndexList DragAwareTreeView::collectRemoteSelectedRows() const {
     return rows;
 }
 
-bool DragAwareTreeView::buildRemoteDragTargets(
-    RemoteModel *remoteModel, const QModelIndexList &rows,
-    const QString &stagingDir, QVector<RemoteDragTarget> &targets,
-    RemoteDragBatchStats &stats) {
-    targets.clear();
-    targets.reserve(rows.size());
-    stats = RemoteDragBatchStats{};
-
-    enumCancelFlag_ = std::make_shared<std::atomic_bool>(false);
-    enumSymlinksSkipped_ = 0;
-    enumDenied_ = 0;
-    enumMs_ = -1;
-    prepTimer_.restart();
-
-    auto uniquePath = [&](const QString &dir, const QString &name) {
-        const QString normalizedName = normalizeStagingName(name);
-        const auto parts = splitNameMultiExt(normalizedName);
-        const QString baseName = parts.first;
-        const QString extSuffix = parts.second;
-        QString candidate = QDir(dir).filePath(normalizedName);
-        int suffix = 1;
-        while (QFileInfo::exists(candidate)) {
-            candidate = QDir(dir).filePath(
-                QString("%1 (%2)%3").arg(baseName).arg(suffix++).arg(extSuffix));
-        }
-        return candidate;
-    };
-    auto joinRemote = [](const QString &base, const QString &name) {
-        if (base == "/")
-            return QStringLiteral("/") + name;
-        return base.endsWith('/') ? base + name : base + "/" + name;
-    };
-
-    for (const QModelIndex &idx : rows) {
-        if (enumCancelFlag_ && enumCancelFlag_->load(std::memory_order_relaxed))
-            return false;
-        if (!idx.isValid())
-            continue;
-
-        const QString name = remoteModel->nameAt(idx);
-        const QString remotePath = joinRemote(remoteModel->rootPath(), name);
-        if (remoteModel->isDir(idx)) {
-            std::vector<RemoteModel::EnumeratedFile> files;
-            RemoteModel::EnumOptions options;
-            QSettings settings("OpenSCP", "OpenSCP");
-            options.maxDepth = settings.value("Advanced/maxFolderDepth", 32).toInt();
-            if (options.maxDepth < 1)
-                options.maxDepth = 32;
-            options.skipSymlinks = true;
-            options.cancel = enumCancelFlag_.get();
-
-            bool partial = false;
-            bool someUnknown = false;
-            quint64 dirCount = 0;
-            quint64 symlinkCount = 0;
-            quint64 deniedCount = 0;
-            quint64 unknownCountPart = 0;
-            remoteModel->enumerateFilesUnderEx(
-                remotePath, files, options, &partial, &someUnknown, &dirCount,
-                &symlinkCount, &deniedCount, &unknownCountPart);
-
-            stats.anySizeUnknown = stats.anySizeUnknown || someUnknown;
-            stats.totalDirs += dirCount;
-            enumSymlinksSkipped_ += symlinkCount;
-            enumDenied_ += deniedCount;
-            stats.unknownSizeCount += unknownCountPart;
-
-            for (const auto &file : files) {
-                if (enumCancelFlag_ &&
-                    enumCancelFlag_->load(std::memory_order_relaxed)) {
-                    return false;
-                }
-                const QString localPath =
-                    QDir(QDir(stagingDir).filePath(normalizeStagingName(name)))
-                        .filePath(normalizeStagingName(file.relativePath));
-                QDir().mkpath(QFileInfo(localPath).dir().absolutePath());
-                targets.push_back({file.remotePath, localPath});
-                if (file.hasSize)
-                    stats.totalBytes += file.size;
-            }
-            stats.totalItems += static_cast<quint64>(files.size());
-            continue;
-        }
-
-        const QString localPath = uniquePath(stagingDir, name);
-        if (remoteModel->hasSize(idx)) {
-            stats.totalBytes += remoteModel->sizeAt(idx);
-        } else {
-            stats.anySizeUnknown = true;
-            stats.unknownSizeCount += 1;
-        }
-        targets.push_back({remotePath, localPath});
-        stats.totalItems += 1;
+void DragAwareTreeView::finishRemoteDragEnumeration() {
+    if (!enumPendingJobs_.isEmpty() ||
+        enumThresholdPromptActive_) {
+        return;
     }
+    if (enumBatchConn_) {
+        QObject::disconnect(enumBatchConn_);
+        enumBatchConn_ = QMetaObject::Connection();
+    }
+    if (enumProgressConn_) {
+        QObject::disconnect(enumProgressConn_);
+        enumProgressConn_ = QMetaObject::Connection();
+    }
+    if (enumFinishedConn_) {
+        QObject::disconnect(enumFinishedConn_);
+        enumFinishedConn_ = QMetaObject::Connection();
+    }
+    if (!dragInProgress_)
+        return;
 
-    if (enumCancelFlag_ && enumCancelFlag_->load(std::memory_order_relaxed))
-        return false;
-    if (targets.isEmpty())
-        return false;
-
-    currentBatchTotal_ = targets.size();
-    enumMs_ = prepTimer_.elapsed();
+    enumMs_ = prepTimer_.isValid() ? prepTimer_.elapsed() : -1;
+    const quint64 enumeratedItems =
+        enumStats_.totalItems + enumStats_.totalDirs;
+    currentBatchTotal_ =
+        static_cast<int>(std::min<quint64>(
+            enumeratedItems,
+            static_cast<quint64>(std::numeric_limits<int>::max())));
+    if (enumTargets_.isEmpty() && enumDirectories_.isEmpty()) {
+        hidePrepOverlay();
+        QDir(currentBatchDir_).removeRecursively();
+        logBatchResult(
+            currentBatchId_, 0, 0,
+            QStringLiteral("result=empty enumMs=%1 symlinkSkipped=%2 "
+                           "depthLimited=%3 invalidNames=%4 unknownSizes=%5 "
+                           "inaccessible=%6")
+                .arg(enumMs_)
+                .arg(enumSymlinksSkipped_)
+                .arg(enumDepthLimits_)
+                .arg(enumInvalidNames_)
+                .arg(enumStats_.unknownSizeCount)
+                .arg(enumInaccessible_));
+        resetRemoteDragState();
+        return;
+    }
 
     QString bytesText = QLocale().formattedDataSize(
-        static_cast<qint64>(stats.totalBytes), 1, QLocale::DataSizeIecFormat);
-    if (stats.anySizeUnknown) {
-        bytesText = QString("~%1 (%2)")
+        static_cast<qint64>(enumStats_.totalBytes), 1,
+        QLocale::DataSizeIecFormat);
+    if (enumStats_.anySizeUnknown) {
+        bytesText = QStringLiteral("~%1 (%2)")
                         .arg(bytesText)
                         .arg(QLocale().toString(
-                            static_cast<qulonglong>(stats.unknownSizeCount)));
+                            static_cast<qulonglong>(
+                                enumStats_.unknownSizeCount)));
     }
-
     const auto thresholds = loadStagingConfirmThresholds();
     const bool exceedsThreshold =
-        stats.totalItems > static_cast<quint64>(thresholds.first) ||
-        stats.totalBytes > thresholds.second;
+        enumeratedItems > static_cast<quint64>(thresholds.first) ||
+        enumStats_.totalBytes > thresholds.second;
+    qInfo(ocEnum)
+        << "enum batch" << currentBatchId_ << "dirs"
+        << QLocale().toString(
+               static_cast<qulonglong>(enumStats_.totalDirs))
+        << "files"
+        << QLocale().toString(
+               static_cast<qulonglong>(enumStats_.totalItems))
+        << "bytes" << bytesText << "enumMs" << enumMs_ << "threshold"
+        << (exceedsThreshold ? "yes" : "no") << "symlinkSkipped"
+        << QLocale().toString(
+               static_cast<qulonglong>(enumSymlinksSkipped_))
+        << "depthLimited"
+        << QLocale().toString(
+               static_cast<qulonglong>(enumDepthLimits_))
+        << "invalidNames"
+        << QLocale().toString(
+               static_cast<qulonglong>(enumInvalidNames_))
+        << "unknownSizes"
+        << QLocale().toString(
+               static_cast<qulonglong>(enumStats_.unknownSizeCount))
+        << "inaccessible"
+        << QLocale().toString(
+               static_cast<qulonglong>(enumInaccessible_));
 
-    qInfo(ocEnum) << "enum batch" << currentBatchId_ << "dirs"
-                  << QLocale().toString(static_cast<qulonglong>(stats.totalDirs))
-                  << "files"
-                  << QLocale().toString(static_cast<qulonglong>(stats.totalItems))
-                  << "bytes" << bytesText << "enumMs" << enumMs_ << "threshold"
-                  << (exceedsThreshold ? "yes" : "no") << "symlinkSkipped"
-                  << QLocale().toString(
-                         static_cast<qulonglong>(enumSymlinksSkipped_))
-                  << "denied"
-                  << QLocale().toString(static_cast<qulonglong>(enumDenied_));
-    return true;
+    if (!enumThresholdConfirmed_ &&
+        !confirmRemoteDragThreshold(enumStats_)) {
+        cancelCurrentBatch(QStringLiteral("threshold"));
+        return;
+    }
+    QVector<RemoteDragTarget> targets = std::move(enumTargets_);
+    QStringList directories = std::move(enumDirectories_);
+    QStringList dragRoots = std::move(enumDragRoots_);
+    const RemoteDragBatchStats stats = enumStats_;
+    enumTargets_.clear();
+    enumDirectories_.clear();
+    enumDragRoots_.clear();
+    startRemoteDragStaging(std::move(targets), std::move(directories),
+                           std::move(dragRoots), stats);
 }
+
 
 bool DragAwareTreeView::confirmRemoteDragThreshold(
     const RemoteDragBatchStats &stats) {
     const auto thresholds = loadStagingConfirmThresholds();
     const bool tooMany =
-        stats.totalItems > static_cast<quint64>(thresholds.first);
+        stats.totalItems + stats.totalDirs >
+        static_cast<quint64>(thresholds.first);
     const bool tooBig = stats.totalBytes > thresholds.second;
     if (!tooMany && !tooBig)
         return true;
@@ -467,7 +482,8 @@ bool DragAwareTreeView::confirmRemoteDragThreshold(
     }
     box.setText(tr("You are about to prepare %1 items%2. Continue?")
                     .arg(QLocale().toString(
-                        static_cast<qulonglong>(stats.totalItems)))
+                        static_cast<qulonglong>(
+                            stats.totalItems + stats.totalDirs)))
                     .arg(sizePart));
     auto *yesButton = box.addButton(tr("Continue"), QMessageBox::AcceptRole);
     box.addButton(tr("Cancel"), QMessageBox::RejectRole);
@@ -475,117 +491,145 @@ bool DragAwareTreeView::confirmRemoteDragThreshold(
     return box.clickedButton() == yesButton;
 }
 
-void DragAwareTreeView::enqueueRemoteDragTargets(
-    QVector<RemoteDragTarget> &targets) {
-    QSet<QString> reserved;
-    auto keyFor = [&](const QString &absPath) {
-        QString key = normalizeStagingName(QDir::cleanPath(absPath));
+bool DragAwareTreeView::enforceRemoteDragThreshold() {
+    if (enumThresholdConfirmed_ || !dragInProgress_)
+        return dragInProgress_;
+    const auto thresholds = loadStagingConfirmThresholds();
+    if (enumStats_.totalItems + enumStats_.totalDirs <=
+            static_cast<quint64>(thresholds.first) &&
+        enumStats_.totalBytes <= thresholds.second) {
+        return true;
+    }
+
+    enumThresholdConfirmed_ = true;
+    enumThresholdPromptActive_ = true;
+    const auto jobs = enumPendingJobs_;
+    if (remoteOps_) {
+        for (const auto jobId : jobs)
+            remoteOps_->setPaused(jobId, true);
+    }
+    const bool confirmed = confirmRemoteDragThreshold(enumStats_);
+    enumThresholdPromptActive_ = false;
+    if (!confirmed) {
+        cancelCurrentBatch(QStringLiteral("threshold"));
+        return false;
+    }
+    if (!dragInProgress_)
+        return false;
+    if (remoteOps_) {
+        for (const auto jobId : jobs)
+            remoteOps_->setPaused(jobId, false);
+    }
+    return true;
+}
+
+void DragAwareTreeView::startRemoteDragStaging(
+    QVector<RemoteDragTarget> targets, QStringList directories,
+    QStringList dragRoots, const RemoteDragBatchStats &stats) {
+    if (!transferMgr_) {
+        cancelCurrentBatch(QStringLiteral("queue-unavailable"));
+        return;
+    }
+
+    auto state = std::make_shared<RemoteDragStagingState>();
+    state->targets = std::move(targets);
+    state->dragRoots = std::move(dragRoots);
+    state->stats = stats;
+    state->batchOptions.sessionKey = transferMgr_->sessionIdentity();
+    state->batchOptions.conflictPolicy = TransferConflictPolicy::Overwrite;
+    state->batchOptions.batchId =
+        transferMgr_->createBatch(state->batchOptions);
+
+    auto pathKey = [](const QString &path) {
+        QString key = normalizeStagingName(QDir::cleanPath(path));
 #if defined(Q_OS_MAC) || defined(Q_OS_WIN)
-        key = key.toLower();
+        key = key.toCaseFolded();
 #endif
         return key;
     };
-    auto uniqueFullPath = [&](const QString &fullPath) {
-        const QFileInfo fileInfo(fullPath);
-        const QString dirPath = fileInfo.dir().absolutePath();
-        const QString normalizedName = normalizeStagingName(fileInfo.fileName());
-        const auto parts = splitNameMultiExt(normalizedName);
-        const QString baseName = parts.first;
-        const QString extSuffix = parts.second;
-
-        auto buildName = [&](int suffix) {
-            if (suffix == 0)
-                return normalizedName;
-            return QString("%1 (%2)%3").arg(baseName).arg(suffix).arg(extSuffix);
-        };
-
-#if defined(Q_OS_MAC) || defined(Q_OS_WIN)
-        QSet<QString> lowerExisting;
-        QDir directory(dirPath);
-        const auto entries =
-            directory.entryList(QDir::NoDotAndDotDot | QDir::AllEntries);
-        for (const QString &entryName : entries)
-            lowerExisting.insert(normalizeStagingName(entryName).toLower());
-#endif
-
-        int suffix = 0;
-        QString candidateName = buildName(suffix);
-        QString candidatePath = QDir(dirPath).filePath(candidateName);
-        QString candidateKey = keyFor(candidatePath);
-        while (
-#if defined(Q_OS_MAC) || defined(Q_OS_WIN)
-            lowerExisting.contains(normalizeStagingName(candidateName).toLower()) ||
-#endif
-            reserved.contains(candidateKey) || QFileInfo::exists(candidatePath)) {
-            candidateName = buildName(++suffix);
-            candidatePath = QDir(dirPath).filePath(candidateName);
-            candidateKey = keyFor(candidatePath);
+    QSet<QString> seenDirectories;
+    for (const QString &directory : directories) {
+        const QString normalized = QDir::cleanPath(directory);
+        const QString relative =
+            QDir(currentBatchDir_).relativeFilePath(normalized);
+        const QString key = pathKey(normalized);
+        if (relative == QLatin1String("..") ||
+            relative.startsWith(QStringLiteral("../")) ||
+            seenDirectories.contains(key)) {
+            continue;
         }
-        reserved.insert(candidateKey);
-        return candidatePath;
-    };
-
-    for (auto &target : targets) {
-        QDir().mkpath(QFileInfo(target.second).dir().absolutePath());
-        target.second = uniqueFullPath(target.second);
-        transferMgr_->enqueueDownload(target.first, target.second);
+        seenDirectories.insert(key);
+        state->reservedPaths.insert(key);
+        state->orderedDirectories.push_back(normalized);
     }
-    transferMgr_->resumeAll();
+    std::sort(
+        state->orderedDirectories.begin(),
+        state->orderedDirectories.end(),
+        [](const QString &left, const QString &right) {
+            const int leftDepth =
+                QDir::fromNativeSeparators(left).count(QLatin1Char('/'));
+            const int rightDepth =
+                QDir::fromNativeSeparators(right).count(QLatin1Char('/'));
+            if (leftDepth != rightDepth)
+                return leftDepth < rightDepth;
+            return left < right;
+        });
+    for (int index = 0; index < state->dragRoots.size(); ++index) {
+        state->dragRootIndexes[QDir::cleanPath(
+            state->dragRoots.at(index))]
+            .push_back(index);
+    }
+
+    stagingState_ = state;
     if (overlayProgress_)
         overlayProgress_->setValue(0);
     stagingTimer_.restart();
-}
 
-QString DragAwareTreeView::formatRemoteDragMetrics(
-    const QString &result, const RemoteDragBatchStats &stats,
-    qint64 stagingMs) const {
-    return QString("result=%1 enumDirs=%2 files=%3 enumMs=%4 stagingMs=%5 "
-                   "symlinkSkipped=%6 denied=%7")
-        .arg(result)
-        .arg(QLocale().toString(static_cast<qulonglong>(stats.totalDirs)))
-        .arg(QLocale().toString(static_cast<qulonglong>(stats.totalItems)))
-        .arg(enumMs_)
-        .arg(stagingMs)
-        .arg(QLocale().toString(static_cast<qulonglong>(enumSymlinksSkipped_)))
-        .arg(QLocale().toString(static_cast<qulonglong>(enumDenied_)));
-}
+    state->addedConnection = connect(
+        transferMgr_, &TransferManager::tasksAdded, this,
+        [this, state](const QVector<quint64> &taskIds) {
+            if (stagingState_ != state || !transferMgr_)
+                return;
+            const auto tasks = transferMgr_->tasksSnapshot(taskIds);
+            for (const auto &task : tasks) {
+                if (task.batchId != state->batchOptions.batchId ||
+                    state->allTaskIds.contains(task.taskId)) {
+                    continue;
+                }
+                state->allTaskIds.insert(task.taskId);
+                state->pendingTaskIds.insert(task.taskId);
+            }
+        });
+    state->updatedConnection = connect(
+        transferMgr_, &TransferManager::tasksUpdated, this,
+        [this, state](const QVector<quint64> &taskIds) {
+            reconcileRemoteDragTasks(state, taskIds, false);
+        });
+    state->removedConnection = connect(
+        transferMgr_, &TransferManager::tasksRemoved, this,
+        [this, state](const QVector<quint64> &taskIds) {
+            reconcileRemoteDragTasks(state, taskIds, true);
+        });
 
-void DragAwareTreeView::resetRemoteDragState() {
-    if (waitTimer_)
-        waitTimer_->stop();
-    dragInProgress_ = false;
-    currentBatchDir_.clear();
-    currentBatchId_.clear();
-    currentBatchTotal_ = 0;
-    enumCancelFlag_.reset();
-    if (quitConn_) {
-        QObject::disconnect(quitConn_);
-        quitConn_ = QMetaObject::Connection();
-    }
-}
-
-void DragAwareTreeView::beginRemoteDragMonitoring(
-    const QVector<RemoteDragTarget> &targets, const RemoteDragBatchStats &stats) {
     if (overlayCancel_) {
         QObject::disconnect(overlayCancel_, nullptr, this, nullptr);
         QObject::connect(overlayCancel_, &QPushButton::clicked, this, [this] {
             cancelCurrentBatch(QStringLiteral("button"));
         });
     }
-
     if (!waitTimer_)
         waitTimer_ = new QTimer(this);
     waitTimer_->setSingleShot(true);
     waitTimer_->stop();
     QObject::disconnect(waitTimer_, nullptr, this, nullptr);
-
     QSettings settings("OpenSCP", "OpenSCP");
-    int timeoutMs = settings.value("Advanced/stagingPrepTimeoutMs", 2000).toInt();
+    int timeoutMs =
+        settings.value("Advanced/stagingPrepTimeoutMs", 2000).toInt();
     timeoutMs = qBound(250, timeoutMs, 60000);
     waitTimer_->setInterval(timeoutMs);
-    QObject::connect(waitTimer_, &QTimer::timeout, this, [this]() {
+    QObject::connect(waitTimer_, &QTimer::timeout, this, [this] {
         auto *mainWindow = qobject_cast<QMainWindow *>(window());
-        if (!mainWindow)
+        if (!mainWindow || !dragInProgress_)
             return;
         QMessageBox box(mainWindow);
         UiAlerts::configure(box);
@@ -593,161 +637,615 @@ void DragAwareTreeView::beginRemoteDragMonitoring(
         box.setWindowTitle(tr("Preparing files…"));
         box.setText(tr("Still preparing files for drag-out. Wait or cancel?"));
         box.addButton(tr("Wait"), QMessageBox::AcceptRole);
-        auto *cancelButton = box.addButton(tr("Cancel"), QMessageBox::RejectRole);
+        auto *cancelButton =
+            box.addButton(tr("Cancel"), QMessageBox::RejectRole);
         box.exec();
         if (box.clickedButton() == cancelButton)
             cancelCurrentBatch(QStringLiteral("dialog"));
     });
     waitTimer_->start();
 
-    QPointer<DragAwareTreeView> self(this);
-    stagingConn_ = QObject::connect(
-        transferMgr_, &TransferManager::tasksChanged, this,
-        [this, self, targets, stats]() {
-            if (!self || !transferMgr_)
-                return;
+    QTimer::singleShot(0, this, [this, state] {
+        pumpRemoteDragStaging(state);
+    });
+}
 
-            const auto tasks = transferMgr_->tasksSnapshot();
-            const int total = targets.size();
-            int done = 0;
-            int failed = 0;
-            for (const auto &target : targets) {
-                for (const auto &task : tasks) {
-                    if (task.type != TransferTask::Type::Download ||
-                        task.dst != target.second) {
-                        continue;
-                    }
-                    if (task.status == TransferTask::Status::Done)
-                        ++done;
-                    else if (task.status == TransferTask::Status::Error ||
-                             task.status == TransferTask::Status::Canceled) {
-                        ++failed;
-                    }
-                    break;
-                }
+void DragAwareTreeView::pumpRemoteDragStaging(
+    const std::shared_ptr<RemoteDragStagingState> &state) {
+    if (!state || stagingState_ != state || state->finished ||
+        !dragInProgress_) {
+        return;
+    }
+    state->pumpScheduled = false;
+    if (!transferMgr_) {
+        cancelCurrentBatch(QStringLiteral("queue-unavailable"));
+        return;
+    }
+    if (state->backpressurePaused) {
+        if (state->pendingTaskIds.size() >= 1000)
+            return;
+        state->backpressurePaused = false;
+    }
+
+    auto pathKey = [](const QString &path) {
+        QString key = normalizeStagingName(QDir::cleanPath(path));
+#if defined(Q_OS_MAC) || defined(Q_OS_WIN)
+        key = key.toCaseFolded();
+#endif
+        return key;
+    };
+    auto uniqueFullPath = [&state, &pathKey](const QString &fullPath) {
+        const QFileInfo fileInfo(fullPath);
+        const QString dirPath = fileInfo.dir().absolutePath();
+        const QString normalizedName =
+            normalizeStagingName(fileInfo.fileName());
+        const auto parts = splitNameMultiExt(normalizedName);
+        const QString baseName = parts.first;
+        const QString extension = parts.second;
+        const QString originalKey = pathKey(fullPath);
+        int suffix = state->nextCollisionSuffix.value(originalKey, 0);
+        while (true) {
+            const QString name =
+                suffix == 0
+                    ? normalizedName
+                    : QStringLiteral("%1 (%2)%3")
+                          .arg(baseName)
+                          .arg(suffix)
+                          .arg(extension);
+            const QString candidate = QDir(dirPath).filePath(name);
+            const QString key = pathKey(candidate);
+            if (!state->reservedPaths.contains(key) &&
+                !QFileInfo::exists(candidate)) {
+                state->reservedPaths.insert(key);
+                state->nextCollisionSuffix.insert(originalKey,
+                                                  suffix + 1);
+                return candidate;
             }
+            ++suffix;
+        }
+    };
+    auto registerFallback = [this, state](quint64 taskId) {
+        if (taskId == 0) {
+            ++state->failed;
+            return;
+        }
+        if (!state->allTaskIds.contains(taskId)) {
+            state->allTaskIds.insert(taskId);
+            state->pendingTaskIds.insert(taskId);
+        }
+        reconcileRemoteDragTasks(state, {taskId}, false);
+    };
 
-            if (overlayProgress_) {
-                const int progressPct =
-                    (total > 0) ? int((done * 100) / total) : 0;
-                overlayProgress_->setValue(progressPct);
-            }
+    constexpr int kEnqueueBatchSize = 250;
+    constexpr int kHighWatermark = 2000;
+    int enqueuedThisTurn = 0;
+    while (enqueuedThisTurn < kEnqueueBatchSize &&
+           state->pendingTaskIds.size() < kHighWatermark &&
+           state->nextDirectory < state->orderedDirectories.size()) {
+        const QString directory =
+            state->orderedDirectories.at(state->nextDirectory++);
+        TransferBatchOptions options = state->batchOptions;
+        options.dependsOnTaskId = state->directoryTaskIds.value(
+            QFileInfo(directory).dir().absolutePath());
+        const quint64 taskId =
+            transferMgr_->enqueueLocalDirectory(directory, options);
+        if (taskId != 0)
+            state->directoryTaskIds.insert(directory, taskId);
+        registerFallback(taskId);
+        ++enqueuedThisTurn;
+    }
+    while (enqueuedThisTurn < kEnqueueBatchSize &&
+           state->pendingTaskIds.size() < kHighWatermark &&
+           state->nextDirectory >= state->orderedDirectories.size() &&
+           state->nextTarget < state->targets.size()) {
+        auto &target = state->targets[state->nextTarget++];
+        const QString originalPath = QDir::cleanPath(target.second);
+        const QString relative =
+            QDir(currentBatchDir_).relativeFilePath(originalPath);
+        if (relative == QLatin1String("..") ||
+            relative.startsWith(QStringLiteral("../"))) {
+            ++state->failed;
+            ++enqueuedThisTurn;
+            continue;
+        }
+        target.second = uniqueFullPath(target.second);
+        const auto rootIndexes =
+            state->dragRootIndexes.value(originalPath);
+        for (const int rootIndex : rootIndexes) {
+            if (rootIndex >= 0 && rootIndex < state->dragRoots.size())
+                state->dragRoots[rootIndex] = target.second;
+        }
+        TransferBatchOptions options = state->batchOptions;
+        options.dependsOnTaskId = state->directoryTaskIds.value(
+            QFileInfo(target.second).dir().absolutePath());
+        registerFallback(transferMgr_->enqueueDownload(
+            target.first, target.second, options));
+        ++enqueuedThisTurn;
+    }
 
-            if ((done + failed) < total)
-                return;
+    state->enqueueComplete =
+        state->nextDirectory >= state->orderedDirectories.size() &&
+        state->nextTarget >= state->targets.size();
+    if (state->pendingTaskIds.size() >= kHighWatermark)
+        state->backpressurePaused = true;
 
-            if (stagingConn_) {
-                QObject::disconnect(stagingConn_);
-                stagingConn_ = QMetaObject::Connection();
-            }
-            hidePrepOverlay();
+    const int total =
+        state->orderedDirectories.size() + state->targets.size();
+    const int completed = state->succeeded + state->failed;
+    if (overlayProgress_) {
+        overlayProgress_->setValue(
+            total > 0 ? int((qint64(completed) * 100) / total) : 0);
+    }
+    if (overlayLabel_) {
+        overlayLabel_->setText(
+            state->backpressurePaused
+                ? tr("Queue backpressure: waiting for pending tasks to "
+                     "drop below 1,000…")
+                : tr("Preparing files…"));
+    }
 
-            auto finishBatch = [this, total, stats](const QString &result,
-                                                    int failedItems) {
-                const qint64 stagingMs =
-                    stagingTimer_.isValid() ? stagingTimer_.elapsed() : -1;
-                logBatchResult(currentBatchId_, total, failedItems,
-                               formatRemoteDragMetrics(result, stats, stagingMs));
-                resetRemoteDragState();
-            };
-
-            if (failed > 0) {
-                const QString prefix =
-                    tr("%1 of %2 files failed. Staging at:")
-                        .arg(failed)
-                        .arg(total);
-                showKeepMessageWithPrefix(prefix, currentBatchDir_);
-                finishBatch(QStringLiteral("partial-fail"), failed);
-                return;
-            }
-
-            QList<QUrl> urls;
-            urls.reserve(targets.size());
-            for (const auto &target : targets)
-                urls << QUrl::fromLocalFile(target.second);
-            auto *mimeData = new QMimeData();
-            mimeData->setUrls(urls);
-            mimeData->setData("application/x-openscp-staging-batch",
-                              currentBatchDir_.toUtf8());
-
-            auto *drag = new QDrag(self);
-            drag->setMimeData(mimeData);
-            const Qt::DropAction result = drag->exec(Qt::CopyAction);
-
-            bool droppedInsideThisWindow = false;
-            if (const QObject *dropTarget = drag->target()) {
-                const QWidget *targetWidget =
-                    qobject_cast<const QWidget *>(dropTarget);
-                QWidget *const sourceWindow = self->window();
-                droppedInsideThisWindow =
-                    targetWidget && sourceWindow &&
-                    targetWidget->window() == sourceWindow;
-            }
-
-            QSettings dragSettings("OpenSCP", "OpenSCP");
-            const bool autoClean =
-                dragSettings.value("Advanced/autoCleanStaging", true).toBool();
-            if (result == Qt::IgnoreAction) {
-                showKeepMessage(currentBatchDir_);
-                finishBatch(QStringLiteral("canceled"), 0);
-                return;
-            }
-            if (!autoClean) {
-                showKeepMessage(currentBatchDir_);
-                finishBatch(QStringLiteral("accepted"), 0);
-                return;
-            }
-
-            // Internal drops may still be copying staged files in the target
-            // panel. Give them extra time; the drop target also performs
-            // explicit cleanup after local copy/move completion.
-            const int cleanupDelayMs = droppedInsideThisWindow ? 10000 : 500;
-            scheduleAutoCleanup(currentBatchDir_, cleanupDelayMs);
-            finishBatch(QStringLiteral("accepted"), 0);
+    if (state->enqueueComplete && state->pendingTaskIds.isEmpty()) {
+        finishRemoteDragStaging(state);
+        return;
+    }
+    if (!state->enqueueComplete && !state->backpressurePaused &&
+        !state->pumpScheduled) {
+        state->pumpScheduled = true;
+        QTimer::singleShot(0, this, [this, state] {
+            pumpRemoteDragStaging(state);
         });
+    }
+}
+
+void DragAwareTreeView::reconcileRemoteDragTasks(
+    const std::shared_ptr<RemoteDragStagingState> &state,
+    const QVector<quint64> &taskIds, bool removed) {
+    if (!state || stagingState_ != state || state->finished ||
+        !transferMgr_) {
+        return;
+    }
+    QVector<quint64> relevant;
+    relevant.reserve(taskIds.size());
+    for (const quint64 taskId : taskIds) {
+        if (state->pendingTaskIds.contains(taskId))
+            relevant.push_back(taskId);
+    }
+    if (relevant.isEmpty())
+        return;
+
+    if (removed) {
+        for (const quint64 taskId : relevant) {
+            if (state->pendingTaskIds.remove(taskId))
+                ++state->failed;
+        }
+    } else {
+        const auto tasks = transferMgr_->tasksSnapshot(relevant);
+        QSet<quint64> observed;
+        for (const auto &task : tasks) {
+            observed.insert(task.taskId);
+            const bool succeeded =
+                task.status == TransferTask::Status::Done;
+            const bool failed =
+                task.status == TransferTask::Status::Error ||
+                task.status == TransferTask::Status::Canceled ||
+                task.status == TransferTask::Status::Skipped ||
+                task.status == TransferTask::Status::Warning;
+            if (!succeeded && !failed)
+                continue;
+            if (!state->pendingTaskIds.remove(task.taskId))
+                continue;
+            if (succeeded)
+                ++state->succeeded;
+            else
+                ++state->failed;
+        }
+        for (const quint64 taskId : relevant) {
+            if (!observed.contains(taskId) &&
+                state->pendingTaskIds.remove(taskId)) {
+                ++state->failed;
+            }
+        }
+    }
+
+    if (state->enqueueComplete && state->pendingTaskIds.isEmpty()) {
+        finishRemoteDragStaging(state);
+        return;
+    }
+    if (!state->enqueueComplete &&
+        (!state->backpressurePaused ||
+         state->pendingTaskIds.size() < 1000) &&
+        !state->pumpScheduled) {
+        state->pumpScheduled = true;
+        QTimer::singleShot(0, this, [this, state] {
+            pumpRemoteDragStaging(state);
+        });
+    }
+}
+
+QString DragAwareTreeView::formatRemoteDragMetrics(
+    const QString &result, const RemoteDragBatchStats &stats,
+    qint64 stagingMs) const {
+    return QString("result=%1 enumDirs=%2 files=%3 enumMs=%4 stagingMs=%5 "
+                   "symlinkSkipped=%6 depthLimited=%7 invalidNames=%8 "
+                   "unknownSizes=%9 inaccessible=%10")
+        .arg(result)
+        .arg(QLocale().toString(static_cast<qulonglong>(stats.totalDirs)))
+        .arg(QLocale().toString(static_cast<qulonglong>(stats.totalItems)))
+        .arg(enumMs_)
+        .arg(stagingMs)
+        .arg(QLocale().toString(static_cast<qulonglong>(enumSymlinksSkipped_)))
+        .arg(QLocale().toString(static_cast<qulonglong>(enumDepthLimits_)))
+        .arg(QLocale().toString(static_cast<qulonglong>(enumInvalidNames_)))
+        .arg(QLocale().toString(
+            static_cast<qulonglong>(stats.unknownSizeCount)))
+        .arg(QLocale().toString(static_cast<qulonglong>(enumInaccessible_)));
+}
+
+void DragAwareTreeView::resetRemoteDragState() {
+    if (waitTimer_)
+        waitTimer_->stop();
+    if (stagingState_) {
+        stagingState_->finished = true;
+        QObject::disconnect(stagingState_->addedConnection);
+        QObject::disconnect(stagingState_->updatedConnection);
+        QObject::disconnect(stagingState_->removedConnection);
+        stagingState_.reset();
+    }
+    dragInProgress_ = false;
+    currentBatchDir_.clear();
+    currentBatchId_.clear();
+    currentBatchTotal_ = 0;
+    enumJobLocalRoots_.clear();
+    enumPendingJobs_.clear();
+    enumTargets_.clear();
+    enumDirectories_.clear();
+    enumDragRoots_.clear();
+    enumStats_ = RemoteDragBatchStats{};
+    enumSymlinksSkipped_ = 0;
+    enumDepthLimits_ = 0;
+    enumInvalidNames_ = 0;
+    enumInaccessible_ = 0;
+    enumThresholdConfirmed_ = false;
+    enumThresholdPromptActive_ = false;
+    if (enumBatchConn_) {
+        QObject::disconnect(enumBatchConn_);
+        enumBatchConn_ = QMetaObject::Connection();
+    }
+    if (enumProgressConn_) {
+        QObject::disconnect(enumProgressConn_);
+        enumProgressConn_ = QMetaObject::Connection();
+    }
+    if (enumFinishedConn_) {
+        QObject::disconnect(enumFinishedConn_);
+        enumFinishedConn_ = QMetaObject::Connection();
+    }
+    if (quitConn_) {
+        QObject::disconnect(quitConn_);
+        quitConn_ = QMetaObject::Connection();
+    }
+}
+
+void DragAwareTreeView::finishRemoteDragStaging(
+    const std::shared_ptr<RemoteDragStagingState> &state) {
+    if (!state || stagingState_ != state || state->finished)
+        return;
+    state->finished = true;
+    QObject::disconnect(state->addedConnection);
+    QObject::disconnect(state->updatedConnection);
+    QObject::disconnect(state->removedConnection);
+    hidePrepOverlay();
+
+    const int total =
+        state->orderedDirectories.size() + state->targets.size();
+    const int enumeratedTotal =
+        static_cast<int>(std::min<quint64>(
+            state->stats.totalItems + state->stats.totalDirs,
+            static_cast<quint64>(std::numeric_limits<int>::max())));
+    auto finishBatch =
+        [this, enumeratedTotal, stats = state->stats](
+            const QString &result, int failedItems) {
+            const qint64 stagingMs =
+                stagingTimer_.isValid() ? stagingTimer_.elapsed() : -1;
+            logBatchResult(
+                currentBatchId_, enumeratedTotal, failedItems,
+                formatRemoteDragMetrics(result, stats, stagingMs));
+            resetRemoteDragState();
+        };
+
+    if (state->failed > 0) {
+        const QString prefix =
+            tr("%1 of %2 staging operations failed. Files kept at:")
+                .arg(state->failed)
+                .arg(total);
+        showKeepMessageWithPrefix(prefix, currentBatchDir_);
+        finishBatch(QStringLiteral("partial-fail"), state->failed);
+        return;
+    }
+
+    QList<QUrl> urls;
+    QSet<QString> seenRoots;
+    for (const QString &root : state->dragRoots) {
+        const QString normalized = QDir::cleanPath(root);
+        if (seenRoots.contains(normalized) ||
+            !QFileInfo::exists(normalized)) {
+            continue;
+        }
+        seenRoots.insert(normalized);
+        urls << QUrl::fromLocalFile(normalized);
+    }
+    if (urls.isEmpty()) {
+        showKeepMessageWithPrefix(
+            tr("No staged drag roots were available. Files kept at:"),
+            currentBatchDir_);
+        finishBatch(QStringLiteral("missing-roots"), 1);
+        return;
+    }
+
+    auto *mimeData = new QMimeData();
+    mimeData->setUrls(urls);
+    mimeData->setData("application/x-openscp-staging-batch",
+                      currentBatchDir_.toUtf8());
+
+    auto *drag = new QDrag(this);
+    drag->setMimeData(mimeData);
+    const Qt::DropAction result = drag->exec(Qt::CopyAction);
+
+    bool droppedInsideThisWindow = false;
+    if (const QObject *dropTarget = drag->target()) {
+        const QWidget *targetWidget =
+            qobject_cast<const QWidget *>(dropTarget);
+        QWidget *const sourceWindow = window();
+        droppedInsideThisWindow =
+            targetWidget && sourceWindow &&
+            targetWidget->window() == sourceWindow;
+    }
+
+    QSettings settings("OpenSCP", "OpenSCP");
+    const bool autoClean =
+        settings.value("Advanced/autoCleanStaging", true).toBool();
+    if (result == Qt::IgnoreAction) {
+        showKeepMessage(currentBatchDir_);
+        finishBatch(QStringLiteral("canceled"), 0);
+        return;
+    }
+    if (!autoClean) {
+        showKeepMessage(currentBatchDir_);
+        finishBatch(QStringLiteral("accepted"), 0);
+        return;
+    }
+
+    const int cleanupDelayMs = droppedInsideThisWindow ? 10000 : 500;
+    scheduleAutoCleanup(currentBatchDir_, cleanupDelayMs);
+    finishBatch(QStringLiteral("accepted"), 0);
 }
 
 void DragAwareTreeView::startRemoteDragAsync(RemoteModel *remoteModel) {
-    if (!remoteModel || !transferMgr_) {
+    if (!remoteModel || !transferMgr_ || !remoteOps_ ||
+        !remoteOps_->hasRequestedSession()) {
         QTreeView::startDrag(Qt::CopyAction);
         return;
     }
     if (dragInProgress_)
         return;
 
-    dragInProgress_ = true;
     const QModelIndexList rows = collectRemoteSelectedRows();
-    if (rows.isEmpty()) {
-        resetRemoteDragState();
+    if (rows.isEmpty())
         return;
-    }
+
+    dragInProgress_ = true;
+    enumTargets_.clear();
+    enumJobLocalRoots_.clear();
+    enumPendingJobs_.clear();
+    enumStats_ = RemoteDragBatchStats{};
+    enumDirectories_.clear();
+    enumDragRoots_.clear();
+    enumSymlinksSkipped_ = 0;
+    enumDepthLimits_ = 0;
+    enumInvalidNames_ = 0;
+    enumInaccessible_ = 0;
+    enumMs_ = -1;
+    enumThresholdConfirmed_ = false;
+    enumThresholdPromptActive_ = false;
+    prepTimer_.restart();
 
     const QString root = buildStagingRoot();
     const QString stamp =
-        QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss");
-    const QString stagingDir = QDir(root).filePath(stamp);
+        QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz");
+    const QString uniqueSuffix =
+        QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+    const QString stagingDir =
+        QDir(root).filePath(stamp + QLatin1Char('-') + uniqueSuffix);
     currentBatchDir_ = stagingDir;
-    currentBatchId_ = stamp;
+    currentBatchId_ = QFileInfo(stagingDir).fileName();
     batchLogged_ = false;
-    QDir().mkpath(stagingDir);
-
+    if (!QDir().mkpath(stagingDir)) {
+        currentBatchDir_.clear();
+        currentBatchId_.clear();
+        dragInProgress_ = false;
+        if (auto *mainWindow = qobject_cast<QMainWindow *>(window())) {
+            mainWindow->statusBar()->showMessage(
+                tr("Could not create the drag staging directory."), 5000);
+        }
+        return;
+    }
     showPrepOverlay(tr("Preparing files…"));
-
-    QVector<RemoteDragTarget> targets;
-    RemoteDragBatchStats stats;
-    if (!buildRemoteDragTargets(remoteModel, rows, stagingDir, targets, stats)) {
-        hidePrepOverlay();
-        resetRemoteDragState();
-        return;
-    }
-    if (!confirmRemoteDragThreshold(stats)) {
-        cancelCurrentBatch(QStringLiteral("threshold"));
-        return;
+    if (overlayCancel_) {
+        QObject::disconnect(overlayCancel_, nullptr, this, nullptr);
+        QObject::connect(overlayCancel_, &QPushButton::clicked, this,
+                         [this] {
+                             cancelCurrentBatch(
+                                 QStringLiteral("enumeration-button"));
+                         });
     }
 
-    enqueueRemoteDragTargets(targets);
-    beginRemoteDragMonitoring(targets, stats);
+    enumBatchConn_ = connect(
+        remoteOps_, &RemoteOperationController::entriesBatchReady, this,
+        [this](const RemoteOperationController::EntryBatch &batch) {
+            const auto rootIt = enumJobLocalRoots_.constFind(batch.job.id);
+            if (rootIt == enumJobLocalRoots_.cend() || !dragInProgress_)
+                return;
+            const QString localRoot = rootIt.value();
+            for (const auto &entry : batch.entries) {
+                if (entry.info.is_dir) {
+                    bool valid = !entry.relativePath.isEmpty();
+                    QStringList normalizedParts;
+                    const QStringList parts =
+                        entry.relativePath.split(QLatin1Char('/'),
+                                                 Qt::SkipEmptyParts);
+                    normalizedParts.reserve(parts.size());
+                    for (const QString &part : parts) {
+                        QString why;
+                        if (!isValidEntryName(part, &why)) {
+                            valid = false;
+                            break;
+                        }
+                        normalizedParts.push_back(
+                            normalizeStagingName(part));
+                    }
+                    if (!valid) {
+                        ++enumInvalidNames_;
+                        continue;
+                    }
+                    enumDirectories_.push_back(
+                        QDir(localRoot).filePath(
+                            normalizedParts.join(QLatin1Char('/'))));
+                    ++enumStats_.totalDirs;
+                    continue;
+                }
+                bool valid = !entry.relativePath.isEmpty();
+                QStringList normalizedParts;
+                const QStringList parts =
+                    entry.relativePath.split(QLatin1Char('/'),
+                                             Qt::SkipEmptyParts);
+                normalizedParts.reserve(parts.size());
+                for (const QString &part : parts) {
+                    QString why;
+                    if (!isValidEntryName(part, &why)) {
+                        valid = false;
+                        break;
+                    }
+                    normalizedParts.push_back(normalizeStagingName(part));
+                }
+                if (!valid) {
+                    ++enumInvalidNames_;
+                    continue;
+                }
+                const QString localPath =
+                    QDir(localRoot).filePath(
+                        normalizedParts.join(QLatin1Char('/')));
+                enumTargets_.push_back({entry.path, localPath});
+                ++enumStats_.totalItems;
+                if (entry.info.has_size) {
+                    const quint64 available =
+                        std::numeric_limits<quint64>::max() -
+                        enumStats_.totalBytes;
+                    enumStats_.totalBytes +=
+                        std::min(available, entry.info.size);
+                }
+            }
+            if (enforceRemoteDragThreshold() &&
+                enumPendingJobs_.isEmpty()) {
+                finishRemoteDragEnumeration();
+            }
+        });
+    enumProgressConn_ = connect(
+        remoteOps_, &RemoteOperationController::jobProgress, this,
+        [this](const RemoteOperationController::Progress &progress) {
+            if (!enumPendingJobs_.contains(progress.job.id) ||
+                !overlayLabel_) {
+                return;
+            }
+            overlayLabel_->setText(
+                tr("Preparing files…") + QStringLiteral(" ") +
+                QLocale().toString(static_cast<qulonglong>(
+                    enumStats_.totalItems)));
+        });
+    enumFinishedConn_ = connect(
+        remoteOps_, &RemoteOperationController::jobFinished, this,
+        [this](const RemoteOperationController::Completion &completion) {
+            if (!enumPendingJobs_.remove(completion.result.job.id))
+                return;
+            enumInaccessible_ += completion.failedEntries;
+            enumSymlinksSkipped_ += completion.skippedSymlinks;
+            enumDepthLimits_ += completion.depthLimits;
+            enumInvalidNames_ += completion.invalidNames;
+            enumStats_.unknownSizeCount += completion.unknownSizes;
+            enumStats_.anySizeUnknown =
+                enumStats_.unknownSizeCount > 0;
+            if (completion.result.outcome ==
+                    RemoteOperationController::Outcome::Failed &&
+                completion.failedEntries == 0) {
+                ++enumInaccessible_;
+            }
+            finishRemoteDragEnumeration();
+        });
+
+    auto joinRemote = [](const QString &base, const QString &name) {
+        if (base == QLatin1String("/"))
+            return QStringLiteral("/") + name;
+        return base.endsWith(QLatin1Char('/')) ? base + name
+                                               : base + QLatin1Char('/') + name;
+    };
+    const QString remoteRoot = remoteModel->rootPath();
+    QSettings settings("OpenSCP", "OpenSCP");
+    int maxDepth =
+        settings.value("Advanced/maxFolderDepth", 32).toInt();
+    if (maxDepth < 1)
+        maxDepth = 32;
+
+    for (const QModelIndex &index : rows) {
+        if (!index.isValid())
+            continue;
+        const QString name = remoteModel->nameAt(index);
+        QString why;
+        if (!isValidEntryName(name, &why)) {
+            ++enumInvalidNames_;
+            continue;
+        }
+        const QString remotePath = joinRemote(remoteRoot, name);
+        const QString localPath =
+            QDir(stagingDir).filePath(normalizeStagingName(name));
+        if (!remoteModel->isDir(index)) {
+            enumTargets_.push_back({remotePath, localPath});
+            enumDragRoots_.push_back(localPath);
+            ++enumStats_.totalItems;
+            if (remoteModel->hasSize(index)) {
+                const quint64 available =
+                    std::numeric_limits<quint64>::max() -
+                    enumStats_.totalBytes;
+                enumStats_.totalBytes +=
+                    std::min(available, remoteModel->sizeAt(index));
+            } else {
+                enumStats_.anySizeUnknown = true;
+                ++enumStats_.unknownSizeCount;
+            }
+            continue;
+        }
+
+        enumDirectories_.push_back(localPath);
+        enumDragRoots_.push_back(localPath);
+        ++enumStats_.totalDirs;
+        RemoteOperationController::TraverseRequest request;
+        request.rootPath = remotePath;
+        request.includeDirectories = true;
+        request.traversal.includeHidden = remoteModel->showHidden();
+        request.traversal.skipSymlinks = true;
+        request.traversal.maxDepth = maxDepth;
+        request.traversal.batchSize = 250;
+        const auto jobId = remoteOps_->submit(request);
+        if (jobId == 0) {
+            ++enumInaccessible_;
+            continue;
+        }
+        enumJobLocalRoots_.insert(jobId, localPath);
+        enumPendingJobs_.insert(jobId);
+    }
+
+    if (!enforceRemoteDragThreshold())
+        return;
+    finishRemoteDragEnumeration();
 }
+
 
 void DragAwareTreeView::cancelCurrentBatch(const QString &reason) {
     if (currentBatchDir_.isEmpty()) {
@@ -755,37 +1253,42 @@ void DragAwareTreeView::cancelCurrentBatch(const QString &reason) {
         resetRemoteDragState();
         return;
     }
-    if (stagingConn_) {
-        QObject::disconnect(stagingConn_);
-        stagingConn_ = QMetaObject::Connection();
+    if (stagingState_) {
+        stagingState_->finished = true;
+        QObject::disconnect(stagingState_->addedConnection);
+        QObject::disconnect(stagingState_->updatedConnection);
+        QObject::disconnect(stagingState_->removedConnection);
     }
     if (waitTimer_)
         waitTimer_->stop();
-    if (enumCancelFlag_)
-        enumCancelFlag_->store(true, std::memory_order_relaxed);
-    hidePrepOverlay();
-    if (transferMgr_) {
-        const auto tasks = transferMgr_->tasksSnapshot();
-        for (const auto &task : tasks) {
-            if (task.type == TransferTask::Type::Download &&
-                task.dst.startsWith(currentBatchDir_)) {
-                transferMgr_->cancelTask(task.taskId);
-            }
-        }
+    if (remoteOps_) {
+        const auto pending = enumPendingJobs_;
+        for (const auto jobId : pending)
+            remoteOps_->cancel(jobId);
     }
-    showKeepMessage(currentBatchDir_);
-    // Ensure final outcome includes symlinkSkipped/denied counters even on
-    // manual cancel
+    hidePrepOverlay();
+    if (transferMgr_ && stagingState_)
+        transferMgr_->cancelBatch(stagingState_->batchOptions.batchId);
+    if (reason != QLatin1String("dtor") &&
+        reason != QLatin1String("quit")) {
+        showKeepMessage(currentBatchDir_);
+    }
+    // Preserve discovery counters in diagnostics even on manual cancel.
     const qint64 stagingMs =
         stagingTimer_.isValid() ? stagingTimer_.elapsed() : -1;
     logBatchResult(
         currentBatchId_, currentBatchTotal_, 0,
         QString("result=canceled enumMs=%1 stagingMs=%2 symlinkSkipped=%3 "
-                "denied=%4 (%5)")
+                "depthLimited=%4 invalidNames=%5 unknownSizes=%6 "
+                "inaccessible=%7 (%8)")
             .arg(enumMs_)
             .arg(stagingMs)
             .arg(QLocale().toString((qulonglong)enumSymlinksSkipped_))
-            .arg(QLocale().toString((qulonglong)enumDenied_))
+            .arg(QLocale().toString((qulonglong)enumDepthLimits_))
+            .arg(QLocale().toString((qulonglong)enumInvalidNames_))
+            .arg(QLocale().toString(
+                (qulonglong)enumStats_.unknownSizeCount))
+            .arg(QLocale().toString((qulonglong)enumInaccessible_))
             .arg(reason));
     resetRemoteDragState();
 }

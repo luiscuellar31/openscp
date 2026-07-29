@@ -2,10 +2,12 @@
 #include "MainWindow.hpp"
 #include "MainWindowSharedUtils.hpp"
 #include "RemoteModel.hpp"
+#include "RemoteOperationController.hpp"
 #include "TransferManager.hpp"
 #include "UiAlerts.hpp"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
 #include <QDirIterator>
@@ -17,15 +19,18 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QProcess>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QSet>
 #include <QStatusBar>
 #include <QTemporaryFile>
+#include <QThreadPool>
 #include <QTreeView>
 #include <QUrl>
 
+#include <algorithm>
+#include <functional>
 #include <memory>
-#include <thread>
 
 static constexpr int NAME_COL = 0;
 
@@ -231,7 +236,8 @@ void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
         1500);
 
     QPointer<MainWindow> self(this);
-    std::thread([self, pairs, deleteSource, skippedCount]() {
+    QThreadPool::globalInstance()->start(
+        [self, pairs, deleteSource, skippedCount]() {
         int successCount = 0;
         int failureCount = 0;
         QString lastError;
@@ -294,7 +300,7 @@ void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
                 self->updateDeleteShortcutEnables();
             },
             Qt::QueuedConnection);
-    }).detach();
+        });
 }
 
 void MainWindow::copyLeftToRight() {
@@ -327,12 +333,12 @@ void MainWindow::copyLeftToRight() {
             return;
         }
 
-        // Always enqueue uploads
         const QString remoteBase =
             scpMode ? normalizeRemotePath(
                           rightPath_ ? rightPath_->text() : QString())
                     : rightRemoteModel_->rootPath();
-        int enqueuedCount = 0;
+        QVector<QPair<QString, QString>> roots;
+        roots.reserve(rows.size());
         int skippedDirs = 0;
         for (const QModelIndex &idx : rows) {
             const QFileInfo sourceFileInfo = leftModel_->fileInfo(idx);
@@ -341,50 +347,27 @@ void MainWindow::copyLeftToRight() {
                     ++skippedDirs;
                     continue;
                 }
-                const QString remoteDirBase =
-                    joinRemotePath(remoteBase, sourceFileInfo.fileName());
-                QDirIterator dirIterator(sourceFileInfo.absoluteFilePath(),
-                                         QDir::NoDotAndDotDot |
-                                             QDir::AllEntries,
-                                         QDirIterator::Subdirectories);
-                while (dirIterator.hasNext()) {
-                    dirIterator.next();
-                    const QFileInfo childFileInfo = dirIterator.fileInfo();
-                    if (!childFileInfo.isFile())
-                        continue;
-                    const QString relativePath =
-                        QDir(sourceFileInfo.absoluteFilePath())
-                            .relativeFilePath(childFileInfo.absoluteFilePath());
-                    const QString remoteTargetPath =
-                        joinRemotePath(remoteDirBase, relativePath);
-                    transferMgr_->enqueueUpload(childFileInfo.absoluteFilePath(),
-                                                remoteTargetPath);
-                    ++enqueuedCount;
-                }
-            } else {
-                const QString remoteTargetPath =
-                    joinRemotePath(remoteBase, sourceFileInfo.fileName());
-                transferMgr_->enqueueUpload(sourceFileInfo.absoluteFilePath(),
-                                            remoteTargetPath);
-                ++enqueuedCount;
+            } else if (!sourceFileInfo.isFile()) {
+                continue;
             }
+            roots.push_back(
+                {sourceFileInfo.absoluteFilePath(),
+                 joinRemotePath(remoteBase,
+                                sourceFileInfo.fileName())});
         }
-        if (enqueuedCount > 0) {
-            QString statusMessage =
-                QString(tr("Queued: %1 uploads")).arg(enqueuedCount);
-            if (skippedDirs > 0) {
-                statusMessage +=
-                    QStringLiteral("  |  ") +
-                    tr("Skipped folders in transfer-only mode: %1")
-                        .arg(skippedDirs);
-            }
-            statusBar()->showMessage(statusMessage, 4000);
-            maybeShowTransferQueue();
-        } else if (skippedDirs > 0) {
+        if (!roots.isEmpty())
+            startLocalUploadDiscovery(roots, false);
+        if (roots.isEmpty() && skippedDirs > 0) {
             UiAlerts::information(
                 this, tr("Upload"),
                 tr("Transfer-only mode currently supports uploading files "
                    "only."));
+        } else if (skippedDirs > 0) {
+            statusBar()->showMessage(
+                tr("Preparing uploads; folders skipped in transfer-only "
+                   "mode: %1")
+                    .arg(skippedDirs),
+                5000);
         }
         return;
     }
@@ -425,262 +408,41 @@ void MainWindow::copyLeftToRight() {
 
 void MainWindow::moveLeftToRight() {
     if (rightIsRemote_) {
-        if (!sftp_ || !rightRemoteModel_) {
+        if (!rightRemoteModel_ || !transferMgr_ || !sftp_) {
             UiAlerts::warning(this, tr("Remote"),
-                                 tr("No active remote session."));
+                              tr("No active remote session."));
             return;
         }
-        const auto rows = leftView_->selectionModel()->selectedRows(NAME_COL);
+        auto *selection = leftView_->selectionModel();
+        const auto rows =
+            selection ? selection->selectedRows(NAME_COL) : QModelIndexList{};
         if (rows.isEmpty()) {
             UiAlerts::information(
                 this, tr("Move"), tr("No entries selected in the left panel."));
             return;
         }
         if (UiAlerts::question(this, tr("Confirm move"),
-                                  tr("This will upload to the server and "
-                                     "delete the local source.\nContinue?")) !=
-            QMessageBox::Yes)
+                               tr("This will upload to the server and "
+                                  "delete the local source.\nContinue?")) !=
+            QMessageBox::Yes) {
             return;
+        }
+
+        QVector<QPair<QString, QString>> roots;
+        roots.reserve(rows.size());
         const QString remoteBase = rightRemoteModel_->rootPath();
-        struct UploadPair {
-            QString localPath;
-            QString remotePath;
-            QString topLocalDir; // non-empty only for files that belong to a
-                                 // moved directory
-        };
-        QVector<UploadPair> pairs;
-        int skippedPrep = 0;
-        int movedEmptyDirs = 0;
-        QString prepError;
-
-        auto ensureRemoteDir = [&](const QString &remoteDirPath) -> bool {
-            if (remoteDirPath.isEmpty())
-                return true;
-            QString currentPath = "/";
-            const QStringList pathParts =
-                remoteDirPath.split('/', Qt::SkipEmptyParts);
-            for (const QString &pathPart : pathParts) {
-                const QString nextPath = joinRemotePath(currentPath, pathPart);
-                bool isDirectory = false;
-                std::string existsError;
-                const bool exists = sftp_->exists(nextPath.toStdString(),
-                                                  isDirectory, existsError);
-                if (!existsError.empty()) {
-                    prepError = QString::fromStdString(existsError);
-                    return false;
-                }
-                if (!exists) {
-                    std::string mkdirError;
-                    if (!sftp_->mkdir(nextPath.toStdString(), mkdirError,
-                                      0755)) {
-                        prepError = QString::fromStdString(mkdirError);
-                        return false;
-                    }
-                }
-                currentPath = nextPath;
-            }
-            return true;
-        };
-
-        for (const QModelIndex &idx : rows) {
-            const QFileInfo sourceFileInfo = leftModel_->fileInfo(idx);
-            if (sourceFileInfo.isDir()) {
-                const QString topLocalDir = sourceFileInfo.absoluteFilePath();
-                const QString baseRemoteDir =
-                    joinRemotePath(remoteBase, sourceFileInfo.fileName());
-                if (!ensureRemoteDir(baseRemoteDir)) {
-                    ++skippedPrep;
-                    continue;
-                }
-                const int pairStart = pairs.size();
-                bool dirPrepFailed = false;
-                int filesInDir = 0;
-                QDirIterator dirIterator(topLocalDir,
-                                         QDir::NoDotAndDotDot |
-                                             QDir::AllEntries,
-                                         QDirIterator::Subdirectories);
-                while (dirIterator.hasNext()) {
-                    dirIterator.next();
-                    const QFileInfo childFileInfo = dirIterator.fileInfo();
-                    const QString relativePath =
-                        QDir(topLocalDir)
-                            .relativeFilePath(childFileInfo.absoluteFilePath());
-                    const QString remoteTargetPath =
-                        joinRemotePath(baseRemoteDir, relativePath);
-                    if (childFileInfo.isDir()) {
-                        if (!ensureRemoteDir(remoteTargetPath)) {
-                            dirPrepFailed = true;
-                            break;
-                        }
-                        continue;
-                    }
-                    if (!childFileInfo.isFile())
-                        continue;
-                    pairs.push_back(
-                        {childFileInfo.absoluteFilePath(), remoteTargetPath,
-                         topLocalDir});
-                    ++filesInDir;
-                }
-                if (dirPrepFailed) {
-                    pairs.resize(pairStart);
-                    ++skippedPrep;
-                    continue;
-                }
-                if (filesInDir == 0) {
-                    if (QDir(topLocalDir).removeRecursively())
-                        ++movedEmptyDirs;
-                    else {
-                        ++skippedPrep;
-                        prepError =
-                            tr("Could not delete source: ") + topLocalDir;
-                    }
-                }
-            } else if (sourceFileInfo.isFile()) {
-                const QString remoteTargetPath =
-                    joinRemotePath(remoteBase, sourceFileInfo.fileName());
-                pairs.push_back(
-                    {sourceFileInfo.absoluteFilePath(), remoteTargetPath,
-                     QString()});
-            }
+        for (const QModelIndex &index : rows) {
+            const QFileInfo source = leftModel_->fileInfo(index);
+            if (!source.isFile() && !source.isDir())
+                continue;
+            roots.push_back(
+                {source.absoluteFilePath(),
+                 joinRemotePath(remoteBase, source.fileName())});
         }
-
-        for (const auto &pair : pairs)
-            transferMgr_->enqueueUpload(pair.localPath, pair.remotePath);
-        if (!pairs.isEmpty()) {
-            statusBar()->showMessage(
-                QString(tr("Queued: %1 uploads (move)")).arg(pairs.size()),
-                4000);
-            maybeShowTransferQueue();
-        } else if (movedEmptyDirs > 0) {
-            statusBar()->showMessage(
-                QString(tr("Moved OK: %1 (empty folders)")).arg(movedEmptyDirs),
-                4000);
-        } else if (skippedPrep > 0) {
-            QString statusMessage =
-                QString(tr("Could not prepare items to move: %1"))
-                    .arg(skippedPrep);
-            if (!prepError.isEmpty())
-                statusMessage += "\n" + tr("Last error: ") + prepError;
-            statusBar()->showMessage(statusMessage, 5000);
-        }
-
-        // Local cleanup on successful upload, without blocking UI.
-        if (!pairs.isEmpty()) {
-            QVector<QPair<QString, QString>> transferPairs;
-            transferPairs.reserve(pairs.size());
-            for (const auto &pair : pairs)
-                transferPairs.push_back({pair.localPath, pair.remotePath});
-
-            struct MoveUploadState {
-                QSet<QString> pendingLocalFiles;
-                QSet<QString> processedLocalFiles;
-                QHash<QString, QString> fileToTopDir;
-                QHash<QString, int> remainingInTopDir;
-                QSet<QString> failedTopDirs;
-                int movedOk = 0;
-                int failed = 0;
-                int skipped = 0;
-                QString lastError;
-            };
-            auto state = std::make_shared<MoveUploadState>();
-            state->movedOk = movedEmptyDirs;
-            state->skipped = skippedPrep;
-            state->lastError = prepError;
-
-            for (const auto &pair : pairs) {
-                state->pendingLocalFiles.insert(pair.localPath);
-                if (!pair.topLocalDir.isEmpty()) {
-                    state->fileToTopDir.insert(pair.localPath, pair.topLocalDir);
-                    state->remainingInTopDir[pair.topLocalDir] =
-                        state->remainingInTopDir.value(pair.topLocalDir) + 1;
-                }
-            }
-
-            auto connPtr = std::make_shared<QMetaObject::Connection>();
-            *connPtr = connect(
-                transferMgr_, &TransferManager::tasksChanged, this,
-                [this, state, remoteBase, connPtr, transferPairs]() {
-                    const auto tasks = transferMgr_->tasksSnapshot();
-
-                    for (const auto &task : tasks) {
-                        if (task.type != TransferTask::Type::Upload)
-                            continue;
-                        const QString local = task.src;
-                        if (!state->pendingLocalFiles.contains(local))
-                            continue;
-                        if (state->processedLocalFiles.contains(local))
-                            continue;
-                        if (task.status != TransferTask::Status::Done &&
-                            task.status != TransferTask::Status::Error &&
-                            task.status != TransferTask::Status::Canceled) {
-                            continue;
-                        }
-
-                        state->processedLocalFiles.insert(local);
-                        const QString topDir = state->fileToTopDir.value(local);
-                        const bool uploadDone =
-                            (task.status == TransferTask::Status::Done);
-                        if (uploadDone) {
-                            const bool removed = !QFileInfo::exists(local) ||
-                                                 QFile::remove(local);
-                            if (removed) {
-                                ++state->movedOk;
-                            } else {
-                                ++state->failed;
-                                state->lastError =
-                                    tr("Could not delete source: ") + local;
-                                if (!topDir.isEmpty())
-                                    state->failedTopDirs.insert(topDir);
-                            }
-                        } else {
-                            ++state->failed;
-                            if (!task.error.isEmpty())
-                                state->lastError = task.error;
-                            if (!topDir.isEmpty())
-                                state->failedTopDirs.insert(topDir);
-                        }
-
-                        if (!topDir.isEmpty()) {
-                            const int rem = qMax(
-                                0, state->remainingInTopDir.value(topDir) - 1);
-                            state->remainingInTopDir[topDir] = rem;
-                            if (rem == 0 &&
-                                !state->failedTopDirs.contains(topDir) &&
-                                QDir(topDir).exists()) {
-                                if (!QDir(topDir).removeRecursively()) {
-                                    ++state->failed;
-                                    state->lastError =
-                                        tr("Could not delete source: ") +
-                                        topDir;
-                                }
-                            }
-                        }
-                    }
-
-                    const bool allFinal = areTransferPairsFinal(
-                        tasks, TransferTask::Type::Upload, transferPairs);
-
-                    if (allFinal) {
-                QString statusMessage =
-                    QString(tr("Moved OK: %1  |  Failed: %2  "
-                               "|  Skipped: %3"))
-                        .arg(state->movedOk)
-                        .arg(state->failed)
-                        .arg(state->skipped);
-                if (state->failed > 0 && !state->lastError.isEmpty()) {
-                    statusMessage += "\n" + tr("Last error: ") + state->lastError;
-                }
-                statusBar()->showMessage(statusMessage, 6000);
-                setLeftRoot(leftPath_->text());
-                QString refreshError;
-                if (rightRemoteModel_)
-                    rightRemoteModel_->setRootPath(remoteBase, &refreshError);
-                QObject::disconnect(*connPtr);
-            }
-        });
-        }
+        startLocalUploadDiscovery(roots, true);
         return;
     }
+
 
     // ---- Existing LOCAL→LOCAL branch ----
     const QString dstDirPath = rightPath_->text();

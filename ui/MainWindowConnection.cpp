@@ -3,9 +3,12 @@
 #include "ConnectionDialog.hpp"
 #include "MainWindowSharedUtils.hpp"
 #include "RemoteModel.hpp"
+#include "RemoteOperationController.hpp"
+#include "SavedSiteSecrets.hpp"
 #include "SavedSitesPersistence.hpp"
 #include "SecretStore.hpp"
 #include "SiteManagerDialog.hpp"
+#include "SyncCoordinator.hpp"
 #include "TransferManager.hpp"
 #include "UiAlerts.hpp"
 #include "openscp/ClientFactory.hpp"
@@ -24,18 +27,19 @@
 #include <QLocale>
 #include <QMessageBox>
 #include <QProgressDialog>
+#include <QPushButton>
 #include <QSettings>
 #include <QStringList>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTimer>
+#include <QThreadPool>
 #include <QtGlobal>
 #include <QUuid>
 
 #include <atomic>
 #include <cstdio>
 #include <memory>
-#include <thread>
 
 // Best-effort memory scrubbing helpers for sensitive data
 static inline void secureClear(QString &text) {
@@ -129,9 +133,18 @@ static bool hasTransportSelectionConflict(const openscp::SessionOptions &opt) {
 
 static bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
                                   const openscp::SessionOptions &b) {
+    const bool compareFtpsTls =
+        (a.protocol != openscp::Protocol::Ftps) ||
+        (openscp::normalizeFtpsMode(a.ftps_mode) ==
+             openscp::normalizeFtpsMode(b.ftps_mode) &&
+         a.ftps_verify_peer == b.ftps_verify_peer &&
+         normalizedIdentityKeyPath(a.ftps_ca_cert_path) ==
+             normalizedIdentityKeyPath(b.ftps_ca_cert_path));
     const bool compareWebDavTls =
         (a.protocol != openscp::Protocol::WebDav) ||
         (a.webdav_scheme == b.webdav_scheme &&
+         openscp::normalizeWebDavBasePath(a.webdav_base_path) ==
+             openscp::normalizeWebDavBasePath(b.webdav_base_path) &&
          a.webdav_verify_peer == b.webdav_verify_peer &&
          normalizedIdentityKeyPath(a.webdav_ca_cert_path) ==
              normalizedIdentityKeyPath(b.webdav_ca_cert_path));
@@ -157,27 +170,32 @@ static bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
                normalizedIdentityKeyPath(b.jump_private_key_path) &&
            normalizedIdentityKeyPath(a.private_key_path) ==
                normalizedIdentityKeyPath(b.private_key_path) &&
-           a.ftps_verify_peer == b.ftps_verify_peer &&
-           normalizedIdentityKeyPath(a.ftps_ca_cert_path) ==
-               normalizedIdentityKeyPath(b.ftps_ca_cert_path) &&
+           compareFtpsTls &&
            compareWebDavTls;
 }
 
 static QString quickSiteSecretKey(const SiteEntry &entry, const QString &item) {
-    if (!entry.siteId.isEmpty())
-        return QString("site-id:%1:%2").arg(entry.siteId, item);
-    return QString("site:%1:%2").arg(entry.name, item);
+    return SavedSiteSecrets::stableKey(entry, item);
 }
 
-static QVector<SiteEntry> loadSavedSitesForQuickConnect(bool *needsSave) {
+struct QuickSitesLoadResult {
+    QVector<SiteEntry> sites;
+    bool needsSave = false;
+    SavedSiteSecrets::MigrationResult legacyMigration;
+};
+
+static QuickSitesLoadResult loadSavedSitesForQuickConnect() {
     const SavedSitesPersistence::LoadResult loaded =
         SavedSitesPersistence::loadSites({
             .trimSiteNames = true,
             .createNewId = [] { return newQuickSiteId(); },
         });
-    if (needsSave)
-        *needsSave = loaded.needsSave;
-    return loaded.sites;
+    QuickSitesLoadResult result;
+    result.sites = loaded.sites;
+    result.needsSave = loaded.needsSave;
+    result.legacyMigration =
+        SavedSiteSecrets::migrateLegacyPlaintext(loaded);
+    return result;
 }
 
 static void saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
@@ -290,127 +308,6 @@ bool MainWindow::isLikelyRemoteTransportError(const QString &rawError) const {
     return false;
 }
 
-bool MainWindow::reconnectActiveRemoteSession(QString *errorOut) {
-    if (errorOut)
-        errorOut->clear();
-    if (!rightIsRemote_ || !sftp_ || !activeSessionOptions_.has_value()) {
-        if (errorOut)
-            *errorOut = tr("No active remote session to reconnect.");
-        return false;
-    }
-    if (isDisconnecting_ || connectInProgress_) {
-        if (errorOut)
-            *errorOut = tr("Connection state is changing; reconnect skipped.");
-        return false;
-    }
-    if (remoteSessionReconnectInFlight_.exchange(true)) {
-        if (errorOut)
-            *errorOut = tr("Reconnect already in progress.");
-        return false;
-    }
-
-    QString restorePath = QStringLiteral("/");
-    if (isScpTransferMode()) {
-        restorePath = normalizeRemotePanelPath(
-            rightPath_ ? rightPath_->text() : QString());
-    } else if (rightRemoteModel_) {
-        restorePath = rightRemoteModel_->rootPath();
-    }
-    statusBar()->showMessage(tr("Remote session became stale. Reconnecting…"),
-                             0);
-
-    std::string connErr;
-    auto replacement = sftp_->newConnectionLike(*activeSessionOptions_, connErr);
-    if (!replacement) {
-        remoteSessionReconnectInFlight_.store(false);
-        if (errorOut)
-            *errorOut = QString::fromStdString(connErr);
-        return false;
-    }
-
-    sftp_->disconnect();
-    sftp_ = std::move(replacement);
-    applyRemoteConnectedUI(*activeSessionOptions_);
-    if (!sftp_ || (!isScpTransferMode() && !rightRemoteModel_)) {
-        remoteSessionReconnectInFlight_.store(false);
-        if (errorOut) {
-            *errorOut = tr("Reconnected transport, but remote panel restore "
-                           "failed.");
-        }
-        return false;
-    }
-
-    if (!restorePath.isEmpty() && restorePath != QStringLiteral("/"))
-        setRightRemoteRoot(restorePath);
-
-    if (transferMgr_) {
-        transferMgr_->setClient(sftp_.get());
-        transferMgr_->setSessionOptions(*activeSessionOptions_);
-    }
-
-    startRemoteSessionHealthMonitoring();
-    statusBar()->showMessage(tr("Remote session reconnected"), 4000);
-    remoteSessionReconnectInFlight_.store(false);
-    return true;
-}
-
-bool MainWindow::maybeRecoverRemoteSession(const QString &operationLabel,
-                                           const QString &rawError) {
-    if (!isLikelyRemoteTransportError(rawError))
-        return false;
-
-    QString reconnectErr;
-    const bool recovered = reconnectActiveRemoteSession(&reconnectErr);
-    if (recovered) {
-        statusBar()->showMessage(
-            tr("Recovered remote session while trying to %1")
-                .arg(operationLabel),
-            4000);
-        return true;
-    }
-    return false;
-}
-
-bool MainWindow::executeCriticalRemoteOperation(
-    const QString &operationLabel,
-    const std::function<bool(openscp::SftpClient *, std::string &)> &operation,
-    std::string &err) {
-    err.clear();
-    if (!operation) {
-        err = "Invalid operation callback";
-        return false;
-    }
-    if (!rightIsRemote_ || !sftp_) {
-        err = "No active remote session";
-        return false;
-    }
-
-    if (operation(sftp_.get(), err))
-        return true;
-
-    const QString firstError = QString::fromStdString(err);
-    if (!maybeRecoverRemoteSession(operationLabel, firstError)) {
-        if (isLikelyRemoteTransportError(firstError) && rightIsRemote_ &&
-            sftp_ && !isDisconnecting_) {
-            UiAlerts::warning(
-                this, tr("Connection lost"),
-                tr("The remote session failed while trying to %1.\n"
-                   "OpenSCP will disconnect to avoid inconsistent operations.\n%2")
-                    .arg(operationLabel,
-                         shortRemoteError(firstError, tr("Transport error."))));
-            disconnectSftp();
-        }
-        return false;
-    }
-
-    err.clear();
-    if (!sftp_) {
-        err = "Remote session unavailable after recovery";
-        return false;
-    }
-    return operation(sftp_.get(), err);
-}
-
 void MainWindow::ensureRemoteSessionHealthMonitoring() {
     if (remoteSessionHealthTimer_)
         return;
@@ -465,16 +362,29 @@ void MainWindow::startRemoteSessionHealthMonitoring() {
 void MainWindow::stopRemoteSessionHealthMonitoring() {
     if (remoteSessionHealthTimer_)
         remoteSessionHealthTimer_->stop();
+    if (remoteOps_ && activeRemoteHealthJob_ != 0)
+        remoteOps_->cancel(activeRemoteHealthJob_);
+    activeRemoteHealthJob_ = 0;
+    activeRemoteHealthReason_.clear();
+    activeRemoteHealthForced_ = false;
     remoteSessionHealthProbeInFlight_.store(false);
-    remoteSessionReconnectInFlight_.store(false);
     lastAppInactiveAtMs_ = 0;
 }
 
 void MainWindow::runRemoteSessionHealthCheck(const QString &reason, bool force) {
-    if (!rightIsRemote_ || !sftp_ || !activeSessionOptions_.has_value())
+    if (!rightIsRemote_ || !sftp_ || !remoteOps_ ||
+        !remoteOps_->hasRequestedSession() ||
+        !activeSessionOptions_.has_value())
         return;
     if (isDisconnecting_ || connectInProgress_)
         return;
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    constexpr qint64 kRecentRemoteActivityMs = 60 * 1000;
+    if (!force && lastSuccessfulRemoteActivityAtMs_ > 0 &&
+        nowMs - lastSuccessfulRemoteActivityAtMs_ <
+            kRecentRemoteActivityMs) {
+        return;
+    }
     bool expected = false;
     if (!remoteSessionHealthProbeInFlight_.compare_exchange_strong(expected,
                                                                      true)) {
@@ -485,42 +395,16 @@ void MainWindow::runRemoteSessionHealthCheck(const QString &reason, bool force) 
         (rightRemoteModel_ && !rightRemoteModel_->rootPath().isEmpty())
             ? rightRemoteModel_->rootPath()
             : QStringLiteral("/");
-    std::string healthCheckError;
-    bool pathIsDirectory = false;
-    const bool probeSucceeded = executeCriticalRemoteOperation(
-        tr("validate the remote session"),
-        [probePath, &pathIsDirectory](openscp::SftpClient *client,
-                                      std::string &opErr) {
-            bool exists = false;
-            exists =
-                client->exists(probePath.toStdString(), pathIsDirectory, opErr);
-            if (exists)
-                return true;
-            return opErr.empty();
-        },
-        healthCheckError);
-    remoteSessionHealthProbeInFlight_.store(false);
-    if (probeSucceeded) {
-        if (force && !reason.isEmpty()) {
-            statusBar()->showMessage(tr("Remote session validated (%1)")
-                                         .arg(reason),
-                                     2500);
-        }
-        return;
+    RemoteOperationController::HealthCheckRequest request;
+    request.path = probePath;
+    activeRemoteHealthReason_ = reason;
+    activeRemoteHealthForced_ = force;
+    activeRemoteHealthJob_ = remoteOps_->submit(request);
+    if (activeRemoteHealthJob_ == 0) {
+        remoteSessionHealthProbeInFlight_.store(false);
+        activeRemoteHealthReason_.clear();
+        activeRemoteHealthForced_ = false;
     }
-    if (!rightIsRemote_ || !sftp_ || isDisconnecting_)
-        return;
-
-    const QString rawErr = QString::fromStdString(healthCheckError);
-    if (!isLikelyRemoteTransportError(rawErr))
-        return;
-
-    UiAlerts::warning(
-        this, tr("Connection lost"),
-        tr("The remote session no longer responds (%1).\n"
-           "OpenSCP will disconnect to avoid inconsistent operations.\n%2")
-            .arg(reason, shortRemoteError(rawErr, tr("Transport error."))));
-    disconnectSftp();
 }
 
 void MainWindow::openConnectDialogWithPreset(
@@ -536,7 +420,10 @@ void MainWindow::openConnectDialogWithPreset(
     if (dlg.saveSiteRequested()) {
         PendingSiteSaveRequest req;
         req.siteName = dlg.siteName();
+        req.initialLocalPath = dlg.initialLocalPath();
+        req.initialRemotePath = dlg.initialRemotePath();
         req.saveCredentials = dlg.saveCredentialsRequested();
+        req.rememberLastPaths = dlg.rememberLastPaths();
         saveRequest = req;
     }
     // Apply global security preferences also for ad‑hoc connections (Advanced
@@ -615,6 +502,20 @@ void MainWindow::applyDisconnectLocalUiState() {
         if (action)
             action->setEnabled(enabled);
     };
+    if (remoteOps_) {
+        if (activeRemoteListJob_ != 0)
+            remoteOps_->cancel(activeRemoteListJob_);
+        activeRemoteListJob_ = 0;
+        remoteOps_->clearSession();
+    }
+    if (syncCoordinator_)
+        syncCoordinator_->cancel();
+    cancelLocalUploadDiscoveries();
+    if (syncProgress_) {
+        syncProgress_->hide();
+        syncProgress_->deleteLater();
+        syncProgress_.clear();
+    }
     // Switch UI immediately to local/local so the app remains usable while
     // transfer workers unwind in the background.
     if (rightRemoteModel_) {
@@ -648,6 +549,7 @@ void MainWindow::applyDisconnectLocalUiState() {
     setActionEnabled(actUploadRight_, false);
     setActionEnabled(actRefreshRight_, false);
     setActionEnabled(actOpenTerminalRight_, false);
+    setActionEnabled(actSync_, false);
     // Local mode: re-enable local actions on the right panel
     setActionEnabled(actNewDirRight_, true);
     setActionEnabled(actNewFileRight_, true);
@@ -688,7 +590,7 @@ bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
         return false;
     QPointer<MainWindow> self(this);
     TransferManager *mgr = transferMgr_;
-    std::thread([self, mgr, disconnectSeq]() {
+    QThreadPool::globalInstance()->start([self, mgr, disconnectSeq]() {
         try {
             mgr->clearClient();
         } catch (...) {
@@ -716,15 +618,74 @@ bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
                     }
                 }
                 self->completeDisconnectSftp(disconnectSeq, false);
+                if (!self->isDisconnecting_ &&
+                    !self->transferCleanupInProgress_ &&
+                    self->pendingCloseAfterDisconnect_) {
+                    self->pendingCloseAfterDisconnect_ = false;
+                    QTimer::singleShot(0, self,
+                                       [self] {
+                                           if (self)
+                                               self->close();
+                                       });
+                }
             },
             Qt::QueuedConnection);
-    }).detach();
+    });
     return true;
 }
 
 void MainWindow::disconnectSftp() {
     if (isDisconnecting_)
         return;
+
+    if (transferMgr_) {
+        const QString sessionKey = transferMgr_->sessionIdentity();
+        QVector<quint64> activeTaskIds;
+        for (const TransferTask &task : transferMgr_->tasksSnapshot()) {
+            const bool belongsToSession =
+                sessionKey.isEmpty() || task.sessionKey.isEmpty() ||
+                task.sessionKey == sessionKey;
+            const bool active =
+                task.status == TransferTask::Status::Queued ||
+                task.status == TransferTask::Status::Running ||
+                task.status == TransferTask::Status::RetryWaiting;
+            if (belongsToSession && active)
+                activeTaskIds.push_back(task.taskId);
+        }
+        if (!activeTaskIds.isEmpty()) {
+            QMessageBox choice(this);
+            UiAlerts::configure(choice);
+            choice.setIcon(QMessageBox::Question);
+            choice.setWindowTitle(tr("Transfers are still active"));
+            choice.setText(
+                tr("%1 transfer(s) are still active for this session.")
+                    .arg(activeTaskIds.size()));
+            choice.setInformativeText(
+                tr("Choose whether to keep their progress for the next "
+                   "connection, cancel them, or stay connected."));
+            auto *pauseButton = choice.addButton(
+                tr("Pause and disconnect"), QMessageBox::AcceptRole);
+            auto *cancelButton = choice.addButton(
+                tr("Cancel and disconnect"), QMessageBox::DestructiveRole);
+            auto *stayButton = choice.addButton(
+                tr("Stay connected"), QMessageBox::RejectRole);
+            choice.setDefaultButton(
+                qobject_cast<QPushButton *>(stayButton));
+            choice.exec();
+            if (choice.clickedButton() == stayButton ||
+                !choice.clickedButton()) {
+                return;
+            }
+            if (choice.clickedButton() == cancelButton) {
+                for (quint64 taskId : activeTaskIds)
+                    transferMgr_->cancelTask(taskId);
+            } else if (choice.clickedButton() != pauseButton) {
+                return;
+            }
+        }
+    }
+
+    persistActiveSitePaths();
     const quint64 disconnectSeq = beginDisconnectFlow();
     scheduleDisconnectWatchdog(disconnectSeq);
 
@@ -736,9 +697,60 @@ void MainWindow::disconnectSftp() {
     completeDisconnectSftp(disconnectSeq, false);
 }
 
+void MainWindow::persistActiveSitePaths() {
+    if (!activeSavedSiteContext_ ||
+        !activeSavedSiteContext_->rememberLastPaths ||
+        activeSavedSiteContext_->siteId.trimmed().isEmpty()) {
+        return;
+    }
+
+    QString localPath;
+    if (leftView_ && leftModel_) {
+        const QModelIndex rootIndex = leftView_->rootIndex();
+        if (rootIndex.isValid())
+            localPath = leftModel_->filePath(rootIndex).trimmed();
+    }
+    if (localPath.isEmpty() && leftPath_)
+        localPath = leftPath_->text().trimmed();
+    QString remotePath;
+    if (rightRemoteModel_)
+        remotePath = rightRemoteModel_->rootPath().trimmed();
+    if (remotePath.isEmpty() && rightPath_)
+        remotePath = rightPath_->text().trimmed();
+    if (remotePath.isEmpty())
+        remotePath = QStringLiteral("/");
+
+    const auto loaded = SavedSitesPersistence::loadSites();
+    const SavedSiteSecrets::MigrationResult migration =
+        SavedSiteSecrets::migrateLegacyPlaintext(loaded);
+    if (!migration.complete) {
+        UiAlerts::warning(
+            this, tr("Paths not saved"),
+            tr("The last paths could not be saved because one or more legacy "
+               "credentials could not be moved to the secure backend:\n%1")
+                .arg(migration.issues.join(QLatin1Char('\n'))));
+        return;
+    }
+    QVector<SiteEntry> sites = loaded.sites;
+    bool updated = false;
+    for (SiteEntry &site : sites) {
+        if (site.siteId != activeSavedSiteContext_->siteId)
+            continue;
+        site.initialLocalPath = localPath;
+        site.initialRemotePath = remotePath;
+        site.rememberLastPaths = true;
+        updated = true;
+        break;
+    }
+    if (updated)
+        SavedSitesPersistence::saveSites(sites, true);
+}
+
 void MainWindow::completeDisconnectSftp(quint64 disconnectSeq, bool forced) {
     if (!isDisconnecting_ || disconnectSeq != disconnectSeq_)
         return;
+    activeSavedSiteContext_.reset();
+    pendingSavedSiteContext_.reset();
     if (sftp_)
         sftp_->disconnect();
     sftp_.reset();
@@ -799,10 +811,9 @@ void MainWindow::showSiteManagerNonModal() {
     connect(dlg, &QObject::destroyed, this, [this] { siteManager_.clear(); });
     connect(dlg, &QDialog::finished, this, [this, dlg](int dialogResult) {
         if (dialogResult == QDialog::Accepted && dlg) {
-            openscp::SessionOptions opt{};
-            if (dlg->selectedOptions(opt)) {
-                startSftpConnect(opt);
-            }
+            SiteEntry site;
+            if (dlg->selectedSite(site))
+                startSavedSiteConnect(site);
         }
     });
     QTimer::singleShot(0, dlg, [dlg] {
@@ -830,18 +841,35 @@ void MainWindow::maybeOpenSiteManagerAfterModal() {
 
 bool MainWindow::confirmInsecureHostPolicyForSession(
     const openscp::SessionOptions &opt) {
-    // FTP/FTPS/WebDAV do not use SSH host keys. FTPS/WebDAV certificate
-    // verification is controlled by their dedicated TLS settings.
-    if (!openscp::capabilitiesForProtocol(opt.protocol).supports_known_hosts)
-        return true;
-    if (opt.known_hosts_policy != openscp::KnownHostsPolicy::Off)
+    const bool unencryptedFtp = opt.protocol == openscp::Protocol::Ftp;
+    const bool unencryptedWebDav =
+        opt.protocol == openscp::Protocol::WebDav &&
+        opt.webdav_scheme == openscp::WebDavScheme::Http;
+    const bool unverifiedTls =
+        (opt.protocol == openscp::Protocol::Ftps &&
+         !opt.ftps_verify_peer) ||
+        (opt.protocol == openscp::Protocol::WebDav &&
+         opt.webdav_scheme == openscp::WebDavScheme::Https &&
+         !opt.webdav_verify_peer);
+    const bool unverifiedSsh =
+        openscp::capabilitiesForProtocol(opt.protocol).supports_known_hosts &&
+        opt.known_hosts_policy == openscp::KnownHostsPolicy::Off;
+    const bool unencrypted = unencryptedFtp || unencryptedWebDav;
+    if (!unencrypted && !unverifiedTls && !unverifiedSsh)
         return true;
 
     const QString hostKey =
         QString::fromStdString(opt.host).trimmed().toLower();
+    const QString riskKey =
+        unencryptedFtp
+            ? QStringLiteral("ftp")
+            : (unencryptedWebDav
+                   ? QStringLiteral("webdav-http")
+                   : (unverifiedTls ? QStringLiteral("tls-unverified")
+                                    : QStringLiteral("ssh-unverified")));
     const QString allowKey =
-        QString("Security/noHostVerificationConfirmedUntilUtc/%1:%2")
-            .arg(hostKey)
+        QString("Security/insecureTransportConfirmedUntilUtc/%1/%2:%3")
+            .arg(riskKey, hostKey)
             .arg((int)opt.port);
     const qint64 now = QDateTime::currentSecsSinceEpoch();
     QSettings settings("OpenSCP", "OpenSCP");
@@ -849,27 +877,42 @@ bool MainWindow::confirmInsecureHostPolicyForSession(
     if (allowedUntil > now)
         return true;
 
+    const QString warningText =
+        unencrypted
+            ? tr("This connection does not encrypt credentials, file names, "
+                 "or file contents. Anyone able to observe the network may "
+                 "read or modify them.\n\n"
+                 "Continue only for a trusted network or legacy server?")
+            : (unverifiedTls
+                   ? tr("TLS encryption is enabled, but the server "
+                        "certificate will not be verified. This allows "
+                        "server impersonation and man-in-the-middle "
+                        "attacks.\n\nContinue at your own risk?")
+                   : tr("The SSH host key will not be verified. This allows "
+                        "server impersonation and man-in-the-middle "
+                        "attacks.\n\nContinue at your own risk?"));
     const auto first = UiAlerts::warning(
-        this, tr("Critical security risk"),
-        tr("You are about to connect using the \"No verification\" policy.\n"
-           "This allows MITM attacks and server impersonation.\n\n"
-           "Do you want to continue at your own risk?"),
-        QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+        this, unencrypted ? tr("Insecure connection")
+                          : tr("Critical security risk"),
+        warningText, QMessageBox::Yes | QMessageBox::Cancel,
+        QMessageBox::Cancel);
     if (first != QMessageBox::Yes)
         return false;
 
-    const QString token = QStringLiteral("UNSAFE");
-    bool inputAccepted = false;
-    const QString entered =
-        QInputDialog::getText(this, tr("Additional confirmation required"),
-                              tr("To confirm, type exactly %1").arg(token),
-                              QLineEdit::Normal, QString(), &inputAccepted)
-            .trimmed();
-    if (!inputAccepted || entered != token) {
-        UiAlerts::information(
-            this, tr("Connection canceled"),
-            tr("Risk confirmation was not completed correctly."));
-        return false;
+    if (!unencrypted) {
+        const QString token = QStringLiteral("UNSAFE");
+        bool inputAccepted = false;
+        const QString entered =
+            QInputDialog::getText(this, tr("Additional confirmation required"),
+                                  tr("To confirm, type exactly %1").arg(token),
+                                  QLineEdit::Normal, QString(), &inputAccepted)
+                .trimmed();
+        if (!inputAccepted || entered != token) {
+            UiAlerts::information(
+                this, tr("Connection canceled"),
+                tr("Risk confirmation was not completed correctly."));
+            return false;
+        }
     }
 
     // Temporary exception per host:port to avoid persistent bypasses.
@@ -880,14 +923,15 @@ bool MainWindow::confirmInsecureHostPolicyForSession(
     const QDateTime expLocal =
         QDateTime::fromSecsSinceEpoch(newUntil).toLocalTime();
     statusBar()->showMessage(
-        tr("Temporary \"no verification\" exception active until %1")
+        tr("Temporary security exception active until %1")
             .arg(QLocale().toString(expLocal, QLocale::ShortFormat)),
         8000);
     return true;
 }
 
 void MainWindow::updateHostPolicyRiskBanner() {
-    const bool show = rightIsRemote_ && sessionNoHostVerification_;
+    const bool show =
+        rightIsRemote_ && !activeSecurityWarning_.trimmed().isEmpty();
     if (!show) {
         if (hostPolicyRiskLabel_)
             hostPolicyRiskLabel_->hide();
@@ -899,10 +943,9 @@ void MainWindow::updateHostPolicyRiskBanner() {
             "QLabel { color: #B00020; font-weight: 600; }");
         statusBar()->addPermanentWidget(hostPolicyRiskLabel_);
     }
-    hostPolicyRiskLabel_->setText(
-        tr("Risk: host key not verified in this session"));
-    hostPolicyRiskLabel_->setToolTip(tr(
-        "The current session does not validate host key; MITM risk exists."));
+    hostPolicyRiskLabel_->setText(activeSecurityWarning_);
+    hostPolicyRiskLabel_->setToolTip(
+        tr("This security exception applies only to the current session."));
     hostPolicyRiskLabel_->show();
 }
 
@@ -1113,7 +1156,7 @@ bool MainWindow::validateSftpConnectStart(
         statusBar()->showMessage(statusMessage, 5000);
         return false;
     };
-    if (!caps.implemented || !caps.supports_file_transfers) {
+    if (!caps.implemented || (!caps.can_upload && !caps.can_download)) {
         UiAlerts::information(
             this, tr("Protocol not available"),
             tr("%1 support is not implemented yet.").arg(protocol));
@@ -1156,7 +1199,7 @@ bool MainWindow::validateSftpConnectStart(
 #endif
     if (!confirmInsecureHostPolicyForSession(opt)) {
         statusBar()->showMessage(
-            tr("Connection canceled: no-verification policy not confirmed"),
+            tr("Connection canceled: security exception not confirmed"),
             5000);
         return false;
     }
@@ -1321,12 +1364,14 @@ void MainWindow::launchSftpConnectWorker(
     std::optional<PendingSiteSaveRequest> saveRequest,
     const std::shared_ptr<std::atomic<bool>> &cancelFlag) {
     QPointer<MainWindow> self(this);
-    std::thread([self, opt = std::move(opt), uiOpt, saveRequest,
-                 cancelFlag]() mutable {
+    QThreadPool::globalInstance()->start(
+        [self, opt = std::move(opt), uiOpt, saveRequest,
+         cancelFlag]() mutable {
         bool connectionSucceeded = false;
         bool canceledByUser = false;
         std::string connectionError;
-        openscp::SftpClient *connectedClient = nullptr;
+        openscp::RemoteClient *connectedClient = nullptr;
+        openscp::RemoteClient *remoteControlClient = nullptr;
         try {
             if (cancelFlag && cancelFlag->load()) {
                 canceledByUser = true;
@@ -1343,8 +1388,29 @@ void MainWindow::launchSftpConnectWorker(
                     if (connectionError.empty())
                         connectionError = "Connection canceled by user";
                 }
-                if (connectionSucceeded)
+                if (connectionSucceeded) {
                     connectedClient = connectedCandidate.release();
+                    if (openscp::capabilitiesForProtocol(uiOpt.protocol)
+                            .can_list) {
+                        std::string controlError;
+                        auto controlCandidate = connectedClient->newConnectionLike(
+                            opt, controlError);
+                        if (controlCandidate) {
+                            remoteControlClient =
+                                controlCandidate.release();
+                        } else {
+                            connectionSucceeded = false;
+                            connectionError =
+                                controlError.empty()
+                                    ? "Could not create the remote control "
+                                      "connection"
+                                    : controlError;
+                            connectedClient->disconnect();
+                            delete connectedClient;
+                            connectedClient = nullptr;
+                        }
+                    }
+                }
             }
         } catch (const std::exception &ex) {
             connectionError = std::string("Connection exception: ") + ex.what();
@@ -1359,32 +1425,55 @@ void MainWindow::launchSftpConnectWorker(
         const bool queued = QMetaObject::invokeMethod(
             qApp,
             [self, connectionSucceeded, connectionErrorText, connectedClient,
-             uiOpt, saveRequest,
+             remoteControlClient, uiOpt, saveRequest,
              canceledByUser]() {
                 if (!self) {
                     if (connectedClient) {
                         connectedClient->disconnect();
                         delete connectedClient;
                     }
+                    if (remoteControlClient) {
+                        remoteControlClient->disconnect();
+                        delete remoteControlClient;
+                    }
                     return;
                 }
                 self->finalizeSftpConnect(connectionSucceeded, connectionErrorText,
-                                          connectedClient, uiOpt, saveRequest,
-                                          canceledByUser);
+                                          connectedClient, remoteControlClient,
+                                          uiOpt, saveRequest, canceledByUser);
             },
             Qt::QueuedConnection);
-        if (!queued && connectedClient) {
-            connectedClient->disconnect();
-            delete connectedClient;
+        if (!queued) {
+            if (connectedClient) {
+                connectedClient->disconnect();
+                delete connectedClient;
+            }
+            if (remoteControlClient) {
+                remoteControlClient->disconnect();
+                delete remoteControlClient;
+            }
         }
-    }).detach();
+        });
 }
 
-void MainWindow::startSftpConnect(
+void MainWindow::startSavedSiteConnect(const SiteEntry &site) {
+    SavedSiteContext context;
+    context.siteId = site.siteId;
+    context.initialLocalPath = site.initialLocalPath;
+    context.initialRemotePath = site.initialRemotePath.trimmed().isEmpty()
+                                    ? QStringLiteral("/")
+                                    : site.initialRemotePath;
+    context.rememberLastPaths = site.rememberLastPaths;
+    pendingSavedSiteContext_ = std::move(context);
+    if (!startSftpConnect(site.opt))
+        pendingSavedSiteContext_.reset();
+}
+
+bool MainWindow::startSftpConnect(
     openscp::SessionOptions opt,
     std::optional<PendingSiteSaveRequest> saveRequest) {
     if (!validateSftpConnectStart(opt))
-        return;
+        return false;
 
     const openscp::SessionOptions uiOpt = opt;
     auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
@@ -1394,14 +1483,17 @@ void MainWindow::startSftpConnect(
         configureSftpConnectCallbacks(opt);
     launchSftpConnectWorker(std::move(opt), uiOpt, std::move(saveRequest),
                             cancelFlag);
+    return true;
 }
 
 void MainWindow::finalizeSftpConnect(
     bool connectionOk, const QString &errorText,
-    openscp::SftpClient *connectedClient,
+    openscp::RemoteClient *connectedClient,
+    openscp::RemoteClient *remoteControlClient,
     const openscp::SessionOptions &uiOpt,
     std::optional<PendingSiteSaveRequest> saveRequest, bool canceledByUser) {
-    std::unique_ptr<openscp::SftpClient> guard(connectedClient);
+    std::unique_ptr<openscp::RemoteClient> guard(connectedClient);
+    std::unique_ptr<openscp::RemoteClient> controlGuard(remoteControlClient);
     if (connectProgress_) {
         connectProgress_->close();
         connectProgress_.clear();
@@ -1413,6 +1505,7 @@ void MainWindow::finalizeSftpConnect(
         actSites_->setEnabled(true);
 
     if (!connectionOk) {
+        pendingSavedSiteContext_.reset();
         if (actConnect_ && !rightIsRemote_)
             actConnect_->setEnabled(true);
         if (canceledByUser)
@@ -1430,8 +1523,48 @@ void MainWindow::finalizeSftpConnect(
     sessionNoHostVerification_ =
         openscp::capabilitiesForProtocol(uiOpt.protocol).supports_known_hosts &&
         (uiOpt.known_hosts_policy == openscp::KnownHostsPolicy::Off);
+    if (uiOpt.protocol == openscp::Protocol::Ftp) {
+        activeSecurityWarning_ =
+            tr("Insecure: FTP traffic is not encrypted");
+    } else if (uiOpt.protocol == openscp::Protocol::WebDav &&
+               uiOpt.webdav_scheme == openscp::WebDavScheme::Http) {
+        activeSecurityWarning_ =
+            tr("Insecure: WebDAV HTTP traffic is not encrypted");
+    } else if ((uiOpt.protocol == openscp::Protocol::Ftps &&
+                !uiOpt.ftps_verify_peer) ||
+               (uiOpt.protocol == openscp::Protocol::WebDav &&
+                uiOpt.webdav_scheme == openscp::WebDavScheme::Https &&
+                !uiOpt.webdav_verify_peer)) {
+        activeSecurityWarning_ =
+            tr("Risk: TLS certificate is not verified");
+    } else if (sessionNoHostVerification_) {
+        activeSecurityWarning_ =
+            tr("Risk: SSH host key is not verified");
+    } else {
+        activeSecurityWarning_.clear();
+    }
     sftp_ = std::move(guard);
+    if (remoteOps_) {
+        if (controlGuard)
+            remoteOps_->installSession(std::move(controlGuard));
+        else
+            remoteOps_->clearSession();
+    }
+    if (pendingSavedSiteContext_) {
+        activeSavedSiteContext_ = std::move(pendingSavedSiteContext_);
+        pendingSavedSiteContext_.reset();
+    } else {
+        activeSavedSiteContext_.reset();
+    }
     applyRemoteConnectedUI(uiOpt);
+    if (rightIsRemote_ && activeSavedSiteContext_) {
+        const QString initialLocal =
+            activeSavedSiteContext_->initialLocalPath.trimmed();
+        if (!initialLocal.isEmpty() && QDir(initialLocal).exists())
+            setLeftRoot(initialLocal);
+    } else {
+        activeSavedSiteContext_.reset();
+    }
     if (rightIsRemote_ && saveRequest.has_value()) {
         maybePersistQuickConnectSite(uiOpt, *saveRequest, true);
     }
@@ -1440,8 +1573,8 @@ void MainWindow::finalizeSftpConnect(
 void MainWindow::maybePersistQuickConnectSite(
     const openscp::SessionOptions &opt, const PendingSiteSaveRequest &req,
     bool connectionEstablished) {
-    bool regeneratedIds = false;
-    QVector<SiteEntry> sites = loadSavedSitesForQuickConnect(&regeneratedIds);
+    QuickSitesLoadResult loadedSites = loadSavedSitesForQuickConnect();
+    QVector<SiteEntry> sites = std::move(loadedSites.sites);
 
     int matchIndex = -1;
     for (int siteIndex = 0; siteIndex < sites.size(); ++siteIndex) {
@@ -1458,6 +1591,9 @@ void MainWindow::maybePersistQuickConnectSite(
         newEntry.name = ensureUniqueQuickSiteName(
             sites, req.siteName.trimmed().isEmpty() ? defaultQuickSiteName(opt)
                                                     : req.siteName.trimmed());
+        newEntry.initialLocalPath = req.initialLocalPath;
+        newEntry.initialRemotePath = req.initialRemotePath;
+        newEntry.rememberLastPaths = req.rememberLastPaths;
         newEntry.opt = opt;
         newEntry.opt.password.reset();
         newEntry.opt.private_key_passphrase.reset();
@@ -1467,7 +1603,23 @@ void MainWindow::maybePersistQuickConnectSite(
         created = true;
     }
 
-    if (created || regeneratedIds) {
+    if ((created || loadedSites.needsSave) &&
+        !loadedSites.legacyMigration.complete) {
+        UiAlerts::warning(
+            this, tr("Site not saved"),
+            tr("OpenSCP connected, but it did not rewrite saved sites because "
+               "one or more legacy credentials could not be moved to the "
+               "secure backend:\n%1")
+                .arg(loadedSites.legacyMigration.issues.join(
+                    QLatin1Char('\n'))));
+        statusBar()->showMessage(
+            connectionEstablished ? tr("Connected. Site was not saved.")
+                                  : tr("Site was not saved."),
+            6000);
+        return;
+    }
+
+    if (created || loadedSites.needsSave) {
         saveSavedSitesForQuickConnect(sites);
         refreshOpenSiteManagerWidget(siteManager_);
     }
@@ -1545,26 +1697,22 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
 
     const openscp::ProtocolCapabilities caps =
         openscp::capabilitiesForProtocol(opt.protocol);
-    const bool transferOnlyMode = !caps.supports_listing;
+    const bool transferOnlyMode = !caps.can_list;
+    // Establish navigation identity before the initial listing emits history
+    // updates or builds scoped favorite menus.
+    activeSessionOptions_ = opt;
 
     if (!transferOnlyMode) {
-        rightRemoteModel_ = new RemoteModel(sftp_.get(), this);
-        rightRemoteModel_->setSessionOptions(opt);
+        rightRemoteModel_ = new RemoteModel(this);
         rightRemoteModel_->setShowHidden(prefShowHidden_);
         connect(rightRemoteModel_, &RemoteModel::rootPathLoaded, this,
                 [this](const QString &path, bool loadOk,
                        const QString &error) {
+                    Q_UNUSED(error);
                     if (!rightRemoteModel_)
                         return;
-                    if (!loadOk) {
-                        UiAlerts::warning(
-                            this, tr("Remote error"),
-                            tr("Could not open the remote folder.\n%1")
-                                .arg(shortRemoteError(
-                                    error,
-                                    tr("Failed to read remote contents."))));
+                    if (!loadOk)
                         return;
-                    }
                     rightPath_->setText(path);
                     addRecentRemotePath(path);
                     refreshRightBreadcrumbs();
@@ -1573,75 +1721,6 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
                         updateDeleteShortcutEnables();
                     }
                 });
-        QString initialRootLoadError;
-        if (!rightRemoteModel_->setRootPath("/", &initialRootLoadError, false)) {
-            UiAlerts::critical(
-                this, tr("Error listing remote"),
-                tr("Could not open the initial remote folder.\n%1")
-                    .arg(shortRemoteError(
-                        initialRootLoadError,
-                        tr("Failed to read remote contents."))));
-            sftp_.reset();
-            rightView_->setModel(rightLocalModel_);
-            activateScpTransferModeUi(false);
-            remoteWriteabilityCache_.clear();
-            activeSessionOptions_.reset();
-            sessionNoHostVerification_ = false;
-            rightIsRemote_ = false;
-            stopRemoteSessionHealthMonitoring();
-            if (transferMgr_)
-                transferMgr_->setClient(nullptr);
-            updateHostPolicyRiskBanner();
-            resetConnectionSessionIndicators();
-            delete rightRemoteModel_;
-            rightRemoteModel_ = nullptr;
-            if (actConnect_)
-                actConnect_->setEnabled(true);
-            if (actDisconnect_)
-                actDisconnect_->setEnabled(false);
-            if (actDownloadF7_)
-                actDownloadF7_->setEnabled(false);
-            if (actUploadRight_)
-                actUploadRight_->setEnabled(false);
-            if (actRefreshRight_)
-                actRefreshRight_->setEnabled(false);
-            if (actOpenTerminalRight_)
-                actOpenTerminalRight_->setEnabled(false);
-            if (actNewDirRight_)
-                actNewDirRight_->setEnabled(true);
-            if (actNewFileRight_)
-                actNewFileRight_->setEnabled(true);
-            if (actRenameRight_)
-                actRenameRight_->setEnabled(true);
-            if (actDeleteRight_)
-                actDeleteRight_->setEnabled(true);
-            if (actMoveRight_)
-                actMoveRight_->setEnabled(true);
-            if (actMoveRightTb_)
-                actMoveRightTb_->setEnabled(true);
-            if (actCopyRightTb_)
-                actCopyRightTb_->setEnabled(true);
-            if (actSearchRight_)
-                actSearchRight_->setEnabled(true);
-            if (actChooseRight_) {
-                actChooseRight_->setIcon(QIcon(
-                    QLatin1String(":/assets/icons/action-open-folder.svg")));
-                actChooseRight_->setEnabled(true);
-                actChooseRight_->setToolTip(actChooseRight_->text());
-            }
-            if (QDir(rightPath_->text()).exists()) {
-                setRightRoot(rightPath_->text());
-            } else {
-                setRightRoot(QDir::homePath());
-            }
-            if (rightView_)
-                rightView_->setEnabled(true);
-            rightRemoteWritable_ = false;
-            applyRemoteWriteabilityActions();
-            updateDeleteShortcutEnables();
-            setWindowTitle(tr("OpenSCP — local/local"));
-            return;
-        }
         activateScpTransferModeUi(false);
         rightView_->setModel(rightRemoteModel_);
         if (rightView_->selectionModel()) {
@@ -1658,18 +1737,25 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         }
         rightView_->setSortingEnabled(true);
         rightView_->sortByColumn(0, Qt::AscendingOrder);
-        rightPath_->setText(rightRemoteModel_->rootPath());
+        const QString initialRemotePath =
+            activeSavedSiteContext_
+                ? activeSavedSiteContext_->initialRemotePath
+                : QStringLiteral("/");
+        rightPath_->setText(initialRemotePath.trimmed().isEmpty()
+                                ? QStringLiteral("/")
+                                : initialRemotePath);
         rightIsRemote_ = true;
+        activeSessionOptions_ = opt;
         pendingRemoteRefreshFromUpload_ = false;
         seenCompletedUploadTaskIds_.clear();
         seenCompletedTransferNoticeTaskIds_.clear();
-        refreshRightBreadcrumbs();
-        activeSessionOptions_ = opt;
         remoteWriteabilityCache_.clear();
         if (transferMgr_) {
+            transferMgr_->setSessionIdentity(remoteNavigationScope());
             transferMgr_->setClient(sftp_.get());
             transferMgr_->setSessionOptions(opt);
         }
+        requestRemoteListing(rightPath_->text(), false, true);
         if (actConnect_)
             actConnect_->setEnabled(false);
         if (actDisconnect_)
@@ -1684,6 +1770,9 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
             actOpenTerminalRight_->setEnabled(true);
         if (actSearchRight_)
             actSearchRight_->setEnabled(true);
+        if (actSync_)
+            actSync_->setEnabled(caps.can_list && caps.can_upload &&
+                                 caps.can_download);
         if (actNewDirRight_)
             actNewDirRight_->setEnabled(true);
         if (actNewFileRight_)
@@ -1718,18 +1807,19 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
 
     rightView_->setModel(rightLocalModel_);
     rightPath_->setText(QStringLiteral("/"));
-    addRecentRemotePath(QStringLiteral("/"));
     rightIsRemote_ = true;
+    activeSessionOptions_ = opt;
+    addRecentRemotePath(QStringLiteral("/"));
     activateScpTransferModeUi(true);
     pendingRemoteRefreshFromUpload_ = false;
     seenCompletedUploadTaskIds_.clear();
     seenCompletedTransferNoticeTaskIds_.clear();
     refreshRightBreadcrumbs();
-    activeSessionOptions_ = opt;
     remoteWriteabilityCache_.clear();
     ++remoteWriteabilityProbeSeq_;
     rightRemoteWritable_ = false;
     if (transferMgr_) {
+        transferMgr_->setSessionIdentity(remoteNavigationScope());
         transferMgr_->setClient(sftp_.get());
         transferMgr_->setSessionOptions(opt);
     }
@@ -1747,6 +1837,8 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         actOpenTerminalRight_->setEnabled(true);
     if (actSearchRight_)
         actSearchRight_->setEnabled(false);
+    if (actSync_)
+        actSync_->setEnabled(false);
     if (actNewDirRight_)
         actNewDirRight_->setEnabled(false);
     if (actNewFileRight_)

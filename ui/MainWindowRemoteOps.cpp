@@ -2,16 +2,14 @@
 #include "MainWindow.hpp"
 #include "MainWindowSharedUtils.hpp"
 #include "PermissionsDialog.hpp"
-#include "RemoteWalker.hpp"
 #include "RemoteModel.hpp"
+#include "RemoteOperationController.hpp"
 #include "TransferManager.hpp"
 #include "UiAlerts.hpp"
-#include "openscp/ClientFactory.hpp"
 
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
-#include <QDirIterator>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -22,18 +20,15 @@
 #include <QMessageBox>
 #include <QPointer>
 #include <QProcess>
+#include <QProgressDialog>
+#include <QScrollBar>
 #include <QSet>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QStatusBar>
-#include <QTemporaryFile>
 #include <QTreeView>
 
-#include <functional>
-#include <limits>
 #include <string>
-#include <thread>
-#include <vector>
 
 static constexpr int NAME_COL = 0;
 
@@ -44,227 +39,6 @@ static QString tempDownloadPathFor(const QString &remoteName) {
         base = QDir::homePath() + "/Downloads";
     QDir().mkpath(base);
     return QDir(base).filePath(remoteName);
-}
-
-static RemoteWalker::Options
-buildDownloadWalkOptions(const QString &localRootPath) {
-    RemoteWalker::Options walkOptions;
-    walkOptions.includeHidden = true;
-    walkOptions.skipSymlinks = false;
-    walkOptions.sanitizeRelativePath = false;
-    walkOptions.maxDepth = std::numeric_limits<int>::max();
-    walkOptions.validateName = [](const QString &entryName, QString *why) {
-        return isValidEntryName(entryName, why);
-    };
-    walkOptions.onDirectoryEnter = [localRootPath](
-                                       const QString &enteredRemotePath,
-                                       const QString &relativePath, int depth) {
-        Q_UNUSED(enteredRemotePath);
-        Q_UNUSED(depth);
-        const QString localDir = relativePath.isEmpty()
-                                     ? localRootPath
-                                     : QDir(localRootPath).filePath(relativePath);
-        QDir().mkpath(localDir);
-    };
-    return walkOptions;
-}
-
-struct RemoteMoveTopSelection {
-    QString remotePath;
-    bool isDir = false;
-};
-
-struct RemoteMoveDownloadPlan {
-    QVector<QPair<QString, QString>> transferPairs;
-    QVector<RemoteMoveTopSelection> topSelections;
-    int skippedInvalidCount = 0;
-};
-
-static RemoteMoveDownloadPlan
-buildRemoteMoveDownloadPlan(openscp::SftpClient *client,
-                            RemoteModel *remoteModel,
-                            const QModelIndexList &rows,
-                            const QString &remoteBase,
-                            const QDir &destinationDir) {
-    RemoteMoveDownloadPlan plan;
-    if (!client || !remoteModel)
-        return plan;
-
-    plan.topSelections.reserve(rows.size());
-    for (const QModelIndex &idx : rows) {
-        const QString name = remoteModel->nameAt(idx);
-        QString why;
-        if (!isValidEntryName(name, &why)) {
-            ++plan.skippedInvalidCount;
-            continue;
-        }
-
-        const QString remotePath = joinRemotePath(remoteBase, name);
-        const QString localPath = destinationDir.filePath(name);
-        const bool isDir = remoteModel->isDir(idx);
-        plan.topSelections.push_back({remotePath, isDir});
-
-        if (isDir) {
-            QDir().mkpath(localPath);
-            RemoteWalker::Options walkOptions = buildDownloadWalkOptions(localPath);
-            RemoteWalker::Stats walkStats;
-            (void)RemoteWalker::walk(
-                client, remotePath, walkOptions,
-                [&](const RemoteWalker::Entry &entry) {
-                    const QString childLocal =
-                        QDir(localPath).filePath(entry.relativePath);
-                    QDir().mkpath(QFileInfo(childLocal).dir().absolutePath());
-                    plan.transferPairs.push_back({entry.remotePath, childLocal});
-                },
-                &walkStats);
-            plan.skippedInvalidCount +=
-                static_cast<int>(walkStats.skippedInvalidNameCount);
-            continue;
-        }
-
-        QDir().mkpath(QFileInfo(localPath).dir().absolutePath());
-        plan.transferPairs.push_back({remotePath, localPath});
-    }
-    return plan;
-}
-
-static int enqueueDownloadPairs(TransferManager *manager,
-                                const QVector<QPair<QString, QString>> &pairs) {
-    if (!manager)
-        return 0;
-    return manager->enqueueDownloads(pairs);
-}
-
-static void attachRemoteMoveCleanup(
-    QObject *owner, TransferManager *manager,
-    const std::function<openscp::SftpClient *()> &clientAccessor,
-    RemoteModel *remoteModel, const QString &remoteBase,
-    const QVector<QPair<QString, QString>> &pairs,
-    const QVector<RemoteMoveTopSelection> &topSelections) {
-    if (!owner || !manager || pairs.isEmpty())
-        return;
-
-    struct MoveState {
-        QSet<QString> filesPending;   // remote files pending deletion
-        QSet<QString> filesProcessed; // remote files already processed
-                                      // (avoid duplicates)
-        QHash<QString, QString> fileToTopDir; // remote file -> top dir path
-        QHash<QString, int> remainingInTopDir; // top dir -> pending files
-        QSet<QString> topDirs;                // top entries that are directories
-        QSet<QString> deletedDirs;            // top dirs already deleted
-    };
-    auto state = std::make_shared<MoveState>();
-    for (const auto &topSelection : topSelections) {
-        if (!topSelection.isDir)
-            continue;
-        state->topDirs.insert(topSelection.remotePath);
-        state->remainingInTopDir.insert(topSelection.remotePath, 0);
-    }
-    for (const auto &pair : pairs) {
-        state->filesPending.insert(pair.first);
-        QString foundTop;
-        for (const auto &topSelection : topSelections) {
-            if (!topSelection.isDir)
-                continue;
-            const QString prefix =
-                topSelection.remotePath.endsWith('/')
-                    ? topSelection.remotePath
-                    : (topSelection.remotePath + '/');
-            if (pair.first == topSelection.remotePath ||
-                pair.first.startsWith(prefix)) {
-                foundTop = topSelection.remotePath;
-                break;
-            }
-        }
-        if (!foundTop.isEmpty()) {
-            state->fileToTopDir.insert(pair.first, foundTop);
-            state->remainingInTopDir[foundTop] =
-                state->remainingInTopDir.value(foundTop) + 1;
-        }
-    }
-
-    // If there are directories with no queued files, remove them only if empty.
-    openscp::SftpClient *client = clientAccessor ? clientAccessor() : nullptr;
-    for (auto remainingIt = state->remainingInTopDir.begin();
-         remainingIt != state->remainingInTopDir.end(); ++remainingIt) {
-        if (remainingIt.value() != 0 || !client)
-            continue;
-
-        std::vector<openscp::FileInfo> listedEntries;
-        std::string listError;
-        if (client->list(remainingIt.key().toStdString(), listedEntries, listError) &&
-            listedEntries.empty()) {
-            std::string removeError;
-            if (client->removeDir(remainingIt.key().toStdString(), removeError))
-                state->deletedDirs.insert(remainingIt.key());
-        }
-    }
-
-    auto connPtr = std::make_shared<QMetaObject::Connection>();
-    *connPtr = QObject::connect(
-        manager, &TransferManager::tasksChanged, owner,
-        [state, remoteBase, connPtr, pairs, remoteModel, clientAccessor,
-         manager]() {
-            const auto tasks = manager->tasksSnapshot();
-            for (const auto &task : tasks) {
-                if (task.type != TransferTask::Type::Download ||
-                    task.status != TransferTask::Status::Done) {
-                    continue;
-                }
-
-                const QString remotePath = task.src;
-                if (!state->filesPending.contains(remotePath) ||
-                    state->filesProcessed.contains(remotePath)) {
-                    continue;
-                }
-
-                openscp::SftpClient *client =
-                    clientAccessor ? clientAccessor() : nullptr;
-                bool deletedRemoteFile = false;
-                if (client) {
-                    std::string removeFileError;
-                    deletedRemoteFile =
-                        client->removeFile(remotePath.toStdString(), removeFileError);
-                }
-                state->filesProcessed.insert(remotePath);
-                state->filesPending.remove(remotePath);
-                if (!deletedRemoteFile)
-                    continue;
-
-                const QString topDir = state->fileToTopDir.value(remotePath);
-                if (topDir.isEmpty())
-                    continue;
-
-                const int remainingCount =
-                    state->remainingInTopDir.value(topDir) - 1;
-                state->remainingInTopDir[topDir] = remainingCount;
-                if (remainingCount != 0 || state->deletedDirs.contains(topDir))
-                    continue;
-
-                openscp::SftpClient *activeClient =
-                    clientAccessor ? clientAccessor() : nullptr;
-                if (!activeClient)
-                    continue;
-                std::vector<openscp::FileInfo> listedEntries;
-                std::string listError;
-                if (activeClient->list(topDir.toStdString(), listedEntries, listError) &&
-                    listedEntries.empty()) {
-                    std::string removeDirError;
-                    if (activeClient->removeDir(topDir.toStdString(), removeDirError))
-                        state->deletedDirs.insert(topDir);
-                }
-            }
-
-            const bool allFinal =
-                areTransferPairsFinal(tasks, TransferTask::Type::Download, pairs);
-            if (!allFinal)
-                return;
-
-            QString refreshError;
-            if (remoteModel)
-                remoteModel->setRootPath(remoteBase, &refreshError);
-            QObject::disconnect(*connPtr);
-        });
 }
 
 // Reveal a file in the system file manager (select/highlight when possible),
@@ -957,15 +731,7 @@ void MainWindow::setRightRemoteRoot(const QString &path) {
         statusBar()->showMessage(tr("Remote path: %1").arg(normalized), 3000);
         return;
     }
-    QString rootLoadError;
-    if (!rightRemoteModel_->setRootPath(path, &rootLoadError)) {
-        UiAlerts::warning(
-            this, tr("Remote error"),
-            tr("Could not open the remote folder.\n%1")
-                .arg(shortRemoteError(rootLoadError,
-                                      tr("Failed to read remote contents."))));
-        return;
-    }
+    requestRemoteListing(path, false);
 }
 
 void MainWindow::refreshRightRemotePanel() {
@@ -977,17 +743,57 @@ void MainWindow::refreshRightRemotePanel() {
         return;
     }
 
-    QString refreshError;
-    if (!rightRemoteModel_->setRootPath(rightRemoteModel_->rootPath(),
-                                        &refreshError,
-                                        true)) {
-        UiAlerts::warning(
-            this, tr("Remote error"),
-            tr("Could not refresh the remote folder.\n%1")
-                .arg(shortRemoteError(refreshError,
-                                      tr("Failed to read remote contents."))));
+    requestRemoteListing(rightRemoteModel_->rootPath(), true);
+}
+
+void MainWindow::requestRemoteListing(const QString &path, bool refresh,
+                                      bool initialLoad) {
+    if (!rightIsRemote_ || !rightRemoteModel_ || !remoteOps_ ||
+        !remoteOps_->hasRequestedSession()) {
+        statusBar()->showMessage(
+            tr("Remote control connection is not available"), 4000);
         return;
     }
+
+    const QString normalized = normalizeRemotePath(path);
+    if (activeRemoteListJob_ != 0)
+        remoteOps_->cancel(activeRemoteListJob_);
+
+    remoteRefreshSelectionNames_.clear();
+    remoteRefreshScrollValue_ = 0;
+    if (refresh && rightView_->selectionModel()) {
+        const QModelIndexList selected =
+            rightView_->selectionModel()->selectedRows(NAME_COL);
+        for (const QModelIndex &index : selected) {
+            const QString name = rightRemoteModel_->nameAt(index);
+            if (!name.isEmpty())
+                remoteRefreshSelectionNames_.push_back(name);
+        }
+        if (rightView_->verticalScrollBar()) {
+            remoteRefreshScrollValue_ =
+                rightView_->verticalScrollBar()->value();
+        }
+    }
+
+    requestedRemotePath_ = normalized;
+    activeRemoteListIsRefresh_ = refresh;
+    activeRemoteListIsInitial_ = initialLoad;
+    if (initialLoad && normalized != QStringLiteral("/"))
+        initialRemoteFallbackAttempted_ = false;
+    if (!refresh)
+        rightRemoteModel_->setLoading(normalized);
+    rightPath_->setText(normalized);
+    refreshRightBreadcrumbs();
+    rightView_->setEnabled(false);
+    statusBar()->showMessage(
+        refresh ? tr("Refreshing remote folder…")
+                : tr("Opening remote folder…"),
+        0);
+
+    RemoteOperationController::ListRequest request;
+    request.path = normalized;
+    request.includeHidden = prefShowHidden_;
+    activeRemoteListJob_ = remoteOps_->submit(request);
 }
 
 void MainWindow::rightItemActivated(const QModelIndex &idx) {
@@ -1052,8 +858,9 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
         sOpenListeners.insert(key);
         auto connPtr = std::make_shared<QMetaObject::Connection>();
         *connPtr = connect(
-            transferMgr_, &TransferManager::tasksChanged, this,
-            [this, remotePath, localPath, key, connPtr]() {
+            transferMgr_, &TransferManager::tasksUpdated, this,
+            [this, remotePath, localPath, key,
+             connPtr](const QVector<quint64> &) {
                 const auto tasks = transferMgr_->tasksSnapshot();
                 for (const auto &task : tasks) {
                     if (task.type == TransferTask::Type::Download &&
@@ -1268,35 +1075,288 @@ void MainWindow::moveRightToLeft() {
         return;
     }
 
-    // Remote -> Local: enqueue downloads and delete remote on completion
-    if (!sftp_ || !rightRemoteModel_) {
+    // Remote -> Local: discover on the serialized control worker, then enqueue
+    // real move tasks. Source deletion is a persisted transfer phase.
+    if (!remoteOps_ || !remoteOps_->hasRequestedSession() ||
+        !rightRemoteModel_ || !transferMgr_) {
         UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
     const auto rows = selectionModel->selectedRows(NAME_COL);
     const QString remoteBase = rightRemoteModel_->rootPath();
-    const RemoteMoveDownloadPlan movePlan = buildRemoteMoveDownloadPlan(
-        sftp_.get(), rightRemoteModel_, rows, remoteBase, dst);
-    const int enqueuedCount =
-        enqueueDownloadPairs(transferMgr_, movePlan.transferPairs);
-    if (enqueuedCount > 0) {
-        QString statusMessage =
-            QString(tr("Queued: %1 downloads (move)")).arg(enqueuedCount);
-        if (movePlan.skippedInvalidCount > 0) {
-            statusMessage +=
-                QString("  |  ") +
-                tr("Skipped invalid: %1").arg(movePlan.skippedInvalidCount);
+    TransferBatchOptions batchOptions;
+    batchOptions.sessionKey = transferMgr_->sessionIdentity();
+    batchOptions.operation = TransferOperation::Move;
+    batchOptions.conflictPolicy = TransferConflictPolicy::Ask;
+    batchOptions.batchId = transferMgr_->createBatch(batchOptions);
+
+    struct MovePreparationState {
+        QHash<RemoteOperationController::JobId, QString> localRoots;
+        QSet<RemoteOperationController::JobId> pending;
+        TransferBatchOptions batchOptions;
+        QString remoteBase;
+        QStringList topRemoteDirectories;
+        QSet<RemoteOperationController::JobId> cleanupPending;
+        int enqueuedFiles = 0;
+        int enqueuedDirectories = 0;
+        int skippedInvalid = 0;
+        quint64 scanFailures = 0;
+        bool canceled = false;
+        bool scanFinished = false;
+        bool cleanupStarted = false;
+        QString lastError;
+        QPointer<QProgressDialog> progress;
+        QMetaObject::Connection batchConnection;
+        QMetaObject::Connection completionConnection;
+        QMetaObject::Connection progressConnection;
+        QMetaObject::Connection transferConnection;
+        QMetaObject::Connection cleanupConnection;
+    };
+    auto state = std::make_shared<MovePreparationState>();
+    state->batchOptions = batchOptions;
+    state->remoteBase = remoteBase;
+
+    auto maybeStartCleanup = std::make_shared<std::function<void()>>();
+    *maybeStartCleanup = [this, state] {
+        if (!state->scanFinished || state->cleanupStarted ||
+            state->canceled || !transferMgr_ || !remoteOps_) {
+            if (state->scanFinished && state->canceled)
+                QObject::disconnect(state->transferConnection);
+            return;
         }
-        statusBar()->showMessage(statusMessage, 4000);
-        maybeShowTransferQueue();
+        const auto tasks = transferMgr_->tasksSnapshot();
+        bool foundBatchTask = false;
+        for (const auto &task : tasks) {
+            if (task.batchId != state->batchOptions.batchId)
+                continue;
+            foundBatchTask = true;
+            if (!isTransferTaskFinalStatus(task.status))
+                return;
+        }
+        if (!foundBatchTask)
+            return;
+
+        state->cleanupStarted = true;
+        QObject::disconnect(state->transferConnection);
+        if (state->topRemoteDirectories.isEmpty()) {
+            if (rightIsRemote_ && rightRemoteModel_)
+                requestRemoteListing(state->remoteBase, true);
+            return;
+        }
+
+        state->cleanupConnection = connect(
+            remoteOps_, &RemoteOperationController::mutationCompleted, this,
+            [this, state](
+                const RemoteOperationController::MutationResult &result) {
+                if (!state->cleanupPending.remove(result.result.job.id))
+                    return;
+                if (!state->cleanupPending.isEmpty())
+                    return;
+                QObject::disconnect(state->cleanupConnection);
+                if (rightIsRemote_ && rightRemoteModel_)
+                    requestRemoteListing(state->remoteBase, true);
+            });
+        for (const QString &remoteDirectory :
+             state->topRemoteDirectories) {
+            RemoteOperationController::DeleteRequest request;
+            request.path = remoteDirectory;
+            request.kind =
+                RemoteOperationController::DeleteKind::Directory;
+            request.recursive = true;
+            request.traversal.includeHidden = true;
+            request.traversal.skipSymlinks = true;
+            request.traversal.maxDepth = 32;
+            request.emptyDirectoriesOnly = true;
+            const auto jobId = remoteOps_->submit(request);
+            if (jobId != 0)
+                state->cleanupPending.insert(jobId);
+        }
+        if (state->cleanupPending.isEmpty()) {
+            QObject::disconnect(state->cleanupConnection);
+            if (rightIsRemote_ && rightRemoteModel_)
+                requestRemoteListing(state->remoteBase, true);
+        }
+    };
+    state->transferConnection = connect(
+        transferMgr_, &TransferManager::tasksUpdated, this,
+        [maybeStartCleanup](const QVector<quint64> &) {
+            (*maybeStartCleanup)();
+        });
+
+    state->progress = new QProgressDialog(
+        tr("Preparing remote move…"), tr("Cancel"), 0, 0, this);
+    state->progress->setWindowTitle(tr("Preparing queue"));
+    state->progress->setWindowModality(Qt::NonModal);
+    state->progress->setMinimumDuration(0);
+    state->progress->setAutoClose(false);
+
+    state->batchConnection = connect(
+        remoteOps_, &RemoteOperationController::entriesBatchReady, this,
+        [this, state](const RemoteOperationController::EntryBatch &batch) {
+            if (!state->pending.contains(batch.job.id) || !transferMgr_)
+                return;
+            const QString localRoot = state->localRoots.value(batch.job.id);
+            for (const auto &entry : batch.entries) {
+                bool valid = !entry.relativePath.isEmpty();
+                const QStringList parts =
+                    entry.relativePath.split(QLatin1Char('/'),
+                                             Qt::SkipEmptyParts);
+                for (const QString &part : parts) {
+                    QString why;
+                    if (!isValidEntryName(part, &why)) {
+                        valid = false;
+                        break;
+                    }
+                }
+                if (!valid) {
+                    ++state->skippedInvalid;
+                    continue;
+                }
+                const QString localPath =
+                    QDir(localRoot).filePath(entry.relativePath);
+                if (entry.info.is_dir) {
+                    transferMgr_->enqueueLocalDirectory(
+                        localPath, state->batchOptions);
+                    ++state->enqueuedDirectories;
+                    continue;
+                }
+                transferMgr_->enqueueDownload(
+                    entry.path, localPath, state->batchOptions);
+                ++state->enqueuedFiles;
+            }
+        });
+    state->progressConnection = connect(
+        remoteOps_, &RemoteOperationController::jobProgress, this,
+        [state](const RemoteOperationController::Progress &progress) {
+            if (!state->pending.contains(progress.job.id) ||
+                !state->progress) {
+                return;
+            }
+            state->progress->setLabelText(
+                QCoreApplication::translate(
+                    "MainWindow",
+                    "Scanning %1\nFound: %2  |  Queued: %3")
+                    .arg(progress.currentPath)
+                    .arg(progress.visitedEntries)
+                    .arg(state->enqueuedFiles));
+        });
+    state->completionConnection = connect(
+        remoteOps_, &RemoteOperationController::jobFinished, this,
+        [this, state, maybeStartCleanup](
+            const RemoteOperationController::Completion &completion) {
+            if (!state->pending.remove(completion.result.job.id))
+                return;
+            state->scanFailures += completion.failedEntries;
+            if (completion.result.outcome ==
+                RemoteOperationController::Outcome::Canceled) {
+                state->canceled = true;
+            } else if (completion.result.outcome !=
+                       RemoteOperationController::Outcome::Succeeded) {
+                ++state->scanFailures;
+            }
+            if (!completion.result.error.isEmpty())
+                state->lastError = completion.result.error;
+            if (!state->pending.isEmpty())
+                return;
+            state->scanFinished = true;
+
+            QObject::disconnect(state->batchConnection);
+            QObject::disconnect(state->completionConnection);
+            QObject::disconnect(state->progressConnection);
+            if (state->progress) {
+                state->progress->hide();
+                state->progress->deleteLater();
+                state->progress.clear();
+            }
+            if (!rightIsRemote_)
+                return;
+            QString statusMessage =
+                tr("Queued: %1 downloads (move)")
+                    .arg(state->enqueuedFiles);
+            if (state->enqueuedDirectories > 0) {
+                statusMessage +=
+                    QStringLiteral("  |  ") +
+                    tr("Folders queued: %1")
+                        .arg(state->enqueuedDirectories);
+            }
+            if (state->skippedInvalid > 0) {
+                statusMessage +=
+                    QStringLiteral("  |  ") +
+                    tr("Skipped invalid: %1").arg(state->skippedInvalid);
+            }
+            if (state->scanFailures > 0) {
+                statusMessage +=
+                    QStringLiteral("  |  ") +
+                    tr("Folders not listed: %1").arg(state->scanFailures);
+            }
+            if (state->canceled)
+                statusMessage += QStringLiteral("  |  ") + tr("Canceled");
+            statusBar()->showMessage(statusMessage, 6000);
+            if (state->enqueuedFiles > 0 ||
+                state->enqueuedDirectories > 0) {
+                maybeShowTransferQueue();
+            }
+            (*maybeStartCleanup)();
+        });
+    connect(state->progress, &QProgressDialog::canceled, this,
+            [this, state] {
+                state->canceled = true;
+                if (remoteOps_) {
+                    const auto pending = state->pending;
+                    for (const auto jobId : pending)
+                        remoteOps_->cancel(jobId);
+                }
+                if (transferMgr_)
+                    transferMgr_->cancelBatch(state->batchOptions.batchId);
+            });
+
+    for (const QModelIndex &index : rows) {
+        const QString name = rightRemoteModel_->nameAt(index);
+        QString why;
+        if (!isValidEntryName(name, &why)) {
+            ++state->skippedInvalid;
+            continue;
+        }
+        const QString remotePath = joinRemotePath(remoteBase, name);
+        const QString localPath = dst.filePath(name);
+        if (!rightRemoteModel_->isDir(index)) {
+            transferMgr_->enqueueDownload(remotePath, localPath,
+                                          batchOptions);
+            ++state->enqueuedFiles;
+            continue;
+        }
+
+        transferMgr_->enqueueLocalDirectory(localPath, batchOptions);
+        ++state->enqueuedDirectories;
+        state->topRemoteDirectories.push_back(remotePath);
+        RemoteOperationController::TraverseRequest request;
+        request.rootPath = remotePath;
+        request.includeDirectories = true;
+        request.traversal.includeHidden = true;
+        request.traversal.skipSymlinks = true;
+        request.traversal.maxDepth = 32;
+        request.traversal.batchSize = 250;
+        const auto jobId = remoteOps_->submit(request);
+        if (jobId != 0) {
+            state->localRoots.insert(jobId, localPath);
+            state->pending.insert(jobId);
+        }
     }
-    // Per-item deletion: as each download finishes OK, delete that remote file;
-    // when a folder has no pending files left, delete the folder.
-    attachRemoteMoveCleanup(
-        this, transferMgr_,
-        [this]() -> openscp::SftpClient * { return sftp_.get(); },
-        rightRemoteModel_, remoteBase, movePlan.transferPairs,
-        movePlan.topSelections);
+    if (state->pending.isEmpty()) {
+        state->scanFinished = true;
+        QObject::disconnect(state->batchConnection);
+        QObject::disconnect(state->completionConnection);
+        QObject::disconnect(state->progressConnection);
+        state->progress->deleteLater();
+        statusBar()->showMessage(
+            tr("Queued: %1 downloads (move)").arg(state->enqueuedFiles),
+            4000);
+        if (state->enqueuedFiles > 0)
+            maybeShowTransferQueue();
+        (*maybeStartCleanup)();
+    } else {
+        state->progress->show();
+    }
 }
 
 
@@ -1353,58 +1413,23 @@ void MainWindow::uploadViaDialog() {
     if (picks.isEmpty())
         return;
     uploadDir_ = QFileInfo(picks.first()).dir().absolutePath();
-    QStringList files;
+    const QString remoteBase = rightRemoteModel_->rootPath();
+    QVector<QPair<QString, QString>> roots;
+    roots.reserve(picks.size());
     for (const QString &pickedPath : picks) {
-        QFileInfo selectedPathInfo(pickedPath);
-        if (selectedPathInfo.isDir()) {
-            QDirIterator dirIterator(pickedPath,
-                                     QDir::NoDotAndDotDot | QDir::AllEntries,
-                                     QDirIterator::Subdirectories);
-            while (dirIterator.hasNext()) {
-                dirIterator.next();
-                if (dirIterator.fileInfo().isFile())
-                    files << dirIterator.filePath();
-            }
-        } else if (selectedPathInfo.isFile()) {
-            files << selectedPathInfo.absoluteFilePath();
-        }
+        const QFileInfo selectedPathInfo(pickedPath);
+        if (!selectedPathInfo.isDir() && !selectedPathInfo.isFile())
+            continue;
+        roots.push_back(
+            {selectedPathInfo.absoluteFilePath(),
+             joinRemotePath(remoteBase,
+                            selectedPathInfo.fileName())});
     }
-    if (files.isEmpty()) {
+    if (roots.isEmpty()) {
         statusBar()->showMessage(tr("Nothing to upload."), 4000);
         return;
     }
-    int enqueuedCount = 0;
-    const QString remoteBase = rightRemoteModel_->rootPath();
-    for (const QString &localPath : files) {
-        const QFileInfo localFileInfo(localPath);
-        QString relBase =
-            localFileInfo.path().startsWith(uploadDir_)
-                ? localFileInfo.path().mid(uploadDir_.size()).trimmed()
-                              : QString();
-        if (relBase.startsWith('/'))
-            relBase.remove(0, 1);
-        QString targetDir = relBase.isEmpty()
-                                ? remoteBase
-                                : joinRemotePath(remoteBase, relBase);
-        if (!targetDir.isEmpty() && targetDir != remoteBase) {
-            bool isDir = false;
-            std::string existsError;
-            bool exists = sftp_->exists(targetDir.toStdString(), isDir,
-                                        existsError);
-            if (!exists && existsError.empty()) {
-                std::string mkdirError;
-                sftp_->mkdir(targetDir.toStdString(), mkdirError, 0755);
-            }
-        }
-        const QString rTarget = joinRemotePath(targetDir, localFileInfo.fileName());
-        transferMgr_->enqueueUpload(localPath, rTarget);
-        ++enqueuedCount;
-    }
-    if (enqueuedCount > 0) {
-        statusBar()->showMessage(
-            QString(tr("Queued: %1 uploads")).arg(enqueuedCount), 4000);
-        maybeShowTransferQueue();
-    }
+    startLocalUploadDiscovery(roots, false);
 }
 
 void MainWindow::newDirRight() {
@@ -1412,30 +1437,44 @@ void MainWindow::newDirRight() {
     if (!promptValidEntryName(this, tr("New folder"), tr("Name:"), {}, name))
         return;
     if (rightIsRemote_) {
-        if (!sftp_ || !rightRemoteModel_)
+        if (!remoteOps_ || !remoteOps_->hasRequestedSession() ||
+            !rightRemoteModel_)
             return;
         const QString remoteDirPath =
             joinRemotePath(rightRemoteModel_->rootPath(), name);
-        std::string mkdirError;
-        const bool okMkdir = executeCriticalRemoteOperation(
-            tr("create a remote folder"),
-            [remoteDirPath](openscp::SftpClient *client, std::string &opErr) {
-                return client->mkdir(remoteDirPath.toStdString(), opErr, 0755);
-            },
-            mkdirError);
-        if (!okMkdir) {
-            invalidateRemoteWriteabilityFromError(
-                QString::fromStdString(mkdirError));
-            UiAlerts::critical(
-                this, tr("Remote"),
-                tr("Could not create the remote folder.\n%1")
-                    .arg(shortRemoteError(mkdirError, tr("Remote error"))));
-            return;
-        }
-        QString refreshError;
-        rightRemoteModel_->setRootPath(rightRemoteModel_->rootPath(),
-                                       &refreshError);
-        cacheCurrentRemoteWriteability(true);
+        const QString base = rightRemoteModel_->rootPath();
+        auto jobId =
+            std::make_shared<RemoteOperationController::JobId>(0);
+        auto connection = std::make_shared<QMetaObject::Connection>();
+        *connection = connect(
+            remoteOps_, &RemoteOperationController::mutationCompleted, this,
+            [this, jobId, connection, base](
+                const RemoteOperationController::MutationResult &result) {
+                if (result.result.job.id != *jobId)
+                    return;
+                QObject::disconnect(*connection);
+                if (!rightIsRemote_)
+                    return;
+                if (result.result.outcome !=
+                    RemoteOperationController::Outcome::Succeeded) {
+                    invalidateRemoteWriteabilityFromError(result.result.error);
+                    UiAlerts::critical(
+                        this, tr("Remote"),
+                        tr("Could not create the remote folder.\n%1")
+                            .arg(shortRemoteError(result.result.error,
+                                                  tr("Remote error"))));
+                    return;
+                }
+                lastSuccessfulRemoteActivityAtMs_ =
+                    QDateTime::currentMSecsSinceEpoch();
+                requestRemoteListing(base, true);
+                cacheCurrentRemoteWriteability(true);
+            });
+        RemoteOperationController::MkdirRequest request;
+        request.path = remoteDirPath;
+        request.mode = 0755;
+        *jobId = remoteOps_->submit(request);
+        statusBar()->showMessage(tr("Creating remote folder…"), 0);
     } else {
         QDir base(rightPath_->text());
         if (!base.mkpath(base.filePath(name))) {
@@ -1453,70 +1492,90 @@ void MainWindow::newFileRight() {
     if (!promptValidEntryName(this, tr("New file"), tr("Name:"), {}, name))
         return;
     if (rightIsRemote_) {
-        if (!sftp_ || !rightRemoteModel_)
+        if (!remoteOps_ || !remoteOps_->hasRequestedSession() ||
+            !rightRemoteModel_)
             return;
         const QString remotePath =
             joinRemotePath(rightRemoteModel_->rootPath(), name);
-        bool isDirectory = false;
-        bool exists = false;
-        std::string existsError;
-        const bool existsCheckOk = executeCriticalRemoteOperation(
-            tr("check remote item existence"),
-            [remotePath, &isDirectory,
-             &exists](openscp::SftpClient *client, std::string &opErr) {
-                exists =
-                    client->exists(remotePath.toStdString(), isDirectory, opErr);
-                if (exists)
-                    return true;
-                return opErr.empty();
-            },
-            existsError);
-        if (!existsCheckOk) {
-            UiAlerts::critical(
-                this, tr("Remote"),
-                tr("Could not check whether the remote file already "
-                   "exists.\n%1")
-                    .arg(shortRemoteError(existsError, tr("Remote error"))));
-            return;
-        }
-        if (exists) {
-            if (UiAlerts::question(
-                    this, tr("File exists"),
-                    tr("«%1» already exists.\nOverwrite?").arg(name),
-                    QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
-                return;
-        }
+        const QString base = rightRemoteModel_->rootPath();
+        auto submitCreate = [this, remotePath, base](bool overwrite) {
+            auto createJob =
+                std::make_shared<RemoteOperationController::JobId>(0);
+            auto createConnection =
+                std::make_shared<QMetaObject::Connection>();
+            *createConnection = connect(
+                remoteOps_,
+                &RemoteOperationController::mutationCompleted, this,
+                [this, createJob, createConnection, remotePath, base](
+                    const RemoteOperationController::MutationResult &result) {
+                    if (result.result.job.id != *createJob)
+                        return;
+                    QObject::disconnect(*createConnection);
+                    if (!rightIsRemote_)
+                        return;
+                    if (result.result.outcome !=
+                        RemoteOperationController::Outcome::Succeeded) {
+                        invalidateRemoteWriteabilityFromError(
+                            result.result.error);
+                        UiAlerts::critical(
+                            this, tr("Remote"),
+                            tr("Could not create the remote file.\n%1")
+                                .arg(shortRemoteError(result.result.error,
+                                                      tr("Remote error"))));
+                        return;
+                    }
+                    lastSuccessfulRemoteActivityAtMs_ =
+                        QDateTime::currentMSecsSinceEpoch();
+                    requestRemoteListing(base, true);
+                    cacheCurrentRemoteWriteability(true);
+                    statusBar()->showMessage(
+                        tr("File created: ") + remotePath, 4000);
+                });
+            RemoteOperationController::CreateFileRequest createRequest;
+            createRequest.path = remotePath;
+            createRequest.overwrite = overwrite;
+            *createJob = remoteOps_->submit(createRequest);
+            statusBar()->showMessage(tr("Creating remote file…"), 0);
+        };
 
-        QTemporaryFile temporaryFile;
-        if (!temporaryFile.open()) {
-            UiAlerts::critical(this, tr("Temporary"),
-                                  tr("Could not create a temporary file."));
-            return;
-        }
-        temporaryFile.close();
-        std::string putError;
-        const bool okPut = executeCriticalRemoteOperation(
-            tr("create a remote file"),
-            [tmpPath = temporaryFile.fileName(),
-             remotePath](openscp::SftpClient *client, std::string &opErr) {
-                return client->put(tmpPath.toStdString(), remotePath.toStdString(),
-                                   opErr);
-            },
-            putError);
-        if (!okPut) {
-            invalidateRemoteWriteabilityFromError(
-                QString::fromStdString(putError));
-            UiAlerts::critical(
-                this, tr("Remote"),
-                tr("Could not upload the temporary file to the server.\n%1")
-                    .arg(shortRemoteError(putError, tr("Remote error"))));
-            return;
-        }
-        QString refreshError;
-        rightRemoteModel_->setRootPath(rightRemoteModel_->rootPath(),
-                                       &refreshError);
-        cacheCurrentRemoteWriteability(true);
-        statusBar()->showMessage(tr("File created: ") + remotePath, 4000);
+        auto statJob =
+            std::make_shared<RemoteOperationController::JobId>(0);
+        auto statConnection = std::make_shared<QMetaObject::Connection>();
+        *statConnection = connect(
+            remoteOps_, &RemoteOperationController::statCompleted, this,
+            [this, statJob, statConnection, submitCreate, name](
+                const RemoteOperationController::StatResult &result) {
+                if (result.result.job.id != *statJob)
+                    return;
+                QObject::disconnect(*statConnection);
+                if (!rightIsRemote_)
+                    return;
+                if (result.result.outcome !=
+                    RemoteOperationController::Outcome::Succeeded) {
+                    UiAlerts::critical(
+                        this, tr("Remote"),
+                        tr("Could not check whether the remote file already "
+                           "exists.\n%1")
+                            .arg(shortRemoteError(result.result.error,
+                                                  tr("Remote error"))));
+                    return;
+                }
+                lastSuccessfulRemoteActivityAtMs_ =
+                    QDateTime::currentMSecsSinceEpoch();
+                if (result.found &&
+                    UiAlerts::question(
+                        this, tr("File exists"),
+                        tr("«%1» already exists.\nOverwrite?").arg(name),
+                        QMessageBox::Yes | QMessageBox::No) !=
+                        QMessageBox::Yes) {
+                    return;
+                }
+                submitCreate(result.found);
+            });
+        RemoteOperationController::StatRequest statRequest;
+        statRequest.path = remotePath;
+        *statJob = remoteOps_->submit(statRequest);
+        statusBar()->showMessage(tr("Checking remote file…"), 0);
     } else {
         QDir base(rightPath_->text());
         const QString path = base.filePath(name);
@@ -1551,7 +1610,8 @@ void MainWindow::renameRightSelected() {
         return;
     }
     if (rightIsRemote_) {
-        if (!sftp_ || !rightRemoteModel_)
+        if (!remoteOps_ || !remoteOps_->hasRequestedSession() ||
+            !rightRemoteModel_)
             return;
         const QModelIndex selectedIndex = rows.first();
         const QString oldName = rightRemoteModel_->nameAt(selectedIndex);
@@ -1561,31 +1621,47 @@ void MainWindow::renameRightSelected() {
                                   QLineEdit::Normal, oldName, &inputAccepted);
         if (!inputAccepted || newName.isEmpty() || newName == oldName)
             return;
+        QString invalidReason;
+        if (!isValidEntryName(newName, &invalidReason)) {
+            UiAlerts::warning(this, tr("Invalid name"), invalidReason);
+            return;
+        }
         const QString base = rightRemoteModel_->rootPath();
         const QString sourcePath = joinRemotePath(base, oldName);
         const QString targetPath = joinRemotePath(base, newName);
-        std::string renameError;
-        const bool okRename = executeCriticalRemoteOperation(
-            tr("rename a remote item"),
-            [sourcePath, targetPath](openscp::SftpClient *client,
-                                     std::string &opErr) {
-                return client->rename(sourcePath.toStdString(),
-                                      targetPath.toStdString(),
-                                      opErr, false);
-            },
-            renameError);
-        if (!okRename) {
-            invalidateRemoteWriteabilityFromError(
-                QString::fromStdString(renameError));
-            UiAlerts::critical(
-                this, tr("Remote"),
-                tr("Could not rename the remote item.\n%1")
-                    .arg(shortRemoteError(renameError, tr("Remote error"))));
-            return;
-        }
-        QString refreshError;
-        rightRemoteModel_->setRootPath(base, &refreshError);
-        cacheCurrentRemoteWriteability(true);
+        auto jobId =
+            std::make_shared<RemoteOperationController::JobId>(0);
+        auto connection = std::make_shared<QMetaObject::Connection>();
+        *connection = connect(
+            remoteOps_, &RemoteOperationController::mutationCompleted, this,
+            [this, jobId, connection, base](
+                const RemoteOperationController::MutationResult &result) {
+                if (result.result.job.id != *jobId)
+                    return;
+                QObject::disconnect(*connection);
+                if (!rightIsRemote_)
+                    return;
+                if (result.result.outcome !=
+                    RemoteOperationController::Outcome::Succeeded) {
+                    invalidateRemoteWriteabilityFromError(result.result.error);
+                    UiAlerts::critical(
+                        this, tr("Remote"),
+                        tr("Could not rename the remote item.\n%1")
+                            .arg(shortRemoteError(result.result.error,
+                                                  tr("Remote error"))));
+                    return;
+                }
+                lastSuccessfulRemoteActivityAtMs_ =
+                    QDateTime::currentMSecsSinceEpoch();
+                requestRemoteListing(base, true);
+                cacheCurrentRemoteWriteability(true);
+            });
+        RemoteOperationController::RenameRequest request;
+        request.from = sourcePath;
+        request.to = targetPath;
+        request.overwrite = false;
+        *jobId = remoteOps_->submit(request);
+        statusBar()->showMessage(tr("Renaming remote item…"), 0);
     } else {
         const QModelIndex selectedIndex = rows.first();
         const QFileInfo selectedFileInfo = rightLocalModel_->fileInfo(selectedIndex);
@@ -1621,7 +1697,8 @@ void MainWindow::deleteRightSelected() {
         return;
     }
     if (rightIsRemote_) {
-        if (!sftp_ || !rightRemoteModel_)
+        if (!remoteOps_ || !remoteOps_->hasRequestedSession() ||
+            !rightRemoteModel_)
             return;
         if (UiAlerts::warning(this, tr("Confirm delete"),
                                  tr("This will permanently delete items on the "
@@ -1629,111 +1706,137 @@ void MainWindow::deleteRightSelected() {
                                  QMessageBox::Yes | QMessageBox::No) !=
             QMessageBox::Yes)
             return;
-        int deletedCount = 0;
-        int failedCount = 0;
-        QString lastError;
         const QString base = rightRemoteModel_->rootPath();
-        QStringList names;
-        names.reserve(rows.size());
-        for (const QModelIndex &idx : rows)
-            names.push_back(rightRemoteModel_->nameAt(idx));
-        std::function<bool(const QString &)> delRec =
-            [&](const QString &remoteItemPath) {
-            // Determine if path is a directory or a file using stat/exists
-            bool isDir = false;
-            bool exists = false;
-            std::string existsError;
-            const bool existsOk = executeCriticalRemoteOperation(
-                tr("delete remote items"),
-                [remoteItemPath, &isDir,
-                 &exists](openscp::SftpClient *client, std::string &opErr) {
-                    exists =
-                        client->exists(remoteItemPath.toStdString(), isDir, opErr);
-                    if (exists)
-                        return true;
-                    // Not found is not an error in delete flow.
-                    return opErr.empty();
-                },
-                existsError);
-            if (!existsOk) {
-                lastError = QString::fromStdString(existsError);
-                return false;
-            }
-            if (!exists)
-                return true;
-            if (!isDir) {
-                std::string removeFileError;
-                const bool removed = executeCriticalRemoteOperation(
-                    tr("delete remote items"),
-                    [remoteItemPath](openscp::SftpClient *client,
-                                     std::string &opErr) {
-                        return client->removeFile(remoteItemPath.toStdString(),
-                                                  opErr);
-                    },
-                    removeFileError);
-                if (!removed) {
-                    lastError = QString::fromStdString(removeFileError);
-                    return false;
-                }
-                return true;
-            }
-            // Directory: list and remove children first (depth-first)
-            std::vector<openscp::FileInfo> entries;
-            std::string listError;
-            const bool listed = executeCriticalRemoteOperation(
-                tr("delete remote items"),
-                [remoteItemPath,
-                 &entries](openscp::SftpClient *client, std::string &opErr) {
-                    entries.clear();
-                    return client->list(remoteItemPath.toStdString(), entries,
-                                        opErr);
-                },
-                listError);
-            if (!listed) {
-                lastError = QString::fromStdString(listError);
-                return false;
-            }
-            for (const auto &entry : entries) {
-                const QString child =
-                    joinRemotePath(remoteItemPath,
-                                   QString::fromStdString(entry.name));
-                if (!delRec(child))
-                    return false;
-            }
-            std::string removeDirError;
-            const bool removedDir = executeCriticalRemoteOperation(
-                tr("delete remote items"),
-                [remoteItemPath](openscp::SftpClient *client,
-                                 std::string &opErr) {
-                    return client->removeDir(remoteItemPath.toStdString(), opErr);
-                },
-                removeDirError);
-            if (!removedDir) {
-                lastError = QString::fromStdString(removeDirError);
-                return false;
-            }
-            return true;
+        struct DeleteState {
+            QSet<RemoteOperationController::JobId> pending;
+            quint64 deletedCount = 0;
+            quint64 failedCount = 0;
+            int completedRequests = 0;
+            bool canceled = false;
+            QString lastError;
+            QString base;
+            QPointer<QProgressDialog> progress;
+            QMetaObject::Connection mutationConnection;
+            QMetaObject::Connection progressConnection;
         };
-        for (const QString &name : names) {
-            const QString path = joinRemotePath(base, name);
-            if (delRec(path))
-                ++deletedCount;
-            else
-                ++failedCount;
+        auto state = std::make_shared<DeleteState>();
+        state->base = base;
+        state->progress = new QProgressDialog(
+            tr("Deleting remote items…"), tr("Cancel"), 0, rows.size(), this);
+        state->progress->setWindowTitle(tr("Delete"));
+        state->progress->setWindowModality(Qt::NonModal);
+        state->progress->setMinimumDuration(0);
+        state->progress->setAutoClose(false);
+        state->progress->show();
+
+        state->mutationConnection = connect(
+            remoteOps_, &RemoteOperationController::mutationCompleted, this,
+            [this, state](
+                const RemoteOperationController::MutationResult &result) {
+                if (!state->pending.remove(result.result.job.id))
+                    return;
+                ++state->completedRequests;
+                state->deletedCount += result.affectedEntries;
+                state->failedCount += result.failedEntries;
+                if (result.result.outcome !=
+                    RemoteOperationController::Outcome::Succeeded) {
+                    if (result.result.outcome ==
+                        RemoteOperationController::Outcome::Canceled) {
+                        state->canceled = true;
+                    } else if (result.failedEntries == 0) {
+                        ++state->failedCount;
+                    }
+                    if (!result.result.error.isEmpty())
+                        state->lastError = result.result.error;
+                }
+                if (state->progress)
+                    state->progress->setValue(state->completedRequests);
+                if (!state->pending.isEmpty())
+                    return;
+
+                QObject::disconnect(state->mutationConnection);
+                QObject::disconnect(state->progressConnection);
+                if (state->progress) {
+                    state->progress->hide();
+                    state->progress->deleteLater();
+                    state->progress.clear();
+                }
+                if (!rightIsRemote_)
+                    return;
+                QString statusMessage =
+                    tr("Deleted OK: %1  |  Failed: %2")
+                        .arg(state->deletedCount)
+                        .arg(state->failedCount);
+                if (state->canceled)
+                    statusMessage += QStringLiteral("  |  ") + tr("Canceled");
+                if (state->failedCount > 0 &&
+                    !state->lastError.isEmpty()) {
+                    statusMessage +=
+                        QStringLiteral("\n") + tr("Last error: ") +
+                        state->lastError;
+                }
+                statusBar()->showMessage(statusMessage, 6000);
+                if (state->failedCount > 0)
+                    invalidateRemoteWriteabilityFromError(state->lastError);
+                if (state->failedCount == 0 &&
+                    state->deletedCount > 0) {
+                    cacheCurrentRemoteWriteability(true);
+                    lastSuccessfulRemoteActivityAtMs_ =
+                        QDateTime::currentMSecsSinceEpoch();
+                }
+                requestRemoteListing(state->base, true);
+            });
+        state->progressConnection = connect(
+            remoteOps_, &RemoteOperationController::jobProgress, this,
+            [state](const RemoteOperationController::Progress &progress) {
+                if (!state->pending.contains(progress.job.id) ||
+                    !state->progress) {
+                    return;
+                }
+                state->progress->setLabelText(
+                    QCoreApplication::translate(
+                        "MainWindow",
+                        "Deleting %1\nRemoved: %2  |  Failed: %3")
+                        .arg(progress.currentPath)
+                        .arg(progress.affectedEntries)
+                        .arg(progress.failedEntries));
+            });
+        connect(state->progress, &QProgressDialog::canceled, this,
+                [this, state] {
+                    state->canceled = true;
+                    if (!remoteOps_)
+                        return;
+                    const auto pending = state->pending;
+                    for (const auto jobId : pending)
+                        remoteOps_->cancel(jobId);
+                });
+
+        for (const QModelIndex &index : rows) {
+            RemoteOperationController::DeleteRequest request;
+            request.path =
+                joinRemotePath(base, rightRemoteModel_->nameAt(index));
+            request.kind =
+                rightRemoteModel_->isDir(index)
+                    ? RemoteOperationController::DeleteKind::Directory
+                    : RemoteOperationController::DeleteKind::File;
+            request.recursive =
+                request.kind ==
+                RemoteOperationController::DeleteKind::Directory;
+            request.traversal.includeHidden = true;
+            request.traversal.skipSymlinks = true;
+            request.traversal.maxDepth = 32;
+            request.traversal.batchSize = 250;
+            const auto jobId = remoteOps_->submit(request);
+            if (jobId != 0)
+                state->pending.insert(jobId);
         }
-        QString statusMessage =
-            QString(tr("Deleted OK: %1  |  Failed: %2"))
-                .arg(deletedCount)
-                .arg(failedCount);
-        if (failedCount > 0 && !lastError.isEmpty())
-            statusMessage += "\n" + tr("Last error: ") + lastError;
-        statusBar()->showMessage(statusMessage, 6000);
-        if (failedCount > 0)
-            invalidateRemoteWriteabilityFromError(lastError);
-        if (failedCount == 0 && deletedCount > 0)
-            cacheCurrentRemoteWriteability(true);
-        QString refreshError;
-        rightRemoteModel_->setRootPath(base, &refreshError);
+        if (state->pending.isEmpty()) {
+            QObject::disconnect(state->mutationConnection);
+            QObject::disconnect(state->progressConnection);
+            state->progress->deleteLater();
+            UiAlerts::warning(this, tr("Remote"),
+                              tr("Could not start remote deletion."));
+        }
     } else {
         if (UiAlerts::warning(
                 this, tr("Confirm delete"),
@@ -1801,7 +1904,7 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
         const bool supportsRemotePermissions =
             activeSessionOptions_.has_value() &&
             openscp::capabilitiesForProtocol(activeSessionOptions_->protocol)
-                .supports_permissions;
+                .can_set_permissions;
         // Up option (if applicable)
         if (canGoUp)
             entries.push_back(actUpRight_);
@@ -1861,11 +1964,12 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
 }
 
 void MainWindow::changeRemotePermissions() {
-    if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_)
+    if (!rightIsRemote_ || !remoteOps_ ||
+        !remoteOps_->hasRequestedSession() || !rightRemoteModel_)
         return;
     if (!activeSessionOptions_.has_value() ||
         !openscp::capabilitiesForProtocol(activeSessionOptions_->protocol)
-             .supports_permissions) {
+             .can_set_permissions) {
         UiAlerts::information(
             this, tr("Permissions"),
             tr("Permissions are not supported for the active protocol."));
@@ -1884,116 +1988,157 @@ void MainWindow::changeRemotePermissions() {
     const QString name = rightRemoteModel_->nameAt(selectedIndex);
     const QString base = rightRemoteModel_->rootPath();
     const QString path = joinRemotePath(base, name);
-    openscp::FileInfo st{};
-    std::string statError;
-    const bool statOk = executeCriticalRemoteOperation(
-        tr("read remote permissions"),
-        [path, &st](openscp::SftpClient *client, std::string &opErr) {
-            return client->stat(path.toStdString(), st, opErr);
-        },
-        statError);
-    if (!statOk) {
-        UiAlerts::warning(
-            this, tr("Permissions"),
-                tr("Could not read permissions.\n%1")
-                .arg(shortRemoteError(
-                    statError, tr("Error reading remote information."))));
-        return;
-    }
-    PermissionsDialog dlg(this);
-    dlg.setMode(st.mode & 0777);
-    if (dlg.exec() != QDialog::Accepted)
-        return;
-    unsigned int newMode = (st.mode & ~0777u) | (dlg.mode() & 0777u);
-    auto applyOne = [&](const QString &targetPath) -> bool {
-        std::string chmodError;
-        const bool chmodOk = executeCriticalRemoteOperation(
-            tr("change remote permissions"),
-            [targetPath, newMode](openscp::SftpClient *client,
-                                  std::string &opErr) {
-                return client->chmod(targetPath.toStdString(), newMode, opErr);
-            },
-            chmodError);
-        if (!chmodOk) {
-            invalidateRemoteWriteabilityFromError(
-                QString::fromStdString(chmodError));
-            const QString item =
-                QFileInfo(targetPath).fileName().isEmpty()
-                    ? targetPath
-                    : QFileInfo(targetPath).fileName();
-            UiAlerts::critical(
-                this, tr("Permissions"),
-                tr("Could not apply permissions to \"%1\".\n%2")
-                    .arg(item, shortRemoteError(
-                                   chmodError, tr("Error applying changes."))));
-            return false;
-        }
-        return true;
-    };
-    bool applySucceeded = true;
-    if (dlg.recursive() && st.is_dir) {
-        QVector<QString> pendingDirs;
-        pendingDirs.push_back(path);
-        while (!pendingDirs.isEmpty() && applySucceeded) {
-            const QString currentPath = pendingDirs.back();
-            pendingDirs.pop_back();
-            if (!applyOne(currentPath)) {
-                applySucceeded = false;
-                break;
+    auto statJob = std::make_shared<RemoteOperationController::JobId>(0);
+    auto statConnection = std::make_shared<QMetaObject::Connection>();
+    *statConnection = connect(
+        remoteOps_, &RemoteOperationController::statCompleted, this,
+        [this, statJob, statConnection, path, base](
+            const RemoteOperationController::StatResult &result) {
+            if (result.result.job.id != *statJob)
+                return;
+            QObject::disconnect(*statConnection);
+            if (!rightIsRemote_)
+                return;
+            if (result.result.outcome !=
+                    RemoteOperationController::Outcome::Succeeded ||
+                !result.found) {
+                UiAlerts::warning(
+                    this, tr("Permissions"),
+                    tr("Could not read permissions.\n%1")
+                        .arg(shortRemoteError(
+                            result.result.error,
+                            tr("Error reading remote information."))));
+                return;
             }
-            std::vector<openscp::FileInfo> entries;
-            std::string listError;
-            const bool listed = executeCriticalRemoteOperation(
-                tr("read remote permissions"),
-                [currentPath,
-                 &entries](openscp::SftpClient *client, std::string &opErr) {
-                    entries.clear();
-                    return client->list(currentPath.toStdString(), entries,
-                                        opErr);
-                },
-                listError);
-            if (!listed)
-                continue;
-            for (const auto &entry : entries) {
-                const QString child =
-                    joinRemotePath(currentPath,
-                                   QString::fromStdString(entry.name));
-                if (entry.is_dir)
-                    pendingDirs.push_back(child);
-                else {
-                    if (!applyOne(child)) {
-                        applySucceeded = false;
-                        break;
+
+            PermissionsDialog dialog(this);
+            dialog.setMode(result.info.mode & 0777);
+            if (dialog.exec() != QDialog::Accepted)
+                return;
+
+            const unsigned int newMode =
+                (result.info.mode & ~0777u) | (dialog.mode() & 0777u);
+            const bool recursive = dialog.recursive() && result.info.is_dir;
+            auto progress = QPointer<QProgressDialog>();
+            if (recursive) {
+                progress = new QProgressDialog(
+                    tr("Changing remote permissions…"), tr("Cancel"), 0, 0,
+                    this);
+                progress->setWindowTitle(tr("Permissions"));
+                progress->setWindowModality(Qt::NonModal);
+                progress->setMinimumDuration(0);
+                progress->setAutoClose(false);
+                progress->show();
+            }
+
+            auto chmodJob =
+                std::make_shared<RemoteOperationController::JobId>(0);
+            auto mutationConnection =
+                std::make_shared<QMetaObject::Connection>();
+            auto progressConnection =
+                std::make_shared<QMetaObject::Connection>();
+            *progressConnection = connect(
+                remoteOps_, &RemoteOperationController::jobProgress, this,
+                [chmodJob, progress](
+                    const RemoteOperationController::Progress &update) {
+                    if (update.job.id != *chmodJob || !progress)
+                        return;
+                    progress->setLabelText(
+                        QCoreApplication::translate(
+                            "MainWindow",
+                            "Changing permissions for %1\nUpdated: %2  |  "
+                            "Failed: %3")
+                            .arg(update.currentPath)
+                            .arg(update.affectedEntries)
+                            .arg(update.failedEntries));
+                });
+            *mutationConnection = connect(
+                remoteOps_,
+                &RemoteOperationController::mutationCompleted, this,
+                [this, chmodJob, mutationConnection, progressConnection,
+                 progress, path, base](
+                    const RemoteOperationController::MutationResult
+                        &mutation) {
+                    if (mutation.result.job.id != *chmodJob)
+                        return;
+                    QObject::disconnect(*mutationConnection);
+                    QObject::disconnect(*progressConnection);
+                    if (progress) {
+                        progress->hide();
+                        progress->deleteLater();
                     }
-                }
+                    if (!rightIsRemote_)
+                        return;
+                    if (mutation.result.outcome !=
+                        RemoteOperationController::Outcome::Succeeded) {
+                        invalidateRemoteWriteabilityFromError(
+                            mutation.result.error);
+                        const QString item =
+                            QFileInfo(path).fileName().isEmpty()
+                                ? path
+                                : QFileInfo(path).fileName();
+                        UiAlerts::critical(
+                            this, tr("Permissions"),
+                            tr("Could not apply permissions to \"%1\".\n%2")
+                                .arg(item,
+                                     shortRemoteError(
+                                         mutation.result.error,
+                                         tr("Error applying changes."))));
+                        return;
+                    }
+                    lastSuccessfulRemoteActivityAtMs_ =
+                        QDateTime::currentMSecsSinceEpoch();
+                    requestRemoteListing(base, true);
+                    cacheCurrentRemoteWriteability(true);
+                    statusBar()->showMessage(
+                        tr("Permissions updated: %1  |  Failed: %2")
+                            .arg(mutation.affectedEntries)
+                            .arg(mutation.failedEntries),
+                        4000);
+                });
+
+            RemoteOperationController::ChmodRequest request;
+            request.path = path;
+            request.mode = newMode;
+            request.recursive = recursive;
+            request.traversal.includeHidden = true;
+            request.traversal.skipSymlinks = true;
+            request.traversal.maxDepth = 32;
+            request.traversal.batchSize = 250;
+            *chmodJob = remoteOps_->submit(request);
+            if (progress) {
+                connect(progress, &QProgressDialog::canceled, this,
+                        [this, chmodJob] {
+                            if (remoteOps_ && *chmodJob != 0)
+                                remoteOps_->cancel(*chmodJob);
+                        });
             }
-        }
-    } else {
-        applySucceeded = applyOne(path);
-    }
-    if (!applySucceeded)
-        return;
-    QString refreshError;
-    rightRemoteModel_->setRootPath(base, &refreshError);
-    cacheCurrentRemoteWriteability(true);
-    statusBar()->showMessage(tr("Permissions updated"), 3000);
+        });
+    RemoteOperationController::StatRequest request;
+    request.path = path;
+    *statJob = remoteOps_->submit(request);
+    statusBar()->showMessage(tr("Reading remote permissions…"), 0);
 }
 
 void MainWindow::applyRemoteWriteabilityActions() {
+    const openscp::ProtocolCapabilities caps =
+        sftp_ ? sftp_->capabilities() : openscp::ProtocolCapabilities{};
     if (actUploadRight_)
-        actUploadRight_->setEnabled(rightRemoteWritable_);
+        actUploadRight_->setEnabled(rightRemoteWritable_ && caps.can_upload);
     if (actNewDirRight_)
-        actNewDirRight_->setEnabled(rightRemoteWritable_);
+        actNewDirRight_->setEnabled(rightRemoteWritable_ && caps.can_mkdir);
     if (actNewFileRight_)
-        actNewFileRight_->setEnabled(rightRemoteWritable_);
+        actNewFileRight_->setEnabled(rightRemoteWritable_ && caps.can_upload);
     if (actRenameRight_)
-        actRenameRight_->setEnabled(rightRemoteWritable_);
+        actRenameRight_->setEnabled(rightRemoteWritable_ && caps.can_rename);
     if (actDeleteRight_)
-        actDeleteRight_->setEnabled(rightRemoteWritable_);
+        actDeleteRight_->setEnabled(rightRemoteWritable_ && caps.can_delete);
     if (actMoveRight_)
-        actMoveRight_->setEnabled(rightRemoteWritable_);
+        actMoveRight_->setEnabled(rightRemoteWritable_ && caps.can_download &&
+                                  caps.can_delete);
     if (actMoveRightTb_)
-        actMoveRightTb_->setEnabled(rightRemoteWritable_);
+        actMoveRightTb_->setEnabled(rightRemoteWritable_ &&
+                                    caps.can_download && caps.can_delete);
     updateDeleteShortcutEnables();
 }
 
@@ -2020,10 +2165,14 @@ void MainWindow::invalidateRemoteWriteabilityFromError(
         return;
     if (!indicatesRemoteWriteabilityDenied(rawError))
         return;
-    cacheCurrentRemoteWriteability(false);
+    // Permissions are path- and operation-specific. Keep capability-based
+    // actions available and let the requested operation report its own denial.
+    updateRemoteWriteability();
 }
 
-// Check if the current remote directory is writable and update enables.
+// Enable operations from protocol capabilities. Permissions are deliberately
+// checked by the real operation; probing with a temporary directory mutates
+// the server and can be both slow and misleading.
 void MainWindow::updateRemoteWriteability() {
     if (!rightIsRemote_ || !sftp_ || !rightRemoteModel_) {
         ++remoteWriteabilityProbeSeq_;
@@ -2032,81 +2181,8 @@ void MainWindow::updateRemoteWriteability() {
         applyRemoteWriteabilityActions();
         return;
     }
-
-    const QString base = rightRemoteModel_->rootPath();
-    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-    auto cacheIt = remoteWriteabilityCache_.constFind(base);
-    if (cacheIt != remoteWriteabilityCache_.cend()) {
-        if ((nowMs - cacheIt->checkedAtMs) <= remoteWriteabilityTtlMs_) {
-            rightRemoteWritable_ = cacheIt->writable;
-            applyRemoteWriteabilityActions();
-            return;
-        }
-    }
-
-    if (!activeSessionOptions_.has_value()) {
-        // Without session options we cannot probe off-thread safely.
-        applyRemoteWriteabilityActions();
-        return;
-    }
-
-    // Keep UI responsive: optimistic state while background probe runs.
+    const openscp::ProtocolCapabilities caps = sftp_->capabilities();
     rightRemoteWritable_ =
-        (cacheIt != remoteWriteabilityCache_.cend()) ? cacheIt->writable
-                                                       : true;
+        caps.can_upload || caps.can_mkdir || caps.can_delete || caps.can_rename;
     applyRemoteWriteabilityActions();
-
-    const quint64 reqId = ++remoteWriteabilityProbeSeq_;
-    const openscp::SessionOptions opt = *activeSessionOptions_;
-    QPointer<MainWindow> self(this);
-    std::thread([self, reqId, base, opt]() mutable {
-        bool probeFinished = false;
-        bool writable = false;
-
-        std::string connErr;
-        auto probe = openscp::CreateConnectedClient(opt, connErr);
-        if (probe) {
-            probeFinished = true;
-            const qint64 timestampMs = QDateTime::currentMSecsSinceEpoch();
-            const QString testName =
-                ".openscp-write-test-" + QString::number(timestampMs);
-            const QString testPath = joinRemotePath(base, testName);
-            std::string mkdirError;
-            const bool created =
-                probe->mkdir(testPath.toStdString(), mkdirError, 0755);
-            if (created) {
-                std::string derr;
-                (void)probe->removeDir(testPath.toStdString(), derr);
-                writable = true;
-            } else {
-                writable = false;
-            }
-            probe->disconnect();
-        }
-
-        QObject *app = QCoreApplication::instance();
-        if (!app)
-            return;
-        QMetaObject::invokeMethod(
-            app,
-            [self, reqId, base, probeFinished, writable]() {
-                if (!self || !probeFinished)
-                    return;
-                if (reqId != self->remoteWriteabilityProbeSeq_.load())
-                    return;
-                if (!self->rightIsRemote_ || !self->rightRemoteModel_)
-                    return;
-                if (self->rightRemoteModel_->rootPath() != base)
-                    return;
-
-                const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-                self->rightRemoteWritable_ = writable;
-                self->remoteWriteabilityCache_.insert(
-                    base, RemoteWriteabilityCacheEntry{writable, nowMs});
-                if (self->remoteWriteabilityCache_.size() > 256)
-                    self->remoteWriteabilityCache_.clear();
-                self->applyRemoteWriteabilityActions();
-            },
-            Qt::QueuedConnection);
-    }).detach();
 }

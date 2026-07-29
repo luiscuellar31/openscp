@@ -126,16 +126,27 @@ QString joinRemotePath(const QString &base, const QString &name) {
 }
 
 QString normalizeRemotePath(const QString &rawPath) {
-    QString normalized = rawPath.trimmed();
-    if (normalized.isEmpty())
-        normalized = QStringLiteral("/");
-    if (!normalized.startsWith(QLatin1Char('/')))
-        normalized.prepend(QLatin1Char('/'));
-    while (normalized.contains(QStringLiteral("//")))
-        normalized.replace(QStringLiteral("//"), QStringLiteral("/"));
-    if (normalized.size() > 1 && normalized.endsWith(QLatin1Char('/')))
-        normalized.chop(1);
-    return normalized;
+    const QString trimmed = rawPath.trimmed();
+    const QStringList rawSegments =
+        trimmed.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    QStringList segments;
+    segments.reserve(rawSegments.size());
+    for (const QString &segment : rawSegments) {
+        if (segment == QStringLiteral("."))
+            continue;
+        if (segment == QStringLiteral("..")) {
+            // Remote navigation is confined to its logical root. Attempts to
+            // walk above it are clamped instead of preserving unsafe dot
+            // segments for a backend to interpret differently.
+            if (!segments.isEmpty())
+                segments.removeLast();
+            continue;
+        }
+        segments.push_back(segment);
+    }
+    return segments.isEmpty()
+               ? QStringLiteral("/")
+               : QStringLiteral("/") + segments.join(QLatin1Char('/'));
 }
 
 QVector<QPair<QString, QString>> buildLocalDestinationPairsWithOverwritePrompt(

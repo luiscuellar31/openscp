@@ -1,14 +1,20 @@
 // Draggable QTreeView that intercepts external drags to run post-drag cleanup
 #pragma once
 #include <QElapsedTimer>
+#include <QHash>
 #include <QMetaObject>
 #include <QPair>
+#include <QPointer>
+#include <QSet>
+#include <QStringList>
 #include <QTreeView>
 #include <QVector>
-#include <atomic>
+
 #include <memory>
 
 class RemoteModel;
+class RemoteOperationController;
+class TransferManager;
 
 class DragAwareTreeView : public QTreeView {
     Q_OBJECT
@@ -17,7 +23,8 @@ class DragAwareTreeView : public QTreeView {
     ~DragAwareTreeView() override;
     // Transfer manager is used to asynchronously stage remote files for
     // drag-out
-    void setTransferManager(class TransferManager *mgr) { transferMgr_ = mgr; }
+    void setTransferManager(TransferManager *mgr);
+    void setRemoteOperationController(RemoteOperationController *controller);
 
     protected:
     void startDrag(Qt::DropActions supportedActions) override;
@@ -40,15 +47,21 @@ class DragAwareTreeView : public QTreeView {
         bool anySizeUnknown = false;
     };
     QModelIndexList collectRemoteSelectedRows() const;
-    bool buildRemoteDragTargets(RemoteModel *remoteModel,
-                                const QModelIndexList &rows,
-                                const QString &stagingDir,
-                                QVector<RemoteDragTarget> &targets,
-                                RemoteDragBatchStats &stats);
+    void finishRemoteDragEnumeration();
     bool confirmRemoteDragThreshold(const RemoteDragBatchStats &stats);
-    void enqueueRemoteDragTargets(QVector<RemoteDragTarget> &targets);
-    void beginRemoteDragMonitoring(const QVector<RemoteDragTarget> &targets,
-                                   const RemoteDragBatchStats &stats);
+    bool enforceRemoteDragThreshold();
+    struct RemoteDragStagingState;
+    void startRemoteDragStaging(QVector<RemoteDragTarget> targets,
+                                QStringList directories,
+                                QStringList dragRoots,
+                                const RemoteDragBatchStats &stats);
+    void pumpRemoteDragStaging(
+        const std::shared_ptr<RemoteDragStagingState> &state);
+    void reconcileRemoteDragTasks(
+        const std::shared_ptr<RemoteDragStagingState> &state,
+        const QVector<quint64> &taskIds, bool removed);
+    void finishRemoteDragStaging(
+        const std::shared_ptr<RemoteDragStagingState> &state);
     QString formatRemoteDragMetrics(const QString &result,
                                     const RemoteDragBatchStats &stats,
                                     qint64 stagingMs) const;
@@ -66,7 +79,8 @@ class DragAwareTreeView : public QTreeView {
     QString buildStagingRoot() const;
 
     // State
-    class TransferManager *transferMgr_ = nullptr; // not owned
+    QPointer<TransferManager> transferMgr_; // not owned
+    QPointer<RemoteOperationController> remoteOps_; // not owned
     QWidget *overlay_ = nullptr;           // owned by this (viewport child)
     class QLabel *overlayLabel_ = nullptr; // non-owning (child of overlay_)
     class QProgressBar *overlayProgress_ =
@@ -84,11 +98,23 @@ class DragAwareTreeView : public QTreeView {
     int currentBatchTotal_ = 0;
     QElapsedTimer prepTimer_;
     QElapsedTimer stagingTimer_;
-    QMetaObject::Connection stagingConn_;
     QMetaObject::Connection quitConn_;
-    std::shared_ptr<std::atomic_bool> enumCancelFlag_;
+    QHash<quint64, QString> enumJobLocalRoots_;
+    QSet<quint64> enumPendingJobs_;
+    QVector<RemoteDragTarget> enumTargets_;
+    QStringList enumDirectories_;
+    QStringList enumDragRoots_;
+    std::shared_ptr<RemoteDragStagingState> stagingState_;
+    RemoteDragBatchStats enumStats_;
+    QMetaObject::Connection enumBatchConn_;
+    QMetaObject::Connection enumProgressConn_;
+    QMetaObject::Connection enumFinishedConn_;
     quint64 enumSymlinksSkipped_ = 0;
-    quint64 enumDenied_ = 0;
+    quint64 enumDepthLimits_ = 0;
+    quint64 enumInvalidNames_ = 0;
+    quint64 enumInaccessible_ = 0;
     qint64 enumMs_ = -1;
+    bool enumThresholdConfirmed_ = false;
+    bool enumThresholdPromptActive_ = false;
     bool batchLogged_ = false; // ensure single-shot logging per batch
 };

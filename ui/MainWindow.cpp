@@ -5,13 +5,16 @@
 #include "ConnectionDialog.hpp"
 #include "DragAwareTreeView.hpp"
 #include "MainWindowSharedUtils.hpp"
+#include "NavigationScope.hpp"
 #include "PermissionsDialog.hpp"
 #include "RemoteModel.hpp"
+#include "RemoteOperationController.hpp"
 #include "SecretStore.hpp"
 #include "SettingsDialog.hpp"
 #include "SiteManagerDialog.hpp"
 #include "TransferManager.hpp"
 #include "TransferQueueDialog.hpp"
+#include "UiAlerts.hpp"
 #include <QAbstractButton>
 #include <QApplication>
 #include <QCheckBox>
@@ -52,6 +55,7 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScreen>
+#include <QScrollBar>
 #include <QSet>
 #include <QSettings>
 #include <QShortcut>
@@ -72,6 +76,7 @@
 #include <QUrlQuery>
 #include <QUuid>
 #include <QVBoxLayout>
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <memory>
@@ -228,6 +233,7 @@ constexpr int kRecentHistoryMaxEntries = 20;
 constexpr const char *kRecentLocalPathsKey = "History/recentLocalPaths";
 constexpr const char *kRecentRemotePathsKey = "History/recentRemotePaths";
 constexpr const char *kRecentServersKey = "History/recentServers";
+constexpr const char *kLocalFavoritesKey = "Favorites/localPaths";
 constexpr const char *kShortcutTransfersKey = "Shortcuts/openTransfers";
 constexpr const char *kShortcutHistoryKey = "Shortcuts/openHistory";
 
@@ -273,11 +279,21 @@ static QString encodeRecentServerEntry(const openscp::SessionOptions &opt) {
     query.addQueryItem(QStringLiteral("port"), QString::number(opt.port));
     query.addQueryItem(QStringLiteral("user"),
                        QString::fromStdString(opt.username).trimmed());
+    if (opt.protocol == openscp::Protocol::Ftps) {
+        query.addQueryItem(
+            QStringLiteral("ftpsMode"),
+            QString::fromLatin1(openscp::ftpsModeStorageName(
+                openscp::normalizeFtpsMode(opt.ftps_mode))));
+    }
     if (opt.protocol == openscp::Protocol::WebDav) {
         query.addQueryItem(
             QStringLiteral("webdavScheme"),
             QString::fromLatin1(openscp::webDavSchemeStorageName(
                 openscp::normalizeWebDavScheme(opt.webdav_scheme))));
+        query.addQueryItem(
+            QStringLiteral("webdavBasePath"),
+            QString::fromStdString(openscp::normalizeWebDavBasePath(
+                opt.webdav_base_path)));
     }
     return query.toString(QUrl::FullyEncoded);
 }
@@ -312,6 +328,13 @@ static bool decodeRecentServerEntry(const QString &encoded,
         opt.host = host.toStdString();
         opt.port = static_cast<std::uint16_t>(portRaw);
         opt.username = user.toStdString();
+        if (protocol == openscp::Protocol::Ftps) {
+            opt.ftps_mode = openscp::ftpsModeFromStorageName(
+                query.queryItemValue(QStringLiteral("ftpsMode"))
+                    .trimmed()
+                    .toLower()
+                    .toStdString());
+        }
         if (protocol == openscp::Protocol::WebDav) {
             const QString rawScheme =
                 query.queryItemValue(QStringLiteral("webdavScheme"))
@@ -329,6 +352,10 @@ static bool decodeRecentServerEntry(const QString &encoded,
                 opt.webdav_verify_peer = false;
                 opt.webdav_ca_cert_path.reset();
             }
+            opt.webdav_base_path = openscp::normalizeWebDavBasePath(
+                query.queryItemValue(QStringLiteral("webdavBasePath"))
+                    .trimmed()
+                    .toStdString());
         }
         *optOut = opt;
     }
@@ -933,10 +960,9 @@ void MainWindow::initializeMainToolbar() {
     actSites_ = mainToolbar->addAction(tr("Saved sites"), [this] {
         SiteManagerDialog dlg(this);
         if (dlg.exec() == QDialog::Accepted) {
-            openscp::SessionOptions opt{};
-            if (dlg.selectedOptions(opt)) {
-                startSftpConnect(opt);
-            }
+            SiteEntry site;
+            if (dlg.selectedSite(site))
+                startSavedSiteConnect(site);
         }
     });
     actSites_->setIcon(mainWindowActionIcon("action-open-saved-sites.svg"));
@@ -949,6 +975,14 @@ void MainWindow::initializeMainToolbar() {
         mainWindowActionIcon("action-open-transfer-queue.svg"));
     actShowQueue_->setToolTip(actShowQueue_->text());
     mainToolbar->addSeparator();
+    actSync_ =
+        mainToolbar->addAction(tr("Compare"), this,
+                               &MainWindow::showSyncDialog);
+    actSync_->setIcon(mainWindowActionIcon("action-refresh.svg"));
+    actSync_->setToolTip(
+        tr("Compare and synchronize the current folders"));
+    actSync_->setEnabled(false);
+    mainToolbar->addSeparator();
     actShowHistory_ =
         mainToolbar->addAction(tr("History"), this, &MainWindow::showHistoryMenu);
     actShowHistory_->setIcon(mainWindowActionIcon("action-open-history.svg"));
@@ -957,6 +991,7 @@ void MainWindow::initializeMainToolbar() {
     // Show text beside icon for Sites and Queue too
     setTextBesideIcon(actSites_, tr("Saved sites"));
     setTextBesideIcon(actShowQueue_, tr("Transfers"));
+    setTextBesideIcon(actSync_, tr("Compare"));
     setTextBesideIcon(actShowHistory_, tr("History"));
 
     // Global shortcut to open the transfer queue
@@ -1038,6 +1073,7 @@ void MainWindow::initializeMenuBarActions() {
     fileMenu_->addAction(actDisconnect_);
     fileMenu_->addAction(actSites_);
     fileMenu_->addAction(actShowQueue_);
+    fileMenu_->addAction(actSync_);
     fileMenu_->addAction(actShowHistory_);
     // On non‑macOS platforms, also show Preferences and Quit under "File"
     // to provide a familiar UX on Linux/Windows while keeping the "OpenSCP" app
@@ -1128,18 +1164,147 @@ void MainWindow::initializeRuntimeState() {
     refreshRightBreadcrumbs();
     restoreMainWindowUiState();
 
+    remoteOps_ = new RemoteOperationController(this);
+    connect(remoteOps_, &RemoteOperationController::listCompleted, this,
+            [this](const RemoteOperationController::ListResult &result) {
+                if (result.result.job.id != activeRemoteListJob_ ||
+                    !rightIsRemote_ || !rightRemoteModel_) {
+                    return;
+                }
+                activeRemoteListJob_ = 0;
+                if (result.result.outcome !=
+                    RemoteOperationController::Outcome::Succeeded) {
+                    if (activeRemoteListIsInitial_ &&
+                        !initialRemoteFallbackAttempted_ &&
+                        requestedRemotePath_ != QStringLiteral("/")) {
+                        initialRemoteFallbackAttempted_ = true;
+                        requestRemoteListing(QStringLiteral("/"), false, true);
+                        return;
+                    }
+                    rightRemoteModel_->clearLoading();
+                    rightView_->setEnabled(true);
+                    statusBar()->showMessage(
+                        tr("Remote folder unavailable. The session remains "
+                           "connected; use Refresh to retry."),
+                        7000);
+                    UiAlerts::warning(
+                        this, tr("Remote error"),
+                        tr("Could not open the remote folder.\n%1")
+                            .arg(result.result.error));
+                    return;
+                }
+
+                std::vector<openscp::FileInfo> entries;
+                entries.reserve(
+                    static_cast<std::size_t>(result.entries.size()));
+                for (const auto &entry : result.entries)
+                    entries.push_back(entry.info);
+                rightRemoteModel_->setEntries(result.path, entries);
+                rightView_->setEnabled(true);
+                lastSuccessfulRemoteActivityAtMs_ =
+                    QDateTime::currentMSecsSinceEpoch();
+
+                if (activeRemoteListIsRefresh_ &&
+                    rightView_->selectionModel()) {
+                    QItemSelectionModel *selection =
+                        rightView_->selectionModel();
+                    selection->clearSelection();
+                    QModelIndex first;
+                    for (int row = 0;
+                         row < rightRemoteModel_->rowCount(); ++row) {
+                        const QModelIndex index =
+                            rightRemoteModel_->index(row, 0);
+                        if (!remoteRefreshSelectionNames_.contains(
+                                rightRemoteModel_->nameAt(index))) {
+                            continue;
+                        }
+                        selection->select(
+                            index, QItemSelectionModel::Select |
+                                       QItemSelectionModel::Rows);
+                        if (!first.isValid())
+                            first = index;
+                    }
+                    if (first.isValid())
+                        selection->setCurrentIndex(
+                            first, QItemSelectionModel::NoUpdate);
+                    if (rightView_->verticalScrollBar()) {
+                        rightView_->verticalScrollBar()->setValue(
+                            remoteRefreshScrollValue_);
+                    }
+                } else if (rightView_->selectionModel()) {
+                    rightView_->selectionModel()->clear();
+                    if (rightView_->verticalScrollBar())
+                        rightView_->verticalScrollBar()->setValue(0);
+                }
+                remoteRefreshSelectionNames_.clear();
+                activeRemoteListIsRefresh_ = false;
+                activeRemoteListIsInitial_ = false;
+            });
+    connect(remoteOps_, &RemoteOperationController::healthCheckCompleted, this,
+            [this](const RemoteOperationController::HealthResult &result) {
+                if (result.result.job.id != activeRemoteHealthJob_)
+                    return;
+                activeRemoteHealthJob_ = 0;
+                remoteSessionHealthProbeInFlight_.store(false);
+                const QString reason = activeRemoteHealthReason_;
+                const bool forced = activeRemoteHealthForced_;
+                activeRemoteHealthReason_.clear();
+                activeRemoteHealthForced_ = false;
+
+                if (result.result.outcome ==
+                    RemoteOperationController::Outcome::Succeeded) {
+                    lastSuccessfulRemoteActivityAtMs_ =
+                        QDateTime::currentMSecsSinceEpoch();
+                    if (forced && !reason.isEmpty()) {
+                        statusBar()->showMessage(
+                            tr("Remote session validated (%1)").arg(reason),
+                            2500);
+                    }
+                    return;
+                }
+                if (!rightIsRemote_ || !sftp_ || isDisconnecting_ ||
+                    result.result.outcome ==
+                        RemoteOperationController::Outcome::Canceled ||
+                    result.result.outcome ==
+                        RemoteOperationController::Outcome::Superseded) {
+                    return;
+                }
+                if (!isLikelyRemoteTransportError(result.result.error))
+                    return;
+                UiAlerts::warning(
+                    this, tr("Connection lost"),
+                    tr("The remote session no longer responds (%1).\n"
+                       "OpenSCP will disconnect to avoid inconsistent "
+                       "operations.\n%2")
+                        .arg(reason,
+                             shortRemoteError(result.result.error,
+                                              tr("Transport error."))));
+                disconnectSftp();
+            });
+
     // Transfer queue
     transferMgr_ = new TransferManager(this);
-    connect(transferMgr_, &TransferManager::tasksChanged, this,
-            [this] {
+    connect(transferMgr_, &TransferManager::tasksUpdated, this,
+            [this](const QVector<quint64> &) {
                 maybeRefreshRemoteAfterCompletedUploads();
                 maybeNotifyCompletedTransfers();
             });
+    connect(transferMgr_, &TransferManager::persistenceWarning, this,
+            [this](const QString &warning) {
+                statusBar()->showMessage(warning, 8000);
+                UiAlerts::warning(this, tr("Transfer queue"), warning);
+            });
+    (void)transferMgr_->enablePersistence();
     // Provide transfer manager to views (for async remote drag-out staging)
-    if (auto *leftDragView = qobject_cast<DragAwareTreeView *>(leftView_))
+    if (auto *leftDragView = qobject_cast<DragAwareTreeView *>(leftView_)) {
         leftDragView->setTransferManager(transferMgr_);
-    if (auto *rightDragView = qobject_cast<DragAwareTreeView *>(rightView_))
+        leftDragView->setRemoteOperationController(remoteOps_);
+    }
+    if (auto *rightDragView = qobject_cast<DragAwareTreeView *>(rightView_)) {
         rightDragView->setTransferManager(transferMgr_);
+        rightDragView->setRemoteOperationController(remoteOps_);
+    }
+    initializeSyncCoordinator();
 
     // Startup cleanup (deferred): remove old staging batches if
     // autoCleanStaging is enabled
@@ -1301,6 +1466,8 @@ void MainWindow::startConnectionSessionIndicators(
 
 void MainWindow::resetConnectionSessionIndicators() {
     activeConnectionType_.clear();
+    activeSecurityWarning_.clear();
+    sessionNoHostVerification_ = false;
     connectionStartedAtMs_ = 0;
     if (connectionElapsedTimer_)
         connectionElapsedTimer_->stop();
@@ -1312,7 +1479,18 @@ void MainWindow::updateConnectionSessionIndicators() {
         const QString typeLabel =
             activeConnectionType_.isEmpty() ? tr("None")
                                               : activeConnectionType_;
-        connectionTypeLabel_->setText(tr("Type: %1").arg(typeLabel));
+        const bool insecure = !activeSecurityWarning_.trimmed().isEmpty();
+        connectionTypeLabel_->setText(
+            insecure ? tr("Type: %1 • UNSAFE").arg(typeLabel)
+                     : tr("Type: %1").arg(typeLabel));
+        connectionTypeLabel_->setStyleSheet(
+            insecure
+                ? QStringLiteral(
+                      "QLabel { color: #B00020; font-weight: 700; }")
+                : QString());
+        connectionTypeLabel_->setToolTip(
+            insecure ? activeSecurityWarning_
+                     : tr("Active connection method for this session"));
     }
 
     if (connectionElapsedLabel_) {
@@ -1367,6 +1545,11 @@ void MainWindow::showEvent(QShowEvent *e) {
 }
 
 void MainWindow::closeEvent(QCloseEvent *e) {
+    if (transferCleanupInProgress_) {
+        pendingCloseAfterDisconnect_ = true;
+        e->ignore();
+        return;
+    }
     if (isDisconnecting_) {
         pendingCloseAfterDisconnect_ = true;
         e->ignore();
@@ -1542,6 +1725,7 @@ void MainWindow::rebuildLocalBreadcrumbs(QToolBar *bar, const QString &path,
         if (crumbIndex + 1 < crumbs.size())
             bar->addSeparator();
     }
+    appendFavoritesMenu(bar, normalized, false, rightPane);
 }
 
 void MainWindow::rebuildRemoteBreadcrumbs(const QString &path) {
@@ -1572,6 +1756,7 @@ void MainWindow::rebuildRemoteBreadcrumbs(const QString &path) {
         if (crumbIndex + 1 < crumbs.size())
             rightBreadcrumbsBar_->addSeparator();
     }
+    appendFavoritesMenu(rightBreadcrumbsBar_, normalized, true, true);
 }
 
 void MainWindow::refreshLeftBreadcrumbs() {
@@ -1641,14 +1826,17 @@ void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
     bool canceled = false;
     bool truncated = false;
 
-    if (view == rightView_ && rightIsRemote_ && (!rightRemoteModel_ || !sftp_)) {
+    if (view == rightView_ && rightIsRemote_ &&
+        (!rightRemoteModel_ || !remoteOps_ ||
+         !remoteOps_->hasRequestedSession())) {
         QMessageBox::warning(this, tr("Remote"),
                              tr("No active remote session."));
         return;
     }
 
     const bool isRemotePanelSearch =
-        (view == rightView_ && rightIsRemote_ && rightRemoteModel_ && sftp_);
+        (view == rightView_ && rightIsRemote_ && rightRemoteModel_ &&
+         remoteOps_ && remoteOps_->hasRequestedSession());
     QString basePathForSummary;
 
     if (isRemotePanelSearch) {
@@ -1657,97 +1845,155 @@ void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
             baseRemote = QStringLiteral("/");
         baseRemote = normalizeRemotePathForMatch(baseRemote);
         basePathForSummary = baseRemote;
+        struct RemoteSearchState {
+            RemoteOperationController::JobId jobId = 0;
+            QVector<QPair<QString, bool>> matches;
+            QRegularExpression regex;
+            QString panelLabel;
+            QString basePath;
+            bool canceledByUser = false;
+            bool truncated = false;
+            QPointer<QProgressDialog> progress;
+            QMetaObject::Connection batchConnection;
+            QMetaObject::Connection progressConnection;
+            QMetaObject::Connection completionConnection;
+        };
+        auto state = std::make_shared<RemoteSearchState>();
+        state->regex = regex;
+        state->panelLabel = panelLabel;
+        state->basePath = baseRemote;
+        state->matches.reserve(kRecursiveSearchMaxMatches);
+        state->progress = new QProgressDialog(
+            tr("Searching recursively in %1...").arg(panelLabel),
+            tr("Cancel"), 0, 0, this);
+        state->progress->setWindowModality(Qt::NonModal);
+        state->progress->setMinimumDuration(0);
+        state->progress->setAutoClose(false);
+        state->progress->show();
 
-        QProgressDialog progress(
-            tr("Searching recursively in %1...").arg(panelLabel), tr("Cancel"),
-            0, 0, this);
-        progress.setWindowModality(Qt::WindowModal);
-        progress.setMinimumDuration(0);
-
-        QSet<QString> visited;
-        QVector<QString> stack;
-        stack.push_back(baseRemote);
-        qint64 pumped = 0;
-
-        while (!stack.isEmpty()) {
-            if (progress.wasCanceled()) {
-                canceled = true;
-                break;
-            }
-
-            const QString current = stack.back();
-            stack.pop_back();
-            const QString currentNorm = normalizeRemotePathForMatch(current);
-            if (visited.contains(currentNorm))
-                continue;
-            visited.insert(currentNorm);
-
-            progress.setLabelText(tr("Scanning %1").arg(currentNorm));
-            QCoreApplication::processEvents();
-            if (progress.wasCanceled()) {
-                canceled = true;
-                break;
-            }
-
-            std::vector<openscp::FileInfo> out;
-            std::string err;
-            if (!sftp_->list(currentNorm.toStdString(), out, err)) {
-                ++scanErrors;
-                continue;
-            }
-
-            for (const auto &entry : out) {
-                const QString name = QString::fromStdString(entry.name);
-                if (name.isEmpty() || name == QStringLiteral(".") ||
-                    name == QStringLiteral("..")) {
-                    continue;
-                }
-                if (!prefShowHidden_ && name.startsWith('.'))
-                    continue;
-
-                const bool isSymlink = (entry.mode & 0120000u) == 0120000u;
-                const bool isDir = entry.is_dir;
-                const QString child =
-                    (currentNorm == QStringLiteral("/")
-                         ? (QStringLiteral("/") + name)
-                         : (currentNorm + QStringLiteral("/") + name));
-                const QString childNorm = normalizeRemotePathForMatch(child);
-
-                QString rel;
-                if (baseRemote == QStringLiteral("/")) {
-                    rel = childNorm.mid(1);
-                } else if (childNorm.startsWith(baseRemote + QStringLiteral("/"))) {
-                    rel = childNorm.mid(baseRemote.size() + 1);
-                } else {
-                    rel = childNorm;
-                }
-                if (rel.isEmpty())
-                    rel = name;
-
-                if (regex.match(name).hasMatch()) {
-                    recursiveMatches.push_back({rel, isDir});
-                    if (recursiveMatches.size() >= kRecursiveSearchMaxMatches) {
-                        truncated = true;
+        state->batchConnection = connect(
+            remoteOps_, &RemoteOperationController::entriesBatchReady, this,
+            [this, state](
+                const RemoteOperationController::EntryBatch &batch) {
+                if (batch.job.id != state->jobId || state->truncated)
+                    return;
+                for (const auto &entry : batch.entries) {
+                    const QString name =
+                        QString::fromStdString(entry.info.name);
+                    if (!state->regex.match(name).hasMatch())
+                        continue;
+                    state->matches.push_back(
+                        {entry.relativePath, entry.info.is_dir});
+                    if (state->matches.size() >=
+                        kRecursiveSearchMaxMatches) {
+                        state->truncated = true;
+                        if (remoteOps_)
+                            remoteOps_->cancel(state->jobId);
                         break;
                     }
                 }
-
-                if (isDir && !isSymlink)
-                    stack.push_back(childNorm);
-
-                ++pumped;
-                if ((pumped % kRecursiveSearchPumpEvery) == 0) {
-                    QCoreApplication::processEvents();
-                    if (progress.wasCanceled()) {
-                        canceled = true;
-                        break;
-                    }
+            });
+        state->progressConnection = connect(
+            remoteOps_, &RemoteOperationController::jobProgress, this,
+            [state](
+                const RemoteOperationController::Progress &update) {
+                if (update.job.id != state->jobId || !state->progress)
+                    return;
+                state->progress->setLabelText(
+                    QCoreApplication::translate(
+                        "MainWindow",
+                        "Scanning %1\nVisited: %2  |  Matches: %3")
+                        .arg(update.currentPath)
+                        .arg(update.visitedEntries)
+                        .arg(state->matches.size()));
+            });
+        state->completionConnection = connect(
+            remoteOps_, &RemoteOperationController::jobFinished, this,
+            [this, state](
+                const RemoteOperationController::Completion &completion) {
+                if (completion.result.job.id != state->jobId)
+                    return;
+                QObject::disconnect(state->batchConnection);
+                QObject::disconnect(state->progressConnection);
+                QObject::disconnect(state->completionConnection);
+                if (state->progress) {
+                    state->progress->hide();
+                    state->progress->deleteLater();
+                    state->progress.clear();
                 }
-            }
+                const bool canceled =
+                    state->canceledByUser ||
+                    (completion.result.outcome ==
+                         RemoteOperationController::Outcome::Canceled &&
+                     !state->truncated);
+                int scanErrors =
+                    static_cast<int>(completion.failedEntries);
+                if (completion.result.outcome ==
+                        RemoteOperationController::Outcome::Failed &&
+                    scanErrors == 0) {
+                    ++scanErrors;
+                }
+                if (completion.result.outcome ==
+                    RemoteOperationController::Outcome::Succeeded) {
+                    lastSuccessfulRemoteActivityAtMs_ =
+                        QDateTime::currentMSecsSinceEpoch();
+                }
 
-            if (canceled || truncated)
-                break;
-        }
+                if (state->matches.isEmpty()) {
+                    QString message =
+                        canceled
+                            ? tr("Search canceled in %1.")
+                                  .arg(state->panelLabel)
+                            : tr("No recursive matches found in %1.")
+                                  .arg(state->panelLabel);
+                    if (scanErrors > 0) {
+                        message +=
+                            QStringLiteral("  ") +
+                            tr("Folders with errors: %1").arg(scanErrors);
+                    }
+                    statusBar()->showMessage(message, 5000);
+                    return;
+                }
+
+                showRecursiveSearchResultsDialog(
+                    this, state->panelLabel, state->basePath,
+                    state->matches, scanErrors, canceled,
+                    state->truncated);
+                QString message =
+                    tr("Found %1 recursive match(es) in %2.")
+                        .arg(state->matches.size())
+                        .arg(state->panelLabel);
+                if (state->truncated) {
+                    message +=
+                        QStringLiteral("  ") +
+                        tr("Results limited to %1.")
+                            .arg(kRecursiveSearchMaxMatches);
+                }
+                if (scanErrors > 0) {
+                    message +=
+                        QStringLiteral("  ") +
+                        tr("Folders with errors: %1").arg(scanErrors);
+                }
+                if (canceled)
+                    message += QStringLiteral("  ") + tr("(Canceled)");
+                statusBar()->showMessage(message, 6000);
+            });
+        connect(state->progress, &QProgressDialog::canceled, this,
+                [this, state] {
+                    state->canceledByUser = true;
+                    if (remoteOps_ && state->jobId != 0)
+                        remoteOps_->cancel(state->jobId);
+                });
+
+        RemoteOperationController::TraverseRequest request;
+        request.rootPath = baseRemote;
+        request.includeDirectories = true;
+        request.traversal.includeHidden = prefShowHidden_;
+        request.traversal.skipSymlinks = true;
+        request.traversal.maxDepth = 32;
+        request.traversal.batchSize = 250;
+        state->jobId = remoteOps_->submit(request);
+        return;
     } else {
         QString baseLocal =
             (view == leftView_) ? (leftPath_ ? leftPath_->text() : QString())
@@ -1898,9 +2144,7 @@ void MainWindow::maybeRefreshRemoteAfterCompletedUploads() {
         pendingRemoteRefreshFromUpload_ = false;
         if (!rightIsRemote_ || !rightRemoteModel_)
             return;
-        QString err;
-        rightRemoteModel_->setRootPath(rightRemoteModel_->rootPath(), &err,
-                                       true);
+        requestRemoteListing(rightRemoteModel_->rootPath(), true);
     });
 }
 
@@ -1957,7 +2201,7 @@ bool MainWindow::isScpTransferMode() const {
         return false;
     const openscp::ProtocolCapabilities caps =
         openscp::capabilitiesForProtocol(activeSessionOptions_->protocol);
-    return caps.supports_file_transfers && !caps.supports_listing;
+    return (caps.can_upload || caps.can_download) && !caps.can_list;
 }
 
 void MainWindow::activateScpTransferModeUi(bool enabled) {
@@ -2060,8 +2304,7 @@ void MainWindow::applyPreferences() {
     prefShowHidden_ = showHidden;
     if (rightRemoteModel_) {
         rightRemoteModel_->setShowHidden(showHidden);
-        QString dummy;
-        rightRemoteModel_->setRootPath(rightRemoteModel_->rootPath(), &dummy);
+        requestRemoteListing(rightRemoteModel_->rootPath(), true);
     }
 
     // Single-click activation (connect/disconnect to clicked())
@@ -2112,14 +2355,142 @@ void MainWindow::addRecentLocalPath(const QString &path) {
     settings.setValue(kRecentLocalPathsKey, recent);
 }
 
+QString MainWindow::remoteNavigationScope() const {
+    if (activeSavedSiteContext_ &&
+        !activeSavedSiteContext_->siteId.trimmed().isEmpty()) {
+        return openscpui::savedSiteNavigationScope(
+            activeSavedSiteContext_->siteId);
+    }
+    if (!activeSessionOptions_)
+        return {};
+    return openscpui::remoteEndpointScope(*activeSessionOptions_);
+}
+
+QString MainWindow::scopedRemoteHistoryKey() const {
+    const QString scope = remoteNavigationScope();
+    return scope.isEmpty()
+               ? QString()
+               : QStringLiteral("History/remoteScopes/%1/recentPaths")
+                     .arg(scope);
+}
+
+QString MainWindow::scopedRemoteFavoritesKey() const {
+    const QString scope = remoteNavigationScope();
+    return scope.isEmpty()
+               ? QString()
+               : QStringLiteral("Favorites/remoteScopes/%1/paths").arg(scope);
+}
+
+void MainWindow::appendFavoritesMenu(QToolBar *bar,
+                                     const QString &currentPath, bool remote,
+                                     bool rightPane) {
+    if (!bar)
+        return;
+    bar->addSeparator();
+    QAction *favoritesAction = bar->addAction(QStringLiteral("★"));
+    favoritesAction->setToolTip(tr("Favorites"));
+    auto *menu = new QMenu(bar);
+    favoritesAction->setMenu(menu);
+
+    const QString settingsKey =
+        remote ? scopedRemoteFavoritesKey()
+               : QString::fromLatin1(kLocalFavoritesKey);
+    if (settingsKey.isEmpty()) {
+        favoritesAction->setEnabled(false);
+        favoritesAction->setToolTip(
+            tr("Connect to a remote server to use remote favorites"));
+        return;
+    }
+
+    QSettings settings("OpenSCP", "OpenSCP");
+    QStringList paths = settings.value(settingsKey).toStringList();
+    const QString normalizedCurrent =
+        remote ? normalizeRemotePathForMatch(currentPath)
+               : normalizedLocalHistoryPath(currentPath);
+    const bool currentIsFavorite = paths.contains(
+        normalizedCurrent, remote ? Qt::CaseSensitive : Qt::CaseInsensitive);
+    QAction *toggleCurrent = menu->addAction(
+        currentIsFavorite ? tr("Remove current path from favorites")
+                          : tr("Add current path to favorites"));
+    connect(toggleCurrent, &QAction::triggered, this,
+            [this, settingsKey, normalizedCurrent, currentIsFavorite, remote,
+             rightPane] {
+                if (normalizedCurrent.isEmpty())
+                    return;
+                QSettings writeSettings("OpenSCP", "OpenSCP");
+                QStringList values =
+                    writeSettings.value(settingsKey).toStringList();
+                const Qt::CaseSensitivity sensitivity =
+                    remote ? Qt::CaseSensitive : Qt::CaseInsensitive;
+                values.removeIf([&](const QString &value) {
+                    return value.compare(normalizedCurrent, sensitivity) == 0;
+                });
+                if (!currentIsFavorite)
+                    values.prepend(normalizedCurrent);
+                writeSettings.setValue(settingsKey, values);
+                if (rightPane)
+                    refreshRightBreadcrumbs();
+                else
+                    refreshLeftBreadcrumbs();
+            });
+
+    menu->addSeparator();
+    for (const QString &rawPath : paths) {
+        const QString path =
+            remote ? normalizeRemotePathForMatch(rawPath)
+                   : normalizedLocalHistoryPath(rawPath);
+        if (path.isEmpty())
+            continue;
+        QAction *openFavorite =
+            menu->addAction(trimHistoryLabel(
+                remote ? path : QDir::toNativeSeparators(path)));
+        openFavorite->setToolTip(path);
+        connect(openFavorite, &QAction::triggered, this,
+                [this, path, remote, rightPane] {
+                    if (remote)
+                        setRightRemoteRoot(path);
+                    else if (rightPane)
+                        setRightRoot(path);
+                    else
+                        setLeftRoot(path);
+                });
+    }
+    if (paths.isEmpty()) {
+        QAction *empty = menu->addAction(tr("No favorites"));
+        empty->setEnabled(false);
+    } else {
+        menu->addSeparator();
+        QAction *clear = menu->addAction(tr("Clear favorites"));
+        connect(clear, &QAction::triggered, this, [this, settingsKey,
+                                                   rightPane] {
+            if (UiAlerts::question(
+                    this, tr("Clear favorites"),
+                    tr("Remove all favorites in this section?"),
+                    QMessageBox::Yes | QMessageBox::No,
+                    QMessageBox::No) != QMessageBox::Yes) {
+                return;
+            }
+            QSettings writeSettings("OpenSCP", "OpenSCP");
+            writeSettings.remove(settingsKey);
+            if (rightPane)
+                refreshRightBreadcrumbs();
+            else
+                refreshLeftBreadcrumbs();
+        });
+    }
+}
+
 void MainWindow::addRecentRemotePath(const QString &path) {
     const QString normalized = normalizeRemotePathForMatch(path);
     if (normalized.isEmpty())
         return;
+    const QString historyKey = scopedRemoteHistoryKey();
+    if (historyKey.isEmpty())
+        return;
     QSettings settings("OpenSCP", "OpenSCP");
-    QStringList recent = settings.value(kRecentRemotePathsKey).toStringList();
+    QStringList recent = settings.value(historyKey).toStringList();
     prependRecentValue(&recent, normalized);
-    settings.setValue(kRecentRemotePathsKey, recent);
+    settings.setValue(historyKey, recent);
 }
 
 void MainWindow::addRecentServer(const openscp::SessionOptions &opt) {
@@ -2152,11 +2523,16 @@ void MainWindow::showHistoryMenu() {
 
     auto *localList = createHistoryTabList(tabs, tr("Recent local paths"));
     auto *remoteList = createHistoryTabList(tabs, tr("Recent remote paths"));
+    auto *legacyRemoteList =
+        createHistoryTabList(tabs, tr("Unscoped legacy"));
     auto *serverList = createHistoryTabList(tabs, tr("Recent servers"));
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
     auto *openBtn =
         buttons->addButton(tr("Open selected"), QDialogButtonBox::ActionRole);
+    auto *favoriteBtn =
+        buttons->addButton(tr("Add to favorites"),
+                           QDialogButtonBox::ActionRole);
     auto *clearBtn =
         buttons->addButton(tr("Clear history"), QDialogButtonBox::ActionRole);
     layout->addWidget(buttons);
@@ -2168,7 +2544,7 @@ void MainWindow::showHistoryMenu() {
         item->setFlags(Qt::NoItemFlags);
     };
 
-    auto activeList = [tabs, localList, remoteList,
+    auto activeList = [tabs, localList, remoteList, legacyRemoteList,
                        serverList]() -> QListWidget * {
         switch (tabs->currentIndex()) {
         case 0:
@@ -2176,33 +2552,78 @@ void MainWindow::showHistoryMenu() {
         case 1:
             return remoteList;
         case 2:
+            return legacyRemoteList;
+        case 3:
             return serverList;
         default:
             return nullptr;
         }
     };
 
-    auto updateOpenEnabled = [activeList, openBtn]() {
+    auto updateActions = [=, this]() {
         if (!openBtn)
             return;
         QListWidget *list = activeList();
         if (!list || !list->currentItem()) {
             openBtn->setEnabled(false);
+            if (favoriteBtn) {
+                favoriteBtn->setEnabled(false);
+                favoriteBtn->setText(tr("Add to favorites"));
+            }
             return;
         }
         const QString value = list->currentItem()->data(Qt::UserRole).toString();
         openBtn->setEnabled(!value.trimmed().isEmpty());
+        if (!favoriteBtn)
+            return;
+
+        const bool localPath = tabs->currentIndex() == 0;
+        const bool remotePath = tabs->currentIndex() == 1;
+        const QString settingsKey =
+            localPath ? QString::fromLatin1(kLocalFavoritesKey)
+                      : (remotePath ? scopedRemoteFavoritesKey() : QString());
+        const QString normalized =
+            localPath ? normalizedLocalHistoryPath(value)
+                      : (remotePath ? normalizeRemotePathForMatch(value)
+                                    : QString());
+        if (settingsKey.isEmpty() || normalized.isEmpty()) {
+            favoriteBtn->setEnabled(false);
+            favoriteBtn->setText(tr("Add to favorites"));
+            return;
+        }
+
+        QSettings settings("OpenSCP", "OpenSCP");
+        const QStringList favorites =
+            settings.value(settingsKey).toStringList();
+        const Qt::CaseSensitivity sensitivity =
+            localPath ? Qt::CaseInsensitive : Qt::CaseSensitive;
+        const bool alreadyFavorite =
+            std::any_of(favorites.cbegin(), favorites.cend(),
+                        [&](const QString &favorite) {
+                            return favorite.compare(normalized, sensitivity) ==
+                                   0;
+                        });
+        favoriteBtn->setEnabled(true);
+        favoriteBtn->setText(alreadyFavorite
+                                 ? tr("Remove from favorites")
+                                 : tr("Add to favorites"));
     };
 
-    auto populate = [=]() {
+    auto populate = [=, this]() {
         localList->clear();
         remoteList->clear();
+        legacyRemoteList->clear();
         serverList->clear();
 
         QSettings settings("OpenSCP", "OpenSCP");
         const QStringList localPaths =
             settings.value(kRecentLocalPathsKey).toStringList();
+        const QString remoteHistoryKey = scopedRemoteHistoryKey();
         const QStringList remotePaths =
+            remoteHistoryKey.isEmpty()
+                ? QStringList()
+                : settings.value(remoteHistoryKey).toStringList();
+        const QStringList legacyRemotePaths =
             settings.value(kRecentRemotePathsKey).toStringList();
         const QStringList recentServers =
             settings.value(kRecentServersKey).toStringList();
@@ -2235,6 +2656,20 @@ void MainWindow::showHistoryMenu() {
         if (remoteList->count() == 0)
             addEmptyPlaceholder(remoteList, tr("No recent history"));
 
+        for (const QString &rawPath : legacyRemotePaths) {
+            const QString normalized = normalizeRemotePathForMatch(rawPath);
+            if (normalized.isEmpty())
+                continue;
+            auto *item = new QListWidgetItem(trimHistoryLabel(normalized),
+                                             legacyRemoteList);
+            item->setToolTip(
+                tr("Legacy path without a server identity: %1").arg(normalized));
+            item->setData(Qt::UserRole, normalized);
+            hasEntries = true;
+        }
+        if (legacyRemoteList->count() == 0)
+            addEmptyPlaceholder(legacyRemoteList, tr("No legacy history"));
+
         for (const QString &encoded : recentServers) {
             openscp::SessionOptions preset;
             QString label;
@@ -2250,7 +2685,7 @@ void MainWindow::showHistoryMenu() {
 
         if (clearBtn)
             clearBtn->setEnabled(hasEntries);
-        updateOpenEnabled();
+        updateActions();
     };
 
     auto openSelected = [&, focusBeforeDialog]() {
@@ -2285,7 +2720,27 @@ void MainWindow::showHistoryMenu() {
             setRightRemoteRoot(value);
             dlg.accept();
             break;
-        case 2: {
+        case 2:
+            if (!rightIsRemote_) {
+                statusBar()->showMessage(
+                    tr("Connect to a remote server to open legacy remote "
+                       "history."),
+                    3500);
+                return;
+            }
+            if (UiAlerts::question(
+                    this, tr("Open unscoped legacy path?"),
+                    tr("This path is not tied to a saved site or endpoint and "
+                       "may belong to another server.\n\n"
+                       "Open it on the current server?"),
+                    QMessageBox::Yes | QMessageBox::No,
+                    QMessageBox::No) != QMessageBox::Yes) {
+                return;
+            }
+            setRightRemoteRoot(value);
+            dlg.accept();
+            break;
+        case 3: {
             if (rightIsRemote_) {
                 statusBar()->showMessage(
                     tr("Disconnect the current remote session before opening "
@@ -2307,6 +2762,45 @@ void MainWindow::showHistoryMenu() {
 
     connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
     connect(openBtn, &QPushButton::clicked, &dlg, openSelected);
+    connect(favoriteBtn, &QPushButton::clicked, &dlg, [=, this]() {
+        QListWidget *list = activeList();
+        if (!list || !list->currentItem())
+            return;
+        const QString value = list->currentItem()->data(Qt::UserRole).toString();
+        const bool localPath = tabs->currentIndex() == 0;
+        const bool remotePath = tabs->currentIndex() == 1;
+        const QString settingsKey =
+            localPath ? QString::fromLatin1(kLocalFavoritesKey)
+                      : (remotePath ? scopedRemoteFavoritesKey() : QString());
+        const QString normalized =
+            localPath ? normalizedLocalHistoryPath(value)
+                      : (remotePath ? normalizeRemotePathForMatch(value)
+                                    : QString());
+        if (settingsKey.isEmpty() || normalized.isEmpty())
+            return;
+
+        QSettings settings("OpenSCP", "OpenSCP");
+        QStringList favorites = settings.value(settingsKey).toStringList();
+        const Qt::CaseSensitivity sensitivity =
+            localPath ? Qt::CaseInsensitive : Qt::CaseSensitive;
+        bool removed = false;
+        favorites.removeIf([&](const QString &favorite) {
+            const bool matches =
+                favorite.compare(normalized, sensitivity) == 0;
+            removed = removed || matches;
+            return matches;
+        });
+        if (!removed)
+            favorites.prepend(normalized);
+        settings.setValue(settingsKey, favorites);
+        if (remotePath)
+            refreshRightBreadcrumbs();
+        else
+            refreshLeftBreadcrumbs();
+        statusBar()->showMessage(
+            removed ? tr("Favorite removed") : tr("Favorite added"), 2500);
+        updateActions();
+    });
     connect(clearBtn, &QPushButton::clicked, &dlg, [=, this]() {
         const auto ret = QMessageBox::question(
             this, tr("Clear history"),
@@ -2316,20 +2810,24 @@ void MainWindow::showHistoryMenu() {
             return;
         QSettings settings("OpenSCP", "OpenSCP");
         settings.remove(kRecentLocalPathsKey);
+        // "Clear history" is global: scoped histories for inactive servers are
+        // otherwise invisible here and would silently survive the operation.
+        settings.remove(QStringLiteral("History/remoteScopes"));
         settings.remove(kRecentRemotePathsKey);
         settings.remove(kRecentServersKey);
         statusBar()->showMessage(tr("History cleared"), 3000);
         populate();
     });
 
-    for (QListWidget *list : {localList, remoteList, serverList}) {
+    for (QListWidget *list :
+         {localList, remoteList, legacyRemoteList, serverList}) {
         connect(list, &QListWidget::itemDoubleClicked, &dlg,
                 [openSelected](QListWidgetItem *) { openSelected(); });
         connect(list, &QListWidget::currentRowChanged, &dlg,
-                [updateOpenEnabled](int) { updateOpenEnabled(); });
+                [updateActions](int) { updateActions(); });
     }
     connect(tabs, &QTabWidget::currentChanged, &dlg,
-            [updateOpenEnabled](int) { updateOpenEnabled(); });
+            [updateActions](int) { updateActions(); });
 
     populate();
     dlg.exec();
