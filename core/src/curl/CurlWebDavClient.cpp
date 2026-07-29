@@ -2,6 +2,7 @@
 #include "openscp/CurlWebDavClient.hpp"
 
 #include "CurlBackendCommon.hpp"
+#include "../common/SafeLocalFile.hpp"
 
 #include <curl/curl.h>
 #include <tinyxml2.h>
@@ -264,6 +265,7 @@ bool performTextRequest(CURL *curl, const SessionOptions &opt,
 
     curlcommon::TransferProgressContext cancelContext{
         {}, {}, interrupted, false};
+    curlcommon::BoundedStringSink responseSink{&response.body};
     const bool configured =
         (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str()) ==
@@ -271,7 +273,7 @@ bool performTextRequest(CURL *curl, const SessionOptions &opt,
         (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
                           curlcommon::appendStringCallback) ==
          CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseSink) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headerList) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION,
                           captureWebDavHeader) == CURLE_OK) &&
@@ -310,6 +312,16 @@ bool performTextRequest(CURL *curl, const SessionOptions &opt,
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.statusCode);
     curl_slist_free_all(headerList);
 
+    if (responseSink.limitExceeded || responseSink.allocationFailed) {
+        if (curlCodeOut)
+            *curlCodeOut = CURLE_WRITE_ERROR;
+        err = responseSink.limitExceeded
+                  ? std::string("WebDAV ") + method +
+                        " response exceeded the 64 MiB safety limit."
+                  : std::string("WebDAV ") + method +
+                        " response could not be stored in memory.";
+        return false;
+    }
     if (rc != CURLE_OK) {
         err = std::string("WebDAV ") + method +
               " failed: " + curl_easy_strerror(rc);
@@ -485,7 +497,7 @@ std::string extractPathFromHref(std::string href) {
     return href;
 }
 
-std::string decodePercent(std::string raw) {
+std::string decodePercent(const std::string &raw) {
     int decodedLen = 0;
     char *decoded = curl_easy_unescape(nullptr, raw.c_str(),
                                        static_cast<int>(raw.size()), &decodedLen);
@@ -942,9 +954,13 @@ bool CurlWebDavClient::get(
         setLastOperationError(RemoteErrorKind::Conflict, err);
         return false;
     }
-    std::FILE *localFile = std::fopen(partial.c_str(), "wb");
+    std::string openError;
+    std::FILE *localFile = localfiles::openRegularFileForWrite(
+        partial, localfiles::WriteMode::Truncate, openError);
     if (!localFile) {
-        err = "Could not open local partial file for writing.";
+        err = openError.empty()
+                  ? "Could not open local partial file for writing."
+                  : openError;
         setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
         return false;
     }

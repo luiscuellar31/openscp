@@ -2,6 +2,7 @@
 #include "openscp/CurlFtpClient.hpp"
 
 #include "CurlBackendCommon.hpp"
+#include "../common/SafeLocalFile.hpp"
 
 #include <curl/curl.h>
 
@@ -306,6 +307,7 @@ bool runDirectoryListingCommand(CURL *curl, const SessionOptions &opt,
 
     curlcommon::TransferProgressContext cancelContext{
         {}, {}, interrupted, false};
+    curlcommon::BoundedStringSink payloadSink{&payload};
     const std::string url = buildFtpUrl(opt, normalizeRemoteDirPath(remotePath));
     const bool configured =
         (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK) &&
@@ -314,7 +316,7 @@ bool runDirectoryListingCommand(CURL *curl, const SessionOptions &opt,
         (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
                           curlcommon::appendStringCallback) ==
          CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_WRITEDATA, &payload) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_WRITEDATA, &payloadSink) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
                           curlcommon::transferProgressCallback) == CURLE_OK) &&
@@ -339,6 +341,16 @@ bool runDirectoryListingCommand(CURL *curl, const SessionOptions &opt,
         if (curlCodeOut)
             *curlCodeOut = CURLE_ABORTED_BY_CALLBACK;
         err = "Interrupted";
+        return false;
+    }
+    if (payloadSink.limitExceeded || payloadSink.allocationFailed) {
+        if (curlCodeOut)
+            *curlCodeOut = CURLE_WRITE_ERROR;
+        err = payloadSink.limitExceeded
+                  ? std::string(protocolLabel(opt.protocol)) +
+                        " directory listing exceeded the 64 MiB safety limit."
+                  : std::string(protocolLabel(opt.protocol)) +
+                        " directory listing could not be stored in memory.";
         return false;
     }
     if (rc != CURLE_OK) {
@@ -393,6 +405,7 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
     }
 
     std::string sink;
+    curlcommon::BoundedStringSink responseSink{&sink};
     curlcommon::TransferProgressContext cancelContext{
         {}, {}, interrupted, false};
     const std::string url = buildFtpUrl(opt, "/");
@@ -402,7 +415,7 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
         curl_easy_setopt(curl, CURLOPT_QUOTE, quote) == CURLE_OK &&
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
                          curlcommon::appendStringCallback) == CURLE_OK &&
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sink) == CURLE_OK &&
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseSink) == CURLE_OK &&
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) == CURLE_OK &&
         curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
                          curlcommon::transferProgressCallback) == CURLE_OK &&
@@ -420,6 +433,13 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
     curlCodeOut = curl_easy_perform(curl);
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCodeOut);
     curl_slist_free_all(quote);
+    if (responseSink.limitExceeded || responseSink.allocationFailed) {
+        curlCodeOut = CURLE_WRITE_ERROR;
+        err = responseSink.limitExceeded
+                  ? "FTP command response exceeded the 64 MiB safety limit."
+                  : "FTP command response could not be stored in memory.";
+        return false;
+    }
     if (curlCodeOut != CURLE_OK) {
         err = std::string(protocolLabel(opt.protocol)) +
               " command failed: " + curl_easy_strerror(curlCodeOut);
@@ -1002,9 +1022,13 @@ bool CurlFtpClient::get(
         setLastOperationError(RemoteErrorKind::Conflict, err);
         return false;
     }
-    std::FILE *localFile = std::fopen(partial.c_str(), "wb");
+    std::string openError;
+    std::FILE *localFile = localfiles::openRegularFileForWrite(
+        partial, localfiles::WriteMode::Truncate, openError);
     if (!localFile) {
-        err = "Could not open local partial file for writing.";
+        err = openError.empty()
+                  ? "Could not open local partial file for writing."
+                  : openError;
         setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
         return false;
     }

@@ -77,6 +77,15 @@ bool configureTlsVerification(CURL *curl, bool verifyPeer,
                               const char *verificationError,
                               const char *caPathError, std::string &err);
 
+inline constexpr std::size_t kMaxMetadataResponseBytes = 64 * 1024 * 1024;
+
+struct BoundedStringSink {
+    std::string *output = nullptr;
+    std::size_t maxBytes = kMaxMetadataResponseBytes;
+    bool limitExceeded = false;
+    bool allocationFailed = false;
+};
+
 size_t appendStringCallback(char *ptr, size_t size, size_t nmemb,
                             void *userdata);
 size_t writeFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata);

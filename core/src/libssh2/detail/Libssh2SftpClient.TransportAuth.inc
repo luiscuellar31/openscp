@@ -561,8 +561,11 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             };
             auto do_kbdint = [&]() {
                 bool kbdCancelled = false;
+                bool kbdRejected = false;
+                std::string kbdRejectionError;
                 KbdIntCtx ctx{opt.username.c_str(), opt.password->c_str(),
-                              &opt.keyboard_interactive_cb, &kbdCancelled};
+                              &opt.keyboard_interactive_cb, &kbdCancelled,
+                              &kbdRejected, &kbdRejectionError};
                 void **abs = libssh2_session_abstract(session_);
                 if (abs)
                     *abs = &ctx;
@@ -579,6 +582,14 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                 if (kbdCancelled) {
                     err =
                         "Keyboard-interactive authentication canceled by user";
+                    rc_kbd = -1;
+                    return false;
+                }
+                if (kbdRejected) {
+                    err = kbdRejectionError.empty()
+                              ? "Keyboard-interactive authentication input was "
+                                "rejected."
+                              : kbdRejectionError;
                     rc_kbd = -1;
                     return false;
                 }

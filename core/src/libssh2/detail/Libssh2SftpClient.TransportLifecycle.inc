@@ -1,6 +1,13 @@
 bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
                                         std::string &err,
                                         bool initializeSftpSubsystem) {
+    const int initResult = ensure_libssh2_initialized();
+    if (initResult != LIBSSH2_ERROR_NONE) {
+        err = "Could not initialize libssh2 (error " +
+              std::to_string(initResult) + ").";
+        setLastOperationError(RemoteErrorKind::Unknown, err, initResult);
+        return false;
+    }
     if (connected_) {
         err = "Already connected";
         return false;
@@ -11,6 +18,23 @@ bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
 
     // Defensive: ensure no leftover state from any previous partial attempt.
     disconnect();
+
+    if (!libssh2detail::validateEndpointHost(opt.host, "SSH host", err)) {
+        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+        return false;
+    }
+    if (opt.proxy_type != ProxyType::None &&
+        !libssh2detail::validateEndpointHost(opt.proxy_host, "Proxy host",
+                                             err)) {
+        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+        return false;
+    }
+    if (opt.jump_host &&
+        !libssh2detail::validateEndpointHost(*opt.jump_host, "Jump host",
+                                             err)) {
+        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+        return false;
+    }
 
     if (!tcpConnect(opt, err))
         return false;

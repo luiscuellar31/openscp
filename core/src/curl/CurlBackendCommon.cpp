@@ -1,5 +1,6 @@
 // Shared internal helpers for libcurl-based backends (FTP/WebDAV).
 #include "CurlBackendCommon.hpp"
+#include "../common/SafeLocalFile.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -84,12 +85,14 @@ bool validateUrlHost(const std::string &host, const char *fieldLabel,
         return false;
     }
 
-    for (const unsigned char ch : host) {
-        if (ch == 0 || ch < 0x20 || ch == 0x7f || std::isspace(ch) != 0 ||
-            ch == '/' || ch == '\\' || ch == '@' || ch == '?' || ch == '#') {
-            err = label + " contains a forbidden URL authority character.";
-            return false;
-        }
+    const auto forbiddenAuthorityCharacter = [](const unsigned char ch) {
+        return ch < 0x20 || ch == 0x7f || std::isspace(ch) != 0 ||
+               ch == '/' || ch == '\\' || ch == '@' || ch == '?' ||
+               ch == '#';
+    };
+    if (std::any_of(host.begin(), host.end(), forbiddenAuthorityCharacter)) {
+        err = label + " contains a forbidden URL authority character.";
+        return false;
     }
 
     const bool bracketed = host.front() == '[' || host.back() == ']';
@@ -100,7 +103,8 @@ bool validateUrlHost(const std::string &host, const char *fieldLabel,
             err = label + " contains malformed IPv6 brackets.";
             return false;
         }
-        const std::string_view literal(host.data() + 1, host.size() - 2);
+        const std::string_view literal =
+            std::string_view(host).substr(1, host.size() - 2);
         if (literal.find(':') == std::string_view::npos) {
             err = label + " contains brackets around a non-IPv6 host.";
             return false;
@@ -220,37 +224,12 @@ std::string localPartialPath(const std::string &destination) {
 }
 
 bool flushAndSyncFile(std::FILE *file, std::string &err) {
-    if (!file) {
-        err = "Invalid local partial file handle.";
-        return false;
-    }
-    if (std::fflush(file) != 0) {
-        err = std::string("Could not flush local partial file: ") +
-              std::strerror(errno);
-        return false;
-    }
-#ifdef _WIN32
-    if (_commit(_fileno(file)) != 0) {
-#else
-    if (::fsync(::fileno(file)) != 0) {
-#endif
-        err = std::string("Could not synchronize local partial file: ") +
-              std::strerror(errno);
-        return false;
-    }
-    return true;
+    return localfiles::flushAndSync(file, err);
 }
 
 bool atomicReplaceLocalFile(const std::string &partial,
                             const std::string &destination, std::string &err) {
-    // Both names are in the same directory, so POSIX rename is an atomic
-    // replacement. Windows support is currently out of release scope; its
-    // standard library rename may reject an existing destination safely.
-    if (std::rename(partial.c_str(), destination.c_str()) == 0)
-        return true;
-    err = std::string("Could not atomically finalize local file: ") +
-          std::strerror(errno);
-    return false;
+    return localfiles::atomicReplace(partial, destination, err);
 }
 
 RemoteError errorFromCurl(CURLcode code, std::string message,
@@ -497,11 +476,25 @@ bool configureTlsVerification(CURL *curl, bool verifyPeer,
 
 size_t appendStringCallback(char *ptr, size_t size, size_t nmemb,
                             void *userdata) {
-    if (!userdata)
+    auto *sink = static_cast<BoundedStringSink *>(userdata);
+    if (!sink || !sink->output || !ptr)
         return 0;
-    auto *out = static_cast<std::string *>(userdata);
+    if (size != 0 && nmemb > std::numeric_limits<size_t>::max() / size) {
+        sink->limitExceeded = true;
+        return 0;
+    }
     const size_t total = size * nmemb;
-    out->append(ptr, total);
+    if (sink->output->size() > sink->maxBytes ||
+        total > sink->maxBytes - sink->output->size()) {
+        sink->limitExceeded = true;
+        return 0;
+    }
+    try {
+        sink->output->append(ptr, total);
+    } catch (...) {
+        sink->allocationFailed = true;
+        return 0;
+    }
     return total;
 }
 

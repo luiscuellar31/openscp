@@ -1,6 +1,7 @@
 // SCP backend module using libssh2 scp_send/scp_recv channels for file
 // transfers over SSH.
 #include "openscp/Libssh2ScpClient.hpp"
+#include "../common/SafeLocalFile.hpp"
 #include <libssh2.h>
 
 #include <algorithm>
@@ -8,7 +9,9 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
+#include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -308,17 +311,30 @@ bool Libssh2ScpClient::get(
         return false;
     }
 
-    std::FILE *localFile = std::fopen(local.c_str(), "wb");
+    if (fileInfo.st_size < 0 ||
+        static_cast<std::uintmax_t>(fileInfo.st_size) >
+            std::numeric_limits<std::size_t>::max()) {
+        err = "Remote SCP file size cannot be represented locally";
+        closeScpChannel(channel, false);
+        setLastOperationError(RemoteErrorKind::Protocol, err);
+        return false;
+    }
+    const std::size_t total = static_cast<std::size_t>(fileInfo.st_size);
+
+    const std::string partial = local + ".part";
+    std::string openError;
+    std::FILE *localFile = localfiles::openRegularFileForWrite(
+        partial, localfiles::WriteMode::Truncate, openError);
     if (!localFile) {
         const int nativeError = errno;
-        err = "Could not open local file for writing";
+        err = openError.empty()
+                  ? "Could not open local partial file for writing"
+                  : openError;
         closeScpChannel(channel, false);
         setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
         return false;
     }
 
-    const std::size_t total =
-        (fileInfo.st_size > 0) ? static_cast<std::size_t>(fileInfo.st_size) : 0;
     std::vector<char> buffer(kScpChunkSize);
     std::size_t done = 0;
 
@@ -327,7 +343,6 @@ bool Libssh2ScpClient::get(
         if (shouldCancel && shouldCancel()) {
             err = "Canceled by user";
             std::fclose(localFile);
-            (void)std::remove(local.c_str());
             closeScpChannel(channel, false);
             return false;
         }
@@ -340,7 +355,6 @@ bool Libssh2ScpClient::get(
         }
         if (n < 0) {
             std::fclose(localFile);
-            (void)std::remove(local.c_str());
             closeScpChannel(channel, false);
             std::string scpErr = "SCP read failed";
             appendSessionErrorDetail(session, scpErr);
@@ -375,26 +389,64 @@ bool Libssh2ScpClient::get(
             const int nativeError = errno;
             err = "Local write failed";
             std::fclose(localFile);
-            (void)std::remove(local.c_str());
             closeScpChannel(channel, false);
             setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
             return false;
         }
 
-        done += static_cast<std::size_t>(n);
+        const std::size_t received = static_cast<std::size_t>(n);
+        if (received > std::numeric_limits<std::size_t>::max() - done) {
+            err = "Remote SCP download exceeded the local size limit";
+            std::fclose(localFile);
+            closeScpChannel(channel, false);
+            setLastOperationError(RemoteErrorKind::Integrity, err);
+            return false;
+        }
+        done += received;
         if (progress && total)
             progress(done, total);
     }
 
+    if (done != total) {
+        err = "Remote SCP download size did not match advertised metadata";
+        std::fclose(localFile);
+        closeScpChannel(channel, false);
+        setLastOperationError(RemoteErrorKind::Integrity, err);
+        return false;
+    }
+
+    std::string syncError;
+    if (!localfiles::flushAndSync(localFile, syncError)) {
+        const int nativeError = errno;
+        std::fclose(localFile);
+        closeScpChannel(channel, false);
+        err = syncError.empty() ? "Could not synchronize local partial file"
+                                : syncError;
+        setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
+        return false;
+    }
     if (std::fclose(localFile) != 0) {
         const int nativeError = errno;
-        err = "Could not finalize local file";
-        (void)std::remove(local.c_str());
         closeScpChannel(channel, false);
+        err = "Could not close local partial file";
         setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
         return false;
     }
     closeScpChannel(channel, true);
+    if (shouldCancel && shouldCancel()) {
+        err = "Canceled by user";
+        setLastOperationError(RemoteErrorKind::Canceled, err);
+        return false;
+    }
+    std::string replaceError;
+    if (!localfiles::atomicReplace(partial, local, replaceError)) {
+        const int nativeError = errno;
+        err = replaceError.empty()
+                  ? "Could not atomically finalize local SCP download"
+                  : replaceError;
+        setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
+        return false;
+    }
     if (progress && total)
         progress(done, total);
     return true;
@@ -417,6 +469,15 @@ bool Libssh2ScpClient::put(
     if (!session) {
         err = "Not connected";
         return false;
+    }
+
+    // Auto mode prioritizes SFTP's temporary upload + atomic rename. Classic
+    // SCP writes directly to the final remote path and is only used when the
+    // user explicitly selects SCP-only mode.
+    if (sftpFallbackEnabled()) {
+        return transferViaSftpFallbackPut(local, remote, err,
+                                          std::move(progress),
+                                          std::move(shouldCancel));
     }
 
     std::uint64_t total = 0;

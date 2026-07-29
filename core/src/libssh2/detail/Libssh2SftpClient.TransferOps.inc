@@ -148,11 +148,17 @@ bool Libssh2SftpClient::get(
     }
 
     // Open local .part for writing
-    FILE *lf = ::fopen(localPart.c_str(), offset > 0 ? "ab" : "wb");
+    std::string openError;
+    FILE *lf = localfiles::openRegularFileForWrite(
+        localPart, offset > 0 ? localfiles::WriteMode::Append
+                              : localfiles::WriteMode::Truncate,
+        openError);
     if (!lf) {
         const int nativeError = errno;
         libssh2_sftp_close(rh);
-        err = "Could not open local file (.part) for writing";
+        err = openError.empty()
+                  ? "Could not open local file (.part) for writing"
+                  : openError;
         setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
         return false;
     }
