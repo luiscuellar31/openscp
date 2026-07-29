@@ -1,21 +1,99 @@
 // Manages saved sites with QSettings and SecretStore for credentials.
 #include "SiteManagerDialog.hpp"
 #include "ConnectionDialog.hpp"
+#include "SavedSiteSecrets.hpp"
 #include "SavedSitesPersistence.hpp"
 #include "SecretStore.hpp"
 #include "UiAlerts.hpp"
 #include "openscp/KnownHostsUtils.hpp"
+#include <QAbstractTableModel>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QHeaderView>
+#include <QItemSelectionModel>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QSaveFile>
 #include <QSettings>
-#include <QTableWidget>
+#include <QSortFilterProxyModel>
+#include <QTableView>
 #include <QUuid>
 #include <QVBoxLayout>
+
+class SiteListModel final : public QAbstractTableModel {
+    public:
+    explicit SiteListModel(const QVector<SiteEntry> *sites,
+                           QObject *parent = nullptr)
+        : QAbstractTableModel(parent), sites_(sites) {}
+
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override {
+        return parent.isValid() || !sites_ ? 0 : sites_->size();
+    }
+
+    int columnCount(const QModelIndex &parent = QModelIndex()) const override {
+        return parent.isValid() ? 0 : 4;
+    }
+
+    QVariant data(const QModelIndex &index,
+                  int role = Qt::DisplayRole) const override {
+        if (!index.isValid() || !sites_ || index.row() < 0 ||
+            index.row() >= sites_->size()) {
+            return {};
+        }
+        const SiteEntry &site = sites_->at(index.row());
+        QString text;
+        switch (index.column()) {
+        case 0:
+            text = site.name;
+            break;
+        case 1:
+            text = QString::fromLatin1(
+                openscp::protocolDisplayName(site.opt.protocol));
+            break;
+        case 2:
+            text = QString::fromStdString(site.opt.host);
+            break;
+        case 3:
+            text = QString::fromStdString(site.opt.username);
+            break;
+        default:
+            return {};
+        }
+        if (role == Qt::DisplayRole || role == Qt::ToolTipRole)
+            return text;
+        if (role == Qt::UserRole)
+            return index.row();
+        return {};
+    }
+
+    QVariant headerData(int section, Qt::Orientation orientation,
+                        int role = Qt::DisplayRole) const override {
+        if (orientation != Qt::Horizontal || role != Qt::DisplayRole)
+            return {};
+        switch (section) {
+        case 0:
+            return QObject::tr("Name");
+        case 1:
+            return QObject::tr("Protocol");
+        case 2:
+            return QObject::tr("Host");
+        case 3:
+            return QObject::tr("User");
+        default:
+            return {};
+        }
+    }
+
+    void reload() {
+        beginResetModel();
+        endResetModel();
+    }
+
+    private:
+    const QVector<SiteEntry> *sites_ = nullptr;
+};
 
 static QString persistStatusText(SecretStore::PersistStatus status) {
     switch (status) {
@@ -88,19 +166,13 @@ static QString newSiteId() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
 
-static QString idSecretKey(const QString &siteId, const QString &item) {
-    return QString("site-id:%1:%2").arg(siteId, item);
-}
-
 static QString legacyNameSecretKey(const QString &siteName,
                                    const QString &item) {
     return QString("site:%1:%2").arg(siteName, item);
 }
 
 static QString siteSecretKey(const SiteEntry &entry, const QString &item) {
-    if (!entry.siteId.isEmpty())
-        return idSecretKey(entry.siteId, item);
-    return legacyNameSecretKey(entry.name, item);
+    return SavedSiteSecrets::stableKey(entry, item);
 }
 
 static void removeLegacyNameSecrets(SecretStore &store,
@@ -119,12 +191,25 @@ SiteManagerDialog::SiteManagerDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle(tr("Site Manager"));
     resize(720, 480); // compact default; view will elide/scroll as needed
     auto *mainLayout = new QVBoxLayout(this);
-    table_ = new QTableWidget(this);
-    table_->setColumnCount(4);
-    table_->setHorizontalHeaderLabels(
-        {tr("Name"), tr("Protocol"), tr("Host"), tr("User")});
+
+    search_ = new QLineEdit(this);
+    search_->setClearButtonEnabled(true);
+    search_->setPlaceholderText(
+        tr("Search by name, protocol, host, or user…"));
+    search_->setAccessibleName(tr("Search saved sites"));
+    mainLayout->addWidget(search_);
+
+    model_ = new SiteListModel(&sites_, this);
+    proxy_ = new QSortFilterProxyModel(this);
+    proxy_->setSourceModel(model_);
+    proxy_->setFilterCaseSensitivity(Qt::CaseInsensitive);
+    proxy_->setFilterKeyColumn(-1);
+    proxy_->setSortCaseSensitivity(Qt::CaseInsensitive);
+    proxy_->setDynamicSortFilter(true);
+
+    table_ = new QTableView(this);
+    table_->setModel(proxy_);
     table_->verticalHeader()->setVisible(false);
-    // Column sizing: stretch to fill and adapt on resize
     table_->horizontalHeader()->setStretchLastSection(true);
     table_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     table_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
@@ -144,6 +229,8 @@ SiteManagerDialog::SiteManagerDialog(QWidget *parent) : QDialog(parent) {
     auto *dialogButtons = new QDialogButtonBox(this);
     btAdd_ = dialogButtons->addButton(tr("Add"), QDialogButtonBox::ActionRole);
     btEdit_ = dialogButtons->addButton(tr("Edit"), QDialogButtonBox::ActionRole);
+    btDuplicate_ =
+        dialogButtons->addButton(tr("Duplicate"), QDialogButtonBox::ActionRole);
     btDel_ =
         dialogButtons->addButton(tr("Delete"), QDialogButtonBox::ActionRole);
     btConn_ =
@@ -154,6 +241,8 @@ SiteManagerDialog::SiteManagerDialog(QWidget *parent) : QDialog(parent) {
     mainLayout->addWidget(dialogButtons);
     connect(btAdd_, &QPushButton::clicked, this, &SiteManagerDialog::onAdd);
     connect(btEdit_, &QPushButton::clicked, this, &SiteManagerDialog::onEdit);
+    connect(btDuplicate_, &QPushButton::clicked, this,
+            &SiteManagerDialog::onDuplicate);
     connect(btDel_, &QPushButton::clicked, this, &SiteManagerDialog::onRemove);
     connect(btConn_, &QPushButton::clicked, this,
             &SiteManagerDialog::onConnect);
@@ -166,12 +255,13 @@ SiteManagerDialog::SiteManagerDialog(QWidget *parent) : QDialog(parent) {
     updateButtons();
     connect(table_->selectionModel(), &QItemSelectionModel::selectionChanged,
             this, &SiteManagerDialog::updateButtons);
+    connect(search_, &QLineEdit::textChanged, proxy_,
+            &QSortFilterProxyModel::setFilterFixedString);
     // Double-click: primary action (connect) for faster workflow.
-    connect(table_, &QTableWidget::itemDoubleClicked, this,
-            [this](QTableWidgetItem *clickedItem) {
-                if (!clickedItem)
-                    return;
-                onConnect();
+    connect(table_, &QTableView::doubleClicked, this,
+            [this](const QModelIndex &index) {
+                if (index.isValid())
+                    onConnect();
             });
 }
 
@@ -187,55 +277,57 @@ void SiteManagerDialog::loadSites() {
             .createNewId = [] { return newSiteId(); },
         });
     sites_ = loaded.sites;
-    if (loaded.needsSave)
-        saveSites();
+    const SavedSiteSecrets::MigrationResult migration =
+        SavedSiteSecrets::migrateLegacyPlaintext(loaded);
+    legacySecretMigrationBlocked_ = !migration.complete;
+    showPersistIssues(this, migration.issues);
+    if (loaded.needsSave && migration.complete)
+        (void)saveSites();
 }
 
-void SiteManagerDialog::saveSites() {
+bool SiteManagerDialog::saveSites() {
+    if (legacySecretMigrationBlocked_) {
+        UiAlerts::warning(
+            this, tr("Sites not saved"),
+            tr("OpenSCP could not migrate one or more legacy credentials to "
+               "the secure backend. Saved-site changes were not written, so "
+               "the existing credentials remain recoverable."));
+        return false;
+    }
     // Keep Site Manager save semantics (no forced sync).
     SavedSitesPersistence::saveSites(sites_, false);
+    return true;
 }
 
 void SiteManagerDialog::refresh() {
-    // Avoid reordering while populating
-    const bool wasSorting = table_->isSortingEnabled();
-    if (wasSorting)
-        table_->setSortingEnabled(false);
-    table_->setRowCount(sites_.size());
-    for (int siteIndex = 0; siteIndex < sites_.size(); ++siteIndex) {
-        const QString fullName = sites_[siteIndex].name;
-        // Keep full text in the item; let view elide visually
-        auto *itName = new QTableWidgetItem(fullName);
-        itName->setToolTip(fullName);
-        itName->setData(Qt::UserRole + 1, fullName);
-        const QString fullHost =
-            QString::fromStdString(sites_[siteIndex].opt.host);
-        auto *itHost = new QTableWidgetItem(fullHost);
-        itHost->setToolTip(fullHost);
-        itHost->setData(Qt::UserRole + 1, fullHost);
-        const QString fullProtocol = QString::fromLatin1(
-            openscp::protocolDisplayName(sites_[siteIndex].opt.protocol));
-        auto *itProtocol = new QTableWidgetItem(fullProtocol);
-        itProtocol->setToolTip(fullProtocol);
-        itProtocol->setData(Qt::UserRole + 1, fullProtocol);
-        const QString fullUser =
-            QString::fromStdString(sites_[siteIndex].opt.username);
-        auto *itUser = new QTableWidgetItem(fullUser);
-        itUser->setToolTip(fullUser);
-        itUser->setData(Qt::UserRole + 1, fullUser);
-        // Store original index so selection works even when the view is sorted
-        itName->setData(Qt::UserRole, siteIndex);
-        itProtocol->setData(Qt::UserRole, siteIndex);
-        itHost->setData(Qt::UserRole, siteIndex);
-        itUser->setData(Qt::UserRole, siteIndex);
-        table_->setItem(siteIndex, 0, itName);
-        table_->setItem(siteIndex, 1, itProtocol);
-        table_->setItem(siteIndex, 2, itHost);
-        table_->setItem(siteIndex, 3, itUser);
-    }
-    if (wasSorting)
-        table_->setSortingEnabled(true);
+    if (model_)
+        model_->reload();
     updateButtons();
+}
+
+int SiteManagerDialog::selectedSiteIndex() const {
+    if (!table_ || !table_->selectionModel() || !proxy_)
+        return -1;
+    const QModelIndexList rows = table_->selectionModel()->selectedRows();
+    if (rows.isEmpty())
+        return -1;
+    const QModelIndex source = proxy_->mapToSource(rows.constFirst());
+    return source.isValid() ? source.row() : -1;
+}
+
+void SiteManagerDialog::selectSiteIndex(int siteIndex) {
+    if (!table_ || !model_ || !proxy_ || siteIndex < 0 ||
+        siteIndex >= sites_.size()) {
+        return;
+    }
+    const QModelIndex source = model_->index(siteIndex, 0);
+    const QModelIndex view = proxy_->mapFromSource(source);
+    if (!view.isValid())
+        return;
+    table_->setCurrentIndex(view);
+    table_->selectRow(view.row());
+    table_->scrollTo(view, QAbstractItemView::PositionAtCenter);
+    table_->setFocus(Qt::OtherFocusReason);
 }
 
 void SiteManagerDialog::onAdd() {
@@ -263,8 +355,15 @@ void SiteManagerDialog::onAdd() {
     newEntry.siteId = newSiteId();
     newEntry.name = name;
     newEntry.opt = sessionOptions;
+    newEntry.initialLocalPath = dlg.initialLocalPath();
+    newEntry.initialRemotePath = dlg.initialRemotePath();
+    newEntry.rememberLastPaths = dlg.rememberLastPaths();
     sites_.push_back(newEntry);
-    saveSites();
+    if (!saveSites()) {
+        sites_.removeLast();
+        refresh();
+        return;
+    }
     refresh();
     // Save secrets
     SecretStore store;
@@ -299,13 +398,7 @@ void SiteManagerDialog::onAdd() {
 }
 
 void SiteManagerDialog::onEdit() {
-    auto selectionModel = table_->selectionModel();
-    if (!selectionModel || !selectionModel->hasSelection())
-        return;
-    int viewRow = selectionModel->selectedRows().first().row();
-    int modelIndex = table_->item(viewRow, 0)
-                         ? table_->item(viewRow, 0)->data(Qt::UserRole).toInt()
-                         : viewRow;
+    const int modelIndex = selectedSiteIndex();
     if (modelIndex < 0 || modelIndex >= sites_.size())
         return;
     SiteEntry editedEntry = sites_[modelIndex];
@@ -313,6 +406,9 @@ void SiteManagerDialog::onEdit() {
     dlg.setWindowTitle(tr("Edit site"));
     dlg.setSiteNameVisible(true);
     dlg.setSiteName(editedEntry.name);
+    dlg.setInitialLocalPath(editedEntry.initialLocalPath);
+    dlg.setInitialRemotePath(editedEntry.initialRemotePath);
+    dlg.setRememberLastPaths(editedEntry.rememberLastPaths);
     // Preload site options and stored secrets
     {
         SecretStore store;
@@ -351,6 +447,9 @@ void SiteManagerDialog::onEdit() {
     if (dlg.exec() != QDialog::Accepted)
         return;
     editedEntry.opt = dlg.options();
+    editedEntry.initialLocalPath = dlg.initialLocalPath();
+    editedEntry.initialRemotePath = dlg.initialRemotePath();
+    editedEntry.rememberLastPaths = dlg.rememberLastPaths();
     QString name = normalizedSiteName(dlg.siteName());
     if (name.isEmpty()) {
         showMissingNameIssue(this);
@@ -360,24 +459,18 @@ void SiteManagerDialog::onEdit() {
         showDuplicateNameIssue(this, name);
         return;
     }
-    const QString oldName = sites_[modelIndex].name;
+    const SiteEntry previousEntry = sites_[modelIndex];
+    const QString oldName = previousEntry.name;
     editedEntry.name = name;
     sites_[modelIndex] = editedEntry;
-    saveSites();
-    refresh();
-    // Reselect and focus the edited site even if sorting changed the row
-    for (int rowIndex = 0; rowIndex < table_->rowCount(); ++rowIndex) {
-        if (auto *nameItem = table_->item(rowIndex, 0)) {
-            if (nameItem->data(Qt::UserRole).toInt() == modelIndex) {
-                table_->setCurrentCell(rowIndex, 0);
-                table_->selectRow(rowIndex);
-                table_->scrollToItem(nameItem,
-                                     QAbstractItemView::PositionAtCenter);
-                table_->setFocus(Qt::OtherFocusReason);
-                break;
-            }
-        }
+    if (!saveSites()) {
+        sites_[modelIndex] = previousEntry;
+        refresh();
+        selectSiteIndex(modelIndex);
+        return;
     }
+    refresh();
+    selectSiteIndex(modelIndex);
     // Update secrets
     SecretStore store;
     QStringList persistIssues;
@@ -413,14 +506,78 @@ void SiteManagerDialog::onEdit() {
     showPersistIssues(this, persistIssues);
 }
 
-void SiteManagerDialog::onRemove() {
-    auto selectionModel = table_->selectionModel();
-    if (!selectionModel || !selectionModel->hasSelection())
+void SiteManagerDialog::onDuplicate() {
+    const int modelIndex = selectedSiteIndex();
+    if (modelIndex < 0 || modelIndex >= sites_.size())
         return;
-    int viewRow = selectionModel->selectedRows().first().row();
-    int modelIndex = table_->item(viewRow, 0)
-                         ? table_->item(viewRow, 0)->data(Qt::UserRole).toInt()
-                         : viewRow;
+
+    const SiteEntry source = sites_.at(modelIndex);
+    SiteEntry duplicate = source;
+    duplicate.siteId = newSiteId();
+    duplicate.opt.password.reset();
+    duplicate.opt.private_key_passphrase.reset();
+    duplicate.opt.proxy_password.reset();
+
+    const QString sourceName = source.name.trimmed().isEmpty()
+                                   ? tr("Unnamed site")
+                                   : source.name.trimmed();
+    const QString baseName = tr("%1 copy").arg(sourceName);
+    duplicate.name = baseName;
+    for (int suffix = 2;
+         hasDuplicateSiteName(sites_, duplicate.name) && suffix < 10000;
+         ++suffix) {
+        duplicate.name = tr("%1 copy %2").arg(sourceName).arg(suffix);
+    }
+    if (hasDuplicateSiteName(sites_, duplicate.name)) {
+        duplicate.name =
+            QString("%1 %2")
+                .arg(baseName,
+                     duplicate.siteId.left(6));
+    }
+
+    sites_.push_back(duplicate);
+    if (!saveSites()) {
+        sites_.removeLast();
+        refresh();
+        selectSiteIndex(modelIndex);
+        return;
+    }
+    refresh();
+    selectSiteIndex(sites_.size() - 1);
+
+    const auto copyChoice = UiAlerts::question(
+        this, tr("Copy credentials?"),
+        tr("The site was duplicated with a new identity.\n\n"
+           "Copy its saved credentials to the duplicate?"),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (copyChoice != QMessageBox::Yes)
+        return;
+
+    SecretStore store;
+    QStringList persistIssues;
+    const auto copySecret = [&](const QString &label, const QString &item) {
+        auto value = store.getSecret(siteSecretKey(source, item));
+        if (!value) {
+            value =
+                store.getSecret(legacyNameSecretKey(source.name, item));
+        }
+        if (!value)
+            return;
+        const auto result =
+            store.setSecret(siteSecretKey(duplicate, item), *value);
+        if (!result.isStored())
+            persistIssues << persistIssueLine(label, result);
+    };
+    copySecret(tr("Password"), QStringLiteral("password"));
+    copySecret(tr("Key passphrase"), QStringLiteral("keypass"));
+    if (source.opt.proxy_type != openscp::ProxyType::None) {
+        copySecret(tr("Proxy password"), QStringLiteral("proxypass"));
+    }
+    showPersistIssues(this, persistIssues);
+}
+
+void SiteManagerDialog::onRemove() {
+    const int modelIndex = selectedSiteIndex();
     if (modelIndex < 0 || modelIndex >= sites_.size())
         return;
     // Capture fields before removing for optional cleanup
@@ -433,7 +590,12 @@ void SiteManagerDialog::onRemove() {
             ? QString::fromStdString(*removed.opt.known_hosts_path)
             : QString();
     sites_.remove(modelIndex);
-    saveSites();
+    if (!saveSites()) {
+        sites_.insert(modelIndex, removed);
+        refresh();
+        selectSiteIndex(modelIndex);
+        return;
+    }
     // Optionally delete stored credentials and known_hosts entry for this site
     QSettings settings("OpenSCP", "OpenSCP");
     const bool deleteSecrets =
@@ -465,13 +627,7 @@ void SiteManagerDialog::onRemove() {
 void SiteManagerDialog::onConnect() { accept(); }
 
 bool SiteManagerDialog::selectedOptions(openscp::SessionOptions &out) const {
-    auto selectionModel = table_->selectionModel();
-    if (!selectionModel || !selectionModel->hasSelection())
-        return false;
-    int viewRow = selectionModel->selectedRows().first().row();
-    int modelIndex = table_->item(viewRow, 0)
-                         ? table_->item(viewRow, 0)->data(Qt::UserRole).toInt()
-                         : viewRow;
+    const int modelIndex = selectedSiteIndex();
     if (modelIndex < 0 || modelIndex >= sites_.size())
         return false;
     out = sites_[modelIndex].opt;
@@ -630,11 +786,25 @@ bool SiteManagerDialog::selectedOptions(openscp::SessionOptions &out) const {
     return true;
 }
 
+bool SiteManagerDialog::selectedSite(SiteEntry &out) const {
+    const int modelIndex = selectedSiteIndex();
+    if (modelIndex < 0 || modelIndex >= sites_.size())
+        return false;
+    out = sites_.at(modelIndex);
+    openscp::SessionOptions options;
+    if (!selectedOptions(options))
+        return false;
+    out.opt = std::move(options);
+    return true;
+}
+
 void SiteManagerDialog::updateButtons() {
     bool hasSelection = table_ && table_->selectionModel() &&
                         table_->selectionModel()->hasSelection();
     if (btEdit_)
         btEdit_->setEnabled(hasSelection);
+    if (btDuplicate_)
+        btDuplicate_->setEnabled(hasSelection);
     if (btDel_)
         btDel_->setEnabled(hasSelection);
     if (btConn_)

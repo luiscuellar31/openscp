@@ -55,6 +55,26 @@ QString uniqueSiteId(const SavedSitesPersistence::LoadOptions &options,
     return candidate;
 }
 
+QString normalizeInitialRemotePath(const QString &rawPath) {
+    const QStringList rawSegments =
+        rawPath.trimmed().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    QStringList segments;
+    segments.reserve(rawSegments.size());
+    for (const QString &segment : rawSegments) {
+        if (segment == QStringLiteral("."))
+            continue;
+        if (segment == QStringLiteral("..")) {
+            if (!segments.isEmpty())
+                segments.removeLast();
+            continue;
+        }
+        segments.push_back(segment);
+    }
+    return segments.isEmpty()
+               ? QStringLiteral("/")
+               : QStringLiteral("/") + segments.join(QLatin1Char('/'));
+}
+
 } // namespace
 
 SavedSitesPersistence::LoadResult
@@ -88,6 +108,30 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
         site.name = settings.value("name").toString();
         if (options.trimSiteNames)
             site.name = site.name.trimmed();
+
+        const bool hasInitialLocalPath =
+            settings.contains("initialLocalPath");
+        const bool hasInitialRemotePath =
+            settings.contains("initialRemotePath");
+        const bool hasRememberLastPaths =
+            settings.contains("rememberLastPaths");
+        site.initialLocalPath =
+            settings.value("initialLocalPath", QString()).toString().trimmed();
+        site.initialRemotePath =
+            settings.value("initialRemotePath", QStringLiteral("/"))
+                .toString()
+                .trimmed();
+        const QString normalizedInitialRemotePath =
+            normalizeInitialRemotePath(site.initialRemotePath);
+        if (site.initialRemotePath != normalizedInitialRemotePath)
+            result.needsSave = true;
+        site.initialRemotePath = normalizedInitialRemotePath;
+        site.rememberLastPaths =
+            settings.value("rememberLastPaths", false).toBool();
+        if (!hasInitialLocalPath || !hasInitialRemotePath ||
+            !hasRememberLastPaths) {
+            result.needsSave = true;
+        }
 
         site.opt.protocol = openscp::protocolFromStorageName(
             settings
@@ -196,6 +240,15 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
 
         site.opt.ftps_verify_peer =
             settings.value("ftpsVerifyPeer", defaultFtpsVerifyPeer).toBool();
+        const bool hasFtpsModeKey = settings.contains("ftpsMode");
+        site.opt.ftps_mode = openscp::ftpsModeFromStorageName(
+            settings.value("ftpsMode", QStringLiteral("auto"))
+                .toString()
+                .trimmed()
+                .toLower()
+                .toStdString());
+        if (!hasFtpsModeKey)
+            result.needsSave = true;
         const QString ftpsCaPath =
             settings.value("ftpsCaCertPath", defaultFtpsCaPath)
                 .toString()
@@ -205,6 +258,15 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
 
         site.opt.webdav_verify_peer =
             settings.value("webdavVerifyPeer", true).toBool();
+        const bool hasWebDavBasePathKey =
+            settings.contains("webdavBasePath");
+        site.opt.webdav_base_path = openscp::normalizeWebDavBasePath(
+            settings.value("webdavBasePath", QStringLiteral("/"))
+                .toString()
+                .trimmed()
+                .toStdString());
+        if (!hasWebDavBasePathKey)
+            result.needsSave = true;
         const QString webDavCaPath =
             settings
                 .value("webdavCaCertPath", QString())
@@ -219,6 +281,21 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
             site.opt.webdav_verify_peer = false;
             site.opt.webdav_ca_cert_path.reset();
         }
+
+        const auto collectLegacySecret = [&](const char *settingsKey,
+                                             const char *secretItem) {
+            if (!settings.contains(settingsKey))
+                return;
+            result.needsSave = true;
+            const QString value = settings.value(settingsKey).toString();
+            if (!value.isEmpty()) {
+                result.legacySecrets.push_back(
+                    {siteIndex, QString::fromLatin1(secretItem), value});
+            }
+        };
+        collectLegacySecret("password", "password");
+        collectLegacySecret("keyPass", "keypass");
+        collectLegacySecret("proxyPass", "proxypass");
 
         result.sites.push_back(site);
     }
@@ -237,6 +314,11 @@ void SavedSitesPersistence::saveSites(const QVector<SiteEntry> &sites,
         const SiteEntry &site = sites[siteIndex];
         settings.setValue("id", site.siteId);
         settings.setValue("name", site.name);
+        settings.setValue("initialLocalPath", site.initialLocalPath);
+        settings.setValue(
+            "initialRemotePath",
+            normalizeInitialRemotePath(site.initialRemotePath));
+        settings.setValue("rememberLastPaths", site.rememberLastPaths);
         settings.setValue(
             "protocol",
             QString::fromLatin1(openscp::protocolStorageName(site.opt.protocol)));
@@ -289,11 +371,19 @@ void SavedSitesPersistence::saveSites(const QVector<SiteEntry> &sites,
                           static_cast<int>(site.opt.transfer_integrity_policy));
         settings.setValue("ftpsVerifyPeer", site.opt.ftps_verify_peer);
         settings.setValue(
+            "ftpsMode",
+            QString::fromLatin1(
+                openscp::ftpsModeStorageName(site.opt.ftps_mode)));
+        settings.setValue(
             "ftpsCaCertPath",
             site.opt.ftps_ca_cert_path
                 ? QString::fromStdString(*site.opt.ftps_ca_cert_path)
                 : QString());
         settings.setValue("webdavVerifyPeer", site.opt.webdav_verify_peer);
+        settings.setValue(
+            "webdavBasePath",
+            QString::fromStdString(openscp::normalizeWebDavBasePath(
+                site.opt.webdav_base_path)));
         settings.setValue(
             "webdavCaCertPath",
             site.opt.webdav_ca_cert_path
