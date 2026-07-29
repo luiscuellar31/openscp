@@ -28,6 +28,9 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include <algorithm>
+#include <functional>
+
 static constexpr int kProgressColumnWidthPx = 84;
 
 static QString statusText(TransferTask::Status s) {
@@ -44,6 +47,14 @@ static QString statusText(TransferTask::Status s) {
         return TransferQueueDialog::tr("Error");
     case TransferTask::Status::Canceled:
         return TransferQueueDialog::tr("Canceled");
+    case TransferTask::Status::WaitingForConnection:
+        return TransferQueueDialog::tr("Waiting for connection");
+    case TransferTask::Status::RetryWaiting:
+        return TransferQueueDialog::tr("Retrying");
+    case TransferTask::Status::Skipped:
+        return TransferQueueDialog::tr("Skipped");
+    case TransferTask::Status::Warning:
+        return TransferQueueDialog::tr("Warning");
     }
     return {};
 }
@@ -104,28 +115,37 @@ static QString formatEta(int sec) {
 
 static bool canPauseStatus(TransferTask::Status s) {
     return s == TransferTask::Status::Queued ||
-           s == TransferTask::Status::Running;
+           s == TransferTask::Status::Running ||
+           s == TransferTask::Status::RetryWaiting ||
+           s == TransferTask::Status::WaitingForConnection;
 }
 
 static bool canResumeStatus(TransferTask::Status s) {
-    return s == TransferTask::Status::Paused;
+    return s == TransferTask::Status::Paused ||
+           s == TransferTask::Status::WaitingForConnection;
 }
 
 static bool canLimitStatus(TransferTask::Status s) {
     return s == TransferTask::Status::Queued ||
            s == TransferTask::Status::Running ||
-           s == TransferTask::Status::Paused;
+           s == TransferTask::Status::Paused ||
+           s == TransferTask::Status::RetryWaiting ||
+           s == TransferTask::Status::WaitingForConnection;
 }
 
 static bool canCancelStatus(TransferTask::Status s) {
     return s == TransferTask::Status::Queued ||
            s == TransferTask::Status::Running ||
-           s == TransferTask::Status::Paused;
+           s == TransferTask::Status::Paused ||
+           s == TransferTask::Status::RetryWaiting ||
+           s == TransferTask::Status::WaitingForConnection;
 }
 
-static bool canRetryStatus(TransferTask::Status s) {
-    return s == TransferTask::Status::Error ||
-           s == TransferTask::Status::Canceled;
+static bool canRetryTask(const TransferTask &task) {
+    return !task.commitUncertain &&
+           (task.status == TransferTask::Status::Error ||
+            task.status == TransferTask::Status::Canceled ||
+            task.status == TransferTask::Status::Warning);
 }
 
 struct SelectedActionsState {
@@ -184,9 +204,11 @@ buildSelectedActionsState(const QVector<quint64> &ids,
         out.canResume = out.canResume || canResumeStatus(task.status);
         out.canLimit = out.canLimit || canLimitStatus(task.status);
         out.canCancel = out.canCancel || canCancelStatus(task.status);
-        out.canRetry = out.canRetry || canRetryStatus(task.status);
+        out.canRetry = out.canRetry || canRetryTask(task);
         out.canOpenDestination =
-            out.canOpenDestination || (task.type == TransferTask::Type::Download);
+            out.canOpenDestination ||
+            task.type == TransferTask::Type::Download ||
+            task.type == TransferTask::Type::CreateLocalDirectory;
     });
     return out;
 }
@@ -331,9 +353,25 @@ class TransferTaskTableModel final : public QAbstractTableModel {
         case ColEta:
             return formatEta(task.etaSeconds);
         case ColType:
-            return task.type == TransferTask::Type::Upload
-                       ? TransferQueueDialog::tr("Upload")
-                       : TransferQueueDialog::tr("Download");
+            switch (task.type) {
+            case TransferTask::Type::Upload:
+                return TransferQueueDialog::tr("Upload");
+            case TransferTask::Type::Download:
+                return TransferQueueDialog::tr("Download");
+            case TransferTask::Type::CreateLocalDirectory:
+                return TransferQueueDialog::tr("Create local folder");
+            case TransferTask::Type::CreateRemoteDirectory:
+                return TransferQueueDialog::tr("Create remote folder");
+            case TransferTask::Type::DeleteLocalFile:
+                return TransferQueueDialog::tr("Delete local file");
+            case TransferTask::Type::DeleteLocalDirectory:
+                return TransferQueueDialog::tr("Delete local folder");
+            case TransferTask::Type::DeleteRemoteFile:
+                return TransferQueueDialog::tr("Delete remote file");
+            case TransferTask::Type::DeleteRemoteDirectory:
+                return TransferQueueDialog::tr("Delete remote folder");
+            }
+            return {};
         case ColSource:
             return task.src;
         case ColDestination:
@@ -352,6 +390,7 @@ class TransferTaskTableModel final : public QAbstractTableModel {
             beginResetModel();
             tasks_ = incoming;
             endResetModel();
+            rebuildIndex();
             return;
         }
 
@@ -366,38 +405,96 @@ class TransferTaskTableModel final : public QAbstractTableModel {
             beginResetModel();
             tasks_ = incoming;
             endResetModel();
+            rebuildIndex();
             return;
         }
 
         for (int row = 0; row < tasks_.size(); ++row) {
-            const auto &prev = tasks_[row];
-            const auto &next = incoming[row];
-            const bool changed =
-                prev.type != next.type || prev.src != next.src ||
-                prev.dst != next.dst || prev.status != next.status ||
-                prev.progress != next.progress ||
-                prev.bytesDone != next.bytesDone ||
-                prev.bytesTotal != next.bytesTotal ||
-                prev.currentSpeedKBps != next.currentSpeedKBps ||
-                prev.etaSeconds != next.etaSeconds ||
-                prev.attempts != next.attempts ||
-                prev.maxAttempts != next.maxAttempts ||
-                prev.error != next.error;
-            tasks_[row] = next;
-            if (changed) {
-                emit dataChanged(index(row, 0), index(row, ColCount - 1),
-                                 {Qt::DisplayRole, Qt::TextAlignmentRole,
-                                  Qt::ToolTipRole, StatusRole, TaskIdRole,
-                                  ProgressRole, TypeRole, SourceRole,
-                                  DestinationRole});
-            }
+            updateRow(row, incoming[row]);
         }
+        rebuildIndex();
+    }
+
+    void upsert(const QVector<TransferTask> &incoming) {
+        QVector<TransferTask> missing;
+        missing.reserve(incoming.size());
+        for (const auto &task : incoming) {
+            const auto found = rowById_.constFind(task.taskId);
+            if (found == rowById_.cend())
+                missing.push_back(task);
+            else
+                updateRow(found.value(), task);
+        }
+        if (!missing.isEmpty()) {
+            const int first = tasks_.size();
+            const int last = first + missing.size() - 1;
+            beginInsertRows({}, first, last);
+            for (const auto &task : missing)
+                tasks_.push_back(task);
+            endInsertRows();
+            rebuildIndex();
+        }
+    }
+
+    void removeTaskIds(const QVector<quint64> &taskIds) {
+        QVector<int> rows;
+        rows.reserve(taskIds.size());
+        for (quint64 taskId : taskIds) {
+            const auto found = rowById_.constFind(taskId);
+            if (found != rowById_.cend())
+                rows.push_back(found.value());
+        }
+        std::sort(rows.begin(), rows.end(), std::greater<int>());
+        rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+        for (int row : rows) {
+            beginRemoveRows({}, row, row);
+            tasks_.removeAt(row);
+            endRemoveRows();
+        }
+        if (!rows.isEmpty())
+            rebuildIndex();
     }
 
     const QVector<TransferTask> &tasks() const { return tasks_; }
 
     private:
+    static bool differs(const TransferTask &prev,
+                        const TransferTask &next) {
+        return prev.type != next.type || prev.src != next.src ||
+               prev.dst != next.dst || prev.status != next.status ||
+               prev.progress != next.progress ||
+               prev.bytesDone != next.bytesDone ||
+               prev.bytesTotal != next.bytesTotal ||
+               prev.currentSpeedKBps != next.currentSpeedKBps ||
+               prev.etaSeconds != next.etaSeconds ||
+               prev.attempts != next.attempts ||
+               prev.maxAttempts != next.maxAttempts ||
+               prev.error != next.error || prev.phase != next.phase;
+    }
+
+    void updateRow(int row, const TransferTask &next) {
+        if (row < 0 || row >= tasks_.size())
+            return;
+        const bool changed = differs(tasks_[row], next);
+        tasks_[row] = next;
+        if (changed) {
+            emit dataChanged(index(row, 0), index(row, ColCount - 1),
+                             {Qt::DisplayRole, Qt::TextAlignmentRole,
+                              Qt::ToolTipRole, StatusRole, TaskIdRole,
+                              ProgressRole, TypeRole, SourceRole,
+                              DestinationRole});
+        }
+    }
+
+    void rebuildIndex() {
+        rowById_.clear();
+        rowById_.reserve(tasks_.size());
+        for (int row = 0; row < tasks_.size(); ++row)
+            rowById_.insert(tasks_[row].taskId, row);
+    }
+
     QVector<TransferTask> tasks_;
+    QHash<quint64, int> rowById_;
 };
 
 class TransferTaskFilterProxyModel final : public QSortFilterProxyModel {
@@ -432,11 +529,15 @@ class TransferTaskFilterProxyModel final : public QSortFilterProxyModel {
         case 1: // Active
             return status == TransferTask::Status::Queued ||
                    status == TransferTask::Status::Running ||
-                   status == TransferTask::Status::Paused;
+                   status == TransferTask::Status::Paused ||
+                   status == TransferTask::Status::WaitingForConnection ||
+                   status == TransferTask::Status::RetryWaiting;
         case 2: // Errors
-            return status == TransferTask::Status::Error;
+            return status == TransferTask::Status::Error ||
+                   status == TransferTask::Status::Warning;
         case 3: // Completed
-            return status == TransferTask::Status::Done;
+            return status == TransferTask::Status::Done ||
+                   status == TransferTask::Status::Skipped;
         case 4: // Canceled
             return status == TransferTask::Status::Canceled;
         default:
@@ -696,8 +797,14 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     connect(autoClearMinutesSpin_, &QSpinBox::valueChanged, this,
             &TransferQueueDialog::onAutoClearChanged);
 
-    connect(mgr_, &TransferManager::tasksChanged, this,
-            &TransferQueueDialog::refresh);
+    connect(mgr_, &TransferManager::tasksAdded, this,
+            &TransferQueueDialog::onTasksAdded);
+    connect(mgr_, &TransferManager::tasksUpdated, this,
+            &TransferQueueDialog::onTasksUpdated);
+    connect(mgr_, &TransferManager::tasksRemoved, this,
+            &TransferQueueDialog::onTasksRemoved);
+    connect(mgr_, &TransferManager::queueSettingsChanged, this,
+            &TransferQueueDialog::onQueueSettingsChanged);
     connect(table_->selectionModel(), &QItemSelectionModel::selectionChanged,
             this, &TransferQueueDialog::updateSummary);
     connect(table_, &QTableView::customContextMenuRequested, this,
@@ -715,6 +822,46 @@ void TransferQueueDialog::refresh() {
     const auto snapshot = mgr_->tasksSnapshot();
     model_->sync(snapshot);
     maybeAutoClear(snapshot);
+    updateSummary();
+}
+
+void TransferQueueDialog::onTasksAdded(
+    const QVector<quint64> &taskIds) {
+    if (!model_)
+        return;
+    model_->upsert(mgr_->tasksSnapshot(taskIds));
+    updateSummary();
+}
+
+void TransferQueueDialog::onTasksUpdated(
+    const QVector<quint64> &taskIds) {
+    if (!model_)
+        return;
+    const auto updated = mgr_->tasksSnapshot(taskIds);
+    model_->upsert(updated);
+    const bool hasTerminalUpdate =
+        std::any_of(updated.cbegin(), updated.cend(),
+                    [](const TransferTask &task) {
+                        return task.status == TransferTask::Status::Done ||
+                               task.status == TransferTask::Status::Error ||
+                               task.status == TransferTask::Status::Canceled ||
+                               task.status == TransferTask::Status::Skipped ||
+                               task.status == TransferTask::Status::Warning;
+                    });
+    if (hasTerminalUpdate)
+        maybeAutoClear(model_->tasks());
+    updateSummary();
+}
+
+void TransferQueueDialog::onTasksRemoved(
+    const QVector<quint64> &taskIds) {
+    if (!model_)
+        return;
+    model_->removeTaskIds(taskIds);
+    updateSummary();
+}
+
+void TransferQueueDialog::onQueueSettingsChanged() {
     updateSummary();
 }
 
@@ -794,7 +941,7 @@ void TransferQueueDialog::onRetrySelected() {
     const auto ids = selectedTaskIds();
     withSelectedTasks(mgr_, ids,
                       [this](quint64 taskId, const TransferTask &task) {
-        if (canRetryStatus(task.status))
+        if (canRetryTask(task))
             mgr_->retryTask(taskId);
     });
 }
@@ -806,7 +953,8 @@ void TransferQueueDialog::onOpenDestination() {
 
     QSet<QString> opened;
     withSelectedTasks(mgr_, ids, [&](quint64, const TransferTask &task) {
-        if (task.type != TransferTask::Type::Download)
+        if (task.type != TransferTask::Type::Download &&
+            task.type != TransferTask::Type::CreateLocalDirectory)
             return;
 
         QString destinationPath = task.dst;
@@ -868,8 +1016,12 @@ void TransferQueueDialog::updateSummary() {
 
     // Summary counts drive both badges and action enablement.
     const auto &tasks = model_->tasks();
-    int queued = 0, running = 0, paused = 0, done = 0, error = 0, canceled = 0;
+    int queued = 0, running = 0, paused = 0, waiting = 0, retrying = 0;
+    int done = 0, skipped = 0, error = 0, warning = 0, canceled = 0;
+    int retryable = 0;
     for (const auto &task : tasks) {
+        if (canRetryTask(task))
+            ++retryable;
         switch (task.status) {
         case TransferTask::Status::Queued:
             ++queued;
@@ -889,10 +1041,22 @@ void TransferQueueDialog::updateSummary() {
         case TransferTask::Status::Canceled:
             ++canceled;
             break;
+        case TransferTask::Status::WaitingForConnection:
+            ++waiting;
+            break;
+        case TransferTask::Status::RetryWaiting:
+            ++retrying;
+            break;
+        case TransferTask::Status::Skipped:
+            ++skipped;
+            break;
+        case TransferTask::Status::Warning:
+            ++warning;
+            break;
         }
     }
 
-    const int active = queued + running + paused;
+    const int active = queued + running + paused + waiting + retrying;
     if (badgeTotal_)
         badgeTotal_->setText(tr("Total: %1").arg(tasks.size()));
     if (badgeActive_)
@@ -902,9 +1066,9 @@ void TransferQueueDialog::updateSummary() {
     if (badgePaused_)
         badgePaused_->setText(tr("Paused: %1").arg(paused));
     if (badgeErrors_)
-        badgeErrors_->setText(tr("Errors: %1").arg(error));
+        badgeErrors_->setText(tr("Errors: %1").arg(error + warning));
     if (badgeCompleted_)
-        badgeCompleted_->setText(tr("Completed: %1").arg(done));
+        badgeCompleted_->setText(tr("Completed: %1").arg(done + skipped));
     if (badgeCanceled_)
         badgeCanceled_->setText(tr("Canceled: %1").arg(canceled));
     if (badgeParallel_)
@@ -919,11 +1083,12 @@ void TransferQueueDialog::updateSummary() {
 
     const bool hasAny = !tasks.isEmpty();
     const bool queuePaused = mgr_ && mgr_->isQueuePaused();
-    const bool canPause = !queuePaused && (queued + running) > 0;
-    const bool canResume = queuePaused || paused > 0;
-    const bool canRetry = (error + canceled) > 0;
-    const bool canClearDone = done > 0;
-    const bool canClearFailed = (error + canceled) > 0;
+    const bool canPause =
+        !queuePaused && (queued + running + retrying + waiting) > 0;
+    const bool canResume = queuePaused || paused + waiting > 0;
+    const bool canRetry = retryable > 0;
+    const bool canClearDone = (done + skipped) > 0;
+    const bool canClearFailed = (error + warning + canceled) > 0;
     const bool canCancelAll = active > 0;
     const auto selectedState =
         buildSelectedActionsState(selectedTaskIds(), buildTaskIndexById(tasks));
@@ -1000,6 +1165,9 @@ void TransferQueueDialog::showContextMenu(const QPoint &pos) {
     QAction *actCopyDst = menu.addAction(tr("Copy destination path"));
     menu.addSeparator();
     QAction *actClearFinished = menu.addAction(tr("Clear finished"));
+    QAction *actRemove = menu.addAction(tr("Remove selected tasks"));
+    QAction *actRemoveWithPartial =
+        menu.addAction(tr("Remove tasks and partial data"));
 
     actPauseSel->setEnabled(selectedState.canPause);
     actResumeSel->setEnabled(selectedState.canResume);
@@ -1010,6 +1178,8 @@ void TransferQueueDialog::showContextMenu(const QPoint &pos) {
     actCopySrc->setEnabled(selectedState.hasSelection);
     actCopyDst->setEnabled(selectedState.hasSelection);
     actClearFinished->setEnabled(true);
+    actRemove->setEnabled(selectedState.hasSelection);
+    actRemoveWithPartial->setEnabled(selectedState.hasSelection);
 
     QAction *chosen = menu.exec(table_->viewport()->mapToGlobal(pos));
     if (!chosen)
@@ -1032,6 +1202,13 @@ void TransferQueueDialog::showContextMenu(const QPoint &pos) {
         onCopyDestinationPath();
     else if (chosen == actClearFinished)
         onClearFinished();
+    else if (chosen == actRemove) {
+        for (quint64 taskId : ids)
+            mgr_->removeTask(taskId, false);
+    } else if (chosen == actRemoveWithPartial) {
+        for (quint64 taskId : ids)
+            mgr_->removeTask(taskId, true);
+    }
 }
 
 void TransferQueueDialog::loadUiState() {
@@ -1131,9 +1308,12 @@ void TransferQueueDialog::maybeAutoClear(
     bool needsCleanup = false;
     // Quick pre-scan avoids manager calls when nothing is eligible yet.
     for (const auto &task : snapshot) {
-        const bool isDone = task.status == TransferTask::Status::Done;
+        const bool isDone =
+            task.status == TransferTask::Status::Done ||
+            task.status == TransferTask::Status::Skipped;
         const bool isFailed = (task.status == TransferTask::Status::Error ||
-                               task.status == TransferTask::Status::Canceled);
+                               task.status == TransferTask::Status::Canceled ||
+                               task.status == TransferTask::Status::Warning);
         bool candidate = false;
         if (mode == AutoClearCompleted)
             candidate = isDone;

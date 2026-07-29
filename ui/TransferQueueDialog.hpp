@@ -41,6 +41,10 @@ class TransferQueueDialog : public QDialog {
     void onClearFinished();
     void onClearFailedCanceled();
     void onAutoClearChanged();
+    void onTasksAdded(const QVector<quint64> &taskIds);
+    void onTasksUpdated(const QVector<quint64> &taskIds);
+    void onTasksRemoved(const QVector<quint64> &taskIds);
+    void onQueueSettingsChanged();
     void showContextMenu(const QPoint &pos); // context menu on the table
 
     private:
