@@ -177,7 +177,9 @@ cmake --build build -j
 - PR integration coverage validates transport variants in CI: direct, `SOCKS5` proxy tunnel, `HTTP CONNECT` proxy tunnel (with auth), and SSH jump host tunnel.
 - Tag release workflow auto-generates draft release notes from Conventional Commits (`feat`, `fix`, `BREAKING CHANGE`, etc.).
 - Linux quality gates run the non-integration core and Qt event-loop tests under
-  `ASan`+`UBSan` and `TSan`; nightly quality also runs `cppcheck`.
+  `ASan`+`UBSan` and `TSan`; nightly quality also runs `cppcheck`, a
+  conservative `clang-tidy` profile, and strict `clang-format` checks for the
+  incrementally formatted module list in `.clang-format-files`.
 - TSan instruments OpenSCP and its tests, but Ubuntu's prebuilt Qt libraries
   are not TSan-instrumented. The job covers application-side races exercised
   through Qt, not races wholly internal to Qt itself.
@@ -213,6 +215,16 @@ Local CI helper before push/PR:
 
 ```bash
 ./scripts/check_ci_local.sh --clean
+```
+
+The helper builds every test executable configured for the available protocol
+backends before running CTest. Add `--full` to build the GUI application too.
+
+The incremental formatting gate can also be checked locally when
+`clang-format` is installed:
+
+```bash
+xargs clang-format --dry-run --Werror < .clang-format-files
 ```
 
 Useful variants:
@@ -289,6 +301,26 @@ handling:
 ./scripts/ci/run_protocol_integration.sh build
 ```
 
+## Development Architecture
+
+The refactored build keeps protocol code, synchronization domain logic,
+reusable UI services, visual widgets, and the application composition root in
+separate internal targets:
+
+- `openscp_core`: protocol-neutral interfaces and SFTP/SCP/FTP/FTPS/WebDAV
+  backends.
+- `openscp_sync_logic`: comparison types and the widget-independent
+  synchronization engine.
+- `openscp_ui_logic`: sessions, navigation, remote actions, credentials,
+  recursive discovery, and transfer services.
+- `openscp_ui_widgets`: dialogs and reusable visual components.
+- `openscp_hello`: `MainWindow`, application startup, and resource assembly.
+
+Tests link these internal libraries instead of recompiling production sources.
+The aggregate `openscp_test_binaries` target builds every configured test
+executable. Contributor-facing structure and formatting rules are documented
+in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Platform Workflows
 
 ### macOS
@@ -324,6 +356,12 @@ bundle verifier is for the packaged app: it checks that Qt frameworks and the
 `qcocoa` platform plugin are present and that no Homebrew, temporary, or other
 machine-local paths remain in its linkage. This local flow does not require
 Apple signing or notarization.
+
+When packaging for macOS 12, every bundled third-party library must also
+support macOS 12 or older. A recent Homebrew bottle may target the host's newer
+macOS version; the linker reports that mismatch and the bundle verifier rejects
+the artifact. Use dependencies built for the intended deployment target or set
+`MINIMUM_SYSTEM_VERSION` to the actual minimum supported by the artifact.
 
 If Qt is outside the default path (`$HOME/Qt/<version>/macos`):
 

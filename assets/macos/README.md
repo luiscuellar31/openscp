@@ -57,6 +57,11 @@ What it does:
 - Creates the selected artifact(s) under `dist/` plus `*.sha256`.
 - Prints release notes snippet when DMG is generated.
 
+`scripts/package_mac.sh` is the orchestration entrypoint. Its signing helpers
+live in `scripts/macos/package_signing.sh`, while artifact creation and
+notarization live in `scripts/macos/package_artifacts.sh`; source the
+orchestrator rather than invoking those internal modules directly.
+
 ## Artifacts and SHA256
 
 - App ZIP: `dist/OpenSCP-<version>-<arch>-UNSIGNED.zip`
@@ -111,6 +116,11 @@ Expect library references to be `@executable_path/../Frameworks/...`.
     - Set `Qt6_DIR=$HOME/Qt/<version>/macos/lib/cmake/Qt6` or set `QT_PREFIX=$HOME/Qt/<version>/macos`.
 - Missing `libssh2`/`openssl@3`/`tinyxml2`:
     - `brew install libssh2 openssl@3 tinyxml2`
+- Linker says a Homebrew library was built for a newer macOS version:
+    - Every bundled library must support `MINIMUM_SYSTEM_VERSION`. Rebuild that
+      dependency for the intended deployment target or raise
+      `MINIMUM_SYSTEM_VERSION` to the artifact's actual minimum. The bundle
+      verifier intentionally rejects an inconsistent package.
 - Still seeing Homebrew/Conda absolute paths in the binary:
     - Re‑run the script; it rewrites to `@executable_path/../Frameworks` where possible.
 

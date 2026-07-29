@@ -129,6 +129,21 @@ Notes:
 - Keep code clean, consistent, and well-commented.
 - Prefer descriptive variable and function names.
 - Use English for all code and comments.
+- Keep functions focused; new or substantially changed functions should
+  normally stay below 120 lines.
+- Add newly formatted C++ modules to `.clang-format-files` and validate them
+  with:
+
+  ```bash
+  xargs clang-format --dry-run --Werror < .clang-format-files
+  ```
+
+OpenSCP separates protocol/core code, reusable UI logic, widgets, and the app
+composition root into the internal CMake targets `openscp_core`,
+`openscp_sync_logic`, `openscp_ui_logic`, `openscp_ui_widgets`, and
+`openscp_hello`. Tests should link these targets instead of recompiling
+production `.cpp` files. The aggregate `openscp_test_binaries` target builds
+every CTest executable enabled by the configured protocol backends.
 
 ---
 

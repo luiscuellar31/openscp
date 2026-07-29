@@ -184,7 +184,9 @@ cmake --build build -j
 - El workflow de release por tag genera automaticamente notas de draft release desde Conventional Commits (`feat`, `fix`, `BREAKING CHANGE`, etc.).
 - Las compuertas de calidad Linux ejecutan los tests no integracion del core y
   del event loop Qt bajo `ASan`+`UBSan` y `TSan`; el workflow nocturno tambien
-  ejecuta `cppcheck`.
+  ejecuta `cppcheck`, un perfil conservador de `clang-tidy` y una comprobacion
+  estricta de `clang-format` para la lista de modulos adoptados
+  incrementalmente en `.clang-format-files`.
 - TSan instrumenta OpenSCP y sus tests, pero las bibliotecas Qt precompiladas
   de Ubuntu no vienen instrumentadas con TSan. El job cubre carreras del lado
   de la aplicacion ejercitadas mediante Qt, no carreras completamente internas
@@ -221,6 +223,17 @@ Script local de CI antes de push/PR:
 
 ```bash
 ./scripts/check_ci_local.sh --clean
+```
+
+El helper compila todos los ejecutables de prueba configurados para los
+backends de protocolo disponibles antes de ejecutar CTest. Agrega `--full`
+para compilar tambien la aplicacion grafica.
+
+Si `clang-format` esta instalado, tambien puedes ejecutar localmente la
+compuerta incremental de formato:
+
+```bash
+xargs clang-format --dry-run --Werror < .clang-format-files
 ```
 
 Variantes utiles:
@@ -297,6 +310,27 @@ CTest:
 ./scripts/ci/run_protocol_integration.sh build
 ```
 
+## Arquitectura de Desarrollo
+
+El build refactorizado separa el codigo de protocolos, el dominio de
+sincronizacion, los servicios reutilizables de UI, los widgets visuales y la
+raiz de composicion de la aplicacion en targets internos:
+
+- `openscp_core`: interfaces neutrales y backends
+  SFTP/SCP/FTP/FTPS/WebDAV.
+- `openscp_sync_logic`: tipos de comparacion y motor de sincronizacion
+  independiente de widgets.
+- `openscp_ui_logic`: sesiones, navegacion, acciones remotas, credenciales,
+  descubrimiento recursivo y servicios de transferencias.
+- `openscp_ui_widgets`: dialogos y componentes visuales reutilizables.
+- `openscp_hello`: `MainWindow`, arranque de la aplicacion y ensamblado de
+  recursos.
+
+Las pruebas enlazan estas bibliotecas en vez de recompilar fuentes de
+produccion. El target agregado `openscp_test_binaries` compila todos los
+ejecutables de prueba configurados. La estructura para contribuidores y las
+reglas de formato estan documentadas en [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Flujos por Plataforma
 
 ### macOS
@@ -333,6 +367,13 @@ detectado. El verificador es para la app ya empaquetada: comprueba que esten los
 frameworks Qt y el plugin de plataforma `qcocoa`, y que el enlazado no conserve
 rutas de Homebrew, temporales o especificas de la maquina. Este flujo local no
 requiere firma ni notarizacion de Apple.
+
+Al empaquetar para macOS 12, todas las bibliotecas de terceros incluidas deben
+soportar tambien macOS 12 o una version anterior. Una botella reciente de
+Homebrew puede requerir la version mas nueva del host; el linker avisa de esa
+diferencia y el verificador rechaza el artefacto. Usa dependencias compiladas
+para el deployment target deseado o ajusta `MINIMUM_SYSTEM_VERSION` al minimo
+real soportado por el artefacto.
 
 Si Qt esta fuera de la ruta por defecto (`$HOME/Qt/<version>/macos`):
 

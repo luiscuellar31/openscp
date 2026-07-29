@@ -6,7 +6,7 @@ Minimal map of repository helper scripts.
 
 | Script | Purpose | Details |
 | --- | --- | --- |
-| [`check_ci_local.sh`](./check_ci_local.sh) | Local pre-push CI check (configure, build, test, optional full app build). | Usage in [README.md](../README.md#testing-locally) and [README_ES.md](../README_ES.md#probar-localmente). |
+| [`check_ci_local.sh`](./check_ci_local.sh) | Local pre-push CI check (configure, build every configured test binary, run CTest, optional full app build). | Usage in [README.md](../README.md#testing-locally) and [README_ES.md](../README_ES.md#probar-localmente). |
 | [`ci/setup_protocol_services.sh`](./ci/setup_protocol_services.sh) | Starts isolated FTP, explicit/implicit FTPS, and HTTPS WebDAV services on Ubuntu. | Generates an ephemeral localhost CA/certificate and serves WebDAV at `/openscp-dav`. |
 | [`ci/run_protocol_integration.sh`](./ci/run_protocol_integration.sh) | Runs the FTP, both FTPS modes, and WebDAV integration binaries directly. | A missing binary or unavailable service is a hard failure rather than a CTest skip. |
 | [`generate_release_notes.sh`](./generate_release_notes.sh) | Generates release notes from Conventional Commits. | Used by release workflow tooling. |
@@ -46,3 +46,7 @@ frameworks, plugins, and linkage are self-contained:
 
 Signing and notarization are not required for this local development and
 verification flow.
+
+The advanced packager sources focused helpers from `scripts/macos/`:
+`package_signing.sh` owns Developer ID/ad-hoc signing and
+`package_artifacts.sh` owns ZIP/PKG/DMG creation plus notarization.
