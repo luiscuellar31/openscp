@@ -1141,8 +1141,8 @@ Correspondências: %2</translation>
     <message>
         <location filename="../ui/MainWindow.cpp" line="979"/>
         <location filename="../ui/MainWindow.cpp" line="994"/>
-        <source>Compare</source>
-        <translation>Comparar</translation>
+        <source>Sync</source>
+        <translation>Sincronizar</translation>
     </message>
     <message>
         <location filename="../ui/MainWindow.cpp" line="983"/>

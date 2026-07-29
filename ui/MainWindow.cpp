@@ -1002,7 +1002,7 @@ void MainWindow::initializeMainToolbar() {
     actShowQueue_->setToolTip(actShowQueue_->text());
     mainToolbar->addSeparator();
     actSync_ =
-        mainToolbar->addAction(tr("Compare"), this,
+        mainToolbar->addAction(tr("Sync"), this,
                                &MainWindow::showSyncDialog);
     actSync_->setIcon(mainWindowActionIcon("action-refresh.svg"));
     actSync_->setToolTip(
@@ -1017,7 +1017,7 @@ void MainWindow::initializeMainToolbar() {
     // Show text beside icon for Sites and Queue too
     setTextBesideIcon(actSites_, tr("Saved sites"));
     setTextBesideIcon(actShowQueue_, tr("Transfers"));
-    setTextBesideIcon(actSync_, tr("Compare"));
+    setTextBesideIcon(actSync_, tr("Sync"));
     setTextBesideIcon(actShowHistory_, tr("History"));
 
     // Global shortcut to open the transfer queue
