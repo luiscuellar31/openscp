@@ -3,13 +3,17 @@
 #include "RemoteClient.hpp"
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 
 namespace openscp {
+namespace curlcommon {
+class CurlEasySession;
+}
 
 class CurlWebDavClient : public RemoteClient {
     public:
-    CurlWebDavClient() = default;
+    CurlWebDavClient();
     ~CurlWebDavClient() override;
 
     Protocol protocol() const override { return Protocol::WebDav; }
@@ -66,7 +70,7 @@ class CurlWebDavClient : public RemoteClient {
     private:
     mutable std::mutex stateMutex_;
     std::mutex operationMutex_;
-    void *easyHandle_ = nullptr;
+    std::unique_ptr<curlcommon::CurlEasySession> easySession_;
     SessionOptions options_{};
     bool connected_ = false;
     std::atomic<bool> interrupted_{false};

@@ -3,9 +3,13 @@
 #include "RemoteClient.hpp"
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 
 namespace openscp {
+namespace curlcommon {
+class CurlEasySession;
+}
 
 class CurlFtpClient : public RemoteClient {
     public:
@@ -69,7 +73,7 @@ class CurlFtpClient : public RemoteClient {
     // One easy handle is reused serially so libcurl can retain its connection
     // cache. Stored opaquely to keep libcurl out of the public header.
     std::mutex operationMutex_;
-    void *easyHandle_ = nullptr;
+    std::unique_ptr<curlcommon::CurlEasySession> easySession_;
     SessionOptions options_{};
     // Absolute server path reported by FTP PWD immediately after login. App
     // paths use "/" as the login directory, so quote commands are translated

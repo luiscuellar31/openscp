@@ -63,27 +63,6 @@ std::string normalizeRemoteDirPath(std::string path) {
     return path;
 }
 
-class InterruptResetGuard {
-    public:
-    explicit InterruptResetGuard(std::atomic<bool> &interrupted)
-        : interrupted_(interrupted) {}
-    ~InterruptResetGuard() { interrupted_.store(false); }
-
-    private:
-    std::atomic<bool> &interrupted_;
-};
-
-bool rejectInterruptedBeforePerform(
-    const std::atomic<bool> *interrupted, std::string &err,
-    CURLcode *curlCodeOut = nullptr) {
-    if (!interrupted || !interrupted->load())
-        return false;
-    if (curlCodeOut)
-        *curlCodeOut = CURLE_ABORTED_BY_CALLBACK;
-    err = "Interrupted";
-    return true;
-}
-
 bool normalizeFtpCommandRoot(const char *entryPath, std::string &root,
                              std::string &err) {
     root = "/";
@@ -327,7 +306,7 @@ bool runDirectoryListingCommand(CURL *curl, const SessionOptions &opt,
               " listing command " + command + ".";
         return false;
     }
-    if (rejectInterruptedBeforePerform(interrupted, err, curlCodeOut))
+    if (curlcommon::rejectInterrupted(interrupted, err, curlCodeOut))
         return false;
 
     const CURLcode rc = curl_easy_perform(curl);
@@ -425,7 +404,7 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
         curl_slist_free_all(quote);
         return false;
     }
-    if (rejectInterruptedBeforePerform(interrupted, err, &curlCodeOut)) {
+    if (curlcommon::rejectInterrupted(interrupted, err, &curlCodeOut)) {
         curl_slist_free_all(quote);
         return false;
     }
@@ -750,7 +729,7 @@ CurlFtpClient::~CurlFtpClient() { disconnect(); }
 
 bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    InterruptResetGuard interruptReset(interrupted_);
+    curlcommon::OperationInterruptGuard interruptReset(interrupted_);
     clearLastOperationError();
     err.clear();
     interrupted_.store(false);
@@ -795,19 +774,15 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
         std::lock_guard<std::mutex> lk(stateMutex_);
         connected_ = false;
     }
-    if (easyHandle_) {
-        curl_easy_cleanup(static_cast<CURL *>(easyHandle_));
-        easyHandle_ = nullptr;
-    }
-    CURL *curl = curl_easy_init();
-    if (!curl) {
-        err = "Could not create CURL handle.";
+    easySession_.reset();
+    auto newEasySession = std::make_unique<curlcommon::CurlEasySession>();
+    if (!newEasySession->initialize(err)) {
         setLastOperationError(RemoteErrorKind::LocalIo, err);
         return false;
     }
-    curl_easy_reset(curl);
+    CURL *curl = newEasySession->get();
+    newEasySession->reset();
     if (!configureCommonCurlHandle(curl, normalized, err)) {
-        curl_easy_cleanup(curl);
         setLastOperationError(RemoteErrorKind::InvalidRequest, err);
         return false;
     }
@@ -818,7 +793,6 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
     struct curl_slist *probeCommands = curl_slist_append(nullptr, "PWD");
     if (!probeCommands) {
         err = "Could not allocate FTP connection probe command.";
-        curl_easy_cleanup(curl);
         setLastOperationError(RemoteErrorKind::LocalIo, err);
         return false;
     }
@@ -834,15 +808,13 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
             CURLE_OK) {
         err = "Could not configure FTP connection probe.";
         curl_slist_free_all(probeCommands);
-        curl_easy_cleanup(curl);
         setLastOperationError(RemoteErrorKind::LocalIo, err);
         return false;
     }
 
     CURLcode rc = CURLE_OK;
-    if (rejectInterruptedBeforePerform(&interrupted_, err, &rc)) {
+    if (curlcommon::rejectInterrupted(&interrupted_, err, &rc)) {
         curl_slist_free_all(probeCommands);
-        curl_easy_cleanup(curl);
         setLastOperationError(RemoteErrorKind::Canceled, err,
                               static_cast<std::int64_t>(rc));
         return false;
@@ -856,14 +828,12 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
         setLastOperationError(RemoteErrorKind::Canceled, err,
                               static_cast<std::int64_t>(
                                   CURLE_ABORTED_BY_CALLBACK));
-        curl_easy_cleanup(curl);
         return false;
     }
     if (rc != CURLE_OK) {
         err = formatCurlProbeFailure(normalized.protocol, rc, responseCode);
         setLastOperationError(
             ftpErrorFromResult(rc, responseCode, err));
-        curl_easy_cleanup(curl);
         return false;
     }
 
@@ -872,13 +842,11 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
         CURLE_OK) {
         err = "Could not determine the FTP login directory.";
         setLastOperationError(RemoteErrorKind::Protocol, err);
-        curl_easy_cleanup(curl);
         return false;
     }
     std::string commandRoot;
     if (!normalizeFtpCommandRoot(entryPath, commandRoot, err)) {
         setLastOperationError(RemoteErrorKind::Protocol, err);
-        curl_easy_cleanup(curl);
         return false;
     }
 
@@ -888,7 +856,7 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
         commandRoot_ = std::move(commandRoot);
         connected_ = true;
     }
-    easyHandle_ = curl;
+    easySession_ = std::move(newEasySession);
     return true;
 }
 
@@ -896,10 +864,7 @@ void CurlFtpClient::disconnect() {
     disconnecting_.store(true);
     interrupted_.store(true);
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    if (easyHandle_) {
-        curl_easy_cleanup(static_cast<CURL *>(easyHandle_));
-        easyHandle_ = nullptr;
-    }
+    easySession_.reset();
     {
         std::lock_guard<std::mutex> lk(stateMutex_);
         connected_ = false;
@@ -922,7 +887,7 @@ bool CurlFtpClient::isConnected() const {
 bool CurlFtpClient::list(const std::string &remote_path,
                          std::vector<FileInfo> &out, std::string &err) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    InterruptResetGuard interruptReset(interrupted_);
+    curlcommon::OperationInterruptGuard interruptReset(interrupted_);
     clearLastOperationError();
     err.clear();
     out.clear();
@@ -955,7 +920,7 @@ bool CurlFtpClient::list(const std::string &remote_path,
 
     CURLcode rc = CURLE_OK;
     long responseCode = 0;
-    const bool ok = fetchFtpListing(static_cast<CURL *>(easyHandle_), opt,
+    const bool ok = fetchFtpListing(easySession_->get(), opt,
                                     remote_path, &interrupted_, out, err, &rc,
                                     &responseCode);
     if (!ok) {
@@ -972,7 +937,7 @@ bool CurlFtpClient::get(
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    InterruptResetGuard interruptReset(interrupted_);
+    curlcommon::OperationInterruptGuard interruptReset(interrupted_);
     clearLastOperationError();
     err.clear();
     interrupted_.store(false);
@@ -1033,7 +998,7 @@ bool CurlFtpClient::get(
         return false;
     }
 
-    CURL *curl = static_cast<CURL *>(easyHandle_);
+    CURL *curl = easySession_->get();
     if (!curl) {
         std::fclose(localFile);
         err = "Could not create CURL handle.";
@@ -1136,7 +1101,7 @@ bool CurlFtpClient::put(
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    InterruptResetGuard interruptReset(interrupted_);
+    curlcommon::OperationInterruptGuard interruptReset(interrupted_);
     clearLastOperationError();
     err.clear();
     interrupted_.store(false);
@@ -1205,7 +1170,7 @@ bool CurlFtpClient::put(
         return false;
     }
 
-    CURL *curl = static_cast<CURL *>(easyHandle_);
+    CURL *curl = easySession_->get();
     if (!curl) {
         std::fclose(localFile);
         err = "Could not create CURL handle.";
@@ -1319,7 +1284,7 @@ bool CurlFtpClient::exists(const std::string &remote_path, bool &isDir,
 bool CurlFtpClient::stat(const std::string &remote_path, FileInfo &info,
                          std::string &err) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    InterruptResetGuard interruptReset(interrupted_);
+    curlcommon::OperationInterruptGuard interruptReset(interrupted_);
     clearLastOperationError();
     err.clear();
     info = FileInfo{};
@@ -1355,7 +1320,7 @@ bool CurlFtpClient::stat(const std::string &remote_path, FileInfo &info,
     std::vector<FileInfo> parentEntries;
     CURLcode rc = CURLE_OK;
     long responseCode = 0;
-    if (!fetchFtpListing(static_cast<CURL *>(easyHandle_), opt,
+    if (!fetchFtpListing(easySession_->get(), opt,
                          remoteParentPath(target), &interrupted_, parentEntries,
                          err, &rc, &responseCode)) {
         if (rc == CURLE_ABORTED_BY_CALLBACK && interrupted_.load())
@@ -1414,7 +1379,7 @@ bool CurlFtpClient::setTimes(const std::string &remote_path, std::uint64_t atime
 bool CurlFtpClient::mkdir(const std::string &remote_dir, std::string &err,
                           unsigned int mode) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    InterruptResetGuard interruptReset(interrupted_);
+    curlcommon::OperationInterruptGuard interruptReset(interrupted_);
     clearLastOperationError();
     err.clear();
     (void)mode;
@@ -1448,7 +1413,7 @@ bool CurlFtpClient::mkdir(const std::string &remote_dir, std::string &err,
     CURLcode rc = CURLE_OK;
     long responseCode = 0;
     const bool ok = runFtpCommands(
-        static_cast<CURL *>(easyHandle_), opt,
+        easySession_->get(), opt,
         {"MKD " + curlcommon::ftpCommandPath(commandRoot, target)},
         &interrupted_, err, rc, responseCode);
     if (!ok)
@@ -1459,7 +1424,7 @@ bool CurlFtpClient::mkdir(const std::string &remote_dir, std::string &err,
 bool CurlFtpClient::removeFile(const std::string &remote_path,
                                std::string &err) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    InterruptResetGuard interruptReset(interrupted_);
+    curlcommon::OperationInterruptGuard interruptReset(interrupted_);
     clearLastOperationError();
     err.clear();
     interrupted_.store(false);
@@ -1494,7 +1459,7 @@ bool CurlFtpClient::removeFile(const std::string &remote_path,
     CURLcode rc = CURLE_OK;
     long responseCode = 0;
     const bool ok = runFtpCommands(
-        static_cast<CURL *>(easyHandle_), opt,
+        easySession_->get(), opt,
         {"DELE " + curlcommon::ftpCommandPath(commandRoot, target)},
         &interrupted_, err, rc, responseCode);
     if (!ok)
@@ -1504,7 +1469,7 @@ bool CurlFtpClient::removeFile(const std::string &remote_path,
 
 bool CurlFtpClient::removeDir(const std::string &remote_dir, std::string &err) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    InterruptResetGuard interruptReset(interrupted_);
+    curlcommon::OperationInterruptGuard interruptReset(interrupted_);
     clearLastOperationError();
     err.clear();
     interrupted_.store(false);
@@ -1539,7 +1504,7 @@ bool CurlFtpClient::removeDir(const std::string &remote_dir, std::string &err) {
     CURLcode rc = CURLE_OK;
     long responseCode = 0;
     const bool ok = runFtpCommands(
-        static_cast<CURL *>(easyHandle_), opt,
+        easySession_->get(), opt,
         {"RMD " + curlcommon::ftpCommandPath(commandRoot, target)},
         &interrupted_, err, rc, responseCode);
     if (!ok)
@@ -1550,7 +1515,7 @@ bool CurlFtpClient::removeDir(const std::string &remote_dir, std::string &err) {
 bool CurlFtpClient::rename(const std::string &from, const std::string &to,
                            std::string &err, bool overwrite) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    InterruptResetGuard interruptReset(interrupted_);
+    curlcommon::OperationInterruptGuard interruptReset(interrupted_);
     clearLastOperationError();
     err.clear();
     interrupted_.store(false);
@@ -1587,7 +1552,7 @@ bool CurlFtpClient::rename(const std::string &from, const std::string &to,
         std::vector<FileInfo> entries;
         CURLcode listCode = CURLE_OK;
         long listResponse = 0;
-        if (!fetchFtpListing(static_cast<CURL *>(easyHandle_), opt,
+        if (!fetchFtpListing(easySession_->get(), opt,
                              remoteParentPath(destination), &interrupted_,
                              entries, err, &listCode, &listResponse)) {
             setLastOperationError(
@@ -1609,7 +1574,7 @@ bool CurlFtpClient::rename(const std::string &from, const std::string &to,
     CURLcode rc = CURLE_OK;
     long responseCode = 0;
     const bool ok = runFtpCommands(
-        static_cast<CURL *>(easyHandle_), opt,
+        easySession_->get(), opt,
         {"RNFR " + curlcommon::ftpCommandPath(commandRoot, source),
          "RNTO " + curlcommon::ftpCommandPath(commandRoot, destination)},
         &interrupted_, err, rc, responseCode);

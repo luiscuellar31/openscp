@@ -47,27 +47,6 @@ using curlcommon::parseUnsignedDec;
 using curlcommon::toLowerAscii;
 using curlcommon::trimAscii;
 
-class InterruptResetGuard {
-    public:
-    explicit InterruptResetGuard(std::atomic<bool> &interrupted)
-        : interrupted_(interrupted) {}
-    ~InterruptResetGuard() { interrupted_.store(false); }
-
-    private:
-    std::atomic<bool> &interrupted_;
-};
-
-bool rejectInterruptedBeforePerform(
-    const std::atomic<bool> *interrupted, std::string &err,
-    CURLcode *curlCodeOut = nullptr) {
-    if (!interrupted || !interrupted->load())
-        return false;
-    if (curlCodeOut)
-        *curlCodeOut = CURLE_ABORTED_BY_CALLBACK;
-    err = "Interrupted";
-    return true;
-}
-
 size_t captureWebDavHeader(char *ptr, size_t size, size_t nmemb,
                            void *userdata) {
     if (!userdata)
@@ -302,7 +281,7 @@ bool performTextRequest(CURL *curl, const SessionOptions &opt,
         }
     }
 
-    if (rejectInterruptedBeforePerform(interrupted, err, curlCodeOut)) {
+    if (curlcommon::rejectInterrupted(interrupted, err, curlCodeOut)) {
         curl_slist_free_all(headerList);
         return false;
     }
@@ -365,7 +344,7 @@ bool performDownloadRequest(CURL *curl, const SessionOptions &opt,
         err = "Could not configure WebDAV download.";
         return false;
     }
-    if (rejectInterruptedBeforePerform(progressContext.interrupted, err,
+    if (curlcommon::rejectInterrupted(progressContext.interrupted, err,
                                       &rcOut)) {
         return false;
     }
@@ -422,7 +401,7 @@ bool performUploadRequest(CURL *curl, const SessionOptions &opt,
         err = "Could not configure WebDAV upload.";
         return false;
     }
-    if (rejectInterruptedBeforePerform(progressContext.interrupted, err,
+    if (curlcommon::rejectInterrupted(progressContext.interrupted, err,
                                       &rcOut)) {
         return false;
     }
@@ -696,11 +675,13 @@ bool unsupportedWebDavOperation(const char *what, std::string &err) {
 
 } // namespace
 
+CurlWebDavClient::CurlWebDavClient() = default;
+
 CurlWebDavClient::~CurlWebDavClient() { disconnect(); }
 
 bool CurlWebDavClient::connect(const SessionOptions &opt, std::string &err) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    InterruptResetGuard interruptReset(interrupted_);
+    curlcommon::OperationInterruptGuard interruptReset(interrupted_);
     clearLastOperationError();
     err.clear();
     interrupted_.store(false);
@@ -745,30 +726,25 @@ bool CurlWebDavClient::connect(const SessionOptions &opt, std::string &err) {
         std::lock_guard<std::mutex> lk(stateMutex_);
         connected_ = false;
     }
-    if (easyHandle_) {
-        curl_easy_cleanup(static_cast<CURL *>(easyHandle_));
-        easyHandle_ = nullptr;
-    }
-    CURL *curl = curl_easy_init();
-    if (!curl) {
-        err = "Could not create CURL handle.";
+    easySession_.reset();
+    auto newEasySession = std::make_unique<curlcommon::CurlEasySession>();
+    if (!newEasySession->initialize(err)) {
         setLastOperationError(RemoteErrorKind::LocalIo, err);
         return false;
     }
+    CURL *curl = newEasySession->get();
     WebDavResponse probe;
     CURLcode probeCode = CURLE_OK;
     if (!performPropfind(curl, normalized, "/", 0, &interrupted_, probe, err,
                          &probeCode)) {
         setLastOperationError(
             curlcommon::errorFromCurl(probeCode, err, probe.statusCode));
-        curl_easy_cleanup(curl);
         return false;
     }
     if (!isSuccessStatus(probe.statusCode)) {
         err = formatHttpFailure("WebDAV connect probe", probe.statusCode);
         setLastOperationError(curlcommon::errorFromHttpStatus(
             probe.statusCode, err, false, probe.retryAfterSeconds));
-        curl_easy_cleanup(curl);
         return false;
     }
 
@@ -777,7 +753,7 @@ bool CurlWebDavClient::connect(const SessionOptions &opt, std::string &err) {
         options_ = normalized;
         connected_ = true;
     }
-    easyHandle_ = curl;
+    easySession_ = std::move(newEasySession);
     return true;
 }
 
@@ -785,10 +761,7 @@ void CurlWebDavClient::disconnect() {
     disconnecting_.store(true);
     interrupted_.store(true);
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    if (easyHandle_) {
-        curl_easy_cleanup(static_cast<CURL *>(easyHandle_));
-        easyHandle_ = nullptr;
-    }
+    easySession_.reset();
     {
         std::lock_guard<std::mutex> lk(stateMutex_);
         connected_ = false;
@@ -812,7 +785,7 @@ bool CurlWebDavClient::isConnected() const {
 bool CurlWebDavClient::list(const std::string &remote_path,
                             std::vector<FileInfo> &out, std::string &err) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    InterruptResetGuard interruptReset(interrupted_);
+    curlcommon::OperationInterruptGuard interruptReset(interrupted_);
     clearLastOperationError();
     err.clear();
     out.clear();
@@ -845,7 +818,7 @@ bool CurlWebDavClient::list(const std::string &remote_path,
     const std::string basePath = normalizeRemotePath(remote_path);
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
-    if (!performPropfind(static_cast<CURL *>(easyHandle_), opt, basePath, 1,
+    if (!performPropfind(easySession_->get(), opt, basePath, 1,
                          &interrupted_, response, err, &rc)) {
         if (rc == CURLE_ABORTED_BY_CALLBACK && interrupted_.load())
             err = "Interrupted";
@@ -906,7 +879,7 @@ bool CurlWebDavClient::get(
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    InterruptResetGuard interruptReset(interrupted_);
+    curlcommon::OperationInterruptGuard interruptReset(interrupted_);
     clearLastOperationError();
     err.clear();
     interrupted_.store(false);
@@ -980,7 +953,7 @@ bool CurlWebDavClient::get(
     CURLcode rc = CURLE_OK;
     std::optional<std::uint32_t> retryAfter;
     const bool ok = performDownloadRequest(
-        static_cast<CURL *>(easyHandle_), opt, remote, localFile,
+        easySession_->get(), opt, remote, localFile,
         progressContext, err, statusCode, rc, retryAfter);
     const bool userCanceled = shouldCancel && shouldCancel();
     if (!ok || userCanceled || interrupted_.load()) {
@@ -1034,7 +1007,7 @@ bool CurlWebDavClient::put(
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    InterruptResetGuard interruptReset(interrupted_);
+    curlcommon::OperationInterruptGuard interruptReset(interrupted_);
     clearLastOperationError();
     err.clear();
     interrupted_.store(false);
@@ -1114,7 +1087,7 @@ bool CurlWebDavClient::put(
     CURLcode rc = CURLE_OK;
     std::optional<std::uint32_t> retryAfter;
     const bool ok = performUploadRequest(
-        static_cast<CURL *>(easyHandle_), opt, remotePartial, localFile,
+        easySession_->get(), opt, remotePartial, localFile,
         static_cast<curl_off_t>(total),
         progressContext, err,
         statusCode, rc, retryAfter);
@@ -1156,7 +1129,7 @@ bool CurlWebDavClient::put(
     };
     WebDavResponse moveResponse;
     CURLcode moveCode = CURLE_OK;
-    if (!performTextRequest(static_cast<CURL *>(easyHandle_), opt, "MOVE",
+    if (!performTextRequest(easySession_->get(), opt, "MOVE",
                             remotePartial, nullptr, headers, &interrupted_,
                             moveResponse, err, &moveCode)) {
         setLastOperationError(curlcommon::errorFromCurl(
@@ -1192,7 +1165,7 @@ bool CurlWebDavClient::exists(const std::string &remote_path, bool &isDir,
 bool CurlWebDavClient::stat(const std::string &remote_path, FileInfo &info,
                             std::string &err) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    InterruptResetGuard interruptReset(interrupted_);
+    curlcommon::OperationInterruptGuard interruptReset(interrupted_);
     clearLastOperationError();
     err.clear();
     info = FileInfo{};
@@ -1225,7 +1198,7 @@ bool CurlWebDavClient::stat(const std::string &remote_path, FileInfo &info,
     const std::string target = normalizeRemotePath(remote_path);
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
-    if (!performPropfind(static_cast<CURL *>(easyHandle_), opt, target, 0,
+    if (!performPropfind(easySession_->get(), opt, target, 0,
                          &interrupted_, response, err, &rc)) {
         if (rc == CURLE_ABORTED_BY_CALLBACK && interrupted_.load())
             err = "Interrupted";
@@ -1316,7 +1289,7 @@ bool CurlWebDavClient::setTimes(const std::string &remote_path,
 bool CurlWebDavClient::mkdir(const std::string &remote_dir, std::string &err,
                              unsigned int mode) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    InterruptResetGuard interruptReset(interrupted_);
+    curlcommon::OperationInterruptGuard interruptReset(interrupted_);
     clearLastOperationError();
     (void)mode;
     err.clear();
@@ -1342,7 +1315,7 @@ bool CurlWebDavClient::mkdir(const std::string &remote_dir, std::string &err,
     }
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
-    if (!performTextRequest(static_cast<CURL *>(easyHandle_), opt, "MKCOL",
+    if (!performTextRequest(easySession_->get(), opt, "MKCOL",
                             remote_dir, nullptr, {}, &interrupted_, response,
                             err, &rc)) {
         setLastOperationError(
@@ -1358,7 +1331,7 @@ bool CurlWebDavClient::mkdir(const std::string &remote_dir, std::string &err,
     if (response.statusCode == 405) {
         WebDavResponse verification;
         CURLcode verificationCode = CURLE_OK;
-        if (!performPropfind(static_cast<CURL *>(easyHandle_), opt, remote_dir,
+        if (!performPropfind(easySession_->get(), opt, remote_dir,
                              0, &interrupted_, verification, err,
                              &verificationCode)) {
             setLastOperationError(curlcommon::errorFromCurl(
@@ -1403,7 +1376,7 @@ bool CurlWebDavClient::mkdir(const std::string &remote_dir, std::string &err,
 bool CurlWebDavClient::removeFile(const std::string &remote_path,
                                   std::string &err) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    InterruptResetGuard interruptReset(interrupted_);
+    curlcommon::OperationInterruptGuard interruptReset(interrupted_);
     clearLastOperationError();
     err.clear();
     interrupted_.store(false);
@@ -1433,7 +1406,7 @@ bool CurlWebDavClient::removeFile(const std::string &remote_path,
     }
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
-    if (!performTextRequest(static_cast<CURL *>(easyHandle_), opt, "DELETE",
+    if (!performTextRequest(easySession_->get(), opt, "DELETE",
                             remote_path, nullptr, {}, &interrupted_, response,
                             err, &rc)) {
         setLastOperationError(
@@ -1456,7 +1429,7 @@ bool CurlWebDavClient::removeDir(const std::string &remote_dir,
 bool CurlWebDavClient::rename(const std::string &from, const std::string &to,
                               std::string &err, bool overwrite) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
-    InterruptResetGuard interruptReset(interrupted_);
+    curlcommon::OperationInterruptGuard interruptReset(interrupted_);
     clearLastOperationError();
     err.clear();
     interrupted_.store(false);
@@ -1494,7 +1467,7 @@ bool CurlWebDavClient::rename(const std::string &from, const std::string &to,
     };
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
-    if (!performTextRequest(static_cast<CURL *>(easyHandle_), opt, "MOVE", from,
+    if (!performTextRequest(easySession_->get(), opt, "MOVE", from,
                             nullptr, headers, &interrupted_, response, err,
                             &rc)) {
         setLastOperationError(

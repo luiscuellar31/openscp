@@ -43,6 +43,39 @@ bool ensureCurlInitialized(std::string &err) {
     return true;
 }
 
+CurlEasySession::~CurlEasySession() {
+    if (handle_)
+        curl_easy_cleanup(handle_);
+}
+
+bool CurlEasySession::initialize(std::string &err) {
+    if (handle_)
+        return true;
+    if (!ensureCurlInitialized(err))
+        return false;
+    handle_ = curl_easy_init();
+    if (!handle_) {
+        err = "Could not create CURL handle.";
+        return false;
+    }
+    return true;
+}
+
+void CurlEasySession::reset() noexcept {
+    if (handle_)
+        curl_easy_reset(handle_);
+}
+
+bool rejectInterrupted(const std::atomic<bool> *interrupted, std::string &err,
+                       CURLcode *curlCodeOut) {
+    if (!interrupted || !interrupted->load())
+        return false;
+    if (curlCodeOut)
+        *curlCodeOut = CURLE_ABORTED_BY_CALLBACK;
+    err = "Interrupted";
+    return true;
+}
+
 std::string trimAscii(std::string value) {
     auto isWs = [](unsigned char c) { return std::isspace(c) != 0; };
     while (!value.empty() && isWs(static_cast<unsigned char>(value.front())))

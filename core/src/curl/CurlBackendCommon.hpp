@@ -19,6 +19,37 @@ namespace openscp::curlcommon {
 
 bool ensureCurlInitialized(std::string &err);
 
+class CurlEasySession final {
+    public:
+    CurlEasySession() = default;
+    ~CurlEasySession();
+    CurlEasySession(const CurlEasySession &) = delete;
+    CurlEasySession &operator=(const CurlEasySession &) = delete;
+
+    [[nodiscard]] bool initialize(std::string &err);
+    void reset() noexcept;
+    [[nodiscard]] CURL *get() const noexcept { return handle_; }
+
+    private:
+    CURL *handle_ = nullptr;
+};
+
+class OperationInterruptGuard final {
+    public:
+    explicit OperationInterruptGuard(std::atomic<bool> &interrupted)
+        : interrupted_(interrupted) {}
+    ~OperationInterruptGuard() { interrupted_.store(false); }
+    OperationInterruptGuard(const OperationInterruptGuard &) = delete;
+    OperationInterruptGuard &
+    operator=(const OperationInterruptGuard &) = delete;
+
+    private:
+    std::atomic<bool> &interrupted_;
+};
+
+bool rejectInterrupted(const std::atomic<bool> *interrupted, std::string &err,
+                       CURLcode *curlCodeOut = nullptr);
+
 std::string trimAscii(std::string value);
 std::string toLowerAscii(std::string value);
 bool parseUnsignedDec(std::string_view token, std::uint64_t &out);
