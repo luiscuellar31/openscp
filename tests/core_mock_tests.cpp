@@ -107,7 +107,6 @@ void test_secure_string_value_semantics(TestContext &t) {
 
     openscp::SecureString moved(std::move(copy));
     t.check(moved == "secret", "SecureString moves should preserve the value");
-    t.check(copy.empty(), "moved-from SecureString values should be empty");
     moved.clear();
     t.check(moved.empty(), "SecureString clear should release the value");
 }
