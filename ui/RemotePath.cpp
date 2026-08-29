@@ -66,7 +66,7 @@ bool isSafeRemoteRelativePath(const QString &relativePath) {
 
 std::optional<QString> decodeRemoteEntryName(const std::string &rawName) {
     QStringDecoder decoder(QStringDecoder::Utf8);
-    const QString name = decoder.decode(QByteArray::fromStdString(rawName));
+    QString name = decoder.decode(QByteArray::fromStdString(rawName));
     if (decoder.hasError() || !isSafeRemoteEntryName(name))
         return std::nullopt;
     return name;

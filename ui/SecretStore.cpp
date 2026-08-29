@@ -42,7 +42,7 @@ static SecretStore::PersistResult mapApplePersistStatus(OSStatus st) {
     } else {
         r.status = SecretStore::PersistStatus::BackendError;
     }
-    r.detail = QString("Keychain OSStatus=%1").arg((int)st);
+    r.detail = QString("Keychain OSStatus=%1").arg(static_cast<int>(st));
     return r;
 }
 
@@ -158,7 +158,7 @@ std::optional<QString> SecretStore::getSecret(const QString &key) const {
     if (st != errSecSuccess || !result)
         return std::nullopt;
 
-    CFDataRef data = (CFDataRef)result;
+    CFDataRef data = static_cast<CFDataRef>(result);
     QString out;
     if (CFGetTypeID(data) == CFDataGetTypeID()) {
         const UInt8 *bytes = CFDataGetBytePtr(data);

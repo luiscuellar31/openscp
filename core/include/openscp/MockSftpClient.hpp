@@ -25,7 +25,7 @@ class MockSftpClient : public RemoteClient {
     bool get(const std::string &remote, const std::string &local,
              std::string &err,
              std::function<void(std::size_t, std::size_t)> progress,
-             std::function<bool()> shouldCancel, bool resume) override {
+             std::function<bool()> shouldCancel, bool) override {
         (void)remote;
         (void)local;
         (void)progress;
@@ -38,7 +38,7 @@ class MockSftpClient : public RemoteClient {
     bool put(const std::string &local, const std::string &remote,
              std::string &err,
              std::function<void(std::size_t, std::size_t)> progress,
-             std::function<bool()> shouldCancel, bool resume) override {
+             std::function<bool()> shouldCancel, bool) override {
         (void)local;
         (void)remote;
         (void)progress;

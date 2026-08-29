@@ -420,7 +420,7 @@ SettingsDialog::buildSettingBindings() const {
     const int optionalIntegrity =
         static_cast<int>(openscp::TransferIntegrityPolicy::Optional);
     addIntCombo("Security/defaultKnownHostsPolicy", strictKhPolicy,
-                defaultKnownHostsPolicy_, [strictKhPolicy](int value) {
+                defaultKnownHostsPolicy_, [](int value) {
                     const int acceptNew =
                         static_cast<int>(openscp::KnownHostsPolicy::AcceptNew);
                     const int off =
@@ -431,7 +431,7 @@ SettingsDialog::buildSettingBindings() const {
                                : strictKhPolicy;
                 });
     addIntCombo("Security/defaultTransferIntegrityPolicy", optionalIntegrity,
-                defaultIntegrityPolicy_, [optionalIntegrity](int value) {
+                defaultIntegrityPolicy_, [](int value) {
                     const int required = static_cast<int>(
                         openscp::TransferIntegrityPolicy::Required);
                     const int off =
@@ -644,7 +644,7 @@ void SettingsDialog::refreshWrappedCheckTexts() {
             checkBox->setText(wrapped);
             checkBox->updateGeometry();
         }
-        const int lineCount = wrapped.count('\n') + 1;
+        const int lineCount = static_cast<int>(wrapped.count('\n') + 1);
         const int textHeight =
             lineCount * QFontMetrics(checkBox->font()).lineSpacing();
         const int minHeight = qMax(indicatorH, textHeight) + 6;

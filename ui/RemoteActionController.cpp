@@ -225,8 +225,8 @@ void RemoteActionController::remove(const QString &basePath,
     state->basePath = basePath;
     state->progress = new QProgressDialog(
         QCoreApplication::translate("MainWindow", "Deleting remote items…"),
-        QCoreApplication::translate("MainWindow", "Cancel"), 0, entries.size(),
-        context_.dialogParent);
+        QCoreApplication::translate("MainWindow", "Cancel"), 0,
+        static_cast<int>(entries.size()), context_.dialogParent);
     state->progress->setWindowTitle(
         QCoreApplication::translate("MainWindow", "Delete"));
     state->progress->setWindowModality(Qt::NonModal);

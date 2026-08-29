@@ -149,7 +149,9 @@ class ConflictCoordinator {
         if (policy == TransferConflictPolicy::NewerOnly) {
             // Two seconds avoids copies caused only by filesystem/protocol
             // timestamp precision.
-            policy = *request.sourceMtime > (*request.destinationMtime + 2)
+            const auto sourceMtime = request.sourceMtime.value_or(0);
+            const auto destinationMtime = request.destinationMtime.value_or(0);
+            policy = sourceMtime > (destinationMtime + 2)
                          ? TransferConflictPolicy::Overwrite
                          : TransferConflictPolicy::Skip;
         }

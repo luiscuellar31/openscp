@@ -71,7 +71,7 @@ const char *statusName(Status status) {
 }
 
 QString errorForUi(const std::string &rawError) {
-    const QString message = QString::fromStdString(rawError).trimmed();
+    QString message = QString::fromStdString(rawError).trimmed();
     if (message.isEmpty())
         return message;
 
@@ -115,10 +115,10 @@ QString numberedPath(const QString &path, int suffix) {
 }
 
 QString numberedRemotePath(const QString &path, int suffix) {
-    const int slash = path.lastIndexOf('/');
+    const qsizetype slash = path.lastIndexOf('/');
     const QString directory = slash >= 0 ? path.left(slash + 1) : QString();
     const QString filename = slash >= 0 ? path.mid(slash + 1) : path;
-    const int dot = filename.lastIndexOf('.');
+    const qsizetype dot = filename.lastIndexOf('.');
     const bool hasExtension = dot > 0;
     const QString base = hasExtension ? filename.left(dot) : filename;
     const QString extension = hasExtension ? filename.mid(dot) : QString();
@@ -422,7 +422,8 @@ void TransferManager::enqueueDownload(const QString &remote,
 quint64 TransferManager::enqueueUpload(const QString &local,
                                        const QString &remote,
                                        const TransferBatchOptions &options) {
-    TransferTask task{TransferTask::Type::Upload};
+    TransferTask task{};
+    task.type = TransferTask::Type::Upload;
     {
         std::lock_guard<std::mutex> lock(mtx_);
         task.taskId = nextId_++;
@@ -453,7 +454,8 @@ quint64 TransferManager::enqueueUpload(const QString &local,
 quint64 TransferManager::enqueueDownload(const QString &remote,
                                          const QString &local,
                                          const TransferBatchOptions &options) {
-    TransferTask task{TransferTask::Type::Download};
+    TransferTask task{};
+    task.type = TransferTask::Type::Download;
     {
         std::lock_guard<std::mutex> lock(mtx_);
         task.taskId = nextId_++;
@@ -484,7 +486,8 @@ quint64 TransferManager::enqueueDownload(const QString &remote,
 quint64
 TransferManager::enqueueLocalDirectory(const QString &localDirectory,
                                        const TransferBatchOptions &options) {
-    TransferTask task{TransferTask::Type::CreateLocalDirectory};
+    TransferTask task{};
+    task.type = TransferTask::Type::CreateLocalDirectory;
     {
         std::lock_guard<std::mutex> lock(mtx_);
         task.taskId = nextId_++;
@@ -509,7 +512,8 @@ TransferManager::enqueueLocalDirectory(const QString &localDirectory,
 quint64
 TransferManager::enqueueRemoteDirectory(const QString &remoteDirectory,
                                         const TransferBatchOptions &options) {
-    TransferTask task{TransferTask::Type::CreateRemoteDirectory};
+    TransferTask task{};
+    task.type = TransferTask::Type::CreateRemoteDirectory;
     {
         std::lock_guard<std::mutex> lock(mtx_);
         task.taskId = nextId_++;
@@ -534,7 +538,8 @@ TransferManager::enqueueRemoteDirectory(const QString &remoteDirectory,
 quint64 TransferManager::enqueuePathTask(TransferTask::Type type,
                                          const QString &path,
                                          const TransferBatchOptions &options) {
-    TransferTask task{type};
+    TransferTask task{};
+    task.type = type;
     {
         std::lock_guard<std::mutex> lock(mtx_);
         task.taskId = nextId_++;
@@ -633,10 +638,12 @@ int TransferManager::enqueueDownloads(
         conflictCoordinator_.ensureBatchPolicy(batchId, options.conflictPolicy);
         const Policy batchPolicy =
             conflictCoordinator_.batchPolicy(batchId, options.conflictPolicy);
-        queueStore_.nodes().reserve(queueStore_.nodes().size() +
-                                    remoteLocalPairs.size());
+        queueStore_.nodes().reserve(
+            queueStore_.nodes().size() +
+            static_cast<std::size_t>(remoteLocalPairs.size()));
         for (const auto &pair : remoteLocalPairs) {
-            TransferTask task{TransferTask::Type::Download};
+            TransferTask task{};
+            task.type = TransferTask::Type::Download;
             task.taskId = nextId_++;
             task.batchId = batchId;
             task.dependsOnTaskId = options.dependsOnTaskId;
@@ -656,7 +663,7 @@ int TransferManager::enqueueDownloads(
     }
     publishAdded(ids);
     schedule();
-    return ids.size();
+    return static_cast<int>(ids.size());
 }
 
 void TransferManager::setBatchConflictPolicy(quint64 batchId, Policy policy) {
@@ -1185,7 +1192,8 @@ void TransferManager::retryTask(quint64 taskId) {
 }
 
 void TransferManager::removeTask(quint64 taskId, bool removePartialData) {
-    TransferTask removed{TransferTask::Type::Download};
+    TransferTask removed{};
+    removed.type = TransferTask::Type::Download;
     bool didRemove = false;
     {
         std::lock_guard<std::mutex> lock(mtx_);
@@ -1284,8 +1292,8 @@ void TransferManager::clearFinishedOlderThan(int minutes, bool clearDone,
                                              bool clearFailedCanceled) {
     if (minutes <= 0 || (!clearDone && !clearFailedCanceled))
         return;
-    const qint64 cutoff =
-        QDateTime::currentMSecsSinceEpoch() - qint64(minutes) * 60 * 1000;
+    const qint64 cutoff = QDateTime::currentMSecsSinceEpoch() -
+                          static_cast<qint64>(minutes) * 60 * 1000;
     QVector<quint64> removed;
     QSet<quint64> removedBatches;
     {
@@ -1351,8 +1359,8 @@ bool TransferManager::shouldRetryError(
         return false;
     if (structuredError.retry_after_seconds.has_value()) {
         const quint64 delay =
-            quint64(*structuredError.retry_after_seconds) * 1000;
-        retryAfterMs = int(std::min<quint64>(delay, 60000));
+            static_cast<quint64>(*structuredError.retry_after_seconds) * 1000;
+        retryAfterMs = static_cast<int>(std::min<quint64>(delay, 60000));
     }
 
     using ErrorKind = openscp::RemoteErrorKind;
@@ -1422,7 +1430,8 @@ bool TransferManager::shouldRetryError(
         bool ok = false;
         const qint64 seconds = match.captured(1).toLongLong(&ok);
         if (ok)
-            retryAfterMs = int(std::clamp<qint64>(seconds, 0, 60) * 1000);
+            retryAfterMs =
+                static_cast<int>(std::clamp<qint64>(seconds, 0, 60) * 1000);
     }
 
     static const QStringList transient = {
@@ -1660,7 +1669,8 @@ bool TransferManager::chooseRenamedDestination(
         }
 
         std::lock_guard<std::mutex> lock(mtx_);
-        TransferTask candidateTask{task.type};
+        TransferTask candidateTask{};
+        candidateTask.type = task.type;
         candidateTask.dst = candidate;
         const std::string key = destinationKey(candidateTask);
         if (reservedDestinations_.count(key))
@@ -1751,18 +1761,19 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
                         current == QStringLiteral("/")
                             ? current + piece
                             : current + QStringLiteral("/") + piece;
-                    bool isDirectory = false;
-                    std::string existsError;
-                    const bool exists = workerClient->exists(
-                        next.toStdString(), isDirectory, existsError);
-                    if (!existsError.empty()) {
-                        err = existsError;
+                    bool componentIsDirectory = false;
+                    std::string componentExistsError;
+                    const bool componentExists = workerClient->exists(
+                        next.toStdString(), componentIsDirectory,
+                        componentExistsError);
+                    if (!componentExistsError.empty()) {
+                        err = componentExistsError;
                         return PrecheckOutcome::Error;
                     }
-                    if (!exists) {
+                    if (!componentExists) {
                         if (!workerClient->mkdir(next.toStdString(), err, 0755))
                             return PrecheckOutcome::Error;
-                    } else if (!isDirectory) {
+                    } else if (!componentIsDirectory) {
                         err =
                             QCoreApplication::translate(
                                 "TransferManager",
@@ -1840,7 +1851,7 @@ void TransferManager::updateProgress(quint64 taskId, std::size_t done,
     TransferTask *task = taskForIdLocked(taskId);
     if (!task)
         return;
-    task->progress = total > 0 ? int((done * 100) / total) : 0;
+    task->progress = total > 0 ? static_cast<int>((done * 100) / total) : 0;
     task->bytesDone = done;
     task->bytesTotal = total;
     if (measuredKBps > 0)
@@ -2166,7 +2177,7 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
             invalidateWorkerClient(slot);
         const int exponentialMs = attempt == 1 ? 1000 : 2000;
         const int backoffMs =
-            exponentialMs + int(QRandomGenerator::global()->bounded(251));
+            exponentialMs + (QRandomGenerator::global()->bounded(251));
         const int delayMs =
             retryAfterMs >= 0
                 ? std::max(backoffMs, std::min(retryAfterMs, 60000))
@@ -2217,7 +2228,8 @@ QVector<quint64> TransferManager::pruneTerminalHistoryLocked() {
     QVector<quint64> removed;
     QSet<quint64> removedBatches;
     std::vector<std::unique_ptr<TransferTask>> kept;
-    kept.reserve(queueStore_.nodes().size() - toRemove);
+    kept.reserve(queueStore_.nodes().size() -
+                 static_cast<std::size_t>(toRemove));
     for (auto &taskNode : queueStore_.nodes()) {
         const auto &task = *taskNode;
         if (toRemove > 0 && isTerminalTransferStatus(task.status) &&

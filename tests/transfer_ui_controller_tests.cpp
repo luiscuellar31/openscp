@@ -29,7 +29,8 @@ TransferTask completedUpload(quint64 id, const QString &destination) {
 
 void testCompletionIsNotRepeated(TestContext &test) {
     openscpui::TransferUiController controller;
-    const QVector tasks{completedUpload(1, QStringLiteral("/team/report.txt"))};
+    const QVector<TransferTask> tasks{
+        completedUpload(1, QStringLiteral("/team/report.txt"))};
     const auto first = controller.observe(tasks, true, QStringLiteral("/team"));
     test.check(first.scheduleRemoteRefresh,
                "a completed upload in the visible folder should refresh it");
@@ -46,7 +47,7 @@ void testCompletionIsNotRepeated(TestContext &test) {
 
 void testRemoteRootBoundaries(TestContext &test) {
     openscpui::TransferUiController controller;
-    const QVector tasks{
+    const QVector<TransferTask> tasks{
         completedUpload(2, QStringLiteral("/teammate/report.txt"))};
     const auto update =
         controller.observe(tasks, true, QStringLiteral("/team"));
@@ -61,8 +62,8 @@ void testBatchNotification(TestContext &test) {
     download.type = TransferTask::Type::Download;
     download.dst = QStringLiteral("/local/a.txt");
     download.status = TransferTask::Status::Done;
-    const QVector tasks{completedUpload(3, QStringLiteral("/remote/a.txt")),
-                        download};
+    const QVector<TransferTask> tasks{
+        completedUpload(3, QStringLiteral("/remote/a.txt")), download};
     const auto update = controller.observe(tasks, false, {});
     test.check(update.completionMessage.contains(QStringLiteral("2")),
                "simultaneous completions should be summarized once");
@@ -72,7 +73,8 @@ void testBatchNotification(TestContext &test) {
 
 void testResetAllowsFreshSessionEffects(TestContext &test) {
     openscpui::TransferUiController controller;
-    const QVector tasks{completedUpload(5, QStringLiteral("/a.txt"))};
+    const QVector<TransferTask> tasks{
+        completedUpload(5, QStringLiteral("/a.txt"))};
     (void)controller.observe(tasks, true, QStringLiteral("/"));
     controller.reset();
     const auto update = controller.observe(tasks, true, QStringLiteral("/"));

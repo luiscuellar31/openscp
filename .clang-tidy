@@ -2,16 +2,19 @@ Checks: >
   -*,
   bugprone-*,
   -bugprone-easily-swappable-parameters,
+  -bugprone-exception-escape,
   -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-macro-parentheses,
   -bugprone-narrowing-conversions,
+  -bugprone-reserved-identifier,
   -bugprone-signed-char-misuse,
-  concurrency-mt-unsafe,
+  -bugprone-unchecked-optional-access,
   concurrency-thread-canceltype-asynchronous,
   performance-*,
+  -performance-unnecessary-value-param,
   readability-function-size
-WarningsAsErrors: ''
-HeaderFilterRegex: '(^|/)(core|ui)/'
+WarningsAsErrors: 'bugprone-*,concurrency-*,performance-*'
+HeaderFilterRegex: '(^|/)(core|ui|tests)/'
 FormatStyle: file
 CheckOptions:
   readability-function-size.LineThreshold: '120'

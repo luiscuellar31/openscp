@@ -106,8 +106,8 @@ std::string normalizeRemoteDirPath(std::string path) {
 
 std::string serverPathForLogicalPath(const SessionOptions &opt,
                                      const std::string &remotePath) {
-    const std::string base = normalizeWebDavBasePath(opt.webdav_base_path);
-    const std::string logical = normalizeRemotePath(remotePath);
+    std::string base = normalizeWebDavBasePath(opt.webdav_base_path);
+    std::string logical = normalizeRemotePath(remotePath);
     if (base == "/")
         return logical;
     if (logical == "/")
@@ -659,7 +659,7 @@ bool performPropfind(CURL *curl, const SessionOptions &opt,
                      WebDavResponse &response, std::string &err,
                      CURLcode *curlCodeOut = nullptr) {
     // PROPFIND drives both stat(depth=0) and list(depth=1).
-    const std::string body = propfindBody();
+    const std::string &body = propfindBody();
     std::vector<std::string> headers = {
         "Depth: " + std::to_string(depth),
         "Content-Type: application/xml; charset=utf-8",

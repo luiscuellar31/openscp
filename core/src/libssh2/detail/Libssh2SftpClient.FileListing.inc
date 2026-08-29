@@ -26,7 +26,7 @@ bool Libssh2SftpClient::list(const std::string &remote_path,
         if (rc > 0) {
             // rc = name length
             FileInfo fi{};
-            fi.name = std::string(filename, rc);
+            fi.name = std::string(filename, static_cast<std::size_t>(rc));
             fi.is_dir = (attrs.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS)
                             ? ((attrs.permissions & LIBSSH2_SFTP_S_IFMT) ==
                                LIBSSH2_SFTP_S_IFDIR)
@@ -38,10 +38,10 @@ bool Libssh2SftpClient::list(const std::string &remote_path,
             if (attrs.flags & LIBSSH2_SFTP_ATTR_ACMODTIME)
                 fi.mtime = attrs.mtime;
             if (attrs.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS)
-                fi.mode = attrs.permissions;
+                fi.mode = static_cast<std::uint32_t>(attrs.permissions);
             if (attrs.flags & LIBSSH2_SFTP_ATTR_UIDGID) {
-                fi.uid = attrs.uid;
-                fi.gid = attrs.gid;
+                fi.uid = static_cast<std::uint32_t>(attrs.uid);
+                fi.gid = static_cast<std::uint32_t>(attrs.gid);
             }
             if (fi.name == "." || fi.name == "..")
                 continue;

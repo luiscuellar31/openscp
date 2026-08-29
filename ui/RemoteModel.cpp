@@ -159,8 +159,8 @@ QVariant RemoteModel::data(const QModelIndex &index, int role) const {
                 return QVariant();
             if (!item.hasSize)
                 return QStringLiteral("—");
-            return QLocale().formattedDataSize((qint64)item.size, 1,
-                                               QLocale::DataSizeIecFormat);
+            return QLocale().formattedDataSize(static_cast<qint64>(item.size),
+                                               1, QLocale::DataSizeIecFormat);
         case 2:
             if (item.mtime > 0)
                 return openscpui::localShortTime(item.mtime);
@@ -189,6 +189,8 @@ QVariant RemoteModel::data(const QModelIndex &index, int role) const {
             setPermissionBit(9, 0001, 'x');
             return permissionsText;
         }
+        default:
+            break;
         }
     }
     if (role == Qt::ToolTipRole) {
@@ -199,8 +201,9 @@ QVariant RemoteModel::data(const QModelIndex &index, int role) const {
         }
         QString tip = tr("File");
         const QString human = QLocale().formattedDataSize(
-            (qint64)item.size, 1, QLocale::DataSizeIecFormat);
-        const QString bytes = QLocale().toString((qulonglong)item.size);
+            static_cast<qint64>(item.size), 1, QLocale::DataSizeIecFormat);
+        const QString bytes =
+            QLocale().toString(static_cast<qulonglong>(item.size));
         tip += QString(" • %1 (%2 bytes)").arg(human, bytes);
         if (item.mtime > 0)
             tip += " • " + openscpui::localShortTime(item.mtime);
@@ -311,7 +314,7 @@ RemoteModel::itemForIndex(const QModelIndex &index) const {
     const int row = index.row();
     if (row < 0 || row >= static_cast<int>(items_.size()))
         return nullptr;
-    return &items_[row];
+    return &items_[static_cast<std::size_t>(row)];
 }
 
 bool RemoteModel::isDir(const QModelIndex &index) const {
@@ -347,6 +350,8 @@ QVariant RemoteModel::headerData(int section, Qt::Orientation orientation,
         return tr("Date");
     case 3:
         return tr("Permissions");
+    default:
+        break;
     }
     return {};
 }

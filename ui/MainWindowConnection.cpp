@@ -18,6 +18,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDebug>
 #include <QDir>
 #include <QGuiApplication>
 #include <QHeaderView>
@@ -43,8 +44,8 @@
 
 // Best-effort memory scrubbing helpers for sensitive data
 static inline void secureClear(QString &text) {
-    const int charCount = text.size();
-    for (int charIndex = 0; charIndex < charCount; ++charIndex)
+    const qsizetype charCount = text.size();
+    for (qsizetype charIndex = 0; charIndex < charCount; ++charIndex)
         text[charIndex] = QChar(u'\0');
     text.clear();
 }
@@ -52,8 +53,8 @@ static inline void secureClear(QByteArray &bytes) {
     if (bytes.isEmpty())
         return;
     volatile char *bytePtr = reinterpret_cast<volatile char *>(bytes.data());
-    const int byteCount = bytes.size();
-    for (int byteIndex = 0; byteIndex < byteCount; ++byteIndex)
+    const qsizetype byteCount = bytes.size();
+    for (qsizetype byteIndex = 0; byteIndex < byteCount; ++byteIndex)
         bytePtr[byteIndex] = 0;
     bytes.clear();
     bytes.squeeze();
@@ -108,10 +109,6 @@ normalizedIdentityJumpUser(const std::optional<std::string> &user) {
 
 static QString protocolDisplayLabel(openscp::Protocol protocol) {
     return QString::fromLatin1(openscp::protocolDisplayName(protocol));
-}
-
-static QString normalizeRemotePanelPath(const QString &rawPath) {
-    return normalizeRemotePath(rawPath);
 }
 
 static QString
@@ -575,6 +572,7 @@ bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
         } catch (...) {
             // Best effort: continue UI teardown even if queue cleanup
             // throws unexpectedly.
+            qWarning() << "Transfer cleanup threw during disconnect";
         }
         QObject *app = QCoreApplication::instance();
         if (!app)
@@ -846,7 +844,7 @@ bool MainWindow::confirmInsecureHostPolicyForSession(
     const QString allowKey =
         QString("Security/insecureTransportConfirmedUntilUtc/%1/%2:%3")
             .arg(riskKey, hostKey)
-            .arg((int)opt.port);
+            .arg(static_cast<int>(opt.port));
     const qint64 now = QDateTime::currentSecsSinceEpoch();
     QSettings settings("OpenSCP", "OpenSCP");
     const qint64 allowedUntil = settings.value(allowKey, 0).toLongLong();
@@ -893,7 +891,7 @@ bool MainWindow::confirmInsecureHostPolicyForSession(
 
     // Temporary exception per host:port to avoid persistent bypasses.
     const int ttlMin = qBound(1, prefNoHostVerificationTtlMin_, 120);
-    const qint64 newUntil = now + qint64(ttlMin) * 60;
+    const qint64 newUntil = now + static_cast<qint64>(ttlMin) * 60;
     settings.setValue(allowKey, newUntil);
     settings.sync();
     const QDateTime expLocal =
@@ -990,15 +988,15 @@ void MainWindow::showTOfuDialog(const QString &host, const QString &algorithm,
     box->setWindowModality(Qt::WindowModal);
     box->setIcon(QMessageBox::Question);
     box->setWindowTitle(tr("Confirm SSH fingerprint"));
-    QString text = QString(tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
-                              "%3\n\nTrust and save to known_hosts?"))
+    QString text = (tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
+                       "%3\n\nTrust and save to known_hosts?"))
                        .arg(host)
                        .arg(algorithm)
                        .arg(fingerprint);
     if (!tofuCanSave_) {
-        text = QString(tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
-                          "%3\n\nFingerprint cannot be saved. Connection "
-                          "allowed only this time."))
+        text = (tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
+                   "%3\n\nFingerprint cannot be saved. Connection "
+                   "allowed only this time."))
                    .arg(host)
                    .arg(algorithm)
                    .arg(fingerprint);
@@ -1008,7 +1006,7 @@ void MainWindow::showTOfuDialog(const QString &host, const QString &algorithm,
                    QMessageBox::YesRole);
     box->addButton(tr("Cancel"), QMessageBox::RejectRole);
     connect(box, &QMessageBox::finished, this, &MainWindow::onTofuFinished);
-    QTimer::singleShot(0, box, [this, box] {
+    QTimer::singleShot(0, box, [box] {
         box->open();
         box->raise();
         box->activateWindow();
@@ -1079,9 +1077,8 @@ void MainWindow::showOneTimeDialog(const QString &host,
     box->setIcon(QMessageBox::Warning);
     box->setWindowTitle(tr("Additional confirmation"));
     box->setText(
-        QString(
-            tr("Could not save the fingerprint. Connect only this time without "
-               "saving?\n\nHost: %1\nAlgorithm: %2\nFingerprint: %3"))
+        (tr("Could not save the fingerprint. Connect only this time without "
+            "saving?\n\nHost: %1\nAlgorithm: %2\nFingerprint: %3"))
             .arg(host, algorithm, fingerprint));
     box->addButton(tr("Connect without saving"), QMessageBox::YesRole);
     box->addButton(tr("Cancel"), QMessageBox::RejectRole);
@@ -1104,7 +1101,7 @@ bool MainWindow::validateSftpConnectStart(const openscp::SessionOptions &opt) {
         const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
         const int elapsedSec =
             (transferCleanupStartedAtMs_ > 0)
-                ? int((nowMs - transferCleanupStartedAtMs_) / 1000)
+                ? static_cast<int>((nowMs - transferCleanupStartedAtMs_) / 1000)
                 : 0;
         statusBar()->showMessage(
             tr("Please wait: previous transfer cleanup is still running (%1s)")
@@ -1267,7 +1264,8 @@ void MainWindow::configureSftpConnectCallbacks(openscp::SessionOptions &opt) {
             };
         auto appendUtf8Response = [&responses](QString &answer) {
             QByteArray bytes = answer.toUtf8();
-            responses.emplace_back(bytes.constData(), (size_t)bytes.size());
+            responses.emplace_back(bytes.constData(),
+                                   static_cast<size_t>(bytes.size()));
             secureClear(bytes);
             secureClear(answer);
         };
@@ -1565,7 +1563,7 @@ void MainWindow::maybePersistQuickConnectSite(
         newEntry.opt.private_key_passphrase.reset();
         newEntry.opt.proxy_password.reset();
         sites.push_back(newEntry);
-        matchIndex = sites.size() - 1;
+        matchIndex = static_cast<int>(sites.size() - 1);
         created = true;
     }
 

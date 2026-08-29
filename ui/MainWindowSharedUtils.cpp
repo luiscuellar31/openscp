@@ -104,7 +104,7 @@ QString shortRemoteError(const QString &raw, const QString &fallback) {
                                            "Authentication failed.");
     }
 
-    const int newlineIndex = message.indexOf('\n');
+    const qsizetype newlineIndex = message.indexOf('\n');
     if (newlineIndex > 0) {
         message = message.left(newlineIndex);
     }

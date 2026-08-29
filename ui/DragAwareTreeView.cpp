@@ -60,7 +60,7 @@ static QString normalizeStagingName(const QString &value) {
 }
 
 static QPair<QString, QString> splitNameMultiExt(const QString &fileName) {
-    const int firstDot = fileName.indexOf('.', 1);
+    const qsizetype firstDot = fileName.indexOf('.', 1);
     if (firstDot <= 0)
         return qMakePair(fileName, QString());
     return qMakePair(fileName.left(firstDot), fileName.mid(firstDot));
@@ -76,7 +76,8 @@ static QPair<int, quint64> loadStagingConfirmThresholds() {
         settings.value("Advanced/stagingConfirmMiB", 100 * 1024).toInt();
     if (mibThreshold < 1)
         mibThreshold = 100 * 1024;
-    return qMakePair(itemThreshold, quint64(mibThreshold) * 1024ull * 1024ull);
+    return qMakePair(itemThreshold,
+                     static_cast<quint64>(mibThreshold) * 1024ull * 1024ull);
 }
 
 struct DragAwareTreeView::RemoteDragStagingState {
@@ -225,7 +226,7 @@ void DragAwareTreeView::showKeepMessageWithPrefix(const QString &prefix,
 
 void DragAwareTreeView::scheduleAutoCleanup(const QString &batchDir,
                                             int initialDelayMs) {
-    auto tryDelete = [this](const QString &dir) -> bool {
+    auto tryDelete = [](const QString &dir) -> bool {
         QDir targetDir(dir);
         if (!targetDir.exists())
             return true;
@@ -253,7 +254,7 @@ void DragAwareTreeView::scheduleAutoCleanup(const QString &batchDir,
         auto timer = new QTimer(this);
         timer->setInterval(1000);
         connect(timer, &QTimer::timeout, this,
-                [this, timer, retries, batchDir, tryDelete]() {
+                [timer, retries, batchDir, tryDelete]() {
                     if (tryDelete(batchDir) || --(*retries) <= 0) {
                         timer->stop();
                         timer->deleteLater();
@@ -551,9 +552,9 @@ void DragAwareTreeView::startRemoteDragStaging(
     std::sort(state->orderedDirectories.begin(),
               state->orderedDirectories.end(),
               [](const QString &left, const QString &right) {
-                  const int leftDepth =
+                  const qsizetype leftDepth =
                       QDir::fromNativeSeparators(left).count(QLatin1Char('/'));
-                  const int rightDepth =
+                  const qsizetype rightDepth =
                       QDir::fromNativeSeparators(right).count(QLatin1Char('/'));
                   if (leftDepth != rightDepth)
                       return leftDepth < rightDepth;
@@ -748,11 +749,14 @@ void DragAwareTreeView::pumpRemoteDragStaging(
     if (state->pendingTaskIds.size() >= kHighWatermark)
         state->backpressurePaused = true;
 
-    const int total = state->orderedDirectories.size() + state->targets.size();
+    const int total = static_cast<int>(state->orderedDirectories.size() +
+                                       state->targets.size());
     const int completed = state->succeeded + state->failed;
     if (overlayProgress_) {
         overlayProgress_->setValue(
-            total > 0 ? int((qint64(completed) * 100) / total) : 0);
+            total > 0 ? static_cast<int>(
+                            (static_cast<qint64>(completed) * 100) / total)
+                      : 0);
     }
     if (overlayLabel_) {
         overlayLabel_->setText(
@@ -908,7 +912,8 @@ void DragAwareTreeView::finishRemoteDragStaging(
     QObject::disconnect(state->removedConnection);
     hidePrepOverlay();
 
-    const int total = state->orderedDirectories.size() + state->targets.size();
+    const int total = static_cast<int>(state->orderedDirectories.size() +
+                                       state->targets.size());
     const int enumeratedTotal = static_cast<int>(std::min<quint64>(
         state->stats.totalItems + state->stats.totalDirs,
         static_cast<quint64>(std::numeric_limits<int>::max())));
@@ -1048,7 +1053,7 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *remoteModel) {
             const auto rootIt = enumJobLocalRoots_.constFind(batch.job.id);
             if (rootIt == enumJobLocalRoots_.cend() || !dragInProgress_)
                 return;
-            const QString localRoot = rootIt.value();
+            const QString &localRoot = rootIt.value();
             for (const auto &entry : batch.entries) {
                 if (entry.info.is_dir) {
                     bool valid = !entry.relativePath.isEmpty();
@@ -1229,11 +1234,13 @@ void DragAwareTreeView::cancelCurrentBatch(const QString &reason) {
                 "inaccessible=%7 (%8)")
             .arg(enumMs_)
             .arg(stagingMs)
-            .arg(QLocale().toString((qulonglong)enumSymlinksSkipped_))
-            .arg(QLocale().toString((qulonglong)enumDepthLimits_))
-            .arg(QLocale().toString((qulonglong)enumInvalidNames_))
-            .arg(QLocale().toString((qulonglong)enumStats_.unknownSizeCount))
-            .arg(QLocale().toString((qulonglong)enumInaccessible_))
+            .arg(QLocale().toString(
+                static_cast<qulonglong>(enumSymlinksSkipped_)))
+            .arg(QLocale().toString(static_cast<qulonglong>(enumDepthLimits_)))
+            .arg(QLocale().toString(static_cast<qulonglong>(enumInvalidNames_)))
+            .arg(QLocale().toString(
+                static_cast<qulonglong>(enumStats_.unknownSizeCount)))
+            .arg(QLocale().toString(static_cast<qulonglong>(enumInaccessible_)))
             .arg(reason));
     resetRemoteDragState();
 }

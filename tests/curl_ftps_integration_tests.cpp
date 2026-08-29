@@ -57,7 +57,7 @@ bool parsePort(const std::optional<std::string> &raw, std::uint16_t &out,
 bool parseBool(const std::optional<std::string> &raw, bool fallback) {
     if (!raw.has_value())
         return fallback;
-    const std::string v = *raw;
+    const std::string &v = *raw;
     if (v == "1" || v == "true" || v == "TRUE" || v == "yes" || v == "YES")
         return true;
     if (v == "0" || v == "false" || v == "FALSE" || v == "no" || v == "NO")

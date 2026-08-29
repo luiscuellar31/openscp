@@ -27,7 +27,7 @@ struct TransferTask {
         DeleteLocalDirectory,
         DeleteRemoteFile,
         DeleteRemoteDirectory
-    } type;
+    } type = Type::Download;
 
     quint64 taskId = 0;
     quint64 batchId = 0;

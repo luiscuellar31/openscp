@@ -1,10 +1,20 @@
 name: Nightly Quality
 
 on:
+  pull_request:
+    branches:
+      - dev
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
   workflow_dispatch:
 
 jobs:
   sanitizers:
+    if: github.event_name == 'workflow_dispatch'
     name: Sanitizers (${{ matrix.sanitizer }})
     runs-on: ubuntu-latest
     strategy:
@@ -15,8 +25,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: dev
 
       - name: Install dependencies
         run: |
@@ -72,22 +80,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: dev
 
       - name: Install analysis tools and dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            clang-format clang-tidy cmake ninja-build pkg-config cppcheck \
+            clang-format-17 clang-tidy-17 cmake ninja-build pkg-config cppcheck \
             libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev \
             qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools \
             qt6-l10n-tools libgl1-mesa-dev
 
       - name: Check C++ formatting
-        run: |
-          xargs --no-run-if-empty \
-            clang-format --dry-run --Werror < .clang-format-files
+        run: ./scripts/check_cpp_quality.sh --format
 
       - name: Configure compilation database
         env:
@@ -97,23 +101,11 @@ jobs:
           cmake -S . -B build-analysis -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            -DOPENSCP_BUILD_TESTS=ON
+            -DOPENSCP_BUILD_TESTS=ON \
+            -DOPENSCP_WERROR=ON
 
       - name: Run conservative clang-tidy checks
-        run: |
-          run-clang-tidy \
-            -p build-analysis \
-            -quiet \
-            '.*/(core/src|ui)/.*\.cpp$'
+        run: ./scripts/check_cpp_quality.sh --tidy --build-dir build-analysis
 
       - name: Run cppcheck
-        run: |
-          cppcheck \
-            --std=c++20 \
-            --enable=warning,performance,portability \
-            --error-exitcode=1 \
-            --inline-suppr \
-            --suppress=missingIncludeSystem \
-            --suppress=unknownMacro \
-            --quiet \
-            core/include core/src ui tests
+        run: ./scripts/check_cpp_quality.sh --cppcheck

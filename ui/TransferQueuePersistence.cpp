@@ -146,8 +146,8 @@ TransferTask::Type typeFromName(const QString &name) {
 
 TransferTask deserializeTask(const QJsonObject &object, quint64 taskId,
                              const QString &currentSessionKey) {
-    TransferTask task{
-        typeFromName(object.value(QStringLiteral("type")).toString())};
+    TransferTask task{};
+    task.type = typeFromName(object.value(QStringLiteral("type")).toString());
     task.taskId = taskId;
     task.batchId =
         parseTaskId(object.value(QStringLiteral("batchId"))).value_or(taskId);
@@ -250,7 +250,7 @@ TransferQueuePersistence::load(const QString &path,
 
     const QJsonArray tasks = root.value(QStringLiteral("tasks")).toArray();
     result.tasks.reserve(tasks.size());
-    for (const QJsonValue &value : tasks) {
+    for (const auto &value : tasks) {
         if (!value.isObject())
             continue;
         const QJsonObject object = value.toObject();

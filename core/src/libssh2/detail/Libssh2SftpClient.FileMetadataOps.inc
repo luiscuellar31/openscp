@@ -8,7 +8,7 @@ bool Libssh2SftpClient::exists(const std::string &remote_path, bool &isDir,
 
     LIBSSH2_SFTP_ATTRIBUTES st{};
     int rc = libssh2_sftp_stat_ex(sftp_, remote_path.c_str(),
-                                  (unsigned)remote_path.size(),
+                                  static_cast<unsigned>(remote_path.size()),
                                   LIBSSH2_SFTP_STAT, &st);
 
     if (rc == 0) {
@@ -40,7 +40,7 @@ bool Libssh2SftpClient::stat(const std::string &remote_path, FileInfo &info,
 
     LIBSSH2_SFTP_ATTRIBUTES st{};
     int rc = libssh2_sftp_stat_ex(sftp_, remote_path.c_str(),
-                                  (unsigned)remote_path.size(),
+                                  static_cast<unsigned>(remote_path.size()),
                                   LIBSSH2_SFTP_STAT, &st);
     if (rc != 0) {
         unsigned long sftp_err = libssh2_sftp_last_error(sftp_);
@@ -58,18 +58,21 @@ bool Libssh2SftpClient::stat(const std::string &remote_path, FileInfo &info,
             ? ((st.permissions & LIBSSH2_SFTP_S_IFMT) == LIBSSH2_SFTP_S_IFDIR)
             : false;
     if (st.flags & LIBSSH2_SFTP_ATTR_SIZE) {
-        info.size = (std::uint64_t)st.filesize;
+        info.size = static_cast<std::uint64_t>(st.filesize);
         info.has_size = true;
     } else {
         info.size = 0;
         info.has_size = false;
     }
-    info.mtime =
-        (st.flags & LIBSSH2_SFTP_ATTR_ACMODTIME) ? (std::uint64_t)st.mtime : 0;
-    info.mode = (st.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS) ? st.permissions : 0;
+    info.mtime = (st.flags & LIBSSH2_SFTP_ATTR_ACMODTIME)
+                     ? static_cast<std::uint64_t>(st.mtime)
+                     : 0;
+    info.mode = (st.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS)
+                    ? static_cast<std::uint32_t>(st.permissions)
+                    : 0;
     if (st.flags & LIBSSH2_SFTP_ATTR_UIDGID) {
-        info.uid = st.uid;
-        info.gid = st.gid;
+        info.uid = static_cast<std::uint32_t>(st.uid);
+        info.gid = static_cast<std::uint32_t>(st.gid);
     }
     return true;
 }
@@ -85,7 +88,7 @@ bool Libssh2SftpClient::chmod(const std::string &remote_path,
     a.flags = LIBSSH2_SFTP_ATTR_PERMISSIONS;
     a.permissions = mode;
     int rc = libssh2_sftp_stat_ex(sftp_, remote_path.c_str(),
-                                  (unsigned)remote_path.size(),
+                                  static_cast<unsigned>(remote_path.size()),
                                   LIBSSH2_SFTP_SETSTAT, &a);
     if (rc != 0) {
         err = "Remote chmod failed";
@@ -108,10 +111,10 @@ bool Libssh2SftpClient::setTimes(const std::string &remote_path,
         return false;
     LIBSSH2_SFTP_ATTRIBUTES a{};
     a.flags = LIBSSH2_SFTP_ATTR_ACMODTIME;
-    a.atime = (unsigned long)atime;
-    a.mtime = (unsigned long)mtime;
+    a.atime = static_cast<unsigned long>(atime);
+    a.mtime = static_cast<unsigned long>(mtime);
     int rc = libssh2_sftp_stat_ex(sftp_, remote_path.c_str(),
-                                  (unsigned)remote_path.size(),
+                                  static_cast<unsigned>(remote_path.size()),
                                   LIBSSH2_SFTP_SETSTAT, &a);
     if (rc != 0) {
         err = "Remote setTimes failed";
@@ -127,11 +130,11 @@ bool Libssh2SftpClient::chown(const std::string &remote_path, std::uint32_t uid,
         return false;
     LIBSSH2_SFTP_ATTRIBUTES a{};
     a.flags = 0;
-    if (uid != (std::uint32_t)-1) {
+    if (uid != static_cast<std::uint32_t>(-1)) {
         a.flags |= LIBSSH2_SFTP_ATTR_UIDGID;
         a.uid = uid;
     }
-    if (gid != (std::uint32_t)-1) {
+    if (gid != static_cast<std::uint32_t>(-1)) {
         a.flags |= LIBSSH2_SFTP_ATTR_UIDGID;
         a.gid = gid;
     }
@@ -141,7 +144,7 @@ bool Libssh2SftpClient::chown(const std::string &remote_path, std::uint32_t uid,
         return true;
     }
     int rc = libssh2_sftp_stat_ex(sftp_, remote_path.c_str(),
-                                  (unsigned)remote_path.size(),
+                                  static_cast<unsigned>(remote_path.size()),
                                   LIBSSH2_SFTP_SETSTAT, &a);
     if (rc != 0) {
         err = "Remote chown failed";

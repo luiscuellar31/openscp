@@ -60,8 +60,9 @@ void testOptionsLifecycle(TestContext &test,
     options.host = "dav.example";
     options.webdav_base_path = "/dav/alice";
     session.setOptions(options);
-    test.check(session.options().has_value() &&
-                   session.options()->host == "dav.example",
+    const auto &activeOptions = session.options();
+    test.check(activeOptions.has_value() &&
+                   activeOptions->host == "dav.example",
                "active endpoint options should be owned by the session");
     session.clearOptions();
     test.check(!session.options().has_value(),

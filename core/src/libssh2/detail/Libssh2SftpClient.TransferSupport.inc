@@ -10,7 +10,7 @@ static void apply_transfer_socket_timeouts(int sock) {
     (void)::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO,
                        reinterpret_cast<const char *>(&tvMs), sizeof(tvMs));
 #else
-    struct timeval tv{};
+    struct timeval tv {};
     tv.tv_sec = 15;
     tv.tv_usec = 0;
     (void)::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
@@ -26,7 +26,7 @@ static bool seek_local_file(FILE *f, std::uint64_t off, std::string *why) {
         return false;
     }
 #else
-    if (fseeko(f, (off_t)off, SEEK_SET) != 0) {
+    if (fseeko(f, static_cast<off_t>(off), SEEK_SET) != 0) {
         if (why)
             *why = posix_err("fseeko(local)");
         return false;
@@ -38,13 +38,13 @@ static bool seek_local_file(FILE *f, std::uint64_t off, std::string *why) {
 static bool get_local_file_size(const std::string &path, std::uint64_t &out,
                                 std::string *why) {
 #ifndef _WIN32
-    struct ::stat st{};
+    struct ::stat st {};
     if (::stat(path.c_str(), &st) != 0) {
         if (why)
             *why = posix_err("stat(local)");
         return false;
     }
-    out = (std::uint64_t)st.st_size;
+    out = static_cast<std::uint64_t>(st.st_size);
     return true;
 #else
     HANDLE h = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL,
@@ -62,7 +62,7 @@ static bool get_local_file_size(const std::string &path, std::uint64_t &out,
         return false;
     }
     CloseHandle(h);
-    out = (std::uint64_t)sz.QuadPart;
+    out = static_cast<std::uint64_t>(sz.QuadPart);
     return true;
 #endif
 }
@@ -152,9 +152,9 @@ static bool rename_remote_with_fallback(LIBSSH2_SFTP *sftp,
     unsigned long lastSftpErr = 0;
     const char *lastAttempt = "none";
     for (const auto &a : attempts) {
-        const int rc =
-            libssh2_sftp_rename_ex(sftp, from.c_str(), (unsigned)from.size(),
-                                   to.c_str(), (unsigned)to.size(), a.flags);
+        const int rc = libssh2_sftp_rename_ex(
+            sftp, from.c_str(), static_cast<unsigned>(from.size()), to.c_str(),
+            static_cast<unsigned>(to.size()), a.flags);
         if (rc == 0)
             return true;
         lastRc = rc;
@@ -236,8 +236,8 @@ hash_local_range(const std::string &path, std::uint64_t offset,
             std::fclose(f);
             return false;
         }
-        const std::size_t want =
-            (std::size_t)std::min<std::uint64_t>(remain, buf.size());
+        const std::size_t want = static_cast<std::size_t>(
+            std::min<std::uint64_t>(remain, buf.size()));
         const std::size_t n = std::fread(buf.data(), 1, want, f);
         if (n == 0) {
             if (why)
@@ -253,7 +253,7 @@ hash_local_range(const std::string &path, std::uint64_t offset,
             std::fclose(f);
             return false;
         }
-        remain -= (std::uint64_t)n;
+        remain -= static_cast<std::uint64_t>(n);
     }
     unsigned int outLen = 0;
     if (EVP_DigestFinal_ex(ctx, out.data(), &outLen) != 1 ||
@@ -283,15 +283,15 @@ hash_remote_range(LIBSSH2_SFTP *sftp, const std::string &remote,
                   std::uint64_t offset, std::uint64_t length, Sha256Digest &out,
                   std::string *why,
                   const std::function<bool()> *shouldCancel = nullptr) {
-    LIBSSH2_SFTP_HANDLE *rh =
-        libssh2_sftp_open_ex(sftp, remote.c_str(), (unsigned)remote.size(),
-                             LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
+    LIBSSH2_SFTP_HANDLE *rh = libssh2_sftp_open_ex(
+        sftp, remote.c_str(), static_cast<unsigned>(remote.size()),
+        LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
     if (!rh) {
         if (why)
             *why = "Could not open remote file for hashing";
         return false;
     }
-    libssh2_sftp_seek64(rh, (libssh2_uint64_t)offset);
+    libssh2_sftp_seek64(rh, static_cast<libssh2_uint64_t>(offset));
     EVP_MD_CTX *ctx = EVP_MD_CTX_new();
     if (!ctx) {
         if (why)
@@ -316,8 +316,8 @@ hash_remote_range(LIBSSH2_SFTP *sftp, const std::string &remote,
             libssh2_sftp_close(rh);
             return false;
         }
-        const std::size_t want =
-            (std::size_t)std::min<std::uint64_t>(remain, buf.size());
+        const std::size_t want = static_cast<std::size_t>(
+            std::min<std::uint64_t>(remain, buf.size()));
         ssize_t n =
             libssh2_sftp_read(rh, reinterpret_cast<char *>(buf.data()), want);
         if (n <= 0) {
@@ -327,14 +327,15 @@ hash_remote_range(LIBSSH2_SFTP *sftp, const std::string &remote,
             libssh2_sftp_close(rh);
             return false;
         }
-        if (EVP_DigestUpdate(ctx, buf.data(), (std::size_t)n) != 1) {
+        if (EVP_DigestUpdate(ctx, buf.data(), static_cast<std::size_t>(n)) !=
+            1) {
             if (why)
                 *why = "EVP_DigestUpdate(remote) failed";
             EVP_MD_CTX_free(ctx);
             libssh2_sftp_close(rh);
             return false;
         }
-        remain -= (std::uint64_t)n;
+        remain -= static_cast<std::uint64_t>(n);
     }
     unsigned int outLen = 0;
     if (EVP_DigestFinal_ex(ctx, out.data(), &outLen) != 1 ||
@@ -354,9 +355,9 @@ static bool hash_remote_full(
     LIBSSH2_SFTP *sftp, const std::string &remote, Sha256Digest &out,
     std::string *why, const std::function<bool()> *shouldCancel = nullptr,
     const std::function<void(std::size_t, std::size_t)> *progress = nullptr) {
-    LIBSSH2_SFTP_HANDLE *rh =
-        libssh2_sftp_open_ex(sftp, remote.c_str(), (unsigned)remote.size(),
-                             LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
+    LIBSSH2_SFTP_HANDLE *rh = libssh2_sftp_open_ex(
+        sftp, remote.c_str(), static_cast<unsigned>(remote.size()),
+        LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
     if (!rh) {
         if (why)
             *why = "Could not open remote file for full hashing";
@@ -396,7 +397,8 @@ static bool hash_remote_full(
         ssize_t n = libssh2_sftp_read(rh, reinterpret_cast<char *>(buf.data()),
                                       buf.size());
         if (n > 0) {
-            if (EVP_DigestUpdate(ctx, buf.data(), (std::size_t)n) != 1) {
+            if (EVP_DigestUpdate(ctx, buf.data(),
+                                 static_cast<std::size_t>(n)) != 1) {
                 if (why)
                     *why = "EVP_DigestUpdate(remote-full) failed";
                 EVP_MD_CTX_free(ctx);

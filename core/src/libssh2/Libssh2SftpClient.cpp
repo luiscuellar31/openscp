@@ -99,7 +99,7 @@ static bool core_sensitive_debug_enabled() {
 }
 
 static bool core_log_enabled(CoreLogLevel level) {
-    return (int)core_log_level() >= (int)level;
+    return static_cast<int>(core_log_level()) >= static_cast<int>(level);
 }
 
 static void core_logf(CoreLogLevel level, const char *fmt, ...) {
@@ -108,7 +108,14 @@ static void core_logf(CoreLogLevel level, const char *fmt, ...) {
     std::fprintf(stderr, "[OpenSCP] ");
     va_list ap;
     va_start(ap, fmt);
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wformat-nonliteral"
+#endif
     std::vfprintf(stderr, fmt, ap);
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
     va_end(ap);
     std::fprintf(stderr, "\n");
 }
@@ -133,8 +140,8 @@ static void write_best_effort(int fd, const char *data, std::size_t len) {
         const ssize_t written = ::write(fd, data, len);
         if (written <= 0)
             return;
-        data += (std::size_t)written;
-        len -= (std::size_t)written;
+        data += static_cast<std::size_t>(written);
+        len -= static_cast<std::size_t>(written);
     }
 }
 #endif
@@ -151,7 +158,7 @@ static void auditLogHostKey(const std::string &host, uint16_t port,
     if (!home)
         return;
     std::string dir = std::string(home) + "/.openscp";
-    struct ::stat st{};
+    struct ::stat st {};
     if (::stat(dir.c_str(), &st) != 0) {
         (void)::mkdir(dir.c_str(), 0700);
     } else {
@@ -165,9 +172,9 @@ static void auditLogHostKey(const std::string &host, uint16_t port,
     char line[1024];
     std::snprintf(line, sizeof(line),
                   "ts=%ld host=%s port=%u alg=\"%s\" fp=\"%s\" status=%s\n",
-                  (long)time(nullptr), host.c_str(), (unsigned)port,
-                  algorithm.c_str(), fingerprint.c_str(),
-                  status ? status : "unknown");
+                  static_cast<long>(time(nullptr)), host.c_str(),
+                  static_cast<unsigned>(port), algorithm.c_str(),
+                  fingerprint.c_str(), status ? status : "unknown");
     write_best_effort(fd, line, std::strlen(line));
     ::close(fd);
 #else
@@ -191,7 +198,7 @@ static bool ensure_parent_dir_0700(const std::string &path, std::string *why) {
         dir = ".";
     else
         dir.resize(p);
-    struct ::stat st{};
+    struct ::stat st {};
     if (::stat(dir.c_str(), &st) != 0) {
         if (::mkdir(dir.c_str(), 0700) != 0) {
             if (why)
@@ -243,14 +250,15 @@ static bool write_all(int fd, const char *data, std::size_t len,
                 *why = posix_err("write");
             return false;
         }
-        off += (std::size_t)w;
+        off += static_cast<std::size_t>(w);
     }
     return true;
 }
 #else
 static std::string win_err(const char *where, DWORD code) {
     std::ostringstream oss;
-    oss << where << " (GetLastError=" << (unsigned long)code << ")";
+    oss << where << " (GetLastError=" << static_cast<unsigned long>(code)
+        << ")";
     return oss.str();
 }
 #endif
@@ -541,7 +549,9 @@ static std::string b64encode(const unsigned char *data, std::size_t len) {
     out.reserve(((len + 2) / 3) * 4);
     std::size_t i = 0;
     while (i + 3 <= len) {
-        unsigned int v = (data[i] << 16) | (data[i + 1] << 8) | data[i + 2];
+        const unsigned int v = (static_cast<unsigned int>(data[i]) << 16U) |
+                               (static_cast<unsigned int>(data[i + 1]) << 8U) |
+                               static_cast<unsigned int>(data[i + 2]);
         out.push_back(kTable[(v >> 18) & 0x3F]);
         out.push_back(kTable[(v >> 12) & 0x3F]);
         out.push_back(kTable[(v >> 6) & 0x3F]);
@@ -549,13 +559,14 @@ static std::string b64encode(const unsigned char *data, std::size_t len) {
         i += 3;
     }
     if (i + 1 == len) {
-        unsigned int v = (data[i] << 16);
+        const unsigned int v = static_cast<unsigned int>(data[i]) << 16U;
         out.push_back(kTable[(v >> 18) & 0x3F]);
         out.push_back(kTable[(v >> 12) & 0x3F]);
         out.push_back('=');
         out.push_back('=');
     } else if (i + 2 == len) {
-        unsigned int v = (data[i] << 16) | (data[i + 1] << 8);
+        const unsigned int v = (static_cast<unsigned int>(data[i]) << 16U) |
+                               (static_cast<unsigned int>(data[i + 1]) << 8U);
         out.push_back(kTable[(v >> 18) & 0x3F]);
         out.push_back(kTable[(v >> 12) & 0x3F]);
         out.push_back(kTable[(v >> 6) & 0x3F]);
@@ -643,7 +654,7 @@ static bool token_matches_hashed_host(const std::string &token,
     unsigned int macLen = 0;
     if (!HMAC(EVP_sha1(), salt.data(), static_cast<int>(salt.size()),
               reinterpret_cast<const unsigned char *>(hostToken.data()),
-              static_cast<int>(hostToken.size()), mac, &macLen)) {
+              hostToken.size(), mac, &macLen)) {
         return false;
     }
     if (expectedMac.size() != static_cast<std::size_t>(macLen))
@@ -678,14 +689,6 @@ static bool line_matches_site_host(const std::string &line,
     return false;
 }
 
-// Preference: write hashed hostnames to known_hosts (OpenSSH style) unless
-// disabled via env
-static bool useHashedKnownHosts() {
-    const char *v = std::getenv("OPENSCP_KNOWNHOSTS_PLAIN");
-    // If env var is set to '1', force PLAIN; otherwise prefer hashed
-    return !(v && *v == '1');
-}
-
 // Global libssh2 initialization (once per process).
 static std::once_flag g_libssh2_init_once;
 static int g_libssh2_init_result = LIBSSH2_ERROR_NONE;
@@ -704,13 +707,13 @@ static std::string openssh_hash_hostname(const std::string &host) {
     if (RAND_bytes(salt, sizeof(salt)) != 1) {
         // fallback: pseudo-random
         for (size_t i = 0; i < sizeof(salt); ++i)
-            salt[i] = (unsigned char)(rand() & 0xFF);
+            salt[i] = static_cast<unsigned char>(rand() & 0xFF);
     }
     unsigned char mac[EVP_MAX_MD_SIZE];
     unsigned int maclen = 0;
-    HMAC(EVP_sha1(), salt, (int)sizeof(salt),
-         reinterpret_cast<const unsigned char *>(host.data()), (int)host.size(),
-         mac, &maclen);
+    HMAC(EVP_sha1(), salt, static_cast<int>(sizeof(salt)),
+         reinterpret_cast<const unsigned char *>(host.data()), host.size(), mac,
+         &maclen);
     std::string s_salt = b64encode(salt, sizeof(salt));
     std::string s_mac = b64encode(mac, maclen);
     return std::string("|1|") + s_salt + "|" + s_mac;
@@ -831,10 +834,11 @@ kbint_password_callback(const char *name, int name_len, const char *instruction,
             }
         };
         if (result == KbdIntPromptResult::Handled &&
-            (int)answers.size() >= num_prompts) {
+            static_cast<int>(answers.size()) >= num_prompts) {
             std::size_t totalAnswerBytes = 0;
             for (int i = 0; i < num_prompts; ++i) {
-                const std::size_t answerSize = answers[(size_t)i].size();
+                const std::size_t answerSize =
+                    answers[static_cast<size_t>(i)].size();
                 if (answerSize >
                         libssh2detail::kMaxKeyboardInteractiveAnswerBytes ||
                     totalAnswerBytes >
@@ -848,7 +852,7 @@ kbint_password_callback(const char *name, int name_len, const char *instruction,
                 totalAnswerBytes += answerSize;
             }
             for (int i = 0; i < num_prompts; ++i) {
-                const std::string &a = answers[(size_t)i];
+                const std::string &a = answers[static_cast<size_t>(i)];
                 if (a.empty()) {
                     responses[i].text = nullptr;
                     responses[i].length = 0;
@@ -891,8 +895,8 @@ kbint_password_callback(const char *name, int name_len, const char *instruction,
     for (int i = 0; i < num_prompts; ++i) {
         // Simple heuristic: if the prompt mentions "user" or "name", send
         // username; otherwise send password
-        const bool wantUser =
-            libssh2detail::promptRequestsUsername(promptTexts[(size_t)i]);
+        const bool wantUser = libssh2detail::promptRequestsUsername(
+            promptTexts[static_cast<size_t>(i)]);
         const char *ans = wantUser ? user : pass;
         const size_t alen = wantUser ? ulen : plen;
         if (!ans || alen == 0) {
@@ -909,7 +913,7 @@ kbint_password_callback(const char *name, int name_len, const char *instruction,
         std::memcpy(buf, ans, alen);
         buf[alen] = '\0';
         responses[i].text = buf;
-        responses[i].length = (unsigned int)alen;
+        responses[i].length = static_cast<unsigned int>(alen);
     }
 }
 

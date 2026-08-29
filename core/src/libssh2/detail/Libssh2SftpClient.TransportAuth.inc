@@ -243,7 +243,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                         if (i)
                             oss << ':';
                         char b[4];
-                        std::snprintf(b, sizeof(b), "%02X", (unsigned)h[i]);
+                        std::snprintf(b, sizeof(b), "%02X",
+                                      static_cast<unsigned>(h[i]));
                         oss << b;
                     }
                     fpStr = std::string("SHA256:") + oss.str();
@@ -261,7 +262,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                     if (i)
                         oss << ':';
                     char b[4];
-                    std::snprintf(b, sizeof(b), "%02X", (unsigned)h[i]);
+                    std::snprintf(b, sizeof(b), "%02X",
+                                  static_cast<unsigned>(h[i]));
                     oss << b;
                 }
                 fpStr = oss.str();
@@ -271,8 +273,6 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             int keyBits = 0;
             switch (keytype) {
             case LIBSSH2_HOSTKEY_TYPE_ED25519:
-                keyBits = 256;
-                break;
             case LIBSSH2_HOSTKEY_TYPE_ECDSA_256:
                 keyBits = 256;
                 break;
@@ -283,7 +283,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                 keyBits = 521;
                 break;
             default:
-                keyBits = (int)keylen * 8;
+                keyBits = static_cast<int>(keylen) * 8;
                 break;
             }
             std::ostringstream algWithBits;
@@ -349,8 +349,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                 // Add entry
                 if (alg != 0 &&
                     libssh2_knownhost_addc(nh, hostForKnown.c_str(), nullptr,
-                                           hostkey, (size_t)keylen, nullptr, 0,
-                                           addMask, nullptr) == 0) {
+                                           hostkey, keylen, nullptr, 0, addMask,
+                                           nullptr) == 0) {
                     std::string persistErr;
                     saved = persist_known_hosts_atomic(nh, khPath, &persistErr);
                     if (!saved && opt.hostkey_status_cb) {
@@ -368,19 +368,21 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                     if (core_sensitive_debug_enabled()) {
                         std::ostringstream preview;
                         const std::size_t n = std::min<std::size_t>(
-                            (std::size_t)keylen, (std::size_t)8);
+                            static_cast<std::size_t>(keylen),
+                            static_cast<std::size_t>(8));
                         for (std::size_t i = 0; i < n; ++i) {
                             if (i)
                                 preview << ' ';
                             char b[4];
-                            std::snprintf(b, sizeof(b), "%02X",
-                                          (unsigned)hostkeyBytes[i]);
+                            std::snprintf(
+                                b, sizeof(b), "%02X",
+                                static_cast<unsigned>(hostkeyBytes[i]));
                             preview << b;
                         }
                         core_logf(CoreLogLevel::Debug,
                                   "Manual known_hosts write for ssh-ed25519 "
                                   "fallback; keylen=%zu key_head=%s",
-                                  (size_t)keylen, preview.str().c_str());
+                                  keylen, preview.str().c_str());
                     } else {
                         core_logf(CoreLogLevel::Debug,
                                   "Manual known_hosts write for ssh-ed25519 "
@@ -416,7 +418,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                         if (!existing.empty() && existing.back() != '\n')
                             lines.push_back(tmp);
                     }
-                    std::string b64 = b64encode(hostkeyBytes, (size_t)keylen);
+                    std::string b64 = b64encode(hostkeyBytes, keylen);
                     std::string hostToken;
                     if (preferHashed) {
                         hostToken = openssh_hash_hostname(hostForKnown);
@@ -517,8 +519,9 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             int emlen = 0;
             (void)libssh2_session_last_error(session_, &emsgPtr, &emlen, 0);
             const std::string lastErr =
-                (emsgPtr && emlen > 0) ? std::string(emsgPtr, (size_t)emlen)
-                                       : std::string();
+                (emsgPtr && emlen > 0)
+                    ? std::string(emsgPtr, static_cast<size_t>(emlen))
+                    : std::string();
             const long lastErrno = libssh2_session_last_errno(session_);
             err = std::string("Key authentication failed") +
                   (lastErr.empty() ? std::string()
@@ -556,7 +559,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                 int emlen = 0;
                 (void)libssh2_session_last_error(session_, &emsgPtr, &emlen, 0);
                 if (emsgPtr && emlen > 0)
-                    pwLastErr.assign(emsgPtr, (size_t)emlen);
+                    pwLastErr.assign(emsgPtr, static_cast<size_t>(emlen));
                 pwErrno = libssh2_session_last_errno(session_);
             };
             auto do_kbdint = [&]() {
@@ -600,7 +603,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                 int emlen = 0;
                 (void)libssh2_session_last_error(session_, &emsgPtr, &emlen, 0);
                 if (emsgPtr && emlen > 0)
-                    kbLastErr.assign(emsgPtr, (size_t)emlen);
+                    kbLastErr.assign(emsgPtr, static_cast<size_t>(emlen));
                 kbErrno = libssh2_session_last_errno(session_);
                 return true;
             };
@@ -620,9 +623,9 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             // If password failed but the session is still alive, NOW query
             // methods and try keyboard-interactive if applicable.
             if (rc_pw != 0) {
-                char *methods =
-                    libssh2_userauth_list(session_, opt.username.c_str(),
-                                          (unsigned)opt.username.size());
+                char *methods = libssh2_userauth_list(
+                    session_, opt.username.c_str(),
+                    static_cast<unsigned>(opt.username.size()));
                 authlist = methods ? std::string(methods) : std::string();
                 if (hasMethod("keyboard-interactive")) {
                     if (!do_kbdint())
@@ -635,9 +638,9 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                 // identities). We need authlist to know if publickey is
                 // allowed.
                 if (authlist.empty()) {
-                    char *methods =
-                        libssh2_userauth_list(session_, opt.username.c_str(),
-                                              (unsigned)opt.username.size());
+                    char *methods = libssh2_userauth_list(
+                        session_, opt.username.c_str(),
+                        static_cast<unsigned>(opt.username.size()));
                     authlist = methods ? std::string(methods) : std::string();
                 }
 
@@ -685,7 +688,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                                                      0);
                     std::string lastErr =
                         (emsgPtr && emlen > 0)
-                            ? std::string(emsgPtr, (size_t)emlen)
+                            ? std::string(emsgPtr, static_cast<size_t>(emlen))
                             : std::string();
                     long lastErrno = libssh2_session_last_errno(session_);
                     // Include return codes for diagnostics
@@ -714,7 +717,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             // Without a password: query methods and then try ssh-agent if the
             // server allows.
             char *methods = libssh2_userauth_list(
-                session_, opt.username.c_str(), (unsigned)opt.username.size());
+                session_, opt.username.c_str(),
+                static_cast<unsigned>(opt.username.size()));
             authlist = methods ? std::string(methods) : std::string();
             bool authed = false;
             if (hasMethod("publickey")) {

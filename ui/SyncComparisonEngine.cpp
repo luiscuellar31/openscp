@@ -120,8 +120,9 @@ QString parentRelativePath(const QString &relativePath) {
 }
 
 int pathDepth(const QString &relativePath) {
-    return relativePath.isEmpty() ? 0
-                                  : relativePath.count(QLatin1Char('/')) + 1;
+    return relativePath.isEmpty()
+               ? 0
+               : static_cast<int>(relativePath.count(QLatin1Char('/')) + 1);
 }
 
 bool isPathInside(const QString &path, const QString &directory) {
@@ -153,7 +154,7 @@ EntryIndex buildEntryIndex(const QVector<SyncSnapshotEntry> &snapshot) {
         entry.relativePath = normalized;
         auto existing = index.find(normalized);
         if (existing == index.end()) {
-            index.insert(normalized, std::move(entry));
+            index.insert(normalized, entry);
             continue;
         }
         existing->metadataReliable = false;

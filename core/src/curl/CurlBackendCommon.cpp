@@ -235,7 +235,8 @@ std::string encodeUrlPath(const std::string &path) {
     static constexpr char hex[] = "0123456789ABCDEF";
     std::string out;
     out.reserve(path.size());
-    for (const unsigned char c : path) {
+    for (const char character : path) {
+        const auto c = static_cast<unsigned char>(character);
         const bool unreserved = std::isalnum(c) != 0 || c == '-' || c == '.' ||
                                 c == '_' || c == '~' || c == '/';
         if (unreserved) {

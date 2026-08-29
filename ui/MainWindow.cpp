@@ -88,10 +88,6 @@
 
 static constexpr int NAME_COL = 0;
 
-static QString normalizeRemotePathForMatch(const QString &rawPath) {
-    return normalizeRemotePath(rawPath);
-}
-
 static QIcon mainWindowActionIcon(const char *name) {
     return QIcon(QStringLiteral(":/assets/icons/") + QLatin1String(name));
 }
@@ -983,7 +979,7 @@ void MainWindow::initializeRuntimeState() {
 
     // Startup cleanup (deferred): remove old staging batches if
     // autoCleanStaging is enabled
-    QTimer::singleShot(0, this, [this] {
+    QTimer::singleShot(0, this, [] {
         QSettings settings("OpenSCP", "OpenSCP");
         const bool autoClean =
             settings.value("Advanced/autoCleanStaging", true).toBool();
@@ -1492,10 +1488,11 @@ void MainWindow::handleTransferUiUpdate() {
 }
 
 bool MainWindow::isScpTransferMode() const {
-    if (!rightIsRemote_ || !sessionController_->options().has_value())
+    const auto &options = sessionController_->options();
+    if (!rightIsRemote_ || !options.has_value())
         return false;
-    const openscp::ProtocolCapabilities caps = openscp::capabilitiesForProtocol(
-        sessionController_->options()->protocol);
+    const openscp::ProtocolCapabilities caps =
+        openscp::capabilitiesForProtocol(options->protocol);
     return (caps.can_upload || caps.can_download) && !caps.can_list;
 }
 
@@ -1647,9 +1644,10 @@ QString MainWindow::remoteNavigationScope() const {
         return openscpui::savedSiteNavigationScope(
             activeSavedSiteContext_->siteId);
     }
-    if (!sessionController_->options())
+    const auto &options = sessionController_->options();
+    if (!options)
         return {};
-    return openscpui::remoteEndpointScope(*sessionController_->options());
+    return openscpui::remoteEndpointScope(*options);
 }
 
 void MainWindow::refreshFavoritesAction(QAction *favoritesAction,

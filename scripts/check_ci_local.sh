@@ -6,6 +6,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-${REPO_DIR}/build-ci-local}"
 RUN_FULL=0
 CLEAN=0
+WERROR="${OPENSCP_WERROR:-OFF}"
 JOBS="${JOBS:-}"
 QT_WRAP_DIR=""
 
@@ -20,6 +21,7 @@ Usage: ./scripts/check_ci_local.sh [options]
 Options:
   --full            Build GUI app target too (openscp_hello)
   --clean           Remove build directory before configuring
+  --werror          Treat first-party compiler warnings as errors
   --build-dir <p>   Custom build directory (default: build-ci-local)
   -j, --jobs <n>    Parallel build jobs
   -h, --help        Show help
@@ -27,6 +29,7 @@ Options:
 Env vars:
   BUILD_DIR         Same as --build-dir
   JOBS              Same as --jobs
+  OPENSCP_WERROR    ON to treat first-party compiler warnings as errors
 
 Examples:
   ./scripts/check_ci_local.sh
@@ -44,6 +47,10 @@ parse_args() {
         ;;
       --clean)
         CLEAN=1
+        shift
+        ;;
+      --werror)
+        WERROR=ON
         shift
         ;;
       --build-dir)
@@ -138,6 +145,7 @@ configure_project() {
     -S "$REPO_DIR"
     -B "$BUILD_DIR"
     -DOPENSCP_BUILD_TESTS=ON
+    "-DOPENSCP_WERROR=${WERROR}"
   )
 
   if [[ "$(uname -s)" == "Darwin" ]]; then

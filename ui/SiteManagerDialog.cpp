@@ -30,7 +30,8 @@ class SiteListModel final : public QAbstractTableModel {
         : QAbstractTableModel(parent), sites_(sites) {}
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override {
-        return parent.isValid() || !sites_ ? 0 : sites_->size();
+        return parent.isValid() || !sites_ ? 0
+                                           : static_cast<int>(sites_->size());
     }
 
     int columnCount(const QModelIndex &parent = QModelIndex()) const override {
@@ -414,7 +415,7 @@ void SiteManagerDialog::onDuplicate() {
         return;
     }
     refresh();
-    selectSiteIndex(sites_.size() - 1);
+    selectSiteIndex(static_cast<int>(sites_.size() - 1));
 
     const auto copyChoice =
         UiAlerts::question(this, tr("Copy credentials?"),

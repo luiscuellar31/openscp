@@ -1312,11 +1312,12 @@ class RemoteOperationController::Impl {
         auto lastProgress = std::chrono::steady_clock::now();
 
         auto flushBatch = [this, &job, &batch](bool finalBatch) {
-            EntryBatch payload{job.key, std::move(batch), finalBatch};
+            QVector<RemoteEntry> entries;
+            entries.swap(batch);
+            EntryBatch payload{job.key, std::move(entries), finalBatch};
             postToUi([payload](RemoteOperationController *controller) {
                 emit controller->entriesBatchReady(payload);
             });
-            batch.clear();
         };
         auto maybePostProgress = [this, &job, &summary, &lastProgress](
                                      const QString &path, bool force) {

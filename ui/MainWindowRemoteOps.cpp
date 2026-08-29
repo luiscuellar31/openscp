@@ -53,7 +53,7 @@ void MainWindow::goUpRight() {
             return;
         if (cur.endsWith('/'))
             cur.chop(1);
-        int slash = cur.lastIndexOf('/');
+        const qsizetype slash = cur.lastIndexOf('/');
         QString parent = (slash <= 0) ? "/" : cur.left(slash);
         setRightRemoteRoot(parent);
     } else {
@@ -78,15 +78,15 @@ void MainWindow::goHomeRight() {
 }
 
 void MainWindow::openRightRemoteTerminal() {
-    if (!rightIsRemote_ || !sessionController_->options().has_value()) {
+    const auto &options = sessionController_->options();
+    if (!rightIsRemote_ || !options.has_value()) {
         UiAlerts::information(
             this, tr("Open in terminal"),
             tr("The right panel must be connected as remote."));
         return;
     }
 
-    const openscp::SessionOptions &sessionOptions =
-        *sessionController_->options();
+    const openscp::SessionOptions &sessionOptions = *options;
     const QString remotePath = normalizeRemotePath(
         rightRemoteModel_ ? rightRemoteModel_->rootPath()
                           : (rightPath_ ? rightPath_->text() : QString()));
@@ -348,7 +348,7 @@ void MainWindow::downloadRightToLeft() {
         statusBar()->showMessage(QString(tr("Queued: %1 downloads")).arg(1),
                                  4000);
         maybeShowTransferQueue();
-        const int slash = remotePath.lastIndexOf('/');
+        const qsizetype slash = remotePath.lastIndexOf('/');
         const QString parent =
             (slash <= 0) ? QStringLiteral("/") : remotePath.left(slash);
         setRightRemoteRoot(parent);
@@ -1020,10 +1020,10 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
 
     QVector<QAction *> entries;
     if (rightIsRemote_) {
+        const auto &options = sessionController_->options();
         const bool supportsRemotePermissions =
-            sessionController_->options().has_value() &&
-            openscp::capabilitiesForProtocol(
-                sessionController_->options()->protocol)
+            options.has_value() &&
+            openscp::capabilitiesForProtocol(options->protocol)
                 .can_set_permissions;
         // Up option (if applicable)
         if (canGoUp)
@@ -1087,10 +1087,11 @@ void MainWindow::changeRemotePermissions() {
     if (!rightIsRemote_ || !remoteActionController_ || !rightRemoteModel_) {
         return;
     }
-    const auto capabilities = sessionController_->options().has_value()
-                                  ? openscp::capabilitiesForProtocol(
-                                        sessionController_->options()->protocol)
-                                  : openscp::ProtocolCapabilities{};
+    const auto &options = sessionController_->options();
+    const auto capabilities =
+        options.has_value()
+            ? openscp::capabilitiesForProtocol(options->protocol)
+            : openscp::ProtocolCapabilities{};
     if (!capabilities.can_set_permissions) {
         UiAlerts::information(
             this, tr("Permissions"),

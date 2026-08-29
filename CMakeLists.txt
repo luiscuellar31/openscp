@@ -54,9 +54,58 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(OPENSCP_BUILD_TESTS "Build and run automated tests (CTest)" OFF)
+option(OPENSCP_WERROR "Treat first-party compiler warnings as errors" OFF)
+
+add_library(openscp_project_warnings INTERFACE)
+if(MSVC)
+    target_compile_options(openscp_project_warnings INTERFACE
+        /W4
+        /permissive-
+    )
+    if(OPENSCP_WERROR)
+        target_compile_options(openscp_project_warnings INTERFACE /WX)
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(openscp_project_warnings INTERFACE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Wshadow
+        -Wformat=2
+        -Wundef
+        -Wconversion
+        -Wsign-conversion
+        -Wcast-qual
+        -Wold-style-cast
+        -Wnon-virtual-dtor
+        -Woverloaded-virtual
+    )
+    if(OPENSCP_WERROR)
+        target_compile_options(openscp_project_warnings INTERFACE -Werror)
+    endif()
+endif()
+
+# Apply the shared warning policy to every first-party target declared below,
+# including targets created by the core and tests subdirectories.
+link_libraries(openscp_project_warnings)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Svg LinguistTools)
 include(GNUInstallDirs)
+
+add_custom_target(openscp_format_check
+    COMMAND "${CMAKE_SOURCE_DIR}/scripts/check_cpp_quality.sh" --format
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Checking all tracked first-party C++ files with clang-format 17"
+    VERBATIM
+)
+
+add_custom_target(openscp_static_analysis
+    COMMAND "${CMAKE_SOURCE_DIR}/scripts/check_cpp_quality.sh"
+            --tidy --cppcheck --build-dir "${CMAKE_BINARY_DIR}"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Running clang-tidy and cppcheck on first-party C++ code"
+    VERBATIM
+)
 
 # Some universal Qt SDKs cannot execute their arm64 host-tool slice on every
 # supported development Mac even though the generated application is valid for

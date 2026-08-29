@@ -95,7 +95,7 @@ std::uint32_t parseUnixPermBits(const std::string &perm) {
 
     const std::uint32_t bits[9] = {0400u, 0200u, 0100u, 040u, 020u,
                                    010u,  04u,   02u,   01u};
-    for (int i = 0; i < 9; ++i) {
+    for (std::size_t i = 0; i < 9; ++i) {
         const char c = perm[1 + i];
         if (c != '-' && c != '\0')
             mode |= bits[i];

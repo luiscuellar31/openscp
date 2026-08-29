@@ -30,7 +30,7 @@ static bool set_socket_timeout_ms(int sock, int timeoutMs) {
                      reinterpret_cast<const char *>(&tvMs), sizeof(tvMs));
     return r1 == 0 && r2 == 0;
 #else
-    struct timeval tv{};
+    struct timeval tv {};
     tv.tv_sec = timeoutMs / 1000;
     tv.tv_usec = (timeoutMs % 1000) * 1000;
     const int r1 = ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
@@ -117,7 +117,7 @@ static bool socket_recv_until(int sock, const std::string &delimiter,
 static bool connect_tcp_endpoint(const std::string &host, uint16_t port,
                                  int &sockOut, std::string &err) {
     sockOut = -1;
-    struct addrinfo hints{};
+    struct addrinfo hints {};
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;

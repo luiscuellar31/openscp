@@ -172,7 +172,9 @@ SiteCredentialRepository::save(const SiteEntry &site,
         }
 
         const SecretStore::PersistResult persistResult = storeValue(
-            site, kind, QString::fromUtf8(value->data(), value->size()));
+            site, kind,
+            QString::fromUtf8(value->data(),
+                              static_cast<qsizetype>(value->size())));
         if (persistResult.isStored())
             result.anyCredentialHandled = true;
         else

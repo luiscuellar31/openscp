@@ -168,6 +168,8 @@ else()
         target_include_directories(openscp_core PRIVATE ${LIBSSH2_INC})
         target_link_libraries(openscp_core PRIVATE ${LIBSSH2_LIB})
     else()
-        message(FATAL_ERROR "libssh2 no encontrado. Instala con 'brew install libssh2'.")
+        message(FATAL_ERROR
+            "libssh2 was not found. Install its development package "
+            "(for example, 'brew install libssh2').")
     endif()
 endif()

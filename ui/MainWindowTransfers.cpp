@@ -182,7 +182,7 @@ void MainWindow::runRemoteDownloadPrescan(
     auto state = std::make_shared<ScanState>();
     state->batchOptions = batchOptions;
     state->dragAndDrop = dragAndDrop;
-    state->skippedInvalid = initialSkipped;
+    state->skippedInvalid = static_cast<quint64>(std::max(0, initialSkipped));
     state->cancelRequested = std::make_shared<std::atomic<bool>>(false);
     remoteScanCancelRequested_ = state->cancelRequested;
 
@@ -596,7 +596,7 @@ void MainWindow::startLocalUploadDiscovery(
         QObject::disconnect(state->updatedConnection);
         QObject::disconnect(state->removedConnection);
     };
-    auto countersSummary = [this](const LocalTreeDiscoveryCounters &counters) {
+    auto countersSummary = [](const LocalTreeDiscoveryCounters &counters) {
         QStringList notes;
         if (counters.skippedSymlinks > 0) {
             notes.push_back(
@@ -632,9 +632,9 @@ void MainWindow::startLocalUploadDiscovery(
         std::sort(
             directories.begin(), directories.end(),
             [](const QString &left, const QString &right) {
-                const int leftDepth =
+                const qsizetype leftDepth =
                     QDir::fromNativeSeparators(left).count(QLatin1Char('/'));
-                const int rightDepth =
+                const qsizetype rightDepth =
                     QDir::fromNativeSeparators(right).count(QLatin1Char('/'));
                 if (leftDepth != rightDepth)
                     return leftDepth > rightDepth;
@@ -687,7 +687,8 @@ void MainWindow::startLocalUploadDiscovery(
             }
         }
         if (changed && state->discovery) {
-            state->discovery->setPendingTaskCount(state->pendingTasks.size());
+            state->discovery->setPendingTaskCount(
+                static_cast<int>(state->pendingTasks.size()));
         }
         if (directoryFailed && !state->canceled) {
             state->canceled = true;
@@ -732,17 +733,9 @@ void MainWindow::startLocalUploadDiscovery(
 
                 TransferBatchOptions entryOptions = state->batchOptions;
                 QString parentRelative = entry.relativePath;
-                const int separator =
+                const qsizetype separator =
                     parentRelative.lastIndexOf(QLatin1Char('/'));
-                if (entry.type == LocalTreeDiscoveryEntry::Type::Directory) {
-                    if (entry.relativePath.isEmpty()) {
-                        parentRelative.clear();
-                    } else if (separator >= 0) {
-                        parentRelative = parentRelative.left(separator);
-                    } else {
-                        parentRelative.clear();
-                    }
-                } else if (separator >= 0) {
+                if (separator >= 0) {
                     parentRelative = parentRelative.left(separator);
                 } else {
                     parentRelative.clear();
@@ -790,7 +783,7 @@ void MainWindow::startLocalUploadDiscovery(
             reconcileTasks(newTaskIds, false);
             if (state->discovery) {
                 state->discovery->setPendingTaskCount(
-                    state->pendingTasks.size());
+                    static_cast<int>(state->pendingTasks.size()));
             }
         });
 

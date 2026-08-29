@@ -74,7 +74,7 @@ static QString displayNameForTask(const TransferTask &task) {
     QString trimmed = alternatePath;
     while (trimmed.endsWith('/'))
         trimmed.chop(1);
-    const int slash = trimmed.lastIndexOf('/');
+    const qsizetype slash = trimmed.lastIndexOf('/');
     if (slash >= 0 && slash + 1 < trimmed.size())
         return trimmed.mid(slash + 1);
     if (!trimmed.isEmpty())
@@ -228,7 +228,7 @@ class TransferTaskTableModel final : public QAbstractTableModel {
     int rowCount(const QModelIndex &parent = QModelIndex()) const override {
         if (parent.isValid())
             return 0;
-        return tasks_.size();
+        return static_cast<int>(tasks_.size());
     }
 
     int columnCount(const QModelIndex &parent = QModelIndex()) const override {
@@ -406,8 +406,8 @@ class TransferTaskTableModel final : public QAbstractTableModel {
                 updateRow(found.value(), task);
         }
         if (!missing.isEmpty()) {
-            const int first = tasks_.size();
-            const int last = first + missing.size() - 1;
+            const int first = static_cast<int>(tasks_.size());
+            const int last = first + static_cast<int>(missing.size()) - 1;
             beginInsertRows({}, first, last);
             for (const auto &task : missing)
                 tasks_.push_back(task);

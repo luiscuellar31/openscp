@@ -140,7 +140,7 @@ std::FILE *openRegularFileForWrite(const std::string &path, WriteMode mode,
         return nullptr;
     }
 
-    struct stat metadata{};
+    struct stat metadata {};
     if (::fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode) ||
         metadata.st_uid != ::geteuid() || metadata.st_nlink != 1) {
         const int savedError = errno != 0 ? errno : EINVAL;

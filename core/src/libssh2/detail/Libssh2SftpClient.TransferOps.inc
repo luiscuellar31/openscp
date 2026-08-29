@@ -69,18 +69,19 @@ bool Libssh2SftpClient::get(
 
     // Remote size (for progress and sanity checks)
     LIBSSH2_SFTP_ATTRIBUTES st{};
-    if (libssh2_sftp_stat_ex(sftp_, remote.c_str(), (unsigned)remote.size(),
+    if (libssh2_sftp_stat_ex(sftp_, remote.c_str(),
+                             static_cast<unsigned>(remote.size()),
                              LIBSSH2_SFTP_STAT, &st) != 0) {
         err = "Could not stat remote path";
         return false;
     }
     const bool hasTotal = (st.flags & LIBSSH2_SFTP_ATTR_SIZE) != 0;
-    std::size_t total = hasTotal ? (std::size_t)st.filesize : 0;
+    std::size_t total = hasTotal ? static_cast<std::size_t>(st.filesize) : 0;
 
     // Open remote for reading
-    LIBSSH2_SFTP_HANDLE *rh =
-        libssh2_sftp_open_ex(sftp_, remote.c_str(), (unsigned)remote.size(),
-                             LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
+    LIBSSH2_SFTP_HANDLE *rh = libssh2_sftp_open_ex(
+        sftp_, remote.c_str(), static_cast<unsigned>(remote.size()),
+        LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
     if (!rh) {
         err = "Could not open remote file for reading";
         return false;
@@ -91,7 +92,7 @@ bool Libssh2SftpClient::get(
         std::uint64_t partSize = 0;
         std::string sizeErr;
         if (get_local_file_size(localPart, partSize, &sizeErr)) {
-            offset = (std::size_t)partSize;
+            offset = static_cast<std::size_t>(partSize);
         }
         if (offset > 0 && hasTotal && offset > total) {
             if (policy == TransferIntegrityPolicy::Required) {
@@ -105,7 +106,8 @@ bool Libssh2SftpClient::get(
             policy != TransferIntegrityPolicy::Off) {
             const std::uint64_t window =
                 std::min<std::uint64_t>(offset, 64 * 1024);
-            const std::uint64_t start = (std::uint64_t)offset - window;
+            const std::uint64_t start =
+                static_cast<std::uint64_t>(offset) - window;
             Sha256Digest lh{}, rhh{};
             std::string hErr;
             const bool okLocal = hash_local_range(localPart, start, window, lh,
@@ -140,7 +142,7 @@ bool Libssh2SftpClient::get(
     }
 
     if (offset > 0) {
-        libssh2_sftp_seek64(rh, (libssh2_uint64_t)offset);
+        libssh2_sftp_seek64(rh, static_cast<libssh2_uint64_t>(offset));
     }
 
     // Open local .part for writing
@@ -172,9 +174,11 @@ bool Libssh2SftpClient::get(
             // the worker session teardown will release pending handles.
             return false;
         }
-        ssize_t n = libssh2_sftp_read(rh, buf.data(), (size_t)buf.size());
+        ssize_t n =
+            libssh2_sftp_read(rh, buf.data(), static_cast<size_t>(buf.size()));
         if (n > 0) {
-            if (std::fwrite(buf.data(), 1, (size_t)n, lf) != (size_t)n) {
+            if (std::fwrite(buf.data(), 1, static_cast<size_t>(n), lf) !=
+                static_cast<size_t>(n)) {
                 const int nativeError = errno;
                 err = "Local write failed";
                 std::fclose(lf);
@@ -183,7 +187,7 @@ bool Libssh2SftpClient::get(
                                       nativeError);
                 return false;
             }
-            done = done + (std::size_t)n;
+            done = done + static_cast<std::size_t>(n);
             if (progress && total)
                 progress(done, total);
         } else if (n == 0) {
@@ -260,21 +264,21 @@ bool Libssh2SftpClient::put(
     std::fseek(lf, 0, SEEK_END);
     long fsz = std::ftell(lf);
     std::fseek(lf, 0, SEEK_SET);
-    std::size_t total = fsz > 0 ? (std::size_t)fsz : 0;
+    std::size_t total = fsz > 0 ? static_cast<std::size_t>(fsz) : 0;
 
     // Resume against remote .part (final destination is set via atomic rename).
     long startOffset = 0;
     if (resume) {
         LIBSSH2_SFTP_ATTRIBUTES stR{};
         if (libssh2_sftp_stat_ex(sftp_, remotePart.c_str(),
-                                 (unsigned)remotePart.size(), LIBSSH2_SFTP_STAT,
-                                 &stR) == 0) {
+                                 static_cast<unsigned>(remotePart.size()),
+                                 LIBSSH2_SFTP_STAT, &stR) == 0) {
             if (stR.flags & LIBSSH2_SFTP_ATTR_SIZE)
-                startOffset = (long)stR.filesize;
+                startOffset = static_cast<long>(stR.filesize);
         }
     }
 
-    if (startOffset > 0 && (std::size_t)startOffset > total) {
+    if (startOffset > 0 && static_cast<std::size_t>(startOffset) > total) {
         if (policy == TransferIntegrityPolicy::Required) {
             std::fclose(lf);
             err = "Invalid resume: remote .part is larger than local file";
@@ -283,11 +287,12 @@ bool Libssh2SftpClient::put(
         startOffset = 0;
     }
 
-    if (startOffset > 0 && (std::size_t)startOffset < total &&
+    if (startOffset > 0 && static_cast<std::size_t>(startOffset) < total &&
         policy != TransferIntegrityPolicy::Off) {
-        const std::uint64_t window =
-            std::min<std::uint64_t>((std::uint64_t)startOffset, 64 * 1024);
-        const std::uint64_t start = (std::uint64_t)startOffset - window;
+        const std::uint64_t window = std::min<std::uint64_t>(
+            static_cast<std::uint64_t>(startOffset), 64 * 1024);
+        const std::uint64_t start =
+            static_cast<std::uint64_t>(startOffset) - window;
         Sha256Digest lsum{}, rsum{};
         std::string herr;
         const bool lok =
@@ -323,8 +328,8 @@ bool Libssh2SftpClient::put(
     unsigned long flags = LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT |
                           ((startOffset > 0) ? 0 : LIBSSH2_FXF_TRUNC);
     LIBSSH2_SFTP_HANDLE *wh = libssh2_sftp_open_ex(
-        sftp_, remotePart.c_str(), (unsigned)remotePart.size(), flags, 0644,
-        LIBSSH2_SFTP_OPENFILE);
+        sftp_, remotePart.c_str(), static_cast<unsigned>(remotePart.size()),
+        flags, 0644, LIBSSH2_SFTP_OPENFILE);
     if (!wh) {
         std::fclose(lf);
         err = "Could not open remote (.part) for writing";
@@ -336,8 +341,9 @@ bool Libssh2SftpClient::put(
     std::size_t done = 0;
 
     // If resuming, advance local and remote
-    if (resume && startOffset > 0 && (std::size_t)startOffset < total) {
-        libssh2_sftp_seek64(wh, (libssh2_uint64_t)startOffset);
+    if (resume && startOffset > 0 &&
+        static_cast<std::size_t>(startOffset) < total) {
+        libssh2_sftp_seek64(wh, static_cast<libssh2_uint64_t>(startOffset));
         if (std::fseek(lf, startOffset, SEEK_SET) != 0) {
             const int nativeError = errno;
             err = "Could not seek local file";
@@ -346,7 +352,7 @@ bool Libssh2SftpClient::put(
             setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
             return false;
         }
-        done = (std::size_t)startOffset;
+        done = static_cast<std::size_t>(startOffset);
     }
 
     while (true) {
@@ -376,9 +382,9 @@ bool Libssh2SftpClient::put(
                     setLastOperationError(structuredFailure);
                     return false;
                 }
-                remain = remain - (size_t)w;
+                remain = remain - static_cast<size_t>(w);
                 p = p + w;
-                done = done + (size_t)w;
+                done = done + static_cast<size_t>(w);
                 if (progress && total)
                     progress(done, total);
             }

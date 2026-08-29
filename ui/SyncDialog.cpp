@@ -117,7 +117,7 @@ class SyncComparisonTableModel final : public QAbstractTableModel {
         : QAbstractTableModel(parent) {}
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override {
-        return parent.isValid() ? 0 : items_.size();
+        return parent.isValid() ? 0 : static_cast<int>(items_.size());
     }
 
     int columnCount(const QModelIndex &parent = QModelIndex()) const override {
@@ -255,9 +255,10 @@ class SyncComparisonTableModel final : public QAbstractTableModel {
         }
         if (!changed)
             return;
-        emit dataChanged(index(0, ActionColumn),
-                         index(items_.size() - 1, ActionColumn),
-                         {Qt::CheckStateRole});
+        emit dataChanged(
+            index(0, ActionColumn),
+            index(static_cast<int>(items_.size() - 1), ActionColumn),
+            {Qt::CheckStateRole});
         if (selectionChanged_)
             selectionChanged_();
     }

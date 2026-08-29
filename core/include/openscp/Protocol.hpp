@@ -253,6 +253,16 @@ inline ScpTransferMode scpTransferModeFromStorageName(const std::string &raw) {
 
 inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
     ProtocolCapabilities capabilities;
+    bool managedFilesSupported = protocol == Protocol::Sftp;
+#if OPENSCP_HAS_CURL_FTP
+    managedFilesSupported = managedFilesSupported ||
+                            protocol == Protocol::Ftp ||
+                            protocol == Protocol::Ftps;
+#endif
+#if OPENSCP_HAS_CURL_WEBDAV
+    managedFilesSupported =
+        managedFilesSupported || protocol == Protocol::WebDav;
+#endif
     const auto enableManagedFiles = [&capabilities] {
         capabilities.implemented = true;
         capabilities.can_list = true;
@@ -271,7 +281,6 @@ inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
 
     switch (protocol) {
     case Protocol::Sftp:
-        enableManagedFiles();
         capabilities.can_resume_download = true;
         capabilities.can_resume_upload = true;
         capabilities.can_set_permissions = true;
@@ -297,16 +306,11 @@ inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
         break;
     case Protocol::Ftp:
     case Protocol::Ftps:
-#if OPENSCP_HAS_CURL_FTP
-        enableManagedFiles();
-#endif
-        break;
     case Protocol::WebDav:
-#if OPENSCP_HAS_CURL_WEBDAV
-        enableManagedFiles();
-#endif
         break;
     }
+    if (managedFilesSupported)
+        enableManagedFiles();
     return capabilities;
 }
 

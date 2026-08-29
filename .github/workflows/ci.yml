@@ -6,6 +6,7 @@ on:
       - dev
   pull_request:
     branches:
+      - dev
       - main
     types:
       - opened
@@ -19,8 +20,10 @@ concurrency:
 
 jobs:
   quick-dev:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-    name: Quick Checks (push to dev)
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
+      (github.event_name == 'pull_request' && github.base_ref == 'dev')
+    name: Quick Checks (dev)
     runs-on: ubuntu-latest
 
     steps:
@@ -40,7 +43,8 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DOPENSCP_BUILD_TESTS=ON
+            -DOPENSCP_BUILD_TESTS=ON \
+            -DOPENSCP_WERROR=ON
 
       - name: Build
         run: cmake --build build --parallel

@@ -11,7 +11,8 @@ namespace openscpui {
 inline QString localShortTime(quint64 secs) {
     if (secs == 0)
         return QStringLiteral("—");
-    const QDateTime dt = QDateTime::fromSecsSinceEpoch((qint64)secs);
+    const QDateTime dt =
+        QDateTime::fromSecsSinceEpoch(static_cast<qint64>(secs));
     if (!dt.isValid())
         return QStringLiteral("—");
     return QLocale::system().toString(dt, QLocale::ShortFormat);

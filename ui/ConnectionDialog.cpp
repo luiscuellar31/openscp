@@ -495,9 +495,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         if (visibilityChanged) {
             if (layout())
                 layout()->activate();
-            if (showProxyRows) {
-                adjustSize();
-            } else if (hasDirectModeSize_) {
+            if (!showProxyRows && hasDirectModeSize_) {
                 resize(directModeSize_);
             } else {
                 adjustSize();
@@ -908,7 +906,7 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &options) {
     if (!options.host.empty())
         host_->setText(QString::fromStdString(options.host));
     if (options.port)
-        port_->setValue((int)options.port);
+        port_->setValue(static_cast<int>(options.port));
     if (!options.username.empty())
         user_->setText(QString::fromStdString(options.username));
     if (options.password && !options.password->empty())
