@@ -11,7 +11,20 @@ ReferenceAlignment: Pointer
 DerivePointerAlignment: false
 NamespaceIndentation: None
 SortIncludes: CaseSensitive
-IncludeBlocks: Preserve
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^".*"$'
+    Priority: 1
+    SortPriority: 1
+  - Regex: '^<(Q|Qt)[A-Za-z0-9_./-]*>$'
+    Priority: 2
+    SortPriority: 2
+  - Regex: '^<(curl|libssh2|openssl|tinyxml2)[A-Za-z0-9_./-]*>$'
+    Priority: 3
+    SortPriority: 3
+  - Regex: '^<.*>$'
+    Priority: 4
+    SortPriority: 4
 AllowShortBlocksOnASingleLine: Never
 AllowShortFunctionsOnASingleLine: InlineOnly
 AllowShortIfStatementsOnASingleLine: Never

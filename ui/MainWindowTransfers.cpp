@@ -1,10 +1,10 @@
 // MainWindow transfer queue UI, remote prescan, and drag-and-drop handling.
-#include "MainWindow.hpp"
 #include "LocalTreeDiscovery.hpp"
+#include "MainWindow.hpp"
 #include "MainWindowSharedUtils.hpp"
-#include "SessionController.hpp"
 #include "RemoteModel.hpp"
 #include "RemoteOperationController.hpp"
+#include "SessionController.hpp"
 #include "TransferQueueDialog.hpp"
 #include "UiAlerts.hpp"
 
@@ -26,8 +26,8 @@
 #include <QScreen>
 #include <QStatusBar>
 #include <QStringList>
-#include <QTimer>
 #include <QThreadPool>
+#include <QTimer>
 
 #include <algorithm>
 #include <atomic>
@@ -35,11 +35,9 @@
 #include <memory>
 
 static constexpr int NAME_COL = 0;
-static const char *kStagingBatchMime =
-    "application/x-openscp-staging-batch";
+static const char *kStagingBatchMime = "application/x-openscp-staging-batch";
 
-static bool isLocalUploadPreparationTerminal(
-    TransferTask::Status status) {
+static bool isLocalUploadPreparationTerminal(TransferTask::Status status) {
     switch (status) {
     case TransferTask::Status::Done:
     case TransferTask::Status::Error:
@@ -104,10 +102,9 @@ static QRect centeredQueueRect(QWidget *dialog, QWidget *mainWindow) {
 void MainWindow::runRemoteDownloadPrescan(
     const QVector<RemoteDownloadSeed> &seeds, int initialSkipped,
     bool dragAndDrop) {
-    if (!rightIsRemote_ || !rightRemoteModel_ || !transferMgr_ ||
-        !remoteOps_ || !remoteOps_->hasRequestedSession()) {
-        UiAlerts::warning(this, tr("Remote"),
-                          tr("No active remote session."));
+    if (!rightIsRemote_ || !rightRemoteModel_ || !transferMgr_ || !remoteOps_ ||
+        !remoteOps_->hasRequestedSession()) {
+        UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
     if (remoteScanInProgress_.exchange(true)) {
@@ -141,9 +138,8 @@ void MainWindow::runRemoteDownloadPrescan(
             queuedPairs.push_back({seed.remotePath, seed.localPath});
         const int enqueuedCount =
             transferMgr_->enqueueDownloads(queuedPairs, batchOptions);
-        QString message =
-            dragAndDrop ? tr("Queued: %1 downloads (DND)")
-                        : tr("Queued: %1 downloads");
+        QString message = dragAndDrop ? tr("Queued: %1 downloads (DND)")
+                                      : tr("Queued: %1 downloads");
         message = message.arg(enqueuedCount);
         if (initialSkipped > 0) {
             message += QStringLiteral("  |  ") +
@@ -201,8 +197,7 @@ void MainWindow::runRemoteDownloadPrescan(
 
     auto finish = std::make_shared<std::function<void()>>();
     *finish = [this, state] {
-        if (!state->pending.isEmpty() ||
-            state->thresholdPromptActive) {
+        if (!state->pending.isEmpty() || state->thresholdPromptActive) {
             return;
         }
         QObject::disconnect(state->batchConnection);
@@ -226,24 +221,20 @@ void MainWindow::runRemoteDownloadPrescan(
             return;
         }
 
-        QString message =
-            state->dragAndDrop ? tr("Queued: %1 downloads (DND)")
-                               : tr("Queued: %1 downloads");
+        QString message = state->dragAndDrop ? tr("Queued: %1 downloads (DND)")
+                                             : tr("Queued: %1 downloads");
         message = message.arg(state->enqueuedDownloads);
         if (state->enqueuedDirectories > 0) {
             message += QStringLiteral("  |  ") +
-                       tr("Folders queued: %1")
-                           .arg(state->enqueuedDirectories);
+                       tr("Folders queued: %1").arg(state->enqueuedDirectories);
         }
         if (state->skippedInvalid > 0) {
             message += QStringLiteral("  |  ") +
-                       tr("Skipped invalid: %1")
-                           .arg(state->skippedInvalid);
+                       tr("Skipped invalid: %1").arg(state->skippedInvalid);
         }
         if (state->listFailures > 0) {
             message += QStringLiteral("  |  ") +
-                       tr("Folders not listed: %1")
-                           .arg(state->listFailures);
+                       tr("Folders not listed: %1").arg(state->listFailures);
         }
         if (state->unknownSizes > 0) {
             message += QStringLiteral("  |  ") +
@@ -252,30 +243,25 @@ void MainWindow::runRemoteDownloadPrescan(
         if (state->skippedSymlinks > 0) {
             message +=
                 QStringLiteral("  |  ") +
-                tr("Symbolic links skipped: %1")
-                    .arg(state->skippedSymlinks);
+                tr("Symbolic links skipped: %1").arg(state->skippedSymlinks);
         }
         if (state->depthLimits > 0) {
             message += QStringLiteral("  |  ") +
-                       tr("Depth limits reached: %1")
-                           .arg(state->depthLimits);
+                       tr("Depth limits reached: %1").arg(state->depthLimits);
         }
         if (state->listFailures > 0 && !state->lastError.isEmpty()) {
-            message += QStringLiteral("\n") + tr("Last error: ") +
-                       state->lastError;
+            message +=
+                QStringLiteral("\n") + tr("Last error: ") + state->lastError;
         }
         statusBar()->showMessage(message, 6000);
-        if (state->enqueuedDownloads > 0 ||
-            state->enqueuedDirectories > 0) {
+        if (state->enqueuedDownloads > 0 || state->enqueuedDirectories > 0) {
             maybeShowTransferQueue();
         }
     };
 
-    auto resumeAfterBackpressure =
-        std::make_shared<std::function<void()>>();
+    auto resumeAfterBackpressure = std::make_shared<std::function<void()>>();
     *resumeAfterBackpressure = [this, state] {
-        if (!state->backpressurePaused ||
-            state->cancelRequested->load() ||
+        if (!state->backpressurePaused || state->cancelRequested->load() ||
             state->pendingTransferTasks.size() >= 1000) {
             return;
         }
@@ -286,52 +272,50 @@ void MainWindow::runRemoteDownloadPrescan(
                 remoteOps_->setPaused(jobId, false);
         }
         if (remoteScanProgress_) {
-            remoteScanProgress_->setLabelText(
-                tr("Scanning remote folders..."));
+            remoteScanProgress_->setLabelText(tr("Scanning remote folders..."));
         }
     };
-    state->tasksAddedConnection = connect(
-        transferMgr_, &TransferManager::tasksAdded, this,
-        [this, state](const QVector<quint64> &taskIds) {
-            if (!transferMgr_)
-                return;
-            const auto tasks = transferMgr_->tasksSnapshot(taskIds);
-            for (const auto &task : tasks) {
-                if (task.batchId == state->batchOptions.batchId &&
-                    !isTransferTaskFinalStatus(task.status)) {
-                    state->pendingTransferTasks.insert(task.taskId);
-                }
-            }
-        });
-    state->tasksUpdatedConnection = connect(
-        transferMgr_, &TransferManager::tasksUpdated, this,
-        [this, state, resumeAfterBackpressure](
-            const QVector<quint64> &taskIds) {
-            if (!transferMgr_)
-                return;
-            QVector<quint64> relevant;
-            relevant.reserve(taskIds.size());
-            for (const quint64 taskId : taskIds) {
-                if (state->pendingTransferTasks.contains(taskId))
-                    relevant.push_back(taskId);
-            }
-            const auto tasks = transferMgr_->tasksSnapshot(relevant);
-            QSet<quint64> observed;
-            for (const auto &task : tasks) {
-                observed.insert(task.taskId);
-                if (isTransferTaskFinalStatus(task.status))
-                    state->pendingTransferTasks.remove(task.taskId);
-            }
-            for (const quint64 taskId : relevant) {
-                if (!observed.contains(taskId))
-                    state->pendingTransferTasks.remove(taskId);
-            }
-            (*resumeAfterBackpressure)();
-        });
+    state->tasksAddedConnection =
+        connect(transferMgr_, &TransferManager::tasksAdded, this,
+                [this, state](const QVector<quint64> &taskIds) {
+                    if (!transferMgr_)
+                        return;
+                    const auto tasks = transferMgr_->tasksSnapshot(taskIds);
+                    for (const auto &task : tasks) {
+                        if (task.batchId == state->batchOptions.batchId &&
+                            !isTransferTaskFinalStatus(task.status)) {
+                            state->pendingTransferTasks.insert(task.taskId);
+                        }
+                    }
+                });
+    state->tasksUpdatedConnection =
+        connect(transferMgr_, &TransferManager::tasksUpdated, this,
+                [this, state,
+                 resumeAfterBackpressure](const QVector<quint64> &taskIds) {
+                    if (!transferMgr_)
+                        return;
+                    QVector<quint64> relevant;
+                    relevant.reserve(taskIds.size());
+                    for (const quint64 taskId : taskIds) {
+                        if (state->pendingTransferTasks.contains(taskId))
+                            relevant.push_back(taskId);
+                    }
+                    const auto tasks = transferMgr_->tasksSnapshot(relevant);
+                    QSet<quint64> observed;
+                    for (const auto &task : tasks) {
+                        observed.insert(task.taskId);
+                        if (isTransferTaskFinalStatus(task.status))
+                            state->pendingTransferTasks.remove(task.taskId);
+                    }
+                    for (const quint64 taskId : relevant) {
+                        if (!observed.contains(taskId))
+                            state->pendingTransferTasks.remove(taskId);
+                    }
+                    (*resumeAfterBackpressure)();
+                });
     state->tasksRemovedConnection = connect(
         transferMgr_, &TransferManager::tasksRemoved, this,
-        [state, resumeAfterBackpressure](
-            const QVector<quint64> &taskIds) {
+        [state, resumeAfterBackpressure](const QVector<quint64> &taskIds) {
             for (const quint64 taskId : taskIds)
                 state->pendingTransferTasks.remove(taskId);
             (*resumeAfterBackpressure)();
@@ -339,8 +323,8 @@ void MainWindow::runRemoteDownloadPrescan(
 
     state->batchConnection = connect(
         remoteOps_, &RemoteOperationController::entriesBatchReady, this,
-        [this, state, finish](
-            const RemoteOperationController::EntryBatch &batch) {
+        [this, state,
+         finish](const RemoteOperationController::EntryBatch &batch) {
             if (!state->pending.contains(batch.job.id) ||
                 state->cancelRequested->load() || !transferMgr_) {
                 return;
@@ -362,9 +346,8 @@ void MainWindow::runRemoteDownloadPrescan(
                 }
 
                 bool valid = !entry.relativePath.isEmpty();
-                const QStringList parts =
-                    entry.relativePath.split(QLatin1Char('/'),
-                                             Qt::SkipEmptyParts);
+                const QStringList parts = entry.relativePath.split(
+                    QLatin1Char('/'), Qt::SkipEmptyParts);
                 for (const QString &part : parts) {
                     QString why;
                     if (!isValidEntryName(part, &why)) {
@@ -397,11 +380,10 @@ void MainWindow::runRemoteDownloadPrescan(
                 for (const auto jobId : scanJobs)
                     remoteOps_->setPaused(jobId, true);
                 const QString sizeText = QLocale().formattedDataSize(
-                    static_cast<qint64>(
-                        std::min<quint64>(
-                            state->knownBytes,
-                            static_cast<quint64>(
-                                std::numeric_limits<qint64>::max()))));
+                    static_cast<qint64>(std::min<quint64>(
+                        state->knownBytes,
+                        static_cast<quint64>(
+                            std::numeric_limits<qint64>::max()))));
                 const bool keepGoing =
                     UiAlerts::question(
                         this, tr("Very large transfer"),
@@ -419,8 +401,7 @@ void MainWindow::runRemoteDownloadPrescan(
                     const auto pending = state->pending;
                     for (const auto jobId : pending)
                         remoteOps_->cancel(jobId);
-                    transferMgr_->cancelBatch(
-                        state->batchOptions.batchId);
+                    transferMgr_->cancelBatch(state->batchOptions.batchId);
                     (*finish)();
                     return;
                 }
@@ -429,8 +410,8 @@ void MainWindow::runRemoteDownloadPrescan(
             }
 
             for (const QString &directory : directories) {
-                transferMgr_->enqueueLocalDirectory(
-                    directory, state->batchOptions);
+                transferMgr_->enqueueLocalDirectory(directory,
+                                                    state->batchOptions);
                 ++state->enqueuedDirectories;
             }
             state->enqueuedDownloads +=
@@ -455,8 +436,7 @@ void MainWindow::runRemoteDownloadPrescan(
         });
     state->progressConnection = connect(
         remoteOps_, &RemoteOperationController::jobProgress, this,
-        [this, state](
-            const RemoteOperationController::Progress &progress) {
+        [this, state](const RemoteOperationController::Progress &progress) {
             if (!state->pending.contains(progress.job.id) ||
                 !remoteScanProgress_) {
                 return;
@@ -466,43 +446,42 @@ void MainWindow::runRemoteDownloadPrescan(
                     .arg(progress.visitedEntries)
                     .arg(state->enqueuedDownloads));
         });
-    state->completionConnection = connect(
-        remoteOps_, &RemoteOperationController::jobFinished, this,
-        [this, state, finish](
-            const RemoteOperationController::Completion &completion) {
-            if (!state->pending.remove(completion.result.job.id))
-                return;
-            state->listFailures += completion.failedEntries;
-            state->skippedInvalid += completion.invalidNames;
-            state->unknownSizes += completion.unknownSizes;
-            state->skippedSymlinks += completion.skippedSymlinks;
-            state->depthLimits += completion.depthLimits;
-            if (completion.result.outcome ==
-                RemoteOperationController::Outcome::Canceled) {
-                state->canceled = true;
-            } else if (completion.result.outcome !=
-                       RemoteOperationController::Outcome::Succeeded) {
-                ++state->listFailures;
-            } else {
-                lastSuccessfulRemoteActivityAtMs_ =
-                    QDateTime::currentMSecsSinceEpoch();
-            }
-            if (!completion.result.error.isEmpty())
-                state->lastError = completion.result.error;
-            (*finish)();
-        });
-    connect(scanProgress, &QProgressDialog::canceled, this,
-            [this, state] {
-                state->canceled = true;
-                state->cancelRequested->store(true);
-                if (remoteOps_) {
-                    const auto pending = state->pending;
-                    for (const auto jobId : pending)
-                        remoteOps_->cancel(jobId);
-                }
-                if (transferMgr_)
-                    transferMgr_->cancelBatch(state->batchOptions.batchId);
-            });
+    state->completionConnection =
+        connect(remoteOps_, &RemoteOperationController::jobFinished, this,
+                [this, state, finish](
+                    const RemoteOperationController::Completion &completion) {
+                    if (!state->pending.remove(completion.result.job.id))
+                        return;
+                    state->listFailures += completion.failedEntries;
+                    state->skippedInvalid += completion.invalidNames;
+                    state->unknownSizes += completion.unknownSizes;
+                    state->skippedSymlinks += completion.skippedSymlinks;
+                    state->depthLimits += completion.depthLimits;
+                    if (completion.result.outcome ==
+                        RemoteOperationController::Outcome::Canceled) {
+                        state->canceled = true;
+                    } else if (completion.result.outcome !=
+                               RemoteOperationController::Outcome::Succeeded) {
+                        ++state->listFailures;
+                    } else {
+                        lastSuccessfulRemoteActivityAtMs_ =
+                            QDateTime::currentMSecsSinceEpoch();
+                    }
+                    if (!completion.result.error.isEmpty())
+                        state->lastError = completion.result.error;
+                    (*finish)();
+                });
+    connect(scanProgress, &QProgressDialog::canceled, this, [this, state] {
+        state->canceled = true;
+        state->cancelRequested->store(true);
+        if (remoteOps_) {
+            const auto pending = state->pending;
+            for (const auto jobId : pending)
+                remoteOps_->cancel(jobId);
+        }
+        if (transferMgr_)
+            transferMgr_->cancelBatch(state->batchOptions.batchId);
+    });
 
     QVector<QPair<QString, QString>> directFiles;
     for (const auto &seed : seeds) {
@@ -537,11 +516,10 @@ void MainWindow::runRemoteDownloadPrescan(
 }
 
 void MainWindow::startLocalUploadDiscovery(
-    const QVector<QPair<QString, QString>> &localRemoteRoots,
-    bool moveSources, bool dragAndDrop) {
+    const QVector<QPair<QString, QString>> &localRemoteRoots, bool moveSources,
+    bool dragAndDrop) {
     if (!transferMgr_ || !sessionController_->client() || !rightIsRemote_) {
-        UiAlerts::warning(this, tr("Remote"),
-                          tr("No active remote session."));
+        UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
     if (localRemoteRoots.isEmpty()) {
@@ -558,10 +536,9 @@ void MainWindow::startLocalUploadDiscovery(
 
     auto *discovery = new LocalTreeDiscovery(this);
     activeLocalUploadDiscoveries_.insert(discovery);
-    connect(discovery, &QObject::destroyed, this,
-            [this, discovery] {
-                activeLocalUploadDiscoveries_.remove(discovery);
-            });
+    connect(discovery, &QObject::destroyed, this, [this, discovery] {
+        activeLocalUploadDiscoveries_.remove(discovery);
+    });
     struct UploadDiscoveryState {
         QPointer<LocalTreeDiscovery> discovery;
         QPointer<QProgressDialog> progress;
@@ -594,12 +571,11 @@ void MainWindow::startLocalUploadDiscovery(
     options.roots.reserve(localRemoteRoots.size());
     for (const auto &root : localRemoteRoots) {
         options.roots.push_back({root.first});
-        state->destinationRoots.push_back(
-            normalizeRemotePath(root.second));
+        state->destinationRoots.push_back(normalizeRemotePath(root.second));
     }
 
-    auto *progress = new QProgressDialog(
-        tr("Preparing local upload queue…"), tr("Cancel"), 0, 0, this);
+    auto *progress = new QProgressDialog(tr("Preparing local upload queue…"),
+                                         tr("Cancel"), 0, 0, this);
     progress->setWindowTitle(moveSources ? tr("Preparing move")
                                          : tr("Preparing upload"));
     progress->setWindowModality(Qt::NonModal);
@@ -624,116 +600,103 @@ void MainWindow::startLocalUploadDiscovery(
         QStringList notes;
         if (counters.skippedSymlinks > 0) {
             notes.push_back(
-                tr("symlinks skipped: %1")
-                    .arg(counters.skippedSymlinks));
+                tr("symlinks skipped: %1").arg(counters.skippedSymlinks));
         }
         if (counters.depthLimits > 0) {
-            notes.push_back(
-                tr("depth limits: %1").arg(counters.depthLimits));
+            notes.push_back(tr("depth limits: %1").arg(counters.depthLimits));
         }
         if (counters.inaccessibleEntries > 0) {
             notes.push_back(
-                tr("inaccessible: %1")
-                    .arg(counters.inaccessibleEntries));
+                tr("inaccessible: %1").arg(counters.inaccessibleEntries));
         }
         if (counters.invalidNames > 0) {
-            notes.push_back(
-                tr("invalid names: %1").arg(counters.invalidNames));
+            notes.push_back(tr("invalid names: %1").arg(counters.invalidNames));
         }
         if (counters.unknownSizes > 0) {
-            notes.push_back(
-                tr("unknown sizes: %1").arg(counters.unknownSizes));
+            notes.push_back(tr("unknown sizes: %1").arg(counters.unknownSizes));
         }
         return notes.join(QStringLiteral(", "));
     };
 
-    auto finishMoveCleanup =
-        std::make_shared<std::function<void()>>();
-    *finishMoveCleanup =
-        [this, state, disconnectTaskTracking] {
-            if (!state->moveSources || !state->scanFinished ||
-                state->moveCleanupStarted || !state->pendingTasks.isEmpty() ||
-                state->canceled) {
-                return;
-            }
-            state->moveCleanupStarted = true;
-            disconnectTaskTracking();
+    auto finishMoveCleanup = std::make_shared<std::function<void()>>();
+    *finishMoveCleanup = [this, state, disconnectTaskTracking] {
+        if (!state->moveSources || !state->scanFinished ||
+            state->moveCleanupStarted || !state->pendingTasks.isEmpty() ||
+            state->canceled) {
+            return;
+        }
+        state->moveCleanupStarted = true;
+        disconnectTaskTracking();
 
-            QStringList directories = state->sourceDirectories;
-            std::sort(
-                directories.begin(), directories.end(),
-                [](const QString &left, const QString &right) {
-                    const int leftDepth =
-                        QDir::fromNativeSeparators(left)
-                            .count(QLatin1Char('/'));
-                    const int rightDepth =
-                        QDir::fromNativeSeparators(right)
-                            .count(QLatin1Char('/'));
-                    if (leftDepth != rightDepth)
-                        return leftDepth > rightDepth;
-                    return left > right;
-                });
-            if (directories.isEmpty()) {
-                setLeftRoot(leftPath_->text());
-                return;
-            }
-            QPointer<MainWindow> safeThis(this);
-            QThreadPool::globalInstance()->start(
-                [safeThis, directories = std::move(directories)] {
-                    for (const QString &directory : directories)
-                        (void)QDir().rmdir(directory);
-                    if (!safeThis)
-                        return;
-                    QMetaObject::invokeMethod(
-                        safeThis,
-                        [safeThis] {
-                            if (!safeThis)
-                                return;
-                            safeThis->setLeftRoot(
-                                safeThis->leftPath_->text());
-                        },
-                        Qt::QueuedConnection);
-                });
-        };
+        QStringList directories = state->sourceDirectories;
+        std::sort(
+            directories.begin(), directories.end(),
+            [](const QString &left, const QString &right) {
+                const int leftDepth =
+                    QDir::fromNativeSeparators(left).count(QLatin1Char('/'));
+                const int rightDepth =
+                    QDir::fromNativeSeparators(right).count(QLatin1Char('/'));
+                if (leftDepth != rightDepth)
+                    return leftDepth > rightDepth;
+                return left > right;
+            });
+        if (directories.isEmpty()) {
+            setLeftRoot(leftPath_->text());
+            return;
+        }
+        QPointer<MainWindow> safeThis(this);
+        QThreadPool::globalInstance()->start(
+            [safeThis, directories = std::move(directories)] {
+                for (const QString &directory : directories)
+                    (void)QDir().rmdir(directory);
+                if (!safeThis)
+                    return;
+                QMetaObject::invokeMethod(
+                    safeThis,
+                    [safeThis] {
+                        if (!safeThis)
+                            return;
+                        safeThis->setLeftRoot(safeThis->leftPath_->text());
+                    },
+                    Qt::QueuedConnection);
+            });
+    };
 
-    auto reconcileTasks =
-        [this, state, finishMoveCleanup](
-            const QVector<quint64> &taskIds, bool removed) {
-            bool changed = false;
-            bool directoryFailed = false;
-            for (const quint64 taskId : taskIds) {
-                if (!state->pendingTasks.contains(taskId))
-                    continue;
-                const auto task =
-                    removed ? std::optional<TransferTask>{}
-                            : transferMgr_->taskSnapshot(taskId);
-                if (state->directoryTaskIds.contains(taskId)) {
-                    if (!task || removed ||
-                        task->status == TransferTask::Status::Error ||
-                        task->status == TransferTask::Status::Canceled ||
-                        task->status == TransferTask::Status::Skipped ||
-                        task->status == TransferTask::Status::Warning) {
-                        directoryFailed = true;
-                    }
-                }
-                if (removed || !task ||
-                    isLocalUploadPreparationTerminal(task->status)) {
-                    state->pendingTasks.remove(taskId);
-                    changed = true;
+    auto reconcileTasks = [this, state, finishMoveCleanup](
+                              const QVector<quint64> &taskIds, bool removed) {
+        bool changed = false;
+        bool directoryFailed = false;
+        for (const quint64 taskId : taskIds) {
+            if (!state->pendingTasks.contains(taskId))
+                continue;
+            const auto task = removed ? std::optional<TransferTask>{}
+                                      : transferMgr_->taskSnapshot(taskId);
+            if (state->directoryTaskIds.contains(taskId)) {
+                if (!task || removed ||
+                    task->status == TransferTask::Status::Error ||
+                    task->status == TransferTask::Status::Canceled ||
+                    task->status == TransferTask::Status::Skipped ||
+                    task->status == TransferTask::Status::Warning) {
+                    directoryFailed = true;
                 }
             }
-            if (changed && state->discovery) {
-                state->discovery->setPendingTaskCount(
-                    state->pendingTasks.size());
+            if (removed || !task ||
+                isLocalUploadPreparationTerminal(task->status)) {
+                state->pendingTasks.remove(taskId);
+                changed = true;
             }
-            if (directoryFailed && !state->canceled) {
-                state->canceled = true;
-                transferMgr_->cancelBatch(state->batchOptions.batchId);
-                if (state->discovery)
-                    state->discovery->cancel();
-            }
-            (*finishMoveCleanup)();
-        };
+        }
+        if (changed && state->discovery) {
+            state->discovery->setPendingTaskCount(state->pendingTasks.size());
+        }
+        if (directoryFailed && !state->canceled) {
+            state->canceled = true;
+            transferMgr_->cancelBatch(state->batchOptions.batchId);
+            if (state->discovery)
+                state->discovery->cancel();
+        }
+        (*finishMoveCleanup)();
+    };
     state->updatedConnection =
         connect(transferMgr_, &TransferManager::tasksUpdated, this,
                 [reconcileTasks](const QVector<quint64> &taskIds) {
@@ -745,132 +708,113 @@ void MainWindow::startLocalUploadDiscovery(
                     reconcileTasks(taskIds, true);
                 });
 
-    connect(discovery, &LocalTreeDiscovery::batchReady, this,
-            [this, state, reconcileTasks](
-                const LocalTreeDiscoveryBatch &batch) {
-                if (state->canceled || !transferMgr_ ||
-                    !rightIsRemote_) {
-                    if (state->discovery)
-                        state->discovery->cancel();
-                    return;
+    connect(
+        discovery, &LocalTreeDiscovery::batchReady, this,
+        [this, state, reconcileTasks](const LocalTreeDiscoveryBatch &batch) {
+            if (state->canceled || !transferMgr_ || !rightIsRemote_) {
+                if (state->discovery)
+                    state->discovery->cancel();
+                return;
+            }
+            state->counters = batch.counters;
+            QVector<quint64> newTaskIds;
+            newTaskIds.reserve(batch.entries.size());
+            for (const auto &entry : batch.entries) {
+                if (entry.rootIndex < 0 ||
+                    entry.rootIndex >= state->destinationRoots.size()) {
+                    continue;
                 }
-                state->counters = batch.counters;
-                QVector<quint64> newTaskIds;
-                newTaskIds.reserve(batch.entries.size());
-                for (const auto &entry : batch.entries) {
-                    if (entry.rootIndex < 0 ||
-                        entry.rootIndex >=
-                            state->destinationRoots.size()) {
-                        continue;
-                    }
-                    QString destination =
-                        state->destinationRoots[entry.rootIndex];
-                    if (!entry.relativePath.isEmpty()) {
-                        destination =
-                            joinRemotePath(destination,
-                                           entry.relativePath);
-                    }
+                QString destination = state->destinationRoots[entry.rootIndex];
+                if (!entry.relativePath.isEmpty()) {
+                    destination =
+                        joinRemotePath(destination, entry.relativePath);
+                }
 
-                    TransferBatchOptions entryOptions =
-                        state->batchOptions;
-                    QString parentRelative = entry.relativePath;
-                    const int separator =
-                        parentRelative.lastIndexOf(QLatin1Char('/'));
-                    if (entry.type ==
-                        LocalTreeDiscoveryEntry::Type::Directory) {
-                        if (entry.relativePath.isEmpty()) {
-                            parentRelative.clear();
-                        } else if (separator >= 0) {
-                            parentRelative =
-                                parentRelative.left(separator);
-                        } else {
-                            parentRelative.clear();
-                        }
+                TransferBatchOptions entryOptions = state->batchOptions;
+                QString parentRelative = entry.relativePath;
+                const int separator =
+                    parentRelative.lastIndexOf(QLatin1Char('/'));
+                if (entry.type == LocalTreeDiscoveryEntry::Type::Directory) {
+                    if (entry.relativePath.isEmpty()) {
+                        parentRelative.clear();
                     } else if (separator >= 0) {
-                        parentRelative =
-                            parentRelative.left(separator);
+                        parentRelative = parentRelative.left(separator);
                     } else {
                         parentRelative.clear();
                     }
-
-                    const QString parentKey =
-                        QString::number(entry.rootIndex) +
-                        QStringLiteral(":") + parentRelative;
-                    if (entry.type ==
-                            LocalTreeDiscoveryEntry::Type::File &&
-                        entry.relativePath.isEmpty()) {
-                        entryOptions.dependsOnTaskId = 0;
-                    } else {
-                        entryOptions.dependsOnTaskId =
-                            state->directoryTasks.value(parentKey, 0);
-                    }
-
-                    quint64 taskId = 0;
-                    if (entry.type ==
-                        LocalTreeDiscoveryEntry::Type::Directory) {
-                        taskId = transferMgr_->enqueueRemoteDirectory(
-                            destination, entryOptions);
-                        const QString directoryKey =
-                            QString::number(entry.rootIndex) +
-                            QStringLiteral(":") + entry.relativePath;
-                        state->directoryTasks.insert(directoryKey,
-                                                     taskId);
-                        if (taskId != 0)
-                            state->directoryTaskIds.insert(taskId);
-                        ++state->directoryCount;
-                        if (!state->sourceDirectorySet.contains(
-                                entry.localPath)) {
-                            state->sourceDirectorySet.insert(
-                                entry.localPath);
-                            state->sourceDirectories.push_back(
-                                entry.localPath);
-                        }
-                    } else {
-                        taskId = transferMgr_->enqueueUpload(
-                            entry.localPath, destination, entryOptions);
-                        ++state->uploadCount;
-                    }
-                    if (taskId != 0) {
-                        state->pendingTasks.insert(taskId);
-                        newTaskIds.push_back(taskId);
-                    }
+                } else if (separator >= 0) {
+                    parentRelative = parentRelative.left(separator);
+                } else {
+                    parentRelative.clear();
                 }
-                // A fast directory task can finish between enqueue() and the
-                // insertion above. Reconcile immediately so discovery
-                // backpressure and move cleanup cannot remain stuck on a
-                // terminal (or already-pruned) task.
-                reconcileTasks(newTaskIds, false);
-                if (state->discovery) {
-                    state->discovery->setPendingTaskCount(
-                        state->pendingTasks.size());
+
+                const QString parentKey = QString::number(entry.rootIndex) +
+                                          QStringLiteral(":") + parentRelative;
+                if (entry.type == LocalTreeDiscoveryEntry::Type::File &&
+                    entry.relativePath.isEmpty()) {
+                    entryOptions.dependsOnTaskId = 0;
+                } else {
+                    entryOptions.dependsOnTaskId =
+                        state->directoryTasks.value(parentKey, 0);
                 }
+
+                quint64 taskId = 0;
+                if (entry.type == LocalTreeDiscoveryEntry::Type::Directory) {
+                    taskId = transferMgr_->enqueueRemoteDirectory(destination,
+                                                                  entryOptions);
+                    const QString directoryKey =
+                        QString::number(entry.rootIndex) + QStringLiteral(":") +
+                        entry.relativePath;
+                    state->directoryTasks.insert(directoryKey, taskId);
+                    if (taskId != 0)
+                        state->directoryTaskIds.insert(taskId);
+                    ++state->directoryCount;
+                    if (!state->sourceDirectorySet.contains(entry.localPath)) {
+                        state->sourceDirectorySet.insert(entry.localPath);
+                        state->sourceDirectories.push_back(entry.localPath);
+                    }
+                } else {
+                    taskId = transferMgr_->enqueueUpload(
+                        entry.localPath, destination, entryOptions);
+                    ++state->uploadCount;
+                }
+                if (taskId != 0) {
+                    state->pendingTasks.insert(taskId);
+                    newTaskIds.push_back(taskId);
+                }
+            }
+            // A fast directory task can finish between enqueue() and the
+            // insertion above. Reconcile immediately so discovery
+            // backpressure and move cleanup cannot remain stuck on a
+            // terminal (or already-pruned) task.
+            reconcileTasks(newTaskIds, false);
+            if (state->discovery) {
+                state->discovery->setPendingTaskCount(
+                    state->pendingTasks.size());
+            }
+        });
+
+    connect(discovery, &LocalTreeDiscovery::progressChanged, this,
+            [state](const LocalTreeDiscoveryCounters &counters,
+                    const QString &currentPath) {
+                state->counters = counters;
+                if (!state->progress)
+                    return;
+                state->progress->setLabelText(
+                    QCoreApplication::translate("MainWindow",
+                                                "Scanning local items: %1\n%2")
+                        .arg(counters.itemCount)
+                        .arg(QDir::toNativeSeparators(currentPath)));
             });
 
     connect(
-        discovery, &LocalTreeDiscovery::progressChanged, this,
-        [state](const LocalTreeDiscoveryCounters &counters,
-                const QString &currentPath) {
-            state->counters = counters;
-            if (!state->progress)
-                return;
-            state->progress->setLabelText(
-                QCoreApplication::translate(
-                    "MainWindow",
-                    "Scanning local items: %1\n%2")
-                    .arg(counters.itemCount)
-                    .arg(QDir::toNativeSeparators(currentPath)));
-        });
-
-    connect(
-        discovery,
-        &LocalTreeDiscovery::largeTreeConfirmationRequired, this,
+        discovery, &LocalTreeDiscovery::largeTreeConfirmationRequired, this,
         [this, state](const LocalTreeDiscoveryCounters &counters) {
             if (state->canceled || !state->discovery)
                 return;
-            const QString knownSize =
-                QLocale().formattedDataSize(qint64(std::min(
-                    counters.knownBytes,
-                    quint64(std::numeric_limits<qint64>::max()))));
+            const QString knownSize = QLocale().formattedDataSize(
+                qint64(std::min(counters.knownBytes,
+                                quint64(std::numeric_limits<qint64>::max()))));
             const auto answer = UiAlerts::question(
                 this, tr("Large upload"),
                 tr("This upload contains more than 100,000 items or 100 GiB "
@@ -879,63 +823,58 @@ void MainWindow::startLocalUploadDiscovery(
                     .arg(counters.itemCount)
                     .arg(knownSize));
             if (answer == QMessageBox::Yes) {
-                state->discovery
-                    ->continueAfterLargeTreeConfirmation();
+                state->discovery->continueAfterLargeTreeConfirmation();
             } else {
                 state->canceled = true;
-                transferMgr_->cancelBatch(
-                    state->batchOptions.batchId);
+                transferMgr_->cancelBatch(state->batchOptions.batchId);
                 state->discovery->cancel();
             }
         });
 
-    connect(progress, &QProgressDialog::canceled, this,
-            [this, state] {
-                if (state->canceled)
-                    return;
-                state->canceled = true;
-                transferMgr_->cancelBatch(state->batchOptions.batchId);
+    connect(progress, &QProgressDialog::canceled, this, [this, state] {
+        if (state->canceled)
+            return;
+        state->canceled = true;
+        transferMgr_->cancelBatch(state->batchOptions.batchId);
+        if (state->discovery)
+            state->discovery->cancel();
+    });
+
+    connect(discovery, &LocalTreeDiscovery::finished, this,
+            [this, state, closeProgress, disconnectTaskTracking,
+             countersSummary,
+             finishMoveCleanup](const LocalTreeDiscoveryCounters &counters) {
+                state->scanFinished = true;
+                state->counters = counters;
+                closeProgress();
                 if (state->discovery)
-                    state->discovery->cancel();
+                    state->discovery->deleteLater();
+
+                QString message =
+                    state->dragAndDrop
+                        ? tr("Queued: %1 uploads, %2 folders (DND)")
+                              .arg(state->uploadCount)
+                              .arg(state->directoryCount)
+                        : (state->moveSources
+                               ? tr("Queued: %1 uploads, %2 folders (move)")
+                                     .arg(state->uploadCount)
+                                     .arg(state->directoryCount)
+                               : tr("Queued: %1 uploads, %2 folders")
+                                     .arg(state->uploadCount)
+                                     .arg(state->directoryCount));
+                const QString notes = countersSummary(counters);
+                if (!notes.isEmpty())
+                    message += QStringLiteral("  |  ") + notes;
+                statusBar()->showMessage(message, 7000);
+                if (state->uploadCount > 0 || state->directoryCount > 0) {
+                    maybeShowTransferQueue();
+                }
+                if (!state->moveSources) {
+                    disconnectTaskTracking();
+                } else {
+                    (*finishMoveCleanup)();
+                }
             });
-
-    connect(
-        discovery, &LocalTreeDiscovery::finished, this,
-        [this, state, closeProgress, disconnectTaskTracking,
-         countersSummary, finishMoveCleanup](
-            const LocalTreeDiscoveryCounters &counters) {
-            state->scanFinished = true;
-            state->counters = counters;
-            closeProgress();
-            if (state->discovery)
-                state->discovery->deleteLater();
-
-            QString message =
-                state->dragAndDrop
-                    ? tr("Queued: %1 uploads, %2 folders (DND)")
-                          .arg(state->uploadCount)
-                          .arg(state->directoryCount)
-                    : (state->moveSources
-                           ? tr("Queued: %1 uploads, %2 folders (move)")
-                                 .arg(state->uploadCount)
-                                 .arg(state->directoryCount)
-                           : tr("Queued: %1 uploads, %2 folders")
-                                 .arg(state->uploadCount)
-                                 .arg(state->directoryCount));
-            const QString notes = countersSummary(counters);
-            if (!notes.isEmpty())
-                message += QStringLiteral("  |  ") + notes;
-            statusBar()->showMessage(message, 7000);
-            if (state->uploadCount > 0 ||
-                state->directoryCount > 0) {
-                maybeShowTransferQueue();
-            }
-            if (!state->moveSources) {
-                disconnectTaskTracking();
-            } else {
-                (*finishMoveCleanup)();
-            }
-        });
 
     auto cancelFinished =
         [this, state, closeProgress, disconnectTaskTracking,
@@ -957,14 +896,12 @@ void MainWindow::startLocalUploadDiscovery(
             statusBar()->showMessage(message, 7000);
         };
     connect(discovery, &LocalTreeDiscovery::canceled, this,
-            [cancelFinished](
-                const LocalTreeDiscoveryCounters &counters) {
+            [cancelFinished](const LocalTreeDiscoveryCounters &counters) {
                 cancelFinished(counters, {});
             });
     connect(discovery, &LocalTreeDiscovery::failed, this,
-            [cancelFinished](
-                const QString &message,
-                const LocalTreeDiscoveryCounters &counters) {
+            [cancelFinished](const QString &message,
+                             const LocalTreeDiscoveryCounters &counters) {
                 cancelFinished(counters, message);
             });
 
@@ -1038,7 +975,8 @@ void MainWindow::maybeShowTransferQueue() {
 }
 
 bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
-    QObject *const rightViewport = rightView_ ? rightView_->viewport() : nullptr;
+    QObject *const rightViewport =
+        rightView_ ? rightView_->viewport() : nullptr;
     QObject *const leftViewport = leftView_ ? leftView_->viewport() : nullptr;
     if (eventSource != rightViewport && eventSource != leftViewport)
         return QMainWindow::eventFilter(eventSource, event);
@@ -1050,33 +988,36 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
         return QString::fromUtf8(raw).trimmed();
     };
 
-    auto scheduleStagingCleanupAfterLocalJobs = [this](const QString &batchDir) {
+    auto scheduleStagingCleanupAfterLocalJobs = [this](
+                                                    const QString &batchDir) {
         if (batchDir.isEmpty())
             return;
         auto *timer = new QTimer(this);
         timer->setInterval(350);
         timer->setSingleShot(false);
         auto attempts = std::make_shared<int>(0);
-        connect(timer, &QTimer::timeout, this, [this, timer, attempts, batchDir] {
-            ++(*attempts);
-            const bool giveUp = (*attempts >= 300); // ~105s max wait
-            if (!giveUp && localFsJobsInFlight_.load() > 0)
-                return;
+        connect(timer, &QTimer::timeout, this,
+                [this, timer, attempts, batchDir] {
+                    ++(*attempts);
+                    const bool giveUp = (*attempts >= 300); // ~105s max wait
+                    if (!giveUp && localFsJobsInFlight_.load() > 0)
+                        return;
 
-            timer->stop();
-            timer->deleteLater();
-            QDir batch(batchDir);
-            if (batch.exists())
-                (void)batch.removeRecursively();
+                    timer->stop();
+                    timer->deleteLater();
+                    QDir batch(batchDir);
+                    if (batch.exists())
+                        (void)batch.removeRecursively();
 
-            // If the staging root is now empty, remove it as well.
-            const QString rootPath = QFileInfo(batchDir).absolutePath();
-            QDir root(rootPath);
-            if (root.exists() &&
-                root.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty()) {
-                (void)root.rmdir(".");
-            }
-        });
+                    // If the staging root is now empty, remove it as well.
+                    const QString rootPath = QFileInfo(batchDir).absolutePath();
+                    QDir root(rootPath);
+                    if (root.exists() &&
+                        root.entryList(QDir::NoDotAndDotDot | QDir::AllEntries)
+                            .isEmpty()) {
+                        (void)root.rmdir(".");
+                    }
+                });
         timer->start();
     };
 
@@ -1102,9 +1043,9 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
             auto *dropEvent = static_cast<QDropEvent *>(event);
             const QString stagingBatchDir =
                 extractStagingBatchDir(dropEvent->mimeData());
-            const auto urls =
-                dropEvent->mimeData() ? dropEvent->mimeData()->urls()
-                                      : QList<QUrl>{};
+            const auto urls = dropEvent->mimeData()
+                                  ? dropEvent->mimeData()->urls()
+                                  : QList<QUrl>{};
             if (urls.isEmpty()) {
                 dropEvent->acceptProposedAction();
                 return true;
@@ -1139,14 +1080,12 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                     if (localPath.isEmpty())
                         continue;
                     const QFileInfo localFileInfo(localPath);
-                    if (!localFileInfo.isDir() &&
-                        !localFileInfo.isFile()) {
+                    if (!localFileInfo.isDir() && !localFileInfo.isFile()) {
                         continue;
                     }
                     roots.push_back(
                         {localFileInfo.absoluteFilePath(),
-                         joinRemotePath(remoteBase,
-                                        localFileInfo.fileName())});
+                         joinRemotePath(remoteBase, localFileInfo.fileName())});
                 }
                 if (!roots.isEmpty())
                     startLocalUploadDiscovery(roots, false, true);
@@ -1195,9 +1134,9 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
             auto *dropEvent = static_cast<QDropEvent *>(event);
             const QString stagingBatchDir =
                 extractStagingBatchDir(dropEvent->mimeData());
-            const auto urls =
-                dropEvent->mimeData() ? dropEvent->mimeData()->urls()
-                                      : QList<QUrl>{};
+            const auto urls = dropEvent->mimeData()
+                                  ? dropEvent->mimeData()->urls()
+                                  : QList<QUrl>{};
             if (!urls.isEmpty()) {
                 // Local copy towards the left panel
                 QDir dst(leftPath_->text());

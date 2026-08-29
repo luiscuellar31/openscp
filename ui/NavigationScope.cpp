@@ -56,14 +56,13 @@ QString remoteEndpointScope(const openscp::SessionOptions &options) {
         openscp::FtpsMode effectiveMode =
             openscp::normalizeFtpsMode(options.ftps_mode);
         if (effectiveMode == openscp::FtpsMode::Auto) {
-            effectiveMode =
-                options.port ==
-                        openscp::defaultPortForProtocol(openscp::Protocol::Ftps)
-                    ? openscp::FtpsMode::ImplicitTls
-                    : openscp::FtpsMode::ExplicitTls;
+            effectiveMode = options.port == openscp::defaultPortForProtocol(
+                                                openscp::Protocol::Ftps)
+                                ? openscp::FtpsMode::ImplicitTls
+                                : openscp::FtpsMode::ExplicitTls;
         }
-        identity.push_back(QString::fromLatin1(
-            openscp::ftpsModeStorageName(effectiveMode)));
+        identity.push_back(
+            QString::fromLatin1(openscp::ftpsModeStorageName(effectiveMode)));
     }
 
     return hashedScope(QStringLiteral("endpoint-"), identity);

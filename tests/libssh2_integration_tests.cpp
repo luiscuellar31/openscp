@@ -131,15 +131,13 @@ bool parsePortOrDefault(const std::optional<std::string> &raw,
 
 bool listContainsName(const std::vector<openscp::FileInfo> &entries,
                       const std::string &name) {
-    return std::any_of(entries.begin(), entries.end(),
-                       [&name](const openscp::FileInfo &e) {
-                           return e.name == name;
-                       });
+    return std::any_of(
+        entries.begin(), entries.end(),
+        [&name](const openscp::FileInfo &e) { return e.name == name; });
 }
 
 bool removeRemoteFileIfExists(openscp::Libssh2SftpClient &client,
-                              const std::string &remotePath,
-                              std::string &err) {
+                              const std::string &remotePath, std::string &err) {
     bool isDir = false;
     err.clear();
     const bool exists = client.exists(remotePath, isDir, err);
@@ -155,8 +153,10 @@ bool removeRemoteFileIfExists(openscp::Libssh2SftpClient &client,
 }
 
 #ifndef _WIN32
-std::string formatHostPortAuthority(const std::string &host, std::uint16_t port) {
-    if (host.find(':') != std::string::npos && host.find(']') == std::string::npos)
+std::string formatHostPortAuthority(const std::string &host,
+                                    std::uint16_t port) {
+    if (host.find(':') != std::string::npos &&
+        host.find(']') == std::string::npos)
         return "[" + host + "]:" + std::to_string(port);
     return host + ":" + std::to_string(port);
 }
@@ -167,7 +167,8 @@ std::size_t countJumpTunnelProcesses(const std::string &targetHost,
                                      std::uint16_t jumpPort) {
     const std::string needleTarget =
         std::string("-W ") + formatHostPortAuthority(targetHost, targetPort);
-    const std::string needlePort = std::string("-p ") + std::to_string(jumpPort);
+    const std::string needlePort =
+        std::string("-p ") + std::to_string(jumpPort);
 
     FILE *pipe = ::popen("ps -ax -o command=", "r");
     if (!pipe)
@@ -201,16 +202,16 @@ bool waitForJumpTunnelCountAtMost(const std::string &targetHost,
                                   std::chrono::milliseconds timeout) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     for (;;) {
-        if (countJumpTunnelProcesses(targetHost, targetPort, jumpHost, jumpPort) <=
-            baselineCount) {
+        if (countJumpTunnelProcesses(targetHost, targetPort, jumpHost,
+                                     jumpPort) <= baselineCount) {
             return true;
         }
         if (std::chrono::steady_clock::now() >= deadline)
             break;
         std::this_thread::sleep_for(std::chrono::milliseconds(120));
     }
-    return countJumpTunnelProcesses(targetHost, targetPort, jumpHost, jumpPort) <=
-           baselineCount;
+    return countJumpTunnelProcesses(targetHost, targetPort, jumpHost,
+                                    jumpPort) <= baselineCount;
 }
 #endif
 
@@ -377,7 +378,8 @@ int main() {
         localTmpRoot / "known_hosts_tofu_mismatch";
     {
         static constexpr const char *kFakeEd25519Key =
-            "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/qwU9iIfMHkUqPnwGwGZRuQQ3v1d";
+            "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/"
+            "qwU9iIfMHkUqPnwGwGZRuQQ3v1d";
         std::ofstream khOut(tofuMismatchKnownHosts,
                             std::ios::binary | std::ios::trunc);
         if (!khOut.is_open()) {
@@ -401,15 +403,17 @@ int main() {
                 return true;
             };
         std::string mismatchErr;
-        const bool mismatchOk = mismatchClient.connect(mismatchOpt, mismatchErr);
+        const bool mismatchOk =
+            mismatchClient.connect(mismatchOpt, mismatchErr);
         t.check(!mismatchOk,
                 "TOFU connect should fail when known_hosts entry mismatches");
         t.check(mismatchErr.find("does not match known_hosts") !=
                     std::string::npos,
                 std::string("TOFU mismatch should report host-key mismatch: ") +
                     mismatchErr);
-        t.check(!confirmCalled,
-                "TOFU mismatch should fail before invoking confirmation callback");
+        t.check(
+            !confirmCalled,
+            "TOFU mismatch should fail before invoking confirmation callback");
         mismatchClient.disconnect();
     }
 
@@ -431,10 +435,9 @@ int main() {
     // A failed overwrite rename must never delete the existing destination.
     if (t.failures == 0) {
         err.clear();
-        t.check(client.put(localSrc.string(), remoteProtected, err, {}, {},
-                           false),
-                std::string("protected destination upload should succeed: ") +
-                    err);
+        t.check(
+            client.put(localSrc.string(), remoteProtected, err, {}, {}, false),
+            std::string("protected destination upload should succeed: ") + err);
     }
     std::vector<std::uint8_t> sourceChecksum;
     if (t.failures == 0) {
@@ -442,30 +445,27 @@ int main() {
         std::size_t checksumDone = 0;
         std::size_t checksumTotal = 0;
         err.clear();
-        t.check(client.checksum(
-                    remoteSrc, "SHA-256", sourceChecksum, err,
-                    [&](std::size_t done, std::size_t total) {
-                        checksumDone = done;
-                        checksumTotal = total;
-                    }),
+        t.check(client.checksum(remoteSrc, "SHA-256", sourceChecksum, err,
+                                [&](std::size_t done, std::size_t total) {
+                                    checksumDone = done;
+                                    checksumTotal = total;
+                                }),
                 std::string("checksum(remoteSrc) should succeed: ") + err);
         err.clear();
-        t.check(client.checksum(remoteProtected, "sha256",
-                                protectedChecksum, err),
-                std::string("checksum(remoteProtected) should succeed: ") +
-                    err);
+        t.check(
+            client.checksum(remoteProtected, "sha256", protectedChecksum, err),
+            std::string("checksum(remoteProtected) should succeed: ") + err);
         t.check(sourceChecksum.size() == 32 &&
                     sourceChecksum == protectedChecksum,
                 "equal remote files should have equal SHA-256 checksums");
         t.check(checksumDone == payload.size() &&
-                    (checksumTotal == 0 ||
-                     checksumTotal == payload.size()),
+                    (checksumTotal == 0 || checksumTotal == payload.size()),
                 "remote checksum should report byte progress");
 
         std::vector<std::uint8_t> canceledDigest;
         err.clear();
-        t.check(!client.checksum(remoteSrc, "SHA-256", canceledDigest, err,
-                                 {}, [] { return true; }),
+        t.check(!client.checksum(remoteSrc, "SHA-256", canceledDigest, err, {},
+                                 [] { return true; }),
                 "a remote checksum should honor cancellation");
         t.check(client.lastOperationError().kind ==
                     openscp::RemoteErrorKind::Canceled,
@@ -529,14 +529,15 @@ int main() {
         t.check(writeFile(localPart, badPayload),
                 "local .part for download mismatch should be writable");
         err.clear();
-        const bool ok = client.get(remoteResumeDownload, localResumeDst.string(),
-                                   err, {}, {}, true);
+        const bool ok = client.get(remoteResumeDownload,
+                                   localResumeDst.string(), err, {}, {}, true);
         t.check(!ok,
                 "get resume with required integrity should fail on mismatch");
-        t.check(err.find("Integrity check failed in resume (download)") !=
-                    std::string::npos,
-                std::string("download mismatch should report integrity error: ") +
-                    err);
+        t.check(
+            err.find("Integrity check failed in resume (download)") !=
+                std::string::npos,
+            std::string("download mismatch should report integrity error: ") +
+                err);
     }
     // Regression: Required integrity must fail on resume mismatch (upload).
     if (t.failures == 0) {
@@ -547,10 +548,11 @@ int main() {
                     err);
         std::vector<std::uint8_t> differentChecksum;
         err.clear();
-        t.check(client.checksum(remoteResumeUploadSeed, "SHA-256",
-                                differentChecksum, err),
-                std::string("checksum(different remote file) should succeed: ") +
-                    err);
+        t.check(
+            client.checksum(remoteResumeUploadSeed, "SHA-256",
+                            differentChecksum, err),
+            std::string("checksum(different remote file) should succeed: ") +
+                err);
         t.check(differentChecksum.size() == 32 &&
                     differentChecksum != sourceChecksum,
                 "different remote files should have different SHA-256 "
@@ -564,9 +566,8 @@ int main() {
     }
     if (t.failures == 0) {
         err.clear();
-        const bool ok =
-            client.put(localSrc.string(), remoteResumeUpload, err, {}, {},
-                       true);
+        const bool ok = client.put(localSrc.string(), remoteResumeUpload, err,
+                                   {}, {}, true);
         t.check(!ok,
                 "put resume with required integrity should fail on mismatch");
         t.check(err.find("Integrity check failed in resume (upload)") !=
@@ -634,7 +635,8 @@ int main() {
 
 #ifndef _WIN32
     // Dedicated lifecycle regression: when jump transport is in use, the
-    // helper ssh process must be torn down after disconnect (no leaked tunnels).
+    // helper ssh process must be torn down after disconnect (no leaked
+    // tunnels).
     if (jumpHost.has_value() && t.failures == 0) {
         const std::size_t baselineJumpCount =
             countJumpTunnelProcesses(*host, port, *jumpHost, jumpPort);
@@ -650,8 +652,9 @@ int main() {
             const bool drained = waitForJumpTunnelCountAtMost(
                 *host, port, *jumpHost, jumpPort, baselineJumpCount,
                 std::chrono::milliseconds(4000));
-            t.check(drained,
-                    "jump lifecycle should stop tunnel process after disconnect");
+            t.check(
+                drained,
+                "jump lifecycle should stop tunnel process after disconnect");
         }
     }
 #endif

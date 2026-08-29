@@ -1,11 +1,11 @@
 // Core unit tests without external framework (run via CTest).
+#include "Libssh2ErrorClassifier.hpp"
+#include "Libssh2InputSafety.hpp"
+#include "SafeLocalFile.hpp"
 #include "openscp/ClientFactory.hpp"
 #include "openscp/Libssh2ScpClient.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
 #include "openscp/MockSftpClient.hpp"
-#include "Libssh2ErrorClassifier.hpp"
-#include "Libssh2InputSafety.hpp"
-#include "SafeLocalFile.hpp"
 #if OPENSCP_HAS_CURL_FTP
 #include "openscp/CurlFtpClient.hpp"
 #endif
@@ -204,8 +204,8 @@ void test_safe_local_partial_files(TestContext &t) {
         t.check(openscp::localfiles::flushAndSync(file, error),
                 std::string("safe partial file should sync: ") + error);
         std::fclose(file);
-        t.check(openscp::localfiles::atomicReplace(
-                    partial.string(), target.string(), error),
+        t.check(openscp::localfiles::atomicReplace(partial.string(),
+                                                   target.string(), error),
                 std::string("safe partial file should publish atomically: ") +
                     error);
     }
@@ -218,13 +218,11 @@ void test_safe_local_partial_files(TestContext &t) {
 }
 
 void test_protocol_helpers(TestContext &t) {
-    t.check(openscp::protocolFromStorageName("sftp") ==
-                openscp::Protocol::Sftp,
+    t.check(openscp::protocolFromStorageName("sftp") == openscp::Protocol::Sftp,
             "protocolFromStorageName should parse sftp");
     t.check(openscp::protocolFromStorageName("SCP") == openscp::Protocol::Scp,
             "protocolFromStorageName should parse scp case-insensitively");
-    t.check(openscp::protocolFromStorageName("FTPS") ==
-                openscp::Protocol::Ftps,
+    t.check(openscp::protocolFromStorageName("FTPS") == openscp::Protocol::Ftps,
             "protocolFromStorageName should parse ftps case-insensitively");
     t.check(openscp::protocolFromStorageName("unknown") ==
                 openscp::Protocol::Sftp,
@@ -241,20 +239,17 @@ void test_protocol_helpers(TestContext &t) {
     t.check(openscp::scpTransferModeFromStorageName("SCP-ONLY") ==
                 openscp::ScpTransferMode::ScpOnly,
             "scpTransferModeFromStorageName should parse scp-only");
-    t.check(
-        std::string(openscp::scpTransferModeStorageName(
-            openscp::ScpTransferMode::ScpOnly)) == "scp-only",
-        "scpTransferModeStorageName should serialize scp-only");
-    t.check(openscp::proxyTypeFromStorageValue(
-                static_cast<int>(openscp::ProxyType::Socks5)) ==
-                openscp::ProxyType::Socks5,
+    t.check(std::string(openscp::scpTransferModeStorageName(
+                openscp::ScpTransferMode::ScpOnly)) == "scp-only",
+            "scpTransferModeStorageName should serialize scp-only");
+    t.check(openscp::proxyTypeFromStorageValue(static_cast<int>(
+                openscp::ProxyType::Socks5)) == openscp::ProxyType::Socks5,
             "proxyTypeFromStorageValue should parse SOCKS5");
     t.check(openscp::proxyTypeFromStorageValue(
                 static_cast<int>(openscp::ProxyType::HttpConnect)) ==
                 openscp::ProxyType::HttpConnect,
             "proxyTypeFromStorageValue should parse HTTP CONNECT");
-    t.check(openscp::proxyTypeFromStorageValue(999) ==
-                openscp::ProxyType::None,
+    t.check(openscp::proxyTypeFromStorageValue(999) == openscp::ProxyType::None,
             "proxyTypeFromStorageValue should fallback invalid values to None");
     t.check(openscp::defaultPortForProxyType(openscp::ProxyType::Socks5) ==
                 1080,
@@ -265,12 +260,12 @@ void test_protocol_helpers(TestContext &t) {
     t.check(openscp::webDavSchemeFromStorageName("http") ==
                 openscp::WebDavScheme::Http,
             "webDavSchemeFromStorageName should parse http");
-    t.check(openscp::webDavSchemeFromStorageName("HTTPS") ==
-                openscp::WebDavScheme::Https,
-            "webDavSchemeFromStorageName should parse https case-insensitively");
-    t.check(std::string(
-                openscp::webDavSchemeStorageName(openscp::WebDavScheme::Http)) ==
-                "http",
+    t.check(
+        openscp::webDavSchemeFromStorageName("HTTPS") ==
+            openscp::WebDavScheme::Https,
+        "webDavSchemeFromStorageName should parse https case-insensitively");
+    t.check(std::string(openscp::webDavSchemeStorageName(
+                openscp::WebDavScheme::Http)) == "http",
             "webDavSchemeStorageName should serialize http");
     t.check(openscp::defaultPortForWebDavScheme(openscp::WebDavScheme::Http) ==
                 80,
@@ -287,10 +282,10 @@ void test_protocol_helpers(TestContext &t) {
     t.check(std::string(openscp::ftpsModeStorageName(
                 openscp::FtpsMode::ImplicitTls)) == "implicit",
             "FTPS mode serializer should persist implicit mode");
-    t.check(openscp::normalizeWebDavBasePath(
-                "remote.php//dav/./files/alice/") ==
-                "/remote.php/dav/files/alice",
-            "WebDAV base paths should be canonical absolute paths");
+    t.check(
+        openscp::normalizeWebDavBasePath("remote.php//dav/./files/alice/") ==
+            "/remote.php/dav/files/alice",
+        "WebDAV base paths should be canonical absolute paths");
     t.check(openscp::normalizeWebDavBasePath("/dav/root/../files") ==
                 "/dav/files",
             "WebDAV base paths should resolve dot segments");
@@ -300,9 +295,9 @@ void test_protocol_helpers(TestContext &t) {
     t.check(sftpCaps.implemented, "SFTP capabilities should be implemented");
     t.check(sftpCaps.supports_listing,
             "SFTP capabilities should include listing");
-    t.check(sftpCaps.can_upload && sftpCaps.can_download &&
-                sftpCaps.can_stat && sftpCaps.can_mkdir &&
-                sftpCaps.can_delete && sftpCaps.can_rename,
+    t.check(sftpCaps.can_upload && sftpCaps.can_download && sftpCaps.can_stat &&
+                sftpCaps.can_mkdir && sftpCaps.can_delete &&
+                sftpCaps.can_rename,
             "SFTP should advertise fine-grained remote operations");
     t.check(sftpCaps.can_checksum,
             "SFTP should advertise on-demand remote checksums");
@@ -320,8 +315,7 @@ void test_protocol_helpers(TestContext &t) {
             "SCP capabilities should not include chmod/chown metadata edits");
     t.check(scpCaps.can_upload && scpCaps.can_download && !scpCaps.can_list,
             "SCP should advertise transfer-only fine-grained capabilities");
-    t.check(!scpCaps.can_checksum,
-            "SCP should not advertise remote checksums");
+    t.check(!scpCaps.can_checksum, "SCP should not advertise remote checksums");
     t.check(scpCaps.supports_known_hosts,
             "SCP capabilities should include known_hosts verification");
 
@@ -418,9 +412,8 @@ void test_curlftp_rejects_unsupported_proxy_type(TestContext &t) {
     std::string err;
     const bool ok = client.connect(opt, err);
     t.check(!ok, "FTP connect should reject unsupported proxy enum values");
-    t.checkContains(
-        err, "Unsupported proxy type",
-        "FTP connect should explain unsupported proxy enum values");
+    t.checkContains(err, "Unsupported proxy type",
+                    "FTP connect should explain unsupported proxy enum values");
     const openscp::RemoteError detail = client.lastOperationError();
     t.check(detail.kind == openscp::RemoteErrorKind::InvalidRequest,
             "FTP validation failure should expose a structured error");
@@ -455,18 +448,16 @@ void test_curl_structured_error_mappings(TestContext &t) {
                 !httpFull.transient && !httpFull.commit_uncertain,
             "HTTP 507 should be a permanent, commit-certain space error");
 
-    const openscp::RemoteError tlsFailure =
-        openscp::curlcommon::errorFromCurl(CURLE_SSL_CONNECT_ERROR,
-                                           "TLS handshake failed");
+    const openscp::RemoteError tlsFailure = openscp::curlcommon::errorFromCurl(
+        CURLE_SSL_CONNECT_ERROR, "TLS handshake failed");
     t.check(tlsFailure.kind == openscp::RemoteErrorKind::Certificate &&
                 !tlsFailure.transient,
             "TLS verification/handshake failures should not be retried");
 
     const int previousErrno = errno;
     errno = ENOSPC;
-    const openscp::RemoteError localFull =
-        openscp::curlcommon::errorFromCurl(CURLE_WRITE_ERROR,
-                                           "local write failed");
+    const openscp::RemoteError localFull = openscp::curlcommon::errorFromCurl(
+        CURLE_WRITE_ERROR, "local write failed");
     errno = previousErrno;
     t.check(localFull.kind == openscp::RemoteErrorKind::InsufficientSpace &&
                 localFull.native_code == ENOSPC,
@@ -707,8 +698,7 @@ void test_client_factory(TestContext &t) {
 
     auto ftp = openscp::CreateClientForProtocol(openscp::Protocol::Ftp);
     auto ftps = openscp::CreateClientForProtocol(openscp::Protocol::Ftps);
-    auto webdav =
-        openscp::CreateClientForProtocol(openscp::Protocol::WebDav);
+    auto webdav = openscp::CreateClientForProtocol(openscp::Protocol::WebDav);
 #if OPENSCP_HAS_CURL_FTP
     t.check(static_cast<bool>(ftp),
             "factory should create FTP backend instance");
@@ -761,9 +751,8 @@ void test_libssh2_rejects_conflicting_proxy_and_jump(TestContext &t) {
     std::string err;
     const bool ok = c.connect(opt, err);
     t.check(!ok, "connect should fail when proxy and jump are both configured");
-    t.checkContains(
-        err, "Proxy and SSH jump host cannot be used together",
-        "connect should explain proxy/jump mutual exclusion");
+    t.checkContains(err, "Proxy and SSH jump host cannot be used together",
+                    "connect should explain proxy/jump mutual exclusion");
     t.check(c.lastOperationError().kind ==
                 openscp::RemoteErrorKind::InvalidRequest,
             "libssh2 validation failures should expose structured metadata");
@@ -803,8 +792,7 @@ void test_shared_libssh2_error_classification(TestContext &t) {
     const openscp::RemoteError authentication =
         openscp::libssh2detail::classifyFailure(
             "Private key authentication failed", nullptr);
-    t.check(authentication.kind ==
-                openscp::RemoteErrorKind::Authentication,
+    t.check(authentication.kind == openscp::RemoteErrorKind::Authentication,
             "shared libssh2 errors should classify authentication failures");
 
     const openscp::RemoteError connection =
@@ -815,9 +803,8 @@ void test_shared_libssh2_error_classification(TestContext &t) {
                 connection.transient && connection.commit_uncertain,
             "shared libssh2 errors should mark uncertain mutations");
 
-    const openscp::RemoteError local =
-        openscp::libssh2detail::classifyFailure(
-            "Could not finalize local .part file", nullptr);
+    const openscp::RemoteError local = openscp::libssh2detail::classifyFailure(
+        "Could not finalize local .part file", nullptr);
     t.check(local.kind == openscp::RemoteErrorKind::LocalIo ||
                 local.kind == openscp::RemoteErrorKind::InsufficientSpace,
             "shared libssh2 errors should classify local file failures");
@@ -889,16 +876,14 @@ void test_remove_known_hosts_entry_non_default_port(TestContext &t) {
     }
 
     std::string err;
-    const bool ok =
-        openscp::RemoveKnownHostEntry(khPath.string(), "example.com", 2222,
-                                      err);
+    const bool ok = openscp::RemoveKnownHostEntry(khPath.string(),
+                                                  "example.com", 2222, err);
     t.check(ok, std::string("port-specific removal should succeed: ") + err);
 
     std::string content;
     t.check(readTextFile(khPath, content),
             "updated known_hosts port fixture should be readable");
-    t.check(content.find("[example.com]:2222 ssh-ed25519") ==
-                std::string::npos,
+    t.check(content.find("[example.com]:2222 ssh-ed25519") == std::string::npos,
             "port-specific known_hosts entry should be removed");
     t.check(content.find("example.com ssh-ed25519") != std::string::npos,
             "default-port known_hosts entry should remain");

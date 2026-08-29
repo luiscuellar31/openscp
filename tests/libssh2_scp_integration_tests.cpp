@@ -104,8 +104,8 @@ int main() {
         envValueWithFallback("OPENSCP_IT_SCP_PASS", "OPENSCP_IT_SFTP_PASS");
     const auto keyPath =
         envValueWithFallback("OPENSCP_IT_SCP_KEY", "OPENSCP_IT_SFTP_KEY");
-    const auto keyPassphrase = envValueWithFallback("OPENSCP_IT_SCP_KEY_PASSPHRASE",
-                                                    "OPENSCP_IT_SFTP_KEY_PASSPHRASE");
+    const auto keyPassphrase = envValueWithFallback(
+        "OPENSCP_IT_SCP_KEY_PASSPHRASE", "OPENSCP_IT_SFTP_KEY_PASSPHRASE");
     const std::string remoteBase =
         envValue("OPENSCP_IT_SCP_REMOTE_BASE")
             .value_or(envValue("OPENSCP_IT_REMOTE_BASE").value_or("/tmp"));
@@ -126,9 +126,9 @@ int main() {
     }
 
     std::uint16_t port = 22;
-    if (!parsePort(envValueWithFallback("OPENSCP_IT_SCP_PORT",
-                                        "OPENSCP_IT_SFTP_PORT"),
-                   port, 22)) {
+    if (!parsePort(
+            envValueWithFallback("OPENSCP_IT_SCP_PORT", "OPENSCP_IT_SFTP_PORT"),
+            port, 22)) {
         std::cerr << "[FAIL] SCP port is invalid\n";
         return EXIT_FAILURE;
     }
@@ -158,19 +158,19 @@ int main() {
             "client should report SCP protocol");
     const auto caps = client.capabilities();
     t.check(caps.implemented, "SCP should be marked implemented");
-    t.check(caps.supports_file_transfers,
-            "SCP should support file transfers");
+    t.check(caps.supports_file_transfers, "SCP should support file transfers");
     t.check(!caps.supports_listing, "SCP should not support listing");
     t.check(!caps.supports_resume, "SCP should not support resume");
 
     const std::string token = uniqueToken();
-    const fs::path tempDir = fs::temp_directory_path() / ("openscp_scp_" + token);
+    const fs::path tempDir =
+        fs::temp_directory_path() / ("openscp_scp_" + token);
     const fs::path localUpload = tempDir / "upload.txt";
     const fs::path localDownload = tempDir / "download.txt";
     fs::create_directories(tempDir);
 
-    const std::string payload = "openscp scp integration payload " + token +
-                                "\nline two\n";
+    const std::string payload =
+        "openscp scp integration payload " + token + "\nline two\n";
     t.check(writeFile(localUpload, payload), "should write local upload file");
 
     const std::string remotePath =
@@ -178,25 +178,27 @@ int main() {
 
     bool uploadProgressCalled = false;
     err.clear();
-    t.check(client.put(localUpload.string(), remotePath, err,
-                       [&](std::size_t done, std::size_t total) {
-                           (void)done;
-                           (void)total;
-                           uploadProgressCalled = true;
-                       },
-                       {}, false),
+    t.check(client.put(
+                localUpload.string(), remotePath, err,
+                [&](std::size_t done, std::size_t total) {
+                    (void)done;
+                    (void)total;
+                    uploadProgressCalled = true;
+                },
+                {}, false),
             std::string("SCP upload should succeed: ") + err);
     t.check(uploadProgressCalled, "upload progress callback should be called");
 
     bool downloadProgressCalled = false;
     err.clear();
-    t.check(client.get(remotePath, localDownload.string(), err,
-                       [&](std::size_t done, std::size_t total) {
-                           (void)done;
-                           (void)total;
-                           downloadProgressCalled = true;
-                       },
-                       {}, false),
+    t.check(client.get(
+                remotePath, localDownload.string(), err,
+                [&](std::size_t done, std::size_t total) {
+                    (void)done;
+                    (void)total;
+                    downloadProgressCalled = true;
+                },
+                {}, false),
             std::string("SCP download should succeed: ") + err);
     t.check(downloadProgressCalled,
             "download progress callback should be called");
@@ -210,9 +212,9 @@ int main() {
     t.check(writeFile(localDownload, preservedDestination),
             "should prepare an existing SCP download destination");
     err.clear();
-    t.check(!client.get(remotePath, localDownload.string(), err, {}, [] {
-                return true;
-            }, false),
+    t.check(!client.get(
+                remotePath, localDownload.string(), err, {},
+                [] { return true; }, false),
             "canceled SCP download should not report success");
     downloaded.clear();
     t.check(readFile(localDownload, downloaded) &&

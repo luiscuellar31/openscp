@@ -13,14 +13,12 @@ bool Libssh2SftpClient::checksum(
                    normalizedAlgorithm.begin(), [](unsigned char character) {
                        return static_cast<char>(std::tolower(character));
                    });
-    if (normalizedAlgorithm != "sha-256" &&
-        normalizedAlgorithm != "sha256") {
+    if (normalizedAlgorithm != "sha-256" && normalizedAlgorithm != "sha256") {
         err = "Unsupported checksum algorithm: " + algorithm;
         setLastOperationError(RemoteErrorKind::Unsupported, err);
         return false;
     }
-    if (remote_path.empty() ||
-        remote_path.find('\0') != std::string::npos) {
+    if (remote_path.empty() || remote_path.find('\0') != std::string::npos) {
         err = "Remote checksum path is invalid";
         setLastOperationError(RemoteErrorKind::InvalidRequest, err);
         return false;
@@ -38,9 +36,8 @@ bool Libssh2SftpClient::checksum(
                           &shouldCancel, &progress)) {
         err = (shouldCancel && shouldCancel())
                   ? "Checksum calculation canceled"
-                  : (hashError.empty()
-                         ? "Could not calculate remote checksum"
-                         : std::move(hashError));
+                  : (hashError.empty() ? "Could not calculate remote checksum"
+                                       : std::move(hashError));
         if (shouldCancel && shouldCancel())
             setLastOperationError(RemoteErrorKind::Canceled, err);
         return false;
@@ -111,9 +108,8 @@ bool Libssh2SftpClient::get(
             const std::uint64_t start = (std::uint64_t)offset - window;
             Sha256Digest lh{}, rhh{};
             std::string hErr;
-            const bool okLocal =
-                hash_local_range(localPart, start, window, lh, &hErr,
-                                 &shouldCancel);
+            const bool okLocal = hash_local_range(localPart, start, window, lh,
+                                                  &hErr, &shouldCancel);
             const bool okRemote =
                 okLocal && hash_remote_range(sftp_, remote, start, window, rhh,
                                              &hErr, &shouldCancel);
@@ -150,8 +146,9 @@ bool Libssh2SftpClient::get(
     // Open local .part for writing
     std::string openError;
     FILE *lf = localfiles::openRegularFileForWrite(
-        localPart, offset > 0 ? localfiles::WriteMode::Append
-                              : localfiles::WriteMode::Truncate,
+        localPart,
+        offset > 0 ? localfiles::WriteMode::Append
+                   : localfiles::WriteMode::Truncate,
         openError);
     if (!lf) {
         const int nativeError = errno;
@@ -293,11 +290,11 @@ bool Libssh2SftpClient::put(
         const std::uint64_t start = (std::uint64_t)startOffset - window;
         Sha256Digest lsum{}, rsum{};
         std::string herr;
-        const bool lok = hash_local_range(local, start, window, lsum, &herr,
-                                          &shouldCancel);
-        const bool rok = lok && hash_remote_range(sftp_, remotePart, start,
-                                                  window, rsum, &herr,
-                                                  &shouldCancel);
+        const bool lok =
+            hash_local_range(local, start, window, lsum, &herr, &shouldCancel);
+        const bool rok =
+            lok && hash_remote_range(sftp_, remotePart, start, window, rsum,
+                                     &herr, &shouldCancel);
         if (shouldCancel && shouldCancel()) {
             std::fclose(lf);
             err = "Canceled by user";
@@ -368,7 +365,8 @@ bool Libssh2SftpClient::put(
                 ssize_t w = libssh2_sftp_write(wh, p, remain);
                 if (w < 0) {
                     const bool canceledNow = (shouldCancel && shouldCancel());
-                    err = canceledNow ? "Canceled by user" : "Remote write failed";
+                    err = canceledNow ? "Canceled by user"
+                                      : "Remote write failed";
                     const RemoteError structuredFailure =
                         classifyStructuredFailure(err, false);
                     if (!canceledNow) {
@@ -414,8 +412,9 @@ bool Libssh2SftpClient::put(
 
     std::string rnErr;
     if (!rename_remote_with_fallback(sftp_, remotePart, remote, true, &rnErr)) {
-        err = std::string("Could not finalize upload (.part -> destination): ") +
-              rnErr;
+        err =
+            std::string("Could not finalize upload (.part -> destination): ") +
+            rnErr;
         return false;
     }
 

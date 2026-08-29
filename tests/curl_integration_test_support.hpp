@@ -21,8 +21,8 @@ class ScopedEnvironment {
 
     void set(const std::string &name, const std::string &value) {
         const char *old = std::getenv(name.c_str());
-        previous_.emplace_back(
-            name, old ? std::optional<std::string>(old) : std::nullopt);
+        previous_.emplace_back(name, old ? std::optional<std::string>(old)
+                                         : std::nullopt);
 #ifdef _WIN32
         (void)_putenv_s(name.c_str(), value.c_str());
 #else
@@ -43,14 +43,12 @@ class ScopedEnvironment {
 #endif
     }
 
-    std::vector<
-        std::pair<std::string, std::optional<std::string>>>
-        previous_;
+    std::vector<std::pair<std::string, std::optional<std::string>>> previous_;
 };
 
 inline void forceUnreachableEnvironmentProxies(ScopedEnvironment &environment) {
     static constexpr const char *proxyVariables[] = {
-        "ALL_PROXY",  "all_proxy",  "FTP_PROXY", "ftp_proxy",
+        "ALL_PROXY",  "all_proxy",  "FTP_PROXY",   "ftp_proxy",
         "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
     };
     for (const char *name : proxyVariables)

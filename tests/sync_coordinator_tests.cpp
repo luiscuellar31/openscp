@@ -10,8 +10,8 @@
 #include <QTemporaryDir>
 #include <QTimer>
 
-#include <chrono>
 #include <algorithm>
+#include <chrono>
 #include <functional>
 #include <iostream>
 #include <thread>
@@ -56,30 +56,28 @@ std::unique_ptr<openscp::RemoteClient> connectedMock() {
 }
 
 class ChecksumMockClient final : public openscp::MockSftpClient {
-  public:
+    public:
     openscp::ProtocolCapabilities capabilities() const override {
         auto result = openscp::MockSftpClient::capabilities();
         result.can_checksum = true;
         return result;
     }
 
-    bool checksum(
-        const std::string &remotePath, const std::string &algorithm,
-        std::vector<std::uint8_t> &digest, std::string &error,
-        std::function<void(std::size_t, std::size_t)> progress,
-        std::function<bool()> shouldCancel) override {
+    bool checksum(const std::string &remotePath, const std::string &algorithm,
+                  std::vector<std::uint8_t> &digest, std::string &error,
+                  std::function<void(std::size_t, std::size_t)> progress,
+                  std::function<bool()> shouldCancel) override {
         if (algorithm != "SHA-256") {
             error = "Unsupported checksum algorithm";
-            setLastOperationError(openscp::RemoteErrorKind::Unsupported,
-                                  error);
+            setLastOperationError(openscp::RemoteErrorKind::Unsupported, error);
             return false;
         }
         if (remotePath == "/slow.bin") {
             for (std::size_t done = 0; done < 250; ++done) {
                 if (shouldCancel && shouldCancel()) {
                     error = "Checksum calculation canceled";
-                    setLastOperationError(
-                        openscp::RemoteErrorKind::Canceled, error);
+                    setLastOperationError(openscp::RemoteErrorKind::Canceled,
+                                          error);
                     return false;
                 }
                 if (progress)
@@ -87,11 +85,11 @@ class ChecksumMockClient final : public openscp::MockSftpClient {
                 std::this_thread::sleep_for(2ms);
             }
         }
-        const QByteArray content =
-            remotePath == "/different.txt" ? QByteArrayLiteral("remote")
-                                            : QByteArrayLiteral("same");
-        const QByteArray calculated = QCryptographicHash::hash(
-            content, QCryptographicHash::Sha256);
+        const QByteArray content = remotePath == "/different.txt"
+                                       ? QByteArrayLiteral("remote")
+                                       : QByteArrayLiteral("same");
+        const QByteArray calculated =
+            QCryptographicHash::hash(content, QCryptographicHash::Sha256);
         digest.assign(calculated.cbegin(), calculated.cend());
         error.clear();
         return true;
@@ -130,16 +128,14 @@ void testAsynchronousSnapshots(TestContext &test) {
     bool failed = false;
     bool eventLoopAdvanced = false;
     SyncPreparationResult prepared;
-    QObject::connect(
-        &coordinator, &SyncCoordinator::preparationReady, &coordinator,
-        [&](const SyncPreparationResult &result) {
-            prepared = result;
-            ready = true;
-        });
+    QObject::connect(&coordinator, &SyncCoordinator::preparationReady,
+                     &coordinator, [&](const SyncPreparationResult &result) {
+                         prepared = result;
+                         ready = true;
+                     });
     QObject::connect(&coordinator, &SyncCoordinator::preparationFailed,
                      &coordinator, [&](const QString &) { failed = true; });
-    QTimer::singleShot(0, &coordinator,
-                       [&] { eventLoopAdvanced = true; });
+    QTimer::singleShot(0, &coordinator, [&] { eventLoopAdvanced = true; });
 
     coordinator.start(localRoot.path(), QStringLiteral("/"));
     test.check(waitUntil([&] { return ready || failed; }),
@@ -151,11 +147,10 @@ void testAsynchronousSnapshots(TestContext &test) {
 
     const auto contains = [](const QVector<SyncSnapshotEntry> &entries,
                              const QString &path) {
-        return std::any_of(
-            entries.cbegin(), entries.cend(),
-            [&](const SyncSnapshotEntry &entry) {
-                return entry.relativePath == path;
-            });
+        return std::any_of(entries.cbegin(), entries.cend(),
+                           [&](const SyncSnapshotEntry &entry) {
+                               return entry.relativePath == path;
+                           });
     };
     test.check(contains(prepared.localSnapshot, QStringLiteral("readme.txt")) &&
                    contains(prepared.localSnapshot, QStringLiteral("empty")),
@@ -189,13 +184,10 @@ void testPersistentExecutionPlan(TestContext &test) {
     if (tasks.size() != 4)
         return;
 
-    test.check(tasks[0].type ==
-                       TransferTask::Type::CreateRemoteDirectory &&
+    test.check(tasks[0].type == TransferTask::Type::CreateRemoteDirectory &&
                    tasks[1].type == TransferTask::Type::Upload &&
-                   tasks[2].type ==
-                       TransferTask::Type::DeleteRemoteFile &&
-                   tasks[3].type ==
-                       TransferTask::Type::DeleteRemoteDirectory,
+                   tasks[2].type == TransferTask::Type::DeleteRemoteFile &&
+                   tasks[3].type == TransferTask::Type::DeleteRemoteDirectory,
                "sync actions should map to queue task types");
     test.check(tasks[0].dst == QStringLiteral("/remote/root/new/folder") &&
                    tasks[1].src ==
@@ -205,31 +197,29 @@ void testPersistentExecutionPlan(TestContext &test) {
                    tasks[2].dependsOnTaskId == tasks[1].taskId &&
                    tasks[3].dependsOnTaskId == tasks[2].taskId,
                "persistent dependencies should preserve safe execution order");
-    test.check(std::all_of(
-                   tasks.cbegin(), tasks.cend(),
-                   [batchId](const TransferTask &task) {
-                       return task.batchId == batchId &&
-                              task.sessionKey == QStringLiteral("site-id");
-                   }),
+    test.check(std::all_of(tasks.cbegin(), tasks.cend(),
+                           [batchId](const TransferTask &task) {
+                               return task.batchId == batchId &&
+                                      task.sessionKey ==
+                                          QStringLiteral("site-id");
+                           }),
                "every sync task should retain batch and session identity");
 }
 
 void testOnDemandChecksums(TestContext &test) {
     QTemporaryDir localRoot;
-    test.check(localRoot.isValid(),
-               "checksum fixture should initialize");
-    const auto writeFile = [&](const QString &name,
-                               const QByteArray &content) {
+    test.check(localRoot.isValid(), "checksum fixture should initialize");
+    const auto writeFile = [&](const QString &name, const QByteArray &content) {
         QFile file(localRoot.filePath(name));
         if (!file.open(QIODevice::WriteOnly))
             return false;
         return file.write(content) == content.size();
     };
-    test.check(writeFile(QStringLiteral("same.txt"),
-                         QByteArrayLiteral("same")) &&
-                   writeFile(QStringLiteral("different.txt"),
-                             QByteArrayLiteral("local")),
-               "checksum fixture files should be writable");
+    test.check(
+        writeFile(QStringLiteral("same.txt"), QByteArrayLiteral("same")) &&
+            writeFile(QStringLiteral("different.txt"),
+                      QByteArrayLiteral("local")),
+        "checksum fixture files should be writable");
 
     RemoteOperationController remote;
     remote.installSession(connectedChecksumMock());
@@ -239,16 +229,14 @@ void testOnDemandChecksums(TestContext &test) {
     bool failed = false;
     bool eventLoopAdvanced = false;
     SyncChecksumResult result;
-    QObject::connect(
-        &coordinator, &SyncCoordinator::checksumReady, &coordinator,
-        [&](const SyncChecksumResult &value) {
-            result = value;
-            ready = true;
-        });
+    QObject::connect(&coordinator, &SyncCoordinator::checksumReady,
+                     &coordinator, [&](const SyncChecksumResult &value) {
+                         result = value;
+                         ready = true;
+                     });
     QObject::connect(&coordinator, &SyncCoordinator::checksumFailed,
                      &coordinator, [&](const QString &) { failed = true; });
-    QTimer::singleShot(0, &coordinator,
-                       [&] { eventLoopAdvanced = true; });
+    QTimer::singleShot(0, &coordinator, [&] { eventLoopAdvanced = true; });
 
     coordinator.startChecksums(
         localRoot.path(), QStringLiteral("/"),
@@ -259,10 +247,9 @@ void testOnDemandChecksums(TestContext &test) {
                "supported SFTP checksums should produce a result");
     test.check(eventLoopAdvanced,
                "local checksum calculation must not block the event loop");
-    test.check(
-        result.localChecksums.value(QStringLiteral("same.txt")) ==
-            result.remoteChecksums.value(QStringLiteral("same.txt")),
-        "identical files should produce identical SHA-256 values");
+    test.check(result.localChecksums.value(QStringLiteral("same.txt")) ==
+                   result.remoteChecksums.value(QStringLiteral("same.txt")),
+               "identical files should produce identical SHA-256 values");
     test.check(
         result.localChecksums.value(QStringLiteral("different.txt")) !=
             result.remoteChecksums.value(QStringLiteral("different.txt")),
@@ -284,8 +271,7 @@ void testChecksumCancellation(TestContext &test) {
     bool remotePhaseStarted = false;
     bool canceled = false;
     QObject::connect(
-        &coordinator, &SyncCoordinator::checksumProgressChanged,
-        &coordinator,
+        &coordinator, &SyncCoordinator::checksumProgressChanged, &coordinator,
         [&](qsizetype completed, qsizetype, const QString &path, quint64,
             quint64 totalBytes) {
             if (completed >= 1 && path == QStringLiteral("slow.bin") &&

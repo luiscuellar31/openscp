@@ -65,7 +65,7 @@ class CurlFtpClient : public RemoteClient {
                 std::string &err, bool overwrite = false) override;
 
     std::unique_ptr<RemoteClient> newConnectionLike(const SessionOptions &opt,
-                                                     std::string &err) override;
+                                                    std::string &err) override;
 
     private:
     Protocol protocol_ = Protocol::Ftp;

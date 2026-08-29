@@ -1,5 +1,6 @@
 // Serialized, cancelable execution lane for remote filesystem operations.
 #include "RemoteOperationController.hpp"
+
 #include "RemotePath.hpp"
 #include "RemoteTreeWalker.hpp"
 
@@ -25,9 +26,13 @@
 
 namespace {
 
-int safeBatchSize(int requested) { return std::clamp(requested, 1, 1000); }
+int safeBatchSize(int requested) {
+    return std::clamp(requested, 1, 1000);
+}
 
-int safeMaxDepth(int requested) { return std::clamp(requested, 1, 1024); }
+int safeMaxDepth(int requested) {
+    return std::clamp(requested, 1, 1024);
+}
 
 QString operationError(const std::string &raw, const QString &fallback) {
     if (!raw.empty())
@@ -134,8 +139,7 @@ class RemoteOperationController::Impl {
             while (insertion != commands_.begin()) {
                 auto previous = std::prev(insertion);
                 const auto *queued = std::get_if<Job>(&*previous);
-                if (!queued ||
-                    queued->key.kind != JobKind::HealthCheck ||
+                if (!queued || queued->key.kind != JobKind::HealthCheck ||
                     queued->key.generation != generation) {
                     break;
                 }
@@ -172,8 +176,7 @@ class RemoteOperationController::Impl {
         const auto registration = jobs_.find(jobId);
         if (registration == jobs_.end())
             return false;
-        registration->second.paused->store(paused,
-                                           std::memory_order_relaxed);
+        registration->second.paused->store(paused, std::memory_order_relaxed);
         wake_.notify_all();
         return true;
     }
@@ -330,8 +333,7 @@ class RemoteOperationController::Impl {
         wake_.wait(lock, [this, &job, stopToken] {
             return stopToken.stop_requested() ||
                    job.canceled->load(std::memory_order_relaxed) ||
-                   !job.paused->load(std::memory_order_relaxed) ||
-                   stopping_;
+                   !job.paused->load(std::memory_order_relaxed) || stopping_;
         });
         return !canceled(job, stopToken) && !stopping_;
     }
@@ -394,8 +396,12 @@ class RemoteOperationController::Impl {
                     });
                 } else if constexpr (std::is_same_v<T, ChecksumRequest>) {
                     const ChecksumResult result{
-                        header, normalizeRemotePath(request.path),
-                        request.algorithm, {}, 0, 0};
+                        header,
+                        normalizeRemotePath(request.path),
+                        request.algorithm,
+                        {},
+                        0,
+                        0};
                     postToUi([result](RemoteOperationController *controller) {
                         emit controller->checksumCompleted(result);
                     });
@@ -563,8 +569,7 @@ class RemoteOperationController::Impl {
             RunSummary summary;
             summary.outcome = Outcome::Failed;
             summary.error = QCoreApplication::translate(
-                "RemoteOperationController",
-                "Remote session is not connected");
+                "RemoteOperationController", "Remote session is not connected");
             populateRemoteError(summary, openscp::RemoteErrorKind::Connection);
             publishEmptyTypedResult(job, summary);
             postCompletion(job.key, summary);
@@ -626,13 +631,13 @@ class RemoteOperationController::Impl {
             summary.outcome =
                 canceled(job, stopToken) ? Outcome::Canceled : Outcome::Failed;
             summary.error = operationError(
-                rawError, summary.outcome == Outcome::Canceled
-                              ? QCoreApplication::translate(
-                                    "RemoteOperationController",
-                                    "Operation canceled")
-                              : QCoreApplication::translate(
-                                    "RemoteOperationController",
-                                    "Could not list remote path"));
+                rawError,
+                summary.outcome == Outcome::Canceled
+                    ? QCoreApplication::translate("RemoteOperationController",
+                                                  "Operation canceled")
+                    : QCoreApplication::translate(
+                          "RemoteOperationController",
+                          "Could not list remote path"));
         } else if (canceled(job, stopToken)) {
             summary.outcome = Outcome::Canceled;
             summary.error = QCoreApplication::translate(
@@ -646,8 +651,7 @@ class RemoteOperationController::Impl {
         if (summary.outcome == Outcome::Succeeded) {
             entries.reserve(static_cast<qsizetype>(rawEntries.size()));
             for (const auto &info : rawEntries) {
-                const auto decodedName =
-                    decodeRemoteEntryName(info.name);
+                const auto decodedName = decodeRemoteEntryName(info.name);
                 if (!decodedName) {
                     ++summary.invalidNames;
                     continue;
@@ -657,8 +661,9 @@ class RemoteOperationController::Impl {
                     name.startsWith(QLatin1Char('.'))) {
                     continue;
                 }
-                entries.push_back(RemoteEntry{joinRemotePath(path, name),
-                                              name, info, 1, isRemoteSymlink(info.mode)});
+                entries.push_back(RemoteEntry{joinRemotePath(path, name), name,
+                                              info, 1,
+                                              isRemoteSymlink(info.mode)});
             }
             summary.visitedEntries = static_cast<quint64>(entries.size());
         }
@@ -728,12 +733,11 @@ class RemoteOperationController::Impl {
                 if (client_->exists(current.toStdString(), isDirectory,
                                     existsError)) {
                     if (!isDirectory) {
-                        rawError =
-                            QCoreApplication::translate(
-                                "RemoteOperationController",
-                                "A non-directory item blocks %1")
-                                .arg(current)
-                                .toStdString();
+                        rawError = QCoreApplication::translate(
+                                       "RemoteOperationController",
+                                       "A non-directory item blocks %1")
+                                       .arg(current)
+                                       .toStdString();
                         ok = false;
                         break;
                     }
@@ -753,9 +757,8 @@ class RemoteOperationController::Impl {
         }
         RunSummary summary = mutationSummary(
             job, stopToken, ok, rawError,
-            QCoreApplication::translate(
-                "RemoteOperationController",
-                "Could not create remote directory"));
+            QCoreApplication::translate("RemoteOperationController",
+                                        "Could not create remote directory"));
         if (ok)
             summary.affectedEntries = 1;
         postMutation(job, summary, path, {});
@@ -813,11 +816,10 @@ class RemoteOperationController::Impl {
         std::string rawError;
         const bool ok = client_->rename(from.toStdString(), to.toStdString(),
                                         rawError, request.overwrite);
-        RunSummary summary =
-            mutationSummary(job, stopToken, ok, rawError,
-                            QCoreApplication::translate(
-                                "RemoteOperationController",
-                                "Could not rename remote item"));
+        RunSummary summary = mutationSummary(
+            job, stopToken, ok, rawError,
+            QCoreApplication::translate("RemoteOperationController",
+                                        "Could not rename remote item"));
         if (ok)
             summary.affectedEntries = 1;
         postMutation(job, summary, from, to);
@@ -833,11 +835,10 @@ class RemoteOperationController::Impl {
                 request.kind == DeleteKind::File
                     ? client_->removeFile(path.toStdString(), rawError)
                     : client_->removeDir(path.toStdString(), rawError);
-            RunSummary summary =
-                mutationSummary(job, stopToken, ok, rawError,
-                                QCoreApplication::translate(
-                                    "RemoteOperationController",
-                                    "Could not delete remote item"));
+            RunSummary summary = mutationSummary(
+                job, stopToken, ok, rawError,
+                QCoreApplication::translate("RemoteOperationController",
+                                            "Could not delete remote item"));
             if (ok)
                 summary.affectedEntries = 1;
             postMutation(job, summary, path, {});
@@ -853,11 +854,11 @@ class RemoteOperationController::Impl {
             std::string rawError;
             const bool ok =
                 client_->chmod(path.toStdString(), request.mode, rawError);
-            RunSummary summary = mutationSummary(
-                job, stopToken, ok, rawError,
-                QCoreApplication::translate(
-                    "RemoteOperationController",
-                    "Could not change remote permissions"));
+            RunSummary summary =
+                mutationSummary(job, stopToken, ok, rawError,
+                                QCoreApplication::translate(
+                                    "RemoteOperationController",
+                                    "Could not change remote permissions"));
             if (ok)
                 summary.affectedEntries = 1;
             postMutation(job, summary, path, {});
@@ -874,8 +875,7 @@ class RemoteOperationController::Impl {
         if (!connected) {
             summary.outcome = Outcome::Failed;
             summary.error = QCoreApplication::translate(
-                "RemoteOperationController",
-                "Remote session is not connected");
+                "RemoteOperationController", "Remote session is not connected");
         } else if (canceled(job, stopToken)) {
             summary.outcome = Outcome::Canceled;
             summary.error = QCoreApplication::translate(
@@ -909,9 +909,8 @@ class RemoteOperationController::Impl {
                 summary.outcome = Outcome::Failed;
                 summary.error = operationError(
                     rawError,
-                    QCoreApplication::translate(
-                        "RemoteOperationController",
-                        "Remote health check failed"));
+                    QCoreApplication::translate("RemoteOperationController",
+                                                "Remote health check failed"));
             }
         }
         populateRemoteError(summary, openscp::RemoteErrorKind::Connection);
@@ -942,16 +941,15 @@ class RemoteOperationController::Impl {
                        std::stop_token stopToken) {
         RunSummary summary;
         const QString path = normalizeRemotePath(request.path);
-        const QString algorithm =
-            request.algorithm.trimmed().isEmpty()
-                ? QStringLiteral("SHA-256")
-                : request.algorithm.trimmed();
+        const QString algorithm = request.algorithm.trimmed().isEmpty()
+                                      ? QStringLiteral("SHA-256")
+                                      : request.algorithm.trimmed();
         std::vector<std::uint8_t> rawDigest;
         std::string rawError;
         quint64 processedBytes = 0;
         quint64 totalBytes = 0;
-        auto lastProgress = std::chrono::steady_clock::now() -
-                            std::chrono::seconds(1);
+        auto lastProgress =
+            std::chrono::steady_clock::now() - std::chrono::seconds(1);
 
         bool ok = false;
         const bool supported = client_->capabilities().can_checksum;
@@ -961,8 +959,7 @@ class RemoteOperationController::Impl {
                     "RemoteOperationController",
                     "Remote checksums are not supported by this protocol")
                     .toStdString();
-            summary.remoteError.kind =
-                openscp::RemoteErrorKind::Unsupported;
+            summary.remoteError.kind = openscp::RemoteErrorKind::Unsupported;
             summary.remoteError.message = rawError;
         } else {
             ok = client_->checksum(
@@ -974,8 +971,7 @@ class RemoteOperationController::Impl {
                     totalBytes = static_cast<quint64>(total);
                     const auto now = std::chrono::steady_clock::now();
                     if (done != total &&
-                        now - lastProgress <
-                            std::chrono::milliseconds(100)) {
+                        now - lastProgress < std::chrono::milliseconds(100)) {
                         return;
                     }
                     lastProgress = now;
@@ -986,9 +982,7 @@ class RemoteOperationController::Impl {
                     progress.totalBytes = totalBytes;
                     postProgress(progress);
                 },
-                [this, &job, stopToken] {
-                    return canceled(job, stopToken);
-                });
+                [this, &job, stopToken] { return canceled(job, stopToken); });
         }
 
         if (ok && !canceled(job, stopToken)) {
@@ -997,21 +991,18 @@ class RemoteOperationController::Impl {
             summary.affectedEntries = 1;
         } else if (canceled(job, stopToken) ||
                    (supported && client_->lastOperationError().kind ==
-                    openscp::RemoteErrorKind::Canceled)) {
+                                     openscp::RemoteErrorKind::Canceled)) {
             summary.outcome = Outcome::Canceled;
-            summary.error =
-                operationError(
-                    rawError,
-                    QCoreApplication::translate(
-                        "RemoteOperationController",
-                        "Checksum calculation canceled"));
+            summary.error = operationError(
+                rawError,
+                QCoreApplication::translate("RemoteOperationController",
+                                            "Checksum calculation canceled"));
         } else {
             summary.outcome = Outcome::Failed;
             summary.error = operationError(
-                rawError,
-                QCoreApplication::translate(
-                    "RemoteOperationController",
-                    "Could not calculate remote checksum"));
+                rawError, QCoreApplication::translate(
+                              "RemoteOperationController",
+                              "Could not calculate remote checksum"));
             summary.failedEntries = 1;
         }
         populateRemoteError(summary, openscp::RemoteErrorKind::RemoteIo);
@@ -1031,9 +1022,12 @@ class RemoteOperationController::Impl {
             reinterpret_cast<const char *>(rawDigest.data()),
             static_cast<qsizetype>(rawDigest.size()));
         const ChecksumResult result{
-            makeHeader(job.key, summary), path, algorithm,
+            makeHeader(job.key, summary),
+            path,
+            algorithm,
             summary.outcome == Outcome::Succeeded ? digest : QByteArray(),
-            processedBytes, totalBytes};
+            processedBytes,
+            totalBytes};
         postToUi([result](RemoteOperationController *controller) {
             emit controller->checksumCompleted(result);
         });
@@ -1099,13 +1093,13 @@ class RemoteOperationController::Impl {
         callbacks.waitUntilReady = [this, &job, stopToken] {
             return !canceled(job, stopToken);
         };
-        callbacks.onDirectoryListed = [&summary](
-                                                 const RemoteTreeWalker::Entry &) {
-            ++summary.visitedEntries;
-            return RemoteTreeWalker::Control::Continue;
-        };
-        callbacks.onEntry = [this, &job, &request, &summary](
-                                const RemoteTreeWalker::Entry &entry) {
+        callbacks.onDirectoryListed =
+            [&summary](const RemoteTreeWalker::Entry &) {
+                ++summary.visitedEntries;
+                return RemoteTreeWalker::Control::Continue;
+            };
+        callbacks.onEntry = [this, &job, &request,
+                             &summary](const RemoteTreeWalker::Entry &entry) {
             ++summary.visitedEntries;
             if (entry.info.is_dir && !entry.isSymlink)
                 return RemoteTreeWalker::Control::Continue;
@@ -1116,10 +1110,9 @@ class RemoteOperationController::Impl {
             if (!client_->removeFile(entry.path.toStdString(), removeError)) {
                 summary.outcome = Outcome::Failed;
                 summary.error = operationError(
-                    removeError,
-                    QCoreApplication::translate(
-                        "RemoteOperationController",
-                        "Could not delete remote file"));
+                    removeError, QCoreApplication::translate(
+                                     "RemoteOperationController",
+                                     "Could not delete remote file"));
                 ++summary.failedEntries;
                 summary.partial = summary.affectedEntries > 0;
                 return RemoteTreeWalker::Control::Abort;
@@ -1128,73 +1121,69 @@ class RemoteOperationController::Impl {
             postMutationProgress(job, summary, entry.path);
             return RemoteTreeWalker::Control::Continue;
         };
-        callbacks.onSkippedSymlink = [&summary](
-                                             const RemoteTreeWalker::Entry &) {
-            ++summary.visitedEntries;
-            ++summary.skippedSymlinks;
-            return RemoteTreeWalker::Control::Continue;
-        };
-        callbacks.onInvalidName =
-            [&summary](const RemoteTreeWalker::Entry &,
-                       const openscp::FileInfo &) {
-                ++summary.invalidNames;
-                ++summary.failedEntries;
-                summary.error = QCoreApplication::translate(
-                    "RemoteOperationController",
-                    "An unsafe remote name was skipped during recursive "
-                    "deletion");
-                summary.partial = summary.affectedEntries > 0;
+        callbacks.onSkippedSymlink =
+            [&summary](const RemoteTreeWalker::Entry &) {
+                ++summary.visitedEntries;
+                ++summary.skippedSymlinks;
                 return RemoteTreeWalker::Control::Continue;
             };
-        callbacks.onDepthLimit = [&summary](
-                                     const RemoteTreeWalker::Entry &entry) {
-            ++summary.depthLimits;
+        callbacks.onInvalidName = [&summary](const RemoteTreeWalker::Entry &,
+                                             const openscp::FileInfo &) {
+            ++summary.invalidNames;
             ++summary.failedEntries;
-            summary.outcome = Outcome::Failed;
             summary.error = QCoreApplication::translate(
-                                "RemoteOperationController",
-                                "Maximum traversal depth reached while "
-                                "deleting %1")
-                                .arg(entry.path);
+                "RemoteOperationController",
+                "An unsafe remote name was skipped during recursive "
+                "deletion");
             summary.partial = summary.affectedEntries > 0;
-            return RemoteTreeWalker::Control::Abort;
+            return RemoteTreeWalker::Control::Continue;
         };
-        callbacks.onListError =
-            [this, &job, stopToken, &summary](
-                const RemoteTreeWalker::Entry &, const std::string &listError) {
-                summary.outcome = canceled(job, stopToken) ? Outcome::Canceled
-                                                           : Outcome::Failed;
-                summary.error = operationError(
-                    listError,
-                    QCoreApplication::translate(
-                        "RemoteOperationController",
-                        "Could not enumerate remote directory before "
-                        "deletion"));
+        callbacks.onDepthLimit =
+            [&summary](const RemoteTreeWalker::Entry &entry) {
+                ++summary.depthLimits;
                 ++summary.failedEntries;
+                summary.outcome = Outcome::Failed;
+                summary.error = QCoreApplication::translate(
+                                    "RemoteOperationController",
+                                    "Maximum traversal depth reached while "
+                                    "deleting %1")
+                                    .arg(entry.path);
                 summary.partial = summary.affectedEntries > 0;
                 return RemoteTreeWalker::Control::Abort;
             };
-        callbacks.onLeaveDirectory =
-            [this, &job, &request, &summary](
-                const RemoteTreeWalker::Entry &entry) {
-                std::string removeError;
-                if (!client_->removeDir(entry.path.toStdString(), removeError)) {
-                    ++summary.failedEntries;
-                    summary.partial = summary.affectedEntries > 0;
-                    if (request.emptyDirectoriesOnly)
-                        return RemoteTreeWalker::Control::Continue;
-                    summary.outcome = Outcome::Failed;
-                    summary.error = operationError(
-                        removeError,
-                        QCoreApplication::translate(
-                            "RemoteOperationController",
-                            "Could not delete remote directory"));
-                    return RemoteTreeWalker::Control::Abort;
-                }
-                ++summary.affectedEntries;
-                postMutationProgress(job, summary, entry.path);
-                return RemoteTreeWalker::Control::Continue;
-            };
+        callbacks.onListError = [this, &job, stopToken,
+                                 &summary](const RemoteTreeWalker::Entry &,
+                                           const std::string &listError) {
+            summary.outcome =
+                canceled(job, stopToken) ? Outcome::Canceled : Outcome::Failed;
+            summary.error = operationError(
+                listError, QCoreApplication::translate(
+                               "RemoteOperationController",
+                               "Could not enumerate remote directory before "
+                               "deletion"));
+            ++summary.failedEntries;
+            summary.partial = summary.affectedEntries > 0;
+            return RemoteTreeWalker::Control::Abort;
+        };
+        callbacks.onLeaveDirectory = [this, &job, &request, &summary](
+                                         const RemoteTreeWalker::Entry &entry) {
+            std::string removeError;
+            if (!client_->removeDir(entry.path.toStdString(), removeError)) {
+                ++summary.failedEntries;
+                summary.partial = summary.affectedEntries > 0;
+                if (request.emptyDirectoriesOnly)
+                    return RemoteTreeWalker::Control::Continue;
+                summary.outcome = Outcome::Failed;
+                summary.error = operationError(
+                    removeError, QCoreApplication::translate(
+                                     "RemoteOperationController",
+                                     "Could not delete remote directory"));
+                return RemoteTreeWalker::Control::Abort;
+            }
+            ++summary.affectedEntries;
+            postMutationProgress(job, summary, entry.path);
+            return RemoteTreeWalker::Control::Continue;
+        };
 
         const RemoteTreeWalker::Result walkResult =
             walker.walk(root, options, callbacks);
@@ -1226,18 +1215,16 @@ class RemoteOperationController::Impl {
         options.maxDepth = safeMaxDepth(request.traversal.maxDepth);
         options.depthPolicy = RemoteTreeWalker::DepthPolicy::IncludeLimit;
 
-        const auto applyMode =
-            [this, &job, &request, &summary](
-                const RemoteTreeWalker::Entry &entry) {
+        const auto applyMode = [this, &job, &request, &summary](
+                                   const RemoteTreeWalker::Entry &entry) {
             std::string chmodError;
             if (!client_->chmod(entry.path.toStdString(), request.mode,
                                 chmodError)) {
                 ++summary.failedEntries;
                 summary.error = operationError(
-                    chmodError,
-                    QCoreApplication::translate(
-                        "RemoteOperationController",
-                        "Could not change remote permissions"));
+                    chmodError, QCoreApplication::translate(
+                                    "RemoteOperationController",
+                                    "Could not change remote permissions"));
             } else {
                 ++summary.affectedEntries;
             }
@@ -1251,31 +1238,28 @@ class RemoteOperationController::Impl {
             return !canceled(job, stopToken);
         };
         callbacks.onEnterDirectory = applyMode;
-        callbacks.onEntry =
-            [applyMode](const RemoteTreeWalker::Entry &entry) {
-                if (entry.info.is_dir && !entry.isSymlink)
-                    return RemoteTreeWalker::Control::Continue;
-                return applyMode(entry);
-            };
-        callbacks.onSkippedSymlink = [&summary](
-                                             const RemoteTreeWalker::Entry &) {
-            ++summary.visitedEntries;
-            ++summary.skippedSymlinks;
-            return RemoteTreeWalker::Control::Continue;
+        callbacks.onEntry = [applyMode](const RemoteTreeWalker::Entry &entry) {
+            if (entry.info.is_dir && !entry.isSymlink)
+                return RemoteTreeWalker::Control::Continue;
+            return applyMode(entry);
         };
-        callbacks.onInvalidName =
-            [&summary](const RemoteTreeWalker::Entry &,
-                       const openscp::FileInfo &) {
-                ++summary.invalidNames;
-                ++summary.failedEntries;
-                summary.error = QCoreApplication::translate(
-                    "RemoteOperationController",
-                    "An unsafe remote name was skipped while changing "
-                    "permissions");
+        callbacks.onSkippedSymlink =
+            [&summary](const RemoteTreeWalker::Entry &) {
+                ++summary.visitedEntries;
+                ++summary.skippedSymlinks;
                 return RemoteTreeWalker::Control::Continue;
             };
-        callbacks.onDepthLimit = [&summary](
-                                     const RemoteTreeWalker::Entry &) {
+        callbacks.onInvalidName = [&summary](const RemoteTreeWalker::Entry &,
+                                             const openscp::FileInfo &) {
+            ++summary.invalidNames;
+            ++summary.failedEntries;
+            summary.error = QCoreApplication::translate(
+                "RemoteOperationController",
+                "An unsafe remote name was skipped while changing "
+                "permissions");
+            return RemoteTreeWalker::Control::Continue;
+        };
+        callbacks.onDepthLimit = [&summary](const RemoteTreeWalker::Entry &) {
             ++summary.depthLimits;
             ++summary.failedEntries;
             summary.error = QCoreApplication::translate(
@@ -1283,17 +1267,15 @@ class RemoteOperationController::Impl {
                 "Maximum traversal depth reached while changing permissions");
             return RemoteTreeWalker::Control::Continue;
         };
-        callbacks.onListError =
-            [&summary](const RemoteTreeWalker::Entry &,
-                       const std::string &listError) {
-                ++summary.failedEntries;
-                summary.error = operationError(
-                    listError,
-                    QCoreApplication::translate(
-                        "RemoteOperationController",
-                        "Could not enumerate remote directory"));
-                return RemoteTreeWalker::Control::Continue;
-            };
+        callbacks.onListError = [&summary](const RemoteTreeWalker::Entry &,
+                                           const std::string &listError) {
+            ++summary.failedEntries;
+            summary.error = operationError(
+                listError, QCoreApplication::translate(
+                               "RemoteOperationController",
+                               "Could not enumerate remote directory"));
+            return RemoteTreeWalker::Control::Continue;
+        };
 
         const RemoteTreeWalker::Result walkResult =
             walker.walk(root, options, callbacks);
@@ -1359,65 +1341,61 @@ class RemoteOperationController::Impl {
             return waitWhilePaused(job, stopToken);
         };
         callbacks.onDirectoryListed =
-            [&rootListed, &maybePostProgress](
-                const RemoteTreeWalker::Entry &directory) {
+            [&rootListed,
+             &maybePostProgress](const RemoteTreeWalker::Entry &directory) {
                 rootListed = true;
                 maybePostProgress(directory.path, false);
                 return RemoteTreeWalker::Control::Continue;
             };
-        callbacks.onListError =
-            [this, &job, stopToken, &summary, &rootListed](
-                const RemoteTreeWalker::Entry &, const std::string &listError) {
-                ++summary.failedEntries;
-                summary.partial = rootListed;
-                summary.error = operationError(
-                    listError,
-                    QCoreApplication::translate(
-                        "RemoteOperationController",
-                        "Could not enumerate remote directory"));
-                if (!rootListed) {
-                    summary.outcome = canceled(job, stopToken)
-                                          ? Outcome::Canceled
-                                          : Outcome::Failed;
-                    return RemoteTreeWalker::Control::Abort;
-                }
-                return RemoteTreeWalker::Control::Continue;
-            };
-        callbacks.onInvalidName =
-            [&summary](const RemoteTreeWalker::Entry &,
-                       const openscp::FileInfo &) {
-                ++summary.invalidNames;
-                return RemoteTreeWalker::Control::Continue;
-            };
-        callbacks.onSkippedSymlink = [&summary](
-                                             const RemoteTreeWalker::Entry &) {
-            ++summary.visitedEntries;
-            ++summary.skippedSymlinks;
+        callbacks.onListError = [this, &job, stopToken, &summary,
+                                 &rootListed](const RemoteTreeWalker::Entry &,
+                                              const std::string &listError) {
+            ++summary.failedEntries;
+            summary.partial = rootListed;
+            summary.error = operationError(
+                listError, QCoreApplication::translate(
+                               "RemoteOperationController",
+                               "Could not enumerate remote directory"));
+            if (!rootListed) {
+                summary.outcome = canceled(job, stopToken) ? Outcome::Canceled
+                                                           : Outcome::Failed;
+                return RemoteTreeWalker::Control::Abort;
+            }
             return RemoteTreeWalker::Control::Continue;
         };
-        callbacks.onDepthLimit = [&summary](
-                                     const RemoteTreeWalker::Entry &) {
+        callbacks.onInvalidName = [&summary](const RemoteTreeWalker::Entry &,
+                                             const openscp::FileInfo &) {
+            ++summary.invalidNames;
+            return RemoteTreeWalker::Control::Continue;
+        };
+        callbacks.onSkippedSymlink =
+            [&summary](const RemoteTreeWalker::Entry &) {
+                ++summary.visitedEntries;
+                ++summary.skippedSymlinks;
+                return RemoteTreeWalker::Control::Continue;
+            };
+        callbacks.onDepthLimit = [&summary](const RemoteTreeWalker::Entry &) {
             ++summary.depthLimits;
             return RemoteTreeWalker::Control::Continue;
         };
         callbacks.onEntry =
             [&summary, &batch, &flushBatch, batchSize, includeDirectories,
-             searchMode, &query, caseSensitivity](
-                const RemoteTreeWalker::Entry &entry) {
+             searchMode, &query,
+             caseSensitivity](const RemoteTreeWalker::Entry &entry) {
                 ++summary.visitedEntries;
                 if (!entry.info.is_dir && !entry.info.has_size)
                     ++summary.unknownSizes;
                 const bool matches =
-                    !searchMode ||
-                    QFileInfo(entry.path).fileName().contains(query,
-                                                              caseSensitivity);
+                    !searchMode || QFileInfo(entry.path)
+                                       .fileName()
+                                       .contains(query, caseSensitivity);
                 const bool emitEntry =
                     matches && (includeDirectories || !entry.info.is_dir);
                 if (emitEntry) {
                     ++summary.matchedEntries;
-                    batch.push_back(RemoteEntry{
-                        entry.path, entry.relativePath, entry.info, entry.depth,
-                        entry.isSymlink});
+                    batch.push_back(RemoteEntry{entry.path, entry.relativePath,
+                                                entry.info, entry.depth,
+                                                entry.isSymlink});
                     if (batch.size() >= batchSize)
                         flushBatch(false);
                 }
@@ -1450,9 +1428,12 @@ class RemoteOperationController::Impl {
 };
 
 RemoteOperationController::RemoteOperationController(QObject *parent)
-    : QObject(parent), impl_(std::make_unique<Impl>(this)) {}
+    : QObject(parent), impl_(std::make_unique<Impl>(this)) {
+}
 
-RemoteOperationController::~RemoteOperationController() { shutdown(); }
+RemoteOperationController::~RemoteOperationController() {
+    shutdown();
+}
 
 RemoteOperationController::SessionGeneration
 RemoteOperationController::installSession(
@@ -1541,7 +1522,9 @@ int RemoteOperationController::cancelGeneration(SessionGeneration generation) {
     return impl_->cancelGeneration(generation);
 }
 
-int RemoteOperationController::cancelAll() { return impl_->cancelAll(); }
+int RemoteOperationController::cancelAll() {
+    return impl_->cancelAll();
+}
 
 void RemoteOperationController::shutdown() {
     if (impl_)

@@ -1,10 +1,12 @@
 // libssh2 backend: manages TCP socket, SSH session, and SFTP channel.
 // Includes keepalive, known_hosts validation, and resume support.
 #include "openscp/Libssh2SftpClient.hpp"
-#include "detail/Libssh2ErrorClassifier.hpp"
-#include "openscp/RuntimeLogging.hpp"
+
 #include "../common/SafeLocalFile.hpp"
+#include "detail/Libssh2ErrorClassifier.hpp"
 #include "detail/Libssh2InputSafety.hpp"
+#include "openscp/RuntimeLogging.hpp"
+
 #include <libssh2.h>
 #include <libssh2_sftp.h>
 
@@ -37,13 +39,14 @@
 #else
 #include <windows.h>
 #endif
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
+#include <openssl/sha.h>
+
 #include <array>
 #include <cstdarg>
 #include <cstdio>
 #include <ctime>
-#include <openssl/evp.h>
-#include <openssl/hmac.h>
-#include <openssl/sha.h>
 #include <sstream>
 
 // POSIX sockets
@@ -272,7 +275,11 @@ integrity_policy_from_env(TransferIntegrityPolicy fallback) {
     return fallback;
 }
 
+// These implementation fragments are order-sensitive code inclusions, not
+// header dependencies. Keep clang-format from regrouping them with headers.
+// clang-format off
 #include "detail/Libssh2SftpClient.TransferSupport.inc"
+// clang-format on
 
 static bool persist_known_hosts_atomic(LIBSSH2_KNOWNHOSTS *nh,
                                        const std::string &khPath,
@@ -483,10 +490,9 @@ static bool persist_text_atomic(const std::string &path,
     const char *ptr = content.data();
     std::size_t rem = content.size();
     while (rem > 0) {
-        const DWORD chunk =
-            rem > static_cast<std::size_t>(0xFFFFFFFFu)
-                ? static_cast<DWORD>(0xFFFFFFFFu)
-                : static_cast<DWORD>(rem);
+        const DWORD chunk = rem > static_cast<std::size_t>(0xFFFFFFFFu)
+                                ? static_cast<DWORD>(0xFFFFFFFFu)
+                                : static_cast<DWORD>(rem);
         DWORD written = 0;
         if (!WriteFile(h, ptr, chunk, &written, NULL) || written != chunk) {
             DWORD ec = GetLastError();
@@ -563,10 +569,9 @@ static bool b64decode(const std::string &input,
     if (input.empty() || (input.size() % 4) != 0)
         return false;
     out.assign((input.size() / 4) * 3, 0);
-    int decoded =
-        EVP_DecodeBlock(out.data(),
-                        reinterpret_cast<const unsigned char *>(input.data()),
-                        static_cast<int>(input.size()));
+    int decoded = EVP_DecodeBlock(
+        out.data(), reinterpret_cast<const unsigned char *>(input.data()),
+        static_cast<int>(input.size()));
     if (decoded < 0)
         return false;
     int pad = 0;
@@ -746,8 +751,7 @@ kbint_password_callback(const char *name, int name_len, const char *instruction,
             *ctx->rejectionError = message;
         if (responses && num_prompts > 0) {
             const int safeCount = std::min(
-                num_prompts,
-                libssh2detail::kMaxKeyboardInteractivePrompts);
+                num_prompts, libssh2detail::kMaxKeyboardInteractivePrompts);
             for (int i = 0; i < safeCount; ++i) {
                 responses[i].text = nullptr;
                 responses[i].length = 0;
@@ -769,8 +773,7 @@ kbint_password_callback(const char *name, int name_len, const char *instruction,
             libssh2detail::kMaxKeyboardInteractivePromptBytes ||
         static_cast<std::size_t>(instruction_len) >
             libssh2detail::kMaxKeyboardInteractivePromptBytes) {
-        rejectPrompts(
-            "Keyboard-interactive heading exceeds the safety limit.");
+        rejectPrompts("Keyboard-interactive heading exceeds the safety limit.");
         return;
     }
 
@@ -786,8 +789,8 @@ kbint_password_callback(const char *name, int name_len, const char *instruction,
     }
     if (prompts) {
         for (int i = 0; i < num_prompts; ++i) {
-            promptViews[static_cast<std::size_t>(i)] = {
-                prompts[i].text, prompts[i].length};
+            promptViews[static_cast<std::size_t>(i)] = {prompts[i].text,
+                                                        prompts[i].length};
         }
     }
     if (!libssh2detail::copyKeyboardInteractivePrompts(
@@ -803,9 +806,7 @@ kbint_password_callback(const char *name, int name_len, const char *instruction,
         KbdIntPromptResult result = KbdIntPromptResult::Unhandled;
         try {
             const std::size_t safeNameLength =
-                (name && name_len > 0)
-                    ? static_cast<std::size_t>(name_len)
-                    : 0;
+                (name && name_len > 0) ? static_cast<std::size_t>(name_len) : 0;
             const std::size_t safeInstructionLength =
                 (instruction && instruction_len > 0)
                     ? static_cast<std::size_t>(instruction_len)
@@ -839,8 +840,8 @@ kbint_password_callback(const char *name, int name_len, const char *instruction,
                     totalAnswerBytes >
                         libssh2detail::kMaxKeyboardInteractiveAnswerBytes -
                             answerSize) {
-                    rejectPrompts(
-                        "Keyboard-interactive answer exceeds the safety limit.");
+                    rejectPrompts("Keyboard-interactive answer exceeds the "
+                                  "safety limit.");
                     scrubAnswers();
                     return;
                 }
@@ -939,8 +940,12 @@ Libssh2SftpClient::classifyStructuredFailure(const std::string &message,
 
 Libssh2SftpClient::Libssh2SftpClient() = default;
 
-Libssh2SftpClient::~Libssh2SftpClient() { disconnect(); }
+Libssh2SftpClient::~Libssh2SftpClient() {
+    disconnect();
+}
 
+// These fragments depend on helpers declared by earlier fragments.
+// clang-format off
 #include "detail/Libssh2SftpClient.TransportNet.inc"
 #include "detail/Libssh2SftpClient.TransportAuth.inc"
 #include "detail/Libssh2SftpClient.TransportLifecycle.inc"
@@ -950,3 +955,4 @@ Libssh2SftpClient::~Libssh2SftpClient() { disconnect(); }
 #include "detail/Libssh2SftpClient.TransferOps.inc"
 
 #include "detail/Libssh2SftpClient.FileMetadataOps.inc"
+// clang-format on

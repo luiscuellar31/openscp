@@ -1,5 +1,6 @@
 // Shared helper utilities for MainWindow split implementation files.
 #include "MainWindowSharedUtils.hpp"
+
 #include "UiAlerts.hpp"
 
 #include <QCoreApplication>
@@ -40,8 +41,8 @@ bool isValidEntryName(const QString &name, QString *why) {
 }
 
 bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
-                          const QString &labelText,
-                          const QString &initialValue, QString &nameOut) {
+                          const QString &labelText, const QString &initialValue,
+                          QString &nameOut) {
     bool inputAccepted = false;
     const QString candidateName =
         QInputDialog::getText(parent, dialogTitle, labelText, QLineEdit::Normal,
@@ -129,11 +130,13 @@ QVector<QPair<QString, QString>> buildLocalDestinationPairsWithOverwritePrompt(
     pairs.reserve(sources.size());
 
     for (const QFileInfo &sourceInfo : sources) {
-        const QString targetPath = destinationDir.filePath(sourceInfo.fileName());
+        const QString targetPath =
+            destinationDir.filePath(sourceInfo.fileName());
         if (QFileInfo::exists(targetPath)) {
             if (policy == OverwritePolicy::Ask) {
                 const auto decision = UiAlerts::question(
-                    parent, QCoreApplication::translate("MainWindow", "Conflict"),
+                    parent,
+                    QCoreApplication::translate("MainWindow", "Conflict"),
                     QCoreApplication::translate(
                         "MainWindow",
                         "“%1” already exists at destination.\nOverwrite?")
@@ -154,7 +157,6 @@ QVector<QPair<QString, QString>> buildLocalDestinationPairsWithOverwritePrompt(
                 ++skipped;
                 continue;
             }
-
         }
         pairs.push_back({sourceInfo.absoluteFilePath(), targetPath});
     }
@@ -197,8 +199,8 @@ bool areTransferPairsFinal(const QVector<TransferTask> &tasks,
                            TransferTask::Type type,
                            const QVector<QPair<QString, QString>> &pairs) {
     for (const auto &pair : pairs) {
-        const TransferTask *task = findTransferTask(tasks, type, pair.first,
-                                                    pair.second);
+        const TransferTask *task =
+            findTransferTask(tasks, type, pair.first, pair.second);
         if (!task || !isTransferTaskFinalStatus(task->status))
             return false;
     }

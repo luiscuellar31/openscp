@@ -1,8 +1,8 @@
 // WebDAV backend implementation based on libcurl and tinyxml2.
 #include "openscp/CurlWebDavClient.hpp"
 
-#include "CurlBackendCommon.hpp"
 #include "../common/SafeLocalFile.hpp"
+#include "CurlBackendCommon.hpp"
 
 #include <curl/curl.h>
 #include <tinyxml2.h>
@@ -74,9 +74,8 @@ std::string normalizeRemotePath(std::string path) {
     std::size_t pos = 0;
     while (pos <= path.size()) {
         const std::size_t slash = path.find('/', pos);
-        const std::string segment =
-            path.substr(pos, slash == std::string::npos ? std::string::npos
-                                                        : slash - pos);
+        const std::string segment = path.substr(
+            pos, slash == std::string::npos ? std::string::npos : slash - pos);
         if (!segment.empty() && segment != ".") {
             if (segment == "..") {
                 if (!segments.empty())
@@ -150,16 +149,15 @@ std::string webDavDestinationKey(const SessionOptions &opt,
                                  const std::string &remotePath) {
     return std::string("remote:webdav:") +
            webDavSchemeStorageName(normalizeWebDavScheme(opt.webdav_scheme)) +
-           ":" + toLowerAscii(opt.host) + ":" + std::to_string(opt.port) +
-           ":" + opt.username + ":" +
-           normalizeWebDavBasePath(opt.webdav_base_path) + ":" +
-           normalizeRemotePath(remotePath);
+           ":" + toLowerAscii(opt.host) + ":" + std::to_string(opt.port) + ":" +
+           opt.username + ":" + normalizeWebDavBasePath(opt.webdav_base_path) +
+           ":" + normalizeRemotePath(remotePath);
 }
 
 std::string formatHttpFailure(const char *what, long statusCode) {
     std::ostringstream out;
-    out << (what ? what : "WebDAV operation")
-        << " failed with HTTP status " << statusCode << ".";
+    out << (what ? what : "WebDAV operation") << " failed with HTTP status "
+        << statusCode << ".";
     return out.str();
 }
 
@@ -195,7 +193,8 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
     if (!opt.username.empty()) {
         if (curl_easy_setopt(curl, CURLOPT_USERNAME, opt.username.c_str()) !=
                 CURLE_OK ||
-            curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY) != CURLE_OK) {
+            curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY) !=
+                CURLE_OK) {
             err = "Could not configure WebDAV authentication username.";
             return false;
         }
@@ -250,12 +249,12 @@ bool performTextRequest(CURL *curl, const SessionOptions &opt,
         (curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str()) ==
          CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
-                          curlcommon::appendStringCallback) ==
+                          curlcommon::appendStringCallback) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseSink) ==
          CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseSink) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headerList) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION,
-                          captureWebDavHeader) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, captureWebDavHeader) ==
+         CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_HEADERDATA,
                           &response.retryAfterSeconds) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) == CURLE_OK) &&
@@ -273,7 +272,8 @@ bool performTextRequest(CURL *curl, const SessionOptions &opt,
         if (curl_easy_setopt(curl, CURLOPT_POSTFIELDS, requestBody->c_str()) !=
                 CURLE_OK ||
             curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE,
-                             static_cast<long>(requestBody->size())) != CURLE_OK) {
+                             static_cast<long>(requestBody->size())) !=
+                CURLE_OK) {
             err = std::string("Could not configure WebDAV request body for ") +
                   method + ".";
             curl_slist_free_all(headerList);
@@ -309,13 +309,11 @@ bool performTextRequest(CURL *curl, const SessionOptions &opt,
     return true;
 }
 
-bool performDownloadRequest(CURL *curl, const SessionOptions &opt,
-                            const std::string &remote,
-                            std::FILE *localFile,
-                            curlcommon::TransferProgressContext &progressContext,
-                            std::string &err, long &statusCodeOut,
-                            CURLcode &rcOut,
-                            std::optional<std::uint32_t> &retryAfterOut) {
+bool performDownloadRequest(
+    CURL *curl, const SessionOptions &opt, const std::string &remote,
+    std::FILE *localFile, curlcommon::TransferProgressContext &progressContext,
+    std::string &err, long &statusCodeOut, CURLcode &rcOut,
+    std::optional<std::uint32_t> &retryAfterOut) {
     statusCodeOut = 0;
     rcOut = CURLE_OK;
     retryAfterOut.reset();
@@ -328,11 +326,10 @@ bool performDownloadRequest(CURL *curl, const SessionOptions &opt,
         (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
-                          curlcommon::writeFileCallback) ==
-         CURLE_OK) &&
+                          curlcommon::writeFileCallback) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_WRITEDATA, localFile) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION,
-                          captureWebDavHeader) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, captureWebDavHeader) ==
+         CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_HEADERDATA, &retryAfterOut) ==
          CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) == CURLE_OK) &&
@@ -351,8 +348,7 @@ bool performDownloadRequest(CURL *curl, const SessionOptions &opt,
     const CURLcode rc = curl_easy_perform(curl);
     rcOut = rc;
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &statusCodeOut);
-    if (progressContext.interrupted &&
-        progressContext.interrupted->load()) {
+    if (progressContext.interrupted && progressContext.interrupted->load()) {
         rcOut = CURLE_ABORTED_BY_CALLBACK;
         err = "Interrupted";
         return false;
@@ -365,11 +361,11 @@ bool performDownloadRequest(CURL *curl, const SessionOptions &opt,
 }
 
 bool performUploadRequest(CURL *curl, const SessionOptions &opt,
-                          const std::string &remote,
-                          std::FILE *localFile, curl_off_t fileSize,
+                          const std::string &remote, std::FILE *localFile,
+                          curl_off_t fileSize,
                           curlcommon::TransferProgressContext &progressContext,
-                          std::string &err,
-                          long &statusCodeOut, CURLcode &rcOut,
+                          std::string &err, long &statusCodeOut,
+                          CURLcode &rcOut,
                           std::optional<std::uint32_t> &retryAfterOut) {
     statusCodeOut = 0;
     rcOut = CURLE_OK;
@@ -384,12 +380,12 @@ bool performUploadRequest(CURL *curl, const SessionOptions &opt,
         (curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT") == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_READFUNCTION,
-                          curlcommon::readFileCallback) ==
-         CURLE_OK) &&
+                          curlcommon::readFileCallback) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_READDATA, localFile) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, fileSize) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION,
-                          captureWebDavHeader) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, fileSize) ==
+         CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, captureWebDavHeader) ==
+         CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_HEADERDATA, &retryAfterOut) ==
          CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) == CURLE_OK) &&
@@ -408,8 +404,7 @@ bool performUploadRequest(CURL *curl, const SessionOptions &opt,
     const CURLcode rc = curl_easy_perform(curl);
     rcOut = rc;
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &statusCodeOut);
-    if (progressContext.interrupted &&
-        progressContext.interrupted->load()) {
+    if (progressContext.interrupted && progressContext.interrupted->load()) {
         rcOut = CURLE_ABORTED_BY_CALLBACK;
         err = "Interrupted";
         return false;
@@ -432,8 +427,8 @@ bool xmlNameEquals(const tinyxml2::XMLElement *elem, const char *local) {
     return elem && std::strcmp(xmlLocalName(elem->Name()), local) == 0;
 }
 
-const tinyxml2::XMLElement *firstChildByLocal(const tinyxml2::XMLElement *parent,
-                                              const char *local) {
+const tinyxml2::XMLElement *
+firstChildByLocal(const tinyxml2::XMLElement *parent, const char *local) {
     if (!parent || !local)
         return nullptr;
     for (const tinyxml2::XMLElement *child = parent->FirstChildElement(); child;
@@ -478,8 +473,8 @@ std::string extractPathFromHref(std::string href) {
 
 std::string decodePercent(const std::string &raw) {
     int decodedLen = 0;
-    char *decoded = curl_easy_unescape(nullptr, raw.c_str(),
-                                       static_cast<int>(raw.size()), &decodedLen);
+    char *decoded = curl_easy_unescape(
+        nullptr, raw.c_str(), static_cast<int>(raw.size()), &decodedLen);
     if (!decoded)
         return raw;
     std::string out(decoded, static_cast<std::size_t>(decodedLen));
@@ -550,8 +545,8 @@ bool parsePropfindResponse(const SessionOptions &opt, const std::string &xml,
         const tinyxml2::XMLElement *elem = stack.back();
         stack.pop_back();
 
-        for (const tinyxml2::XMLElement *child = elem->FirstChildElement(); child;
-             child = child->NextSiblingElement()) {
+        for (const tinyxml2::XMLElement *child = elem->FirstChildElement();
+             child; child = child->NextSiblingElement()) {
             stack.push_back(child);
         }
 
@@ -565,8 +560,8 @@ bool parsePropfindResponse(const SessionOptions &opt, const std::string &xml,
 
         const std::string hrefRaw(hrefTxt);
         WebDavResource parsed;
-        const std::string serverPath = normalizeRemotePath(
-            decodePercent(extractPathFromHref(hrefRaw)));
+        const std::string serverPath =
+            normalizeRemotePath(decodePercent(extractPathFromHref(hrefRaw)));
         if (!logicalPathForServerPath(opt, serverPath, parsed.path))
             continue;
         if (hrefRaw.back() == '/')
@@ -584,7 +579,8 @@ bool parsePropfindResponse(const SessionOptions &opt, const std::string &xml,
                 statusText ? parseHttpStatusCode(statusText) : 0;
             if (statusCode < 200 || statusCode >= 300)
                 continue;
-            const tinyxml2::XMLElement *prop = firstChildByLocal(propStat, "prop");
+            const tinyxml2::XMLElement *prop =
+                firstChildByLocal(propStat, "prop");
             parsePropElement(prop, parsed);
             consumedPropStat = true;
         }
@@ -640,9 +636,13 @@ bool isDirectChildPath(const std::string &parentPath, const std::string &path,
     return true;
 }
 
-bool isSuccessStatus(long status) { return status >= 200 && status < 300; }
+bool isSuccessStatus(long status) {
+    return status >= 200 && status < 300;
+}
 
-bool isPathMissingStatus(long status) { return status == 404; }
+bool isPathMissingStatus(long status) {
+    return status == 404;
+}
 
 const std::string &propfindBody() {
     static const std::string body =
@@ -677,7 +677,9 @@ bool unsupportedWebDavOperation(const char *what, std::string &err) {
 
 CurlWebDavClient::CurlWebDavClient() = default;
 
-CurlWebDavClient::~CurlWebDavClient() { disconnect(); }
+CurlWebDavClient::~CurlWebDavClient() {
+    disconnect();
+}
 
 bool CurlWebDavClient::connect(const SessionOptions &opt, std::string &err) {
     std::lock_guard<std::mutex> operationLock(operationMutex_);
@@ -704,8 +706,8 @@ bool CurlWebDavClient::connect(const SessionOptions &opt, std::string &err) {
         setLastOperationError(RemoteErrorKind::Unsupported, err);
         return false;
     }
-    if (!curlcommon::validateRemotePath(opt.webdav_base_path,
-                                        "WebDAV base", err)) {
+    if (!curlcommon::validateRemotePath(opt.webdav_base_path, "WebDAV base",
+                                        err)) {
         setLastOperationError(RemoteErrorKind::InvalidRequest, err);
         return false;
     }
@@ -775,7 +777,9 @@ void CurlWebDavClient::disconnect() {
     disconnecting_.store(false);
 }
 
-void CurlWebDavClient::interrupt() { interrupted_.store(true); }
+void CurlWebDavClient::interrupt() {
+    interrupted_.store(true);
+}
 
 bool CurlWebDavClient::isConnected() const {
     std::lock_guard<std::mutex> lk(stateMutex_);
@@ -818,8 +822,8 @@ bool CurlWebDavClient::list(const std::string &remote_path,
     const std::string basePath = normalizeRemotePath(remote_path);
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
-    if (!performPropfind(easySession_->get(), opt, basePath, 1,
-                         &interrupted_, response, err, &rc)) {
+    if (!performPropfind(easySession_->get(), opt, basePath, 1, &interrupted_,
+                         response, err, &rc)) {
         if (rc == CURLE_ABORTED_BY_CALLBACK && interrupted_.load())
             err = "Interrupted";
         setLastOperationError(
@@ -863,14 +867,13 @@ bool CurlWebDavClient::list(const std::string &remote_path,
         out.push_back(std::move(info));
     }
 
-    std::sort(out.begin(), out.end(),
-              [](const FileInfo &a, const FileInfo &b) {
-                  const std::string al = toLowerAscii(a.name);
-                  const std::string bl = toLowerAscii(b.name);
-                  if (al == bl)
-                      return a.name < b.name;
-                  return al < bl;
-              });
+    std::sort(out.begin(), out.end(), [](const FileInfo &a, const FileInfo &b) {
+        const std::string al = toLowerAscii(a.name);
+        const std::string bl = toLowerAscii(b.name);
+        if (al == bl)
+            return a.name < b.name;
+        return al < bl;
+    });
     return true;
 }
 
@@ -938,31 +941,31 @@ bool CurlWebDavClient::get(
         return false;
     }
 
-    curlcommon::TransferProgressContext progressContext{
-        progress, shouldCancel, &interrupted_, false};
+    curlcommon::TransferProgressContext progressContext{progress, shouldCancel,
+                                                        &interrupted_, false};
     const bool canceledBeforeTransfer = shouldCancel && shouldCancel();
     if (canceledBeforeTransfer || interrupted_.load()) {
         std::fclose(localFile);
         err = canceledBeforeTransfer ? "Canceled by user" : "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err,
-                              static_cast<std::int64_t>(
-                                  CURLE_ABORTED_BY_CALLBACK));
+        setLastOperationError(
+            RemoteErrorKind::Canceled, err,
+            static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
         return false;
     }
     long statusCode = 0;
     CURLcode rc = CURLE_OK;
     std::optional<std::uint32_t> retryAfter;
-    const bool ok = performDownloadRequest(
-        easySession_->get(), opt, remote, localFile,
-        progressContext, err, statusCode, rc, retryAfter);
+    const bool ok = performDownloadRequest(easySession_->get(), opt, remote,
+                                           localFile, progressContext, err,
+                                           statusCode, rc, retryAfter);
     const bool userCanceled = shouldCancel && shouldCancel();
     if (!ok || userCanceled || interrupted_.load()) {
         std::fclose(localFile);
         if (userCanceled || interrupted_.load()) {
             err = userCanceled ? "Canceled by user" : "Interrupted";
-            setLastOperationError(RemoteErrorKind::Canceled, err,
-                                  static_cast<std::int64_t>(
-                                      CURLE_ABORTED_BY_CALLBACK));
+            setLastOperationError(
+                RemoteErrorKind::Canceled, err,
+                static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
         } else {
             setLastOperationError(
                 curlcommon::errorFromCurl(rc, err, statusCode));
@@ -972,9 +975,8 @@ bool CurlWebDavClient::get(
     if (!curlcommon::isCompletedWebDavGetStatus(statusCode)) {
         std::fclose(localFile);
         err = formatHttpFailure("WebDAV GET", statusCode);
-        setLastOperationError(
-            curlcommon::errorFromHttpStatus(statusCode, err, false,
-                                            retryAfter));
+        setLastOperationError(curlcommon::errorFromHttpStatus(
+            statusCode, err, false, retryAfter));
         return false;
     }
     if (!curlcommon::flushAndSyncFile(localFile, err)) {
@@ -990,9 +992,9 @@ bool CurlWebDavClient::get(
     const bool canceledBeforeCommit = shouldCancel && shouldCancel();
     if (canceledBeforeCommit || interrupted_.load()) {
         err = canceledBeforeCommit ? "Canceled by user" : "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err,
-                              static_cast<std::int64_t>(
-                                  CURLE_ABORTED_BY_CALLBACK));
+        setLastOperationError(
+            RemoteErrorKind::Canceled, err,
+            static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
         return false;
     }
     if (!curlcommon::atomicReplaceLocalFile(partial, local, err)) {
@@ -1072,33 +1074,32 @@ bool CurlWebDavClient::put(
         return false;
     }
 
-    curlcommon::TransferProgressContext progressContext{
-        progress, shouldCancel, &interrupted_, true};
+    curlcommon::TransferProgressContext progressContext{progress, shouldCancel,
+                                                        &interrupted_, true};
     const bool canceledBeforeTransfer = shouldCancel && shouldCancel();
     if (canceledBeforeTransfer || interrupted_.load()) {
         std::fclose(localFile);
         err = canceledBeforeTransfer ? "Canceled by user" : "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err,
-                              static_cast<std::int64_t>(
-                                  CURLE_ABORTED_BY_CALLBACK));
+        setLastOperationError(
+            RemoteErrorKind::Canceled, err,
+            static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
         return false;
     }
     long statusCode = 0;
     CURLcode rc = CURLE_OK;
     std::optional<std::uint32_t> retryAfter;
-    const bool ok = performUploadRequest(
-        easySession_->get(), opt, remotePartial, localFile,
-        static_cast<curl_off_t>(total),
-        progressContext, err,
-        statusCode, rc, retryAfter);
+    const bool ok =
+        performUploadRequest(easySession_->get(), opt, remotePartial, localFile,
+                             static_cast<curl_off_t>(total), progressContext,
+                             err, statusCode, rc, retryAfter);
     std::fclose(localFile);
     const bool userCanceled = shouldCancel && shouldCancel();
     if (!ok || userCanceled || interrupted_.load()) {
         if (userCanceled || interrupted_.load()) {
             err = userCanceled ? "Canceled by user" : "Interrupted";
-            setLastOperationError(RemoteErrorKind::Canceled, err,
-                                  static_cast<std::int64_t>(
-                                      CURLE_ABORTED_BY_CALLBACK));
+            setLastOperationError(
+                RemoteErrorKind::Canceled, err,
+                static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
         } else {
             setLastOperationError(
                 curlcommon::errorFromCurl(rc, err, statusCode));
@@ -1107,18 +1108,17 @@ bool CurlWebDavClient::put(
     }
     if (!curlcommon::isCompletedWebDavWriteStatus(statusCode)) {
         err = formatHttpFailure("WebDAV PUT", statusCode);
-        setLastOperationError(
-            curlcommon::errorFromHttpStatus(statusCode, err, false,
-                                            retryAfter));
+        setLastOperationError(curlcommon::errorFromHttpStatus(
+            statusCode, err, false, retryAfter));
         return false;
     }
 
     const bool canceledBeforeCommit = shouldCancel && shouldCancel();
     if (canceledBeforeCommit || interrupted_.load()) {
         err = canceledBeforeCommit ? "Canceled by user" : "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err,
-                              static_cast<std::int64_t>(
-                                  CURLE_ABORTED_BY_CALLBACK));
+        setLastOperationError(
+            RemoteErrorKind::Canceled, err,
+            static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
         return false;
     }
 
@@ -1129,15 +1129,14 @@ bool CurlWebDavClient::put(
     };
     WebDavResponse moveResponse;
     CURLcode moveCode = CURLE_OK;
-    if (!performTextRequest(easySession_->get(), opt, "MOVE",
-                            remotePartial, nullptr, headers, &interrupted_,
-                            moveResponse, err, &moveCode)) {
+    if (!performTextRequest(easySession_->get(), opt, "MOVE", remotePartial,
+                            nullptr, headers, &interrupted_, moveResponse, err,
+                            &moveCode)) {
         setLastOperationError(curlcommon::errorFromCurl(
             moveCode, err, moveResponse.statusCode, true));
         return false;
     }
-    if (!curlcommon::isCompletedWebDavWriteStatus(
-            moveResponse.statusCode)) {
+    if (!curlcommon::isCompletedWebDavWriteStatus(moveResponse.statusCode)) {
         err = formatHttpFailure("WebDAV MOVE", moveResponse.statusCode);
         setLastOperationError(webDavMutationStatusError(
             moveResponse.statusCode, err, moveResponse.retryAfterSeconds));
@@ -1198,8 +1197,8 @@ bool CurlWebDavClient::stat(const std::string &remote_path, FileInfo &info,
     const std::string target = normalizeRemotePath(remote_path);
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
-    if (!performPropfind(easySession_->get(), opt, target, 0,
-                         &interrupted_, response, err, &rc)) {
+    if (!performPropfind(easySession_->get(), opt, target, 0, &interrupted_,
+                         response, err, &rc)) {
         if (rc == CURLE_ABORTED_BY_CALLBACK && interrupted_.load())
             err = "Interrupted";
         setLastOperationError(
@@ -1227,10 +1226,9 @@ bool CurlWebDavClient::stat(const std::string &remote_path, FileInfo &info,
     }
 
     // Some servers return only one resource; accept it as target fallback.
-    auto it = std::find_if(resources.begin(), resources.end(),
-                           [&target](const WebDavResource &r) {
-                               return r.path == target;
-                           });
+    auto it = std::find_if(
+        resources.begin(), resources.end(),
+        [&target](const WebDavResource &r) { return r.path == target; });
     if (it == resources.end()) {
         if (resources.size() == 1) {
             it = resources.begin();
@@ -1240,9 +1238,8 @@ bool CurlWebDavClient::stat(const std::string &remote_path, FileInfo &info,
         }
     }
 
-    info.name = (target == "/")
-                    ? std::string("/")
-                    : target.substr(target.find_last_of('/') + 1);
+    info.name = (target == "/") ? std::string("/")
+                                : target.substr(target.find_last_of('/') + 1);
     info.is_dir = it->isDir;
     if (it->hasSize) {
         info.has_size = true;
@@ -1315,9 +1312,8 @@ bool CurlWebDavClient::mkdir(const std::string &remote_dir, std::string &err,
     }
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
-    if (!performTextRequest(easySession_->get(), opt, "MKCOL",
-                            remote_dir, nullptr, {}, &interrupted_, response,
-                            err, &rc)) {
+    if (!performTextRequest(easySession_->get(), opt, "MKCOL", remote_dir,
+                            nullptr, {}, &interrupted_, response, err, &rc)) {
         setLastOperationError(
             curlcommon::errorFromCurl(rc, err, response.statusCode, true));
         return false;
@@ -1331,8 +1327,8 @@ bool CurlWebDavClient::mkdir(const std::string &remote_dir, std::string &err,
     if (response.statusCode == 405) {
         WebDavResponse verification;
         CURLcode verificationCode = CURLE_OK;
-        if (!performPropfind(easySession_->get(), opt, remote_dir,
-                             0, &interrupted_, verification, err,
+        if (!performPropfind(easySession_->get(), opt, remote_dir, 0,
+                             &interrupted_, verification, err,
                              &verificationCode)) {
             setLastOperationError(curlcommon::errorFromCurl(
                 verificationCode, err, verification.statusCode));
@@ -1346,11 +1342,10 @@ bool CurlWebDavClient::mkdir(const std::string &remote_dir, std::string &err,
                 return false;
             }
             const std::string target = normalizeRemotePath(remote_dir);
-            auto it = std::find_if(
-                resources.begin(), resources.end(),
-                [&target](const WebDavResource &resource) {
-                    return resource.path == target;
-                });
+            auto it = std::find_if(resources.begin(), resources.end(),
+                                   [&target](const WebDavResource &resource) {
+                                       return resource.path == target;
+                                   });
             if (it != resources.end()) {
                 if (it->isDir)
                     return true;
@@ -1406,9 +1401,8 @@ bool CurlWebDavClient::removeFile(const std::string &remote_path,
     }
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
-    if (!performTextRequest(easySession_->get(), opt, "DELETE",
-                            remote_path, nullptr, {}, &interrupted_, response,
-                            err, &rc)) {
+    if (!performTextRequest(easySession_->get(), opt, "DELETE", remote_path,
+                            nullptr, {}, &interrupted_, response, err, &rc)) {
         setLastOperationError(
             curlcommon::errorFromCurl(rc, err, response.statusCode, true));
         return false;
@@ -1443,8 +1437,7 @@ bool CurlWebDavClient::rename(const std::string &from, const std::string &to,
         setLastOperationError(RemoteErrorKind::InvalidRequest, err);
         return false;
     }
-    if (normalizeRemotePath(from) == "/" ||
-        normalizeRemotePath(to) == "/") {
+    if (normalizeRemotePath(from) == "/" || normalizeRemotePath(to) == "/") {
         err = "Refusing to rename the WebDAV base collection.";
         setLastOperationError(RemoteErrorKind::InvalidRequest, err);
         return false;
@@ -1467,9 +1460,8 @@ bool CurlWebDavClient::rename(const std::string &from, const std::string &to,
     };
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
-    if (!performTextRequest(easySession_->get(), opt, "MOVE", from,
-                            nullptr, headers, &interrupted_, response, err,
-                            &rc)) {
+    if (!performTextRequest(easySession_->get(), opt, "MOVE", from, nullptr,
+                            headers, &interrupted_, response, err, &rc)) {
         setLastOperationError(
             curlcommon::errorFromCurl(rc, err, response.statusCode, true));
         return false;
@@ -1485,7 +1477,8 @@ bool CurlWebDavClient::rename(const std::string &from, const std::string &to,
 }
 
 std::unique_ptr<RemoteClient>
-CurlWebDavClient::newConnectionLike(const SessionOptions &opt, std::string &err) {
+CurlWebDavClient::newConnectionLike(const SessionOptions &opt,
+                                    std::string &err) {
     auto ptr = std::make_unique<CurlWebDavClient>();
     SessionOptions normalized = opt;
     normalized.protocol = Protocol::WebDav;

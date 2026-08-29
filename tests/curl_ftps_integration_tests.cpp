@@ -130,9 +130,8 @@ int main() {
     opt.protocol = openscp::Protocol::Ftps;
     opt.host = *host;
     opt.port = port;
-    opt.ftps_mode =
-        modeRaw ? openscp::ftpsModeFromStorageName(*modeRaw)
-                : openscp::FtpsMode::Auto;
+    opt.ftps_mode = modeRaw ? openscp::ftpsModeFromStorageName(*modeRaw)
+                            : openscp::FtpsMode::Auto;
     opt.username = user.value_or("anonymous");
     if (pass.has_value())
         opt.password = pass;
@@ -180,13 +179,14 @@ int main() {
 
     bool uploadProgressCalled = false;
     err.clear();
-    t.check(client->put(localUpload.string(), remotePath, err,
-                        [&](std::size_t done, std::size_t total) {
-                            (void)done;
-                            (void)total;
-                            uploadProgressCalled = true;
-                        },
-                        {}, false),
+    t.check(client->put(
+                localUpload.string(), remotePath, err,
+                [&](std::size_t done, std::size_t total) {
+                    (void)done;
+                    (void)total;
+                    uploadProgressCalled = true;
+                },
+                {}, false),
             std::string("FTPS upload should succeed: ") + err);
     t.check(uploadProgressCalled, "upload progress callback should be called");
 
@@ -201,13 +201,14 @@ int main() {
 
     bool downloadProgressCalled = false;
     err.clear();
-    t.check(client->get(renamedPath, localDownload.string(), err,
-                        [&](std::size_t done, std::size_t total) {
-                            (void)done;
-                            (void)total;
-                            downloadProgressCalled = true;
-                        },
-                        {}, false),
+    t.check(client->get(
+                renamedPath, localDownload.string(), err,
+                [&](std::size_t done, std::size_t total) {
+                    (void)done;
+                    (void)total;
+                    downloadProgressCalled = true;
+                },
+                {}, false),
             std::string("FTPS download should succeed: ") + err);
     t.check(downloadProgressCalled,
             "download progress callback should be called");

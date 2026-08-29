@@ -18,21 +18,21 @@ class QSettings;
 
 class SettingsDialog : public QDialog {
     Q_OBJECT
-  public:
+    public:
     explicit SettingsDialog(QWidget *parent = nullptr);
 
-  signals:
+    signals:
     void settingsApplied();
 
-  protected:
+    protected:
     void resizeEvent(QResizeEvent *event) override;
 
-  private slots:
+    private slots:
     void onApply(); // save without closing; disable until further changes
     void updateApplyFromControls(); // enable Apply if any option differs from
                                     // persisted
 
-  private:
+    private:
     struct PageBuildContext {
         class QListWidget *sectionList = nullptr;
         class QStackedWidget *pages = nullptr;
@@ -114,8 +114,9 @@ class SettingsDialog : public QDialog {
         nullptr; // default local download directory
     class QPushButton *defaultDownloadBrowseBtn_ = nullptr;
     class QPushButton *resetMainLayoutBtn_ = nullptr;
-    QComboBox *defaultProtocol_ = nullptr; // default protocol in connect/site dialogs
-    QComboBox *scpModeDefault_ = nullptr; // default SCP transfer mode
+    QComboBox *defaultProtocol_ =
+        nullptr; // default protocol in connect/site dialogs
+    QComboBox *scpModeDefault_ = nullptr;  // default SCP transfer mode
     QCheckBox *showConnOnStart_ = nullptr; // open Site Manager at startup
     QCheckBox *showConnOnDisconnect_ =
         nullptr; // open Site Manager on disconnect
@@ -171,6 +172,6 @@ class SettingsDialog : public QDialog {
         nullptr; // remote session health probe interval
     QPushButton *applyBtn_ =
         nullptr; // Apply button (enabled only when modified)
-    QPushButton *closeBtn_ = nullptr; // Close button (never primary/default)
+    QPushButton *closeBtn_ = nullptr;    // Close button (never primary/default)
     QVector<QCheckBox *> wrappedChecks_; // checkboxes with auto text wrapping
 };

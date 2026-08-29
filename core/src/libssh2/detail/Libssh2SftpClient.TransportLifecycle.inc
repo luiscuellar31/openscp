@@ -29,9 +29,8 @@ bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
         setLastOperationError(RemoteErrorKind::InvalidRequest, err);
         return false;
     }
-    if (opt.jump_host &&
-        !libssh2detail::validateEndpointHost(*opt.jump_host, "Jump host",
-                                             err)) {
+    if (opt.jump_host && !libssh2detail::validateEndpointHost(
+                             *opt.jump_host, "Jump host", err)) {
         setLastOperationError(RemoteErrorKind::InvalidRequest, err);
         return false;
     }
@@ -141,7 +140,8 @@ bool Libssh2SftpClient::describeJumpTunnelFailure(std::string &err) {
     // Poll child state without blocking; handshake path remains responsive.
     if (jumpPid > 0) {
         int status = 0;
-        const pid_t wr = ::waitpid(static_cast<pid_t>(jumpPid), &status, WNOHANG);
+        const pid_t wr =
+            ::waitpid(static_cast<pid_t>(jumpPid), &status, WNOHANG);
         if (wr == static_cast<pid_t>(jumpPid) ||
             (wr == -1 && errno == ECHILD)) {
             exited = true;

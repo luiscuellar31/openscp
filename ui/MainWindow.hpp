@@ -3,16 +3,18 @@
 #include "NavigationStore.hpp"
 #include "TransferUiController.hpp"
 #include "openscp/SftpTypes.hpp"
+
 #include <QAction>
 #include <QFileSystemModel>
 #include <QLineEdit>
 #include <QMainWindow>
-#include <QPointer>
 #include <QPair>
+#include <QPointer>
 #include <QSet>
 #include <QStringList>
 #include <QTreeView>
 #include <QVector>
+
 #include <atomic>
 #include <condition_variable>
 #include <functional>
@@ -28,19 +30,19 @@ namespace openscpui {
 class PaneController;
 class RemoteActionController;
 class SessionController;
-}
-struct SiteEntry;  // fwd
-class QModelIndex; // fwd for slot signatures
-class QToolBar;    // fwd
-class QMenu;       // fwd
-class QEvent;      // fwd for eventFilter
-class QCloseEvent; // fwd for closeEvent
-class QDialog;     // fwd
-class QLabel;      // fwd
+} // namespace openscpui
+struct SiteEntry;     // fwd
+class QModelIndex;    // fwd for slot signatures
+class QToolBar;       // fwd
+class QMenu;          // fwd
+class QEvent;         // fwd for eventFilter
+class QCloseEvent;    // fwd for closeEvent
+class QDialog;        // fwd
+class QLabel;         // fwd
 class QStackedWidget; // fwd
-class QTimer;      // fwd
-class QSplitter;   // fwd
-class QPushButton; // fwd
+class QTimer;         // fwd
+class QSplitter;      // fwd
+class QPushButton;    // fwd
 namespace openscp {
 class RemoteClient;
 struct SessionOptions;
@@ -71,15 +73,15 @@ class MainWindow : public QMainWindow {
     void chooseRightDir();
     void leftPathEntered();
     void rightPathEntered();
-    void copyLeftToRight(); // F5
-    void copyRightToLeft(); // remote -> left (no dialog)
-    void moveRightToLeft(); // move selection from right panel to left
-    void moveLeftToRight(); // F6
-    void deleteFromLeft();  // Delete
-    void goUpRight();       // Go up one level (right)
-    void goUpLeft();        // Go up one level (left)
-    void goHomeRight();     // Go to home/root (right)
-    void goHomeLeft();      // Go to local home (left)
+    void copyLeftToRight();         // F5
+    void copyRightToLeft();         // remote -> left (no dialog)
+    void moveRightToLeft();         // move selection from right panel to left
+    void moveLeftToRight();         // F6
+    void deleteFromLeft();          // Delete
+    void goUpRight();               // Go up one level (right)
+    void goUpLeft();                // Go up one level (left)
+    void goHomeRight();             // Go to home/root (right)
+    void goHomeLeft();              // Go to local home (left)
     void openRightRemoteTerminal(); // Open SSH terminal at current right path
     void refreshRightRemotePanel(); // Refresh current remote folder (right)
     void showHistoryMenu();         // Show recent routes/servers
@@ -197,7 +199,7 @@ class MainWindow : public QMainWindow {
     QAction *actMoveRightTb_ = nullptr; // right toolbar: Move (generic text)
 
     // Sub-toolbar actions
-    QAction *actUpLeft_ = nullptr;  // back left
+    QAction *actUpLeft_ = nullptr; // back left
     QAction *actHomeLeft_ = nullptr;
     QAction *actUpRight_ = nullptr; // back right
     QAction *actHomeRight_ = nullptr;
@@ -315,8 +317,7 @@ class MainWindow : public QMainWindow {
         const QVector<QPair<QString, QString>> &localRemoteRoots,
         bool moveSources, bool dragAndDrop = false);
     void cancelLocalUploadDiscoveries();
-    void searchItemsInCurrentFolder(QTreeView *view,
-                                    const QString &panelLabel);
+    void searchItemsInCurrentFolder(QTreeView *view, const QString &panelLabel);
     void rebuildContextMenu(QMenu *menu,
                             const QVector<QAction *> &entries) const;
     void refreshLeftBreadcrumbs();
@@ -333,8 +334,7 @@ class MainWindow : public QMainWindow {
     void ensureRemoteSessionHealthMonitoring();
     void startRemoteSessionHealthMonitoring();
     void stopRemoteSessionHealthMonitoring();
-    void runRemoteSessionHealthCheck(const QString &reason,
-                                     bool force = false);
+    void runRemoteSessionHealthCheck(const QString &reason, bool force = false);
     QString preferredLocalHomePath() const;
 
     // Capability-derived mutation state. Actual path permissions are checked by

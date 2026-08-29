@@ -51,9 +51,7 @@ class TransferManager : public QObject {
     void setMaxConcurrent(int maxConcurrent);
     int maxConcurrent() const { return maxConcurrent_.load(); }
     void setGlobalSpeedLimitKBps(int kbps);
-    int globalSpeedLimitKBps() const {
-        return bandwidthLimiter_.limitKBps();
-    }
+    int globalSpeedLimitKBps() const { return bandwidthLimiter_.limitKBps(); }
     bool isQueuePaused() const { return paused_.load(); }
 
     void pauseTask(quint64 taskId);
@@ -66,8 +64,8 @@ class TransferManager : public QObject {
     // Source-compatible enqueue API.
     void enqueueUpload(const QString &local, const QString &remote);
     void enqueueDownload(const QString &remote, const QString &local);
-    int enqueueDownloads(
-        const QVector<QPair<QString, QString>> &remoteLocalPairs);
+    int
+    enqueueDownloads(const QVector<QPair<QString, QString>> &remoteLocalPairs);
 
     // Batch-aware API. A zero batchId is replaced with a stable generated ID.
     quint64 enqueueUpload(const QString &local, const QString &remote,
@@ -82,17 +80,15 @@ class TransferManager : public QObject {
                                const TransferBatchOptions &options = {});
     quint64 enqueueRemoteDelete(const QString &remotePath, bool directory,
                                 const TransferBatchOptions &options = {});
-    int enqueueDownloads(
-        const QVector<QPair<QString, QString>> &remoteLocalPairs,
-        const TransferBatchOptions &options);
+    int
+    enqueueDownloads(const QVector<QPair<QString, QString>> &remoteLocalPairs,
+                     const TransferBatchOptions &options);
     quint64 createBatch(const TransferBatchOptions &options = {});
     void cancelBatch(quint64 batchId);
-    void setBatchConflictPolicy(quint64 batchId,
-                                TransferConflictPolicy policy);
+    void setBatchConflictPolicy(quint64 batchId, TransferConflictPolicy policy);
 
     QVector<TransferTask> tasksSnapshot() const;
-    QVector<TransferTask>
-    tasksSnapshot(const QVector<quint64> &taskIds) const;
+    QVector<TransferTask> tasksSnapshot(const QVector<quint64> &taskIds) const;
     std::optional<TransferTask> taskSnapshot(quint64 taskId) const;
 
     void pauseAll();
@@ -200,15 +196,15 @@ class TransferManager : public QObject {
     bool hasRunnableTaskLocked(std::size_t slotIndex);
     std::optional<TransferTask> pickRunnableTaskLocked(std::size_t slotIndex);
     void workerLoop(std::size_t slotIndex, std::stop_token stopToken);
-    std::shared_ptr<openscp::RemoteClient>
-    workerClient(WorkerSlot &slot, quint64 taskId, quint64 generation,
-                 std::string &err);
+    std::shared_ptr<openscp::RemoteClient> workerClient(WorkerSlot &slot,
+                                                        quint64 taskId,
+                                                        quint64 generation,
+                                                        std::string &err);
     void invalidateWorkerClient(WorkerSlot &slot);
     void interruptTask(quint64 taskId);
     void interruptAllActive();
     bool shouldCancel(quint64 taskId) const;
-    bool waitForRetry(quint64 taskId, int delayMs,
-                      std::stop_token stopToken);
+    bool waitForRetry(quint64 taskId, int delayMs, std::stop_token stopToken);
 
     void executeTask(WorkerSlot &slot, TransferTask task,
                      std::stop_token stopToken);
@@ -221,21 +217,20 @@ class TransferManager : public QObject {
         TransferTask &task,
         const std::shared_ptr<openscp::RemoteClient> &workerClient, bool resume,
         std::string &err);
-    bool runPostAction(
-        TransferTask &task,
-        const std::shared_ptr<openscp::RemoteClient> &workerClient,
-        std::string &err);
+    bool
+    runPostAction(TransferTask &task,
+                  const std::shared_ptr<openscp::RemoteClient> &workerClient,
+                  std::string &err);
     bool shouldRetryError(const openscp::RemoteError &structuredError,
-                          const std::string &rawError,
-                          int &retryAfterMs) const;
+                          const std::string &rawError, int &retryAfterMs) const;
     bool isTransportFailure(const openscp::RemoteError &structuredError,
                             const std::string &rawError) const;
-    ConflictResolution
-    resolveConflict(TransferTask &task, bool allowResume,
-                    const QString &name, const QString &sourceInfo,
-                    const QString &destinationInfo,
-                    std::optional<qint64> sourceMtime,
-                    std::optional<qint64> destinationMtime);
+    ConflictResolution resolveConflict(TransferTask &task, bool allowResume,
+                                       const QString &name,
+                                       const QString &sourceInfo,
+                                       const QString &destinationInfo,
+                                       std::optional<qint64> sourceMtime,
+                                       std::optional<qint64> destinationMtime);
     bool chooseRenamedDestination(
         TransferTask &task,
         const std::shared_ptr<openscp::RemoteClient> &workerClient,

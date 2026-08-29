@@ -1,7 +1,9 @@
 // Read-only, data-only model for remote entries.
 #pragma once
 #include "openscp/SftpTypes.hpp"
+
 #include <QAbstractTableModel>
+
 #include <vector>
 
 class RemoteModel : public QAbstractTableModel {
@@ -43,8 +45,7 @@ class RemoteModel : public QAbstractTableModel {
     bool showHidden() const { return showHidden_; }
 
     signals:
-    void rootPathLoaded(const QString &path, bool loadOk,
-                        const QString &error);
+    void rootPathLoaded(const QString &path, bool loadOk, const QString &error);
 
     private:
     QString currentPath_;

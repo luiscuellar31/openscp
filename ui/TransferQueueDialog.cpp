@@ -1,6 +1,8 @@
 // Table with per-task state and actions (pause/resume/retry/clear).
 #include "TransferQueueDialog.hpp"
+
 #include "UiFormatters.hpp"
+
 #include <QAbstractItemView>
 #include <QAbstractTableModel>
 #include <QApplication>
@@ -14,8 +16,8 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QHBoxLayout>
-#include <QHeaderView>
 #include <QHash>
+#include <QHeaderView>
 #include <QInputDialog>
 #include <QLabel>
 #include <QMenu>
@@ -89,9 +91,7 @@ static QString formatEta(int sec) {
     if (hours > 0)
         return QString("%1h %2m").arg(hours).arg(minutes, 2, 10, QChar('0'));
     if (minutes > 0)
-        return QString("%1m %2s")
-            .arg(minutes)
-            .arg(seconds, 2, 10, QChar('0'));
+        return QString("%1m %2s").arg(minutes).arg(seconds, 2, 10, QChar('0'));
     return QString("%1s").arg(seconds);
 }
 
@@ -164,8 +164,7 @@ static void forEachSelectedTask(const QVector<quint64> &ids,
 
 template <typename Callback>
 static void withSelectedTasks(TransferManager *manager,
-                              const QVector<quint64> &ids,
-                              Callback callback) {
+                              const QVector<quint64> &ids, Callback callback) {
     if (ids.isEmpty())
         return;
     // Use one immutable snapshot so all selected operations see the same state.
@@ -297,8 +296,7 @@ class TransferTaskTableModel final : public QAbstractTableModel {
             if (index.column() == ColStatus || index.column() == ColProgress ||
                 index.column() == ColTransferred ||
                 index.column() == ColSpeed || index.column() == ColEta ||
-                index.column() == ColType ||
-                index.column() == ColAttempts) {
+                index.column() == ColType || index.column() == ColAttempts) {
                 return static_cast<int>(Qt::AlignCenter);
             }
             return static_cast<int>(Qt::AlignLeft | Qt::AlignVCenter);
@@ -440,8 +438,7 @@ class TransferTaskTableModel final : public QAbstractTableModel {
     const QVector<TransferTask> &tasks() const { return tasks_; }
 
     private:
-    static bool differs(const TransferTask &prev,
-                        const TransferTask &next) {
+    static bool differs(const TransferTask &prev, const TransferTask &next) {
         return prev.type != next.type || prev.src != next.src ||
                prev.dst != next.dst || prev.status != next.status ||
                prev.progress != next.progress ||
@@ -619,18 +616,17 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
 
     // Default visual order (without changing logical column ids).
     auto *header = table_->horizontalHeader();
-    const QList<int> desiredOrder = {
-        TransferTaskTableModel::ColName,
-        TransferTaskTableModel::ColStatus,
-        TransferTaskTableModel::ColProgress,
-        TransferTaskTableModel::ColTransferred,
-        TransferTaskTableModel::ColSpeed,
-        TransferTaskTableModel::ColEta,
-        TransferTaskTableModel::ColType,
-        TransferTaskTableModel::ColSource,
-        TransferTaskTableModel::ColDestination,
-        TransferTaskTableModel::ColAttempts,
-        TransferTaskTableModel::ColError};
+    const QList<int> desiredOrder = {TransferTaskTableModel::ColName,
+                                     TransferTaskTableModel::ColStatus,
+                                     TransferTaskTableModel::ColProgress,
+                                     TransferTaskTableModel::ColTransferred,
+                                     TransferTaskTableModel::ColSpeed,
+                                     TransferTaskTableModel::ColEta,
+                                     TransferTaskTableModel::ColType,
+                                     TransferTaskTableModel::ColSource,
+                                     TransferTaskTableModel::ColDestination,
+                                     TransferTaskTableModel::ColAttempts,
+                                     TransferTaskTableModel::ColError};
     for (int visual = 0; visual < desiredOrder.size(); ++visual) {
         const int logical = desiredOrder[visual];
         const int currentVisual = header->visualIndex(logical);
@@ -659,8 +655,8 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     badgeErrors_ = makeBadge(tr("Errors: 0"), "#C62828");
     badgeCompleted_ = makeBadge(tr("Completed: 0"), "#2E7D32");
     badgeCanceled_ = makeBadge(tr("Canceled: 0"), "#5D4037");
-    badgeParallel_ = makeBadge(tr("Parallel: %1").arg(mgr_->maxConcurrent()),
-                               "#455A64");
+    badgeParallel_ =
+        makeBadge(tr("Parallel: %1").arg(mgr_->maxConcurrent()), "#455A64");
     badgeLimit_ = makeBadge(tr("Global limit: off"), "#616161");
     hbBadges->addWidget(badgeTotal_);
     hbBadges->addWidget(badgeActive_);
@@ -807,36 +803,32 @@ void TransferQueueDialog::refresh() {
     updateSummary();
 }
 
-void TransferQueueDialog::onTasksAdded(
-    const QVector<quint64> &taskIds) {
+void TransferQueueDialog::onTasksAdded(const QVector<quint64> &taskIds) {
     if (!model_)
         return;
     model_->upsert(mgr_->tasksSnapshot(taskIds));
     updateSummary();
 }
 
-void TransferQueueDialog::onTasksUpdated(
-    const QVector<quint64> &taskIds) {
+void TransferQueueDialog::onTasksUpdated(const QVector<quint64> &taskIds) {
     if (!model_)
         return;
     const auto updated = mgr_->tasksSnapshot(taskIds);
     model_->upsert(updated);
-    const bool hasTerminalUpdate =
-        std::any_of(updated.cbegin(), updated.cend(),
-                    [](const TransferTask &task) {
-                        return task.status == TransferTask::Status::Done ||
-                               task.status == TransferTask::Status::Error ||
-                               task.status == TransferTask::Status::Canceled ||
-                               task.status == TransferTask::Status::Skipped ||
-                               task.status == TransferTask::Status::Warning;
-                    });
+    const bool hasTerminalUpdate = std::any_of(
+        updated.cbegin(), updated.cend(), [](const TransferTask &task) {
+            return task.status == TransferTask::Status::Done ||
+                   task.status == TransferTask::Status::Error ||
+                   task.status == TransferTask::Status::Canceled ||
+                   task.status == TransferTask::Status::Skipped ||
+                   task.status == TransferTask::Status::Warning;
+        });
     if (hasTerminalUpdate)
         maybeAutoClear(model_->tasks());
     updateSummary();
 }
 
-void TransferQueueDialog::onTasksRemoved(
-    const QVector<quint64> &taskIds) {
+void TransferQueueDialog::onTasksRemoved(const QVector<quint64> &taskIds) {
     if (!model_)
         return;
     model_->removeTaskIds(taskIds);
@@ -847,27 +839,35 @@ void TransferQueueDialog::onQueueSettingsChanged() {
     updateSummary();
 }
 
-void TransferQueueDialog::onPause() { mgr_->pauseAll(); }
-void TransferQueueDialog::onResume() { mgr_->resumeAll(); }
-void TransferQueueDialog::onRetry() { mgr_->retryFailed(); }
-void TransferQueueDialog::onClearDone() { mgr_->clearCompleted(); }
+void TransferQueueDialog::onPause() {
+    mgr_->pauseAll();
+}
+void TransferQueueDialog::onResume() {
+    mgr_->resumeAll();
+}
+void TransferQueueDialog::onRetry() {
+    mgr_->retryFailed();
+}
+void TransferQueueDialog::onClearDone() {
+    mgr_->clearCompleted();
+}
 
 void TransferQueueDialog::onPauseSelected() {
     const auto ids = selectedTaskIds();
     withSelectedTasks(mgr_, ids,
                       [this](quint64 taskId, const TransferTask &task) {
-        if (canPauseStatus(task.status))
-            mgr_->pauseTask(taskId);
-    });
+                          if (canPauseStatus(task.status))
+                              mgr_->pauseTask(taskId);
+                      });
 }
 
 void TransferQueueDialog::onResumeSelected() {
     const auto ids = selectedTaskIds();
     withSelectedTasks(mgr_, ids,
                       [this](quint64 taskId, const TransferTask &task) {
-        if (canResumeStatus(task.status))
-            mgr_->resumeTask(taskId);
-    });
+                          if (canResumeStatus(task.status))
+                              mgr_->resumeTask(taskId);
+                      });
 }
 
 void TransferQueueDialog::onApplyGlobalSpeed() {
@@ -902,12 +902,14 @@ void TransferQueueDialog::onStopSelected() {
     const auto ids = selectedTaskIds();
     withSelectedTasks(mgr_, ids,
                       [this](quint64 taskId, const TransferTask &task) {
-        if (canCancelStatus(task.status))
-            mgr_->cancelTask(taskId);
-    });
+                          if (canCancelStatus(task.status))
+                              mgr_->cancelTask(taskId);
+                      });
 }
 
-void TransferQueueDialog::onStopAll() { mgr_->cancelAll(); }
+void TransferQueueDialog::onStopAll() {
+    mgr_->cancelAll();
+}
 
 void TransferQueueDialog::onFilterChanged(int filterId) {
     if (!proxy_)
@@ -923,9 +925,9 @@ void TransferQueueDialog::onRetrySelected() {
     const auto ids = selectedTaskIds();
     withSelectedTasks(mgr_, ids,
                       [this](quint64 taskId, const TransferTask &task) {
-        if (canRetryTask(task))
-            mgr_->retryTask(taskId);
-    });
+                          if (canRetryTask(task))
+                              mgr_->retryTask(taskId);
+                      });
 }
 
 void TransferQueueDialog::onOpenDestination() {
@@ -946,7 +948,8 @@ void TransferQueueDialog::onOpenDestination() {
             if (!parent.isEmpty() && QDir(parent).exists())
                 destinationPath = parent;
         }
-        const QString normalized = QFileInfo(destinationPath).absoluteFilePath();
+        const QString normalized =
+            QFileInfo(destinationPath).absoluteFilePath();
         if (normalized.isEmpty() || opened.contains(normalized))
             return;
         opened.insert(normalized);
@@ -959,8 +962,9 @@ void TransferQueueDialog::onCopySourcePath() {
     if (ids.isEmpty())
         return;
     QStringList lines;
-    withSelectedTasks(mgr_, ids,
-                      [&](quint64, const TransferTask &task) { lines << task.src; });
+    withSelectedTasks(mgr_, ids, [&](quint64, const TransferTask &task) {
+        lines << task.src;
+    });
     if (!lines.isEmpty())
         QGuiApplication::clipboard()->setText(lines.join("\n"));
 }
@@ -970,8 +974,9 @@ void TransferQueueDialog::onCopyDestinationPath() {
     if (ids.isEmpty())
         return;
     QStringList lines;
-    withSelectedTasks(mgr_, ids,
-                      [&](quint64, const TransferTask &task) { lines << task.dst; });
+    withSelectedTasks(mgr_, ids, [&](quint64, const TransferTask &task) {
+        lines << task.dst;
+    });
     if (!lines.isEmpty())
         QGuiApplication::clipboard()->setText(lines.join("\n"));
 }
@@ -1054,8 +1059,7 @@ void TransferQueueDialog::updateSummary() {
     if (badgeCanceled_)
         badgeCanceled_->setText(tr("Canceled: %1").arg(canceled));
     if (badgeParallel_)
-        badgeParallel_->setText(
-            tr("Parallel: %1").arg(mgr_->maxConcurrent()));
+        badgeParallel_->setText(tr("Parallel: %1").arg(mgr_->maxConcurrent()));
 
     const int gkb = mgr_->globalSpeedLimitKBps();
     if (badgeLimit_) {
@@ -1221,18 +1225,19 @@ void TransferQueueDialog::loadUiState() {
     }
 
     suppressAutoClearSignal_ = true;
-    const int defaultAutoMode = qBound(
-        static_cast<int>(AutoClearOff),
-        settings
-            .value("Transfer/defaultQueueAutoClearMode",
-                   static_cast<int>(AutoClearOff))
-            .toInt(),
-        static_cast<int>(AutoClearFinished));
+    const int defaultAutoMode =
+        qBound(static_cast<int>(AutoClearOff),
+               settings
+                   .value("Transfer/defaultQueueAutoClearMode",
+                          static_cast<int>(AutoClearOff))
+                   .toInt(),
+               static_cast<int>(AutoClearFinished));
     const int defaultAutoMin = qBound(
         1, settings.value("Transfer/defaultQueueAutoClearMinutes", 15).toInt(),
         1440);
     const int autoMode =
-        settings.value("UI/transferQueue/autoClearMode", defaultAutoMode).toInt();
+        settings.value("UI/transferQueue/autoClearMode", defaultAutoMode)
+            .toInt();
     const int autoMin =
         settings.value("UI/transferQueue/autoClearMinutes", defaultAutoMin)
             .toInt();
@@ -1290,9 +1295,8 @@ void TransferQueueDialog::maybeAutoClear(
     bool needsCleanup = false;
     // Quick pre-scan avoids manager calls when nothing is eligible yet.
     for (const auto &task : snapshot) {
-        const bool isDone =
-            task.status == TransferTask::Status::Done ||
-            task.status == TransferTask::Status::Skipped;
+        const bool isDone = task.status == TransferTask::Status::Done ||
+                            task.status == TransferTask::Status::Skipped;
         const bool isFailed = (task.status == TransferTask::Status::Error ||
                                task.status == TransferTask::Status::Canceled ||
                                task.status == TransferTask::Status::Warning);
@@ -1304,8 +1308,7 @@ void TransferQueueDialog::maybeAutoClear(
         else if (mode == AutoClearFinished)
             candidate = (isDone || isFailed);
 
-        if (candidate && task.finishedAtMs > 0 &&
-            task.finishedAtMs <= cutoff) {
+        if (candidate && task.finishedAtMs > 0 && task.finishedAtMs <= cutoff) {
             needsCleanup = true;
             break;
         }

@@ -1,5 +1,6 @@
 // Builds the connection form and exposes getters/setters for SessionOptions.
 #include "ConnectionDialog.hpp"
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -12,11 +13,11 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSignalBlocker>
-#include <QtGlobal>
 #include <QSpinBox>
 #include <QTimer>
 #include <QToolButton>
 #include <QWidget>
+#include <QtGlobal>
 
 static void setFormRowVisible(QFormLayout *layout, QWidget *field,
                               bool visible) {
@@ -34,21 +35,17 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     lay->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
     protocol_ = new QComboBox(this);
-    protocol_->addItem(tr("SFTP"),
-                       static_cast<int>(openscp::Protocol::Sftp));
+    protocol_->addItem(tr("SFTP"), static_cast<int>(openscp::Protocol::Sftp));
     protocol_->addItem(tr("SCP"), static_cast<int>(openscp::Protocol::Scp));
     protocol_->addItem(tr("FTP"), static_cast<int>(openscp::Protocol::Ftp));
-    protocol_->addItem(tr("FTPS"),
-                       static_cast<int>(openscp::Protocol::Ftps));
+    protocol_->addItem(tr("FTPS"), static_cast<int>(openscp::Protocol::Ftps));
     protocol_->addItem(tr("WebDAV"),
                        static_cast<int>(openscp::Protocol::WebDav));
     scpMode_ = new QComboBox(this);
-    scpMode_->addItem(
-        tr("Automatic (safe SFTP uploads)"),
-        static_cast<int>(openscp::ScpTransferMode::Auto));
-    scpMode_->addItem(
-        tr("SCP only (uploads are non-atomic)"),
-        static_cast<int>(openscp::ScpTransferMode::ScpOnly));
+    scpMode_->addItem(tr("Automatic (safe SFTP uploads)"),
+                      static_cast<int>(openscp::ScpTransferMode::Auto));
+    scpMode_->addItem(tr("SCP only (uploads are non-atomic)"),
+                      static_cast<int>(openscp::ScpTransferMode::ScpOnly));
     scpMode_->setItemData(
         0,
         tr("Uploads use a temporary remote file and atomic rename through "
@@ -70,8 +67,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
                 .trimmed()
                 .toLower()
                 .toStdString());
-        const int pidx =
-            protocol_->findData(static_cast<int>(defaultProtocol));
+        const int pidx = protocol_->findData(static_cast<int>(defaultProtocol));
         if (pidx >= 0)
             protocol_->setCurrentIndex(pidx);
 
@@ -284,8 +280,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     setSiteNameVisible(false);
     saveSite_ = new QCheckBox(tr("Save to saved sites"), this);
     saveSite_->setChecked(true);
-    saveCredentials_ =
-        new QCheckBox(tr("Save passwords/passphrases"), this);
+    saveCredentials_ = new QCheckBox(tr("Save passwords/passphrases"), this);
     saveCredentials_->setChecked(false);
     lay->addRow(QString(), saveSite_);
     lay->addRow(QString(), saveCredentials_);
@@ -349,8 +344,8 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     integrityPolicy_->addItem(
         tr("Off (not recommended)"),
         static_cast<int>(openscp::TransferIntegrityPolicy::Off));
-    integrityPolicy_->setToolTip(tr(
-        "Checksum verification for resume and final transfer validation."));
+    integrityPolicy_->setToolTip(
+        tr("Checksum verification for resume and final transfer validation."));
     ftpsMode_ = new QComboBox(this);
     ftpsMode_->addItem(tr("Automatic (based on port)"),
                        static_cast<int>(openscp::FtpsMode::Auto));
@@ -383,8 +378,8 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     webDavBasePath_->setMinimumWidth(kInputMinWidth);
     webDavBasePath_->setToolTip(
         tr("Remote paths are confined below this WebDAV collection."));
-    webDavVerifyPeer_ =
-        new QCheckBox(tr("Verify WebDAV server certificate (recommended)"), this);
+    webDavVerifyPeer_ = new QCheckBox(
+        tr("Verify WebDAV server certificate (recommended)"), this);
     webDavCaPath_ = new QLineEdit(this);
     webDavCaPath_->setPlaceholderText(tr("System CA bundle"));
     webDavCaPath_->setMinimumWidth(kInputMinWidth);
@@ -412,21 +407,21 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
 
         int integrityIdx = integrityPolicy_->findData(
             settings
-                .value(
-                    "Security/defaultTransferIntegrityPolicy",
-                    static_cast<int>(openscp::TransferIntegrityPolicy::Optional))
+                .value("Security/defaultTransferIntegrityPolicy",
+                       static_cast<int>(
+                           openscp::TransferIntegrityPolicy::Optional))
                 .toInt());
         if (integrityIdx < 0) {
             integrityIdx = integrityPolicy_->findData(
-                static_cast<int>(
-                    openscp::TransferIntegrityPolicy::Optional));
+                static_cast<int>(openscp::TransferIntegrityPolicy::Optional));
         }
         if (integrityIdx >= 0)
             integrityPolicy_->setCurrentIndex(integrityIdx);
 
         if (ftpsVerifyPeer_) {
             ftpsVerifyPeer_->setChecked(
-                settings.value("Security/ftpsVerifyPeerDefault", true).toBool());
+                settings.value("Security/ftpsVerifyPeerDefault", true)
+                    .toBool());
         }
         if (ftpsCaPath_) {
             ftpsCaPath_->setText(
@@ -436,8 +431,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         }
         if (webDavVerifyPeer_) {
             webDavVerifyPeer_->setChecked(
-                settings
-                    .value("Security/webdavVerifyPeerDefault", true)
+                settings.value("Security/webdavVerifyPeerDefault", true)
                     .toBool());
         }
         if (webDavCaPath_) {
@@ -462,10 +456,9 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     auto updateProxyFields = [this, lay]() {
         const auto type = openscp::normalizeProxyType(
             static_cast<openscp::ProxyType>(proxyType_->currentData().toInt()));
-        const auto protocol = protocol_
-                                  ? static_cast<openscp::Protocol>(
-                                        protocol_->currentData().toInt())
-                                  : openscp::Protocol::Sftp;
+        const auto protocol = protocol_ ? static_cast<openscp::Protocol>(
+                                              protocol_->currentData().toInt())
+                                        : openscp::Protocol::Sftp;
         const auto caps = openscp::capabilitiesForProtocol(protocol);
         const bool showProxyRows =
             caps.supports_proxy && (type != openscp::ProxyType::None);
@@ -513,8 +506,8 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     };
     connect(proxyType_, &QComboBox::currentIndexChanged, this,
             [this, updateProxyFields](int) {
-                const auto type = openscp::normalizeProxyType(
-                    static_cast<openscp::ProxyType>(
+                const auto type =
+                    openscp::normalizeProxyType(static_cast<openscp::ProxyType>(
                         proxyType_->currentData().toInt()));
                 if (type != openscp::ProxyType::None && jumpEnabled_ &&
                     jumpEnabled_->isChecked()) {
@@ -524,10 +517,9 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
             });
 
     auto updateJumpFields = [this, lay]() {
-        const auto protocol = protocol_
-                                  ? static_cast<openscp::Protocol>(
-                                        protocol_->currentData().toInt())
-                                  : openscp::Protocol::Sftp;
+        const auto protocol = protocol_ ? static_cast<openscp::Protocol>(
+                                              protocol_->currentData().toInt())
+                                        : openscp::Protocol::Sftp;
         bool jumpSupported =
             openscp::capabilitiesForProtocol(protocol).supports_jump_host;
 #ifdef Q_OS_WIN
@@ -536,9 +528,8 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         if (!jumpSupported && jumpEnabled_ && jumpEnabled_->isChecked())
             jumpEnabled_->setChecked(false);
 
-        const bool showJumpRows =
-            jumpEnabled_ && jumpEnabled_->isVisible() &&
-            jumpEnabled_->isChecked();
+        const bool showJumpRows = jumpEnabled_ && jumpEnabled_->isVisible() &&
+                                  jumpEnabled_->isChecked();
         setFormRowVisible(lay, jumpHostPortRow_, showJumpRows);
         setFormRowVisible(lay, jumpUser_, showJumpRows);
         setFormRowVisible(lay, jumpKeyPathRow_, showJumpRows);
@@ -555,7 +546,8 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
                 if (checked && proxyType_) {
                     const int directIdx = proxyType_->findData(
                         static_cast<int>(openscp::ProxyType::None));
-                    if (directIdx >= 0 && proxyType_->currentIndex() != directIdx)
+                    if (directIdx >= 0 &&
+                        proxyType_->currentIndex() != directIdx)
                         proxyType_->setCurrentIndex(directIdx);
                 }
                 updateJumpFields();
@@ -563,46 +555,43 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     connect(ftpsMode_, &QComboBox::currentIndexChanged, this, [this](int) {
         if (!protocol_ || !port_ || !ftpsMode_)
             return;
-        const auto protocol = static_cast<openscp::Protocol>(
-            protocol_->currentData().toInt());
+        const auto protocol =
+            static_cast<openscp::Protocol>(protocol_->currentData().toInt());
         const auto selectedMode = openscp::normalizeFtpsMode(
-            static_cast<openscp::FtpsMode>(
-                ftpsMode_->currentData().toInt()));
+            static_cast<openscp::FtpsMode>(ftpsMode_->currentData().toInt()));
         if (protocol == openscp::Protocol::Ftps) {
             if (selectedMode == openscp::FtpsMode::ExplicitTls &&
                 (lastFtpsMode_ == openscp::FtpsMode::ImplicitTls ||
                  port_->value() == 990)) {
                 port_->setValue(21);
             } else if (selectedMode == openscp::FtpsMode::ImplicitTls &&
-                       (lastFtpsMode_ ==
-                            openscp::FtpsMode::ExplicitTls ||
+                       (lastFtpsMode_ == openscp::FtpsMode::ExplicitTls ||
                         port_->value() == 21)) {
                 port_->setValue(990);
             }
         }
         lastFtpsMode_ = selectedMode;
     });
-    connect(webDavScheme_, &QComboBox::currentIndexChanged, this,
-            [this](int) {
-                if (!protocol_ || !port_ || !webDavScheme_)
-                    return;
-                const auto protocol = static_cast<openscp::Protocol>(
-                    protocol_->currentData().toInt());
-                const auto selectedScheme = openscp::normalizeWebDavScheme(
-                    static_cast<openscp::WebDavScheme>(
-                        webDavScheme_->currentData().toInt()));
-                const int previousDefaultPort = static_cast<int>(
-                    openscp::defaultPortForWebDavScheme(lastWebDavScheme_));
-                const int selectedDefaultPort = static_cast<int>(
-                    openscp::defaultPortForWebDavScheme(selectedScheme));
-                if (protocol == openscp::Protocol::WebDav &&
-                    port_->value() == previousDefaultPort &&
-                    previousDefaultPort != selectedDefaultPort) {
-                    port_->setValue(selectedDefaultPort);
-                }
-                lastWebDavScheme_ = selectedScheme;
-                updateProtocolUi(protocol, false);
-            });
+    connect(webDavScheme_, &QComboBox::currentIndexChanged, this, [this](int) {
+        if (!protocol_ || !port_ || !webDavScheme_)
+            return;
+        const auto protocol =
+            static_cast<openscp::Protocol>(protocol_->currentData().toInt());
+        const auto selectedScheme =
+            openscp::normalizeWebDavScheme(static_cast<openscp::WebDavScheme>(
+                webDavScheme_->currentData().toInt()));
+        const int previousDefaultPort = static_cast<int>(
+            openscp::defaultPortForWebDavScheme(lastWebDavScheme_));
+        const int selectedDefaultPort = static_cast<int>(
+            openscp::defaultPortForWebDavScheme(selectedScheme));
+        if (protocol == openscp::Protocol::WebDav &&
+            port_->value() == previousDefaultPort &&
+            previousDefaultPort != selectedDefaultPort) {
+            port_->setValue(selectedDefaultPort);
+        }
+        lastWebDavScheme_ = selectedScheme;
+        updateProtocolUi(protocol, false);
+    });
 
     connect(protocol_, &QComboBox::currentIndexChanged, this,
             [this, updateProxyFields, updateJumpFields](int) {
@@ -614,16 +603,17 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
                 updateProtocolUi(protocol);
                 updateProxyFields();
                 updateJumpFields();
-                if (host_ && previouslyFocused && previouslyFocused != protocol_ &&
+                if (host_ && previouslyFocused &&
+                    previouslyFocused != protocol_ &&
                     previouslyFocused != host_ &&
                     !previouslyFocused->isVisibleTo(this)) {
                     host_->setFocus(Qt::OtherFocusReason);
                 }
             });
     const auto initialProtocol =
-        protocol_ ? static_cast<openscp::Protocol>(
-                        protocol_->currentData().toInt())
-                  : openscp::Protocol::Sftp;
+        protocol_
+            ? static_cast<openscp::Protocol>(protocol_->currentData().toInt())
+            : openscp::Protocol::Sftp;
     updateProtocolUi(initialProtocol);
     updateProxyFields();
     updateJumpFields();
@@ -662,13 +652,11 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
             jumpKeyPath_->setText(selectedPath);
     });
     connect(initialLocalPathBrowse_, &QToolButton::clicked, this, [this] {
-        const QString start =
-            initialLocalPath_->text().trimmed().isEmpty()
-                ? QDir::homePath()
-                : initialLocalPath_->text().trimmed();
-        const QString selectedPath =
-            QFileDialog::getExistingDirectory(this, tr("Select initial local path"),
-                                              start);
+        const QString start = initialLocalPath_->text().trimmed().isEmpty()
+                                  ? QDir::homePath()
+                                  : initialLocalPath_->text().trimmed();
+        const QString selectedPath = QFileDialog::getExistingDirectory(
+            this, tr("Select initial local path"), start);
         if (!selectedPath.isEmpty())
             initialLocalPath_->setText(QDir::cleanPath(selectedPath));
     });
@@ -677,8 +665,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     lay->addRow(dialogButtons);
     connect(dialogButtons, &QDialogButtonBox::accepted, this, &QDialog::accept);
-    connect(dialogButtons, &QDialogButtonBox::rejected, this,
-            &QDialog::reject);
+    connect(dialogButtons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
     // Initial focus to guide users to provide an explicit target host.
     QTimer::singleShot(0, host_, [this] {
@@ -775,19 +762,19 @@ openscp::SessionOptions ConnectionDialog::options() const {
             static_cast<openscp::Protocol>(protocol_->currentData().toInt());
     }
     if (scpMode_) {
-        sessionOptions.scp_transfer_mode = static_cast<openscp::ScpTransferMode>(
-            scpMode_->currentData().toInt());
+        sessionOptions.scp_transfer_mode =
+            static_cast<openscp::ScpTransferMode>(
+                scpMode_->currentData().toInt());
     }
     if (ftpsMode_) {
         sessionOptions.ftps_mode = openscp::normalizeFtpsMode(
-            static_cast<openscp::FtpsMode>(
-                ftpsMode_->currentData().toInt()));
+            static_cast<openscp::FtpsMode>(ftpsMode_->currentData().toInt()));
     }
     if (sessionOptions.protocol != openscp::Protocol::Scp)
         sessionOptions.scp_transfer_mode = openscp::ScpTransferMode::Auto;
     if (webDavScheme_) {
-        sessionOptions.webdav_scheme = openscp::normalizeWebDavScheme(
-            static_cast<openscp::WebDavScheme>(
+        sessionOptions.webdav_scheme =
+            openscp::normalizeWebDavScheme(static_cast<openscp::WebDavScheme>(
                 webDavScheme_->currentData().toInt()));
     }
     if (webDavBasePath_) {
@@ -849,20 +836,22 @@ openscp::SessionOptions ConnectionDialog::options() const {
                          !jumpHost_->text().trimmed().isEmpty();
     const bool useProxy =
         caps.supports_proxy &&
-        (sessionOptions.proxy_type != openscp::ProxyType::None) &&
-        !useJump;
+        (sessionOptions.proxy_type != openscp::ProxyType::None) && !useJump;
     if (useProxy) {
         sessionOptions.proxy_host = proxyHost_->text().trimmed().toStdString();
-        sessionOptions.proxy_port = static_cast<std::uint16_t>(proxyPort_->value());
+        sessionOptions.proxy_port =
+            static_cast<std::uint16_t>(proxyPort_->value());
         if (!proxyUser_->text().isEmpty())
             sessionOptions.proxy_username = proxyUser_->text().toStdString();
         if (!proxyPass_->text().isEmpty())
-            sessionOptions.proxy_password = proxyPass_->text().toUtf8().toStdString();
+            sessionOptions.proxy_password =
+                proxyPass_->text().toUtf8().toStdString();
     }
     if (useJump) {
         sessionOptions.proxy_type = openscp::ProxyType::None;
         sessionOptions.jump_host = jumpHost_->text().trimmed().toStdString();
-        sessionOptions.jump_port = static_cast<std::uint16_t>(jumpPort_->value());
+        sessionOptions.jump_port =
+            static_cast<std::uint16_t>(jumpPort_->value());
         if (!jumpUser_->text().isEmpty())
             sessionOptions.jump_username = jumpUser_->text().toStdString();
         if (!jumpKeyPath_->text().isEmpty())
@@ -926,13 +915,14 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &options) {
         pass_->setText(QString::fromStdString(*options.password));
     if (options.private_key_path && !options.private_key_path->empty())
         keyPath_->setText(QString::fromStdString(*options.private_key_path));
-    if (options.private_key_passphrase && !options.private_key_passphrase->empty())
-        keyPass_->setText(QString::fromStdString(*options.private_key_passphrase));
+    if (options.private_key_passphrase &&
+        !options.private_key_passphrase->empty())
+        keyPass_->setText(
+            QString::fromStdString(*options.private_key_passphrase));
     if (options.known_hosts_path && !options.known_hosts_path->empty())
         khPath_->setText(QString::fromStdString(*options.known_hosts_path));
     // Policy
-    int idx =
-        khPolicy_->findData(static_cast<int>(options.known_hosts_policy));
+    int idx = khPolicy_->findData(static_cast<int>(options.known_hosts_policy));
     if (idx >= 0)
         khPolicy_->setCurrentIndex(idx);
     if (integrityPolicy_) {
@@ -943,8 +933,7 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &options) {
     }
     if (ftpsMode_) {
         const auto mode = openscp::normalizeFtpsMode(options.ftps_mode);
-        const int ftpsModeIndex =
-            ftpsMode_->findData(static_cast<int>(mode));
+        const int ftpsModeIndex = ftpsMode_->findData(static_cast<int>(mode));
         if (ftpsModeIndex >= 0)
             ftpsMode_->setCurrentIndex(ftpsModeIndex);
         lastFtpsMode_ = mode;
@@ -960,9 +949,8 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &options) {
         }
     }
     if (webDavScheme_) {
-        const int webDavSchemeIndex = webDavScheme_->findData(
-            static_cast<int>(
-                openscp::normalizeWebDavScheme(options.webdav_scheme)));
+        const int webDavSchemeIndex = webDavScheme_->findData(static_cast<int>(
+            openscp::normalizeWebDavScheme(options.webdav_scheme)));
         if (webDavSchemeIndex >= 0)
             webDavScheme_->setCurrentIndex(webDavSchemeIndex);
         lastWebDavScheme_ =
@@ -975,7 +963,8 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &options) {
     if (webDavVerifyPeer_)
         webDavVerifyPeer_->setChecked(options.webdav_verify_peer);
     if (webDavCaPath_) {
-        if (options.webdav_ca_cert_path && !options.webdav_ca_cert_path->empty()) {
+        if (options.webdav_ca_cert_path &&
+            !options.webdav_ca_cert_path->empty()) {
             webDavCaPath_->setText(
                 QString::fromStdString(*options.webdav_ca_cert_path));
         } else {
@@ -988,9 +977,8 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &options) {
 #ifdef Q_OS_WIN
     jumpSupportedInUi = false;
 #endif
-    const bool hasJump =
-        jumpSupportedInUi && options.jump_host.has_value() &&
-        !options.jump_host->empty();
+    const bool hasJump = jumpSupportedInUi && options.jump_host.has_value() &&
+                         !options.jump_host->empty();
     const bool proxySupportedInUi = caps.supports_proxy;
     const auto requestedProxyType =
         openscp::normalizeProxyType(options.proxy_type);
@@ -998,8 +986,8 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &options) {
         (!proxySupportedInUi || hasJump) ? openscp::ProxyType::None
                                          : requestedProxyType;
     if (proxyType_) {
-        int proxyTypeIndex = proxyType_->findData(
-            static_cast<int>(effectiveProxyType));
+        int proxyTypeIndex =
+            proxyType_->findData(static_cast<int>(effectiveProxyType));
         if (proxyTypeIndex >= 0)
             proxyType_->setCurrentIndex(proxyTypeIndex);
     }
@@ -1028,7 +1016,8 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &options) {
         jumpPort_->setValue(static_cast<int>(options.jump_port));
     if (options.jump_username && !options.jump_username->empty())
         jumpUser_->setText(QString::fromStdString(*options.jump_username));
-    if (options.jump_private_key_path && !options.jump_private_key_path->empty())
+    if (options.jump_private_key_path &&
+        !options.jump_private_key_path->empty())
         jumpKeyPath_->setText(
             QString::fromStdString(*options.jump_private_key_path));
 }
@@ -1062,14 +1051,14 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol,
             setFormRowVisible(formLayout_, webDavScheme_, isWebDavProtocol);
         }
         if (webDavBasePath_) {
-            setFormRowVisible(formLayout_, webDavBasePath_,
-                              isWebDavProtocol);
+            setFormRowVisible(formLayout_, webDavBasePath_, isWebDavProtocol);
         }
         const bool showWebDavTlsRows =
             isWebDavProtocol &&
             (selectedWebDavScheme == openscp::WebDavScheme::Https);
         if (webDavVerifyPeer_) {
-            setFormRowVisible(formLayout_, webDavVerifyPeer_, showWebDavTlsRows);
+            setFormRowVisible(formLayout_, webDavVerifyPeer_,
+                              showWebDavTlsRows);
         }
         if (webDavCaPathRow_) {
             setFormRowVisible(formLayout_, webDavCaPathRow_, showWebDavTlsRows);
@@ -1098,8 +1087,8 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol,
         std::uint16_t protocolDefaultPort =
             openscp::defaultPortForProtocol(protocol);
         if (protocol == openscp::Protocol::Ftps && ftpsMode_) {
-            const auto mode = openscp::normalizeFtpsMode(
-                static_cast<openscp::FtpsMode>(
+            const auto mode =
+                openscp::normalizeFtpsMode(static_cast<openscp::FtpsMode>(
                     ftpsMode_->currentData().toInt()));
             if (mode == openscp::FtpsMode::ExplicitTls)
                 protocolDefaultPort = 21;
@@ -1113,9 +1102,8 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol,
         port_->setValue(static_cast<int>(protocolDefaultPort));
     }
 
-    const bool sshAuthSupported =
-        (protocol == openscp::Protocol::Sftp ||
-         protocol == openscp::Protocol::Scp);
+    const bool sshAuthSupported = (protocol == openscp::Protocol::Sftp ||
+                                   protocol == openscp::Protocol::Scp);
     if (formLayout_ && keyPathRow_)
         setFormRowVisible(formLayout_, keyPathRow_, sshAuthSupported);
     if (formLayout_ && keyPassRow_)
@@ -1130,8 +1118,8 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol,
 
     if (proxyType_) {
         if (!caps.supports_proxy) {
-            const int directIdx =
-                proxyType_->findData(static_cast<int>(openscp::ProxyType::None));
+            const int directIdx = proxyType_->findData(
+                static_cast<int>(openscp::ProxyType::None));
             if (directIdx >= 0)
                 proxyType_->setCurrentIndex(directIdx);
         }
@@ -1161,8 +1149,7 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol,
         jumpEnabled_->setToolTip(
             jumpSupported ? QString()
                           : tr("Not available for the selected protocol."));
-        const bool showJumpRows =
-            jumpSupported && jumpEnabled_->isChecked();
+        const bool showJumpRows = jumpSupported && jumpEnabled_->isChecked();
         if (formLayout_) {
             setFormRowVisible(formLayout_, jumpHostPortRow_, showJumpRows);
             setFormRowVisible(formLayout_, jumpUser_, showJumpRows);

@@ -1,6 +1,7 @@
 // Site manager: list, add/edit/remove, and select to connect.
 #pragma once
 #include "SiteEntry.hpp"
+
 #include <QDialog>
 #include <QString>
 #include <QVector>

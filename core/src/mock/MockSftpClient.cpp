@@ -1,5 +1,6 @@
 // Mock implementation: maintains a map of predefined paths for listing.
 #include "openscp/MockSftpClient.hpp"
+
 #include <algorithm>
 
 namespace openscp {
@@ -32,7 +33,9 @@ MockSftpClient::newConnectionLike(const SessionOptions &opt, std::string &err) {
     return p;
 }
 
-void MockSftpClient::disconnect() { connected_ = false; }
+void MockSftpClient::disconnect() {
+    connected_ = false;
+}
 
 bool MockSftpClient::list(const std::string &remote_path,
                           std::vector<FileInfo> &out, std::string &err) {

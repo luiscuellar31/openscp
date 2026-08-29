@@ -1,5 +1,6 @@
 // Checkbox UI for user/group/others permissions.
 #include "PermissionsDialog.hpp"
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -126,7 +127,9 @@ unsigned int PermissionsDialog::mode() const {
     return modeValue;
 }
 
-bool PermissionsDialog::recursive() const { return recursive_->isChecked(); }
+bool PermissionsDialog::recursive() const {
+    return recursive_->isChecked();
+}
 
 void PermissionsDialog::updateOctalPreviewAndPreset() {
     const unsigned int modeValue = mode() & 0777;

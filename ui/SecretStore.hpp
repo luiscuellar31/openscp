@@ -3,6 +3,7 @@
 // env var.
 #pragma once
 #include <QString>
+
 #include <optional>
 
 // Minimal secret store abstraction.

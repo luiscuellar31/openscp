@@ -1,6 +1,7 @@
 // Dialog to visualize and manage the transfer queue.
 #pragma once
 #include "TransferManager.hpp"
+
 #include <QDialog>
 
 class QLabel;
@@ -69,9 +70,10 @@ class TransferQueueDialog : public QDialog {
     void maybeAutoClear(const QVector<TransferTask> &snapshot);
     void closeEvent(QCloseEvent *e) override;
 
-    TransferManager *mgr_;                    // source of truth for the queue
-    QTableView *table_ = nullptr;             // view of tasks
-    TransferTaskTableModel *model_ = nullptr; // task model (taskId-based updates)
+    TransferManager *mgr_;        // source of truth for the queue
+    QTableView *table_ = nullptr; // view of tasks
+    TransferTaskTableModel *model_ =
+        nullptr; // task model (taskId-based updates)
     TransferTaskFilterProxyModel *proxy_ = nullptr; // status filter proxy
     QLabel *badgeTotal_ = nullptr;
     QLabel *badgeActive_ = nullptr;

@@ -127,38 +127,34 @@ static bool rename_remote_with_fallback(LIBSSH2_SFTP *sftp,
         long flags;
         const char *name;
     };
-    const std::vector<Attempt> attempts = overwrite
-                                              ? std::vector<Attempt>{
-                                                    {LIBSSH2_SFTP_RENAME_ATOMIC |
-                                                         LIBSSH2_SFTP_RENAME_NATIVE |
-                                                         LIBSSH2_SFTP_RENAME_OVERWRITE,
-                                                     "atomic+native+overwrite"},
-                                                    {LIBSSH2_SFTP_RENAME_ATOMIC |
-                                                         LIBSSH2_SFTP_RENAME_OVERWRITE,
-                                                     "atomic+overwrite"},
-                                                    {LIBSSH2_SFTP_RENAME_NATIVE |
-                                                         LIBSSH2_SFTP_RENAME_OVERWRITE,
-                                                     "native+overwrite"},
-                                                    {LIBSSH2_SFTP_RENAME_OVERWRITE,
-                                                     "overwrite"},
-                                                    {0, "plain"}}
-                                              : std::vector<Attempt>{
-                                                    {LIBSSH2_SFTP_RENAME_ATOMIC |
-                                                         LIBSSH2_SFTP_RENAME_NATIVE,
-                                                     "atomic+native"},
-                                                    {LIBSSH2_SFTP_RENAME_ATOMIC,
-                                                     "atomic"},
-                                                    {LIBSSH2_SFTP_RENAME_NATIVE,
-                                                     "native"},
-                                                    {0, "plain"}};
+    const std::vector<Attempt> attempts =
+        overwrite
+            ? std::vector<Attempt>{{LIBSSH2_SFTP_RENAME_ATOMIC |
+                                        LIBSSH2_SFTP_RENAME_NATIVE |
+                                        LIBSSH2_SFTP_RENAME_OVERWRITE,
+                                    "atomic+native+overwrite"},
+                                   {LIBSSH2_SFTP_RENAME_ATOMIC |
+                                        LIBSSH2_SFTP_RENAME_OVERWRITE,
+                                    "atomic+overwrite"},
+                                   {LIBSSH2_SFTP_RENAME_NATIVE |
+                                        LIBSSH2_SFTP_RENAME_OVERWRITE,
+                                    "native+overwrite"},
+                                   {LIBSSH2_SFTP_RENAME_OVERWRITE, "overwrite"},
+                                   {0, "plain"}}
+            : std::vector<Attempt>{
+                  {LIBSSH2_SFTP_RENAME_ATOMIC | LIBSSH2_SFTP_RENAME_NATIVE,
+                   "atomic+native"},
+                  {LIBSSH2_SFTP_RENAME_ATOMIC, "atomic"},
+                  {LIBSSH2_SFTP_RENAME_NATIVE, "native"},
+                  {0, "plain"}};
 
     int lastRc = 0;
     unsigned long lastSftpErr = 0;
     const char *lastAttempt = "none";
     for (const auto &a : attempts) {
-        const int rc = libssh2_sftp_rename_ex(
-            sftp, from.c_str(), (unsigned)from.size(), to.c_str(),
-            (unsigned)to.size(), a.flags);
+        const int rc =
+            libssh2_sftp_rename_ex(sftp, from.c_str(), (unsigned)from.size(),
+                                   to.c_str(), (unsigned)to.size(), a.flags);
         if (rc == 0)
             return true;
         lastRc = rc;
@@ -181,8 +177,8 @@ static bool rename_remote_with_fallback(LIBSSH2_SFTP *sftp,
     return false;
 }
 
-static bool transfer_cancel_requested(
-    const std::function<bool()> *shouldCancel) {
+static bool
+transfer_cancel_requested(const std::function<bool()> *shouldCancel) {
     return shouldCancel && *shouldCancel && (*shouldCancel)();
 }
 
@@ -194,19 +190,18 @@ static bool ensure_sftp_ready(bool connected, LIBSSH2_SFTP *sftp,
     return false;
 }
 
-static bool fail_if_transfer_canceled(
-    const std::function<bool()> *shouldCancel, std::string &err) {
+static bool fail_if_transfer_canceled(const std::function<bool()> *shouldCancel,
+                                      std::string &err) {
     if (!transfer_cancel_requested(shouldCancel))
         return false;
     err = "Canceled by user";
     return true;
 }
 
-static bool hash_local_range(const std::string &path, std::uint64_t offset,
-                             std::uint64_t length, Sha256Digest &out,
-                             std::string *why,
-                             const std::function<bool()> *shouldCancel =
-                                 nullptr) {
+static bool
+hash_local_range(const std::string &path, std::uint64_t offset,
+                 std::uint64_t length, Sha256Digest &out, std::string *why,
+                 const std::function<bool()> *shouldCancel = nullptr) {
     FILE *f = ::fopen(path.c_str(), "rb");
     if (!f) {
         if (why)
@@ -274,21 +269,20 @@ static bool hash_local_range(const std::string &path, std::uint64_t offset,
     return true;
 }
 
-static bool hash_local_full(const std::string &path, Sha256Digest &out,
-                            std::string *why,
-                            const std::function<bool()> *shouldCancel =
-                                nullptr) {
+static bool
+hash_local_full(const std::string &path, Sha256Digest &out, std::string *why,
+                const std::function<bool()> *shouldCancel = nullptr) {
     std::uint64_t sz = 0;
     if (!get_local_file_size(path, sz, why))
         return false;
     return hash_local_range(path, 0, sz, out, why, shouldCancel);
 }
 
-static bool hash_remote_range(LIBSSH2_SFTP *sftp, const std::string &remote,
-                              std::uint64_t offset, std::uint64_t length,
-                              Sha256Digest &out, std::string *why,
-                              const std::function<bool()> *shouldCancel =
-                                  nullptr) {
+static bool
+hash_remote_range(LIBSSH2_SFTP *sftp, const std::string &remote,
+                  std::uint64_t offset, std::uint64_t length, Sha256Digest &out,
+                  std::string *why,
+                  const std::function<bool()> *shouldCancel = nullptr) {
     LIBSSH2_SFTP_HANDLE *rh =
         libssh2_sftp_open_ex(sftp, remote.c_str(), (unsigned)remote.size(),
                              LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
@@ -324,8 +318,8 @@ static bool hash_remote_range(LIBSSH2_SFTP *sftp, const std::string &remote,
         }
         const std::size_t want =
             (std::size_t)std::min<std::uint64_t>(remain, buf.size());
-        ssize_t n = libssh2_sftp_read(rh, reinterpret_cast<char *>(buf.data()),
-                                      want);
+        ssize_t n =
+            libssh2_sftp_read(rh, reinterpret_cast<char *>(buf.data()), want);
         if (n <= 0) {
             if (why)
                 *why = "Insufficient remote read while hashing";
@@ -356,13 +350,10 @@ static bool hash_remote_range(LIBSSH2_SFTP *sftp, const std::string &remote,
     return true;
 }
 
-static bool hash_remote_full(LIBSSH2_SFTP *sftp, const std::string &remote,
-                             Sha256Digest &out, std::string *why,
-                             const std::function<bool()> *shouldCancel =
-                                 nullptr,
-                             const std::function<void(std::size_t,
-                                                      std::size_t)> *progress =
-                                 nullptr) {
+static bool hash_remote_full(
+    LIBSSH2_SFTP *sftp, const std::string &remote, Sha256Digest &out,
+    std::string *why, const std::function<bool()> *shouldCancel = nullptr,
+    const std::function<void(std::size_t, std::size_t)> *progress = nullptr) {
     LIBSSH2_SFTP_HANDLE *rh =
         libssh2_sftp_open_ex(sftp, remote.c_str(), (unsigned)remote.size(),
                              LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
@@ -386,9 +377,8 @@ static bool hash_remote_full(LIBSSH2_SFTP *sftp, const std::string &remote,
         return false;
     }
     LIBSSH2_SFTP_ATTRIBUTES attributes{};
-    const bool hasTotal =
-        libssh2_sftp_fstat_ex(rh, &attributes, 0) == 0 &&
-        (attributes.flags & LIBSSH2_SFTP_ATTR_SIZE) != 0;
+    const bool hasTotal = libssh2_sftp_fstat_ex(rh, &attributes, 0) == 0 &&
+                          (attributes.flags & LIBSSH2_SFTP_ATTR_SIZE) != 0;
     const std::size_t total =
         hasTotal ? static_cast<std::size_t>(attributes.filesize) : 0;
     std::size_t done = 0;
@@ -460,8 +450,8 @@ static bool verify_final_transfer_integrity(
     if (!localOk || !remoteOk) {
         if (policy != TransferIntegrityPolicy::Required)
             return true;
-        err = std::string("Could not verify final integrity (") +
-              transferKind + "): " + hashErr;
+        err = std::string("Could not verify final integrity (") + transferKind +
+              "): " + hashErr;
         return false;
     }
     if (localDigest != remoteDigest) {

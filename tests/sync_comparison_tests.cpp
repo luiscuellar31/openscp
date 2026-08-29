@@ -256,8 +256,7 @@ void testChecksumComparison(TestContext &test) {
     remote.size = local.size;
     remote.modifiedMs = local.modifiedMs;
     remote.checksum = QByteArrayLiteral("different");
-    const auto mismatch =
-        SyncComparisonEngine::compare({local}, {remote});
+    const auto mismatch = SyncComparisonEngine::compare({local}, {remote});
     test.check(mismatch.size() == 1 &&
                    mismatch.front().action == SyncAction::Conflict,
                "different checksums with equivalent metadata should be a "

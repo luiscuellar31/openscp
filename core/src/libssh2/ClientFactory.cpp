@@ -40,7 +40,7 @@ std::unique_ptr<RemoteClient> CreateClientForProtocol(Protocol protocol) {
 }
 
 std::unique_ptr<RemoteClient> CreateConnectedClient(const SessionOptions &opt,
-                                                     std::string &err) {
+                                                    std::string &err) {
     err.clear();
     auto client = CreateClientForProtocol(opt.protocol);
     if (!client) {

@@ -123,8 +123,9 @@ int main() {
         parseBool(envValue("OPENSCP_IT_WEBDAV_VERIFY_PEER"), true);
 
     if (!host.has_value() || !remoteBase.has_value()) {
-        std::cout << "[SKIP] openscp_webdav_integration_tests requires "
-                  << "OPENSCP_IT_WEBDAV_HOST and OPENSCP_IT_WEBDAV_REMOTE_BASE\n";
+        std::cout
+            << "[SKIP] openscp_webdav_integration_tests requires "
+            << "OPENSCP_IT_WEBDAV_HOST and OPENSCP_IT_WEBDAV_REMOTE_BASE\n";
         return kSkipExitCode;
     }
 
@@ -149,8 +150,9 @@ int main() {
     opt.username = user.value_or("");
     if (pass.has_value())
         opt.password = pass;
-    opt.webdav_verify_peer =
-        (opt.webdav_scheme == openscp::WebDavScheme::Https) ? verifyPeer : false;
+    opt.webdav_verify_peer = (opt.webdav_scheme == openscp::WebDavScheme::Https)
+                                 ? verifyPeer
+                                 : false;
     if (caCert.has_value())
         opt.webdav_ca_cert_path = *caCert;
 
@@ -180,8 +182,7 @@ int main() {
     const fs::path localUpload = tempDir / "upload.txt";
     const fs::path localDownload = tempDir / "download.txt";
     const fs::path canceledDownload = tempDir / "canceled.txt";
-    const fs::path boundaryCanceledDownload =
-        tempDir / "boundary-canceled.txt";
+    const fs::path boundaryCanceledDownload = tempDir / "boundary-canceled.txt";
     fs::create_directories(tempDir);
 
     const std::string payload =
@@ -193,8 +194,7 @@ int main() {
     const std::string remoteFileName = "upload file.txt";
     const std::string renamedFileName = "renamed file.txt";
     const std::string remotePath = joinRemotePath(remoteDir, remoteFileName);
-    const std::string renamedPath =
-        joinRemotePath(remoteDir, renamedFileName);
+    const std::string renamedPath = joinRemotePath(remoteDir, renamedFileName);
     const std::string canceledUploadPath =
         joinRemotePath(remoteDir, "canceled upload.txt");
 
@@ -208,13 +208,14 @@ int main() {
 
     bool uploadProgressCalled = false;
     err.clear();
-    t.check(client->put(localUpload.string(), remotePath, err,
-                        [&](std::size_t done, std::size_t total) {
-                            (void)done;
-                            (void)total;
-                            uploadProgressCalled = true;
-                        },
-                        {}, false),
+    t.check(client->put(
+                localUpload.string(), remotePath, err,
+                [&](std::size_t done, std::size_t total) {
+                    (void)done;
+                    (void)total;
+                    uploadProgressCalled = true;
+                },
+                {}, false),
             std::string("WebDAV upload should succeed: ") + err);
     t.check(uploadProgressCalled, "upload progress callback should be called");
 
@@ -231,13 +232,14 @@ int main() {
 
     bool downloadProgressCalled = false;
     err.clear();
-    t.check(client->get(renamedPath, localDownload.string(), err,
-                        [&](std::size_t done, std::size_t total) {
-                            (void)done;
-                            (void)total;
-                            downloadProgressCalled = true;
-                        },
-                        {}, false),
+    t.check(client->get(
+                renamedPath, localDownload.string(), err,
+                [&](std::size_t done, std::size_t total) {
+                    (void)done;
+                    (void)total;
+                    downloadProgressCalled = true;
+                },
+                {}, false),
             std::string("WebDAV download should succeed: ") + err);
     t.check(downloadProgressCalled,
             "download progress callback should be called");
@@ -250,8 +252,9 @@ int main() {
     t.check(writeFile(canceledDownload, "keep existing destination"),
             "should prepare existing WebDAV destination");
     err.clear();
-    t.check(!client->get(renamedPath, canceledDownload.string(), err, {},
-                         [] { return true; }, false),
+    t.check(!client->get(
+                renamedPath, canceledDownload.string(), err, {},
+                [] { return true; }, false),
             "canceled WebDAV download should fail");
     std::string preserved;
     t.check(readFile(canceledDownload, preserved) &&
@@ -264,16 +267,15 @@ int main() {
             "should prepare a boundary-cancel WebDAV destination");
     std::atomic<bool> cancelFinishedDownload{false};
     err.clear();
-    t.check(
-        !client->get(
-            renamedPath, boundaryCanceledDownload.string(), err,
-            [&](std::size_t done, std::size_t total) {
-                (void)total;
-                if (done >= payload.size())
-                    cancelFinishedDownload.store(true);
-            },
-            [&] { return cancelFinishedDownload.load(); }, false),
-        "WebDAV cancellation at completion should prevent final replace");
+    t.check(!client->get(
+                renamedPath, boundaryCanceledDownload.string(), err,
+                [&](std::size_t done, std::size_t total) {
+                    (void)total;
+                    if (done >= payload.size())
+                        cancelFinishedDownload.store(true);
+                },
+                [&] { return cancelFinishedDownload.load(); }, false),
+            "WebDAV cancellation at completion should prevent final replace");
     preserved.clear();
     t.check(readFile(boundaryCanceledDownload, preserved) &&
                 preserved == "keep boundary destination",
@@ -283,22 +285,22 @@ int main() {
 
     std::atomic<bool> cancelFinishedUpload{false};
     err.clear();
-    t.check(
-        !client->put(
-            localUpload.string(), canceledUploadPath, err,
-            [&](std::size_t done, std::size_t total) {
-                (void)total;
-                if (done >= payload.size())
-                    cancelFinishedUpload.store(true);
-            },
-            [&] { return cancelFinishedUpload.load(); }, false),
-        "WebDAV cancellation at upload completion should prevent MOVE");
+    t.check(!client->put(
+                localUpload.string(), canceledUploadPath, err,
+                [&](std::size_t done, std::size_t total) {
+                    (void)total;
+                    if (done >= payload.size())
+                        cancelFinishedUpload.store(true);
+                },
+                [&] { return cancelFinishedUpload.load(); }, false),
+            "WebDAV cancellation at upload completion should prevent MOVE");
     bool canceledUploadIsDir = false;
     err.clear();
     const bool canceledUploadExists =
         client->exists(canceledUploadPath, canceledUploadIsDir, err);
-    t.check(!canceledUploadExists && err.empty(),
-            "late-canceled WebDAV upload must not publish the final destination");
+    t.check(
+        !canceledUploadExists && err.empty(),
+        "late-canceled WebDAV upload must not publish the final destination");
     if (canceledUploadExists) {
         err.clear();
         (void)client->removeFile(canceledUploadPath, err);
@@ -313,8 +315,7 @@ int main() {
     if (canceledPartialExists) {
         err.clear();
         t.check(client->removeFile(canceledUploadPartial, err),
-                std::string(
-                    "WebDAV canceled upload partial cleanup failed: ") +
+                std::string("WebDAV canceled upload partial cleanup failed: ") +
                     err);
     }
 

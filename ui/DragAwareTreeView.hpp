@@ -52,11 +52,10 @@ class DragAwareTreeView : public QTreeView {
     bool enforceRemoteDragThreshold();
     struct RemoteDragStagingState;
     void startRemoteDragStaging(QVector<RemoteDragTarget> targets,
-                                QStringList directories,
-                                QStringList dragRoots,
+                                QStringList directories, QStringList dragRoots,
                                 const RemoteDragBatchStats &stats);
-    void pumpRemoteDragStaging(
-        const std::shared_ptr<RemoteDragStagingState> &state);
+    void
+    pumpRemoteDragStaging(const std::shared_ptr<RemoteDragStagingState> &state);
     void reconcileRemoteDragTasks(
         const std::shared_ptr<RemoteDragStagingState> &state,
         const QVector<quint64> &taskIds, bool removed);
@@ -79,7 +78,7 @@ class DragAwareTreeView : public QTreeView {
     QString buildStagingRoot() const;
 
     // State
-    QPointer<TransferManager> transferMgr_; // not owned
+    QPointer<TransferManager> transferMgr_;         // not owned
     QPointer<RemoteOperationController> remoteOps_; // not owned
     QWidget *overlay_ = nullptr;           // owned by this (viewport child)
     class QLabel *overlayLabel_ = nullptr; // non-owning (child of overlay_)

@@ -1,5 +1,6 @@
 // Shared internal helpers for libcurl-based backends (FTP/WebDAV).
 #include "CurlBackendCommon.hpp"
+
 #include "../common/SafeLocalFile.hpp"
 
 #include <algorithm>
@@ -32,9 +33,8 @@ bool ensureCurlInitialized(std::string &err) {
     static std::once_flag initFlag;
     static CURLcode initResult = CURLE_OK;
     // libcurl global init is process-wide and must run exactly once.
-    std::call_once(initFlag, [] {
-        initResult = curl_global_init(CURL_GLOBAL_DEFAULT);
-    });
+    std::call_once(initFlag,
+                   [] { initResult = curl_global_init(CURL_GLOBAL_DEFAULT); });
     if (initResult != CURLE_OK) {
         err = std::string("libcurl initialization failed: ") +
               curl_easy_strerror(initResult);
@@ -119,9 +119,8 @@ bool validateUrlHost(const std::string &host, const char *fieldLabel,
     }
 
     const auto forbiddenAuthorityCharacter = [](const unsigned char ch) {
-        return ch < 0x20 || ch == 0x7f || std::isspace(ch) != 0 ||
-               ch == '/' || ch == '\\' || ch == '@' || ch == '?' ||
-               ch == '#';
+        return ch < 0x20 || ch == 0x7f || std::isspace(ch) != 0 || ch == '/' ||
+               ch == '\\' || ch == '@' || ch == '?' || ch == '#';
     };
     if (std::any_of(host.begin(), host.end(), forbiddenAuthorityCharacter)) {
         err = label + " contains a forbidden URL authority character.";
@@ -154,8 +153,8 @@ bool validateUrlHost(const std::string &host, const char *fieldLabel,
     const std::size_t firstColon = host.find(':');
     if (firstColon != std::string::npos &&
         host.find(':', firstColon + 1) == std::string::npos) {
-        err = label +
-              " must not include a port; use the separate port setting.";
+        err =
+            label + " must not include a port; use the separate port setting.";
         return false;
     }
     if (firstColon == std::string::npos &&
@@ -194,8 +193,7 @@ std::string ftpCommandPath(const std::string &loginRoot,
     while (root.size() > 1 && root.back() == '/')
         root.pop_back();
 
-    std::string logical =
-        logicalPath.empty() ? std::string("/") : logicalPath;
+    std::string logical = logicalPath.empty() ? std::string("/") : logicalPath;
     if (logical.front() != '/')
         logical.insert(logical.begin(), '/');
     if (root == "/")
@@ -238,9 +236,8 @@ std::string encodeUrlPath(const std::string &path) {
     std::string out;
     out.reserve(path.size());
     for (const unsigned char c : path) {
-        const bool unreserved =
-            std::isalnum(c) != 0 || c == '-' || c == '.' || c == '_' ||
-            c == '~' || c == '/';
+        const bool unreserved = std::isalnum(c) != 0 || c == '-' || c == '.' ||
+                                c == '_' || c == '~' || c == '/';
         if (unreserved) {
             out.push_back(static_cast<char>(c));
         } else {
@@ -265,8 +262,8 @@ bool atomicReplaceLocalFile(const std::string &partial,
     return localfiles::atomicReplace(partial, destination, err);
 }
 
-RemoteError errorFromCurl(CURLcode code, std::string message,
-                          long responseCode, bool commitUncertain) {
+RemoteError errorFromCurl(CURLcode code, std::string message, long responseCode,
+                          bool commitUncertain) {
     RemoteError error;
     error.message = std::move(message);
     error.native_code =
@@ -341,10 +338,9 @@ RemoteError errorFromCurl(CURLcode code, std::string message,
         break;
     }
     error.commit_uncertain =
-        commitUncertain &&
-        (error.kind == RemoteErrorKind::Connection ||
-         error.kind == RemoteErrorKind::Timeout ||
-         error.kind == RemoteErrorKind::RemoteIo);
+        commitUncertain && (error.kind == RemoteErrorKind::Connection ||
+                            error.kind == RemoteErrorKind::Timeout ||
+                            error.kind == RemoteErrorKind::RemoteIo);
     return error;
 }
 
@@ -365,8 +361,7 @@ RemoteError errorFromHttpStatus(long statusCode, std::string message,
     } else if (statusCode == 408 || statusCode == 504) {
         error.kind = RemoteErrorKind::Timeout;
         error.transient = true;
-    } else if (statusCode == 409 || statusCode == 412 ||
-               statusCode == 423) {
+    } else if (statusCode == 409 || statusCode == 412 || statusCode == 423) {
         error.kind = RemoteErrorKind::Conflict;
     } else if (statusCode == 429) {
         error.kind = RemoteErrorKind::RateLimited;
@@ -427,9 +422,8 @@ bool configureProxy(CURL *curl, const SessionOptions &opt,
     }
     if (!validateUrlHost(opt.proxy_host, "Proxy host", err))
         return false;
-    const std::string proxy =
-        normalizeHostAuthorityForUrl(opt.proxy_host) + ":" +
-        std::to_string(opt.proxy_port);
+    const std::string proxy = normalizeHostAuthorityForUrl(opt.proxy_host) +
+                              ":" + std::to_string(opt.proxy_port);
     if (curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str()) != CURLE_OK) {
         err = std::string("Could not configure ") + backendLabel +
               " proxy endpoint.";
@@ -452,13 +446,14 @@ bool configureProxy(CURL *curl, const SessionOptions &opt,
         return false;
     }
     if (curl_easy_setopt(curl, CURLOPT_PROXYTYPE, proxyType) != CURLE_OK) {
-        err = std::string("Could not configure ") + backendLabel + " proxy type.";
+        err =
+            std::string("Could not configure ") + backendLabel + " proxy type.";
         return false;
     }
     if (curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL,
-                         (normalizedProxyType == ProxyType::HttpConnect) ? 1L
-                                                                          : 0L) !=
-        CURLE_OK) {
+                         (normalizedProxyType == ProxyType::HttpConnect)
+                             ? 1L
+                             : 0L) != CURLE_OK) {
         err = std::string("Could not configure ") + backendLabel +
               " proxy tunnel mode.";
         return false;
@@ -547,8 +542,9 @@ size_t readFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
     return std::fread(ptr, 1, total, file);
 }
 
-int transferProgressCallback(void *userdata, curl_off_t dltotal, curl_off_t dlnow,
-                             curl_off_t ultotal, curl_off_t ulnow) {
+int transferProgressCallback(void *userdata, curl_off_t dltotal,
+                             curl_off_t dlnow, curl_off_t ultotal,
+                             curl_off_t ulnow) {
     auto *ctx = static_cast<TransferProgressContext *>(userdata);
     if (!ctx)
         return 0;
@@ -562,12 +558,11 @@ int transferProgressCallback(void *userdata, curl_off_t dltotal, curl_off_t dlno
     const bool preferUpload = ctx->preferUploadCounters;
     // Some protocols only report one side reliably; pick preferred counters
     // and fallback to the opposite side when needed.
-    const curl_off_t totalRaw =
-        preferUpload ? ((ultotal > 0) ? ultotal : dltotal)
-                     : ((dltotal > 0) ? dltotal : ultotal);
-    const curl_off_t doneRaw =
-        preferUpload ? ((ulnow > 0) ? ulnow : dlnow)
-                     : ((dlnow > 0) ? dlnow : ulnow);
+    const curl_off_t totalRaw = preferUpload
+                                    ? ((ultotal > 0) ? ultotal : dltotal)
+                                    : ((dltotal > 0) ? dltotal : ultotal);
+    const curl_off_t doneRaw = preferUpload ? ((ulnow > 0) ? ulnow : dlnow)
+                                            : ((dlnow > 0) ? dlnow : ulnow);
     const std::size_t total =
         totalRaw > 0 ? static_cast<std::size_t>(totalRaw) : 0u;
     const std::size_t done =

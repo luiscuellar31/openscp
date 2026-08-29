@@ -1,6 +1,6 @@
 // SecretStore implementation: Keychain (macOS), Libsecret (Linux), or optional
 // fallback with QSettings.
-#define QT_NO_KEYWORDS //error GDBusSignalInfo  **signals macros
+#define QT_NO_KEYWORDS // error GDBusSignalInfo  **signals macros
 #include "SecretStore.hpp"
 #if defined(HAVE_LIBSECRET)
 #include <libsecret/secret.h>
@@ -9,6 +9,7 @@
 #include <QSettings>
 #include <QString>
 #include <QVariant>
+
 #include <cstdlib>
 #include <limits>
 
@@ -196,7 +197,9 @@ void SecretStore::removeSecret(const QString &key) {
         CFRelease(account);
 }
 
-bool SecretStore::insecureFallbackActive() { return false; }
+bool SecretStore::insecureFallbackActive() {
+    return false;
+}
 
 #elif defined(HAVE_LIBSECRET) // Linux with Libsecret/Secret Service
 
@@ -233,9 +236,8 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
 std::optional<QString> SecretStore::getSecret(const QString &key) const {
     QByteArray keyUtf8 = key.toUtf8();
     GError *gerr = nullptr;
-    gchar *pw = secret_password_lookup_sync(openscp_schema(), nullptr, &gerr,
-                                            "key", keyUtf8.constData(),
-                                            nullptr);
+    gchar *pw = secret_password_lookup_sync(
+        openscp_schema(), nullptr, &gerr, "key", keyUtf8.constData(), nullptr);
     if (!pw) {
         if (gerr)
             g_error_free(gerr);

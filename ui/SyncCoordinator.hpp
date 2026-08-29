@@ -43,7 +43,7 @@ Q_DECLARE_METATYPE(SyncChecksumResult)
 class SyncCoordinator final : public QObject {
     Q_OBJECT
 
-  public:
+    public:
     explicit SyncCoordinator(RemoteOperationController *remoteOperations,
                              TransferManager *transfers,
                              QObject *parent = nullptr);
@@ -62,30 +62,26 @@ class SyncCoordinator final : public QObject {
 
     // Enqueues a complete execution plan as one persistent, ordered batch.
     // Returns its batch ID, or zero when no work was accepted.
-    quint64 enqueuePlan(const SyncExecutionPlan &plan,
-                        const QString &localRoot,
-                        const QString &remoteRoot,
-                        const QString &sessionKey,
+    quint64 enqueuePlan(const SyncExecutionPlan &plan, const QString &localRoot,
+                        const QString &remoteRoot, const QString &sessionKey,
                         qsizetype *taskCountOut = nullptr);
 
-  signals:
+    signals:
     void progressChanged(quint64 itemCount, quint64 knownBytes,
                          const QString &currentPath);
     void preparationReady(const SyncPreparationResult &result);
     void preparationFailed(const QString &message);
     void preparationCanceled();
-    void largeTreeConfirmationRequired(quint64 itemCount,
-                                       quint64 knownBytes);
+    void largeTreeConfirmationRequired(quint64 itemCount, quint64 knownBytes);
     void checksumProgressChanged(qsizetype completedChecksums,
                                  qsizetype totalChecksums,
                                  const QString &currentPath,
-                                 quint64 processedBytes,
-                                 quint64 totalBytes);
+                                 quint64 processedBytes, quint64 totalBytes);
     void checksumReady(const SyncChecksumResult &result);
     void checksumFailed(const QString &message);
     void checksumCanceled();
 
-  private:
+    private:
     struct PreparationState;
     struct ChecksumState;
 

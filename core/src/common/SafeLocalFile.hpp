@@ -19,7 +19,7 @@ bool flushAndSync(std::FILE *file, std::string &error);
 
 // Atomically publishes a sibling temporary/partial file and durably syncs the
 // parent directory where the platform supports it.
-bool atomicReplace(const std::string &temporary,
-                   const std::string &destination, std::string &error);
+bool atomicReplace(const std::string &temporary, const std::string &destination,
+                   std::string &error);
 
 } // namespace openscp::localfiles

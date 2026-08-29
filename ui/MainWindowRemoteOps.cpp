@@ -45,9 +45,9 @@ static QString tempDownloadPathFor(const QString &remoteName) {
 
 void MainWindow::goUpRight() {
     if (rightIsRemote_) {
-        QString cur = rightRemoteModel_ ? rightRemoteModel_->rootPath()
-                                        : (rightPath_ ? rightPath_->text()
-                                                      : QString());
+        QString cur = rightRemoteModel_
+                          ? rightRemoteModel_->rootPath()
+                          : (rightPath_ ? rightPath_->text() : QString());
         cur = normalizeRemotePath(cur);
         if (cur == "/" || cur.isEmpty())
             return;
@@ -68,7 +68,8 @@ void MainWindow::goUpRight() {
 
 void MainWindow::goHomeRight() {
     if (rightIsRemote_) {
-        // SFTP does not provide a portable remote HOME query; use root fallback.
+        // SFTP does not provide a portable remote HOME query; use root
+        // fallback.
         setRightRemoteRoot(QStringLiteral("/"));
     } else {
         setRightRoot(preferredLocalHomePath());
@@ -78,12 +79,14 @@ void MainWindow::goHomeRight() {
 
 void MainWindow::openRightRemoteTerminal() {
     if (!rightIsRemote_ || !sessionController_->options().has_value()) {
-        UiAlerts::information(this, tr("Open in terminal"),
-                              tr("The right panel must be connected as remote."));
+        UiAlerts::information(
+            this, tr("Open in terminal"),
+            tr("The right panel must be connected as remote."));
         return;
     }
 
-    const openscp::SessionOptions &sessionOptions = *sessionController_->options();
+    const openscp::SessionOptions &sessionOptions =
+        *sessionController_->options();
     const QString remotePath = normalizeRemotePath(
         rightRemoteModel_ ? rightRemoteModel_->rootPath()
                           : (rightPath_ ? rightPath_->text() : QString()));
@@ -96,30 +99,27 @@ void MainWindow::openRightRemoteTerminal() {
     const openscpui::TerminalCommandBuilder terminalCommands;
     const openscpui::TerminalCommandResult command =
         terminalCommands.prepare(sessionOptions, remotePath,
-                                 forceInteractiveLogin,
-                                 enableSftpCliFallback);
+                                 forceInteractiveLogin, enableSftpCliFallback);
     if (!command.isValid()) {
-        UiAlerts::warning(
-            this, tr("Open in terminal"),
-            tr("Could not prepare the terminal command.\n%1")
-                .arg(command.error.isEmpty() ? tr("Unknown error.")
-                                             : command.error));
+        UiAlerts::warning(this, tr("Open in terminal"),
+                          tr("Could not prepare the terminal command.\n%1")
+                              .arg(command.error.isEmpty()
+                                       ? tr("Unknown error.")
+                                       : command.error));
         return;
     }
 
     QString launchError;
     if (!terminalCommands.launch(command.command, &launchError)) {
-        UiAlerts::warning(
-            this, tr("Open in terminal"),
-            tr("Could not open a remote terminal.\n%1")
-                .arg(launchError.isEmpty() ? tr("Unknown error.")
-                                           : launchError));
+        UiAlerts::warning(this, tr("Open in terminal"),
+                          tr("Could not open a remote terminal.\n%1")
+                              .arg(launchError.isEmpty() ? tr("Unknown error.")
+                                                         : launchError));
         return;
     }
 
-    const bool hasPrivateKey =
-        sessionOptions.private_key_path.has_value() &&
-        !sessionOptions.private_key_path->empty();
+    const bool hasPrivateKey = sessionOptions.private_key_path.has_value() &&
+                               !sessionOptions.private_key_path->empty();
     const bool hasSavedPassword = sessionOptions.password.has_value() &&
                                   !sessionOptions.password->empty() &&
                                   !hasPrivateKey;
@@ -202,10 +202,9 @@ void MainWindow::requestRemoteListing(const QString &path, bool refresh,
     rightPath_->setText(normalized);
     refreshRightBreadcrumbs();
     rightView_->setEnabled(false);
-    statusBar()->showMessage(
-        refresh ? tr("Refreshing remote folder…")
-                : tr("Opening remote folder…"),
-        0);
+    statusBar()->showMessage(refresh ? tr("Refreshing remote folder…")
+                                     : tr("Opening remote folder…"),
+                             0);
 
     RemoteOperationController::ListRequest request;
     request.path = normalized;
@@ -231,7 +230,8 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
         return;
     if (rightRemoteModel_->isDir(idx)) {
         const QString name = rightRemoteModel_->nameAt(idx);
-        const QString next = joinRemotePath(rightRemoteModel_->rootPath(), name);
+        const QString next =
+            joinRemotePath(rightRemoteModel_->rootPath(), name);
         setRightRemoteRoot(next);
         return;
     }
@@ -251,9 +251,8 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
     bool alreadyActive = false;
     {
         const auto tasks = transferMgr_->tasksSnapshot();
-        alreadyActive = hasActiveTransferTask(tasks,
-                                              TransferTask::Type::Download,
-                                              remotePath, localPath);
+        alreadyActive = hasActiveTransferTask(
+            tasks, TransferTask::Type::Download, remotePath, localPath);
     }
     if (!alreadyActive) {
         // Enqueue download so it appears in the queue (instead of direct
@@ -302,7 +301,7 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
 void MainWindow::downloadRightToLeft() {
     if (!rightIsRemote_) {
         UiAlerts::information(this, tr("Download"),
-                                 tr("The right panel is not remote."));
+                              tr("The right panel is not remote."));
         return;
     }
     if (!sessionController_->client()) {
@@ -318,7 +317,7 @@ void MainWindow::downloadRightToLeft() {
     QDir dst(downloadDir_);
     if (!dst.exists()) {
         UiAlerts::warning(this, tr("Invalid destination"),
-                             tr("Destination folder does not exist."));
+                          tr("Destination folder does not exist."));
         return;
     }
     if (isScpTransferMode()) {
@@ -350,8 +349,8 @@ void MainWindow::downloadRightToLeft() {
                                  4000);
         maybeShowTransferQueue();
         const int slash = remotePath.lastIndexOf('/');
-        const QString parent = (slash <= 0) ? QStringLiteral("/")
-                                            : remotePath.left(slash);
+        const QString parent =
+            (slash <= 0) ? QStringLiteral("/") : remotePath.left(slash);
         setRightRemoteRoot(parent);
         return;
     }
@@ -370,7 +369,7 @@ void MainWindow::downloadRightToLeft() {
             rows << rightRemoteModel_->index(rowIndex, NAME_COL);
         if (rows.isEmpty()) {
             UiAlerts::information(this, tr("Download"),
-                                     tr("Nothing to download."));
+                                  tr("Nothing to download."));
             return;
         }
     }
@@ -389,8 +388,7 @@ void MainWindow::downloadRightToLeft() {
         }
         const QString remotePath = joinRemotePath(remoteBase, name);
         const QString localPath = dst.filePath(name);
-        seeds.push_back(
-            {remotePath, localPath, rightRemoteModel_->isDir(idx)});
+        seeds.push_back({remotePath, localPath, rightRemoteModel_->isDir(idx)});
     }
     runRemoteDownloadPrescan(seeds, skippedInvalidCount, false);
 }
@@ -535,8 +533,8 @@ void MainWindow::moveRightToLeft() {
 
     auto maybeStartCleanup = std::make_shared<std::function<void()>>();
     *maybeStartCleanup = [this, state] {
-        if (!state->scanFinished || state->cleanupStarted ||
-            state->canceled || !transferMgr_ || !remoteOps_) {
+        if (!state->scanFinished || state->cleanupStarted || state->canceled ||
+            !transferMgr_ || !remoteOps_) {
             if (state->scanFinished && state->canceled)
                 QObject::disconnect(state->transferConnection);
             return;
@@ -563,8 +561,8 @@ void MainWindow::moveRightToLeft() {
 
         state->cleanupConnection = connect(
             remoteOps_, &RemoteOperationController::mutationCompleted, this,
-            [this, state](
-                const RemoteOperationController::MutationResult &result) {
+            [this,
+             state](const RemoteOperationController::MutationResult &result) {
                 if (!state->cleanupPending.remove(result.result.job.id))
                     return;
                 if (!state->cleanupPending.isEmpty())
@@ -573,12 +571,10 @@ void MainWindow::moveRightToLeft() {
                 if (rightIsRemote_ && rightRemoteModel_)
                     requestRemoteListing(state->remoteBase, true);
             });
-        for (const QString &remoteDirectory :
-             state->topRemoteDirectories) {
+        for (const QString &remoteDirectory : state->topRemoteDirectories) {
             RemoteOperationController::DeleteRequest request;
             request.path = remoteDirectory;
-            request.kind =
-                RemoteOperationController::DeleteKind::Directory;
+            request.kind = RemoteOperationController::DeleteKind::Directory;
             request.recursive = true;
             request.traversal.includeHidden = true;
             request.traversal.skipSymlinks = true;
@@ -594,14 +590,14 @@ void MainWindow::moveRightToLeft() {
                 requestRemoteListing(state->remoteBase, true);
         }
     };
-    state->transferConnection = connect(
-        transferMgr_, &TransferManager::tasksUpdated, this,
-        [maybeStartCleanup](const QVector<quint64> &) {
-            (*maybeStartCleanup)();
-        });
+    state->transferConnection =
+        connect(transferMgr_, &TransferManager::tasksUpdated, this,
+                [maybeStartCleanup](const QVector<quint64> &) {
+                    (*maybeStartCleanup)();
+                });
 
-    state->progress = new QProgressDialog(
-        tr("Preparing remote move…"), tr("Cancel"), 0, 0, this);
+    state->progress = new QProgressDialog(tr("Preparing remote move…"),
+                                          tr("Cancel"), 0, 0, this);
     state->progress->setWindowTitle(tr("Preparing queue"));
     state->progress->setWindowModality(Qt::NonModal);
     state->progress->setMinimumDuration(0);
@@ -615,9 +611,8 @@ void MainWindow::moveRightToLeft() {
             const QString localRoot = state->localRoots.value(batch.job.id);
             for (const auto &entry : batch.entries) {
                 bool valid = !entry.relativePath.isEmpty();
-                const QStringList parts =
-                    entry.relativePath.split(QLatin1Char('/'),
-                                             Qt::SkipEmptyParts);
+                const QStringList parts = entry.relativePath.split(
+                    QLatin1Char('/'), Qt::SkipEmptyParts);
                 for (const QString &part : parts) {
                     QString why;
                     if (!isValidEntryName(part, &why)) {
@@ -632,27 +627,25 @@ void MainWindow::moveRightToLeft() {
                 const QString localPath =
                     QDir(localRoot).filePath(entry.relativePath);
                 if (entry.info.is_dir) {
-                    transferMgr_->enqueueLocalDirectory(
-                        localPath, state->batchOptions);
+                    transferMgr_->enqueueLocalDirectory(localPath,
+                                                        state->batchOptions);
                     ++state->enqueuedDirectories;
                     continue;
                 }
-                transferMgr_->enqueueDownload(
-                    entry.path, localPath, state->batchOptions);
+                transferMgr_->enqueueDownload(entry.path, localPath,
+                                              state->batchOptions);
                 ++state->enqueuedFiles;
             }
         });
     state->progressConnection = connect(
         remoteOps_, &RemoteOperationController::jobProgress, this,
         [state](const RemoteOperationController::Progress &progress) {
-            if (!state->pending.contains(progress.job.id) ||
-                !state->progress) {
+            if (!state->pending.contains(progress.job.id) || !state->progress) {
                 return;
             }
             state->progress->setLabelText(
                 QCoreApplication::translate(
-                    "MainWindow",
-                    "Scanning %1\nFound: %2  |  Queued: %3")
+                    "MainWindow", "Scanning %1\nFound: %2  |  Queued: %3")
                     .arg(progress.currentPath)
                     .arg(progress.visitedEntries)
                     .arg(state->enqueuedFiles));
@@ -688,13 +681,11 @@ void MainWindow::moveRightToLeft() {
             if (!rightIsRemote_)
                 return;
             QString statusMessage =
-                tr("Queued: %1 downloads (move)")
-                    .arg(state->enqueuedFiles);
+                tr("Queued: %1 downloads (move)").arg(state->enqueuedFiles);
             if (state->enqueuedDirectories > 0) {
                 statusMessage +=
                     QStringLiteral("  |  ") +
-                    tr("Folders queued: %1")
-                        .arg(state->enqueuedDirectories);
+                    tr("Folders queued: %1").arg(state->enqueuedDirectories);
             }
             if (state->skippedInvalid > 0) {
                 statusMessage +=
@@ -709,23 +700,21 @@ void MainWindow::moveRightToLeft() {
             if (state->canceled)
                 statusMessage += QStringLiteral("  |  ") + tr("Canceled");
             statusBar()->showMessage(statusMessage, 6000);
-            if (state->enqueuedFiles > 0 ||
-                state->enqueuedDirectories > 0) {
+            if (state->enqueuedFiles > 0 || state->enqueuedDirectories > 0) {
                 maybeShowTransferQueue();
             }
             (*maybeStartCleanup)();
         });
-    connect(state->progress, &QProgressDialog::canceled, this,
-            [this, state] {
-                state->canceled = true;
-                if (remoteOps_) {
-                    const auto pending = state->pending;
-                    for (const auto jobId : pending)
-                        remoteOps_->cancel(jobId);
-                }
-                if (transferMgr_)
-                    transferMgr_->cancelBatch(state->batchOptions.batchId);
-            });
+    connect(state->progress, &QProgressDialog::canceled, this, [this, state] {
+        state->canceled = true;
+        if (remoteOps_) {
+            const auto pending = state->pending;
+            for (const auto jobId : pending)
+                remoteOps_->cancel(jobId);
+        }
+        if (transferMgr_)
+            transferMgr_->cancelBatch(state->batchOptions.batchId);
+    });
 
     for (const QModelIndex &index : rows) {
         const QString name = rightRemoteModel_->nameAt(index);
@@ -737,8 +726,7 @@ void MainWindow::moveRightToLeft() {
         const QString remotePath = joinRemotePath(remoteBase, name);
         const QString localPath = dst.filePath(name);
         if (!rightRemoteModel_->isDir(index)) {
-            transferMgr_->enqueueDownload(remotePath, localPath,
-                                          batchOptions);
+            transferMgr_->enqueueDownload(remotePath, localPath, batchOptions);
             ++state->enqueuedFiles;
             continue;
         }
@@ -766,8 +754,7 @@ void MainWindow::moveRightToLeft() {
         QObject::disconnect(state->progressConnection);
         state->progress->deleteLater();
         statusBar()->showMessage(
-            tr("Queued: %1 downloads (move)").arg(state->enqueuedFiles),
-            4000);
+            tr("Queued: %1 downloads (move)").arg(state->enqueuedFiles), 4000);
         if (state->enqueuedFiles > 0)
             maybeShowTransferQueue();
         (*maybeStartCleanup)();
@@ -775,7 +762,6 @@ void MainWindow::moveRightToLeft() {
         state->progress->show();
     }
 }
-
 
 void MainWindow::uploadViaDialog() {
     if (!rightIsRemote_ || !sessionController_->client()) {
@@ -839,8 +825,7 @@ void MainWindow::uploadViaDialog() {
             continue;
         roots.push_back(
             {selectedPathInfo.absoluteFilePath(),
-             joinRemotePath(remoteBase,
-                            selectedPathInfo.fileName())});
+             joinRemotePath(remoteBase, selectedPathInfo.fileName())});
     }
     if (roots.isEmpty()) {
         statusBar()->showMessage(tr("Nothing to upload."), 4000);
@@ -856,13 +841,13 @@ void MainWindow::newDirRight() {
     if (rightIsRemote_) {
         if (!remoteActionController_ || !rightRemoteModel_)
             return;
-        remoteActionController_->createDirectory(
-            rightRemoteModel_->rootPath(), name);
+        remoteActionController_->createDirectory(rightRemoteModel_->rootPath(),
+                                                 name);
     } else {
         QDir base(rightPath_->text());
         if (!base.mkpath(base.filePath(name))) {
             UiAlerts::critical(this, tr("Local"),
-                                  tr("Could not create folder."));
+                               tr("Could not create folder."));
             return;
         }
         setRightRoot(base.absolutePath());
@@ -877,8 +862,8 @@ void MainWindow::newFileRight() {
     if (rightIsRemote_) {
         if (!remoteActionController_ || !rightRemoteModel_)
             return;
-        remoteActionController_->createFile(
-            rightRemoteModel_->rootPath(), name);
+        remoteActionController_->createFile(rightRemoteModel_->rootPath(),
+                                            name);
     } else {
         QDir base(rightPath_->text());
         const QString path = base.filePath(name);
@@ -891,8 +876,7 @@ void MainWindow::newFileRight() {
         }
         QFile newFile(path);
         if (!newFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            UiAlerts::critical(this, tr("Local"),
-                                  tr("Could not create file."));
+            UiAlerts::critical(this, tr("Local"), tr("Could not create file."));
             return;
         }
         newFile.close();
@@ -909,7 +893,7 @@ void MainWindow::renameRightSelected() {
     const auto rows = selectionModel->selectedRows();
     if (rows.size() != 1) {
         UiAlerts::information(this, tr("Rename"),
-                                 tr("Select exactly one item."));
+                              tr("Select exactly one item."));
         return;
     }
     if (rightIsRemote_) {
@@ -928,22 +912,23 @@ void MainWindow::renameRightSelected() {
             UiAlerts::warning(this, tr("Invalid name"), invalidReason);
             return;
         }
-        remoteActionController_->rename(
-            rightRemoteModel_->rootPath(), oldName, newName);
+        remoteActionController_->rename(rightRemoteModel_->rootPath(), oldName,
+                                        newName);
     } else {
         const QModelIndex selectedIndex = rows.first();
-        const QFileInfo selectedFileInfo = rightLocalModel_->fileInfo(selectedIndex);
+        const QFileInfo selectedFileInfo =
+            rightLocalModel_->fileInfo(selectedIndex);
         bool inputAccepted = false;
-        const QString newName =
-            QInputDialog::getText(this, tr("Rename"), tr("New name:"),
-                                  QLineEdit::Normal,
-                                  selectedFileInfo.fileName(), &inputAccepted);
+        const QString newName = QInputDialog::getText(
+            this, tr("Rename"), tr("New name:"), QLineEdit::Normal,
+            selectedFileInfo.fileName(), &inputAccepted);
         if (!inputAccepted || newName.isEmpty() ||
             newName == selectedFileInfo.fileName())
             return;
         const QString newPath =
             QDir(selectedFileInfo.absolutePath()).filePath(newName);
-        bool renamed = QFile::rename(selectedFileInfo.absoluteFilePath(), newPath);
+        bool renamed =
+            QFile::rename(selectedFileInfo.absoluteFilePath(), newPath);
         if (!renamed)
             renamed = QDir(selectedFileInfo.absolutePath())
                           .rename(selectedFileInfo.absoluteFilePath(), newPath);
@@ -973,8 +958,7 @@ void MainWindow::deleteRightSelected() {
             entries.push_back({rightRemoteModel_->nameAt(index),
                                rightRemoteModel_->isDir(index)});
         }
-        remoteActionController_->remove(rightRemoteModel_->rootPath(),
-                                        entries);
+        remoteActionController_->remove(rightRemoteModel_->rootPath(), entries);
         return;
     }
 
@@ -995,9 +979,7 @@ void MainWindow::deleteRightSelected() {
         removed ? ++deletedCount : ++failedCount;
     }
     statusBar()->showMessage(
-        tr("Deleted: %1  |  Failed: %2")
-            .arg(deletedCount)
-            .arg(failedCount),
+        tr("Deleted: %1  |  Failed: %2").arg(deletedCount).arg(failedCount),
         5000);
     setRightRoot(rightPath_->text());
 }
@@ -1040,7 +1022,8 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
     if (rightIsRemote_) {
         const bool supportsRemotePermissions =
             sessionController_->options().has_value() &&
-            openscp::capabilitiesForProtocol(sessionController_->options()->protocol)
+            openscp::capabilitiesForProtocol(
+                sessionController_->options()->protocol)
                 .can_set_permissions;
         // Up option (if applicable)
         if (canGoUp)
@@ -1101,15 +1084,13 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
 }
 
 void MainWindow::changeRemotePermissions() {
-    if (!rightIsRemote_ || !remoteActionController_ ||
-        !rightRemoteModel_) {
+    if (!rightIsRemote_ || !remoteActionController_ || !rightRemoteModel_) {
         return;
     }
-    const auto capabilities =
-        sessionController_->options().has_value()
-            ? openscp::capabilitiesForProtocol(
-                  sessionController_->options()->protocol)
-            : openscp::ProtocolCapabilities{};
+    const auto capabilities = sessionController_->options().has_value()
+                                  ? openscp::capabilitiesForProtocol(
+                                        sessionController_->options()->protocol)
+                                  : openscp::ProtocolCapabilities{};
     if (!capabilities.can_set_permissions) {
         UiAlerts::information(
             this, tr("Permissions"),
@@ -1128,21 +1109,20 @@ void MainWindow::changeRemotePermissions() {
     const QModelIndex index = rows.first();
     remoteActionController_->changePermissions(
         rightRemoteModel_->rootPath(),
-        {rightRemoteModel_->nameAt(index),
-         rightRemoteModel_->isDir(index)});
+        {rightRemoteModel_->nameAt(index), rightRemoteModel_->isDir(index)});
 }
 
 void MainWindow::applyRemoteMutationActions() {
     const openscp::ProtocolCapabilities caps =
-        sessionController_->client() ? sessionController_->client()->capabilities() : openscp::ProtocolCapabilities{};
-    const auto availability =
-        openscpui::RemoteActionController::availability(
-            caps, rightRemoteMutationsSupported_);
+        sessionController_->client()
+            ? sessionController_->client()->capabilities()
+            : openscp::ProtocolCapabilities{};
+    const auto availability = openscpui::RemoteActionController::availability(
+        caps, rightRemoteMutationsSupported_);
     if (actUploadRight_)
         actUploadRight_->setEnabled(availability.canUpload);
     if (actNewDirRight_)
-        actNewDirRight_->setEnabled(
-            availability.canCreateDirectory);
+        actNewDirRight_->setEnabled(availability.canCreateDirectory);
     if (actNewFileRight_)
         actNewFileRight_->setEnabled(availability.canCreateFile);
     if (actRenameRight_)
@@ -1160,14 +1140,15 @@ void MainWindow::applyRemoteMutationActions() {
 // checked by the real operation; probing with a temporary directory mutates
 // the server and can be both slow and misleading.
 void MainWindow::updateRemoteMutationCapability() {
-    if (!rightIsRemote_ || !sessionController_->client() || !rightRemoteModel_) {
+    if (!rightIsRemote_ || !sessionController_->client() ||
+        !rightRemoteModel_) {
         rightRemoteMutationsSupported_ = false;
         applyRemoteMutationActions();
         return;
     }
-    const openscp::ProtocolCapabilities caps = sessionController_->client()->capabilities();
+    const openscp::ProtocolCapabilities caps =
+        sessionController_->client()->capabilities();
     rightRemoteMutationsSupported_ =
-        openscpui::RemoteActionController::availability(caps)
-            .canMutate;
+        openscpui::RemoteActionController::availability(caps).canMutate;
     applyRemoteMutationActions();
 }

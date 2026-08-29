@@ -1,6 +1,7 @@
 // Simulated SFTP client for UI testing without network.
 #pragma once
 #include "RemoteClient.hpp"
+
 #include <unordered_map>
 
 namespace openscp {
@@ -8,8 +9,7 @@ namespace openscp {
 class MockSftpClient : public RemoteClient {
     public:
     ProtocolCapabilities capabilities() const override {
-        ProtocolCapabilities result =
-            capabilitiesForProtocol(Protocol::Sftp);
+        ProtocolCapabilities result = capabilitiesForProtocol(Protocol::Sftp);
         result.can_checksum = false;
         return result;
     }
@@ -113,7 +113,7 @@ class MockSftpClient : public RemoteClient {
                   std::uint64_t mtime, std::string &err) override;
 
     std::unique_ptr<RemoteClient> newConnectionLike(const SessionOptions &opt,
-                                                  std::string &err) override;
+                                                    std::string &err) override;
 
     private:
     bool connected_ = false;

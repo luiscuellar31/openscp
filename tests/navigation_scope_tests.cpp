@@ -41,8 +41,7 @@ void testEndpointIsolation(TestContext &test) {
                "host casing should not split one endpoint");
 
     auto normalizedBase = base;
-    normalizedBase.webdav_base_path =
-        "//remote.php/./dav/files/team/../alice/";
+    normalizedBase.webdav_base_path = "//remote.php/./dav/files/team/../alice/";
     test.check(openscpui::remoteEndpointScope(normalizedBase) == scope,
                "equivalent WebDAV base paths should share a scope");
 
@@ -71,8 +70,7 @@ void testEndpointIsolation(TestContext &test) {
 void testSavedSiteScope(TestContext &test) {
     const QString rawId = QStringLiteral(" legacy/site\\id ");
     const QString scope = openscpui::savedSiteNavigationScope(rawId);
-    test.check(scope.startsWith(QStringLiteral("site-")) &&
-                   scope.size() == 37,
+    test.check(scope.startsWith(QStringLiteral("site-")) && scope.size() == 37,
                "saved-site scopes should be opaque fixed-length identifiers");
     test.check(!scope.contains(QStringLiteral("legacy")) &&
                    !scope.contains(QLatin1Char('/')) &&
@@ -113,8 +111,7 @@ void testFtpsModeIsolation(TestContext &test) {
                    openscpui::remoteEndpointScope(explicitTls),
                "automatic FTPS should share a scope with its effective mode");
 
-    automatic.port =
-        openscp::defaultPortForProtocol(openscp::Protocol::Ftps);
+    automatic.port = openscp::defaultPortForProtocol(openscp::Protocol::Ftps);
     implicitTls.port = automatic.port;
     test.check(openscpui::remoteEndpointScope(automatic) ==
                    openscpui::remoteEndpointScope(implicitTls),

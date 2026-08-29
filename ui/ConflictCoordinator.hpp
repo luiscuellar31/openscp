@@ -36,8 +36,7 @@ struct ConflictResolution {
 // concurrent conflicts in that batch require only one user interaction.
 class ConflictCoordinator {
     public:
-    using Resolver =
-        std::function<ConflictResolution(const ConflictRequest &)>;
+    using Resolver = std::function<ConflictResolution(const ConflictRequest &)>;
     using CancelCheck = std::function<bool()>;
 
     void ensureBatchPolicy(std::uint64_t batchId,
@@ -50,18 +49,16 @@ class ConflictCoordinator {
         }
     }
 
-    void setBatchPolicy(std::uint64_t batchId,
-                        TransferConflictPolicy policy) {
+    void setBatchPolicy(std::uint64_t batchId, TransferConflictPolicy policy) {
         const auto state = stateFor(batchId);
         std::lock_guard<std::timed_mutex> lock(state->mutex);
         state->policy = policy;
         state->configured = true;
     }
 
-    TransferConflictPolicy
-    batchPolicy(std::uint64_t batchId,
-                TransferConflictPolicy fallback =
-                    TransferConflictPolicy::Ask) const {
+    TransferConflictPolicy batchPolicy(
+        std::uint64_t batchId,
+        TransferConflictPolicy fallback = TransferConflictPolicy::Ask) const {
         const auto state = findState(batchId);
         if (!state)
             return fallback;
@@ -69,14 +66,12 @@ class ConflictCoordinator {
         return state->configured ? state->policy : fallback;
     }
 
-    ConflictResolution
-    resolve(const ConflictRequest &request,
-            TransferConflictPolicy fallbackPolicy,
-            const Resolver &resolver,
-            const CancelCheck &shouldCancel = {}) {
+    ConflictResolution resolve(const ConflictRequest &request,
+                               TransferConflictPolicy fallbackPolicy,
+                               const Resolver &resolver,
+                               const CancelCheck &shouldCancel = {}) {
         const auto state = stateFor(request.batchId);
-        std::unique_lock<std::timed_mutex> lock(state->mutex,
-                                                std::defer_lock);
+        std::unique_lock<std::timed_mutex> lock(state->mutex, std::defer_lock);
         while (!lock.try_lock_for(std::chrono::milliseconds(50))) {
             if (shouldCancel && shouldCancel())
                 return canceledResolution();
@@ -149,9 +144,8 @@ class ConflictCoordinator {
         return true;
     }
 
-    static ConflictResolution
-    evaluate(TransferConflictPolicy policy,
-             const ConflictRequest &request) {
+    static ConflictResolution evaluate(TransferConflictPolicy policy,
+                                       const ConflictRequest &request) {
         if (policy == TransferConflictPolicy::NewerOnly) {
             // Two seconds avoids copies caused only by filesystem/protocol
             // timestamp precision.
@@ -174,8 +168,7 @@ class ConflictCoordinator {
         return state;
     }
 
-    std::shared_ptr<BatchState>
-    findState(std::uint64_t batchId) const {
+    std::shared_ptr<BatchState> findState(std::uint64_t batchId) const {
         std::lock_guard<std::mutex> lock(statesMutex_);
         const auto found = states_.find(batchId);
         return found == states_.end() ? nullptr : found->second;

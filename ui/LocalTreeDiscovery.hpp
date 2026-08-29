@@ -49,8 +49,7 @@ struct LocalTreeDiscoveryOptions {
     int pendingHighWatermark = 2000;
     int pendingLowWatermark = 1000;
     quint64 confirmationItemLimit = 100'000;
-    quint64 confirmationKnownBytesLimit =
-        100ULL * 1024ULL * 1024ULL * 1024ULL;
+    quint64 confirmationKnownBytesLimit = 100ULL * 1024ULL * 1024ULL * 1024ULL;
 };
 
 Q_DECLARE_METATYPE(LocalTreeDiscoveryEntry)
@@ -60,7 +59,7 @@ Q_DECLARE_METATYPE(LocalTreeDiscoveryBatch)
 class LocalTreeDiscovery final : public QObject {
     Q_OBJECT
 
-  public:
+    public:
     explicit LocalTreeDiscovery(QObject *parent = nullptr);
     ~LocalTreeDiscovery() override;
 
@@ -70,18 +69,18 @@ class LocalTreeDiscovery final : public QObject {
     void setPendingTaskCount(int pendingTaskCount);
     bool isRunning() const { return running_.load(); }
 
-  signals:
+    signals:
     void batchReady(const LocalTreeDiscoveryBatch &batch);
     void progressChanged(const LocalTreeDiscoveryCounters &counters,
                          const QString &currentPath);
-    void largeTreeConfirmationRequired(
-        const LocalTreeDiscoveryCounters &counters);
+    void
+    largeTreeConfirmationRequired(const LocalTreeDiscoveryCounters &counters);
     void finished(const LocalTreeDiscoveryCounters &counters);
     void canceled(const LocalTreeDiscoveryCounters &counters);
     void failed(const QString &message,
                 const LocalTreeDiscoveryCounters &counters);
 
-  private:
+    private:
     enum class LargeTreeDecision { Waiting, Continue, Cancel };
 
     void stopWorker();
@@ -89,9 +88,9 @@ class LocalTreeDiscovery final : public QObject {
     bool deliverBatch(LocalTreeDiscoveryBatch batch, quint64 generation,
                       std::stop_token stopToken);
     bool waitForBackpressure(std::stop_token stopToken);
-    bool requestLargeTreeConfirmation(
-        const LocalTreeDiscoveryCounters &counters, quint64 generation,
-        std::stop_token stopToken);
+    bool
+    requestLargeTreeConfirmation(const LocalTreeDiscoveryCounters &counters,
+                                 quint64 generation, std::stop_token stopToken);
 
     std::jthread worker_;
     std::atomic_bool running_{false};
@@ -107,4 +106,3 @@ class LocalTreeDiscovery final : public QObject {
     quint64 deliveredBatchSequence_ = 0;
     LargeTreeDecision largeTreeDecision_ = LargeTreeDecision::Waiting;
 };
-

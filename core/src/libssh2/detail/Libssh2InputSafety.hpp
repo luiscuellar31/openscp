@@ -12,7 +12,8 @@ namespace openscp::libssh2detail {
 
 inline constexpr int kMaxKeyboardInteractivePrompts = 32;
 inline constexpr std::size_t kMaxKeyboardInteractivePromptBytes = 16 * 1024;
-inline constexpr std::size_t kMaxKeyboardInteractiveTotalPromptBytes = 64 * 1024;
+inline constexpr std::size_t kMaxKeyboardInteractiveTotalPromptBytes =
+    64 * 1024;
 inline constexpr std::size_t kMaxKeyboardInteractiveAnswerBytes = 64 * 1024;
 
 struct KeyboardInteractivePromptView {
@@ -29,9 +30,8 @@ inline bool validateEndpointHost(std::string_view host, const char *fieldLabel,
         return false;
     }
     const auto forbiddenHostCharacter = [](const unsigned char ch) {
-        return ch < 0x20 || ch == 0x7f || std::isspace(ch) != 0 ||
-               ch == '/' || ch == '\\' || ch == '@' || ch == '?' ||
-               ch == '#';
+        return ch < 0x20 || ch == 0x7f || std::isspace(ch) != 0 || ch == '/' ||
+               ch == '\\' || ch == '@' || ch == '?' || ch == '#';
     };
     if (std::any_of(host.begin(), host.end(), forbiddenHostCharacter)) {
         error = label + " contains a forbidden host character.";
@@ -54,12 +54,12 @@ inline bool validateEndpointHost(std::string_view host, const char *fieldLabel,
     return true;
 }
 
-inline bool copyKeyboardInteractivePrompts(
-    const KeyboardInteractivePromptView *prompts, int promptCount,
-    std::vector<std::string> &out, std::string &error) {
+inline bool
+copyKeyboardInteractivePrompts(const KeyboardInteractivePromptView *prompts,
+                               int promptCount, std::vector<std::string> &out,
+                               std::string &error) {
     out.clear();
-    if (promptCount < 0 ||
-        promptCount > kMaxKeyboardInteractivePrompts) {
+    if (promptCount < 0 || promptCount > kMaxKeyboardInteractivePrompts) {
         error = "Keyboard-interactive prompt count exceeds the safety limit.";
         return false;
     }
@@ -72,9 +72,9 @@ inline bool copyKeyboardInteractivePrompts(
     for (int i = 0; i < promptCount; ++i) {
         const std::size_t length = prompts[i].length;
         if (length > kMaxKeyboardInteractivePromptBytes ||
-            totalBytes >
-                kMaxKeyboardInteractiveTotalPromptBytes - length) {
-            error = "Keyboard-interactive prompt data exceeds the safety limit.";
+            totalBytes > kMaxKeyboardInteractiveTotalPromptBytes - length) {
+            error =
+                "Keyboard-interactive prompt data exceeds the safety limit.";
             return false;
         }
         if (length > 0 && !prompts[i].text) {
@@ -91,8 +91,7 @@ inline bool copyKeyboardInteractivePrompts(
     try {
         out.reserve(static_cast<std::size_t>(promptCount));
         for (int i = 0; i < promptCount; ++i) {
-            const char *text =
-                reinterpret_cast<const char *>(prompts[i].text);
+            const char *text = reinterpret_cast<const char *>(prompts[i].text);
             out.emplace_back(text ? text : "", prompts[i].length);
         }
     } catch (...) {
@@ -108,8 +107,8 @@ inline bool promptRequestsUsername(std::string_view prompt) {
         [prompt](std::string_view needle) -> bool {
         if (needle.empty() || needle.size() > prompt.size())
             return false;
-        for (std::size_t offset = 0;
-             offset <= prompt.size() - needle.size(); ++offset) {
+        for (std::size_t offset = 0; offset <= prompt.size() - needle.size();
+             ++offset) {
             bool matches = true;
             for (std::size_t i = 0; i < needle.size(); ++i) {
                 unsigned char ch =

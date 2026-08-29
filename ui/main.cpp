@@ -1,6 +1,7 @@
 // Application entry point: initialize Qt and show MainWindow.
 #include "AppVersion.hpp"
 #include "MainWindow.hpp"
+
 #include <QApplication>
 #include <QDir>
 #include <QFile>
@@ -20,17 +21,16 @@ int main(int argc, char *argv[]) {
 
     // Load translation if available (supports resources and disk)
     QSettings settings("OpenSCP", "OpenSCP");
-    const QString languageCode = settings.value("UI/language", "en")
-                                     .toString()
-                                     .trimmed()
-                                     .toLower();
+    const QString languageCode =
+        settings.value("UI/language", "en").toString().trimmed().toLower();
     static QTranslator translator; // static so it lives until app.exec()
     const QString translationBaseName = QString("openscp_%1").arg(languageCode);
     const QString exeDir = QCoreApplication::applicationDirPath();
     const QString transDir1 = QDir(exeDir).filePath("translations");
     const QString transDir2 =
         QDir(QCoreApplication::applicationDirPath()).absolutePath();
-    const QString resourceTranslationPath = ":/i18n/" + translationBaseName + ".qm";
+    const QString resourceTranslationPath =
+        ":/i18n/" + translationBaseName + ".qm";
     // English is the source language: no app translator is needed for "en".
     if (languageCode != QStringLiteral("en")) {
         if (QFile::exists(resourceTranslationPath)

@@ -63,8 +63,7 @@ std::string ftpCommandPath(const std::string &loginRoot,
 bool isCompletedWebDavGetStatus(long statusCode);
 bool isCompletedWebDavWriteStatus(long statusCode);
 std::optional<std::uint32_t>
-parseRetryAfter(std::string_view value,
-                std::time_t now = std::time(nullptr));
+parseRetryAfter(std::string_view value, std::time_t now = std::time(nullptr));
 std::string encodeUrlPath(const std::string &path);
 
 std::string localPartialPath(const std::string &destination);
@@ -73,12 +72,11 @@ bool atomicReplaceLocalFile(const std::string &partial,
                             const std::string &destination, std::string &err);
 
 RemoteError errorFromCurl(CURLcode code, std::string message,
-                          long responseCode = 0,
-                          bool commitUncertain = false);
-RemoteError errorFromHttpStatus(long statusCode, std::string message,
-                                bool commitUncertain = false,
-                                std::optional<std::uint32_t> retryAfter =
-                                    std::nullopt);
+                          long responseCode = 0, bool commitUncertain = false);
+RemoteError
+errorFromHttpStatus(long statusCode, std::string message,
+                    bool commitUncertain = false,
+                    std::optional<std::uint32_t> retryAfter = std::nullopt);
 
 // Process-local guard for deterministic .part paths. It prevents independent
 // worker clients from writing the same destination concurrently.
@@ -87,8 +85,7 @@ class ActiveDestinationLease {
     explicit ActiveDestinationLease(std::string key);
     ~ActiveDestinationLease();
     ActiveDestinationLease(const ActiveDestinationLease &) = delete;
-    ActiveDestinationLease &
-    operator=(const ActiveDestinationLease &) = delete;
+    ActiveDestinationLease &operator=(const ActiveDestinationLease &) = delete;
 
     bool acquired() const noexcept { return acquired_; }
 
@@ -129,7 +126,8 @@ struct TransferProgressContext {
     bool preferUploadCounters = false;
 };
 
-int transferProgressCallback(void *userdata, curl_off_t dltotal, curl_off_t dlnow,
-                             curl_off_t ultotal, curl_off_t ulnow);
+int transferProgressCallback(void *userdata, curl_off_t dltotal,
+                             curl_off_t dlnow, curl_off_t ultotal,
+                             curl_off_t ulnow);
 
 } // namespace openscp::curlcommon

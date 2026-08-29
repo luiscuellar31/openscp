@@ -142,12 +142,12 @@ int main() {
             "FTP should advertise remote CRUD operations");
 
     const std::string token = uniqueToken();
-    const fs::path tempDir = fs::temp_directory_path() / ("openscp_ftp_" + token);
+    const fs::path tempDir =
+        fs::temp_directory_path() / ("openscp_ftp_" + token);
     const fs::path localUpload = tempDir / "upload.txt";
     const fs::path localDownload = tempDir / "download.txt";
     const fs::path canceledDownload = tempDir / "canceled.txt";
-    const fs::path boundaryCanceledDownload =
-        tempDir / "boundary-canceled.txt";
+    const fs::path boundaryCanceledDownload = tempDir / "boundary-canceled.txt";
     fs::create_directories(tempDir);
 
     const std::string payload =
@@ -168,13 +168,14 @@ int main() {
 
     bool uploadProgressCalled = false;
     err.clear();
-    t.check(client->put(localUpload.string(), remotePath, err,
-                        [&](std::size_t done, std::size_t total) {
-                            (void)done;
-                            (void)total;
-                            uploadProgressCalled = true;
-                        },
-                        {}, false),
+    t.check(client->put(
+                localUpload.string(), remotePath, err,
+                [&](std::size_t done, std::size_t total) {
+                    (void)done;
+                    (void)total;
+                    uploadProgressCalled = true;
+                },
+                {}, false),
             std::string("FTP upload should succeed: ") + err);
     t.check(uploadProgressCalled, "upload progress callback should be called");
 
@@ -197,13 +198,14 @@ int main() {
 
     bool downloadProgressCalled = false;
     err.clear();
-    t.check(client->get(renamedPath, localDownload.string(), err,
-                        [&](std::size_t done, std::size_t total) {
-                            (void)done;
-                            (void)total;
-                            downloadProgressCalled = true;
-                        },
-                        {}, false),
+    t.check(client->get(
+                renamedPath, localDownload.string(), err,
+                [&](std::size_t done, std::size_t total) {
+                    (void)done;
+                    (void)total;
+                    downloadProgressCalled = true;
+                },
+                {}, false),
             std::string("FTP download should succeed: ") + err);
     t.check(downloadProgressCalled,
             "download progress callback should be called");
@@ -216,8 +218,9 @@ int main() {
     t.check(writeFile(canceledDownload, "keep existing destination"),
             "should prepare an existing download destination");
     err.clear();
-    t.check(!client->get(renamedPath, canceledDownload.string(), err, {},
-                         [] { return true; }, false),
+    t.check(!client->get(
+                renamedPath, canceledDownload.string(), err, {},
+                [] { return true; }, false),
             "canceled FTP download should fail");
     std::string preserved;
     t.check(readFile(canceledDownload, preserved) &&
@@ -249,16 +252,15 @@ int main() {
 
     std::atomic<bool> cancelFinishedUpload{false};
     err.clear();
-    t.check(
-        !client->put(
-            localUpload.string(), canceledUploadPath, err,
-            [&](std::size_t done, std::size_t total) {
-                (void)total;
-                if (done >= payload.size())
-                    cancelFinishedUpload.store(true);
-            },
-            [&] { return cancelFinishedUpload.load(); }, false),
-        "FTP cancellation at upload completion should prevent RNFR/RNTO");
+    t.check(!client->put(
+                localUpload.string(), canceledUploadPath, err,
+                [&](std::size_t done, std::size_t total) {
+                    (void)total;
+                    if (done >= payload.size())
+                        cancelFinishedUpload.store(true);
+                },
+                [&] { return cancelFinishedUpload.load(); }, false),
+            "FTP cancellation at upload completion should prevent RNFR/RNTO");
     bool canceledUploadIsDir = false;
     err.clear();
     const bool canceledUploadExists =

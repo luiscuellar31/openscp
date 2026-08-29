@@ -2,6 +2,7 @@
 // authenticated SSH transport setup from Libssh2SftpClient.
 #pragma once
 #include "Libssh2SftpClient.hpp"
+
 #include <optional>
 
 namespace openscp {
@@ -60,7 +61,7 @@ class Libssh2ScpClient : public RemoteClient {
                 std::string &err, bool overwrite = false) override;
 
     std::unique_ptr<RemoteClient> newConnectionLike(const SessionOptions &opt,
-                                                     std::string &err) override;
+                                                    std::string &err) override;
 
     private:
     class StructuredErrorScope {
@@ -69,8 +70,7 @@ class Libssh2ScpClient : public RemoteClient {
                              bool mutation);
         ~StructuredErrorScope();
         StructuredErrorScope(const StructuredErrorScope &) = delete;
-        StructuredErrorScope &
-        operator=(const StructuredErrorScope &) = delete;
+        StructuredErrorScope &operator=(const StructuredErrorScope &) = delete;
 
         private:
         Libssh2ScpClient &owner_;

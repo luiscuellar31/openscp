@@ -24,8 +24,7 @@ std::string ioError(const char *operation) {
 
 #ifndef _WIN32
 bool syncParentDirectory(const std::string &path, std::string &error) {
-    std::filesystem::path parent =
-        std::filesystem::path(path).parent_path();
+    std::filesystem::path parent = std::filesystem::path(path).parent_path();
     if (parent.empty())
         parent = ".";
 #ifdef O_DIRECTORY
@@ -56,11 +55,9 @@ std::FILE *openRegularFileForWrite(const std::string &path, WriteMode mode,
                                    std::string &error) {
     error.clear();
 #ifdef _WIN32
-    HANDLE handle =
-        CreateFileA(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
-                    OPEN_ALWAYS,
-                    FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
-                    nullptr);
+    HANDLE handle = CreateFileA(
+        path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     if (handle == INVALID_HANDLE_VALUE) {
         error = "Could not safely open local file for writing.";
         return nullptr;
@@ -71,8 +68,7 @@ std::FILE *openRegularFileForWrite(const std::string &path, WriteMode mode,
         (tagInfo.FileAttributes &
          (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
         CloseHandle(handle);
-        error =
-            "Local partial path is not a regular non-reparse-point file.";
+        error = "Local partial path is not a regular non-reparse-point file.";
         errno = EINVAL;
         return nullptr;
     }
@@ -90,10 +86,9 @@ std::FILE *openRegularFileForWrite(const std::string &path, WriteMode mode,
         return nullptr;
     }
 
-    const int descriptor =
-        _open_osfhandle(reinterpret_cast<intptr_t>(handle),
-                       _O_BINARY | _O_WRONLY |
-                           (mode == WriteMode::Append ? _O_APPEND : 0));
+    const int descriptor = _open_osfhandle(
+        reinterpret_cast<intptr_t>(handle),
+        _O_BINARY | _O_WRONLY | (mode == WriteMode::Append ? _O_APPEND : 0));
     if (descriptor < 0) {
         CloseHandle(handle);
         error = ioError("Could not create local file descriptor");
@@ -145,15 +140,14 @@ std::FILE *openRegularFileForWrite(const std::string &path, WriteMode mode,
         return nullptr;
     }
 
-    struct stat metadata {};
+    struct stat metadata{};
     if (::fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode) ||
         metadata.st_uid != ::geteuid() || metadata.st_nlink != 1) {
         const int savedError = errno != 0 ? errno : EINVAL;
         ::close(descriptor);
         errno = savedError;
-        error =
-            "Local partial path must be a user-owned regular file without "
-            "additional hard links.";
+        error = "Local partial path must be a user-owned regular file without "
+                "additional hard links.";
         return nullptr;
     }
     if (::fchmod(descriptor, S_IRUSR | S_IWUSR) != 0) {
@@ -163,9 +157,8 @@ std::FILE *openRegularFileForWrite(const std::string &path, WriteMode mode,
         error = ioError("Could not restrict local partial file permissions");
         return nullptr;
     }
-    if (mode == WriteMode::Truncate &&
-        (::ftruncate(descriptor, 0) != 0 ||
-         ::lseek(descriptor, 0, SEEK_SET) < 0)) {
+    if (mode == WriteMode::Truncate && (::ftruncate(descriptor, 0) != 0 ||
+                                        ::lseek(descriptor, 0, SEEK_SET) < 0)) {
         const int savedError = errno;
         ::close(descriptor);
         errno = savedError;
@@ -207,8 +200,8 @@ bool flushAndSync(std::FILE *file, std::string &error) {
     return true;
 }
 
-bool atomicReplace(const std::string &temporary,
-                   const std::string &destination, std::string &error) {
+bool atomicReplace(const std::string &temporary, const std::string &destination,
+                   std::string &error) {
 #ifdef _WIN32
     if (!MoveFileExA(temporary.c_str(), destination.c_str(),
                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {

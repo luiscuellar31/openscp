@@ -10,12 +10,13 @@
 #include <QString>
 #include <QVector>
 #include <QWidget>
+
 #include <string>
 
 bool isValidEntryName(const QString &name, QString *why = nullptr);
 bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
-                          const QString &labelText,
-                          const QString &initialValue, QString &nameOut);
+                          const QString &labelText, const QString &initialValue,
+                          QString &nameOut);
 QString shortRemoteError(const QString &raw, const QString &fallback);
 QString shortRemoteError(const std::string &raw, const QString &fallback);
 

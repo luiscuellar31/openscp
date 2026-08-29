@@ -31,22 +31,21 @@ void testRetryAfter(TestContext &test) {
 
     test.check(parseRetryAfter("15", 0) == std::optional<std::uint32_t>(15),
                "Retry-After should parse delta seconds");
-    test.check(parseRetryAfter(" 120 ", 0) ==
-                   std::optional<std::uint32_t>(60),
+    test.check(parseRetryAfter(" 120 ", 0) == std::optional<std::uint32_t>(60),
                "Retry-After delta seconds should be capped at 60");
 
     constexpr std::time_t beforeDate = 1445412450;
     test.check(parseRetryAfter("Wed, 21 Oct 2015 07:28:00 GMT", beforeDate) ==
                    std::optional<std::uint32_t>(30),
                "Retry-After should parse an HTTP date relative to now");
-    test.check(parseRetryAfter("Wed, 21 Oct 2015 07:28:00 GMT",
-                               beforeDate - 120) ==
-                   std::optional<std::uint32_t>(60),
-               "HTTP-date Retry-After should also be capped at 60");
-    test.check(parseRetryAfter("Wed, 21 Oct 2015 07:28:00 GMT",
-                               beforeDate + 60) ==
-                   std::optional<std::uint32_t>(0),
-               "past Retry-After dates should request no additional wait");
+    test.check(
+        parseRetryAfter("Wed, 21 Oct 2015 07:28:00 GMT", beforeDate - 120) ==
+            std::optional<std::uint32_t>(60),
+        "HTTP-date Retry-After should also be capped at 60");
+    test.check(
+        parseRetryAfter("Wed, 21 Oct 2015 07:28:00 GMT", beforeDate + 60) ==
+            std::optional<std::uint32_t>(0),
+        "past Retry-After dates should request no additional wait");
     test.check(!parseRetryAfter("not a retry date", beforeDate).has_value(),
                "invalid Retry-After values should be ignored");
 }
@@ -61,8 +60,9 @@ void testHostValidation(TestContext &test) {
     test.check(validateUrlHost("[2001:db8::1]", "Host", err),
                "bracketed IPv6 hosts should be accepted");
     err.clear();
-    test.check(validateUrlHost("2001:db8::1", "Host", err),
-               "unbracketed IPv6 hosts should be accepted and normalized later");
+    test.check(
+        validateUrlHost("2001:db8::1", "Host", err),
+        "unbracketed IPv6 hosts should be accepted and normalized later");
 
     err.clear();
     test.check(!validateUrlHost("trusted.example@127.0.0.1", "Host", err),
@@ -74,9 +74,9 @@ void testHostValidation(TestContext &test) {
     test.check(!validateUrlHost("example.test:2121", "Host", err),
                "ports must use the separate port field");
     err.clear();
-    test.check(!validateUrlHost("example.test\r\nX-Test: injected", "Host",
-                                err),
-               "control characters must be rejected in hosts");
+    test.check(
+        !validateUrlHost("example.test\r\nX-Test: injected", "Host", err),
+        "control characters must be rejected in hosts");
 }
 
 void testClientsRejectAuthorityInjection(TestContext &test) {
@@ -118,9 +118,10 @@ void testFtpCommandRoot(TestContext &test) {
     test.check(ftpCommandPath("/", "/workspace/file.txt") ==
                    "/workspace/file.txt",
                "FTP commands should preserve paths for a root login");
-    test.check(ftpCommandPath("/srv/ftp/alice", "/workspace/file.txt") ==
-                   "/srv/ftp/alice/workspace/file.txt",
-               "FTP commands should resolve logical paths below the login root");
+    test.check(
+        ftpCommandPath("/srv/ftp/alice", "/workspace/file.txt") ==
+            "/srv/ftp/alice/workspace/file.txt",
+        "FTP commands should resolve logical paths below the login root");
     test.check(ftpCommandPath("/srv/ftp/alice/", "/") == "/srv/ftp/alice",
                "FTP logical root should resolve to the PWD login directory");
 }

@@ -1,16 +1,18 @@
 // SCP backend module using libssh2 scp_send/scp_recv channels for file
 // transfers over SSH.
 #include "openscp/Libssh2ScpClient.hpp"
+
 #include "../common/SafeLocalFile.hpp"
 #include "detail/Libssh2ErrorClassifier.hpp"
+
 #include <libssh2.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <chrono>
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <limits>
 #include <thread>
@@ -82,8 +84,8 @@ RemoteError
 Libssh2ScpClient::classifyStructuredFailure(const std::string &message,
                                             bool mutation) const {
     const RemoteError fallback = delegate_.lastOperationError();
-    return libssh2detail::classifyFailure(
-        message, delegate_.sessionHandle(), nullptr, mutation, &fallback);
+    return libssh2detail::classifyFailure(message, delegate_.sessionHandle(),
+                                          nullptr, mutation, &fallback);
 }
 
 bool Libssh2ScpClient::connect(const SessionOptions &opt, std::string &err) {
@@ -103,9 +105,13 @@ void Libssh2ScpClient::disconnect() {
     sessionOptions_.reset();
 }
 
-void Libssh2ScpClient::interrupt() { delegate_.interrupt(); }
+void Libssh2ScpClient::interrupt() {
+    delegate_.interrupt();
+}
 
-bool Libssh2ScpClient::isConnected() const { return delegate_.isConnected(); }
+bool Libssh2ScpClient::isConnected() const {
+    return delegate_.isConnected();
+}
 
 bool Libssh2ScpClient::list(const std::string &remote_path,
                             std::vector<FileInfo> &out, std::string &err) {
@@ -143,8 +149,7 @@ bool Libssh2ScpClient::get(
         // SCP could be blocked by server policy/path rules; try SFTP fallback
         // only when the selected mode allows it.
         if (!sftpFallbackEnabled()) {
-            scpErr +=
-                " (SFTP fallback is disabled by the selected SCP mode)";
+            scpErr += " (SFTP fallback is disabled by the selected SCP mode)";
             err = std::move(scpErr);
             return false;
         }
@@ -162,9 +167,8 @@ bool Libssh2ScpClient::get(
         return false;
     }
 
-    if (fileInfo.st_size < 0 ||
-        static_cast<std::uintmax_t>(fileInfo.st_size) >
-            std::numeric_limits<std::size_t>::max()) {
+    if (fileInfo.st_size < 0 || static_cast<std::uintmax_t>(fileInfo.st_size) >
+                                    std::numeric_limits<std::size_t>::max()) {
         err = "Remote SCP file size cannot be represented locally";
         closeScpChannel(channel, false);
         setLastOperationError(RemoteErrorKind::Protocol, err);
@@ -189,7 +193,8 @@ bool Libssh2ScpClient::get(
     std::vector<char> buffer(kScpChunkSize);
     std::size_t done = 0;
 
-    // Pull from remote channel until EOF; libssh2 is polled in non-blocking mode.
+    // Pull from remote channel until EOF; libssh2 is polled in non-blocking
+    // mode.
     while (true) {
         if (shouldCancel && shouldCancel()) {
             err = "Canceled by user";
@@ -198,8 +203,8 @@ bool Libssh2ScpClient::get(
             return false;
         }
 
-        const ssize_t n = libssh2_channel_read(channel, buffer.data(),
-                                               static_cast<size_t>(buffer.size()));
+        const ssize_t n = libssh2_channel_read(
+            channel, buffer.data(), static_cast<size_t>(buffer.size()));
         if (n == LIBSSH2_ERROR_EAGAIN) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
@@ -326,9 +331,8 @@ bool Libssh2ScpClient::put(
     // SCP writes directly to the final remote path and is only used when the
     // user explicitly selects SCP-only mode.
     if (sftpFallbackEnabled()) {
-        return transferViaSftpFallbackPut(local, remote, err,
-                                          std::move(progress),
-                                          std::move(shouldCancel));
+        return transferViaSftpFallbackPut(
+            local, remote, err, std::move(progress), std::move(shouldCancel));
     }
 
     std::uint64_t total = 0;
@@ -347,17 +351,16 @@ bool Libssh2ScpClient::put(
         return false;
     }
 
-    LIBSSH2_CHANNEL *channel = libssh2_scp_send64(
-        session, remote.c_str(), 0644, static_cast<libssh2_int64_t>(total), 0,
-        0);
+    LIBSSH2_CHANNEL *channel =
+        libssh2_scp_send64(session, remote.c_str(), 0644,
+                           static_cast<libssh2_int64_t>(total), 0, 0);
     if (!channel) {
         std::string scpErr = "Could not open remote file for SCP upload";
         appendSessionErrorDetail(session, scpErr);
         std::fclose(localFile);
         // Mirror download behavior: optional fallback to SFTP upload.
         if (!sftpFallbackEnabled()) {
-            scpErr +=
-                " (SFTP fallback is disabled by the selected SCP mode)";
+            scpErr += " (SFTP fallback is disabled by the selected SCP mode)";
             err = std::move(scpErr);
             return false;
         }

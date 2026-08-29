@@ -84,8 +84,8 @@ class RemoteClient {
     virtual bool
     checksum(const std::string &remote_path, const std::string &algorithm,
              std::vector<std::uint8_t> &digest, std::string &err,
-             std::function<void(std::size_t /*done*/,
-                                std::size_t /*total*/)> progress = {},
+             std::function<void(std::size_t /*done*/, std::size_t /*total*/)>
+                 progress = {},
              std::function<bool()> shouldCancel = {}) {
         (void)remote_path;
         (void)algorithm;
@@ -115,17 +115,14 @@ class RemoteClient {
         lastError_ = std::move(error);
     }
 
-    void setLastOperationError(RemoteErrorKind kind, std::string message,
-                               std::int64_t nativeCode = 0,
-                               bool transient = false,
-                               bool commitUncertain = false,
-                               std::optional<std::uint32_t> retryAfter =
-                                   std::nullopt) {
+    void setLastOperationError(
+        RemoteErrorKind kind, std::string message, std::int64_t nativeCode = 0,
+        bool transient = false, bool commitUncertain = false,
+        std::optional<std::uint32_t> retryAfter = std::nullopt) {
         RemoteError error;
-        error.kind =
-            (kind == RemoteErrorKind::LocalIo && nativeCode == ENOSPC)
-                ? RemoteErrorKind::InsufficientSpace
-                : kind;
+        error.kind = (kind == RemoteErrorKind::LocalIo && nativeCode == ENOSPC)
+                         ? RemoteErrorKind::InsufficientSpace
+                         : kind;
         error.message = std::move(message);
         error.native_code = nativeCode;
         error.retry_after_seconds = retryAfter;

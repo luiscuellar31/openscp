@@ -1,10 +1,12 @@
 // Manages saved sites and delegates credential storage to its repository.
 #include "SiteManagerDialog.hpp"
+
 #include "ConnectionDialog.hpp"
 #include "SavedSitesPersistence.hpp"
 #include "SiteCredentialRepository.hpp"
 #include "UiAlerts.hpp"
 #include "openscp/KnownHostsUtils.hpp"
+
 #include <QAbstractTableModel>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -148,8 +150,7 @@ SiteManagerDialog::SiteManagerDialog(QWidget *parent) : QDialog(parent) {
 
     search_ = new QLineEdit(this);
     search_->setClearButtonEnabled(true);
-    search_->setPlaceholderText(
-        tr("Search by name, protocol, host, or user…"));
+    search_->setPlaceholderText(tr("Search by name, protocol, host, or user…"));
     search_->setAccessibleName(tr("Search saved sites"));
     mainLayout->addWidget(search_);
 
@@ -182,7 +183,8 @@ SiteManagerDialog::SiteManagerDialog(QWidget *parent) : QDialog(parent) {
 
     auto *dialogButtons = new QDialogButtonBox(this);
     btAdd_ = dialogButtons->addButton(tr("Add"), QDialogButtonBox::ActionRole);
-    btEdit_ = dialogButtons->addButton(tr("Edit"), QDialogButtonBox::ActionRole);
+    btEdit_ =
+        dialogButtons->addButton(tr("Edit"), QDialogButtonBox::ActionRole);
     btDuplicate_ =
         dialogButtons->addButton(tr("Duplicate"), QDialogButtonBox::ActionRole);
     btDel_ =
@@ -293,9 +295,9 @@ void SiteManagerDialog::onAdd() {
     auto sessionOptions = dlg.options();
     QString name = normalizedSiteName(dlg.siteName());
     if (name.isEmpty()) {
-        name = normalizedSiteName(
-            QString("%1@%2").arg(QString::fromStdString(sessionOptions.username),
-                                 QString::fromStdString(sessionOptions.host)));
+        name = normalizedSiteName(QString("%1@%2").arg(
+            QString::fromStdString(sessionOptions.username),
+            QString::fromStdString(sessionOptions.host)));
     }
     if (name.isEmpty()) {
         showMissingNameIssue(this);
@@ -321,8 +323,8 @@ void SiteManagerDialog::onAdd() {
     }
     refresh();
     SiteCredentialRepository credentials;
-    showPersistIssues(this,
-                      credentials.save(newEntry, sessionOptions).issueMessages());
+    showPersistIssues(
+        this, credentials.save(newEntry, sessionOptions).issueMessages());
 }
 
 void SiteManagerDialog::onEdit() {
@@ -401,9 +403,7 @@ void SiteManagerDialog::onDuplicate() {
     }
     if (hasDuplicateSiteName(sites_, duplicate.name)) {
         duplicate.name =
-            QString("%1 %2")
-                .arg(baseName,
-                     duplicate.siteId.left(6));
+            QString("%1 %2").arg(baseName, duplicate.siteId.left(6));
     }
 
     sites_.push_back(duplicate);
@@ -416,11 +416,11 @@ void SiteManagerDialog::onDuplicate() {
     refresh();
     selectSiteIndex(sites_.size() - 1);
 
-    const auto copyChoice = UiAlerts::question(
-        this, tr("Copy credentials?"),
-        tr("The site was duplicated with a new identity.\n\n"
-           "Copy its saved credentials to the duplicate?"),
-        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    const auto copyChoice =
+        UiAlerts::question(this, tr("Copy credentials?"),
+                           tr("The site was duplicated with a new identity.\n\n"
+                              "Copy its saved credentials to the duplicate?"),
+                           QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if (copyChoice != QMessageBox::Yes)
         return;
 
@@ -472,7 +472,9 @@ void SiteManagerDialog::onRemove() {
     refresh();
 }
 
-void SiteManagerDialog::onConnect() { accept(); }
+void SiteManagerDialog::onConnect() {
+    accept();
+}
 
 bool SiteManagerDialog::selectedOptions(openscp::SessionOptions &out) const {
     const int modelIndex = selectedSiteIndex();

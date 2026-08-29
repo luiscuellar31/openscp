@@ -22,12 +22,12 @@ static bool set_socket_timeout_ms(int sock, int timeoutMs) {
         timeoutMs = 0;
 #ifdef _WIN32
     DWORD tvMs = static_cast<DWORD>(timeoutMs);
-    const int r1 = ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,
-                                reinterpret_cast<const char *>(&tvMs),
-                                sizeof(tvMs));
-    const int r2 = ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO,
-                                reinterpret_cast<const char *>(&tvMs),
-                                sizeof(tvMs));
+    const int r1 =
+        ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,
+                     reinterpret_cast<const char *>(&tvMs), sizeof(tvMs));
+    const int r2 =
+        ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO,
+                     reinterpret_cast<const char *>(&tvMs), sizeof(tvMs));
     return r1 == 0 && r2 == 0;
 #else
     struct timeval tv{};
@@ -45,9 +45,8 @@ static bool socket_send_all(int sock, const unsigned char *data,
     // send(2) may write partially; loop until the full buffer is sent.
     std::size_t off = 0;
     while (off < len) {
-        const ssize_t w =
-            ::send(sock, reinterpret_cast<const char *>(data + off), len - off,
-                   0);
+        const ssize_t w = ::send(
+            sock, reinterpret_cast<const char *>(data + off), len - off, 0);
         if (w < 0) {
             if (errno == EINTR)
                 continue;
@@ -73,8 +72,7 @@ static bool socket_recv_exact(int sock, unsigned char *buf, std::size_t len,
         if (r < 0) {
             if (errno == EINTR)
                 continue;
-            err =
-                std::string(stage) + " recv failed: " + std::strerror(errno);
+            err = std::string(stage) + " recv failed: " + std::strerror(errno);
             return false;
         }
         if (r == 0) {
@@ -100,8 +98,7 @@ static bool socket_recv_until(int sock, const std::string &delimiter,
         if (r < 0) {
             if (errno == EINTR)
                 continue;
-            err =
-                std::string(stage) + " recv failed: " + std::strerror(errno);
+            err = std::string(stage) + " recv failed: " + std::strerror(errno);
             return false;
         }
         if (r == 0) {
@@ -186,7 +183,8 @@ static const char *socks5_reply_text(unsigned char rep) {
 
 static std::string format_host_port_authority(const std::string &host,
                                               std::uint16_t port) {
-    if (host.find(':') != std::string::npos && host.find(']') == std::string::npos)
+    if (host.find(':') != std::string::npos &&
+        host.find(']') == std::string::npos)
         return "[" + host + "]:" + std::to_string(port);
     return host + ":" + std::to_string(port);
 }
@@ -210,9 +208,8 @@ static std::string read_jump_tunnel_stderr(int fd) {
     char buf[256];
     while (out.size() < 4096) {
         const std::size_t remaining = 4096 - out.size();
-        const ssize_t n = ::read(fd, buf,
-                                 remaining < sizeof(buf) ? remaining
-                                                         : sizeof(buf));
+        const ssize_t n =
+            ::read(fd, buf, remaining < sizeof(buf) ? remaining : sizeof(buf));
         if (n > 0) {
             out.append(buf, static_cast<std::size_t>(n));
             continue;
@@ -228,8 +225,9 @@ static std::string read_jump_tunnel_stderr(int fd) {
     return trim_ascii_whitespace(out);
 }
 
-static std::string format_jump_tunnel_exit_error(const char *prefix,
-                                                 const std::string &stderrText) {
+static std::string
+format_jump_tunnel_exit_error(const char *prefix,
+                              const std::string &stderrText) {
     std::string out(prefix ? prefix : "SSH jump tunnel failed.");
     if (!stderrText.empty()) {
         if (!out.empty() && out.back() != '.' && out.back() != ':')
@@ -328,10 +326,9 @@ static bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut,
 
         std::vector<char *> argv;
         argv.reserve(args.size() + 1);
-        std::transform(args.begin(), args.end(), std::back_inserter(argv),
-                       [](const std::string &a) {
-                           return const_cast<char *>(a.c_str());
-                       });
+        std::transform(
+            args.begin(), args.end(), std::back_inserter(argv),
+            [](const std::string &a) { return const_cast<char *>(a.c_str()); });
         argv.push_back(nullptr);
         ::execvp("ssh", argv.data());
         const std::string execErr =
@@ -377,8 +374,7 @@ static void stop_ssh_jump_tunnel(int pid) {
     int status = 0;
     for (int attempt = 0; attempt < 8; ++attempt) {
         const pid_t wr = ::waitpid(static_cast<pid_t>(pid), &status, WNOHANG);
-        if (wr == static_cast<pid_t>(pid) ||
-            (wr == -1 && errno == ECHILD)) {
+        if (wr == static_cast<pid_t>(pid) || (wr == -1 && errno == ECHILD)) {
             return;
         }
         if (attempt == 0) {
@@ -389,8 +385,7 @@ static void stop_ssh_jump_tunnel(int pid) {
     (void)::kill(static_cast<pid_t>(pid), SIGKILL);
     while (true) {
         const pid_t wr = ::waitpid(static_cast<pid_t>(pid), &status, 0);
-        if (wr == static_cast<pid_t>(pid) ||
-            (wr == -1 && errno == ECHILD)) {
+        if (wr == static_cast<pid_t>(pid) || (wr == -1 && errno == ECHILD)) {
             return;
         }
         if (wr == -1 && errno != EINTR)
@@ -527,9 +522,8 @@ static bool establish_socks5_tunnel(int sock, const SessionOptions &opt,
         return false;
     }
     std::vector<unsigned char> sink(tail);
-    if (tail > 0 &&
-        !socket_recv_exact(sock, sink.data(), sink.size(), "SOCKS5 connect",
-                           err)) {
+    if (tail > 0 && !socket_recv_exact(sock, sink.data(), sink.size(),
+                                       "SOCKS5 connect", err)) {
         return false;
     }
     return true;
@@ -541,7 +535,8 @@ static bool establish_http_connect_tunnel(int sock, const SessionOptions &opt,
         err = "HTTP CONNECT target host is empty.";
         return false;
     }
-    const std::string authority = format_host_port_authority(opt.host, opt.port);
+    const std::string authority =
+        format_host_port_authority(opt.host, opt.port);
     std::ostringstream req;
     req << "CONNECT " << authority << " HTTP/1.1\r\n";
     req << "Host: " << authority << "\r\n";

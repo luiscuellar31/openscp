@@ -1,9 +1,9 @@
 // MainWindow local-side filesystem operations and local navigation.
 #include "MainWindow.hpp"
 #include "MainWindowSharedUtils.hpp"
-#include "SessionController.hpp"
 #include "RemoteModel.hpp"
 #include "RemoteOperationController.hpp"
+#include "SessionController.hpp"
 #include "TransferManager.hpp"
 #include "UiAlerts.hpp"
 
@@ -27,8 +27,8 @@
 #include <QTemporaryFile>
 #include <QThreadPool>
 #include <QTreeView>
-#include <QUuid>
 #include <QUrl>
+#include <QUuid>
 
 #include <algorithm>
 #include <functional>
@@ -89,8 +89,8 @@ static bool copyEntryToEmptyDestination(const QString &srcPath,
         while (dirIterator.hasNext()) {
             dirIterator.next();
             const QFileInfo entryFileInfo = dirIterator.fileInfo();
-            const QString relativePath =
-                QDir(srcPath).relativeFilePath(entryFileInfo.absoluteFilePath());
+            const QString relativePath = QDir(srcPath).relativeFilePath(
+                entryFileInfo.absoluteFilePath());
             const QString target = QDir(dstPath).filePath(relativePath);
 
             if (entryFileInfo.isDir()) {
@@ -123,8 +123,7 @@ static bool copyEntryToEmptyDestination(const QString &srcPath,
 
 static bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
                                  QString &error) {
-    const QString destinationParent =
-        QFileInfo(dstPath).dir().absolutePath();
+    const QString destinationParent = QFileInfo(dstPath).dir().absolutePath();
     if (!QDir().mkpath(destinationParent)) {
         error = QString(QCoreApplication::translate(
                             "MainWindow",
@@ -133,8 +132,7 @@ static bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
         return false;
     }
 
-    const QString token =
-        QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString token = QUuid::createUuid().toString(QUuid::WithoutBraces);
     const QString stagedPath =
         QDir(destinationParent)
             .filePath(QStringLiteral(".openscp-stage-") + token);
@@ -163,9 +161,9 @@ static bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
             !hadDestination || renameEntry(backupPath, dstPath);
         error =
             restored
-                ? QString(QCoreApplication::translate(
-                              "MainWindow",
-                              "Could not publish completed copy: %1"))
+                ? QString(
+                      QCoreApplication::translate(
+                          "MainWindow", "Could not publish completed copy: %1"))
                       .arg(dstPath)
                 : QString(QCoreApplication::translate(
                               "MainWindow",
@@ -213,9 +211,8 @@ static QString buildLocalFsSummaryMessage(bool deleteSource, int successCount,
             .arg(failureCount)
             .arg(skippedCount);
     }
-    return QString(
-               QCoreApplication::translate("MainWindow",
-                                           "Copied: %1  |  Failed: %2"))
+    return QString(QCoreApplication::translate("MainWindow",
+                                               "Copied: %1  |  Failed: %2"))
         .arg(successCount)
         .arg(failureCount);
 }
@@ -255,7 +252,9 @@ void MainWindow::chooseRightDir() {
 }
 
 // Navigate left pane to the path typed by the user.
-void MainWindow::leftPathEntered() { setLeftRoot(leftPath_->text()); }
+void MainWindow::leftPathEntered() {
+    setLeftRoot(leftPath_->text());
+}
 
 // Navigate right pane (local or remote) to the path typed by the user.
 void MainWindow::rightPathEntered() {
@@ -277,7 +276,7 @@ void MainWindow::setLeftRoot(const QString &path) {
         updateDeleteShortcutEnables();
     } else {
         UiAlerts::warning(this, tr("Invalid path"),
-                             tr("Folder does not exist."));
+                          tr("Folder does not exist."));
     }
 }
 
@@ -294,7 +293,7 @@ void MainWindow::setRightRoot(const QString &path) {
         updateDeleteShortcutEnables();
     } else {
         UiAlerts::warning(this, tr("Invalid path"),
-                             tr("Folder does not exist."));
+                          tr("Folder does not exist."));
     }
 }
 
@@ -307,14 +306,13 @@ void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
     }
 
     ++localFsJobsInFlight_;
-    statusBar()->showMessage(
-        deleteSource ? tr("Moving selected items...")
-                     : tr("Copying selected items..."),
-        1500);
+    statusBar()->showMessage(deleteSource ? tr("Moving selected items...")
+                                          : tr("Copying selected items..."),
+                             1500);
 
     QPointer<MainWindow> self(this);
-    QThreadPool::globalInstance()->start(
-        [self, pairs, deleteSource, skippedCount]() {
+    QThreadPool::globalInstance()->start([self, pairs, deleteSource,
+                                          skippedCount]() {
         int successCount = 0;
         int failureCount = 0;
         QString lastError;
@@ -333,11 +331,10 @@ void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
                         ++successCount;
                     } else {
                         ++failureCount;
-                        lastError =
-                            QString(QCoreApplication::translate(
-                                        "MainWindow",
-                                        "Could not delete source: %1"))
-                                .arg(pair.sourcePath);
+                        lastError = QString(QCoreApplication::translate(
+                                                "MainWindow",
+                                                "Could not delete source: %1"))
+                                        .arg(pair.sourcePath);
                     }
                 } else {
                     ++successCount;
@@ -352,8 +349,9 @@ void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
         if (!app)
             return;
         QMetaObject::invokeMethod(
-            app, [self, successCount, failureCount, skippedCount, lastError,
-                  deleteSource]() {
+            app,
+            [self, successCount, failureCount, skippedCount, lastError,
+             deleteSource]() {
                 if (!self)
                     return;
 
@@ -362,11 +360,10 @@ void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
                 QString statusMessage = buildLocalFsSummaryMessage(
                     deleteSource, successCount, failureCount, skippedCount);
                 if (failureCount > 0 && !lastError.isEmpty()) {
-                    statusMessage +=
-                        "\n" +
-                        QCoreApplication::translate("MainWindow",
-                                                    "Last error: ") +
-                        lastError;
+                    statusMessage += "\n" +
+                                     QCoreApplication::translate(
+                                         "MainWindow", "Last error: ") +
+                                     lastError;
                 }
                 self->statusBar()->showMessage(statusMessage, 6000);
 
@@ -377,7 +374,7 @@ void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
                 self->updateDeleteShortcutEnables();
             },
             Qt::QueuedConnection);
-        });
+    });
 }
 
 void MainWindow::copyLeftToRight() {
@@ -386,7 +383,7 @@ void MainWindow::copyLeftToRight() {
         // directory ----
         if (!sessionController_->client()) {
             UiAlerts::warning(this, tr("Remote"),
-                                 tr("No active remote session."));
+                              tr("No active remote session."));
             return;
         }
         const bool scpMode = isScpTransferMode();
@@ -399,20 +396,19 @@ void MainWindow::copyLeftToRight() {
         // Selection on the left panel (local source)
         auto selectionModel = leftView_->selectionModel();
         if (!selectionModel) {
-            UiAlerts::warning(this, tr("Copy"),
-                                 tr("No selection available."));
+            UiAlerts::warning(this, tr("Copy"), tr("No selection available."));
             return;
         }
         const auto rows = selectionModel->selectedRows(NAME_COL);
         if (rows.isEmpty()) {
-            UiAlerts::information(
-                this, tr("Copy"), tr("No entries selected in the left panel."));
+            UiAlerts::information(this, tr("Copy"),
+                                  tr("No entries selected in the left panel."));
             return;
         }
 
         const QString remoteBase =
-            scpMode ? normalizeRemotePath(
-                          rightPath_ ? rightPath_->text() : QString())
+            scpMode ? normalizeRemotePath(rightPath_ ? rightPath_->text()
+                                                     : QString())
                     : rightRemoteModel_->rootPath();
         QVector<QPair<QString, QString>> roots;
         roots.reserve(rows.size());
@@ -429,8 +425,7 @@ void MainWindow::copyLeftToRight() {
             }
             roots.push_back(
                 {sourceFileInfo.absoluteFilePath(),
-                 joinRemotePath(remoteBase,
-                                sourceFileInfo.fileName())});
+                 joinRemotePath(remoteBase, sourceFileInfo.fileName())});
         }
         if (!roots.isEmpty())
             startLocalUploadDiscovery(roots, false);
@@ -454,7 +449,7 @@ void MainWindow::copyLeftToRight() {
     QDir dstDir(dstDirPath);
     if (!dstDir.exists()) {
         UiAlerts::warning(this, tr("Invalid destination"),
-                             tr("Destination folder does not exist."));
+                          tr("Destination folder does not exist."));
         return;
     }
 
@@ -466,7 +461,7 @@ void MainWindow::copyLeftToRight() {
     const auto rows = selectionModel->selectedRows(NAME_COL);
     if (rows.isEmpty()) {
         UiAlerts::information(this, tr("Copy"),
-                                 tr("No entries selected in the left panel."));
+                              tr("No entries selected in the left panel."));
         return;
     }
 
@@ -485,7 +480,8 @@ void MainWindow::copyLeftToRight() {
 
 void MainWindow::moveLeftToRight() {
     if (rightIsRemote_) {
-        if (!rightRemoteModel_ || !transferMgr_ || !sessionController_->client()) {
+        if (!rightRemoteModel_ || !transferMgr_ ||
+            !sessionController_->client()) {
             UiAlerts::warning(this, tr("Remote"),
                               tr("No active remote session."));
             return;
@@ -494,8 +490,8 @@ void MainWindow::moveLeftToRight() {
         const auto rows =
             selection ? selection->selectedRows(NAME_COL) : QModelIndexList{};
         if (rows.isEmpty()) {
-            UiAlerts::information(
-                this, tr("Move"), tr("No entries selected in the left panel."));
+            UiAlerts::information(this, tr("Move"),
+                                  tr("No entries selected in the left panel."));
             return;
         }
         if (UiAlerts::question(this, tr("Confirm move"),
@@ -512,27 +508,25 @@ void MainWindow::moveLeftToRight() {
             const QFileInfo source = leftModel_->fileInfo(index);
             if (!source.isFile() && !source.isDir())
                 continue;
-            roots.push_back(
-                {source.absoluteFilePath(),
-                 joinRemotePath(remoteBase, source.fileName())});
+            roots.push_back({source.absoluteFilePath(),
+                             joinRemotePath(remoteBase, source.fileName())});
         }
         startLocalUploadDiscovery(roots, true);
         return;
     }
-
 
     // ---- Existing LOCAL→LOCAL branch ----
     const QString dstDirPath = rightPath_->text();
     QDir dstDir(dstDirPath);
     if (!dstDir.exists()) {
         UiAlerts::warning(this, tr("Invalid destination"),
-                             tr("Destination folder does not exist."));
+                          tr("Destination folder does not exist."));
         return;
     }
     const auto rows = leftView_->selectionModel()->selectedRows(NAME_COL);
     if (rows.isEmpty()) {
         UiAlerts::information(this, tr("Move"),
-                                 tr("No entries selected in the left panel."));
+                              tr("No entries selected in the left panel."));
         return;
     }
     if (UiAlerts::question(
@@ -557,13 +551,13 @@ void MainWindow::deleteFromLeft() {
     const auto rows = leftView_->selectionModel()->selectedRows(NAME_COL);
     if (rows.isEmpty()) {
         UiAlerts::information(this, tr("Delete"),
-                                 tr("No entries selected in the left panel."));
+                              tr("No entries selected in the left panel."));
         return;
     }
     if (UiAlerts::warning(this, tr("Confirm delete"),
-                             tr("This will permanently delete the selected "
-                                "items in the left panel.\nContinue?"),
-                             QMessageBox::Yes | QMessageBox::No) !=
+                          tr("This will permanently delete the selected "
+                             "items in the left panel.\nContinue?"),
+                          QMessageBox::Yes | QMessageBox::No) !=
         QMessageBox::Yes)
         return;
     int deletedCount = 0;
@@ -579,11 +573,10 @@ void MainWindow::deleteFromLeft() {
         else
             ++failedCount;
     }
-    statusBar()->showMessage(
-        QString(tr("Deleted: %1  |  Failed: %2"))
-            .arg(deletedCount)
-            .arg(failedCount),
-        5000);
+    statusBar()->showMessage(QString(tr("Deleted: %1  |  Failed: %2"))
+                                 .arg(deletedCount)
+                                 .arg(failedCount),
+                             5000);
 }
 
 void MainWindow::goUpLeft() {
@@ -645,20 +638,20 @@ void MainWindow::renameLeftSelected() {
     const auto rows = selectionModel->selectedRows();
     if (rows.size() != 1) {
         UiAlerts::information(this, tr("Rename"),
-                                 tr("Select exactly one item."));
+                              tr("Select exactly one item."));
         return;
     }
     const QModelIndex selectedIndex = rows.first();
     const QFileInfo selectedFileInfo = leftModel_->fileInfo(selectedIndex);
     bool inputAccepted = false;
-    const QString newName =
-        QInputDialog::getText(this, tr("Rename"), tr("New name:"),
-                              QLineEdit::Normal, selectedFileInfo.fileName(),
-                              &inputAccepted);
+    const QString newName = QInputDialog::getText(
+        this, tr("Rename"), tr("New name:"), QLineEdit::Normal,
+        selectedFileInfo.fileName(), &inputAccepted);
     if (!inputAccepted || newName.isEmpty() ||
         newName == selectedFileInfo.fileName())
         return;
-    const QString newPath = QDir(selectedFileInfo.absolutePath()).filePath(newName);
+    const QString newPath =
+        QDir(selectedFileInfo.absolutePath()).filePath(newName);
     bool renamed = QFile::rename(selectedFileInfo.absoluteFilePath(), newPath);
     if (!renamed)
         renamed = QDir(selectedFileInfo.absolutePath())
@@ -677,8 +670,7 @@ void MainWindow::newDirLeft() {
         return;
     QDir base(leftPath_->text());
     if (!base.mkpath(base.filePath(name))) {
-        UiAlerts::critical(this, tr("Local"),
-                              tr("Could not create folder."));
+        UiAlerts::critical(this, tr("Local"), tr("Could not create folder."));
         return;
     }
     setLeftRoot(base.absolutePath());
@@ -692,10 +684,10 @@ void MainWindow::newFileLeft() {
     QDir base(leftPath_->text());
     const QString path = base.filePath(name);
     if (QFileInfo::exists(path)) {
-        if (UiAlerts::question(
-                this, tr("File exists"),
-                tr("«%1» already exists.\nOverwrite?").arg(name),
-                QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
+        if (UiAlerts::question(this, tr("File exists"),
+                               tr("«%1» already exists.\nOverwrite?").arg(name),
+                               QMessageBox::Yes | QMessageBox::No) !=
+            QMessageBox::Yes)
             return;
     }
     QFile newFile(path);

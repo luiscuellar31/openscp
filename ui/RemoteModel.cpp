@@ -1,22 +1,25 @@
 // Remote model implementation (table: Name, Size, Date, Permissions).
 #include "RemoteModel.hpp"
+
 #include "MainWindowSharedUtils.hpp"
 #include "TimeUtils.hpp"
+
 #include <QApplication>
 #include <QDateTime>
 #include <QFileIconProvider>
 #include <QFileInfo>
 #include <QIcon>
+#include <QLocale>
+#include <QMimeData>
 #include <QMimeDatabase>
 #include <QMimeType>
 #include <QStyle>
 #include <QVariant>
-#include <algorithm>
-#include <QLocale>
-#include <QMimeData>
 
-RemoteModel::RemoteModel(QObject *parent)
-    : QAbstractTableModel(parent) {}
+#include <algorithm>
+
+RemoteModel::RemoteModel(QObject *parent) : QAbstractTableModel(parent) {
+}
 
 int RemoteModel::rowCount(const QModelIndex &parent) const {
     if (parent.isValid())
@@ -55,10 +58,9 @@ static QIcon remoteLinkIcon() {
         QIcon themed = QIcon::fromTheme(QStringLiteral("emblem-symbolic-link"));
         if (!themed.isNull())
             return themed;
-        return QApplication::style()
-                   ? QApplication::style()->standardIcon(
-                         QStyle::SP_FileLinkIcon)
-                   : QIcon();
+        return QApplication::style() ? QApplication::style()->standardIcon(
+                                           QStyle::SP_FileLinkIcon)
+                                     : QIcon();
     }();
     return icon;
 }
@@ -231,18 +233,17 @@ void RemoteModel::clearLoading() {
     endResetModel();
 }
 
-void RemoteModel::setEntries(
-    const QString &path,
-    const std::vector<openscp::FileInfo> &entries) {
+void RemoteModel::setEntries(const QString &path,
+                             const std::vector<openscp::FileInfo> &entries) {
     std::vector<Item> nextItems;
     nextItems.reserve(entries.size());
     for (const auto &fileInfo : entries) {
         const QString name = QString::fromStdString(fileInfo.name);
         if (!showHidden_ && name.startsWith('.'))
             continue;
-        nextItems.push_back(
-            {name, fileInfo.is_dir, fileInfo.size, fileInfo.has_size,
-             fileInfo.mtime, fileInfo.mode, fileInfo.uid, fileInfo.gid});
+        nextItems.push_back({name, fileInfo.is_dir, fileInfo.size,
+                             fileInfo.has_size, fileInfo.mtime, fileInfo.mode,
+                             fileInfo.uid, fileInfo.gid});
     }
     sortItemsVector(nextItems, sortColumn_, sortOrder_);
     beginResetModel();
@@ -303,8 +304,8 @@ void RemoteModel::sortItemsVector(std::vector<Item> &items, int column,
     std::sort(items.begin(), items.end(), compareItems);
 }
 
-const RemoteModel::Item *RemoteModel::itemForIndex(
-    const QModelIndex &index) const {
+const RemoteModel::Item *
+RemoteModel::itemForIndex(const QModelIndex &index) const {
     if (!index.isValid() || index.model() != this)
         return nullptr;
     const int row = index.row();

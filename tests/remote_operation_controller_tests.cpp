@@ -1,6 +1,5 @@
 // Unit tests for the serialized remote-operation execution lane.
 #include "RemoteOperationController.hpp"
-
 #include "openscp/SftpClient.hpp"
 
 #include <QCoreApplication>
@@ -141,23 +140,20 @@ class ControllerFakeClient final : public openscp::SftpClient {
                 {"deep", true, 0, false, 0, 0040755u, 1, 1},
                 {"unknown.bin", false, 0, false, 0, 0100644u, 1, 1},
                 {"../escape.txt", false, 1, true, 0, 0100644u, 1, 1},
-                {"nested/escape.txt", false, 1, true, 0, 0100644u, 1,
-                 1},
+                {"nested/escape.txt", false, 1, true, 0, 0100644u, 1, 1},
             };
         } else if (remotePath == "/summary/deep") {
             out = {
-                {"must-not-be-listed.txt", false, 1, true, 0, 0100644u, 1,
-                 1},
+                {"must-not-be-listed.txt", false, 1, true, 0, 0100644u, 1, 1},
             };
         } else if (remotePath == "/unsafe") {
             out = {
                 {"safe.txt", false, 4, true, 0, 0100644u, 1, 1},
                 {".", true, 0, false, 0, 0040755u, 1, 1},
                 {"..", true, 0, false, 0, 0040755u, 1, 1},
-                {"nested/escape.txt", false, 1, true, 0, 0100644u, 1,
-                 1},
-                {std::string("bad-") + char(0xff), false, 1, true, 0,
-                 0100644u, 1, 1},
+                {"nested/escape.txt", false, 1, true, 0, 0100644u, 1, 1},
+                {std::string("bad-") + char(0xff), false, 1, true, 0, 0100644u,
+                 1, 1},
             };
         } else {
             out.clear();
@@ -174,8 +170,7 @@ class ControllerFakeClient final : public openscp::SftpClient {
     }
 
     bool put(const std::string &, const std::string &remotePath,
-             std::string &err,
-             std::function<void(std::size_t, std::size_t)>,
+             std::string &err, std::function<void(std::size_t, std::size_t)>,
              std::function<bool()>, bool) override {
         ActiveCall call(state_, "put:" + remotePath);
         err.clear();
@@ -243,25 +238,22 @@ class ControllerFakeClient final : public openscp::SftpClient {
         return true;
     }
 
-    bool checksum(
-        const std::string &remotePath, const std::string &algorithm,
-        std::vector<std::uint8_t> &digest, std::string &err,
-        std::function<void(std::size_t, std::size_t)> progress,
-        std::function<bool()> shouldCancel) override {
+    bool checksum(const std::string &remotePath, const std::string &algorithm,
+                  std::vector<std::uint8_t> &digest, std::string &err,
+                  std::function<void(std::size_t, std::size_t)> progress,
+                  std::function<bool()> shouldCancel) override {
         ActiveCall call(state_, "checksum:" + remotePath);
         if (algorithm != "SHA-256") {
             err = "Unsupported checksum algorithm";
             setLastOperationError(openscp::RemoteErrorKind::Unsupported, err);
             return false;
         }
-        const std::size_t total =
-            remotePath == "/checksum-slow.bin" ? 200 : 4;
+        const std::size_t total = remotePath == "/checksum-slow.bin" ? 200 : 4;
         for (std::size_t done = 0; done < total; ++done) {
             if ((shouldCancel && shouldCancel()) ||
                 state_->interrupted.load()) {
                 err = "Checksum calculation canceled";
-                setLastOperationError(openscp::RemoteErrorKind::Canceled,
-                                      err);
+                setLastOperationError(openscp::RemoteErrorKind::Canceled, err);
                 return false;
             }
             if (progress)
@@ -328,15 +320,14 @@ void testTypedOperationsAreSerialized(TestContext &test) {
                 searchMatches += batch.entries.size();
         });
     QObject::connect(
-        &controller, &RemoteOperationController::checksumCompleted,
-        &controller,
+        &controller, &RemoteOperationController::checksumCompleted, &controller,
         [&](const RemoteOperationController::ChecksumResult &result) {
             callbacksOnUiThread &= QThread::currentThread() == uiThread;
             if (result.result.outcome ==
                     RemoteOperationController::Outcome::Succeeded &&
                 result.path == QStringLiteral("/checksum.bin") &&
-                result.digest == QByteArray::fromRawData(
-                                     "\x01\x02\x03\x04", 4)) {
+                result.digest ==
+                    QByteArray::fromRawData("\x01\x02\x03\x04", 4)) {
                 checksumDelivered = true;
             }
         });
@@ -369,10 +360,10 @@ void testTypedOperationsAreSerialized(TestContext &test) {
     controller.submit(RemoteOperationController::StatRequest{"/alpha.txt"});
     controller.submit(
         RemoteOperationController::MkdirRequest{"/created", 0755});
-    controller.submit(RemoteOperationController::MkdirRequest{
-        "/parent/child", 0755, true});
-    controller.submit(RemoteOperationController::CreateFileRequest{
-        "/empty.txt", true});
+    controller.submit(
+        RemoteOperationController::MkdirRequest{"/parent/child", 0755, true});
+    controller.submit(
+        RemoteOperationController::CreateFileRequest{"/empty.txt", true});
     controller.submit(RemoteOperationController::RenameRequest{
         "/created", "/renamed", false});
     controller.submit(RemoteOperationController::DeleteRequest{
@@ -395,8 +386,7 @@ void testTypedOperationsAreSerialized(TestContext &test) {
     traversal.traversal.batchSize = 2;
     controller.submit(traversal);
     controller.submit(
-        RemoteOperationController::ChecksumRequest{"/checksum.bin",
-                                                   "SHA-256"});
+        RemoteOperationController::ChecksumRequest{"/checksum.bin", "SHA-256"});
 
     test.check(spinUntil([&] { return finishedSignals == 13; }),
                "every typed request should deliver a completion");
@@ -438,34 +428,28 @@ void testChecksumCancellationKeepsEventLoopResponsive(TestContext &test) {
                              started = true;
                      });
     QObject::connect(
-        &controller, &RemoteOperationController::checksumCompleted,
-        &controller,
+        &controller, &RemoteOperationController::checksumCompleted, &controller,
         [&](const RemoteOperationController::ChecksumResult &result) {
             if (result.result.job.id == checksumJob) {
-                typedCanceled =
-                    result.result.outcome ==
-                    RemoteOperationController::Outcome::Canceled;
+                typedCanceled = result.result.outcome ==
+                                RemoteOperationController::Outcome::Canceled;
             }
         });
     QObject::connect(
         &controller, &RemoteOperationController::jobFinished, &controller,
         [&](const RemoteOperationController::Completion &completion) {
             if (completion.result.job.id == checksumJob) {
-                canceled =
-                    completion.result.outcome ==
-                    RemoteOperationController::Outcome::Canceled;
+                canceled = completion.result.outcome ==
+                           RemoteOperationController::Outcome::Canceled;
             }
         });
 
     controller.installSession(makeConnectedClient(state));
     test.check(spinUntil([&] { return controller.hasRequestedSession(); }),
                "checksum cancellation session should be requested");
-    checksumJob = controller.submit(
-        RemoteOperationController::ChecksumRequest{
-            QStringLiteral("/checksum-slow.bin"),
-            QStringLiteral("SHA-256")});
-    QTimer::singleShot(0, &controller,
-                       [&] { eventLoopAdvanced = true; });
+    checksumJob = controller.submit(RemoteOperationController::ChecksumRequest{
+        QStringLiteral("/checksum-slow.bin"), QStringLiteral("SHA-256")});
+    QTimer::singleShot(0, &controller, [&] { eventLoopAdvanced = true; });
     test.check(spinUntil([&] { return started && eventLoopAdvanced; }),
                "remote checksum must leave the Qt event loop responsive");
     test.check(controller.cancel(checksumJob),
@@ -483,18 +467,18 @@ void testListRejectsUnsafeNames(TestContext &test) {
     std::optional<RemoteOperationController::ListResult> listResult;
     std::optional<RemoteOperationController::Completion> completion;
 
-    QObject::connect(
-        &controller, &RemoteOperationController::listCompleted, &controller,
-        [&](const RemoteOperationController::ListResult &result) {
-            if (result.result.job.id == listJob)
-                listResult = result;
-        });
-    QObject::connect(
-        &controller, &RemoteOperationController::jobFinished, &controller,
-        [&](const RemoteOperationController::Completion &result) {
-            if (result.result.job.id == listJob)
-                completion = result;
-        });
+    QObject::connect(&controller, &RemoteOperationController::listCompleted,
+                     &controller,
+                     [&](const RemoteOperationController::ListResult &result) {
+                         if (result.result.job.id == listJob)
+                             listResult = result;
+                     });
+    QObject::connect(&controller, &RemoteOperationController::jobFinished,
+                     &controller,
+                     [&](const RemoteOperationController::Completion &result) {
+                         if (result.result.job.id == listJob)
+                             completion = result;
+                     });
 
     controller.installSession(makeConnectedClient(state));
     listJob = controller.submit(
@@ -541,9 +525,8 @@ void testRecursiveMutationsRejectUnsafeNames(TestContext &test) {
     chmod.traversal.skipSymlinks = true;
     chmodJob = controller.submit(chmod);
 
-    test.check(
-        spinUntil([&] { return deleteCompletion && chmodCompletion; }),
-        "recursive mutation safety fixtures should complete");
+    test.check(spinUntil([&] { return deleteCompletion && chmodCompletion; }),
+               "recursive mutation safety fixtures should complete");
     const auto checkCounters =
         [&](const std::optional<RemoteOperationController::Completion>
                 &completion,
@@ -556,7 +539,7 @@ void testRecursiveMutationsRejectUnsafeNames(TestContext &test) {
             test.check(completion->skippedSymlinks == 1,
                        "recursive mutations should count skipped symlinks");
             test.check(completion->result.outcome ==
-                           RemoteOperationController::Outcome::Failed &&
+                               RemoteOperationController::Outcome::Failed &&
                            completion->result.partial,
                        "skipping unsafe mutation targets should report a "
                        "partial failure");
@@ -568,13 +551,13 @@ void testRecursiveMutationsRejectUnsafeNames(TestContext &test) {
 
     std::lock_guard lock(state->mutex);
     test.check(
-        std::none_of(
-            state->calls.cbegin(), state->calls.cend(),
-            [](const std::string &call) {
-                return call.find("../") != std::string::npos ||
-                       call.find("nested/escape") != std::string::npos ||
-                       call.find("linked-file") != std::string::npos;
-            }),
+        std::none_of(state->calls.cbegin(), state->calls.cend(),
+                     [](const std::string &call) {
+                         return call.find("../") != std::string::npos ||
+                                call.find("nested/escape") !=
+                                    std::string::npos ||
+                                call.find("linked-file") != std::string::npos;
+                     }),
         "recursive mutations must never target unsafe names or skipped links");
 }
 
@@ -692,12 +675,12 @@ void testTraversalPauseProvidesBackpressure(TestContext &test) {
     bool slowFinished = false;
     bool traversalFinished = false;
 
-    QObject::connect(
-        &controller, &RemoteOperationController::jobStarted, &controller,
-        [&](const RemoteOperationController::JobKey &job) {
-            if (job.id == slowJob)
-                slowStarted = true;
-        });
+    QObject::connect(&controller, &RemoteOperationController::jobStarted,
+                     &controller,
+                     [&](const RemoteOperationController::JobKey &job) {
+                         if (job.id == slowJob)
+                             slowStarted = true;
+                     });
     QObject::connect(
         &controller, &RemoteOperationController::jobFinished, &controller,
         [&](const RemoteOperationController::Completion &completion) {
@@ -710,8 +693,8 @@ void testTraversalPauseProvidesBackpressure(TestContext &test) {
     controller.installSession(makeConnectedClient(state));
     test.check(spinUntil([&] { return controller.hasRequestedSession(); }),
                "pause test session should be requested");
-    slowJob =
-        controller.submit(RemoteOperationController::ListRequest{"/slow", true});
+    slowJob = controller.submit(
+        RemoteOperationController::ListRequest{"/slow", true});
     test.check(spinUntil([&] { return slowStarted; }),
                "pause test blocker should start");
 
@@ -754,12 +737,12 @@ void testHealthChecksYieldToUserWork(TestContext &test) {
     bool healthFinished = false;
     bool statFinished = false;
 
-    QObject::connect(
-        &controller, &RemoteOperationController::jobStarted, &controller,
-        [&](const RemoteOperationController::JobKey &job) {
-            if (job.id == blocker)
-                blockerStarted = true;
-        });
+    QObject::connect(&controller, &RemoteOperationController::jobStarted,
+                     &controller,
+                     [&](const RemoteOperationController::JobKey &job) {
+                         if (job.id == blocker)
+                             blockerStarted = true;
+                     });
     QObject::connect(
         &controller, &RemoteOperationController::jobFinished, &controller,
         [&](const RemoteOperationController::Completion &completion) {
@@ -772,23 +755,22 @@ void testHealthChecksYieldToUserWork(TestContext &test) {
     controller.installSession(makeConnectedClient(state));
     test.check(spinUntil([&] { return controller.hasRequestedSession(); }),
                "priority test session should be requested");
-    blocker =
-        controller.submit(RemoteOperationController::ListRequest{"/slow", true});
+    blocker = controller.submit(
+        RemoteOperationController::ListRequest{"/slow", true});
     test.check(spinUntil([&] { return blockerStarted; }),
                "priority test blocker should start");
 
     health = controller.submit(
         RemoteOperationController::HealthCheckRequest{"/probe"});
-    userStat = controller.submit(
-        RemoteOperationController::StatRequest{"/priority"});
+    userStat =
+        controller.submit(RemoteOperationController::StatRequest{"/priority"});
     controller.cancel(blocker);
     test.check(spinUntil([&] { return healthFinished && statFinished; }),
                "queued health and user jobs should both finish");
 
     std::lock_guard lock(state->mutex);
     const auto statPosition =
-        std::find(state->calls.cbegin(), state->calls.cend(),
-                  "stat:/priority");
+        std::find(state->calls.cbegin(), state->calls.cend(), "stat:/priority");
     const auto healthPosition =
         std::find(state->calls.cbegin(), state->calls.cend(), "stat:/probe");
     test.check(statPosition != state->calls.cend() &&
@@ -807,8 +789,7 @@ void testDiscoverySummaryCountersAndConfinement(TestContext &test) {
     RemoteOperationController::JobId searchJob = 0;
 
     QObject::connect(
-        &controller, &RemoteOperationController::entriesBatchReady,
-        &controller,
+        &controller, &RemoteOperationController::entriesBatchReady, &controller,
         [&](const RemoteOperationController::EntryBatch &batch) {
             if (batch.job.id != traversalJob && batch.job.id != searchJob)
                 return;
@@ -840,8 +821,7 @@ void testDiscoverySummaryCountersAndConfinement(TestContext &test) {
     searchJob = controller.submit(search);
 
     test.check(
-        spinUntil(
-            [&] { return traversalCompletion && searchCompletion; }),
+        spinUntil([&] { return traversalCompletion && searchCompletion; }),
         "traverse and search should report discovery summaries");
 
     const auto checkSummary =
@@ -869,23 +849,20 @@ void testDiscoverySummaryCountersAndConfinement(TestContext &test) {
         };
     checkSummary(traversalCompletion, 2,
                  "traversal completion should be available");
-    checkSummary(searchCompletion, 1,
-                 "search completion should be available");
+    checkSummary(searchCompletion, 1, "search completion should be available");
 
     test.check(
-        std::none_of(
-            emittedPaths.cbegin(), emittedPaths.cend(),
-            [](const QString &path) {
-                return path.contains(QStringLiteral("..")) ||
-                       path.contains(QStringLiteral("nested/escape"));
-            }),
+        std::none_of(emittedPaths.cbegin(), emittedPaths.cend(),
+                     [](const QString &path) {
+                         return path.contains(QStringLiteral("..")) ||
+                                path.contains(QStringLiteral("nested/escape"));
+                     }),
         "unsafe remote names must never escape into streamed relative paths");
     {
         std::lock_guard lock(state->mutex);
-        test.check(
-            std::find(state->calls.cbegin(), state->calls.cend(),
-                      "list:/summary/deep") == state->calls.cend(),
-            "depth-limited directories must not issue a child listing");
+        test.check(std::find(state->calls.cbegin(), state->calls.cend(),
+                             "list:/summary/deep") == state->calls.cend(),
+                   "depth-limited directories must not issue a child listing");
     }
 }
 

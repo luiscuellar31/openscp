@@ -1,14 +1,16 @@
 // Implementation of OpenSCP settings dialog.
 #include "SettingsDialog.hpp"
+
 #include "UiAlerts.hpp"
 #include "openscp/SftpTypes.hpp"
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QFormLayout>
 #include <QFontMetrics>
+#include <QFormLayout>
 #include <QHBoxLayout>
 #include <QKeySequence>
 #include <QKeySequenceEdit>
@@ -117,14 +119,13 @@ SettingsDialog::buildSettingBindings() const {
         };
     };
 
-    auto makeLineEditBinding = [](const QString &key, const QString &defaultValue,
-                                  QLineEdit *edit,
+    auto makeLineEditBinding = [](const QString &key,
+                                  const QString &defaultValue, QLineEdit *edit,
                                   const StringNormalizer &normalize = {}) {
         return SettingBinding{
             key,
             [key, defaultValue, normalize](const QSettings &settings) {
-                QString value =
-                    settings.value(key, defaultValue).toString();
+                QString value = settings.value(key, defaultValue).toString();
                 return normalize ? normalize(value) : value;
             },
             [edit, defaultValue, normalize] {
@@ -150,11 +151,10 @@ SettingsDialog::buildSettingBindings() const {
                 return settings.value(key, defaultValue).toString().trimmed();
             },
             [editor, defaultValue] {
-                return editor
-                           ? editor->keySequence()
-                                 .toString(QKeySequence::PortableText)
-                                 .trimmed()
-                           : defaultValue;
+                return editor ? editor->keySequence()
+                                    .toString(QKeySequence::PortableText)
+                                    .trimmed()
+                              : defaultValue;
             },
             [editor](const QVariant &value) {
                 if (editor) {
@@ -239,8 +239,8 @@ SettingsDialog::buildSettingBindings() const {
     };
     auto addSpin = [&](const char *key, int defaultValue, QSpinBox *spin,
                        int minValue = 1, int maxValue = 0) {
-        bindings.push_back(makeSpinBinding(QString::fromLatin1(key), defaultValue,
-                                           spin, minValue, maxValue));
+        bindings.push_back(makeSpinBinding(
+            QString::fromLatin1(key), defaultValue, spin, minValue, maxValue));
     };
     auto addLineEdit = [&](const char *key, const QString &defaultValue,
                            QLineEdit *edit,
@@ -261,9 +261,8 @@ SettingsDialog::buildSettingBindings() const {
     auto addStringCombo = [&](const char *key, const QString &defaultValue,
                               QComboBox *combo,
                               const StringNormalizer &normalize = {}) {
-        bindings.push_back(makeStringComboBinding(QString::fromLatin1(key),
-                                                  defaultValue, combo,
-                                                  normalize));
+        bindings.push_back(makeStringComboBinding(
+            QString::fromLatin1(key), defaultValue, combo, normalize));
     };
 
     struct BoolBindingSpec {
@@ -293,8 +292,7 @@ SettingsDialog::buildSettingBindings() const {
     bindings.push_back({
         QStringLiteral("UI/openBehaviorMode"),
         [](const QSettings &settings) {
-            QString mode = settings
-                               .value("UI/openBehaviorMode")
+            QString mode = settings.value("UI/openBehaviorMode")
                                .toString()
                                .trimmed()
                                .toLower();
@@ -342,11 +340,11 @@ SettingsDialog::buildSettingBindings() const {
                 historyShortcutEdit_);
     addLineEdit("UI/defaultDownloadDir", defaultDownloadDirPath(),
                 defaultDownloadDirEdit_, [](const QString &raw) {
-            QString path = raw.trimmed();
-            if (path.isEmpty())
-                path = defaultDownloadDirPath();
-            return QDir::cleanPath(path);
-        });
+                    QString path = raw.trimmed();
+                    if (path.isEmpty())
+                        path = defaultDownloadDirPath();
+                    return QDir::cleanPath(path);
+                });
     addBool("Sites/deleteSecretsOnRemove", false, deleteSecretsOnRemove_);
 
     bindings.push_back({
@@ -364,9 +362,8 @@ SettingsDialog::buildSettingBindings() const {
             return static_cast<int>(protocol);
         },
         [this] {
-            return defaultProtocol_
-                       ? defaultProtocol_->currentData().toInt()
-                       : static_cast<int>(openscp::Protocol::Sftp);
+            return defaultProtocol_ ? defaultProtocol_->currentData().toInt()
+                                    : static_cast<int>(openscp::Protocol::Sftp);
         },
         [this](const QVariant &value) {
             if (!defaultProtocol_)
@@ -376,11 +373,10 @@ SettingsDialog::buildSettingBindings() const {
                 defaultProtocol_->setCurrentIndex(index);
         },
         [](QSettings &settings, const QVariant &value) {
-            const auto protocol =
-                static_cast<openscp::Protocol>(value.toInt());
-            settings.setValue("Protocol/defaultProtocol",
-                              QString::fromLatin1(
-                                  openscp::protocolStorageName(protocol)));
+            const auto protocol = static_cast<openscp::Protocol>(value.toInt());
+            settings.setValue(
+                "Protocol/defaultProtocol",
+                QString::fromLatin1(openscp::protocolStorageName(protocol)));
         },
     });
     bindings.push_back({
@@ -388,10 +384,10 @@ SettingsDialog::buildSettingBindings() const {
         [](const QSettings &settings) {
             const auto mode = openscp::scpTransferModeFromStorageName(
                 settings
-                    .value("Protocol/scpTransferModeDefault",
-                           QString::fromLatin1(
-                               openscp::scpTransferModeStorageName(
-                                   openscp::ScpTransferMode::Auto)))
+                    .value(
+                        "Protocol/scpTransferModeDefault",
+                        QString::fromLatin1(openscp::scpTransferModeStorageName(
+                            openscp::ScpTransferMode::Auto)))
                     .toString()
                     .trimmed()
                     .toLower()
@@ -425,26 +421,26 @@ SettingsDialog::buildSettingBindings() const {
         static_cast<int>(openscp::TransferIntegrityPolicy::Optional);
     addIntCombo("Security/defaultKnownHostsPolicy", strictKhPolicy,
                 defaultKnownHostsPolicy_, [strictKhPolicy](int value) {
-            const int acceptNew =
-                static_cast<int>(openscp::KnownHostsPolicy::AcceptNew);
-            const int off =
-                static_cast<int>(openscp::KnownHostsPolicy::Off);
-            return (value == strictKhPolicy || value == acceptNew ||
-                    value == off)
-                       ? value
-                       : strictKhPolicy;
-        });
+                    const int acceptNew =
+                        static_cast<int>(openscp::KnownHostsPolicy::AcceptNew);
+                    const int off =
+                        static_cast<int>(openscp::KnownHostsPolicy::Off);
+                    return (value == strictKhPolicy || value == acceptNew ||
+                            value == off)
+                               ? value
+                               : strictKhPolicy;
+                });
     addIntCombo("Security/defaultTransferIntegrityPolicy", optionalIntegrity,
                 defaultIntegrityPolicy_, [optionalIntegrity](int value) {
-            const int required =
-                static_cast<int>(openscp::TransferIntegrityPolicy::Required);
-            const int off =
-                static_cast<int>(openscp::TransferIntegrityPolicy::Off);
-            return (value == optionalIntegrity || value == required ||
-                    value == off)
-                       ? value
-                       : optionalIntegrity;
-        });
+                    const int required = static_cast<int>(
+                        openscp::TransferIntegrityPolicy::Required);
+                    const int off =
+                        static_cast<int>(openscp::TransferIntegrityPolicy::Off);
+                    return (value == optionalIntegrity || value == required ||
+                            value == off)
+                               ? value
+                               : optionalIntegrity;
+                });
 
     const BoolBindingSpec securityBoolBindings[] = {
         {"Security/ftpsVerifyPeerDefault", true, ftpsVerifyPeerDefault_},
@@ -532,8 +528,8 @@ QVariantMap SettingsDialog::readPersistedSnapshot(
     return snapshot;
 }
 
-QVariantMap
-SettingsDialog::readCurrentSnapshot(const QVector<SettingBinding> &bindings) const {
+QVariantMap SettingsDialog::readCurrentSnapshot(
+    const QVector<SettingBinding> &bindings) const {
     QVariantMap snapshot;
     for (const auto &binding : bindings) {
         if (!binding.readCurrent)
@@ -582,7 +578,8 @@ QString SettingsDialog::wrapTextToWidth(const QString &text,
         QString current;
         for (const QString &word : words) {
             const QString candidate =
-                current.isEmpty() ? word : (current + QStringLiteral(" ") + word);
+                current.isEmpty() ? word
+                                  : (current + QStringLiteral(" ") + word);
             if (current.isEmpty() ||
                 fontMetrics.horizontalAdvance(candidate) <= maxWidth) {
                 current = candidate;
@@ -620,7 +617,8 @@ void SettingsDialog::refreshWrappedCheckTexts() {
         if (widgetWidth <= 0) {
             int viewportWidth = 0;
             for (QWidget *ancestorWidget = checkBox->parentWidget();
-                 ancestorWidget; ancestorWidget = ancestorWidget->parentWidget()) {
+                 ancestorWidget;
+                 ancestorWidget = ancestorWidget->parentWidget()) {
                 if (auto *scrollArea =
                         qobject_cast<QScrollArea *>(ancestorWidget)) {
                     viewportWidth = scrollArea->viewport()
@@ -632,17 +630,16 @@ void SettingsDialog::refreshWrappedCheckTexts() {
             widgetWidth = viewportWidth > 0 ? viewportWidth : width();
         }
 
-        const int indicatorW =
-            checkBox->style()->pixelMetric(QStyle::PM_IndicatorWidth, nullptr,
-                                           checkBox);
-        const int indicatorH =
-            checkBox->style()->pixelMetric(QStyle::PM_IndicatorHeight, nullptr,
-                                           checkBox);
+        const int indicatorW = checkBox->style()->pixelMetric(
+            QStyle::PM_IndicatorWidth, nullptr, checkBox);
+        const int indicatorH = checkBox->style()->pixelMetric(
+            QStyle::PM_IndicatorHeight, nullptr, checkBox);
         const int spacingW = checkBox->style()->pixelMetric(
             QStyle::PM_CheckBoxLabelSpacing, nullptr, checkBox);
-        const int textWidth = qMax(100, widgetWidth - indicatorW - spacingW - 10);
-        const QString wrapped = wrapTextToWidth(raw, QFontMetrics(checkBox->font()),
-                                                textWidth);
+        const int textWidth =
+            qMax(100, widgetWidth - indicatorW - spacingW - 10);
+        const QString wrapped =
+            wrapTextToWidth(raw, QFontMetrics(checkBox->font()), textWidth);
         if (checkBox->text() != wrapped) {
             checkBox->setText(wrapped);
             checkBox->updateGeometry();
@@ -679,7 +676,8 @@ void SettingsDialog::recalcSectionListWidth(QListWidget *sectionList) const {
     int maxTextWidth = 0;
     for (int rowIndex = 0; rowIndex < sectionList->count(); ++rowIndex) {
         if (auto *item = sectionList->item(rowIndex))
-            maxTextWidth = qMax(maxTextWidth, fm.horizontalAdvance(item->text()));
+            maxTextWidth =
+                qMax(maxTextWidth, fm.horizontalAdvance(item->text()));
     }
     const int width = qBound(150, maxTextWidth + 48, 260);
     sectionList->setFixedWidth(width);
@@ -757,8 +755,7 @@ QSpinBox *SettingsDialog::addSpinRow(QFormLayout *target, QWidget *parent,
                                      const QString &labelText, int minValue,
                                      int maxValue, int defaultValue,
                                      const QString &suffix, int minWidth,
-                                     int step,
-                                     const QString &toolTip) const {
+                                     int step, const QString &toolTip) const {
     auto *spin = new QSpinBox(parent);
     spin->setRange(minValue, maxValue);
     spin->setValue(defaultValue);
@@ -800,10 +797,10 @@ void SettingsDialog::addBrowsePathRow(QFormLayout *target, QWidget *parent,
                 const QString basePath =
                     currentPath.isEmpty() ? QDir::homePath() : currentPath;
                 const QString pickedPath =
-                    pickFile
-                        ? QFileDialog::getOpenFileName(this, dialogTitle, basePath)
-                        : QFileDialog::getExistingDirectory(this, dialogTitle,
-                                                            basePath);
+                    pickFile ? QFileDialog::getOpenFileName(this, dialogTitle,
+                                                            basePath)
+                             : QFileDialog::getExistingDirectory(
+                                   this, dialogTitle, basePath);
                 if (!pickedPath.isEmpty() && edit)
                     edit->setText(pickedPath);
             });
@@ -821,14 +818,14 @@ void SettingsDialog::buildGeneralPage(const PageBuildContext &ctx) {
                                {tr("French"), QStringLiteral("fr")},
                                {tr("Portuguese"), QStringLiteral("pt")}});
     clickMode_ = addComboRow(generalForm, generalPage, tr("Open with:"));
-    addComboItems(clickMode_, {{tr("Double click"), 2},
-                               {tr("Single click"), 1}});
+    addComboItems(clickMode_,
+                  {{tr("Double click"), 2}, {tr("Single click"), 1}});
     openBehaviorMode_ =
         addComboRow(generalForm, generalPage, tr("On file open:"));
-    addComboItems(openBehaviorMode_, {{tr("Always ask"), QStringLiteral("ask")},
-                                      {tr("Show folder"),
-                                       QStringLiteral("reveal")},
-                                      {tr("Open file"), QStringLiteral("open")}});
+    addComboItems(openBehaviorMode_,
+                  {{tr("Always ask"), QStringLiteral("ask")},
+                   {tr("Show folder"), QStringLiteral("reveal")},
+                   {tr("Open file"), QStringLiteral("open")}});
     addTrackedCheckRows(
         generalForm, generalPage,
         {{&showHidden_, tr("Show hidden files")},
@@ -839,7 +836,8 @@ void SettingsDialog::buildGeneralPage(const PageBuildContext &ctx) {
                      tr("Select download folder"), false,
                      defaultDownloadDirEdit_, defaultDownloadBrowseBtn_);
 
-    resetMainLayoutBtn_ = new QPushButton(tr("Restore default sizes"), generalPage);
+    resetMainLayoutBtn_ =
+        new QPushButton(tr("Restore default sizes"), generalPage);
     addLabeledRow(generalForm, generalPage, tr("Window layout:"),
                   resetMainLayoutBtn_);
     connect(resetMainLayoutBtn_, &QPushButton::clicked, this, [this] {
@@ -875,7 +873,8 @@ void SettingsDialog::buildGeneralPage(const PageBuildContext &ctx) {
 
 void SettingsDialog::buildShortcutsPage(const PageBuildContext &ctx) {
     QFormLayout *shortcutsForm = nullptr;
-    QWidget *shortcutsPage = createFormPage(ctx, tr("Shortcuts"), shortcutsForm);
+    QWidget *shortcutsPage =
+        createFormPage(ctx, tr("Shortcuts"), shortcutsForm);
     shortcutsForm->setVerticalSpacing(8);
     auto *shortcutsHint = new QLabel(
         tr("Select an action and press the new key combination directly in the "
@@ -895,11 +894,12 @@ void SettingsDialog::buildShortcutsPage(const PageBuildContext &ctx) {
 
 void SettingsDialog::buildTransfersPage(const PageBuildContext &ctx) {
     QFormLayout *transfersForm = nullptr;
-    QWidget *transfersPage = createFormPage(ctx, tr("Transfers"), transfersForm);
+    QWidget *transfersPage =
+        createFormPage(ctx, tr("Transfers"), transfersForm);
     transfersForm->setVerticalSpacing(10);
     maxConcurrentSpin_ = addSpinRow(
-        transfersForm, transfersPage, tr("Parallel tasks:"), 1, 8, 2,
-        QString(), 90, 1, tr("Maximum number of concurrent transfers."));
+        transfersForm, transfersPage, tr("Parallel tasks:"), 1, 8, 2, QString(),
+        90, 1, tr("Maximum number of concurrent transfers."));
     globalSpeedDefaultSpin_ = addSpinRow(
         transfersForm, transfersPage, tr("Default global limit:"), 0, 1'000'000,
         0, tr(" KB/s"), 120, 1, tr("0 = no global speed limit."));
@@ -912,9 +912,9 @@ void SettingsDialog::buildTransfersPage(const PageBuildContext &ctx) {
                    {tr("All finished"), kQueueAutoClearFinished}});
     addLabeledRow(transfersForm, transfersPage, tr("Queue auto-clear default:"),
                   queueAutoClearModeDefault_);
-    queueAutoClearMinutesDefaultSpin_ = addSpinRow(
-        transfersForm, transfersPage, tr("Queue auto-clear after:"), 1, 1440, 15,
-        tr(" min"));
+    queueAutoClearMinutesDefaultSpin_ =
+        addSpinRow(transfersForm, transfersPage, tr("Queue auto-clear after:"),
+                   1, 1440, 15, tr(" min"));
     connect(queueAutoClearModeDefault_, &QComboBox::currentIndexChanged, this,
             [this](int) {
                 updateQueueAutoClearDefaultsUi();
@@ -928,13 +928,15 @@ void SettingsDialog::buildSitesPage(const PageBuildContext &ctx) {
     sitesForm->setVerticalSpacing(8);
     defaultProtocol_ = new QComboBox(sitesPage);
     setFieldWidth(defaultProtocol_);
-    addComboItems(defaultProtocol_,
-                  {{tr("SFTP"), static_cast<int>(openscp::Protocol::Sftp)},
-                   {tr("SCP"), static_cast<int>(openscp::Protocol::Scp)},
-                   {tr("FTP"), static_cast<int>(openscp::Protocol::Ftp)},
-                   {tr("FTPS"), static_cast<int>(openscp::Protocol::Ftps)},
-                   {tr("WebDAV"), static_cast<int>(openscp::Protocol::WebDav)}});
-    addLabeledRow(sitesForm, sitesPage, tr("Default protocol:"), defaultProtocol_);
+    addComboItems(
+        defaultProtocol_,
+        {{tr("SFTP"), static_cast<int>(openscp::Protocol::Sftp)},
+         {tr("SCP"), static_cast<int>(openscp::Protocol::Scp)},
+         {tr("FTP"), static_cast<int>(openscp::Protocol::Ftp)},
+         {tr("FTPS"), static_cast<int>(openscp::Protocol::Ftps)},
+         {tr("WebDAV"), static_cast<int>(openscp::Protocol::WebDav)}});
+    addLabeledRow(sitesForm, sitesPage, tr("Default protocol:"),
+                  defaultProtocol_);
     scpModeDefault_ = new QComboBox(sitesPage);
     setFieldWidth(scpModeDefault_);
     addComboItems(scpModeDefault_,
@@ -952,7 +954,8 @@ void SettingsDialog::buildSitesPage(const PageBuildContext &ctx) {
         tr("Classic SCP writes directly to the final remote path. A canceled "
            "or failed upload may leave a partial destination."),
         Qt::ToolTipRole);
-    addLabeledRow(sitesForm, sitesPage, tr("Default SCP mode:"), scpModeDefault_);
+    addLabeledRow(sitesForm, sitesPage, tr("Default SCP mode:"),
+                  scpModeDefault_);
     addTrackedCheckRows(
         sitesForm, sitesPage,
         {{&deleteSecretsOnRemove_,
@@ -965,26 +968,25 @@ void SettingsDialog::buildSecurityPage(const PageBuildContext &ctx) {
     securityForm->setVerticalSpacing(8);
     defaultKnownHostsPolicy_ = new QComboBox(securityPage);
     setFieldWidth(defaultKnownHostsPolicy_);
-    addComboItems(defaultKnownHostsPolicy_,
-                  {{tr("Strict"),
-                    static_cast<int>(openscp::KnownHostsPolicy::Strict)},
-                   {tr("Accept new (TOFU)"),
-                    static_cast<int>(openscp::KnownHostsPolicy::AcceptNew)},
-                   {tr("No verification (double confirmation, expires in 15 min)"),
-                    static_cast<int>(openscp::KnownHostsPolicy::Off)}});
+    addComboItems(
+        defaultKnownHostsPolicy_,
+        {{tr("Strict"), static_cast<int>(openscp::KnownHostsPolicy::Strict)},
+         {tr("Accept new (TOFU)"),
+          static_cast<int>(openscp::KnownHostsPolicy::AcceptNew)},
+         {tr("No verification (double confirmation, expires in 15 min)"),
+          static_cast<int>(openscp::KnownHostsPolicy::Off)}});
     addLabeledRow(securityForm, securityPage, tr("Default known_hosts policy:"),
                   defaultKnownHostsPolicy_);
     defaultIntegrityPolicy_ = new QComboBox(securityPage);
     setFieldWidth(defaultIntegrityPolicy_);
-    addComboItems(defaultIntegrityPolicy_,
-                  {{tr("Optional (recommended)"),
-                    static_cast<int>(
-                        openscp::TransferIntegrityPolicy::Optional)},
-                   {tr("Required (strict)"),
-                    static_cast<int>(
-                        openscp::TransferIntegrityPolicy::Required)},
-                   {tr("Off (not recommended)"),
-                    static_cast<int>(openscp::TransferIntegrityPolicy::Off)}});
+    addComboItems(
+        defaultIntegrityPolicy_,
+        {{tr("Optional (recommended)"),
+          static_cast<int>(openscp::TransferIntegrityPolicy::Optional)},
+         {tr("Required (strict)"),
+          static_cast<int>(openscp::TransferIntegrityPolicy::Required)},
+         {tr("Off (not recommended)"),
+          static_cast<int>(openscp::TransferIntegrityPolicy::Off)}});
     addLabeledRow(securityForm, securityPage, tr("Default integrity policy:"),
                   defaultIntegrityPolicy_);
     addTrackedCheckRows(
@@ -994,17 +996,18 @@ void SettingsDialog::buildSecurityPage(const PageBuildContext &ctx) {
     addBrowsePathRow(securityForm, securityPage, tr("Default FTPS CA bundle:"),
                      tr("Select FTPS CA bundle"), true,
                      ftpsCaCertPathDefaultEdit_,
-                     ftpsCaCertPathDefaultBrowseBtn_,
-                     tr("System CA bundle"));
+                     ftpsCaCertPathDefaultBrowseBtn_, tr("System CA bundle"));
     addTrackedCheckRows(
         securityForm, securityPage,
-        {{&knownHostsHashed_, tr("Hash hostnames in known_hosts (recommended).")},
+        {{&knownHostsHashed_,
+          tr("Hash hostnames in known_hosts (recommended).")},
          {&fpHex_, tr("Show fingerprint in HEX (colon) format (visual only).")},
          {&terminalForceInteractiveLogin_,
           tr("Force interactive login when using Open in terminal "
              "(disable key/agent auth).")},
          {&terminalEnableSftpCliFallback_,
-          tr("Enable automatic SFTP CLI fallback when using Open in terminal.")}});
+          tr("Enable automatic SFTP CLI fallback when using Open in "
+             "terminal.")}});
 #if defined(Q_OS_MAC) || defined(Q_OS_MACOS) || defined(__APPLE__)
     addTrackedCheckRows(
         securityForm, securityPage,
@@ -1030,8 +1033,8 @@ void SettingsDialog::buildNetworkPage(const PageBuildContext &ctx) {
     QWidget *networkPage = createFormPage(ctx, tr("Network"), networkForm);
     networkForm->setVerticalSpacing(8);
     sessionHealthIntervalSecSpin_ = addSpinRow(
-        networkForm, networkPage, tr("Session health check interval:"), 60, 86400,
-        600, tr(" s"));
+        networkForm, networkPage, tr("Session health check interval:"), 60,
+        86400, 600, tr(" s"));
 }
 
 void SettingsDialog::buildStagingPage(const PageBuildContext &ctx) {
@@ -1046,13 +1049,12 @@ void SettingsDialog::buildStagingPage(const PageBuildContext &ctx) {
         stagingForm, stagingPage,
         {{&autoCleanStaging_,
           tr("Auto-clean staging after successful drag-out (recommended).")}});
-    stagingRetentionDaysSpin_ = addSpinRow(
-        stagingForm, stagingPage, tr("Startup cleanup retention:"), 1, 365, 7,
-        tr(" days"), 110);
+    stagingRetentionDaysSpin_ =
+        addSpinRow(stagingForm, stagingPage, tr("Startup cleanup retention:"),
+                   1, 365, 7, tr(" days"), 110);
     stagingPrepTimeoutMsSpin_ = addSpinRow(
         stagingForm, stagingPage, tr("Preparation timeout:"), 250, 60000, 2000,
-        tr(" ms"), 110, 250,
-        tr("Time before showing the Wait/Cancel dialog."));
+        tr(" ms"), 110, 250, tr("Time before showing the Wait/Cancel dialog."));
     stagingConfirmItemsSpin_ = addSpinRow(
         stagingForm, stagingPage, tr("Confirm from items:"), 50, 100000, 500,
         QString(), 110, 1,
@@ -1070,8 +1072,8 @@ void SettingsDialog::buildStagingPage(const PageBuildContext &ctx) {
     maxDepthSpin_->setRange(4, 256);
     maxDepthSpin_->setValue(32);
     maxDepthSpin_->setMinimumWidth(90);
-    maxDepthSpin_->setToolTip(
-        tr("Limit for recursive folder drag-out to avoid deep trees and loops."));
+    maxDepthSpin_->setToolTip(tr(
+        "Limit for recursive folder drag-out to avoid deep trees and loops."));
     auto *hint = new QLabel(tr("Recommended: 32"), stagingPage);
     hint->setStyleSheet("color: palette(window-text);");
     row->addWidget(maxDepthSpin_);
@@ -1085,10 +1087,11 @@ void SettingsDialog::setupSectionNavigation(const PageBuildContext &ctx) {
         return;
     connect(ctx.sectionList, &QListWidget::currentRowChanged, ctx.pages,
             &QStackedWidget::setCurrentIndex);
-    connect(ctx.sectionList, &QListWidget::currentRowChanged, this, [this](int) {
-        refreshWrappedCheckTexts();
-        QTimer::singleShot(0, this, [this] { refreshWrappedCheckTexts(); });
-    });
+    connect(
+        ctx.sectionList, &QListWidget::currentRowChanged, this, [this](int) {
+            refreshWrappedCheckTexts();
+            QTimer::singleShot(0, this, [this] { refreshWrappedCheckTexts(); });
+        });
     ctx.sectionList->setCurrentRow(0);
 }
 
@@ -1143,36 +1146,26 @@ void SettingsDialog::connectDirtyTracking() {
           queueAutoClearModeDefault_}) {
         bindDirtyFlag(combo, qOverload<int>(&QComboBox::currentIndexChanged));
     }
-    for (QCheckBox *check : {showHidden_,
-                             showConnOnStart_,
-                             showConnOnDisconnect_,
-                             showQueueOnEnqueue_,
-                             deleteSecretsOnRemove_,
-                             ftpsVerifyPeerDefault_,
-                             knownHostsHashed_,
-                             fpHex_,
-                             terminalForceInteractiveLogin_,
-                             terminalEnableSftpCliFallback_,
-                             autoCleanStaging_}) {
+    for (QCheckBox *check :
+         {showHidden_, showConnOnStart_, showConnOnDisconnect_,
+          showQueueOnEnqueue_, deleteSecretsOnRemove_, ftpsVerifyPeerDefault_,
+          knownHostsHashed_, fpHex_, terminalForceInteractiveLogin_,
+          terminalEnableSftpCliFallback_, autoCleanStaging_}) {
         bindDirtyFlag(check, &QCheckBox::toggled);
     }
-    for (QLineEdit *edit :
-         {defaultDownloadDirEdit_, ftpsCaCertPathDefaultEdit_, stagingRootEdit_}) {
+    for (QLineEdit *edit : {defaultDownloadDirEdit_, ftpsCaCertPathDefaultEdit_,
+                            stagingRootEdit_}) {
         bindDirtyFlag(edit, &QLineEdit::textChanged);
     }
-    for (QSpinBox *spin : {noHostVerifyTtlMinSpin_,
-                           maxConcurrentSpin_,
-                           globalSpeedDefaultSpin_,
-                           queueAutoClearMinutesDefaultSpin_,
-                           sessionHealthIntervalSecSpin_,
-                           stagingRetentionDaysSpin_,
-                           stagingPrepTimeoutMsSpin_,
-                           stagingConfirmItemsSpin_,
-                           stagingConfirmMiBSpin_,
-                           maxDepthSpin_}) {
+    for (QSpinBox *spin :
+         {noHostVerifyTtlMinSpin_, maxConcurrentSpin_, globalSpeedDefaultSpin_,
+          queueAutoClearMinutesDefaultSpin_, sessionHealthIntervalSecSpin_,
+          stagingRetentionDaysSpin_, stagingPrepTimeoutMsSpin_,
+          stagingConfirmItemsSpin_, stagingConfirmMiBSpin_, maxDepthSpin_}) {
         bindDirtyFlag(spin, qOverload<int>(&QSpinBox::valueChanged));
     }
-    for (QKeySequenceEdit *editor : {queueShortcutEdit_, historyShortcutEdit_}) {
+    for (QKeySequenceEdit *editor :
+         {queueShortcutEdit_, historyShortcutEdit_}) {
         if (editor) {
             connect(editor, &QKeySequenceEdit::keySequenceChanged, this,
                     &SettingsDialog::updateApplyFromControls);
@@ -1186,8 +1179,7 @@ void SettingsDialog::connectDirtyTracking() {
 void SettingsDialog::connectInsecureFallbackGuard() {
     if (!insecureFallback_)
         return;
-    connect(insecureFallback_, &QCheckBox::toggled, this,
-            [this](bool enabled) {
+    connect(insecureFallback_, &QCheckBox::toggled, this, [this](bool enabled) {
         if (enabled) {
             bool prevAutoDefault = false;
             bool prevDefault = false;

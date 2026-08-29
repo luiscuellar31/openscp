@@ -30,10 +30,10 @@ void configure(QMessageBox &box, Qt::WindowModality modality) {
     box.setWindowModality(modality);
 }
 
-QMessageBox::StandardButton
-show(QWidget *parent, QMessageBox::Icon icon, const QString &title,
-     const QString &text, QMessageBox::StandardButtons buttons,
-     QMessageBox::StandardButton defaultButton) {
+QMessageBox::StandardButton show(QWidget *parent, QMessageBox::Icon icon,
+                                 const QString &title, const QString &text,
+                                 QMessageBox::StandardButtons buttons,
+                                 QMessageBox::StandardButton defaultButton) {
     QMessageBox box(parent);
     configure(box);
     box.setIcon(icon);
@@ -57,10 +57,10 @@ information(QWidget *parent, const QString &title, const QString &text,
                 defaultButton);
 }
 
-QMessageBox::StandardButton
-warning(QWidget *parent, const QString &title, const QString &text,
-        QMessageBox::StandardButtons buttons,
-        QMessageBox::StandardButton defaultButton) {
+QMessageBox::StandardButton warning(QWidget *parent, const QString &title,
+                                    const QString &text,
+                                    QMessageBox::StandardButtons buttons,
+                                    QMessageBox::StandardButton defaultButton) {
     return show(parent, QMessageBox::Warning, title, text, buttons,
                 defaultButton);
 }

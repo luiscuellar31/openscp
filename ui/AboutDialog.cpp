@@ -1,7 +1,9 @@
 // Implementation of the "About" dialog for OpenSCP.
 #include "AboutDialog.hpp"
+
 #include "AppVersion.hpp"
 #include "UiAlerts.hpp"
+
 #include <QClipboard>
 #include <QCoreApplication>
 #include <QDesktopServices>
@@ -223,9 +225,8 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
         tr("Copy version and environment details for support."));
     connect(copyDiagnosticsBtn, &QPushButton::clicked, this, [this] {
         if (QGuiApplication::clipboard() == nullptr) {
-            UiAlerts::information(
-                this, tr("Diagnostics unavailable"),
-                tr("Could not access the system clipboard."));
+            UiAlerts::information(this, tr("Diagnostics unavailable"),
+                                  tr("Could not access the system clipboard."));
             return;
         }
         QGuiApplication::clipboard()->setText(buildDiagnosticsText());

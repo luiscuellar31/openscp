@@ -3,6 +3,7 @@
 #pragma once
 #include "KnownHostsUtils.hpp"
 #include "RemoteClient.hpp"
+
 #include <mutex>
 #include <string>
 #include <vector>
@@ -70,14 +71,13 @@ class Libssh2SftpClient : public RemoteClient {
     bool rename(const std::string &from, const std::string &to,
                 std::string &err, bool overwrite = false) override;
 
-    bool checksum(
-        const std::string &remote_path, const std::string &algorithm,
-        std::vector<std::uint8_t> &digest, std::string &err,
-        std::function<void(std::size_t, std::size_t)> progress = {},
-        std::function<bool()> shouldCancel = {}) override;
+    bool checksum(const std::string &remote_path, const std::string &algorithm,
+                  std::vector<std::uint8_t> &digest, std::string &err,
+                  std::function<void(std::size_t, std::size_t)> progress = {},
+                  std::function<bool()> shouldCancel = {}) override;
 
     std::unique_ptr<RemoteClient> newConnectionLike(const SessionOptions &opt,
-                                                     std::string &err) override;
+                                                    std::string &err) override;
 
     // Exposed for protocol adapters that share the authenticated SSH transport
     // (for example, SCP channel operations).
@@ -90,8 +90,7 @@ class Libssh2SftpClient : public RemoteClient {
                              bool mutation);
         ~StructuredErrorScope();
         StructuredErrorScope(const StructuredErrorScope &) = delete;
-        StructuredErrorScope &
-        operator=(const StructuredErrorScope &) = delete;
+        StructuredErrorScope &operator=(const StructuredErrorScope &) = delete;
 
         private:
         Libssh2SftpClient &owner_;

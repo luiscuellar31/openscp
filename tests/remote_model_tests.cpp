@@ -28,8 +28,7 @@ struct TestContext {
 };
 
 openscp::FileInfo entry(std::string name, bool directory, std::uint64_t size,
-                        bool hasSize, std::uint64_t mtime,
-                        std::uint32_t mode) {
+                        bool hasSize, std::uint64_t mtime, std::uint32_t mode) {
     openscp::FileInfo info;
     info.name = std::move(name);
     info.is_dir = directory;
@@ -79,7 +78,7 @@ void testLoadingAndReplacement(TestContext &test) {
                    model.isDir(model.index(0, 0)),
                "directories should sort before files");
     test.check(model.nameAt(model.index(1, 0)) ==
-                   QStringLiteral("unknown.bin") &&
+                       QStringLiteral("unknown.bin") &&
                    !model.hasSize(model.index(1, 0)),
                "unknown file sizes should remain distinguishable from zero");
     test.check(model.data(model.index(1, 1), Qt::DisplayRole).toString() ==
@@ -92,12 +91,11 @@ void testLoadingAndReplacement(TestContext &test) {
 void testFilteringSortingAndMimeData(TestContext &test) {
     RemoteModel model;
     model.setShowHidden(true);
-    model.setEntries(
-        QStringLiteral("/"),
-        {entry("small", false, 1, true, 0, 0100644),
-         entry("large", false, 50, true, 0, 0100644),
-         entry(".config", false, 10, true, 0, 0100600),
-         entry("dir", true, 0, false, 0, 0040755)});
+    model.setEntries(QStringLiteral("/"),
+                     {entry("small", false, 1, true, 0, 0100644),
+                      entry("large", false, 50, true, 0, 0100644),
+                      entry(".config", false, 10, true, 0, 0100600),
+                      entry("dir", true, 0, false, 0, 0040755)});
 
     test.check(model.rowCount() == 4,
                "show-hidden should retain dot-prefixed entries");

@@ -46,8 +46,7 @@ void testLegacyMigration(TestContext &test) {
     writeLegacySites();
     int nextId = 0;
     const auto loaded = SavedSitesPersistence::loadSites(
-        {.trimSiteNames = true,
-         .createNewId = [&nextId] {
+        {.trimSiteNames = true, .createNewId = [&nextId] {
              return QStringLiteral("generated-%1").arg(++nextId);
          }});
 
@@ -103,8 +102,7 @@ void testRoundTrip(TestContext &test) {
         return;
 
     const SiteEntry &restored = loaded.sites.front();
-    test.check(restored.siteId == site.siteId &&
-                   restored.name == site.name,
+    test.check(restored.siteId == site.siteId && restored.name == site.name,
                "site identity should survive persistence");
     test.check(restored.initialLocalPath == site.initialLocalPath &&
                    restored.initialRemotePath == site.initialRemotePath &&
@@ -112,8 +110,7 @@ void testRoundTrip(TestContext &test) {
                "initial and remembered paths should survive persistence");
     test.check(restored.opt.webdav_base_path == "/teams/alpha",
                "WebDAV base path should survive persistence");
-    test.check(!restored.opt.password &&
-                   !restored.opt.private_key_passphrase &&
+    test.check(!restored.opt.password && !restored.opt.private_key_passphrase &&
                    !restored.opt.proxy_password,
                "saved-site metadata must never round-trip credentials through "
                "QSettings");
@@ -151,8 +148,8 @@ void testDuplicateIdsAreRepaired(TestContext &test) {
     settings.sync();
 
     int generated = 0;
-    const auto loaded = SavedSitesPersistence::loadSites(
-        {.createNewId = [&generated] {
+    const auto loaded =
+        SavedSitesPersistence::loadSites({.createNewId = [&generated] {
             return QStringLiteral("replacement-%1").arg(++generated);
         }});
     test.check(loaded.needsSave,
@@ -191,10 +188,10 @@ void testLegacySecretsRemainAvailableForSecureMigration(TestContext &test) {
                 loaded.legacySecrets[0].item == QStringLiteral("password") &&
                 loaded.legacySecrets[0].value == QStringLiteral("password-1"),
             "password migration metadata should identify its site and item");
-        test.check(
-            loaded.legacySecrets[1].item == QStringLiteral("keypass") &&
-                loaded.legacySecrets[1].value == QStringLiteral("key-pass-1"),
-            "key passphrase should be captured for secure migration");
+        test.check(loaded.legacySecrets[1].item == QStringLiteral("keypass") &&
+                       loaded.legacySecrets[1].value ==
+                           QStringLiteral("key-pass-1"),
+                   "key passphrase should be captured for secure migration");
         test.check(
             loaded.legacySecrets[2].item == QStringLiteral("proxypass") &&
                 loaded.legacySecrets[2].value == QStringLiteral("proxy-pass-1"),

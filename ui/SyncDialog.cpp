@@ -1,5 +1,6 @@
 // One-way directory comparison, filtering, preview, and execution planning.
 #include "SyncDialog.hpp"
+
 #include "UiFormatters.hpp"
 
 #include <QAbstractItemView>
@@ -75,18 +76,22 @@ QString entryMetadataText(const std::optional<SyncSnapshotEntry> &entry) {
     QStringList details{entryTypeText(entry->type)};
     if (entry->type == SyncEntryType::File) {
         details.push_back(entry->size ? formatByteSize(*entry->size)
-                                      : QCoreApplication::translate("SyncDialog", "unknown size"));
+                                      : QCoreApplication::translate(
+                                            "SyncDialog", "unknown size"));
     }
     if (entry->modifiedMs) {
         details.push_back(QDateTime::fromMSecsSinceEpoch(*entry->modifiedMs)
                               .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
     } else if (entry->type == SyncEntryType::File) {
-        details.push_back(QCoreApplication::translate("SyncDialog", "unknown date"));
+        details.push_back(
+            QCoreApplication::translate("SyncDialog", "unknown date"));
     }
     if (!entry->metadataReliable)
-        details.push_back(QCoreApplication::translate("SyncDialog", "unreliable metadata"));
+        details.push_back(
+            QCoreApplication::translate("SyncDialog", "unreliable metadata"));
     if (!entry->checksumAlgorithm.isEmpty() && !entry->checksum.isEmpty())
-        details.push_back(QCoreApplication::translate("SyncDialog", "checksum available"));
+        details.push_back(
+            QCoreApplication::translate("SyncDialog", "checksum available"));
     return details.join(QStringLiteral(" · "));
 }
 
@@ -149,8 +154,10 @@ class SyncComparisonTableModel final : public QAbstractTableModel {
         }
         if (role == Qt::ToolTipRole) {
             return QStringLiteral("%1\n%2: %3\n%4: %5\n%6")
-                .arg(item.relativePath, QCoreApplication::translate("SyncDialog", "Source"),
-                     entryMetadataText(item.source), QCoreApplication::translate("SyncDialog", "Destination"),
+                .arg(item.relativePath,
+                     QCoreApplication::translate("SyncDialog", "Source"),
+                     entryMetadataText(item.source),
+                     QCoreApplication::translate("SyncDialog", "Destination"),
                      entryMetadataText(item.destination), item.reason);
         }
         if (role == Qt::TextAlignmentRole && index.column() == ActionColumn) {
@@ -174,7 +181,8 @@ class SyncComparisonTableModel final : public QAbstractTableModel {
         case SourceColumn:
             return QCoreApplication::translate("SyncDialog", "Source metadata");
         case DestinationColumn:
-            return QCoreApplication::translate("SyncDialog", "Destination metadata");
+            return QCoreApplication::translate("SyncDialog",
+                                               "Destination metadata");
         case ActionColumn:
             return QCoreApplication::translate("SyncDialog", "Action");
         case ReasonColumn:
@@ -470,8 +478,8 @@ void SyncDialog::setChecksumAvailable(bool available) {
 void SyncDialog::setChecksumBusy(bool busy) {
     checksumBusy_ = busy;
     checksumButton_->setEnabled(checksumAvailable_ && !busy);
-    checksumButton_->setText(
-        busy ? tr("Calculating checksums…") : tr("Compare checksums…"));
+    checksumButton_->setText(busy ? tr("Calculating checksums…")
+                                  : tr("Compare checksums…"));
     if (buttonBox_ && buttonBox_->button(QDialogButtonBox::Ok))
         buttonBox_->button(QDialogButtonBox::Ok)->setEnabled(!busy);
 }
@@ -580,7 +588,9 @@ void SyncDialog::updateSummary() {
             .arg(unknown));
 }
 
-void SyncDialog::syncOptionsFromControls() { options_ = comparisonOptions(); }
+void SyncDialog::syncOptionsFromControls() {
+    options_ = comparisonOptions();
+}
 
 void SyncDialog::applyOptionsToControls() {
     if (!directionCombo_)
