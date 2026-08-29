@@ -7,6 +7,8 @@
 #include "openscp/Libssh2ScpClient.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
 #include "openscp/MockSftpClient.hpp"
+#include "openscp/SecureString.hpp"
+#include "openscp/UniqueFile.hpp"
 #if OPENSCP_HAS_CURL_FTP
 #include "openscp/CurlFtpClient.hpp"
 #endif
@@ -89,6 +91,25 @@ void test_session_defaults(TestContext &t) {
             "default FTPS mode should preserve legacy auto behavior");
     t.check((std::is_same_v<openscp::RemoteClient, openscp::SftpClient>),
             "RemoteClient should remain source-compatible with SftpClient");
+    t.check((std::is_same_v<decltype(o.password),
+                            std::optional<openscp::SecureString>>),
+            "session passwords should use SecureString storage");
+}
+
+void test_secure_string_value_semantics(TestContext &t) {
+    openscp::SecureString original("secret");
+    openscp::SecureString copy(original);
+    original = std::string_view("changed");
+
+    t.check(copy == "secret", "SecureString copies should own their buffers");
+    t.check(original == "changed",
+            "SecureString assignment should replace the prior value");
+
+    openscp::SecureString moved(std::move(copy));
+    t.check(moved == "secret", "SecureString moves should preserve the value");
+    t.check(copy.empty(), "moved-from SecureString values should be empty");
+    moved.clear();
+    t.check(moved.empty(), "SecureString clear should release the value");
 }
 
 void test_libssh2_input_safety(TestContext &t) {
@@ -146,13 +167,11 @@ void test_safe_local_partial_files(TestContext &t) {
     fs::create_symlink(target, partial, ec);
     t.check(!ec, "symlink fixture should be created");
     std::string symlinkError;
-    std::FILE *unsafe = openscp::localfiles::openRegularFileForWrite(
+    openscp::UniqueFile unsafe(openscp::localfiles::openRegularFileForWrite(
         partial.string(), openscp::localfiles::WriteMode::Truncate,
-        symlinkError);
-    t.check(unsafe == nullptr,
+        symlinkError));
+    t.check(!unsafe,
             "local partial files must reject final-component symlinks");
-    if (unsafe)
-        std::fclose(unsafe);
     std::string preservedContents;
     t.check(readTextFile(target, preservedContents) &&
                 preservedContents == "preserve-me",
@@ -162,13 +181,10 @@ void test_safe_local_partial_files(TestContext &t) {
     fs::create_hard_link(target, partial, ec);
     t.check(!ec, "hard-link fixture should be created");
     symlinkError.clear();
-    unsafe = openscp::localfiles::openRegularFileForWrite(
+    unsafe.reset(openscp::localfiles::openRegularFileForWrite(
         partial.string(), openscp::localfiles::WriteMode::Truncate,
-        symlinkError);
-    t.check(unsafe == nullptr,
-            "local partial files must reject additional hard links");
-    if (unsafe)
-        std::fclose(unsafe);
+        symlinkError));
+    t.check(!unsafe, "local partial files must reject additional hard links");
     preservedContents.clear();
     t.check(readTextFile(target, preservedContents) &&
                 preservedContents == "preserve-me",
@@ -177,18 +193,18 @@ void test_safe_local_partial_files(TestContext &t) {
 #endif
 
     std::string error;
-    std::FILE *file = openscp::localfiles::openRegularFileForWrite(
-        partial.string(), openscp::localfiles::WriteMode::Truncate, error);
-    t.check(file != nullptr,
+    openscp::UniqueFile file(openscp::localfiles::openRegularFileForWrite(
+        partial.string(), openscp::localfiles::WriteMode::Truncate, error));
+    t.check(static_cast<bool>(file),
             std::string("regular local partial files should open: ") + error);
     if (file) {
         const char payload[] = "replacement";
-        t.check(std::fwrite(payload, 1, sizeof(payload) - 1, file) ==
+        t.check(std::fwrite(payload, 1, sizeof(payload) - 1, file.get()) ==
                     sizeof(payload) - 1,
                 "safe partial file should be writable");
-        t.check(openscp::localfiles::flushAndSync(file, error),
+        t.check(openscp::localfiles::flushAndSync(file.get(), error),
                 std::string("safe partial file should sync: ") + error);
-        std::fclose(file);
+        file.reset();
         t.check(openscp::localfiles::atomicReplace(partial.string(),
                                                    target.string(), error),
                 std::string("safe partial file should publish atomically: ") +
@@ -884,6 +900,7 @@ int main() {
     openscp::test::TestHarness harness("core");
     harness.add("core behavior", [](TestContext &test) {
         test_session_defaults(test);
+        test_secure_string_value_semantics(test);
         test_libssh2_input_safety(test);
         test_safe_local_partial_files(test);
         test_protocol_helpers(test);

@@ -4,6 +4,7 @@
 
 #include "../common/SafeLocalFile.hpp"
 #include "detail/Libssh2ErrorClassifier.hpp"
+#include "openscp/UniqueFile.hpp"
 
 #include <libssh2.h>
 
@@ -189,6 +190,7 @@ bool Libssh2ScpClient::get(
         setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
         return false;
     }
+    UniqueFile localFileOwner(localFile);
 
     std::vector<char> buffer(kScpChunkSize);
     std::size_t done = 0;
@@ -198,7 +200,7 @@ bool Libssh2ScpClient::get(
     while (true) {
         if (shouldCancel && shouldCancel()) {
             err = "Canceled by user";
-            std::fclose(localFile);
+            localFileOwner.reset();
             closeScpChannel(channel, false);
             return false;
         }
@@ -210,7 +212,7 @@ bool Libssh2ScpClient::get(
             continue;
         }
         if (n < 0) {
-            std::fclose(localFile);
+            localFileOwner.reset();
             closeScpChannel(channel, false);
             std::string scpErr = "SCP read failed";
             appendSessionErrorDetail(session, scpErr);
@@ -244,7 +246,7 @@ bool Libssh2ScpClient::get(
             static_cast<size_t>(n)) {
             const int nativeError = errno;
             err = "Local write failed";
-            std::fclose(localFile);
+            localFileOwner.reset();
             closeScpChannel(channel, false);
             setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
             return false;
@@ -253,7 +255,7 @@ bool Libssh2ScpClient::get(
         const std::size_t received = static_cast<std::size_t>(n);
         if (received > std::numeric_limits<std::size_t>::max() - done) {
             err = "Remote SCP download exceeded the local size limit";
-            std::fclose(localFile);
+            localFileOwner.reset();
             closeScpChannel(channel, false);
             setLastOperationError(RemoteErrorKind::Integrity, err);
             return false;
@@ -265,7 +267,7 @@ bool Libssh2ScpClient::get(
 
     if (done != total) {
         err = "Remote SCP download size did not match advertised metadata";
-        std::fclose(localFile);
+        localFileOwner.reset();
         closeScpChannel(channel, false);
         setLastOperationError(RemoteErrorKind::Integrity, err);
         return false;
@@ -274,14 +276,14 @@ bool Libssh2ScpClient::get(
     std::string syncError;
     if (!localfiles::flushAndSync(localFile, syncError)) {
         const int nativeError = errno;
-        std::fclose(localFile);
+        localFileOwner.reset();
         closeScpChannel(channel, false);
         err = syncError.empty() ? "Could not synchronize local partial file"
                                 : syncError;
         setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
         return false;
     }
-    if (std::fclose(localFile) != 0) {
+    if (localFileOwner.close() != 0) {
         const int nativeError = errno;
         closeScpChannel(channel, false);
         err = "Could not close local partial file";
@@ -350,6 +352,7 @@ bool Libssh2ScpClient::put(
         setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
         return false;
     }
+    UniqueFile localFileOwner(localFile);
 
     LIBSSH2_CHANNEL *channel =
         libssh2_scp_send64(session, remote.c_str(), 0644,
@@ -357,7 +360,7 @@ bool Libssh2ScpClient::put(
     if (!channel) {
         std::string scpErr = "Could not open remote file for SCP upload";
         appendSessionErrorDetail(session, scpErr);
-        std::fclose(localFile);
+        localFileOwner.reset();
         // Mirror download behavior: optional fallback to SFTP upload.
         if (!sftpFallbackEnabled()) {
             scpErr += " (SFTP fallback is disabled by the selected SCP mode)";
@@ -387,7 +390,7 @@ bool Libssh2ScpClient::put(
             if (std::ferror(localFile)) {
                 const int nativeError = errno;
                 err = "Local read failed";
-                std::fclose(localFile);
+                localFileOwner.reset();
                 closeScpChannel(channel, false);
                 setLastOperationError(RemoteErrorKind::LocalIo, err,
                                       nativeError);
@@ -402,7 +405,7 @@ bool Libssh2ScpClient::put(
         while (remaining > 0) {
             if (shouldCancel && shouldCancel()) {
                 err = "Canceled by user";
-                std::fclose(localFile);
+                localFileOwner.reset();
                 closeScpChannel(channel, false);
                 return false;
             }
@@ -412,7 +415,7 @@ bool Libssh2ScpClient::put(
                 continue;
             }
             if (wr < 0) {
-                std::fclose(localFile);
+                localFileOwner.reset();
                 closeScpChannel(channel, false);
                 std::string scpErr = "SCP write failed";
                 appendSessionErrorDetail(session, scpErr);
@@ -444,7 +447,7 @@ bool Libssh2ScpClient::put(
         }
     }
 
-    if (std::fclose(localFile) != 0) {
+    if (localFileOwner.close() != 0) {
         const int nativeError = errno;
         err = "Could not close local file";
         closeScpChannel(channel, false);

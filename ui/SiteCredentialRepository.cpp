@@ -1,10 +1,13 @@
 #include "SiteCredentialRepository.hpp"
 
+#include "AppSettings.hpp"
+
+#include <QByteArray>
 #include <QCoreApplication>
-#include <QSettings>
 
 #include <array>
 #include <memory>
+#include <string_view>
 
 namespace {
 
@@ -14,37 +17,41 @@ constexpr std::array<SiteCredentialKind, 3> kCredentialKinds{
     SiteCredentialKind::ProxyPassword,
 };
 
-std::optional<std::string>
+const openscp::SecureString *
 credentialValue(const openscp::SessionOptions &options,
                 SiteCredentialKind kind) {
     switch (kind) {
     case SiteCredentialKind::Password:
-        return options.password;
+        return options.password ? &*options.password : nullptr;
     case SiteCredentialKind::KeyPassphrase:
-        return options.private_key_passphrase;
+        return options.private_key_passphrase ? &*options.private_key_passphrase
+                                              : nullptr;
     case SiteCredentialKind::ProxyPassword:
         if (options.proxy_type != openscp::ProxyType::None)
-            return options.proxy_password;
-        return std::nullopt;
+            return options.proxy_password ? &*options.proxy_password : nullptr;
+        return nullptr;
     }
-    return std::nullopt;
+    return nullptr;
 }
 
 void assignCredential(openscp::SessionOptions &options, SiteCredentialKind kind,
                       const QString &value) {
-    const std::string utf8Value = value.toUtf8().toStdString();
+    QByteArray utf8Value = value.toUtf8();
+    const std::string_view valueView(
+        utf8Value.constData(), static_cast<std::size_t>(utf8Value.size()));
     switch (kind) {
     case SiteCredentialKind::Password:
-        options.password = utf8Value;
+        options.password.emplace(valueView);
         break;
     case SiteCredentialKind::KeyPassphrase:
-        options.private_key_passphrase = utf8Value;
+        options.private_key_passphrase.emplace(valueView);
         break;
     case SiteCredentialKind::ProxyPassword:
         if (options.proxy_type != openscp::ProxyType::None)
-            options.proxy_password = utf8Value;
+            options.proxy_password.emplace(valueView);
         break;
     }
+    utf8Value.fill('\0');
 }
 
 std::optional<SiteCredentialKind> kindFromItem(const QString &item) {
@@ -164,7 +171,7 @@ SiteCredentialRepository::save(const SiteEntry &site,
                                bool removeMissing) {
     SiteCredentialOperationResult result;
     for (SiteCredentialKind kind : kCredentialKinds) {
-        const std::optional<std::string> value = credentialValue(options, kind);
+        const openscp::SecureString *value = credentialValue(options, kind);
         if (!value || value->empty()) {
             if (removeMissing)
                 backend_.remove(stableKey(site, kind));
@@ -233,7 +240,7 @@ SiteCredentialOperationResult SiteCredentialRepository::load(
 void SiteCredentialRepository::loadLegacyPlaintext(
     const SiteEntry &site, int settingsIndex, openscp::SessionOptions &options,
     SiteCredentialOperationResult &result) {
-    QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
+    openscpui::AppSettings settings;
     const int siteCount = settings.beginReadArray(QStringLiteral("sites"));
     if (settingsIndex < 0 || settingsIndex >= siteCount) {
         settings.endArray();
@@ -266,7 +273,7 @@ void SiteCredentialRepository::loadLegacyPlaintext(
             continue;
         }
 
-        const std::optional<std::string> existing =
+        const openscp::SecureString *existing =
             credentialValue(options, legacy.kind);
         if (!existing || existing->empty()) {
             assignCredential(options, legacy.kind, legacy.value);

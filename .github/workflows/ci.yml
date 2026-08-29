@@ -34,7 +34,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            cmake ninja-build pkg-config \
+            binutils cmake ninja-build pkg-config ripgrep \
             libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev \
             qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools \
             libgl1-mesa-dev
@@ -48,6 +48,9 @@ jobs:
 
       - name: Build
         run: cmake --build build --parallel
+
+      - name: Verify ELF hardening
+        run: cmake --build build --target openscp_hardening_check
 
       - name: Test (quick, no integration)
         run: ctest --test-dir build --output-on-failure -LE integration
@@ -70,7 +73,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            cmake ninja-build pkg-config \
+            binutils cmake ninja-build pkg-config ripgrep \
             libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev \
             qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools \
             libgl1-mesa-dev
@@ -222,6 +225,10 @@ jobs:
 
       - name: Build
         run: cmake --build build --parallel
+
+      - name: Verify ELF hardening
+        if: runner.os == 'Linux'
+        run: cmake --build build --target openscp_hardening_check
 
       - name: Write HTTP CONNECT proxy helper
         run: |

@@ -27,12 +27,13 @@ NavigationStore::NavigationStore(QString organization, QString application)
       application_(std::move(application)) {
 }
 
-NavigationStore::NavigationStore(QString settingsFile, QSettings::Format format)
+NavigationStore::NavigationStore(QString settingsFile,
+                                 AppSettings::Format format)
     : settingsFile_(std::move(settingsFile)), settingsFormat_(format) {
 }
 
 NavigationStore NavigationStore::forIniFile(const QString &filePath) {
-    return NavigationStore(filePath, QSettings::IniFormat);
+    return NavigationStore(filePath, AppSettings::IniFormat);
 }
 
 QString NavigationStore::normalizeLocalPath(const QString &path) {
@@ -271,9 +272,9 @@ void NavigationStore::clearAllHistory() {
 
 std::unique_ptr<QSettings> NavigationStore::createSettings() const {
     if (!settingsFile_.isEmpty()) {
-        return std::make_unique<QSettings>(settingsFile_, settingsFormat_);
+        return std::make_unique<AppSettings>(settingsFile_, settingsFormat_);
     }
-    return std::make_unique<QSettings>(organization_, application_);
+    return std::make_unique<AppSettings>(organization_, application_);
 }
 
 QString NavigationStore::historyKeyForScope(const QString &scope) {

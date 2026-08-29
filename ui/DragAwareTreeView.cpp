@@ -1,6 +1,7 @@
 // Implementation of DragAwareTreeView
 #include "DragAwareTreeView.hpp"
 
+#include "AppSettings.hpp"
 #include "MainWindowSharedUtils.hpp"
 #include "RemoteModel.hpp"
 #include "RemoteOperationController.hpp"
@@ -26,7 +27,6 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSet>
-#include <QSettings>
 #include <QShortcut>
 #include <QStatusBar>
 #include <QTimer>
@@ -43,7 +43,7 @@ Q_LOGGING_CATEGORY(ocEnum, "openscp.enum")
 Q_LOGGING_CATEGORY(ocDrag, "openscp.drag")
 
 static QString stagingRootFromSettings() {
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     QString root = settings.value("Advanced/stagingRoot").toString();
     if (root.isEmpty()) {
         root = QDir::homePath() + "/Downloads/OpenSCP-Dragged";
@@ -67,7 +67,7 @@ static QPair<QString, QString> splitNameMultiExt(const QString &fileName) {
 }
 
 static QPair<int, quint64> loadStagingConfirmThresholds() {
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     int itemThreshold =
         settings.value("Advanced/stagingConfirmItems", 100000).toInt();
     if (itemThreshold < 1)
@@ -167,7 +167,7 @@ void DragAwareTreeView::startDrag(Qt::DropActions supportedActions) {
     if (batchDir.isEmpty())
         return;
 
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     const bool autoClean =
         settings.value("Advanced/autoCleanStaging", true).toBool();
 
@@ -265,7 +265,7 @@ void DragAwareTreeView::scheduleAutoCleanup(const QString &batchDir,
 }
 
 QString DragAwareTreeView::buildStagingRoot() const {
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     QString root = settings.value("Advanced/stagingRoot").toString();
     if (root.isEmpty())
         root = QDir::homePath() + "/Downloads/OpenSCP-Dragged";
@@ -607,7 +607,7 @@ void DragAwareTreeView::startRemoteDragStaging(
     waitTimer_->setSingleShot(true);
     waitTimer_->stop();
     QObject::disconnect(waitTimer_, nullptr, this, nullptr);
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     int timeoutMs =
         settings.value("Advanced/stagingPrepTimeoutMs", 2000).toInt();
     timeoutMs = qBound(250, timeoutMs, 60000);
@@ -971,7 +971,7 @@ void DragAwareTreeView::finishRemoteDragStaging(
                                   targetWidget->window() == sourceWindow;
     }
 
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     const bool autoClean =
         settings.value("Advanced/autoCleanStaging", true).toBool();
     if (result == Qt::IgnoreAction) {
@@ -1142,7 +1142,7 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *remoteModel) {
         });
 
     const QString remoteRoot = remoteModel->rootPath();
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     int maxDepth = settings.value("Advanced/maxFolderDepth", 32).toInt();
     if (maxDepth < 1)
         maxDepth = 32;

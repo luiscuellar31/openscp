@@ -3,6 +3,7 @@
 #include "MainWindow.hpp"
 
 #include "AboutDialog.hpp"
+#include "AppSettings.hpp"
 #include "ConnectionDialog.hpp"
 #include "DragAwareTreeView.hpp"
 #include "MainWindowSharedUtils.hpp"
@@ -61,7 +62,6 @@
 #include <QScreen>
 #include <QScrollBar>
 #include <QSet>
-#include <QSettings>
 #include <QShortcut>
 #include <QShowEvent>
 #include <QSize>
@@ -805,7 +805,7 @@ void MainWindow::initializePanelInteractions() {
 
 void MainWindow::initializeRuntimeState() {
     {
-        QSettings settings("OpenSCP", "OpenSCP");
+        openscpui::AppSettings settings;
         downloadDir_ = defaultDownloadDirFromSettings(settings);
     }
     QDir().mkpath(downloadDir_);
@@ -980,7 +980,7 @@ void MainWindow::initializeRuntimeState() {
     // Startup cleanup (deferred): remove old staging batches if
     // autoCleanStaging is enabled
     QTimer::singleShot(0, this, [] {
-        QSettings settings("OpenSCP", "OpenSCP");
+        openscpui::AppSettings settings;
         const bool autoClean =
             settings.value("Advanced/autoCleanStaging", true).toBool();
         if (!autoClean)
@@ -1032,7 +1032,7 @@ void MainWindow::initializeRuntimeState() {
 
     // Startup preferences and migration
     {
-        QSettings settings("OpenSCP", "OpenSCP");
+        openscpui::AppSettings settings;
         // One-shot migration: if only showConnOnStart exists, copy to
         // openSiteManagerOnDisconnect
         if (!settings.contains("UI/openSiteManagerOnDisconnect") &&
@@ -1234,7 +1234,7 @@ void MainWindow::closeEvent(QCloseEvent *e) {
 
 void MainWindow::resetMainWindowLayoutToDefaults() {
     {
-        QSettings settings("OpenSCP", "OpenSCP");
+        openscpui::AppSettings settings;
         settings.remove("UI/mainWindow/geometry");
         settings.remove("UI/mainWindow/windowState");
         settings.remove("UI/mainWindow/splitterState");
@@ -1278,7 +1278,7 @@ void MainWindow::resetMainWindowLayoutToDefaults() {
 void MainWindow::saveRightHeaderState(bool remoteMode) const {
     if (!rightView_ || !rightView_->header())
         return;
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     const QString key = remoteMode
                             ? QStringLiteral("UI/mainWindow/rightHeaderRemote")
                             : QStringLiteral("UI/mainWindow/rightHeaderLocal");
@@ -1288,7 +1288,7 @@ void MainWindow::saveRightHeaderState(bool remoteMode) const {
 bool MainWindow::restoreRightHeaderState(bool remoteMode) {
     if (!rightView_ || !rightView_->header())
         return false;
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     const QString key = remoteMode
                             ? QStringLiteral("UI/mainWindow/rightHeaderRemote")
                             : QStringLiteral("UI/mainWindow/rightHeaderLocal");
@@ -1299,7 +1299,7 @@ bool MainWindow::restoreRightHeaderState(bool remoteMode) {
 }
 
 void MainWindow::saveMainWindowUiState() const {
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     settings.setValue("UI/mainWindow/geometry", saveGeometry());
     settings.setValue("UI/mainWindow/windowState", saveState());
     if (mainSplitter_)
@@ -1313,7 +1313,7 @@ void MainWindow::saveMainWindowUiState() const {
 }
 
 void MainWindow::restoreMainWindowUiState() {
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     const QByteArray geometry =
         settings.value("UI/mainWindow/geometry").toByteArray();
     if (!geometry.isEmpty()) {
@@ -1521,7 +1521,7 @@ void MainWindow::activateScpTransferModeUi(bool enabled) {
 }
 
 void MainWindow::applyPreferences() {
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     const bool showHidden = settings.value("UI/showHidden", false).toBool();
     const bool singleClick = settings.value("UI/singleClick", false).toBool();
     QString openBehaviorMode =
@@ -1622,7 +1622,7 @@ void MainWindow::applyPreferences() {
 void MainWindow::applyTransferPreferences() {
     if (!transferMgr_)
         return;
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     const int maxConcurrent =
         qBound(1, settings.value("Transfer/maxConcurrent", 2).toInt(), 8);
     const int globalSpeed =

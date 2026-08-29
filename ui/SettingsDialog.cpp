@@ -1,6 +1,7 @@
 // Implementation of OpenSCP settings dialog.
 #include "SettingsDialog.hpp"
 
+#include "AppSettings.hpp"
 #include "UiAlerts.hpp"
 #include "openscp/SftpTypes.hpp"
 
@@ -21,7 +22,6 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
-#include <QSettings>
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QStandardPaths>
@@ -849,7 +849,7 @@ void SettingsDialog::buildGeneralPage(const PageBuildContext &ctx) {
         if (ret != QMessageBox::Yes)
             return;
 
-        QSettings settings("OpenSCP", "OpenSCP");
+        openscpui::AppSettings settings;
         removeSettingsKeys(&settings, {"UI/mainWindow/geometry",
                                        "UI/mainWindow/windowState",
                                        "UI/mainWindow/splitterState",
@@ -1116,7 +1116,7 @@ void SettingsDialog::buildBottomButtons(QVBoxLayout *root) {
 }
 
 void SettingsDialog::loadPersistedSettings() {
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     const auto bindings = buildSettingBindings();
     const QVariantMap persistedSnapshot =
         readPersistedSnapshot(settings, bindings);
@@ -1256,7 +1256,7 @@ void SettingsDialog::resizeEvent(QResizeEvent *event) {
 }
 
 void SettingsDialog::onApply() {
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     const auto bindings = buildSettingBindings();
     const QVariantMap persistedSnapshot =
         readPersistedSnapshot(settings, bindings);
@@ -1283,7 +1283,7 @@ void SettingsDialog::onApply() {
 }
 
 void SettingsDialog::updateApplyFromControls() {
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     const auto bindings = buildSettingBindings();
     const QVariantMap persistedSnapshot =
         readPersistedSnapshot(settings, bindings);

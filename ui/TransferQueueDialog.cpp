@@ -1,6 +1,7 @@
 // Table with per-task state and actions (pause/resume/retry/clear).
 #include "TransferQueueDialog.hpp"
 
+#include "AppSettings.hpp"
 #include "UiFormatters.hpp"
 
 #include <QAbstractItemView>
@@ -23,7 +24,6 @@
 #include <QMenu>
 #include <QPushButton>
 #include <QSet>
-#include <QSettings>
 #include <QSortFilterProxyModel>
 #include <QSpinBox>
 #include <QTableView>
@@ -1198,7 +1198,7 @@ void TransferQueueDialog::showContextMenu(const QPoint &pos) {
 }
 
 void TransferQueueDialog::loadUiState() {
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
 
     const QByteArray geom =
         settings.value("UI/transferQueue/geometry").toByteArray();
@@ -1253,7 +1253,7 @@ void TransferQueueDialog::loadUiState() {
 }
 
 void TransferQueueDialog::saveUiState() const {
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     settings.setValue("UI/transferQueue/geometry", saveGeometry());
 
     if (table_ && table_->horizontalHeader()) {

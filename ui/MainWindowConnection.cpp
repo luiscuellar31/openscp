@@ -1,4 +1,5 @@
 // MainWindow connection/session/security and saved-site persistence logic.
+#include "AppSettings.hpp"
 #include "ConnectionDialog.hpp"
 #include "MainWindow.hpp"
 #include "MainWindowSharedUtils.hpp"
@@ -29,7 +30,6 @@
 #include <QMessageBox>
 #include <QProgressDialog>
 #include <QPushButton>
-#include <QSettings>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QStringList>
@@ -190,8 +190,9 @@ static QuickSitesLoadResult loadSavedSitesForQuickConnect() {
     return result;
 }
 
-static void saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
-    SavedSitesPersistence::saveSites(sites, true);
+static SavedSitesPersistence::SaveResult
+saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
+    return SavedSitesPersistence::saveSites(sites, true);
 }
 
 static QString defaultQuickSiteName(const openscp::SessionOptions &opt) {
@@ -408,7 +409,7 @@ void MainWindow::openConnectDialogWithPreset(
     // Apply global security preferences also for ad‑hoc connections (Advanced
     // settings)
     {
-        QSettings securitySettings("OpenSCP", "OpenSCP");
+        openscpui::AppSettings securitySettings;
         sessionOptions.known_hosts_hash_names =
             securitySettings.value("Security/knownHostsHashed", true).toBool();
         sessionOptions.show_fp_hex =
@@ -719,8 +720,12 @@ void MainWindow::persistActiveSitePaths() {
         updated = true;
         break;
     }
-    if (updated)
-        SavedSitesPersistence::saveSites(sites, true);
+    if (updated) {
+        const auto saveResult = SavedSitesPersistence::saveSites(sites, true);
+        if (!saveResult.ok) {
+            UiAlerts::warning(this, tr("Paths not saved"), saveResult.error);
+        }
+    }
 }
 
 void MainWindow::completeDisconnectSftp(quint64 disconnectSeq, bool forced) {
@@ -759,7 +764,7 @@ void MainWindow::setOpenSiteManagerOnDisconnect(bool enabled) {
     if (openSiteManagerOnDisconnect_ == enabled)
         return;
     openSiteManagerOnDisconnect_ = enabled;
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     settings.setValue("UI/openSiteManagerOnDisconnect", enabled);
     settings.sync();
 }
@@ -802,7 +807,7 @@ void MainWindow::setOpenSiteManagerOnStartup(bool enabled) {
     if (openSiteManagerOnStartup_ == enabled)
         return;
     openSiteManagerOnStartup_ = enabled;
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     settings.setValue("UI/showConnOnStart", enabled);
     settings.sync();
 }
@@ -846,7 +851,7 @@ bool MainWindow::confirmInsecureHostPolicyForSession(
             .arg(riskKey, hostKey)
             .arg(static_cast<int>(opt.port));
     const qint64 now = QDateTime::currentSecsSinceEpoch();
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     const qint64 allowedUntil = settings.value(allowKey, 0).toLongLong();
     if (allowedUntil > now)
         return true;
@@ -1234,7 +1239,8 @@ void MainWindow::configureSftpConnectCallbacks(openscp::SessionOptions &opt) {
     // Keyboard-interactive callback (OTP/2FA). Prefer auto-filling
     // password/username; request OTP if needed.
     const std::string savedUser = opt.username;
-    const std::string savedPass = opt.password ? *opt.password : std::string();
+    const openscp::SecureString savedPass =
+        opt.password ? *opt.password : openscp::SecureString();
     opt.keyboard_interactive_cb =
         [self, savedUser, savedPass](const std::string &name,
                                      const std::string &instruction,
@@ -1290,7 +1296,7 @@ void MainWindow::configureSftpConnectCallbacks(openscp::SessionOptions &opt) {
                 promptTextLower.contains("passphrase") ||
                 promptTextLower.contains("passcode")) {
                 if (!savedPass.empty()) {
-                    responses.emplace_back(savedPass);
+                    responses.emplace_back(savedPass.data(), savedPass.size());
                     continue;
                 }
                 QString answer;
@@ -1584,7 +1590,15 @@ void MainWindow::maybePersistQuickConnectSite(
     }
 
     if (created || loadedSites.needsSave) {
-        saveSavedSitesForQuickConnect(sites);
+        const auto siteSaveResult = saveSavedSitesForQuickConnect(sites);
+        if (!siteSaveResult.ok) {
+            UiAlerts::warning(this, tr("Site not saved"), siteSaveResult.error);
+            statusBar()->showMessage(connectionEstablished
+                                         ? tr("Connected. Site was not saved.")
+                                         : tr("Site was not saved."),
+                                     6000);
+            return;
+        }
         refreshOpenSiteManagerWidget(siteManager_);
     }
 

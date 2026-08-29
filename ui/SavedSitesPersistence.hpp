@@ -31,7 +31,14 @@ struct LoadResult {
     bool needsSave = false;
 };
 
+struct SaveResult {
+    bool ok = false;
+    QString error;
+
+    [[nodiscard]] explicit operator bool() const noexcept { return ok; }
+};
+
 LoadResult loadSites(const LoadOptions &options = {});
-void saveSites(const QVector<SiteEntry> &sites, bool syncToDisk);
+SaveResult saveSites(const QVector<SiteEntry> &sites, bool syncToDisk);
 
 } // namespace SavedSitesPersistence

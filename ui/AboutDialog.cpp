@@ -1,6 +1,7 @@
 // Implementation of the "About" dialog for OpenSCP.
 #include "AboutDialog.hpp"
 
+#include "AppSettings.hpp"
 #include "AppVersion.hpp"
 #include "UiAlerts.hpp"
 
@@ -17,7 +18,6 @@
 #include <QPixmap>
 #include <QPlainTextEdit>
 #include <QPushButton>
-#include <QSettings>
 #include <QStringConverter>
 #include <QStringList>
 #include <QSysInfo>
@@ -164,7 +164,7 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     libsText->setMinimumHeight(180);
 
     // Decide which file to load based on UI language (settings: UI/language)
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     const QString languageCode =
         settings.value("UI/language", "en").toString().toLower();
     QString suffix = QStringLiteral("EN");

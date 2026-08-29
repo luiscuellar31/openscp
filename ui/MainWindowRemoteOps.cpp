@@ -1,4 +1,5 @@
 // MainWindow remote-side operations and writeability state.
+#include "AppSettings.hpp"
 #include "MainWindow.hpp"
 #include "MainWindowSharedUtils.hpp"
 #include "PermissionsDialog.hpp"
@@ -25,7 +26,6 @@
 #include <QProgressDialog>
 #include <QScrollBar>
 #include <QSet>
-#include <QSettings>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTreeView>
@@ -90,7 +90,7 @@ void MainWindow::openRightRemoteTerminal() {
     const QString remotePath = normalizeRemotePath(
         rightRemoteModel_ ? rightRemoteModel_->rootPath()
                           : (rightPath_ ? rightPath_->text() : QString()));
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     const bool forceInteractiveLogin =
         settings.value("Terminal/forceInteractiveLogin", false).toBool();
     const bool enableSftpCliFallback =

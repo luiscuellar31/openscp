@@ -208,22 +208,20 @@ hash_local_range(const std::string &path, std::uint64_t offset,
             *why = "Could not open local file for hashing";
         return false;
     }
+    UniqueFile localFile(f);
     if (!seek_local_file(f, offset, why)) {
-        std::fclose(f);
         return false;
     }
     EVP_MD_CTX *ctx = EVP_MD_CTX_new();
     if (!ctx) {
         if (why)
             *why = "Could not initialize local hash context";
-        std::fclose(f);
         return false;
     }
     if (EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr) != 1) {
         if (why)
             *why = "EVP_DigestInit_ex(local) failed";
         EVP_MD_CTX_free(ctx);
-        std::fclose(f);
         return false;
     }
     std::array<unsigned char, 64 * 1024> buf{};
@@ -233,7 +231,6 @@ hash_local_range(const std::string &path, std::uint64_t offset,
             if (why)
                 *why = "Canceled by user";
             EVP_MD_CTX_free(ctx);
-            std::fclose(f);
             return false;
         }
         const std::size_t want = static_cast<std::size_t>(
@@ -243,14 +240,12 @@ hash_local_range(const std::string &path, std::uint64_t offset,
             if (why)
                 *why = "Insufficient local read while hashing";
             EVP_MD_CTX_free(ctx);
-            std::fclose(f);
             return false;
         }
         if (EVP_DigestUpdate(ctx, buf.data(), n) != 1) {
             if (why)
                 *why = "EVP_DigestUpdate(local) failed";
             EVP_MD_CTX_free(ctx);
-            std::fclose(f);
             return false;
         }
         remain -= static_cast<std::uint64_t>(n);
@@ -261,11 +256,9 @@ hash_local_range(const std::string &path, std::uint64_t offset,
         if (why)
             *why = "EVP_DigestFinal_ex(local) failed";
         EVP_MD_CTX_free(ctx);
-        std::fclose(f);
         return false;
     }
     EVP_MD_CTX_free(ctx);
-    std::fclose(f);
     return true;
 }
 

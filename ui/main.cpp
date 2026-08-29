@@ -1,4 +1,5 @@
 // Application entry point: initialize Qt and show MainWindow.
+#include "AppSettings.hpp"
 #include "AppVersion.hpp"
 #include "MainWindow.hpp"
 
@@ -7,7 +8,6 @@
 #include <QFile>
 #include <QLibraryInfo>
 #include <QLocale>
-#include <QSettings>
 #include <QTranslator>
 
 int main(int argc, char *argv[]) {
@@ -20,7 +20,7 @@ int main(int argc, char *argv[]) {
     // Theme: use system default (no overrides)
 
     // Load translation if available (supports resources and disk)
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     const QString languageCode =
         settings.value("UI/language", "en").toString().trimmed().toLower();
     static QTranslator translator; // static so it lives until app.exec()

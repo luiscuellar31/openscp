@@ -3,6 +3,7 @@
 // exist.
 #include "TestHarness.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
+#include "openscp/UniqueFile.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -160,13 +161,13 @@ std::size_t countJumpTunnelProcesses(const std::string &targetHost,
     const std::string needlePort =
         std::string("-p ") + std::to_string(jumpPort);
 
-    FILE *pipe = ::popen("ps -ax -o command=", "r");
+    openscp::UniqueFile pipe(::popen("ps -ax -o command=", "r"), &::pclose);
     if (!pipe)
         return 0;
 
     std::size_t matches = 0;
     char lineBuf[4096];
-    while (std::fgets(lineBuf, sizeof(lineBuf), pipe)) {
+    while (std::fgets(lineBuf, sizeof(lineBuf), pipe.get())) {
         std::string line(lineBuf);
         if (!line.empty() && line.back() == '\n')
             line.pop_back();
@@ -180,7 +181,6 @@ std::size_t countJumpTunnelProcesses(const std::string &targetHost,
             continue;
         ++matches;
     }
-    (void)::pclose(pipe);
     return matches;
 }
 

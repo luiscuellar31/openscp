@@ -1,8 +1,9 @@
 // Shared persistence helpers for saved sites (QSettings array: "sites").
 #include "SavedSitesPersistence.hpp"
 
+#include "AppSettings.hpp"
+
 #include <QSet>
-#include <QSettings>
 #include <QUuid>
 
 #include <cstdint>
@@ -83,7 +84,7 @@ SavedSitesPersistence::LoadResult
 SavedSitesPersistence::loadSites(const LoadOptions &options) {
     LoadResult result;
 
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     const auto defaultScpMode =
         loadDefaultScpTransferModeFromSettings(settings);
     const bool defaultFtpsVerifyPeer =
@@ -93,7 +94,8 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
             .toString()
             .trimmed();
 
-    const int siteCount = settings.beginReadArray("sites");
+    const int siteCount =
+        settings.beginReadArray(openscpui::settingskeys::Sites);
     QSet<QString> usedIds;
     for (int siteIndex = 0; siteIndex < siteCount; ++siteIndex) {
         settings.setArrayIndex(siteIndex);
@@ -303,11 +305,12 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
     return result;
 }
 
-void SavedSitesPersistence::saveSites(const QVector<SiteEntry> &sites,
-                                      bool syncToDisk) {
-    QSettings settings("OpenSCP", "OpenSCP");
-    settings.remove("sites");
-    settings.beginWriteArray("sites");
+SavedSitesPersistence::SaveResult
+SavedSitesPersistence::saveSites(const QVector<SiteEntry> &sites,
+                                 bool syncToDisk) {
+    openscpui::AppSettings settings;
+    settings.remove(openscpui::settingskeys::Sites);
+    settings.beginWriteArray(openscpui::settingskeys::Sites);
     for (int siteIndex = 0; siteIndex < sites.size(); ++siteIndex) {
         settings.setArrayIndex(siteIndex);
         const SiteEntry &site = sites[siteIndex];
@@ -385,6 +388,10 @@ void SavedSitesPersistence::saveSites(const QVector<SiteEntry> &sites,
                 : QString());
     }
     settings.endArray();
-    if (syncToDisk)
-        settings.sync();
+    // A SaveResult can only be trustworthy after QSettings has flushed its
+    // backend. Keep the parameter for source compatibility while making both
+    // call modes report actual persistence failures.
+    (void)syncToDisk;
+    const auto result = settings.syncSecure();
+    return {result.ok, result.error};
 }

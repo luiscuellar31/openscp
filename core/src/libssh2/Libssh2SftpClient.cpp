@@ -6,6 +6,7 @@
 #include "detail/Libssh2ErrorClassifier.hpp"
 #include "detail/Libssh2InputSafety.hpp"
 #include "openscp/RuntimeLogging.hpp"
+#include "openscp/UniqueFile.hpp"
 
 #include <libssh2.h>
 #include <libssh2_sftp.h>

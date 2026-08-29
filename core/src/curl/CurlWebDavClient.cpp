@@ -3,6 +3,7 @@
 
 #include "../common/SafeLocalFile.hpp"
 #include "CurlBackendCommon.hpp"
+#include "openscp/UniqueFile.hpp"
 
 #include <curl/curl.h>
 #include <tinyxml2.h>
@@ -940,12 +941,13 @@ bool CurlWebDavClient::get(
         setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
         return false;
     }
+    UniqueFile localFileOwner(localFile);
 
     curlcommon::TransferProgressContext progressContext{progress, shouldCancel,
                                                         &interrupted_, false};
     const bool canceledBeforeTransfer = shouldCancel && shouldCancel();
     if (canceledBeforeTransfer || interrupted_.load()) {
-        std::fclose(localFile);
+        localFileOwner.reset();
         err = canceledBeforeTransfer ? "Canceled by user" : "Interrupted";
         setLastOperationError(
             RemoteErrorKind::Canceled, err,
@@ -960,7 +962,7 @@ bool CurlWebDavClient::get(
                                            statusCode, rc, retryAfter);
     const bool userCanceled = shouldCancel && shouldCancel();
     if (!ok || userCanceled || interrupted_.load()) {
-        std::fclose(localFile);
+        localFileOwner.reset();
         if (userCanceled || interrupted_.load()) {
             err = userCanceled ? "Canceled by user" : "Interrupted";
             setLastOperationError(
@@ -973,18 +975,18 @@ bool CurlWebDavClient::get(
         return false;
     }
     if (!curlcommon::isCompletedWebDavGetStatus(statusCode)) {
-        std::fclose(localFile);
+        localFileOwner.reset();
         err = formatHttpFailure("WebDAV GET", statusCode);
         setLastOperationError(curlcommon::errorFromHttpStatus(
             statusCode, err, false, retryAfter));
         return false;
     }
     if (!curlcommon::flushAndSyncFile(localFile, err)) {
-        std::fclose(localFile);
+        localFileOwner.reset();
         setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
         return false;
     }
-    if (std::fclose(localFile) != 0) {
+    if (localFileOwner.close() != 0) {
         err = "Could not close local partial file after download.";
         setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
         return false;
@@ -1073,12 +1075,13 @@ bool CurlWebDavClient::put(
         setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
         return false;
     }
+    UniqueFile localFileOwner(localFile);
 
     curlcommon::TransferProgressContext progressContext{progress, shouldCancel,
                                                         &interrupted_, true};
     const bool canceledBeforeTransfer = shouldCancel && shouldCancel();
     if (canceledBeforeTransfer || interrupted_.load()) {
-        std::fclose(localFile);
+        localFileOwner.reset();
         err = canceledBeforeTransfer ? "Canceled by user" : "Interrupted";
         setLastOperationError(
             RemoteErrorKind::Canceled, err,
@@ -1092,7 +1095,7 @@ bool CurlWebDavClient::put(
         performUploadRequest(easySession_->get(), opt, remotePartial, localFile,
                              static_cast<curl_off_t>(total), progressContext,
                              err, statusCode, rc, retryAfter);
-    std::fclose(localFile);
+    localFileOwner.reset();
     const bool userCanceled = shouldCancel && shouldCancel();
     if (!ok || userCanceled || interrupted_.load()) {
         if (userCanceled || interrupted_.load()) {

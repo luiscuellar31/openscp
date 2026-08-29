@@ -1,6 +1,9 @@
 // Builds the connection form and exposes getters/setters for SessionOptions.
 #include "ConnectionDialog.hpp"
 
+#include "AppSettings.hpp"
+
+#include <QByteArray>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -11,13 +14,26 @@
 #include <QLineEdit>
 #include <QPointer>
 #include <QPushButton>
-#include <QSettings>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QTimer>
 #include <QToolButton>
 #include <QWidget>
 #include <QtGlobal>
+
+#include <string_view>
+
+namespace {
+
+openscp::SecureString secureUtf8(const QString &value) {
+    QByteArray bytes = value.toUtf8();
+    openscp::SecureString secure(std::string_view(
+        bytes.constData(), static_cast<std::size_t>(bytes.size())));
+    bytes.fill('\0');
+    return secure;
+}
+
+} // namespace
 
 static void setFormRowVisible(QFormLayout *layout, QWidget *field,
                               bool visible) {
@@ -57,7 +73,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
            "or failed upload may leave a partial destination."),
         Qt::ToolTipRole);
     {
-        QSettings settings("OpenSCP", "OpenSCP");
+        openscpui::AppSettings settings;
         const auto defaultProtocol = openscp::protocolFromStorageName(
             settings
                 .value("Protocol/defaultProtocol",
@@ -392,7 +408,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     webDavCaRowLayout->addWidget(webDavCaPath_);
     webDavCaRowLayout->addWidget(webDavCaBrowse_);
     {
-        QSettings settings("OpenSCP", "OpenSCP");
+        openscpui::AppSettings settings;
         int khPolicyIdx = khPolicy_->findData(
             settings
                 .value("Security/defaultKnownHostsPolicy",
@@ -785,7 +801,7 @@ openscp::SessionOptions ConnectionDialog::options() const {
 
     // Password (if provided)
     if (!pass_->text().isEmpty())
-        sessionOptions.password = pass_->text().toUtf8().toStdString();
+        sessionOptions.password = secureUtf8(pass_->text());
 
     // Private key path (if provided)
     if (!keyPath_->text().isEmpty())
@@ -793,8 +809,7 @@ openscp::SessionOptions ConnectionDialog::options() const {
 
     // Key passphrase (if provided)
     if (!keyPass_->text().isEmpty())
-        sessionOptions.private_key_passphrase =
-            keyPass_->text().toUtf8().toStdString();
+        sessionOptions.private_key_passphrase = secureUtf8(keyPass_->text());
 
     // known_hosts
     if (!khPath_->text().isEmpty())
@@ -842,8 +857,7 @@ openscp::SessionOptions ConnectionDialog::options() const {
         if (!proxyUser_->text().isEmpty())
             sessionOptions.proxy_username = proxyUser_->text().toStdString();
         if (!proxyPass_->text().isEmpty())
-            sessionOptions.proxy_password =
-                proxyPass_->text().toUtf8().toStdString();
+            sessionOptions.proxy_password = secureUtf8(proxyPass_->text());
     }
     if (useJump) {
         sessionOptions.proxy_type = openscp::ProxyType::None;
@@ -910,13 +924,16 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &options) {
     if (!options.username.empty())
         user_->setText(QString::fromStdString(options.username));
     if (options.password && !options.password->empty())
-        pass_->setText(QString::fromStdString(*options.password));
+        pass_->setText(QString::fromUtf8(
+            options.password->data(),
+            static_cast<qsizetype>(options.password->size())));
     if (options.private_key_path && !options.private_key_path->empty())
         keyPath_->setText(QString::fromStdString(*options.private_key_path));
     if (options.private_key_passphrase &&
         !options.private_key_passphrase->empty())
-        keyPass_->setText(
-            QString::fromStdString(*options.private_key_passphrase));
+        keyPass_->setText(QString::fromUtf8(
+            options.private_key_passphrase->data(),
+            static_cast<qsizetype>(options.private_key_passphrase->size())));
     if (options.known_hosts_path && !options.known_hosts_path->empty())
         khPath_->setText(QString::fromStdString(*options.known_hosts_path));
     // Policy
@@ -1005,7 +1022,9 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &options) {
         proxyUser_->setText(QString::fromStdString(*options.proxy_username));
     if (effectiveProxyType != openscp::ProxyType::None &&
         options.proxy_password && !options.proxy_password->empty())
-        proxyPass_->setText(QString::fromStdString(*options.proxy_password));
+        proxyPass_->setText(QString::fromUtf8(
+            options.proxy_password->data(),
+            static_cast<qsizetype>(options.proxy_password->size())));
     if (jumpEnabled_)
         jumpEnabled_->setChecked(hasJump);
     if (hasJump)

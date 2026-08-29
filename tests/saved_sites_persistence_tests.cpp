@@ -1,7 +1,9 @@
+#include "AppSettings.hpp"
 #include "SavedSitesPersistence.hpp"
 #include "TestHarness.hpp"
 
 #include <QCoreApplication>
+#include <QFileInfo>
 #include <QSettings>
 #include <QTemporaryDir>
 
@@ -82,7 +84,21 @@ void testRoundTrip(TestContext &test) {
     site.initialRemotePath = QStringLiteral("/releases/current");
     site.rememberLastPaths = true;
 
-    SavedSitesPersistence::saveSites({site}, true);
+    const auto saveResult = SavedSitesPersistence::saveSites({site}, true);
+    test.check(saveResult.ok,
+               std::string("saved sites should report persistence success: ") +
+                   saveResult.error.toStdString());
+#ifdef Q_OS_UNIX
+    openscpui::AppSettings applicationSettings;
+    const auto permissions =
+        QFileInfo(applicationSettings.fileName()).permissions();
+    constexpr QFileDevice::Permissions nonOwnerPermissions =
+        QFileDevice::ReadGroup | QFileDevice::WriteGroup |
+        QFileDevice::ExeGroup | QFileDevice::ReadOther |
+        QFileDevice::WriteOther | QFileDevice::ExeOther;
+    test.check((permissions & nonOwnerPermissions) == 0,
+               "saved-site settings should use owner-only permissions");
+#endif
     const auto loaded = SavedSitesPersistence::loadSites();
     test.check(!loaded.needsSave,
                "normalized saved sites should not require another migration");
@@ -232,7 +248,10 @@ void testInitialRemotePathNormalization(TestContext &test) {
         return;
     SiteEntry site = loaded.sites.front();
     site.initialRemotePath = QStringLiteral("/../../safe/../root");
-    SavedSitesPersistence::saveSites({site}, true);
+    const auto saveResult = SavedSitesPersistence::saveSites({site}, true);
+    test.check(saveResult.ok,
+               std::string("normalized paths should save successfully: ") +
+                   saveResult.error.toStdString());
     const auto restored = SavedSitesPersistence::loadSites();
     test.check(restored.sites.size() == 1 &&
                    restored.sites.front().initialRemotePath ==

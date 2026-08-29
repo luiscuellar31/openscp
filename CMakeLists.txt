@@ -85,9 +85,30 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     endif()
 endif()
 
-# Apply the shared warning policy to every first-party target declared below,
-# including targets created by the core and tests subdirectories.
-link_libraries(openscp_project_warnings)
+add_library(openscp_project_hardening INTERFACE)
+if(MSVC)
+    target_compile_options(openscp_project_hardening INTERFACE /GS)
+    target_link_options(openscp_project_hardening INTERFACE
+        /DYNAMICBASE
+        /NXCOMPAT
+    )
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(openscp_project_hardening INTERFACE
+        -fstack-protector-strong
+        $<$<PLATFORM_ID:Linux>:-fPIE>
+    )
+    target_compile_definitions(openscp_project_hardening INTERFACE
+        $<$<AND:$<PLATFORM_ID:Linux>,$<NOT:$<CONFIG:Debug>>>:_FORTIFY_SOURCE=3>
+    )
+    target_link_options(openscp_project_hardening INTERFACE
+        $<$<PLATFORM_ID:Linux>:-pie>
+        $<$<PLATFORM_ID:Linux>:-Wl,-z,relro,-z,now,-z,noexecstack>
+    )
+endif()
+
+# Apply shared quality and hardening policies to every first-party target
+# declared below, including targets created by core and tests subdirectories.
+link_libraries(openscp_project_warnings openscp_project_hardening)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Svg LinguistTools)
 include(GNUInstallDirs)
@@ -181,6 +202,8 @@ target_include_directories(openscp_sync_logic
 target_link_libraries(openscp_sync_logic PUBLIC Qt6::Core)
 
 add_library(openscp_ui_logic STATIC
+    ui/AppSettings.hpp
+    ui/AppSettings.cpp
     ui/RemotePath.hpp
     ui/RemotePath.cpp
     ui/MainWindowSharedUtils.hpp
@@ -321,6 +344,17 @@ target_include_directories(openscp_hello PRIVATE
 target_link_libraries(openscp_hello PRIVATE
     openscp_ui_widgets
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_custom_target(openscp_hardening_check
+        COMMAND "${CMAKE_SOURCE_DIR}/scripts/check_linux_hardening.sh"
+                "$<TARGET_FILE:openscp_hello>"
+        DEPENDS openscp_hello
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Verifying ELF hardening for OpenSCP"
+        VERBATIM
+    )
+endif()
 
 if (APPLE)
     target_link_libraries(openscp_ui_logic PRIVATE

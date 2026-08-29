@@ -5,8 +5,9 @@
 #if defined(HAVE_LIBSECRET)
 #include <libsecret/secret.h>
 #endif
+#include "AppSettings.hpp"
+
 #include <QByteArray>
-#include <QSettings>
 #include <QString>
 #include <QVariant>
 
@@ -70,9 +71,10 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
 
     // Accessibility policy based on user preference (default: less restrictive
     // OFF)
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     const bool restrictive =
-        settings.value("Security/macKeychainRestrictive", false).toBool();
+        settings.value(openscpui::settingskeys::MacKeychainRestrictive, false)
+            .toBool();
     CFTypeRef chosenAttr = restrictive
                                ? kSecAttrAccessibleWhenUnlockedThisDeviceOnly
                                : kSecAttrAccessibleAfterFirstUnlock;
@@ -224,6 +226,7 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
         openscp_schema(), SECRET_COLLECTION_DEFAULT, "OpenSCP secret",
         secretValueUtf8.constData(), nullptr, &gerr, "key", keyUtf8.constData(),
         nullptr);
+    secretValueUtf8.fill('\0');
     if (ok)
         return {PersistStatus::Stored, QString()};
     QString detail = gerr ? QString::fromUtf8(gerr->message)
@@ -272,8 +275,9 @@ static bool fallbackEnabledEnv() {
 }
 
 static bool fallbackEnabledConfigured() {
-    QSettings settings("OpenSCP", "OpenSCP");
-    return settings.value("Security/enableInsecureSecretFallback", false)
+    openscpui::AppSettings settings;
+    return settings
+        .value(openscpui::settingskeys::EnableInsecureSecretFallback, false)
         .toBool();
 }
 
@@ -298,13 +302,12 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
         return {PersistStatus::Unavailable,
                 QStringLiteral("Insecure fallback disabled by configuration")};
     }
-    QSettings settings("OpenSCP", "Secrets");
+    openscpui::AppSettings settings(
+        openscpui::AppSettings::Store::SecretFallback);
     settings.setValue(key, value);
-    settings.sync();
-    if (settings.status() != QSettings::NoError) {
-        return {PersistStatus::BackendError,
-                QStringLiteral("QSettings could not persist the secret")};
-    }
+    const auto syncResult = settings.syncSecure();
+    if (!syncResult.ok)
+        return {PersistStatus::BackendError, syncResult.error};
     return {PersistStatus::Stored, QString()};
 #endif
 }
@@ -316,7 +319,8 @@ std::optional<QString> SecretStore::getSecret(const QString &key) const {
 #else
     if (!fallbackEnabled())
         return std::nullopt;
-    QSettings settings("OpenSCP", "Secrets");
+    openscpui::AppSettings settings(
+        openscpui::AppSettings::Store::SecretFallback);
     QVariant storedValue = settings.value(key);
     if (!storedValue.isValid())
         return std::nullopt;
@@ -331,8 +335,10 @@ void SecretStore::removeSecret(const QString &key) {
 #else
     if (!fallbackEnabled())
         return;
-    QSettings settings("OpenSCP", "Secrets");
+    openscpui::AppSettings settings(
+        openscpui::AppSettings::Store::SecretFallback);
     settings.remove(key);
+    (void)settings.syncSecure();
 #endif
 }
 

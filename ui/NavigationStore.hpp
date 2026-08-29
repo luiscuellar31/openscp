@@ -1,8 +1,8 @@
 #pragma once
 
+#include "AppSettings.hpp"
 #include "openscp/SessionOptions.hpp"
 
-#include <QSettings>
 #include <QString>
 #include <QStringList>
 
@@ -48,7 +48,7 @@ class NavigationStore {
     void clearAllHistory();
 
     private:
-    NavigationStore(QString settingsFile, QSettings::Format format);
+    NavigationStore(QString settingsFile, AppSettings::Format format);
 
     std::unique_ptr<QSettings> createSettings() const;
     static QString historyKeyForScope(const QString &scope);
@@ -58,7 +58,7 @@ class NavigationStore {
     QString organization_;
     QString application_;
     QString settingsFile_;
-    QSettings::Format settingsFormat_ = QSettings::NativeFormat;
+    AppSettings::Format settingsFormat_ = AppSettings::NativeFormat;
 };
 
 } // namespace openscpui

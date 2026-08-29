@@ -3,6 +3,7 @@
 
 #include "../common/SafeLocalFile.hpp"
 #include "CurlBackendCommon.hpp"
+#include "openscp/UniqueFile.hpp"
 
 #include <curl/curl.h>
 
@@ -231,15 +232,14 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
 
     const std::string username =
         opt.username.empty() ? std::string("anonymous") : opt.username;
-    const std::string password =
+    const char *password =
         (opt.username.empty() && (!opt.password || opt.password->empty()))
-            ? std::string("anonymous@openscp.local")
-            : (opt.password ? *opt.password : std::string());
+            ? "anonymous@openscp.local"
+            : (opt.password ? opt.password->c_str() : "");
 
     if (curl_easy_setopt(curl, CURLOPT_USERNAME, username.c_str()) !=
             CURLE_OK ||
-        curl_easy_setopt(curl, CURLOPT_PASSWORD, password.c_str()) !=
-            CURLE_OK) {
+        curl_easy_setopt(curl, CURLOPT_PASSWORD, password) != CURLE_OK) {
         err = "Could not set FTP credentials.";
         return false;
     }
@@ -1004,17 +1004,18 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
         setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
         return false;
     }
+    UniqueFile localFileOwner(localFile);
 
     CURL *curl = easySession_->get();
     if (!curl) {
-        std::fclose(localFile);
+        localFileOwner.reset();
         err = "Could not create CURL handle.";
         setLastOperationError(RemoteErrorKind::LocalIo, err);
         return false;
     }
     curl_easy_reset(curl);
     if (!configureCommonCurlHandle(curl, opt, err)) {
-        std::fclose(localFile);
+        localFileOwner.reset();
         setLastOperationError(RemoteErrorKind::InvalidRequest, err);
         return false;
     }
@@ -1033,7 +1034,7 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
         (curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progressContext) ==
          CURLE_OK);
     if (!configured) {
-        std::fclose(localFile);
+        localFileOwner.reset();
         err = "Could not configure FTP download.";
         setLastOperationError(RemoteErrorKind::LocalIo, err);
         return false;
@@ -1041,7 +1042,7 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
 
     const bool canceledBeforeTransfer = shouldCancel && shouldCancel();
     if (canceledBeforeTransfer || interrupted_.load()) {
-        std::fclose(localFile);
+        localFileOwner.reset();
         err = canceledBeforeTransfer ? "Canceled by user" : "Interrupted";
         setLastOperationError(
             RemoteErrorKind::Canceled, err,
@@ -1053,7 +1054,7 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
     const bool userCanceled = shouldCancel && shouldCancel();
     if (userCanceled || interrupted_.load()) {
-        std::fclose(localFile);
+        localFileOwner.reset();
         err = userCanceled ? "Canceled by user" : "Interrupted";
         setLastOperationError(
             RemoteErrorKind::Canceled, err,
@@ -1061,14 +1062,14 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
         return false;
     }
     if (rc != CURLE_OK) {
-        std::fclose(localFile);
+        localFileOwner.reset();
         err = std::string(protocolLabel(opt.protocol)) +
               " download failed: " + curl_easy_strerror(rc);
         setLastOperationError(ftpErrorFromResult(rc, responseCode, err));
         return false;
     }
     if (responseCode >= 400) {
-        std::fclose(localFile);
+        localFileOwner.reset();
         err = std::string(protocolLabel(opt.protocol)) +
               " download was rejected (server response " +
               std::to_string(responseCode) + ").";
@@ -1077,11 +1078,11 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
         return false;
     }
     if (!curlcommon::flushAndSyncFile(localFile, err)) {
-        std::fclose(localFile);
+        localFileOwner.reset();
         setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
         return false;
     }
-    if (std::fclose(localFile) != 0) {
+    if (localFileOwner.close() != 0) {
         err = "Could not close local partial file after download.";
         setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
         return false;
@@ -1175,17 +1176,18 @@ bool CurlFtpClient::put(const std::string &local, const std::string &remote,
         setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
         return false;
     }
+    UniqueFile localFileOwner(localFile);
 
     CURL *curl = easySession_->get();
     if (!curl) {
-        std::fclose(localFile);
+        localFileOwner.reset();
         err = "Could not create CURL handle.";
         setLastOperationError(RemoteErrorKind::LocalIo, err);
         return false;
     }
     curl_easy_reset(curl);
     if (!configureCommonCurlHandle(curl, opt, err)) {
-        std::fclose(localFile);
+        localFileOwner.reset();
         setLastOperationError(RemoteErrorKind::InvalidRequest, err);
         return false;
     }
@@ -1209,7 +1211,7 @@ bool CurlFtpClient::put(const std::string &local, const std::string &remote,
         (curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progressContext) ==
          CURLE_OK);
     if (!configured) {
-        std::fclose(localFile);
+        localFileOwner.reset();
         err = "Could not configure FTP upload.";
         setLastOperationError(RemoteErrorKind::LocalIo, err);
         return false;
@@ -1217,7 +1219,7 @@ bool CurlFtpClient::put(const std::string &local, const std::string &remote,
 
     const bool canceledBeforeTransfer = shouldCancel && shouldCancel();
     if (canceledBeforeTransfer || interrupted_.load()) {
-        std::fclose(localFile);
+        localFileOwner.reset();
         err = canceledBeforeTransfer ? "Canceled by user" : "Interrupted";
         setLastOperationError(
             RemoteErrorKind::Canceled, err,
@@ -1225,7 +1227,7 @@ bool CurlFtpClient::put(const std::string &local, const std::string &remote,
         return false;
     }
     const CURLcode rc = curl_easy_perform(curl);
-    std::fclose(localFile);
+    localFileOwner.reset();
     long responseCode = 0;
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
     const bool userCanceled = shouldCancel && shouldCancel();

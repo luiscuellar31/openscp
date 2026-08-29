@@ -1,6 +1,7 @@
 // Manages saved sites and delegates credential storage to its repository.
 #include "SiteManagerDialog.hpp"
 
+#include "AppSettings.hpp"
 #include "ConnectionDialog.hpp"
 #include "SavedSitesPersistence.hpp"
 #include "SiteCredentialRepository.hpp"
@@ -17,7 +18,6 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QSaveFile>
-#include <QSettings>
 #include <QSortFilterProxyModel>
 #include <QTableView>
 #include <QUuid>
@@ -251,8 +251,11 @@ bool SiteManagerDialog::saveSites() {
                "the existing credentials remain recoverable."));
         return false;
     }
-    // Keep Site Manager save semantics (no forced sync).
-    SavedSitesPersistence::saveSites(sites_, false);
+    const auto result = SavedSitesPersistence::saveSites(sites_, false);
+    if (!result.ok) {
+        UiAlerts::warning(this, tr("Sites not saved"), result.error);
+        return false;
+    }
     return true;
 }
 
@@ -450,7 +453,7 @@ void SiteManagerDialog::onRemove() {
         return;
     }
     // Optionally delete stored credentials and known_hosts entry for this site
-    QSettings settings("OpenSCP", "OpenSCP");
+    openscpui::AppSettings settings;
     const bool deleteSecrets =
         settings.value("Sites/deleteSecretsOnRemove", false).toBool();
     if (deleteSecrets) {
@@ -484,7 +487,7 @@ bool SiteManagerDialog::selectedOptions(openscp::SessionOptions &out) const {
     out = sites_[modelIndex].opt;
     // Apply global security preferences
     {
-        QSettings settings("OpenSCP", "OpenSCP");
+        openscpui::AppSettings settings;
         out.known_hosts_hash_names =
             settings.value("Security/knownHostsHashed", true).toBool();
         out.show_fp_hex = settings.value("Security/fpHex", false).toBool();

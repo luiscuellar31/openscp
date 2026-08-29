@@ -1,6 +1,7 @@
 // One-way directory comparison, filtering, preview, and execution planning.
 #include "SyncDialog.hpp"
 
+#include "AppSettings.hpp"
 #include "UiFormatters.hpp"
 
 #include <QAbstractItemView>
@@ -21,7 +22,6 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
-#include <QSettings>
 #include <QSortFilterProxyModel>
 #include <QTableView>
 #include <QTimer>
@@ -618,7 +618,7 @@ void SyncDialog::loadPresets() {
     presetCombo_->clear();
     presetCombo_->addItem(tr("Custom"));
 
-    QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
+    openscpui::AppSettings settings;
     const QVariantList presets =
         settings.value(QStringLiteral("SyncDialog/filterPresetsV1")).toList();
     for (const QVariant &value : presets) {
@@ -650,7 +650,7 @@ void SyncDialog::saveCurrentPreset() {
     saved.insert(QStringLiteral("exclude"), excludeEdit_->toPlainText());
     saved.insert(QStringLiteral("hidden"), includeHiddenCheck_->isChecked());
 
-    QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
+    openscpui::AppSettings settings;
     QVariantList presets =
         settings.value(QStringLiteral("SyncDialog/filterPresetsV1")).toList();
     bool replaced = false;
@@ -686,7 +686,7 @@ void SyncDialog::deleteCurrentPreset() {
         return;
     }
 
-    QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
+    openscpui::AppSettings settings;
     QVariantList presets =
         settings.value(QStringLiteral("SyncDialog/filterPresetsV1")).toList();
     for (qsizetype index = presets.size(); index-- > 0;) {

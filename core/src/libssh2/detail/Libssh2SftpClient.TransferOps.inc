@@ -161,6 +161,7 @@ bool Libssh2SftpClient::get(
         setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
         return false;
     }
+    UniqueFile localFile(lf);
 
     const std::size_t CHUNK = 64 * 1024;
     std::vector<char> buf(CHUNK);
@@ -169,7 +170,7 @@ bool Libssh2SftpClient::get(
     while (true) {
         if (shouldCancel && shouldCancel()) {
             err = "Canceled by user";
-            std::fclose(lf);
+            localFile.reset();
             // Avoid a potentially blocking per-handle close on cancellation;
             // the worker session teardown will release pending handles.
             return false;
@@ -181,7 +182,7 @@ bool Libssh2SftpClient::get(
                 static_cast<size_t>(n)) {
                 const int nativeError = errno;
                 err = "Local write failed";
-                std::fclose(lf);
+                localFile.reset();
                 libssh2_sftp_close(rh);
                 setLastOperationError(RemoteErrorKind::LocalIo, err,
                                       nativeError);
@@ -197,7 +198,7 @@ bool Libssh2SftpClient::get(
             err = canceledNow ? "Canceled by user" : "Remote read failed";
             const RemoteError structuredFailure =
                 classifyStructuredFailure(err, false);
-            std::fclose(lf);
+            localFile.reset();
             if (!canceledNow) {
                 (void)libssh2_sftp_close(rh);
             }
@@ -209,13 +210,13 @@ bool Libssh2SftpClient::get(
     std::string syncErr;
     if (!flush_local_file(lf, &syncErr)) {
         const int nativeError = errno;
-        std::fclose(lf);
+        localFile.reset();
         libssh2_sftp_close(rh);
         err = std::string("Could not sync local file (.part): ") + syncErr;
         setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
         return false;
     }
-    std::fclose(lf);
+    localFile.reset();
     libssh2_sftp_close(rh);
 
     if (fail_if_transfer_canceled(&shouldCancel, err))
@@ -259,6 +260,7 @@ bool Libssh2SftpClient::put(
         setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
         return false;
     }
+    UniqueFile localFile(lf);
 
     // Local size
     std::fseek(lf, 0, SEEK_END);
@@ -280,7 +282,7 @@ bool Libssh2SftpClient::put(
 
     if (startOffset > 0 && static_cast<std::size_t>(startOffset) > total) {
         if (policy == TransferIntegrityPolicy::Required) {
-            std::fclose(lf);
+            localFile.reset();
             err = "Invalid resume: remote .part is larger than local file";
             return false;
         }
@@ -301,13 +303,13 @@ bool Libssh2SftpClient::put(
             lok && hash_remote_range(sftp_, remotePart, start, window, rsum,
                                      &herr, &shouldCancel);
         if (shouldCancel && shouldCancel()) {
-            std::fclose(lf);
+            localFile.reset();
             err = "Canceled by user";
             return false;
         }
         if (!lok || !rok) {
             if (policy == TransferIntegrityPolicy::Required) {
-                std::fclose(lf);
+                localFile.reset();
                 err = std::string(
                           "Could not validate resume integrity (upload): ") +
                       herr;
@@ -316,7 +318,7 @@ bool Libssh2SftpClient::put(
             startOffset = 0;
         } else if (lsum != rsum) {
             if (policy == TransferIntegrityPolicy::Required) {
-                std::fclose(lf);
+                localFile.reset();
                 err = "Integrity check failed in resume (upload): local/remote "
                       "prefix does not match";
                 return false;
@@ -331,7 +333,7 @@ bool Libssh2SftpClient::put(
         sftp_, remotePart.c_str(), static_cast<unsigned>(remotePart.size()),
         flags, 0644, LIBSSH2_SFTP_OPENFILE);
     if (!wh) {
-        std::fclose(lf);
+        localFile.reset();
         err = "Could not open remote (.part) for writing";
         return false;
     }
@@ -348,7 +350,7 @@ bool Libssh2SftpClient::put(
             const int nativeError = errno;
             err = "Could not seek local file";
             libssh2_sftp_close(wh);
-            std::fclose(lf);
+            localFile.reset();
             setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
             return false;
         }
@@ -363,7 +365,7 @@ bool Libssh2SftpClient::put(
             while (remain > 0) {
                 if (shouldCancel && shouldCancel()) {
                     err = "Canceled by user";
-                    std::fclose(lf);
+                    localFile.reset();
                     // Avoid a potentially blocking per-handle close on
                     // cancellation; worker disconnect will release it.
                     return false;
@@ -378,7 +380,7 @@ bool Libssh2SftpClient::put(
                     if (!canceledNow) {
                         (void)libssh2_sftp_close(wh);
                     }
-                    std::fclose(lf);
+                    localFile.reset();
                     setLastOperationError(structuredFailure);
                     return false;
                 }
@@ -393,7 +395,7 @@ bool Libssh2SftpClient::put(
                 const int nativeError = errno;
                 err = "Local read failed";
                 libssh2_sftp_close(wh);
-                std::fclose(lf);
+                localFile.reset();
                 setLastOperationError(RemoteErrorKind::LocalIo, err,
                                       nativeError);
                 return false;
@@ -403,7 +405,7 @@ bool Libssh2SftpClient::put(
     }
 
     libssh2_sftp_close(wh);
-    std::fclose(lf);
+    localFile.reset();
 
     if (fail_if_transfer_canceled(&shouldCancel, err))
         return false;

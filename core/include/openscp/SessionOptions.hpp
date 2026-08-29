@@ -2,6 +2,7 @@
 #pragma once
 
 #include "Protocol.hpp"
+#include "SecureString.hpp"
 
 #include <cstdint>
 #include <functional>
@@ -25,9 +26,9 @@ struct SessionOptions {
     std::uint16_t port = defaultPortForProtocol(Protocol::Sftp);
     std::string username;
 
-    std::optional<std::string> password;
+    std::optional<SecureString> password;
     std::optional<std::string> private_key_path;
-    std::optional<std::string> private_key_passphrase;
+    std::optional<SecureString> private_key_passphrase;
 
     std::optional<std::string> known_hosts_path;
     KnownHostsPolicy known_hosts_policy = KnownHostsPolicy::Strict;
@@ -49,7 +50,7 @@ struct SessionOptions {
     std::string proxy_host;
     std::uint16_t proxy_port = 0;
     std::optional<std::string> proxy_username;
-    std::optional<std::string> proxy_password;
+    std::optional<SecureString> proxy_password;
 
     std::optional<std::string> jump_host;
     std::uint16_t jump_port = 22;

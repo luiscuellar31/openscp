@@ -429,7 +429,8 @@ static bool establish_socks5_tunnel(int sock, const SessionOptions &opt,
 
     if (helloResp[1] == 0x02) {
         const std::string user = haveProxyUser ? *opt.proxy_username : "";
-        const std::string pass = haveProxyPass ? *opt.proxy_password : "";
+        const std::string_view pass =
+            haveProxyPass ? opt.proxy_password->view() : std::string_view();
         if (user.empty()) {
             err = "SOCKS5 proxy authentication requires username.";
             return false;
@@ -546,13 +547,16 @@ static bool establish_http_connect_tunnel(int sock, const SessionOptions &opt,
         (opt.proxy_password && !opt.proxy_password->empty())) {
         const std::string user =
             opt.proxy_username ? *opt.proxy_username : std::string();
-        const std::string pass =
-            opt.proxy_password ? *opt.proxy_password : std::string();
-        const std::string creds = user + ":" + pass;
+        std::string creds = user + ":";
+        if (opt.proxy_password) {
+            creds.append(opt.proxy_password->data(),
+                         opt.proxy_password->size());
+        }
         req << "Proxy-Authorization: Basic "
             << b64encode(reinterpret_cast<const unsigned char *>(creds.data()),
                          creds.size())
             << "\r\n";
+        std::fill(creds.begin(), creds.end(), '\0');
     }
     req << "\r\n";
     const std::string payload = req.str();
