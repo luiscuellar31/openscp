@@ -1,21 +1,11 @@
 #include "RemoteActionController.hpp"
+#include "TestHarness.hpp"
 
 #include <QCoreApplication>
 
 #include <iostream>
 
 namespace {
-
-struct TestContext {
-    int failures = 0;
-
-    void check(bool condition, const char *message) {
-        if (condition)
-            return;
-        ++failures;
-        std::cerr << "[FAIL] " << message << '\n';
-    }
-};
 
 void testDisconnectedState(TestContext &test) {
     openscp::ProtocolCapabilities capabilities;

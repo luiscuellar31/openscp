@@ -1,5 +1,6 @@
 // Unit tests for the serialized remote-operation execution lane.
 #include "RemoteOperationController.hpp"
+#include "TestHarness.hpp"
 #include "openscp/SftpClient.hpp"
 
 #include <QCoreApplication>
@@ -21,17 +22,6 @@
 #include <vector>
 
 namespace {
-
-struct TestContext {
-    int failures = 0;
-
-    void check(bool condition, const char *message) {
-        if (condition)
-            return;
-        ++failures;
-        std::cerr << "[FAIL] " << message << '\n';
-    }
-};
 
 bool spinUntil(const std::function<bool()> &predicate, int timeoutMs = 3000) {
     QElapsedTimer timer;

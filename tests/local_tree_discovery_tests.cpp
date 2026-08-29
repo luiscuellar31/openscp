@@ -1,4 +1,5 @@
 #include "LocalTreeDiscovery.hpp"
+#include "TestHarness.hpp"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -15,17 +16,6 @@
 #include <iostream>
 
 namespace {
-
-struct TestContext {
-    int failures = 0;
-
-    void check(bool condition, const char *message) {
-        if (condition)
-            return;
-        ++failures;
-        std::cerr << "[FAIL] " << message << '\n';
-    }
-};
 
 bool spinUntil(const std::function<bool()> &predicate, int timeoutMs = 5000) {
     QElapsedTimer timer;

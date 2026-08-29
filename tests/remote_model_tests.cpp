@@ -2,6 +2,7 @@
 // network clients and expose stable Qt model semantics while controller jobs
 // run elsewhere.
 #include "RemoteModel.hpp"
+#include "TestHarness.hpp"
 
 #include <QCoreApplication>
 #include <QMimeData>
@@ -15,17 +16,6 @@
 #include <vector>
 
 namespace {
-
-struct TestContext {
-    int failures = 0;
-
-    void check(bool condition, const char *message) {
-        if (condition)
-            return;
-        ++failures;
-        std::cerr << "[FAIL] " << message << '\n';
-    }
-};
 
 openscp::FileInfo entry(std::string name, bool directory, std::uint64_t size,
                         bool hasSize, std::uint64_t mtime, std::uint32_t mode) {

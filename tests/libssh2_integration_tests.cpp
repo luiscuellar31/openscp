@@ -1,6 +1,7 @@
 // Integration tests for real Libssh2SftpClient against a test SFTP server.
 // The test is skipped (exit code 77) unless required OPENSCP_IT_* env vars
 // exist.
+#include "TestHarness.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
 
 #include <algorithm>
@@ -22,17 +23,6 @@ namespace fs = std::filesystem;
 namespace {
 
 constexpr int kSkipExitCode = 77;
-
-struct TestContext {
-    int failures = 0;
-
-    void check(bool cond, const std::string &msg) {
-        if (!cond) {
-            ++failures;
-            std::cerr << "[FAIL] " << msg << "\n";
-        }
-    }
-};
 
 std::optional<std::string> envValue(const char *key) {
     const char *raw = std::getenv(key);

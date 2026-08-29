@@ -1,4 +1,5 @@
 #include "RemotePath.hpp"
+#include "TestHarness.hpp"
 #include "UiFormatters.hpp"
 
 #include <QCoreApplication>
@@ -6,17 +7,6 @@
 #include <iostream>
 
 namespace {
-
-struct TestContext {
-    int failures = 0;
-
-    void check(bool condition, const char *message) {
-        if (condition)
-            return;
-        ++failures;
-        std::cerr << "[FAIL] " << message << '\n';
-    }
-};
 
 void testRemotePaths(TestContext &test) {
     test.check(normalizeRemotePath(QString()) == QStringLiteral("/"),
@@ -52,11 +42,8 @@ void testByteFormatting(TestContext &test) {
 } // namespace
 
 int main(int argc, char **argv) {
-    QCoreApplication application(argc, argv);
-    TestContext test;
-    testRemotePaths(test);
-    testByteFormatting(test);
-    if (test.failures == 0)
-        std::cout << "All UI utility tests passed\n";
-    return test.failures == 0 ? 0 : 1;
+    openscp::test::TestHarness harness("UI utility");
+    harness.add("remote paths", testRemotePaths);
+    harness.add("byte formatting", testByteFormatting);
+    return harness.runWithApplication<QCoreApplication>(argc, argv);
 }

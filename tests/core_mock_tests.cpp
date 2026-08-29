@@ -2,6 +2,7 @@
 #include "Libssh2ErrorClassifier.hpp"
 #include "Libssh2InputSafety.hpp"
 #include "SafeLocalFile.hpp"
+#include "TestHarness.hpp"
 #include "openscp/ClientFactory.hpp"
 #include "openscp/Libssh2ScpClient.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
@@ -31,22 +32,6 @@
 namespace {
 
 namespace fs = std::filesystem;
-
-struct TestContext {
-    int failures = 0;
-
-    void check(bool cond, const std::string &msg) {
-        if (!cond) {
-            ++failures;
-            std::cerr << "[FAIL] " << msg << "\n";
-        }
-    }
-
-    void checkContains(const std::string &haystack, const std::string &needle,
-                       const std::string &msg) {
-        check(haystack.find(needle) != std::string::npos, msg);
-    }
-};
 
 openscp::SessionOptions validOptions() {
     openscp::SessionOptions opt;
@@ -896,45 +881,41 @@ void test_remove_known_hosts_entry_non_default_port(TestContext &t) {
 } // namespace
 
 int main() {
-    TestContext t;
-    test_session_defaults(t);
-    test_libssh2_input_safety(t);
-    test_safe_local_partial_files(t);
-    test_protocol_helpers(t);
-    test_connect_validation(t);
-    test_disconnect_changes_state(t);
-    test_list_requires_connection(t);
-    test_list_sorting_and_known_path(t);
-    test_list_root_and_empty_path(t);
-    test_missing_path_error(t);
-    test_unsupported_methods_report_error(t);
-    test_new_connection_like(t);
-    test_new_connection_like_validation(t);
-    test_client_factory(t);
-    test_set_times(t);
-    test_libssh2_rejects_conflicting_proxy_and_jump(t);
-    test_libssh2_backends_expose_structured_errors(t);
-    test_shared_libssh2_error_classification(t);
+    openscp::test::TestHarness harness("core");
+    harness.add("core behavior", [](TestContext &test) {
+        test_session_defaults(test);
+        test_libssh2_input_safety(test);
+        test_safe_local_partial_files(test);
+        test_protocol_helpers(test);
+        test_connect_validation(test);
+        test_disconnect_changes_state(test);
+        test_list_requires_connection(test);
+        test_list_sorting_and_known_path(test);
+        test_list_root_and_empty_path(test);
+        test_missing_path_error(test);
+        test_unsupported_methods_report_error(test);
+        test_new_connection_like(test);
+        test_new_connection_like_validation(test);
+        test_client_factory(test);
+        test_set_times(test);
+        test_libssh2_rejects_conflicting_proxy_and_jump(test);
+        test_libssh2_backends_expose_structured_errors(test);
+        test_shared_libssh2_error_classification(test);
 #if OPENSCP_HAS_CURL_FTP
-    test_curlftp_rejects_unsupported_proxy_type(t);
-    test_curlftp_rejects_command_injection_paths(t);
+        test_curlftp_rejects_unsupported_proxy_type(test);
+        test_curlftp_rejects_command_injection_paths(test);
 #endif
 #if OPENSCP_HAS_CURL_FTP || OPENSCP_HAS_CURL_WEBDAV
-    test_curl_structured_error_mappings(t);
+        test_curl_structured_error_mappings(test);
 #endif
 #if OPENSCP_HAS_CURL_WEBDAV
-    test_curlwebdav_rejects_control_characters(t);
+        test_curlwebdav_rejects_control_characters(test);
 #endif
 #ifdef _WIN32
-    test_libssh2_rejects_jump_on_windows(t);
+        test_libssh2_rejects_jump_on_windows(test);
 #endif
-    test_remove_known_hosts_entry_plain_and_hashed(t);
-    test_remove_known_hosts_entry_non_default_port(t);
-
-    if (t.failures != 0) {
-        std::cerr << "[FAILURES] " << t.failures << "\n";
-        return EXIT_FAILURE;
-    }
-    std::cout << "[OK] openscp_core_tests\n";
-    return EXIT_SUCCESS;
+        test_remove_known_hosts_entry_plain_and_hashed(test);
+        test_remove_known_hosts_entry_non_default_port(test);
+    });
+    return harness.run();
 }

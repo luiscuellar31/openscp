@@ -1,5 +1,6 @@
 // Focused unit tests for security-sensitive libcurl backend helpers.
 #include "CurlBackendCommon.hpp"
+#include "TestHarness.hpp"
 #if OPENSCP_HAS_CURL_FTP
 #include "openscp/CurlFtpClient.hpp"
 #endif
@@ -14,17 +15,6 @@
 #include <string>
 
 namespace {
-
-struct TestContext {
-    int failures = 0;
-
-    void check(bool condition, const std::string &message) {
-        if (condition)
-            return;
-        ++failures;
-        std::cerr << "[FAIL] " << message << "\n";
-    }
-};
 
 void testRetryAfter(TestContext &test) {
     using openscp::curlcommon::parseRetryAfter;

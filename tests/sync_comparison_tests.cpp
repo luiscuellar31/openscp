@@ -1,5 +1,6 @@
 // Pure comparison/filter/planning tests.
 #include "SyncComparisonEngine.hpp"
+#include "TestHarness.hpp"
 
 #include <QCoreApplication>
 
@@ -7,17 +8,6 @@
 #include <optional>
 
 namespace {
-
-struct TestContext {
-    int failures = 0;
-
-    void check(bool condition, const char *message) {
-        if (condition)
-            return;
-        ++failures;
-        std::cerr << "[FAIL] " << message << '\n';
-    }
-};
 
 SyncSnapshotEntry file(const QString &path, std::optional<quint64> size,
                        std::optional<qint64> modifiedMs, bool reliable = true) {

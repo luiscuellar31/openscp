@@ -1,3 +1,4 @@
+#include "TestHarness.hpp"
 #include "TransferUiController.hpp"
 
 #include <QCoreApplication>
@@ -5,17 +6,6 @@
 #include <iostream>
 
 namespace {
-
-struct TestContext {
-    int failures = 0;
-
-    void check(bool condition, const char *message) {
-        if (condition)
-            return;
-        ++failures;
-        std::cerr << "[FAIL] " << message << '\n';
-    }
-};
 
 TransferTask completedUpload(quint64 id, const QString &destination) {
     TransferTask task;

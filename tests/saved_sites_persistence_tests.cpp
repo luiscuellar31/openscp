@@ -1,4 +1,5 @@
 #include "SavedSitesPersistence.hpp"
+#include "TestHarness.hpp"
 
 #include <QCoreApplication>
 #include <QSettings>
@@ -7,17 +8,6 @@
 #include <iostream>
 
 namespace {
-
-struct TestContext {
-    int failures = 0;
-
-    void check(bool condition, const char *message) {
-        if (condition)
-            return;
-        ++failures;
-        std::cerr << "[FAIL] " << message << '\n';
-    }
-};
 
 void writeLegacySites() {
     QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));

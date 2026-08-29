@@ -1,5 +1,6 @@
 // Integration tests for CurlFtpClient against a real FTP server.
 // Skips with exit code 77 unless required OPENSCP_IT_FTP_* vars exist.
+#include "TestHarness.hpp"
 #include "curl_integration_test_support.hpp"
 #include "openscp/ClientFactory.hpp"
 
@@ -21,71 +22,12 @@ namespace {
 
 constexpr int kSkipExitCode = 77;
 
-struct TestContext {
-    int failures = 0;
-
-    void check(bool cond, const std::string &msg) {
-        if (!cond) {
-            ++failures;
-            std::cerr << "[FAIL] " << msg << "\n";
-        }
-    }
-};
-
-std::optional<std::string> envValue(const char *key) {
-    const char *raw = std::getenv(key);
-    if (!raw || !*raw)
-        return std::nullopt;
-    return std::string(raw);
-}
-
-bool parsePort(const std::optional<std::string> &raw, std::uint16_t &out,
-               std::uint16_t fallback) {
-    if (!raw.has_value()) {
-        out = fallback;
-        return true;
-    }
-    try {
-        const int n = std::stoi(*raw);
-        if (n < 1 || n > 65535)
-            return false;
-        out = static_cast<std::uint16_t>(n);
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-std::string uniqueToken() {
-    const auto now =
-        std::chrono::steady_clock::now().time_since_epoch().count();
-    return std::to_string(static_cast<long long>(now));
-}
-
-std::string joinRemotePath(const std::string &base, const std::string &name) {
-    if (base.empty())
-        return std::string("/") + name;
-    if (base.back() == '/')
-        return base + name;
-    return base + "/" + name;
-}
-
-bool writeFile(const fs::path &path, const std::string &content) {
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out.is_open())
-        return false;
-    out << content;
-    return out.good();
-}
-
-bool readFile(const fs::path &path, std::string &out) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in.is_open())
-        return false;
-    out.assign(std::istreambuf_iterator<char>(in),
-               std::istreambuf_iterator<char>());
-    return true;
-}
+using openscp::testsupport::envValue;
+using openscp::testsupport::joinRemotePath;
+using openscp::testsupport::parsePort;
+using openscp::testsupport::readFile;
+using openscp::testsupport::uniqueToken;
+using openscp::testsupport::writeFile;
 
 } // namespace
 

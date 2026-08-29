@@ -1,5 +1,6 @@
 // Transfer queue tests without an external test framework.
 #include "ConflictCoordinator.hpp"
+#include "TestHarness.hpp"
 #include "TransferManager.hpp"
 #include "openscp/MockSftpClient.hpp"
 
@@ -33,17 +34,6 @@ struct TransferManagerTestAccess {
 namespace {
 
 using namespace std::chrono_literals;
-
-struct TestContext {
-    int failures = 0;
-
-    void check(bool condition, const char *message) {
-        if (condition)
-            return;
-        ++failures;
-        std::cerr << "[FAIL] " << message << '\n';
-    }
-};
 
 bool waitUntil(const std::function<bool()> &predicate,
                std::chrono::milliseconds timeout = 5000ms) {
