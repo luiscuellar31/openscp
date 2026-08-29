@@ -2,6 +2,7 @@
 #include "SavedSitesPersistence.hpp"
 
 #include "AppSettings.hpp"
+#include "RemotePath.hpp"
 
 #include <QSet>
 #include <QUuid>
@@ -58,26 +59,6 @@ QString uniqueSiteId(const SavedSitesPersistence::LoadOptions &options,
     return candidate;
 }
 
-QString normalizeInitialRemotePath(const QString &rawPath) {
-    const QStringList rawSegments =
-        rawPath.trimmed().split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    QStringList segments;
-    segments.reserve(rawSegments.size());
-    for (const QString &segment : rawSegments) {
-        if (segment == QStringLiteral("."))
-            continue;
-        if (segment == QStringLiteral("..")) {
-            if (!segments.isEmpty())
-                segments.removeLast();
-            continue;
-        }
-        segments.push_back(segment);
-    }
-    return segments.isEmpty()
-               ? QStringLiteral("/")
-               : QStringLiteral("/") + segments.join(QLatin1Char('/'));
-}
-
 } // namespace
 
 SavedSitesPersistence::LoadResult
@@ -125,7 +106,7 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
                 .toString()
                 .trimmed();
         const QString normalizedInitialRemotePath =
-            normalizeInitialRemotePath(site.initialRemotePath);
+            ::normalizeRemotePath(site.initialRemotePath);
         if (site.initialRemotePath != normalizedInitialRemotePath)
             result.needsSave = true;
         site.initialRemotePath = normalizedInitialRemotePath;
@@ -318,7 +299,7 @@ SavedSitesPersistence::saveSites(const QVector<SiteEntry> &sites,
         settings.setValue("name", site.name);
         settings.setValue("initialLocalPath", site.initialLocalPath);
         settings.setValue("initialRemotePath",
-                          normalizeInitialRemotePath(site.initialRemotePath));
+                          ::normalizeRemotePath(site.initialRemotePath));
         settings.setValue("rememberLastPaths", site.rememberLastPaths);
         settings.setValue("protocol",
                           QString::fromLatin1(

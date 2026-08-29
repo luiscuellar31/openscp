@@ -1,5 +1,8 @@
 #include "RemotePath.hpp"
 
+#include "openscp/RemotePath.hpp"
+
+#include <QByteArray>
 #include <QDir>
 #include <QStringDecoder>
 #include <QStringList>
@@ -7,28 +10,12 @@
 #include <algorithm>
 
 QString normalizeRemotePath(const QString &rawPath) {
-    QString normalizedInput = rawPath.trimmed();
-    normalizedInput.replace(QLatin1Char('\\'), QLatin1Char('/'));
-
-    const QStringList rawSegments =
-        normalizedInput.split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    QStringList segments;
-    segments.reserve(rawSegments.size());
-    for (const QString &segment : rawSegments) {
-        if (segment == QLatin1String("."))
-            continue;
-        if (segment == QLatin1String("..")) {
-            // A remote path is confined to its logical root.
-            if (!segments.isEmpty())
-                segments.removeLast();
-            continue;
-        }
-        segments.push_back(segment);
-    }
-
-    return segments.isEmpty()
-               ? QStringLiteral("/")
-               : QStringLiteral("/") + segments.join(QLatin1Char('/'));
+    const QByteArray utf8 = rawPath.trimmed().toUtf8();
+    const std::string normalized =
+        openscp::normalizeRemotePath(std::string_view(
+            utf8.constData(), static_cast<std::size_t>(utf8.size())));
+    return QString::fromUtf8(normalized.data(),
+                             static_cast<qsizetype>(normalized.size()));
 }
 
 QString joinRemotePath(const QString &base, const QString &relativePath) {

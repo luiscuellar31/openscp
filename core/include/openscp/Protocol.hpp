@@ -1,11 +1,12 @@
 // Supported protocols, storage conversion, and operation capabilities.
 #pragma once
 
+#include "RemotePath.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <string>
-#include <vector>
 
 #ifndef OPENSCP_HAS_CURL_FTP
 #define OPENSCP_HAS_CURL_FTP 1
@@ -142,35 +143,7 @@ inline FtpsMode ftpsModeFromStorageName(const std::string &raw) {
 }
 
 inline std::string normalizeWebDavBasePath(std::string raw) {
-    std::replace(raw.begin(), raw.end(), '\\', '/');
-    std::vector<std::string> segments;
-    std::size_t position = 0;
-    while (position <= raw.size()) {
-        const std::size_t separatorPosition = raw.find('/', position);
-        const std::string segment =
-            raw.substr(position, separatorPosition == std::string::npos
-                                     ? std::string::npos
-                                     : separatorPosition - position);
-        if (!segment.empty() && segment != ".") {
-            if (segment == "..") {
-                if (!segments.empty())
-                    segments.pop_back();
-            } else {
-                segments.push_back(segment);
-            }
-        }
-        if (separatorPosition == std::string::npos)
-            break;
-        position = separatorPosition + 1;
-    }
-
-    std::string normalized = "/";
-    for (std::size_t index = 0; index < segments.size(); ++index) {
-        if (index != 0)
-            normalized.push_back('/');
-        normalized += segments[index];
-    }
-    return normalized;
+    return normalizeRemotePath(raw);
 }
 
 inline constexpr std::uint16_t defaultPortForProtocol(Protocol protocol) {

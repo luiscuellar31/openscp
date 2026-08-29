@@ -1,6 +1,7 @@
 // Focused unit tests for security-sensitive libcurl backend helpers.
 #include "CurlBackendCommon.hpp"
 #include "TestHarness.hpp"
+#include "openscp/RemotePath.hpp"
 #if OPENSCP_HAS_CURL_FTP
 #include "openscp/CurlFtpClient.hpp"
 #endif
@@ -114,6 +115,44 @@ void testFtpCommandRoot(TestContext &test) {
         "FTP commands should resolve logical paths below the login root");
     test.check(ftpCommandPath("/srv/ftp/alice/", "/") == "/srv/ftp/alice",
                "FTP logical root should resolve to the PWD login directory");
+    test.check(ftpCommandPath("srv\\ftp\\alice", "../release/./file") ==
+                   "/srv/ftp/alice/release/file",
+               "FTP PWD roots and relative paths should share canonical "
+               "normalization");
+}
+
+void testRemotePathNormalization(TestContext &test) {
+    using openscp::normalizeRemotePath;
+
+    test.check(normalizeRemotePath("") == "/" &&
+                   normalizeRemotePath("relative/path") == "/relative/path",
+               "remote paths should always be absolute");
+    test.check(normalizeRemotePath("//team\\alpha/./tmp/../release") ==
+                   "/team/alpha/release",
+               "remote paths should normalize separators and dot segments");
+    test.check(normalizeRemotePath("../../../../safe") == "/safe",
+               "remote paths must not escape above their logical root");
+}
+
+void testWebDavPaths(TestContext &test) {
+    using openscp::curlcommon::webDavLogicalPath;
+    using openscp::curlcommon::webDavServerPath;
+
+    test.check(webDavServerPath("remote.php/dav/./files/alice/",
+                                "projects/../release") ==
+                   "/remote.php/dav/files/alice/release",
+               "WebDAV bases and relative paths should compose canonically");
+    test.check(webDavServerPath("/", "/release") == "/release",
+               "a root WebDAV base should preserve logical paths");
+
+    std::string logical;
+    test.check(webDavLogicalPath("/remote.php/dav/files/alice",
+                                 "/remote.php/dav/files/alice/team", logical) &&
+                   logical == "/team",
+               "WebDAV server paths should map back below their base");
+    test.check(!webDavLogicalPath("/remote.php/dav/files/alice",
+                                  "/remote.php/dav/files/bob", logical),
+               "WebDAV paths outside the configured base should be rejected");
 }
 
 void testWebDavCompletionStatuses(TestContext &test) {
@@ -131,6 +170,56 @@ void testWebDavCompletionStatuses(TestContext &test) {
     test.check(!isCompletedWebDavWriteStatus(202) &&
                    !isCompletedWebDavWriteStatus(206),
                "asynchronous or partial WebDAV writes must not be committed");
+}
+
+void testCurlClientState(TestContext &test) {
+    openscp::SessionOptions defaults;
+    defaults.protocol = openscp::Protocol::Ftp;
+    openscp::curlcommon::CurlClientState state(defaults);
+
+    std::shared_ptr<const openscp::SessionOptions> connectedOptions;
+    {
+        auto operation = state.beginOperation();
+        test.check(!operation.disconnecting() &&
+                       !operation.interrupted()->load(),
+                   "new curl operations should start ready to run");
+        state.prepareForConnect();
+
+        auto session = std::make_unique<openscp::curlcommon::CurlEasySession>();
+        std::string error;
+        test.check(session->initialize(error),
+                   std::string("curl session should initialize: ") + error);
+        auto mutableOptions =
+            std::make_shared<openscp::SessionOptions>(defaults);
+        mutableOptions->host = "ftp.example.test";
+        connectedOptions = mutableOptions;
+        state.commitConnection(connectedOptions, std::move(session),
+                               "srv\\ftp\\alice/./");
+
+        const auto snapshot = state.snapshot(operation);
+        test.check(snapshot && snapshot.options.get() == connectedOptions.get(),
+                   "curl snapshots should share immutable session options");
+        test.check(snapshot.commandRoot == "/srv/ftp/alice",
+                   "curl state should canonicalize the FTP PWD root");
+
+        state.requestInterrupt();
+        test.check(operation.interrupted()->load(),
+                   "curl state should publish interruption requests");
+    }
+
+    {
+        auto nextOperation = state.beginOperation();
+        test.check(!nextOperation.interrupted()->load(),
+                   "completed curl operations should clear interruption state");
+    }
+    state.disconnect(defaults);
+    test.check(!state.isConnected(),
+               "curl disconnect should clear the reusable session");
+    {
+        auto operation = state.beginOperation();
+        test.check(!state.snapshot(operation),
+                   "disconnected curl state should not expose a snapshot");
+    }
 }
 
 void testBoundedStringSink(TestContext &test) {
@@ -156,7 +245,10 @@ int main() {
     testHostValidation(test);
     testClientsRejectAuthorityInjection(test);
     testFtpCommandRoot(test);
+    testRemotePathNormalization(test);
+    testWebDavPaths(test);
     testWebDavCompletionStatuses(test);
+    testCurlClientState(test);
     testBoundedStringSink(test);
     if (test.failures != 0) {
         std::cerr << "[FAIL] openscp_curl_backend_common_tests failures="

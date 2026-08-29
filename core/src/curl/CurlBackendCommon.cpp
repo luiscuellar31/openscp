@@ -2,6 +2,7 @@
 #include "CurlBackendCommon.hpp"
 
 #include "../common/SafeLocalFile.hpp"
+#include "openscp/RemotePath.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -64,6 +65,91 @@ bool CurlEasySession::initialize(std::string &err) {
 void CurlEasySession::reset() noexcept {
     if (handle_)
         curl_easy_reset(handle_);
+}
+
+CurlClientState::Operation::Operation(CurlClientState &owner)
+    : owner_(&owner), lock_(owner.operationMutex_) {
+    owner_->interrupted_.store(false);
+}
+
+CurlClientState::Operation::Operation(Operation &&other) noexcept
+    : owner_(std::exchange(other.owner_, nullptr)),
+      lock_(std::move(other.lock_)) {
+}
+
+CurlClientState::Operation::~Operation() {
+    if (owner_)
+        owner_->interrupted_.store(false);
+}
+
+bool CurlClientState::Operation::disconnecting() const noexcept {
+    return owner_ && owner_->disconnecting_.load();
+}
+
+std::atomic<bool> *CurlClientState::Operation::interrupted() const noexcept {
+    return owner_ ? &owner_->interrupted_ : nullptr;
+}
+
+CurlClientState::CurlClientState(SessionOptions defaultOptions)
+    : options_(
+          std::make_shared<const SessionOptions>(std::move(defaultOptions))) {
+}
+
+CurlClientState::~CurlClientState() = default;
+
+CurlClientState::Operation CurlClientState::beginOperation() {
+    return Operation(*this);
+}
+
+void CurlClientState::prepareForConnect() {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    connected_ = false;
+    session_.reset();
+}
+
+void CurlClientState::commitConnection(
+    std::shared_ptr<const SessionOptions> options,
+    std::unique_ptr<CurlEasySession> session, std::string commandRoot) {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    options_ = std::move(options);
+    session_ = std::move(session);
+    commandRoot_ = normalizeRemotePath(commandRoot);
+    connected_ = options_ && session_ && session_->get();
+}
+
+void CurlClientState::disconnect(SessionOptions defaultOptions) {
+    disconnecting_.store(true);
+    interrupted_.store(true);
+    std::lock_guard<std::mutex> operationLock(operationMutex_);
+    {
+        std::lock_guard<std::mutex> stateLock(stateMutex_);
+        session_.reset();
+        options_ =
+            std::make_shared<const SessionOptions>(std::move(defaultOptions));
+        commandRoot_ = "/";
+        connected_ = false;
+    }
+    interrupted_.store(false);
+    disconnecting_.store(false);
+}
+
+void CurlClientState::requestInterrupt() noexcept {
+    interrupted_.store(true);
+}
+
+bool CurlClientState::isConnected() const {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    return connected_;
+}
+
+CurlConnectionSnapshot
+CurlClientState::snapshot(const Operation &operation) const {
+    if (operation.owner_ != this)
+        return {};
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    if (!connected_)
+        return {};
+    return {options_, session_.get(), commandRoot_};
 }
 
 bool rejectInterrupted(const std::atomic<bool> *interrupted, std::string &err,
@@ -187,20 +273,44 @@ bool validateRemotePath(const std::string &path, const char *backendLabel,
 
 std::string ftpCommandPath(const std::string &loginRoot,
                            const std::string &logicalPath) {
-    std::string root = loginRoot.empty() ? std::string("/") : loginRoot;
-    if (root.front() != '/')
-        root.insert(root.begin(), '/');
-    while (root.size() > 1 && root.back() == '/')
-        root.pop_back();
-
-    std::string logical = logicalPath.empty() ? std::string("/") : logicalPath;
-    if (logical.front() != '/')
-        logical.insert(logical.begin(), '/');
+    std::string root = normalizeRemotePath(loginRoot);
+    std::string logical = normalizeRemotePath(logicalPath);
     if (root == "/")
         return logical;
     if (logical == "/")
         return root;
     return root + logical;
+}
+
+std::string webDavServerPath(std::string_view basePath,
+                             std::string_view logicalPath) {
+    std::string base = normalizeRemotePath(basePath);
+    std::string logical = normalizeRemotePath(logicalPath);
+    if (base == "/")
+        return logical;
+    if (logical == "/")
+        return base;
+    return base + logical;
+}
+
+bool webDavLogicalPath(std::string_view basePath, std::string_view serverPath,
+                       std::string &logicalPath) {
+    const std::string base = normalizeRemotePath(basePath);
+    const std::string server = normalizeRemotePath(serverPath);
+    if (base == "/") {
+        logicalPath = server;
+        return true;
+    }
+    if (server == base) {
+        logicalPath = "/";
+        return true;
+    }
+    const std::string prefix = base + "/";
+    if (server.rfind(prefix, 0) != 0)
+        return false;
+    logicalPath =
+        normalizeRemotePath(std::string_view(server).substr(base.size()));
+    return true;
 }
 
 bool isCompletedWebDavGetStatus(long statusCode) {
@@ -401,6 +511,38 @@ std::string localDestinationKey(const std::string &path) {
     } catch (...) {
         return std::string("local:") + path;
     }
+}
+
+bool configureBaseCurlHandle(CURL *curl, const char *backendLabel,
+                             bool acceptCompressedResponses,
+                             std::optional<long> responseTimeoutSeconds,
+                             std::string &err) {
+    if (!curl) {
+        err = "Could not create CURL handle.";
+        return false;
+    }
+    if (curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 60L) != CURLE_OK) {
+        err = std::string("Could not configure ") + backendLabel +
+              " client timeouts.";
+        return false;
+    }
+    if (responseTimeoutSeconds &&
+        curl_easy_setopt(curl, CURLOPT_FTP_RESPONSE_TIMEOUT,
+                         *responseTimeoutSeconds) != CURLE_OK) {
+        err = std::string("Could not configure ") + backendLabel +
+              " client timeouts.";
+        return false;
+    }
+    if (acceptCompressedResponses &&
+        curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "") != CURLE_OK) {
+        err = std::string("Could not configure ") + backendLabel +
+              " response encoding.";
+        return false;
+    }
+    return true;
 }
 
 bool configureProxy(CURL *curl, const SessionOptions &opt,

@@ -92,7 +92,7 @@ openscp_add_test(openscp_ui_utilities_tests
         ${CMAKE_SOURCE_DIR}/ui/UiFormatters.cpp
         ${CMAKE_SOURCE_DIR}/ui/UiFormatters.hpp
     INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/ui
-    LINK_LIBRARIES Qt6::Core
+    LINK_LIBRARIES Qt6::Core openscp_core
 )
 
 openscp_add_test(openscp_sync_comparison_tests

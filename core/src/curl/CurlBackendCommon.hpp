@@ -11,6 +11,8 @@
 #include <cstdio>
 #include <ctime>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -34,17 +36,64 @@ class CurlEasySession final {
     CURL *handle_ = nullptr;
 };
 
-class OperationInterruptGuard final {
+struct CurlConnectionSnapshot {
+    std::shared_ptr<const SessionOptions> options;
+    CurlEasySession *session = nullptr;
+    std::string commandRoot = "/";
+
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return options && session && session->get();
+    }
+};
+
+class CurlClientState final {
     public:
-    explicit OperationInterruptGuard(std::atomic<bool> &interrupted)
-        : interrupted_(interrupted) {}
-    ~OperationInterruptGuard() { interrupted_.store(false); }
-    OperationInterruptGuard(const OperationInterruptGuard &) = delete;
-    OperationInterruptGuard &
-    operator=(const OperationInterruptGuard &) = delete;
+    class Operation final {
+        public:
+        Operation(const Operation &) = delete;
+        Operation &operator=(const Operation &) = delete;
+        Operation(Operation &&other) noexcept;
+        Operation &operator=(Operation &&) = delete;
+        ~Operation();
+
+        [[nodiscard]] bool disconnecting() const noexcept;
+        [[nodiscard]] std::atomic<bool> *interrupted() const noexcept;
+
+        private:
+        friend class CurlClientState;
+        explicit Operation(CurlClientState &owner);
+
+        CurlClientState *owner_ = nullptr;
+        std::unique_lock<std::mutex> lock_;
+    };
+
+    explicit CurlClientState(SessionOptions defaultOptions);
+    ~CurlClientState();
+    CurlClientState(const CurlClientState &) = delete;
+    CurlClientState &operator=(const CurlClientState &) = delete;
+
+    [[nodiscard]] Operation beginOperation();
+    void prepareForConnect();
+    void commitConnection(std::shared_ptr<const SessionOptions> options,
+                          std::unique_ptr<CurlEasySession> session,
+                          std::string commandRoot = "/");
+    void disconnect(SessionOptions defaultOptions);
+    void requestInterrupt() noexcept;
+    [[nodiscard]] bool isConnected() const;
+    [[nodiscard]] CurlConnectionSnapshot
+    snapshot(const Operation &operation) const;
 
     private:
-    std::atomic<bool> &interrupted_;
+    // Lock hierarchy: operationMutex_ is acquired before stateMutex_. A
+    // snapshot is valid only while its Operation keeps the outer lock held.
+    mutable std::mutex stateMutex_;
+    std::mutex operationMutex_;
+    std::unique_ptr<CurlEasySession> session_;
+    std::shared_ptr<const SessionOptions> options_;
+    std::string commandRoot_ = "/";
+    bool connected_ = false;
+    std::atomic<bool> interrupted_{false};
+    std::atomic<bool> disconnecting_{false};
 };
 
 bool rejectInterrupted(const std::atomic<bool> *interrupted, std::string &err,
@@ -60,6 +109,10 @@ bool validateRemotePath(const std::string &path, const char *backendLabel,
                         std::string &err);
 std::string ftpCommandPath(const std::string &loginRoot,
                            const std::string &logicalPath);
+std::string webDavServerPath(std::string_view basePath,
+                             std::string_view logicalPath);
+bool webDavLogicalPath(std::string_view basePath, std::string_view serverPath,
+                       std::string &logicalPath);
 bool isCompletedWebDavGetStatus(long statusCode);
 bool isCompletedWebDavWriteStatus(long statusCode);
 std::optional<std::uint32_t>
@@ -95,6 +148,11 @@ class ActiveDestinationLease {
 };
 
 std::string localDestinationKey(const std::string &path);
+
+bool configureBaseCurlHandle(CURL *curl, const char *backendLabel,
+                             bool acceptCompressedResponses,
+                             std::optional<long> responseTimeoutSeconds,
+                             std::string &err);
 
 bool configureProxy(CURL *curl, const SessionOptions &opt,
                     const char *backendLabel, const char *backendKindLabel,

@@ -2,13 +2,11 @@
 #pragma once
 #include "RemoteClient.hpp"
 
-#include <atomic>
 #include <memory>
-#include <mutex>
 
 namespace openscp {
 namespace curlcommon {
-class CurlEasySession;
+class CurlClientState;
 }
 
 class CurlWebDavClient : public RemoteClient {
@@ -68,13 +66,7 @@ class CurlWebDavClient : public RemoteClient {
                                                     std::string &err) override;
 
     private:
-    mutable std::mutex stateMutex_;
-    std::mutex operationMutex_;
-    std::unique_ptr<curlcommon::CurlEasySession> easySession_;
-    SessionOptions options_{};
-    bool connected_ = false;
-    std::atomic<bool> interrupted_{false};
-    std::atomic<bool> disconnecting_{false};
+    std::unique_ptr<curlcommon::CurlClientState> state_;
 };
 
 } // namespace openscp
