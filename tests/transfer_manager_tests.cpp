@@ -1151,19 +1151,31 @@ OPENSCP_TEST(testFailedDependencySkipsFollowingWork, test) {
     batch.sessionKey = QStringLiteral("test-session");
     const quint64 first = manager.enqueueDownload(
         QStringLiteral("/remote/fails"), destination.filePath("fails"), batch);
+    test.check(waitUntil([&] {
+                   const auto task = manager.taskSnapshot(first);
+                   return task && task->status == TransferTask::Status::Error;
+               }),
+               "the prerequisite should fail before late dependents arrive");
     batch.dependsOnTaskId = first;
-    manager.enqueueRemoteDelete(QStringLiteral("/must-not-delete"), false,
-                                batch);
+    const quint64 second = manager.enqueueRemoteDelete(
+        QStringLiteral("/must-not-delete"), false, batch);
+    batch.dependsOnTaskId = second;
+    manager.enqueueRemoteDelete(QStringLiteral("/must-not-delete-either"),
+                                false, batch);
 
-    test.check(waitUntil(
-                   [&] {
-                       const auto tasks = manager.tasksSnapshot();
-                       return tasks.size() == 2 &&
-                              tasks[0].status == TransferTask::Status::Error &&
-                              tasks[1].status == TransferTask::Status::Skipped;
-                   },
-                   10'000ms),
-               "failed prerequisites should skip dependent mutations");
+    test.check(
+        waitUntil(
+            [&] {
+                const auto tasks = manager.tasksSnapshot();
+                return tasks.size() == 3 &&
+                       tasks[0].status == TransferTask::Status::Error &&
+                       tasks[1].status == TransferTask::Status::Skipped &&
+                       tasks[1].skippedByFailedDependency &&
+                       tasks[2].status == TransferTask::Status::Skipped &&
+                       tasks[2].skippedByFailedDependency;
+            },
+            10'000ms),
+        "failed prerequisites should skip late dependency chains");
 }
 
 OPENSCP_TEST(testDependencySkipsKeepTerminalCounterAndHistoryBounded, test) {

@@ -54,6 +54,7 @@ struct TransferTask {
     TransferPhase phase = TransferPhase::Transfer;
     bool restored = false;
     bool commitUncertain = false;
+    bool skippedByFailedDependency = false;
 
     enum class Status {
         Queued,

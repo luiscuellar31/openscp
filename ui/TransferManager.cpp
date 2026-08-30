@@ -327,6 +327,10 @@ const TransferTask *TransferManager::taskForIdLocked(quint64 taskId) const {
 }
 
 void TransferManager::appendTaskLocked(TransferTask task) {
+    if (dependencyFailedLocked(task)) {
+        skipForFailedDependencyLocked(task,
+                                      QDateTime::currentMSecsSinceEpoch());
+    }
     queueStore_.append(std::move(task));
 }
 
@@ -406,7 +410,38 @@ bool TransferManager::dependencySatisfiedLocked(
         return true;
     }
     const Status status = dependency->status;
-    return status == Status::Done || status == Status::Skipped;
+    return status == Status::Done || (status == Status::Skipped &&
+                                      !dependency->skippedByFailedDependency);
+}
+
+bool TransferManager::dependencyFailedLocked(const TransferTask &task) const {
+    if (task.dependsOnTaskId == 0)
+        return false;
+    const TransferTask *dependency = taskForIdLocked(task.dependsOnTaskId);
+    if (!dependency)
+        return false;
+    const Status status = dependency->status;
+    return status == Status::Error || status == Status::Canceled ||
+           status == Status::Warning || dependency->skippedByFailedDependency;
+}
+
+void TransferManager::skipForFailedDependencyLocked(TransferTask &task,
+                                                    qint64 now) {
+    if (isTerminalTransferStatus(task.status))
+        return;
+    pausedTasks_.erase(task.taskId);
+    canceledTasks_.erase(task.taskId);
+    resumeRequestedTasks_.erase(task.taskId);
+    task.status = Status::Skipped;
+    task.phase = TransferPhase::Finished;
+    task.error = QCoreApplication::translate(
+        "TransferManager",
+        "Skipped because a prerequisite task did not complete successfully.");
+    task.currentSpeedKBps = 0;
+    task.etaSeconds = -1;
+    task.finishedAtMs = now;
+    task.skippedByFailedDependency = true;
+    ++terminalTaskCount_;
 }
 
 void TransferManager::enqueueUpload(const QString &local,
@@ -2345,19 +2380,7 @@ void TransferManager::finishWorkerTask(quint64 taskId, qint64 precheckMs,
                             candidate.dependsOnTaskId)) {
                         continue;
                     }
-                    pausedTasks_.erase(candidate.taskId);
-                    canceledTasks_.erase(candidate.taskId);
-                    resumeRequestedTasks_.erase(candidate.taskId);
-                    candidate.status = Status::Skipped;
-                    candidate.phase = TransferPhase::Finished;
-                    candidate.error = QCoreApplication::translate(
-                        "TransferManager",
-                        "Skipped because a prerequisite task did not "
-                        "complete successfully.");
-                    candidate.currentSpeedKBps = 0;
-                    candidate.etaSeconds = -1;
-                    candidate.finishedAtMs = now;
-                    ++terminalTaskCount_;
+                    skipForFailedDependencyLocked(candidate, now);
                     dependencySkipped.push_back(candidate.taskId);
                     failedPrerequisites.insert(candidate.taskId);
                     foundDependent = true;
