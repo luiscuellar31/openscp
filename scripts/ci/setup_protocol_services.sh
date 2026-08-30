@@ -235,9 +235,14 @@ write_vsftpd_config \
   "${LOG_DIR}/ftps-implicit.log" implicit
 
 log "starting FTP, explicit FTPS, and implicit FTPS"
-sudo /usr/sbin/vsftpd "$FTP_CONFIG"
-sudo /usr/sbin/vsftpd "$FTPS_EXPLICIT_CONFIG"
-sudo /usr/sbin/vsftpd "$FTPS_IMPLICIT_CONFIG"
+log "launching FTP"
+sudo /usr/sbin/vsftpd "$FTP_CONFIG" || die "FTP process failed to launch"
+log "launching explicit FTPS"
+sudo /usr/sbin/vsftpd "$FTPS_EXPLICIT_CONFIG" ||
+  die "explicit FTPS process failed to launch"
+log "launching implicit FTPS"
+sudo /usr/sbin/vsftpd "$FTPS_IMPLICIT_CONFIG" ||
+  die "implicit FTPS process failed to launch"
 
 wait_for_port "FTP" "$FTP_PORT"
 wait_for_port "explicit FTPS" "$FTPS_EXPLICIT_PORT"
@@ -296,8 +301,12 @@ APACHE_CONFIG="${CONFIG_DIR}/apache2-webdav.conf"
     '</VirtualHost>'
 } >"$APACHE_CONFIG"
 
-sudo /usr/sbin/apache2 -t -f "$APACHE_CONFIG"
-sudo /usr/sbin/apache2 -f "$APACHE_CONFIG" -k start
+log "validating Apache WebDAV configuration"
+sudo /usr/sbin/apache2 -t -f "$APACHE_CONFIG" ||
+  die "Apache WebDAV configuration validation failed"
+log "launching Apache WebDAV"
+sudo /usr/sbin/apache2 -f "$APACHE_CONFIG" -k start ||
+  die "Apache WebDAV process failed to launch"
 wait_for_port "HTTPS WebDAV" "$WEBDAV_PORT"
 
 log "running service-level smoke checks"

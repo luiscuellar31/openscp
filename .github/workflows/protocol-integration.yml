@@ -242,6 +242,27 @@ jobs:
             elif grep -q 'FTP did not start' \
               /tmp/openscp-protocol-setup.log; then
               exit 41
+            elif grep -q 'Apache WebDAV process failed to launch' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 57
+            elif grep -q 'Apache WebDAV configuration validation failed' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 56
+            elif grep -q 'implicit FTPS process failed to launch' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 55
+            elif grep -q 'explicit FTPS process failed to launch' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 54
+            elif grep -q 'FTP process failed to launch' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 53
+            elif grep -q 'configuring Apache WebDAV' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 52
+            elif grep -q 'starting FTP, explicit FTPS, and implicit FTPS' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 51
             fi
             exit 39
           fi
