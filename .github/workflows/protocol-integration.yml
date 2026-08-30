@@ -107,7 +107,18 @@ jobs:
         run: |
           cmake --build build --parallel --target \
             openscp_sftp_integration_tests \
-            openscp_scp_integration_tests
+            openscp_scp_integration_tests 2>&1 | \
+            tee /tmp/openscp-ssh-build.log
+
+      - name: Report SSH build diagnostics
+        if: failure()
+        run: |
+          grep -E -i \
+            'error:|fatal:|undefined reference|no rule to make target' \
+            /tmp/openscp-ssh-build.log | tail -20 | \
+            while IFS= read -r line; do
+              echo "::error title=SSH integration build::${line}"
+            done
 
       - name: Run SFTP and SCP integration binaries directly
         env:
@@ -119,6 +130,10 @@ jobs:
         run: |
           ./build/tests/openscp_sftp_integration_tests
           ./build/tests/openscp_scp_integration_tests
+
+      - name: Make SSH service log readable after failure
+        if: failure()
+        run: sudo chmod a+r /tmp/openscp_sshd.log || true
 
       - name: Upload SSH service log on failure
         if: failure()
@@ -172,7 +187,18 @@ jobs:
             openscp_webdav_integration_tests
 
       - name: Start real protocol services
-        run: ./scripts/ci/setup_protocol_services.sh
+        run: |
+          ./scripts/ci/setup_protocol_services.sh 2>&1 | \
+            tee /tmp/openscp-protocol-setup.log
+
+      - name: Report protocol service diagnostics
+        if: failure()
+        run: |
+          grep -E -i 'error|failed|fatal|denied|address already in use' \
+            /tmp/openscp-protocol-setup.log | tail -20 | \
+            while IFS= read -r line; do
+              echo "::error title=Protocol service setup::${line}"
+            done
 
       - name: Run protocol integration binaries directly
         run: ./scripts/ci/run_protocol_integration.sh build
@@ -233,7 +259,19 @@ jobs:
             "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=${SANITIZERS}"
 
       - name: Build instrumented app and tests
-        run: cmake --build build --parallel
+        run: |
+          cmake --build build --parallel 2>&1 | \
+            tee /tmp/openscp-sanitizer-build.log
+
+      - name: Report sanitizer build diagnostics
+        if: failure()
+        run: |
+          grep -E -i \
+            'error:|fatal:|undefined reference|no rule to make target' \
+            /tmp/openscp-sanitizer-build.log | tail -20 | \
+            while IFS= read -r line; do
+              echo "::error title=Sanitizer build::${line}"
+            done
 
       - name: Test with ASan and UBSan
         if: matrix.id == 'asan-ubsan'
