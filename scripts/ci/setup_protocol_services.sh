@@ -105,7 +105,7 @@ launch_vsftpd() {
   local launch_log="${LOG_DIR}/${label// /-}-launch.log"
 
   log "launching ${label}"
-  if ! sudo /usr/sbin/vsftpd "$config_path" >"$launch_log" 2>&1; then
+  if ! { sudo /usr/sbin/vsftpd "$config_path"; } >"$launch_log" 2>&1; then
     log "${label} launcher returned non-zero; checking socket readiness"
   fi
 }
