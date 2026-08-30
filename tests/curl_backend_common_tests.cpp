@@ -2,6 +2,7 @@
 #include "CurlBackendCommon.hpp"
 #include "TestHarness.hpp"
 #include "openscp/RemotePath.hpp"
+#include "openscp/UniqueFile.hpp"
 #if OPENSCP_HAS_CURL_FTP
 #include "openscp/CurlFtpClient.hpp"
 #endif
@@ -10,6 +11,7 @@
 #endif
 
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <optional>
@@ -104,6 +106,7 @@ OPENSCP_TEST(testClientsRejectAuthorityInjection, test) {
 }
 
 OPENSCP_TEST(testFtpCommandRoot, test) {
+    using openscp::curlcommon::encodeFtpUrlPath;
     using openscp::curlcommon::ftpCommandPath;
 
     test.check(ftpCommandPath("/", "/workspace/file.txt") ==
@@ -119,6 +122,12 @@ OPENSCP_TEST(testFtpCommandRoot, test) {
                    "/srv/ftp/alice/release/file",
                "FTP PWD roots and relative paths should share canonical "
                "normalization");
+    test.check(encodeFtpUrlPath("/workspace/release notes", false) ==
+                   "/workspace/release%20notes",
+               "FTP file URLs should encode normalized logical paths");
+    test.check(encodeFtpUrlPath("/workspace/release notes/", true) ==
+                   "/workspace/release%20notes/",
+               "FTP directory URLs must retain their trailing slash");
 }
 
 OPENSCP_TEST(testRemotePathNormalization, test) {
@@ -291,6 +300,46 @@ OPENSCP_TEST(testCurlTransferLifecycle, test) {
                        openscp::RemoteErrorKind::InvalidRequest &&
                    configurationError.message == "invalid setup",
                "common transfer failures should classify invalid setup");
+
+    bool cancelAtBoundary = false;
+    openscp::curlcommon::TransferProgressContext boundaryProgress{
+        [&](std::size_t done, std::size_t total) {
+            cancelAtBoundary = total > 0 && done >= total;
+        },
+        [&] { return cancelAtBoundary; }, nullptr, true};
+    test.check(openscp::curlcommon::transferProgressCallback(
+                   &boundaryProgress, 0, 0, 16, 16) == 0 &&
+                   boundaryProgress.payloadComplete && cancelAtBoundary,
+               "boundary cancellation should let the remote partial commit");
+    error.clear();
+    test.check(openscp::curlcommon::detectTransferCancellation(boundaryProgress,
+                                                               error) &&
+                   error == "Canceled by user",
+               "boundary cancellation should still prevent final publish");
+
+    openscp::curlcommon::TransferProgressContext incompleteProgress{
+        {}, [] { return true; }, nullptr, true};
+    test.check(openscp::curlcommon::transferProgressCallback(
+                   &incompleteProgress, 0, 0, 16, 8) == 1 &&
+                   !incompleteProgress.payloadComplete,
+               "incomplete transfers should abort immediately on cancel");
+
+    openscp::UniqueFile rewindable(std::tmpfile());
+    test.check(static_cast<bool>(rewindable),
+               "the upload rewind test should create a temporary file");
+    if (rewindable) {
+        constexpr char payload[] = "rewindable";
+        test.check(std::fwrite(payload, 1, sizeof(payload), rewindable.get()) ==
+                       sizeof(payload),
+                   "the upload rewind test should seed its file");
+        test.check(openscp::curlcommon::seekFileCallback(
+                       rewindable.get(), 0, SEEK_SET) == CURL_SEEKFUNC_OK,
+                   "curl uploads should rewind after authentication retries");
+        char firstByte = '\0';
+        test.check(std::fread(&firstByte, 1, 1, rewindable.get()) == 1 &&
+                       firstByte == payload[0],
+                   "rewound uploads should restart at the requested offset");
+    }
 }
 
 } // namespace

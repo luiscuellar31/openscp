@@ -360,6 +360,13 @@ std::string encodeUrlPath(const std::string &path) {
     return out;
 }
 
+std::string encodeFtpUrlPath(std::string_view logicalPath, bool directory) {
+    std::string normalized = normalizeRemotePath(logicalPath);
+    if (directory && normalized != "/")
+        normalized.push_back('/');
+    return encodeUrlPath(normalized);
+}
+
 std::string localPartialPath(const std::string &destination) {
     return destination + ".part";
 }
@@ -698,6 +705,26 @@ size_t readFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
     return std::fread(ptr, 1, total, file);
 }
 
+int seekFileCallback(void *userdata, curl_off_t offset, int origin) {
+    if (!userdata)
+        return CURL_SEEKFUNC_FAIL;
+    auto *file = static_cast<std::FILE *>(userdata);
+#ifdef _WIN32
+    const auto nativeOffset = static_cast<__int64>(offset);
+    if (static_cast<curl_off_t>(nativeOffset) != offset ||
+        _fseeki64(file, nativeOffset, origin) != 0) {
+        return CURL_SEEKFUNC_FAIL;
+    }
+#else
+    const auto nativeOffset = static_cast<off_t>(offset);
+    if (static_cast<curl_off_t>(nativeOffset) != offset ||
+        fseeko(file, nativeOffset, origin) != 0) {
+        return CURL_SEEKFUNC_FAIL;
+    }
+#endif
+    return CURL_SEEKFUNC_OK;
+}
+
 bool configureFileDownload(CURL *curl, std::FILE *file,
                            TransferProgressContext &progressContext,
                            std::string &err) {
@@ -725,6 +752,9 @@ bool configureFileUpload(CURL *curl, std::FILE *file, curl_off_t fileSize,
         (curl_easy_setopt(curl, CURLOPT_READFUNCTION, readFileCallback) ==
          CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_READDATA, file) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_SEEKFUNCTION, seekFileCallback) ==
+         CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_SEEKDATA, file) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, fileSize) ==
          CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) == CURLE_OK) &&
@@ -823,12 +853,6 @@ int transferProgressCallback(void *userdata, curl_off_t dltotal,
     auto *ctx = static_cast<TransferProgressContext *>(userdata);
     if (!ctx)
         return 0;
-    if (ctx->interrupted && ctx->interrupted->load())
-        return 1;
-    if (ctx->shouldCancel && ctx->shouldCancel())
-        return 1;
-    if (!ctx->progressCb)
-        return 0;
 
     const bool preferUpload = ctx->preferUploadCounters;
     // Some protocols only report one side reliably; pick preferred counters
@@ -838,17 +862,28 @@ int transferProgressCallback(void *userdata, curl_off_t dltotal,
                                     : ((dltotal > 0) ? dltotal : ultotal);
     const curl_off_t doneRaw = preferUpload ? ((ulnow > 0) ? ulnow : dlnow)
                                             : ((dlnow > 0) ? dlnow : ulnow);
+    if (totalRaw > 0 && doneRaw >= totalRaw)
+        ctx->payloadComplete = true;
+
+    if (ctx->interrupted && ctx->interrupted->load())
+        return 1;
+    if (!ctx->payloadComplete && ctx->shouldCancel && ctx->shouldCancel())
+        return 1;
+    if (!ctx->progressCb)
+        return 0;
+
     const std::size_t total =
         totalRaw > 0 ? static_cast<std::size_t>(totalRaw) : 0u;
     const std::size_t done =
         doneRaw > 0 ? static_cast<std::size_t>(doneRaw) : 0u;
     ctx->progressCb(done, total);
     // A progress callback can itself publish the state that makes
-    // shouldCancel() true (for example at done == total). Observe that state
-    // before libcurl is allowed to report a successful transfer.
+    // shouldCancel() true. Abort incomplete payloads immediately; completed
+    // payloads finish their response so callers can retain the remote/local
+    // partial while still refusing the final publish step.
     if (ctx->interrupted && ctx->interrupted->load())
         return 1;
-    if (ctx->shouldCancel && ctx->shouldCancel())
+    if (!ctx->payloadComplete && ctx->shouldCancel && ctx->shouldCancel())
         return 1;
     return 0;
 }

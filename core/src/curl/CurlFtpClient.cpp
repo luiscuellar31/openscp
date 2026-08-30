@@ -56,13 +56,6 @@ std::string trimAsciiLeft(std::string s) {
     return s;
 }
 
-std::string normalizeRemoteDirPath(std::string path) {
-    path = normalizeRemotePath(path);
-    if (path != "/" && !path.empty() && path.back() != '/')
-        path.push_back('/');
-    return path;
-}
-
 bool normalizeFtpCommandRoot(const char *entryPath, std::string &root,
                              std::string &err) {
     root = "/";
@@ -157,10 +150,10 @@ const char *ftpUrlScheme(const SessionOptions &opt) {
 }
 
 std::string buildFtpUrl(const SessionOptions &opt,
-                        const std::string &remotePath) {
+                        const std::string &remotePath, bool directory = false) {
     const std::string host = curlcommon::normalizeHostAuthorityForUrl(opt.host);
     const std::string path =
-        curlcommon::encodeUrlPath(normalizeRemotePath(remotePath));
+        curlcommon::encodeFtpUrlPath(remotePath, directory);
     return std::string(ftpUrlScheme(opt)) + "://" + host + ":" +
            std::to_string(opt.port) + path;
 }
@@ -271,8 +264,7 @@ bool runDirectoryListingCommand(CURL *curl, const SessionOptions &opt,
     curlcommon::TransferProgressContext cancelContext{
         {}, {}, interrupted, false};
     curlcommon::BoundedStringSink payloadSink{&payload};
-    const std::string url =
-        buildFtpUrl(opt, normalizeRemoteDirPath(remotePath));
+    const std::string url = buildFtpUrl(opt, remotePath, true);
     const bool configured =
         (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_DIRLISTONLY, 0L) == CURLE_OK) &&

@@ -878,6 +878,8 @@ bool CurlWebDavClient::put(
     curlcommon::TransferProgressContext progressContext{
         progress, shouldCancel, operation.interrupted(), true};
     std::optional<std::uint32_t> retryAfter;
+    std::string responseBody;
+    curlcommon::BoundedStringSink responseSink{&responseBody};
     const std::string uploadUrl = buildWebDavUrl(opt, remotePartial);
     const curlcommon::CurlTransferResult result =
         curlcommon::performCurlTransfer(
@@ -892,6 +894,11 @@ bool CurlWebDavClient::put(
                            CURLE_OK &&
                        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT") ==
                            CURLE_OK &&
+                       curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
+                                        curlcommon::appendStringCallback) ==
+                           CURLE_OK &&
+                       curl_easy_setopt(curl, CURLOPT_WRITEDATA,
+                                        &responseSink) == CURLE_OK &&
                        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION,
                                         captureWebDavHeader) == CURLE_OK &&
                        curl_easy_setopt(curl, CURLOPT_HEADERDATA,
