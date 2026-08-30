@@ -157,7 +157,36 @@ if [[ "$RUN_TIDY" -eq 1 ]]; then
     tidy_extra_args=()
     if [[ "$(uname -s)" == "Darwin" ]]; then
         sdk_path="$(xcrun --show-sdk-path)"
-        tidy_extra_args+=("-extra-arg=-isysroot" "-extra-arg=${sdk_path}")
+        sdk_cxx_headers="${sdk_path}/usr/include/c++/v1"
+        apple_clang_resource_dir="$(xcrun clang -print-resource-dir)"
+        apple_clang_builtin_headers="${apple_clang_resource_dir}/include"
+        [[ -d "$sdk_cxx_headers" ]] || {
+            printf 'Apple libc++ headers not found: %s\n' "$sdk_cxx_headers" >&2
+            exit 1
+        }
+        [[ -d "$apple_clang_resource_dir" ]] || {
+            printf 'Apple Clang resource directory not found: %s\n' \
+                "$apple_clang_resource_dir" >&2
+            exit 1
+        }
+        [[ -d "$apple_clang_builtin_headers" ]] || {
+            printf 'Apple Clang builtin headers not found: %s\n' \
+                "$apple_clang_builtin_headers" >&2
+            exit 1
+        }
+        # Homebrew LLVM 17 ships a libc++ without std::jthread. clang-tidy
+        # must parse with the same Apple libc++ and builtin headers used by the
+        # application build.
+        tidy_extra_args+=(
+            "-extra-arg-before=-nostdinc++"
+            "-extra-arg-before=-isystem"
+            "-extra-arg-before=${sdk_cxx_headers}"
+            "-extra-arg-before=-isystem"
+            "-extra-arg-before=${apple_clang_builtin_headers}"
+            "-extra-arg=-resource-dir=${apple_clang_resource_dir}"
+            "-extra-arg=-isysroot"
+            "-extra-arg=${sdk_path}"
+        )
     fi
     source_root_regex="$(printf '%s\n' "$REPO_DIR" | sed 's#[.[\*^$()+?{|\\/]#\\&#g')"
     "$run_tidy_bin" \

@@ -518,14 +518,12 @@ ActiveDestinationLease::~ActiveDestinationLease() {
 }
 
 std::string localDestinationKey(const std::string &path) {
-    try {
-        return std::string("local:") +
-               std::filesystem::absolute(std::filesystem::path(path))
-                   .lexically_normal()
-                   .string();
-    } catch (...) {
+    std::error_code pathError;
+    const std::filesystem::path absolutePath =
+        std::filesystem::absolute(std::filesystem::path(path), pathError);
+    if (pathError)
         return std::string("local:") + path;
-    }
+    return std::string("local:") + absolutePath.lexically_normal().string();
 }
 
 bool configureBaseCurlHandle(CURL *curl, const char *backendLabel,

@@ -12,30 +12,18 @@
 namespace openscp {
 
 std::unique_ptr<RemoteClient> CreateClientForProtocol(Protocol protocol) {
-    switch (protocol) {
-    case Protocol::Sftp:
+    if (protocol == Protocol::Sftp)
         return std::make_unique<Libssh2SftpClient>();
-    case Protocol::Scp:
+    if (protocol == Protocol::Scp)
         return std::make_unique<Libssh2ScpClient>();
-    case Protocol::Ftp:
 #if defined(OPENSCP_HAS_CURL_FTP) && OPENSCP_HAS_CURL_FTP
-        return std::make_unique<CurlFtpClient>(Protocol::Ftp);
-#else
-        return nullptr;
+    if (protocol == Protocol::Ftp || protocol == Protocol::Ftps)
+        return std::make_unique<CurlFtpClient>(protocol);
 #endif
-    case Protocol::Ftps:
-#if defined(OPENSCP_HAS_CURL_FTP) && OPENSCP_HAS_CURL_FTP
-        return std::make_unique<CurlFtpClient>(Protocol::Ftps);
-#else
-        return nullptr;
-#endif
-    case Protocol::WebDav:
 #if defined(OPENSCP_HAS_CURL_WEBDAV) && OPENSCP_HAS_CURL_WEBDAV
+    if (protocol == Protocol::WebDav)
         return std::make_unique<CurlWebDavClient>();
-#else
-        return nullptr;
 #endif
-    }
     return nullptr;
 }
 
