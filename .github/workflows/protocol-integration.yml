@@ -22,6 +22,111 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  real-ssh-services:
+    name: SFTP and SCP
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build and SSH service dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            cmake ninja-build netcat-openbsd openssh-server pkg-config \
+            libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev \
+            qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools \
+            qt6-l10n-tools libgl1-mesa-dev
+
+      - name: Start isolated SSH service
+        run: |
+          set -euo pipefail
+          sudo install -d -m 755 /run/sshd
+          sudo ssh-keygen -A
+
+          sudo useradd --create-home --shell /bin/bash openscp_it || true
+          sudo usermod -U openscp_it || true
+          sudo passwd -d openscp_it || true
+          sudo chage -E -1 openscp_it || true
+
+          ssh-keygen -t ed25519 -N "" \
+            -f /tmp/openscp_it_linux_ed25519 -q
+          sudo install -d -o openscp_it -g openscp_it -m 700 \
+            /home/openscp_it/.ssh
+          sudo install -o openscp_it -g openscp_it -m 600 \
+            /tmp/openscp_it_linux_ed25519.pub \
+            /home/openscp_it/.ssh/authorized_keys
+          sudo install -d -o openscp_it -g openscp_it -m 700 \
+            /home/openscp_it/upload
+
+          sudo tee /tmp/openscp_sshd_config >/dev/null <<'EOF'
+          Port 2222
+          ListenAddress 127.0.0.1
+          Protocol 2
+          HostKey /etc/ssh/ssh_host_ed25519_key
+          HostKey /etc/ssh/ssh_host_rsa_key
+          PubkeyAuthentication yes
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          ChallengeResponseAuthentication no
+          UsePAM no
+          PermitRootLogin no
+          AllowUsers openscp_it
+          AuthorizedKeysFile .ssh/authorized_keys
+          Subsystem sftp internal-sftp
+          PidFile /tmp/openscp_sshd.pid
+          LogLevel VERBOSE
+          PrintMotd no
+          UseDNS no
+          EOF
+
+          sudo /usr/sbin/sshd -t -f /tmp/openscp_sshd_config
+          sudo /usr/sbin/sshd -f /tmp/openscp_sshd_config \
+            -E /tmp/openscp_sshd.log
+
+          for _ in {1..20}; do
+            if nc -z 127.0.0.1 2222; then
+              exit 0
+            fi
+            sleep 1
+          done
+          sudo cat /tmp/openscp_sshd.log || true
+          exit 1
+
+      - name: Configure SSH integration build
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOPENSCP_BUILD_TESTS=ON \
+            -DOPENSCP_WERROR=ON
+
+      - name: Build SFTP and SCP integration binaries
+        run: |
+          cmake --build build --parallel --target \
+            openscp_sftp_integration_tests \
+            openscp_scp_integration_tests
+
+      - name: Run SFTP and SCP integration binaries directly
+        env:
+          OPENSCP_IT_SFTP_HOST: 127.0.0.1
+          OPENSCP_IT_SFTP_PORT: "2222"
+          OPENSCP_IT_SFTP_USER: openscp_it
+          OPENSCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
+          OPENSCP_IT_REMOTE_BASE: /home/openscp_it/upload
+        run: |
+          ./build/tests/openscp_sftp_integration_tests
+          ./build/tests/openscp_scp_integration_tests
+
+      - name: Upload SSH service log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ssh-service-log
+          path: /tmp/openscp_sshd.log
+          if-no-files-found: ignore
+
   real-protocol-services:
     name: FTP, FTPS, and WebDAV
     runs-on: ubuntu-latest
