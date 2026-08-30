@@ -204,6 +204,18 @@ jobs:
           if ! ./scripts/ci/setup_protocol_services.sh \
             >/tmp/openscp-protocol-setup.log 2>&1; then
             cat /tmp/openscp-protocol-setup.log
+            grep -E -i 'error|failed|fatal|denied|address already in use' \
+              /tmp/openscp-protocol-setup.log | tail -20 | \
+              while IFS= read -r line; do
+                line="${line//'%'/'%25'}"
+                printf '%s\n' \
+                  "::error file=scripts/ci/setup_protocol_services.sh,line=1,title=Protocol service setup::${line}"
+              done
+            {
+              printf '%s\n' '### Protocol service setup failure' '```text'
+              tail -100 /tmp/openscp-protocol-setup.log
+              printf '%s\n' '```'
+            } >>"$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           cat /tmp/openscp-protocol-setup.log
