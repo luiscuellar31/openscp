@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - dev
+      - backup29ago
   pull_request:
     branches:
       - main
