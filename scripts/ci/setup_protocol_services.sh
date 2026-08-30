@@ -102,12 +102,11 @@ write_vsftpd_config() {
 launch_vsftpd() {
   local label="$1"
   local config_path="$2"
-  local launch_error
+  local launch_log="${LOG_DIR}/${label// /-}-launch.log"
 
   log "launching ${label}"
-  if ! launch_error="$(sudo /usr/sbin/vsftpd "$config_path" 2>&1)"; then
-    launch_error="${launch_error//$'\n'/; }"
-    die "${label} process failed to launch: ${launch_error}"
+  if ! sudo /usr/sbin/vsftpd "$config_path" >"$launch_log" 2>&1; then
+    log "${label} launcher returned non-zero; checking socket readiness"
   fi
 }
 
