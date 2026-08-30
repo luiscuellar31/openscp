@@ -210,13 +210,40 @@ jobs:
                 line="${line//'%'/'%25'}"
                 printf '%s\n' \
                   "::error file=scripts/ci/setup_protocol_services.sh,line=1,title=Protocol service setup::${line}"
-              done
+              done || true
             {
               printf '%s\n' '### Protocol service setup failure' '```text'
               tail -100 /tmp/openscp-protocol-setup.log
               printf '%s\n' '```'
             } >>"$GITHUB_STEP_SUMMARY"
-            exit 1
+            # Phase-specific codes remain visible through the public Checks
+            # API even when GitHub withholds unauthenticated workflow logs.
+            if grep -q 'smoke check: HTTPS WebDAV' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 48
+            elif grep -q 'smoke check: implicit FTPS' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 47
+            elif grep -q 'smoke check: explicit FTPS' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 46
+            elif grep -q 'smoke check: FTP' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 45
+            elif grep -q 'HTTPS WebDAV did not start' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 44
+            elif grep -q 'implicit FTPS did not start' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 43
+            elif grep -q 'explicit FTPS did not start' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 42
+            elif grep -q 'FTP did not start' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 41
+            fi
+            exit 39
           fi
           cat /tmp/openscp-protocol-setup.log
 

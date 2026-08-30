@@ -301,21 +301,25 @@ sudo /usr/sbin/apache2 -f "$APACHE_CONFIG" -k start
 wait_for_port "HTTPS WebDAV" "$WEBDAV_PORT"
 
 log "running service-level smoke checks"
+log "smoke check: FTP"
 curl --fail --silent --show-error \
   --user "${IT_USER}:${IT_PASSWORD}" \
   --list-only "ftp://127.0.0.1:${FTP_PORT}/workspace/" >/dev/null
 
+log "smoke check: explicit FTPS"
 curl --fail --silent --show-error \
   --ssl-reqd \
   --cacert "$CA_CERT" \
   --user "${IT_USER}:${IT_PASSWORD}" \
   --list-only "ftp://127.0.0.1:${FTPS_EXPLICIT_PORT}/workspace/" >/dev/null
 
+log "smoke check: implicit FTPS"
 curl --fail --silent --show-error \
   --cacert "$CA_CERT" \
   --user "${IT_USER}:${IT_PASSWORD}" \
   --list-only "ftps://127.0.0.1:${FTPS_IMPLICIT_PORT}/workspace/" >/dev/null
 
+log "smoke check: HTTPS WebDAV"
 curl --fail --silent --show-error \
   --cacert "$CA_CERT" \
   --user "${IT_USER}:${IT_PASSWORD}" \
