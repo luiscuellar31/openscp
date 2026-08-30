@@ -76,7 +76,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         openscpui::AppSettings settings;
         const auto defaultProtocol = openscp::protocolFromStorageName(
             settings
-                .value("Protocol/defaultProtocol",
+                .value(openscpui::settingskeys::DefaultProtocol,
                        QString::fromLatin1(openscp::protocolStorageName(
                            openscp::Protocol::Sftp)))
                 .toString()
@@ -89,7 +89,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
 
         const auto defaultMode = openscp::scpTransferModeFromStorageName(
             settings
-                .value("Protocol/scpTransferModeDefault",
+                .value(openscpui::settingskeys::DefaultScpTransferMode,
                        QString::fromLatin1(openscp::scpTransferModeStorageName(
                            openscp::ScpTransferMode::Auto)))
                 .toString()
@@ -411,7 +411,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         openscpui::AppSettings settings;
         int khPolicyIdx = khPolicy_->findData(
             settings
-                .value("Security/defaultKnownHostsPolicy",
+                .value(openscpui::settingskeys::DefaultKnownHostsPolicy,
                        static_cast<int>(openscp::KnownHostsPolicy::Strict))
                 .toInt());
         if (khPolicyIdx < 0) {
@@ -423,7 +423,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
 
         int integrityIdx = integrityPolicy_->findData(
             settings
-                .value("Security/defaultTransferIntegrityPolicy",
+                .value(openscpui::settingskeys::DefaultTransferIntegrityPolicy,
                        static_cast<int>(
                            openscp::TransferIntegrityPolicy::Optional))
                 .toInt());
@@ -436,23 +436,30 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
 
         if (ftpsVerifyPeer_) {
             ftpsVerifyPeer_->setChecked(
-                settings.value("Security/ftpsVerifyPeerDefault", true)
+                settings
+                    .value(openscpui::settingskeys::FtpsVerifyPeerDefault, true)
                     .toBool());
         }
         if (ftpsCaPath_) {
             ftpsCaPath_->setText(
-                settings.value("Security/ftpsCaCertPathDefault", QString())
+                settings
+                    .value(openscpui::settingskeys::FtpsCaCertPathDefault,
+                           QString())
                     .toString()
                     .trimmed());
         }
         if (webDavVerifyPeer_) {
             webDavVerifyPeer_->setChecked(
-                settings.value("Security/webdavVerifyPeerDefault", true)
+                settings
+                    .value(openscpui::settingskeys::WebDavVerifyPeerDefault,
+                           true)
                     .toBool());
         }
         if (webDavCaPath_) {
             webDavCaPath_->setText(
-                settings.value("Security/webdavCaCertPathDefault", QString())
+                settings
+                    .value(openscpui::settingskeys::WebDavCaCertPathDefault,
+                           QString())
                     .toString()
                     .trimmed());
         }

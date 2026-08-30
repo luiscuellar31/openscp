@@ -455,7 +455,9 @@ void SiteManagerDialog::onRemove() {
     // Optionally delete stored credentials and known_hosts entry for this site
     openscpui::AppSettings settings;
     const bool deleteSecrets =
-        settings.value("Sites/deleteSecretsOnRemove", false).toBool();
+        settings
+            .value(openscpui::settingskeys::SitesDeleteSecretsOnRemove, false)
+            .toBool();
     if (deleteSecrets) {
         SiteCredentialRepository().removeAll(removed);
         // Also remove known_hosts entry if we know the file and host
@@ -489,8 +491,11 @@ bool SiteManagerDialog::selectedOptions(openscp::SessionOptions &out) const {
     {
         openscpui::AppSettings settings;
         out.known_hosts_hash_names =
-            settings.value("Security/knownHostsHashed", true).toBool();
-        out.show_fp_hex = settings.value("Security/fpHex", false).toBool();
+            settings.value(openscpui::settingskeys::KnownHostsHashed, true)
+                .toBool();
+        out.show_fp_hex =
+            settings.value(openscpui::settingskeys::FingerprintHex, false)
+                .toBool();
     }
     const SiteEntry &selected = sites_[modelIndex];
     SiteCredentialRepository credentials;

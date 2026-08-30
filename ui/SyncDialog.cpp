@@ -620,7 +620,10 @@ void SyncDialog::loadPresets() {
 
     openscpui::AppSettings settings;
     const QVariantList presets =
-        settings.value(QStringLiteral("SyncDialog/filterPresetsV1")).toList();
+        settings
+            .value(
+                QString::fromLatin1(openscpui::settingskeys::SyncFilterPresets))
+            .toList();
     for (const QVariant &value : presets) {
         const QVariantMap preset = value.toMap();
         const QString name = preset.value(QStringLiteral("name")).toString();
@@ -651,8 +654,10 @@ void SyncDialog::saveCurrentPreset() {
     saved.insert(QStringLiteral("hidden"), includeHiddenCheck_->isChecked());
 
     openscpui::AppSettings settings;
-    QVariantList presets =
-        settings.value(QStringLiteral("SyncDialog/filterPresetsV1")).toList();
+    QVariantList presets = settings
+                               .value(QString::fromLatin1(
+                                   openscpui::settingskeys::SyncFilterPresets))
+                               .toList();
     bool replaced = false;
     for (QVariant &value : presets) {
         const QVariantMap existing = value.toMap();
@@ -666,7 +671,9 @@ void SyncDialog::saveCurrentPreset() {
     }
     if (!replaced)
         presets.push_back(saved);
-    settings.setValue(QStringLiteral("SyncDialog/filterPresetsV1"), presets);
+    settings.setValue(
+        QString::fromLatin1(openscpui::settingskeys::SyncFilterPresets),
+        presets);
 
     loadPresets();
     const int savedIndex = presetCombo_->findText(
@@ -687,8 +694,10 @@ void SyncDialog::deleteCurrentPreset() {
     }
 
     openscpui::AppSettings settings;
-    QVariantList presets =
-        settings.value(QStringLiteral("SyncDialog/filterPresetsV1")).toList();
+    QVariantList presets = settings
+                               .value(QString::fromLatin1(
+                                   openscpui::settingskeys::SyncFilterPresets))
+                               .toList();
     for (qsizetype index = presets.size(); index-- > 0;) {
         if (presets.at(index)
                 .toMap()
@@ -698,7 +707,9 @@ void SyncDialog::deleteCurrentPreset() {
             presets.removeAt(index);
         }
     }
-    settings.setValue(QStringLiteral("SyncDialog/filterPresetsV1"), presets);
+    settings.setValue(
+        QString::fromLatin1(openscpui::settingskeys::SyncFilterPresets),
+        presets);
     loadPresets();
 }
 

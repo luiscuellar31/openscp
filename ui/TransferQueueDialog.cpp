@@ -1202,13 +1202,15 @@ void TransferQueueDialog::loadUiState() {
     openscpui::AppSettings settings;
 
     const QByteArray geom =
-        settings.value("UI/transferQueue/geometry").toByteArray();
+        settings.value(openscpui::settingskeys::TransferQueueGeometry)
+            .toByteArray();
     if (!geom.isEmpty())
         restoreGeometry(geom);
 
     if (table_ && table_->horizontalHeader()) {
         const QByteArray header =
-            settings.value("UI/transferQueue/headerStateV4").toByteArray();
+            settings.value(openscpui::settingskeys::TransferQueueHeaderState)
+                .toByteArray();
         if (!header.isEmpty())
             table_->horizontalHeader()->restoreState(header);
         table_->horizontalHeader()->setSectionResizeMode(
@@ -1218,7 +1220,9 @@ void TransferQueueDialog::loadUiState() {
     }
 
     const int filter =
-        settings.value("UI/transferQueue/filterMode", FilterAll).toInt();
+        settings
+            .value(openscpui::settingskeys::TransferQueueFilterMode, FilterAll)
+            .toInt();
     if (filterGroup_ && filterGroup_->button(filter)) {
         filterGroup_->button(filter)->setChecked(true);
         if (proxy_)
@@ -1226,21 +1230,30 @@ void TransferQueueDialog::loadUiState() {
     }
 
     suppressAutoClearSignal_ = true;
-    const int defaultAutoMode =
-        qBound(static_cast<int>(AutoClearOff),
-               settings
-                   .value("Transfer/defaultQueueAutoClearMode",
-                          static_cast<int>(AutoClearOff))
-                   .toInt(),
-               static_cast<int>(AutoClearFinished));
+    const int defaultAutoMode = qBound(
+        static_cast<int>(AutoClearOff),
+        settings
+            .value(openscpui::settingskeys::TransferDefaultQueueAutoClearMode,
+                   static_cast<int>(AutoClearOff))
+            .toInt(),
+        static_cast<int>(AutoClearFinished));
     const int defaultAutoMin = qBound(
-        1, settings.value("Transfer/defaultQueueAutoClearMinutes", 15).toInt(),
+        1,
+        settings
+            .value(
+                openscpui::settingskeys::TransferDefaultQueueAutoClearMinutes,
+                15)
+            .toInt(),
         1440);
     const int autoMode =
-        settings.value("UI/transferQueue/autoClearMode", defaultAutoMode)
+        settings
+            .value(openscpui::settingskeys::TransferQueueAutoClearMode,
+                   defaultAutoMode)
             .toInt();
     const int autoMin =
-        settings.value("UI/transferQueue/autoClearMinutes", defaultAutoMin)
+        settings
+            .value(openscpui::settingskeys::TransferQueueAutoClearMinutes,
+                   defaultAutoMin)
             .toInt();
     if (autoClearModeCombo_) {
         int modeIndex = autoClearModeCombo_->findData(autoMode);
@@ -1255,10 +1268,11 @@ void TransferQueueDialog::loadUiState() {
 
 void TransferQueueDialog::saveUiState() const {
     openscpui::AppSettings settings;
-    settings.setValue("UI/transferQueue/geometry", saveGeometry());
+    settings.setValue(openscpui::settingskeys::TransferQueueGeometry,
+                      saveGeometry());
 
     if (table_ && table_->horizontalHeader()) {
-        settings.setValue("UI/transferQueue/headerStateV4",
+        settings.setValue(openscpui::settingskeys::TransferQueueHeaderState,
                           table_->horizontalHeader()->saveState());
     }
 
@@ -1266,15 +1280,18 @@ void TransferQueueDialog::saveUiState() const {
     if (filterGroup_ && filterGroup_->checkedButton()) {
         filterMode = filterGroup_->id(filterGroup_->checkedButton());
     }
-    settings.setValue("UI/transferQueue/filterMode", filterMode);
+    settings.setValue(openscpui::settingskeys::TransferQueueFilterMode,
+                      filterMode);
 
     const int autoMode = autoClearModeCombo_
                              ? autoClearModeCombo_->currentData().toInt()
                              : AutoClearOff;
     const int autoMin =
         autoClearMinutesSpin_ ? autoClearMinutesSpin_->value() : 15;
-    settings.setValue("UI/transferQueue/autoClearMode", autoMode);
-    settings.setValue("UI/transferQueue/autoClearMinutes", autoMin);
+    settings.setValue(openscpui::settingskeys::TransferQueueAutoClearMode,
+                      autoMode);
+    settings.setValue(openscpui::settingskeys::TransferQueueAutoClearMinutes,
+                      autoMin);
     settings.sync();
 }
 

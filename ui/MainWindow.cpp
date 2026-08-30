@@ -198,9 +198,6 @@ static QString formatConnectionElapsed(qint64 totalSeconds) {
         .arg(seconds, 2, 10, QLatin1Char('0'));
 }
 
-constexpr const char *kShortcutTransfersKey = "Shortcuts/openTransfers";
-constexpr const char *kShortcutHistoryKey = "Shortcuts/openHistory";
-
 static QString trimHistoryLabel(const QString &raw, int maxLen = 96) {
     QString out = raw.simplified();
     if (out.size() <= maxLen)
@@ -1048,10 +1045,12 @@ void MainWindow::initializeRuntimeState() {
     QTimer::singleShot(0, this, [] {
         openscpui::AppSettings settings;
         const bool autoClean =
-            settings.value("Advanced/autoCleanStaging", true).toBool();
+            settings.value(openscpui::settingskeys::AutoCleanStaging, true)
+                .toBool();
         if (!autoClean)
             return;
-        QString root = settings.value("Advanced/stagingRoot").toString();
+        QString root =
+            settings.value(openscpui::settingskeys::StagingRoot).toString();
         if (root.isEmpty())
             root = QDir::homePath() + "/Downloads/OpenSCP-Dragged";
         QDir stagingRootDir(root);
@@ -1059,7 +1058,10 @@ void MainWindow::initializeRuntimeState() {
             return;
         const QDateTime now = QDateTime::currentDateTimeUtc();
         const int retentionDays = qBound(
-            1, settings.value("Advanced/stagingRetentionDays", 7).toInt(), 365);
+            1,
+            settings.value(openscpui::settingskeys::StagingRetentionDays, 7)
+                .toInt(),
+            365);
         const qint64 maxAgeMs = qint64(retentionDays) * 24 * 60 * 60 * 1000;
         // Match timestamp batches: yyyyMMdd-HHmmss
         QRegularExpression re("^\\d{8}-\\d{6}$");
@@ -1101,18 +1103,29 @@ void MainWindow::initializeRuntimeState() {
         openscpui::AppSettings settings;
         // One-shot migration: if only showConnOnStart exists, copy to
         // openSiteManagerOnDisconnect
-        if (!settings.contains("UI/openSiteManagerOnDisconnect") &&
-            settings.contains("UI/showConnOnStart")) {
+        if (!settings.contains(
+                openscpui::settingskeys::UiOpenSiteManagerOnDisconnect) &&
+            settings.contains(
+                openscpui::settingskeys::UiShowConnectionOnStart)) {
             const bool showSiteManagerOnStart =
-                settings.value("UI/showConnOnStart", true).toBool();
-            settings.setValue("UI/openSiteManagerOnDisconnect",
-                              showSiteManagerOnStart);
+                settings
+                    .value(openscpui::settingskeys::UiShowConnectionOnStart,
+                           true)
+                    .toBool();
+            settings.setValue(
+                openscpui::settingskeys::UiOpenSiteManagerOnDisconnect,
+                showSiteManagerOnStart);
             settings.sync();
         }
         openSiteManagerOnStartup_ =
-            settings.value("UI/showConnOnStart", true).toBool();
+            settings
+                .value(openscpui::settingskeys::UiShowConnectionOnStart, true)
+                .toBool();
         openSiteManagerOnDisconnect_ =
-            settings.value("UI/openSiteManagerOnDisconnect", true).toBool();
+            settings
+                .value(openscpui::settingskeys::UiOpenSiteManagerOnDisconnect,
+                       true)
+                .toBool();
         if (openSiteManagerOnStartup_ && !QCoreApplication::closingDown() &&
             !sessionController_->client()) {
             QTimer::singleShot(0, this, [this] { showSiteManagerNonModal(); });
@@ -1301,12 +1314,12 @@ void MainWindow::closeEvent(QCloseEvent *e) {
 void MainWindow::resetMainWindowLayoutToDefaults() {
     {
         openscpui::AppSettings settings;
-        settings.remove("UI/mainWindow/geometry");
-        settings.remove("UI/mainWindow/windowState");
-        settings.remove("UI/mainWindow/splitterState");
-        settings.remove("UI/mainWindow/leftHeaderState");
-        settings.remove("UI/mainWindow/rightHeaderLocal");
-        settings.remove("UI/mainWindow/rightHeaderRemote");
+        settings.remove(openscpui::settingskeys::MainWindowGeometry);
+        settings.remove(openscpui::settingskeys::MainWindowState);
+        settings.remove(openscpui::settingskeys::MainWindowSplitterState);
+        settings.remove(openscpui::settingskeys::MainWindowLeftHeaderState);
+        settings.remove(openscpui::settingskeys::MainWindowRightHeaderLocal);
+        settings.remove(openscpui::settingskeys::MainWindowRightHeaderRemote);
         settings.sync();
     }
 
@@ -1345,9 +1358,11 @@ void MainWindow::saveRightHeaderState(bool remoteMode) const {
     if (!rightView_ || !rightView_->header())
         return;
     openscpui::AppSettings settings;
-    const QString key = remoteMode
-                            ? QStringLiteral("UI/mainWindow/rightHeaderRemote")
-                            : QStringLiteral("UI/mainWindow/rightHeaderLocal");
+    const QString key =
+        remoteMode ? QString::fromLatin1(
+                         openscpui::settingskeys::MainWindowRightHeaderRemote)
+                   : QString::fromLatin1(
+                         openscpui::settingskeys::MainWindowRightHeaderLocal);
     settings.setValue(key, rightView_->header()->saveState());
 }
 
@@ -1355,9 +1370,11 @@ bool MainWindow::restoreRightHeaderState(bool remoteMode) {
     if (!rightView_ || !rightView_->header())
         return false;
     openscpui::AppSettings settings;
-    const QString key = remoteMode
-                            ? QStringLiteral("UI/mainWindow/rightHeaderRemote")
-                            : QStringLiteral("UI/mainWindow/rightHeaderLocal");
+    const QString key =
+        remoteMode ? QString::fromLatin1(
+                         openscpui::settingskeys::MainWindowRightHeaderRemote)
+                   : QString::fromLatin1(
+                         openscpui::settingskeys::MainWindowRightHeaderLocal);
     const QByteArray state = settings.value(key).toByteArray();
     if (state.isEmpty())
         return false;
@@ -1366,13 +1383,14 @@ bool MainWindow::restoreRightHeaderState(bool remoteMode) {
 
 void MainWindow::saveMainWindowUiState() const {
     openscpui::AppSettings settings;
-    settings.setValue("UI/mainWindow/geometry", saveGeometry());
-    settings.setValue("UI/mainWindow/windowState", saveState());
+    settings.setValue(openscpui::settingskeys::MainWindowGeometry,
+                      saveGeometry());
+    settings.setValue(openscpui::settingskeys::MainWindowState, saveState());
     if (mainSplitter_)
-        settings.setValue("UI/mainWindow/splitterState",
+        settings.setValue(openscpui::settingskeys::MainWindowSplitterState,
                           mainSplitter_->saveState());
     if (leftView_ && leftView_->header())
-        settings.setValue("UI/mainWindow/leftHeaderState",
+        settings.setValue(openscpui::settingskeys::MainWindowLeftHeaderState,
                           leftView_->header()->saveState());
     saveRightHeaderState(rightIsRemote_);
     settings.sync();
@@ -1381,24 +1399,27 @@ void MainWindow::saveMainWindowUiState() const {
 void MainWindow::restoreMainWindowUiState() {
     openscpui::AppSettings settings;
     const QByteArray geometry =
-        settings.value("UI/mainWindow/geometry").toByteArray();
+        settings.value(openscpui::settingskeys::MainWindowGeometry)
+            .toByteArray();
     if (!geometry.isEmpty()) {
         restoreGeometry(geometry);
         restoredWindowGeometry_ = true;
     }
     const QByteArray winState =
-        settings.value("UI/mainWindow/windowState").toByteArray();
+        settings.value(openscpui::settingskeys::MainWindowState).toByteArray();
     if (!winState.isEmpty())
         restoreState(winState);
     if (mainSplitter_) {
         const QByteArray splitterState =
-            settings.value("UI/mainWindow/splitterState").toByteArray();
+            settings.value(openscpui::settingskeys::MainWindowSplitterState)
+                .toByteArray();
         if (!splitterState.isEmpty())
             mainSplitter_->restoreState(splitterState);
     }
     if (leftView_ && leftView_->header()) {
         const QByteArray leftHeader =
-            settings.value("UI/mainWindow/leftHeaderState").toByteArray();
+            settings.value(openscpui::settingskeys::MainWindowLeftHeaderState)
+                .toByteArray();
         if (!leftHeader.isEmpty())
             leftView_->header()->restoreState(leftHeader);
     }
@@ -1590,13 +1611,19 @@ void MainWindow::activateScpTransferModeUi(bool enabled) {
 
 void MainWindow::applyPreferences() {
     openscpui::AppSettings settings;
-    const bool showHidden = settings.value("UI/showHidden", false).toBool();
-    const bool singleClick = settings.value("UI/singleClick", false).toBool();
+    const bool showHidden =
+        settings.value(openscpui::settingskeys::UiShowHidden, false).toBool();
+    const bool singleClick =
+        settings.value(openscpui::settingskeys::UiSingleClick, false).toBool();
     QString openBehaviorMode =
-        settings.value("UI/openBehaviorMode").toString().trimmed().toLower();
+        settings.value(openscpui::settingskeys::UiOpenBehaviorMode)
+            .toString()
+            .trimmed()
+            .toLower();
     if (openBehaviorMode.isEmpty()) {
         const bool revealLegacy =
-            settings.value("UI/openRevealInFolder", false).toBool();
+            settings.value(openscpui::settingskeys::UiOpenRevealInFolder, false)
+                .toBool();
         openBehaviorMode =
             revealLegacy ? QStringLiteral("reveal") : QStringLiteral("ask");
     }
@@ -1607,13 +1634,20 @@ void MainWindow::applyPreferences() {
     }
     prefOpenBehaviorMode_ = openBehaviorMode;
     prefShowQueueOnEnqueue_ =
-        settings.value("UI/showQueueOnEnqueue", true).toBool();
+        settings.value(openscpui::settingskeys::UiShowQueueOnEnqueue, true)
+            .toBool();
     prefNoHostVerificationTtlMin_ = qBound(
-        1, settings.value("Security/noHostVerificationTtlMin", 15).toInt(),
+        1,
+        settings
+            .value(openscpui::settingskeys::NoHostVerificationTtlMinutes, 15)
+            .toInt(),
         120);
     const int sessionHealthIntervalMs =
         qBound(60,
-               settings.value("Network/sessionHealthIntervalSec", 600).toInt(),
+               settings
+                   .value(openscpui::settingskeys::SessionHealthIntervalSeconds,
+                          600)
+                   .toInt(),
                86400) *
         1000;
     sessionHealthMonitor_.setInterval(sessionHealthIntervalMs);
@@ -1621,7 +1655,9 @@ void MainWindow::applyPreferences() {
     QDir().mkpath(downloadDir_);
     if (actShowQueue_) {
         const QString queueShortcutText =
-            settings.value(kShortcutTransfersKey, QStringLiteral("F12"))
+            settings
+                .value(openscpui::settingskeys::ShortcutOpenTransfers,
+                       QStringLiteral("F12"))
                 .toString()
                 .trimmed();
         actShowQueue_->setShortcut(QKeySequence::fromString(
@@ -1630,7 +1666,9 @@ void MainWindow::applyPreferences() {
     }
     if (actShowHistory_) {
         const QString historyShortcutText =
-            settings.value(kShortcutHistoryKey, QStringLiteral("Ctrl+Shift+H"))
+            settings
+                .value(openscpui::settingskeys::ShortcutOpenHistory,
+                       QStringLiteral("Ctrl+Shift+H"))
                 .toString()
                 .trimmed();
         actShowHistory_->setShortcut(QKeySequence::fromString(
@@ -1639,7 +1677,9 @@ void MainWindow::applyPreferences() {
     }
     // Keep Site Manager auto-open preference up to date
     openSiteManagerOnDisconnect_ =
-        settings.value("UI/openSiteManagerOnDisconnect", true).toBool();
+        settings
+            .value(openscpui::settingskeys::UiOpenSiteManagerOnDisconnect, true)
+            .toBool();
     applyTransferPreferences();
 
     // Local: model filters (hidden on/off)
@@ -1690,9 +1730,13 @@ void MainWindow::applyTransferPreferences() {
         return;
     openscpui::AppSettings settings;
     const int maxConcurrent =
-        qBound(1, settings.value("Transfer/maxConcurrent", 2).toInt(), 8);
-    const int globalSpeed =
-        qMax(0, settings.value("Transfer/globalSpeedKBps", 0).toInt());
+        qBound(1,
+               settings.value(openscpui::settingskeys::TransferMaxConcurrent, 2)
+                   .toInt(),
+               8);
+    const int globalSpeed = qMax(
+        0, settings.value(openscpui::settingskeys::TransferGlobalSpeedKbps, 0)
+               .toInt());
     transferMgr_->setMaxConcurrent(maxConcurrent);
     transferMgr_->setGlobalSpeedLimitKBps(globalSpeed);
     if (transferDlg_)

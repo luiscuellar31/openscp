@@ -22,7 +22,10 @@ int main(int argc, char *argv[]) {
     // Load translation if available (supports resources and disk)
     openscpui::AppSettings settings;
     const QString languageCode =
-        settings.value("UI/language", "en").toString().trimmed().toLower();
+        settings.value(openscpui::settingskeys::UiLanguage, "en")
+            .toString()
+            .trimmed()
+            .toLower();
     static QTranslator translator; // static so it lives until app.exec()
     const QString translationBaseName = QString("openscp_%1").arg(languageCode);
     const QString exeDir = QCoreApplication::applicationDirPath();

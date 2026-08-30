@@ -80,6 +80,18 @@ done < <(git ls-files core ui tests)
     exit 1
 }
 
+uncatalogued_settings_keys="$(
+    rg -n --pcre2 \
+        '"(?:UI|Advanced|Transfer|Security|Network|Protocol|Terminal|Sites|SyncDialog|Shortcuts|History|Favorites)/[A-Za-z0-9_/%.-]+"' \
+        ui --glob '*.{cpp,h,hpp}' --glob '!AppSettings.hpp' || true
+)"
+if [[ -n "$uncatalogued_settings_keys" ]]; then
+    printf '%s\n' \
+        "Fixed QSettings paths must be declared in ui/AppSettings.hpp:" \
+        "$uncatalogued_settings_keys" >&2
+    exit 1
+fi
+
 find_llvm17_tool() {
     local tool_name="$1"
     local candidate=""

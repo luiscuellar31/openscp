@@ -92,9 +92,14 @@ void MainWindow::openRightRemoteTerminal() {
                           : (rightPath_ ? rightPath_->text() : QString()));
     openscpui::AppSettings settings;
     const bool forceInteractiveLogin =
-        settings.value("Terminal/forceInteractiveLogin", false).toBool();
+        settings
+            .value(openscpui::settingskeys::TerminalForceInteractiveLogin,
+                   false)
+            .toBool();
     const bool enableSftpCliFallback =
-        settings.value("Terminal/enableSftpCliFallback", true).toBool();
+        settings
+            .value(openscpui::settingskeys::TerminalEnableSftpCliFallback, true)
+            .toBool();
 
     const openscpui::TerminalCommandBuilder terminalCommands;
     const openscpui::TerminalCommandResult command =

@@ -23,7 +23,7 @@ openscp::ScpTransferMode
 loadDefaultScpTransferModeFromSettings(const QSettings &settings) {
     return openscp::scpTransferModeFromStorageName(
         settings
-            .value("Protocol/scpTransferModeDefault",
+            .value(openscpui::settingskeys::DefaultScpTransferMode,
                    QString::fromLatin1(openscp::scpTransferModeStorageName(
                        openscp::ScpTransferMode::Auto)))
             .toString()
@@ -69,9 +69,11 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
     const auto defaultScpMode =
         loadDefaultScpTransferModeFromSettings(settings);
     const bool defaultFtpsVerifyPeer =
-        settings.value("Security/ftpsVerifyPeerDefault", true).toBool();
+        settings.value(openscpui::settingskeys::FtpsVerifyPeerDefault, true)
+            .toBool();
     const QString defaultFtpsCaPath =
-        settings.value("Security/ftpsCaCertPathDefault", QString())
+        settings
+            .value(openscpui::settingskeys::FtpsCaCertPathDefault, QString())
             .toString()
             .trimmed();
 

@@ -311,9 +311,13 @@ void MainWindow::openConnectDialogWithPreset(
     {
         openscpui::AppSettings securitySettings;
         sessionOptions.known_hosts_hash_names =
-            securitySettings.value("Security/knownHostsHashed", true).toBool();
+            securitySettings
+                .value(openscpui::settingskeys::KnownHostsHashed, true)
+                .toBool();
         sessionOptions.show_fp_hex =
-            securitySettings.value("Security/fpHex", false).toBool();
+            securitySettings
+                .value(openscpui::settingskeys::FingerprintHex, false)
+                .toBool();
     }
     if (hasTransportSelectionConflict(sessionOptions)) {
         UiAlerts::warning(
@@ -666,7 +670,8 @@ void MainWindow::setOpenSiteManagerOnDisconnect(bool enabled) {
         return;
     openSiteManagerOnDisconnect_ = enabled;
     openscpui::AppSettings settings;
-    settings.setValue("UI/openSiteManagerOnDisconnect", enabled);
+    settings.setValue(openscpui::settingskeys::UiOpenSiteManagerOnDisconnect,
+                      enabled);
     settings.sync();
 }
 
@@ -709,7 +714,8 @@ void MainWindow::setOpenSiteManagerOnStartup(bool enabled) {
         return;
     openSiteManagerOnStartup_ = enabled;
     openscpui::AppSettings settings;
-    settings.setValue("UI/showConnOnStart", enabled);
+    settings.setValue(openscpui::settingskeys::UiShowConnectionOnStart,
+                      enabled);
     settings.sync();
 }
 
@@ -835,7 +841,9 @@ QString MainWindow::defaultDownloadDirFromSettings(const QSettings &settings) {
     if (fallback.isEmpty())
         fallback = QDir::homePath() + "/Downloads";
     QString configured = QDir::cleanPath(
-        settings.value("UI/defaultDownloadDir", fallback).toString().trimmed());
+        settings.value(openscpui::settingskeys::UiDefaultDownloadDir, fallback)
+            .toString()
+            .trimmed());
     if (configured.isEmpty())
         configured = fallback;
     return configured;

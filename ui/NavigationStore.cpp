@@ -15,10 +15,6 @@ namespace openscpui {
 namespace {
 
 constexpr int kMaximumRecentEntries = 20;
-constexpr auto kRecentLocalPathsKey = "History/recentLocalPaths";
-constexpr auto kLegacyRemotePathsKey = "History/recentRemotePaths";
-constexpr auto kRecentServersKey = "History/recentServers";
-constexpr auto kLocalFavoritesKey = "Favorites/localPaths";
 
 } // namespace
 
@@ -162,9 +158,10 @@ void NavigationStore::addRecentLocalPath(const QString &path) {
     if (normalized.isEmpty())
         return;
     auto settings = createSettings();
-    QStringList values = settings->value(kRecentLocalPathsKey).toStringList();
+    QStringList values =
+        settings->value(settingskeys::RecentLocalPaths).toStringList();
     prependRecent(values, normalized);
-    settings->setValue(kRecentLocalPathsKey, values);
+    settings->setValue(settingskeys::RecentLocalPaths, values);
 }
 
 void NavigationStore::addRecentRemotePath(const QString &scope,
@@ -184,13 +181,16 @@ void NavigationStore::addRecentServer(const openscp::SessionOptions &session) {
         return;
     const QString encoded = encodeRecentServer(session);
     auto settings = createSettings();
-    QStringList values = settings->value(kRecentServersKey).toStringList();
+    QStringList values =
+        settings->value(settingskeys::RecentServers).toStringList();
     prependRecent(values, encoded);
-    settings->setValue(kRecentServersKey, values);
+    settings->setValue(settingskeys::RecentServers, values);
 }
 
 QStringList NavigationStore::recentLocalPaths() const {
-    return createSettings()->value(kRecentLocalPathsKey).toStringList();
+    return createSettings()
+        ->value(settingskeys::RecentLocalPaths)
+        .toStringList();
 }
 
 QStringList NavigationStore::recentRemotePaths(const QString &scope) const {
@@ -200,11 +200,13 @@ QStringList NavigationStore::recentRemotePaths(const QString &scope) const {
 }
 
 QStringList NavigationStore::legacyRemotePaths() const {
-    return createSettings()->value(kLegacyRemotePathsKey).toStringList();
+    return createSettings()
+        ->value(settingskeys::LegacyRecentRemotePaths)
+        .toStringList();
 }
 
 QStringList NavigationStore::recentServers() const {
-    return createSettings()->value(kRecentServersKey).toStringList();
+    return createSettings()->value(settingskeys::RecentServers).toStringList();
 }
 
 QStringList NavigationStore::favorites(Location location,
@@ -264,10 +266,11 @@ void NavigationStore::clearFavorites(Location location,
 
 void NavigationStore::clearAllHistory() {
     auto settings = createSettings();
-    settings->remove(kRecentLocalPathsKey);
-    settings->remove(QStringLiteral("History/remoteScopes"));
-    settings->remove(kLegacyRemotePathsKey);
-    settings->remove(kRecentServersKey);
+    settings->remove(settingskeys::RecentLocalPaths);
+    settings->remove(
+        QString::fromLatin1(openscpui::settingskeys::RemoteScopes));
+    settings->remove(settingskeys::LegacyRecentRemotePaths);
+    settings->remove(settingskeys::RecentServers);
 }
 
 std::unique_ptr<QSettings> NavigationStore::createSettings() const {
@@ -281,18 +284,20 @@ QString NavigationStore::historyKeyForScope(const QString &scope) {
     const QString normalized = scope.trimmed();
     return normalized.isEmpty()
                ? QString()
-               : QStringLiteral("History/remoteScopes/%1/recentPaths")
+               : QString::fromLatin1(
+                     openscpui::settingskeys::RemoteScopeRecentPathsPattern)
                      .arg(normalized);
 }
 
 QString NavigationStore::favoritesKey(Location location,
                                       const QString &remoteScope) {
     if (location == Location::Local)
-        return QString::fromLatin1(kLocalFavoritesKey);
+        return QString::fromLatin1(settingskeys::LocalFavorites);
     const QString normalized = remoteScope.trimmed();
     return normalized.isEmpty()
                ? QString()
-               : QStringLiteral("Favorites/remoteScopes/%1/paths")
+               : QString::fromLatin1(
+                     openscpui::settingskeys::RemoteScopeFavoritesPattern)
                      .arg(normalized);
 }
 
