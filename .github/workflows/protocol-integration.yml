@@ -128,8 +128,21 @@ jobs:
           OPENSCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
           OPENSCP_IT_REMOTE_BASE: /home/openscp_it/upload
         run: |
-          ./build/tests/openscp_sftp_integration_tests
-          ./build/tests/openscp_scp_integration_tests
+          ./build/tests/openscp_sftp_integration_tests 2>&1 | \
+            tee /tmp/openscp-ssh-tests.log
+          ./build/tests/openscp_scp_integration_tests 2>&1 | \
+            tee -a /tmp/openscp-ssh-tests.log
+
+      - name: Report SSH integration diagnostics
+        if: failure()
+        run: |
+          if [[ -f /tmp/openscp-ssh-tests.log ]]; then
+            grep -E -i '\[fail\]|error|failed|not found|command' \
+              /tmp/openscp-ssh-tests.log | tail -25 | \
+              while IFS= read -r line; do
+                echo "::error title=SSH integration::${line}"
+              done
+          fi
 
       - name: Make SSH service log readable after failure
         if: failure()
@@ -201,7 +214,20 @@ jobs:
             done
 
       - name: Run protocol integration binaries directly
-        run: ./scripts/ci/run_protocol_integration.sh build
+        run: |
+          ./scripts/ci/run_protocol_integration.sh build 2>&1 | \
+            tee /tmp/openscp-protocol-tests.log
+
+      - name: Report protocol integration diagnostics
+        if: failure()
+        run: |
+          if [[ -f /tmp/openscp-protocol-tests.log ]]; then
+            grep -E -i '\[fail\]|error|failed|not found|command' \
+              /tmp/openscp-protocol-tests.log | tail -25 | \
+              while IFS= read -r line; do
+                echo "::error title=Protocol integration::${line}"
+              done
+          fi
 
       - name: Make service logs readable after failure
         if: failure()
@@ -281,7 +307,8 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           ctest --test-dir build --output-on-failure \
-            -LE integration --timeout 180
+            -LE integration --timeout 180 2>&1 | \
+            tee /tmp/openscp-sanitizer-tests.log
 
       - name: Explain TSan coverage boundary
         if: matrix.id == 'tsan'
@@ -295,4 +322,17 @@ jobs:
           TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1:history_size=7
         run: |
           ctest --test-dir build --output-on-failure \
-            -LE integration --timeout 180
+            -LE integration --timeout 180 2>&1 | \
+            tee /tmp/openscp-sanitizer-tests.log
+
+      - name: Report sanitizer test diagnostics
+        if: failure()
+        run: |
+          if [[ -f /tmp/openscp-sanitizer-tests.log ]]; then
+            grep -E \
+              'AddressSanitizer|ThreadSanitizer|runtime error:|tests FAILED|The following tests FAILED' \
+              /tmp/openscp-sanitizer-tests.log | tail -25 | \
+              while IFS= read -r line; do
+                echo "::error title=Sanitizer tests::${line}"
+              done
+          fi
