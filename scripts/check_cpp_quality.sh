@@ -63,6 +63,7 @@ cd "$REPO_DIR"
 
 cpp_files=()
 translation_units=()
+implementation_fragments=()
 while IFS= read -r source_file; do
     case "$source_file" in
     *.cpp|*.cc|*.cxx)
@@ -71,6 +72,9 @@ while IFS= read -r source_file; do
         ;;
     *.h|*.hh|*.hpp|*.inc)
         cpp_files+=("$source_file")
+        if [[ "$source_file" == *.inc ]]; then
+            implementation_fragments+=("$source_file")
+        fi
         ;;
     esac
 done < <(git ls-files core ui tests)
@@ -79,6 +83,38 @@ done < <(git ls-files core ui tests)
     printf '%s\n' "No tracked first-party C++ files were found." >&2
     exit 1
 }
+
+for fragment in "${implementation_fragments[@]}"; do
+    case "$fragment" in
+    core/src/libssh2/detail/Libssh2SftpClient.FileListing.inc|\
+    core/src/libssh2/detail/Libssh2SftpClient.FileMetadataOps.inc|\
+    core/src/libssh2/detail/Libssh2SftpClient.TransferOps.inc|\
+    core/src/libssh2/detail/Libssh2SftpClient.TransferSupport.inc|\
+    core/src/libssh2/detail/Libssh2SftpClient.TransportAuth.inc|\
+    core/src/libssh2/detail/Libssh2SftpClient.TransportLifecycle.inc|\
+    core/src/libssh2/detail/Libssh2SftpClient.TransportNet.inc)
+        ;;
+    *)
+        printf 'New implementation fragment is not allowed: %s\n' \
+            "$fragment" >&2
+        printf '%s\n' \
+            "Use a normal .hpp/.cpp translation unit instead." >&2
+        exit 1
+        ;;
+    esac
+
+    fragment_include="#include \"detail/${fragment##*/}\""
+    include_count="$(
+        rg -F -c "$fragment_include" \
+            core/src/libssh2/Libssh2SftpClient.cpp || true
+    )"
+    include_count="${include_count:-0}"
+    if [[ "$include_count" != "1" ]]; then
+        printf '%s must be included exactly once; found %s inclusion(s).\n' \
+            "$fragment" "$include_count" >&2
+        exit 1
+    fi
+done
 
 uncatalogued_settings_keys="$(
     rg -n --pcre2 \

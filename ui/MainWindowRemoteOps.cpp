@@ -30,8 +30,6 @@
 #include <QStatusBar>
 #include <QTreeView>
 
-static constexpr int NAME_COL = 0;
-
 static QString tempDownloadPathFor(const QString &remoteName) {
     QString base =
         QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
@@ -185,7 +183,7 @@ void MainWindow::requestRemoteListing(const QString &path, bool refresh,
     remoteRefreshScrollValue_ = 0;
     if (refresh && rightView_->selectionModel()) {
         const QModelIndexList selected =
-            rightView_->selectionModel()->selectedRows(NAME_COL);
+            rightView_->selectionModel()->selectedRows(kNameColumn);
         for (const QModelIndex &index : selected) {
             const QString name = rightRemoteModel_->nameAt(index);
             if (!name.isEmpty())
@@ -362,12 +360,12 @@ void MainWindow::downloadRightToLeft() {
     auto selectionModel = rightView_->selectionModel();
     QModelIndexList rows;
     if (selectionModel)
-        rows = selectionModel->selectedRows(NAME_COL);
+        rows = selectionModel->selectedRows(kNameColumn);
     if (rows.isEmpty()) {
         // Download everything visible (first level) if there is no selection
         int rowCount = rightRemoteModel_ ? rightRemoteModel_->rowCount() : 0;
         for (int rowIndex = 0; rowIndex < rowCount; ++rowIndex)
-            rows << rightRemoteModel_->index(rowIndex, NAME_COL);
+            rows << rightRemoteModel_->index(rowIndex, kNameColumn);
         if (rows.isEmpty()) {
             UiAlerts::information(this, tr("Download"),
                                   tr("Nothing to download."));
@@ -410,7 +408,7 @@ void MainWindow::copyRightToLeft() {
         UiAlerts::warning(this, tr("Copy"), tr("No selection."));
         return;
     }
-    const auto rows = selectionModel->selectedRows(NAME_COL);
+    const auto rows = selectionModel->selectedRows(kNameColumn);
     if (rows.isEmpty()) {
         UiAlerts::information(this, tr("Copy"), tr("Nothing selected."));
         return;
@@ -462,7 +460,8 @@ void MainWindow::copyRightToLeft() {
 // - Local  -> local copy and delete the source.
 void MainWindow::moveRightToLeft() {
     auto selectionModel = rightView_->selectionModel();
-    if (!selectionModel || selectionModel->selectedRows(NAME_COL).isEmpty()) {
+    if (!selectionModel ||
+        selectionModel->selectedRows(kNameColumn).isEmpty()) {
         UiAlerts::information(this, tr("Move"), tr("Nothing selected."));
         return;
     }
@@ -476,7 +475,7 @@ void MainWindow::moveRightToLeft() {
 
     if (!rightIsRemote_) {
         // Local -> Local: move (copy then delete)
-        const auto rows = selectionModel->selectedRows(NAME_COL);
+        const auto rows = selectionModel->selectedRows(kNameColumn);
         QVector<QFileInfo> sources;
         sources.reserve(rows.size());
         for (const QModelIndex &idx : rows)
@@ -498,7 +497,7 @@ void MainWindow::moveRightToLeft() {
         UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
-    const auto rows = selectionModel->selectedRows(NAME_COL);
+    const auto rows = selectionModel->selectedRows(kNameColumn);
     const QString remoteBase = rightRemoteModel_->rootPath();
     TransferBatchOptions batchOptions;
     batchOptions.sessionKey = transferMgr_->sessionIdentity();
@@ -984,7 +983,7 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
     // Selection state and ability to go up
     bool hasSel = false;
     if (auto selectionModel = rightView_->selectionModel()) {
-        hasSel = !selectionModel->selectedRows(NAME_COL).isEmpty();
+        hasSel = !selectionModel->selectedRows(kNameColumn).isEmpty();
     }
     // Is there a parent directory?
     bool canGoUp = false;

@@ -13,6 +13,8 @@
 
 #include <string>
 
+inline constexpr int kNameColumn = 0;
+
 bool isValidEntryName(const QString &name, QString *why = nullptr);
 bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
                           const QString &labelText, const QString &initialValue,

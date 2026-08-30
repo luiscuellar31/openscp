@@ -18,6 +18,13 @@ allowlist.
 - Preserve explicit ownership. Use `UniqueFile` for `FILE*`, `SecureString` for
   secrets, and RAII for locks and protocol handles.
 
+New implementation fragments are not allowed: use normal `.hpp`/`.cpp`
+translation units. The seven existing `Libssh2SftpClient.*.inc` files are a
+closed legacy set because their private transport helpers deliberately share
+internal linkage in one translation unit. CMake lists them explicitly and the
+quality script requires each one to be included exactly once. They remain
+subject to formatting and analysis through `Libssh2SftpClient.cpp`.
+
 Format every tracked `.cpp`, `.cc`, `.cxx`, `.h`, `.hh`, `.hpp`, and `.inc`
 file with LLVM 17. Check the repository with:
 

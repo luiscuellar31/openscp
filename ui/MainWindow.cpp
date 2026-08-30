@@ -86,8 +86,6 @@
 #include <memory>
 #include <thread>
 
-static constexpr int NAME_COL = 0;
-
 static QIcon mainWindowActionIcon(const char *name) {
     return QIcon(QStringLiteral(":/assets/icons/") + QLatin1String(name));
 }
@@ -531,7 +529,7 @@ void MainWindow::initializePanels(const QString &home) {
             if (!rightIsRemote_)
                 return; // only when remote
             auto sel = rightView_->selectionModel();
-            if (!sel || sel->selectedRows(NAME_COL).isEmpty()) {
+            if (!sel || sel->selectedRows(kNameColumn).isEmpty()) {
                 statusBar()->showMessage(tr("Select items to download"), 2000);
                 return;
             }
@@ -2164,7 +2162,7 @@ void MainWindow::updateDeleteShortcutEnables() {
     auto hasColSel = [&](QTreeView *treeView) -> bool {
         if (!treeView || !treeView->selectionModel())
             return false;
-        return !treeView->selectionModel()->selectedRows(NAME_COL).isEmpty();
+        return !treeView->selectionModel()->selectedRows(kNameColumn).isEmpty();
     };
     const bool leftHasSel = hasColSel(leftView_);
     const bool rightHasSel = hasColSel(rightView_);

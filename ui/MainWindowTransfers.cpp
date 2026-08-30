@@ -34,8 +34,7 @@
 #include <limits>
 #include <memory>
 
-static constexpr int NAME_COL = 0;
-static const char *kStagingBatchMime = "application/x-openscp-staging-batch";
+constexpr char kStagingBatchMime[] = "application/x-openscp-staging-batch";
 
 static bool isLocalUploadPreparationTerminal(TransferTask::Status status) {
     switch (status) {
@@ -1161,11 +1160,11 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
             if (rightIsRemote_ == true && rightView_ && rightRemoteModel_) {
                 auto selectionModel = rightView_->selectionModel();
                 if (!selectionModel ||
-                    selectionModel->selectedRows(NAME_COL).isEmpty()) {
+                    selectionModel->selectedRows(kNameColumn).isEmpty()) {
                     dropEvent->acceptProposedAction();
                     return true;
                 }
-                const auto rows = selectionModel->selectedRows(NAME_COL);
+                const auto rows = selectionModel->selectedRows(kNameColumn);
                 int bad = 0;
                 QVector<RemoteDownloadSeed> seeds;
                 seeds.reserve(rows.size());

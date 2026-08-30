@@ -15,6 +15,23 @@ set(OPENSCP_CORE_SRCS
     src/libssh2/Libssh2SftpClient.cpp   # real implementation
 )
 
+# These legacy fragments form one libssh2 translation unit because their
+# private transport helpers intentionally share internal linkage. New code
+# must use normal .hpp/.cpp units; scripts/check_cpp_quality.sh enforces this
+# closed list and formats every fragment.
+set(OPENSCP_LIBSSH2_FRAGMENTS
+    src/libssh2/detail/Libssh2SftpClient.FileListing.inc
+    src/libssh2/detail/Libssh2SftpClient.FileMetadataOps.inc
+    src/libssh2/detail/Libssh2SftpClient.TransferOps.inc
+    src/libssh2/detail/Libssh2SftpClient.TransferSupport.inc
+    src/libssh2/detail/Libssh2SftpClient.TransportAuth.inc
+    src/libssh2/detail/Libssh2SftpClient.TransportLifecycle.inc
+    src/libssh2/detail/Libssh2SftpClient.TransportNet.inc
+)
+set_source_files_properties(${OPENSCP_LIBSSH2_FRAGMENTS}
+    PROPERTIES HEADER_FILE_ONLY TRUE
+)
+
 set(OPENSCP_HAS_CURL_FTP 0)
 set(OPENSCP_HAS_CURL_WEBDAV 0)
 
@@ -105,7 +122,10 @@ if (OPENSCP_ENABLE_MOCK)
     list(APPEND OPENSCP_CORE_SRCS src/mock/MockSftpClient.cpp)
 endif()
 
-add_library(openscp_core STATIC ${OPENSCP_CORE_SRCS})
+add_library(openscp_core STATIC
+    ${OPENSCP_CORE_SRCS}
+    ${OPENSCP_LIBSSH2_FRAGMENTS}
+)
 
 target_include_directories(openscp_core
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include

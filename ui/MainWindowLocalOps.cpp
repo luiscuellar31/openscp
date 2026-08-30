@@ -34,8 +34,6 @@
 #include <functional>
 #include <memory>
 
-static constexpr int NAME_COL = 0;
-
 static bool entryExists(const QString &path) {
     const QFileInfo info(path);
     return info.exists() || info.isSymLink();
@@ -399,7 +397,7 @@ void MainWindow::copyLeftToRight() {
             UiAlerts::warning(this, tr("Copy"), tr("No selection available."));
             return;
         }
-        const auto rows = selectionModel->selectedRows(NAME_COL);
+        const auto rows = selectionModel->selectedRows(kNameColumn);
         if (rows.isEmpty()) {
             UiAlerts::information(this, tr("Copy"),
                                   tr("No entries selected in the left panel."));
@@ -458,7 +456,7 @@ void MainWindow::copyLeftToRight() {
         UiAlerts::warning(this, tr("Copy"), tr("No selection available."));
         return;
     }
-    const auto rows = selectionModel->selectedRows(NAME_COL);
+    const auto rows = selectionModel->selectedRows(kNameColumn);
     if (rows.isEmpty()) {
         UiAlerts::information(this, tr("Copy"),
                               tr("No entries selected in the left panel."));
@@ -487,8 +485,8 @@ void MainWindow::moveLeftToRight() {
             return;
         }
         auto *selection = leftView_->selectionModel();
-        const auto rows =
-            selection ? selection->selectedRows(NAME_COL) : QModelIndexList{};
+        const auto rows = selection ? selection->selectedRows(kNameColumn)
+                                    : QModelIndexList{};
         if (rows.isEmpty()) {
             UiAlerts::information(this, tr("Move"),
                                   tr("No entries selected in the left panel."));
@@ -523,7 +521,7 @@ void MainWindow::moveLeftToRight() {
                           tr("Destination folder does not exist."));
         return;
     }
-    const auto rows = leftView_->selectionModel()->selectedRows(NAME_COL);
+    const auto rows = leftView_->selectionModel()->selectedRows(kNameColumn);
     if (rows.isEmpty()) {
         UiAlerts::information(this, tr("Move"),
                               tr("No entries selected in the left panel."));
@@ -548,7 +546,7 @@ void MainWindow::moveLeftToRight() {
 }
 
 void MainWindow::deleteFromLeft() {
-    const auto rows = leftView_->selectionModel()->selectedRows(NAME_COL);
+    const auto rows = leftView_->selectionModel()->selectedRows(kNameColumn);
     if (rows.isEmpty()) {
         UiAlerts::information(this, tr("Delete"),
                               tr("No entries selected in the left panel."));
@@ -706,7 +704,7 @@ void MainWindow::showLeftContextMenu(const QPoint &pos) {
     // Selection and ability to go up
     bool hasSel = false;
     if (auto selectionModel = leftView_->selectionModel()) {
-        hasSel = !selectionModel->selectedRows(NAME_COL).isEmpty();
+        hasSel = !selectionModel->selectedRows(kNameColumn).isEmpty();
     }
     QDir currentDir(leftPath_ ? leftPath_->text() : QString());
     bool canGoUp = currentDir.cdUp();

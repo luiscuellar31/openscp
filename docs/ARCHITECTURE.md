@@ -53,7 +53,7 @@ behavior testable without constructing `MainWindow`.
 ## Connection coordination
 
 `SessionController` owns connection/disconnection lifecycle and the active
-client. Two focused coordinators own state that previously lived in
+client. Three focused coordinators own state that previously lived in
 `MainWindow`:
 
 - `HostKeyPromptCoordinator` serializes host-key prompts, preserves pending
@@ -62,6 +62,9 @@ client. Two focused coordinators own state that previously lived in
 - `SessionHealthMonitor` owns its timer, activity timestamps, application
   resume detection, active probe ID, overlap prevention, and cancellation on
   stop.
+- `ConnectionStatusCoordinator` owns the session timer, connection type, and
+  elapsed-time snapshots while `MainWindow` retains translated presentation
+  and security-warning styling.
 
 `MainWindow` provides translated strings, dialogs, status messages, and
 connection-loss alerts through callbacks. It does not own either
@@ -77,8 +80,9 @@ for initialization, persistence, or explicit full refreshes.
 
 `TransferUiController` is initialized once from a full snapshot and then
 observes upserts and removed IDs. Direct manager queries such as
-`hasActiveTaskForSource`, `hasActiveTaskForDestination`, and `isBatchTerminal`
-avoid copying large queues for simple decisions.
+`hasActiveTaskForSource`, `hasActiveTaskForDestination`,
+`activeTaskIdsForSession`, and `isBatchTerminal` avoid copying large queues for
+simple decisions.
 
 The permitted nested mutex order in `TransferManager` is:
 
