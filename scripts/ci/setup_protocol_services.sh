@@ -99,6 +99,18 @@ write_vsftpd_config() {
   } >"$output_path"
 }
 
+launch_vsftpd() {
+  local label="$1"
+  local config_path="$2"
+  local launch_error
+
+  log "launching ${label}"
+  if ! launch_error="$(sudo /usr/sbin/vsftpd "$config_path" 2>&1)"; then
+    launch_error="${launch_error//$'\n'/; }"
+    die "${label} process failed to launch: ${launch_error}"
+  fi
+}
+
 dump_diagnostics() {
   local status="$1"
   if [[ $status -eq 0 ]]; then
@@ -235,14 +247,9 @@ write_vsftpd_config \
   "${LOG_DIR}/ftps-implicit.log" implicit
 
 log "starting FTP, explicit FTPS, and implicit FTPS"
-log "launching FTP"
-sudo /usr/sbin/vsftpd "$FTP_CONFIG" || die "FTP process failed to launch"
-log "launching explicit FTPS"
-sudo /usr/sbin/vsftpd "$FTPS_EXPLICIT_CONFIG" ||
-  die "explicit FTPS process failed to launch"
-log "launching implicit FTPS"
-sudo /usr/sbin/vsftpd "$FTPS_IMPLICIT_CONFIG" ||
-  die "implicit FTPS process failed to launch"
+launch_vsftpd "FTP" "$FTP_CONFIG"
+launch_vsftpd "explicit FTPS" "$FTPS_EXPLICIT_CONFIG"
+launch_vsftpd "implicit FTPS" "$FTPS_IMPLICIT_CONFIG"
 
 wait_for_port "FTP" "$FTP_PORT"
 wait_for_port "explicit FTPS" "$FTPS_EXPLICIT_PORT"
