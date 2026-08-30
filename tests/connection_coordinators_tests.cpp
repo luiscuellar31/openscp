@@ -33,7 +33,7 @@ bool waitForPresentations(std::condition_variable &condition, std::mutex &mutex,
                               [&] { return presented.size() >= expected; });
 }
 
-void testHostKeyAcceptanceAndRejection(TestContext &test) {
+OPENSCP_TEST(testHostKeyAcceptanceAndRejection, test) {
     openscpui::HostKeyPromptCoordinator coordinator;
     std::mutex mutex;
     std::condition_variable presentedChanged;
@@ -70,7 +70,7 @@ void testHostKeyAcceptanceAndRejection(TestContext &test) {
                "decisions without an active prompt should be ignored");
 }
 
-void testHostKeyCancellation(TestContext &test) {
+OPENSCP_TEST(testHostKeyCancellation, test) {
     openscpui::HostKeyPromptCoordinator coordinator;
     std::promise<void> presented;
     coordinator.setPresentPrompt(
@@ -98,7 +98,7 @@ void testHostKeyCancellation(TestContext &test) {
                "later host-key requests should remain usable");
 }
 
-void testConcurrentHostKeyPromptsAreSerialized(TestContext &test) {
+OPENSCP_TEST(testConcurrentHostKeyPromptsAreSerialized, test) {
     openscpui::HostKeyPromptCoordinator coordinator;
     std::mutex mutex;
     std::condition_variable presentedChanged;
@@ -137,7 +137,7 @@ void testConcurrentHostKeyPromptsAreSerialized(TestContext &test) {
                "the second serialized prompt should retain its decision");
 }
 
-void testSessionHealthLifecycleAndOverlappingProbes(TestContext &test) {
+OPENSCP_TEST(testSessionHealthLifecycleAndOverlappingProbes, test) {
     openscpui::SessionHealthMonitor monitor;
     quint64 nextJobId = 0;
     QVector<QString> submittedPaths;
@@ -210,7 +210,7 @@ void testSessionHealthLifecycleAndOverlappingProbes(TestContext &test) {
                "health probes should use the current remote path callback");
 }
 
-void testSessionHealthResumeProbe(TestContext &test) {
+OPENSCP_TEST(testSessionHealthResumeProbe, test) {
     openscpui::SessionHealthMonitor monitor;
     QString submittedReason;
     quint64 nextJobId = 40;
@@ -242,14 +242,6 @@ void testSessionHealthResumeProbe(TestContext &test) {
 } // namespace
 
 int main(int argc, char **argv) {
-    QCoreApplication application(argc, argv);
-    TestContext test;
-    testHostKeyAcceptanceAndRejection(test);
-    testHostKeyCancellation(test);
-    testConcurrentHostKeyPromptsAreSerialized(test);
-    testSessionHealthLifecycleAndOverlappingProbes(test);
-    testSessionHealthResumeProbe(test);
-    if (test.failures == 0)
-        std::cout << "All connection coordinator tests passed\n";
-    return test.failures == 0 ? 0 : 1;
+    openscp::test::TestHarness harness("connection coordinator");
+    return harness.runWithApplication<QCoreApplication>(argc, argv);
 }

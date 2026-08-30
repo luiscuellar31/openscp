@@ -283,7 +283,7 @@ makeConnectedClient(const std::shared_ptr<FakeState> &state) {
     return client;
 }
 
-void testTypedOperationsAreSerialized(TestContext &test) {
+OPENSCP_TEST(testTypedOperationsAreSerialized, test) {
     RemoteOperationController controller;
     const auto state = std::make_shared<FakeState>();
     int readySignals = 0;
@@ -402,7 +402,7 @@ void testTypedOperationsAreSerialized(TestContext &test) {
     }
 }
 
-void testChecksumCancellationKeepsEventLoopResponsive(TestContext &test) {
+OPENSCP_TEST(testChecksumCancellationKeepsEventLoopResponsive, test) {
     RemoteOperationController controller;
     const auto state = std::make_shared<FakeState>();
     RemoteOperationController::JobId checksumJob = 0;
@@ -450,7 +450,7 @@ void testChecksumCancellationKeepsEventLoopResponsive(TestContext &test) {
                "checksum cancellation should interrupt blocking remote I/O");
 }
 
-void testListRejectsUnsafeNames(TestContext &test) {
+OPENSCP_TEST(testListRejectsUnsafeNames, test) {
     RemoteOperationController controller;
     const auto state = std::make_shared<FakeState>();
     RemoteOperationController::JobId listJob = 0;
@@ -483,7 +483,7 @@ void testListRejectsUnsafeNames(TestContext &test) {
                "normal listings should report every rejected name");
 }
 
-void testRecursiveMutationsRejectUnsafeNames(TestContext &test) {
+OPENSCP_TEST(testRecursiveMutationsRejectUnsafeNames, test) {
     RemoteOperationController controller;
     const auto state = std::make_shared<FakeState>();
     RemoteOperationController::JobId deleteJob = 0;
@@ -551,7 +551,7 @@ void testRecursiveMutationsRejectUnsafeNames(TestContext &test) {
         "recursive mutations must never target unsafe names or skipped links");
 }
 
-void testCancellationAndGenerationReplacement(TestContext &test) {
+OPENSCP_TEST(testCancellationAndGenerationReplacement, test) {
     RemoteOperationController controller;
     const auto firstState = std::make_shared<FakeState>();
     const auto secondState = std::make_shared<FakeState>();
@@ -614,7 +614,7 @@ void testCancellationAndGenerationReplacement(TestContext &test) {
                "a replaced client should not be destroyed on the UI thread");
 }
 
-void testExplicitCancellationAndShutdown(TestContext &test) {
+OPENSCP_TEST(testExplicitCancellationAndShutdown, test) {
     const auto state = std::make_shared<FakeState>();
     RemoteOperationController::JobId slowJob = 0;
     bool started = false;
@@ -656,7 +656,7 @@ void testExplicitCancellationAndShutdown(TestContext &test) {
                "shutdown should destroy the client on the serialized lane");
 }
 
-void testTraversalPauseProvidesBackpressure(TestContext &test) {
+OPENSCP_TEST(testTraversalPauseProvidesBackpressure, test) {
     RemoteOperationController controller;
     const auto state = std::make_shared<FakeState>();
     RemoteOperationController::JobId slowJob = 0;
@@ -717,7 +717,7 @@ void testTraversalPauseProvidesBackpressure(TestContext &test) {
                "resumed traversal should finish");
 }
 
-void testHealthChecksYieldToUserWork(TestContext &test) {
+OPENSCP_TEST(testHealthChecksYieldToUserWork, test) {
     RemoteOperationController controller;
     const auto state = std::make_shared<FakeState>();
     RemoteOperationController::JobId blocker = 0;
@@ -769,7 +769,7 @@ void testHealthChecksYieldToUserWork(TestContext &test) {
                "queued health checks must yield to later user operations");
 }
 
-void testDiscoverySummaryCountersAndConfinement(TestContext &test) {
+OPENSCP_TEST(testDiscoverySummaryCountersAndConfinement, test) {
     RemoteOperationController controller;
     const auto state = std::make_shared<FakeState>();
     std::optional<RemoteOperationController::Completion> traversalCompletion;
@@ -859,23 +859,6 @@ void testDiscoverySummaryCountersAndConfinement(TestContext &test) {
 } // namespace
 
 int main(int argc, char **argv) {
-    QCoreApplication application(argc, argv);
-    TestContext test;
-    testTypedOperationsAreSerialized(test);
-    testCancellationAndGenerationReplacement(test);
-    testExplicitCancellationAndShutdown(test);
-    testChecksumCancellationKeepsEventLoopResponsive(test);
-    testListRejectsUnsafeNames(test);
-    testRecursiveMutationsRejectUnsafeNames(test);
-    testTraversalPauseProvidesBackpressure(test);
-    testHealthChecksYieldToUserWork(test);
-    testDiscoverySummaryCountersAndConfinement(test);
-
-    if (test.failures == 0) {
-        std::cout << "All remote operation controller tests passed\n";
-        return 0;
-    }
-    std::cerr << test.failures
-              << " remote operation controller test(s) failed\n";
-    return 1;
+    openscp::test::TestHarness harness("remote operation controller");
+    return harness.runWithApplication<QCoreApplication>(argc, argv);
 }

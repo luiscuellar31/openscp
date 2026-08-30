@@ -34,7 +34,7 @@ void writeLegacySites() {
     settings.sync();
 }
 
-void testLegacyMigration(TestContext &test) {
+OPENSCP_TEST(testLegacyMigration, test) {
     writeLegacySites();
     int nextId = 0;
     const auto loaded = SavedSitesPersistence::loadSites(
@@ -68,7 +68,7 @@ void testLegacyMigration(TestContext &test) {
                "legacy WebDAV sites should migrate to a root base path");
 }
 
-void testRoundTrip(TestContext &test) {
+OPENSCP_TEST(testRoundTrip, test) {
     SiteEntry site;
     site.siteId = QStringLiteral("stable-site-id");
     site.name = QStringLiteral("Production DAV");
@@ -131,7 +131,7 @@ void testRoundTrip(TestContext &test) {
     raw.endArray();
 }
 
-void testDuplicateIdsAreRepaired(TestContext &test) {
+OPENSCP_TEST(testDuplicateIdsAreRepaired, test) {
     QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
     settings.clear();
     settings.beginWriteArray(QStringLiteral("sites"));
@@ -167,7 +167,7 @@ void testDuplicateIdsAreRepaired(TestContext &test) {
                "receive new identities");
 }
 
-void testLegacySecretsRemainAvailableForSecureMigration(TestContext &test) {
+OPENSCP_TEST(testLegacySecretsRemainAvailableForSecureMigration, test) {
     QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
     settings.clear();
     settings.beginWriteArray(QStringLiteral("sites"));
@@ -213,7 +213,7 @@ void testLegacySecretsRemainAvailableForSecureMigration(TestContext &test) {
     settings.endArray();
 }
 
-void testInitialRemotePathNormalization(TestContext &test) {
+OPENSCP_TEST(testInitialRemotePathNormalization, test) {
     QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
     settings.clear();
     settings.beginWriteArray(QStringLiteral("sites"));
@@ -276,18 +276,8 @@ int main(int argc, char **argv) {
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                        settingsRoot.path());
 
-    TestContext test;
-    testLegacyMigration(test);
-    testRoundTrip(test);
-    testDuplicateIdsAreRepaired(test);
-    testLegacySecretsRemainAvailableForSecureMigration(test);
-    testInitialRemotePathNormalization(test);
-
+    openscp::test::TestHarness harness("saved-sites persistence");
+    const int result = harness.run();
     QSettings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP")).clear();
-    if (test.failures == 0) {
-        std::cout << "All saved-sites persistence tests passed\n";
-        return 0;
-    }
-    std::cerr << test.failures << " saved-sites persistence test(s) failed\n";
-    return 1;
+    return result;
 }

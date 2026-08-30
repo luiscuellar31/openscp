@@ -1,7 +1,7 @@
 include(CMakeParseArguments)
 
 function(openscp_add_test TARGET_NAME)
-    set(options)
+    set(options CUSTOM_MAIN)
     set(one_value_args SKIP_RETURN_CODE)
     set(multi_value_args SOURCES INCLUDE_DIRECTORIES LINK_LIBRARIES LABELS)
     cmake_parse_arguments(TEST
@@ -50,6 +50,10 @@ function(openscp_add_test TARGET_NAME)
         if(TEST_SOURCE_ABSOLUTE MATCHES "_tests\\.cpp$")
             set_property(GLOBAL APPEND PROPERTY OPENSCP_REGISTERED_TEST_SOURCES
                 "${TEST_SOURCE_ABSOLUTE}")
+            if(NOT TEST_CUSTOM_MAIN)
+                set_property(GLOBAL APPEND PROPERTY OPENSCP_HARNESS_TEST_SOURCES
+                    "${TEST_SOURCE_ABSOLUTE}")
+            endif()
         endif()
     endforeach()
 endfunction()
@@ -102,6 +106,7 @@ openscp_add_test(openscp_sync_comparison_tests
 )
 
 openscp_add_test(openscp_sftp_integration_tests
+    CUSTOM_MAIN
     SOURCES libssh2_integration_tests.cpp
     INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/include
     LINK_LIBRARIES openscp_core
@@ -110,6 +115,7 @@ openscp_add_test(openscp_sftp_integration_tests
 )
 
 openscp_add_test(openscp_scp_integration_tests
+    CUSTOM_MAIN
     SOURCES libssh2_scp_integration_tests.cpp
     INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/include
     LINK_LIBRARIES openscp_core
@@ -121,6 +127,7 @@ get_target_property(OPENSCP_CORE_HAS_CURL_FTP
     openscp_core OPENSCP_HAS_CURL_FTP)
 if(OPENSCP_CORE_HAS_CURL_FTP)
     openscp_add_test(openscp_ftp_integration_tests
+        CUSTOM_MAIN
         SOURCES curl_ftp_integration_tests.cpp
         INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/include
         LINK_LIBRARIES openscp_core
@@ -128,6 +135,7 @@ if(OPENSCP_CORE_HAS_CURL_FTP)
         SKIP_RETURN_CODE 77
     )
     openscp_add_test(openscp_ftps_integration_tests
+        CUSTOM_MAIN
         SOURCES curl_ftps_integration_tests.cpp
         INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/include
         LINK_LIBRARIES openscp_core
@@ -154,6 +162,7 @@ endif()
 
 if(OPENSCP_CORE_HAS_CURL_WEBDAV)
     openscp_add_test(openscp_webdav_integration_tests
+        CUSTOM_MAIN
         SOURCES curl_webdav_integration_tests.cpp
         INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/include
         LINK_LIBRARIES openscp_core
@@ -180,6 +189,22 @@ foreach(TEST_SOURCE IN LISTS OPENSCP_DISCOVERED_TEST_SOURCES)
         message(FATAL_ERROR
             "Unregistered test source: ${TEST_SOURCE}. "
             "Add it with openscp_add_test(...).")
+    endif()
+endforeach()
+
+# Unit-test sources use TestHarness and OPENSCP_TEST static registration. The
+# CUSTOM_MAIN escape hatch is reserved for protocol scenarios whose exit code
+# 77 preserves CTest's service/credential skip contract.
+get_property(OPENSCP_HARNESS_TEST_SOURCES GLOBAL PROPERTY
+    OPENSCP_HARNESS_TEST_SOURCES)
+list(REMOVE_DUPLICATES OPENSCP_HARNESS_TEST_SOURCES)
+foreach(TEST_SOURCE IN LISTS OPENSCP_HARNESS_TEST_SOURCES)
+    file(READ "${TEST_SOURCE}" TEST_SOURCE_CONTENTS)
+    if(NOT TEST_SOURCE_CONTENTS MATCHES "openscp::test::TestHarness")
+        message(FATAL_ERROR
+            "Test source bypasses TestHarness: ${TEST_SOURCE}. "
+            "Use OPENSCP_TEST(...) auto-registration or mark a protocol "
+            "integration scenario CUSTOM_MAIN.")
     endif()
 endforeach()
 

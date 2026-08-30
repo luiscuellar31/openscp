@@ -62,7 +62,7 @@ bool readTextFile(const fs::path &path, std::string &out) {
     return in.good() || in.eof();
 }
 
-void test_session_defaults(TestContext &t) {
+OPENSCP_TEST(test_session_defaults, t) {
     openscp::SessionOptions o;
     t.check(o.protocol == openscp::Protocol::Sftp,
             "default protocol should be SFTP");
@@ -96,7 +96,7 @@ void test_session_defaults(TestContext &t) {
             "session passwords should use SecureString storage");
 }
 
-void test_secure_string_value_semantics(TestContext &t) {
+OPENSCP_TEST(test_secure_string_value_semantics, t) {
     openscp::SecureString original("secret");
     openscp::SecureString copy(original);
     original = std::string_view("changed");
@@ -111,7 +111,7 @@ void test_secure_string_value_semantics(TestContext &t) {
     t.check(moved.empty(), "SecureString clear should release the value");
 }
 
-void test_libssh2_input_safety(TestContext &t) {
+OPENSCP_TEST(test_libssh2_input_safety, t) {
     using namespace openscp::libssh2detail;
 
     const unsigned char nonTerminatedPrompt[] = {'U', 's', 'e', 'r'};
@@ -152,7 +152,7 @@ void test_libssh2_input_safety(TestContext &t) {
             "SSH hosts must keep ports in the dedicated field");
 }
 
-void test_safe_local_partial_files(TestContext &t) {
+OPENSCP_TEST(test_safe_local_partial_files, t) {
     const fs::path target = makeTempFilePath("safe-target");
     const fs::path partial = target.string() + ".part";
     std::error_code ec;
@@ -217,7 +217,7 @@ void test_safe_local_partial_files(TestContext &t) {
     fs::remove_all(target.parent_path(), ec);
 }
 
-void test_protocol_helpers(TestContext &t) {
+OPENSCP_TEST(test_protocol_helpers, t) {
     t.check(openscp::protocolFromStorageName("sftp") == openscp::Protocol::Sftp,
             "protocolFromStorageName should parse sftp");
     t.check(openscp::protocolFromStorageName("SCP") == openscp::Protocol::Scp,
@@ -398,7 +398,7 @@ void test_protocol_helpers(TestContext &t) {
 }
 
 #if OPENSCP_HAS_CURL_FTP
-void test_curlftp_rejects_unsupported_proxy_type(TestContext &t) {
+OPENSCP_TEST(test_curlftp_rejects_unsupported_proxy_type, t) {
     openscp::CurlFtpClient client(openscp::Protocol::Ftp);
     openscp::SessionOptions opt;
     opt.protocol = openscp::Protocol::Ftp;
@@ -419,7 +419,7 @@ void test_curlftp_rejects_unsupported_proxy_type(TestContext &t) {
             "FTP validation failure should expose a structured error");
 }
 
-void test_curlftp_rejects_command_injection_paths(TestContext &t) {
+OPENSCP_TEST(test_curlftp_rejects_command_injection_paths, t) {
     openscp::CurlFtpClient client(openscp::Protocol::Ftp);
     std::vector<openscp::FileInfo> entries;
     std::string err;
@@ -434,7 +434,7 @@ void test_curlftp_rejects_command_injection_paths(TestContext &t) {
 #endif
 
 #if OPENSCP_HAS_CURL_FTP || OPENSCP_HAS_CURL_WEBDAV
-void test_curl_structured_error_mappings(TestContext &t) {
+OPENSCP_TEST(test_curl_structured_error_mappings, t) {
     const openscp::RemoteError diskFull = openscp::curlcommon::errorFromCurl(
         CURLE_REMOTE_DISK_FULL, "remote disk full");
     t.check(diskFull.kind == openscp::RemoteErrorKind::InsufficientSpace &&
@@ -466,7 +466,7 @@ void test_curl_structured_error_mappings(TestContext &t) {
 #endif
 
 #if OPENSCP_HAS_CURL_WEBDAV
-void test_curlwebdav_rejects_control_characters(TestContext &t) {
+OPENSCP_TEST(test_curlwebdav_rejects_control_characters, t) {
     openscp::CurlWebDavClient client;
     std::vector<openscp::FileInfo> entries;
     std::string err;
@@ -480,7 +480,7 @@ void test_curlwebdav_rejects_control_characters(TestContext &t) {
 }
 #endif
 
-void test_connect_validation(TestContext &t) {
+OPENSCP_TEST(test_connect_validation, t) {
     openscp::MockSftpClient c;
     std::string err;
     openscp::SessionOptions opt;
@@ -500,7 +500,7 @@ void test_connect_validation(TestContext &t) {
             "client should report connected after successful connect");
 }
 
-void test_disconnect_changes_state(TestContext &t) {
+OPENSCP_TEST(test_disconnect_changes_state, t) {
     openscp::MockSftpClient c;
     std::string err;
     auto opt = validOptions();
@@ -514,7 +514,7 @@ void test_disconnect_changes_state(TestContext &t) {
     t.check(!c.list("/", out, err), "list should fail after disconnect");
 }
 
-void test_list_requires_connection(TestContext &t) {
+OPENSCP_TEST(test_list_requires_connection, t) {
     openscp::MockSftpClient c;
     std::vector<openscp::FileInfo> out;
     std::string err;
@@ -522,7 +522,7 @@ void test_list_requires_connection(TestContext &t) {
     t.check(!err.empty(), "list should provide error when disconnected");
 }
 
-void test_list_sorting_and_known_path(TestContext &t) {
+OPENSCP_TEST(test_list_sorting_and_known_path, t) {
     openscp::MockSftpClient c;
     std::string err;
     auto opt = validOptions();
@@ -542,7 +542,7 @@ void test_list_sorting_and_known_path(TestContext &t) {
     }
 }
 
-void test_list_root_and_empty_path(TestContext &t) {
+OPENSCP_TEST(test_list_root_and_empty_path, t) {
     openscp::MockSftpClient c;
     std::string err;
     auto opt = validOptions();
@@ -568,7 +568,7 @@ void test_list_root_and_empty_path(TestContext &t) {
             "list('') should match root entry count");
 }
 
-void test_missing_path_error(TestContext &t) {
+OPENSCP_TEST(test_missing_path_error, t) {
     openscp::MockSftpClient c;
     std::string err;
     auto opt = validOptions();
@@ -582,7 +582,7 @@ void test_missing_path_error(TestContext &t) {
     t.check(!err.empty(), "missing path should report non-empty error");
 }
 
-void test_unsupported_methods_report_error(TestContext &t) {
+OPENSCP_TEST(test_unsupported_methods_report_error, t) {
     openscp::MockSftpClient c;
     std::string err;
     bool isDir = true;
@@ -657,7 +657,7 @@ void test_unsupported_methods_report_error(TestContext &t) {
             "a mock without hashing must not advertise checksum support");
 }
 
-void test_new_connection_like(TestContext &t) {
+OPENSCP_TEST(test_new_connection_like, t) {
     openscp::MockSftpClient c;
     auto opt = validOptions();
     std::string err;
@@ -668,7 +668,7 @@ void test_new_connection_like(TestContext &t) {
             "newConnectionLike client should be connected");
 }
 
-void test_new_connection_like_validation(TestContext &t) {
+OPENSCP_TEST(test_new_connection_like_validation, t) {
     openscp::MockSftpClient c;
     openscp::SessionOptions bad;
     bad.host = "";
@@ -679,7 +679,7 @@ void test_new_connection_like_validation(TestContext &t) {
     t.check(!err.empty(), "newConnectionLike should report validation errors");
 }
 
-void test_client_factory(TestContext &t) {
+OPENSCP_TEST(test_client_factory, t) {
     auto sftp = openscp::CreateClientForProtocol(openscp::Protocol::Sftp);
     t.check(static_cast<bool>(sftp),
             "factory should create SFTP backend instance");
@@ -731,7 +731,7 @@ void test_client_factory(TestContext &t) {
 #endif
 }
 
-void test_set_times(TestContext &t) {
+OPENSCP_TEST(test_set_times, t) {
     openscp::MockSftpClient c;
     std::string err;
     const bool ok = c.setTimes("/home/luis/foto.jpg", 10, 20, err);
@@ -739,7 +739,7 @@ void test_set_times(TestContext &t) {
     t.check(err.empty(), "setTimes should not set an error in mock client");
 }
 
-void test_libssh2_rejects_conflicting_proxy_and_jump(TestContext &t) {
+OPENSCP_TEST(test_libssh2_rejects_conflicting_proxy_and_jump, t) {
     openscp::Libssh2SftpClient c;
     openscp::SessionOptions opt = validOptions();
     opt.proxy_type = openscp::ProxyType::Socks5;
@@ -758,7 +758,7 @@ void test_libssh2_rejects_conflicting_proxy_and_jump(TestContext &t) {
             "libssh2 validation failures should expose structured metadata");
 }
 
-void test_libssh2_backends_expose_structured_errors(TestContext &t) {
+OPENSCP_TEST(test_libssh2_backends_expose_structured_errors, t) {
     openscp::Libssh2SftpClient sftp;
     std::vector<openscp::FileInfo> entries;
     std::string err;
@@ -788,7 +788,7 @@ void test_libssh2_backends_expose_structured_errors(TestContext &t) {
             "error");
 }
 
-void test_shared_libssh2_error_classification(TestContext &t) {
+OPENSCP_TEST(test_shared_libssh2_error_classification, t) {
     const openscp::RemoteError authentication =
         openscp::libssh2detail::classifyFailure(
             "Private key authentication failed", nullptr);
@@ -811,7 +811,7 @@ void test_shared_libssh2_error_classification(TestContext &t) {
 }
 
 #ifdef _WIN32
-void test_libssh2_rejects_jump_on_windows(TestContext &t) {
+OPENSCP_TEST(test_libssh2_rejects_jump_on_windows, t) {
     openscp::Libssh2SftpClient c;
     openscp::SessionOptions opt = validOptions();
     opt.jump_host = std::string("bastion.example.test");
@@ -825,7 +825,7 @@ void test_libssh2_rejects_jump_on_windows(TestContext &t) {
 }
 #endif
 
-void test_remove_known_hosts_entry_plain_and_hashed(TestContext &t) {
+OPENSCP_TEST(test_remove_known_hosts_entry_plain_and_hashed, t) {
     const std::string key =
         "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/qwU9iIfMHkUqPnwGwGZRuQQ3v1d";
     const fs::path khPath = makeTempFilePath("openscp-knownhosts-cleanup");
@@ -862,7 +862,7 @@ void test_remove_known_hosts_entry_plain_and_hashed(TestContext &t) {
     fs::remove_all(khPath.parent_path(), ec);
 }
 
-void test_remove_known_hosts_entry_non_default_port(TestContext &t) {
+OPENSCP_TEST(test_remove_known_hosts_entry_non_default_port, t) {
     const std::string key =
         "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/qwU9iIfMHkUqPnwGwGZRuQQ3v1d";
     const fs::path khPath = makeTempFilePath("openscp-knownhosts-port");
@@ -897,41 +897,5 @@ void test_remove_known_hosts_entry_non_default_port(TestContext &t) {
 
 int main() {
     openscp::test::TestHarness harness("core");
-    harness.add("core behavior", [](TestContext &test) {
-        test_session_defaults(test);
-        test_secure_string_value_semantics(test);
-        test_libssh2_input_safety(test);
-        test_safe_local_partial_files(test);
-        test_protocol_helpers(test);
-        test_connect_validation(test);
-        test_disconnect_changes_state(test);
-        test_list_requires_connection(test);
-        test_list_sorting_and_known_path(test);
-        test_list_root_and_empty_path(test);
-        test_missing_path_error(test);
-        test_unsupported_methods_report_error(test);
-        test_new_connection_like(test);
-        test_new_connection_like_validation(test);
-        test_client_factory(test);
-        test_set_times(test);
-        test_libssh2_rejects_conflicting_proxy_and_jump(test);
-        test_libssh2_backends_expose_structured_errors(test);
-        test_shared_libssh2_error_classification(test);
-#if OPENSCP_HAS_CURL_FTP
-        test_curlftp_rejects_unsupported_proxy_type(test);
-        test_curlftp_rejects_command_injection_paths(test);
-#endif
-#if OPENSCP_HAS_CURL_FTP || OPENSCP_HAS_CURL_WEBDAV
-        test_curl_structured_error_mappings(test);
-#endif
-#if OPENSCP_HAS_CURL_WEBDAV
-        test_curlwebdav_rejects_control_characters(test);
-#endif
-#ifdef _WIN32
-        test_libssh2_rejects_jump_on_windows(test);
-#endif
-        test_remove_known_hosts_entry_plain_and_hashed(test);
-        test_remove_known_hosts_entry_non_default_port(test);
-    });
     return harness.run();
 }

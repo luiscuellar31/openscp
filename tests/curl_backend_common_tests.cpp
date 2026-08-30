@@ -17,7 +17,7 @@
 
 namespace {
 
-void testRetryAfter(TestContext &test) {
+OPENSCP_TEST(testRetryAfter, test) {
     using openscp::curlcommon::parseRetryAfter;
 
     test.check(parseRetryAfter("15", 0) == std::optional<std::uint32_t>(15),
@@ -41,7 +41,7 @@ void testRetryAfter(TestContext &test) {
                "invalid Retry-After values should be ignored");
 }
 
-void testHostValidation(TestContext &test) {
+OPENSCP_TEST(testHostValidation, test) {
     using openscp::curlcommon::validateUrlHost;
 
     std::string err;
@@ -70,7 +70,7 @@ void testHostValidation(TestContext &test) {
         "control characters must be rejected in hosts");
 }
 
-void testClientsRejectAuthorityInjection(TestContext &test) {
+OPENSCP_TEST(testClientsRejectAuthorityInjection, test) {
 #if OPENSCP_HAS_CURL_FTP
     {
         openscp::CurlFtpClient client(openscp::Protocol::Ftp);
@@ -103,7 +103,7 @@ void testClientsRejectAuthorityInjection(TestContext &test) {
 #endif
 }
 
-void testFtpCommandRoot(TestContext &test) {
+OPENSCP_TEST(testFtpCommandRoot, test) {
     using openscp::curlcommon::ftpCommandPath;
 
     test.check(ftpCommandPath("/", "/workspace/file.txt") ==
@@ -121,7 +121,7 @@ void testFtpCommandRoot(TestContext &test) {
                "normalization");
 }
 
-void testRemotePathNormalization(TestContext &test) {
+OPENSCP_TEST(testRemotePathNormalization, test) {
     using openscp::normalizeRemotePath;
 
     test.check(normalizeRemotePath("") == "/" &&
@@ -134,7 +134,7 @@ void testRemotePathNormalization(TestContext &test) {
                "remote paths must not escape above their logical root");
 }
 
-void testWebDavPaths(TestContext &test) {
+OPENSCP_TEST(testWebDavPaths, test) {
     using openscp::curlcommon::webDavLogicalPath;
     using openscp::curlcommon::webDavServerPath;
 
@@ -155,7 +155,7 @@ void testWebDavPaths(TestContext &test) {
                "WebDAV paths outside the configured base should be rejected");
 }
 
-void testWebDavCompletionStatuses(TestContext &test) {
+OPENSCP_TEST(testWebDavCompletionStatuses, test) {
     using openscp::curlcommon::isCompletedWebDavGetStatus;
     using openscp::curlcommon::isCompletedWebDavWriteStatus;
 
@@ -172,7 +172,7 @@ void testWebDavCompletionStatuses(TestContext &test) {
                "asynchronous or partial WebDAV writes must not be committed");
 }
 
-void testCurlClientState(TestContext &test) {
+OPENSCP_TEST(testCurlClientState, test) {
     openscp::SessionOptions defaults;
     defaults.protocol = openscp::Protocol::Ftp;
     openscp::curlcommon::CurlClientState state(defaults);
@@ -222,7 +222,7 @@ void testCurlClientState(TestContext &test) {
     }
 }
 
-void testBoundedStringSink(TestContext &test) {
+OPENSCP_TEST(testBoundedStringSink, test) {
     std::string output;
     openscp::curlcommon::BoundedStringSink sink{&output, 4};
     char first[] = {'a', 'b', 'c'};
@@ -237,7 +237,7 @@ void testBoundedStringSink(TestContext &test) {
                "oversized response chunks must not be partially appended");
 }
 
-void testCurlTransferLifecycle(TestContext &test) {
+OPENSCP_TEST(testCurlTransferLifecycle, test) {
     std::uint64_t missingSize = 42;
     std::string missingError;
     test.check(openscp::curlcommon::openFileForUpload(
@@ -296,22 +296,6 @@ void testCurlTransferLifecycle(TestContext &test) {
 } // namespace
 
 int main() {
-    TestContext test;
-    testRetryAfter(test);
-    testHostValidation(test);
-    testClientsRejectAuthorityInjection(test);
-    testFtpCommandRoot(test);
-    testRemotePathNormalization(test);
-    testWebDavPaths(test);
-    testWebDavCompletionStatuses(test);
-    testCurlClientState(test);
-    testBoundedStringSink(test);
-    testCurlTransferLifecycle(test);
-    if (test.failures != 0) {
-        std::cerr << "[FAIL] openscp_curl_backend_common_tests failures="
-                  << test.failures << "\n";
-        return EXIT_FAILURE;
-    }
-    std::cout << "[OK] openscp_curl_backend_common_tests\n";
-    return EXIT_SUCCESS;
+    openscp::test::TestHarness harness("curl backend common");
+    return harness.run();
 }

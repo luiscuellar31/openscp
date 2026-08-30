@@ -7,7 +7,7 @@
 
 namespace {
 
-void testLiteralPattern(TestContext &test) {
+OPENSCP_TEST(testLiteralPattern, test) {
     QString error;
     const auto expression = openscpui::PaneController::compileSearchPattern(
         QStringLiteral("report"), &error);
@@ -17,7 +17,7 @@ void testLiteralPattern(TestContext &test) {
                "literal searches should be substring and case insensitive");
 }
 
-void testWildcardPattern(TestContext &test) {
+OPENSCP_TEST(testWildcardPattern, test) {
     const auto expression = openscpui::PaneController::compileSearchPattern(
         QStringLiteral("report-??.pdf"));
     test.check(expression.match(QStringLiteral("report-01.pdf")).hasMatch(),
@@ -27,7 +27,7 @@ void testWildcardPattern(TestContext &test) {
         "wildcard searches should remain anchored");
 }
 
-void testRegularExpression(TestContext &test) {
+OPENSCP_TEST(testRegularExpression, test) {
     const auto expression = openscpui::PaneController::compileSearchPattern(
         QStringLiteral("^invoice_[0-9]+\\.csv$"));
     test.check(expression.match(QStringLiteral("invoice_42.csv")).hasMatch(),
@@ -36,7 +36,7 @@ void testRegularExpression(TestContext &test) {
                "regular-expression constraints should be preserved");
 }
 
-void testInvalidExpression(TestContext &test) {
+OPENSCP_TEST(testInvalidExpression, test) {
     QString error;
     const auto expression = openscpui::PaneController::compileSearchPattern(
         QStringLiteral("[unfinished"), &error);
@@ -47,13 +47,6 @@ void testInvalidExpression(TestContext &test) {
 } // namespace
 
 int main(int argc, char **argv) {
-    QCoreApplication application(argc, argv);
-    TestContext test;
-    testLiteralPattern(test);
-    testWildcardPattern(test);
-    testRegularExpression(test);
-    testInvalidExpression(test);
-    if (test.failures == 0)
-        std::cout << "All pane controller tests passed\n";
-    return test.failures == 0 ? 0 : 1;
+    openscp::test::TestHarness harness("pane controller");
+    return harness.runWithApplication<QCoreApplication>(argc, argv);
 }

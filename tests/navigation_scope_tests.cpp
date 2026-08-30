@@ -18,7 +18,7 @@ openscp::SessionOptions endpoint() {
     return options;
 }
 
-void testEndpointIsolation(TestContext &test) {
+OPENSCP_TEST(testEndpointIsolation, test) {
     const auto base = endpoint();
     const QString scope = openscpui::remoteEndpointScope(base);
     test.check(scope.startsWith(QStringLiteral("endpoint-")) &&
@@ -57,7 +57,7 @@ void testEndpointIsolation(TestContext &test) {
                "secrets must never influence or leak through endpoint scopes");
 }
 
-void testSavedSiteScope(TestContext &test) {
+OPENSCP_TEST(testSavedSiteScope, test) {
     const QString rawId = QStringLiteral(" legacy/site\\id ");
     const QString scope = openscpui::savedSiteNavigationScope(rawId);
     test.check(scope.startsWith(QStringLiteral("site-")) && scope.size() == 37,
@@ -80,7 +80,7 @@ void testSavedSiteScope(TestContext &test) {
                "an empty saved-site ID must not create a shared scope");
 }
 
-void testFtpsModeIsolation(TestContext &test) {
+OPENSCP_TEST(testFtpsModeIsolation, test) {
     openscp::SessionOptions explicitTls;
     explicitTls.protocol = openscp::Protocol::Ftps;
     explicitTls.host = "ftp.example";
@@ -112,12 +112,6 @@ void testFtpsModeIsolation(TestContext &test) {
 } // namespace
 
 int main(int argc, char **argv) {
-    QCoreApplication application(argc, argv);
-    TestContext test;
-    testEndpointIsolation(test);
-    testSavedSiteScope(test);
-    testFtpsModeIsolation(test);
-    if (test.failures == 0)
-        std::cout << "All navigation scope tests passed\n";
-    return test.failures == 0 ? 0 : 1;
+    openscp::test::TestHarness harness("navigation scope");
+    return harness.runWithApplication<QCoreApplication>(argc, argv);
 }

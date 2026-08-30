@@ -29,7 +29,7 @@ openscp::FileInfo entry(std::string name, bool directory, std::uint64_t size,
     return info;
 }
 
-void testLoadingAndReplacement(TestContext &test) {
+OPENSCP_TEST(testLoadingAndReplacement, test) {
     RemoteModel model;
     int loadSignals = 0;
     QString loadedPath;
@@ -81,7 +81,7 @@ void testLoadingAndReplacement(TestContext &test) {
                "loaded entries should be draggable");
 }
 
-void testFilteringSortingAndMimeData(TestContext &test) {
+OPENSCP_TEST(testFilteringSortingAndMimeData, test) {
     RemoteModel model;
     model.setShowHidden(true);
     model.setEntries(QStringLiteral("/"),
@@ -108,7 +108,7 @@ void testFilteringSortingAndMimeData(TestContext &test) {
                "remote drags should advertise native file URLs");
 }
 
-void testLargeListingsReusePrecomputedDisplayData(TestContext &test) {
+OPENSCP_TEST(testLargeListingsReusePrecomputedDisplayData, test) {
     RemoteModel model;
     std::vector<openscp::FileInfo> entries;
     entries.reserve(10'000);
@@ -136,12 +136,6 @@ void testLargeListingsReusePrecomputedDisplayData(TestContext &test) {
 } // namespace
 
 int main(int argc, char **argv) {
-    QCoreApplication application(argc, argv);
-    TestContext test;
-    testLoadingAndReplacement(test);
-    testFilteringSortingAndMimeData(test);
-    testLargeListingsReusePrecomputedDisplayData(test);
-    if (test.failures == 0)
-        std::cout << "All RemoteModel tests passed\n";
-    return test.failures == 0 ? 0 : 1;
+    openscp::test::TestHarness harness("RemoteModel");
+    return harness.runWithApplication<QCoreApplication>(argc, argv);
 }

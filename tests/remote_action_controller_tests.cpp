@@ -7,7 +7,7 @@
 
 namespace {
 
-void testDisconnectedState(TestContext &test) {
+OPENSCP_TEST(testDisconnectedState, test) {
     openscp::ProtocolCapabilities capabilities;
     capabilities.can_upload = true;
     capabilities.can_delete = true;
@@ -17,7 +17,7 @@ void testDisconnectedState(TestContext &test) {
                "disconnected sessions should disable every remote action");
 }
 
-void testIndependentCapabilities(TestContext &test) {
+OPENSCP_TEST(testIndependentCapabilities, test) {
     openscp::ProtocolCapabilities capabilities;
     capabilities.can_mkdir = true;
     capabilities.can_rename = true;
@@ -32,7 +32,7 @@ void testIndependentCapabilities(TestContext &test) {
                "unsupported actions should remain disabled");
 }
 
-void testMoveRequiresDownloadAndDelete(TestContext &test) {
+OPENSCP_TEST(testMoveRequiresDownloadAndDelete, test) {
     openscp::ProtocolCapabilities capabilities;
     capabilities.can_download = true;
     auto result = openscpui::RemoteActionController::availability(capabilities);
@@ -48,12 +48,6 @@ void testMoveRequiresDownloadAndDelete(TestContext &test) {
 } // namespace
 
 int main(int argc, char **argv) {
-    QCoreApplication application(argc, argv);
-    TestContext test;
-    testDisconnectedState(test);
-    testIndependentCapabilities(test);
-    testMoveRequiresDownloadAndDelete(test);
-    if (test.failures == 0)
-        std::cout << "All remote action controller tests passed\n";
-    return test.failures == 0 ? 0 : 1;
+    openscp::test::TestHarness harness("remote action controller");
+    return harness.runWithApplication<QCoreApplication>(argc, argv);
 }

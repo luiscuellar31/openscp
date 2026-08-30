@@ -36,7 +36,7 @@ const SyncComparisonItem *findItem(const QVector<SyncComparisonItem> &items,
     return nullptr;
 }
 
-void testPathAndGlobHelpers(TestContext &test) {
+OPENSCP_TEST(testPathAndGlobHelpers, test) {
     test.check(SyncComparisonEngine::normalizeRelativePath(QStringLiteral(
                    "./src/../main.cpp")) == QStringLiteral("main.cpp"),
                "relative paths should resolve dot segments");
@@ -83,7 +83,7 @@ void testPathAndGlobHelpers(TestContext &test) {
                "deduplicate");
 }
 
-void testComparisonRules(TestContext &test) {
+OPENSCP_TEST(testComparisonRules, test) {
     QVector<SyncSnapshotEntry> local{
         file(QStringLiteral("same.txt"), 10, 10'000),
         file(QStringLiteral("size.txt"), 20, 10'000),
@@ -162,7 +162,7 @@ void testComparisonRules(TestContext &test) {
                "reversing direction should keep local destination extras");
 }
 
-void testIncludePatternsPreserveParents(TestContext &test) {
+OPENSCP_TEST(testIncludePatternsPreserveParents, test) {
     QVector<SyncSnapshotEntry> local{
         directory(QStringLiteral("src")),
         directory(QStringLiteral("src/nested")),
@@ -183,7 +183,7 @@ void testIncludePatternsPreserveParents(TestContext &test) {
                "non-matching files should be filtered");
 }
 
-void testExecutionPlanOrdering(TestContext &test) {
+OPENSCP_TEST(testExecutionPlanOrdering, test) {
     QVector<SyncSnapshotEntry> local{
         directory(QStringLiteral("incoming")),
         file(QStringLiteral("incoming/new.bin"), 128, 20'000),
@@ -231,7 +231,7 @@ void testExecutionPlanOrdering(TestContext &test) {
                "unchecked preview rows must not enter the execution plan");
 }
 
-void testChecksumComparison(TestContext &test) {
+OPENSCP_TEST(testChecksumComparison, test) {
     SyncSnapshotEntry local = file(QStringLiteral("verified.bin"), 10, 20'000);
     local.checksumAlgorithm = QStringLiteral("SHA-256");
     local.checksum = QByteArrayLiteral("same");
@@ -256,15 +256,6 @@ void testChecksumComparison(TestContext &test) {
 } // namespace
 
 int main(int argc, char **argv) {
-    QCoreApplication app(argc, argv);
-    TestContext test;
-    testPathAndGlobHelpers(test);
-    testComparisonRules(test);
-    testIncludePatternsPreserveParents(test);
-    testExecutionPlanOrdering(test);
-    testChecksumComparison(test);
-
-    if (test.failures == 0)
-        std::cout << "[PASS] sync comparison tests\n";
-    return test.failures == 0 ? 0 : 1;
+    openscp::test::TestHarness harness("sync comparison");
+    return harness.runWithApplication<QCoreApplication>(argc, argv);
 }

@@ -97,7 +97,7 @@ std::unique_ptr<openscp::RemoteClient> connectedChecksumMock() {
     return client;
 }
 
-void testAsynchronousSnapshots(TestContext &test) {
+OPENSCP_TEST(testAsynchronousSnapshots, test) {
     QTemporaryDir localRoot;
     test.check(localRoot.isValid(), "local snapshot fixture should initialize");
     QFile localFile(localRoot.filePath("readme.txt"));
@@ -149,7 +149,7 @@ void testAsynchronousSnapshots(TestContext &test) {
                "remote controller batches should enter the snapshot");
 }
 
-void testPersistentExecutionPlan(TestContext &test) {
+OPENSCP_TEST(testPersistentExecutionPlan, test) {
     RemoteOperationController remote;
     TransferManager transfers;
     transfers.setSessionIdentity(QStringLiteral("site-id"));
@@ -196,7 +196,7 @@ void testPersistentExecutionPlan(TestContext &test) {
                "every sync task should retain batch and session identity");
 }
 
-void testOnDemandChecksums(TestContext &test) {
+OPENSCP_TEST(testOnDemandChecksums, test) {
     QTemporaryDir localRoot;
     test.check(localRoot.isValid(), "checksum fixture should initialize");
     const auto writeFile = [&](const QString &name, const QByteArray &content) {
@@ -246,7 +246,7 @@ void testOnDemandChecksums(TestContext &test) {
         "different files should produce different SHA-256 values");
 }
 
-void testChecksumCancellation(TestContext &test) {
+OPENSCP_TEST(testChecksumCancellation, test) {
     QTemporaryDir localRoot;
     QFile slowFile(localRoot.filePath(QStringLiteral("slow.bin")));
     test.check(slowFile.open(QIODevice::WriteOnly),
@@ -286,17 +286,6 @@ void testChecksumCancellation(TestContext &test) {
 } // namespace
 
 int main(int argc, char **argv) {
-    QCoreApplication app(argc, argv);
-    TestContext test;
-    testAsynchronousSnapshots(test);
-    testPersistentExecutionPlan(test);
-    testOnDemandChecksums(test);
-    testChecksumCancellation(test);
-
-    if (test.failures == 0) {
-        std::cout << "All sync coordinator tests passed\n";
-        return 0;
-    }
-    std::cerr << test.failures << " sync coordinator test(s) failed\n";
-    return 1;
+    openscp::test::TestHarness harness("sync coordinator");
+    return harness.runWithApplication<QCoreApplication>(argc, argv);
 }

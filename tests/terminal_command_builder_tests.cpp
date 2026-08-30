@@ -28,7 +28,7 @@ openscpui::TerminalCommandBuilder builder() {
     });
 }
 
-void testBuildsSshAndFallbackWithoutSecrets(TestContext &test) {
+OPENSCP_TEST(testBuildsSshAndFallbackWithoutSecrets, test) {
     const auto result = builder().prepare(
         session(), QStringLiteral("/team/Quarter's reports"), false, true);
     test.check(result.isValid(), "valid sessions should produce a command");
@@ -45,7 +45,7 @@ void testBuildsSshAndFallbackWithoutSecrets(TestContext &test) {
         "stored passwords must never be copied to terminal arguments");
 }
 
-void testRejectsCredentialedProxy(TestContext &test) {
+OPENSCP_TEST(testRejectsCredentialedProxy, test) {
     auto options = session();
     options.proxy_type = openscp::ProxyType::Socks5;
     options.proxy_host = "proxy.example";
@@ -63,7 +63,7 @@ void testRejectsCredentialedProxy(TestContext &test) {
                "proxy errors must not expose credentials");
 }
 
-void testRejectsAmbiguousNetworkRoute(TestContext &test) {
+OPENSCP_TEST(testRejectsAmbiguousNetworkRoute, test) {
     auto options = session();
     options.proxy_type = openscp::ProxyType::HttpConnect;
     options.proxy_host = "proxy.example";
@@ -76,7 +76,7 @@ void testRejectsAmbiguousNetworkRoute(TestContext &test) {
                "jump hosts and proxies should not be combined implicitly");
 }
 
-void testInteractiveModeDisablesPublicKeys(TestContext &test) {
+OPENSCP_TEST(testInteractiveModeDisablesPublicKeys, test) {
     auto options = session();
     options.private_key_path = "/tmp/private key";
     const auto result =
@@ -93,13 +93,6 @@ void testInteractiveModeDisablesPublicKeys(TestContext &test) {
 } // namespace
 
 int main(int argc, char **argv) {
-    QCoreApplication application(argc, argv);
-    TestContext test;
-    testBuildsSshAndFallbackWithoutSecrets(test);
-    testRejectsCredentialedProxy(test);
-    testRejectsAmbiguousNetworkRoute(test);
-    testInteractiveModeDisablesPublicKeys(test);
-    if (test.failures == 0)
-        std::cout << "All terminal command builder tests passed\n";
-    return test.failures == 0 ? 0 : 1;
+    openscp::test::TestHarness harness("terminal command builder");
+    return harness.runWithApplication<QCoreApplication>(argc, argv);
 }

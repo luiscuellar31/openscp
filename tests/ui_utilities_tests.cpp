@@ -8,7 +8,7 @@
 
 namespace {
 
-void testRemotePaths(TestContext &test) {
+OPENSCP_TEST(testRemotePaths, test) {
     test.check(normalizeRemotePath(QString()) == QStringLiteral("/"),
                "an empty remote path should normalize to root");
     test.check(normalizeRemotePath(QStringLiteral("folder\\child")) ==
@@ -28,7 +28,7 @@ void testRemotePaths(TestContext &test) {
                "joining should normalize traversal segments");
 }
 
-void testByteFormatting(TestContext &test) {
+OPENSCP_TEST(testByteFormatting, test) {
     test.check(formatByteSize(0) == QStringLiteral("0 B"),
                "zero bytes should use the byte unit");
     test.check(formatByteSize(1536) == QStringLiteral("1.5 KiB"),
@@ -43,7 +43,5 @@ void testByteFormatting(TestContext &test) {
 
 int main(int argc, char **argv) {
     openscp::test::TestHarness harness("UI utility");
-    harness.add("remote paths", testRemotePaths);
-    harness.add("byte formatting", testByteFormatting);
     return harness.runWithApplication<QCoreApplication>(argc, argv);
 }

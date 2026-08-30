@@ -55,7 +55,7 @@ openscp::SessionOptions testOptions() {
     return options;
 }
 
-void testConflictPoliciesAndUnsupportedFallback(TestContext &test) {
+OPENSCP_TEST(testConflictPoliciesAndUnsupportedFallback, test) {
     ConflictCoordinator coordinator;
     std::atomic<int> prompts{0};
 
@@ -137,7 +137,7 @@ void testConflictPoliciesAndUnsupportedFallback(TestContext &test) {
                "unsupported newer-only policy should remain Ask");
 }
 
-void testConcurrentConflictsUseOneBatchResolution(TestContext &test) {
+OPENSCP_TEST(testConcurrentConflictsUseOneBatchResolution, test) {
     ConflictCoordinator coordinator;
     constexpr std::uint64_t batchId = 44;
     coordinator.setBatchPolicy(batchId, TransferConflictPolicy::Ask);
@@ -182,7 +182,7 @@ void testConcurrentConflictsUseOneBatchResolution(TestContext &test) {
                "apply-to-remaining should persist the selected batch policy");
 }
 
-void testBatchDownloadEnqueueAndGranularSignals(TestContext &test) {
+OPENSCP_TEST(testBatchDownloadEnqueueAndGranularSignals, test) {
     TransferManager manager;
     int compatibilityNotifications = 0;
     int addedNotifications = 0;
@@ -248,7 +248,7 @@ void testBatchDownloadEnqueueAndGranularSignals(TestContext &test) {
                "empty and unknown batches should not report terminal");
 }
 
-void testTaskNodesStayStableAcrossQueueGrowth(TestContext &test) {
+OPENSCP_TEST(testTaskNodesStayStableAcrossQueueGrowth, test) {
     TransferManager manager;
     manager.pauseAll();
     const quint64 first = manager.enqueueDownload(
@@ -280,7 +280,7 @@ void testTaskNodesStayStableAcrossQueueGrowth(TestContext &test) {
                "O(1) task lookup should remain valid after 10,000 inserts");
 }
 
-void testConcurrencyUpdates(TestContext &test) {
+OPENSCP_TEST(testConcurrencyUpdates, test) {
     TransferManager manager;
     int queueSettingsNotifications = 0;
     QObject::connect(
@@ -367,7 +367,7 @@ void configureManager(TransferManager &manager, openscp::SftpClient &baseClient,
     manager.setClient(&baseClient);
 }
 
-void testPersistentWorkersRunConcurrently(TestContext &test) {
+OPENSCP_TEST(testPersistentWorkersRunConcurrently, test) {
     auto probe = std::make_shared<ConcurrencyProbe>();
     ConcurrentMockClient baseClient(probe);
     const auto options = testOptions();
@@ -405,7 +405,7 @@ void testPersistentWorkersRunConcurrently(TestContext &test) {
                "every queued task should run exactly once");
 }
 
-void testSuccessfulWorkerConnectionReuse(TestContext &test) {
+OPENSCP_TEST(testSuccessfulWorkerConnectionReuse, test) {
     auto probe = std::make_shared<ConcurrencyProbe>();
     ConcurrentMockClient baseClient(probe);
     TransferManager manager;
@@ -485,7 +485,7 @@ class CancelLifecycleClient final : public openscp::MockSftpClient {
     std::shared_ptr<LifecycleProbe> probe_;
 };
 
-void testCanceledWorkerInvalidatesItsConnection(TestContext &test) {
+OPENSCP_TEST(testCanceledWorkerInvalidatesItsConnection, test) {
     auto probe = std::make_shared<LifecycleProbe>();
     CancelLifecycleClient baseClient(probe);
     TransferManager manager;
@@ -523,7 +523,7 @@ void testCanceledWorkerInvalidatesItsConnection(TestContext &test) {
                "the task after cancellation must use a fresh connection");
 }
 
-void testClearClientInvalidatesWorkerConnections(TestContext &test) {
+OPENSCP_TEST(testClearClientInvalidatesWorkerConnections, test) {
     auto probe = std::make_shared<LifecycleProbe>();
     CancelLifecycleClient baseClient(probe);
     TransferManager manager;
@@ -589,7 +589,7 @@ class FinalTransportFailureClient final : public openscp::MockSftpClient {
     std::shared_ptr<LifecycleProbe> probe_;
 };
 
-void testFinalTransportErrorInvalidatesConnection(TestContext &test) {
+OPENSCP_TEST(testFinalTransportErrorInvalidatesConnection, test) {
     auto probe = std::make_shared<LifecycleProbe>();
     FinalTransportFailureClient baseClient(probe);
     TransferManager manager;
@@ -621,7 +621,7 @@ void testFinalTransportErrorInvalidatesConnection(TestContext &test) {
                "recovery after a transport failure should reconnect");
 }
 
-void testPersistentTaskDependencies(TestContext &test) {
+OPENSCP_TEST(testPersistentTaskDependencies, test) {
     auto probe = std::make_shared<ConcurrencyProbe>();
     ConcurrentMockClient baseClient(probe);
     const auto options = testOptions();
@@ -653,7 +653,7 @@ void testPersistentTaskDependencies(TestContext &test) {
                "a persisted dependency should prevent concurrent execution");
 }
 
-void testDestinationReservation(TestContext &test) {
+OPENSCP_TEST(testDestinationReservation, test) {
     auto probe = std::make_shared<ConcurrencyProbe>();
     ConcurrentMockClient baseClient(probe);
     const auto options = testOptions();
@@ -720,7 +720,7 @@ class RetryMockClient final : public openscp::MockSftpClient {
     std::shared_ptr<RetryProbe> probe_;
 };
 
-void testTransientRetries(TestContext &test) {
+OPENSCP_TEST(testTransientRetries, test) {
     auto probe = std::make_shared<RetryProbe>();
     RetryMockClient baseClient(probe);
     const auto options = testOptions();
@@ -772,7 +772,7 @@ class UnclassifiedErrorMockClient final : public openscp::MockSftpClient {
     std::shared_ptr<std::atomic<int>> attempts_;
 };
 
-void testUnclassifiedErrorNeverRetries(TestContext &test) {
+OPENSCP_TEST(testUnclassifiedErrorNeverRetries, test) {
     auto attempts = std::make_shared<std::atomic<int>>(0);
     UnclassifiedErrorMockClient baseClient(attempts);
     TransferManager manager;
@@ -840,7 +840,7 @@ class MovePhaseMockClient final : public openscp::MockSftpClient {
     std::shared_ptr<MovePhaseProbe> probe_;
 };
 
-void testMoveDeleteSourcePhasePersistsWithoutRetransfer(TestContext &test) {
+OPENSCP_TEST(testMoveDeleteSourcePhasePersistsWithoutRetransfer, test) {
     QTemporaryDir root;
     const QString queuePath = root.filePath("transfer-queue-v1.json");
     auto probe = std::make_shared<MovePhaseProbe>();
@@ -913,7 +913,7 @@ class CommitUncertainMockClient final : public openscp::MockSftpClient {
     }
 };
 
-void testCommitUncertainDoesNotRetry(TestContext &test) {
+OPENSCP_TEST(testCommitUncertainDoesNotRetry, test) {
     CommitUncertainMockClient baseClient;
     const auto options = testOptions();
     TransferManager manager;
@@ -968,7 +968,7 @@ class PermanentErrorMockClient final : public openscp::MockSftpClient {
     std::shared_ptr<std::atomic<int>> attempts_;
 };
 
-void testPermanentStructuredErrorNeverRetries(TestContext &test) {
+OPENSCP_TEST(testPermanentStructuredErrorNeverRetries, test) {
     auto attempts = std::make_shared<std::atomic<int>>(0);
     PermanentErrorMockClient baseClient(attempts);
     const auto options = testOptions();
@@ -1020,7 +1020,7 @@ class InsufficientSpaceMockClient final : public openscp::MockSftpClient {
     std::shared_ptr<std::atomic<int>> attempts_;
 };
 
-void testInsufficientSpaceNeverRetries(TestContext &test) {
+OPENSCP_TEST(testInsufficientSpaceNeverRetries, test) {
     auto attempts = std::make_shared<std::atomic<int>>(0);
     InsufficientSpaceMockClient baseClient(attempts);
     const auto options = testOptions();
@@ -1088,7 +1088,7 @@ class PermanentKindsMockClient final : public openscp::MockSftpClient {
     std::shared_ptr<PermanentKindsProbe> probe_;
 };
 
-void testOtherPermanentKindsNeverRetry(TestContext &test) {
+OPENSCP_TEST(testOtherPermanentKindsNeverRetry, test) {
     auto probe = std::make_shared<PermanentKindsProbe>();
     PermanentKindsMockClient baseClient(probe);
     TransferManager manager;
@@ -1121,7 +1121,7 @@ void testOtherPermanentKindsNeverRetry(TestContext &test) {
                "permanent structured error kinds must never be retried");
 }
 
-void testFailedDependencySkipsFollowingWork(TestContext &test) {
+OPENSCP_TEST(testFailedDependencySkipsFollowingWork, test) {
     auto attempts = std::make_shared<std::atomic<int>>(0);
     PermanentErrorMockClient baseClient(attempts);
     const auto options = testOptions();
@@ -1148,8 +1148,7 @@ void testFailedDependencySkipsFollowingWork(TestContext &test) {
                "failed prerequisites should skip dependent mutations");
 }
 
-void testDependencySkipsKeepTerminalCounterAndHistoryBounded(
-    TestContext &test) {
+OPENSCP_TEST(testDependencySkipsKeepTerminalCounterAndHistoryBounded, test) {
     auto attempts = std::make_shared<std::atomic<int>>(0);
     PermanentErrorMockClient baseClient(attempts);
     TransferManager manager;
@@ -1216,7 +1215,7 @@ class RateMockClient final : public openscp::MockSftpClient {
     }
 };
 
-void testAggregateRateLimit(TestContext &test) {
+OPENSCP_TEST(testAggregateRateLimit, test) {
     RateMockClient baseClient;
     const auto options = testOptions();
     TransferManager manager;
@@ -1250,7 +1249,7 @@ void testAggregateRateLimit(TestContext &test) {
                "token bucket should retain a bounded initial burst");
 }
 
-void testBatchCancellationAndDirectoryTasks(TestContext &test) {
+OPENSCP_TEST(testBatchCancellationAndDirectoryTasks, test) {
     TransferManager manager;
     TransferBatchOptions batch;
     batch.batchId = manager.createBatch(batch);
@@ -1285,7 +1284,7 @@ void testBatchCancellationAndDirectoryTasks(TestContext &test) {
                "empty local folders should be explicit queue tasks");
 }
 
-void testPersistentDeletionTasks(TestContext &test) {
+OPENSCP_TEST(testPersistentDeletionTasks, test) {
     auto probe = std::make_shared<ConcurrencyProbe>();
     ConcurrentMockClient baseClient(probe);
     const auto options = testOptions();
@@ -1324,7 +1323,7 @@ void testPersistentDeletionTasks(TestContext &test) {
                "persistent deletion tasks should remove their targets");
 }
 
-void testTerminalHistoryIsBounded(TestContext &test) {
+OPENSCP_TEST(testTerminalHistoryIsBounded, test) {
     TransferManager manager;
     QVector<QPair<QString, QString>> downloads;
     downloads.reserve(5100);
@@ -1341,7 +1340,7 @@ void testTerminalHistoryIsBounded(TestContext &test) {
                "history pruning should retain the newest terminal tasks");
 }
 
-void testRemovingTaskCanDeletePartialData(TestContext &test) {
+OPENSCP_TEST(testRemovingTaskCanDeletePartialData, test) {
     QTemporaryDir root;
     const QString destination = root.filePath("partial.dat");
     QFile partial(destination + QStringLiteral(".part"));
@@ -1398,7 +1397,7 @@ class RemotePartialCleanupClient final : public openscp::MockSftpClient {
     std::shared_ptr<RemotePartialProbe> probe_;
 };
 
-void testRemovingUploadCanQueueRemotePartialCleanup(TestContext &test) {
+OPENSCP_TEST(testRemovingUploadCanQueueRemotePartialCleanup, test) {
     auto probe = std::make_shared<RemotePartialProbe>();
     TransferManager manager;
     TransferBatchOptions batch;
@@ -1429,7 +1428,7 @@ void testRemovingUploadCanQueueRemotePartialCleanup(TestContext &test) {
                "remote cleanup should target the deterministic .part path");
 }
 
-void testPausedQueuePersistence(TestContext &test) {
+OPENSCP_TEST(testPausedQueuePersistence, test) {
     QTemporaryDir root;
     const QString queuePath = root.filePath("transfer-queue-v1.json");
     {
@@ -1473,7 +1472,7 @@ void testPausedQueuePersistence(TestContext &test) {
                "persistent tasks should retain move phase metadata");
 }
 
-void testDirectoryTaskPersistence(TestContext &test) {
+OPENSCP_TEST(testDirectoryTaskPersistence, test) {
     QTemporaryDir root;
     const QString queuePath = root.filePath("transfer-queue-v1.json");
     const QString localDirectory = root.filePath("empty/local");
@@ -1504,7 +1503,7 @@ void testDirectoryTaskPersistence(TestContext &test) {
     }
 }
 
-void testDeleteTaskPersistence(TestContext &test) {
+OPENSCP_TEST(testDeleteTaskPersistence, test) {
     QTemporaryDir root;
     const QString queuePath = root.filePath("transfer-queue-v1.json");
     {
@@ -1537,7 +1536,7 @@ void testDeleteTaskPersistence(TestContext &test) {
     }
 }
 
-void testCorruptPersistenceIsPreserved(TestContext &test) {
+OPENSCP_TEST(testCorruptPersistenceIsPreserved, test) {
     QTemporaryDir root;
     const QString queuePath = root.filePath("transfer-queue-v1.json");
     QFile file(queuePath);
@@ -1558,7 +1557,7 @@ void testCorruptPersistenceIsPreserved(TestContext &test) {
                "corrupt persistence should never be overwritten");
 }
 
-void testFuturePersistenceIsPreserved(TestContext &test) {
+OPENSCP_TEST(testFuturePersistenceIsPreserved, test) {
     QTemporaryDir root;
     const QString queuePath = root.filePath("transfer-queue-v1.json");
     QFile file(queuePath);
@@ -1579,7 +1578,7 @@ void testFuturePersistenceIsPreserved(TestContext &test) {
                "future persistence schema should never be overwritten");
 }
 
-void testPersistenceUsesDebouncedAutomaticSave(TestContext &test) {
+OPENSCP_TEST(testPersistenceUsesDebouncedAutomaticSave, test) {
     QTemporaryDir root;
     const QString queuePath = root.filePath("transfer-queue-v1.json");
     TransferManager manager;
@@ -1599,46 +1598,6 @@ int main(int argc, char **argv) {
     QCoreApplication application(argc, argv);
     QCoreApplication::setApplicationName(
         QStringLiteral("openscp-transfer-manager-tests"));
-
-    TestContext test;
-    testConflictPoliciesAndUnsupportedFallback(test);
-    testConcurrentConflictsUseOneBatchResolution(test);
-    testBatchDownloadEnqueueAndGranularSignals(test);
-    testTaskNodesStayStableAcrossQueueGrowth(test);
-    testConcurrencyUpdates(test);
-    testPersistentWorkersRunConcurrently(test);
-    testSuccessfulWorkerConnectionReuse(test);
-    testCanceledWorkerInvalidatesItsConnection(test);
-    testClearClientInvalidatesWorkerConnections(test);
-    testFinalTransportErrorInvalidatesConnection(test);
-    testPersistentTaskDependencies(test);
-    testDestinationReservation(test);
-    testTransientRetries(test);
-    testUnclassifiedErrorNeverRetries(test);
-    testMoveDeleteSourcePhasePersistsWithoutRetransfer(test);
-    testCommitUncertainDoesNotRetry(test);
-    testPermanentStructuredErrorNeverRetries(test);
-    testInsufficientSpaceNeverRetries(test);
-    testOtherPermanentKindsNeverRetry(test);
-    testFailedDependencySkipsFollowingWork(test);
-    testDependencySkipsKeepTerminalCounterAndHistoryBounded(test);
-    testAggregateRateLimit(test);
-    testBatchCancellationAndDirectoryTasks(test);
-    testPersistentDeletionTasks(test);
-    testTerminalHistoryIsBounded(test);
-    testRemovingTaskCanDeletePartialData(test);
-    testRemovingUploadCanQueueRemotePartialCleanup(test);
-    testPausedQueuePersistence(test);
-    testDirectoryTaskPersistence(test);
-    testDeleteTaskPersistence(test);
-    testCorruptPersistenceIsPreserved(test);
-    testFuturePersistenceIsPreserved(test);
-    testPersistenceUsesDebouncedAutomaticSave(test);
-
-    if (test.failures == 0) {
-        std::cout << "All transfer manager tests passed\n";
-        return 0;
-    }
-    std::cerr << test.failures << " transfer manager test(s) failed\n";
-    return 1;
+    openscp::test::TestHarness harness("transfer manager");
+    return harness.run();
 }

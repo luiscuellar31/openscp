@@ -40,7 +40,7 @@ SiteEntry site(QString id = QStringLiteral("site-1"),
     return entry;
 }
 
-void testSaveLoadAndRemoval(TestContext &test) {
+OPENSCP_TEST(testSaveLoadAndRemoval, test) {
     FakeSecretBackend backend;
     SiteCredentialRepository repository(backend.interface());
     const SiteEntry entry = site();
@@ -69,7 +69,7 @@ void testSaveLoadAndRemoval(TestContext &test) {
                "saving absent credentials should remove stale values");
 }
 
-void testLegacyNameMigrationAndCopy(TestContext &test) {
+OPENSCP_TEST(testLegacyNameMigrationAndCopy, test) {
     FakeSecretBackend backend;
     SiteCredentialRepository repository(backend.interface());
     const SiteEntry source =
@@ -100,7 +100,7 @@ void testLegacyNameMigrationAndCopy(TestContext &test) {
                "copy should duplicate credentials under the target identity");
 }
 
-void testFailureReporting(TestContext &test) {
+OPENSCP_TEST(testFailureReporting, test) {
     FakeSecretBackend backend;
     backend.saveStatus = SecretStore::PersistStatus::PermissionDenied;
     SiteCredentialRepository repository(backend.interface());
@@ -118,12 +118,6 @@ void testFailureReporting(TestContext &test) {
 } // namespace
 
 int main(int argc, char **argv) {
-    QCoreApplication application(argc, argv);
-    TestContext test;
-    testSaveLoadAndRemoval(test);
-    testLegacyNameMigrationAndCopy(test);
-    testFailureReporting(test);
-    if (test.failures == 0)
-        std::cout << "All site credential repository tests passed\n";
-    return test.failures == 0 ? 0 : 1;
+    openscp::test::TestHarness harness("site credential repository");
+    return harness.runWithApplication<QCoreApplication>(argc, argv);
 }

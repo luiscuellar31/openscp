@@ -35,7 +35,7 @@ bool writeFile(const QString &path, QByteArray contents = "x") {
     return file.write(contents) == contents.size();
 }
 
-void testBatchesEmptyFoldersAndEventLoop(TestContext &test) {
+OPENSCP_TEST(testBatchesEmptyFoldersAndEventLoop, test) {
     QTemporaryDir root;
     test.check(root.isValid(), "temporary discovery root should initialize");
     test.check(QDir().mkpath(root.filePath("empty")),
@@ -81,7 +81,7 @@ void testBatchesEmptyFoldersAndEventLoop(TestContext &test) {
                "empty directories should be explicit discovery entries");
 }
 
-void testCancellation(TestContext &test) {
+OPENSCP_TEST(testCancellation, test) {
     QTemporaryDir root;
     test.check(root.isValid(), "cancellation root should initialize");
     for (int index = 0; index < 100; ++index) {
@@ -113,7 +113,7 @@ void testCancellation(TestContext &test) {
                "cancel should prevent the remaining entries from batching");
 }
 
-void testLargeTreeConfirmationAndDepthCounters(TestContext &test) {
+OPENSCP_TEST(testLargeTreeConfirmationAndDepthCounters, test) {
     QTemporaryDir root;
     test.check(root.isValid(), "limit root should initialize");
     test.check(QDir().mkpath(root.filePath("a/b/c")),
@@ -165,7 +165,7 @@ void testLargeTreeConfirmationAndDepthCounters(TestContext &test) {
     }
 }
 
-void testBackpressureHysteresis(TestContext &test) {
+OPENSCP_TEST(testBackpressureHysteresis, test) {
     QTemporaryDir root;
     test.check(root.isValid(), "backpressure root should initialize");
     for (int index = 0; index < 20; ++index) {
@@ -213,17 +213,6 @@ void testBackpressureHysteresis(TestContext &test) {
 } // namespace
 
 int main(int argc, char **argv) {
-    QCoreApplication app(argc, argv);
-    TestContext test;
-    testBatchesEmptyFoldersAndEventLoop(test);
-    testCancellation(test);
-    testLargeTreeConfirmationAndDepthCounters(test);
-    testBackpressureHysteresis(test);
-
-    if (test.failures == 0) {
-        std::cout << "All local tree discovery tests passed\n";
-        return 0;
-    }
-    std::cerr << test.failures << " local tree discovery test(s) failed\n";
-    return 1;
+    openscp::test::TestHarness harness("local tree discovery");
+    return harness.runWithApplication<QCoreApplication>(argc, argv);
 }

@@ -64,11 +64,15 @@ void testOptionsLifecycle(TestContext &test,
 int main(int argc, char **argv) {
     QCoreApplication application(argc, argv);
     openscpui::SessionController session;
-    TestContext test;
-    testConnectionCancellation(test, session);
-    testDisconnectGenerations(test, session);
-    testOptionsLifecycle(test, session);
-    if (test.failures == 0)
-        std::cout << "All session controller tests passed\n";
-    return test.failures == 0 ? 0 : 1;
+    openscp::test::TestHarness harness("session controller");
+    harness.add("connection cancellation", [&session](TestContext &test) {
+        testConnectionCancellation(test, session);
+    });
+    harness.add("disconnect generations", [&session](TestContext &test) {
+        testDisconnectGenerations(test, session);
+    });
+    harness.add("options lifecycle", [&session](TestContext &test) {
+        testOptionsLifecycle(test, session);
+    });
+    return harness.run();
 }

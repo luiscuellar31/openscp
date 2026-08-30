@@ -23,7 +23,7 @@ TransferTask queuedUpload(quint64 id, const QString &destination) {
     return task;
 }
 
-void testCompletionIsNotRepeated(TestContext &test) {
+OPENSCP_TEST(testCompletionIsNotRepeated, test) {
     openscpui::TransferUiController controller;
     controller.initialize(
         {queuedUpload(1, QStringLiteral("/team/report.txt"))});
@@ -44,7 +44,7 @@ void testCompletionIsNotRepeated(TestContext &test) {
                "unchanged terminal tasks should not repeat UI effects");
 }
 
-void testRemoteRootBoundaries(TestContext &test) {
+OPENSCP_TEST(testRemoteRootBoundaries, test) {
     openscpui::TransferUiController controller;
     const QVector<TransferTask> tasks{
         completedUpload(2, QStringLiteral("/teammate/report.txt"))};
@@ -54,7 +54,7 @@ void testRemoteRootBoundaries(TestContext &test) {
                "similar path prefixes must not cross directory boundaries");
 }
 
-void testBatchNotification(TestContext &test) {
+OPENSCP_TEST(testBatchNotification, test) {
     openscpui::TransferUiController controller;
     TransferTask download;
     download.taskId = 4;
@@ -70,7 +70,7 @@ void testBatchNotification(TestContext &test) {
                "local mode should not schedule a remote refresh");
 }
 
-void testResetAllowsFreshSessionEffects(TestContext &test) {
+OPENSCP_TEST(testResetAllowsFreshSessionEffects, test) {
     openscpui::TransferUiController controller;
     const QVector<TransferTask> tasks{
         completedUpload(5, QStringLiteral("/a.txt"))};
@@ -83,7 +83,7 @@ void testResetAllowsFreshSessionEffects(TestContext &test) {
                "session reset should discard prior UI observation state");
 }
 
-void testInitializationAndRemovalDeltas(TestContext &test) {
+OPENSCP_TEST(testInitializationAndRemovalDeltas, test) {
     openscpui::TransferUiController controller;
     const TransferTask completed =
         completedUpload(6, QStringLiteral("/existing.txt"));
@@ -102,7 +102,7 @@ void testInitializationAndRemovalDeltas(TestContext &test) {
                "removal deltas should release per-task observation state");
 }
 
-void testFrequentDeltasStayIncremental(TestContext &test) {
+OPENSCP_TEST(testFrequentDeltasStayIncremental, test) {
     openscpui::TransferUiController controller;
     QVector<TransferTask> initial;
     initial.reserve(10'000);
@@ -132,15 +132,6 @@ void testFrequentDeltasStayIncremental(TestContext &test) {
 } // namespace
 
 int main(int argc, char **argv) {
-    QCoreApplication application(argc, argv);
-    TestContext test;
-    testCompletionIsNotRepeated(test);
-    testRemoteRootBoundaries(test);
-    testBatchNotification(test);
-    testResetAllowsFreshSessionEffects(test);
-    testInitializationAndRemovalDeltas(test);
-    testFrequentDeltasStayIncremental(test);
-    if (test.failures == 0)
-        std::cout << "All transfer UI controller tests passed\n";
-    return test.failures == 0 ? 0 : 1;
+    openscp::test::TestHarness harness("transfer UI controller");
+    return harness.runWithApplication<QCoreApplication>(argc, argv);
 }

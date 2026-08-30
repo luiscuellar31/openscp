@@ -50,7 +50,7 @@ void testRecentHistory(TestContext &test, openscpui::NavigationStore &store) {
                "clearing history should include inactive remote scopes");
 }
 
-void testServerRoundTripDoesNotPersistSecrets(TestContext &test) {
+OPENSCP_TEST(testServerRoundTripDoesNotPersistSecrets, test) {
     openscp::SessionOptions original;
     original.protocol = openscp::Protocol::WebDav;
     original.host = "DAV.Example";
@@ -93,11 +93,12 @@ int main(int argc, char **argv) {
 
     auto store = openscpui::NavigationStore::forIniFile(
         directory.filePath(QStringLiteral("navigation.ini")));
-    TestContext test;
-    testScopedFavorites(test, store);
-    testRecentHistory(test, store);
-    testServerRoundTripDoesNotPersistSecrets(test);
-    if (test.failures == 0)
-        std::cout << "All navigation store tests passed\n";
-    return test.failures == 0 ? 0 : 1;
+    openscp::test::TestHarness harness("navigation store");
+    harness.add("scoped favorites", [&store](TestContext &test) {
+        testScopedFavorites(test, store);
+    });
+    harness.add("recent history", [&store](TestContext &test) {
+        testRecentHistory(test, store);
+    });
+    return harness.run();
 }
