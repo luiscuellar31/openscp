@@ -364,6 +364,21 @@ std::string localPartialPath(const std::string &destination) {
     return destination + ".part";
 }
 
+std::FILE *openFileForUpload(const std::string &path, std::uint64_t &fileSize,
+                             std::string &err) {
+    fileSize = 0;
+    try {
+        fileSize = std::filesystem::file_size(path);
+    } catch (...) {
+        err = "Could not determine local file size.";
+        return nullptr;
+    }
+    std::FILE *file = std::fopen(path.c_str(), "rb");
+    if (!file)
+        err = "Could not open local file for reading.";
+    return file;
+}
+
 bool flushAndSyncFile(std::FILE *file, std::string &err) {
     return localfiles::flushAndSync(file, err);
 }
@@ -683,6 +698,125 @@ size_t readFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
     std::FILE *file = static_cast<std::FILE *>(userdata);
     const size_t total = size * nmemb;
     return std::fread(ptr, 1, total, file);
+}
+
+bool configureFileDownload(CURL *curl, std::FILE *file,
+                           TransferProgressContext &progressContext,
+                           std::string &err) {
+    const bool configured =
+        curl && file &&
+        (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeFileCallback) ==
+         CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_WRITEDATA, file) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
+                          transferProgressCallback) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progressContext) ==
+         CURLE_OK);
+    if (!configured)
+        err = "Could not configure CURL download transfer.";
+    return configured;
+}
+
+bool configureFileUpload(CURL *curl, std::FILE *file, curl_off_t fileSize,
+                         TransferProgressContext &progressContext,
+                         std::string &err) {
+    const bool configured =
+        curl && file &&
+        (curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_READFUNCTION, readFileCallback) ==
+         CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_READDATA, file) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, fileSize) ==
+         CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
+                          transferProgressCallback) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progressContext) ==
+         CURLE_OK);
+    if (!configured)
+        err = "Could not configure CURL upload transfer.";
+    return configured;
+}
+
+bool detectTransferCancellation(const TransferProgressContext &progressContext,
+                                std::string &err) {
+    if (progressContext.shouldCancel && progressContext.shouldCancel()) {
+        err = "Canceled by user";
+        return true;
+    }
+    if (progressContext.interrupted && progressContext.interrupted->load()) {
+        err = "Interrupted";
+        return true;
+    }
+    return false;
+}
+
+CurlTransferResult
+performCurlTransfer(CURL *curl, TransferProgressContext &progressContext,
+                    std::string_view operationLabel,
+                    const CurlTransferConfigurator &configure,
+                    std::string &err) {
+    CurlTransferResult result;
+    if (!curl) {
+        result.failure = CurlTransferFailure::Configuration;
+        err = "Could not create CURL handle.";
+        return result;
+    }
+
+    curl_easy_reset(curl);
+    if (!configure || !configure(curl, err)) {
+        result.failure = CurlTransferFailure::Configuration;
+        if (err.empty())
+            err = std::string("Could not configure ") +
+                  std::string(operationLabel) + ".";
+        return result;
+    }
+
+    if (detectTransferCancellation(progressContext, err)) {
+        result.failure = CurlTransferFailure::Canceled;
+        result.curlCode = CURLE_ABORTED_BY_CALLBACK;
+        return result;
+    }
+
+    result.curlCode = curl_easy_perform(curl);
+    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result.responseCode);
+    if (detectTransferCancellation(progressContext, err)) {
+        result.failure = CurlTransferFailure::Canceled;
+        result.curlCode = CURLE_ABORTED_BY_CALLBACK;
+        return result;
+    }
+    if (result.curlCode != CURLE_OK) {
+        result.failure = CurlTransferFailure::Transport;
+        err = std::string(operationLabel) +
+              " failed: " + curl_easy_strerror(result.curlCode);
+    }
+    return result;
+}
+
+RemoteError
+transferFailureError(const CurlTransferResult &result, std::string message,
+                     const CurlTransportErrorMapper &transportErrorMapper) {
+    if (result.failure == CurlTransferFailure::Canceled) {
+        RemoteError error;
+        error.kind = RemoteErrorKind::Canceled;
+        error.message = std::move(message);
+        error.native_code =
+            static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK);
+        return error;
+    }
+    if (result.failure == CurlTransferFailure::Configuration) {
+        RemoteError error;
+        error.kind = RemoteErrorKind::InvalidRequest;
+        error.message = std::move(message);
+        return error;
+    }
+    if (transportErrorMapper) {
+        return transportErrorMapper(result.curlCode, result.responseCode,
+                                    message);
+    }
+    return errorFromCurl(result.curlCode, std::move(message),
+                         result.responseCode);
 }
 
 int transferProgressCallback(void *userdata, curl_off_t dltotal,

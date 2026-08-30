@@ -237,6 +237,62 @@ void testBoundedStringSink(TestContext &test) {
                "oversized response chunks must not be partially appended");
 }
 
+void testCurlTransferLifecycle(TestContext &test) {
+    std::uint64_t missingSize = 42;
+    std::string missingError;
+    test.check(openscp::curlcommon::openFileForUpload(
+                   "openscp-definitely-missing-upload-file", missingSize,
+                   missingError) == nullptr &&
+                   missingSize == 0 && !missingError.empty(),
+               "upload preparation should reject missing local files");
+
+    openscp::curlcommon::CurlEasySession session;
+    std::string error;
+    test.check(session.initialize(error),
+               std::string("curl session should initialize: ") + error);
+    if (!session.get())
+        return;
+
+    openscp::curlcommon::TransferProgressContext progressContext;
+    const auto configurationFailure = openscp::curlcommon::performCurlTransfer(
+        session.get(), progressContext, "test transfer",
+        [](CURL *, std::string &) { return false; }, error);
+    test.check(configurationFailure.failure ==
+                   openscp::curlcommon::CurlTransferFailure::Configuration,
+               "the common transfer lifecycle should classify setup failures");
+    test.check(!error.empty(),
+               "setup failures should always produce a diagnostic");
+
+    error.clear();
+    progressContext.shouldCancel = [] { return true; };
+    const auto canceled = openscp::curlcommon::performCurlTransfer(
+        session.get(), progressContext, "test transfer",
+        [](CURL *curl, std::string &) {
+            return curl_easy_setopt(curl, CURLOPT_URL,
+                                    "https://example.invalid/") == CURLE_OK;
+        },
+        error);
+    test.check(canceled.failure ==
+                       openscp::curlcommon::CurlTransferFailure::Canceled &&
+                   canceled.curlCode == CURLE_ABORTED_BY_CALLBACK,
+               "cancellation should be observed before network I/O");
+    test.check(error == "Canceled by user",
+               "user cancellation should retain a stable diagnostic");
+    const openscp::RemoteError canceledError =
+        openscp::curlcommon::transferFailureError(canceled, error);
+    test.check(canceledError.kind == openscp::RemoteErrorKind::Canceled &&
+                   canceledError.native_code == CURLE_ABORTED_BY_CALLBACK,
+               "common transfer failures should preserve cancellation data");
+
+    const openscp::RemoteError configurationError =
+        openscp::curlcommon::transferFailureError(configurationFailure,
+                                                  "invalid setup");
+    test.check(configurationError.kind ==
+                       openscp::RemoteErrorKind::InvalidRequest &&
+                   configurationError.message == "invalid setup",
+               "common transfer failures should classify invalid setup");
+}
+
 } // namespace
 
 int main() {
@@ -250,6 +306,7 @@ int main() {
     testWebDavCompletionStatuses(test);
     testCurlClientState(test);
     testBoundedStringSink(test);
+    testCurlTransferLifecycle(test);
     if (test.failures != 0) {
         std::cerr << "[FAIL] openscp_curl_backend_common_tests failures="
                   << test.failures << "\n";

@@ -14,7 +14,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
-#include <filesystem>
 #include <limits>
 #include <mutex>
 #include <sstream>
@@ -259,15 +258,11 @@ bool runDirectoryListingCommand(CURL *curl, const SessionOptions &opt,
                                 const std::string &remotePath,
                                 const char *command, std::string &payload,
                                 const std::atomic<bool> *interrupted,
-                                std::string &err,
-                                CURLcode *curlCodeOut = nullptr,
-                                long *responseCodeOut = nullptr) {
+                                curlcommon::CurlTransferResult &result,
+                                std::string &err) {
     // Shared wire call for MLSD/LIST; parser choice is made by callers.
     payload.clear();
-    if (curlCodeOut)
-        *curlCodeOut = CURLE_OK;
-    if (responseCodeOut)
-        *responseCodeOut = 0;
+    result = curlcommon::CurlTransferResult{};
     curl_easy_reset(curl);
     if (!configureCommonCurlHandle(curl, opt, err)) {
         return false;
@@ -295,25 +290,18 @@ bool runDirectoryListingCommand(CURL *curl, const SessionOptions &opt,
               protocolLabel(opt.protocol) + " listing command " + command + ".";
         return false;
     }
-    if (curlcommon::rejectInterrupted(interrupted, err, curlCodeOut))
+    if (curlcommon::rejectInterrupted(interrupted, err, &result.curlCode))
         return false;
 
-    const CURLcode rc = curl_easy_perform(curl);
-    long responseCode = 0;
-    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
-    if (curlCodeOut)
-        *curlCodeOut = rc;
-    if (responseCodeOut)
-        *responseCodeOut = responseCode;
+    result.curlCode = curl_easy_perform(curl);
+    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result.responseCode);
     if (interrupted && interrupted->load()) {
-        if (curlCodeOut)
-            *curlCodeOut = CURLE_ABORTED_BY_CALLBACK;
+        result.curlCode = CURLE_ABORTED_BY_CALLBACK;
         err = "Interrupted";
         return false;
     }
     if (payloadSink.limitExceeded || payloadSink.allocationFailed) {
-        if (curlCodeOut)
-            *curlCodeOut = CURLE_WRITE_ERROR;
+        result.curlCode = CURLE_WRITE_ERROR;
         err = payloadSink.limitExceeded
                   ? std::string(protocolLabel(opt.protocol)) +
                         " directory listing exceeded the 64 MiB safety limit."
@@ -321,15 +309,15 @@ bool runDirectoryListingCommand(CURL *curl, const SessionOptions &opt,
                         " directory listing could not be stored in memory.";
         return false;
     }
-    if (rc != CURLE_OK) {
+    if (result.curlCode != CURLE_OK) {
         err = std::string(protocolLabel(opt.protocol)) + " listing command " +
-              command + " failed: " + curl_easy_strerror(rc);
+              command + " failed: " + curl_easy_strerror(result.curlCode);
         return false;
     }
-    if (responseCode >= 400) {
+    if (result.responseCode >= 400) {
         err = std::string(protocolLabel(opt.protocol)) + " listing command " +
               command + " was rejected (server response " +
-              std::to_string(responseCode) + ").";
+              std::to_string(result.responseCode) + ").";
         return false;
     }
     return true;
@@ -656,33 +644,31 @@ bool fetchFtpListing(CURL *curl, const SessionOptions &opt,
                      long *lastResponseCode = nullptr) {
     std::string mlsdPayload;
     std::string mlsdErr;
-    CURLcode mlsdCode = CURLE_OK;
-    long mlsdResponse = 0;
-    const bool mlsdOk = runDirectoryListingCommand(
-        curl, opt, remotePath, "MLSD", mlsdPayload, interrupted, mlsdErr,
-        &mlsdCode, &mlsdResponse);
+    curlcommon::CurlTransferResult mlsdResult;
+    const bool mlsdOk =
+        runDirectoryListingCommand(curl, opt, remotePath, "MLSD", mlsdPayload,
+                                   interrupted, mlsdResult, mlsdErr);
     if (mlsdOk && parseMlsdListing(mlsdPayload, out))
         return true;
     if (interrupted && interrupted->load()) {
         if (lastCurlCode)
             *lastCurlCode = CURLE_ABORTED_BY_CALLBACK;
         if (lastResponseCode)
-            *lastResponseCode = mlsdResponse;
+            *lastResponseCode = mlsdResult.responseCode;
         err = "Interrupted";
         return false;
     }
 
     std::string listPayload;
     std::string listErr;
-    CURLcode listCode = CURLE_OK;
-    long listResponse = 0;
-    const bool listOk = runDirectoryListingCommand(
-        curl, opt, remotePath, "LIST", listPayload, interrupted, listErr,
-        &listCode, &listResponse);
+    curlcommon::CurlTransferResult listResult;
+    const bool listOk =
+        runDirectoryListingCommand(curl, opt, remotePath, "LIST", listPayload,
+                                   interrupted, listResult, listErr);
     if (lastCurlCode)
-        *lastCurlCode = listOk ? CURLE_OK : listCode;
+        *lastCurlCode = listOk ? CURLE_OK : listResult.curlCode;
     if (lastResponseCode)
-        *lastResponseCode = listResponse;
+        *lastResponseCode = listResult.responseCode;
     if (listOk && parseListListing(listPayload, out))
         return true;
 
@@ -957,75 +943,39 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
     }
     UniqueFile localFileOwner(localFile);
 
-    CURL *curl = connection.session->get();
-    if (!curl) {
-        localFileOwner.reset();
-        err = "Could not create CURL handle.";
-        setLastOperationError(RemoteErrorKind::LocalIo, err);
-        return false;
-    }
-    curl_easy_reset(curl);
-    if (!configureCommonCurlHandle(curl, opt, err)) {
-        localFileOwner.reset();
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
-
     curlcommon::TransferProgressContext progressContext{
         progress, shouldCancel, operation.interrupted(), false};
     const std::string url = buildFtpUrl(opt, remote);
-    const bool configured =
-        (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
-                          curlcommon::writeFileCallback) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_WRITEDATA, localFile) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
-                          curlcommon::transferProgressCallback) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progressContext) ==
-         CURLE_OK);
-    if (!configured) {
+    const curlcommon::CurlTransferResult result =
+        curlcommon::performCurlTransfer(
+            connection.session->get(), progressContext,
+            std::string(protocolLabel(opt.protocol)) + " download",
+            [&](CURL *curl, std::string &configurationError) {
+                return configureCommonCurlHandle(curl, opt,
+                                                 configurationError) &&
+                       curlcommon::configureFileDownload(curl, localFile,
+                                                         progressContext,
+                                                         configurationError) &&
+                       curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) ==
+                           CURLE_OK;
+            },
+            err);
+    if (!result.succeeded()) {
         localFileOwner.reset();
-        err = "Could not configure FTP download.";
-        setLastOperationError(RemoteErrorKind::LocalIo, err);
+        setLastOperationError(curlcommon::transferFailureError(
+            result, err,
+            [](CURLcode code, long responseCode, const std::string &message) {
+                return ftpErrorFromResult(code, responseCode, message);
+            }));
         return false;
     }
-
-    const bool canceledBeforeTransfer = shouldCancel && shouldCancel();
-    if (canceledBeforeTransfer || operation.interrupted()->load()) {
-        localFileOwner.reset();
-        err = canceledBeforeTransfer ? "Canceled by user" : "Interrupted";
-        setLastOperationError(
-            RemoteErrorKind::Canceled, err,
-            static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
-        return false;
-    }
-    const CURLcode rc = curl_easy_perform(curl);
-    long responseCode = 0;
-    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
-    const bool userCanceled = shouldCancel && shouldCancel();
-    if (userCanceled || operation.interrupted()->load()) {
-        localFileOwner.reset();
-        err = userCanceled ? "Canceled by user" : "Interrupted";
-        setLastOperationError(
-            RemoteErrorKind::Canceled, err,
-            static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
-        return false;
-    }
-    if (rc != CURLE_OK) {
-        localFileOwner.reset();
-        err = std::string(protocolLabel(opt.protocol)) +
-              " download failed: " + curl_easy_strerror(rc);
-        setLastOperationError(ftpErrorFromResult(rc, responseCode, err));
-        return false;
-    }
-    if (responseCode >= 400) {
+    if (result.responseCode >= 400) {
         localFileOwner.reset();
         err = std::string(protocolLabel(opt.protocol)) +
               " download was rejected (server response " +
-              std::to_string(responseCode) + ").";
+              std::to_string(result.responseCode) + ").";
         setLastOperationError(curlcommon::errorFromCurl(
-            CURLE_REMOTE_FILE_NOT_FOUND, err, responseCode));
+            CURLE_REMOTE_FILE_NOT_FOUND, err, result.responseCode));
         return false;
     }
     if (!curlcommon::flushAndSyncFile(localFile, err)) {
@@ -1038,9 +988,7 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
         setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
         return false;
     }
-    const bool canceledBeforeCommit = shouldCancel && shouldCancel();
-    if (canceledBeforeCommit || operation.interrupted()->load()) {
-        err = canceledBeforeCommit ? "Canceled by user" : "Interrupted";
+    if (curlcommon::detectTransferCancellation(progressContext, err)) {
         setLastOperationError(
             RemoteErrorKind::Canceled, err,
             static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
@@ -1107,100 +1055,52 @@ bool CurlFtpClient::put(const std::string &local, const std::string &remote,
     }
 
     std::uint64_t total = 0;
-    try {
-        total = std::filesystem::file_size(local);
-    } catch (...) {
-        err = "Could not determine local file size.";
-        setLastOperationError(RemoteErrorKind::LocalIo, err);
-        return false;
-    }
-
-    std::FILE *localFile = std::fopen(local.c_str(), "rb");
+    std::FILE *localFile = curlcommon::openFileForUpload(local, total, err);
     if (!localFile) {
-        err = "Could not open local file for reading.";
         setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
         return false;
     }
     UniqueFile localFileOwner(localFile);
 
     CURL *curl = connection.session->get();
-    if (!curl) {
-        localFileOwner.reset();
-        err = "Could not create CURL handle.";
-        setLastOperationError(RemoteErrorKind::LocalIo, err);
-        return false;
-    }
-    curl_easy_reset(curl);
-    if (!configureCommonCurlHandle(curl, opt, err)) {
-        localFileOwner.reset();
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
-
     curlcommon::TransferProgressContext progressContext{
         progress, shouldCancel, operation.interrupted(), true};
     const std::string url = buildFtpUrl(opt, remotePartial);
-    const bool configured =
-        (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_READFUNCTION,
-                          curlcommon::readFileCallback) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_READDATA, localFile) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE,
-                          static_cast<curl_off_t>(total)) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_FTP_CREATE_MISSING_DIRS,
-                          CURLFTP_CREATE_DIR_RETRY) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
-                          curlcommon::transferProgressCallback) == CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progressContext) ==
-         CURLE_OK);
-    if (!configured) {
-        localFileOwner.reset();
-        err = "Could not configure FTP upload.";
-        setLastOperationError(RemoteErrorKind::LocalIo, err);
-        return false;
-    }
-
-    const bool canceledBeforeTransfer = shouldCancel && shouldCancel();
-    if (canceledBeforeTransfer || operation.interrupted()->load()) {
-        localFileOwner.reset();
-        err = canceledBeforeTransfer ? "Canceled by user" : "Interrupted";
-        setLastOperationError(
-            RemoteErrorKind::Canceled, err,
-            static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
-        return false;
-    }
-    const CURLcode rc = curl_easy_perform(curl);
+    const curlcommon::CurlTransferResult result =
+        curlcommon::performCurlTransfer(
+            curl, progressContext,
+            std::string(protocolLabel(opt.protocol)) + " upload",
+            [&](CURL *handle, std::string &configurationError) {
+                return configureCommonCurlHandle(handle, opt,
+                                                 configurationError) &&
+                       curlcommon::configureFileUpload(
+                           handle, localFile, static_cast<curl_off_t>(total),
+                           progressContext, configurationError) &&
+                       curl_easy_setopt(handle, CURLOPT_URL, url.c_str()) ==
+                           CURLE_OK &&
+                       curl_easy_setopt(handle, CURLOPT_FTP_CREATE_MISSING_DIRS,
+                                        CURLFTP_CREATE_DIR_RETRY) == CURLE_OK;
+            },
+            err);
     localFileOwner.reset();
-    long responseCode = 0;
-    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
-    const bool userCanceled = shouldCancel && shouldCancel();
-    if (userCanceled || operation.interrupted()->load()) {
-        err = userCanceled ? "Canceled by user" : "Interrupted";
-        setLastOperationError(
-            RemoteErrorKind::Canceled, err,
-            static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
+    if (!result.succeeded()) {
+        setLastOperationError(curlcommon::transferFailureError(
+            result, err,
+            [](CURLcode code, long responseCode, const std::string &message) {
+                return ftpErrorFromResult(code, responseCode, message);
+            }));
         return false;
     }
-    if (rc != CURLE_OK) {
-        err = std::string(protocolLabel(opt.protocol)) +
-              " upload failed: " + curl_easy_strerror(rc);
-        setLastOperationError(ftpErrorFromResult(rc, responseCode, err));
-        return false;
-    }
-    if (responseCode >= 400) {
+    if (result.responseCode >= 400) {
         err = std::string(protocolLabel(opt.protocol)) +
               " upload was rejected (server response " +
-              std::to_string(responseCode) + ").";
-        setLastOperationError(
-            curlcommon::errorFromCurl(CURLE_UPLOAD_FAILED, err, responseCode));
+              std::to_string(result.responseCode) + ").";
+        setLastOperationError(curlcommon::errorFromCurl(
+            CURLE_UPLOAD_FAILED, err, result.responseCode));
         return false;
     }
 
-    const bool canceledBeforeCommit = shouldCancel && shouldCancel();
-    if (canceledBeforeCommit || operation.interrupted()->load()) {
-        err = canceledBeforeCommit ? "Canceled by user" : "Interrupted";
+    if (curlcommon::detectTransferCancellation(progressContext, err)) {
         setLastOperationError(
             RemoteErrorKind::Canceled, err,
             static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));

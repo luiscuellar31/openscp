@@ -120,6 +120,8 @@ parseRetryAfter(std::string_view value, std::time_t now = std::time(nullptr));
 std::string encodeUrlPath(const std::string &path);
 
 std::string localPartialPath(const std::string &destination);
+std::FILE *openFileForUpload(const std::string &path, std::uint64_t &fileSize,
+                             std::string &err);
 bool flushAndSyncFile(std::FILE *file, std::string &err);
 bool atomicReplaceLocalFile(const std::string &partial,
                             const std::string &destination, std::string &err);
@@ -183,6 +185,49 @@ struct TransferProgressContext {
     const std::atomic<bool> *interrupted = nullptr;
     bool preferUploadCounters = false;
 };
+
+enum class CurlTransferFailure {
+    None,
+    Configuration,
+    Canceled,
+    Transport,
+};
+
+struct CurlTransferResult {
+    CurlTransferFailure failure = CurlTransferFailure::None;
+    CURLcode curlCode = CURLE_OK;
+    long responseCode = 0;
+
+    [[nodiscard]] bool succeeded() const noexcept {
+        return failure == CurlTransferFailure::None;
+    }
+};
+
+using CurlTransferConfigurator =
+    std::function<bool(CURL *curl, std::string &err)>;
+using CurlTransportErrorMapper = std::function<RemoteError(
+    CURLcode code, long responseCode, const std::string &message)>;
+
+bool configureFileDownload(CURL *curl, std::FILE *file,
+                           TransferProgressContext &progressContext,
+                           std::string &err);
+bool configureFileUpload(CURL *curl, std::FILE *file, curl_off_t fileSize,
+                         TransferProgressContext &progressContext,
+                         std::string &err);
+bool detectTransferCancellation(const TransferProgressContext &progressContext,
+                                std::string &err);
+
+// Owns the protocol-neutral easy-handle lifecycle for one transfer. Backends
+// provide only their URL, authentication and protocol-specific options, then
+// classify response codes according to their own semantics.
+CurlTransferResult
+performCurlTransfer(CURL *curl, TransferProgressContext &progressContext,
+                    std::string_view operationLabel,
+                    const CurlTransferConfigurator &configure,
+                    std::string &err);
+RemoteError
+transferFailureError(const CurlTransferResult &result, std::string message,
+                     const CurlTransportErrorMapper &transportErrorMapper = {});
 
 int transferProgressCallback(void *userdata, curl_off_t dltotal,
                              curl_off_t dlnow, curl_off_t ultotal,
