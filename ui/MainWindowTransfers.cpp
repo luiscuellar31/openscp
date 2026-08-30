@@ -340,8 +340,8 @@ void MainWindow::runRemoteDownloadPrescan(
                         const quint64 available =
                             std::numeric_limits<quint64>::max() -
                             state->knownBytes;
-                        state->knownBytes +=
-                            std::min(available, entry.info.size);
+                        state->knownBytes += std::min(
+                            available, static_cast<quint64>(entry.info.size));
                     }
                 }
 

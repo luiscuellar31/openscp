@@ -1103,8 +1103,8 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *remoteModel) {
                     const quint64 available =
                         std::numeric_limits<quint64>::max() -
                         enumStats_.totalBytes;
-                    enumStats_.totalBytes +=
-                        std::min(available, entry.info.size);
+                    enumStats_.totalBytes += std::min(
+                        available, static_cast<quint64>(entry.info.size));
                 }
             }
             if (enforceRemoteDragThreshold() && enumPendingJobs_.isEmpty()) {

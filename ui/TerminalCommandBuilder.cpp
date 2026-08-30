@@ -317,12 +317,14 @@ QString withSftpFallback(const QString &sshCommand,
              sftpCommand);
 }
 
+#ifdef Q_OS_MAC
 QString appleScriptStringLiteral(const QString &raw) {
     QString escaped = raw;
     escaped.replace(QStringLiteral("\\"), QStringLiteral("\\\\"));
     escaped.replace(QStringLiteral("\""), QStringLiteral("\\\""));
     return QStringLiteral("\"") + escaped + QStringLiteral("\"");
 }
+#endif
 
 } // namespace
 

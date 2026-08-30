@@ -171,7 +171,9 @@ bool Libssh2SftpClient::removeFile(const std::string &remote_path,
     auto structuredErrorScope = beginStructuredOperation(err, true);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
-    int rc = libssh2_sftp_unlink(sftp_, remote_path.c_str());
+    int rc =
+        libssh2_sftp_unlink_ex(sftp_, remote_path.c_str(),
+                               static_cast<unsigned int>(remote_path.size()));
     if (rc != 0) {
         err = "sftp_unlink failed";
         return false;

@@ -289,7 +289,7 @@ void testTypedOperationsAreSerialized(TestContext &test) {
     int readySignals = 0;
     int finishedSignals = 0;
     int successfulSignals = 0;
-    int searchMatches = 0;
+    qsizetype searchMatches = 0;
     bool checksumDelivered = false;
     bool checksumProgressDelivered = false;
     bool callbacksOnUiThread = true;

@@ -2,7 +2,7 @@
 #pragma once
 
 #include <QString>
-#include <QtTypes>
+#include <QtCore/qglobal.h>
 
 [[nodiscard]] QString formatByteSize(quint64 bytes);
 [[nodiscard]] QString formatTransferRate(double kibibytesPerSecond);

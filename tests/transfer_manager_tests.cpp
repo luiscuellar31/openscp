@@ -186,7 +186,7 @@ void testBatchDownloadEnqueueAndGranularSignals(TestContext &test) {
     TransferManager manager;
     int compatibilityNotifications = 0;
     int addedNotifications = 0;
-    int addedIds = 0;
+    qsizetype addedIds = 0;
     QObject::connect(
         &manager, &TransferManager::tasksChanged, &manager,
         [&compatibilityNotifications] { ++compatibilityNotifications; });
@@ -1351,7 +1351,7 @@ void testRemovingTaskCanDeletePartialData(TestContext &test) {
     partial.close();
 
     TransferManager manager;
-    int removedSignals = 0;
+    qsizetype removedSignals = 0;
     QObject::connect(
         &manager, &TransferManager::tasksRemoved, &manager,
         [&](const QVector<quint64> &ids) { removedSignals += ids.size(); });

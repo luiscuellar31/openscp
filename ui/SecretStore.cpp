@@ -269,6 +269,7 @@ bool SecretStore::insecureFallbackActive() {
 #else // non-Apple and without Libsecret: optional insecure fallback controlled
       // by env var or settings
 
+#ifndef OPENSCP_BUILD_SECURE_ONLY
 static bool fallbackEnabledEnv() {
     const char *v = std::getenv("OPENSCP_ENABLE_INSECURE_FALLBACK");
     return v && *v == '1';
@@ -284,6 +285,7 @@ static bool fallbackEnabledConfigured() {
 static bool fallbackEnabled() {
     return fallbackEnabledEnv() || fallbackEnabledConfigured();
 }
+#endif
 
 SecretStore::PersistResult SecretStore::setSecret(const QString &key,
                                                   const QString &value) {
