@@ -204,7 +204,7 @@ jobs:
           if ! ./scripts/ci/setup_protocol_services.sh \
             >/tmp/openscp-protocol-setup.log 2>&1; then
             cat /tmp/openscp-protocol-setup.log
-            grep -E -i 'error|failed|fatal|denied|address already in use' \
+            grep -E -i 'error|failed|fatal|oops|denied|address already in use' \
               /tmp/openscp-protocol-setup.log | tail -20 | \
               while IFS= read -r line; do
                 line="${line//'%'/'%25'}"
@@ -271,7 +271,7 @@ jobs:
       - name: Report protocol service diagnostics
         if: failure()
         run: |
-          grep -E -i 'error|failed|fatal|denied|address already in use' \
+          grep -E -i 'error|failed|fatal|oops|denied|address already in use' \
             /tmp/openscp-protocol-setup.log | tail -20 | \
             while IFS= read -r line; do
               echo "::error title=Protocol service setup::${line}"

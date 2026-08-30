@@ -245,6 +245,11 @@ write_vsftpd_config \
   "$FTPS_IMPLICIT_PASSIVE_MIN" "$FTPS_IMPLICIT_PASSIVE_MAX" \
   "${LOG_DIR}/ftps-implicit.log" implicit
 
+sudo chown root:root \
+  "$FTP_CONFIG" "$FTPS_EXPLICIT_CONFIG" "$FTPS_IMPLICIT_CONFIG"
+sudo chmod 0600 \
+  "$FTP_CONFIG" "$FTPS_EXPLICIT_CONFIG" "$FTPS_IMPLICIT_CONFIG"
+
 log "starting FTP, explicit FTPS, and implicit FTPS"
 launch_vsftpd "FTP" "$FTP_CONFIG"
 launch_vsftpd "explicit FTPS" "$FTPS_EXPLICIT_CONFIG"
