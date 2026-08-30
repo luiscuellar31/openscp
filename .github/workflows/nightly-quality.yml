@@ -70,7 +70,7 @@ jobs:
         env:
           ASAN_OPTIONS: detect_leaks=1:strict_init_order=1
           UBSAN_OPTIONS: print_stacktrace=1
-          TSAN_OPTIONS: halt_on_error=1
+          TSAN_OPTIONS: suppressions=${{ github.workspace }}/.github/tsan-suppressions.txt:halt_on_error=1
         run: ctest --test-dir build --output-on-failure
 
   static-analysis:

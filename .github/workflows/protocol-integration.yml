@@ -382,7 +382,7 @@ jobs:
         if: matrix.id == 'tsan'
         env:
           QT_QPA_PLATFORM: offscreen
-          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1:history_size=7
+          TSAN_OPTIONS: suppressions=${{ github.workspace }}/.github/tsan-suppressions.txt:halt_on_error=1:second_deadlock_stack=1:history_size=7
         run: |
           ctest --test-dir build --output-on-failure \
             -LE integration --timeout 180 2>&1 | \
