@@ -201,8 +201,12 @@ jobs:
 
       - name: Start real protocol services
         run: |
-          ./scripts/ci/setup_protocol_services.sh 2>&1 | \
-            tee /tmp/openscp-protocol-setup.log
+          if ! ./scripts/ci/setup_protocol_services.sh \
+            >/tmp/openscp-protocol-setup.log 2>&1; then
+            cat /tmp/openscp-protocol-setup.log
+            exit 1
+          fi
+          cat /tmp/openscp-protocol-setup.log
 
       - name: Report protocol service diagnostics
         if: failure()
