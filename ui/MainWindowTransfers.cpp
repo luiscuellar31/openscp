@@ -464,8 +464,7 @@ void MainWindow::runRemoteDownloadPrescan(
                                RemoteOperationController::Outcome::Succeeded) {
                         ++state->listFailures;
                     } else {
-                        lastSuccessfulRemoteActivityAtMs_ =
-                            QDateTime::currentMSecsSinceEpoch();
+                        sessionHealthMonitor_.recordActivity();
                     }
                     if (!completion.result.error.isEmpty())
                         state->lastError = completion.result.error;

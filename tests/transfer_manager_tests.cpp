@@ -1137,12 +1137,14 @@ void testFailedDependencySkipsFollowingWork(TestContext &test) {
     manager.enqueueRemoteDelete(QStringLiteral("/must-not-delete"), false,
                                 batch);
 
-    test.check(waitUntil([&] {
-                   const auto tasks = manager.tasksSnapshot();
-                   return tasks.size() == 2 &&
-                          tasks[0].status == TransferTask::Status::Error &&
-                          tasks[1].status == TransferTask::Status::Skipped;
-               }),
+    test.check(waitUntil(
+                   [&] {
+                       const auto tasks = manager.tasksSnapshot();
+                       return tasks.size() == 2 &&
+                              tasks[0].status == TransferTask::Status::Error &&
+                              tasks[1].status == TransferTask::Status::Skipped;
+                   },
+                   10'000ms),
                "failed prerequisites should skip dependent mutations");
 }
 

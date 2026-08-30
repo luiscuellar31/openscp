@@ -204,6 +204,8 @@ target_link_libraries(openscp_sync_logic PUBLIC Qt6::Core)
 add_library(openscp_ui_logic STATIC
     ui/AppSettings.hpp
     ui/AppSettings.cpp
+    ui/HostKeyPromptCoordinator.hpp
+    ui/HostKeyPromptCoordinator.cpp
     ui/RemotePath.hpp
     ui/RemotePath.cpp
     ui/MainWindowSharedUtils.hpp
@@ -218,6 +220,8 @@ add_library(openscp_ui_logic STATIC
     ui/RemoteActionController.cpp
     ui/SessionController.hpp
     ui/SessionController.cpp
+    ui/SessionHealthMonitor.hpp
+    ui/SessionHealthMonitor.cpp
     ui/TerminalCommandBuilder.hpp
     ui/TerminalCommandBuilder.cpp
     ui/TransferUiController.hpp

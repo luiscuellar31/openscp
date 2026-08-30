@@ -21,7 +21,6 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QDir>
-#include <QGuiApplication>
 #include <QHeaderView>
 #include <QInputDialog>
 #include <QLabel>
@@ -41,6 +40,7 @@
 #include <atomic>
 #include <cstdio>
 #include <memory>
+#include <utility>
 
 // Best-effort memory scrubbing helpers for sensitive data
 static inline void secureClear(QString &text) {
@@ -287,106 +287,6 @@ bool MainWindow::isLikelyRemoteTransportError(const QString &rawError) const {
     return false;
 }
 
-void MainWindow::ensureRemoteSessionHealthMonitoring() {
-    if (remoteSessionHealthTimer_)
-        return;
-
-    remoteSessionHealthTimer_ = new QTimer(this);
-    remoteSessionHealthTimer_->setSingleShot(false);
-    remoteSessionHealthTimer_->setInterval(remoteSessionHealthIntervalMs_);
-    connect(remoteSessionHealthTimer_, &QTimer::timeout, this,
-            [this] { runRemoteSessionHealthCheck(tr("periodic"), false); });
-
-    auto *guiApp =
-        qobject_cast<QGuiApplication *>(QCoreApplication::instance());
-    if (!guiApp)
-        return;
-    connect(guiApp, &QGuiApplication::applicationStateChanged, this,
-            [this](Qt::ApplicationState state) {
-                const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-                if (state == Qt::ApplicationActive) {
-                    if (lastAppInactiveAtMs_ <= 0) {
-                        lastAppInactiveAtMs_ = 0;
-                        return;
-                    }
-                    const qint64 inactiveMs = nowMs - lastAppInactiveAtMs_;
-                    lastAppInactiveAtMs_ = 0;
-                    constexpr qint64 kResumeProbeThresholdMs = 60 * 1000;
-                    if (inactiveMs >= kResumeProbeThresholdMs &&
-                        rightIsRemote_ && sessionController_->client()) {
-                        runRemoteSessionHealthCheck(
-                            tr("resume (%1s)").arg(inactiveMs / 1000), true);
-                    }
-                    return;
-                }
-                lastAppInactiveAtMs_ = nowMs;
-            });
-}
-
-void MainWindow::startRemoteSessionHealthMonitoring() {
-    if (!rightIsRemote_ || !sessionController_->client())
-        return;
-    ensureRemoteSessionHealthMonitoring();
-    if (!remoteSessionHealthTimer_)
-        return;
-    if (remoteSessionHealthIntervalMs_ < 60000)
-        remoteSessionHealthIntervalMs_ = 60000;
-    remoteSessionHealthTimer_->setInterval(remoteSessionHealthIntervalMs_);
-    remoteSessionHealthProbeInFlight_.store(false);
-    lastAppInactiveAtMs_ = 0;
-    if (!remoteSessionHealthTimer_->isActive())
-        remoteSessionHealthTimer_->start();
-}
-
-void MainWindow::stopRemoteSessionHealthMonitoring() {
-    if (remoteSessionHealthTimer_)
-        remoteSessionHealthTimer_->stop();
-    if (remoteOps_ && activeRemoteHealthJob_ != 0)
-        remoteOps_->cancel(activeRemoteHealthJob_);
-    activeRemoteHealthJob_ = 0;
-    activeRemoteHealthReason_.clear();
-    activeRemoteHealthForced_ = false;
-    remoteSessionHealthProbeInFlight_.store(false);
-    lastAppInactiveAtMs_ = 0;
-}
-
-void MainWindow::runRemoteSessionHealthCheck(const QString &reason,
-                                             bool force) {
-    if (!rightIsRemote_ || !sessionController_->client() || !remoteOps_ ||
-        !remoteOps_->hasRequestedSession() ||
-        !sessionController_->options().has_value())
-        return;
-    if (sessionController_->isDisconnecting() ||
-        sessionController_->isConnecting())
-        return;
-    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-    constexpr qint64 kRecentRemoteActivityMs = 60 * 1000;
-    if (!force && lastSuccessfulRemoteActivityAtMs_ > 0 &&
-        nowMs - lastSuccessfulRemoteActivityAtMs_ < kRecentRemoteActivityMs) {
-        return;
-    }
-    bool expected = false;
-    if (!remoteSessionHealthProbeInFlight_.compare_exchange_strong(expected,
-                                                                   true)) {
-        return;
-    }
-
-    const QString probePath =
-        (rightRemoteModel_ && !rightRemoteModel_->rootPath().isEmpty())
-            ? rightRemoteModel_->rootPath()
-            : QStringLiteral("/");
-    RemoteOperationController::HealthCheckRequest request;
-    request.path = probePath;
-    activeRemoteHealthReason_ = reason;
-    activeRemoteHealthForced_ = force;
-    activeRemoteHealthJob_ = remoteOps_->submit(request);
-    if (activeRemoteHealthJob_ == 0) {
-        remoteSessionHealthProbeInFlight_.store(false);
-        activeRemoteHealthReason_.clear();
-        activeRemoteHealthForced_ = false;
-    }
-}
-
 void MainWindow::openConnectDialogWithPreset(
     const std::optional<openscp::SessionOptions> &preset) {
     ConnectionDialog dlg(this);
@@ -450,7 +350,8 @@ void MainWindow::connectSftp() {
 
 // Tear down the current remote session and restore local mode.
 quint64 MainWindow::beginDisconnectFlow() {
-    stopRemoteSessionHealthMonitoring();
+    sessionHealthMonitor_.stop();
+    hostKeyPromptCoordinator_.cancel();
     const quint64 disconnectSeq = sessionController_->beginDisconnect();
     transferCleanupInProgress_ = (transferMgr_ != nullptr);
     transferCleanupStartedAtMs_ =
@@ -940,32 +841,8 @@ QString MainWindow::defaultDownloadDirFromSettings(const QSettings &settings) {
     return configured;
 }
 
-bool MainWindow::confirmHostKeyUI(const QString &host, quint16 port,
-                                  const QString &algorithm,
-                                  const QString &fingerprint, bool canSave) {
-    tofuHost_ = host + ":" + QString::number(port);
-    tofuAlg_ = algorithm;
-    tofuFp_ = fingerprint;
-    tofuCanSave_ = canSave;
-    {
-        std::unique_lock<std::mutex> tofuLock(tofuMutex_);
-        tofuDecided_ = false;
-        tofuAccepted_ = false;
-    }
-    QMetaObject::invokeMethod(
-        this,
-        [this, host, algorithm, fingerprint] {
-            showTOfuDialog(host, algorithm, fingerprint);
-        },
-        Qt::QueuedConnection);
-    std::unique_lock<std::mutex> tofuLock(tofuMutex_);
-    tofuCv_.wait(tofuLock, [&] { return tofuDecided_; });
-    return tofuAccepted_;
-}
-
-// Explicit non‑modal TOFU dialog per spec: open() + finished -> onTofuFinished
-void MainWindow::showTOfuDialog(const QString &host, const QString &algorithm,
-                                const QString &fingerprint) {
+void MainWindow::showHostKeyPrompt(
+    const openscpui::HostKeyPromptCoordinator::Prompt &prompt) {
     if (tofuBox_) {
         tofuBox_->raise();
         tofuBox_->activateWindow();
@@ -993,21 +870,23 @@ void MainWindow::showTOfuDialog(const QString &host, const QString &algorithm,
     box->setWindowModality(Qt::WindowModal);
     box->setIcon(QMessageBox::Question);
     box->setWindowTitle(tr("Confirm SSH fingerprint"));
-    QString text = (tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
-                       "%3\n\nTrust and save to known_hosts?"))
-                       .arg(host)
-                       .arg(algorithm)
-                       .arg(fingerprint);
-    if (!tofuCanSave_) {
+    QString text;
+    if (!prompt.canSave) {
         text = (tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
                    "%3\n\nFingerprint cannot be saved. Connection "
                    "allowed only this time."))
-                   .arg(host)
-                   .arg(algorithm)
-                   .arg(fingerprint);
+                   .arg(prompt.host)
+                   .arg(prompt.algorithm)
+                   .arg(prompt.fingerprint);
+    } else {
+        text = (tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
+                   "%3\n\nTrust and save to known_hosts?"))
+                   .arg(prompt.host)
+                   .arg(prompt.algorithm)
+                   .arg(prompt.fingerprint);
     }
     box->setText(text);
-    box->addButton(tofuCanSave_ ? tr("Trust") : tr("Connect without saving"),
+    box->addButton(prompt.canSave ? tr("Trust") : tr("Connect without saving"),
                    QMessageBox::YesRole);
     box->addButton(tr("Cancel"), QMessageBox::RejectRole);
     connect(box, &QMessageBox::finished, this, &MainWindow::onTofuFinished);
@@ -1035,18 +914,10 @@ bool MainWindow::consumeTofuDialogDecision(int result) {
     return accept;
 }
 
-void MainWindow::publishTofuDecision(bool accept) {
-    {
-        std::unique_lock<std::mutex> tofuLock(tofuMutex_);
-        tofuAccepted_ = accept;
-        tofuDecided_ = true;
-    }
-    tofuCv_.notify_one();
-}
-
 void MainWindow::onTofuFinished(int dialogResult) {
+    const auto prompt = hostKeyPromptCoordinator_.pendingPrompt();
     const bool accept = consumeTofuDialogDecision(dialogResult);
-    if (!tofuCanSave_ && accept) {
+    if (prompt && !prompt->canSave && accept) {
         statusBar()->showMessage(
             tr("Could not save fingerprint; allowing one-time connection"),
             5000);
@@ -1062,45 +933,9 @@ void MainWindow::onTofuFinished(int dialogResult) {
     if (openscp::sensitiveLoggingEnabled())
         std::fprintf(stderr, "[OpenSCP] TOFU closed; progress resumed=%s\n",
                      resumedProgress ? "true" : "false");
-    publishTofuDecision(accept);
+    (void)hostKeyPromptCoordinator_.resolve(accept);
 }
 
-// Secondary non‑modal dialog for one‑time connection without saving
-void MainWindow::showOneTimeDialog(const QString &host,
-                                   const QString &algorithm,
-                                   const QString &fingerprint) {
-    if (tofuBox_) {
-        tofuBox_->raise();
-        tofuBox_->activateWindow();
-        return;
-    }
-    auto *box = new QMessageBox(this);
-    UiAlerts::configure(*box);
-    tofuBox_ = box;
-    box->setAttribute(Qt::WA_DeleteOnClose, true);
-    box->setWindowModality(Qt::WindowModal);
-    box->setIcon(QMessageBox::Warning);
-    box->setWindowTitle(tr("Additional confirmation"));
-    box->setText(
-        (tr("Could not save the fingerprint. Connect only this time without "
-            "saving?\n\nHost: %1\nAlgorithm: %2\nFingerprint: %3"))
-            .arg(host, algorithm, fingerprint));
-    box->addButton(tr("Connect without saving"), QMessageBox::YesRole);
-    box->addButton(tr("Cancel"), QMessageBox::RejectRole);
-    connect(box, &QMessageBox::finished, this, &MainWindow::onOneTimeFinished);
-    QTimer::singleShot(0, box, [box] { box->open(); });
-}
-
-void MainWindow::onOneTimeFinished(int dialogResult) {
-    const bool accept = consumeTofuDialogDecision(dialogResult);
-    if (accept)
-        statusBar()->showMessage(
-            tr("One-time connection without saving confirmed by user"), 5000);
-    else
-        statusBar()->showMessage(tr("Connection cancelled after save failure"),
-                                 5000);
-    publishTofuDecision(accept);
-}
 bool MainWindow::validateSftpConnectStart(const openscp::SessionOptions &opt) {
     if (transferCleanupInProgress_) {
         const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
@@ -1218,10 +1053,14 @@ void MainWindow::configureSftpConnectCallbacks(openscp::SessionOptions &opt) {
                                     bool canSave) {
         if (!self)
             return false;
-        return self->confirmHostKeyUI(
-            QString::fromStdString(host), static_cast<quint16>(port),
-            QString::fromStdString(algorithm),
-            QString::fromStdString(fingerprint), canSave);
+        openscpui::HostKeyPromptCoordinator::Prompt prompt;
+        prompt.host = QString::fromStdString(host);
+        prompt.port = static_cast<quint16>(port);
+        prompt.algorithm = QString::fromStdString(algorithm);
+        prompt.fingerprint = QString::fromStdString(fingerprint);
+        prompt.canSave = canSave;
+        return self->hostKeyPromptCoordinator_.requestDecision(
+            std::move(prompt));
     };
     opt.hostkey_status_cb = [self](const std::string &msg) {
         if (!self)
@@ -1750,7 +1589,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         addRecentServer(opt);
         setWindowTitle(tr("OpenSCP — local/remote (%1)").arg(activeProtocol));
         updateHostPolicyRiskBanner();
-        startRemoteSessionHealthMonitoring();
+        sessionHealthMonitor_.start();
         updateRemoteMutationCapability();
         updateDeleteShortcutEnables();
         return;
@@ -1815,6 +1654,6 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     addRecentServer(opt);
     setWindowTitle(tr("OpenSCP — local/remote (%1)").arg(activeProtocol));
     updateHostPolicyRiskBanner();
-    startRemoteSessionHealthMonitoring();
+    sessionHealthMonitor_.start();
     updateDeleteShortcutEnables();
 }

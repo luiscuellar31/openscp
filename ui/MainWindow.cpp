@@ -210,9 +210,29 @@ static QString trimHistoryLabel(const QString &raw, int maxLen = 96) {
     return out.left(maxLen - 3) + QStringLiteral("...");
 }
 
-MainWindow::~MainWindow() = default; // define the destructor here
+MainWindow::~MainWindow() {
+    hostKeyPromptCoordinator_.cancel();
+    sessionHealthMonitor_.stop();
+}
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
+    QPointer<MainWindow> self(this);
+    hostKeyPromptCoordinator_.setPresentPrompt(
+        [self](const openscpui::HostKeyPromptCoordinator::Prompt &prompt) {
+            if (!self)
+                return;
+            QMetaObject::invokeMethod(
+                self,
+                [self, prompt] {
+                    if (!self)
+                        return;
+                    const auto pending =
+                        self->hostKeyPromptCoordinator_.pendingPrompt();
+                    if (pending && pending->requestId == prompt.requestId)
+                        self->showHostKeyPrompt(prompt);
+                },
+                Qt::QueuedConnection);
+        });
     sessionController_ = new openscpui::SessionController(this);
     paneController_ = new openscpui::PaneController(this);
     const QString home = preferredLocalHomePath();
@@ -819,6 +839,61 @@ void MainWindow::initializeRuntimeState() {
     restoreMainWindowUiState();
 
     remoteOps_ = new RemoteOperationController(this);
+    openscpui::SessionHealthMonitor::Callbacks healthCallbacks;
+    healthCallbacks.canProbe = [this] {
+        return rightIsRemote_ && sessionController_->client() && remoteOps_ &&
+               remoteOps_->hasRequestedSession() &&
+               sessionController_->options().has_value() &&
+               !sessionController_->isDisconnecting() &&
+               !sessionController_->isConnecting();
+    };
+    healthCallbacks.probePath = [this] {
+        return (rightRemoteModel_ && !rightRemoteModel_->rootPath().isEmpty())
+                   ? rightRemoteModel_->rootPath()
+                   : QStringLiteral("/");
+    };
+    healthCallbacks.submitProbe = [this](const QString &path) {
+        if (!remoteOps_)
+            return quint64{0};
+        RemoteOperationController::HealthCheckRequest request;
+        request.path = path;
+        return remoteOps_->submit(request);
+    };
+    healthCallbacks.cancelProbe = [this](quint64 jobId) {
+        if (remoteOps_)
+            remoteOps_->cancel(jobId);
+    };
+    healthCallbacks.periodicReason = [] { return tr("periodic"); };
+    healthCallbacks.resumeReason = [](qint64 inactiveSeconds) {
+        return tr("resume (%1s)").arg(inactiveSeconds);
+    };
+    healthCallbacks.probeSucceeded =
+        [this](const openscpui::SessionHealthMonitor::ProbeContext &context) {
+            if (context.forced && !context.reason.isEmpty()) {
+                statusBar()->showMessage(
+                    tr("Remote session validated (%1)").arg(context.reason),
+                    2500);
+            }
+        };
+    healthCallbacks.probeFailed =
+        [this](const openscpui::SessionHealthMonitor::ProbeContext &context,
+               const QString &error) {
+            if (!rightIsRemote_ || !sessionController_->client() ||
+                sessionController_->isDisconnecting() ||
+                !isLikelyRemoteTransportError(error)) {
+                return;
+            }
+            UiAlerts::warning(
+                this, tr("Connection lost"),
+                tr("The remote session no longer responds (%1).\n"
+                   "OpenSCP will disconnect to avoid inconsistent "
+                   "operations.\n%2")
+                    .arg(context.reason,
+                         shortRemoteError(error, tr("Transport error."))));
+            disconnectSftp();
+        };
+    sessionHealthMonitor_.setCallbacks(std::move(healthCallbacks));
+
     remoteActionController_ = new openscpui::RemoteActionController(this);
     openscpui::RemoteActionController::Context remoteActionContext;
     remoteActionContext.dialogParent = this;
@@ -829,7 +904,7 @@ void MainWindow::initializeRuntimeState() {
         requestRemoteListing(path, true);
     };
     remoteActionContext.remoteActivitySucceeded = [this] {
-        lastSuccessfulRemoteActivityAtMs_ = QDateTime::currentMSecsSinceEpoch();
+        sessionHealthMonitor_.recordActivity();
     };
     remoteActionContext.requestPermissions = [this](std::uint32_t currentMode,
                                                     bool isDirectory)
@@ -880,8 +955,7 @@ void MainWindow::initializeRuntimeState() {
                 entries.push_back(entry.info);
             rightRemoteModel_->setEntries(result.path, entries);
             rightView_->setEnabled(true);
-            lastSuccessfulRemoteActivityAtMs_ =
-                QDateTime::currentMSecsSinceEpoch();
+            sessionHealthMonitor_.recordActivity();
 
             if (activeRemoteListIsRefresh_ && rightView_->selectionModel()) {
                 QItemSelectionModel *selection = rightView_->selectionModel();
@@ -916,44 +990,25 @@ void MainWindow::initializeRuntimeState() {
         });
     connect(remoteOps_, &RemoteOperationController::healthCheckCompleted, this,
             [this](const RemoteOperationController::HealthResult &result) {
-                if (result.result.job.id != activeRemoteHealthJob_)
-                    return;
-                activeRemoteHealthJob_ = 0;
-                remoteSessionHealthProbeInFlight_.store(false);
-                const QString reason = activeRemoteHealthReason_;
-                const bool forced = activeRemoteHealthForced_;
-                activeRemoteHealthReason_.clear();
-                activeRemoteHealthForced_ = false;
-
-                if (result.result.outcome ==
-                    RemoteOperationController::Outcome::Succeeded) {
-                    lastSuccessfulRemoteActivityAtMs_ =
-                        QDateTime::currentMSecsSinceEpoch();
-                    if (forced && !reason.isEmpty()) {
-                        statusBar()->showMessage(
-                            tr("Remote session validated (%1)").arg(reason),
-                            2500);
-                    }
-                    return;
+                using HealthOutcome =
+                    openscpui::SessionHealthMonitor::ProbeOutcome;
+                HealthOutcome outcome = HealthOutcome::Failed;
+                switch (result.result.outcome) {
+                case RemoteOperationController::Outcome::Succeeded:
+                    outcome = HealthOutcome::Succeeded;
+                    break;
+                case RemoteOperationController::Outcome::Canceled:
+                    outcome = HealthOutcome::Canceled;
+                    break;
+                case RemoteOperationController::Outcome::Superseded:
+                    outcome = HealthOutcome::Superseded;
+                    break;
+                case RemoteOperationController::Outcome::Failed:
+                    outcome = HealthOutcome::Failed;
+                    break;
                 }
-                if (!rightIsRemote_ || !sessionController_->client() ||
-                    sessionController_->isDisconnecting() ||
-                    result.result.outcome ==
-                        RemoteOperationController::Outcome::Canceled ||
-                    result.result.outcome ==
-                        RemoteOperationController::Outcome::Superseded) {
-                    return;
-                }
-                if (!isLikelyRemoteTransportError(result.result.error))
-                    return;
-                UiAlerts::warning(
-                    this, tr("Connection lost"),
-                    tr("The remote session no longer responds (%1).\n"
-                       "OpenSCP will disconnect to avoid inconsistent "
-                       "operations.\n%2")
-                        .arg(reason, shortRemoteError(result.result.error,
-                                                      tr("Transport error."))));
-                disconnectSftp();
+                (void)sessionHealthMonitor_.completeProbe(
+                    result.result.job.id, outcome, result.result.error);
             });
 
     // Transfer queue
@@ -1470,7 +1525,7 @@ void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
     context.isRemote = view == rightView_ && rightIsRemote_;
     context.includeHidden = prefShowHidden_;
     context.remoteActivitySucceeded = [this] {
-        lastSuccessfulRemoteActivityAtMs_ = QDateTime::currentMSecsSinceEpoch();
+        sessionHealthMonitor_.recordActivity();
     };
     paneController_->search(context);
 }
@@ -1556,14 +1611,12 @@ void MainWindow::applyPreferences() {
     prefNoHostVerificationTtlMin_ = qBound(
         1, settings.value("Security/noHostVerificationTtlMin", 15).toInt(),
         120);
-    remoteSessionHealthIntervalMs_ =
+    const int sessionHealthIntervalMs =
         qBound(60,
                settings.value("Network/sessionHealthIntervalSec", 600).toInt(),
                86400) *
         1000;
-    if (remoteSessionHealthTimer_) {
-        remoteSessionHealthTimer_->setInterval(remoteSessionHealthIntervalMs_);
-    }
+    sessionHealthMonitor_.setInterval(sessionHealthIntervalMs);
     downloadDir_ = defaultDownloadDirFromSettings(settings);
     QDir().mkpath(downloadDir_);
     if (actShowQueue_) {

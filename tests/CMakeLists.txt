@@ -74,6 +74,7 @@ foreach(TEST_COMPONENT IN ITEMS
         pane_controller
         remote_action_controller
         session_controller
+        connection_coordinators
         transfer_ui_controller
         terminal_command_builder
         sync_coordinator

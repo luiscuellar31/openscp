@@ -1,6 +1,8 @@
 // Declaration of the main window and its state/actions.
 #pragma once
+#include "HostKeyPromptCoordinator.hpp"
 #include "NavigationStore.hpp"
+#include "SessionHealthMonitor.hpp"
 #include "TransferUiController.hpp"
 #include "openscp/SftpTypes.hpp"
 
@@ -16,7 +18,6 @@
 #include <QVector>
 
 #include <atomic>
-#include <condition_variable>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -231,20 +232,10 @@ class MainWindow : public QMainWindow {
     QString downloadDir_; // last local folder chosen for downloads
     QString uploadDir_;   // last local folder chosen for uploads
 
-    // Host key confirmation (TOFU) — non‑modal UI with sync wait (no exec())
-    bool confirmHostKeyUI(const QString &host, quint16 port,
-                          const QString &algorithm, const QString &fingerprint,
-                          bool canSave);
-
-    // Explicit non‑modal TOFU dialog API per spec
-    void showTOfuDialog(const QString &host, const QString &algorithm,
-                        const QString &fingerprint);
+    void showHostKeyPrompt(
+        const openscpui::HostKeyPromptCoordinator::Prompt &prompt);
     void onTofuFinished(int dialogResult);
-    void showOneTimeDialog(const QString &host, const QString &algorithm,
-                           const QString &fingerprint);
-    void onOneTimeFinished(int dialogResult);
     bool consumeTofuDialogDecision(int result);
-    void publishTofuDecision(bool accept);
     void showSiteManagerNonModal();
     void maybeOpenSiteManagerAfterModal();
     bool
@@ -332,10 +323,6 @@ class MainWindow : public QMainWindow {
     void handleTransferUiUpdate(const QVector<quint64> &upsertIds,
                                 const QVector<quint64> &removedIds);
     bool isLikelyRemoteTransportError(const QString &rawError) const;
-    void ensureRemoteSessionHealthMonitoring();
-    void startRemoteSessionHealthMonitoring();
-    void stopRemoteSessionHealthMonitoring();
-    void runRemoteSessionHealthCheck(const QString &reason, bool force = false);
     QString preferredLocalHomePath() const;
 
     // Capability-derived mutation state. Actual path permissions are checked by
@@ -346,6 +333,8 @@ class MainWindow : public QMainWindow {
 
     bool firstShow_ = true;
     bool restoredWindowGeometry_ = false;
+    openscpui::HostKeyPromptCoordinator hostKeyPromptCoordinator_;
+    openscpui::SessionHealthMonitor sessionHealthMonitor_;
     openscpui::TransferUiController transferUiController_;
 
     // User preferences
@@ -372,16 +361,8 @@ class MainWindow : public QMainWindow {
     QLabel *connectionTypeLabel_ = nullptr;
     QLabel *connectionElapsedLabel_ = nullptr;
     QTimer *connectionElapsedTimer_ = nullptr;
-    QTimer *remoteSessionHealthTimer_ = nullptr;
     qint64 connectionStartedAtMs_ = 0;
     QString activeConnectionType_;
-    qint64 lastAppInactiveAtMs_ = 0;
-    std::atomic<bool> remoteSessionHealthProbeInFlight_{false};
-    quint64 activeRemoteHealthJob_ = 0;
-    QString activeRemoteHealthReason_;
-    bool activeRemoteHealthForced_ = false;
-    qint64 lastSuccessfulRemoteActivityAtMs_ = 0;
-    int remoteSessionHealthIntervalMs_ = 10 * 60 * 1000;
     // Connection progress dialog (non-modal), to avoid blocking TOFU
     QPointer<class QProgressDialog> connectProgress_;
     bool connectProgressDimmed_ = false;
@@ -400,13 +381,4 @@ class MainWindow : public QMainWindow {
     bool activeRemoteListIsRefresh_ = false;
     bool activeRemoteListIsInitial_ = false;
     bool initialRemoteFallbackAttempted_ = false;
-    // TOFU wait state
-    std::mutex tofuMutex_;
-    std::condition_variable tofuCv_;
-    bool tofuDecided_ = false;
-    bool tofuAccepted_ = false;
-    bool tofuCanSave_ = false;
-    QString tofuHost_;
-    QString tofuAlg_;
-    QString tofuFp_;
 };
