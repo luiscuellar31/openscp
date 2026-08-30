@@ -1016,6 +1016,7 @@ void MainWindow::initializeRuntimeState() {
                 UiAlerts::warning(this, tr("Transfer queue"), warning);
             });
     (void)transferMgr_->enablePersistence();
+    // A single cold snapshot seeds the delta-based UI observer at startup.
     transferUiController_.initialize(transferMgr_->tasksSnapshot());
     connect(transferMgr_, &TransferManager::tasksAdded, this,
             [this](const QVector<quint64> &ids) {
@@ -1186,72 +1187,52 @@ void MainWindow::initializeConnectionSessionIndicators() {
         statusBar()->addPermanentWidget(connectionElapsedLabel_);
     }
 
-    if (!connectionElapsedTimer_) {
-        connectionElapsedTimer_ = new QTimer(this);
-        connectionElapsedTimer_->setInterval(1000);
-        connect(connectionElapsedTimer_, &QTimer::timeout, this,
-                &MainWindow::updateConnectionSessionIndicators);
-    }
+    connectionStatusCoordinator_.setRenderCallback(
+        [this](
+            const openscpui::ConnectionStatusCoordinator::Snapshot &snapshot) {
+            if (connectionTypeLabel_) {
+                const QString typeLabel =
+                    snapshot.connected ? snapshot.connectionType : tr("None");
+                const bool insecure =
+                    !activeSecurityWarning_.trimmed().isEmpty();
+                connectionTypeLabel_->setText(
+                    insecure ? tr("Type: %1 • UNSAFE").arg(typeLabel)
+                             : tr("Type: %1").arg(typeLabel));
+                connectionTypeLabel_->setStyleSheet(
+                    insecure ? QStringLiteral(
+                                   "QLabel { color: #B00020; font-weight: "
+                                   "700; }")
+                             : QString());
+                connectionTypeLabel_->setToolTip(
+                    insecure ? activeSecurityWarning_
+                             : tr("Active connection method for this session"));
+            }
 
+            if (connectionElapsedLabel_) {
+                connectionElapsedLabel_->setText(
+                    snapshot.connected ? tr("Session: %1")
+                                             .arg(formatConnectionElapsed(
+                                                 snapshot.elapsedSeconds))
+                                       : tr("Session: --:--:--"));
+            }
+        });
     resetConnectionSessionIndicators();
 }
 
 void MainWindow::startConnectionSessionIndicators(
     const QString &connectionType) {
-    if (!connectionTypeLabel_ || !connectionElapsedLabel_ ||
-        !connectionElapsedTimer_) {
+    if (!connectionTypeLabel_ || !connectionElapsedLabel_)
         initializeConnectionSessionIndicators();
-    }
 
     const QString normalizedType = connectionType.trimmed();
-    activeConnectionType_ =
-        normalizedType.isEmpty() ? tr("Unknown") : normalizedType;
-    connectionStartedAtMs_ = QDateTime::currentMSecsSinceEpoch();
-    if (connectionElapsedTimer_)
-        connectionElapsedTimer_->start();
-    updateConnectionSessionIndicators();
+    connectionStatusCoordinator_.start(
+        normalizedType.isEmpty() ? tr("Unknown") : normalizedType);
 }
 
 void MainWindow::resetConnectionSessionIndicators() {
-    activeConnectionType_.clear();
     activeSecurityWarning_.clear();
     sessionNoHostVerification_ = false;
-    connectionStartedAtMs_ = 0;
-    if (connectionElapsedTimer_)
-        connectionElapsedTimer_->stop();
-    updateConnectionSessionIndicators();
-}
-
-void MainWindow::updateConnectionSessionIndicators() {
-    if (connectionTypeLabel_) {
-        const QString typeLabel = activeConnectionType_.isEmpty()
-                                      ? tr("None")
-                                      : activeConnectionType_;
-        const bool insecure = !activeSecurityWarning_.trimmed().isEmpty();
-        connectionTypeLabel_->setText(
-            insecure ? tr("Type: %1 • UNSAFE").arg(typeLabel)
-                     : tr("Type: %1").arg(typeLabel));
-        connectionTypeLabel_->setStyleSheet(
-            insecure
-                ? QStringLiteral("QLabel { color: #B00020; font-weight: 700; }")
-                : QString());
-        connectionTypeLabel_->setToolTip(
-            insecure ? activeSecurityWarning_
-                     : tr("Active connection method for this session"));
-    }
-
-    if (connectionElapsedLabel_) {
-        if (connectionStartedAtMs_ <= 0) {
-            connectionElapsedLabel_->setText(tr("Session: --:--:--"));
-        } else {
-            const qint64 elapsedSeconds =
-                qMax<qint64>(0, (QDateTime::currentMSecsSinceEpoch() -
-                                 connectionStartedAtMs_) /
-                                    1000);
-            connectionElapsedLabel_->setText(
-                tr("Session: %1").arg(formatConnectionElapsed(elapsedSeconds)));
-        }
-    }
+    connectionStatusCoordinator_.reset();
 }
 
 // Show the application About dialog.

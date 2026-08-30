@@ -1,3 +1,4 @@
+#include "ConnectionStatusCoordinator.hpp"
 #include "HostKeyPromptCoordinator.hpp"
 #include "SessionHealthMonitor.hpp"
 #include "TestHarness.hpp"
@@ -237,6 +238,35 @@ OPENSCP_TEST(testSessionHealthResumeProbe, test) {
                    41, openscpui::SessionHealthMonitor::ProbeOutcome::Canceled),
                "canceled resume probes should clear overlap protection");
     monitor.stop();
+}
+
+OPENSCP_TEST(testConnectionStatusLifecycle, test) {
+    openscpui::ConnectionStatusCoordinator coordinator;
+    QVector<openscpui::ConnectionStatusCoordinator::Snapshot> snapshots;
+    coordinator.setRenderCallback(
+        [&](const auto &snapshot) { snapshots.push_back(snapshot); });
+
+    test.check(snapshots.size() == 1 && !snapshots.back().connected,
+               "connection status should publish its disconnected state");
+    coordinator.start(QStringLiteral("SFTP"), 1'000);
+    test.check(coordinator.isConnected() && snapshots.back().connected &&
+                   snapshots.back().connectionType == QStringLiteral("SFTP") &&
+                   snapshots.back().elapsedSeconds == 0,
+               "starting a session should publish its type and zero elapsed "
+               "time");
+
+    coordinator.refresh(6'500);
+    test.check(snapshots.back().elapsedSeconds == 5,
+               "refresh should publish deterministic elapsed seconds");
+    coordinator.refresh(500);
+    test.check(snapshots.back().elapsedSeconds == 0,
+               "clock changes should never produce negative durations");
+
+    coordinator.reset();
+    test.check(!coordinator.isConnected() && !snapshots.back().connected &&
+                   snapshots.back().connectionType.isEmpty() &&
+                   snapshots.back().elapsedSeconds == 0,
+               "reset should stop and clear connection session state");
 }
 
 } // namespace

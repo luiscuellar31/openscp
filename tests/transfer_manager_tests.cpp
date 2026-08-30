@@ -236,16 +236,34 @@ OPENSCP_TEST(testBatchDownloadEnqueueAndGranularSignals, test) {
                                         QStringLiteral("/remote/file-0.dat")) &&
             !manager.isBatchTerminal(batchId),
         "direct queries should preserve task type and terminal state");
+    const QVector<quint64> activeIds =
+        manager.activeTaskIdsForSession(QStringLiteral("site-a"));
+    test.check(activeIds.size() == downloads.size() && activeIds.front() == 1 &&
+                   activeIds.back() == 10'000,
+               "session queries should return only IDs without copying a "
+               "large queue");
 
     manager.cancelBatch(batchId);
     test.check(manager.isBatchTerminal(batchId) &&
                    !manager.hasActiveTaskForDestination(
                        TransferTask::Type::Download,
-                       QStringLiteral("/local/file-9999.dat")),
+                       QStringLiteral("/local/file-9999.dat")) &&
+                   manager.activeTaskIdsForSession({}).isEmpty(),
                "batch cancellation should become visible without snapshots");
     test.check(!manager.isBatchTerminal(0) &&
                    !manager.isBatchTerminal(batchId + 1000),
                "empty and unknown batches should not report terminal");
+
+    TransferManager sessionManager;
+    sessionManager.setSessionIdentity(QStringLiteral("site-a"));
+    sessionManager.enqueueDownload(QStringLiteral("/remote/session.dat"),
+                                   QStringLiteral("/local/session.dat"));
+    test.check(
+        sessionManager.activeTaskIdsForSession(QStringLiteral("site-a")) ==
+                QVector<quint64>{1} &&
+            sessionManager.activeTaskIdsForSession(QStringLiteral("site-b"))
+                .isEmpty(),
+        "session queries should exclude work owned by another connection");
 }
 
 OPENSCP_TEST(testTaskNodesStayStableAcrossQueueGrowth, test) {

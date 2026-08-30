@@ -524,18 +524,8 @@ void MainWindow::disconnectSftp() {
 
     if (transferMgr_) {
         const QString sessionKey = transferMgr_->sessionIdentity();
-        QVector<quint64> activeTaskIds;
-        for (const TransferTask &task : transferMgr_->tasksSnapshot()) {
-            const bool belongsToSession = sessionKey.isEmpty() ||
-                                          task.sessionKey.isEmpty() ||
-                                          task.sessionKey == sessionKey;
-            const bool active =
-                task.status == TransferTask::Status::Queued ||
-                task.status == TransferTask::Status::Running ||
-                task.status == TransferTask::Status::RetryWaiting;
-            if (belongsToSession && active)
-                activeTaskIds.push_back(task.taskId);
-        }
+        const QVector<quint64> activeTaskIds =
+            transferMgr_->activeTaskIdsForSession(sessionKey);
         if (!activeTaskIds.isEmpty()) {
             QMessageBox choice(this);
             UiAlerts::configure(choice);

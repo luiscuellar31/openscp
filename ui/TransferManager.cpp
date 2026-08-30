@@ -737,6 +737,24 @@ bool TransferManager::hasActiveTaskForDestination(
                        });
 }
 
+QVector<quint64>
+TransferManager::activeTaskIdsForSession(const QString &sessionKey) const {
+    QVector<quint64> result;
+    std::lock_guard<std::mutex> lock(mtx_);
+    for (const auto &taskNode : queueStore_.nodes()) {
+        const auto &task = *taskNode;
+        const bool belongsToSession = sessionKey.isEmpty() ||
+                                      task.sessionKey.isEmpty() ||
+                                      task.sessionKey == sessionKey;
+        const bool active = task.status == Status::Queued ||
+                            task.status == Status::Running ||
+                            task.status == Status::RetryWaiting;
+        if (belongsToSession && active)
+            result.push_back(task.taskId);
+    }
+    return result;
+}
+
 bool TransferManager::isBatchTerminal(quint64 batchId) const {
     if (batchId == 0)
         return false;

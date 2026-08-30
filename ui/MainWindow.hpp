@@ -1,5 +1,6 @@
 // Declaration of the main window and its state/actions.
 #pragma once
+#include "ConnectionStatusCoordinator.hpp"
 #include "HostKeyPromptCoordinator.hpp"
 #include "NavigationStore.hpp"
 #include "SessionHealthMonitor.hpp"
@@ -244,7 +245,6 @@ class MainWindow : public QMainWindow {
     void initializeConnectionSessionIndicators();
     void startConnectionSessionIndicators(const QString &connectionType);
     void resetConnectionSessionIndicators();
-    void updateConnectionSessionIndicators();
     void showTransferQueue();
     void maybeShowTransferQueue();
     void openLocalPathWithPreference(const QString &localPath);
@@ -335,6 +335,7 @@ class MainWindow : public QMainWindow {
     bool restoredWindowGeometry_ = false;
     openscpui::HostKeyPromptCoordinator hostKeyPromptCoordinator_;
     openscpui::SessionHealthMonitor sessionHealthMonitor_;
+    openscpui::ConnectionStatusCoordinator connectionStatusCoordinator_;
     openscpui::TransferUiController transferUiController_;
 
     // User preferences
@@ -360,9 +361,6 @@ class MainWindow : public QMainWindow {
     QLabel *hostPolicyRiskLabel_ = nullptr;
     QLabel *connectionTypeLabel_ = nullptr;
     QLabel *connectionElapsedLabel_ = nullptr;
-    QTimer *connectionElapsedTimer_ = nullptr;
-    qint64 connectionStartedAtMs_ = 0;
-    QString activeConnectionType_;
     // Connection progress dialog (non-modal), to avoid blocking TOFU
     QPointer<class QProgressDialog> connectProgress_;
     bool connectProgressDimmed_ = false;

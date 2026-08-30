@@ -95,6 +95,8 @@ class TransferManager : public QObject {
     [[nodiscard]] bool
     hasActiveTaskForDestination(TransferTask::Type type,
                                 const QString &destination) const;
+    [[nodiscard]] QVector<quint64>
+    activeTaskIdsForSession(const QString &sessionKey) const;
     [[nodiscard]] bool isBatchTerminal(quint64 batchId) const;
 
     void pauseAll();
