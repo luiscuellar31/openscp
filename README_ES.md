@@ -185,8 +185,8 @@ cmake --build build -j
 - Las compuertas de calidad Linux ejecutan los tests no integracion del core y
   del event loop Qt bajo `ASan`+`UBSan` y `TSan`; el workflow nocturno tambien
   ejecuta `cppcheck`, un perfil conservador de `clang-tidy` y una comprobacion
-  estricta de `clang-format` para la lista de modulos adoptados
-  incrementalmente en `.clang-format-files`.
+  estricta de `clang-format` para todos los fuentes, headers y archivos `.inc`
+  C++ de primera parte rastreados.
 - TSan instrumenta OpenSCP y sus tests, pero las bibliotecas Qt precompiladas
   de Ubuntu no vienen instrumentadas con TSan. El job cubre carreras del lado
   de la aplicacion ejercitadas mediante Qt, no carreras completamente internas
@@ -222,7 +222,7 @@ ctest --test-dir build --output-on-failure
 Script local de CI antes de push/PR:
 
 ```bash
-./scripts/check_ci_local.sh --clean
+./scripts/check_ci_local.sh --clean --full --werror
 ```
 
 El helper compila todos los ejecutables de prueba configurados para los
@@ -230,10 +230,10 @@ backends de protocolo disponibles antes de ejecutar CTest. Agrega `--full`
 para compilar tambien la aplicacion grafica.
 
 Si `clang-format` esta instalado, tambien puedes ejecutar localmente la
-compuerta incremental de formato:
+compuerta global de formato:
 
 ```bash
-xargs clang-format --dry-run --Werror < .clang-format-files
+./scripts/check_cpp_quality.sh --format
 ```
 
 Variantes utiles:
@@ -250,6 +250,10 @@ BUILD_DIR=build-ci-local JOBS=8 ./scripts/check_ci_local.sh --clean
 ```
 
 Indice de scripts: [scripts/README.md](scripts/README.md)
+
+La separacion interna de capas y las reglas de desarrollo aplicables se
+documentan en [Arquitectura](docs/ARCHITECTURE.md) y
+[Convenciones de ingenieria](docs/CONVENTIONS.md).
 
 `openscp_sftp_integration_tests` se omite si no defines variables de integracion:
 

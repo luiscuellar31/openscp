@@ -131,12 +131,16 @@ Notes:
 - Use English for all code and comments.
 - Keep functions focused; new or substantially changed functions should
   normally stay below 120 lines.
-- Add newly formatted C++ modules to `.clang-format-files` and validate them
-  with:
+- Format every tracked first-party C++ source, header, and `.inc` file. Validate
+  the complete repository with:
 
   ```bash
-  xargs clang-format --dry-run --Werror < .clang-format-files
+  ./scripts/check_cpp_quality.sh --format
   ```
+
+The enforced layering, ownership, concurrency, and test rules are documented
+in [Architecture](docs/ARCHITECTURE.md) and
+[Engineering Conventions](docs/CONVENTIONS.md).
 
 OpenSCP separates protocol/core code, reusable UI logic, widgets, and the app
 composition root into the internal CMake targets `openscp_core`,
@@ -166,7 +170,10 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-Shortcut script available: `./scripts/check_ci_local.sh --clean` (script: [scripts/check_ci_local.sh](scripts/check_ci_local.sh), usage details: [README.md#testing-locally](README.md#testing-locally), script index: [scripts/README.md](scripts/README.md))
+Shortcut script available: `./scripts/check_ci_local.sh --clean --full --werror`
+(script: [scripts/check_ci_local.sh](scripts/check_ci_local.sh), usage details:
+[README.md#testing-locally](README.md#testing-locally), script index:
+[scripts/README.md](scripts/README.md)).
 
 If your change is platform-specific (e.g., macOS packaging), validate on that platform too.
 

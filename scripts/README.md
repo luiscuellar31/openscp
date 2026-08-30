@@ -25,6 +25,8 @@ Minimal map of repository helper scripts.
 
 | Script | Purpose |
 | --- | --- |
+| [`check_cpp_quality.sh`](./check_cpp_quality.sh) | Discovers all tracked first-party C++ files and runs repository-wide clang-format, clang-tidy, and cppcheck gates. |
+| [`check_linux_hardening.sh`](./check_linux_hardening.sh) | Uses `readelf` to verify PIE, RELRO, immediate binding, and a non-executable stack for the Linux executable. |
 | [`verify_qt_svg_plugins.sh`](./verify_qt_svg_plugins.sh) | Validates required Qt SVG plugins in packaged trees. |
 | [`verify_macos_bundle.sh`](./verify_macos_bundle.sh) | Validates macOS app bundle linkage/layout. |
 

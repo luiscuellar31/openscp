@@ -178,8 +178,8 @@ cmake --build build -j
 - Tag release workflow auto-generates draft release notes from Conventional Commits (`feat`, `fix`, `BREAKING CHANGE`, etc.).
 - Linux quality gates run the non-integration core and Qt event-loop tests under
   `ASan`+`UBSan` and `TSan`; nightly quality also runs `cppcheck`, a
-  conservative `clang-tidy` profile, and strict `clang-format` checks for the
-  incrementally formatted module list in `.clang-format-files`.
+  conservative `clang-tidy` profile, and strict `clang-format` checks for every
+  tracked first-party C++ source, header, and `.inc` file.
 - TSan instruments OpenSCP and its tests, but Ubuntu's prebuilt Qt libraries
   are not TSan-instrumented. The job covers application-side races exercised
   through Qt, not races wholly internal to Qt itself.
@@ -214,17 +214,17 @@ ctest --test-dir build --output-on-failure
 Local CI helper before push/PR:
 
 ```bash
-./scripts/check_ci_local.sh --clean
+./scripts/check_ci_local.sh --clean --full --werror
 ```
 
 The helper builds every test executable configured for the available protocol
 backends before running CTest. Add `--full` to build the GUI application too.
 
-The incremental formatting gate can also be checked locally when
+The repository-wide formatting gate can also be checked locally when
 `clang-format` is installed:
 
 ```bash
-xargs clang-format --dry-run --Werror < .clang-format-files
+./scripts/check_cpp_quality.sh --format
 ```
 
 Useful variants:
@@ -241,6 +241,10 @@ BUILD_DIR=build-ci-local JOBS=8 ./scripts/check_ci_local.sh --clean
 ```
 
 Script index: [scripts/README.md](scripts/README.md)
+
+Internal layering and enforceable development rules are documented in
+[Architecture](docs/ARCHITECTURE.md) and
+[Engineering Conventions](docs/CONVENTIONS.md).
 
 `openscp_sftp_integration_tests` is skipped unless integration variables are set:
 
