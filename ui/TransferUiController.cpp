@@ -7,23 +7,32 @@
 
 namespace openscpui {
 
-TransferUiUpdate
-TransferUiController::observe(const QVector<TransferTask> &tasks,
-                              bool remotePanelActive,
-                              const QString &remoteRoot) {
-    QSet<quint64> activeTaskIds;
-    QSet<quint64> activeUploadIds;
-    activeTaskIds.reserve(tasks.size());
-    activeUploadIds.reserve(tasks.size());
+void TransferUiController::initialize(const QVector<TransferTask> &snapshot) {
+    reset();
+    completedUploadIds_.reserve(snapshot.size());
+    notifiedTaskIds_.reserve(snapshot.size());
+    for (const TransferTask &task : snapshot) {
+        if (task.status != TransferTask::Status::Done)
+            continue;
+        notifiedTaskIds_.insert(task.taskId);
+        if (task.type == TransferTask::Type::Upload)
+            completedUploadIds_.insert(task.taskId);
+    }
+}
+
+TransferUiUpdate TransferUiController::observe(
+    const QVector<TransferTask> &upserts, const QVector<quint64> &removedIds,
+    bool remotePanelActive, const QString &remoteRoot) {
+    for (const quint64 taskId : removedIds) {
+        completedUploadIds_.remove(taskId);
+        notifiedTaskIds_.remove(taskId);
+    }
 
     bool newUploadInCurrentRoot = false;
     int newlyCompleted = 0;
     QString firstCompletionMessage;
 
-    for (const TransferTask &task : tasks) {
-        activeTaskIds.insert(task.taskId);
-        if (task.type == TransferTask::Type::Upload)
-            activeUploadIds.insert(task.taskId);
+    for (const TransferTask &task : upserts) {
         if (task.status != TransferTask::Status::Done)
             continue;
 
@@ -56,11 +65,6 @@ TransferUiController::observe(const QVector<TransferTask> &tasks,
                                                  "Download completed: %1")
                          .arg(name);
     }
-
-    completedUploadIds_.removeIf(
-        [&](quint64 taskId) { return !activeUploadIds.contains(taskId); });
-    notifiedTaskIds_.removeIf(
-        [&](quint64 taskId) { return !activeTaskIds.contains(taskId); });
 
     TransferUiUpdate update;
     if (newUploadInCurrentRoot && remotePanelActive && !refreshScheduled_) {

@@ -167,8 +167,9 @@ static void withSelectedTasks(TransferManager *manager,
                               const QVector<quint64> &ids, Callback callback) {
     if (ids.isEmpty())
         return;
-    // Use one immutable snapshot so all selected operations see the same state.
-    const auto taskIndex = buildTaskIndexById(manager->tasksSnapshot());
+    // Use one immutable, ID-scoped snapshot so selected operations see the
+    // same state without copying the complete queue.
+    const auto taskIndex = buildTaskIndexById(manager->tasksSnapshot(ids));
     forEachSelectedTask(ids, taskIndex, callback);
 }
 
@@ -1135,7 +1136,7 @@ void TransferQueueDialog::showContextMenu(const QPoint &pos) {
     }
 
     const auto ids = selectedTaskIds();
-    const auto snapshot = mgr_->tasksSnapshot();
+    const auto snapshot = mgr_->tasksSnapshot(ids);
     const auto selectedState =
         buildSelectedActionsState(ids, buildTaskIndexById(snapshot));
 

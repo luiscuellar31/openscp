@@ -8,8 +8,6 @@
 #include <QDateTime>
 #include <QFileIconProvider>
 #include <QFileInfo>
-#include <QIcon>
-#include <QLocale>
 #include <QMimeData>
 #include <QMimeDatabase>
 #include <QMimeType>
@@ -17,8 +15,10 @@
 #include <QVariant>
 
 #include <algorithm>
+#include <array>
 
 RemoteModel::RemoteModel(QObject *parent) : QAbstractTableModel(parent) {
+    iconCache_.setMaxCost(128);
 }
 
 int RemoteModel::rowCount(const QModelIndex &parent) const {
@@ -79,52 +79,80 @@ static QIcon iconFromMimeTheme(const QString &name) {
     return icon;
 }
 
-static QIcon iconForRemoteEntry(const QString &name, bool isDir, bool isLink) {
+static QString permissionText(bool isDir, bool isLink, quint32 mode) {
+    QString permissions(10, '-');
+    permissions[0] = isLink ? 'l' : (isDir ? 'd' : '-');
+    constexpr std::array<std::pair<quint32, char>, 9> bits{{
+        {0400, 'r'},
+        {0200, 'w'},
+        {0100, 'x'},
+        {0040, 'r'},
+        {0020, 'w'},
+        {0010, 'x'},
+        {0004, 'r'},
+        {0002, 'w'},
+        {0001, 'x'},
+    }};
+    qsizetype position = 1;
+    for (const auto &[mask, flag] : bits) {
+        if ((mode & mask) != 0)
+            permissions[position] = QLatin1Char(flag);
+        ++position;
+    }
+    return permissions;
+}
+
+QIcon RemoteModel::iconForRemoteEntry(const Item &item) const {
+    const QString currentTheme = QIcon::themeName();
+    if (cachedIconTheme_ != currentTheme) {
+        iconCache_.clear();
+        cachedIconTheme_ = currentTheme;
+    }
+
     QString key;
-    if (isLink) {
+    if (item.isLink) {
         key = QStringLiteral("__link");
-    } else if (isDir) {
+    } else if (item.isDir) {
         key = QStringLiteral("__dir");
     } else {
-        const QString ext = QFileInfo(name).completeSuffix().toLower();
+        const QString ext = QFileInfo(item.name).completeSuffix().toLower();
         key = ext.isEmpty() ? QStringLiteral("__file")
                             : QStringLiteral("ext:") + ext;
     }
 
-    static QHash<QString, QIcon> cache;
-    if (cache.contains(key))
-        return cache.value(key);
+    if (const QIcon *cached = iconCache_.object(key))
+        return *cached;
 
     QIcon icon;
 #ifdef Q_OS_MAC
     static QFileIconProvider provider;
-    if (isDir) {
+    if (item.isDir) {
         icon = provider.icon(QFileIconProvider::Folder);
-    } else if (!isLink) {
-        const QString ext = QFileInfo(name).completeSuffix().toLower();
+    } else if (!item.isLink) {
+        const QString ext = QFileInfo(item.name).completeSuffix().toLower();
         QString probeName = QStringLiteral("remote-entry");
         if (!ext.isEmpty())
             probeName += QStringLiteral(".") + ext;
         icon = provider.icon(QFileInfo(probeName));
     }
 #endif
-    if (icon.isNull() && isLink) {
+    if (icon.isNull() && item.isLink) {
         icon = remoteLinkIcon();
     }
-    if (icon.isNull() && isDir) {
+    if (icon.isNull() && item.isDir) {
         icon = remoteFolderIcon();
     }
-    if (icon.isNull() && !isDir && !isLink) {
-        icon = iconFromMimeTheme(name);
+    if (icon.isNull() && !item.isDir && !item.isLink) {
+        icon = iconFromMimeTheme(item.name);
     }
-    if (icon.isNull() && !isDir && !isLink) {
+    if (icon.isNull() && !item.isDir && !item.isLink) {
         icon = remoteFileIcon();
     }
     if (icon.isNull()) {
         icon = remoteFileIcon();
     }
 
-    cache.insert(key, icon);
+    iconCache_.insert(key, new QIcon(icon));
     return icon;
 }
 
@@ -140,15 +168,14 @@ QVariant RemoteModel::data(const QModelIndex &index, int role) const {
     if (!entry)
         return {};
     const Item &item = *entry;
-    const bool isLink = (item.mode & 0120000u) == 0120000u; // S_IFLNK
     if (role == Qt::DecorationRole && index.column() == 0) {
-        return iconForRemoteEntry(item.name, item.isDir, isLink);
+        return iconForRemoteEntry(item);
     }
     if (role == Qt::DisplayRole) {
         switch (index.column()) {
         case 0: {
             QString suffix;
-            if (isLink)
+            if (item.isLink)
                 suffix = "@";
             else if (item.isDir)
                 suffix = "/";
@@ -159,36 +186,15 @@ QVariant RemoteModel::data(const QModelIndex &index, int role) const {
                 return QVariant();
             if (!item.hasSize)
                 return QStringLiteral("—");
-            return QLocale().formattedDataSize(static_cast<qint64>(item.size),
-                                               1, QLocale::DataSizeIecFormat);
+            return locale_.formattedDataSize(static_cast<qint64>(item.size), 1,
+                                             QLocale::DataSizeIecFormat);
         case 2:
             if (item.mtime > 0)
                 return openscpui::localShortTime(item.mtime);
             else
                 return QVariant();
-        case 3: {
-            // Permissions in rwxr-xr-x style
-            QString permissionsText(10, '-');
-            const quint32 modeBits = item.mode;
-            // file type
-            bool isSymlink = (modeBits & 0120000u) == 0120000u;
-            permissionsText[0] = isSymlink ? 'l' : (item.isDir ? 'd' : '-');
-            auto setPermissionBit = [&](int position, quint32 mask,
-                                        QChar flag) {
-                if (modeBits & mask)
-                    permissionsText[position] = flag;
-            };
-            setPermissionBit(1, 0400, 'r');
-            setPermissionBit(2, 0200, 'w');
-            setPermissionBit(3, 0100, 'x');
-            setPermissionBit(4, 0040, 'r');
-            setPermissionBit(5, 0020, 'w');
-            setPermissionBit(6, 0010, 'x');
-            setPermissionBit(7, 0004, 'r');
-            setPermissionBit(8, 0002, 'w');
-            setPermissionBit(9, 0001, 'x');
-            return permissionsText;
-        }
+        case 3:
+            return item.permissions;
         default:
             break;
         }
@@ -200,10 +206,10 @@ QVariant RemoteModel::data(const QModelIndex &index, int role) const {
             return tr("Size: unknown (not provided by the server)");
         }
         QString tip = tr("File");
-        const QString human = QLocale().formattedDataSize(
+        const QString human = locale_.formattedDataSize(
             static_cast<qint64>(item.size), 1, QLocale::DataSizeIecFormat);
         const QString bytes =
-            QLocale().toString(static_cast<qulonglong>(item.size));
+            locale_.toString(static_cast<qulonglong>(item.size));
         tip += QString(" • %1 (%2 bytes)").arg(human, bytes);
         if (item.mtime > 0)
             tip += " • " + openscpui::localShortTime(item.mtime);
@@ -244,9 +250,11 @@ void RemoteModel::setEntries(const QString &path,
         const QString name = QString::fromStdString(fileInfo.name);
         if (!showHidden_ && name.startsWith('.'))
             continue;
-        nextItems.push_back({name, fileInfo.is_dir, fileInfo.size,
-                             fileInfo.has_size, fileInfo.mtime, fileInfo.mode,
-                             fileInfo.uid, fileInfo.gid});
+        const bool isLink = (fileInfo.mode & 0120000u) == 0120000u;
+        nextItems.push_back(
+            {name, fileInfo.is_dir, isLink, fileInfo.size, fileInfo.has_size,
+             fileInfo.mtime, fileInfo.mode, fileInfo.uid, fileInfo.gid,
+             permissionText(fileInfo.is_dir, isLink, fileInfo.mode)});
     }
     sortItemsVector(nextItems, sortColumn_, sortOrder_);
     beginResetModel();

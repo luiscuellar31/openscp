@@ -329,7 +329,8 @@ class MainWindow : public QMainWindow {
     void saveMainWindowUiState() const;
     void saveRightHeaderState(bool remoteMode) const;
     bool restoreRightHeaderState(bool remoteMode);
-    void handleTransferUiUpdate();
+    void handleTransferUiUpdate(const QVector<quint64> &upsertIds,
+                                const QVector<quint64> &removedIds);
     bool isLikelyRemoteTransportError(const QString &rawError) const;
     void ensureRemoteSessionHealthMonitoring();
     void startRemoteSessionHealthMonitoring();

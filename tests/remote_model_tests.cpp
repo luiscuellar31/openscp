@@ -67,6 +67,9 @@ void testLoadingAndReplacement(TestContext &test) {
     test.check(model.nameAt(model.index(0, 0)) == QStringLiteral("folder") &&
                    model.isDir(model.index(0, 0)),
                "directories should sort before files");
+    test.check(model.data(model.index(0, 3), Qt::DisplayRole).toString() ==
+                   QStringLiteral("drwxr-xr-x"),
+               "permission text should preserve the remote mode");
     test.check(model.nameAt(model.index(1, 0)) ==
                        QStringLiteral("unknown.bin") &&
                    !model.hasSize(model.index(1, 0)),
@@ -105,6 +108,31 @@ void testFilteringSortingAndMimeData(TestContext &test) {
                "remote drags should advertise native file URLs");
 }
 
+void testLargeListingsReusePrecomputedDisplayData(TestContext &test) {
+    RemoteModel model;
+    std::vector<openscp::FileInfo> entries;
+    entries.reserve(10'000);
+    for (int index = 0; index < 10'000; ++index) {
+        entries.push_back(entry("file-" + std::to_string(index) + ".dat", false,
+                                static_cast<std::uint64_t>(index) + 1, true,
+                                1'700'000'000, 0100640));
+    }
+    model.setEntries(QStringLiteral("/large"), entries);
+
+    test.check(model.rowCount() == 10'000,
+               "large remote listings should retain every visible entry");
+    for (int row = 0; row < model.rowCount(); row += 97) {
+        test.check(!model.data(model.index(row, 1), Qt::DisplayRole)
+                        .toString()
+                        .isEmpty(),
+                   "large listing sizes should remain formatted");
+        test.check(
+            model.data(model.index(row, 3), Qt::DisplayRole).toString() ==
+                QStringLiteral("-rw-r-----"),
+            "large listings should reuse precomputed permissions");
+    }
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -112,6 +140,7 @@ int main(int argc, char **argv) {
     TestContext test;
     testLoadingAndReplacement(test);
     testFilteringSortingAndMimeData(test);
+    testLargeListingsReusePrecomputedDisplayData(test);
     if (test.failures == 0)
         std::cout << "All RemoteModel tests passed\n";
     return test.failures == 0 ? 0 : 1;

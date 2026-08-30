@@ -3,6 +3,9 @@
 #include "openscp/SftpTypes.hpp"
 
 #include <QAbstractTableModel>
+#include <QCache>
+#include <QIcon>
+#include <QLocale>
 
 #include <vector>
 
@@ -52,20 +55,26 @@ class RemoteModel : public QAbstractTableModel {
     struct Item {
         QString name;
         bool isDir;
+        bool isLink;
         quint64 size;
         bool hasSize;
         quint64 mtime;
         quint32 mode;
         quint32 uid;
         quint32 gid;
+        QString permissions;
     };
     std::vector<Item> items_;
+    QLocale locale_;
+    mutable QCache<QString, QIcon> iconCache_;
+    mutable QString cachedIconTheme_;
     bool showHidden_ = false; // hide names starting with '.' if false
     bool loading_ = false;
     int sortColumn_ = 0;
     Qt::SortOrder sortOrder_ = Qt::AscendingOrder;
 
     const Item *itemForIndex(const QModelIndex &index) const;
+    QIcon iconForRemoteEntry(const Item &item) const;
     void replaceItems(std::vector<Item> &&nextItems, const QString &path);
     void sortItemsVector(std::vector<Item> &items, int column,
                          Qt::SortOrder order) const;

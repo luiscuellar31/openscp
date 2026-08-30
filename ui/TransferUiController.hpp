@@ -15,7 +15,9 @@ struct TransferUiUpdate {
 
 class TransferUiController {
     public:
-    TransferUiUpdate observe(const QVector<TransferTask> &tasks,
+    void initialize(const QVector<TransferTask> &snapshot);
+    TransferUiUpdate observe(const QVector<TransferTask> &upserts,
+                             const QVector<quint64> &removedIds,
                              bool remotePanelActive, const QString &remoteRoot);
     void completeScheduledRefresh();
     void reset();

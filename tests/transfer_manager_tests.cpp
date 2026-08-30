@@ -222,6 +222,30 @@ void testBatchDownloadEnqueueAndGranularSignals(TestContext &test) {
                "indexed snapshots should return only existing task IDs");
     test.check(selected[1].src == QStringLiteral("/remote/file-4999.dat"),
                "indexed snapshots should preserve requested ID order");
+
+    const quint64 batchId = snapshot.front().batchId;
+    test.check(
+        manager.hasActiveTaskForSource(TransferTask::Type::Download,
+                                       QStringLiteral("/remote/file-0.dat")) &&
+            manager.hasActiveTaskForDestination(
+                TransferTask::Type::Download,
+                QStringLiteral("/local/file-9999.dat")),
+        "direct path queries should find active work in large queues");
+    test.check(
+        !manager.hasActiveTaskForSource(TransferTask::Type::Upload,
+                                        QStringLiteral("/remote/file-0.dat")) &&
+            !manager.isBatchTerminal(batchId),
+        "direct queries should preserve task type and terminal state");
+
+    manager.cancelBatch(batchId);
+    test.check(manager.isBatchTerminal(batchId) &&
+                   !manager.hasActiveTaskForDestination(
+                       TransferTask::Type::Download,
+                       QStringLiteral("/local/file-9999.dat")),
+               "batch cancellation should become visible without snapshots");
+    test.check(!manager.isBatchTerminal(0) &&
+                   !manager.isBatchTerminal(batchId + 1000),
+               "empty and unknown batches should not report terminal");
 }
 
 void testTaskNodesStayStableAcrossQueueGrowth(TestContext &test) {

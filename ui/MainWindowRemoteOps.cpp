@@ -248,12 +248,8 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
     const QString localPath = tempDownloadPathFor(name);
     // Avoid duplicates: if there is already an active download with same
     // src/dst, do not enqueue again
-    bool alreadyActive = false;
-    {
-        const auto tasks = transferMgr_->tasksSnapshot();
-        alreadyActive = hasActiveTransferTask(
-            tasks, TransferTask::Type::Download, remotePath, localPath);
-    }
+    const bool alreadyActive = transferMgr_->hasActiveTaskForSource(
+        TransferTask::Type::Download, remotePath);
     if (!alreadyActive) {
         // Enqueue download so it appears in the queue (instead of direct
         // download)
@@ -276,8 +272,8 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
         *connPtr = connect(
             transferMgr_, &TransferManager::tasksUpdated, this,
             [this, remotePath, localPath, key,
-             connPtr](const QVector<quint64> &) {
-                const auto tasks = transferMgr_->tasksSnapshot();
+             connPtr](const QVector<quint64> &taskIds) {
+                const auto tasks = transferMgr_->tasksSnapshot(taskIds);
                 for (const auto &task : tasks) {
                     if (task.type == TransferTask::Type::Download &&
                         task.src == remotePath && task.dst == localPath) {
@@ -539,16 +535,7 @@ void MainWindow::moveRightToLeft() {
                 QObject::disconnect(state->transferConnection);
             return;
         }
-        const auto tasks = transferMgr_->tasksSnapshot();
-        bool foundBatchTask = false;
-        for (const auto &task : tasks) {
-            if (task.batchId != state->batchOptions.batchId)
-                continue;
-            foundBatchTask = true;
-            if (!isTransferTaskFinalStatus(task.status))
-                return;
-        }
-        if (!foundBatchTask)
+        if (!transferMgr_->isBatchTerminal(state->batchOptions.batchId))
             return;
 
         state->cleanupStarted = true;

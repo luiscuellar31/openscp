@@ -958,14 +958,25 @@ void MainWindow::initializeRuntimeState() {
 
     // Transfer queue
     transferMgr_ = new TransferManager(this);
-    connect(transferMgr_, &TransferManager::tasksUpdated, this,
-            [this](const QVector<quint64> &) { handleTransferUiUpdate(); });
     connect(transferMgr_, &TransferManager::persistenceWarning, this,
             [this](const QString &warning) {
                 statusBar()->showMessage(warning, 8000);
                 UiAlerts::warning(this, tr("Transfer queue"), warning);
             });
     (void)transferMgr_->enablePersistence();
+    transferUiController_.initialize(transferMgr_->tasksSnapshot());
+    connect(transferMgr_, &TransferManager::tasksAdded, this,
+            [this](const QVector<quint64> &ids) {
+                handleTransferUiUpdate(ids, {});
+            });
+    connect(transferMgr_, &TransferManager::tasksUpdated, this,
+            [this](const QVector<quint64> &ids) {
+                handleTransferUiUpdate(ids, {});
+            });
+    connect(transferMgr_, &TransferManager::tasksRemoved, this,
+            [this](const QVector<quint64> &ids) {
+                handleTransferUiUpdate({}, ids);
+            });
     // Provide transfer manager to views (for async remote drag-out staging)
     if (auto *leftDragView = qobject_cast<DragAwareTreeView *>(leftView_)) {
         leftDragView->setTransferManager(transferMgr_);
@@ -1464,16 +1475,18 @@ void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
     paneController_->search(context);
 }
 
-void MainWindow::handleTransferUiUpdate() {
+void MainWindow::handleTransferUiUpdate(const QVector<quint64> &upsertIds,
+                                        const QVector<quint64> &removedIds) {
     if (!transferMgr_) {
         transferUiController_.reset();
         return;
     }
     const QString remoteRoot =
         rightRemoteModel_ ? rightRemoteModel_->rootPath() : QString();
+    const QVector<TransferTask> upserts =
+        transferMgr_->tasksSnapshot(upsertIds);
     const openscpui::TransferUiUpdate update = transferUiController_.observe(
-        transferMgr_->tasksSnapshot(), rightIsRemote_ && rightRemoteModel_,
-        remoteRoot);
+        upserts, removedIds, rightIsRemote_ && rightRemoteModel_, remoteRoot);
     if (!update.completionMessage.isEmpty())
         statusBar()->showMessage(update.completionMessage, 5000);
     if (!update.scheduleRemoteRefresh)

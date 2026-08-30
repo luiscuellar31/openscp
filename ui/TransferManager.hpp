@@ -90,6 +90,12 @@ class TransferManager : public QObject {
     QVector<TransferTask> tasksSnapshot() const;
     QVector<TransferTask> tasksSnapshot(const QVector<quint64> &taskIds) const;
     std::optional<TransferTask> taskSnapshot(quint64 taskId) const;
+    [[nodiscard]] bool hasActiveTaskForSource(TransferTask::Type type,
+                                              const QString &source) const;
+    [[nodiscard]] bool
+    hasActiveTaskForDestination(TransferTask::Type type,
+                                const QString &destination) const;
+    [[nodiscard]] bool isBatchTerminal(quint64 batchId) const;
 
     void pauseAll();
     void resumeAll();
@@ -147,6 +153,11 @@ class TransferManager : public QObject {
     std::atomic<int> maxConcurrent_{2};
     std::atomic<bool> compatibilityChangePending_{false};
 
+    // Mutex hierarchy when nesting is unavoidable:
+    // connFactoryMutex_ -> mtx_. Worker-slot client mutexes and retry,
+    // persistence, and performance mutexes are independent and must be
+    // released before acquiring either mutex in that chain. External client
+    // calls and Qt signal emissions happen without these locks held.
     mutable std::mutex mtx_;
     std::condition_variable workCv_;
     std::condition_variable idleCv_;
