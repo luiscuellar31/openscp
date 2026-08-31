@@ -1,8 +1,8 @@
 # Contributing to OpenSCP
 
-OpenSCP welcomes focused bug fixes, documentation improvements, tests, and new
-features. Public pull requests target `dev`; the maintainer promotes tested
-work to `main` and creates release tags.
+Thanks for helping improve OpenSCP. Focused bug fixes, documentation updates,
+tests, and new features are all welcome. Public pull requests target `dev`; the
+maintainer promotes tested work to `main` and creates release tags.
 
 Never report a suspected vulnerability in a public issue or pull request. Use
 the private process in [SECURITY.md](SECURITY.md).
@@ -132,7 +132,7 @@ is unavailable. CI invokes them directly so missing infrastructure is an error.
 For an existing SFTP server, set `OPENSCP_IT_SFTP_HOST`,
 `OPENSCP_IT_SFTP_PORT`, `OPENSCP_IT_SFTP_USER`, the remote base, and either a
 password or private key before running CTest. See each integration test source
-for its complete environment contract.
+for the full list of variables it accepts.
 
 > [!WARNING]
 > `scripts/ci/setup_protocol_services.sh` is intended only for a disposable

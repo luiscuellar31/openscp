@@ -1,10 +1,9 @@
 # Platform Compatibility Policy
 
-This document defines the current compatibility contract for OpenSCP. A build
-made by a third party may have a different baseline; the rows below describe
-the official project artifacts and the continuously tested source build.
+This page describes the platforms and protocols covered by official OpenSCP
+builds. Community builds may use different baselines.
 
-| Target | Baseline | How it is enforced |
+| Target | Supported baseline | How it is checked |
 | --- | --- | --- |
 | macOS `.app` / `.dmg` / `.pkg` (arm64 and x86_64) | macOS 12.0+ | Qt 6.8.3 and pinned non-Qt dependencies are built for 12.0; every bundled Mach-O is checked before upload. |
 | Linux AppImage x86_64 | glibc 2.28+ | Built in a digest-pinned Rocky Linux 8 container; all bundled ELF objects are audited for `GLIBC_*` and `GLIBCXX_*`. |
@@ -21,7 +20,7 @@ source tree. SFTP and SCP are always built because libssh2 is required. The
 libcurl backends are optional in community builds: FTP/FTPS require libcurl,
 and WebDAV requires both libcurl and tinyxml2.
 
-| Build or artifact | Protocol contract | How it is selected |
+| Build or package | Included protocols | Notes |
 | --- | --- | --- |
 | Native/community source build | SFTP and SCP; FTP/FTPS when libcurl is found; WebDAV when libcurl and tinyxml2 are found | CMake reports every enabled or disabled backend during configuration. `OPENSCP_ENABLE_FTP_BACKEND` and `OPENSCP_ENABLE_WEBDAV_BACKEND` may disable the optional backends explicitly. |
 | Official macOS `.app` / `.dmg` / `.pkg` | SFTP, SCP, FTP, FTPS, and WebDAV | The release build provides libcurl and builds the pinned tinyxml2 dependency before packaging. |

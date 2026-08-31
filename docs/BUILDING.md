@@ -35,8 +35,8 @@ sudo apt-get install -y \
   qt6-l10n-tools
 ```
 
-If libcurl or tinyxml2 is absent, CMake reports the optional protocols it
-disabled instead of silently pretending they are available.
+If libcurl or tinyxml2 is absent, CMake reports which optional protocols were
+disabled.
 
 ### Development build
 
