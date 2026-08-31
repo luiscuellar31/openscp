@@ -30,7 +30,7 @@ relink).
 - Typical modules in this project: `Qt6Core`, `Qt6Gui`, `Qt6Widgets`, and
   `Qt6Svg` (plus translation tools for build). No local modifications.
 - Verify which Qt libraries your binary uses:
-  - Linux: `ldd ./build/openscp_hello | grep Qt6`
+  - Linux: `ldd ./build/openscp | grep Qt6`
   - macOS: `otool -L OpenSCP.app/Contents/MacOS/OpenSCP | grep Qt` (if using a bundled `.app`)
 
 ---
@@ -75,7 +75,7 @@ cmake -S . -B build -DCMAKE_PREFIX_PATH="$HOME/qt-<version>"
 cmake --build build --parallel
 
 # Run with your Qt (if installed in a non-standard location)
-LD_LIBRARY_PATH="$HOME/qt-<version>/lib:$LD_LIBRARY_PATH" ./build/openscp_hello
+LD_LIBRARY_PATH="$HOME/qt-<version>/lib:$LD_LIBRARY_PATH" ./build/openscp
 ```
 
 If you use AppImage, you can extract, replace the `libQt6*.so.*` inside `squashfs-root/usr/lib/`, and repack with `appimagetool`. Alternatively, run from the extracted tree with an updated `LD_LIBRARY_PATH`.

@@ -1,434 +1,94 @@
 <div align="center">
-    <img src="assets/program/icon-openscp-2048.png" alt="OpenSCP icon" width="128">
-    <h1 align="center">OpenSCP</h1>
+  <img src="assets/program/icon-openscp-2048.png" alt="OpenSCP icon" width="128">
+  <h1>OpenSCP</h1>
 
-<p>
-    <strong>Two-panel SFTP/SCP/FTP/FTPS/WebDAV client focused on simplicity and security</strong>
-</p>
+  <p><strong>A clear, two-panel client for SFTP, SCP, FTP, FTPS, and WebDAV.</strong></p>
+  <p><a href="README_ES.md">Leer en español</a></p>
 
-<p>
-    <a href="README_ES.md"><strong>Leer en Español</strong></a>
-</p>
-
-<p>
-    <strong>OpenSCP</strong> is a two-panel commander-style file explorer written in <strong>C++/Qt</strong>, with <strong>SFTP</strong>, initial <strong>SCP</strong>, <strong>FTP/FTPS</strong>, and <strong>WebDAV</strong> support. It aims to be a lightweight alternative to tools like WinSCP, focused on <strong>security</strong>, <strong>clarity</strong>, and <strong>extensibility</strong>.
-</p>
-
-<br>
-
-<img src="assets/screenshots/screenshot-main-window.png" alt="OpenSCP main window showing dual panels and transfer queue" width="900">
-
+  <img src="assets/screenshots/screenshot-main-window.png" alt="OpenSCP main window" width="900">
 </div>
 
-## Releases and Branches
+OpenSCP is a C++20 and Qt 6 desktop application for moving and managing files
+between local and remote systems. It focuses on predictable behavior, secure
+defaults, and a familiar commander-style workflow.
 
-Stable tagged releases:
-https://github.com/luiscuellar31/openscp/releases
+## Quick start
 
-- `main`: tested and stable branch
-- `dev`: active development branch (PR target)
-
-## Quick Start
-
-OpenSCP 1.0.0 supports macOS and Linux. Windows code is intentionally limited
-to modular porting foundations (including the DPAPI credential backend); no
-Windows artifact or runtime support is promised for 1.0.0.
-Windows port developers must opt into the non-release scaffold explicitly with
-`-DOPENSCP_ENABLE_EXPERIMENTAL_WINDOWS_PORT=ON`.
+OpenSCP currently supports Linux and macOS. A compatible Qt 6 installation,
+CMake 3.22+, libssh2, and OpenSSL are required. libcurl and tinyxml2 enable the
+optional FTP/FTPS and WebDAV backends.
 
 ```bash
 git clone https://github.com/luiscuellar31/openscp.git
 cd openscp
-rm -rf build
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
 
 # Linux
-./build/openscp_hello
+./scripts/linux.sh dev
 
-# macOS (recommended configure + build + launch flow)
+# macOS
 ./scripts/macos.sh dev
 ```
 
-## What OpenSCP Offers (v1.0.0)
+For distribution-specific dependencies, manual build steps, packaging, and
+troubleshooting, see [Building OpenSCP](docs/BUILDING.md).
 
-### 1. Dual-panel workflow
+## Highlights
 
-- Independent local/remote navigation.
-- Quick `Home` navigation in panel toolbars (left local panel always; right panel uses local `HOME` in local mode and `/` fallback in remote mode).
-- Right panel includes `Open in terminal` in remote mode to start an SSH terminal directly in the currently viewed remote path using the active transport settings (direct, proxy tunnel, or jump host); if the SSH shell fails with a session error (for example PTY denied), it automatically falls back to `sftp` CLI in the same terminal. If transport requirements cannot be reproduced safely, the app shows an explicit error instead of downgrading to a basic direct SSH fallback. In `Settings > Security`, you can force interactive login (password/keyboard-interactive) and toggle automatic `sftp` CLI fallback for these commands.
-- Drag-and-drop copy/move between panels.
-- Remote context operations: download, upload, rename, delete, new folder/file, permissions.
-- Clickable breadcrumbs and per-panel search (toolbar button or `Ctrl/Cmd+F`) with wildcard/regex patterns and optional recursive mode.
-- Each panel toolbar has a one-click `Favorites` menu. Both panels share global
-  local favorites in local/local mode; while connected, the right panel
-  switches to remote favorites scoped to the saved site or endpoint.
-- Remote panel icons use MIME-based detection (plus native provider on macOS) for closer parity with local icons.
+- Local/remote dual-panel navigation with breadcrumbs, history, favorites,
+  search, and drag-and-drop.
+- SFTP and SCP through libssh2; optional FTP, FTPS, and WebDAV through libcurl.
+- A persistent transfer queue with parallel workers, pause, resume, retry,
+  conflict policies, bandwidth limits, and resumable `.part` files.
+- Saved sites with Keychain on macOS and Secret Service/libsecret on Linux.
+- Strict, accept-new, or explicitly disabled SSH host-key verification.
+- SOCKS5, HTTP CONNECT, and SSH jump-host support where the protocol allows it.
+- One-way synchronization with preview, filters, and optional checksum checks.
+- Spanish, French, and Portuguese interfaces in addition to English.
 
-### 2. Transfer engine and queue
+Protocol availability depends on how the application was packaged. Consult the
+[protocol matrix](docs/PLATFORM_COMPATIBILITY.md#protocol-availability-by-build)
+before selecting an artifact.
 
-- Real parallel transfers with isolated worker connections (2 by default,
-  configurable from 1 to 8 in `Settings > Transfers > Parallel tasks`).
-- Expensive queue prechecks run off the UI thread; scheduling fairness and queue metrics reduce starvation under high concurrency.
-- Pause/resume/cancel/retry, per-task/global limits, and resume support.
-- Status-aware queue actions: controls are enabled only when the selected task state allows that action (for example, retry for `Error`/`Canceled`, resume for `Paused`).
-- Queue UI with per-row progress percentages, filters, and detailed columns (`Speed`, `ETA`, `Transferred`, `Error`, etc.).
-- Context actions like retry selected, open destination, copy paths, and cleanup policies.
-- Queue window/layout/filter persistence.
-- Main status bar emits transfer completion notices (for successful uploads/downloads).
-- Non-terminal tasks are persisted without credentials and restored paused
-  after a restart; tasks for another site wait until that session reconnects.
-- Recursive batches stream discovery in bounded chunks, apply queue
-  backpressure, represent empty folders explicitly, and stop for confirmation
-  at the large-tree safety thresholds.
-- Conflict handling is serialized per batch and supports ask, overwrite, skip,
-  resume, rename, and copy-if-newer policies.
-- Downloads and uploads use deterministic `.part` files and atomic finalization
-  where the server supports it; canceling a task preserves partial data for an
-  explicit resume or cleanup decision.
-- Transfers use interruptible worker sessions and bounded socket read/write waits to avoid indefinite hangs during stalled network conditions.
-- Upload completion path is hardened and remote views refresh reliably after finished uploads.
-- Main remote session health checks run periodically and after wake/resume; if transport is no longer valid, OpenSCP disconnects safely with a clear warning.
+## Documentation
 
-### 3. Remote transport security hardening
+- [Building and packaging](docs/BUILDING.md)
+- [Contributing and translations](CONTRIBUTING.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Platform and protocol compatibility](docs/PLATFORM_COMPATIBILITY.md)
+- [Security policy](SECURITY.md)
+- [Licensing](docs/LICENSING.md)
 
-- Auth: password, private key (+passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
-- Protocol selector per site/session (`SFTP`, `SCP`, `FTP`, `FTPS`, `WebDAV`).
-- FTP/FTPS support listing, metadata fallback, directory creation, deletion,
-  and rename, including paths with spaces and command-injection rejection.
-- FTPS supports automatic, explicit TLS, and implicit TLS modes.
-- WebDAV support includes remote listing (`PROPFIND`), a confined configurable
-  base path, and file operations (`GET`, `PUT`, `MKCOL`, `DELETE`, `MOVE`).
-- SCP mode policy per site/session: `Automatic` uses safe SFTP temporary
-  uploads with atomic rename; `SCP only` is available for legacy servers but
-  writes directly to the final remote path and is therefore non-atomic.
-- FTPS certificate verification (peer+host) is enabled by default, with optional custom CA bundle per site/session.
-- FTP and HTTP WebDAV require a temporary insecure-transport confirmation;
-  disabling TLS verification requires an additional `UNSAFE` confirmation and
-  leaves a visible session warning.
-- Host-key policies: `Strict`, `Accept new (TOFU)`, `No verification` (hardened).
-- Per-site transport can use direct TCP, `SOCKS5`, or `HTTP CONNECT` proxy tunneling.
-- Per-site SSH jump host (`ProxyJump`/bastion) tunneling is supported.
-- Current implementation treats proxy tunneling and jump host tunneling as mutually exclusive per session.
-- Hardened no-verification flow: double confirmation, TTL-based temporary exception, risk banner.
-- Atomic `known_hosts` persistence and strict POSIX permissions (`~/.ssh` 0700, file 0600).
-- One-time-connect confirmation when fingerprint persistence fails.
-- Safer keyboard-interactive cancel path (no accidental password fallback).
-- Transfer integrity policy (`off/optional/required`) per site/session (and env override) using `.part` + atomic finalize.
-- Sensitive data redacted from production logs by default.
+## Runtime diagnostics
 
-### 4. Sites and credential storage
+These optional environment variables are useful when diagnosing a problem:
 
-- Saved sites use stable UUID identities.
-- Saved sites persist proxy type/endpoint/username per site.
-- Saved sites persist SSH jump host settings (host/port/user/key path) per site.
-- Saved sites persist SCP mode policy per site.
-- Saved sites persist FTPS certificate settings (verify toggle and optional CA bundle path) per site.
-- Saved sites can define initial local/remote paths and optionally remember the
-  last paths after a clean disconnect.
-- The Site Manager uses a searchable model for name, protocol, host, and user,
-  and can duplicate a site under a new UUID with optional secure credential
-  copying (off by default).
-- Duplicate site names blocked; rename/delete cleans legacy or orphan secrets.
-- Optional cleanup of stored credentials and related `known_hosts` entries when deleting sites.
-- Secure backends:
-    - macOS: Keychain
-    - Windows porting foundation: DPAPI (not a supported 1.0.0 platform)
-    - Linux: libsecret (when available)
-- Proxy passwords are stored in the secure backend (never in plaintext site settings).
-- Clear persistence feedback in secure-only builds.
-- Quick Connect can save/update site data without creating duplicates.
-- Local favorites are global; remote favorites and history are isolated by
-  saved-site UUID or endpoint identity. Legacy unscoped history is kept in a
-  separate, confirmation-gated section.
+- `OPENSCP_LOG_LEVEL=off|error|warn|info|debug`
+- `OPENSCP_TRANSFER_INTEGRITY=off|optional|required`
+- `OPENSCP_KNOWNHOSTS_PLAIN=1|0`
+- `OPENSCP_FP_HEX_ONLY=1`
+- `OPENSCP_ENABLE_INSECURE_FALLBACK=1` only when the build permits it
 
-### 5. UX/UI quality
+Sensitive logging remains disabled unless the application is explicitly run in
+the development environment.
 
-- Connection dialog improved (clearer inputs, inline key/known_hosts selectors, show/hide password fields).
-- Connection dialog includes per-site proxy configuration (`Direct`, `SOCKS5`, `HTTP CONNECT`) with optional auth.
-- Connection dialog includes optional per-site SSH jump host (bastion) configuration.
-- Connection dialog includes FTPS certificate controls (verify toggle + optional CA bundle selector).
-- UI language selection includes `English`, `Spanish`, `French`, and `Portuguese`.
-- Settings redesigned into focused sections: `General`, `Transfers`, `Sites`, `Security`, `Network`, and `Staging and drag-out`.
-- Settings keeps controls visible while resizing (minimum size + scrollable pages).
-- One-click reset for default main-window layout/sizes in Settings.
-- Permissions dialog includes octal preview + common presets.
-- About dialog includes diagnostics copy support and friendlier fallback messaging.
-- Transfer queue dialog opens centered relative to the main window.
-- Status bar shows connection type and per-session elapsed connection time.
-- `Sync` scans the current local and remote roots without blocking the UI,
-  previews one-way Local→Remote or Remote→Local synchronization, and only
-  queues the operations explicitly selected in the preview.
-- Synchronization supports glob filters and reusable presets, keeps
-  destination-only files by default, and exposes mirror deletion as a
-  separately previewed, explicitly confirmed option.
-- When the backend supports it, selected file pairs can be compared on demand
-  with SHA-256 without changing either side.
-- Disconnect flow stays responsive: UI returns to local mode immediately while transfer cleanup can continue in background, with watchdog/status feedback.
-- Reconnect is blocked while previous transfer cleanup is still running, preventing session overlap races.
-
-### 6. Quality baseline (CI and tests)
-
-- CI split by intent:
-    - push to `dev`: fast Linux non-integration baseline plus the dedicated
-      real-protocol and sanitizer workflow
-    - PR to `main`: Linux/macOS integration gates plus the dedicated
-      real-protocol and sanitizer workflow
-- Integration workflows spin up temporary SFTP, FTP, explicit FTPS, implicit
-  FTPS, and HTTPS WebDAV servers for end-to-end checks.
-- The curl protocol gate uses a temporary CA with localhost/127.0.0.1 SANs and
-  serves WebDAV below a non-root `/openscp-dav` base path.
-- FTP, both FTPS modes, and WebDAV integration binaries are invoked directly,
-  so a missing or unreachable service fails CI instead of being reported as a
-  skipped CTest.
-- PR integration coverage validates transport variants in CI: direct, `SOCKS5` proxy tunnel, `HTTP CONNECT` proxy tunnel (with auth), and SSH jump host tunnel.
-- Tag release workflow auto-generates draft release notes from Conventional Commits (`feat`, `fix`, `BREAKING CHANGE`, etc.).
-- Linux quality gates run the non-integration core and Qt event-loop tests under
-  `ASan`+`UBSan` and `TSan`; nightly quality also runs `cppcheck`, a
-  conservative `clang-tidy` profile, and strict `clang-format` checks for every
-  tracked first-party C++ source, header, and `.inc` file.
-- TSan instruments OpenSCP and its tests, but Ubuntu's prebuilt Qt libraries
-  are not TSan-instrumented. The job covers application-side races exercised
-  through Qt, not races wholly internal to Qt itself.
-
-## Requirements
-
-- A compatible Qt `6.x`; Qt `6.8.3` is recommended and pinned for official
-  self-contained releases
-- libssh2 (OpenSSL 3 recommended)
-- libcurl (optional; required for FTP/FTPS/WebDAV backends)
-- tinyxml2 (optional; required for WebDAV backend XML parsing)
-- CMake `3.22+`
-- C++20 compiler
-
-Optional:
-
-- macOS: Keychain (native)
-- Future Windows port: DPAPI module (not a supported 1.0.0 target)
-- Linux: libsecret / Secret Service
-- OpenSSH client (`ssh`) for SSH jump host tunneling.
-- FTP/FTPS backend can be disabled explicitly with
-  `-DOPENSCP_ENABLE_FTP_BACKEND=OFF`.
-- WebDAV backend can be disabled explicitly with
-  `-DOPENSCP_ENABLE_WEBDAV_BACKEND=OFF`.
-
-## Testing Locally
-
-```bash
-cmake -S . -B build -DOPENSCP_BUILD_TESTS=ON
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-```
-
-Local CI helper before push/PR:
-
-```bash
-./scripts/check_ci_local.sh --clean --full --werror
-```
-
-The helper builds every test executable configured for the available protocol
-backends before running CTest. Add `--full` to build the GUI application too.
-
-The repository-wide formatting gate can also be checked locally when
-`clang-format` is installed:
-
-```bash
-./scripts/check_cpp_quality.sh --format
-```
-
-Useful variants:
-
-```bash
-# Also build the GUI app target
-./scripts/check_ci_local.sh --clean --full
-
-# Custom build directory + parallel jobs
-./scripts/check_ci_local.sh --clean --build-dir build-ci-local -j 8
-
-# Same via environment variables
-BUILD_DIR=build-ci-local JOBS=8 ./scripts/check_ci_local.sh --clean
-```
-
-Script index: [scripts/README.md](scripts/README.md)
-
-Internal layering and enforceable development rules are documented in
-[Architecture](docs/ARCHITECTURE.md) and
-[Engineering Conventions](docs/CONVENTIONS.md).
-
-`openscp_sftp_integration_tests` is skipped unless integration variables are set:
-
-- `OPENSCP_IT_SFTP_HOST`
-- `OPENSCP_IT_SFTP_PORT`
-- `OPENSCP_IT_SFTP_USER`
-- `OPENSCP_IT_SFTP_PASS` or `OPENSCP_IT_SFTP_KEY`
-- `OPENSCP_IT_SFTP_KEY_PASSPHRASE` (if needed)
-- `OPENSCP_IT_REMOTE_BASE`
-- `OPENSCP_IT_PROXY_TYPE` (`socks5` or `http`, optional)
-- `OPENSCP_IT_PROXY_HOST` (required when `OPENSCP_IT_PROXY_TYPE` is set)
-- `OPENSCP_IT_PROXY_PORT` (optional; defaults: `1080` for `socks5`, `8080` for `http`)
-- `OPENSCP_IT_PROXY_USER` (optional)
-- `OPENSCP_IT_PROXY_PASS` (optional)
-- `OPENSCP_IT_JUMP_HOST` (optional)
-- `OPENSCP_IT_JUMP_PORT` (optional; default `22`)
-- `OPENSCP_IT_JUMP_USER` (optional)
-- `OPENSCP_IT_JUMP_KEY` (optional)
-
-`openscp_ftp_integration_tests` is skipped unless integration variables are set:
-
-- `OPENSCP_IT_FTP_HOST`
-- `OPENSCP_IT_FTP_PORT` (optional; default `21`)
-- `OPENSCP_IT_FTP_USER` (optional)
-- `OPENSCP_IT_FTP_PASS` (optional)
-- `OPENSCP_IT_FTP_REMOTE_BASE`
-
-`openscp_ftps_integration_tests` is skipped unless integration variables are set:
-
-- `OPENSCP_IT_FTPS_HOST`
-- `OPENSCP_IT_FTPS_PORT` (optional; default `990`)
-- `OPENSCP_IT_FTPS_USER` (optional)
-- `OPENSCP_IT_FTPS_PASS` (optional)
-- `OPENSCP_IT_FTPS_REMOTE_BASE`
-- `OPENSCP_IT_FTPS_MODE` (`auto`, `explicit`, or `implicit`; optional)
-- `OPENSCP_IT_FTPS_VERIFY_PEER` (`1`/`0`, optional; default `1`)
-- `OPENSCP_IT_FTPS_CA_CERT` (optional)
-
-`openscp_webdav_integration_tests` is skipped unless integration variables are
-set:
-
-- `OPENSCP_IT_WEBDAV_HOST`
-- `OPENSCP_IT_WEBDAV_PORT` (optional; default `443`)
-- `OPENSCP_IT_WEBDAV_USER` (optional)
-- `OPENSCP_IT_WEBDAV_PASS` (optional)
-- `OPENSCP_IT_WEBDAV_REMOTE_BASE`
-- `OPENSCP_IT_WEBDAV_SCHEME` (`http` or `https`; optional)
-- `OPENSCP_IT_WEBDAV_BASE_PATH` (optional; default `/`)
-- `OPENSCP_IT_WEBDAV_VERIFY_PEER` (`1`/`0`, optional; default `1`)
-- `OPENSCP_IT_WEBDAV_CA_CERT` (optional)
-
-The Ubuntu CI service setup and direct test runner live in
-[`scripts/ci`](scripts/ci). They are intentionally separate from CTest skip
-handling:
-
-```bash
-./scripts/ci/setup_protocol_services.sh
-./scripts/ci/run_protocol_integration.sh build
-```
-
-## Development Architecture
-
-The refactored build keeps protocol code, synchronization domain logic,
-reusable UI services, visual widgets, and the application composition root in
-separate internal targets:
-
-- `openscp_core`: protocol-neutral interfaces and SFTP/SCP/FTP/FTPS/WebDAV
-  backends.
-- `openscp_sync_logic`: comparison types and the widget-independent
-  synchronization engine.
-- `openscp_ui_logic`: sessions, navigation, remote actions, credentials,
-  recursive discovery, and transfer services.
-- `openscp_ui_widgets`: dialogs and reusable visual components.
-- `openscp_hello`: `MainWindow`, application startup, and resource assembly.
-
-Tests link these internal libraries instead of recompiling production sources.
-The aggregate `openscp_test_binaries` target builds every configured test
-executable. Contributor-facing structure and formatting rules are documented
-in [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Platform Workflows
-
-### macOS
-
-Recommended daily loop (also the recommended way to launch a local build):
-
-```bash
-./scripts/macos.sh dev
-```
-
-Step-by-step:
-
-```bash
-./scripts/macos.sh configure
-./scripts/macos.sh build
-./scripts/macos.sh run
-```
-
-Local unsigned packaging:
-
-```bash
-./scripts/macos.sh app
-./scripts/verify_macos_bundle.sh build/OpenSCP.app
-
-# Other artifact formats
-./scripts/macos.sh pkg
-./scripts/macos.sh dmg
-./scripts/macos.sh dist
-```
-
-The `dev` command can launch against the detected Qt development runtime. The
-bundle verifier is for the packaged app: it checks that Qt frameworks and the
-`qcocoa` platform plugin are present and that no Homebrew, temporary, or other
-machine-local paths remain in its linkage. This local flow does not require
-Apple signing or notarization.
-
-Official arm64 and x86_64 artifacts target macOS 12. CI builds the bundled
-OpenSSL, libssh2, and tinyxml2 from pinned, checksummed sources with that
-deployment target; it does not ship recent Homebrew bottles. The bundle
-verifier rejects any included Mach-O that requires a newer system.
-
-If Qt is outside the default path (`$HOME/Qt/<version>/macos`):
-
-```bash
-export QT_PREFIX="/path/to/Qt/<version>/macos"
-# or
-export Qt6_DIR="/path/to/Qt/<version>/macos/lib/cmake/Qt6"
-```
-
-Full packaging details: [assets/macos/README.md](assets/macos/README.md)
-
-### Linux
-
-Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/README.md](assets/linux/README.md)
-
-The complete release contract, including the x86_64 AppImage glibc 2.28 floor,
-the current arm64 baseline, and Windows status, is documented in
-[docs/PLATFORM_COMPATIBILITY.md](docs/PLATFORM_COMPATIBILITY.md).
-
-## Runtime Environment Variables
-
-- `OPENSCP_KNOWNHOSTS_PLAIN=1|0` - force plain vs hashed hostnames in `known_hosts`.
-- `OPENSCP_FP_HEX_ONLY=1` - show fingerprints in HEX with `:`.
-- `OPENSCP_TRANSFER_INTEGRITY=off|optional|required` - override transfer integrity policy.
-- `OPENSCP_LOG_LEVEL=off|error|warn|info|debug` - set log verbosity.
-- `OPENSCP_ENV=dev|prod` - runtime environment selector (`dev` enables development-only diagnostics).
-- `OPENSCP_LOG_SENSITIVE=1` - enable sensitive debug details only when `OPENSCP_ENV=dev` (disabled by default).
-- `OPENSCP_ENABLE_INSECURE_FALLBACK=1` - enable insecure secret fallback only when supported by the build/platform.
-
-## Screenshots
+## More screenshots
 
 <p align="center">
-    <img src="assets/screenshots/screenshot-site-manager.png" alt="Site Manager with saved servers" width="32%">
-    <img src="assets/screenshots/screenshot-connect.png" alt="Connect dialog with authentication options" width="32%">
-    <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Transfer queue with progress, filters, and actions" width="32%">
-    <br>
-    <img src="assets/screenshots/screenshot-history.png" alt="Connection history panel with recent sites" width="32%">
-    <img src="assets/screenshots/screenshot-settings.png" alt="Settings dialog with security and transfer options" width="32%">
+  <img src="assets/screenshots/screenshot-site-manager.png" alt="Saved sites" width="32%">
+  <img src="assets/screenshots/screenshot-connect.png" alt="Connection dialog" width="32%">
+  <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Transfer queue" width="32%">
 </p>
 
-## Roadmap
+## Releases and contributions
 
-- Complete and validate the modular Windows port after 1.0.0; the current
-  Windows-specific pieces are scaffolding, not release support.
-- Protocols: broader WebDAV interoperability coverage.
-- Broader enterprise proxy/jump auth flows (for example, non-batch/interactive jump auth).
-- More UX features: command palette and themes.
+Tagged releases are published on the
+[GitHub Releases page](https://github.com/luiscuellar31/openscp/releases).
+`main` contains stable work and `dev` is the pull-request target.
 
-## Credits and Licenses
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before
+opening a pull request. Report vulnerabilities privately as described in
+[SECURITY.md](SECURITY.md).
 
-- libssh2, libcurl, tinyxml2, OpenSSL, zlib, and Qt are owned by their respective authors.
-- License texts: [docs/credits/LICENSES/](docs/credits/LICENSES/)
-- Qt (LGPL) materials: [docs/credits](docs/credits)
-
-## Contributing
-
-- Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for workflow and standards.
-- Issues and pull requests are welcome, especially around macOS/Linux stability, i18n, and SFTP/SCP/FTP/FTPS/WebDAV robustness.
+OpenSCP is available under GPLv3-only or a commercial license. Third-party
+components retain their own licenses; see [Licensing](docs/LICENSING.md) and
+[third-party credits](docs/credits/CREDITS.md).

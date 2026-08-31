@@ -1,206 +1,161 @@
 # Contributing to OpenSCP
 
-First off, thank you for your interest in contributing to OpenSCP!
-This project is open-source and welcomes ideas, improvements, and bug fixes from the community.
-Please take a moment to read these guidelines before opening issues or pull requests.
+OpenSCP welcomes focused bug fixes, documentation improvements, tests, and new
+features. Public pull requests target `dev`; the maintainer promotes tested
+work to `main` and creates release tags.
 
----
+Never report a suspected vulnerability in a public issue or pull request. Use
+the private process in [SECURITY.md](SECURITY.md).
 
-## Branch Structure
+## Workflow
 
-- `main` → Stable branch.
-  Contains only tested, working versions of OpenSCP.
-  Do not submit pull requests directly to this branch (PRs to `main` will be retargeted or closed).
-
-- `dev` → Active integration branch.
-  All new features, fixes, and improvements should be based on `dev`.
-  Once ready, changes from `dev` are merged into `main` for official releases.
-
-Note: Merges to `main` are performed by the maintainer only.
-
-### Stable Releases
-
-If you need a fixed/stable version, please use the Releases page:
-
-- Latest tagged builds: https://github.com/luiscuellar31/openscp/releases
-
-Tags are immutable and represent tested snapshots you can depend on. The `main` branch remains stable but may move forward between releases.
-
----
-
-## How to Contribute
-
-1. Fork the repository to your own GitHub account.
-2. Clone your fork locally:
-
-   ```bash
-   git clone https://github.com/<your-username>/openscp.git
-   cd openscp
-   ```
-
-3. Create a new branch from `dev` for your change:
-
-   ```bash
-   git checkout dev
-   git pull origin dev
-   git checkout -b feature/your-feature-name
-   ```
-
-4. Make your changes, then commit using Conventional Commits:
-
-   ```bash
-   git add .
-   git commit -m "feat: add new SFTP progress indicator"
-   ```
-
-5. Push your branch to your fork:
-
-   ```bash
-   git push origin feature/your-feature-name
-   ```
-
-6. On GitHub, open a Pull Request (PR):
-
-   - Base branch: `dev` (all PRs must target `dev`)
-   - Compare branch: `feature/your-feature-name`
-
----
-
-## Issue Reporting and Labels
-
-When opening an issue, please apply the label that best matches the report so triage is faster.
-
-Recommended labels:
-
-- `bug` for defects or regressions.
-- `enhancement` for feature requests or UX improvements.
-- `documentation` for docs/readme related changes.
-- `question` for usage or behavior questions.
-- `security` for potential security vulnerabilities.
-
-Title prefixes like `[BUG]`, `[FEATURE]`, etc. are **not required** for regular issues.
-
-Security reports are the only exception: follow [SECURITY.md](SECURITY.md), including the `security` label and the `[SECURITY]` title prefix.
-
----
-
-## Keeping Your Fork Up to Date (`dev`)
-
-Your fork only matches the main repository the first time you create it.
-Before opening or updating a PR to `dev`, sync your local/fork `dev` branch with the upstream repository and then rebase your feature branch.
-
-1. Add `upstream` once (if you do not have it yet):
-
-   ```bash
-   git remote add upstream https://github.com/luiscuellar31/openscp.git
-   ```
-
-2. Sync your local `dev` and your fork's `dev` with upstream:
-
-   ```bash
-   git fetch upstream
-   git checkout dev
-   git rebase upstream/dev
-   git push origin dev
-   ```
-
-3. Rebase your working branch on top of the latest `upstream/dev`:
-
-   ```bash
-   git checkout feature/your-feature-name
-   git rebase upstream/dev
-   ```
-
-4. Push your rebased branch:
-
-   ```bash
-   git push --force-with-lease origin feature/your-feature-name
-   ```
-
-Notes:
-- `--force-with-lease` is required after a rebase if the branch was already pushed before.
-- Do not use plain `--force`; `--force-with-lease` is safer.
-
----
-
-## Code Style and Standards
-
-- Follow Conventional Commits for commit messages.
-- Keep code clean, consistent, and well-commented.
-- Prefer descriptive variable and function names.
-- Use English for all code and comments.
-- Keep functions focused; new or substantially changed functions should
-  normally stay below 120 lines.
-- Format every tracked first-party C++ source, header, and `.inc` file. Validate
-  the complete repository with:
-
-  ```bash
-  ./scripts/check_cpp_quality.sh --format
-  ```
-
-The enforced layering, ownership, concurrency, and test rules are documented
-in [Architecture](docs/ARCHITECTURE.md) and
-[Engineering Conventions](docs/CONVENTIONS.md).
-
-OpenSCP separates protocol/core code, reusable UI logic, widgets, and the app
-composition root into the internal CMake targets `openscp_core`,
-`openscp_sync_logic`, `openscp_ui_logic`, `openscp_ui_widgets`, and
-`openscp_hello`. Tests should link these targets instead of recompiling
-production `.cpp` files. The aggregate `openscp_test_binaries` target builds
-every CTest executable enabled by the configured protocol backends.
-
----
-
-## Pull Request Guidelines
-
-- Make sure your PR targets `dev`, not `main`.
-- Keep PRs focused, one feature or fix per PR.
-- Include a clear description of what was changed and why.
-- If your PR addresses an issue, link it in the description (e.g., `Closes #42`).
-
----
-
-## Local Validation (Required)
-
-Before opening a PR, run at least the same baseline checks executed in CI:
+Fork the repository, branch from the latest `dev`, and keep each pull request
+focused on one change:
 
 ```bash
-cmake -S . -B build -DOPENSCP_BUILD_TESTS=ON
-cmake --build build -j
-ctest --test-dir build --output-on-failure
+git clone https://github.com/<your-user>/openscp.git
+cd openscp
+git remote add upstream https://github.com/luiscuellar31/openscp.git
+git fetch upstream
+git switch -c feature/short-name upstream/dev
 ```
 
-Shortcut script available: `./scripts/check_ci_local.sh --clean --full --werror`
-(script: [scripts/check_ci_local.sh](scripts/check_ci_local.sh), usage details:
-[README.md#testing-locally](README.md#testing-locally), script index:
-[scripts/README.md](scripts/README.md)).
+Use descriptive commits, preferably following Conventional Commits. Before
+updating an existing pull request, rebase on `upstream/dev` and use
+`git push --force-with-lease` if the rebased branch was already published.
 
-If your change is platform-specific (e.g., macOS packaging), validate on that platform too.
+## Build and test
 
-### SFTP Integration Test (Optional Locally, Required in Linux/macOS CI)
-
-`openscp_sftp_integration_tests` runs against a real SFTP server and is enabled in Linux/macOS CI.
-Locally, it is skipped unless these variables are set.
-You can authenticate with password (`OPENSCP_IT_SFTP_PASS`) or private key (`OPENSCP_IT_SFTP_KEY`):
+The normal development entrypoints are:
 
 ```bash
-export OPENSCP_IT_SFTP_HOST=127.0.0.1
-export OPENSCP_IT_SFTP_PORT=2222
-export OPENSCP_IT_SFTP_USER=openscp_it
-export OPENSCP_IT_SFTP_PASS=<test-password>
-# or: export OPENSCP_IT_SFTP_KEY=/path/to/private_key
-# optional: export OPENSCP_IT_SFTP_KEY_PASSPHRASE=...
-export OPENSCP_IT_REMOTE_BASE=/home/openscp_it/upload
-ctest --test-dir build --output-on-failure
+./scripts/linux.sh dev
+./scripts/macos.sh dev
 ```
 
----
+Run the local CI baseline before opening a pull request:
+
+```bash
+./scripts/check_ci_local.sh --clean --full --werror
+./scripts/checks/cpp-quality.sh --format
+./scripts/checks/shell-quality.sh
+git diff --check
+```
+
+Static analysis is available after configuring a build with a compilation
+database:
+
+```bash
+./scripts/checks/cpp-quality.sh --tidy --cppcheck \
+  --build-dir build-ci-local
+```
+
+Platform-specific changes must also be exercised on that platform. Complete
+dependency and packaging instructions are in [docs/BUILDING.md](docs/BUILDING.md).
+
+## Engineering rules
+
+- Use C++20, English identifiers, and the repository's `.clang-format` file.
+- Prefer clear ownership and RAII. Use `UniqueFile` for `FILE*` and
+  `SecureString` for secrets.
+- Keep functions focused; substantially changed functions should normally stay
+  below the configured 120-line `clang-tidy` threshold.
+- Keep protocol/network code out of models and widgets. The dependency
+  direction is described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- Do not call remote clients, presentation callbacks, or emit Qt signals while
+  holding queue/state mutexes.
+- Preserve persisted formats unless the change includes an explicit migration.
+- Never persist passwords, passphrases, or proxy credentials in plain settings
+  or transfer-queue data.
+- Add tests for success, failure, cancellation, malformed input, and concurrent
+  behavior when those paths are relevant.
+- Tests should link the production target that owns the behavior; do not compile
+  private copies of production `.cpp` files.
+
+Do not globally suppress a warning to accommodate new code. A narrow
+suppression needs a documented compatibility reason or false positive.
+
+## Translations
+
+English strings live in the C++ sources. Spanish, French, and Portuguese Qt
+Linguist catalogs under `translations/` are tracked; generated `.qm` files are
+not.
+
+Use `lupdate` and `lrelease` from the same Qt 6 installation used for the build:
+
+```bash
+export QT_TOOLS_DIR=/path/to/Qt/6.x/<platform>/bin
+"$QT_TOOLS_DIR/lupdate" -version
+"$QT_TOOLS_DIR/lrelease" -version
+```
+
+After adding, removing, or changing a user-visible string, run from the
+repository root:
+
+```bash
+"$QT_TOOLS_DIR/lupdate" \
+  -recursive \
+  -extensions cpp,hpp \
+  -locations absolute \
+  -source-language en \
+  ui \
+  -ts \
+  translations/openscp_es.ts \
+  translations/openscp_fr.ts \
+  translations/openscp_pt.ts
+```
+
+Review the diff in context. Preserve `%1`, `%2`, `%n`, newlines, rich-text tags,
+and mnemonic markers such as `&`. New unfinished messages must be translated;
+vanished messages should correspond to intentionally removed source strings.
+
+```bash
+rg -n 'type="unfinished"' translations
+rg -n 'type="(vanished|obsolete)"' translations
+
+mkdir -p build/translations-check
+for locale in es fr pt; do
+  "$QT_TOOLS_DIR/lrelease" -nounfinished \
+    "translations/openscp_${locale}.ts" \
+    -qm "build/translations-check/openscp_${locale}.qm"
+done
+```
+
+Commit the source change and affected `.ts` files together. Test the changed
+screen in every affected language; never commit `.qm` files or `build/` output.
+
+## Integration tests
+
+Real SFTP/SCP/FTP/FTPS/WebDAV tests skip locally when their service environment
+is unavailable. CI invokes them directly so missing infrastructure is an error.
+
+For an existing SFTP server, set `OPENSCP_IT_SFTP_HOST`,
+`OPENSCP_IT_SFTP_PORT`, `OPENSCP_IT_SFTP_USER`, the remote base, and either a
+password or private key before running CTest. See each integration test source
+for its complete environment contract.
+
+> [!WARNING]
+> `scripts/ci/setup_protocol_services.sh` is intended only for a disposable
+> Ubuntu VM or dedicated ephemeral runner. It uses `sudo`, creates or reuses a
+> system user and resets its password, enables Apache modules, starts FTP/FTPS
+> and WebDAV services, and leaves those changes active. Do not run it on a
+> normal workstation or shared host.
+
+The controlled Linux service flow is documented in
+[docs/BUILDING.md](docs/BUILDING.md#protocol-integration-services).
+
+## Pull-request checklist
+
+- Target `dev`, explain the motivation, and link related issues.
+- Keep behavior changes separate from broad mechanical formatting.
+- Include tests or explain why the change cannot be tested automatically.
+- Update user-facing documentation only where the source of truth changed.
+- Confirm the relevant local checks and platform builds in the description.
 
 ## Licensing
 
-By contributing, you agree that your contributions will be licensed under the same license as OpenSCP (GPLv3).
-
----
-
-Thank you for helping make OpenSCP better!
-Every contribution, big or small, is deeply appreciated.
+Contributions follow the dual-licensing terms in
+[docs/LICENSING.md](docs/LICENSING.md). Unless otherwise agreed in writing, a
+submission is GPLv3-only and grants the maintainers the right to relicense it as
+part of OpenSCP's commercial distribution. Only submit work you have the right
+to contribute and identify third-party material for license review.

@@ -1,113 +1,110 @@
 # OpenSCP Architecture
 
-OpenSCP is split into protocol, reusable UI logic, widget, and composition
-layers. Dependencies point inward: protocol and data types do not depend on
-the application window, while `MainWindow` composes the reusable controllers
-and presents translated UI.
+OpenSCP separates protocol code from application policy and widgets. Dependency
+arrows point toward the protocol-neutral layers; network operations never run
+inside item models or dialogs.
+
+```text
+openscp
+  -> openscp_ui_widgets
+       -> openscp_ui_logic
+            -> openscp_sync_logic
+            -> openscp_core
+```
 
 ## Build targets
 
-| Target | Responsibility |
+| Target | Owns |
 | --- | --- |
-| `openscp_core` | Protocol clients, session options, secure values, safe local files, remote-path normalization, and runtime logging. |
-| `openscp_sync_logic` | Data-only synchronization comparison and execution planning. |
-| `openscp_ui_logic` | Models, persistence, transfer scheduling, remote operations, and connection coordinators. |
-| `openscp_ui_widgets` | Dialogs and reusable widgets that present `openscp_ui_logic`. |
-| `openscp_hello` | Application composition, menus, panels, translations, and platform resources. |
+| `openscp_core` | Remote-client contract, protocol backends, secure values, remote paths, and safe local files. |
+| `openscp_sync_logic` | Data-only comparison and synchronization planning. |
+| `openscp_ui_logic` | Sessions, persistence, navigation, remote jobs, and transfer orchestration. |
+| `openscp_ui_widgets` | Dialogs and reusable visual components. |
+| `openscp` | Startup, `MainWindow`, translations, menus, and application resources. |
 
-Tests link the production target that owns the behavior. They must not compile
-copies of production `.cpp` files unless a small utility is intentionally
-tested without its owning target.
+Tests link the target that owns the behavior. Integration tests use the same
+protocol implementations as the application.
 
-## Core and protocols
+## Protocol boundary
 
-`openscp::RemoteClient` is the stable virtual protocol contract. SFTP and SCP
-use libssh2. FTP, FTPS, and WebDAV use libcurl while retaining their distinct
-protocol semantics.
+`openscp::RemoteClient` is the common contract. SFTP and SCP use libssh2; FTP,
+FTPS, and WebDAV use libcurl. `ClientFactory` is the only place that selects a
+backend from `SessionOptions`.
 
-The curl backends share:
+Backends must:
 
-- `CurlClientState`, which owns the connected session, immutable
-  `std::shared_ptr<const SessionOptions>`, interruption state, and operation
-  serialization;
-- common curl-handle configuration and error classification;
-- `openscp::normalizeRemotePath(std::string_view)`, with Qt adapters at the UI
-  boundary;
-- FTP logical-root mapping from the server `PWD` and WebDAV base-path mapping.
+- normalize logical remote paths before mapping them to a server root;
+- expose supported operations through `ProtocolCapabilities`;
+- return structured errors for retry and presentation policy;
+- keep secrets in `SecureString` and local `FILE*` ownership in `UniqueFile`;
+- make cancellation unblock network waits promptly.
 
-`SessionOptions` stores passwords and passphrases as `SecureString`. Local
-`FILE*` ownership uses `UniqueFile`. Code must not introduce parallel manual
-ownership paths for those resources.
+The cURL implementations share connection state, bounded response handling,
+proxy/TLS configuration, and upload/download lifecycle code. Protocol files own
+only their request and response semantics.
 
-## Remote operations
+## Remote operations and sessions
 
-`RemoteOperationController` serializes use of the control connection and
-publishes job IDs plus immutable result values. Models never perform network
-I/O. `RemoteModel` receives completed listings, precomputes permissions, and
-uses a bounded icon cache.
+`SessionController` owns the active client and connection lifecycle.
+`RemoteOperationController` serializes control-connection jobs and publishes
+immutable results. `RemoteTreeWalker` and `LocalTreeDiscovery` perform bounded,
+cancelable traversal outside the UI thread.
 
-`RemoteActionController`, `PaneController`, and `SyncCoordinator` receive
-callbacks for presentation or application-specific policy. This keeps their
-behavior testable without constructing `MainWindow`.
+`RemoteModel` only stores completed listings. Dialogs and models never call a
+remote client directly.
 
-## Connection coordination
+Host-key prompts, health checks, and connection-status timing are coordinated
+independently so blocking network work cannot own presentation state.
 
-`SessionController` owns connection/disconnection lifecycle and the active
-client. Three focused coordinators own state that previously lived in
-`MainWindow`:
+## Transfers and synchronization
 
-- `HostKeyPromptCoordinator` serializes host-key prompts, preserves pending
-  prompt data, publishes a presentation callback, and wakes all waiters on
-  cancellation.
-- `SessionHealthMonitor` owns its timer, activity timestamps, application
-  resume detection, active probe ID, overlap prevention, and cancellation on
-  stop.
-- `ConnectionStatusCoordinator` owns the session timer, connection type, and
-  elapsed-time snapshots while `MainWindow` retains translated presentation
-  and security-warning styling.
+`TransferManager` is the transfer queue boundary. It owns worker connections,
+task state, retries, conflict policy, destination reservations, persistence,
+and notifications. `TransferQueue` keeps stable task storage and round-robin
+selection; `TransferExecutor`, `BandwidthLimiter`, and
+`TransferQueuePersistence` each own their narrower policy.
 
-`MainWindow` provides translated strings, dialogs, status messages, and
-connection-loss alerts through callbacks. It does not own either
-coordinator's synchronization or probe state.
-
-## Transfer queue
-
-`TransferManager` owns stable task nodes in `TransferQueueStore`, worker-slot
-connections, scheduling, persistence, retries, and destination reservations.
-Hot-path consumers use `tasksAdded`, `tasksUpdated`, and `tasksRemoved`, then
-request snapshots only for those IDs. A complete `tasksSnapshot()` is reserved
-for initialization, persistence, or explicit full refreshes.
-
-`TransferUiController` is initialized once from a full snapshot and then
-observes upserts and removed IDs. Direct manager queries such as
-`hasActiveTaskForSource`, `hasActiveTaskForDestination`,
-`activeTaskIdsForSession`, and `isBatchTerminal` avoid copying large queues for
-simple decisions.
-
-The permitted nested mutex order in `TransferManager` is:
+The only permitted nested manager lock order is:
 
 ```text
 connFactoryMutex_ -> mtx_
 ```
 
-Worker-client, retry, persistence, and performance mutexes are independent.
-They must be released before acquiring the chain above. External client calls
-and Qt signal emissions occur without these locks held.
+External client calls, callbacks, and Qt signal emissions occur after releasing
+manager locks.
 
-## Persistence and settings
+Synchronization follows three steps:
 
-`AppSettings` centralizes the QSettings organization/application identity,
-keys, synchronization, and owner-only file permissions. Saved sites preserve
-their existing on-disk format; credentials are delegated to `SecretStore`.
-Queue persistence uses an explicit versioned format and fails closed for
-unknown future schemas or corrupt input.
+1. `SyncCoordinator` gathers bounded local and remote snapshots.
+2. `SyncComparisonEngine` produces a data-only execution plan.
+3. Accepted actions enter `TransferManager` as one ordered batch.
 
-## Validation boundaries
+## Persistence
 
-Unit tests cover data models and coordinators. Integration binaries exercise
-real SFTP, SCP, FTP, FTPS, and WebDAV services when their environment is
-available. Linux CI additionally verifies RELRO, immediate binding, PIE, and a
-non-executable stack.
+Each persisted domain has one owner:
 
-See [CONVENTIONS.md](CONVENTIONS.md) for enforceable coding and validation
-rules.
+| Owner | Data |
+| --- | --- |
+| `AppSettings` | Application identity and settings keys. |
+| `SavedSitesPersistence` | Saved-site records and schema migration. |
+| `SiteCredentialRepository` | Credential keys and migration into secure storage. |
+| `SecretStore` | Keychain, Secret Service/libsecret, and platform encryption. |
+| `NavigationStore` | Local history plus session-scoped remote history/favorites. |
+| `TransferQueuePersistence` | Versioned, atomic storage of non-terminal tasks. |
+
+Presentation code must use these boundaries instead of writing raw settings or
+secret keys. Unknown future schemas and corrupt data must fail without
+overwriting recoverable files.
+
+## Application composition
+
+`MainWindow` creates the models, controllers, and dialogs, then connects their
+signals and presentation callbacks. It owns translated text and visible
+application policy, but reusable controllers own their operational state.
+
+When adding behavior, prefer extending the component that already owns the
+data. Add a new class only when it gains a clear lifetime, invariant, or testable
+policy; do not create one merely to shorten another file.
+
+Contributor rules, validation, and translation commands live in
+[CONTRIBUTING.md](../CONTRIBUTING.md).

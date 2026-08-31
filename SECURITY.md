@@ -7,6 +7,9 @@ Please report suspected vulnerabilities privately through
 Do not open a public issue until a fix has been released or the maintainers
 confirm that public discussion is safe.
 
+The public issue labels and title conventions in [CONTRIBUTING.md](CONTRIBUTING.md)
+do not apply to vulnerability reports.
+
 If you find a security problem:
 
 1. Open a private vulnerability report using the link above.
