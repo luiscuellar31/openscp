@@ -90,8 +90,6 @@ OPENSCP_TEST(test_session_defaults, t) {
             "WebDAV TLS verification should default to enabled");
     t.check(o.ftps_mode == openscp::FtpsMode::Auto,
             "default FTPS mode should preserve legacy auto behavior");
-    t.check((std::is_same_v<openscp::RemoteClient, openscp::SftpClient>),
-            "RemoteClient should remain source-compatible with SftpClient");
     t.check((std::is_same_v<decltype(o.password),
                             std::optional<openscp::SecureString>>),
             "session passwords should use SecureString storage");
@@ -344,8 +342,7 @@ OPENSCP_TEST(test_protocol_helpers, t) {
     const auto sftpCaps =
         openscp::capabilitiesForProtocol(openscp::Protocol::Sftp);
     t.check(sftpCaps.implemented, "SFTP capabilities should be implemented");
-    t.check(sftpCaps.supports_listing,
-            "SFTP capabilities should include listing");
+    t.check(sftpCaps.can_list, "SFTP capabilities should include listing");
     t.check(sftpCaps.can_upload && sftpCaps.can_download && sftpCaps.can_stat &&
                 sftpCaps.can_mkdir && sftpCaps.can_delete &&
                 sftpCaps.can_rename,
@@ -356,13 +353,12 @@ OPENSCP_TEST(test_protocol_helpers, t) {
     const auto scpCaps =
         openscp::capabilitiesForProtocol(openscp::Protocol::Scp);
     t.check(scpCaps.implemented, "SCP capabilities should be implemented");
-    t.check(scpCaps.supports_file_transfers,
+    t.check(scpCaps.can_upload && scpCaps.can_download,
             "SCP capabilities should include file transfers");
-    t.check(!scpCaps.supports_listing,
-            "SCP capabilities should not include listing");
-    t.check(!scpCaps.supports_resume,
+    t.check(!scpCaps.can_list, "SCP capabilities should not include listing");
+    t.check(!scpCaps.can_resume_download && !scpCaps.can_resume_upload,
             "SCP capabilities should not include resume");
-    t.check(!scpCaps.supports_permissions,
+    t.check(!scpCaps.can_set_permissions,
             "SCP capabilities should not include chmod/chown metadata edits");
     t.check(scpCaps.can_upload && scpCaps.can_download && !scpCaps.can_list,
             "SCP should advertise transfer-only fine-grained capabilities");
@@ -375,11 +371,10 @@ OPENSCP_TEST(test_protocol_helpers, t) {
 #if OPENSCP_HAS_CURL_WEBDAV
     t.check(webdavCaps.implemented,
             "WebDAV capabilities should be implemented");
-    t.check(webdavCaps.supports_listing,
-            "WebDAV capabilities should include listing");
-    t.check(webdavCaps.supports_file_transfers,
+    t.check(webdavCaps.can_list, "WebDAV capabilities should include listing");
+    t.check(webdavCaps.can_upload && webdavCaps.can_download,
             "WebDAV capabilities should include file transfers");
-    t.check(webdavCaps.supports_metadata,
+    t.check(webdavCaps.can_read_metadata,
             "WebDAV capabilities should include metadata");
     t.check(webdavCaps.supports_proxy,
             "WebDAV capabilities should include proxy support");
@@ -393,10 +388,10 @@ OPENSCP_TEST(test_protocol_helpers, t) {
 #else
     t.check(!webdavCaps.implemented,
             "WebDAV capabilities should report not implemented");
-    t.check(!webdavCaps.supports_listing,
+    t.check(!webdavCaps.can_list,
             "WebDAV capabilities should not advertise listing when backend is "
             "disabled");
-    t.check(!webdavCaps.supports_file_transfers,
+    t.check(!webdavCaps.can_upload && !webdavCaps.can_download,
             "WebDAV capabilities should not advertise transfers when backend "
             "is disabled");
 #endif
@@ -407,9 +402,9 @@ OPENSCP_TEST(test_protocol_helpers, t) {
         openscp::capabilitiesForProtocol(openscp::Protocol::Ftps);
 #if OPENSCP_HAS_CURL_FTP
     t.check(ftpCaps.implemented, "FTP capabilities should be implemented");
-    t.check(ftpCaps.supports_file_transfers,
+    t.check(ftpCaps.can_upload && ftpCaps.can_download,
             "FTP capabilities should include file transfers");
-    t.check(ftpCaps.supports_listing,
+    t.check(ftpCaps.can_list,
             "FTP capabilities should include directory listing support");
     t.check(!ftpCaps.supports_known_hosts,
             "FTP should not advertise SSH known_hosts verification");
@@ -420,9 +415,9 @@ OPENSCP_TEST(test_protocol_helpers, t) {
     t.check(!ftpCaps.can_checksum && !ftpsCaps.can_checksum,
             "FTP and FTPS should not advertise remote checksums");
     t.check(ftpsCaps.implemented, "FTPS capabilities should be implemented");
-    t.check(ftpsCaps.supports_file_transfers,
+    t.check(ftpsCaps.can_upload && ftpsCaps.can_download,
             "FTPS capabilities should include file transfers");
-    t.check(ftpsCaps.supports_listing,
+    t.check(ftpsCaps.can_list,
             "FTPS capabilities should include directory listing support");
     t.check(!ftpsCaps.supports_known_hosts,
             "FTPS should use TLS certificates, not SSH known_hosts");
@@ -430,19 +425,19 @@ OPENSCP_TEST(test_protocol_helpers, t) {
     t.check(!ftpCaps.implemented,
             "FTP capabilities should report not implemented when backend is "
             "disabled");
-    t.check(!ftpCaps.supports_file_transfers,
+    t.check(!ftpCaps.can_upload && !ftpCaps.can_download,
             "FTP capabilities should not advertise transfers when backend is "
             "disabled");
-    t.check(!ftpCaps.supports_listing,
+    t.check(!ftpCaps.can_list,
             "FTP capabilities should not advertise listing when backend is "
             "disabled");
     t.check(!ftpsCaps.implemented,
             "FTPS capabilities should report not implemented when backend is "
             "disabled");
-    t.check(!ftpsCaps.supports_file_transfers,
+    t.check(!ftpsCaps.can_upload && !ftpsCaps.can_download,
             "FTPS capabilities should not advertise transfers when backend is "
             "disabled");
-    t.check(!ftpsCaps.supports_listing,
+    t.check(!ftpsCaps.can_list,
             "FTPS capabilities should not advertise listing when backend is "
             "disabled");
 #endif

@@ -102,8 +102,9 @@ int main() {
             "WebDAV client should report WebDAV protocol");
     const auto caps = client->capabilities();
     t.check(caps.implemented, "WebDAV should be marked implemented");
-    t.check(caps.supports_file_transfers, "WebDAV should support transfers");
-    t.check(caps.supports_listing, "WebDAV should support remote listing");
+    t.check(caps.can_upload && caps.can_download,
+            "WebDAV should support transfers");
+    t.check(caps.can_list, "WebDAV should support remote listing");
     t.check(caps.can_stat && caps.can_mkdir && caps.can_delete &&
                 caps.can_rename,
             "WebDAV should advertise remote CRUD operations");

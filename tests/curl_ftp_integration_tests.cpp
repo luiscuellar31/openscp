@@ -77,8 +77,9 @@ int main() {
             "FTP client should report FTP protocol");
     const auto caps = client->capabilities();
     t.check(caps.implemented, "FTP should be marked implemented");
-    t.check(caps.supports_file_transfers, "FTP should support transfers");
-    t.check(caps.supports_listing, "FTP should support remote listing");
+    t.check(caps.can_upload && caps.can_download,
+            "FTP should support transfers");
+    t.check(caps.can_list, "FTP should support remote listing");
     t.check(caps.can_stat && caps.can_mkdir && caps.can_delete &&
                 caps.can_rename,
             "FTP should advertise remote CRUD operations");

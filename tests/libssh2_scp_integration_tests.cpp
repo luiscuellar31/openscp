@@ -148,9 +148,11 @@ int main() {
             "client should report SCP protocol");
     const auto caps = client.capabilities();
     t.check(caps.implemented, "SCP should be marked implemented");
-    t.check(caps.supports_file_transfers, "SCP should support file transfers");
-    t.check(!caps.supports_listing, "SCP should not support listing");
-    t.check(!caps.supports_resume, "SCP should not support resume");
+    t.check(caps.can_upload && caps.can_download,
+            "SCP should support file transfers");
+    t.check(!caps.can_list, "SCP should not support listing");
+    t.check(!caps.can_resume_download && !caps.can_resume_upload,
+            "SCP should not support resume");
 
     const std::string token = uniqueToken();
     const fs::path tempDir =

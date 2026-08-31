@@ -1,7 +1,10 @@
 // Abstract, protocol-neutral interface for remote operations.
 #pragma once
 
-#include "SftpTypes.hpp"
+#include "Protocol.hpp"
+#include "RemoteError.hpp"
+#include "RemoteFileInfo.hpp"
+#include "SessionOptions.hpp"
 
 #include <cerrno>
 #include <cstdint>
@@ -17,8 +20,6 @@ namespace openscp {
 
 class RemoteClient {
     public:
-    using ProgressCB = std::function<void(double)>; // 0..1 (currently unused)
-
     virtual ~RemoteClient() = default;
 
     virtual Protocol protocol() const { return Protocol::Sftp; }
@@ -135,9 +136,5 @@ class RemoteClient {
     mutable std::mutex lastErrorMutex_;
     RemoteError lastError_{};
 };
-
-// Source compatibility for callers that used the original protocol-specific
-// interface name. New code should use RemoteClient.
-using SftpClient = RemoteClient;
 
 } // namespace openscp

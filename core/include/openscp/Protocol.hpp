@@ -43,14 +43,7 @@ struct ProtocolCapabilities {
     bool can_set_timestamps = false;
     bool can_checksum = false;
 
-    // Deprecated aggregate flags retained for source compatibility.
-    bool supports_listing = false;
-    bool supports_file_transfers = false;
-    bool supports_resume = false;
-    bool supports_metadata = false;
-    bool supports_permissions = false;
-    bool supports_ownership = false;
-    bool supports_timestamps = false;
+    // Transport capabilities that are not represented by a filesystem action.
     bool supports_proxy = false;
     bool supports_jump_host = false;
     bool supports_known_hosts = false;
@@ -282,9 +275,6 @@ inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
         capabilities.can_delete = true;
         capabilities.can_rename = true;
         capabilities.can_read_metadata = true;
-        capabilities.supports_listing = true;
-        capabilities.supports_file_transfers = true;
-        capabilities.supports_metadata = true;
         capabilities.supports_proxy = true;
     };
 
@@ -296,10 +286,6 @@ inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
         capabilities.can_set_ownership = true;
         capabilities.can_set_timestamps = true;
         capabilities.can_checksum = true;
-        capabilities.supports_resume = true;
-        capabilities.supports_permissions = true;
-        capabilities.supports_ownership = true;
-        capabilities.supports_timestamps = true;
         capabilities.supports_jump_host = true;
         capabilities.supports_known_hosts = true;
         capabilities.supports_transfer_integrity = true;
@@ -308,7 +294,6 @@ inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
         capabilities.implemented = true;
         capabilities.can_upload = true;
         capabilities.can_download = true;
-        capabilities.supports_file_transfers = true;
         capabilities.supports_proxy = true;
         capabilities.supports_jump_host = true;
         capabilities.supports_known_hosts = true;
