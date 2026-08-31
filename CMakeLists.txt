@@ -449,7 +449,7 @@ endif()
 ###############################################################################
 if(APPLE)
     # Bundle identifier propagated into Info.plist
-    set(BUNDLE_ID "com.openscp.app" CACHE STRING "macOS bundle identifier")
+    set(BUNDLE_ID "io.github.luiscuellar31.openscp" CACHE STRING "macOS bundle identifier")
 
     # Configure Info.plist from template
     set(_INFO_PLIST_IN  "${CMAKE_SOURCE_DIR}/assets/macos/Info.plist.in")

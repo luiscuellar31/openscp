@@ -124,11 +124,11 @@ prepare_desktop() {
 Type=Application
 Name=OpenSCP
 GenericName=Remote File Transfer Client
-Comment=Two-panel remote file transfer client focused on simplicity and security
+Comment=Lightweight two-panel client for remote file transfers
 Exec=openscp
 Icon=openscp
 Terminal=false
-Categories=Network;FileTransfer;Utility;
+Categories=Network;FileTransfer;
 Keywords=Remote;File;Transfer;Client;Network;
 StartupWMClass=OpenSCP
 EOF

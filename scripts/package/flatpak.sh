@@ -3,11 +3,11 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-MANIFEST="${MANIFEST:-${REPO_DIR}/packaging/flatpak/com.openscp.OpenSCP.yml}"
+MANIFEST="${MANIFEST:-${REPO_DIR}/packaging/flatpak/io.github.luiscuellar31.openscp.yml}"
 BUILD_DIR="${BUILD_DIR:-${REPO_DIR}/dist/flatpak/build-dir}"
 REPO_OUT="${REPO_OUT:-${REPO_DIR}/dist/flatpak/repo}"
 BUNDLE_OUT="${BUNDLE_OUT:-${REPO_DIR}/dist/OpenSCP.flatpak}"
-APP_ID="${APP_ID:-com.openscp.OpenSCP}"
+APP_ID="${APP_ID:-io.github.luiscuellar31.openscp}"
 BRANCH="${BRANCH:-stable}"
 RUNTIME_VERSION_OVERRIDE="${RUNTIME_VERSION_OVERRIDE:-}"
 CHECKER="${REPO_DIR}/scripts/verify/qt-svg-plugins.sh"

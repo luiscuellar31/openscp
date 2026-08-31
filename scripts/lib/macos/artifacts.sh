@@ -55,7 +55,7 @@ create_pkg() {
   staging="$(mktemp -d)"
   component_pkg="${staging}/component.pkg"
   component_plist="${staging}/components.plist"
-  package_identifier="${PKG_IDENTIFIER:-com.luiscuellar.openscp}"
+  package_identifier="${PKG_IDENTIFIER:-io.github.luiscuellar31.openscp.pkg}"
   cp -R "$source_app" "$staging/"
   pkgbuild --analyze --root "$staging" "$component_plist" >/dev/null
 

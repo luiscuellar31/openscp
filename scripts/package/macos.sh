@@ -12,7 +12,8 @@ set -euo pipefail
 #
 # Configuration via environment variables (local-only usage):
 #   APP_NAME               Default: "OpenSCP"
-#   BUNDLE_ID              Default: "com.openscp.app"
+#   BUNDLE_ID              Default: "io.github.luiscuellar31.openscp"
+#   PKG_IDENTIFIER         Default: "io.github.luiscuellar31.openscp.pkg"
 #   MINIMUM_SYSTEM_VERSION Default: "12.0" (CMake deployment target + Info.plist)
 #   CMAKE_OSX_ARCHITECTURES Default: current machine architecture
 #                            (or "arm64;x86_64" for universal naming)
@@ -63,7 +64,7 @@ BUILD_DIR="${REPO_DIR}/build"
 DIST_DIR="${REPO_DIR}/dist"
 
 APP_NAME="${APP_NAME:-OpenSCP}"
-BUNDLE_ID="${BUNDLE_ID:-com.openscp.app}"
+BUNDLE_ID="${BUNDLE_ID:-io.github.luiscuellar31.openscp}"
 MINIMUM_SYSTEM_VERSION="${MINIMUM_SYSTEM_VERSION:-12.0}"
 ARCHS="${CMAKE_OSX_ARCHITECTURES:-$(uname -m)}"
 PACKAGE_FORMATS="${PACKAGE_FORMATS:-dmg}"

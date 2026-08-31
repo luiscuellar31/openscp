@@ -5,6 +5,7 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${REPO_DIR}/build"
 APP_PATH="${BUILD_DIR}/OpenSCP.app"
+BUNDLE_ID="${BUNDLE_ID:-io.github.luiscuellar31.openscp}"
 EFFECTIVE_QT6_DIR=""
 EFFECTIVE_QT_PREFIX=""
 QT_HOST_WRAP_DIR=""
@@ -131,6 +132,7 @@ Optional env vars:
   Qt6_DIR=/path/to/Qt/<ver>/macos/lib/cmake/Qt6
   QT6_DIR=/path/to/Qt/<ver>/macos/lib/cmake/Qt6
   CMAKE_OSX_ARCHITECTURES=arm64|x86_64|arm64;x86_64
+  BUNDLE_ID=io.github.example.OpenSCP
   SKIP_CODESIGN=1|0
   SKIP_NOTARIZATION=1|0
 
@@ -147,6 +149,7 @@ configure_release() {
     -S "$REPO_DIR"
     -B "$BUILD_DIR"
     -DCMAKE_BUILD_TYPE=Release
+    "-DBUNDLE_ID=${BUNDLE_ID}"
   )
   if [[ -d "$EFFECTIVE_QT_PREFIX" ]]; then
     args+=("-DCMAKE_PREFIX_PATH=${EFFECTIVE_QT_PREFIX}")

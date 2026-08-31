@@ -1,4 +1,4 @@
-app-id: com.openscp.OpenSCP
+app-id: io.github.luiscuellar31.openscp
 runtime: org.kde.Platform
 runtime-version: "6.9"
 sdk: org.kde.Sdk
@@ -26,7 +26,7 @@ modules:
       - type: archive
         url: https://libssh2.org/download/libssh2-1.11.1.tar.gz
         sha256: d9ec76cbe34db98eec3539fe2c899d26b0c837cb3eb466a56b0f109cabf658f7
-        
+
   - name: openscp
     buildsystem: cmake-ninja
     config-opts:
@@ -37,6 +37,8 @@ modules:
     sources:
       - type: dir
         path: ../..
+    post-install:
+      - install -Dm644 packaging/flatpak/io.github.luiscuellar31.openscp.metainfo.xml /app/share/metainfo/io.github.luiscuellar31.openscp.metainfo.xml
     cleanup:
       - /include
       - /lib/cmake

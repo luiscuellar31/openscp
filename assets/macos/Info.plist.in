@@ -60,10 +60,10 @@
   <key>LSRequiresNativeExecution</key>
   <true/>
   <key>LSApplicationCategoryType</key>
-  <string>public.app-category.developer-tools</string>
+  <string>public.app-category.utilities</string>
 
   <key>CFBundleGetInfoString</key>
-  <string>Two-panel remote file transfer client focused on simplicity and security</string>
+  <string>Lightweight two-panel client for remote file transfers</string>
 
   <key>NSHumanReadableCopyright</key>
   <string>© @CURRENT_YEAR@ OpenSCP contributors</string>
