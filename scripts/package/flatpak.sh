@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MANIFEST="${MANIFEST:-${REPO_DIR}/packaging/flatpak/com.openscp.OpenSCP.yml}"
 BUILD_DIR="${BUILD_DIR:-${REPO_DIR}/dist/flatpak/build-dir}"
 REPO_OUT="${REPO_OUT:-${REPO_DIR}/dist/flatpak/repo}"
@@ -10,12 +10,21 @@ BUNDLE_OUT="${BUNDLE_OUT:-${REPO_DIR}/dist/OpenSCP.flatpak}"
 APP_ID="${APP_ID:-com.openscp.OpenSCP}"
 BRANCH="${BRANCH:-stable}"
 RUNTIME_VERSION_OVERRIDE="${RUNTIME_VERSION_OVERRIDE:-}"
-CHECKER="${REPO_DIR}/scripts/verify_qt_svg_plugins.sh"
+CHECKER="${REPO_DIR}/scripts/verify/qt-svg-plugins.sh"
 APP_ICON="${APP_ICON:-${REPO_DIR}/assets/program/icon-openscp-256.png}"
 
 log() { printf "\033[1;34m[flatpak]\033[0m %s\n" "$*"; }
 err() { printf "\033[1;31m[err    ]\033[0m %s\n" "$*"; }
 die() { err "$*"; exit 1; }
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/package/flatpak.sh [flatpak-builder options]
+
+Builds dist/OpenSCP.flatpak. Additional arguments are forwarded to
+flatpak-builder; environment overrides are documented in docs/BUILDING.md.
+EOF
+}
 
 ensure_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required tool: $1"
@@ -57,6 +66,11 @@ uses_external_qt_runtime() {
 }
 
 main() {
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    usage
+    return 0
+  fi
+
   [[ "$(uname -s)" == "Linux" ]] || die "Flatpak packaging must run on Linux."
   [[ -f "$MANIFEST" ]] || die "Manifest not found: $MANIFEST"
   [[ -x "$CHECKER" ]] || die "Qt runtime checker not found/executable: $CHECKER"

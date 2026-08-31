@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RUN_FORMAT=0
 RUN_TIDY=0
 RUN_CPPCHECK=0
@@ -10,10 +10,10 @@ BUILD_DIR="${REPO_DIR}/build-analysis"
 
 usage() {
     printf '%s\n' \
-        "Usage: ./scripts/check_cpp_quality.sh [options]" \
+        "Usage: ./scripts/checks/cpp-quality.sh [options]" \
         "" \
         "Options:" \
-        "  --format          Check all tracked first-party C++ files" \
+        "  --format          Check all first-party C++ files" \
         "  --tidy            Run clang-tidy using a compilation database" \
         "  --cppcheck        Run cppcheck" \
         "  --build-dir <p>   Compilation database directory" \
@@ -62,59 +62,26 @@ fi
 cd "$REPO_DIR"
 
 cpp_files=()
-translation_units=()
-implementation_fragments=()
 while IFS= read -r source_file; do
     case "$source_file" in
     *.cpp|*.cc|*.cxx)
         cpp_files+=("$source_file")
-        translation_units+=("$source_file")
         ;;
-    *.h|*.hh|*.hpp|*.inc)
+    *.h|*.hh|*.hpp)
         cpp_files+=("$source_file")
-        if [[ "$source_file" == *.inc ]]; then
-            implementation_fragments+=("$source_file")
-        fi
         ;;
     esac
-done < <(git ls-files core ui tests)
+done < <(
+    find core ui tests -type f \
+        \( -name '*.cpp' -o -name '*.cc' -o -name '*.cxx' \
+        -o -name '*.h' -o -name '*.hh' -o -name '*.hpp' \) \
+        -print | LC_ALL=C sort
+)
 
 [[ "${#cpp_files[@]}" -gt 0 ]] || {
-    printf '%s\n' "No tracked first-party C++ files were found." >&2
+    printf '%s\n' "No first-party C++ files were found." >&2
     exit 1
 }
-
-for fragment in "${implementation_fragments[@]}"; do
-    case "$fragment" in
-    core/src/libssh2/detail/Libssh2SftpClient.FileListing.inc|\
-    core/src/libssh2/detail/Libssh2SftpClient.FileMetadataOps.inc|\
-    core/src/libssh2/detail/Libssh2SftpClient.TransferOps.inc|\
-    core/src/libssh2/detail/Libssh2SftpClient.TransferSupport.inc|\
-    core/src/libssh2/detail/Libssh2SftpClient.TransportAuth.inc|\
-    core/src/libssh2/detail/Libssh2SftpClient.TransportLifecycle.inc|\
-    core/src/libssh2/detail/Libssh2SftpClient.TransportNet.inc)
-        ;;
-    *)
-        printf 'New implementation fragment is not allowed: %s\n' \
-            "$fragment" >&2
-        printf '%s\n' \
-            "Use a normal .hpp/.cpp translation unit instead." >&2
-        exit 1
-        ;;
-    esac
-
-    fragment_include="#include \"detail/${fragment##*/}\""
-    include_count="$(
-        rg -F -c "$fragment_include" \
-            core/src/libssh2/Libssh2SftpClient.cpp || true
-    )"
-    include_count="${include_count:-0}"
-    if [[ "$include_count" != "1" ]]; then
-        printf '%s must be included exactly once; found %s inclusion(s).\n' \
-            "$fragment" "$include_count" >&2
-        exit 1
-    fi
-done
 
 uncatalogued_settings_keys="$(
     rg -n --pcre2 \

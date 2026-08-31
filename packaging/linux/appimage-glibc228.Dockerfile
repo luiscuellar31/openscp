@@ -2,7 +2,7 @@ FROM quay.io/rockylinux/rockylinux@sha256:e8a49c5403b687db05d4d67333fa45808fbe74
 
 # Rocky Linux 8 supplies glibc 2.28. GCC Toolset provides modern C++20 support
 # without raising that libc floor; libstdc++ and libgcc are bundled later by
-# package_appimage.sh.
+# scripts/package/appimage.sh.
 RUN dnf -y --setopt=install_weak_deps=False install epel-release dnf-plugins-core \
     && dnf config-manager --set-enabled powertools \
     && dnf -y --setopt=install_weak_deps=False install \

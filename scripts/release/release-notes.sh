@@ -5,10 +5,10 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/generate_release_notes.sh --tag <tag> [options]
+  ./scripts/release/release-notes.sh --tag <tag> [options]
 
 Options:
-  --tag <tag>          Tag to generate notes for (e.g. v1.0.0). Required.
+  --tag <tag>          Tag to generate notes for (e.g. vX.Y.Z). Required.
   --version <version>  Version label to show in notes (default: tag without leading v).
   --repo <owner/repo>  GitHub repository for compare links (optional).
   --range <A..B>       Explicit git range. If omitted, uses previous tag..tag.
@@ -26,6 +26,10 @@ append_item() {
   local text="$2"
   printf -v "$var_name" '%s- %s\n' "${!var_name}" "$text"
 }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+cd "$REPO_ROOT"
 
 TAG=""
 VERSION=""

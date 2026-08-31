@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Artifact and notarization helpers sourced by scripts/package_mac.sh.
+# Artifact and notarization helpers sourced by scripts/package/macos.sh.
 
 create_dmg() {
   local dmg_path="$1"

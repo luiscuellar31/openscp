@@ -54,6 +54,11 @@ jobs:
             echo "Could not detect project version from CMakeLists.txt"
             exit 1
           fi
+          snap_version="$(sed -n 's/^version:[[:space:]]*"\([0-9][0-9.]*\)"[[:space:]]*$/\1/p' packaging/snap/snapcraft.yaml | head -n1)"
+          if [[ "$snap_version" != "$version" ]]; then
+            echo "Version source mismatch: CMake=${version}, Snap=${snap_version:-missing}"
+            exit 1
+          fi
           if [[ "v${version}" != "$tag" ]]; then
             echo "Tag/version mismatch: tag=${tag}, project=v${version}"
             exit 1
@@ -127,11 +132,11 @@ jobs:
           OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=ON \
           MINIMUM_SYSTEM_VERSION="${{ matrix.minimum_macos }}" \
           CMAKE_OSX_ARCHITECTURES="${{ matrix.arch }}" \
-          ./scripts/package_mac.sh
+          ./scripts/package/macos.sh
 
       - name: Verify macOS bundle linkage
         run: |
-          bash ./scripts/verify_macos_bundle.sh build/OpenSCP.app
+          bash ./scripts/verify/macos-bundle.sh build/OpenSCP.app
 
       - name: Collect macOS artifacts
         run: |
@@ -291,7 +296,7 @@ jobs:
             --env "Qt6_DIR=${Qt6_DIR:-}" \
             --env "PATH=$QT_ROOT_DIR/bin:$HOME/.local/bin:/opt/rh/gcc-toolset-13/root/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
             openscp-appimage-glibc228 \
-            ./scripts/package_appimage.sh
+            ./scripts/package/appimage.sh
           sudo chown -R "$(id -u):$(id -g)" build dist
 
       - name: Build AppImage (Ubuntu 24.04 arm64 baseline)
@@ -302,16 +307,16 @@ jobs:
           OPENSCP_MAX_GLIBC_VERSION: "2.39"
         run: |
           rm -rf dist build
-          ./scripts/package_appimage.sh
+          ./scripts/package/appimage.sh
 
       - name: Build Snap
         run: |
-          sudo env "PATH=$PATH" ./scripts/package_snap.sh --destructive-mode
+          sudo env "PATH=$PATH" ./scripts/package/snap.sh --destructive-mode
 
       - name: Build Flatpak
         run: |
           rm -rf dist/flatpak
-          ./scripts/package_flatpak.sh --user --install-deps-from=flathub
+          ./scripts/package/flatpak.sh --user --install-deps-from=flathub
 
       - name: Collect Linux artifacts
         run: |
@@ -386,7 +391,7 @@ jobs:
           set -euo pipefail
           tag="${{ needs.verify-tag.outputs.tag_name }}"
           version="${{ needs.verify-tag.outputs.version }}"
-          bash ./scripts/generate_release_notes.sh \
+          bash ./scripts/release/release-notes.sh \
             --tag "$tag" \
             --version "$version" \
             --repo "${{ github.repository }}" \

@@ -2,7 +2,7 @@ app-id: com.openscp.OpenSCP
 runtime: org.kde.Platform
 runtime-version: "6.9"
 sdk: org.kde.Sdk
-command: openscp_hello
+command: openscp
 rename-desktop-file: openscp.desktop
 rename-icon: openscp
 copy-icon: true
@@ -32,6 +32,8 @@ modules:
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
       - -DOPENSCP_BUILD_TESTS=OFF
+      - -DOPENSCP_ENABLE_FTP_BACKEND=OFF
+      - -DOPENSCP_ENABLE_WEBDAV_BACKEND=OFF
     sources:
       - type: dir
         path: ../..

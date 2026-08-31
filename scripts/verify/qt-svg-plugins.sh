@@ -10,7 +10,7 @@ die() { err "$*"; exit 1; }
 usage() {
   cat << 'EOF'
 Usage:
-  verify_qt_svg_plugins.sh [--allow-runtime-provided] [--context <name>] <package-root>
+  ./scripts/verify/qt-svg-plugins.sh [--allow-runtime-provided] [--context <name>] <package-root>
 
 Options:
   --allow-runtime-provided  Do not fail if qsvg/qsvgicon/qxcb are missing from package payload.
@@ -129,7 +129,7 @@ targets=()
 
 while IFS= read -r exe; do
   targets+=("$exe")
-done < <(find "$ROOT" -type f -name "openscp_hello" | sort -u)
+done < <(find "$ROOT" -type f -name "openscp" | sort -u)
 
 targets+=("${svg_plugins[@]}")
 targets+=("${svg_icon_plugins[@]}")

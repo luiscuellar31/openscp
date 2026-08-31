@@ -1,16 +1,17 @@
 name: openscp
 base: core24
 version: "1.0.0"
-summary: Two-panel SFTP client focused on simplicity and security
+summary: Two-panel remote file transfer client
 description: |
-  Two-panel SFTP client focused on simplicity and security
+  Two-panel remote file transfer client focused on simplicity and security.
+  This package provides the SFTP and SCP backends.
 grade: stable
 confinement: strict
 icon: icon.png
 
 apps:
   openscp:
-    command: usr/bin/openscp_hello
+    command: usr/bin/openscp
     desktop: usr/share/applications/openscp-snap.desktop
     extensions: [kde-neon-6]
     plugs:
@@ -27,6 +28,8 @@ parts:
     cmake-parameters:
       - -DCMAKE_BUILD_TYPE=Release
       - -DCMAKE_INSTALL_PREFIX=/usr
+      - -DOPENSCP_ENABLE_FTP_BACKEND=OFF
+      - -DOPENSCP_ENABLE_WEBDAV_BACKEND=OFF
     build-packages:
       - pkg-config
       - libssh2-1-dev
@@ -41,7 +44,7 @@ parts:
         "${CRAFT_PART_INSTALL}/usr/share/applications/openscp-snap.desktop"
     override-prime: |
       craftctl default
-      "${CRAFT_PROJECT_DIR}/../../scripts/verify_qt_svg_plugins.sh" \
+      "${CRAFT_PROJECT_DIR}/../../scripts/verify/qt-svg-plugins.sh" \
         --allow-runtime-provided \
         --context snap \
         "${CRAFT_PRIME}"

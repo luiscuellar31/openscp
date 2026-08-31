@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Signing helpers sourced by scripts/package_mac.sh. The caller owns all
+# Signing helpers sourced by scripts/package/macos.sh. The caller owns all
 # configuration and logging functions.
 
 sign_item() {

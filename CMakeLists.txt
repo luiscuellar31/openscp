@@ -11,22 +11,22 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
     endif()
 endif()
 
-project(OpenSCP_hello LANGUAGES CXX VERSION 1.0.0)
+project(OpenSCP LANGUAGES CXX VERSION 1.0.0)
 
 if(WIN32)
     option(OPENSCP_ENABLE_EXPERIMENTAL_WINDOWS_PORT
-        "Allow configuration of the unsupported post-1.0 Windows scaffold"
+        "Allow configuration of the unsupported Windows port scaffold"
         OFF)
     if(NOT OPENSCP_ENABLE_EXPERIMENTAL_WINDOWS_PORT)
         message(FATAL_ERROR
-            "OpenSCP 1.0.0 does not support Windows. The modular Windows "
-            "port is intentionally gated to prevent accidental release "
-            "builds. Port developers may opt in with "
+            "OpenSCP does not currently support Windows. The modular port "
+            "is intentionally gated to prevent accidental release builds. "
+            "Port developers may opt in with "
             "-DOPENSCP_ENABLE_EXPERIMENTAL_WINDOWS_PORT=ON.")
     endif()
     message(WARNING
         "Experimental Windows scaffold enabled: this configuration is not "
-        "a supported OpenSCP 1.0.0 release target.")
+        "a supported OpenSCP release target.")
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
@@ -182,14 +182,14 @@ message(STATUS
 include(GNUInstallDirs)
 
 add_custom_target(openscp_format_check
-    COMMAND "${CMAKE_SOURCE_DIR}/scripts/check_cpp_quality.sh" --format
+    COMMAND "${CMAKE_SOURCE_DIR}/scripts/checks/cpp-quality.sh" --format
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    COMMENT "Checking all tracked first-party C++ files with clang-format 17"
+    COMMENT "Checking all first-party C++ files with clang-format 17"
     VERBATIM
 )
 
 add_custom_target(openscp_static_analysis
-    COMMAND "${CMAKE_SOURCE_DIR}/scripts/check_cpp_quality.sh"
+    COMMAND "${CMAKE_SOURCE_DIR}/scripts/checks/cpp-quality.sh"
             --tidy --cppcheck --build-dir "${CMAKE_BINARY_DIR}"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Running clang-tidy and cppcheck on first-party C++ code"
@@ -375,7 +375,7 @@ target_link_libraries(openscp_ui_widgets
         Qt6::Svg
 )
 
-add_executable(openscp_hello
+add_executable(openscp
     ui/main.cpp
     ui/MainWindow.hpp
     ui/MainWindow.cpp
@@ -410,20 +410,20 @@ endif()
 # Generate a header with the application version from CMake project version
 configure_file(ui/AppVersion.hpp.in ${CMAKE_CURRENT_BINARY_DIR}/AppVersion.hpp @ONLY)
 
-target_include_directories(openscp_hello PRIVATE
+target_include_directories(openscp PRIVATE
     ${CMAKE_SOURCE_DIR}/core/include
     ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-target_link_libraries(openscp_hello PRIVATE
+target_link_libraries(openscp PRIVATE
     openscp_ui_widgets
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_custom_target(openscp_hardening_check
-        COMMAND "${CMAKE_SOURCE_DIR}/scripts/check_linux_hardening.sh"
-                "$<TARGET_FILE:openscp_hello>"
-        DEPENDS openscp_hello
+        COMMAND "${CMAKE_SOURCE_DIR}/scripts/verify/linux-hardening.sh"
+                "$<TARGET_FILE:openscp>"
+        DEPENDS openscp
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Verifying ELF hardening for OpenSCP"
         VERBATIM
@@ -468,7 +468,7 @@ if(APPLE)
     configure_file("${_INFO_PLIST_IN}" "${_INFO_PLIST_OUT}" @ONLY)
 
     # Convert target into a macOS bundle and set output name to OpenSCP
-    set_target_properties(openscp_hello PROPERTIES
+    set_target_properties(openscp PROPERTIES
         MACOSX_BUNDLE TRUE
         OUTPUT_NAME "OpenSCP"                                 # OpenSCP.app and inner binary 'OpenSCP'
         MACOSX_BUNDLE_INFO_PLIST "${_INFO_PLIST_OUT}"
@@ -483,15 +483,15 @@ if(APPLE)
     if (EXISTS "${_APP_ICON_FILE}")
         set_source_files_properties("${_APP_ICON_FILE}" PROPERTIES
             MACOSX_PACKAGE_LOCATION "Resources")
-        target_sources(openscp_hello PRIVATE "${_APP_ICON_FILE}")
-        set_target_properties(openscp_hello PROPERTIES MACOSX_BUNDLE_ICON_FILE "${ICON_FILE}.icns")
+        target_sources(openscp PRIVATE "${_APP_ICON_FILE}")
+        set_target_properties(openscp PROPERTIES MACOSX_BUNDLE_ICON_FILE "${ICON_FILE}.icns")
     else()
         message(WARNING "Bundle icon missing: expected ${_APP_ICON_FILE}")
     endif()
 
     # Keep regular build fast/simple. Packaging/deployment is handled by:
     #   ./scripts/macos.sh app|pkg|dmg|dist
-    # which runs scripts/package_mac.sh (macdeployqt + signing/notarization flow).
+    # which runs scripts/package/macos.sh (macdeployqt + signing/notarization flow).
 endif()
 
 if (OPENSCP_BUILD_SECURE_ONLY)
@@ -511,7 +511,7 @@ foreach(qm ${QM_FILES})
     get_filename_component(_qm_name "${qm}" NAME)
     set_source_files_properties(${qm} PROPERTIES QT_RESOURCE_ALIAS "${_qm_name}")
 endforeach()
-qt_add_resources(openscp_hello i18n
+qt_add_resources(openscp i18n
     PREFIX "/i18n"
     FILES ${QM_FILES}
 )
@@ -551,13 +551,13 @@ foreach(icon ${ICON_FILES})
     set_source_files_properties(${icon} PROPERTIES QT_RESOURCE_ALIAS icons/${_name})
 endforeach()
 
-qt_add_resources(openscp_hello app_icons
+qt_add_resources(openscp app_icons
     PREFIX "/assets"
     FILES ${ICON_FILES}
 )
 
 # Program assets (PNG icon for About dialog)
-qt_add_resources(openscp_hello app_images
+qt_add_resources(openscp app_images
     PREFIX "/assets/program"
     FILES
         assets/program/icon-openscp-2048.png
@@ -574,7 +574,7 @@ if(UNIX AND NOT APPLE)
     set(APP_ICON_NAME    openscp) # must match Icon= in the .desktop
 
     # Install binary
-    install(TARGETS openscp_hello RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(TARGETS openscp RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
     # Install .desktop file
     install(FILES ${APP_DESKTOP_FILE}

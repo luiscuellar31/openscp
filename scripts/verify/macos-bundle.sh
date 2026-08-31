@@ -2,13 +2,16 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../lib/version.sh"
+
 log() { printf "\033[1;34m[verify]\033[0m %s\n" "$*"; }
 err() { printf "\033[1;31m[err ]\033[0m %s\n" "$*" >&2; }
 die() { err "$*"; exit 1; }
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/verify_macos_bundle.sh <path-to-OpenSCP.app>
+Usage: ./scripts/verify/macos-bundle.sh <path-to-OpenSCP.app>
 
 Validates:
 - Info.plist contains a valid minimum macOS version and every bundled Mach-O
@@ -18,6 +21,11 @@ Validates:
 - @rpath/@loader_path/@executable_path dependencies resolve within the bundle
 EOF
 }
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
 
 [[ $# -eq 1 ]] || { usage; die "Expected exactly one argument"; }
 
@@ -184,24 +192,6 @@ list_minimum_macos_versions() {
   '
 }
 
-version_is_greater() {
-  local candidate="$1"
-  local allowed="$2"
-  awk -v candidate="$candidate" -v allowed="$allowed" 'BEGIN {
-    candidate_count = split(candidate, candidate_parts, ".")
-    allowed_count = split(allowed, allowed_parts, ".")
-    count = candidate_count > allowed_count ? candidate_count : allowed_count
-    for (part_index = 1; part_index <= count; ++part_index) {
-      candidate_part = candidate_parts[part_index] + 0
-      allowed_part = allowed_parts[part_index] + 0
-      if (candidate_part > allowed_part)
-        exit 0
-      if (candidate_part < allowed_part)
-        exit 1
-    }
-    exit 1
-  }'
-}
 
 check_minimum_macos_version() {
   local file="$1"

@@ -19,7 +19,7 @@ set -euo pipefail
 #
 # Optional env vars:
 #   APP_NAME            Default: "OpenSCP"
-#   EXEC_NAME           Default: "openscp_hello" (the built binary name)
+#   EXEC_NAME           Default: "openscp" (the built binary name)
 #   CMAKE_PREFIX_PATH   Point to your Qt root if not in system paths
 #   Qt6_DIR             Qt6 CMake config dir (…/lib/cmake/Qt6), optional
 #   OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION
@@ -34,12 +34,12 @@ set -euo pipefail
 #   OPENSCP_MAX_GLIBC_VERSION
 #                       If set, reject every bundled ELF requiring a newer GLIBC
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="${REPO_DIR}/build"
 DIST_DIR="${REPO_DIR}/dist"
 
 APP_NAME="${APP_NAME:-OpenSCP}"
-EXEC_NAME="${EXEC_NAME:-openscp_hello}"
+EXEC_NAME="${EXEC_NAME:-openscp}"
 LINUXDEPLOY="${LINUXDEPLOY:-linuxdeploy}"
 LINUXDEPLOY_QT="${LINUXDEPLOY_QT:-linuxdeploy-plugin-qt}"
 APPIMAGETOOL="${APPIMAGETOOL:-appimagetool}"
@@ -50,6 +50,16 @@ log() { printf "\033[1;34m[pack]\033[0m %s\n" "$*"; }
 warn() { printf "\033[1;33m[warn]\033[0m %s\n" "$*"; }
 err() { printf "\033[1;31m[err ]\033[0m %s\n" "$*"; }
 die() { err "$*"; exit 1; }
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/package/appimage.sh
+
+Builds a Release AppImage and writes it under dist/. Configuration is provided
+through the environment variables documented at the top of this script and in
+docs/BUILDING.md.
+EOF
+}
 
 ensure_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required tool: $1"
@@ -113,13 +123,13 @@ prepare_desktop() {
 [Desktop Entry]
 Type=Application
 Name=OpenSCP
-GenericName=SFTP Client
-Comment=Two-panel SFTP client focused on simplicity and security
-Exec=openscp_hello
+GenericName=Remote File Transfer Client
+Comment=Two-panel remote file transfer client focused on simplicity and security
+Exec=openscp
 Icon=openscp
 Terminal=false
 Categories=Network;FileTransfer;Utility;
-Keywords=SFTP;SSH;File;Transfer;Client;
+Keywords=Remote;File;Transfer;Client;Network;
 StartupWMClass=OpenSCP
 EOF
 }
@@ -152,15 +162,6 @@ copy_licenses() {
   fi
 }
 
-# Copy full docs directory to the AppDir root so the About dialog can find
-# docs/ABOUT_LIBRARIES_*.txt by walking up from applicationDirPath.
-copy_docs() {
-  if [[ -d "${REPO_DIR}/docs" ]]; then
-    mkdir -p "$APPDIR/docs"
-    cp -R "${REPO_DIR}/docs/." "$APPDIR/docs/"
-  fi
-}
-
 # Copy the original about PNG under AppDir/assets/program so AboutDialog's
 # filesystem fallback can find it if resource loading fails.
 copy_about_png_fallback() {
@@ -172,7 +173,7 @@ copy_about_png_fallback() {
 
 # Validate that Qt runtime plugins and dependencies are present in the packaged tree.
 verify_qt_runtime_plugins() {
-  local checker="${REPO_DIR}/scripts/verify_qt_svg_plugins.sh"
+  local checker="${REPO_DIR}/scripts/verify/qt-svg-plugins.sh"
   [[ -x "$checker" ]] || die "Qt runtime checker not found or not executable: $checker"
   "$checker" --context appimage "$APPDIR"
 }
@@ -195,7 +196,7 @@ bundle_gnu_runtime() {
 
 verify_linux_abi_if_requested() {
   [[ -n "${OPENSCP_MAX_GLIBC_VERSION:-}" ]] || return 0
-  local checker="${REPO_DIR}/scripts/check_linux_abi.sh"
+  local checker="${REPO_DIR}/scripts/verify/linux-abi.sh"
   [[ -x "$checker" ]] || die "Linux ABI checker not found or not executable: $checker"
   OPENSCP_REQUIRE_BUNDLED_LIBSTDCXX=1 \
     "$checker" "$APPDIR" "$OPENSCP_MAX_GLIBC_VERSION"
@@ -260,6 +261,12 @@ ensure_optional_qt_desktop_theme_plugins() {
 }
 
 main() {
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    usage
+    return 0
+  fi
+  [[ $# -eq 0 ]] || die "Unexpected argument: $1"
+
   mkdir -p "$BUILD_DIR" "$DIST_DIR"
 
   # Build Release
@@ -291,7 +298,6 @@ main() {
   prepare_desktop "$APPDIR/usr/share/applications/openscp.desktop"
   prepare_icon "$APPDIR/usr/share/icons/hicolor/256x256/apps/openscp.png"
   copy_licenses
-  copy_docs
   copy_about_png_fallback
 
   # Ensure tools

@@ -94,13 +94,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            clang-format-17 clang-tidy-17 cmake ninja-build pkg-config cppcheck \
+            clang-format-17 clang-tidy-17 cmake ninja-build pkg-config cppcheck shellcheck \
             libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev libsecret-1-dev \
             qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools \
             qt6-l10n-tools libgl1-mesa-dev
 
       - name: Check C++ formatting
-        run: ./scripts/check_cpp_quality.sh --format
+        run: ./scripts/checks/cpp-quality.sh --format
+
+      - name: Check shell scripts
+        run: ./scripts/checks/shell-quality.sh
 
       - name: Configure compilation database
         env:
@@ -114,7 +117,7 @@ jobs:
             -DOPENSCP_WERROR=ON
 
       - name: Run conservative clang-tidy checks
-        run: ./scripts/check_cpp_quality.sh --tidy --build-dir build-analysis
+        run: ./scripts/checks/cpp-quality.sh --tidy --build-dir build-analysis
 
       - name: Run cppcheck
-        run: ./scripts/check_cpp_quality.sh --cppcheck
+        run: ./scripts/checks/cpp-quality.sh --cppcheck

@@ -58,7 +58,7 @@ set -euo pipefail
 #   (hash .sha256 alongside each artifact)
 #     where <ARCH> is arm64, x86_64, or arm64+x86_64
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="${REPO_DIR}/build"
 DIST_DIR="${REPO_DIR}/dist"
 
@@ -86,8 +86,8 @@ QTPREFIX=""
 MACDEPLOYQT_PATH=""
 QT_HOST_WRAP_DIR=""
 
-source "${REPO_DIR}/scripts/macos/package_signing.sh"
-source "${REPO_DIR}/scripts/macos/package_artifacts.sh"
+source "${REPO_DIR}/scripts/lib/macos/signing.sh"
+source "${REPO_DIR}/scripts/lib/macos/artifacts.sh"
 
 # Helpers
 log() { printf "\033[1;34m[pack]\033[0m %s\n" "$*"; }
@@ -95,58 +95,23 @@ warn() { printf "\033[1;33m[warn]\033[0m %s\n" "$*"; }
 err() { printf "\033[1;31m[err ]\033[0m %s\n" "$*"; }
 die() { err "$*"; exit 1; }
 
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/package/macos.sh
+
+Builds one or more macOS artifacts. Select formats with PACKAGE_FORMATS
+(app,pkg,dmg) and configure signing, notarization, Qt, and architectures with
+the environment variables documented at the top of this script and in
+docs/BUILDING.md.
+EOF
+}
+
+source "${REPO_DIR}/scripts/lib/macos/qt-host-tools.sh"
+
 ensure_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required tool: $1"
 }
 
-create_qt_x86_wrapper() {
-  local target="$1"
-  local real_bin="$2"
-  printf '#!/usr/bin/env bash\nexec /usr/bin/arch -x86_64 %q "$@"\n' \
-    "$real_bin" > "$target"
-  chmod +x "$target"
-}
-
-qt_tool_runs() {
-  { ( "$@" ) >/dev/null 2>&1; } 2>/dev/null
-}
-
-setup_qt_host_wrappers_if_needed() {
-  local qt_prefix="$1"
-  [[ "$(uname -s)" == "Darwin" ]] || return 0
-  [[ "$(uname -m)" == "arm64" ]] || return 0
-  [[ -n "$qt_prefix" ]] || return 0
-
-  local uic="${qt_prefix}/libexec/uic"
-  local rcc="${qt_prefix}/libexec/rcc"
-  local moc="${qt_prefix}/libexec/moc"
-  local lrelease="${qt_prefix}/libexec/lrelease"
-  if [[ ! -x "$lrelease" ]]; then
-    lrelease="${qt_prefix}/bin/lrelease"
-  fi
-  [[ -x "$uic" && -x "$rcc" && -x "$moc" && -x "$lrelease" ]] || return 0
-
-  if qt_tool_runs "$uic" -h &&
-     qt_tool_runs "$rcc" -h &&
-     qt_tool_runs "$moc" -h &&
-     qt_tool_runs "$lrelease" -version; then
-    return 0
-  fi
-  if ! qt_tool_runs /usr/bin/arch -x86_64 "$uic" -h ||
-     ! qt_tool_runs /usr/bin/arch -x86_64 "$rcc" -h ||
-     ! qt_tool_runs /usr/bin/arch -x86_64 "$moc" -h ||
-     ! qt_tool_runs /usr/bin/arch -x86_64 "$lrelease" -version; then
-    die "Qt host tools are not runnable natively or through Rosetta under ${qt_prefix}"
-  fi
-
-  QT_HOST_WRAP_DIR="${BUILD_DIR}/qt-tools-wrap"
-  mkdir -p "$QT_HOST_WRAP_DIR"
-  create_qt_x86_wrapper "${QT_HOST_WRAP_DIR}/uic" "$uic"
-  create_qt_x86_wrapper "${QT_HOST_WRAP_DIR}/rcc" "$rcc"
-  create_qt_x86_wrapper "${QT_HOST_WRAP_DIR}/moc" "$moc"
-  create_qt_x86_wrapper "${QT_HOST_WRAP_DIR}/lrelease" "$lrelease"
-  warn "Qt host tools are not runnable natively; using their x86_64 slices through Rosetta."
-}
 
 discover_macdeployqt() {
   # 1) QT_PREFIX (explicit) lookup
@@ -872,6 +837,12 @@ sanitize_qt_plugins_linkage() {
 }
 
 main() {
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    usage
+    return 0
+  fi
+  [[ $# -eq 0 ]] || die "Unexpected argument: $1"
+
   mkdir -p "$BUILD_DIR" "$DIST_DIR"
 
   # Auto-local defaults: if no Apple signing/notarization creds are present and
@@ -942,7 +913,7 @@ main() {
   if [[ -d "$qt_cfg_dir" ]]; then
     qt_prefix="$(cd "$qt_cfg_dir/../../.." && pwd)"
     log "Using Qt from: $qt_prefix"
-    setup_qt_host_wrappers_if_needed "$qt_prefix"
+    setup_qt_host_wrappers_if_needed "$qt_prefix" "$BUILD_DIR"
     local cmake_prefix_path="$qt_prefix"
     if [[ -n "${CMAKE_PREFIX_PATH:-}" ]]; then
       cmake_prefix_path="${qt_prefix};${CMAKE_PREFIX_PATH}"
@@ -1033,14 +1004,6 @@ main() {
     mkdir -p "$RESOURCES_DIR/licenses"
     cp -R "${REPO_DIR}/docs/credits/LICENSES" "$RESOURCES_DIR/licenses/"
     [[ -f "${REPO_DIR}/docs/credits/CREDITS.md" ]] && cp "${REPO_DIR}/docs/credits/CREDITS.md" "$RESOURCES_DIR/licenses/"
-  fi
-
-  # Copy full docs directory so About dialog can load ABOUT_LIBRARIES_* from docs/
-  # Place it under Resources/docs to match the runtime search paths in AboutDialog.cpp
-  if [[ -d "${REPO_DIR}/docs" ]]; then
-    mkdir -p "$RESOURCES_DIR/docs"
-    # Copy contents (including nested credits/LICENSES) to ensure internal references resolve
-    cp -R "${REPO_DIR}/docs/." "$RESOURCES_DIR/docs/"
   fi
 
   # Clean env to avoid picking up conda/Homebrew plugin paths

@@ -2,14 +2,23 @@
 
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PROJECT_DIR="${PROJECT_DIR:-${REPO_DIR}/packaging/snap}"
-CHECKER="${REPO_DIR}/scripts/verify_qt_svg_plugins.sh"
+CHECKER="${REPO_DIR}/scripts/verify/qt-svg-plugins.sh"
 SNAPCRAFT="${SNAPCRAFT:-snapcraft}"
 
 log() { printf "\033[1;34m[snap]\033[0m %s\n" "$*"; }
 err() { printf "\033[1;31m[err ]\033[0m %s\n" "$*"; }
 die() { err "$*"; exit 1; }
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/package/snap.sh [snapcraft pack options]
+
+Builds and validates the Snap package. Additional arguments are forwarded to
+snapcraft pack; prerequisites are documented in docs/BUILDING.md.
+EOF
+}
 
 ensure_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required tool: $1"
@@ -50,6 +59,11 @@ uses_kde_neon_extension() {
 }
 
 main() {
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    usage
+    return 0
+  fi
+
   [[ "$(uname -s)" == "Linux" ]] || die "Snap packaging must run on Linux."
   [[ -d "$PROJECT_DIR" ]] || die "Snap project directory not found: $PROJECT_DIR"
   [[ -x "$CHECKER" ]] || die "Qt runtime checker not found/executable: $CHECKER"

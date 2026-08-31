@@ -1,11 +1,11 @@
 [Desktop Entry]
 Type=Application
 Name=OpenSCP
-GenericName=SFTP Client
-Comment=Two-panel SFTP client focused on simplicity and security
-Exec=openscp_hello
+GenericName=Remote File Transfer Client
+Comment=Two-panel remote file transfer client focused on simplicity and security
+Exec=openscp
 Icon=openscp
 Terminal=false
 Categories=Network;FileTransfer;Utility;
-Keywords=SFTP;SSH;File;Transfer;Client;
+Keywords=Remote;File;Transfer;Client;Network;
 StartupWMClass=OpenSCP

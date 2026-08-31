@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../lib/version.sh"
+
 # Build the non-Qt libraries shipped inside official macOS artifacts. Homebrew
 # bottles target the runner that produced them, so they cannot be used when the
 # application advertises compatibility with an older macOS release.
@@ -114,22 +117,6 @@ cmake -S "$work_dir/libssh2-${LIBSSH2_VERSION}" \
 cmake --build "$work_dir/libssh2-build" --parallel "$jobs"
 cmake --install "$work_dir/libssh2-build"
 
-version_is_greater() {
-  local candidate="$1"
-  local allowed="$2"
-  awk -v candidate="$candidate" -v allowed="$allowed" 'BEGIN {
-    candidate_count = split(candidate, candidate_parts, ".")
-    allowed_count = split(allowed, allowed_parts, ".")
-    count = candidate_count > allowed_count ? candidate_count : allowed_count
-    for (part_index = 1; part_index <= count; ++part_index) {
-      candidate_part = candidate_parts[part_index] + 0
-      allowed_part = allowed_parts[part_index] + 0
-      if (candidate_part > allowed_part) exit 0
-      if (candidate_part < allowed_part) exit 1
-    }
-    exit 1
-  }'
-}
 
 log "Verifying architecture and deployment target of installed libraries"
 validated_count=0

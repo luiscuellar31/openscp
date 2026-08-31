@@ -13,6 +13,8 @@ log() { printf "\033[1;34m[macos]\033[0m %s\n" "$*"; }
 warn() { printf "\033[1;33m[warn]\033[0m %s\n" "$*"; }
 die() { printf "\033[1;31m[err ]\033[0m %s\n" "$*"; exit 1; }
 
+source "${REPO_DIR}/scripts/lib/macos/qt-host-tools.sh"
+
 list_rpaths() {
   local bin="$1"
   otool -l "$bin" | awk '
@@ -108,53 +110,6 @@ resolve_qt_paths() {
   fi
 }
 
-create_qt_x86_wrapper() {
-  local target="$1"
-  local real_bin="$2"
-  printf '#!/usr/bin/env bash\nexec /usr/bin/arch -x86_64 %q "$@"\n' \
-    "$real_bin" > "$target"
-  chmod +x "$target"
-}
-
-qt_tool_runs() {
-  { ( "$@" ) >/dev/null 2>&1; } 2>/dev/null
-}
-
-setup_qt_host_wrappers_if_needed() {
-  [[ "$(uname -s)" == "Darwin" ]] || return 0
-  [[ "$(uname -m)" == "arm64" ]] || return 0
-  [[ -n "$EFFECTIVE_QT_PREFIX" ]] || return 0
-
-  local uic="${EFFECTIVE_QT_PREFIX}/libexec/uic"
-  local rcc="${EFFECTIVE_QT_PREFIX}/libexec/rcc"
-  local moc="${EFFECTIVE_QT_PREFIX}/libexec/moc"
-  local lrelease="${EFFECTIVE_QT_PREFIX}/libexec/lrelease"
-  if [[ ! -x "$lrelease" ]]; then
-    lrelease="${EFFECTIVE_QT_PREFIX}/bin/lrelease"
-  fi
-  [[ -x "$uic" && -x "$rcc" && -x "$moc" && -x "$lrelease" ]] || return 0
-
-  if qt_tool_runs "$uic" -h &&
-     qt_tool_runs "$rcc" -h &&
-     qt_tool_runs "$moc" -h &&
-     qt_tool_runs "$lrelease" -version; then
-    return 0
-  fi
-  if ! qt_tool_runs /usr/bin/arch -x86_64 "$uic" -h ||
-     ! qt_tool_runs /usr/bin/arch -x86_64 "$rcc" -h ||
-     ! qt_tool_runs /usr/bin/arch -x86_64 "$moc" -h ||
-     ! qt_tool_runs /usr/bin/arch -x86_64 "$lrelease" -version; then
-    die "Qt host tools are not runnable natively or through Rosetta under ${EFFECTIVE_QT_PREFIX}"
-  fi
-
-  QT_HOST_WRAP_DIR="${BUILD_DIR}/qt-tools-wrap"
-  mkdir -p "$QT_HOST_WRAP_DIR"
-  create_qt_x86_wrapper "${QT_HOST_WRAP_DIR}/uic" "$uic"
-  create_qt_x86_wrapper "${QT_HOST_WRAP_DIR}/rcc" "$rcc"
-  create_qt_x86_wrapper "${QT_HOST_WRAP_DIR}/moc" "$moc"
-  create_qt_x86_wrapper "${QT_HOST_WRAP_DIR}/lrelease" "$lrelease"
-  warn "Qt host tools are not runnable natively; using their x86_64 slices through Rosetta."
-}
 
 usage() {
   cat <<'EOF'
@@ -187,7 +142,7 @@ EOF
 resolve_qt_paths
 
 configure_release() {
-  setup_qt_host_wrappers_if_needed
+  setup_qt_host_wrappers_if_needed "$EFFECTIVE_QT_PREFIX" "$BUILD_DIR"
   local args=(
     -S "$REPO_DIR"
     -B "$BUILD_DIR"
@@ -248,14 +203,14 @@ run_app() {
 
 package_format() {
   local formats="$1"
-  [[ -x "${REPO_DIR}/scripts/package_mac.sh" ]] || die "Missing scripts/package_mac.sh"
+  [[ -x "${REPO_DIR}/scripts/package/macos.sh" ]] || die "Missing scripts/package/macos.sh"
   log "Packaging formats: ${formats}"
   SKIP_CODESIGN="${SKIP_CODESIGN:-1}" \
   SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-1}" \
   PACKAGE_FORMATS="${formats}" \
   Qt6_DIR="${EFFECTIVE_QT6_DIR}" \
   CMAKE_OSX_ARCHITECTURES="${CMAKE_OSX_ARCHITECTURES:-$(uname -m)}" \
-  "${REPO_DIR}/scripts/package_mac.sh"
+  "${REPO_DIR}/scripts/package/macos.sh"
 }
 
 cmd="${1:-help}"

@@ -2,12 +2,15 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../lib/version.sh"
+
 log() { printf '\033[1;34m[abi]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[abi]\033[0m %s\n' "$*" >&2; exit 1; }
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/check_linux_abi.sh <ELF-file-or-directory> <max-glibc>
+Usage: ./scripts/verify/linux-abi.sh <ELF-file-or-directory> <max-glibc>
 
 Checks every ELF object below the supplied path. It rejects GLIBC requirements
 above the configured compatibility floor and verifies that any required
@@ -16,6 +19,11 @@ GLIBCXX symbol version is provided by the bundled libstdc++.so.6.
 Set OPENSCP_REQUIRE_BUNDLED_LIBSTDCXX=0 only for non-self-contained builds.
 EOF
 }
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
 
 [[ $# -eq 2 ]] || { usage; exit 2; }
 ROOT_PATH="$1"
@@ -27,22 +35,6 @@ REQUIRE_BUNDLED_LIBSTDCXX="${OPENSCP_REQUIRE_BUNDLED_LIBSTDCXX:-1}"
   die "Invalid maximum GLIBC version: $MAX_GLIBC"
 command -v readelf >/dev/null 2>&1 || die "Missing required tool: readelf"
 
-version_is_greater() {
-  local candidate="$1"
-  local allowed="$2"
-  awk -v candidate="$candidate" -v allowed="$allowed" 'BEGIN {
-    candidate_count = split(candidate, candidate_parts, ".")
-    allowed_count = split(allowed, allowed_parts, ".")
-    count = candidate_count > allowed_count ? candidate_count : allowed_count
-    for (part_index = 1; part_index <= count; ++part_index) {
-      candidate_part = candidate_parts[part_index] + 0
-      allowed_part = allowed_parts[part_index] + 0
-      if (candidate_part > allowed_part) exit 0
-      if (candidate_part < allowed_part) exit 1
-    }
-    exit 1
-  }'
-}
 
 highest_version() {
   awk 'NF' | sort -Vu | tail -n1

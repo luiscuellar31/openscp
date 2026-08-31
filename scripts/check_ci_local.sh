@@ -8,18 +8,20 @@ RUN_FULL=0
 CLEAN=0
 WERROR="${OPENSCP_WERROR:-OFF}"
 JOBS="${JOBS:-}"
-QT_WRAP_DIR=""
+QT_HOST_WRAP_DIR=""
 
 log() { printf "\033[1;34m[ci-check]\033[0m %s\n" "$*"; }
 warn() { printf "\033[1;33m[warn]\033[0m %s\n" "$*"; }
 die() { printf "\033[1;31m[err ]\033[0m %s\n" "$*"; exit 1; }
+
+source "${REPO_DIR}/scripts/lib/macos/qt-host-tools.sh"
 
 usage() {
   cat <<'EOF'
 Usage: ./scripts/check_ci_local.sh [options]
 
 Options:
-  --full            Build GUI app target too (openscp_hello)
+  --full            Build GUI app target too (openscp)
   --clean           Remove build directory before configuring
   --werror          Treat first-party compiler warnings as errors
   --build-dir <p>   Custom build directory (default: build-ci-local)
@@ -93,51 +95,6 @@ latest_qt6_dir() {
   [[ -n "$best" ]] && printf "%s\n" "$best"
 }
 
-create_qt_x86_wrapper() {
-  local target="$1"
-  local real_bin="$2"
-  cat > "${target}" <<EOF
-#!/usr/bin/env bash
-exec arch -x86_64 "${real_bin}" "\$@"
-EOF
-  chmod +x "${target}"
-}
-
-setup_macos_qt_wrappers_if_needed() {
-  local qt6_dir="$1"
-  [[ "$(uname -s)" == "Darwin" ]] || return 0
-  [[ "$(uname -m)" == "arm64" ]] || return 0
-  [[ -n "$qt6_dir" ]] || return 0
-
-  local qt_prefix
-  qt_prefix="$(cd "$qt6_dir/../../.." && pwd)"
-  local uic="${qt_prefix}/libexec/uic"
-  local rcc="${qt_prefix}/libexec/rcc"
-  local moc="${qt_prefix}/libexec/moc"
-  local lrelease="${qt_prefix}/libexec/lrelease"
-  if [[ ! -x "$lrelease" ]]; then
-    lrelease="${qt_prefix}/bin/lrelease"
-  fi
-  [[ -x "$uic" && -x "$rcc" && -x "$moc" ]] || return 0
-
-  if arch -x86_64 "$uic" -h >/dev/null 2>&1; then
-    QT_WRAP_DIR="${BUILD_DIR}/qt-tools-wrap"
-    mkdir -p "$QT_WRAP_DIR"
-    create_qt_x86_wrapper "${QT_WRAP_DIR}/uic" "$uic"
-    create_qt_x86_wrapper "${QT_WRAP_DIR}/rcc" "$rcc"
-    create_qt_x86_wrapper "${QT_WRAP_DIR}/moc" "$moc"
-    if [[ -x "$lrelease" ]]; then
-      create_qt_x86_wrapper "${QT_WRAP_DIR}/lrelease" "$lrelease"
-    fi
-    warn "Using x86_64 wrappers for Qt host tools (uic/rcc/moc/lrelease)."
-    return 0
-  fi
-
-  if "$uic" -h >/dev/null 2>&1; then
-    return 0
-  fi
-  warn "Qt host tools are not runnable (native/x86_64). Check your Qt installation."
-}
 
 configure_project() {
   local -a cmake_args
@@ -162,12 +119,16 @@ configure_project() {
       fi
     fi
 
-    setup_macos_qt_wrappers_if_needed "$effective_qt6_dir"
-    if [[ -n "$QT_WRAP_DIR" ]]; then
-      cmake_args+=("-DCMAKE_AUTOUIC_EXECUTABLE=${QT_WRAP_DIR}/uic")
-      cmake_args+=("-DCMAKE_AUTORCC_EXECUTABLE=${QT_WRAP_DIR}/rcc")
-      cmake_args+=("-DCMAKE_AUTOMOC_EXECUTABLE=${QT_WRAP_DIR}/moc")
-      cmake_args+=("-DOPENSCP_QT_HOST_TOOLS_DIR=${QT_WRAP_DIR}")
+    local effective_qt_prefix=""
+    if [[ -n "$effective_qt6_dir" ]]; then
+      effective_qt_prefix="$(cd "$effective_qt6_dir/../../.." && pwd)"
+    fi
+    setup_qt_host_wrappers_if_needed "$effective_qt_prefix" "$BUILD_DIR" 0 warn
+    if [[ -n "$QT_HOST_WRAP_DIR" ]]; then
+      cmake_args+=("-DCMAKE_AUTOUIC_EXECUTABLE=${QT_HOST_WRAP_DIR}/uic")
+      cmake_args+=("-DCMAKE_AUTORCC_EXECUTABLE=${QT_HOST_WRAP_DIR}/rcc")
+      cmake_args+=("-DCMAKE_AUTOMOC_EXECUTABLE=${QT_HOST_WRAP_DIR}/moc")
+      cmake_args+=("-DOPENSCP_QT_HOST_TOOLS_DIR=${QT_HOST_WRAP_DIR}")
     fi
   fi
 
@@ -188,8 +149,8 @@ build_targets() {
   cmake "${build_args[@]}" --target openscp_test_binaries
 
   if [[ "$RUN_FULL" -eq 1 ]]; then
-    log "Building GUI app target (openscp_hello)"
-    cmake "${build_args[@]}" --target openscp_hello
+    log "Building GUI app target (openscp)"
+    cmake "${build_args[@]}" --target openscp
   fi
 }
 
