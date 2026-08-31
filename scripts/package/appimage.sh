@@ -20,6 +20,7 @@ set -euo pipefail
 # Optional env vars:
 #   APP_NAME            Default: "OpenSCP"
 #   EXEC_NAME           Default: "openscp" (the built binary name)
+#   BUILD_DIR           CMake build directory (default: build-appimage/)
 #   CMAKE_PREFIX_PATH   Point to your Qt root if not in system paths
 #   Qt6_DIR             Qt6 CMake config dir (…/lib/cmake/Qt6), optional
 #   OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION
@@ -35,7 +36,7 @@ set -euo pipefail
 #                       If set, reject every bundled ELF requiring a newer GLIBC
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BUILD_DIR="${REPO_DIR}/build"
+BUILD_DIR="${BUILD_DIR:-${REPO_DIR}/build-appimage}"
 DIST_DIR="${REPO_DIR}/dist"
 
 APP_NAME="${APP_NAME:-OpenSCP}"
@@ -57,7 +58,8 @@ Usage: ./scripts/package/appimage.sh
 
 Builds a Release AppImage and writes it under dist/. Configuration is provided
 through the environment variables documented at the top of this script and in
-docs/BUILDING.md.
+docs/BUILDING.md. The isolated CMake build directory defaults to
+build-appimage/ and can be changed with BUILD_DIR.
 EOF
 }
 

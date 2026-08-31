@@ -122,7 +122,8 @@ done
 ```
 
 Commit the source change and affected `.ts` files together. Test the changed
-screen in every affected language; never commit `.qm` files or `build/` output.
+screen in every affected language; never commit `.qm` files or generated
+`build*/` output.
 
 ## Integration tests
 

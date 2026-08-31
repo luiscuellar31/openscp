@@ -71,6 +71,10 @@ Install each format's own host tools before running its command:
 ./scripts/package/flatpak.sh
 ```
 
+AppImage uses `build-appimage/` by default so its release-oriented Qt and
+CMake configuration cannot alter the development cache in `build/`. Set
+`BUILD_DIR=/path/to/build` only when a different isolated directory is needed.
+
 The packagers validate the required Qt SVG plugins. Official AppImages also
 audit the bundled ELF ABI; the check can be run directly against an AppDir:
 

@@ -279,7 +279,7 @@ jobs:
           OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION: "ON"
         run: |
           set -euo pipefail
-          rm -rf dist build
+          rm -rf dist build build-appimage
           docker build --platform linux/amd64 \
             --tag openscp-appimage-glibc228 \
             --file packaging/linux/appimage-glibc228.Dockerfile \
@@ -297,7 +297,7 @@ jobs:
             --env "PATH=$QT_ROOT_DIR/bin:$HOME/.local/bin:/opt/rh/gcc-toolset-13/root/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
             openscp-appimage-glibc228 \
             ./scripts/package/appimage.sh
-          sudo chown -R "$(id -u):$(id -g)" build dist
+          sudo chown -R "$(id -u):$(id -g)" build-appimage dist
 
       - name: Build AppImage (Ubuntu 24.04 arm64 baseline)
         if: matrix.arch_name == 'aarch64'
@@ -306,7 +306,7 @@ jobs:
           OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION: "ON"
           OPENSCP_MAX_GLIBC_VERSION: "2.39"
         run: |
-          rm -rf dist build
+          rm -rf dist build build-appimage
           ./scripts/package/appimage.sh
 
       - name: Build Snap
