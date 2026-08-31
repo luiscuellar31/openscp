@@ -2,6 +2,20 @@
 
 OpenSCP bundles or links against:
 
+## Tango and Tango-style interface icons
+
+- License: Public domain
+- Projects and source artwork:
+  - [Tango Icon Library](https://commons.wikimedia.org/wiki/Category:Tango_project)
+  - [Emblem-star.svg](https://commons.wikimedia.org/wiki/File:Emblem-star.svg)
+    by Rocket000
+  - [Emblem-star-gray.svg](https://commons.wikimedia.org/wiki/File:Emblem-star-gray.svg)
+    by Addicted04, derived from `Emblem-star.svg`
+- Notes: OpenSCP includes public-domain Tango artwork and adapted variants.
+  `bookmark.svg` is derived from the Tango `bookmark-new.svg` icon, with the
+  new-bookmark highlight removed. The favorite state icons retain the source
+  artwork under descriptive OpenSCP resource names.
+
 ## Qt 6 (6.8.3 release baseline)
 
 - License: LGPL-3.0

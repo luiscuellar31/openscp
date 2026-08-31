@@ -524,7 +524,7 @@ set(ICON_FILES
     assets/icons/action-disconnect.svg
     assets/icons/action-download.svg
     assets/icons/action-favorite-active.svg
-    assets/icons/action-favorites.svg
+    assets/icons/action-favorite-inactive.svg
     assets/icons/action-go-home.svg
     assets/icons/action-go-up.svg
     assets/icons/action-open-about-us.svg
@@ -543,6 +543,7 @@ set(ICON_FILES
     assets/icons/action-search-item.svg
     assets/icons/action-rename.svg
     assets/icons/action-upload.svg
+    assets/icons/bookmark.svg
 )
 
 # Aliases for stable paths: /assets/icons/<name>.svg

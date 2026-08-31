@@ -88,6 +88,7 @@ class MainWindow : public QMainWindow {
     void openRightRemoteTerminal(); // Open SSH terminal at current right path
     void refreshRightRemotePanel(); // Refresh current remote folder (right)
     void showHistoryMenu();         // Show recent routes/servers
+    void showFavoritesDialog();     // Browse and manage saved paths
 
     void connectRemote();
     void disconnectRemote();
@@ -189,8 +190,8 @@ class MainWindow : public QMainWindow {
     QAction *actOpenTerminalRight_ = nullptr;
     QAction *actSearchLeft_ = nullptr;
     QAction *actSearchRight_ = nullptr;
-    QAction *actFavoritesLeft_ = nullptr;
-    QAction *actFavoritesRight_ = nullptr;
+    QAction *actFavoriteToggleLeft_ = nullptr;
+    QAction *actFavoriteToggleRight_ = nullptr;
     QAction *actNewDirRight_ = nullptr;
     QAction *actNewFileRight_ = nullptr;
     QAction *actRenameRight_ = nullptr;
@@ -218,6 +219,7 @@ class MainWindow : public QMainWindow {
     class TransferQueueDialog *transferDlg_ = nullptr;
     QAction *actShowQueue_ = nullptr;
     QAction *actShowHistory_ = nullptr;
+    QAction *actShowFavorites_ = nullptr;
     QAction *actSync_ = nullptr;
     QAction *actSites_ = nullptr;        // site manager
     QAction *actPrefsToolbar_ = nullptr; // settings button (right toolbar)
@@ -255,8 +257,9 @@ class MainWindow : public QMainWindow {
     void addRecentRemotePath(const QString &path);
     void addRecentServer(const openscp::SessionOptions &opt);
     QString remoteNavigationScope() const;
-    void refreshFavoritesAction(QAction *action, const QString &currentPath,
-                                bool remote, bool rightPane);
+    void toggleCurrentFavorite(bool rightPane);
+    void refreshFavoriteToggleAction(QAction *action,
+                                     const QString &currentPath, bool remote);
     void refreshFavoritesActions();
     void applyTransferPreferences();
     static QString

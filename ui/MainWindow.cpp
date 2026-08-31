@@ -99,16 +99,6 @@ void setActionIconAndTooltip(QAction *action, const QIcon &icon) {
     action->setToolTip(action->text());
 }
 
-void setInstantPopup(QToolBar *bar, QAction *action) {
-    if (!bar || !action)
-        return;
-    auto *button = qobject_cast<QToolButton *>(bar->widgetForAction(action));
-    if (!button)
-        return;
-    button->setPopupMode(QToolButton::InstantPopup);
-    button->setAccessibleName(action->text());
-}
-
 void bindActionToPanelShortcut(QAction *action, QWidget *panel,
                                const QKeySequence &shortcut) {
     if (!action)
@@ -119,7 +109,7 @@ void bindActionToPanelShortcut(QAction *action, QWidget *panel,
         panel->addAction(action);
 }
 
-QListWidget *createHistoryTabList(QTabWidget *tabs, const QString &title) {
+QListWidget *createNavigationTabList(QTabWidget *tabs, const QString &title) {
     if (!tabs)
         return nullptr;
     auto *list = new QListWidget(tabs);
@@ -128,6 +118,23 @@ QListWidget *createHistoryTabList(QTabWidget *tabs, const QString &title) {
     list->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     tabs->addTab(list, title);
     return list;
+}
+
+void addDisabledListPlaceholder(QListWidget *list, const QString &text) {
+    if (!list)
+        return;
+    auto *item = new QListWidgetItem(text, list);
+    item->setFlags(Qt::NoItemFlags);
+}
+
+bool listHasUserData(QListWidget *list) {
+    if (!list)
+        return false;
+    for (int row = 0; row < list->count(); ++row) {
+        if (!list->item(row)->data(Qt::UserRole).toString().isEmpty())
+            return true;
+    }
+    return false;
 }
 
 void configurePanelTreeView(QTreeView *view, QAbstractItemModel *model,
@@ -195,7 +202,7 @@ QString formatConnectionElapsed(qint64 totalSeconds) {
         .arg(seconds, 2, 10, QLatin1Char('0'));
 }
 
-QString trimHistoryLabel(const QString &raw, int maxLen = 96) {
+QString trimNavigationLabel(const QString &raw, int maxLen = 96) {
     QString out = raw.simplified();
     if (out.size() <= maxLen)
         return out;
@@ -337,12 +344,14 @@ void MainWindow::initializePanels(const QString &home) {
     actHomeLeft_ =
         leftPaneBar_->addAction(tr("Home"), this, &MainWindow::goHomeLeft);
     setActionIconAndTooltip(actHomeLeft_, resIcon("action-go-home.svg"));
-    actFavoritesLeft_ = new QAction(tr("Favorites"), this);
-    actFavoritesLeft_->setObjectName(QStringLiteral("leftFavoritesAction"));
-    actFavoritesLeft_->setMenu(new QMenu(leftPaneBar_));
-    setActionIconAndTooltip(actFavoritesLeft_, resIcon("action-favorites.svg"));
-    leftPaneBar_->addAction(actFavoritesLeft_);
-    setInstantPopup(leftPaneBar_, actFavoritesLeft_);
+    actFavoriteToggleLeft_ =
+        leftPaneBar_->addAction(tr("Add current path to favorites"), this,
+                                [this] { toggleCurrentFavorite(false); });
+    actFavoriteToggleLeft_->setObjectName(
+        QStringLiteral("leftFavoriteToggleAction"));
+    actFavoriteToggleLeft_->setCheckable(true);
+    setActionIconAndTooltip(actFavoriteToggleLeft_,
+                            resIcon("action-favorite-inactive.svg"));
     actSearchLeft_ = leftPaneBar_->addAction(
         tr("Search items"), this, [this, leftSearchLabel] {
             searchItemsInCurrentFolder(leftView_, leftSearchLabel());
@@ -421,13 +430,14 @@ void MainWindow::initializePanels(const QString &home) {
     actHomeRight_ =
         rightPaneBar_->addAction(tr("Home"), this, &MainWindow::goHomeRight);
     setActionIconAndTooltip(actHomeRight_, resIcon("action-go-home.svg"));
-    actFavoritesRight_ = new QAction(tr("Favorites"), this);
-    actFavoritesRight_->setObjectName(QStringLiteral("rightFavoritesAction"));
-    actFavoritesRight_->setMenu(new QMenu(rightPaneBar_));
-    setActionIconAndTooltip(actFavoritesRight_,
-                            resIcon("action-favorites.svg"));
-    rightPaneBar_->addAction(actFavoritesRight_);
-    setInstantPopup(rightPaneBar_, actFavoritesRight_);
+    actFavoriteToggleRight_ =
+        rightPaneBar_->addAction(tr("Add current path to favorites"), this,
+                                 [this] { toggleCurrentFavorite(true); });
+    actFavoriteToggleRight_->setObjectName(
+        QStringLiteral("rightFavoriteToggleAction"));
+    actFavoriteToggleRight_->setCheckable(true);
+    setActionIconAndTooltip(actFavoriteToggleRight_,
+                            resIcon("action-favorite-inactive.svg"));
     actSearchRight_ = rightPaneBar_->addAction(
         tr("Search items"), this, [this, rightSearchLabel] {
             searchItemsInCurrentFolder(rightView_, rightSearchLabel());
@@ -658,12 +668,18 @@ void MainWindow::initializeMainToolbar() {
                                              &MainWindow::showHistoryMenu);
     actShowHistory_->setIcon(mainWindowActionIcon("action-open-history.svg"));
     actShowHistory_->setToolTip(actShowHistory_->text());
+    actShowFavorites_ = mainToolbar->addAction(
+        tr("Favorites"), this, &MainWindow::showFavoritesDialog);
+    actShowFavorites_->setObjectName(QStringLiteral("showFavoritesAction"));
+    actShowFavorites_->setIcon(mainWindowActionIcon("bookmark.svg"));
+    actShowFavorites_->setToolTip(actShowFavorites_->text());
 
     // Show text beside icon for Sites and Queue too
     setTextBesideIcon(actSites_, tr("Saved sites"));
     setTextBesideIcon(actShowQueue_, tr("Transfers"));
     setTextBesideIcon(actSync_, tr("Sync"));
     setTextBesideIcon(actShowHistory_, tr("History"));
+    setTextBesideIcon(actShowFavorites_, tr("Favorites"));
 
     // Global shortcut to open the transfer queue
     actShowQueue_->setShortcut(QKeySequence(Qt::Key_F12));
@@ -691,7 +707,7 @@ void MainWindow::initializeMainToolbar() {
         this->addAction(actToggleFs);
     }
 
-    // Separator to the right of the history button
+    // Separator to the right of the history/favorites navigation group
     mainToolbar->addSeparator();
 
     // Spacer to push next action to the far right
@@ -745,6 +761,7 @@ void MainWindow::initializeMenuBarActions() {
     fileMenu_->addAction(actShowQueue_);
     fileMenu_->addAction(actSync_);
     fileMenu_->addAction(actShowHistory_);
+    fileMenu_->addAction(actShowFavorites_);
     // On non‑macOS platforms, also show Preferences and Quit under "File"
     // to provide a familiar UX on Linux/Windows while keeping the "OpenSCP" app
     // menu.
@@ -1497,7 +1514,7 @@ void MainWindow::rebuildRemoteBreadcrumbs(const QString &path) {
 void MainWindow::refreshLeftBreadcrumbs() {
     const QString path = leftPath_ ? leftPath_->text() : QString();
     rebuildLocalBreadcrumbs(leftBreadcrumbsBar_, path, false);
-    refreshFavoritesAction(actFavoritesLeft_, path, false, false);
+    refreshFavoriteToggleAction(actFavoriteToggleLeft_, path, false);
 }
 
 void MainWindow::refreshRightBreadcrumbs() {
@@ -1506,7 +1523,7 @@ void MainWindow::refreshRightBreadcrumbs() {
         rebuildRemoteBreadcrumbs(path);
     else
         rebuildLocalBreadcrumbs(rightBreadcrumbsBar_, path, true);
-    refreshFavoritesAction(actFavoritesRight_, path, rightIsRemote_, true);
+    refreshFavoriteToggleAction(actFavoriteToggleRight_, path, rightIsRemote_);
 }
 
 void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
@@ -1743,104 +1760,90 @@ QString MainWindow::remoteNavigationScope() const {
     return openscpui::remoteEndpointScope(*options);
 }
 
-void MainWindow::refreshFavoritesAction(QAction *favoritesAction,
-                                        const QString &currentPath, bool remote,
-                                        bool rightPane) {
-    if (!favoritesAction)
+void MainWindow::toggleCurrentFavorite(bool rightPane) {
+    const bool remote = rightPane && rightIsRemote_;
+    const auto location = remote ? openscpui::NavigationStore::Location::Remote
+                                 : openscpui::NavigationStore::Location::Local;
+    const QString remoteScope = remote ? remoteNavigationScope() : QString();
+    if (remote && remoteScope.isEmpty()) {
+        statusBar()->showMessage(
+            tr("Connect to a remote server to use remote favorites"), 3500);
         return;
-    QMenu *menu = favoritesAction->menu();
-    if (!menu)
+    }
+
+    const QString currentPath =
+        rightPane ? (rightPath_ ? rightPath_->text() : QString())
+                  : (leftPath_ ? leftPath_->text() : QString());
+    const QString normalizedCurrent =
+        remote ? openscpui::NavigationStore::normalizeRemotePath(currentPath)
+               : openscpui::NavigationStore::normalizeLocalPath(currentPath);
+    if (normalizedCurrent.isEmpty()) {
+        refreshFavoritesActions();
         return;
-    menu->clear();
-    favoritesAction->setText(tr("Favorites"));
-    favoritesAction->setToolTip(tr("Favorites"));
+    }
+
+    const bool added = navigationStore_.toggleFavorite(
+        location, normalizedCurrent, remoteScope);
+    refreshFavoritesActions();
+    statusBar()->showMessage(
+        added ? tr("Favorite added") : tr("Favorite removed"), 2500);
+}
+
+void MainWindow::refreshFavoriteToggleAction(QAction *favoriteAction,
+                                             const QString &currentPath,
+                                             bool remote) {
+    if (!favoriteAction)
+        return;
 
     const auto location = remote ? openscpui::NavigationStore::Location::Remote
                                  : openscpui::NavigationStore::Location::Local;
     const QString remoteScope = remote ? remoteNavigationScope() : QString();
     if (remote && remoteScope.isEmpty()) {
-        favoritesAction->setEnabled(false);
-        favoritesAction->setIcon(mainWindowActionIcon("action-favorites.svg"));
-        favoritesAction->setToolTip(
+        favoriteAction->setChecked(false);
+        favoriteAction->setEnabled(false);
+        favoriteAction->setIcon(
+            mainWindowActionIcon("action-favorite-inactive.svg"));
+        favoriteAction->setText(
+            tr("Connect to a remote server to use remote favorites"));
+        favoriteAction->setToolTip(
             tr("Connect to a remote server to use remote favorites"));
         return;
     }
 
-    const QStringList paths = navigationStore_.favorites(location, remoteScope);
     const QString normalizedCurrent =
         remote ? openscpui::NavigationStore::normalizeRemotePath(currentPath)
                : openscpui::NavigationStore::normalizeLocalPath(currentPath);
+    if (normalizedCurrent.isEmpty()) {
+        favoriteAction->setChecked(false);
+        favoriteAction->setEnabled(false);
+        favoriteAction->setIcon(
+            mainWindowActionIcon("action-favorite-inactive.svg"));
+        favoriteAction->setText(tr("Add current path to favorites"));
+        favoriteAction->setToolTip(tr("Add current path to favorites"));
+        return;
+    }
+
     const bool currentIsFavorite =
         navigationStore_.isFavorite(location, normalizedCurrent, remoteScope);
-    favoritesAction->setEnabled(true);
-    favoritesAction->setIcon(
-        mainWindowActionIcon(currentIsFavorite ? "action-favorite-active.svg"
-                                               : "action-favorites.svg"));
-    QAction *toggleCurrent = menu->addAction(
-        currentIsFavorite ? tr("Remove current path from favorites")
-                          : tr("Add current path to favorites"));
-    connect(toggleCurrent, &QAction::triggered, this,
-            [this, location, remoteScope, normalizedCurrent] {
-                if (normalizedCurrent.isEmpty())
-                    return;
-                navigationStore_.toggleFavorite(location, normalizedCurrent,
-                                                remoteScope);
-                QTimer::singleShot(0, this,
-                                   [this] { refreshFavoritesActions(); });
-            });
-
-    menu->addSeparator();
-    for (const QString &rawPath : paths) {
-        const QString path =
-            remote ? openscpui::NavigationStore::normalizeRemotePath(rawPath)
-                   : openscpui::NavigationStore::normalizeLocalPath(rawPath);
-        if (path.isEmpty())
-            continue;
-        QAction *openFavorite = menu->addAction(
-            trimHistoryLabel(remote ? path : QDir::toNativeSeparators(path)));
-        openFavorite->setToolTip(path);
-        connect(openFavorite, &QAction::triggered, this,
-                [this, path, remote, rightPane] {
-                    QTimer::singleShot(0, this,
-                                       [this, path, remote, rightPane] {
-                                           if (remote)
-                                               setRightRemoteRoot(path);
-                                           else if (rightPane)
-                                               setRightRoot(path);
-                                           else
-                                               setLeftRoot(path);
-                                       });
-                });
-    }
-    if (paths.isEmpty()) {
-        QAction *empty = menu->addAction(tr("No favorites"));
-        empty->setEnabled(false);
-    } else {
-        menu->addSeparator();
-        QAction *clear = menu->addAction(tr("Clear favorites"));
-        connect(clear, &QAction::triggered, this,
-                [this, location, remoteScope] {
-                    if (UiAlerts::question(
-                            this, tr("Clear favorites"),
-                            tr("Remove all favorites in this section?"),
-                            QMessageBox::Yes | QMessageBox::No,
-                            QMessageBox::No) != QMessageBox::Yes) {
-                        return;
-                    }
-                    navigationStore_.clearFavorites(location, remoteScope);
-                    QTimer::singleShot(0, this,
-                                       [this] { refreshFavoritesActions(); });
-                });
-    }
+    const QString actionText = currentIsFavorite
+                                   ? tr("Remove current path from favorites")
+                                   : tr("Add current path to favorites");
+    favoriteAction->setEnabled(true);
+    favoriteAction->setChecked(currentIsFavorite);
+    favoriteAction->setIcon(mainWindowActionIcon(
+        currentIsFavorite ? "action-favorite-active.svg"
+                          : "action-favorite-inactive.svg"));
+    favoriteAction->setText(actionText);
+    favoriteAction->setToolTip(actionText);
 }
 
 void MainWindow::refreshFavoritesActions() {
-    refreshFavoritesAction(actFavoritesLeft_,
-                           leftPath_ ? leftPath_->text() : QString(), false,
-                           false);
-    refreshFavoritesAction(actFavoritesRight_,
-                           rightPath_ ? rightPath_->text() : QString(),
-                           rightIsRemote_, true);
+    refreshFavoriteToggleAction(actFavoriteToggleLeft_,
+                                leftPath_ ? leftPath_->text() : QString(),
+                                false);
+    refreshFavoriteToggleAction(actFavoriteToggleRight_,
+                                rightPath_ ? rightPath_->text() : QString(),
+                                rightIsRemote_);
 }
 
 void MainWindow::addRecentRemotePath(const QString &path) {
@@ -1849,6 +1852,192 @@ void MainWindow::addRecentRemotePath(const QString &path) {
 
 void MainWindow::addRecentServer(const openscp::SessionOptions &opt) {
     navigationStore_.addRecentServer(opt);
+}
+
+void MainWindow::showFavoritesDialog() {
+    QWidget *focusBeforeDialog = QApplication::focusWidget();
+
+    QDialog dlg(this);
+    dlg.setObjectName(QStringLiteral("favoritesDialog"));
+    dlg.setWindowTitle(tr("Favorites"));
+    dlg.resize(640, 420);
+    dlg.setMinimumSize(520, 340);
+
+    auto *layout = new QVBoxLayout(&dlg);
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(8);
+
+    auto *tabs = new QTabWidget(&dlg);
+    tabs->setObjectName(QStringLiteral("favoritesTabs"));
+    layout->addWidget(tabs, 1);
+
+    auto *localList = createNavigationTabList(tabs, tr("Local"));
+    auto *remoteList = createNavigationTabList(tabs, tr("Remote"));
+    localList->setObjectName(QStringLiteral("localFavoritesList"));
+    remoteList->setObjectName(QStringLiteral("remoteFavoritesList"));
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
+    auto *openBtn =
+        buttons->addButton(tr("Open selected"), QDialogButtonBox::ActionRole);
+    auto *removeBtn = buttons->addButton(tr("Remove from favorites"),
+                                         QDialogButtonBox::ActionRole);
+    auto *clearBtn =
+        buttons->addButton(tr("Clear favorites"), QDialogButtonBox::ActionRole);
+    openBtn->setObjectName(QStringLiteral("openFavoriteButton"));
+    removeBtn->setObjectName(QStringLiteral("removeFavoriteButton"));
+    clearBtn->setObjectName(QStringLiteral("clearFavoritesButton"));
+    layout->addWidget(buttons);
+
+    auto activeList = [tabs, localList, remoteList]() -> QListWidget * {
+        return tabs->currentIndex() == 1 ? remoteList : localList;
+    };
+    auto currentRemoteScope = [this]() {
+        return rightIsRemote_ ? remoteNavigationScope() : QString();
+    };
+    auto updateActions = [=]() {
+        QListWidget *list = activeList();
+        const bool remote = tabs->currentIndex() == 1;
+        const bool remoteAvailable = !remote || !currentRemoteScope().isEmpty();
+        const QString selected =
+            list && list->currentItem()
+                ? list->currentItem()->data(Qt::UserRole).toString()
+                : QString();
+        const bool hasSelection =
+            remoteAvailable && !selected.trimmed().isEmpty();
+        openBtn->setEnabled(hasSelection);
+        removeBtn->setEnabled(hasSelection);
+        clearBtn->setEnabled(remoteAvailable && listHasUserData(list));
+    };
+
+    auto populate = [=, this]() {
+        localList->clear();
+        remoteList->clear();
+
+        const QStringList localPaths = navigationStore_.favorites(
+            openscpui::NavigationStore::Location::Local);
+        for (const QString &rawPath : localPaths) {
+            const QString path =
+                openscpui::NavigationStore::normalizeLocalPath(rawPath);
+            if (path.isEmpty())
+                continue;
+            auto *item = new QListWidgetItem(
+                trimNavigationLabel(QDir::toNativeSeparators(path)), localList);
+            item->setToolTip(path);
+            item->setData(Qt::UserRole, path);
+        }
+        if (!listHasUserData(localList))
+            addDisabledListPlaceholder(localList, tr("No favorites"));
+
+        const QString remoteScope = currentRemoteScope();
+        if (remoteScope.isEmpty()) {
+            addDisabledListPlaceholder(
+                remoteList,
+                tr("Connect to a remote server to use remote favorites"));
+        } else {
+            const QStringList remotePaths = navigationStore_.favorites(
+                openscpui::NavigationStore::Location::Remote, remoteScope);
+            for (const QString &rawPath : remotePaths) {
+                const QString path =
+                    openscpui::NavigationStore::normalizeRemotePath(rawPath);
+                if (path.isEmpty())
+                    continue;
+                auto *item =
+                    new QListWidgetItem(trimNavigationLabel(path), remoteList);
+                item->setToolTip(path);
+                item->setData(Qt::UserRole, path);
+            }
+            if (!listHasUserData(remoteList))
+                addDisabledListPlaceholder(remoteList, tr("No favorites"));
+        }
+
+        updateActions();
+    };
+
+    auto openSelected = [&, focusBeforeDialog]() {
+        QListWidget *list = activeList();
+        if (!list || !list->currentItem())
+            return;
+        const QString path = list->currentItem()->data(Qt::UserRole).toString();
+        if (path.trimmed().isEmpty())
+            return;
+
+        if (tabs->currentIndex() == 1) {
+            if (!rightIsRemote_ || currentRemoteScope().isEmpty()) {
+                statusBar()->showMessage(
+                    tr("Connect to a remote server to use remote favorites"),
+                    3500);
+                return;
+            }
+            setRightRemoteRoot(path);
+        } else {
+            const bool inRightPanel =
+                focusWithinWidget(focusBeforeDialog, rightView_) ||
+                focusWithinWidget(focusBeforeDialog, rightPath_) ||
+                focusWithinWidget(focusBeforeDialog, rightPaneBar_) ||
+                focusWithinWidget(focusBeforeDialog, rightBreadcrumbsBar_);
+            if (!rightIsRemote_ && inRightPanel)
+                setRightRoot(path);
+            else
+                setLeftRoot(path);
+        }
+        dlg.accept();
+    };
+
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    connect(openBtn, &QPushButton::clicked, &dlg, openSelected);
+    connect(removeBtn, &QPushButton::clicked, &dlg, [=, this]() {
+        QListWidget *list = activeList();
+        if (!list || !list->currentItem())
+            return;
+        const QString path = list->currentItem()->data(Qt::UserRole).toString();
+        const bool remote = tabs->currentIndex() == 1;
+        const QString remoteScope = remote ? currentRemoteScope() : QString();
+        if (path.isEmpty() || (remote && remoteScope.isEmpty()))
+            return;
+
+        const auto location = remote
+                                  ? openscpui::NavigationStore::Location::Remote
+                                  : openscpui::NavigationStore::Location::Local;
+        if (!navigationStore_.isFavorite(location, path, remoteScope)) {
+            populate();
+            return;
+        }
+        navigationStore_.toggleFavorite(location, path, remoteScope);
+        refreshFavoritesActions();
+        statusBar()->showMessage(tr("Favorite removed"), 2500);
+        populate();
+    });
+    connect(clearBtn, &QPushButton::clicked, &dlg, [=, this]() {
+        const bool remote = tabs->currentIndex() == 1;
+        const QString remoteScope = remote ? currentRemoteScope() : QString();
+        if (remote && remoteScope.isEmpty())
+            return;
+        if (UiAlerts::question(this, tr("Clear favorites"),
+                               tr("Remove all favorites in this section?"),
+                               QMessageBox::Yes | QMessageBox::No,
+                               QMessageBox::No) != QMessageBox::Yes) {
+            return;
+        }
+
+        navigationStore_.clearFavorites(
+            remote ? openscpui::NavigationStore::Location::Remote
+                   : openscpui::NavigationStore::Location::Local,
+            remoteScope);
+        refreshFavoritesActions();
+        populate();
+    });
+
+    for (QListWidget *list : {localList, remoteList}) {
+        connect(list, &QListWidget::itemDoubleClicked, &dlg,
+                [openSelected](QListWidgetItem *) { openSelected(); });
+        connect(list, &QListWidget::currentRowChanged, &dlg,
+                [updateActions](int) { updateActions(); });
+    }
+    connect(tabs, &QTabWidget::currentChanged, &dlg,
+            [updateActions](int) { updateActions(); });
+
+    populate();
+    dlg.exec();
 }
 
 void MainWindow::showHistoryMenu() {
@@ -1866,10 +2055,11 @@ void MainWindow::showHistoryMenu() {
     auto *tabs = new QTabWidget(&dlg);
     layout->addWidget(tabs, 1);
 
-    auto *localList = createHistoryTabList(tabs, tr("Recent local paths"));
-    auto *remoteList = createHistoryTabList(tabs, tr("Recent remote paths"));
-    auto *legacyRemoteList = createHistoryTabList(tabs, tr("Unscoped legacy"));
-    auto *serverList = createHistoryTabList(tabs, tr("Recent servers"));
+    auto *localList = createNavigationTabList(tabs, tr("Recent local paths"));
+    auto *remoteList = createNavigationTabList(tabs, tr("Recent remote paths"));
+    auto *legacyRemoteList =
+        createNavigationTabList(tabs, tr("Unscoped legacy"));
+    auto *serverList = createNavigationTabList(tabs, tr("Recent servers"));
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
     auto *openBtn =
@@ -1879,13 +2069,6 @@ void MainWindow::showHistoryMenu() {
     auto *clearBtn =
         buttons->addButton(tr("Clear history"), QDialogButtonBox::ActionRole);
     layout->addWidget(buttons);
-
-    auto addEmptyPlaceholder = [](QListWidget *list, const QString &text) {
-        if (!list)
-            return;
-        auto *item = new QListWidgetItem(text, list);
-        item->setFlags(Qt::NoItemFlags);
-    };
 
     auto activeList = [tabs, localList, remoteList, legacyRemoteList,
                        serverList]() -> QListWidget * {
@@ -1969,35 +2152,35 @@ void MainWindow::showHistoryMenu() {
             if (normalized.isEmpty())
                 continue;
             auto *item = new QListWidgetItem(
-                trimHistoryLabel(QDir::toNativeSeparators(normalized)),
+                trimNavigationLabel(QDir::toNativeSeparators(normalized)),
                 localList);
             item->setToolTip(normalized);
             item->setData(Qt::UserRole, normalized);
             hasEntries = true;
         }
         if (localList->count() == 0)
-            addEmptyPlaceholder(localList, tr("No recent history"));
+            addDisabledListPlaceholder(localList, tr("No recent history"));
 
         for (const QString &rawPath : remotePaths) {
             const QString normalized =
                 openscpui::NavigationStore::normalizeRemotePath(rawPath);
             if (normalized.isEmpty())
                 continue;
-            auto *item =
-                new QListWidgetItem(trimHistoryLabel(normalized), remoteList);
+            auto *item = new QListWidgetItem(trimNavigationLabel(normalized),
+                                             remoteList);
             item->setToolTip(normalized);
             item->setData(Qt::UserRole, normalized);
             hasEntries = true;
         }
         if (remoteList->count() == 0)
-            addEmptyPlaceholder(remoteList, tr("No recent history"));
+            addDisabledListPlaceholder(remoteList, tr("No recent history"));
 
         for (const QString &rawPath : legacyRemotePaths) {
             const QString normalized =
                 openscpui::NavigationStore::normalizeRemotePath(rawPath);
             if (normalized.isEmpty())
                 continue;
-            auto *item = new QListWidgetItem(trimHistoryLabel(normalized),
+            auto *item = new QListWidgetItem(trimNavigationLabel(normalized),
                                              legacyRemoteList);
             item->setToolTip(tr("Legacy path without a server identity: %1")
                                  .arg(normalized));
@@ -2005,7 +2188,8 @@ void MainWindow::showHistoryMenu() {
             hasEntries = true;
         }
         if (legacyRemoteList->count() == 0)
-            addEmptyPlaceholder(legacyRemoteList, tr("No legacy history"));
+            addDisabledListPlaceholder(legacyRemoteList,
+                                       tr("No legacy history"));
 
         for (const QString &encoded : recentServers) {
             openscp::SessionOptions preset;
@@ -2015,13 +2199,13 @@ void MainWindow::showHistoryMenu() {
                 continue;
             }
             auto *item =
-                new QListWidgetItem(trimHistoryLabel(label), serverList);
+                new QListWidgetItem(trimNavigationLabel(label), serverList);
             item->setToolTip(label);
             item->setData(Qt::UserRole, encoded);
             hasEntries = true;
         }
         if (serverList->count() == 0)
-            addEmptyPlaceholder(serverList, tr("No recent history"));
+            addDisabledListPlaceholder(serverList, tr("No recent history"));
 
         if (clearBtn)
             clearBtn->setEnabled(hasEntries);
