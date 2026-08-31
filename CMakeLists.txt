@@ -563,6 +563,19 @@ qt_add_resources(openscp app_images
         assets/program/icon-openscp-2048.png
 )
 
+qt_add_resources(openscp credits
+    PREFIX "/credits"
+    BASE docs/credits
+    FILES
+        docs/credits/CREDITS.md
+        docs/credits/LICENSES/OpenSSL-Apache-2.0.txt
+        docs/credits/LICENSES/Qt-LGPL-3.0.txt
+        docs/credits/LICENSES/libcurl-curl-license.txt
+        docs/credits/LICENSES/libssh2-BSD-3-Clause.txt
+        docs/credits/LICENSES/tinyxml2-zlib-license.txt
+        docs/credits/LICENSES/zlib-license.txt
+)
+
 # Ensure predictable in-resource path for the program icon
 set_source_files_properties(assets/program/icon-openscp-2048.png
     PROPERTIES QT_RESOURCE_ALIAS "icon-openscp-2048.png")

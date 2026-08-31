@@ -1,7 +1,6 @@
 // Implementation of the "About" dialog for OpenSCP.
 #include "AboutDialog.hpp"
 
-#include "AppSettings.hpp"
 #include "AppVersion.hpp"
 #include "UiAlerts.hpp"
 
@@ -16,11 +15,12 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPixmap>
-#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QStringConverter>
 #include <QStringList>
 #include <QSysInfo>
+#include <QTextBrowser>
+#include <QTextDocument>
 #include <QTextStream>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -62,15 +62,6 @@ QString findFromCandidates(const QStringList &relativeCandidates,
         }
     }
     return {};
-}
-
-QString findDocsFile(const QStringList &fileNames) {
-    QStringList docsCandidates;
-    docsCandidates.reserve(fileNames.size());
-    for (const QString &fileName : fileNames) {
-        docsCandidates << QStringLiteral("docs/%1").arg(fileName);
-    }
-    return findFromCandidates(docsCandidates, false);
 }
 
 QString findLicensesDir() {
@@ -156,49 +147,25 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     auto *libsTitle = new QLabel(tr("Used libraries:"), this);
     lay->addWidget(libsTitle);
 
-    // Scrollable text area to show long credits/licenses text loaded from
-    // docs/*.txt
-    auto *libsText = new QPlainTextEdit(this);
+    auto *libsText = new QTextBrowser(this);
     libsText->setReadOnly(true);
-    libsText->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    libsText->setOpenExternalLinks(true);
     libsText->setMinimumHeight(180);
 
-    // Decide which file to load based on UI language (settings: UI/language)
-    openscpui::AppSettings settings;
-    const QString languageCode =
-        settings.value(openscpui::settingskeys::kUiLanguage, "en")
-            .toString()
-            .toLower();
-    QString suffix = QStringLiteral("EN");
-    if (languageCode.startsWith("es")) {
-        suffix = QStringLiteral("ES");
-    } else if (languageCode.startsWith("fr")) {
-        suffix = QStringLiteral("FR");
-    } else if (languageCode.startsWith("pt")) {
-        suffix = QStringLiteral("PT");
-    }
-
-    const QStringList candidates = {
-        QStringLiteral("ABOUT_LIBRARIES_%1.txt").arg(suffix),
-        QStringLiteral("ABOUT_LIBRARIES_%1").arg(suffix),
-        QStringLiteral("ABOUT_LIBRARIES.txt"),
-        QStringLiteral("ABOUT_LIBRARIES")};
-    const QString path = findDocsFile(candidates);
     QString content;
-    if (!path.isEmpty()) {
-        QFile licenseFile(path);
-        if (licenseFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            QTextStream licenseStream(&licenseFile);
-            licenseStream.setEncoding(QStringConverter::Utf8);
-            content = licenseStream.readAll();
-        }
+    QFile creditsFile(QStringLiteral(":/credits/CREDITS.md"));
+    if (creditsFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QTextStream creditsStream(&creditsFile);
+        creditsStream.setEncoding(QStringConverter::Utf8);
+        content = creditsStream.readAll();
     }
     if (content.isEmpty()) {
         content = tr("No third-party license details were found in this "
                      "installation.\n"
                      "Use an official package for full license information.");
     }
-    libsText->setPlainText(content);
+    libsText->document()->setBaseUrl(QUrl(QStringLiteral("qrc:/credits/")));
+    libsText->setMarkdown(content);
     lay->addWidget(libsText);
 
     const QString licensesDir = findLicensesDir();
