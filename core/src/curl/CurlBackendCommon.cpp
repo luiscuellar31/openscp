@@ -3,6 +3,7 @@
 
 #include "../common/SafeLocalFile.hpp"
 #include "openscp/RemotePath.hpp"
+#include "openscp/UniqueFile.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -27,6 +28,15 @@ namespace {
 
 std::mutex activeDestinationMutex;
 std::unordered_set<std::string> activeDestinations;
+
+RemoteError makeRemoteError(RemoteErrorKind kind, std::string message,
+                            std::int64_t nativeCode = 0) {
+    RemoteError error;
+    error.kind = kind;
+    error.message = std::move(message);
+    error.native_code = nativeCode;
+    return error;
+}
 
 } // namespace
 
@@ -887,6 +897,132 @@ transferFailureError(const CurlTransferResult &result, std::string message,
     }
     return errorFromCurl(result.curlCode, std::move(message),
                          result.responseCode);
+}
+
+bool downloadToLocalFile(CURL *curl, const std::string &destination,
+                         std::function<void(std::size_t, std::size_t)> progress,
+                         std::function<bool()> shouldCancel,
+                         const std::atomic<bool> *interrupted,
+                         std::string_view operationLabel,
+                         const CurlDownloadConfigurator &configure,
+                         const CurlTransportErrorMapper &transportErrorMapper,
+                         const CurlResponseErrorMapper &responseErrorMapper,
+                         RemoteError &failure, std::string &err) {
+    const std::string partial = localPartialPath(destination);
+    ActiveDestinationLease destinationLease(localDestinationKey(destination));
+    ActiveDestinationLease partialLease(localDestinationKey(partial));
+    if (!destinationLease.acquired() || !partialLease.acquired()) {
+        err = "Another transfer is already using this local destination.";
+        failure = makeRemoteError(RemoteErrorKind::Conflict, err);
+        return false;
+    }
+
+    std::string openError;
+    std::FILE *localFile = localfiles::openRegularFileForWrite(
+        partial, localfiles::WriteMode::Truncate, openError);
+    if (!localFile) {
+        const int openCode = errno;
+        err = openError.empty()
+                  ? "Could not open local partial file for writing."
+                  : std::move(openError);
+        failure = makeRemoteError(RemoteErrorKind::LocalIo, err, openCode);
+        return false;
+    }
+    UniqueFile localFileOwner(localFile);
+
+    TransferProgressContext progressContext{
+        std::move(progress), std::move(shouldCancel), interrupted, false};
+    const CurlTransferResult result = performCurlTransfer(
+        curl, progressContext, operationLabel,
+        [&](CURL *handle, std::string &configurationError) {
+            return configure && configure(handle, localFile, progressContext,
+                                          configurationError);
+        },
+        err);
+    if (!result.succeeded()) {
+        localFileOwner.reset();
+        failure = transferFailureError(result, err, transportErrorMapper);
+        return false;
+    }
+    if (responseErrorMapper) {
+        if (auto responseError =
+                responseErrorMapper(result.responseCode, err)) {
+            localFileOwner.reset();
+            failure = std::move(*responseError);
+            return false;
+        }
+    }
+    if (!flushAndSyncFile(localFile, err)) {
+        const int flushCode = errno;
+        localFileOwner.reset();
+        failure = makeRemoteError(RemoteErrorKind::LocalIo, err, flushCode);
+        return false;
+    }
+    if (localFileOwner.close() != 0) {
+        const int closeCode = errno;
+        err = "Could not close local partial file after download.";
+        failure = makeRemoteError(RemoteErrorKind::LocalIo, err, closeCode);
+        return false;
+    }
+    if (detectTransferCancellation(progressContext, err)) {
+        failure = makeRemoteError(
+            RemoteErrorKind::Canceled, err,
+            static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
+        return false;
+    }
+    if (!atomicReplaceLocalFile(partial, destination, err)) {
+        failure = makeRemoteError(RemoteErrorKind::LocalIo, err, errno);
+        return false;
+    }
+    return true;
+}
+
+bool uploadFromLocalFile(CURL *curl, const std::string &source,
+                         std::function<void(std::size_t, std::size_t)> progress,
+                         std::function<bool()> shouldCancel,
+                         const std::atomic<bool> *interrupted,
+                         std::string_view operationLabel,
+                         const CurlUploadConfigurator &configure,
+                         const CurlTransportErrorMapper &transportErrorMapper,
+                         const CurlResponseErrorMapper &responseErrorMapper,
+                         RemoteError &failure, std::string &err) {
+    std::uint64_t total = 0;
+    std::FILE *localFile = openFileForUpload(source, total, err);
+    if (!localFile) {
+        failure = makeRemoteError(RemoteErrorKind::LocalIo, err, errno);
+        return false;
+    }
+    UniqueFile localFileOwner(localFile);
+
+    TransferProgressContext progressContext{
+        std::move(progress), std::move(shouldCancel), interrupted, true};
+    const CurlTransferResult result = performCurlTransfer(
+        curl, progressContext, operationLabel,
+        [&](CURL *handle, std::string &configurationError) {
+            return configure &&
+                   configure(handle, localFile, static_cast<curl_off_t>(total),
+                             progressContext, configurationError);
+        },
+        err);
+    localFileOwner.reset();
+    if (!result.succeeded()) {
+        failure = transferFailureError(result, err, transportErrorMapper);
+        return false;
+    }
+    if (responseErrorMapper) {
+        if (auto responseError =
+                responseErrorMapper(result.responseCode, err)) {
+            failure = std::move(*responseError);
+            return false;
+        }
+    }
+    if (detectTransferCancellation(progressContext, err)) {
+        failure = makeRemoteError(
+            RemoteErrorKind::Canceled, err,
+            static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
+        return false;
+    }
+    return true;
 }
 
 int transferProgressCallback(void *userdata, curl_off_t dltotal,

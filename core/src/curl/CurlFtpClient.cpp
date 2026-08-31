@@ -1,10 +1,8 @@
 // FTP/FTPS backend implementation based on libcurl.
 #include "openscp/CurlFtpClient.hpp"
 
-#include "../common/SafeLocalFile.hpp"
 #include "CurlBackendCommon.hpp"
 #include "openscp/RemotePath.hpp"
-#include "openscp/UniqueFile.hpp"
 
 #include <curl/curl.h>
 
@@ -16,9 +14,11 @@
 #include <ctime>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace openscp {
@@ -880,81 +880,37 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
     const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
 
-    const std::string partial = curlcommon::localPartialPath(local);
-    curlcommon::ActiveDestinationLease destinationLease(
-        curlcommon::localDestinationKey(local));
-    curlcommon::ActiveDestinationLease partialLease(
-        curlcommon::localDestinationKey(partial));
-    if (!destinationLease.acquired() || !partialLease.acquired()) {
-        err = "Another transfer is already using this local destination.";
-        setLastOperationError(RemoteErrorKind::Conflict, err);
-        return false;
-    }
-    std::string openError;
-    std::FILE *localFile = localfiles::openRegularFileForWrite(
-        partial, localfiles::WriteMode::Truncate, openError);
-    if (!localFile) {
-        err = openError.empty()
-                  ? "Could not open local partial file for writing."
-                  : openError;
-        setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
-        return false;
-    }
-    UniqueFile localFileOwner(localFile);
-
-    curlcommon::TransferProgressContext progressContext{
-        progress, shouldCancel, operation.interrupted(), false};
     const std::string url = buildFtpUrl(opt, remote);
-    const curlcommon::CurlTransferResult result =
-        curlcommon::performCurlTransfer(
-            connection.session->get(), progressContext,
+    RemoteError failure;
+    if (!curlcommon::downloadToLocalFile(
+            connection.session->get(), local, std::move(progress),
+            std::move(shouldCancel), operation.interrupted(),
             std::string(protocolLabel(opt.protocol)) + " download",
-            [&](CURL *curl, std::string &configurationError) {
+            [&](CURL *curl, std::FILE *file,
+                curlcommon::TransferProgressContext &progressContext,
+                std::string &configurationError) {
                 return configureCommonCurlHandle(curl, opt,
                                                  configurationError) &&
-                       curlcommon::configureFileDownload(curl, localFile,
-                                                         progressContext,
-                                                         configurationError) &&
+                       curlcommon::configureFileDownload(
+                           curl, file, progressContext, configurationError) &&
                        curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) ==
                            CURLE_OK;
             },
-            err);
-    if (!result.succeeded()) {
-        localFileOwner.reset();
-        setLastOperationError(curlcommon::transferFailureError(
-            result, err,
             [](CURLcode code, long responseCode, const std::string &message) {
                 return ftpErrorFromResult(code, responseCode, message);
-            }));
-        return false;
-    }
-    if (result.responseCode >= 400) {
-        localFileOwner.reset();
-        err = std::string(protocolLabel(opt.protocol)) +
-              " download was rejected (server response " +
-              std::to_string(result.responseCode) + ").";
-        setLastOperationError(curlcommon::errorFromCurl(
-            CURLE_REMOTE_FILE_NOT_FOUND, err, result.responseCode));
-        return false;
-    }
-    if (!curlcommon::flushAndSyncFile(localFile, err)) {
-        localFileOwner.reset();
-        setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
-        return false;
-    }
-    if (localFileOwner.close() != 0) {
-        err = "Could not close local partial file after download.";
-        setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
-        return false;
-    }
-    if (curlcommon::detectTransferCancellation(progressContext, err)) {
-        setLastOperationError(
-            RemoteErrorKind::Canceled, err,
-            static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
-        return false;
-    }
-    if (!curlcommon::atomicReplaceLocalFile(partial, local, err)) {
-        setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
+            },
+            [&](long responseCode,
+                std::string &responseError) -> std::optional<RemoteError> {
+                if (responseCode < 400)
+                    return std::nullopt;
+                responseError = std::string(protocolLabel(opt.protocol)) +
+                                " download was rejected (server response " +
+                                std::to_string(responseCode) + ").";
+                return curlcommon::errorFromCurl(CURLE_REMOTE_FILE_NOT_FOUND,
+                                                 responseError, responseCode);
+            },
+            failure, err)) {
+        setLastOperationError(failure);
         return false;
     }
     return true;
@@ -996,56 +952,41 @@ bool CurlFtpClient::put(const std::string &local, const std::string &remote,
         return false;
     }
 
-    std::uint64_t total = 0;
-    std::FILE *localFile = curlcommon::openFileForUpload(local, total, err);
-    if (!localFile) {
-        setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
-        return false;
-    }
-    UniqueFile localFileOwner(localFile);
-
     CURL *curl = connection.session->get();
-    curlcommon::TransferProgressContext progressContext{
-        progress, shouldCancel, operation.interrupted(), true};
     const std::string url = buildFtpUrl(opt, remotePartial);
-    const curlcommon::CurlTransferResult result =
-        curlcommon::performCurlTransfer(
-            curl, progressContext,
+    RemoteError failure;
+    if (!curlcommon::uploadFromLocalFile(
+            curl, local, std::move(progress), std::move(shouldCancel),
+            operation.interrupted(),
             std::string(protocolLabel(opt.protocol)) + " upload",
-            [&](CURL *handle, std::string &configurationError) {
+            [&](CURL *handle, std::FILE *file, curl_off_t fileSize,
+                curlcommon::TransferProgressContext &progressContext,
+                std::string &configurationError) {
                 return configureCommonCurlHandle(handle, opt,
                                                  configurationError) &&
-                       curlcommon::configureFileUpload(
-                           handle, localFile, static_cast<curl_off_t>(total),
-                           progressContext, configurationError) &&
+                       curlcommon::configureFileUpload(handle, file, fileSize,
+                                                       progressContext,
+                                                       configurationError) &&
                        curl_easy_setopt(handle, CURLOPT_URL, url.c_str()) ==
                            CURLE_OK &&
                        curl_easy_setopt(handle, CURLOPT_FTP_CREATE_MISSING_DIRS,
                                         CURLFTP_CREATE_DIR_RETRY) == CURLE_OK;
             },
-            err);
-    localFileOwner.reset();
-    if (!result.succeeded()) {
-        setLastOperationError(curlcommon::transferFailureError(
-            result, err,
             [](CURLcode code, long responseCode, const std::string &message) {
                 return ftpErrorFromResult(code, responseCode, message);
-            }));
-        return false;
-    }
-    if (result.responseCode >= 400) {
-        err = std::string(protocolLabel(opt.protocol)) +
-              " upload was rejected (server response " +
-              std::to_string(result.responseCode) + ").";
-        setLastOperationError(curlcommon::errorFromCurl(
-            CURLE_UPLOAD_FAILED, err, result.responseCode));
-        return false;
-    }
-
-    if (curlcommon::detectTransferCancellation(progressContext, err)) {
-        setLastOperationError(
-            RemoteErrorKind::Canceled, err,
-            static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
+            },
+            [&](long responseCode,
+                std::string &responseError) -> std::optional<RemoteError> {
+                if (responseCode < 400)
+                    return std::nullopt;
+                responseError = std::string(protocolLabel(opt.protocol)) +
+                                " upload was rejected (server response " +
+                                std::to_string(responseCode) + ").";
+                return curlcommon::errorFromCurl(CURLE_UPLOAD_FAILED,
+                                                 responseError, responseCode);
+            },
+            failure, err)) {
+        setLastOperationError(failure);
         return false;
     }
 

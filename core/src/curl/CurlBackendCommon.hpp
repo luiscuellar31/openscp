@@ -1,7 +1,8 @@
 // Shared internal helpers for libcurl-based backends (FTP/WebDAV).
 #pragma once
 
-#include "openscp/SftpTypes.hpp"
+#include "openscp/RemoteError.hpp"
+#include "openscp/SessionOptions.hpp"
 
 #include <curl/curl.h>
 
@@ -246,6 +247,14 @@ using CurlTransferConfigurator =
     std::function<bool(CURL *curl, std::string &err)>;
 using CurlTransportErrorMapper = std::function<RemoteError(
     CURLcode code, long responseCode, const std::string &message)>;
+using CurlResponseErrorMapper = std::function<std::optional<RemoteError>(
+    long responseCode, std::string &err)>;
+using CurlDownloadConfigurator = std::function<bool(
+    CURL *curl, std::FILE *file, TransferProgressContext &progressContext,
+    std::string &err)>;
+using CurlUploadConfigurator = std::function<bool(
+    CURL *curl, std::FILE *file, curl_off_t fileSize,
+    TransferProgressContext &progressContext, std::string &err)>;
 
 bool configureFileDownload(CURL *curl, std::FILE *file,
                            TransferProgressContext &progressContext,
@@ -267,6 +276,27 @@ performCurlTransfer(CURL *curl, TransferProgressContext &progressContext,
 RemoteError
 transferFailureError(const CurlTransferResult &result, std::string message,
                      const CurlTransportErrorMapper &transportErrorMapper = {});
+
+// Own the protocol-neutral local file lifecycle around a CURL transfer. The
+// backend still configures and classifies its protocol-specific request.
+bool downloadToLocalFile(CURL *curl, const std::string &destination,
+                         std::function<void(std::size_t, std::size_t)> progress,
+                         std::function<bool()> shouldCancel,
+                         const std::atomic<bool> *interrupted,
+                         std::string_view operationLabel,
+                         const CurlDownloadConfigurator &configure,
+                         const CurlTransportErrorMapper &transportErrorMapper,
+                         const CurlResponseErrorMapper &responseErrorMapper,
+                         RemoteError &failure, std::string &err);
+bool uploadFromLocalFile(CURL *curl, const std::string &source,
+                         std::function<void(std::size_t, std::size_t)> progress,
+                         std::function<bool()> shouldCancel,
+                         const std::atomic<bool> *interrupted,
+                         std::string_view operationLabel,
+                         const CurlUploadConfigurator &configure,
+                         const CurlTransportErrorMapper &transportErrorMapper,
+                         const CurlResponseErrorMapper &responseErrorMapper,
+                         RemoteError &failure, std::string &err);
 
 int transferProgressCallback(void *userdata, curl_off_t dltotal,
                              curl_off_t dlnow, curl_off_t ultotal,

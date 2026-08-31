@@ -1,10 +1,8 @@
 // WebDAV backend implementation based on libcurl and tinyxml2.
 #include "openscp/CurlWebDavClient.hpp"
 
-#include "../common/SafeLocalFile.hpp"
 #include "CurlBackendCommon.hpp"
 #include "openscp/RemotePath.hpp"
-#include "openscp/UniqueFile.hpp"
 
 #include <curl/curl.h>
 #include <tinyxml2.h>
@@ -708,41 +706,19 @@ bool CurlWebDavClient::get(
     const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
 
-    const std::string partial = curlcommon::localPartialPath(local);
-    curlcommon::ActiveDestinationLease destinationLease(
-        curlcommon::localDestinationKey(local));
-    curlcommon::ActiveDestinationLease partialLease(
-        curlcommon::localDestinationKey(partial));
-    if (!destinationLease.acquired() || !partialLease.acquired()) {
-        err = "Another transfer is already using this local destination.";
-        setLastOperationError(RemoteErrorKind::Conflict, err);
-        return false;
-    }
-    std::string openError;
-    std::FILE *localFile = localfiles::openRegularFileForWrite(
-        partial, localfiles::WriteMode::Truncate, openError);
-    if (!localFile) {
-        err = openError.empty()
-                  ? "Could not open local partial file for writing."
-                  : openError;
-        setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
-        return false;
-    }
-    UniqueFile localFileOwner(localFile);
-
-    curlcommon::TransferProgressContext progressContext{
-        progress, shouldCancel, operation.interrupted(), false};
     std::optional<std::uint32_t> retryAfter;
     const std::string url = buildWebDavUrl(opt, remote);
-    const curlcommon::CurlTransferResult result =
-        curlcommon::performCurlTransfer(
-            connection.session->get(), progressContext, "WebDAV download",
-            [&](CURL *curl, std::string &configurationError) {
+    RemoteError failure;
+    if (!curlcommon::downloadToLocalFile(
+            connection.session->get(), local, std::move(progress),
+            std::move(shouldCancel), operation.interrupted(), "WebDAV download",
+            [&](CURL *curl, std::FILE *file,
+                curlcommon::TransferProgressContext &progressContext,
+                std::string &configurationError) {
                 return configureCommonCurlHandle(curl, opt,
                                                  configurationError) &&
-                       curlcommon::configureFileDownload(curl, localFile,
-                                                         progressContext,
-                                                         configurationError) &&
+                       curlcommon::configureFileDownload(
+                           curl, file, progressContext, configurationError) &&
                        curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) ==
                            CURLE_OK &&
                        curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L) ==
@@ -752,37 +728,17 @@ bool CurlWebDavClient::get(
                        curl_easy_setopt(curl, CURLOPT_HEADERDATA,
                                         &retryAfter) == CURLE_OK;
             },
-            err);
-    if (!result.succeeded()) {
-        localFileOwner.reset();
-        setLastOperationError(curlcommon::transferFailureError(result, err));
-        return false;
-    }
-    if (!curlcommon::isCompletedWebDavGetStatus(result.responseCode)) {
-        localFileOwner.reset();
-        err = formatHttpFailure("WebDAV GET", result.responseCode);
-        setLastOperationError(curlcommon::errorFromHttpStatus(
-            result.responseCode, err, false, retryAfter));
-        return false;
-    }
-    if (!curlcommon::flushAndSyncFile(localFile, err)) {
-        localFileOwner.reset();
-        setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
-        return false;
-    }
-    if (localFileOwner.close() != 0) {
-        err = "Could not close local partial file after download.";
-        setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
-        return false;
-    }
-    if (curlcommon::detectTransferCancellation(progressContext, err)) {
-        setLastOperationError(
-            RemoteErrorKind::Canceled, err,
-            static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
-        return false;
-    }
-    if (!curlcommon::atomicReplaceLocalFile(partial, local, err)) {
-        setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
+            {},
+            [&](long responseCode,
+                std::string &responseError) -> std::optional<RemoteError> {
+                if (curlcommon::isCompletedWebDavGetStatus(responseCode))
+                    return std::nullopt;
+                responseError = formatHttpFailure("WebDAV GET", responseCode);
+                return curlcommon::errorFromHttpStatus(
+                    responseCode, responseError, false, retryAfter);
+            },
+            failure, err)) {
+        setLastOperationError(failure);
         return false;
     }
     return true;
@@ -822,29 +778,22 @@ bool CurlWebDavClient::put(
         return false;
     }
 
-    std::uint64_t total = 0;
-    std::FILE *localFile = curlcommon::openFileForUpload(local, total, err);
-    if (!localFile) {
-        setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
-        return false;
-    }
-    UniqueFile localFileOwner(localFile);
-
-    curlcommon::TransferProgressContext progressContext{
-        progress, shouldCancel, operation.interrupted(), true};
     std::optional<std::uint32_t> retryAfter;
     std::string responseBody;
     curlcommon::BoundedStringSink responseSink{&responseBody};
     const std::string uploadUrl = buildWebDavUrl(opt, remotePartial);
-    const curlcommon::CurlTransferResult result =
-        curlcommon::performCurlTransfer(
-            connection.session->get(), progressContext, "WebDAV upload",
-            [&](CURL *curl, std::string &configurationError) {
+    RemoteError failure;
+    if (!curlcommon::uploadFromLocalFile(
+            connection.session->get(), local, std::move(progress),
+            std::move(shouldCancel), operation.interrupted(), "WebDAV upload",
+            [&](CURL *curl, std::FILE *file, curl_off_t fileSize,
+                curlcommon::TransferProgressContext &progressContext,
+                std::string &configurationError) {
                 return configureCommonCurlHandle(curl, opt,
                                                  configurationError) &&
-                       curlcommon::configureFileUpload(
-                           curl, localFile, static_cast<curl_off_t>(total),
-                           progressContext, configurationError) &&
+                       curlcommon::configureFileUpload(curl, file, fileSize,
+                                                       progressContext,
+                                                       configurationError) &&
                        curl_easy_setopt(curl, CURLOPT_URL, uploadUrl.c_str()) ==
                            CURLE_OK &&
                        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT") ==
@@ -859,23 +808,17 @@ bool CurlWebDavClient::put(
                        curl_easy_setopt(curl, CURLOPT_HEADERDATA,
                                         &retryAfter) == CURLE_OK;
             },
-            err);
-    localFileOwner.reset();
-    if (!result.succeeded()) {
-        setLastOperationError(curlcommon::transferFailureError(result, err));
-        return false;
-    }
-    if (!curlcommon::isCompletedWebDavWriteStatus(result.responseCode)) {
-        err = formatHttpFailure("WebDAV PUT", result.responseCode);
-        setLastOperationError(curlcommon::errorFromHttpStatus(
-            result.responseCode, err, false, retryAfter));
-        return false;
-    }
-
-    if (curlcommon::detectTransferCancellation(progressContext, err)) {
-        setLastOperationError(
-            RemoteErrorKind::Canceled, err,
-            static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
+            {},
+            [&](long responseCode,
+                std::string &responseError) -> std::optional<RemoteError> {
+                if (curlcommon::isCompletedWebDavWriteStatus(responseCode))
+                    return std::nullopt;
+                responseError = formatHttpFailure("WebDAV PUT", responseCode);
+                return curlcommon::errorFromHttpStatus(
+                    responseCode, responseError, false, retryAfter);
+            },
+            failure, err)) {
+        setLastOperationError(failure);
         return false;
     }
 
