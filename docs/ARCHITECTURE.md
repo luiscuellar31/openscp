@@ -1,8 +1,9 @@
-# OpenSCP Architecture
+# Architecture
 
-OpenSCP separates protocol code from application policy and widgets. Dependency
-arrows point toward the protocol-neutral layers; network operations never run
-inside item models or dialogs.
+This page is a map for contributors. It explains where a change belongs and
+records a few rules that are easy to miss when reading one class at a time.
+
+OpenSCP is split into layers:
 
 ```text
 openscp
@@ -12,99 +13,95 @@ openscp
             -> openscp_core
 ```
 
-## Build targets
+An arrow means "depends on." Dependencies should continue downward through the
+diagram. Protocol code should not know about windows or dialogs, and network
+work should never run inside a model or widget.
 
-| Target | Owns |
+## Where code belongs
+
+| Target | What belongs there |
 | --- | --- |
-| `openscp_core` | Remote-client contract, protocol backends, secure values, remote paths, and safe local files. |
-| `openscp_sync_logic` | Data-only comparison and synchronization planning. |
-| `openscp_ui_logic` | Sessions, persistence, navigation, remote jobs, and transfer orchestration. |
+| `openscp_core` | The remote-client interface, protocol backends, remote paths, secure values, and safe local-file helpers. |
+| `openscp_sync_logic` | File comparison and synchronization plans that do not need widgets or network connections. |
+| `openscp_ui_logic` | Sessions, navigation, saved data, remote jobs, and transfer coordination. |
 | `openscp_ui_widgets` | Dialogs and reusable visual components. |
-| `openscp` | Startup, `MainWindow`, translations, menus, and application resources. |
+| `openscp` | Startup, `MainWindow`, menus, translations, and application resources. |
 
-Tests link the target that owns the behavior. Integration tests use the same
-protocol implementations as the application.
+Tests should link the closest target that owns the behavior. Integration tests
+use the same protocol implementations as the application.
 
-## Protocol boundary
+## Connections and remote work
 
-`openscp::RemoteClient` is the common contract. SFTP and SCP use libssh2; FTP,
-FTPS, and WebDAV use libcurl. `ClientFactory` is the only place that selects a
-backend from `SessionOptions`.
+All protocols implement `openscp::RemoteClient`. `ClientFactory` chooses the
+backend from `SessionOptions`: libssh2 handles SFTP and SCP, while libcurl
+handles FTP, FTPS, and WebDAV.
 
-Backends must:
+A backend is responsible for validating remote paths, reporting the operations
+it supports, protecting secrets with `SecureString`, and making cancellation
+unblock network waits promptly. The libcurl backends share their connection,
+proxy, TLS, and transfer plumbing; each protocol file keeps only its own request
+and response rules.
 
-- normalize logical remote paths before mapping them to a server root;
-- expose supported operations through `ProtocolCapabilities`;
-- return structured errors for retry and presentation policy;
-- keep secrets in `SecureString` and local `FILE*` ownership in `UniqueFile`;
-- make cancellation unblock network waits promptly.
+`SessionController` owns the active connection. `RemoteOperationController`
+runs control-connection jobs one at a time and returns completed results.
+`RemoteTreeWalker` and `LocalTreeDiscovery` scan directories outside the UI
+thread and can be canceled.
 
-The cURL implementations share connection state, bounded response handling,
-proxy/TLS configuration, and upload/download lifecycle code. Protocol files own
-only their request and response semantics.
-
-## Remote operations and sessions
-
-`SessionController` owns the active client and connection lifecycle.
-`RemoteOperationController` serializes control-connection jobs and publishes
-immutable results. `RemoteTreeWalker` and `LocalTreeDiscovery` perform bounded,
-cancelable traversal outside the UI thread.
-
-`RemoteModel` only stores completed listings. Dialogs and models never call a
-remote client directly.
-
-Host-key prompts, health checks, and connection-status timing are coordinated
-independently so blocking network work cannot own presentation state.
+Models store results; they do not fetch them. Dialogs collect input; they do not
+call a remote client. Host-key prompts, health checks, and connection timing are
+kept separate from blocking network operations.
 
 ## Transfers and synchronization
 
-`TransferManager` is the transfer queue boundary. It owns worker connections,
-task state, retries, conflict policy, destination reservations, persistence,
-and notifications. `TransferQueue` keeps stable task storage and round-robin
-selection; `TransferExecutor`, `BandwidthLimiter`, and
-`TransferQueuePersistence` each own their narrower policy.
+`TransferManager` is the entry point for the transfer queue. It coordinates
+worker connections, task state, retries, conflicts, destination reservations,
+persistence, and notifications. The supporting classes have narrower jobs:
 
-The only permitted nested manager lock order is:
+- `TransferQueue` stores tasks and selects work fairly.
+- `TransferExecutor` runs a selected transfer.
+- `BandwidthLimiter` applies speed limits.
+- `TransferQueuePersistence` saves unfinished tasks safely.
+
+There is one allowed nested lock order inside the manager:
 
 ```text
 connFactoryMutex_ -> mtx_
 ```
 
-External client calls, callbacks, and Qt signal emissions occur after releasing
-manager locks.
+Release manager locks before calling a remote client, invoking a callback, or
+emitting a Qt signal.
 
-Synchronization follows three steps:
+Synchronization has three steps:
 
-1. `SyncCoordinator` gathers bounded local and remote snapshots.
-2. `SyncComparisonEngine` produces a data-only execution plan.
-3. Accepted actions enter `TransferManager` as one ordered batch.
+1. `SyncCoordinator` collects bounded local and remote snapshots.
+2. `SyncComparisonEngine` creates a data-only plan.
+3. The accepted actions enter `TransferManager` as one ordered batch.
 
-## Persistence
+## Saved data
 
-Each persisted domain has one owner:
+Each kind of persisted data has one owner:
 
 | Owner | Data |
 | --- | --- |
 | `AppSettings` | Application identity and settings keys. |
-| `SavedSitesPersistence` | Saved-site records and schema migration. |
-| `SiteCredentialRepository` | Credential keys and migration into secure storage. |
+| `SavedSitesPersistence` | Saved sites and schema migrations. |
+| `SiteCredentialRepository` | Credential keys and secure-storage migration. |
 | `SecretStore` | Keychain, Secret Service/libsecret, and platform encryption. |
-| `NavigationStore` | Local history plus session-scoped remote history/favorites. |
-| `TransferQueuePersistence` | Versioned, atomic storage of non-terminal tasks. |
+| `NavigationStore` | Local history and session-scoped remote history and favorites. |
+| `TransferQueuePersistence` | Versioned, atomic storage for unfinished transfers. |
 
-Presentation code must use these boundaries instead of writing raw settings or
-secret keys. Unknown future schemas and corrupt data must fail without
-overwriting recoverable files.
+Use these classes instead of reading or writing their settings directly. A new
+schema needs an explicit migration, and corrupt or newer data must not be
+silently overwritten.
 
-## Application composition
+## Adding a change
 
-`MainWindow` creates the models, controllers, and dialogs, then connects their
-signals and presentation callbacks. It owns translated text and visible
-application policy, but reusable controllers own their operational state.
+`MainWindow` connects the application pieces and owns visible UI policy. The
+controllers own the state and behavior behind it.
 
-When adding behavior, prefer extending the component that already owns the
-data. Add a new class only when it gains a clear lifetime, invariant, or testable
-policy; do not create one merely to shorten another file.
+When deciding where new code belongs, start with the component that already
+owns the data. Extract a new class when it has a clear lifetime, invariant, or
+testable responsibility—not just to make another file shorter.
 
-Contributor rules, validation, and translation commands live in
+Build, test, and translation instructions are in
 [CONTRIBUTING.md](../CONTRIBUTING.md).
