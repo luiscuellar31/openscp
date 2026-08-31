@@ -79,6 +79,11 @@ the development environment.
   <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Transfer queue" width="32%">
 </p>
 
+<p align="center">
+  <img src="assets/screenshots/screenshot-history.png" alt="Navigation history" width="40%">
+  <img src="assets/screenshots/screenshot-settings.png" alt="Application settings" width="40%">
+</p>
+
 ## Releases and contributions
 
 Tagged releases are published on the

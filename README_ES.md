@@ -79,6 +79,11 @@ aplicación se ejecute explícitamente en un entorno de desarrollo.
   <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Cola de transferencias" width="32%">
 </p>
 
+<p align="center">
+  <img src="assets/screenshots/screenshot-history.png" alt="Historial de navegación" width="40%">
+  <img src="assets/screenshots/screenshot-settings.png" alt="Ajustes de la aplicación" width="40%">
+</p>
+
 ## Lanzamientos y contribuciones
 
 Las versiones etiquetadas se publican en
