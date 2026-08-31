@@ -5,9 +5,10 @@
 #include "NavigationStore.hpp"
 #include "SessionHealthMonitor.hpp"
 #include "TransferUiController.hpp"
-#include "openscp/SftpTypes.hpp"
+#include "openscp/SessionOptions.hpp"
 
 #include <QAction>
+#include <QDir>
 #include <QFileSystemModel>
 #include <QLineEdit>
 #include <QMainWindow>
@@ -88,9 +89,9 @@ class MainWindow : public QMainWindow {
     void refreshRightRemotePanel(); // Refresh current remote folder (right)
     void showHistoryMenu();         // Show recent routes/servers
 
-    void connectSftp();
-    void disconnectSftp();
-    void completeDisconnectSftp(quint64 disconnectSeq, bool forced);
+    void connectRemote();
+    void disconnectRemote();
+    void completeDisconnectRemote(quint64 disconnectSeq, bool forced);
     void rightItemActivated(const QModelIndex &idx); // double click on remote
     void
     leftItemActivated(const QModelIndex &idx); // double click on local (left)
@@ -262,25 +263,25 @@ class MainWindow : public QMainWindow {
     defaultDownloadDirFromSettings(const class QSettings &settings);
 
     // Helpers for connecting and wiring up the remote UI
-    bool startSftpConnect(
+    bool startRemoteConnection(
         openscp::SessionOptions opt,
         std::optional<PendingSiteSaveRequest> saveRequest = std::nullopt);
     void startSavedSiteConnect(const SiteEntry &site);
     void persistActiveSitePaths();
-    bool validateSftpConnectStart(const openscp::SessionOptions &opt);
-    void initializeSftpConnectUiState(
+    bool validateConnectionStart(const openscp::SessionOptions &opt);
+    void initializeConnectionUiState(
         const std::shared_ptr<std::atomic<bool>> &cancelFlag);
-    void configureSftpConnectCallbacks(openscp::SessionOptions &opt);
-    void launchSftpConnectWorker(
+    void configureConnectionCallbacks(openscp::SessionOptions &opt);
+    void launchConnectionWorker(
         openscp::SessionOptions opt, const openscp::SessionOptions &uiOpt,
         std::optional<PendingSiteSaveRequest> saveRequest,
         const std::shared_ptr<std::atomic<bool>> &cancelFlag);
-    void finalizeSftpConnect(bool connectionOk, const QString &errorText,
-                             openscp::RemoteClient *connectedClient,
-                             openscp::RemoteClient *remoteControlClient,
-                             const openscp::SessionOptions &uiOpt,
-                             std::optional<PendingSiteSaveRequest> saveRequest,
-                             bool canceledByUser);
+    void finalizeConnection(bool connectionOk, const QString &errorText,
+                            openscp::RemoteClient *connectedClient,
+                            openscp::RemoteClient *remoteControlClient,
+                            const openscp::SessionOptions &uiOpt,
+                            std::optional<PendingSiteSaveRequest> saveRequest,
+                            bool canceledByUser);
     quint64 beginDisconnectFlow();
     void applyDisconnectLocalUiState();
     bool runDisconnectTransferCleanupAsync(quint64 disconnectSeq);
@@ -295,6 +296,9 @@ class MainWindow : public QMainWindow {
     };
     static QVector<LocalFsPair>
     toLocalFsPairs(const QVector<QPair<QString, QString>> &pairs);
+    void runLocalFsSelection(const QModelIndexList &rows,
+                             QFileSystemModel *sourceModel,
+                             const QDir &destination, bool deleteSource);
     void runLocalFsOperation(const QVector<LocalFsPair> &pairs,
                              bool deleteSource, int skippedCount = 0);
     struct RemoteDownloadSeed {
@@ -303,7 +307,8 @@ class MainWindow : public QMainWindow {
         bool isDir = false;
     };
     void runRemoteDownloadPrescan(const QVector<RemoteDownloadSeed> &seeds,
-                                  int initialSkipped, bool dragAndDrop);
+                                  int initialSkipped, bool dragAndDrop,
+                                  bool moveSources = false);
     void startLocalUploadDiscovery(
         const QVector<QPair<QString, QString>> &localRemoteRoots,
         bool moveSources, bool dragAndDrop = false);

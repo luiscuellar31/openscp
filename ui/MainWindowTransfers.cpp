@@ -104,7 +104,7 @@ QRect centeredQueueRect(QWidget *dialog, QWidget *mainWindow) {
 
 void MainWindow::runRemoteDownloadPrescan(
     const QVector<RemoteDownloadSeed> &seeds, int initialSkipped,
-    bool dragAndDrop) {
+    bool dragAndDrop, bool moveSources) {
     if (!rightIsRemote_ || !rightRemoteModel_ || !transferMgr_ || !remoteOps_ ||
         !remoteOps_->hasRequestedSession()) {
         UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
@@ -127,13 +127,15 @@ void MainWindow::runRemoteDownloadPrescan(
 
     TransferBatchOptions batchOptions;
     batchOptions.sessionKey = transferMgr_->sessionIdentity();
+    batchOptions.operation =
+        moveSources ? TransferOperation::Move : TransferOperation::Copy;
     batchOptions.conflictPolicy = TransferConflictPolicy::Ask;
     batchOptions.batchId = transferMgr_->createBatch(batchOptions);
 
     const bool needsDirectoryScan =
         std::any_of(seeds.cbegin(), seeds.cend(),
                     [](const RemoteDownloadSeed &seed) { return seed.isDir; });
-    if (!needsDirectoryScan) {
+    if (!needsDirectoryScan && !moveSources) {
         remoteScanInProgress_ = false;
         QVector<QPair<QString, QString>> queuedPairs;
         queuedPairs.reserve(seeds.size());
@@ -159,8 +161,14 @@ void MainWindow::runRemoteDownloadPrescan(
         QSet<RemoteOperationController::JobId> pending;
         TransferBatchOptions batchOptions;
         std::shared_ptr<std::atomic<bool>> cancelRequested;
+        QString remoteBase;
+        QStringList topRemoteDirectories;
+        QSet<RemoteOperationController::JobId> cleanupPending;
         bool dragAndDrop = false;
+        bool moveSources = false;
         bool canceled = false;
+        bool scanReported = false;
+        bool cleanupStarted = false;
         bool thresholdPrompted = false;
         bool thresholdPromptActive = false;
         bool backpressurePaused = false;
@@ -181,10 +189,13 @@ void MainWindow::runRemoteDownloadPrescan(
         QMetaObject::Connection tasksAddedConnection;
         QMetaObject::Connection tasksUpdatedConnection;
         QMetaObject::Connection tasksRemovedConnection;
+        QMetaObject::Connection cleanupConnection;
     };
     auto state = std::make_shared<ScanState>();
     state->batchOptions = batchOptions;
     state->dragAndDrop = dragAndDrop;
+    state->moveSources = moveSources;
+    state->remoteBase = rightRemoteModel_->rootPath();
     state->skippedInvalid = static_cast<quint64>(std::max(0, initialSkipped));
     state->cancelRequested = std::make_shared<std::atomic<bool>>(false);
     remoteScanCancelRequested_ = state->cancelRequested;
@@ -200,65 +211,129 @@ void MainWindow::runRemoteDownloadPrescan(
 
     auto finish = std::make_shared<std::function<void()>>();
     *finish = [this, state] {
-        if (!state->pending.isEmpty() || state->thresholdPromptActive) {
+        if (!state->pending.isEmpty() || state->thresholdPromptActive)
+            return;
+
+        if (!state->scanReported) {
+            state->scanReported = true;
+            QObject::disconnect(state->batchConnection);
+            QObject::disconnect(state->progressConnection);
+            QObject::disconnect(state->completionConnection);
+            remoteScanInProgress_ = false;
+            remoteScanCancelRequested_.reset();
+            if (remoteScanProgress_) {
+                remoteScanProgress_->hide();
+                remoteScanProgress_->deleteLater();
+                remoteScanProgress_.clear();
+            }
+
+            if (rightIsRemote_ && transferMgr_) {
+                if (state->canceled && !state->moveSources) {
+                    statusBar()->showMessage(tr("Remote scan canceled"), 4000);
+                } else {
+                    QString message =
+                        state->moveSources
+                            ? tr("Queued: %1 downloads (move)")
+                            : (state->dragAndDrop
+                                   ? tr("Queued: %1 downloads (DND)")
+                                   : tr("Queued: %1 downloads"));
+                    message = message.arg(state->enqueuedDownloads);
+                    if (state->enqueuedDirectories > 0) {
+                        message += QStringLiteral("  |  ") +
+                                   tr("Folders queued: %1")
+                                       .arg(state->enqueuedDirectories);
+                    }
+                    if (state->skippedInvalid > 0) {
+                        message += QStringLiteral("  |  ") +
+                                   tr("Skipped invalid: %1")
+                                       .arg(state->skippedInvalid);
+                    }
+                    if (state->listFailures > 0) {
+                        message += QStringLiteral("  |  ") +
+                                   tr("Folders not listed: %1")
+                                       .arg(state->listFailures);
+                    }
+                    if (state->unknownSizes > 0) {
+                        message +=
+                            QStringLiteral("  |  ") +
+                            tr("Unknown sizes: %1").arg(state->unknownSizes);
+                    }
+                    if (state->skippedSymlinks > 0) {
+                        message += QStringLiteral("  |  ") +
+                                   tr("Symbolic links skipped: %1")
+                                       .arg(state->skippedSymlinks);
+                    }
+                    if (state->depthLimits > 0) {
+                        message += QStringLiteral("  |  ") +
+                                   tr("Depth limits reached: %1")
+                                       .arg(state->depthLimits);
+                    }
+                    if (state->canceled) {
+                        message += QStringLiteral("  |  ") + tr("Canceled");
+                    }
+                    if (state->listFailures > 0 &&
+                        !state->lastError.isEmpty()) {
+                        message += QStringLiteral("\n") + tr("Last error: ") +
+                                   state->lastError;
+                    }
+                    statusBar()->showMessage(message, 6000);
+                    if (state->enqueuedDownloads > 0 ||
+                        state->enqueuedDirectories > 0) {
+                        maybeShowTransferQueue();
+                    }
+                }
+            }
+        }
+
+        if (!state->moveSources || state->canceled || !transferMgr_ ||
+            !remoteOps_) {
+            QObject::disconnect(state->tasksAddedConnection);
+            QObject::disconnect(state->tasksUpdatedConnection);
+            QObject::disconnect(state->tasksRemovedConnection);
             return;
         }
-        QObject::disconnect(state->batchConnection);
-        QObject::disconnect(state->progressConnection);
-        QObject::disconnect(state->completionConnection);
+        if (!state->pendingTransferTasks.isEmpty() || state->cleanupStarted)
+            return;
+
+        state->cleanupStarted = true;
         QObject::disconnect(state->tasksAddedConnection);
         QObject::disconnect(state->tasksUpdatedConnection);
         QObject::disconnect(state->tasksRemovedConnection);
-        remoteScanInProgress_ = false;
-        remoteScanCancelRequested_.reset();
-        if (remoteScanProgress_) {
-            remoteScanProgress_->hide();
-            remoteScanProgress_->deleteLater();
-            remoteScanProgress_.clear();
-        }
-
-        if (!rightIsRemote_ || !transferMgr_)
-            return;
-        if (state->canceled) {
-            statusBar()->showMessage(tr("Remote scan canceled"), 4000);
+        if (state->topRemoteDirectories.isEmpty()) {
+            if (rightIsRemote_ && rightRemoteModel_)
+                requestRemoteListing(state->remoteBase, true);
             return;
         }
 
-        QString message = state->dragAndDrop ? tr("Queued: %1 downloads (DND)")
-                                             : tr("Queued: %1 downloads");
-        message = message.arg(state->enqueuedDownloads);
-        if (state->enqueuedDirectories > 0) {
-            message += QStringLiteral("  |  ") +
-                       tr("Folders queued: %1").arg(state->enqueuedDirectories);
+        state->cleanupConnection = connect(
+            remoteOps_, &RemoteOperationController::mutationCompleted, this,
+            [this,
+             state](const RemoteOperationController::MutationResult &result) {
+                if (!state->cleanupPending.remove(result.result.job.id) ||
+                    !state->cleanupPending.isEmpty()) {
+                    return;
+                }
+                QObject::disconnect(state->cleanupConnection);
+                if (rightIsRemote_ && rightRemoteModel_)
+                    requestRemoteListing(state->remoteBase, true);
+            });
+        for (const QString &remoteDirectory : state->topRemoteDirectories) {
+            RemoteOperationController::DeleteRequest request;
+            request.path = remoteDirectory;
+            request.kind = RemoteOperationController::DeleteKind::Directory;
+            request.recursive = true;
+            request.traversal.includeHidden = true;
+            request.traversal.skipSymlinks = true;
+            request.traversal.maxDepth = 32;
+            request.emptyDirectoriesOnly = true;
+            const auto jobId = remoteOps_->submit(request);
+            if (jobId != 0)
+                state->cleanupPending.insert(jobId);
         }
-        if (state->skippedInvalid > 0) {
-            message += QStringLiteral("  |  ") +
-                       tr("Skipped invalid: %1").arg(state->skippedInvalid);
-        }
-        if (state->listFailures > 0) {
-            message += QStringLiteral("  |  ") +
-                       tr("Folders not listed: %1").arg(state->listFailures);
-        }
-        if (state->unknownSizes > 0) {
-            message += QStringLiteral("  |  ") +
-                       tr("Unknown sizes: %1").arg(state->unknownSizes);
-        }
-        if (state->skippedSymlinks > 0) {
-            message +=
-                QStringLiteral("  |  ") +
-                tr("Symbolic links skipped: %1").arg(state->skippedSymlinks);
-        }
-        if (state->depthLimits > 0) {
-            message += QStringLiteral("  |  ") +
-                       tr("Depth limits reached: %1").arg(state->depthLimits);
-        }
-        if (state->listFailures > 0 && !state->lastError.isEmpty()) {
-            message +=
-                QStringLiteral("\n") + tr("Last error: ") + state->lastError;
-        }
-        statusBar()->showMessage(message, 6000);
-        if (state->enqueuedDownloads > 0 || state->enqueuedDirectories > 0) {
-            maybeShowTransferQueue();
+        if (state->cleanupPending.isEmpty()) {
+            QObject::disconnect(state->cleanupConnection);
+            if (rightIsRemote_ && rightRemoteModel_)
+                requestRemoteListing(state->remoteBase, true);
         }
     };
 
@@ -293,7 +368,7 @@ void MainWindow::runRemoteDownloadPrescan(
                 });
     state->tasksUpdatedConnection =
         connect(transferMgr_, &TransferManager::tasksUpdated, this,
-                [this, state,
+                [this, state, finish,
                  resumeAfterBackpressure](const QVector<quint64> &taskIds) {
                     if (!transferMgr_)
                         return;
@@ -315,14 +390,17 @@ void MainWindow::runRemoteDownloadPrescan(
                             state->pendingTransferTasks.remove(taskId);
                     }
                     (*resumeAfterBackpressure)();
+                    (*finish)();
                 });
-    state->tasksRemovedConnection = connect(
-        transferMgr_, &TransferManager::tasksRemoved, this,
-        [state, resumeAfterBackpressure](const QVector<quint64> &taskIds) {
-            for (const quint64 taskId : taskIds)
-                state->pendingTransferTasks.remove(taskId);
-            (*resumeAfterBackpressure)();
-        });
+    state->tasksRemovedConnection =
+        connect(transferMgr_, &TransferManager::tasksRemoved, this,
+                [state, finish,
+                 resumeAfterBackpressure](const QVector<quint64> &taskIds) {
+                    for (const quint64 taskId : taskIds)
+                        state->pendingTransferTasks.remove(taskId);
+                    (*resumeAfterBackpressure)();
+                    (*finish)();
+                });
 
     state->batchConnection = connect(
         remoteOps_, &RemoteOperationController::entriesBatchReady, this,
@@ -374,7 +452,7 @@ void MainWindow::runRemoteDownloadPrescan(
             constexpr quint64 kLargeTreeItems = 100000;
             constexpr quint64 kLargeTreeBytes =
                 quint64(100) * 1024 * 1024 * 1024;
-            if (!state->thresholdPrompted &&
+            if (!state->moveSources && !state->thresholdPrompted &&
                 (state->discoveredItems > kLargeTreeItems ||
                  state->knownBytes > kLargeTreeBytes)) {
                 state->thresholdPrompted = true;
@@ -493,6 +571,8 @@ void MainWindow::runRemoteDownloadPrescan(
         }
         transferMgr_->enqueueLocalDirectory(seed.localPath, batchOptions);
         ++state->enqueuedDirectories;
+        if (moveSources)
+            state->topRemoteDirectories.push_back(seed.remotePath);
         RemoteOperationController::TraverseRequest request;
         request.rootPath = seed.remotePath;
         request.includeDirectories = true;

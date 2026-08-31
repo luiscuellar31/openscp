@@ -1,6 +1,6 @@
 // Dialog to capture remote connection options (protocol/host/auth/security).
 #pragma once
-#include "openscp/SftpTypes.hpp"
+#include "openscp/SessionOptions.hpp"
 
 #include <QDialog>
 #include <QSize>

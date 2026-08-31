@@ -345,10 +345,10 @@ void MainWindow::openConnectDialogWithPreset(
         // do it.
         saveRequest.reset();
     }
-    startSftpConnect(sessionOptions, saveRequest);
+    startRemoteConnection(sessionOptions, saveRequest);
 }
 
-void MainWindow::connectSftp() {
+void MainWindow::connectRemote() {
     openConnectDialogWithPreset(std::nullopt);
 }
 
@@ -461,7 +461,7 @@ void MainWindow::scheduleDisconnectWatchdog(quint64 disconnectSeq) {
             tr("Disconnect timeout reached; forcing local mode while cleanup "
                "continues"),
             5000);
-        completeDisconnectSftp(disconnectSeq, true);
+        completeDisconnectRemote(disconnectSeq, true);
     });
 }
 
@@ -502,7 +502,7 @@ bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
                             tr("Background transfer cleanup finished"), 3000);
                     }
                 }
-                self->completeDisconnectSftp(disconnectSeq, false);
+                self->completeDisconnectRemote(disconnectSeq, false);
                 if (!self->sessionController_->isDisconnecting() &&
                     !self->transferCleanupInProgress_ &&
                     self->pendingCloseAfterDisconnect_) {
@@ -518,7 +518,7 @@ bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
     return true;
 }
 
-void MainWindow::disconnectSftp() {
+void MainWindow::disconnectRemote() {
     if (sessionController_->isDisconnecting())
         return;
 
@@ -567,7 +567,7 @@ void MainWindow::disconnectSftp() {
 
     transferCleanupInProgress_ = false;
     transferCleanupStartedAtMs_ = 0;
-    completeDisconnectSftp(disconnectSeq, false);
+    completeDisconnectRemote(disconnectSeq, false);
 }
 
 void MainWindow::persistActiveSitePaths() {
@@ -623,7 +623,7 @@ void MainWindow::persistActiveSitePaths() {
     }
 }
 
-void MainWindow::completeDisconnectSftp(quint64 disconnectSeq, bool forced) {
+void MainWindow::completeDisconnectRemote(quint64 disconnectSeq, bool forced) {
     if (!sessionController_->isCurrentDisconnect(disconnectSeq))
         return;
     activeSavedSiteContext_.reset();
@@ -934,7 +934,7 @@ void MainWindow::onTofuFinished(int dialogResult) {
     (void)hostKeyPromptCoordinator_.resolve(accept);
 }
 
-bool MainWindow::validateSftpConnectStart(const openscp::SessionOptions &opt) {
+bool MainWindow::validateConnectionStart(const openscp::SessionOptions &opt) {
     if (transferCleanupInProgress_) {
         const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
         const int elapsedSec =
@@ -1015,7 +1015,7 @@ bool MainWindow::validateSftpConnectStart(const openscp::SessionOptions &opt) {
     return true;
 }
 
-void MainWindow::initializeSftpConnectUiState(
+void MainWindow::initializeConnectionUiState(
     const std::shared_ptr<std::atomic<bool>> &cancelFlag) {
     if (!sessionController_->beginConnection(cancelFlag))
         return;
@@ -1042,7 +1042,7 @@ void MainWindow::initializeSftpConnectUiState(
     connectProgressDimmed_ = false;
 }
 
-void MainWindow::configureSftpConnectCallbacks(openscp::SessionOptions &opt) {
+void MainWindow::configureConnectionCallbacks(openscp::SessionOptions &opt) {
     QPointer<MainWindow> self(this);
     // Inject host key confirmation (TOFU) via UI
     opt.hostkey_confirm_cb = [self](const std::string &host, std::uint16_t port,
@@ -1173,7 +1173,7 @@ void MainWindow::configureSftpConnectCallbacks(openscp::SessionOptions &opt) {
     };
 }
 
-void MainWindow::launchSftpConnectWorker(
+void MainWindow::launchConnectionWorker(
     openscp::SessionOptions opt, const openscp::SessionOptions &uiOpt,
     std::optional<PendingSiteSaveRequest> saveRequest,
     const std::shared_ptr<std::atomic<bool>> &cancelFlag) {
@@ -1255,7 +1255,7 @@ void MainWindow::launchSftpConnectWorker(
                     }
                     return;
                 }
-                self->finalizeSftpConnect(
+                self->finalizeConnection(
                     connectionSucceeded, connectionErrorText, connectedClient,
                     remoteControlClient, uiOpt, saveRequest, canceledByUser);
             },
@@ -1276,28 +1276,28 @@ void MainWindow::startSavedSiteConnect(const SiteEntry &site) {
                                     : site.initialRemotePath;
     context.rememberLastPaths = site.rememberLastPaths;
     pendingSavedSiteContext_ = std::move(context);
-    if (!startSftpConnect(site.opt))
+    if (!startRemoteConnection(site.opt))
         pendingSavedSiteContext_.reset();
 }
 
-bool MainWindow::startSftpConnect(
+bool MainWindow::startRemoteConnection(
     openscp::SessionOptions opt,
     std::optional<PendingSiteSaveRequest> saveRequest) {
-    if (!validateSftpConnectStart(opt))
+    if (!validateConnectionStart(opt))
         return false;
 
     const openscp::SessionOptions uiOpt = opt;
     auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
-    initializeSftpConnectUiState(cancelFlag);
+    initializeConnectionUiState(cancelFlag);
 
     if (openscp::capabilitiesForProtocol(opt.protocol).supports_known_hosts)
-        configureSftpConnectCallbacks(opt);
-    launchSftpConnectWorker(std::move(opt), uiOpt, std::move(saveRequest),
-                            cancelFlag);
+        configureConnectionCallbacks(opt);
+    launchConnectionWorker(std::move(opt), uiOpt, std::move(saveRequest),
+                           cancelFlag);
     return true;
 }
 
-void MainWindow::finalizeSftpConnect(
+void MainWindow::finalizeConnection(
     bool connectionOk, const QString &errorText,
     openscp::RemoteClient *connectedClient,
     openscp::RemoteClient *remoteControlClient,
@@ -1491,6 +1491,47 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     const openscp::ProtocolCapabilities caps =
         openscp::capabilitiesForProtocol(opt.protocol);
     const bool transferOnlyMode = !caps.can_list;
+    const auto applyConnectedActions = [this, &caps](bool browsable) {
+        const auto enable = [](QAction *action, bool enabled) {
+            if (action)
+                action->setEnabled(enabled);
+        };
+        enable(actConnect_, false);
+        enable(actDisconnect_, true);
+        enable(actDownloadF7_, true);
+        enable(actUploadRight_, true);
+        enable(actRefreshRight_, browsable);
+        enable(actOpenTerminalRight_, true);
+        enable(actSearchRight_, browsable);
+        enable(actSync_, browsable && caps.can_upload && caps.can_download);
+        enable(actNewDirRight_, browsable);
+        enable(actNewFileRight_, browsable);
+        enable(actRenameRight_, browsable);
+        enable(actDeleteRight_, browsable);
+        if (!browsable) {
+            enable(actMoveRight_, false);
+            enable(actMoveRightTb_, false);
+            enable(actCopyRightTb_, false);
+        }
+        if (actChooseRight_) {
+            actChooseRight_->setIcon(QIcon(
+                QLatin1String(":/assets/icons/action-open-folder-remote.svg")));
+            actChooseRight_->setEnabled(false);
+            actChooseRight_->setToolTip(tr("Not available in remote mode"));
+        }
+    };
+    const auto finishConnectedUi = [this, &opt] {
+        const QString activeProtocol = protocolDisplayLabel(opt.protocol);
+        startConnectionSessionIndicators(activeProtocol);
+        statusBar()->showMessage(
+            tr("Connected (%1) to %2")
+                .arg(activeProtocol, QString::fromStdString(opt.host)),
+            4000);
+        addRecentServer(opt);
+        setWindowTitle(tr("OpenSCP — local/remote (%1)").arg(activeProtocol));
+        updateHostPolicyRiskBanner();
+        sessionHealthMonitor_.start();
+    };
     // Establish navigation identity before the initial listing emits history
     // updates or builds scoped favorite menus.
     sessionController_->setOptions(opt);
@@ -1544,50 +1585,8 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
             transferMgr_->setSessionOptions(opt);
         }
         requestRemoteListing(rightPath_->text(), false, true);
-        if (actConnect_)
-            actConnect_->setEnabled(false);
-        if (actDisconnect_)
-            actDisconnect_->setEnabled(true);
-        if (actDownloadF7_)
-            actDownloadF7_->setEnabled(true);
-        if (actUploadRight_)
-            actUploadRight_->setEnabled(true);
-        if (actRefreshRight_)
-            actRefreshRight_->setEnabled(true);
-        if (actOpenTerminalRight_)
-            actOpenTerminalRight_->setEnabled(true);
-        if (actSearchRight_)
-            actSearchRight_->setEnabled(true);
-        if (actSync_)
-            actSync_->setEnabled(caps.can_list && caps.can_upload &&
-                                 caps.can_download);
-        if (actNewDirRight_)
-            actNewDirRight_->setEnabled(true);
-        if (actNewFileRight_)
-            actNewFileRight_->setEnabled(true);
-        if (actRenameRight_)
-            actRenameRight_->setEnabled(true);
-        if (actDeleteRight_)
-            actDeleteRight_->setEnabled(true);
-        if (actChooseRight_) {
-            actChooseRight_->setIcon(QIcon(
-                QLatin1String(":/assets/icons/action-open-folder-remote.svg")));
-            // Opening the system file explorer on a remote host is not
-            // supported cross‑platform. Disable this action in remote mode to
-            // avoid confusion.
-            actChooseRight_->setEnabled(false);
-            actChooseRight_->setToolTip(tr("Not available in remote mode"));
-        }
-        const QString activeProtocol = protocolDisplayLabel(opt.protocol);
-        startConnectionSessionIndicators(activeProtocol);
-        statusBar()->showMessage(
-            tr("Connected (%1) to %2")
-                .arg(activeProtocol, QString::fromStdString(opt.host)),
-            4000);
-        addRecentServer(opt);
-        setWindowTitle(tr("OpenSCP — local/remote (%1)").arg(activeProtocol));
-        updateHostPolicyRiskBanner();
-        sessionHealthMonitor_.start();
+        applyConnectedActions(true);
+        finishConnectedUi();
         updateRemoteMutationCapability();
         updateDeleteShortcutEnables();
         return;
@@ -1607,51 +1606,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         transferMgr_->setClient(sessionController_->client());
         transferMgr_->setSessionOptions(opt);
     }
-    if (actConnect_)
-        actConnect_->setEnabled(false);
-    if (actDisconnect_)
-        actDisconnect_->setEnabled(true);
-    if (actDownloadF7_)
-        actDownloadF7_->setEnabled(true);
-    if (actUploadRight_)
-        actUploadRight_->setEnabled(true);
-    if (actRefreshRight_)
-        actRefreshRight_->setEnabled(false);
-    if (actOpenTerminalRight_)
-        actOpenTerminalRight_->setEnabled(true);
-    if (actSearchRight_)
-        actSearchRight_->setEnabled(false);
-    if (actSync_)
-        actSync_->setEnabled(false);
-    if (actNewDirRight_)
-        actNewDirRight_->setEnabled(false);
-    if (actNewFileRight_)
-        actNewFileRight_->setEnabled(false);
-    if (actRenameRight_)
-        actRenameRight_->setEnabled(false);
-    if (actDeleteRight_)
-        actDeleteRight_->setEnabled(false);
-    if (actMoveRight_)
-        actMoveRight_->setEnabled(false);
-    if (actMoveRightTb_)
-        actMoveRightTb_->setEnabled(false);
-    if (actCopyRightTb_)
-        actCopyRightTb_->setEnabled(false);
-    if (actChooseRight_) {
-        actChooseRight_->setIcon(QIcon(
-            QLatin1String(":/assets/icons/action-open-folder-remote.svg")));
-        actChooseRight_->setEnabled(false);
-        actChooseRight_->setToolTip(tr("Not available in remote mode"));
-    }
-    const QString activeProtocol = protocolDisplayLabel(opt.protocol);
-    startConnectionSessionIndicators(activeProtocol);
-    statusBar()->showMessage(
-        tr("Connected (%1) to %2")
-            .arg(activeProtocol, QString::fromStdString(opt.host)),
-        4000);
-    addRecentServer(opt);
-    setWindowTitle(tr("OpenSCP — local/remote (%1)").arg(activeProtocol));
-    updateHostPolicyRiskBanner();
-    sessionHealthMonitor_.start();
+    applyConnectedActions(false);
+    finishConnectedUi();
     updateDeleteShortcutEnables();
 }

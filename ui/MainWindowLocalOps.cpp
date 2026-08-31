@@ -237,6 +237,21 @@ MainWindow::toLocalFsPairs(const QVector<QPair<QString, QString>> &pairs) {
     return localFsPairs;
 }
 
+void MainWindow::runLocalFsSelection(const QModelIndexList &rows,
+                                     QFileSystemModel *sourceModel,
+                                     const QDir &destination,
+                                     bool deleteSource) {
+    QVector<QFileInfo> sources;
+    sources.reserve(rows.size());
+    for (const QModelIndex &index : rows)
+        sources.push_back(sourceModel->fileInfo(index));
+
+    int skipped = 0;
+    const auto selectedPairs = buildLocalDestinationPairsWithOverwritePrompt(
+        this, sources, destination, &skipped);
+    runLocalFsOperation(toLocalFsPairs(selectedPairs), deleteSource, skipped);
+}
+
 void MainWindow::chooseLeftDir() {
     const QString dir = QFileDialog::getExistingDirectory(
         this, tr("Select left folder"), leftPath_->text());
@@ -466,17 +481,7 @@ void MainWindow::copyLeftToRight() {
         return;
     }
 
-    QVector<QFileInfo> sources;
-    sources.reserve(rows.size());
-    for (const QModelIndex &idx : rows)
-        sources.push_back(leftModel_->fileInfo(idx));
-
-    int skipped = 0;
-    const QVector<QPair<QString, QString>> selectedPairs =
-        buildLocalDestinationPairsWithOverwritePrompt(this, sources, dstDir,
-                                                      &skipped);
-    const QVector<LocalFsPair> pairs = toLocalFsPairs(selectedPairs);
-    runLocalFsOperation(pairs, false, skipped);
+    runLocalFsSelection(rows, leftModel_, dstDir, false);
 }
 
 void MainWindow::moveLeftToRight() {
@@ -535,17 +540,7 @@ void MainWindow::moveLeftToRight() {
             tr("This will copy and then delete the source.\nContinue?")) !=
         QMessageBox::Yes)
         return;
-    QVector<QFileInfo> sources;
-    sources.reserve(rows.size());
-    for (const QModelIndex &idx : rows)
-        sources.push_back(leftModel_->fileInfo(idx));
-
-    int skipped = 0;
-    const QVector<QPair<QString, QString>> selectedPairs =
-        buildLocalDestinationPairsWithOverwritePrompt(this, sources, dstDir,
-                                                      &skipped);
-    const QVector<LocalFsPair> pairs = toLocalFsPairs(selectedPairs);
-    runLocalFsOperation(pairs, true, skipped);
+    runLocalFsSelection(rows, leftModel_, dstDir, true);
 }
 
 void MainWindow::deleteFromLeft() {

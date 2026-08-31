@@ -1,7 +1,7 @@
 // Stable, secret-free identities for server-scoped navigation state.
 #pragma once
 
-#include "openscp/SftpTypes.hpp"
+#include "openscp/SessionOptions.hpp"
 
 #include <QString>
 

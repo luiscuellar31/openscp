@@ -606,12 +606,12 @@ void MainWindow::initializeMainToolbar() {
     rightPaneBar_->setIconSize(QSize(subIconPx, subIconPx));
     // Copy/move/delete actions now live in the left sub‑toolbar
     actConnect_ =
-        mainToolbar->addAction(tr("Connect"), this, &MainWindow::connectSftp);
+        mainToolbar->addAction(tr("Connect"), this, &MainWindow::connectRemote);
     actConnect_->setIcon(mainWindowActionIcon("action-connect.svg"));
     actConnect_->setToolTip(actConnect_->text());
     mainToolbar->addSeparator();
     actDisconnect_ = mainToolbar->addAction(tr("Disconnect"), this,
-                                            &MainWindow::disconnectSftp);
+                                            &MainWindow::disconnectRemote);
     actDisconnect_->setIcon(mainWindowActionIcon("action-disconnect.svg"));
     actDisconnect_->setToolTip(actDisconnect_->text());
     actDisconnect_->setEnabled(false);
@@ -886,7 +886,7 @@ void MainWindow::initializeRuntimeState() {
                    "operations.\n%2")
                     .arg(context.reason,
                          shortRemoteError(error, tr("Transport error."))));
-            disconnectSftp();
+            disconnectRemote();
         };
     sessionHealthMonitor_.setCallbacks(std::move(healthCallbacks));
 
@@ -1283,7 +1283,7 @@ void MainWindow::closeEvent(QCloseEvent *e) {
     }
     if (rightIsRemote_) {
         pendingCloseAfterDisconnect_ = true;
-        disconnectSftp();
+        disconnectRemote();
         e->ignore();
         return;
     }

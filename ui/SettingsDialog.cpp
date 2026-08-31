@@ -3,7 +3,7 @@
 
 #include "AppSettings.hpp"
 #include "UiAlerts.hpp"
-#include "openscp/SftpTypes.hpp"
+#include "openscp/Protocol.hpp"
 
 #include <QCheckBox>
 #include <QComboBox>

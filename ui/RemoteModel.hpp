@@ -1,6 +1,6 @@
 // Read-only, data-only model for remote entries.
 #pragma once
-#include "openscp/SftpTypes.hpp"
+#include "openscp/RemoteFileInfo.hpp"
 
 #include <QAbstractTableModel>
 #include <QCache>

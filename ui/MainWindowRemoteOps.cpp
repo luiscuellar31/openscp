@@ -420,18 +420,7 @@ void MainWindow::copyRightToLeft() {
     }
 
     if (!rightIsRemote_) {
-        // Local -> Local copy (right to left)
-        QVector<QFileInfo> sources;
-        sources.reserve(rows.size());
-        for (const QModelIndex &idx : rows)
-            sources.push_back(rightLocalModel_->fileInfo(idx));
-
-        int skipped = 0;
-        const QVector<QPair<QString, QString>> selectedPairs =
-            buildLocalDestinationPairsWithOverwritePrompt(this, sources, dst,
-                                                          &skipped);
-        const QVector<LocalFsPair> pairs = toLocalFsPairs(selectedPairs);
-        runLocalFsOperation(pairs, false, skipped);
+        runLocalFsSelection(rows, rightLocalModel_, dst, false);
         return;
     }
 
@@ -478,285 +467,31 @@ void MainWindow::moveRightToLeft() {
         return;
     }
 
+    const auto rows = selectionModel->selectedRows(kNameColumn);
     if (!rightIsRemote_) {
-        // Local -> Local: move (copy then delete)
-        const auto rows = selectionModel->selectedRows(kNameColumn);
-        QVector<QFileInfo> sources;
-        sources.reserve(rows.size());
-        for (const QModelIndex &idx : rows)
-            sources.push_back(rightLocalModel_->fileInfo(idx));
-
-        int skipped = 0;
-        const QVector<QPair<QString, QString>> selectedPairs =
-            buildLocalDestinationPairsWithOverwritePrompt(this, sources, dst,
-                                                          &skipped);
-        const QVector<LocalFsPair> pairs = toLocalFsPairs(selectedPairs);
-        runLocalFsOperation(pairs, true, skipped);
+        runLocalFsSelection(rows, rightLocalModel_, dst, true);
         return;
     }
-
-    // Remote -> Local: discover on the serialized control worker, then enqueue
-    // real move tasks. Source deletion is a persisted transfer phase.
-    if (!remoteOps_ || !remoteOps_->hasRequestedSession() ||
-        !rightRemoteModel_ || !transferMgr_) {
+    if (!rightRemoteModel_) {
         UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
-    const auto rows = selectionModel->selectedRows(kNameColumn);
+
+    int skippedInvalidCount = 0;
+    QVector<RemoteDownloadSeed> seeds;
+    seeds.reserve(rows.size());
     const QString remoteBase = rightRemoteModel_->rootPath();
-    TransferBatchOptions batchOptions;
-    batchOptions.sessionKey = transferMgr_->sessionIdentity();
-    batchOptions.operation = TransferOperation::Move;
-    batchOptions.conflictPolicy = TransferConflictPolicy::Ask;
-    batchOptions.batchId = transferMgr_->createBatch(batchOptions);
-
-    struct MovePreparationState {
-        QHash<RemoteOperationController::JobId, QString> localRoots;
-        QSet<RemoteOperationController::JobId> pending;
-        TransferBatchOptions batchOptions;
-        QString remoteBase;
-        QStringList topRemoteDirectories;
-        QSet<RemoteOperationController::JobId> cleanupPending;
-        int enqueuedFiles = 0;
-        int enqueuedDirectories = 0;
-        int skippedInvalid = 0;
-        quint64 scanFailures = 0;
-        bool canceled = false;
-        bool scanFinished = false;
-        bool cleanupStarted = false;
-        QString lastError;
-        QPointer<QProgressDialog> progress;
-        QMetaObject::Connection batchConnection;
-        QMetaObject::Connection completionConnection;
-        QMetaObject::Connection progressConnection;
-        QMetaObject::Connection transferConnection;
-        QMetaObject::Connection cleanupConnection;
-    };
-    auto state = std::make_shared<MovePreparationState>();
-    state->batchOptions = batchOptions;
-    state->remoteBase = remoteBase;
-
-    auto maybeStartCleanup = std::make_shared<std::function<void()>>();
-    *maybeStartCleanup = [this, state] {
-        if (!state->scanFinished || state->cleanupStarted || state->canceled ||
-            !transferMgr_ || !remoteOps_) {
-            if (state->scanFinished && state->canceled)
-                QObject::disconnect(state->transferConnection);
-            return;
-        }
-        if (!transferMgr_->isBatchTerminal(state->batchOptions.batchId))
-            return;
-
-        state->cleanupStarted = true;
-        QObject::disconnect(state->transferConnection);
-        if (state->topRemoteDirectories.isEmpty()) {
-            if (rightIsRemote_ && rightRemoteModel_)
-                requestRemoteListing(state->remoteBase, true);
-            return;
-        }
-
-        state->cleanupConnection = connect(
-            remoteOps_, &RemoteOperationController::mutationCompleted, this,
-            [this,
-             state](const RemoteOperationController::MutationResult &result) {
-                if (!state->cleanupPending.remove(result.result.job.id))
-                    return;
-                if (!state->cleanupPending.isEmpty())
-                    return;
-                QObject::disconnect(state->cleanupConnection);
-                if (rightIsRemote_ && rightRemoteModel_)
-                    requestRemoteListing(state->remoteBase, true);
-            });
-        for (const QString &remoteDirectory : state->topRemoteDirectories) {
-            RemoteOperationController::DeleteRequest request;
-            request.path = remoteDirectory;
-            request.kind = RemoteOperationController::DeleteKind::Directory;
-            request.recursive = true;
-            request.traversal.includeHidden = true;
-            request.traversal.skipSymlinks = true;
-            request.traversal.maxDepth = 32;
-            request.emptyDirectoriesOnly = true;
-            const auto jobId = remoteOps_->submit(request);
-            if (jobId != 0)
-                state->cleanupPending.insert(jobId);
-        }
-        if (state->cleanupPending.isEmpty()) {
-            QObject::disconnect(state->cleanupConnection);
-            if (rightIsRemote_ && rightRemoteModel_)
-                requestRemoteListing(state->remoteBase, true);
-        }
-    };
-    state->transferConnection =
-        connect(transferMgr_, &TransferManager::tasksUpdated, this,
-                [maybeStartCleanup](const QVector<quint64> &) {
-                    (*maybeStartCleanup)();
-                });
-
-    state->progress = new QProgressDialog(tr("Preparing remote move…"),
-                                          tr("Cancel"), 0, 0, this);
-    state->progress->setWindowTitle(tr("Preparing queue"));
-    state->progress->setWindowModality(Qt::NonModal);
-    state->progress->setMinimumDuration(0);
-    state->progress->setAutoClose(false);
-
-    state->batchConnection = connect(
-        remoteOps_, &RemoteOperationController::entriesBatchReady, this,
-        [this, state](const RemoteOperationController::EntryBatch &batch) {
-            if (!state->pending.contains(batch.job.id) || !transferMgr_)
-                return;
-            const QString localRoot = state->localRoots.value(batch.job.id);
-            for (const auto &entry : batch.entries) {
-                bool valid = !entry.relativePath.isEmpty();
-                const QStringList parts = entry.relativePath.split(
-                    QLatin1Char('/'), Qt::SkipEmptyParts);
-                for (const QString &part : parts) {
-                    QString why;
-                    if (!isValidEntryName(part, &why)) {
-                        valid = false;
-                        break;
-                    }
-                }
-                if (!valid) {
-                    ++state->skippedInvalid;
-                    continue;
-                }
-                const QString localPath =
-                    QDir(localRoot).filePath(entry.relativePath);
-                if (entry.info.is_dir) {
-                    transferMgr_->enqueueLocalDirectory(localPath,
-                                                        state->batchOptions);
-                    ++state->enqueuedDirectories;
-                    continue;
-                }
-                transferMgr_->enqueueDownload(entry.path, localPath,
-                                              state->batchOptions);
-                ++state->enqueuedFiles;
-            }
-        });
-    state->progressConnection = connect(
-        remoteOps_, &RemoteOperationController::jobProgress, this,
-        [state](const RemoteOperationController::Progress &progress) {
-            if (!state->pending.contains(progress.job.id) || !state->progress) {
-                return;
-            }
-            state->progress->setLabelText(
-                QCoreApplication::translate(
-                    "MainWindow", "Scanning %1\nFound: %2  |  Queued: %3")
-                    .arg(progress.currentPath)
-                    .arg(progress.visitedEntries)
-                    .arg(state->enqueuedFiles));
-        });
-    state->completionConnection = connect(
-        remoteOps_, &RemoteOperationController::jobFinished, this,
-        [this, state, maybeStartCleanup](
-            const RemoteOperationController::Completion &completion) {
-            if (!state->pending.remove(completion.result.job.id))
-                return;
-            state->scanFailures += completion.failedEntries;
-            if (completion.result.outcome ==
-                RemoteOperationController::Outcome::Canceled) {
-                state->canceled = true;
-            } else if (completion.result.outcome !=
-                       RemoteOperationController::Outcome::Succeeded) {
-                ++state->scanFailures;
-            }
-            if (!completion.result.error.isEmpty())
-                state->lastError = completion.result.error;
-            if (!state->pending.isEmpty())
-                return;
-            state->scanFinished = true;
-
-            QObject::disconnect(state->batchConnection);
-            QObject::disconnect(state->completionConnection);
-            QObject::disconnect(state->progressConnection);
-            if (state->progress) {
-                state->progress->hide();
-                state->progress->deleteLater();
-                state->progress.clear();
-            }
-            if (!rightIsRemote_)
-                return;
-            QString statusMessage =
-                tr("Queued: %1 downloads (move)").arg(state->enqueuedFiles);
-            if (state->enqueuedDirectories > 0) {
-                statusMessage +=
-                    QStringLiteral("  |  ") +
-                    tr("Folders queued: %1").arg(state->enqueuedDirectories);
-            }
-            if (state->skippedInvalid > 0) {
-                statusMessage +=
-                    QStringLiteral("  |  ") +
-                    tr("Skipped invalid: %1").arg(state->skippedInvalid);
-            }
-            if (state->scanFailures > 0) {
-                statusMessage +=
-                    QStringLiteral("  |  ") +
-                    tr("Folders not listed: %1").arg(state->scanFailures);
-            }
-            if (state->canceled)
-                statusMessage += QStringLiteral("  |  ") + tr("Canceled");
-            statusBar()->showMessage(statusMessage, 6000);
-            if (state->enqueuedFiles > 0 || state->enqueuedDirectories > 0) {
-                maybeShowTransferQueue();
-            }
-            (*maybeStartCleanup)();
-        });
-    connect(state->progress, &QProgressDialog::canceled, this, [this, state] {
-        state->canceled = true;
-        if (remoteOps_) {
-            const auto pending = state->pending;
-            for (const auto jobId : pending)
-                remoteOps_->cancel(jobId);
-        }
-        if (transferMgr_)
-            transferMgr_->cancelBatch(state->batchOptions.batchId);
-    });
-
     for (const QModelIndex &index : rows) {
         const QString name = rightRemoteModel_->nameAt(index);
         QString why;
         if (!isValidEntryName(name, &why)) {
-            ++state->skippedInvalid;
+            ++skippedInvalidCount;
             continue;
         }
-        const QString remotePath = joinRemotePath(remoteBase, name);
-        const QString localPath = dst.filePath(name);
-        if (!rightRemoteModel_->isDir(index)) {
-            transferMgr_->enqueueDownload(remotePath, localPath, batchOptions);
-            ++state->enqueuedFiles;
-            continue;
-        }
-
-        transferMgr_->enqueueLocalDirectory(localPath, batchOptions);
-        ++state->enqueuedDirectories;
-        state->topRemoteDirectories.push_back(remotePath);
-        RemoteOperationController::TraverseRequest request;
-        request.rootPath = remotePath;
-        request.includeDirectories = true;
-        request.traversal.includeHidden = true;
-        request.traversal.skipSymlinks = true;
-        request.traversal.maxDepth = 32;
-        request.traversal.batchSize = 250;
-        const auto jobId = remoteOps_->submit(request);
-        if (jobId != 0) {
-            state->localRoots.insert(jobId, localPath);
-            state->pending.insert(jobId);
-        }
+        seeds.push_back({joinRemotePath(remoteBase, name), dst.filePath(name),
+                         rightRemoteModel_->isDir(index)});
     }
-    if (state->pending.isEmpty()) {
-        state->scanFinished = true;
-        QObject::disconnect(state->batchConnection);
-        QObject::disconnect(state->completionConnection);
-        QObject::disconnect(state->progressConnection);
-        state->progress->deleteLater();
-        statusBar()->showMessage(
-            tr("Queued: %1 downloads (move)").arg(state->enqueuedFiles), 4000);
-        if (state->enqueuedFiles > 0)
-            maybeShowTransferQueue();
-        (*maybeStartCleanup)();
-    } else {
-        state->progress->show();
-    }
+    runRemoteDownloadPrescan(seeds, skippedInvalidCount, false, true);
 }
 
 void MainWindow::uploadViaDialog() {

@@ -1,7 +1,7 @@
 // Persistent saved-site value object, independent of Site Manager widgets.
 #pragma once
 
-#include "openscp/SftpTypes.hpp"
+#include "openscp/SessionOptions.hpp"
 
 #include <QString>
 

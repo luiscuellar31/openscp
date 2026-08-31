@@ -1,7 +1,7 @@
 // Unit tests for the serialized remote-operation execution lane.
 #include "RemoteOperationController.hpp"
 #include "TestHarness.hpp"
-#include "openscp/SftpClient.hpp"
+#include "openscp/RemoteClient.hpp"
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -67,7 +67,7 @@ class ActiveCall {
     std::shared_ptr<FakeState> state_;
 };
 
-class ControllerFakeClient final : public openscp::SftpClient {
+class ControllerFakeClient final : public openscp::RemoteClient {
     public:
     explicit ControllerFakeClient(std::shared_ptr<FakeState> state)
         : state_(std::move(state)) {}
@@ -258,7 +258,7 @@ class ControllerFakeClient final : public openscp::SftpClient {
         return true;
     }
 
-    std::unique_ptr<openscp::SftpClient>
+    std::unique_ptr<openscp::RemoteClient>
     newConnectionLike(const openscp::SessionOptions &options,
                       std::string &err) override {
         auto client = std::make_unique<ControllerFakeClient>(state_);
