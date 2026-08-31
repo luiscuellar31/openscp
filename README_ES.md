@@ -10,7 +10,10 @@
 
 OpenSCP es una aplicación de escritorio escrita en C++20 y Qt 6 para mover y
 administrar archivos entre sistemas locales y remotos. Se enfoca en un
-comportamiento predecible, valores seguros y un flujo estilo commander.
+comportamiento predecible, valores seguros y un flujo estilo commander. OpenSCP
+está inspirado en WinSCP y busca ofrecer una alternativa ligera y
+multiplataforma, enfocada en la simplicidad, la seguridad, la claridad y la
+extensibilidad.
 
 ## Inicio rápido
 
@@ -66,10 +69,13 @@ Estas variables opcionales ayudan a diagnosticar problemas:
 - `OPENSCP_TRANSFER_INTEGRITY=off|optional|required`
 - `OPENSCP_KNOWNHOSTS_PLAIN=1|0`
 - `OPENSCP_FP_HEX_ONLY=1`
+- `OPENSCP_ENV=dev|prod` selecciona el entorno de ejecución
+- `OPENSCP_LOG_SENSITIVE=1` permite detalles sensibles de diagnóstico solamente
+  junto con `OPENSCP_ENV=dev`
 - `OPENSCP_ENABLE_INSECURE_FALLBACK=1` solo cuando el build lo permite
 
-El registro de información sensible permanece deshabilitado salvo que la
-aplicación se ejecute explícitamente en un entorno de desarrollo.
+El registro de información sensible está deshabilitado por defecto y solamente
+debe utilizarse temporalmente en un entorno de desarrollo controlado.
 
 ## Más capturas
 
@@ -83,6 +89,18 @@ aplicación se ejecute explícitamente en un entorno de desarrollo.
   <img src="assets/screenshots/screenshot-history.png" alt="Historial de navegación" width="40%">
   <img src="assets/screenshots/screenshot-settings.png" alt="Ajustes de la aplicación" width="40%">
 </p>
+
+## Roadmap
+
+- Completar y validar el port para Windows. El código específico de Windows que
+  existe actualmente es infraestructura experimental, no funcionalidad de
+  ejecución o lanzamiento soportada.
+- Ampliar la cobertura de interoperabilidad WebDAV más allá del entorno de
+  servidor probado actualmente.
+- Admitir más flujos empresariales de autenticación para proxies y jump hosts
+  SSH, incluida la autenticación interactiva y no batch del jump host.
+- Añadir opciones de personalización para el usuario, como una paleta de
+  comandos y temas seleccionables.
 
 ## Lanzamientos y contribuciones
 

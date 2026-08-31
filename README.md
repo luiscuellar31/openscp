@@ -10,7 +10,9 @@
 
 OpenSCP is a C++20 and Qt 6 desktop application for moving and managing files
 between local and remote systems. It focuses on predictable behavior, secure
-defaults, and a familiar commander-style workflow.
+defaults, and a familiar commander-style workflow. OpenSCP is inspired by
+WinSCP and aims to provide a lightweight, cross-platform alternative focused on
+simplicity, security, clarity, and extensibility.
 
 ## Quick start
 
@@ -66,10 +68,13 @@ These optional environment variables are useful when diagnosing a problem:
 - `OPENSCP_TRANSFER_INTEGRITY=off|optional|required`
 - `OPENSCP_KNOWNHOSTS_PLAIN=1|0`
 - `OPENSCP_FP_HEX_ONLY=1`
+- `OPENSCP_ENV=dev|prod` selects the runtime environment
+- `OPENSCP_LOG_SENSITIVE=1` permits sensitive diagnostic details only together
+  with `OPENSCP_ENV=dev`
 - `OPENSCP_ENABLE_INSECURE_FALLBACK=1` only when the build permits it
 
-Sensitive logging remains disabled unless the application is explicitly run in
-the development environment.
+Sensitive logging is disabled by default and should only be used temporarily in
+a controlled development environment.
 
 ## More screenshots
 
@@ -83,6 +88,17 @@ the development environment.
   <img src="assets/screenshots/screenshot-history.png" alt="Navigation history" width="40%">
   <img src="assets/screenshots/screenshot-settings.png" alt="Application settings" width="40%">
 </p>
+
+## Roadmap
+
+- Complete and validate the Windows port. The existing Windows-specific code is
+  experimental scaffolding, not supported runtime or release functionality.
+- Broaden WebDAV interoperability coverage beyond the currently tested server
+  environment.
+- Support more enterprise proxy and SSH jump-host authentication flows,
+  including interactive, non-batch jump authentication.
+- Add user-facing customization such as a command palette and selectable
+  themes.
 
 ## Releases and contributions
 
