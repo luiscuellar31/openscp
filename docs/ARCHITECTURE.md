@@ -3,29 +3,21 @@
 This page is a map for contributors. It explains where a change belongs and
 records a few rules that are easy to miss when reading one class at a time.
 
-OpenSCP is split into layers:
+## Project layers
 
-```text
-openscp
-  -> openscp_ui_widgets
-       -> openscp_ui_logic
-            -> openscp_sync_logic
-            -> openscp_core
-```
+Read the table from top to bottom. A target may use the OpenSCP targets listed
+below it, but lower layers must not depend on the UI layers.
 
-An arrow means "depends on." Dependencies should continue downward through the
-diagram. Protocol code should not know about windows or dialogs, and network
-work should never run inside a model or widget.
+| Layer | Target | Uses | Responsibility |
+| --- | --- | --- | --- |
+| Application | `openscp` | `openscp_ui_widgets` | Starts the application and assembles the main window. |
+| Widgets | `openscp_ui_widgets` | `openscp_ui_logic` | Dialogs and reusable visual components. |
+| Application logic | `openscp_ui_logic` | `openscp_core`, `openscp_sync_logic` | Sessions, navigation, transfers, and saved data. |
+| Foundation | `openscp_sync_logic` | — | File comparison and synchronization plans. |
+| Foundation | `openscp_core` | — | Protocols, remote paths, secure values, and safe local-file helpers. |
 
-## Where code belongs
-
-| Target | What belongs there |
-| --- | --- |
-| `openscp_core` | The remote-client interface, protocol backends, remote paths, secure values, and safe local-file helpers. |
-| `openscp_sync_logic` | File comparison and synchronization plans that do not need widgets or network connections. |
-| `openscp_ui_logic` | Sessions, navigation, saved data, remote jobs, and transfer coordination. |
-| `openscp_ui_widgets` | Dialogs and reusable visual components. |
-| `openscp` | Startup, `MainWindow`, menus, translations, and application resources. |
+Protocol code must not know about windows or dialogs, and network work must
+never run inside a model or widget.
 
 Tests should link the closest target that owns the behavior. Integration tests
 use the same protocol implementations as the application.
