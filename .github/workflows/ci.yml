@@ -53,7 +53,32 @@ jobs:
             -DOPENSCP_FORTIFY_SOURCE_LEVEL=AUTO
 
       - name: Build oldest native baseline
-        run: cmake --build build-compat --parallel 2
+        run: |
+          set -o pipefail
+          cmake --build build-compat --parallel 2 2>&1 | \
+            tee /tmp/openscp-baseline-build.log
+
+      - name: Report baseline build diagnostics
+        if: failure()
+        run: |
+          log=/tmp/openscp-baseline-build.log
+          [[ -s "$log" ]] || exit 0
+
+          diagnostics="$(
+            grep -E -i \
+              'FAILED:|fatal error:|error:|killed signal|ninja: build stopped' \
+              "$log" | tail -40 || true
+          )"
+          if [[ -z "$diagnostics" ]]; then
+            diagnostics="$(tail -40 "$log")"
+          fi
+
+          while IFS= read -r line; do
+            line="${line//'%'/'%25'}"
+            line="${line//$'\r'/'%0D'}"
+            line="${line//$'\n'/'%0A'}"
+            echo "::error title=Ubuntu 22.04 baseline::${line}"
+          done <<< "$diagnostics"
 
       - name: Verify baseline ELF hardening
         run: cmake --build build-compat --target openscp_hardening_check
