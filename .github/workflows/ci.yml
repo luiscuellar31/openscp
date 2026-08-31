@@ -18,6 +18,9 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   compatibility-linux-native:
     if: >-
@@ -28,7 +31,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install baseline dependencies
         run: |
@@ -47,11 +52,14 @@ jobs:
             -DOPENSCP_WERROR=ON \
             -DOPENSCP_FORTIFY_SOURCE_LEVEL=AUTO
 
-      - name: Build and test
-        run: |
-          cmake --build build-compat --parallel
-          cmake --build build-compat --target openscp_hardening_check
-          ctest --test-dir build-compat --output-on-failure -LE integration
+      - name: Build oldest native baseline
+        run: cmake --build build-compat --parallel 2
+
+      - name: Verify baseline ELF hardening
+        run: cmake --build build-compat --target openscp_hardening_check
+
+      - name: Test oldest native baseline
+        run: ctest --test-dir build-compat --output-on-failure -LE integration
 
   quick-dev:
     if: >-
@@ -62,7 +70,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Linux dependencies
         run: |
@@ -100,7 +110,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
