@@ -1,9 +1,11 @@
-// Stable task ownership and O(1) identity lookup for the transfer queue.
+// Storage and round-robin selection for queued transfers.
 #pragma once
 
 #include "TransferTypes.hpp"
 
+#include <functional>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -27,4 +29,17 @@ class TransferQueueStore final {
     private:
     Nodes nodes_;
     std::unordered_map<quint64, TransferTask *> byId_;
+};
+
+class TransferScheduler final {
+    public:
+    using RunnablePredicate = std::function<bool(TransferTask &)>;
+
+    [[nodiscard]] std::optional<std::size_t>
+    nextRunnable(TransferQueueStore::Nodes &tasks,
+                 const RunnablePredicate &isRunnable);
+    void normalizeForSize(std::size_t taskCount);
+
+    private:
+    std::size_t cursor_ = 0;
 };

@@ -184,12 +184,8 @@ OPENSCP_TEST(testConcurrentConflictsUseOneBatchResolution, test) {
 
 OPENSCP_TEST(testBatchDownloadEnqueueAndGranularSignals, test) {
     TransferManager manager;
-    int compatibilityNotifications = 0;
     int addedNotifications = 0;
     qsizetype addedIds = 0;
-    QObject::connect(
-        &manager, &TransferManager::tasksChanged, &manager,
-        [&compatibilityNotifications] { ++compatibilityNotifications; });
     QObject::connect(&manager, &TransferManager::tasksAdded, &manager,
                      [&](const QVector<quint64> &ids) {
                          ++addedNotifications;
@@ -206,8 +202,6 @@ OPENSCP_TEST(testBatchDownloadEnqueueAndGranularSignals, test) {
     const int added = manager.enqueueDownloads(downloads);
     test.check(added == downloads.size(),
                "batch enqueue should report every added download");
-    test.check(compatibilityNotifications == 1,
-               "batch enqueue should retain one compatibility notification");
     test.check(addedNotifications == 1 && addedIds == downloads.size(),
                "batch enqueue should publish one granular range");
 
@@ -362,7 +356,7 @@ class ConcurrentMockClient : public openscp::MockSftpClient {
         return true;
     }
 
-    std::unique_ptr<openscp::SftpClient>
+    std::unique_ptr<openscp::RemoteClient>
     newConnectionLike(const openscp::SessionOptions &options,
                       std::string &err) override {
         probe_->connections.fetch_add(1);
@@ -376,7 +370,8 @@ class ConcurrentMockClient : public openscp::MockSftpClient {
     std::shared_ptr<ConcurrencyProbe> probe_;
 };
 
-void configureManager(TransferManager &manager, openscp::SftpClient &baseClient,
+void configureManager(TransferManager &manager,
+                      openscp::RemoteClient &baseClient,
                       const openscp::SessionOptions &options) {
     std::string connectError;
     (void)baseClient.connect(options, connectError);
@@ -725,7 +720,7 @@ class RetryMockClient final : public openscp::MockSftpClient {
         return true;
     }
 
-    std::unique_ptr<openscp::SftpClient>
+    std::unique_ptr<openscp::RemoteClient>
     newConnectionLike(const openscp::SessionOptions &options,
                       std::string &err) override {
         auto worker = std::make_unique<RetryMockClient>(probe_);
@@ -921,7 +916,7 @@ class CommitUncertainMockClient final : public openscp::MockSftpClient {
         return false;
     }
 
-    std::unique_ptr<openscp::SftpClient>
+    std::unique_ptr<openscp::RemoteClient>
     newConnectionLike(const openscp::SessionOptions &options,
                       std::string &err) override {
         auto worker = std::make_unique<CommitUncertainMockClient>();
@@ -973,7 +968,7 @@ class PermanentErrorMockClient final : public openscp::MockSftpClient {
         return false;
     }
 
-    std::unique_ptr<openscp::SftpClient>
+    std::unique_ptr<openscp::RemoteClient>
     newConnectionLike(const openscp::SessionOptions &options,
                       std::string &err) override {
         auto worker = std::make_unique<PermanentErrorMockClient>(attempts_);
@@ -1235,7 +1230,7 @@ class RateMockClient final : public openscp::MockSftpClient {
         return true;
     }
 
-    std::unique_ptr<openscp::SftpClient>
+    std::unique_ptr<openscp::RemoteClient>
     newConnectionLike(const openscp::SessionOptions &options,
                       std::string &err) override {
         auto worker = std::make_unique<RateMockClient>();

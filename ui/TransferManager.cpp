@@ -147,14 +147,6 @@ TransferManager::TransferManager(QObject *parent) : QObject(parent) {
     persistenceTimer_->setInterval(250);
     connect(persistenceTimer_, &QTimer::timeout, this,
             &TransferManager::persistNow);
-    compatibilityTimer_ = new QTimer(this);
-    compatibilityTimer_->setSingleShot(true);
-    compatibilityTimer_->setInterval(50);
-    connect(compatibilityTimer_, &QTimer::timeout, this, [this] {
-        compatibilityChangePending_.store(false);
-        emit tasksChanged();
-    });
-
     workerSlots_.reserve(kWorkerSlots);
     for (int index = 0; index < kWorkerSlots; ++index)
         workerSlots_.push_back(std::make_unique<WorkerSlot>(index));
@@ -201,6 +193,8 @@ TransferManager::~TransferManager() {
     }
     workerSlots_.clear();
 }
+
+// Session and queue configuration
 
 void TransferManager::setSessionOptions(const openscp::SessionOptions &opt) {
     {
@@ -303,7 +297,6 @@ void TransferManager::setMaxConcurrent(int maxConcurrent) {
     if (maxConcurrent_.exchange(bounded) == bounded)
         return;
     emit queueSettingsChanged();
-    emit tasksChanged();
     schedulePersistence();
     workCv_.notify_all();
 }
@@ -314,7 +307,6 @@ void TransferManager::setGlobalSpeedLimitKBps(int kbps) {
         return;
     bandwidthLimiter_.setLimitKBps(bounded);
     emit queueSettingsChanged();
-    emit tasksChanged();
     schedulePersistence();
 }
 
@@ -332,6 +324,34 @@ void TransferManager::appendTaskLocked(TransferTask task) {
                                       QDateTime::currentMSecsSinceEpoch());
     }
     queueStore_.append(std::move(task));
+}
+
+quint64
+TransferManager::enqueuePreparedTask(TransferTask task,
+                                     const TransferBatchOptions &options,
+                                     bool inheritBatchConflictPolicy) {
+    quint64 taskId = 0;
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        task.taskId = nextId_++;
+        task.batchId = normalizedBatchIdLocked(options.batchId);
+        task.dependsOnTaskId = options.dependsOnTaskId;
+        task.sessionKey = options.sessionKey.isEmpty() ? currentSessionKey_
+                                                       : options.sessionKey;
+        initializeConnectionStatusLocked(task);
+        task.queuedAtMs = QDateTime::currentMSecsSinceEpoch();
+        conflictCoordinator_.ensureBatchPolicy(task.batchId,
+                                               options.conflictPolicy);
+        if (inheritBatchConflictPolicy) {
+            task.conflictPolicy = conflictCoordinator_.batchPolicy(
+                task.batchId, options.conflictPolicy);
+        }
+        taskId = task.taskId;
+        appendTaskLocked(std::move(task));
+    }
+    publishAdded({taskId});
+    schedule();
+    return taskId;
 }
 
 void TransferManager::rebuildTaskLookupLocked() {
@@ -369,6 +389,8 @@ void TransferManager::initializeConnectionStatusLocked(
         task.status = Status::WaitingForConnection;
     }
 }
+
+// Task creation and batch policy
 
 std::string TransferManager::destinationKey(const TransferTask &task) const {
     if (task.type == TransferTask::Type::Upload ||
@@ -444,46 +466,19 @@ void TransferManager::skipForFailedDependencyLocked(TransferTask &task,
     ++terminalTaskCount_;
 }
 
-void TransferManager::enqueueUpload(const QString &local,
-                                    const QString &remote) {
-    (void)enqueueUpload(local, remote, {});
-}
-
-void TransferManager::enqueueDownload(const QString &remote,
-                                      const QString &local) {
-    (void)enqueueDownload(remote, local, {});
-}
-
 quint64 TransferManager::enqueueUpload(const QString &local,
                                        const QString &remote,
                                        const TransferBatchOptions &options) {
     TransferTask task{};
     task.type = TransferTask::Type::Upload;
-    {
-        std::lock_guard<std::mutex> lock(mtx_);
-        task.taskId = nextId_++;
-        task.batchId = normalizedBatchIdLocked(options.batchId);
-        task.dependsOnTaskId = options.dependsOnTaskId;
-        task.sessionKey = options.sessionKey.isEmpty() ? currentSessionKey_
-                                                       : options.sessionKey;
-        initializeConnectionStatusLocked(task);
-        task.src = local;
-        task.dst = remote;
-        task.operation = options.operation;
-        task.conflictPolicy = options.conflictPolicy;
-        task.postAction = options.operation == TransferOperation::Move
-                              ? TransferPostAction::DeleteSource
-                              : TransferPostAction::None;
-        task.queuedAtMs = QDateTime::currentMSecsSinceEpoch();
-        conflictCoordinator_.ensureBatchPolicy(task.batchId,
-                                               options.conflictPolicy);
-        task.conflictPolicy = conflictCoordinator_.batchPolicy(
-            task.batchId, options.conflictPolicy);
-        appendTaskLocked(task);
-    }
-    publishAdded({task.taskId});
-    schedule();
-    return task.taskId;
+    task.src = local;
+    task.dst = remote;
+    task.operation = options.operation;
+    task.conflictPolicy = options.conflictPolicy;
+    task.postAction = options.operation == TransferOperation::Move
+                          ? TransferPostAction::DeleteSource
+                          : TransferPostAction::None;
+    return enqueuePreparedTask(std::move(task), options, true);
 }
 
 quint64 TransferManager::enqueueDownload(const QString &remote,
@@ -491,31 +486,14 @@ quint64 TransferManager::enqueueDownload(const QString &remote,
                                          const TransferBatchOptions &options) {
     TransferTask task{};
     task.type = TransferTask::Type::Download;
-    {
-        std::lock_guard<std::mutex> lock(mtx_);
-        task.taskId = nextId_++;
-        task.batchId = normalizedBatchIdLocked(options.batchId);
-        task.dependsOnTaskId = options.dependsOnTaskId;
-        task.sessionKey = options.sessionKey.isEmpty() ? currentSessionKey_
-                                                       : options.sessionKey;
-        initializeConnectionStatusLocked(task);
-        task.src = remote;
-        task.dst = local;
-        task.operation = options.operation;
-        task.conflictPolicy = options.conflictPolicy;
-        task.postAction = options.operation == TransferOperation::Move
-                              ? TransferPostAction::DeleteSource
-                              : TransferPostAction::None;
-        task.queuedAtMs = QDateTime::currentMSecsSinceEpoch();
-        conflictCoordinator_.ensureBatchPolicy(task.batchId,
-                                               options.conflictPolicy);
-        task.conflictPolicy = conflictCoordinator_.batchPolicy(
-            task.batchId, options.conflictPolicy);
-        appendTaskLocked(task);
-    }
-    publishAdded({task.taskId});
-    schedule();
-    return task.taskId;
+    task.src = remote;
+    task.dst = local;
+    task.operation = options.operation;
+    task.conflictPolicy = options.conflictPolicy;
+    task.postAction = options.operation == TransferOperation::Move
+                          ? TransferPostAction::DeleteSource
+                          : TransferPostAction::None;
+    return enqueuePreparedTask(std::move(task), options, true);
 }
 
 quint64
@@ -523,25 +501,10 @@ TransferManager::enqueueLocalDirectory(const QString &localDirectory,
                                        const TransferBatchOptions &options) {
     TransferTask task{};
     task.type = TransferTask::Type::CreateLocalDirectory;
-    {
-        std::lock_guard<std::mutex> lock(mtx_);
-        task.taskId = nextId_++;
-        task.batchId = normalizedBatchIdLocked(options.batchId);
-        task.dependsOnTaskId = options.dependsOnTaskId;
-        task.sessionKey = options.sessionKey.isEmpty() ? currentSessionKey_
-                                                       : options.sessionKey;
-        initializeConnectionStatusLocked(task);
-        task.dst = localDirectory;
-        task.operation = TransferOperation::Copy;
-        task.conflictPolicy = Policy::Skip;
-        task.queuedAtMs = QDateTime::currentMSecsSinceEpoch();
-        conflictCoordinator_.ensureBatchPolicy(task.batchId,
-                                               options.conflictPolicy);
-        appendTaskLocked(task);
-    }
-    publishAdded({task.taskId});
-    schedule();
-    return task.taskId;
+    task.dst = localDirectory;
+    task.operation = TransferOperation::Copy;
+    task.conflictPolicy = Policy::Skip;
+    return enqueuePreparedTask(std::move(task), options, false);
 }
 
 quint64
@@ -549,25 +512,10 @@ TransferManager::enqueueRemoteDirectory(const QString &remoteDirectory,
                                         const TransferBatchOptions &options) {
     TransferTask task{};
     task.type = TransferTask::Type::CreateRemoteDirectory;
-    {
-        std::lock_guard<std::mutex> lock(mtx_);
-        task.taskId = nextId_++;
-        task.batchId = normalizedBatchIdLocked(options.batchId);
-        task.dependsOnTaskId = options.dependsOnTaskId;
-        task.sessionKey = options.sessionKey.isEmpty() ? currentSessionKey_
-                                                       : options.sessionKey;
-        initializeConnectionStatusLocked(task);
-        task.dst = remoteDirectory;
-        task.operation = TransferOperation::Copy;
-        task.conflictPolicy = Policy::Skip;
-        task.queuedAtMs = QDateTime::currentMSecsSinceEpoch();
-        conflictCoordinator_.ensureBatchPolicy(task.batchId,
-                                               options.conflictPolicy);
-        appendTaskLocked(task);
-    }
-    publishAdded({task.taskId});
-    schedule();
-    return task.taskId;
+    task.dst = remoteDirectory;
+    task.operation = TransferOperation::Copy;
+    task.conflictPolicy = Policy::Skip;
+    return enqueuePreparedTask(std::move(task), options, false);
 }
 
 quint64 TransferManager::enqueuePathTask(TransferTask::Type type,
@@ -575,26 +523,11 @@ quint64 TransferManager::enqueuePathTask(TransferTask::Type type,
                                          const TransferBatchOptions &options) {
     TransferTask task{};
     task.type = type;
-    {
-        std::lock_guard<std::mutex> lock(mtx_);
-        task.taskId = nextId_++;
-        task.batchId = normalizedBatchIdLocked(options.batchId);
-        task.dependsOnTaskId = options.dependsOnTaskId;
-        task.sessionKey = options.sessionKey.isEmpty() ? currentSessionKey_
-                                                       : options.sessionKey;
-        initializeConnectionStatusLocked(task);
-        task.src = path;
-        task.dst = path;
-        task.operation = TransferOperation::Copy;
-        task.conflictPolicy = Policy::Skip;
-        task.queuedAtMs = QDateTime::currentMSecsSinceEpoch();
-        conflictCoordinator_.ensureBatchPolicy(task.batchId,
-                                               options.conflictPolicy);
-        appendTaskLocked(task);
-    }
-    publishAdded({task.taskId});
-    schedule();
-    return task.taskId;
+    task.src = path;
+    task.dst = path;
+    task.operation = TransferOperation::Copy;
+    task.conflictPolicy = Policy::Skip;
+    return enqueuePreparedTask(std::move(task), options, false);
 }
 
 quint64
@@ -648,11 +581,6 @@ void TransferManager::cancelBatch(quint64 batchId) {
         publishRemoved(removed);
     for (quint64 taskId : active)
         interruptTask(taskId);
-}
-
-int TransferManager::enqueueDownloads(
-    const QVector<QPair<QString, QString>> &remoteLocalPairs) {
-    return enqueueDownloads(remoteLocalPairs, {});
 }
 
 int TransferManager::enqueueDownloads(
@@ -804,6 +732,8 @@ bool TransferManager::isBatchTerminal(quint64 batchId) const {
     }
     return found;
 }
+
+// Worker scheduling and cancellation
 
 bool TransferManager::hasRunnableTaskLocked(std::size_t slotIndex) {
     if (shuttingDown_.load() || paused_.load() ||
@@ -990,6 +920,8 @@ bool TransferManager::shouldCancel(quint64 taskId) const {
     return canceledTasks_.count(taskId) || pausedTasks_.count(taskId);
 }
 
+// Task state transitions and queue controls
+
 void TransferManager::transitionToQueued(TransferTask &task, qint64 nowMs,
                                          bool resume) {
     task.status = Status::Queued;
@@ -1084,10 +1016,8 @@ void TransferManager::pauseAll() {
     }
     if (!changed.isEmpty())
         publishUpdated(changed);
-    else {
+    else
         emit queueSettingsChanged();
-        emit tasksChanged();
-    }
     interruptAllActive();
 }
 
@@ -1322,7 +1252,8 @@ void TransferManager::removeTask(quint64 taskId, bool removePartialData) {
     }
 }
 
-void TransferManager::clearCompleted() {
+void TransferManager::removeInactiveTasks(
+    const std::function<bool(const TransferTask &)> &shouldRemove) {
     QVector<quint64> removed;
     QSet<quint64> removedBatches;
     {
@@ -1331,9 +1262,7 @@ void TransferManager::clearCompleted() {
         kept.reserve(queueStore_.nodes().size());
         for (auto &taskNode : queueStore_.nodes()) {
             const auto &task = *taskNode;
-            if ((task.status == Status::Done ||
-                 task.status == Status::Skipped) &&
-                !activeTaskIds_.count(task.taskId)) {
+            if (shouldRemove(task) && !activeTaskIds_.count(task.taskId)) {
                 removed.push_back(task.taskId);
                 removedBatches.insert(task.batchId);
             } else {
@@ -1349,33 +1278,18 @@ void TransferManager::clearCompleted() {
         publishRemoved(removed);
 }
 
+void TransferManager::clearCompleted() {
+    removeInactiveTasks([](const TransferTask &task) {
+        return task.status == Status::Done || task.status == Status::Skipped;
+    });
+}
+
 void TransferManager::clearFailedCanceled() {
-    QVector<quint64> removed;
-    QSet<quint64> removedBatches;
-    {
-        std::lock_guard<std::mutex> lock(mtx_);
-        std::vector<std::unique_ptr<TransferTask>> kept;
-        kept.reserve(queueStore_.nodes().size());
-        for (auto &taskNode : queueStore_.nodes()) {
-            const auto &task = *taskNode;
-            const bool removable = task.status == Status::Error ||
-                                   task.status == Status::Canceled ||
-                                   task.status == Status::Warning ||
-                                   task.status == Status::Skipped;
-            if (removable && !activeTaskIds_.count(task.taskId)) {
-                removed.push_back(task.taskId);
-                removedBatches.insert(task.batchId);
-            } else {
-                kept.push_back(std::move(taskNode));
-            }
-        }
-        queueStore_.nodes().swap(kept);
-        rebuildTaskLookupLocked();
-        for (quint64 batchId : removedBatches)
-            forgetBatchPolicyIfUnusedLocked(batchId);
-    }
-    if (!removed.isEmpty())
-        publishRemoved(removed);
+    removeInactiveTasks([](const TransferTask &task) {
+        return task.status == Status::Error ||
+               task.status == Status::Canceled ||
+               task.status == Status::Warning || task.status == Status::Skipped;
+    });
 }
 
 void TransferManager::clearFinishedOlderThan(int minutes, bool clearDone,
@@ -1384,36 +1298,15 @@ void TransferManager::clearFinishedOlderThan(int minutes, bool clearDone,
         return;
     const qint64 cutoff = QDateTime::currentMSecsSinceEpoch() -
                           static_cast<qint64>(minutes) * 60 * 1000;
-    QVector<quint64> removed;
-    QSet<quint64> removedBatches;
-    {
-        std::lock_guard<std::mutex> lock(mtx_);
-        std::vector<std::unique_ptr<TransferTask>> kept;
-        kept.reserve(queueStore_.nodes().size());
-        for (auto &taskNode : queueStore_.nodes()) {
-            const auto &task = *taskNode;
-            const bool selected =
-                (clearDone && task.status == Status::Done) ||
-                (clearFailedCanceled && (task.status == Status::Error ||
-                                         task.status == Status::Canceled ||
-                                         task.status == Status::Skipped ||
-                                         task.status == Status::Warning));
-            if (selected && task.finishedAtMs > 0 &&
-                task.finishedAtMs <= cutoff &&
-                !activeTaskIds_.count(task.taskId)) {
-                removed.push_back(task.taskId);
-                removedBatches.insert(task.batchId);
-            } else {
-                kept.push_back(std::move(taskNode));
-            }
-        }
-        queueStore_.nodes().swap(kept);
-        rebuildTaskLookupLocked();
-        for (quint64 batchId : removedBatches)
-            forgetBatchPolicyIfUnusedLocked(batchId);
-    }
-    if (!removed.isEmpty())
-        publishRemoved(removed);
+    removeInactiveTasks([=](const TransferTask &task) {
+        const bool selected =
+            (clearDone && task.status == Status::Done) ||
+            (clearFailedCanceled &&
+             (task.status == Status::Error || task.status == Status::Canceled ||
+              task.status == Status::Skipped ||
+              task.status == Status::Warning));
+        return selected && task.finishedAtMs > 0 && task.finishedAtMs <= cutoff;
+    });
 }
 
 void TransferManager::processNext() {
@@ -1424,6 +1317,8 @@ void TransferManager::schedule() {
     if (!paused_.load())
         workCv_.notify_all();
 }
+
+// Retry and conflict policy
 
 bool TransferManager::waitForRetry(quint64 taskId, int delayMs,
                                    std::stop_token stopToken) {
@@ -1786,6 +1681,8 @@ bool TransferManager::chooseRenamedDestination(
               .toStdString();
     return false;
 }
+
+// Transfer execution
 
 TransferManager::PrecheckOutcome TransferManager::precheckTask(
     TransferTask &task,
@@ -2440,11 +2337,12 @@ void TransferManager::recordCompletionMetrics(quint64 taskId, Status status,
                    << "runningCounter=" << running_.load();
 }
 
+// Notifications and persistence
+
 void TransferManager::publishAdded(const QVector<quint64> &ids) {
     if (ids.isEmpty())
         return;
     emit tasksAdded(ids);
-    emit tasksChanged();
     schedulePersistence();
 }
 
@@ -2452,7 +2350,6 @@ void TransferManager::publishUpdated(const QVector<quint64> &ids) {
     if (ids.isEmpty())
         return;
     emit tasksUpdated(ids);
-    scheduleCompatibilityChanged();
     schedulePersistence();
 }
 
@@ -2460,24 +2357,7 @@ void TransferManager::publishRemoved(const QVector<quint64> &ids) {
     if (ids.isEmpty())
         return;
     emit tasksRemoved(ids);
-    emit tasksChanged();
     schedulePersistence();
-}
-
-void TransferManager::scheduleCompatibilityChanged() {
-    if (compatibilityChangePending_.exchange(true))
-        return;
-    const bool invoked = QMetaObject::invokeMethod(
-        this,
-        [this] {
-            if (compatibilityTimer_)
-                compatibilityTimer_->start();
-        },
-        Qt::QueuedConnection);
-    if (!invoked) {
-        compatibilityChangePending_.store(false);
-        emit tasksChanged();
-    }
 }
 
 void TransferManager::schedulePersistence() {

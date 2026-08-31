@@ -3,11 +3,11 @@
 
 #include "BandwidthLimiter.hpp"
 #include "TransferExecutor.hpp"
+#include "TransferQueue.hpp"
 #include "TransferQueuePersistence.hpp"
-#include "TransferQueueStore.hpp"
-#include "TransferScheduler.hpp"
 #include "TransferTypes.hpp"
-#include "openscp/SftpTypes.hpp"
+#include "openscp/RemoteError.hpp"
+#include "openscp/SessionOptions.hpp"
 
 #include <QObject>
 #include <QPair>
@@ -17,6 +17,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -61,17 +62,11 @@ class TransferManager : public QObject {
     void setTaskSpeedLimit(quint64 taskId, int kbps);
     void removeTask(quint64 taskId, bool removePartialData = false);
 
-    // Source-compatible enqueue API.
-    void enqueueUpload(const QString &local, const QString &remote);
-    void enqueueDownload(const QString &remote, const QString &local);
-    int
-    enqueueDownloads(const QVector<QPair<QString, QString>> &remoteLocalPairs);
-
-    // Batch-aware API. A zero batchId is replaced with a stable generated ID.
+    // A zero batchId is replaced with a stable generated ID.
     quint64 enqueueUpload(const QString &local, const QString &remote,
-                          const TransferBatchOptions &options);
+                          const TransferBatchOptions &options = {});
     quint64 enqueueDownload(const QString &remote, const QString &local,
-                            const TransferBatchOptions &options);
+                            const TransferBatchOptions &options = {});
     quint64 enqueueLocalDirectory(const QString &localDirectory,
                                   const TransferBatchOptions &options = {});
     quint64 enqueueRemoteDirectory(const QString &remoteDirectory,
@@ -82,7 +77,7 @@ class TransferManager : public QObject {
                                 const TransferBatchOptions &options = {});
     int
     enqueueDownloads(const QVector<QPair<QString, QString>> &remoteLocalPairs,
-                     const TransferBatchOptions &options);
+                     const TransferBatchOptions &options = {});
     quint64 createBatch(const TransferBatchOptions &options = {});
     void cancelBatch(quint64 batchId);
     void setBatchConflictPolicy(quint64 batchId, TransferConflictPolicy policy);
@@ -122,10 +117,6 @@ class TransferManager : public QObject {
     void queueSettingsChanged();
     void persistenceWarning(const QString &message);
 
-    // Compatibility signal for existing integrations. It is emitted together
-    // with every granular queue mutation.
-    void tasksChanged();
-
     public slots:
     void processNext();
     void schedule();
@@ -153,7 +144,6 @@ class TransferManager : public QObject {
     std::atomic<bool> shuttingDown_{false};
     std::atomic<int> running_{0};
     std::atomic<int> maxConcurrent_{2};
-    std::atomic<bool> compatibilityChangePending_{false};
 
     // Mutex hierarchy when nesting is unavoidable:
     // connFactoryMutex_ -> mtx_. Worker-slot client mutexes and retry,
@@ -179,7 +169,6 @@ class TransferManager : public QObject {
     BandwidthLimiter bandwidthLimiter_;
 
     QTimer *persistenceTimer_ = nullptr;
-    QTimer *compatibilityTimer_ = nullptr;
     QString persistencePath_;
     bool persistenceEnabled_ = false;
     bool persistenceBlocked_ = false;
@@ -196,6 +185,9 @@ class TransferManager : public QObject {
     TransferTask *taskForIdLocked(quint64 taskId);
     const TransferTask *taskForIdLocked(quint64 taskId) const;
     void appendTaskLocked(TransferTask task);
+    quint64 enqueuePreparedTask(TransferTask task,
+                                const TransferBatchOptions &options,
+                                bool inheritBatchConflictPolicy);
     void rebuildTaskLookupLocked();
     void forgetBatchPolicyIfUnusedLocked(quint64 batchId);
     quint64 normalizedBatchIdLocked(quint64 requested);
@@ -262,6 +254,8 @@ class TransferManager : public QObject {
                            qint64 nowMs);
     void transitionToDone(TransferTask &task, qint64 nowMs);
     void resetForRetry(TransferTask &task, qint64 nowMs);
+    void removeInactiveTasks(
+        const std::function<bool(const TransferTask &)> &shouldRemove);
     QVector<quint64> pruneTerminalHistoryLocked();
     void recordCompletionMetrics(quint64 taskId, TransferTask::Status status,
                                  quint64 bytesDone, qint64 queueLatencyMs,
@@ -270,7 +264,6 @@ class TransferManager : public QObject {
     void publishAdded(const QVector<quint64> &ids);
     void publishUpdated(const QVector<quint64> &ids);
     void publishRemoved(const QVector<quint64> &ids);
-    void scheduleCompatibilityChanged();
     void schedulePersistence();
     bool restorePersistenceFile(QString &warning);
     bool writePersistenceFile(QString &warning);

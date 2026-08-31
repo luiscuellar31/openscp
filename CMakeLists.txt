@@ -324,10 +324,8 @@ add_library(openscp_ui_logic STATIC
     ui/BandwidthLimiter.cpp
     ui/TransferQueuePersistence.hpp
     ui/TransferQueuePersistence.cpp
-    ui/TransferQueueStore.hpp
-    ui/TransferQueueStore.cpp
-    ui/TransferScheduler.hpp
-    ui/TransferScheduler.cpp
+    ui/TransferQueue.hpp
+    ui/TransferQueue.cpp
     ui/TransferExecutor.hpp
     ui/TransferExecutor.cpp
 )
