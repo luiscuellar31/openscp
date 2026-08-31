@@ -438,10 +438,14 @@ bool SecretStore::insecureFallbackActive() {
 namespace {
 
 const SecretSchema *openscp_schema() {
-    static const SecretSchema schema = {
-        "openscp.secret",
-        SECRET_SCHEMA_NONE,
-        {{"key", SECRET_SCHEMA_ATTRIBUTE_STRING}, {NULL}}};
+    static const SecretSchema schema = [] {
+        SecretSchema value{};
+        value.name = "openscp.secret";
+        value.flags = SECRET_SCHEMA_NONE;
+        value.attributes[0].name = "key";
+        value.attributes[0].type = SECRET_SCHEMA_ATTRIBUTE_STRING;
+        return value;
+    }();
     return &schema;
 }
 
