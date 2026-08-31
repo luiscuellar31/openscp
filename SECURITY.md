@@ -1,47 +1,31 @@
 # Security Policy
 
-## Reporting a Vulnerability
+## Report a vulnerability
 
-Please report suspected vulnerabilities privately through
-[GitHub Security Advisories](https://github.com/luiscuellar31/openscp/security/advisories/new).
-Do not open a public issue until a fix has been released or the maintainers
-confirm that public discussion is safe.
+Please use a private
+[GitHub Security Advisory](https://github.com/luiscuellar31/openscp/security/advisories/new)
+instead of a public issue. This gives us time to investigate and prepare a fix
+before details become public.
 
-The public issue labels and title conventions in [CONTRIBUTING.md](CONTRIBUTING.md)
-do not apply to vulnerability reports.
+A useful report includes:
 
-If you find a security problem:
+- the affected OpenSCP version or commit and your operating system;
+- what you expected to happen and what happened instead;
+- clear reproduction steps and the likely impact;
+- sanitized logs, screenshots, or test data; and
+- a temporary workaround, if you know one.
 
-1. Open a private vulnerability report using the link above.
-2. Describe impact, reproduction steps, and the affected version/commit.
-3. Include only sanitized logs and test data.
-4. Allow the maintainers time to investigate and coordinate a release before
-   publishing details.
+Never include passwords, private keys, credentials, or other sensitive data. If
+a secret was shared accidentally, revoke or rotate it immediately and replace
+it with sanitized information in the report.
 
-## What to Include in the Report
+## Supported versions
 
-- Observed behavior and expected behavior.
-- Potential risk/impact (for example: credential exposure, host-key validation bypass, etc.).
-- Environment details: operating system, OpenSCP version, and authentication method.
-- Minimal reproducible evidence (sanitized logs, screenshots, clear steps).
-- If available, a temporary mitigation/workaround.
+We prioritize the latest published release and the stable `main` branch. Issues
+on `dev` are also in scope when they affect current development work.
 
-## Scope and Supported Versions
+## What to expect
 
-Priority is given to:
-
-- `main` (stable branch).
-- The latest published release.
-- `dev` when the issue affects recent development changes.
-
-## Response Process
-
-- Initial triage target: within 72 hours.
-- Severity/priority confirmation: as soon as possible based on impact.
-- Fix timing: handled according to severity and technical complexity.
-
-## Responsible Disclosure
-
-Do not post credentials, private keys, exploit details, or sensitive data in
-public issues.
-If secrets were accidentally shared, revoke/rotate them immediately and update the report with sanitized data.
+We aim to acknowledge a report within 72 hours. After the initial review, we
+will confirm the severity and coordinate the fix and disclosure with the
+reporter. Resolution time depends on the impact and complexity of the issue.
