@@ -30,7 +30,9 @@
 #include <QStatusBar>
 #include <QTreeView>
 
-static QString tempDownloadPathFor(const QString &remoteName) {
+namespace {
+
+QString tempDownloadPathFor(const QString &remoteName) {
     QString base =
         QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
     if (base.isEmpty())
@@ -38,6 +40,8 @@ static QString tempDownloadPathFor(const QString &remoteName) {
     QDir().mkpath(base);
     return QDir(base).filePath(remoteName);
 }
+
+} // namespace
 
 // Reveal a file in the system file manager (select/highlight when possible),
 
@@ -91,12 +95,13 @@ void MainWindow::openRightRemoteTerminal() {
     openscpui::AppSettings settings;
     const bool forceInteractiveLogin =
         settings
-            .value(openscpui::settingskeys::TerminalForceInteractiveLogin,
+            .value(openscpui::settingskeys::kTerminalForceInteractiveLogin,
                    false)
             .toBool();
     const bool enableSftpCliFallback =
         settings
-            .value(openscpui::settingskeys::TerminalEnableSftpCliFallback, true)
+            .value(openscpui::settingskeys::kTerminalEnableSftpCliFallback,
+                   true)
             .toBool();
 
     const openscpui::TerminalCommandBuilder terminalCommands;

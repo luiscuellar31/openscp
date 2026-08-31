@@ -1,6 +1,7 @@
 // Core unit tests without external framework (run via CTest).
 #include "Libssh2ErrorClassifier.hpp"
 #include "Libssh2InputSafety.hpp"
+#include "RemoteListingLimits.hpp"
 #include "SafeLocalFile.hpp"
 #include "TestHarness.hpp"
 #include "openscp/ClientFactory.hpp"
@@ -94,6 +95,56 @@ OPENSCP_TEST(test_session_defaults, t) {
     t.check((std::is_same_v<decltype(o.password),
                             std::optional<openscp::SecureString>>),
             "session passwords should use SecureString storage");
+}
+
+OPENSCP_TEST(test_security_policy_normalization, t) {
+    const auto invalidKnownHosts = static_cast<openscp::KnownHostsPolicy>(999);
+    const auto invalidIntegrity =
+        static_cast<openscp::TransferIntegrityPolicy>(-7);
+
+    t.check(!openscp::isValidKnownHostsPolicy(invalidKnownHosts) &&
+                openscp::normalizeKnownHostsPolicy(invalidKnownHosts) ==
+                    openscp::KnownHostsPolicy::Strict,
+            "invalid known-hosts policies must normalize to Strict");
+    t.check(openscp::knownHostsPolicyFromStorageValue(999) ==
+                openscp::KnownHostsPolicy::Strict,
+            "corrupt persisted host verification must fail secure");
+    t.check(!openscp::isValidTransferIntegrityPolicy(invalidIntegrity) &&
+                openscp::normalizeTransferIntegrityPolicy(invalidIntegrity) ==
+                    openscp::TransferIntegrityPolicy::Optional,
+            "invalid integrity policies must normalize to the documented "
+            "default");
+
+    openscp::SessionOptions options = validOptions();
+    options.known_hosts_policy = invalidKnownHosts;
+    openscp::Libssh2SftpClient client;
+    std::string error;
+    t.check(!client.connect(options, error) &&
+                client.lastOperationError().kind ==
+                    openscp::RemoteErrorKind::InvalidRequest,
+            "the SSH trust boundary must reject invalid security policies");
+
+    options.known_hosts_policy = openscp::KnownHostsPolicy::Strict;
+    options.port = 0;
+    error.clear();
+    t.check(!client.connect(options, error) &&
+                client.lastOperationError().kind ==
+                    openscp::RemoteErrorKind::InvalidRequest,
+            "the SSH trust boundary must reject invalid endpoint ports");
+}
+
+OPENSCP_TEST(test_remote_listing_budget, t) {
+    openscp::RemoteListingBudget budget(2, 5);
+    t.check(budget.tryConsume(2) && budget.tryConsume(3),
+            "listing budget should accept entries exactly at both limits");
+    t.check(!budget.tryConsume(0),
+            "listing budget should reject entries beyond the count limit");
+    t.check(budget.entries() == 2 && budget.nameBytes() == 5,
+            "rejected entries must not mutate listing accounting");
+
+    openscp::RemoteListingBudget byteBudget(10, 4);
+    t.check(!byteBudget.tryConsume(5) && byteBudget.entries() == 0,
+            "listing budget should reject one oversized filename safely");
 }
 
 OPENSCP_TEST(test_secure_string_value_semantics, t) {

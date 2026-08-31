@@ -616,31 +616,16 @@ bool CurlWebDavClient::isConnected() const {
 
 bool CurlWebDavClient::list(const std::string &remote_path,
                             std::vector<FileInfo> &out, std::string &err) {
-    auto operation = state_->beginOperation();
     clearLastOperationError();
-    err.clear();
     out.clear();
-    if (operation.disconnecting()) {
-        err = "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err);
+    auto operation =
+        state_->beginConnectedOperation(err, "WebDAV", {remote_path});
+    if (!operation) {
+        setLastOperationError(operation.failure());
         return false;
     }
-    if (!curlcommon::validateRemotePath(remote_path, "WebDAV", err)) {
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
-    const auto connection = state_->snapshot(operation);
-    if (!connection) {
-        err = "Not connected.";
-        setLastOperationError(RemoteErrorKind::Connection, err);
-        return false;
-    }
+    const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
-
-    if (!ensureCurlInitialized(err)) {
-        setLastOperationError(RemoteErrorKind::LocalIo, err);
-        return false;
-    }
 
     const std::string basePath = normalizeRemotePath(remote_path);
     WebDavResponse response;
@@ -704,39 +689,24 @@ bool CurlWebDavClient::get(
     const std::string &remote, const std::string &local, std::string &err,
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
-    auto operation = state_->beginOperation();
     clearLastOperationError();
-    err.clear();
-    if (operation.disconnecting()) {
-        err = "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err);
-        return false;
-    }
     if (resume) {
         err = "WebDAV backend does not support resume.";
         setLastOperationError(RemoteErrorKind::Unsupported, err);
         return false;
     }
-    if (!curlcommon::validateRemotePath(remote, "WebDAV", err)) {
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+    const std::string_view preflightError =
+        normalizeRemotePath(remote) == "/" || local.empty()
+            ? "WebDAV download requires a file path and local destination."
+            : "";
+    auto operation = state_->beginConnectedOperation(err, "WebDAV", {remote},
+                                                     preflightError);
+    if (!operation) {
+        setLastOperationError(operation.failure());
         return false;
     }
-    if (normalizeRemotePath(remote) == "/" || local.empty()) {
-        err = "WebDAV download requires a file path and local destination.";
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
-    const auto connection = state_->snapshot(operation);
-    if (!connection) {
-        err = "Not connected.";
-        setLastOperationError(RemoteErrorKind::Connection, err);
-        return false;
-    }
+    const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
-    if (!ensureCurlInitialized(err)) {
-        setLastOperationError(RemoteErrorKind::LocalIo, err);
-        return false;
-    }
 
     const std::string partial = curlcommon::localPartialPath(local);
     curlcommon::ActiveDestinationLease destinationLease(
@@ -822,39 +792,24 @@ bool CurlWebDavClient::put(
     const std::string &local, const std::string &remote, std::string &err,
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
-    auto operation = state_->beginOperation();
     clearLastOperationError();
-    err.clear();
-    if (operation.disconnecting()) {
-        err = "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err);
-        return false;
-    }
     if (resume) {
         err = "WebDAV backend does not support resume.";
         setLastOperationError(RemoteErrorKind::Unsupported, err);
         return false;
     }
-    if (!curlcommon::validateRemotePath(remote, "WebDAV", err)) {
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+    const std::string_view preflightError =
+        normalizeRemotePath(remote) == "/" || local.empty()
+            ? "WebDAV upload requires a local file and remote file path."
+            : "";
+    auto operation = state_->beginConnectedOperation(err, "WebDAV", {remote},
+                                                     preflightError);
+    if (!operation) {
+        setLastOperationError(operation.failure());
         return false;
     }
-    if (normalizeRemotePath(remote) == "/" || local.empty()) {
-        err = "WebDAV upload requires a local file and remote file path.";
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
-    const auto connection = state_->snapshot(operation);
-    if (!connection) {
-        err = "Not connected.";
-        setLastOperationError(RemoteErrorKind::Connection, err);
-        return false;
-    }
+    const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
-    if (!ensureCurlInitialized(err)) {
-        setLastOperationError(RemoteErrorKind::LocalIo, err);
-        return false;
-    }
 
     const std::string remotePartial = normalizeRemotePath(remote) + ".part";
     curlcommon::ActiveDestinationLease destinationLease(
@@ -967,31 +922,16 @@ bool CurlWebDavClient::exists(const std::string &remote_path, bool &isDir,
 
 bool CurlWebDavClient::stat(const std::string &remote_path, FileInfo &info,
                             std::string &err) {
-    auto operation = state_->beginOperation();
     clearLastOperationError();
-    err.clear();
     info = FileInfo{};
-    if (operation.disconnecting()) {
-        err = "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err);
+    auto operation =
+        state_->beginConnectedOperation(err, "WebDAV", {remote_path});
+    if (!operation) {
+        setLastOperationError(operation.failure());
         return false;
     }
-    if (!curlcommon::validateRemotePath(remote_path, "WebDAV", err)) {
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
-    const auto connection = state_->snapshot(operation);
-    if (!connection) {
-        err = "Not connected.";
-        setLastOperationError(RemoteErrorKind::Connection, err);
-        return false;
-    }
+    const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
-
-    if (!ensureCurlInitialized(err)) {
-        setLastOperationError(RemoteErrorKind::LocalIo, err);
-        return false;
-    }
 
     const std::string target = normalizeRemotePath(remote_path);
     WebDavResponse response;
@@ -1084,25 +1024,15 @@ bool CurlWebDavClient::setTimes(const std::string &remote_path,
 
 bool CurlWebDavClient::mkdir(const std::string &remote_dir, std::string &err,
                              unsigned int mode) {
-    auto operation = state_->beginOperation();
     clearLastOperationError();
     (void)mode;
-    err.clear();
-    if (operation.disconnecting()) {
-        err = "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err);
+    auto operation =
+        state_->beginConnectedOperation(err, "WebDAV", {remote_dir});
+    if (!operation) {
+        setLastOperationError(operation.failure());
         return false;
     }
-    if (!curlcommon::validateRemotePath(remote_dir, "WebDAV", err)) {
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
-    const auto connection = state_->snapshot(operation);
-    if (!connection) {
-        err = "Not connected.";
-        setLastOperationError(RemoteErrorKind::Connection, err);
-        return false;
-    }
+    const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
@@ -1165,29 +1095,16 @@ bool CurlWebDavClient::mkdir(const std::string &remote_dir, std::string &err,
 
 bool CurlWebDavClient::removeFile(const std::string &remote_path,
                                   std::string &err) {
-    auto operation = state_->beginOperation();
     clearLastOperationError();
-    err.clear();
-    if (operation.disconnecting()) {
-        err = "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err);
+    const bool targetsRoot = normalizeRemotePath(remote_path) == "/";
+    auto operation = state_->beginConnectedOperation(
+        err, "WebDAV", {remote_path},
+        targetsRoot ? "Refusing to delete the WebDAV base collection." : "");
+    if (!operation) {
+        setLastOperationError(operation.failure());
         return false;
     }
-    if (!curlcommon::validateRemotePath(remote_path, "WebDAV", err)) {
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
-    if (normalizeRemotePath(remote_path) == "/") {
-        err = "Refusing to delete the WebDAV base collection.";
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
-    const auto connection = state_->snapshot(operation);
-    if (!connection) {
-        err = "Not connected.";
-        setLastOperationError(RemoteErrorKind::Connection, err);
-        return false;
-    }
+    const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
@@ -1214,30 +1131,17 @@ bool CurlWebDavClient::removeDir(const std::string &remote_dir,
 
 bool CurlWebDavClient::rename(const std::string &from, const std::string &to,
                               std::string &err, bool overwrite) {
-    auto operation = state_->beginOperation();
     clearLastOperationError();
-    err.clear();
-    if (operation.disconnecting()) {
-        err = "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err);
+    const bool targetsRoot =
+        normalizeRemotePath(from) == "/" || normalizeRemotePath(to) == "/";
+    auto operation = state_->beginConnectedOperation(
+        err, "WebDAV", {from, to},
+        targetsRoot ? "Refusing to rename the WebDAV base collection." : "");
+    if (!operation) {
+        setLastOperationError(operation.failure());
         return false;
     }
-    if (!curlcommon::validateRemotePath(from, "WebDAV", err) ||
-        !curlcommon::validateRemotePath(to, "WebDAV", err)) {
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
-    if (normalizeRemotePath(from) == "/" || normalizeRemotePath(to) == "/") {
-        err = "Refusing to rename the WebDAV base collection.";
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
-    const auto connection = state_->snapshot(operation);
-    if (!connection) {
-        err = "Not connected.";
-        setLastOperationError(RemoteErrorKind::Connection, err);
-        return false;
-    }
+    const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
     const std::string destination = buildWebDavUrl(opt, to);
     // RFC 4918 MOVE requires absolute Destination URL.

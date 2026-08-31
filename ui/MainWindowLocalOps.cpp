@@ -34,12 +34,14 @@
 #include <functional>
 #include <memory>
 
-static bool entryExists(const QString &path) {
+namespace {
+
+bool entryExists(const QString &path) {
     const QFileInfo info(path);
     return info.exists() || info.isSymLink();
 }
 
-static bool removeEntry(const QString &path) {
+bool removeEntry(const QString &path) {
     const QFileInfo info(path);
     if (!info.exists() && !info.isSymLink())
         return true;
@@ -48,16 +50,15 @@ static bool removeEntry(const QString &path) {
     return QFile::remove(path);
 }
 
-static bool renameEntry(const QString &from, const QString &to) {
+bool renameEntry(const QString &from, const QString &to) {
     const QFileInfo info(from);
     if (info.isDir() && !info.isSymLink())
         return QDir().rename(from, to);
     return QFile::rename(from, to);
 }
 
-static bool copyEntryToEmptyDestination(const QString &srcPath,
-                                        const QString &dstPath,
-                                        QString &error) {
+bool copyEntryToEmptyDestination(const QString &srcPath, const QString &dstPath,
+                                 QString &error) {
     QFileInfo srcInfo(srcPath);
 
     if (srcInfo.isFile()) {
@@ -119,8 +120,8 @@ static bool copyEntryToEmptyDestination(const QString &srcPath,
     return false;
 }
 
-static bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
-                                 QString &error) {
+bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
+                          QString &error) {
     const QString destinationParent = QFileInfo(dstPath).dir().absolutePath();
     if (!QDir().mkpath(destinationParent)) {
         error = QString(QCoreApplication::translate(
@@ -176,7 +177,7 @@ static bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
     return true;
 }
 
-static void revealInFolder(const QString &filePath) {
+void revealInFolder(const QString &filePath) {
 #if defined(Q_OS_MAC)
     // macOS: use 'open -R' to reveal in Finder
     QProcess::startDetached("open", {"-R", filePath});
@@ -191,8 +192,8 @@ static void revealInFolder(const QString &filePath) {
 #endif
 }
 
-static QString buildLocalFsSummaryMessage(bool deleteSource, int successCount,
-                                          int failureCount, int skippedCount) {
+QString buildLocalFsSummaryMessage(bool deleteSource, int successCount,
+                                   int failureCount, int skippedCount) {
     if (deleteSource) {
         return QString(QCoreApplication::translate(
                            "MainWindow",
@@ -214,6 +215,8 @@ static QString buildLocalFsSummaryMessage(bool deleteSource, int successCount,
         .arg(successCount)
         .arg(failureCount);
 }
+
+} // namespace
 
 QString MainWindow::preferredLocalHomePath() const {
     const QString home = QDir::homePath();

@@ -138,7 +138,8 @@ void showSearchResults(QWidget *parent, const QString &panelLabel,
 
     auto *summaryLabel = new QLabel(summary, &dialog);
     summaryLabel->setWordWrap(true);
-    summaryLabel->setFrameStyle(QFrame::StyledPanel | QFrame::Plain);
+    summaryLabel->setFrameStyle(static_cast<int>(QFrame::StyledPanel) |
+                                static_cast<int>(QFrame::Plain));
     summaryLabel->setMargin(8);
     layout->addWidget(summaryLabel);
 

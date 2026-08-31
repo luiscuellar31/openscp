@@ -1,19 +1,27 @@
 bool Libssh2SftpClient::list(const std::string &remote_path,
                              std::vector<FileInfo> &out, std::string &err) {
     auto structuredErrorScope = beginStructuredOperation(err);
+    out.clear();
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
 
     std::string path = remote_path.empty() ? "/" : remote_path;
+    if (path.size() > std::numeric_limits<unsigned int>::max()) {
+        err = "Remote directory path exceeds the libssh2 size limit";
+        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+        return false;
+    }
 
-    LIBSSH2_SFTP_HANDLE *dir = libssh2_sftp_opendir(sftp_, path.c_str());
+    LIBSSH2_SFTP_HANDLE *dir = libssh2_sftp_open_ex(
+        sftp_, path.c_str(), static_cast<unsigned int>(path.size()), 0, 0,
+        LIBSSH2_SFTP_OPENDIR);
     if (!dir) {
         err = "sftp_opendir failed for: " + path;
         return false;
     }
 
-    out.clear();
     out.reserve(64);
+    RemoteListingBudget listingBudget;
 
     char filename[512];
     char longentry[1024];
@@ -45,17 +53,25 @@ bool Libssh2SftpClient::list(const std::string &remote_path,
             }
             if (fi.name == "." || fi.name == "..")
                 continue;
+            if (!listingBudget.tryConsume(fi.name.size())) {
+                err = "SFTP directory listing exceeded the safety limit.";
+                (void)libssh2_sftp_closedir(dir);
+                out.clear();
+                setLastOperationError(RemoteErrorKind::Protocol, err);
+                return false;
+            }
             out.push_back(std::move(fi));
         } else if (rc == 0) {
             // end of directory
             break;
         } else {
             err = "sftp_readdir_ex failed";
-            libssh2_sftp_closedir(dir);
+            (void)libssh2_sftp_closedir(dir);
+            out.clear();
             return false;
         }
     }
 
-    libssh2_sftp_closedir(dir);
+    (void)libssh2_sftp_closedir(dir);
     return true;
 }

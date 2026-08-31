@@ -159,9 +159,9 @@ void NavigationStore::addRecentLocalPath(const QString &path) {
         return;
     auto settings = createSettings();
     QStringList values =
-        settings->value(settingskeys::RecentLocalPaths).toStringList();
+        settings->value(settingskeys::kRecentLocalPaths).toStringList();
     prependRecent(values, normalized);
-    settings->setValue(settingskeys::RecentLocalPaths, values);
+    settings->setValue(settingskeys::kRecentLocalPaths, values);
 }
 
 void NavigationStore::addRecentRemotePath(const QString &scope,
@@ -182,14 +182,14 @@ void NavigationStore::addRecentServer(const openscp::SessionOptions &session) {
     const QString encoded = encodeRecentServer(session);
     auto settings = createSettings();
     QStringList values =
-        settings->value(settingskeys::RecentServers).toStringList();
+        settings->value(settingskeys::kRecentServers).toStringList();
     prependRecent(values, encoded);
-    settings->setValue(settingskeys::RecentServers, values);
+    settings->setValue(settingskeys::kRecentServers, values);
 }
 
 QStringList NavigationStore::recentLocalPaths() const {
     return createSettings()
-        ->value(settingskeys::RecentLocalPaths)
+        ->value(settingskeys::kRecentLocalPaths)
         .toStringList();
 }
 
@@ -201,12 +201,12 @@ QStringList NavigationStore::recentRemotePaths(const QString &scope) const {
 
 QStringList NavigationStore::legacyRemotePaths() const {
     return createSettings()
-        ->value(settingskeys::LegacyRecentRemotePaths)
+        ->value(settingskeys::kLegacyRecentRemotePaths)
         .toStringList();
 }
 
 QStringList NavigationStore::recentServers() const {
-    return createSettings()->value(settingskeys::RecentServers).toStringList();
+    return createSettings()->value(settingskeys::kRecentServers).toStringList();
 }
 
 QStringList NavigationStore::favorites(Location location,
@@ -266,11 +266,11 @@ void NavigationStore::clearFavorites(Location location,
 
 void NavigationStore::clearAllHistory() {
     auto settings = createSettings();
-    settings->remove(settingskeys::RecentLocalPaths);
+    settings->remove(settingskeys::kRecentLocalPaths);
     settings->remove(
-        QString::fromLatin1(openscpui::settingskeys::RemoteScopes));
-    settings->remove(settingskeys::LegacyRecentRemotePaths);
-    settings->remove(settingskeys::RecentServers);
+        QString::fromLatin1(openscpui::settingskeys::kRemoteScopes));
+    settings->remove(settingskeys::kLegacyRecentRemotePaths);
+    settings->remove(settingskeys::kRecentServers);
 }
 
 std::unique_ptr<QSettings> NavigationStore::createSettings() const {
@@ -285,19 +285,19 @@ QString NavigationStore::historyKeyForScope(const QString &scope) {
     return normalized.isEmpty()
                ? QString()
                : QString::fromLatin1(
-                     openscpui::settingskeys::RemoteScopeRecentPathsPattern)
+                     openscpui::settingskeys::kRemoteScopeRecentPathsPattern)
                      .arg(normalized);
 }
 
 QString NavigationStore::favoritesKey(Location location,
                                       const QString &remoteScope) {
     if (location == Location::Local)
-        return QString::fromLatin1(settingskeys::LocalFavorites);
+        return QString::fromLatin1(settingskeys::kLocalFavorites);
     const QString normalized = remoteScope.trimmed();
     return normalized.isEmpty()
                ? QString()
                : QString::fromLatin1(
-                     openscpui::settingskeys::RemoteScopeFavoritesPattern)
+                     openscpui::settingskeys::kRemoteScopeFavoritesPattern)
                      .arg(normalized);
 }
 

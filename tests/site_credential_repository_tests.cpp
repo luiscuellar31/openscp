@@ -1,8 +1,13 @@
 #include "SiteCredentialRepository.hpp"
 #include "TestHarness.hpp"
 
+#ifdef Q_OS_WIN
+#include "AppSettings.hpp"
+#endif
+
 #include <QCoreApplication>
 #include <QHash>
+#include <QUuid>
 
 #include <iostream>
 #include <memory>
@@ -12,6 +17,9 @@ namespace {
 struct FakeSecretBackend {
     QHash<QString, QString> values;
     SecretStore::PersistStatus saveStatus = SecretStore::PersistStatus::Stored;
+    SecretStore::LoadStatus missingLoadStatus =
+        SecretStore::LoadStatus::Missing;
+    SecretStore::DeleteStatus deleteStatus = SecretStore::DeleteStatus::Removed;
 
     SiteCredentialRepository::Backend interface() {
         return {
@@ -20,13 +28,28 @@ struct FakeSecretBackend {
                     values.insert(key, value);
                 return SecretStore::PersistResult{saveStatus, {}};
             },
-            [this](const QString &key) -> std::optional<QString> {
+            [this](const QString &key) -> SecretStore::LoadResult {
                 const auto iterator = values.constFind(key);
-                if (iterator == values.cend())
-                    return std::nullopt;
-                return iterator.value();
+                if (iterator == values.cend()) {
+                    return {missingLoadStatus,
+                            {},
+                            missingLoadStatus ==
+                                    SecretStore::LoadStatus::Missing
+                                ? QString()
+                                : QStringLiteral("simulated load failure")};
+                }
+                return {SecretStore::LoadStatus::Loaded, iterator.value(), {}};
             },
-            [this](const QString &key) { values.remove(key); },
+            [this](const QString &key) -> SecretStore::DeleteResult {
+                if (deleteStatus != SecretStore::DeleteStatus::Removed) {
+                    return {deleteStatus,
+                            QStringLiteral("simulated delete failure")};
+                }
+                const bool existed = values.remove(key) > 0;
+                return {existed ? SecretStore::DeleteStatus::Removed
+                                : SecretStore::DeleteStatus::Missing,
+                        {}};
+            },
         };
     }
 };
@@ -114,6 +137,56 @@ OPENSCP_TEST(testFailureReporting, test) {
     test.check(!result.issueMessages().value(0).isEmpty(),
                "backend failures should have a user-facing description");
 }
+
+OPENSCP_TEST(testLoadAndDeleteFailureReporting, test) {
+    FakeSecretBackend backend;
+    SiteCredentialRepository repository(backend.interface());
+    SiteEntry entry = site();
+    openscp::SessionOptions options = entry.opt;
+
+    backend.missingLoadStatus = SecretStore::LoadStatus::PermissionDenied;
+    const auto loaded = repository.load(entry, options);
+    test.check(loaded.issues.size() == 3,
+               "credential read failures should be distinguishable from "
+               "missing values");
+
+    backend.missingLoadStatus = SecretStore::LoadStatus::Missing;
+    backend.deleteStatus = SecretStore::DeleteStatus::PermissionDenied;
+    const auto removed = repository.removeAll(entry);
+    test.check(removed.issues.size() == 6,
+               "stable and legacy credential cleanup failures should be "
+               "reported");
+}
+
+#ifdef Q_OS_WIN
+OPENSCP_TEST(testWindowsDpapiSecretRoundTrip, test) {
+    SecretStore store;
+    const QString key = QStringLiteral("test/dpapi/%1")
+                            .arg(QUuid::createUuid().toString(QUuid::Id128));
+    const QString value = QStringLiteral("s3cret-\u2713-\u00f1");
+
+    const auto stored = store.setSecret(key, value);
+    test.check(stored.isStored(),
+               "Windows DPAPI should store a per-user encrypted secret");
+    openscpui::AppSettings rawSettings(
+        openscpui::AppSettings::Store::SecretFallback);
+    const QByteArray rawValue = rawSettings.value(key).toByteArray();
+    test.check(rawValue.startsWith("dpapi-v1:") &&
+                   !rawValue.contains(value.toUtf8()),
+               "Windows settings should contain only versioned ciphertext");
+    const auto restored = store.getSecret(key);
+    test.check(restored.isLoaded() && restored.value == value,
+               "Windows DPAPI should decrypt the original UTF-8 secret");
+    test.check(!SecretStore::insecureFallbackActive(),
+               "Windows DPAPI must not be reported as an insecure fallback");
+
+    const auto removed = store.removeSecret(key);
+    test.check(removed.isRemovedOrMissing() &&
+                   store.getSecret(key).status ==
+                       SecretStore::LoadStatus::Missing,
+               "removing a Windows DPAPI secret should be persistent");
+}
+#endif
 
 } // namespace
 

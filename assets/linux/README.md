@@ -13,9 +13,20 @@ Main artifacts:
 - Snap: `packaging/snap/*.snap`
 - Flatpak bundle: `dist/OpenSCP.flatpak`
 
+Official compatibility baselines:
+
+- x86_64 AppImage: glibc 2.28 or newer. CI builds it in the digest-pinned
+  Rocky Linux 8 image defined by `packaging/linux/appimage-glibc228.Dockerfile`.
+- aarch64 AppImage: glibc 2.39 or newer (Ubuntu 24.04 baseline for 1.0.0).
+- Native source build: continuously checked on Ubuntu 22.04 and newer.
+- Snap and Flatpak use their declared external runtimes.
+
+See [the platform compatibility policy](../../docs/PLATFORM_COMPATIBILITY.md)
+for the exact release contract.
+
 ## Prerequisites
 
-- Qt 6.x (tested with 6.8.3)
+- Qt 6.x (6.8.3 recommended and pinned for official AppImages)
 - libssh2 (OpenSSL 3 recommended)
 - libcurl (for FTP/FTPS/WebDAV backends)
 - tinyxml2 (for WebDAV backend XML parsing)
@@ -60,7 +71,14 @@ CMAKE_PREFIX_PATH=/path/to/Qt/<version>/gcc_64 ./scripts/package_appimage.sh
 Qt6_DIR=/path/to/Qt/<version>/gcc_64/lib/cmake/Qt6 ./scripts/package_appimage.sh
 ```
 
-The script now validates Qt SVG plugins (`qsvg` and `qsvgicon`) inside the AppDir before completing.
+The script validates Qt SVG plugins (`qsvg` and `qsvgicon`) inside the AppDir,
+bundles the matching GNU C++ runtime, and creates the immutable image only after
+those checks pass. Official builds also set `OPENSCP_MAX_GLIBC_VERSION`; the ABI
+gate can be run manually against an extracted AppDir:
+
+```bash
+./scripts/check_linux_abi.sh dist/OpenSCP.AppDir 2.28
+```
 
 ## Snap Packaging
 

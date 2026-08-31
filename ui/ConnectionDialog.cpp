@@ -33,16 +33,15 @@ openscp::SecureString secureUtf8(const QString &value) {
     return secure;
 }
 
-} // namespace
-
-static void setFormRowVisible(QFormLayout *layout, QWidget *field,
-                              bool visible) {
+void setFormRowVisible(QFormLayout *layout, QWidget *field, bool visible) {
     if (!layout || !field)
         return;
     if (QWidget *label = layout->labelForField(field))
         label->setVisible(visible);
     field->setVisible(visible);
 }
+
+} // namespace
 
 ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle(tr("Connect"));
@@ -76,7 +75,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         openscpui::AppSettings settings;
         const auto defaultProtocol = openscp::protocolFromStorageName(
             settings
-                .value(openscpui::settingskeys::DefaultProtocol,
+                .value(openscpui::settingskeys::kDefaultProtocol,
                        QString::fromLatin1(openscp::protocolStorageName(
                            openscp::Protocol::Sftp)))
                 .toString()
@@ -89,7 +88,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
 
         const auto defaultMode = openscp::scpTransferModeFromStorageName(
             settings
-                .value(openscpui::settingskeys::DefaultScpTransferMode,
+                .value(openscpui::settingskeys::kDefaultScpTransferMode,
                        QString::fromLatin1(openscp::scpTransferModeStorageName(
                            openscp::ScpTransferMode::Auto)))
                 .toString()
@@ -411,7 +410,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         openscpui::AppSettings settings;
         int khPolicyIdx = khPolicy_->findData(
             settings
-                .value(openscpui::settingskeys::DefaultKnownHostsPolicy,
+                .value(openscpui::settingskeys::kDefaultKnownHostsPolicy,
                        static_cast<int>(openscp::KnownHostsPolicy::Strict))
                 .toInt());
         if (khPolicyIdx < 0) {
@@ -423,7 +422,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
 
         int integrityIdx = integrityPolicy_->findData(
             settings
-                .value(openscpui::settingskeys::DefaultTransferIntegrityPolicy,
+                .value(openscpui::settingskeys::kDefaultTransferIntegrityPolicy,
                        static_cast<int>(
                            openscp::TransferIntegrityPolicy::Optional))
                 .toInt());
@@ -437,13 +436,14 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         if (ftpsVerifyPeer_) {
             ftpsVerifyPeer_->setChecked(
                 settings
-                    .value(openscpui::settingskeys::FtpsVerifyPeerDefault, true)
+                    .value(openscpui::settingskeys::kFtpsVerifyPeerDefault,
+                           true)
                     .toBool());
         }
         if (ftpsCaPath_) {
             ftpsCaPath_->setText(
                 settings
-                    .value(openscpui::settingskeys::FtpsCaCertPathDefault,
+                    .value(openscpui::settingskeys::kFtpsCaCertPathDefault,
                            QString())
                     .toString()
                     .trimmed());
@@ -451,14 +451,14 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         if (webDavVerifyPeer_) {
             webDavVerifyPeer_->setChecked(
                 settings
-                    .value(openscpui::settingskeys::WebDavVerifyPeerDefault,
+                    .value(openscpui::settingskeys::kWebDavVerifyPeerDefault,
                            true)
                     .toBool());
         }
         if (webDavCaPath_) {
             webDavCaPath_->setText(
                 settings
-                    .value(openscpui::settingskeys::WebDavCaCertPathDefault,
+                    .value(openscpui::settingskeys::kWebDavCaCertPathDefault,
                            QString())
                     .toString()
                     .trimmed());
@@ -821,11 +821,12 @@ openscp::SessionOptions ConnectionDialog::options() const {
     // known_hosts
     if (!khPath_->text().isEmpty())
         sessionOptions.known_hosts_path = khPath_->text().toStdString();
-    sessionOptions.known_hosts_policy = static_cast<openscp::KnownHostsPolicy>(
-        khPolicy_->currentData().toInt());
+    sessionOptions.known_hosts_policy =
+        openscp::knownHostsPolicyFromStorageValue(
+            khPolicy_->currentData().toInt());
     if (integrityPolicy_) {
         sessionOptions.transfer_integrity_policy =
-            static_cast<openscp::TransferIntegrityPolicy>(
+            openscp::transferIntegrityPolicyFromStorageValue(
                 integrityPolicy_->currentData().toInt());
     }
     if (ftpsVerifyPeer_) {

@@ -19,6 +19,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  compatibility-linux-native:
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
+    name: Native Linux Baseline (Ubuntu 22.04)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install baseline dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            binutils cmake g++ ninja-build pkg-config ripgrep \
+            libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev \
+            qt6-base-dev libqt6svg6-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools \
+            libgl1-mesa-dev
+
+      - name: Configure oldest native baseline
+        run: |
+          cmake -S . -B build-compat -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOPENSCP_BUILD_TESTS=ON \
+            -DOPENSCP_WERROR=ON \
+            -DOPENSCP_FORTIFY_SOURCE_LEVEL=AUTO
+
+      - name: Build and test
+        run: |
+          cmake --build build-compat --parallel
+          cmake --build build-compat --target openscp_hardening_check
+          ctest --test-dir build-compat --output-on-failure -LE integration
+
   quick-dev:
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/dev') ||

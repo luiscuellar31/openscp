@@ -57,6 +57,42 @@ struct ProtocolCapabilities {
     bool supports_transfer_integrity = false;
 };
 
+inline constexpr bool isValidKnownHostsPolicy(KnownHostsPolicy policy) {
+    return policy == KnownHostsPolicy::Strict ||
+           policy == KnownHostsPolicy::AcceptNew ||
+           policy == KnownHostsPolicy::Off;
+}
+
+// Invalid persisted values must never weaken host-key verification.
+inline constexpr KnownHostsPolicy
+normalizeKnownHostsPolicy(KnownHostsPolicy policy) {
+    return isValidKnownHostsPolicy(policy) ? policy : KnownHostsPolicy::Strict;
+}
+
+inline KnownHostsPolicy knownHostsPolicyFromStorageValue(int raw) {
+    return normalizeKnownHostsPolicy(static_cast<KnownHostsPolicy>(raw));
+}
+
+inline constexpr bool
+isValidTransferIntegrityPolicy(TransferIntegrityPolicy policy) {
+    return policy == TransferIntegrityPolicy::Off ||
+           policy == TransferIntegrityPolicy::Optional ||
+           policy == TransferIntegrityPolicy::Required;
+}
+
+inline constexpr TransferIntegrityPolicy
+normalizeTransferIntegrityPolicy(TransferIntegrityPolicy policy) {
+    return isValidTransferIntegrityPolicy(policy)
+               ? policy
+               : TransferIntegrityPolicy::Optional;
+}
+
+inline TransferIntegrityPolicy
+transferIntegrityPolicyFromStorageValue(int raw) {
+    return normalizeTransferIntegrityPolicy(
+        static_cast<TransferIntegrityPolicy>(raw));
+}
+
 inline constexpr bool isValidProxyType(ProxyType type) {
     return type == ProxyType::None || type == ProxyType::Socks5 ||
            type == ProxyType::HttpConnect;

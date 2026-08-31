@@ -22,10 +22,17 @@ set -euo pipefail
 #   EXEC_NAME           Default: "openscp_hello" (the built binary name)
 #   CMAKE_PREFIX_PATH   Point to your Qt root if not in system paths
 #   Qt6_DIR             Qt6 CMake config dir (…/lib/cmake/Qt6), optional
+#   OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION
+#                       Set to ON for official artifacts; local/community
+#                       packages remain free to use a compatible Qt 6.
 #   LINUXDEPLOY         Path or command name (default: linuxdeploy)
 #   LINUXDEPLOY_QT      Path or command name (default: linuxdeploy-plugin-qt)
 #   APPIMAGETOOL        Path or command name (default: appimagetool)
 #   SKIP_QT_PLUGIN      Set to 1 to skip the qt plugin (not recommended)
+#   OPENSCP_BUNDLE_GNU_RUNTIME
+#                       Copy libstdc++ and libgcc_s into the AppDir (default: 1)
+#   OPENSCP_MAX_GLIBC_VERSION
+#                       If set, reject every bundled ELF requiring a newer GLIBC
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${REPO_DIR}/build"
@@ -170,6 +177,30 @@ verify_qt_runtime_plugins() {
   "$checker" --context appimage "$APPDIR"
 }
 
+bundle_gnu_runtime() {
+  [[ "${OPENSCP_BUNDLE_GNU_RUNTIME:-1}" == "1" ]] || return 0
+  local compiler="${CXX:-c++}"
+  command -v "$compiler" >/dev/null 2>&1 ||
+    die "C++ compiler not found while locating the GNU runtime: $compiler"
+
+  local runtime_name runtime_path
+  mkdir -p "$APPDIR/usr/lib"
+  for runtime_name in libstdc++.so.6 libgcc_s.so.1; do
+    runtime_path="$("$compiler" -print-file-name="$runtime_name")"
+    [[ -f "$runtime_path" && "$runtime_path" != "$runtime_name" ]] ||
+      die "Could not locate $runtime_name with $compiler"
+    cp -L "$runtime_path" "$APPDIR/usr/lib/$runtime_name"
+  done
+}
+
+verify_linux_abi_if_requested() {
+  [[ -n "${OPENSCP_MAX_GLIBC_VERSION:-}" ]] || return 0
+  local checker="${REPO_DIR}/scripts/check_linux_abi.sh"
+  [[ -x "$checker" ]] || die "Linux ABI checker not found or not executable: $checker"
+  OPENSCP_REQUIRE_BUNDLED_LIBSTDCXX=1 \
+    "$checker" "$APPDIR" "$OPENSCP_MAX_GLIBC_VERSION"
+}
+
 ensure_qt_svg_iconengine() {
   local dest_dir="$APPDIR/usr/plugins/iconengines"
   if compgen -G "$dest_dir/libqsvgicon.so*" >/dev/null 2>&1 || compgen -G "$dest_dir/qsvgicon.so*" >/dev/null 2>&1; then
@@ -233,11 +264,19 @@ main() {
 
   # Build Release
   log "Configuring and building (Release)"
+  local -a cmake_args=(
+    -S "$REPO_DIR"
+    -B "$BUILD_DIR"
+    -DCMAKE_BUILD_TYPE=Release
+    "-DOPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=${OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION:-OFF}"
+  )
   if [[ -n "${Qt6_DIR:-}" ]]; then
-    cmake -S "$REPO_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DQt6_DIR="$Qt6_DIR" ${CMAKE_PREFIX_PATH:+-DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH"}
-  else
-    cmake -S "$REPO_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release ${CMAKE_PREFIX_PATH:+-DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH"}
+    cmake_args+=("-DQt6_DIR=${Qt6_DIR}")
   fi
+  if [[ -n "${CMAKE_PREFIX_PATH:-}" ]]; then
+    cmake_args+=("-DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}")
+  fi
+  cmake "${cmake_args[@]}"
   cmake --build "$BUILD_DIR" -j
 
   local exe
@@ -268,7 +307,8 @@ main() {
   arch="$(appimage_arch)"
   out_name="${APP_NAME}-${version}-${arch}.AppImage"
 
-  # Create AppImage (run from dist to keep outputs localized)
+  # Populate and validate AppDir before creating the immutable AppImage. This
+  # order ensures manually staged plugins and runtimes are actually included.
   pushd "$DIST_DIR" >/dev/null
   # Clean old file with same name
   rm -f "$out_name"
@@ -278,19 +318,17 @@ main() {
   if [[ "${SKIP_QT_PLUGIN:-0}" != "1" ]]; then
     cmd+=( --plugin qt )
   fi
-  cmd+=( --output appimage )
   log "Running: ${cmd[*]}"
   "${cmd[@]}"
   ensure_qt_svg_iconengine
   ensure_optional_qt_desktop_theme_plugins
+  bundle_gnu_runtime
   verify_qt_runtime_plugins
+  verify_linux_abi_if_requested
 
-  # Rename the produced AppImage to our canonical name if needed
-  local produced
-  produced=$(ls -1t *.AppImage 2>/dev/null | head -n1 || true)
-  if [[ -n "$produced" && "$produced" != "$out_name" ]]; then
-    mv -f "$produced" "$out_name"
-  fi
+  log "Creating AppImage: $out_name"
+  ARCH="$arch" "$APPIMAGETOOL" "$APPDIR" "$out_name"
+  [[ -f "$out_name" ]] || die "appimagetool did not produce: $out_name"
 
   # Generate SHA256
   if command -v sha256sum >/dev/null 2>&1; then

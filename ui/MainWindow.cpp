@@ -86,18 +86,20 @@
 #include <memory>
 #include <thread>
 
-static QIcon mainWindowActionIcon(const char *name) {
+namespace {
+
+QIcon mainWindowActionIcon(const char *name) {
     return QIcon(QStringLiteral(":/assets/icons/") + QLatin1String(name));
 }
 
-static void setActionIconAndTooltip(QAction *action, const QIcon &icon) {
+void setActionIconAndTooltip(QAction *action, const QIcon &icon) {
     if (!action)
         return;
     action->setIcon(icon);
     action->setToolTip(action->text());
 }
 
-static void setInstantPopup(QToolBar *bar, QAction *action) {
+void setInstantPopup(QToolBar *bar, QAction *action) {
     if (!bar || !action)
         return;
     auto *button = qobject_cast<QToolButton *>(bar->widgetForAction(action));
@@ -107,8 +109,8 @@ static void setInstantPopup(QToolBar *bar, QAction *action) {
     button->setAccessibleName(action->text());
 }
 
-static void bindActionToPanelShortcut(QAction *action, QWidget *panel,
-                                      const QKeySequence &shortcut) {
+void bindActionToPanelShortcut(QAction *action, QWidget *panel,
+                               const QKeySequence &shortcut) {
     if (!action)
         return;
     action->setShortcut(shortcut);
@@ -117,8 +119,7 @@ static void bindActionToPanelShortcut(QAction *action, QWidget *panel,
         panel->addAction(action);
 }
 
-static QListWidget *createHistoryTabList(QTabWidget *tabs,
-                                         const QString &title) {
+QListWidget *createHistoryTabList(QTabWidget *tabs, const QString &title) {
     if (!tabs)
         return nullptr;
     auto *list = new QListWidget(tabs);
@@ -129,8 +130,8 @@ static QListWidget *createHistoryTabList(QTabWidget *tabs,
     return list;
 }
 
-static void configurePanelTreeView(QTreeView *view, QAbstractItemModel *model,
-                                   const QModelIndex &rootIndex) {
+void configurePanelTreeView(QTreeView *view, QAbstractItemModel *model,
+                            const QModelIndex &rootIndex) {
     if (!view || !model)
         return;
     view->setModel(model);
@@ -145,8 +146,7 @@ static void configurePanelTreeView(QTreeView *view, QAbstractItemModel *model,
     view->setDragEnabled(true);
 }
 
-static void configurePanelDropTarget(QTreeView *view,
-                                     QObject *eventFilterOwner) {
+void configurePanelDropTarget(QTreeView *view, QObject *eventFilterOwner) {
     if (!view)
         return;
     view->setAcceptDrops(true);
@@ -157,15 +157,14 @@ static void configurePanelDropTarget(QTreeView *view,
         view->viewport()->installEventFilter(eventFilterOwner);
 }
 
-static QToolBar *createPaneIconToolbar(const QString &title, QWidget *parent) {
+QToolBar *createPaneIconToolbar(const QString &title, QWidget *parent) {
     auto *bar = new QToolBar(title, parent);
     bar->setIconSize(QSize(18, 18));
     bar->setToolButtonStyle(Qt::ToolButtonIconOnly);
     return bar;
 }
 
-static QToolBar *createBreadcrumbToolbar(const QString &title,
-                                         QWidget *parent) {
+QToolBar *createBreadcrumbToolbar(const QString &title, QWidget *parent) {
     auto *bar = new QToolBar(title, parent);
     bar->setMovable(false);
     bar->setToolButtonStyle(Qt::ToolButtonTextOnly);
@@ -174,7 +173,7 @@ static QToolBar *createBreadcrumbToolbar(const QString &title,
     return bar;
 }
 
-static bool focusWithinWidget(QWidget *focus, QWidget *root) {
+bool focusWithinWidget(QWidget *focus, QWidget *root) {
     if (!focus || !root)
         return false;
     for (QWidget *cur = focus; cur != nullptr; cur = cur->parentWidget()) {
@@ -184,7 +183,7 @@ static bool focusWithinWidget(QWidget *focus, QWidget *root) {
     return false;
 }
 
-static QString formatConnectionElapsed(qint64 totalSeconds) {
+QString formatConnectionElapsed(qint64 totalSeconds) {
     if (totalSeconds < 0)
         totalSeconds = 0;
     const qint64 hours = totalSeconds / 3600;
@@ -196,7 +195,7 @@ static QString formatConnectionElapsed(qint64 totalSeconds) {
         .arg(seconds, 2, 10, QLatin1Char('0'));
 }
 
-static QString trimHistoryLabel(const QString &raw, int maxLen = 96) {
+QString trimHistoryLabel(const QString &raw, int maxLen = 96) {
     QString out = raw.simplified();
     if (out.size() <= maxLen)
         return out;
@@ -204,6 +203,8 @@ static QString trimHistoryLabel(const QString &raw, int maxLen = 96) {
         return out.left(maxLen);
     return out.left(maxLen - 3) + QStringLiteral("...");
 }
+
+} // namespace
 
 MainWindow::~MainWindow() {
     hostKeyPromptCoordinator_.cancel();
@@ -1044,12 +1045,12 @@ void MainWindow::initializeRuntimeState() {
     QTimer::singleShot(0, this, [] {
         openscpui::AppSettings settings;
         const bool autoClean =
-            settings.value(openscpui::settingskeys::AutoCleanStaging, true)
+            settings.value(openscpui::settingskeys::kAutoCleanStaging, true)
                 .toBool();
         if (!autoClean)
             return;
         QString root =
-            settings.value(openscpui::settingskeys::StagingRoot).toString();
+            settings.value(openscpui::settingskeys::kStagingRoot).toString();
         if (root.isEmpty())
             root = QDir::homePath() + "/Downloads/OpenSCP-Dragged";
         QDir stagingRootDir(root);
@@ -1058,7 +1059,7 @@ void MainWindow::initializeRuntimeState() {
         const QDateTime now = QDateTime::currentDateTimeUtc();
         const int retentionDays = qBound(
             1,
-            settings.value(openscpui::settingskeys::StagingRetentionDays, 7)
+            settings.value(openscpui::settingskeys::kStagingRetentionDays, 7)
                 .toInt(),
             365);
         const qint64 maxAgeMs = qint64(retentionDays) * 24 * 60 * 60 * 1000;
@@ -1103,26 +1104,26 @@ void MainWindow::initializeRuntimeState() {
         // One-shot migration: if only showConnOnStart exists, copy to
         // openSiteManagerOnDisconnect
         if (!settings.contains(
-                openscpui::settingskeys::UiOpenSiteManagerOnDisconnect) &&
+                openscpui::settingskeys::kUiOpenSiteManagerOnDisconnect) &&
             settings.contains(
-                openscpui::settingskeys::UiShowConnectionOnStart)) {
+                openscpui::settingskeys::kUiShowConnectionOnStart)) {
             const bool showSiteManagerOnStart =
                 settings
-                    .value(openscpui::settingskeys::UiShowConnectionOnStart,
+                    .value(openscpui::settingskeys::kUiShowConnectionOnStart,
                            true)
                     .toBool();
             settings.setValue(
-                openscpui::settingskeys::UiOpenSiteManagerOnDisconnect,
+                openscpui::settingskeys::kUiOpenSiteManagerOnDisconnect,
                 showSiteManagerOnStart);
             settings.sync();
         }
         openSiteManagerOnStartup_ =
             settings
-                .value(openscpui::settingskeys::UiShowConnectionOnStart, true)
+                .value(openscpui::settingskeys::kUiShowConnectionOnStart, true)
                 .toBool();
         openSiteManagerOnDisconnect_ =
             settings
-                .value(openscpui::settingskeys::UiOpenSiteManagerOnDisconnect,
+                .value(openscpui::settingskeys::kUiOpenSiteManagerOnDisconnect,
                        true)
                 .toBool();
         if (openSiteManagerOnStartup_ && !QCoreApplication::closingDown() &&
@@ -1293,12 +1294,12 @@ void MainWindow::closeEvent(QCloseEvent *e) {
 void MainWindow::resetMainWindowLayoutToDefaults() {
     {
         openscpui::AppSettings settings;
-        settings.remove(openscpui::settingskeys::MainWindowGeometry);
-        settings.remove(openscpui::settingskeys::MainWindowState);
-        settings.remove(openscpui::settingskeys::MainWindowSplitterState);
-        settings.remove(openscpui::settingskeys::MainWindowLeftHeaderState);
-        settings.remove(openscpui::settingskeys::MainWindowRightHeaderLocal);
-        settings.remove(openscpui::settingskeys::MainWindowRightHeaderRemote);
+        settings.remove(openscpui::settingskeys::kMainWindowGeometry);
+        settings.remove(openscpui::settingskeys::kMainWindowState);
+        settings.remove(openscpui::settingskeys::kMainWindowSplitterState);
+        settings.remove(openscpui::settingskeys::kMainWindowLeftHeaderState);
+        settings.remove(openscpui::settingskeys::kMainWindowRightHeaderLocal);
+        settings.remove(openscpui::settingskeys::kMainWindowRightHeaderRemote);
         settings.sync();
     }
 
@@ -1339,9 +1340,9 @@ void MainWindow::saveRightHeaderState(bool remoteMode) const {
     openscpui::AppSettings settings;
     const QString key =
         remoteMode ? QString::fromLatin1(
-                         openscpui::settingskeys::MainWindowRightHeaderRemote)
+                         openscpui::settingskeys::kMainWindowRightHeaderRemote)
                    : QString::fromLatin1(
-                         openscpui::settingskeys::MainWindowRightHeaderLocal);
+                         openscpui::settingskeys::kMainWindowRightHeaderLocal);
     settings.setValue(key, rightView_->header()->saveState());
 }
 
@@ -1351,9 +1352,9 @@ bool MainWindow::restoreRightHeaderState(bool remoteMode) {
     openscpui::AppSettings settings;
     const QString key =
         remoteMode ? QString::fromLatin1(
-                         openscpui::settingskeys::MainWindowRightHeaderRemote)
+                         openscpui::settingskeys::kMainWindowRightHeaderRemote)
                    : QString::fromLatin1(
-                         openscpui::settingskeys::MainWindowRightHeaderLocal);
+                         openscpui::settingskeys::kMainWindowRightHeaderLocal);
     const QByteArray state = settings.value(key).toByteArray();
     if (state.isEmpty())
         return false;
@@ -1362,14 +1363,14 @@ bool MainWindow::restoreRightHeaderState(bool remoteMode) {
 
 void MainWindow::saveMainWindowUiState() const {
     openscpui::AppSettings settings;
-    settings.setValue(openscpui::settingskeys::MainWindowGeometry,
+    settings.setValue(openscpui::settingskeys::kMainWindowGeometry,
                       saveGeometry());
-    settings.setValue(openscpui::settingskeys::MainWindowState, saveState());
+    settings.setValue(openscpui::settingskeys::kMainWindowState, saveState());
     if (mainSplitter_)
-        settings.setValue(openscpui::settingskeys::MainWindowSplitterState,
+        settings.setValue(openscpui::settingskeys::kMainWindowSplitterState,
                           mainSplitter_->saveState());
     if (leftView_ && leftView_->header())
-        settings.setValue(openscpui::settingskeys::MainWindowLeftHeaderState,
+        settings.setValue(openscpui::settingskeys::kMainWindowLeftHeaderState,
                           leftView_->header()->saveState());
     saveRightHeaderState(rightIsRemote_);
     settings.sync();
@@ -1378,26 +1379,26 @@ void MainWindow::saveMainWindowUiState() const {
 void MainWindow::restoreMainWindowUiState() {
     openscpui::AppSettings settings;
     const QByteArray geometry =
-        settings.value(openscpui::settingskeys::MainWindowGeometry)
+        settings.value(openscpui::settingskeys::kMainWindowGeometry)
             .toByteArray();
     if (!geometry.isEmpty()) {
         restoreGeometry(geometry);
         restoredWindowGeometry_ = true;
     }
     const QByteArray winState =
-        settings.value(openscpui::settingskeys::MainWindowState).toByteArray();
+        settings.value(openscpui::settingskeys::kMainWindowState).toByteArray();
     if (!winState.isEmpty())
         restoreState(winState);
     if (mainSplitter_) {
         const QByteArray splitterState =
-            settings.value(openscpui::settingskeys::MainWindowSplitterState)
+            settings.value(openscpui::settingskeys::kMainWindowSplitterState)
                 .toByteArray();
         if (!splitterState.isEmpty())
             mainSplitter_->restoreState(splitterState);
     }
     if (leftView_ && leftView_->header()) {
         const QByteArray leftHeader =
-            settings.value(openscpui::settingskeys::MainWindowLeftHeaderState)
+            settings.value(openscpui::settingskeys::kMainWindowLeftHeaderState)
                 .toByteArray();
         if (!leftHeader.isEmpty())
             leftView_->header()->restoreState(leftHeader);
@@ -1591,17 +1592,18 @@ void MainWindow::activateScpTransferModeUi(bool enabled) {
 void MainWindow::applyPreferences() {
     openscpui::AppSettings settings;
     const bool showHidden =
-        settings.value(openscpui::settingskeys::UiShowHidden, false).toBool();
+        settings.value(openscpui::settingskeys::kUiShowHidden, false).toBool();
     const bool singleClick =
-        settings.value(openscpui::settingskeys::UiSingleClick, false).toBool();
+        settings.value(openscpui::settingskeys::kUiSingleClick, false).toBool();
     QString openBehaviorMode =
-        settings.value(openscpui::settingskeys::UiOpenBehaviorMode)
+        settings.value(openscpui::settingskeys::kUiOpenBehaviorMode)
             .toString()
             .trimmed()
             .toLower();
     if (openBehaviorMode.isEmpty()) {
         const bool revealLegacy =
-            settings.value(openscpui::settingskeys::UiOpenRevealInFolder, false)
+            settings
+                .value(openscpui::settingskeys::kUiOpenRevealInFolder, false)
                 .toBool();
         openBehaviorMode =
             revealLegacy ? QStringLiteral("reveal") : QStringLiteral("ask");
@@ -1613,21 +1615,22 @@ void MainWindow::applyPreferences() {
     }
     prefOpenBehaviorMode_ = openBehaviorMode;
     prefShowQueueOnEnqueue_ =
-        settings.value(openscpui::settingskeys::UiShowQueueOnEnqueue, true)
+        settings.value(openscpui::settingskeys::kUiShowQueueOnEnqueue, true)
             .toBool();
     prefNoHostVerificationTtlMin_ = qBound(
         1,
         settings
-            .value(openscpui::settingskeys::NoHostVerificationTtlMinutes, 15)
+            .value(openscpui::settingskeys::kNoHostVerificationTtlMinutes, 15)
             .toInt(),
         120);
     const int sessionHealthIntervalMs =
-        qBound(60,
-               settings
-                   .value(openscpui::settingskeys::SessionHealthIntervalSeconds,
-                          600)
-                   .toInt(),
-               86400) *
+        qBound(
+            60,
+            settings
+                .value(openscpui::settingskeys::kSessionHealthIntervalSeconds,
+                       600)
+                .toInt(),
+            86400) *
         1000;
     sessionHealthMonitor_.setInterval(sessionHealthIntervalMs);
     downloadDir_ = defaultDownloadDirFromSettings(settings);
@@ -1635,7 +1638,7 @@ void MainWindow::applyPreferences() {
     if (actShowQueue_) {
         const QString queueShortcutText =
             settings
-                .value(openscpui::settingskeys::ShortcutOpenTransfers,
+                .value(openscpui::settingskeys::kShortcutOpenTransfers,
                        QStringLiteral("F12"))
                 .toString()
                 .trimmed();
@@ -1646,7 +1649,7 @@ void MainWindow::applyPreferences() {
     if (actShowHistory_) {
         const QString historyShortcutText =
             settings
-                .value(openscpui::settingskeys::ShortcutOpenHistory,
+                .value(openscpui::settingskeys::kShortcutOpenHistory,
                        QStringLiteral("Ctrl+Shift+H"))
                 .toString()
                 .trimmed();
@@ -1657,7 +1660,8 @@ void MainWindow::applyPreferences() {
     // Keep Site Manager auto-open preference up to date
     openSiteManagerOnDisconnect_ =
         settings
-            .value(openscpui::settingskeys::UiOpenSiteManagerOnDisconnect, true)
+            .value(openscpui::settingskeys::kUiOpenSiteManagerOnDisconnect,
+                   true)
             .toBool();
     applyTransferPreferences();
 
@@ -1708,13 +1712,13 @@ void MainWindow::applyTransferPreferences() {
     if (!transferMgr_)
         return;
     openscpui::AppSettings settings;
-    const int maxConcurrent =
-        qBound(1,
-               settings.value(openscpui::settingskeys::TransferMaxConcurrent, 2)
-                   .toInt(),
-               8);
+    const int maxConcurrent = qBound(
+        1,
+        settings.value(openscpui::settingskeys::kTransferMaxConcurrent, 2)
+            .toInt(),
+        8);
     const int globalSpeed = qMax(
-        0, settings.value(openscpui::settingskeys::TransferGlobalSpeedKbps, 0)
+        0, settings.value(openscpui::settingskeys::kTransferGlobalSpeedKbps, 0)
                .toInt());
     transferMgr_->setMaxConcurrent(maxConcurrent);
     transferMgr_->setGlobalSpeedLimitKBps(globalSpeed);

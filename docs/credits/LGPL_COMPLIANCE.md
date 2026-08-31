@@ -1,6 +1,12 @@
 # Qt (LGPLv3) Compliance — OpenSCP
 
-OpenSCP uses Qt 6.8.3 under the GNU LGPL v3. This document explains how we comply with the license and how you can exercise your rights (to obtain source code, replace the Qt libraries, and relink).
+OpenSCP recommends Qt 6.8.3 under the GNU LGPL v3. Self-contained official
+artifacts use that exact version; community builds may use another compatible
+Qt 6. Snap and Flatpak consume Qt from their separately distributed runtimes,
+so their exact patch version is controlled and disclosed by the runtime
+provider. This document explains how we comply with the license and how you can
+exercise your rights (to obtain source code, replace the Qt libraries, and
+relink).
 
 ---
 
@@ -17,8 +23,12 @@ OpenSCP uses Qt 6.8.3 under the GNU LGPL v3. This document explains how we compl
 
 ## 2) Qt version and modules
 
-- Qt version used in releases: 6.8.3 (LTS). We pin to this exact version in distributed binaries; if we ship a patch release, we will update this document accordingly.
-- Typical modules in this project: `Qt6Core`, `Qt6Gui`, `Qt6Widgets` (plus translation tools for build). No local modifications.
+- Qt version used in self-contained releases (`.app`, `.dmg`, `.pkg`, and
+  AppImage): 6.8.3 (LTS). CI rejects a different version for these artifacts.
+- Snap and Flatpak use a compatible dynamic Qt 6 supplied by their external
+  runtime. Consult the runtime metadata for its exact corresponding source.
+- Typical modules in this project: `Qt6Core`, `Qt6Gui`, `Qt6Widgets`, and
+  `Qt6Svg` (plus translation tools for build). No local modifications.
 - Verify which Qt libraries your binary uses:
   - Linux: `ldd ./build/openscp_hello | grep Qt6`
   - macOS: `otool -L OpenSCP.app/Contents/MacOS/OpenSCP | grep Qt` (if using a bundled `.app`)
@@ -27,7 +37,8 @@ OpenSCP uses Qt 6.8.3 under the GNU LGPL v3. This document explains how we compl
 
 ## 3) Obtaining the corresponding Qt source code
 
-We link to the exact Qt source matching the binaries we distribute. Example for Qt 6.8.3:
+For the Qt binaries that OpenSCP bundles, we link to the exact matching source.
+For Qt 6.8.3:
 
 - Official source tarball: https://download.qt.io/official_releases/qt/6.8/6.8.3/single/qt-everywhere-src-6.8.3.tar.xz
 

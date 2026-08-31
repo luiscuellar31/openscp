@@ -10,100 +10,102 @@ namespace settingskeys {
 // Stable application-settings schema. Persisted record fields (saved-site
 // members, queue JSON and secret identifiers) remain owned by their respective
 // serializers; every fixed QSettings path belongs here.
-inline constexpr char Sites[] = "sites";
-inline constexpr char SitesDeleteSecretsOnRemove[] =
+inline constexpr char kSites[] = "sites";
+inline constexpr char kSitesDeleteSecretsOnRemove[] =
     "Sites/deleteSecretsOnRemove";
 
-inline constexpr char UiLanguage[] = "UI/language";
-inline constexpr char UiShowHidden[] = "UI/showHidden";
-inline constexpr char UiShowConnectionOnStart[] = "UI/showConnOnStart";
-inline constexpr char UiOpenSiteManagerOnDisconnect[] =
+inline constexpr char kUiLanguage[] = "UI/language";
+inline constexpr char kUiShowHidden[] = "UI/showHidden";
+inline constexpr char kUiShowConnectionOnStart[] = "UI/showConnOnStart";
+inline constexpr char kUiOpenSiteManagerOnDisconnect[] =
     "UI/openSiteManagerOnDisconnect";
-inline constexpr char UiSingleClick[] = "UI/singleClick";
-inline constexpr char UiOpenBehaviorMode[] = "UI/openBehaviorMode";
-inline constexpr char UiOpenRevealInFolder[] = "UI/openRevealInFolder";
-inline constexpr char UiOpenBehaviorChosen[] = "UI/openBehaviorChosen";
-inline constexpr char UiShowQueueOnEnqueue[] = "UI/showQueueOnEnqueue";
-inline constexpr char UiDefaultDownloadDir[] = "UI/defaultDownloadDir";
-inline constexpr char MainWindowGeometry[] = "UI/mainWindow/geometry";
-inline constexpr char MainWindowState[] = "UI/mainWindow/windowState";
-inline constexpr char MainWindowSplitterState[] = "UI/mainWindow/splitterState";
-inline constexpr char MainWindowLeftHeaderState[] =
+inline constexpr char kUiSingleClick[] = "UI/singleClick";
+inline constexpr char kUiOpenBehaviorMode[] = "UI/openBehaviorMode";
+inline constexpr char kUiOpenRevealInFolder[] = "UI/openRevealInFolder";
+inline constexpr char kUiOpenBehaviorChosen[] = "UI/openBehaviorChosen";
+inline constexpr char kUiShowQueueOnEnqueue[] = "UI/showQueueOnEnqueue";
+inline constexpr char kUiDefaultDownloadDir[] = "UI/defaultDownloadDir";
+inline constexpr char kMainWindowGeometry[] = "UI/mainWindow/geometry";
+inline constexpr char kMainWindowState[] = "UI/mainWindow/windowState";
+inline constexpr char kMainWindowSplitterState[] =
+    "UI/mainWindow/splitterState";
+inline constexpr char kMainWindowLeftHeaderState[] =
     "UI/mainWindow/leftHeaderState";
-inline constexpr char MainWindowRightHeaderLocal[] =
+inline constexpr char kMainWindowRightHeaderLocal[] =
     "UI/mainWindow/rightHeaderLocal";
-inline constexpr char MainWindowRightHeaderRemote[] =
+inline constexpr char kMainWindowRightHeaderRemote[] =
     "UI/mainWindow/rightHeaderRemote";
-inline constexpr char TransferQueueGeometry[] = "UI/transferQueue/geometry";
-inline constexpr char TransferQueueHeaderState[] =
+inline constexpr char kTransferQueueGeometry[] = "UI/transferQueue/geometry";
+inline constexpr char kTransferQueueHeaderState[] =
     "UI/transferQueue/headerStateV4";
-inline constexpr char TransferQueueFilterMode[] = "UI/transferQueue/filterMode";
-inline constexpr char TransferQueueAutoClearMode[] =
+inline constexpr char kTransferQueueFilterMode[] =
+    "UI/transferQueue/filterMode";
+inline constexpr char kTransferQueueAutoClearMode[] =
     "UI/transferQueue/autoClearMode";
-inline constexpr char TransferQueueAutoClearMinutes[] =
+inline constexpr char kTransferQueueAutoClearMinutes[] =
     "UI/transferQueue/autoClearMinutes";
 
-inline constexpr char DefaultProtocol[] = "Protocol/defaultProtocol";
-inline constexpr char DefaultScpTransferMode[] =
+inline constexpr char kDefaultProtocol[] = "Protocol/defaultProtocol";
+inline constexpr char kDefaultScpTransferMode[] =
     "Protocol/scpTransferModeDefault";
 
-inline constexpr char DefaultKnownHostsPolicy[] =
+inline constexpr char kDefaultKnownHostsPolicy[] =
     "Security/defaultKnownHostsPolicy";
-inline constexpr char DefaultTransferIntegrityPolicy[] =
+inline constexpr char kDefaultTransferIntegrityPolicy[] =
     "Security/defaultTransferIntegrityPolicy";
-inline constexpr char FtpsVerifyPeerDefault[] =
+inline constexpr char kFtpsVerifyPeerDefault[] =
     "Security/ftpsVerifyPeerDefault";
-inline constexpr char FtpsCaCertPathDefault[] =
+inline constexpr char kFtpsCaCertPathDefault[] =
     "Security/ftpsCaCertPathDefault";
-inline constexpr char WebDavVerifyPeerDefault[] =
+inline constexpr char kWebDavVerifyPeerDefault[] =
     "Security/webdavVerifyPeerDefault";
-inline constexpr char WebDavCaCertPathDefault[] =
+inline constexpr char kWebDavCaCertPathDefault[] =
     "Security/webdavCaCertPathDefault";
-inline constexpr char KnownHostsHashed[] = "Security/knownHostsHashed";
-inline constexpr char FingerprintHex[] = "Security/fpHex";
-inline constexpr char NoHostVerificationTtlMinutes[] =
+inline constexpr char kKnownHostsHashed[] = "Security/knownHostsHashed";
+inline constexpr char kFingerprintHex[] = "Security/fpHex";
+inline constexpr char kNoHostVerificationTtlMinutes[] =
     "Security/noHostVerificationTtlMin";
-inline constexpr char EnableInsecureSecretFallback[] =
+inline constexpr char kEnableInsecureSecretFallback[] =
     "Security/enableInsecureSecretFallback";
-inline constexpr char MacKeychainRestrictive[] =
+inline constexpr char kMacKeychainRestrictive[] =
     "Security/macKeychainRestrictive";
 
-inline constexpr char TransferMaxConcurrent[] = "Transfer/maxConcurrent";
-inline constexpr char TransferGlobalSpeedKbps[] = "Transfer/globalSpeedKBps";
-inline constexpr char TransferDefaultQueueAutoClearMode[] =
+inline constexpr char kTransferMaxConcurrent[] = "Transfer/maxConcurrent";
+inline constexpr char kTransferGlobalSpeedKbps[] = "Transfer/globalSpeedKBps";
+inline constexpr char kTransferDefaultQueueAutoClearMode[] =
     "Transfer/defaultQueueAutoClearMode";
-inline constexpr char TransferDefaultQueueAutoClearMinutes[] =
+inline constexpr char kTransferDefaultQueueAutoClearMinutes[] =
     "Transfer/defaultQueueAutoClearMinutes";
 
-inline constexpr char SessionHealthIntervalSeconds[] =
+inline constexpr char kSessionHealthIntervalSeconds[] =
     "Network/sessionHealthIntervalSec";
 
-inline constexpr char StagingRoot[] = "Advanced/stagingRoot";
-inline constexpr char StagingPreparationTimeoutMs[] =
+inline constexpr char kStagingRoot[] = "Advanced/stagingRoot";
+inline constexpr char kStagingPreparationTimeoutMs[] =
     "Advanced/stagingPrepTimeoutMs";
-inline constexpr char StagingConfirmationItems[] =
+inline constexpr char kStagingConfirmationItems[] =
     "Advanced/stagingConfirmItems";
-inline constexpr char StagingConfirmationMiB[] = "Advanced/stagingConfirmMiB";
-inline constexpr char AutoCleanStaging[] = "Advanced/autoCleanStaging";
-inline constexpr char MaximumFolderDepth[] = "Advanced/maxFolderDepth";
-inline constexpr char StagingRetentionDays[] = "Advanced/stagingRetentionDays";
+inline constexpr char kStagingConfirmationMiB[] = "Advanced/stagingConfirmMiB";
+inline constexpr char kAutoCleanStaging[] = "Advanced/autoCleanStaging";
+inline constexpr char kMaximumFolderDepth[] = "Advanced/maxFolderDepth";
+inline constexpr char kStagingRetentionDays[] = "Advanced/stagingRetentionDays";
 
-inline constexpr char TerminalForceInteractiveLogin[] =
+inline constexpr char kTerminalForceInteractiveLogin[] =
     "Terminal/forceInteractiveLogin";
-inline constexpr char TerminalEnableSftpCliFallback[] =
+inline constexpr char kTerminalEnableSftpCliFallback[] =
     "Terminal/enableSftpCliFallback";
-inline constexpr char ShortcutOpenTransfers[] = "Shortcuts/openTransfers";
-inline constexpr char ShortcutOpenHistory[] = "Shortcuts/openHistory";
+inline constexpr char kShortcutOpenTransfers[] = "Shortcuts/openTransfers";
+inline constexpr char kShortcutOpenHistory[] = "Shortcuts/openHistory";
 
-inline constexpr char SyncFilterPresets[] = "SyncDialog/filterPresetsV1";
-inline constexpr char RecentLocalPaths[] = "History/recentLocalPaths";
-inline constexpr char LegacyRecentRemotePaths[] = "History/recentRemotePaths";
-inline constexpr char RecentServers[] = "History/recentServers";
-inline constexpr char RemoteScopes[] = "History/remoteScopes";
-inline constexpr char RemoteScopeRecentPathsPattern[] =
+inline constexpr char kSyncFilterPresets[] = "SyncDialog/filterPresetsV1";
+inline constexpr char kRecentLocalPaths[] = "History/recentLocalPaths";
+inline constexpr char kLegacyRecentRemotePaths[] = "History/recentRemotePaths";
+inline constexpr char kRecentServers[] = "History/recentServers";
+inline constexpr char kRemoteScopes[] = "History/remoteScopes";
+inline constexpr char kRemoteScopeRecentPathsPattern[] =
     "History/remoteScopes/%1/recentPaths";
-inline constexpr char LocalFavorites[] = "Favorites/localPaths";
-inline constexpr char RemoteScopeFavoritesPattern[] =
+inline constexpr char kLocalFavorites[] = "Favorites/localPaths";
+inline constexpr char kRemoteScopeFavoritesPattern[] =
     "Favorites/remoteScopes/%1/paths";
 
 } // namespace settingskeys

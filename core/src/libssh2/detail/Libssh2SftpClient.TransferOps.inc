@@ -163,8 +163,8 @@ bool Libssh2SftpClient::get(
     }
     UniqueFile localFile(lf);
 
-    const std::size_t CHUNK = 64 * 1024;
-    std::vector<char> buf(CHUNK);
+    constexpr std::size_t kChunkSize = 64 * 1024;
+    std::vector<char> buf(kChunkSize);
     std::size_t done = offset;
 
     while (true) {
@@ -338,8 +338,8 @@ bool Libssh2SftpClient::put(
         return false;
     }
 
-    const std::size_t CHUNK = 64 * 1024;
-    std::vector<char> buf(CHUNK);
+    constexpr std::size_t kChunkSize = 64 * 1024;
+    std::vector<char> buf(kChunkSize);
     std::size_t done = 0;
 
     // If resuming, advance local and remote

@@ -7,6 +7,7 @@ option(OPENSCP_ENABLE_WEBDAV_BACKEND
        "Build WebDAV backend module (requires libcurl + tinyxml2 development files)" ON)
 
 set(OPENSCP_CORE_SRCS
+    src/common/RemoteListingLimits.hpp
     src/common/RemotePath.cpp
     src/common/SafeLocalFile.cpp
     src/libssh2/ClientFactory.cpp      # protocol -> backend factory

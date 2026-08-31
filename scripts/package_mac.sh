@@ -14,10 +14,17 @@ set -euo pipefail
 #   APP_NAME               Default: "OpenSCP"
 #   BUNDLE_ID              Default: "com.openscp.app"
 #   MINIMUM_SYSTEM_VERSION Default: "12.0" (CMake deployment target + Info.plist)
-#   CMAKE_OSX_ARCHITECTURES Default: "arm64" (or "arm64;x86_64" for universal naming)
+#   CMAKE_OSX_ARCHITECTURES Default: current machine architecture
+#                            (or "arm64;x86_64" for universal naming)
 #   CMAKE_PREFIX_PATH      Path to your Qt 6 install root (if not in default search path)
+#   OPENSCP_DEPENDENCY_PREFIX
+#                          Optional prefix containing release-built libssh2,
+#                          OpenSSL, and tinyxml2 libraries.
 #   QT_PREFIX              Path to Qt install root (…/Qt/<version>/macos)
 #   Qt6_DIR                Path to Qt6 CMake config dir (…/lib/cmake/Qt6); used to derive Qt bin for macdeployqt
+#   OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION
+#                          Set to ON for official artifacts; local/community
+#                          packages remain free to use a compatible Qt 6.
 #   PACKAGE_FORMATS        Comma-separated outputs: app,pkg,dmg (default: dmg)
 #   MACDEPLOYQT_DISABLE_PLUGIN_SCAN
 #                          Set to 1 to pass -no-plugins to macdeployqt.
@@ -58,7 +65,7 @@ DIST_DIR="${REPO_DIR}/dist"
 APP_NAME="${APP_NAME:-OpenSCP}"
 BUNDLE_ID="${BUNDLE_ID:-com.openscp.app}"
 MINIMUM_SYSTEM_VERSION="${MINIMUM_SYSTEM_VERSION:-12.0}"
-ARCHS="${CMAKE_OSX_ARCHITECTURES:-arm64}"
+ARCHS="${CMAKE_OSX_ARCHITECTURES:-$(uname -m)}"
 PACKAGE_FORMATS="${PACKAGE_FORMATS:-dmg}"
 ENTITLEMENTS_FILE="${ENTITLEMENTS_FILE:-${REPO_DIR}/assets/macos/entitlements.plist}"
 
@@ -76,6 +83,7 @@ INFO_PLIST_OUT="${CONTENTS_DIR}/Info.plist"
 
 # Will be set when discovering Qt/macdeployqt to help locate frameworks
 QTPREFIX=""
+MACDEPLOYQT_PATH=""
 QT_HOST_WRAP_DIR=""
 
 source "${REPO_DIR}/scripts/macos/package_signing.sh"
@@ -146,7 +154,7 @@ discover_macdeployqt() {
     local from_prefix="${QT_PREFIX}/bin/macdeployqt"
     if [[ -x "$from_prefix" ]]; then
       QTPREFIX="$(cd "$(dirname "$from_prefix")/.." && pwd)"
-      echo "$from_prefix"; return
+      MACDEPLOYQT_PATH="$from_prefix"; return
     fi
   fi
   # 2) Qt6_DIR based lookup
@@ -160,7 +168,7 @@ discover_macdeployqt() {
         die "Refusing to use conda macdeployqt at: $real. Point Qt6_DIR to your official Qt (e.g., \$HOME/Qt/<version>/macos/lib/cmake/Qt6)."
       fi
       QTPREFIX="$(cd "$(dirname "$cand")/.." && pwd)"
-      echo "$cand"; return
+      MACDEPLOYQT_PATH="$cand"; return
     fi
   fi
   # 3) Auto-detect from $HOME/Qt/<version>/macos
@@ -168,7 +176,7 @@ discover_macdeployqt() {
   home_prefix="$(detect_qt_prefix_from_home || true)"
   if [[ -n "$home_prefix" && -x "${home_prefix}/bin/macdeployqt" ]]; then
     QTPREFIX="$home_prefix"
-    echo "${home_prefix}/bin/macdeployqt"; return
+    MACDEPLOYQT_PATH="${home_prefix}/bin/macdeployqt"; return
   fi
   # 4) PATH fallback (reject miniconda)
   if command -v macdeployqt >/dev/null 2>&1; then
@@ -180,7 +188,7 @@ discover_macdeployqt() {
       die "Found macdeployqt in conda path: $real. Please use official Qt macdeployqt or set Qt6_DIR to your Qt installation."
     fi
     QTPREFIX="$(cd "$(dirname "$pathbin")/.." && pwd)"
-    echo "$pathbin"; return
+    MACDEPLOYQT_PATH="$pathbin"; return
   fi
   die "macdeployqt not found. Install Qt 6 and ensure macdeployqt is available (or set QT_PREFIX/Qt6_DIR)."
 }
@@ -411,6 +419,10 @@ bundle_non_qt_deps() {
   mkdir -p "$FRAMEWORKS_DIR"
 
   local exe="$MACOS_DIR/${APP_NAME}"
+  local dependency_prefix="${OPENSCP_DEPENDENCY_PREFIX:-}"
+  if [[ -n "$dependency_prefix" && ! -d "$dependency_prefix/lib" ]]; then
+    die "OPENSCP_DEPENDENCY_PREFIX has no lib directory: $dependency_prefix"
+  fi
   local want_libssh2="" want_libcrypto="" want_tinyxml2=""
   if otool -L "$exe" | grep -q "libssh2"; then want_libssh2=1; fi
   if otool -L "$exe" | grep -q "libcrypto"; then want_libcrypto=1; fi
@@ -433,28 +445,53 @@ maybe_copy() {
   echo "$dest_path"
 }
 
+copy_from_dependency_prefix() {
+  local pattern="$1"
+  local src_path="" install_name="" dest_basename="" dest_path=""
+  src_path=$(find "$dependency_prefix/lib" -maxdepth 1 -type f -name "$pattern" | sort | head -n1 || true)
+  [[ -n "$src_path" ]] ||
+    die "No library matching $pattern found under $dependency_prefix/lib"
+
+  # Versioned source files commonly have an ABI install-name with a shorter
+  # basename (for example libssh2.1.dylib). Preserve that ABI name so existing
+  # executable references resolve to the newly copied release library.
+  install_name=$(otool -D "$src_path" | awk 'NR == 2 { print $1; exit }')
+  dest_basename=$(basename "${install_name:-$src_path}")
+  dest_path="$FRAMEWORKS_DIR/$dest_basename"
+
+  find "$FRAMEWORKS_DIR" -maxdepth 1 \( -type f -o -type l \) \
+    -name "$pattern" -delete
+  cp -L "$src_path" "$dest_path"
+  printf '%s\n' "$dest_path"
+}
+
   local libs_to_fix=()
 
   if [[ -n "$want_libssh2" ]]; then
     local existing
-    existing=$(ls "$FRAMEWORKS_DIR"/libssh2*.dylib 2>/dev/null | head -n1 || true)
-    if [[ -n "$existing" ]]; then
+    if [[ -n "$dependency_prefix" ]]; then
+      existing=$(copy_from_dependency_prefix 'libssh2*.dylib')
       libs_to_fix+=("$existing")
     else
-      local libdir="" src=""
-      libdir=$(pkg-config --variable=libdir libssh2 2>/dev/null || true)
-      if [[ -z "$libdir" ]]; then
-        for d in /opt/homebrew/opt/libssh2/lib /opt/homebrew/lib /usr/local/opt/libssh2/lib /usr/local/lib; do
-          [[ -d "$d" ]] && libdir="$d" && break
-        done
-      fi
-      src=$(ls "$libdir"/libssh2*.dylib 2>/dev/null | head -n1 || true)
-      [[ -z "$src" ]] && die "libssh2 dylib not found (looked under $libdir). Install with 'brew install libssh2'."
-      existing=$(maybe_copy "$src" "$FRAMEWORKS_DIR")
-      libs_to_fix+=("$existing")
-      # Redirect the executable's reference if it still points to Homebrew path
-      if otool -L "$exe" | grep -q "$src"; then
-        redirect_dep_to_rpath "$exe" "$src"
+      existing=$(ls "$FRAMEWORKS_DIR"/libssh2*.dylib 2>/dev/null | head -n1 || true)
+      if [[ -n "$existing" ]]; then
+        libs_to_fix+=("$existing")
+      else
+        local libdir="" src=""
+        libdir=$(pkg-config --variable=libdir libssh2 2>/dev/null || true)
+        if [[ -z "$libdir" ]]; then
+          for d in /opt/homebrew/opt/libssh2/lib /opt/homebrew/lib /usr/local/opt/libssh2/lib /usr/local/lib; do
+            [[ -d "$d" ]] && libdir="$d" && break
+          done
+        fi
+        src=$(ls "$libdir"/libssh2*.dylib 2>/dev/null | head -n1 || true)
+        [[ -z "$src" ]] && die "libssh2 dylib not found (looked under $libdir). Install with 'brew install libssh2'."
+        existing=$(maybe_copy "$src" "$FRAMEWORKS_DIR")
+        libs_to_fix+=("$existing")
+        # Redirect the executable's reference if it still points to Homebrew path
+        if otool -L "$exe" | grep -q "$src"; then
+          redirect_dep_to_rpath "$exe" "$src"
+        fi
       fi
     fi
     # Set ID to @rpath/<name>
@@ -465,27 +502,32 @@ maybe_copy() {
 
   if [[ -n "$want_libcrypto" ]]; then
     local existing
-    existing=$(ls "$FRAMEWORKS_DIR"/libcrypto*.dylib 2>/dev/null | head -n1 || true)
-    if [[ -n "$existing" ]]; then
+    if [[ -n "$dependency_prefix" ]]; then
+      existing=$(copy_from_dependency_prefix 'libcrypto*.dylib')
       libs_to_fix+=("$existing")
     else
-      local src=""
-      if command -v brew >/dev/null 2>&1; then
-        local pfx
-        pfx=$(brew --prefix openssl@3 2>/dev/null || true)
-        if [[ -n "$pfx" && -d "$pfx/lib" ]]; then src=$(ls "$pfx/lib"/libcrypto*.dylib 2>/dev/null | head -n1 || true); fi
-      fi
-      if [[ -z "$src" ]]; then
-        for d in /opt/homebrew/opt/openssl@3/lib /usr/local/opt/openssl@3/lib; do
-          [[ -d "$d" ]] && src=$(ls "$d"/libcrypto*.dylib 2>/dev/null | head -n1 || true)
-          [[ -n "$src" ]] && break
-        done
-      fi
-      [[ -z "$src" ]] && die "OpenSSL libcrypto dylib not found. Install with 'brew install openssl@3'."
-      existing=$(maybe_copy "$src" "$FRAMEWORKS_DIR")
-      libs_to_fix+=("$existing")
-      if otool -L "$exe" | grep -q "$src"; then
-        redirect_dep_to_rpath "$exe" "$src"
+      existing=$(ls "$FRAMEWORKS_DIR"/libcrypto*.dylib 2>/dev/null | head -n1 || true)
+      if [[ -n "$existing" ]]; then
+        libs_to_fix+=("$existing")
+      else
+        local src=""
+        if command -v brew >/dev/null 2>&1; then
+          local pfx
+          pfx=$(brew --prefix openssl@3 2>/dev/null || true)
+          if [[ -n "$pfx" && -d "$pfx/lib" ]]; then src=$(ls "$pfx/lib"/libcrypto*.dylib 2>/dev/null | head -n1 || true); fi
+        fi
+        if [[ -z "$src" ]]; then
+          for d in /opt/homebrew/opt/openssl@3/lib /usr/local/opt/openssl@3/lib; do
+            [[ -d "$d" ]] && src=$(ls "$d"/libcrypto*.dylib 2>/dev/null | head -n1 || true)
+            [[ -n "$src" ]] && break
+          done
+        fi
+        [[ -z "$src" ]] && die "OpenSSL libcrypto dylib not found. Install with 'brew install openssl@3'."
+        existing=$(maybe_copy "$src" "$FRAMEWORKS_DIR")
+        libs_to_fix+=("$existing")
+        if otool -L "$exe" | grep -q "$src"; then
+          redirect_dep_to_rpath "$exe" "$src"
+        fi
       fi
     fi
     if [[ -f "$existing" ]]; then
@@ -493,32 +535,49 @@ maybe_copy() {
     fi
   fi
 
+  # macdeployqt may stage libssl next to libcrypto even when it is not a direct
+  # executable dependency. If a release prefix is authoritative, replace that
+  # copy as well so no newer Homebrew Mach-O remains in the bundle.
+  if [[ -n "$dependency_prefix" ]] &&
+     compgen -G "$FRAMEWORKS_DIR/libssl*.dylib" >/dev/null 2>&1; then
+    local bundled_libssl
+    bundled_libssl=$(copy_from_dependency_prefix 'libssl*.dylib')
+    libs_to_fix+=("$bundled_libssl")
+    install_name_tool -id "@rpath/$(basename "$bundled_libssl")" \
+      "$bundled_libssl" || true
+  fi
+
   if [[ -n "$want_tinyxml2" ]]; then
     local existing
-    existing=$(ls "$FRAMEWORKS_DIR"/libtinyxml2*.dylib 2>/dev/null | head -n1 || true)
-    if [[ -n "$existing" ]]; then
+    if [[ -n "$dependency_prefix" ]]; then
+      existing=$(copy_from_dependency_prefix 'libtinyxml2*.dylib')
       libs_to_fix+=("$existing")
     else
-      local libdir="" src=""
-      libdir=$(pkg-config --variable=libdir tinyxml2 2>/dev/null || true)
-      if [[ -z "$libdir" ]] && command -v brew >/dev/null 2>&1; then
-        local pfx
-        pfx=$(brew --prefix tinyxml2 2>/dev/null || true)
-        if [[ -n "$pfx" && -d "$pfx/lib" ]]; then
-          libdir="$pfx/lib"
+      existing=$(ls "$FRAMEWORKS_DIR"/libtinyxml2*.dylib 2>/dev/null | head -n1 || true)
+      if [[ -n "$existing" ]]; then
+        libs_to_fix+=("$existing")
+      else
+        local libdir="" src=""
+        libdir=$(pkg-config --variable=libdir tinyxml2 2>/dev/null || true)
+        if [[ -z "$libdir" ]] && command -v brew >/dev/null 2>&1; then
+          local pfx
+          pfx=$(brew --prefix tinyxml2 2>/dev/null || true)
+          if [[ -n "$pfx" && -d "$pfx/lib" ]]; then
+            libdir="$pfx/lib"
+          fi
         fi
-      fi
-      if [[ -z "$libdir" ]]; then
-        for d in /opt/homebrew/opt/tinyxml2/lib /usr/local/opt/tinyxml2/lib /opt/homebrew/lib /usr/local/lib; do
-          [[ -d "$d" ]] && libdir="$d" && break
-        done
-      fi
-      src=$(ls "$libdir"/libtinyxml2*.dylib 2>/dev/null | head -n1 || true)
-      [[ -z "$src" ]] && die "tinyxml2 dylib not found (looked under $libdir). Install with 'brew install tinyxml2'."
-      existing=$(maybe_copy "$src" "$FRAMEWORKS_DIR")
-      libs_to_fix+=("$existing")
-      if otool -L "$exe" | grep -q "$src"; then
-        redirect_dep_to_rpath "$exe" "$src"
+        if [[ -z "$libdir" ]]; then
+          for d in /opt/homebrew/opt/tinyxml2/lib /usr/local/opt/tinyxml2/lib /opt/homebrew/lib /usr/local/lib; do
+            [[ -d "$d" ]] && libdir="$d" && break
+          done
+        fi
+        src=$(ls "$libdir"/libtinyxml2*.dylib 2>/dev/null | head -n1 || true)
+        [[ -z "$src" ]] && die "tinyxml2 dylib not found (looked under $libdir). Install with 'brew install tinyxml2'."
+        existing=$(maybe_copy "$src" "$FRAMEWORKS_DIR")
+        libs_to_fix+=("$existing")
+        if otool -L "$exe" | grep -q "$src"; then
+          redirect_dep_to_rpath "$exe" "$src"
+        fi
       fi
     fi
     if [[ -f "$existing" ]]; then
@@ -542,7 +601,9 @@ maybe_copy() {
         fi
       fi
     done < <(list_deps "$lib")
+    rewrite_external_refs_to_bundle "$lib"
   done
+  rewrite_external_refs_to_bundle "$exe"
 }
 
 # Copy a Qt *.framework from a source lib dir into the app bundle Frameworks
@@ -847,8 +908,30 @@ main() {
 
   # Build the app (Release) — ensures OpenSCP.app exists
   log "Configuring and building (Release)"
+  # A previous packaging run may have left frameworks or plugins that are no
+  # longer reachable by the current executable. Recreate only the generated
+  # app bundle so stale dylibs cannot silently enter a new artifact.
+  rm -rf "$APP_DIR"
   # Prefer explicit Qt env vars, then auto-detect under $HOME/Qt/<version>/macos
   local qt_cfg_dir="${Qt6_DIR:-${QT6_DIR:-}}"
+  local -a dependency_cmake_args=()
+  if [[ -n "${OPENSCP_DEPENDENCY_PREFIX:-}" ]]; then
+    local dependency_prefix="${OPENSCP_DEPENDENCY_PREFIX}"
+    local libssh2_link="${dependency_prefix}/lib/libssh2.dylib"
+    [[ -f "${dependency_prefix}/include/libssh2.h" ]] ||
+      die "Missing libssh2 headers under OPENSCP_DEPENDENCY_PREFIX"
+    [[ -f "$libssh2_link" ]] ||
+      die "Missing libssh2.dylib under OPENSCP_DEPENDENCY_PREFIX"
+    dependency_cmake_args+=(
+      "-DOPENSSL_ROOT_DIR=${dependency_prefix}"
+      "-DOPENSSL_CRYPTO_LIBRARY=${dependency_prefix}/lib/libcrypto.dylib"
+      "-DOPENSSL_SSL_LIBRARY=${dependency_prefix}/lib/libssl.dylib"
+      "-DOPENSSL_INCLUDE_DIR=${dependency_prefix}/include"
+      "-Dtinyxml2_DIR=${dependency_prefix}/lib/cmake/tinyxml2"
+      "-DLIBSSH2_INC=${dependency_prefix}/include"
+      "-DLIBSSH2_LIB=${libssh2_link}"
+    )
+  fi
   if [[ -z "$qt_cfg_dir" && -n "${QT_PREFIX:-}" ]]; then
     qt_cfg_dir="${QT_PREFIX}/lib/cmake/Qt6"
   fi
@@ -860,21 +943,29 @@ main() {
     qt_prefix="$(cd "$qt_cfg_dir/../../.." && pwd)"
     log "Using Qt from: $qt_prefix"
     setup_qt_host_wrappers_if_needed "$qt_prefix"
+    local cmake_prefix_path="$qt_prefix"
+    if [[ -n "${CMAKE_PREFIX_PATH:-}" ]]; then
+      cmake_prefix_path="${qt_prefix};${CMAKE_PREFIX_PATH}"
+    fi
     local -a cmake_args=(
       -S "$REPO_DIR"
       -B "$BUILD_DIR"
       -DCMAKE_BUILD_TYPE=Release
-      "-DCMAKE_PREFIX_PATH=${qt_prefix}"
+      "-DCMAKE_PREFIX_PATH=${cmake_prefix_path}"
       "-DQt6_DIR=${qt_cfg_dir}"
       "-DBUNDLE_ID=${BUNDLE_ID}"
       "-DCMAKE_OSX_ARCHITECTURES=${ARCHS}"
       "-DCMAKE_OSX_DEPLOYMENT_TARGET=${MINIMUM_SYSTEM_VERSION}"
+      "-DOPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=${OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION:-OFF}"
     )
     if [[ -n "$QT_HOST_WRAP_DIR" ]]; then
       cmake_args+=("-DCMAKE_AUTOUIC_EXECUTABLE=${QT_HOST_WRAP_DIR}/uic")
       cmake_args+=("-DCMAKE_AUTORCC_EXECUTABLE=${QT_HOST_WRAP_DIR}/rcc")
       cmake_args+=("-DCMAKE_AUTOMOC_EXECUTABLE=${QT_HOST_WRAP_DIR}/moc")
       cmake_args+=("-DOPENSCP_QT_HOST_TOOLS_DIR=${QT_HOST_WRAP_DIR}")
+    fi
+    if ((${#dependency_cmake_args[@]:-0})); then
+      cmake_args+=("${dependency_cmake_args[@]}")
     fi
     cmake "${cmake_args[@]}"
   else
@@ -883,10 +974,19 @@ main() {
     else
       warn "No Qt6_DIR/QT_PREFIX provided and no Qt found in \$HOME/Qt; relying on system CMake find_package()"
     fi
-    cmake -S "$REPO_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release \
-      -DBUNDLE_ID="$BUNDLE_ID" \
-      -DCMAKE_OSX_ARCHITECTURES="$ARCHS" \
-      -DCMAKE_OSX_DEPLOYMENT_TARGET="$MINIMUM_SYSTEM_VERSION"
+    local -a fallback_cmake_args=(
+      -S "$REPO_DIR"
+      -B "$BUILD_DIR"
+      -DCMAKE_BUILD_TYPE=Release
+      "-DBUNDLE_ID=${BUNDLE_ID}"
+      "-DCMAKE_OSX_ARCHITECTURES=${ARCHS}"
+      "-DCMAKE_OSX_DEPLOYMENT_TARGET=${MINIMUM_SYSTEM_VERSION}"
+      "-DOPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=${OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION:-OFF}"
+    )
+    if ((${#dependency_cmake_args[@]:-0})); then
+      fallback_cmake_args+=("${dependency_cmake_args[@]}")
+    fi
+    cmake "${fallback_cmake_args[@]}"
   fi
   cmake --build "$BUILD_DIR" -j
 
@@ -948,7 +1048,9 @@ main() {
 
   # macdeployqt to bundle Qt frameworks/plugins
   local mqt
-  mqt="$(discover_macdeployqt)"
+  discover_macdeployqt
+  mqt="$MACDEPLOYQT_PATH"
+  [[ -x "$mqt" ]] || die "Resolved macdeployqt is not executable: $mqt"
   log "Running macdeployqt at: $mqt"
   local disable_plugin_scan=0
   if [[ "${MACDEPLOYQT_DISABLE_PLUGIN_SCAN:-0}" == "1" ]]; then
@@ -964,7 +1066,7 @@ main() {
   # Build macdeployqt command safely even with set -u and possibly empty extra args
   local libarg=()
   if [[ -n "$QTPREFIX" && -d "$QTPREFIX/lib" ]]; then
-    libarg=( -libpath "$QTPREFIX/lib" )
+    libarg=( "-libpath=$QTPREFIX/lib" )
   fi
   local cmd=("$mqt" "$APP_DIR" -always-overwrite -verbose=1)
   if [[ $disable_plugin_scan -eq 1 ]]; then
@@ -1023,13 +1125,7 @@ main() {
   # Validate and fix any lingering Homebrew/Conda refs
   log "Validating linkage for internal libraries"
   otool -L "$MACOS_DIR/${APP_NAME}" | grep -E 'libssh2|libcrypto|libssl|tinyxml2|@executable_path' || true
-  # Redirect any remaining absolute paths for our key libs found in the executable
-  while read -r dep; do
-    base=$(basename "$dep")
-    if [[ -f "$FRAMEWORKS_DIR/$base" ]]; then
-      install_name_tool -change "$dep" "@executable_path/../Frameworks/$base" "$MACOS_DIR/${APP_NAME}" || true
-    fi
-  done < <(list_deps "$MACOS_DIR/${APP_NAME}" | grep -E '/(opt/homebrew|usr/local|miniconda).*(lib(ssh2|crypto|ssl|tinyxml2).*)' || true)
+  rewrite_external_refs_to_bundle "$MACOS_DIR/${APP_NAME}"
 
   # Sign (hardened runtime) — skipped entirely when SKIP_CODESIGN=1
   if [[ "${SKIP_CODESIGN:-0}" != "1" ]]; then

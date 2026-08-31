@@ -1,6 +1,8 @@
 name: Nightly Quality
 
 on:
+  schedule:
+    - cron: "23 4 * * *"
   pull_request:
     branches:
       - dev
@@ -14,7 +16,7 @@ on:
 
 jobs:
   sanitizers:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name != 'pull_request'
     name: Sanitizers (${{ matrix.sanitizer }})
     runs-on: ubuntu-latest
     strategy:

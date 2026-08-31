@@ -254,7 +254,7 @@ package_format() {
   SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-1}" \
   PACKAGE_FORMATS="${formats}" \
   Qt6_DIR="${EFFECTIVE_QT6_DIR}" \
-  CMAKE_OSX_ARCHITECTURES="${CMAKE_OSX_ARCHITECTURES:-arm64}" \
+  CMAKE_OSX_ARCHITECTURES="${CMAKE_OSX_ARCHITECTURES:-$(uname -m)}" \
   "${REPO_DIR}/scripts/package_mac.sh"
 }
 

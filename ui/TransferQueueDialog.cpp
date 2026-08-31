@@ -34,9 +34,11 @@
 #include <algorithm>
 #include <functional>
 
-static constexpr int kProgressColumnWidthPx = 84;
+namespace {
 
-static QString statusText(TransferTask::Status s) {
+constexpr int kProgressColumnWidthPx = 84;
+
+QString statusText(TransferTask::Status s) {
     switch (s) {
     case TransferTask::Status::Queued:
         return TransferQueueDialog::tr("Queued");
@@ -62,7 +64,7 @@ static QString statusText(TransferTask::Status s) {
     return {};
 }
 
-static QString displayNameForTask(const TransferTask &task) {
+QString displayNameForTask(const TransferTask &task) {
     const QString path =
         (task.type == TransferTask::Type::Upload) ? task.src : task.dst;
     QFileInfo taskFileInfo(path);
@@ -82,7 +84,7 @@ static QString displayNameForTask(const TransferTask &task) {
     return TransferQueueDialog::tr("(unnamed)");
 }
 
-static QString formatEta(int sec) {
+QString formatEta(int sec) {
     if (sec < 0)
         return QString::fromUtf8("—");
     const int hours = sec / 3600;
@@ -95,19 +97,19 @@ static QString formatEta(int sec) {
     return QString("%1s").arg(seconds);
 }
 
-static bool canPauseStatus(TransferTask::Status s) {
+bool canPauseStatus(TransferTask::Status s) {
     return s == TransferTask::Status::Queued ||
            s == TransferTask::Status::Running ||
            s == TransferTask::Status::RetryWaiting ||
            s == TransferTask::Status::WaitingForConnection;
 }
 
-static bool canResumeStatus(TransferTask::Status s) {
+bool canResumeStatus(TransferTask::Status s) {
     return s == TransferTask::Status::Paused ||
            s == TransferTask::Status::WaitingForConnection;
 }
 
-static bool canLimitStatus(TransferTask::Status s) {
+bool canLimitStatus(TransferTask::Status s) {
     return s == TransferTask::Status::Queued ||
            s == TransferTask::Status::Running ||
            s == TransferTask::Status::Paused ||
@@ -115,7 +117,7 @@ static bool canLimitStatus(TransferTask::Status s) {
            s == TransferTask::Status::WaitingForConnection;
 }
 
-static bool canCancelStatus(TransferTask::Status s) {
+bool canCancelStatus(TransferTask::Status s) {
     return s == TransferTask::Status::Queued ||
            s == TransferTask::Status::Running ||
            s == TransferTask::Status::Paused ||
@@ -123,7 +125,7 @@ static bool canCancelStatus(TransferTask::Status s) {
            s == TransferTask::Status::WaitingForConnection;
 }
 
-static bool canRetryTask(const TransferTask &task) {
+bool canRetryTask(const TransferTask &task) {
     return !task.commitUncertain &&
            (task.status == TransferTask::Status::Error ||
             task.status == TransferTask::Status::Canceled ||
@@ -142,7 +144,7 @@ struct SelectedActionsState {
 
 using TaskIndexById = QHash<quint64, const TransferTask *>;
 
-static TaskIndexById buildTaskIndexById(const QVector<TransferTask> &snapshot) {
+TaskIndexById buildTaskIndexById(const QVector<TransferTask> &snapshot) {
     TaskIndexById index;
     index.reserve(snapshot.size());
     for (const auto &task : snapshot)
@@ -151,9 +153,8 @@ static TaskIndexById buildTaskIndexById(const QVector<TransferTask> &snapshot) {
 }
 
 template <typename Callback>
-static void forEachSelectedTask(const QVector<quint64> &ids,
-                                const TaskIndexById &taskIndex,
-                                Callback &&callback) {
+void forEachSelectedTask(const QVector<quint64> &ids,
+                         const TaskIndexById &taskIndex, Callback &&callback) {
     for (quint64 taskId : ids) {
         const auto taskIt = taskIndex.constFind(taskId);
         if (taskIt == taskIndex.cend())
@@ -163,8 +164,8 @@ static void forEachSelectedTask(const QVector<quint64> &ids,
 }
 
 template <typename Callback>
-static void withSelectedTasks(TransferManager *manager,
-                              const QVector<quint64> &ids, Callback callback) {
+void withSelectedTasks(TransferManager *manager, const QVector<quint64> &ids,
+                       Callback callback) {
     if (ids.isEmpty())
         return;
     // Use one immutable, ID-scoped snapshot so selected operations see the
@@ -173,9 +174,8 @@ static void withSelectedTasks(TransferManager *manager,
     forEachSelectedTask(ids, taskIndex, callback);
 }
 
-static SelectedActionsState
-buildSelectedActionsState(const QVector<quint64> &ids,
-                          const TaskIndexById &taskIndex) {
+SelectedActionsState buildSelectedActionsState(const QVector<quint64> &ids,
+                                               const TaskIndexById &taskIndex) {
     SelectedActionsState out;
     out.hasSelection = !ids.isEmpty();
     if (!out.hasSelection)
@@ -194,6 +194,8 @@ buildSelectedActionsState(const QVector<quint64> &ids,
     });
     return out;
 }
+
+} // namespace
 
 class TransferTaskTableModel final : public QAbstractTableModel {
     public:
@@ -1202,14 +1204,14 @@ void TransferQueueDialog::loadUiState() {
     openscpui::AppSettings settings;
 
     const QByteArray geom =
-        settings.value(openscpui::settingskeys::TransferQueueGeometry)
+        settings.value(openscpui::settingskeys::kTransferQueueGeometry)
             .toByteArray();
     if (!geom.isEmpty())
         restoreGeometry(geom);
 
     if (table_ && table_->horizontalHeader()) {
         const QByteArray header =
-            settings.value(openscpui::settingskeys::TransferQueueHeaderState)
+            settings.value(openscpui::settingskeys::kTransferQueueHeaderState)
                 .toByteArray();
         if (!header.isEmpty())
             table_->horizontalHeader()->restoreState(header);
@@ -1221,7 +1223,7 @@ void TransferQueueDialog::loadUiState() {
 
     const int filter =
         settings
-            .value(openscpui::settingskeys::TransferQueueFilterMode, FilterAll)
+            .value(openscpui::settingskeys::kTransferQueueFilterMode, FilterAll)
             .toInt();
     if (filterGroup_ && filterGroup_->button(filter)) {
         filterGroup_->button(filter)->setChecked(true);
@@ -1233,7 +1235,7 @@ void TransferQueueDialog::loadUiState() {
     const int defaultAutoMode = qBound(
         static_cast<int>(AutoClearOff),
         settings
-            .value(openscpui::settingskeys::TransferDefaultQueueAutoClearMode,
+            .value(openscpui::settingskeys::kTransferDefaultQueueAutoClearMode,
                    static_cast<int>(AutoClearOff))
             .toInt(),
         static_cast<int>(AutoClearFinished));
@@ -1241,18 +1243,18 @@ void TransferQueueDialog::loadUiState() {
         1,
         settings
             .value(
-                openscpui::settingskeys::TransferDefaultQueueAutoClearMinutes,
+                openscpui::settingskeys::kTransferDefaultQueueAutoClearMinutes,
                 15)
             .toInt(),
         1440);
     const int autoMode =
         settings
-            .value(openscpui::settingskeys::TransferQueueAutoClearMode,
+            .value(openscpui::settingskeys::kTransferQueueAutoClearMode,
                    defaultAutoMode)
             .toInt();
     const int autoMin =
         settings
-            .value(openscpui::settingskeys::TransferQueueAutoClearMinutes,
+            .value(openscpui::settingskeys::kTransferQueueAutoClearMinutes,
                    defaultAutoMin)
             .toInt();
     if (autoClearModeCombo_) {
@@ -1268,11 +1270,11 @@ void TransferQueueDialog::loadUiState() {
 
 void TransferQueueDialog::saveUiState() const {
     openscpui::AppSettings settings;
-    settings.setValue(openscpui::settingskeys::TransferQueueGeometry,
+    settings.setValue(openscpui::settingskeys::kTransferQueueGeometry,
                       saveGeometry());
 
     if (table_ && table_->horizontalHeader()) {
-        settings.setValue(openscpui::settingskeys::TransferQueueHeaderState,
+        settings.setValue(openscpui::settingskeys::kTransferQueueHeaderState,
                           table_->horizontalHeader()->saveState());
     }
 
@@ -1280,7 +1282,7 @@ void TransferQueueDialog::saveUiState() const {
     if (filterGroup_ && filterGroup_->checkedButton()) {
         filterMode = filterGroup_->id(filterGroup_->checkedButton());
     }
-    settings.setValue(openscpui::settingskeys::TransferQueueFilterMode,
+    settings.setValue(openscpui::settingskeys::kTransferQueueFilterMode,
                       filterMode);
 
     const int autoMode = autoClearModeCombo_
@@ -1288,9 +1290,9 @@ void TransferQueueDialog::saveUiState() const {
                              : AutoClearOff;
     const int autoMin =
         autoClearMinutesSpin_ ? autoClearMinutesSpin_->value() : 15;
-    settings.setValue(openscpui::settingskeys::TransferQueueAutoClearMode,
+    settings.setValue(openscpui::settingskeys::kTransferQueueAutoClearMode,
                       autoMode);
-    settings.setValue(openscpui::settingskeys::TransferQueueAutoClearMinutes,
+    settings.setValue(openscpui::settingskeys::kTransferQueueAutoClearMinutes,
                       autoMin);
     settings.sync();
 }

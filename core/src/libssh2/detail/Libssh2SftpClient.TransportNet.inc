@@ -1,4 +1,6 @@
-static void configure_tcp_keepalive(int s) {
+namespace {
+
+void configure_tcp_keepalive(int s) {
     // Enable TCP keepalive
     int opt = 1;
     (void)::setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt));
@@ -15,7 +17,7 @@ static void configure_tcp_keepalive(int s) {
 #endif
 }
 
-static bool set_socket_timeout_ms(int sock, int timeoutMs) {
+bool set_socket_timeout_ms(int sock, int timeoutMs) {
     if (sock < 0)
         return false;
     if (timeoutMs < 0)
@@ -39,9 +41,8 @@ static bool set_socket_timeout_ms(int sock, int timeoutMs) {
 #endif
 }
 
-static bool socket_send_all(int sock, const unsigned char *data,
-                            std::size_t len, const char *stage,
-                            std::string &err) {
+bool socket_send_all(int sock, const unsigned char *data, std::size_t len,
+                     const char *stage, std::string &err) {
     // send(2) may write partially; loop until the full buffer is sent.
     std::size_t off = 0;
     while (off < len) {
@@ -62,8 +63,8 @@ static bool socket_send_all(int sock, const unsigned char *data,
     return true;
 }
 
-static bool socket_recv_exact(int sock, unsigned char *buf, std::size_t len,
-                              const char *stage, std::string &err) {
+bool socket_recv_exact(int sock, unsigned char *buf, std::size_t len,
+                       const char *stage, std::string &err) {
     // recv(2) may return partial data; loop until we fill the requested bytes.
     std::size_t off = 0;
     while (off < len) {
@@ -84,9 +85,9 @@ static bool socket_recv_exact(int sock, unsigned char *buf, std::size_t len,
     return true;
 }
 
-static bool socket_recv_until(int sock, const std::string &delimiter,
-                              std::size_t maxBytes, const char *stage,
-                              std::string &out, std::string &err) {
+bool socket_recv_until(int sock, const std::string &delimiter,
+                       std::size_t maxBytes, const char *stage,
+                       std::string &out, std::string &err) {
     out.clear();
     if (delimiter.empty()) {
         err = std::string(stage) + " invalid delimiter";
@@ -114,8 +115,8 @@ static bool socket_recv_until(int sock, const std::string &delimiter,
     return true;
 }
 
-static bool connect_tcp_endpoint(const std::string &host, uint16_t port,
-                                 int &sockOut, std::string &err) {
+bool connect_tcp_endpoint(const std::string &host, uint16_t port, int &sockOut,
+                          std::string &err) {
     sockOut = -1;
     struct addrinfo hints {};
     memset(&hints, 0, sizeof(hints));
@@ -155,7 +156,7 @@ static bool connect_tcp_endpoint(const std::string &host, uint16_t port,
     return false;
 }
 
-static const char *socks5_reply_text(unsigned char rep) {
+const char *socks5_reply_text(unsigned char rep) {
     switch (rep) {
     case 0x00:
         return "succeeded";
@@ -181,8 +182,8 @@ static const char *socks5_reply_text(unsigned char rep) {
     return "unknown error";
 }
 
-static std::string format_host_port_authority(const std::string &host,
-                                              std::uint16_t port) {
+std::string format_host_port_authority(const std::string &host,
+                                       std::uint16_t port) {
     if (host.find(':') != std::string::npos &&
         host.find(']') == std::string::npos)
         return "[" + host + "]:" + std::to_string(port);
@@ -190,7 +191,7 @@ static std::string format_host_port_authority(const std::string &host,
 }
 
 #ifndef _WIN32
-static std::string trim_ascii_whitespace(std::string value) {
+std::string trim_ascii_whitespace(std::string value) {
     auto notSpace = [](unsigned char ch) { return !std::isspace(ch); };
     value.erase(value.begin(),
                 std::find_if(value.begin(), value.end(), notSpace));
@@ -199,7 +200,7 @@ static std::string trim_ascii_whitespace(std::string value) {
     return value;
 }
 
-static std::string read_jump_tunnel_stderr(int fd) {
+std::string read_jump_tunnel_stderr(int fd) {
     if (fd < 0)
         return std::string();
 
@@ -225,9 +226,8 @@ static std::string read_jump_tunnel_stderr(int fd) {
     return trim_ascii_whitespace(out);
 }
 
-static std::string
-format_jump_tunnel_exit_error(const char *prefix,
-                              const std::string &stderrText) {
+std::string format_jump_tunnel_exit_error(const char *prefix,
+                                          const std::string &stderrText) {
     std::string out(prefix ? prefix : "SSH jump tunnel failed.");
     if (!stderrText.empty()) {
         if (!out.empty() && out.back() != '.' && out.back() != ':')
@@ -237,9 +237,8 @@ format_jump_tunnel_exit_error(const char *prefix,
     return out;
 }
 
-static bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut,
-                                  int &pidOut, int &stderrFdOut,
-                                  std::string &err) {
+bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut, int &pidOut,
+                           int &stderrFdOut, std::string &err) {
     sockOut = -1;
     pidOut = -1;
     stderrFdOut = -1;
@@ -367,7 +366,7 @@ static bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut,
     return true;
 }
 
-static void stop_ssh_jump_tunnel(int pid) {
+void stop_ssh_jump_tunnel(int pid) {
     if (pid <= 0)
         return;
 
@@ -394,8 +393,8 @@ static void stop_ssh_jump_tunnel(int pid) {
 }
 #endif
 
-static bool establish_socks5_tunnel(int sock, const SessionOptions &opt,
-                                    std::string &err) {
+bool establish_socks5_tunnel(int sock, const SessionOptions &opt,
+                             std::string &err) {
     const bool haveProxyUser =
         opt.proxy_username.has_value() && !opt.proxy_username->empty();
     const bool haveProxyPass =
@@ -530,8 +529,8 @@ static bool establish_socks5_tunnel(int sock, const SessionOptions &opt,
     return true;
 }
 
-static bool establish_http_connect_tunnel(int sock, const SessionOptions &opt,
-                                          std::string &err) {
+bool establish_http_connect_tunnel(int sock, const SessionOptions &opt,
+                                   std::string &err) {
     if (opt.host.empty()) {
         err = "HTTP CONNECT target host is empty.";
         return false;
@@ -595,6 +594,8 @@ static bool establish_http_connect_tunnel(int sock, const SessionOptions &opt,
     err = "HTTP proxy returned malformed CONNECT status.";
     return false;
 }
+
+} // namespace
 
 bool Libssh2SftpClient::tcpConnect(const SessionOptions &opt,
                                    std::string &err) {

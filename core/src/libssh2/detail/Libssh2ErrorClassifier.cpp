@@ -182,7 +182,9 @@ RemoteError classifyFailure(const std::string &message,
         error.transient = true;
         break;
     case LIBSSH2_ERROR_METHOD_NOT_SUPPORTED:
+#ifdef LIBSSH2_ERROR_ALGO_UNSUPPORTED
     case LIBSSH2_ERROR_ALGO_UNSUPPORTED:
+#endif
     case LIBSSH2_ERROR_KEX_FAILURE:
     case LIBSSH2_ERROR_KEY_EXCHANGE_FAILURE:
         error.kind = RemoteErrorKind::Unsupported;

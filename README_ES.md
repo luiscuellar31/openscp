@@ -30,6 +30,13 @@ https://github.com/luiscuellar31/openscp/releases
 
 ## Inicio Rapido
 
+OpenSCP 1.0.0 soporta macOS y Linux. El codigo de Windows se limita
+intencionalmente a bases modulares para el port futuro (incluido el backend de
+credenciales DPAPI); 1.0.0 no promete artefactos ni soporte de ejecucion en
+Windows.
+Los desarrolladores del port deben habilitar explicitamente la base no apta
+para release con `-DOPENSCP_ENABLE_EXPERIMENTAL_WINDOWS_PORT=ON`.
+
 ```bash
 git clone https://github.com/luiscuellar31/openscp.git
 cd openscp
@@ -132,6 +139,7 @@ cmake --build build -j
 - Eliminacion opcional de credenciales guardadas y entradas relacionadas en `known_hosts` al borrar sitios.
 - Backends seguros:
     - macOS: Keychain
+    - Base para el port de Windows: DPAPI (plataforma no soportada en 1.0.0)
     - Linux: libsecret (si esta disponible)
 - Las contrasenas de proxy se guardan en backend seguro (nunca en texto plano en ajustes del sitio).
 - Feedback claro de persistencia en builds secure-only.
@@ -194,7 +202,8 @@ cmake --build build -j
 
 ## Requisitos
 
-- Qt `6.x` (probado con `6.8.3`)
+- Una version compatible de Qt `6.x`; se recomienda Qt `6.8.3` y los releases
+  oficiales autocontenidos la fijan exactamente
 - libssh2 (recomendado OpenSSL 3)
 - libcurl (opcional; requerido para backends FTP/FTPS/WebDAV)
 - tinyxml2 (opcional; requerido para parseo XML del backend WebDAV)
@@ -204,6 +213,7 @@ cmake --build build -j
 Opcional:
 
 - macOS: Keychain (nativo)
+- Port futuro de Windows: modulo DPAPI (target no soportado en 1.0.0)
 - Linux: libsecret / Secret Service
 - Cliente OpenSSH (`ssh`) para tunel de jump host SSH.
 - El backend FTP/FTPS se puede desactivar explicitamente con
@@ -372,12 +382,10 @@ frameworks Qt y el plugin de plataforma `qcocoa`, y que el enlazado no conserve
 rutas de Homebrew, temporales o especificas de la maquina. Este flujo local no
 requiere firma ni notarizacion de Apple.
 
-Al empaquetar para macOS 12, todas las bibliotecas de terceros incluidas deben
-soportar tambien macOS 12 o una version anterior. Una botella reciente de
-Homebrew puede requerir la version mas nueva del host; el linker avisa de esa
-diferencia y el verificador rechaza el artefacto. Usa dependencias compiladas
-para el deployment target deseado o ajusta `MINIMUM_SYSTEM_VERSION` al minimo
-real soportado por el artefacto.
+Los artefactos oficiales arm64 y x86_64 apuntan a macOS 12. CI compila OpenSSL,
+libssh2 y tinyxml2 desde fuentes fijadas y verificadas para ese deployment
+target; no incluye botellas recientes de Homebrew. El verificador rechaza
+cualquier Mach-O incluido que requiera un sistema mas nuevo.
 
 Si Qt esta fuera de la ruta por defecto (`$HOME/Qt/<version>/macos`):
 
@@ -392,6 +400,10 @@ Detalles completos de empaquetado: [assets/macos/README.md](assets/macos/README.
 ### Linux
 
 Detalles de build y empaquetado Linux (AppImage, Snap, Flatpak): [assets/linux/README.md](assets/linux/README.md)
+
+El contrato completo de releases, incluido el minimo glibc 2.28 del AppImage
+x86_64, el baseline arm64 actual y el estado de Windows, esta en
+[docs/PLATFORM_COMPATIBILITY.md](docs/PLATFORM_COMPATIBILITY.md).
 
 ## Variables de Entorno en Runtime
 
@@ -416,7 +428,8 @@ Detalles de build y empaquetado Linux (AppImage, Snap, Flatpak): [assets/linux/R
 
 ## Roadmap
 
-- El soporte para Windows esta planeado para futuras versiones.
+- Completar y validar el port modular de Windows despues de 1.0.0; las piezas
+  especificas actuales son una base de desarrollo, no soporte de lanzamiento.
 - Protocolos: ampliar cobertura de interoperabilidad WebDAV.
 - Flujos de autenticacion enterprise mas amplios para proxy/jump (por ejemplo, autenticacion jump interactiva fuera de modo batch).
 - Mas UX: command palette y temas.

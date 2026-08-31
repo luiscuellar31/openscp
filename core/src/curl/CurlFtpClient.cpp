@@ -832,32 +832,16 @@ bool CurlFtpClient::isConnected() const {
 
 bool CurlFtpClient::list(const std::string &remote_path,
                          std::vector<FileInfo> &out, std::string &err) {
-    auto operation = state_->beginOperation();
     clearLastOperationError();
-    err.clear();
     out.clear();
-    if (operation.disconnecting()) {
-        err = "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err);
+    auto operation = state_->beginConnectedOperation(
+        err, protocolLabel(protocol_), {remote_path});
+    if (!operation) {
+        setLastOperationError(operation.failure());
         return false;
     }
-    if (!curlcommon::validateRemotePath(remote_path, protocolLabel(protocol_),
-                                        err)) {
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
-
-    const auto connection = state_->snapshot(operation);
-    if (!connection) {
-        err = "Not connected.";
-        setLastOperationError(RemoteErrorKind::Connection, err);
-        return false;
-    }
+    const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
-    if (!ensureCurlInitialized(err)) {
-        setLastOperationError(RemoteErrorKind::LocalIo, err);
-        return false;
-    }
 
     CURLcode rc = CURLE_OK;
     long responseCode = 0;
@@ -876,42 +860,25 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
                         std::string &err,
                         std::function<void(std::size_t, std::size_t)> progress,
                         std::function<bool()> shouldCancel, bool resume) {
-    auto operation = state_->beginOperation();
     clearLastOperationError();
-    err.clear();
-    if (operation.disconnecting()) {
-        err = "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err);
-        return false;
-    }
     if (resume) {
         err = std::string(protocolLabel(protocol_)) +
               " backend does not support resume.";
         setLastOperationError(RemoteErrorKind::Unsupported, err);
         return false;
     }
-    if (!curlcommon::validateRemotePath(remote, protocolLabel(protocol_),
-                                        err)) {
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+    const std::string_view preflightError =
+        normalizeRemotePath(remote) == "/" || local.empty()
+            ? "FTP download requires a file path and local destination."
+            : "";
+    auto operation = state_->beginConnectedOperation(
+        err, protocolLabel(protocol_), {remote}, preflightError);
+    if (!operation) {
+        setLastOperationError(operation.failure());
         return false;
     }
-    if (normalizeRemotePath(remote) == "/" || local.empty()) {
-        err = "FTP download requires a file path and local destination.";
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
-
-    const auto connection = state_->snapshot(operation);
-    if (!connection) {
-        err = "Not connected.";
-        setLastOperationError(RemoteErrorKind::Connection, err);
-        return false;
-    }
+    const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
-    if (!ensureCurlInitialized(err)) {
-        setLastOperationError(RemoteErrorKind::LocalIo, err);
-        return false;
-    }
 
     const std::string partial = curlcommon::localPartialPath(local);
     curlcommon::ActiveDestinationLease destinationLease(
@@ -997,43 +964,26 @@ bool CurlFtpClient::put(const std::string &local, const std::string &remote,
                         std::string &err,
                         std::function<void(std::size_t, std::size_t)> progress,
                         std::function<bool()> shouldCancel, bool resume) {
-    auto operation = state_->beginOperation();
     clearLastOperationError();
-    err.clear();
-    if (operation.disconnecting()) {
-        err = "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err);
-        return false;
-    }
     if (resume) {
         err = std::string(protocolLabel(protocol_)) +
               " backend does not support resume.";
         setLastOperationError(RemoteErrorKind::Unsupported, err);
         return false;
     }
-    if (!curlcommon::validateRemotePath(remote, protocolLabel(protocol_),
-                                        err)) {
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+    const std::string_view preflightError =
+        normalizeRemotePath(remote) == "/" || local.empty()
+            ? "FTP upload requires a local file and remote file path."
+            : "";
+    auto operation = state_->beginConnectedOperation(
+        err, protocolLabel(protocol_), {remote}, preflightError);
+    if (!operation) {
+        setLastOperationError(operation.failure());
         return false;
     }
-    if (normalizeRemotePath(remote) == "/" || local.empty()) {
-        err = "FTP upload requires a local file and remote file path.";
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
-
-    const auto connection = state_->snapshot(operation);
-    if (!connection) {
-        err = "Not connected.";
-        setLastOperationError(RemoteErrorKind::Connection, err);
-        return false;
-    }
+    const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
     const std::string &commandRoot = connection.commandRoot;
-    if (!ensureCurlInitialized(err)) {
-        setLastOperationError(RemoteErrorKind::LocalIo, err);
-        return false;
-    }
 
     const std::string remotePartial = normalizeRemotePath(remote) + ".part";
     curlcommon::ActiveDestinationLease destinationLease(
@@ -1126,28 +1076,16 @@ bool CurlFtpClient::exists(const std::string &remote_path, bool &isDir,
 
 bool CurlFtpClient::stat(const std::string &remote_path, FileInfo &info,
                          std::string &err) {
-    auto operation = state_->beginOperation();
     clearLastOperationError();
-    err.clear();
     info = FileInfo{};
-    if (operation.disconnecting()) {
-        err = "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err);
+    auto operation = state_->beginConnectedOperation(
+        err, protocolLabel(protocol_), {remote_path});
+    if (!operation) {
+        setLastOperationError(operation.failure());
         return false;
     }
-    if (!curlcommon::validateRemotePath(remote_path, protocolLabel(protocol_),
-                                        err)) {
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
-
     const std::string target = normalizeRemotePath(remote_path);
-    const auto connection = state_->snapshot(operation);
-    if (!connection) {
-        err = "Not connected.";
-        setLastOperationError(RemoteErrorKind::Connection, err);
-        return false;
-    }
+    const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
     if (target == "/") {
         info.name = "/";
@@ -1217,30 +1155,19 @@ bool CurlFtpClient::setTimes(const std::string &remote_path,
 
 bool CurlFtpClient::mkdir(const std::string &remote_dir, std::string &err,
                           unsigned int mode) {
-    auto operation = state_->beginOperation();
     clearLastOperationError();
-    err.clear();
     (void)mode;
-    if (operation.disconnecting()) {
-        err = "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err);
-        return false;
-    }
-    if (!curlcommon::validateRemotePath(remote_dir, protocolLabel(protocol_),
-                                        err)) {
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+    auto operation = state_->beginConnectedOperation(
+        err, protocolLabel(protocol_), {remote_dir});
+    if (!operation) {
+        setLastOperationError(operation.failure());
         return false;
     }
     const std::string target = normalizeRemotePath(remote_dir);
     if (target == "/")
         return true;
 
-    const auto connection = state_->snapshot(operation);
-    if (!connection) {
-        err = "Not connected.";
-        setLastOperationError(RemoteErrorKind::Connection, err);
-        return false;
-    }
+    const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
     const std::string &commandRoot = connection.commandRoot;
     CURLcode rc = CURLE_OK;
@@ -1256,31 +1183,16 @@ bool CurlFtpClient::mkdir(const std::string &remote_dir, std::string &err,
 
 bool CurlFtpClient::removeFile(const std::string &remote_path,
                                std::string &err) {
-    auto operation = state_->beginOperation();
     clearLastOperationError();
-    err.clear();
-    if (operation.disconnecting()) {
-        err = "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err);
-        return false;
-    }
-    if (!curlcommon::validateRemotePath(remote_path, protocolLabel(protocol_),
-                                        err)) {
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
     const std::string target = normalizeRemotePath(remote_path);
-    if (target == "/") {
-        err = "Refusing to delete the FTP server root.";
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+    auto operation = state_->beginConnectedOperation(
+        err, protocolLabel(protocol_), {remote_path},
+        target == "/" ? "Refusing to delete the FTP server root." : "");
+    if (!operation) {
+        setLastOperationError(operation.failure());
         return false;
     }
-    const auto connection = state_->snapshot(operation);
-    if (!connection) {
-        err = "Not connected.";
-        setLastOperationError(RemoteErrorKind::Connection, err);
-        return false;
-    }
+    const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
     const std::string &commandRoot = connection.commandRoot;
     CURLcode rc = CURLE_OK;
@@ -1295,31 +1207,16 @@ bool CurlFtpClient::removeFile(const std::string &remote_path,
 }
 
 bool CurlFtpClient::removeDir(const std::string &remote_dir, std::string &err) {
-    auto operation = state_->beginOperation();
     clearLastOperationError();
-    err.clear();
-    if (operation.disconnecting()) {
-        err = "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err);
-        return false;
-    }
-    if (!curlcommon::validateRemotePath(remote_dir, protocolLabel(protocol_),
-                                        err)) {
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
     const std::string target = normalizeRemotePath(remote_dir);
-    if (target == "/") {
-        err = "Refusing to delete the FTP server root.";
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+    auto operation = state_->beginConnectedOperation(
+        err, protocolLabel(protocol_), {remote_dir},
+        target == "/" ? "Refusing to delete the FTP server root." : "");
+    if (!operation) {
+        setLastOperationError(operation.failure());
         return false;
     }
-    const auto connection = state_->snapshot(operation);
-    if (!connection) {
-        err = "Not connected.";
-        setLastOperationError(RemoteErrorKind::Connection, err);
-        return false;
-    }
+    const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
     const std::string &commandRoot = connection.commandRoot;
     CURLcode rc = CURLE_OK;
@@ -1335,32 +1232,19 @@ bool CurlFtpClient::removeDir(const std::string &remote_dir, std::string &err) {
 
 bool CurlFtpClient::rename(const std::string &from, const std::string &to,
                            std::string &err, bool overwrite) {
-    auto operation = state_->beginOperation();
     clearLastOperationError();
-    err.clear();
-    if (operation.disconnecting()) {
-        err = "Interrupted";
-        setLastOperationError(RemoteErrorKind::Canceled, err);
-        return false;
-    }
-    if (!curlcommon::validateRemotePath(from, protocolLabel(protocol_), err) ||
-        !curlcommon::validateRemotePath(to, protocolLabel(protocol_), err)) {
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
-        return false;
-    }
     const std::string source = normalizeRemotePath(from);
     const std::string destination = normalizeRemotePath(to);
-    if (source == "/" || destination == "/") {
-        err = "Refusing to rename the FTP server root.";
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+    auto operation = state_->beginConnectedOperation(
+        err, protocolLabel(protocol_), {from, to},
+        source == "/" || destination == "/"
+            ? "Refusing to rename the FTP server root."
+            : "");
+    if (!operation) {
+        setLastOperationError(operation.failure());
         return false;
     }
-    const auto connection = state_->snapshot(operation);
-    if (!connection) {
-        err = "Not connected.";
-        setLastOperationError(RemoteErrorKind::Connection, err);
-        return false;
-    }
+    const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
     const std::string &commandRoot = connection.commandRoot;
     if (!overwrite) {

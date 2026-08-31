@@ -8,6 +8,8 @@
 #include <QTemporaryDir>
 
 #include <iostream>
+#include <optional>
+#include <string>
 
 namespace {
 
@@ -257,6 +259,85 @@ OPENSCP_TEST(testInitialRemotePathNormalization, test) {
                    restored.sites.front().initialRemotePath ==
                        QStringLiteral("/root"),
                "saved initial paths should remain confined to the remote root");
+}
+
+OPENSCP_TEST(testCorruptSecurityAndPortValuesAreRepaired, test) {
+    QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
+    settings.clear();
+    settings.beginWriteArray(QStringLiteral("sites"));
+    settings.setArrayIndex(0);
+    settings.setValue(QStringLiteral("id"), QStringLiteral("corrupt-site"));
+    settings.setValue(QStringLiteral("name"), QStringLiteral("Corrupt site"));
+    settings.setValue(QStringLiteral("protocol"), QStringLiteral("sftp"));
+    settings.setValue(QStringLiteral("port"), -1);
+    settings.setValue(QStringLiteral("proxyType"), 999);
+    settings.setValue(QStringLiteral("proxyPort"), 70000);
+    settings.setValue(QStringLiteral("jumpPort"), QStringLiteral("invalid"));
+    settings.setValue(QStringLiteral("khPolicy"), 999);
+    settings.setValue(QStringLiteral("integrityPolicy"), -9);
+    settings.setValue(QStringLiteral("initialLocalPath"), QString());
+    settings.setValue(QStringLiteral("initialRemotePath"), QStringLiteral("/"));
+    settings.setValue(QStringLiteral("rememberLastPaths"), false);
+    settings.setValue(QStringLiteral("scpTransferMode"),
+                      QStringLiteral("auto"));
+    settings.setValue(QStringLiteral("ftpsMode"), QStringLiteral("auto"));
+    settings.setValue(QStringLiteral("webdavBasePath"), QStringLiteral("/"));
+    settings.endArray();
+    settings.sync();
+
+    const auto loaded = SavedSitesPersistence::loadSites();
+    test.check(loaded.needsSave,
+               "corrupt persisted values should request a repaired rewrite");
+    test.check(loaded.sites.size() == 1,
+               "a repairable site should remain available");
+    if (loaded.sites.size() != 1)
+        return;
+
+    const auto &options = loaded.sites.front().opt;
+    test.check(options.port == 22 && options.jump_port == 22,
+               "invalid endpoint ports should use protocol-safe defaults");
+    test.check(options.proxy_type == openscp::ProxyType::None &&
+                   options.proxy_port == 0,
+               "an invalid proxy configuration should normalize to disabled");
+    test.check(options.known_hosts_policy == openscp::KnownHostsPolicy::Strict,
+               "corrupt host verification must normalize to Strict");
+    test.check(options.transfer_integrity_policy ==
+                   openscp::TransferIntegrityPolicy::Optional,
+               "corrupt integrity policy should use its documented default");
+}
+
+OPENSCP_TEST(testWebDavSecurityDefaultsAreAppliedToLegacySites, test) {
+    QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
+    settings.clear();
+    settings.setValue(
+        QString::fromLatin1(openscpui::settingskeys::kWebDavVerifyPeerDefault),
+        false);
+    settings.setValue(
+        QString::fromLatin1(openscpui::settingskeys::kWebDavCaCertPathDefault),
+        QStringLiteral("/configured/ca.pem"));
+    settings.beginWriteArray(QStringLiteral("sites"));
+    settings.setArrayIndex(0);
+    settings.setValue(QStringLiteral("id"), QStringLiteral("legacy-dav"));
+    settings.setValue(QStringLiteral("name"), QStringLiteral("Legacy DAV"));
+    settings.setValue(QStringLiteral("protocol"), QStringLiteral("webdav"));
+    settings.setValue(QStringLiteral("port"), 443);
+    settings.setValue(QStringLiteral("initialLocalPath"), QString());
+    settings.setValue(QStringLiteral("initialRemotePath"), QStringLiteral("/"));
+    settings.setValue(QStringLiteral("rememberLastPaths"), false);
+    settings.setValue(QStringLiteral("scpTransferMode"),
+                      QStringLiteral("auto"));
+    settings.setValue(QStringLiteral("ftpsMode"), QStringLiteral("auto"));
+    settings.setValue(QStringLiteral("webdavBasePath"), QStringLiteral("/"));
+    settings.endArray();
+    settings.sync();
+
+    const auto loaded = SavedSitesPersistence::loadSites();
+    test.check(loaded.sites.size() == 1 &&
+                   !loaded.sites.front().opt.webdav_verify_peer &&
+                   loaded.sites.front().opt.webdav_ca_cert_path ==
+                       std::optional<std::string>("/configured/ca.pem"),
+               "legacy WebDAV sites should inherit both configured TLS "
+               "defaults");
 }
 
 } // namespace

@@ -34,9 +34,11 @@
 #include <limits>
 #include <memory>
 
+namespace {
+
 constexpr char kStagingBatchMime[] = "application/x-openscp-staging-batch";
 
-static bool isLocalUploadPreparationTerminal(TransferTask::Status status) {
+bool isLocalUploadPreparationTerminal(TransferTask::Status status) {
     switch (status) {
     case TransferTask::Status::Done:
     case TransferTask::Status::Error:
@@ -54,7 +56,7 @@ static bool isLocalUploadPreparationTerminal(TransferTask::Status status) {
     return false;
 }
 
-static QRect centeredQueueRect(QWidget *dialog, QWidget *mainWindow) {
+QRect centeredQueueRect(QWidget *dialog, QWidget *mainWindow) {
     if (!dialog)
         return {};
 
@@ -97,6 +99,8 @@ static QRect centeredQueueRect(QWidget *dialog, QWidget *mainWindow) {
     rect.moveTopLeft(QPoint(boundedX, boundedY));
     return rect;
 }
+
+} // namespace
 
 void MainWindow::runRemoteDownloadPrescan(
     const QVector<RemoteDownloadSeed> &seeds, int initialSkipped,

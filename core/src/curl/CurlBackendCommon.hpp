@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <ctime>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -67,12 +68,47 @@ class CurlClientState final {
         std::unique_lock<std::mutex> lock_;
     };
 
+    class ConnectedOperation final {
+        public:
+        ConnectedOperation(const ConnectedOperation &) = delete;
+        ConnectedOperation &operator=(const ConnectedOperation &) = delete;
+        ConnectedOperation(ConnectedOperation &&) noexcept = default;
+        ConnectedOperation &operator=(ConnectedOperation &&) = delete;
+
+        [[nodiscard]] explicit operator bool() const noexcept {
+            return static_cast<bool>(connection_);
+        }
+        [[nodiscard]] const CurlConnectionSnapshot &connection() const {
+            return connection_;
+        }
+        [[nodiscard]] std::atomic<bool> *interrupted() const noexcept {
+            return operation_.interrupted();
+        }
+        [[nodiscard]] const RemoteError &failure() const noexcept {
+            return failure_;
+        }
+
+        private:
+        friend class CurlClientState;
+        ConnectedOperation(Operation operation,
+                           CurlConnectionSnapshot connection,
+                           RemoteError failure = {});
+
+        Operation operation_;
+        CurlConnectionSnapshot connection_;
+        RemoteError failure_;
+    };
+
     explicit CurlClientState(SessionOptions defaultOptions);
     ~CurlClientState();
     CurlClientState(const CurlClientState &) = delete;
     CurlClientState &operator=(const CurlClientState &) = delete;
 
     [[nodiscard]] Operation beginOperation();
+    [[nodiscard]] ConnectedOperation
+    beginConnectedOperation(std::string &err, const char *backendLabel,
+                            std::initializer_list<std::string_view> remotePaths,
+                            std::string_view semanticError = {});
     void prepareForConnect();
     void commitConnection(std::shared_ptr<const SessionOptions> options,
                           std::unique_ptr<CurlEasySession> session,

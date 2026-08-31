@@ -221,13 +221,42 @@ OPENSCP_TEST(testCurlClientState, test) {
         test.check(!nextOperation.interrupted()->load(),
                    "completed curl operations should clear interruption state");
     }
+    {
+        std::string error;
+        auto operation = state.beginConnectedOperation(error, "FTP", {"/safe"});
+        test.check(operation && error.empty() &&
+                       operation.connection().options.get() ==
+                           connectedOptions.get(),
+                   "connected curl operations should expose the shared state");
+    }
     state.disconnect(defaults);
     test.check(!state.isConnected(),
                "curl disconnect should clear the reusable session");
     {
-        auto operation = state.beginOperation();
-        test.check(!state.snapshot(operation),
-                   "disconnected curl state should not expose a snapshot");
+        std::string error;
+        auto operation = state.beginConnectedOperation(error, "FTP", {"/safe"});
+        test.check(!operation && error == "Not connected." &&
+                       operation.failure().kind ==
+                           openscp::RemoteErrorKind::Connection,
+                   "disconnected curl operations should fail structurally");
+    }
+    {
+        std::string error;
+        auto operation = state.beginConnectedOperation(
+            error, "FTP", {std::string("/unsafe\npath")});
+        test.check(!operation && operation.failure().kind ==
+                                     openscp::RemoteErrorKind::InvalidRequest,
+                   "curl operations should validate paths before state");
+    }
+    {
+        std::string error;
+        auto operation = state.beginConnectedOperation(
+            error, "FTP", {"/"}, "Refusing a semantic root operation.");
+        test.check(!operation &&
+                       error == "Refusing a semantic root operation." &&
+                       operation.failure().kind ==
+                           openscp::RemoteErrorKind::InvalidRequest,
+                   "semantic preflight should run before connection state");
     }
 }
 

@@ -166,7 +166,7 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     // Decide which file to load based on UI language (settings: UI/language)
     openscpui::AppSettings settings;
     const QString languageCode =
-        settings.value(openscpui::settingskeys::UiLanguage, "en")
+        settings.value(openscpui::settingskeys::kUiLanguage, "en")
             .toString()
             .toLower();
     QString suffix = QStringLiteral("EN");

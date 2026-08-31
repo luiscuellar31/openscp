@@ -158,7 +158,14 @@ bool Libssh2SftpClient::mkdir(const std::string &remote_dir, std::string &err,
     auto structuredErrorScope = beginStructuredOperation(err, true);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
-    int rc = libssh2_sftp_mkdir(sftp_, remote_dir.c_str(), mode);
+    if (remote_dir.size() > std::numeric_limits<unsigned int>::max()) {
+        err = "Remote directory path exceeds the libssh2 size limit";
+        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+        return false;
+    }
+    int rc = libssh2_sftp_mkdir_ex(sftp_, remote_dir.c_str(),
+                                   static_cast<unsigned int>(remote_dir.size()),
+                                   mode);
     if (rc != 0) {
         err = "sftp_mkdir failed";
         return false;
@@ -186,7 +193,14 @@ bool Libssh2SftpClient::removeDir(const std::string &remote_dir,
     auto structuredErrorScope = beginStructuredOperation(err, true);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
-    int rc = libssh2_sftp_rmdir(sftp_, remote_dir.c_str());
+    if (remote_dir.size() > std::numeric_limits<unsigned int>::max()) {
+        err = "Remote directory path exceeds the libssh2 size limit";
+        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+        return false;
+    }
+    int rc =
+        libssh2_sftp_rmdir_ex(sftp_, remote_dir.c_str(),
+                              static_cast<unsigned int>(remote_dir.size()));
     if (rc != 0) {
         err = "sftp_rmdir failed (directory not empty?)";
         return false;

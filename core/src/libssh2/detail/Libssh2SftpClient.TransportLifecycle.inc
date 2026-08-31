@@ -1,6 +1,19 @@
 bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
                                         std::string &err,
                                         bool initializeSftpSubsystem) {
+    if (!isValidKnownHostsPolicy(opt.known_hosts_policy) ||
+        !isValidTransferIntegrityPolicy(opt.transfer_integrity_policy)) {
+        err = "Invalid SSH security policy.";
+        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+        return false;
+    }
+    if (!isValidProxyType(opt.proxy_type) || opt.port == 0 ||
+        (opt.proxy_type != ProxyType::None && opt.proxy_port == 0) ||
+        (opt.jump_host && opt.jump_port == 0)) {
+        err = "Invalid SSH endpoint or proxy port configuration.";
+        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+        return false;
+    }
     const int initResult = ensure_libssh2_initialized();
     if (initResult != LIBSSH2_ERROR_NONE) {
         err = "Could not initialize libssh2 (error " +

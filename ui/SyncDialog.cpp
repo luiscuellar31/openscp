@@ -621,8 +621,8 @@ void SyncDialog::loadPresets() {
     openscpui::AppSettings settings;
     const QVariantList presets =
         settings
-            .value(
-                QString::fromLatin1(openscpui::settingskeys::SyncFilterPresets))
+            .value(QString::fromLatin1(
+                openscpui::settingskeys::kSyncFilterPresets))
             .toList();
     for (const QVariant &value : presets) {
         const QVariantMap preset = value.toMap();
@@ -656,7 +656,7 @@ void SyncDialog::saveCurrentPreset() {
     openscpui::AppSettings settings;
     QVariantList presets = settings
                                .value(QString::fromLatin1(
-                                   openscpui::settingskeys::SyncFilterPresets))
+                                   openscpui::settingskeys::kSyncFilterPresets))
                                .toList();
     bool replaced = false;
     for (QVariant &value : presets) {
@@ -672,7 +672,7 @@ void SyncDialog::saveCurrentPreset() {
     if (!replaced)
         presets.push_back(saved);
     settings.setValue(
-        QString::fromLatin1(openscpui::settingskeys::SyncFilterPresets),
+        QString::fromLatin1(openscpui::settingskeys::kSyncFilterPresets),
         presets);
 
     loadPresets();
@@ -696,7 +696,7 @@ void SyncDialog::deleteCurrentPreset() {
     openscpui::AppSettings settings;
     QVariantList presets = settings
                                .value(QString::fromLatin1(
-                                   openscpui::settingskeys::SyncFilterPresets))
+                                   openscpui::settingskeys::kSyncFilterPresets))
                                .toList();
     for (qsizetype index = presets.size(); index-- > 0;) {
         if (presets.at(index)
@@ -708,7 +708,7 @@ void SyncDialog::deleteCurrentPreset() {
         }
     }
     settings.setValue(
-        QString::fromLatin1(openscpui::settingskeys::SyncFilterPresets),
+        QString::fromLatin1(openscpui::settingskeys::kSyncFilterPresets),
         presets);
     loadPresets();
 }

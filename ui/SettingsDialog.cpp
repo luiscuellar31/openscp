@@ -29,7 +29,9 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
-static QString defaultDownloadDirPath() {
+namespace {
+
+QString defaultDownloadDirPath() {
     QString downloadPath =
         QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
     if (downloadPath.isEmpty())
@@ -46,21 +48,22 @@ constexpr int kFieldMaxWidth = 520;
 
 using ComboItem = QPair<QString, QVariant>;
 
-static void addComboItems(QComboBox *combo,
-                          std::initializer_list<ComboItem> items) {
+void addComboItems(QComboBox *combo, std::initializer_list<ComboItem> items) {
     if (!combo)
         return;
     for (const auto &item : items)
         combo->addItem(item.first, item.second);
 }
 
-static void removeSettingsKeys(QSettings *settings,
-                               std::initializer_list<const char *> keys) {
+void removeSettingsKeys(QSettings *settings,
+                        std::initializer_list<const char *> keys) {
     if (!settings)
         return;
     for (const char *key : keys)
         settings->remove(QString::fromLatin1(key));
 }
+
+} // namespace
 
 QVector<SettingsDialog::SettingBinding>
 SettingsDialog::buildSettingBindings() const {
@@ -269,19 +272,19 @@ SettingsDialog::buildSettingBindings() const {
         QCheckBox *check;
     };
     const BoolBindingSpec generalBoolBindings[] = {
-        {openscpui::settingskeys::UiShowHidden, false, showHidden_},
-        {openscpui::settingskeys::UiShowConnectionOnStart, true,
+        {openscpui::settingskeys::kUiShowHidden, false, showHidden_},
+        {openscpui::settingskeys::kUiShowConnectionOnStart, true,
          showConnOnStart_},
-        {openscpui::settingskeys::UiOpenSiteManagerOnDisconnect, true,
+        {openscpui::settingskeys::kUiOpenSiteManagerOnDisconnect, true,
          showConnOnDisconnect_},
     };
 
-    addStringCombo(openscpui::settingskeys::UiLanguage, QStringLiteral("en"),
+    addStringCombo(openscpui::settingskeys::kUiLanguage, QStringLiteral("en"),
                    langCombo_);
     for (const BoolBindingSpec &spec : generalBoolBindings)
         addBool(spec.key, spec.defaultValue, spec.check);
 
-    addBool(openscpui::settingskeys::UiSingleClick, false, nullptr);
+    addBool(openscpui::settingskeys::kUiSingleClick, false, nullptr);
     bindings.back().readCurrent = [this] {
         return clickMode_ && clickMode_->currentData().toInt() == 1;
     };
@@ -291,17 +294,17 @@ SettingsDialog::buildSettingBindings() const {
     };
 
     bindings.push_back({
-        QString::fromLatin1(openscpui::settingskeys::UiOpenBehaviorMode),
+        QString::fromLatin1(openscpui::settingskeys::kUiOpenBehaviorMode),
         [](const QSettings &settings) {
             QString mode =
-                settings.value(openscpui::settingskeys::UiOpenBehaviorMode)
+                settings.value(openscpui::settingskeys::kUiOpenBehaviorMode)
                     .toString()
                     .trimmed()
                     .toLower();
             if (mode.isEmpty()) {
                 const bool revealLegacy =
                     settings
-                        .value(openscpui::settingskeys::UiOpenRevealInFolder,
+                        .value(openscpui::settingskeys::kUiOpenRevealInFolder,
                                false)
                         .toBool();
                 mode = revealLegacy ? QStringLiteral("reveal")
@@ -325,32 +328,32 @@ SettingsDialog::buildSettingBindings() const {
         },
         [](QSettings &settings, const QVariant &value) {
             const QString openMode = value.toString();
-            settings.setValue(openscpui::settingskeys::UiOpenBehaviorMode,
+            settings.setValue(openscpui::settingskeys::kUiOpenBehaviorMode,
                               openMode);
             if (openMode == QStringLiteral("reveal")) {
-                settings.setValue(openscpui::settingskeys::UiOpenRevealInFolder,
-                                  true);
-                settings.setValue(openscpui::settingskeys::UiOpenBehaviorChosen,
-                                  true);
+                settings.setValue(
+                    openscpui::settingskeys::kUiOpenRevealInFolder, true);
+                settings.setValue(
+                    openscpui::settingskeys::kUiOpenBehaviorChosen, true);
             } else if (openMode == QStringLiteral("open")) {
-                settings.setValue(openscpui::settingskeys::UiOpenRevealInFolder,
-                                  false);
-                settings.setValue(openscpui::settingskeys::UiOpenBehaviorChosen,
-                                  true);
+                settings.setValue(
+                    openscpui::settingskeys::kUiOpenRevealInFolder, false);
+                settings.setValue(
+                    openscpui::settingskeys::kUiOpenBehaviorChosen, true);
             } else {
-                settings.setValue(openscpui::settingskeys::UiOpenBehaviorChosen,
-                                  false);
+                settings.setValue(
+                    openscpui::settingskeys::kUiOpenBehaviorChosen, false);
             }
         },
     });
 
-    addBool(openscpui::settingskeys::UiShowQueueOnEnqueue, true,
+    addBool(openscpui::settingskeys::kUiShowQueueOnEnqueue, true,
             showQueueOnEnqueue_);
-    addShortcut(openscpui::settingskeys::ShortcutOpenTransfers,
+    addShortcut(openscpui::settingskeys::kShortcutOpenTransfers,
                 QStringLiteral("F12"), queueShortcutEdit_);
-    addShortcut(openscpui::settingskeys::ShortcutOpenHistory,
+    addShortcut(openscpui::settingskeys::kShortcutOpenHistory,
                 QStringLiteral("Ctrl+Shift+H"), historyShortcutEdit_);
-    addLineEdit(openscpui::settingskeys::UiDefaultDownloadDir,
+    addLineEdit(openscpui::settingskeys::kUiDefaultDownloadDir,
                 defaultDownloadDirPath(), defaultDownloadDirEdit_,
                 [](const QString &raw) {
                     QString path = raw.trimmed();
@@ -358,15 +361,15 @@ SettingsDialog::buildSettingBindings() const {
                         path = defaultDownloadDirPath();
                     return QDir::cleanPath(path);
                 });
-    addBool(openscpui::settingskeys::SitesDeleteSecretsOnRemove, false,
+    addBool(openscpui::settingskeys::kSitesDeleteSecretsOnRemove, false,
             deleteSecretsOnRemove_);
 
     bindings.push_back({
-        QString::fromLatin1(openscpui::settingskeys::DefaultProtocol),
+        QString::fromLatin1(openscpui::settingskeys::kDefaultProtocol),
         [](const QSettings &settings) {
             const auto protocol = openscp::protocolFromStorageName(
                 settings
-                    .value(openscpui::settingskeys::DefaultProtocol,
+                    .value(openscpui::settingskeys::kDefaultProtocol,
                            QString::fromLatin1(openscp::protocolStorageName(
                                openscp::Protocol::Sftp)))
                     .toString()
@@ -389,17 +392,17 @@ SettingsDialog::buildSettingBindings() const {
         [](QSettings &settings, const QVariant &value) {
             const auto protocol = static_cast<openscp::Protocol>(value.toInt());
             settings.setValue(
-                openscpui::settingskeys::DefaultProtocol,
+                openscpui::settingskeys::kDefaultProtocol,
                 QString::fromLatin1(openscp::protocolStorageName(protocol)));
         },
     });
     bindings.push_back({
-        QString::fromLatin1(openscpui::settingskeys::DefaultScpTransferMode),
+        QString::fromLatin1(openscpui::settingskeys::kDefaultScpTransferMode),
         [](const QSettings &settings) {
             const auto mode = openscp::scpTransferModeFromStorageName(
                 settings
                     .value(
-                        openscpui::settingskeys::DefaultScpTransferMode,
+                        openscpui::settingskeys::kDefaultScpTransferMode,
                         QString::fromLatin1(openscp::scpTransferModeStorageName(
                             openscp::ScpTransferMode::Auto)))
                     .toString()
@@ -424,7 +427,7 @@ SettingsDialog::buildSettingBindings() const {
             const auto mode =
                 static_cast<openscp::ScpTransferMode>(value.toInt());
             settings.setValue(
-                openscpui::settingskeys::DefaultScpTransferMode,
+                openscpui::settingskeys::kDefaultScpTransferMode,
                 QString::fromLatin1(openscp::scpTransferModeStorageName(mode)));
         },
     });
@@ -433,7 +436,7 @@ SettingsDialog::buildSettingBindings() const {
         static_cast<int>(openscp::KnownHostsPolicy::Strict);
     const int optionalIntegrity =
         static_cast<int>(openscp::TransferIntegrityPolicy::Optional);
-    addIntCombo(openscpui::settingskeys::DefaultKnownHostsPolicy,
+    addIntCombo(openscpui::settingskeys::kDefaultKnownHostsPolicy,
                 strictKhPolicy, defaultKnownHostsPolicy_, [](int value) {
                     const int acceptNew =
                         static_cast<int>(openscp::KnownHostsPolicy::AcceptNew);
@@ -444,7 +447,7 @@ SettingsDialog::buildSettingBindings() const {
                                ? value
                                : strictKhPolicy;
                 });
-    addIntCombo(openscpui::settingskeys::DefaultTransferIntegrityPolicy,
+    addIntCombo(openscpui::settingskeys::kDefaultTransferIntegrityPolicy,
                 optionalIntegrity, defaultIntegrityPolicy_, [](int value) {
                     const int required = static_cast<int>(
                         openscp::TransferIntegrityPolicy::Required);
@@ -457,32 +460,33 @@ SettingsDialog::buildSettingBindings() const {
                 });
 
     const BoolBindingSpec securityBoolBindings[] = {
-        {openscpui::settingskeys::FtpsVerifyPeerDefault, true,
+        {openscpui::settingskeys::kFtpsVerifyPeerDefault, true,
          ftpsVerifyPeerDefault_},
-        {openscpui::settingskeys::KnownHostsHashed, true, knownHostsHashed_},
-        {openscpui::settingskeys::FingerprintHex, false, fpHex_},
-        {openscpui::settingskeys::TerminalForceInteractiveLogin, false,
+        {openscpui::settingskeys::kKnownHostsHashed, true, knownHostsHashed_},
+        {openscpui::settingskeys::kFingerprintHex, false, fpHex_},
+        {openscpui::settingskeys::kTerminalForceInteractiveLogin, false,
          terminalForceInteractiveLogin_},
-        {openscpui::settingskeys::TerminalEnableSftpCliFallback, true,
+        {openscpui::settingskeys::kTerminalEnableSftpCliFallback, true,
          terminalEnableSftpCliFallback_},
     };
     for (const BoolBindingSpec &spec : securityBoolBindings)
         addBool(spec.key, spec.defaultValue, spec.check);
 
-    addLineEdit(openscpui::settingskeys::FtpsCaCertPathDefault, QString(),
+    addLineEdit(openscpui::settingskeys::kFtpsCaCertPathDefault, QString(),
                 ftpsCaCertPathDefaultEdit_,
                 [](const QString &raw) { return raw.trimmed(); });
-    addSpin(openscpui::settingskeys::NoHostVerificationTtlMinutes, 15,
+    addSpin(openscpui::settingskeys::kNoHostVerificationTtlMinutes, 15,
             noHostVerifyTtlMinSpin_);
 
 #if defined(Q_OS_MAC) || defined(Q_OS_MACOS) || defined(__APPLE__)
-    addBool(openscpui::settingskeys::MacKeychainRestrictive, false,
+    addBool(openscpui::settingskeys::kMacKeychainRestrictive, false,
             macKeychainRestrictive_);
 #endif
 
 #if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) &&       \
-    !defined(HAVE_LIBSECRET) && !defined(OPENSCP_BUILD_SECURE_ONLY)
-    addBool(openscpui::settingskeys::EnableInsecureSecretFallback, false,
+    !defined(Q_OS_WIN) && !defined(HAVE_LIBSECRET) &&                          \
+    !defined(OPENSCP_BUILD_SECURE_ONLY)
+    addBool(openscpui::settingskeys::kEnableInsecureSecretFallback, false,
             insecureFallback_);
 #endif
 
@@ -492,21 +496,22 @@ SettingsDialog::buildSettingBindings() const {
         QSpinBox *spin;
     };
     const SpinBindingSpec plainSpinBindings[] = {
-        {openscpui::settingskeys::TransferMaxConcurrent, 2, maxConcurrentSpin_},
-        {openscpui::settingskeys::TransferGlobalSpeedKbps, 0,
+        {openscpui::settingskeys::kTransferMaxConcurrent, 2,
+         maxConcurrentSpin_},
+        {openscpui::settingskeys::kTransferGlobalSpeedKbps, 0,
          globalSpeedDefaultSpin_},
-        {openscpui::settingskeys::StagingPreparationTimeoutMs, 2000,
+        {openscpui::settingskeys::kStagingPreparationTimeoutMs, 2000,
          stagingPrepTimeoutMsSpin_},
-        {openscpui::settingskeys::StagingConfirmationItems, 500,
+        {openscpui::settingskeys::kStagingConfirmationItems, 500,
          stagingConfirmItemsSpin_},
-        {openscpui::settingskeys::StagingConfirmationMiB, 1024,
+        {openscpui::settingskeys::kStagingConfirmationMiB, 1024,
          stagingConfirmMiBSpin_},
-        {openscpui::settingskeys::MaximumFolderDepth, 32, maxDepthSpin_},
+        {openscpui::settingskeys::kMaximumFolderDepth, 32, maxDepthSpin_},
     };
     for (const SpinBindingSpec &spec : plainSpinBindings)
         addSpin(spec.key, spec.defaultValue, spec.spin);
 
-    addIntCombo(openscpui::settingskeys::TransferDefaultQueueAutoClearMode,
+    addIntCombo(openscpui::settingskeys::kTransferDefaultQueueAutoClearMode,
                 kQueueAutoClearOff, queueAutoClearModeDefault_, [](int value) {
                     return qBound(kQueueAutoClearOff, value,
                                   kQueueAutoClearFinished);
@@ -520,11 +525,11 @@ SettingsDialog::buildSettingBindings() const {
         int maxValue;
     };
     const BoundedSpinBindingSpec boundedSpinBindings[] = {
-        {openscpui::settingskeys::TransferDefaultQueueAutoClearMinutes, 15,
+        {openscpui::settingskeys::kTransferDefaultQueueAutoClearMinutes, 15,
          queueAutoClearMinutesDefaultSpin_, 1, 1440},
-        {openscpui::settingskeys::SessionHealthIntervalSeconds, 600,
+        {openscpui::settingskeys::kSessionHealthIntervalSeconds, 600,
          sessionHealthIntervalSecSpin_, 60, 86400},
-        {openscpui::settingskeys::StagingRetentionDays, 7,
+        {openscpui::settingskeys::kStagingRetentionDays, 7,
          stagingRetentionDaysSpin_, 1, 365},
     };
     for (const BoundedSpinBindingSpec &spec : boundedSpinBindings) {
@@ -532,10 +537,11 @@ SettingsDialog::buildSettingBindings() const {
                 spec.maxValue);
     }
 
-    addLineEdit(openscpui::settingskeys::StagingRoot,
+    addLineEdit(openscpui::settingskeys::kStagingRoot,
                 QDir::homePath() + "/Downloads/OpenSCP-Dragged",
                 stagingRootEdit_);
-    addBool(openscpui::settingskeys::AutoCleanStaging, true, autoCleanStaging_);
+    addBool(openscpui::settingskeys::kAutoCleanStaging, true,
+            autoCleanStaging_);
 
     return bindings;
 }
@@ -874,12 +880,12 @@ void SettingsDialog::buildGeneralPage(const PageBuildContext &ctx) {
 
         openscpui::AppSettings settings;
         removeSettingsKeys(
-            &settings, {openscpui::settingskeys::MainWindowGeometry,
-                        openscpui::settingskeys::MainWindowState,
-                        openscpui::settingskeys::MainWindowSplitterState,
-                        openscpui::settingskeys::MainWindowLeftHeaderState,
-                        openscpui::settingskeys::MainWindowRightHeaderLocal,
-                        openscpui::settingskeys::MainWindowRightHeaderRemote});
+            &settings, {openscpui::settingskeys::kMainWindowGeometry,
+                        openscpui::settingskeys::kMainWindowState,
+                        openscpui::settingskeys::kMainWindowSplitterState,
+                        openscpui::settingskeys::kMainWindowLeftHeaderState,
+                        openscpui::settingskeys::kMainWindowRightHeaderLocal,
+                        openscpui::settingskeys::kMainWindowRightHeaderRemote});
         settings.sync();
         bool appliedNow = false;
         if (QWidget *parentWindow = parentWidget()) {
@@ -1039,7 +1045,8 @@ void SettingsDialog::buildSecurityPage(const PageBuildContext &ctx) {
           tr("Use stricter Keychain accessibility (this device only).")}});
 #endif
 #if !defined(__APPLE__) && !defined(Q_OS_MAC) && !defined(Q_OS_MACOS) &&       \
-    !defined(HAVE_LIBSECRET) && !defined(OPENSCP_BUILD_SECURE_ONLY)
+    !defined(Q_OS_WIN) && !defined(HAVE_LIBSECRET) &&                          \
+    !defined(OPENSCP_BUILD_SECURE_ONLY)
     addTrackedCheckRows(
         securityForm, securityPage,
         {{&insecureFallback_,
@@ -1287,7 +1294,7 @@ void SettingsDialog::onApply() {
     const QVariantMap currentSnapshot = readCurrentSnapshot(bindings);
     const QString prevLang =
         persistedSnapshot
-            .value(QString::fromLatin1(openscpui::settingskeys::UiLanguage))
+            .value(QString::fromLatin1(openscpui::settingskeys::kUiLanguage))
             .toString();
 
     writeSnapshot(settings, currentSnapshot, bindings);
@@ -1296,7 +1303,7 @@ void SettingsDialog::onApply() {
     // Only notify if language actually changed
     const QString chosenLang =
         currentSnapshot
-            .value(QString::fromLatin1(openscpui::settingskeys::UiLanguage))
+            .value(QString::fromLatin1(openscpui::settingskeys::kUiLanguage))
             .toString();
     if (prevLang != chosenLang) {
         UiAlerts::information(

@@ -1,6 +1,6 @@
 // Protect transfer workers from indefinite kernel-level socket blocking when
 // the peer/network disappears without a clean TCP close.
-static void apply_transfer_socket_timeouts(int sock) {
+void apply_transfer_socket_timeouts(int sock) {
     if (sock < 0)
         return;
 #ifdef _WIN32
@@ -18,7 +18,7 @@ static void apply_transfer_socket_timeouts(int sock) {
 #endif
 }
 
-static bool seek_local_file(FILE *f, std::uint64_t off, std::string *why) {
+bool seek_local_file(FILE *f, std::uint64_t off, std::string *why) {
 #ifdef _WIN32
     if (_fseeki64(f, (__int64)off, SEEK_SET) != 0) {
         if (why)
@@ -35,8 +35,8 @@ static bool seek_local_file(FILE *f, std::uint64_t off, std::string *why) {
     return true;
 }
 
-static bool get_local_file_size(const std::string &path, std::uint64_t &out,
-                                std::string *why) {
+bool get_local_file_size(const std::string &path, std::uint64_t &out,
+                         std::string *why) {
 #ifndef _WIN32
     struct ::stat st {};
     if (::stat(path.c_str(), &st) != 0) {
@@ -67,7 +67,7 @@ static bool get_local_file_size(const std::string &path, std::uint64_t &out,
 #endif
 }
 
-static bool flush_local_file(FILE *f, std::string *why) {
+bool flush_local_file(FILE *f, std::string *why) {
     if (std::fflush(f) != 0) {
         if (why)
             *why = "fflush(local) failed";
@@ -91,8 +91,8 @@ static bool flush_local_file(FILE *f, std::string *why) {
     return true;
 }
 
-static bool replace_local_file_atomic(const std::string &from,
-                                      const std::string &to, std::string *why) {
+bool replace_local_file_atomic(const std::string &from, const std::string &to,
+                               std::string *why) {
 #ifndef _WIN32
     if (::rename(from.c_str(), to.c_str()) != 0) {
         if (why)
@@ -113,10 +113,9 @@ static bool replace_local_file_atomic(const std::string &from,
 #endif
 }
 
-static bool rename_remote_with_fallback(LIBSSH2_SFTP *sftp,
-                                        const std::string &from,
-                                        const std::string &to, bool overwrite,
-                                        std::string *why) {
+bool rename_remote_with_fallback(LIBSSH2_SFTP *sftp, const std::string &from,
+                                 const std::string &to, bool overwrite,
+                                 std::string *why) {
     if (!sftp) {
         if (why)
             *why = "SFTP handle is null";
@@ -177,31 +176,28 @@ static bool rename_remote_with_fallback(LIBSSH2_SFTP *sftp,
     return false;
 }
 
-static bool
-transfer_cancel_requested(const std::function<bool()> *shouldCancel) {
+bool transfer_cancel_requested(const std::function<bool()> *shouldCancel) {
     return shouldCancel && *shouldCancel && (*shouldCancel)();
 }
 
-static bool ensure_sftp_ready(bool connected, LIBSSH2_SFTP *sftp,
-                              std::string &err) {
+bool ensure_sftp_ready(bool connected, LIBSSH2_SFTP *sftp, std::string &err) {
     if (connected && sftp)
         return true;
     err = "Not connected";
     return false;
 }
 
-static bool fail_if_transfer_canceled(const std::function<bool()> *shouldCancel,
-                                      std::string &err) {
+bool fail_if_transfer_canceled(const std::function<bool()> *shouldCancel,
+                               std::string &err) {
     if (!transfer_cancel_requested(shouldCancel))
         return false;
     err = "Canceled by user";
     return true;
 }
 
-static bool
-hash_local_range(const std::string &path, std::uint64_t offset,
-                 std::uint64_t length, Sha256Digest &out, std::string *why,
-                 const std::function<bool()> *shouldCancel = nullptr) {
+bool hash_local_range(const std::string &path, std::uint64_t offset,
+                      std::uint64_t length, Sha256Digest &out, std::string *why,
+                      const std::function<bool()> *shouldCancel = nullptr) {
     FILE *f = ::fopen(path.c_str(), "rb");
     if (!f) {
         if (why)
@@ -262,20 +258,19 @@ hash_local_range(const std::string &path, std::uint64_t offset,
     return true;
 }
 
-static bool
-hash_local_full(const std::string &path, Sha256Digest &out, std::string *why,
-                const std::function<bool()> *shouldCancel = nullptr) {
+bool hash_local_full(const std::string &path, Sha256Digest &out,
+                     std::string *why,
+                     const std::function<bool()> *shouldCancel = nullptr) {
     std::uint64_t sz = 0;
     if (!get_local_file_size(path, sz, why))
         return false;
     return hash_local_range(path, 0, sz, out, why, shouldCancel);
 }
 
-static bool
-hash_remote_range(LIBSSH2_SFTP *sftp, const std::string &remote,
-                  std::uint64_t offset, std::uint64_t length, Sha256Digest &out,
-                  std::string *why,
-                  const std::function<bool()> *shouldCancel = nullptr) {
+bool hash_remote_range(LIBSSH2_SFTP *sftp, const std::string &remote,
+                       std::uint64_t offset, std::uint64_t length,
+                       Sha256Digest &out, std::string *why,
+                       const std::function<bool()> *shouldCancel = nullptr) {
     LIBSSH2_SFTP_HANDLE *rh = libssh2_sftp_open_ex(
         sftp, remote.c_str(), static_cast<unsigned>(remote.size()),
         LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
@@ -344,7 +339,7 @@ hash_remote_range(LIBSSH2_SFTP *sftp, const std::string &remote,
     return true;
 }
 
-static bool hash_remote_full(
+bool hash_remote_full(
     LIBSSH2_SFTP *sftp, const std::string &remote, Sha256Digest &out,
     std::string *why, const std::function<bool()> *shouldCancel = nullptr,
     const std::function<void(std::size_t, std::size_t)> *progress = nullptr) {
@@ -425,7 +420,7 @@ static bool hash_remote_full(
     return true;
 }
 
-static bool verify_final_transfer_integrity(
+bool verify_final_transfer_integrity(
     LIBSSH2_SFTP *sftp, const std::string &localPath,
     const std::string &remotePath, TransferIntegrityPolicy policy,
     const char *transferKind, std::string &err,

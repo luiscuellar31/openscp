@@ -2,6 +2,7 @@
 // Includes keepalive, known_hosts validation, and resume support.
 #include "openscp/Libssh2SftpClient.hpp"
 
+#include "../common/RemoteListingLimits.hpp"
 #include "../common/SafeLocalFile.hpp"
 #include "detail/Libssh2ErrorClassifier.hpp"
 #include "detail/Libssh2InputSafety.hpp"
@@ -50,6 +51,7 @@
 #include <ctime>
 #include <sstream>
 
+#ifndef _WIN32
 // POSIX sockets
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -58,8 +60,11 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#endif
 
 namespace openscp {
+
+namespace {
 
 enum class CoreLogLevel : int {
     Off = 0,
@@ -69,7 +74,7 @@ enum class CoreLogLevel : int {
     Debug = 4
 };
 
-static CoreLogLevel core_log_level() {
+CoreLogLevel core_log_level() {
     static const CoreLogLevel level = []() {
         const char *raw = std::getenv("OPENSCP_LOG_LEVEL");
         if (!raw || !*raw)
@@ -94,16 +99,16 @@ static CoreLogLevel core_log_level() {
     return level;
 }
 
-static bool core_sensitive_debug_enabled() {
+bool core_sensitive_debug_enabled() {
     static const bool enabled = openscp::sensitiveLoggingEnabled();
     return enabled;
 }
 
-static bool core_log_enabled(CoreLogLevel level) {
+bool core_log_enabled(CoreLogLevel level) {
     return static_cast<int>(core_log_level()) >= static_cast<int>(level);
 }
 
-static void core_logf(CoreLogLevel level, const char *fmt, ...) {
+void core_logf(CoreLogLevel level, const char *fmt, ...) {
     if (!core_log_enabled(level) || !fmt)
         return;
     std::fprintf(stderr, "[OpenSCP] ");
@@ -123,7 +128,7 @@ static void core_logf(CoreLogLevel level, const char *fmt, ...) {
 
 // Resolve POSIX home directory robustly (prefer $HOME, fallback to getpwuid)
 #ifndef _WIN32
-static std::string resolve_posix_home() {
+std::string resolve_posix_home() {
     const char *home = std::getenv("HOME");
     if (home && *home)
         return std::string(home);
@@ -136,7 +141,7 @@ static std::string resolve_posix_home() {
 
 // Append host key audit log lines to ~/.openscp/openscp.auth (0600).
 #ifndef _WIN32
-static void write_best_effort(int fd, const char *data, std::size_t len) {
+void write_best_effort(int fd, const char *data, std::size_t len) {
     while (len > 0) {
         const ssize_t written = ::write(fd, data, len);
         if (written <= 0)
@@ -148,10 +153,9 @@ static void write_best_effort(int fd, const char *data, std::size_t len) {
 #endif
 
 // Best-effort.
-static void auditLogHostKey(const std::string &host, uint16_t port,
-                            const std::string &algorithm,
-                            const std::string &fingerprint,
-                            const char *status) {
+void auditLogHostKey(const std::string &host, uint16_t port,
+                     const std::string &algorithm,
+                     const std::string &fingerprint, const char *status) {
     if (!openscp::sensitiveLoggingEnabled())
         return;
 #ifndef _WIN32
@@ -188,11 +192,11 @@ static void auditLogHostKey(const std::string &host, uint16_t port,
 }
 
 #ifndef _WIN32
-static std::string posix_err(const char *where) {
+std::string posix_err(const char *where) {
     return std::string(where) + ": " + std::strerror(errno);
 }
 
-static bool ensure_parent_dir_0700(const std::string &path, std::string *why) {
+bool ensure_parent_dir_0700(const std::string &path, std::string *why) {
     std::string dir = path;
     std::size_t p = dir.find_last_of('/');
     if (p == std::string::npos)
@@ -214,7 +218,7 @@ static bool ensure_parent_dir_0700(const std::string &path, std::string *why) {
     return true;
 }
 
-static bool fsync_parent_dir(const std::string &path, std::string *why) {
+bool fsync_parent_dir(const std::string &path, std::string *why) {
     std::string dir = path;
     std::size_t p = dir.find_last_of('/');
     if (p == std::string::npos)
@@ -241,8 +245,7 @@ static bool fsync_parent_dir(const std::string &path, std::string *why) {
     return true;
 }
 
-static bool write_all(int fd, const char *data, std::size_t len,
-                      std::string *why) {
+bool write_all(int fd, const char *data, std::size_t len, std::string *why) {
     std::size_t off = 0;
     while (off < len) {
         ssize_t w = ::write(fd, data + off, len - off);
@@ -256,7 +259,7 @@ static bool write_all(int fd, const char *data, std::size_t len,
     return true;
 }
 #else
-static std::string win_err(const char *where, DWORD code) {
+std::string win_err(const char *where, DWORD code) {
     std::ostringstream oss;
     oss << where << " (GetLastError=" << static_cast<unsigned long>(code)
         << ")";
@@ -266,7 +269,7 @@ static std::string win_err(const char *where, DWORD code) {
 
 using Sha256Digest = std::array<unsigned char, SHA256_DIGEST_LENGTH>;
 
-static TransferIntegrityPolicy
+TransferIntegrityPolicy
 integrity_policy_from_env(TransferIntegrityPolicy fallback) {
     const char *raw = std::getenv("OPENSCP_TRANSFER_INTEGRITY");
     if (!raw || !*raw)
@@ -290,9 +293,8 @@ integrity_policy_from_env(TransferIntegrityPolicy fallback) {
 #include "detail/Libssh2SftpClient.TransferSupport.inc"
 // clang-format on
 
-static bool persist_known_hosts_atomic(LIBSSH2_KNOWNHOSTS *nh,
-                                       const std::string &khPath,
-                                       std::string *why) {
+bool persist_known_hosts_atomic(LIBSSH2_KNOWNHOSTS *nh,
+                                const std::string &khPath, std::string *why) {
     if (!nh) {
         if (why)
             *why = "known_hosts not initialized";
@@ -422,8 +424,8 @@ static bool persist_known_hosts_atomic(LIBSSH2_KNOWNHOSTS *nh,
 }
 
 #ifndef _WIN32
-static bool persist_text_atomic(const std::string &path,
-                                const std::string &content, std::string *why) {
+bool persist_text_atomic(const std::string &path, const std::string &content,
+                         std::string *why) {
     if (path.empty()) {
         if (why)
             *why = "empty destination path";
@@ -479,8 +481,8 @@ static bool persist_text_atomic(const std::string &path,
     return true;
 }
 #else
-static bool persist_text_atomic(const std::string &path,
-                                const std::string &content, std::string *why) {
+bool persist_text_atomic(const std::string &path, const std::string &content,
+                         std::string *why) {
     if (path.empty()) {
         if (why)
             *why = "empty destination path";
@@ -543,7 +545,7 @@ static bool persist_text_atomic(const std::string &path,
 #endif
 
 // Simple Base64 encoder (standard, with '=' padding)
-static std::string b64encode(const unsigned char *data, std::size_t len) {
+std::string b64encode(const unsigned char *data, std::size_t len) {
     static constexpr char kTable[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string out;
@@ -576,8 +578,7 @@ static std::string b64encode(const unsigned char *data, std::size_t len) {
     return out;
 }
 
-static bool b64decode(const std::string &input,
-                      std::vector<unsigned char> &out) {
+bool b64decode(const std::string &input, std::vector<unsigned char> &out) {
     if (input.empty() || (input.size() % 4) != 0)
         return false;
     out.assign((input.size() / 4) * 3, 0);
@@ -598,9 +599,9 @@ static bool b64decode(const std::string &input,
     return true;
 }
 
-static bool parse_known_hosts_host_field(const std::string &line,
-                                         std::size_t &hostStart,
-                                         std::size_t &hostEnd) {
+bool parse_known_hosts_host_field(const std::string &line,
+                                  std::size_t &hostStart,
+                                  std::size_t &hostEnd) {
     auto isSpace = [](unsigned char c) { return std::isspace(c) != 0; };
     std::size_t i = 0;
     while (i < line.size() && isSpace(static_cast<unsigned char>(line[i])))
@@ -634,8 +635,8 @@ static bool parse_known_hosts_host_field(const std::string &line,
     return true;
 }
 
-static bool token_matches_hashed_host(const std::string &token,
-                                      const std::string &hostToken) {
+bool token_matches_hashed_host(const std::string &token,
+                               const std::string &hostToken) {
     if (token.size() <= 4 || token[0] != '|' || token[1] != '1' ||
         token[2] != '|')
         return false;
@@ -663,8 +664,8 @@ static bool token_matches_hashed_host(const std::string &token,
     return std::equal(expectedMac.begin(), expectedMac.end(), mac);
 }
 
-static bool line_matches_site_host(const std::string &line,
-                                   const std::vector<std::string> &targets) {
+bool line_matches_site_host(const std::string &line,
+                            const std::vector<std::string> &targets) {
     std::size_t hostStart = 0;
     std::size_t hostEnd = 0;
     if (!parse_known_hosts_host_field(line, hostStart, hostEnd))
@@ -691,10 +692,10 @@ static bool line_matches_site_host(const std::string &line,
 }
 
 // Global libssh2 initialization (once per process).
-static std::once_flag g_libssh2_init_once;
-static int g_libssh2_init_result = LIBSSH2_ERROR_NONE;
+std::once_flag g_libssh2_init_once;
+int g_libssh2_init_result = LIBSSH2_ERROR_NONE;
 
-static int ensure_libssh2_initialized() {
+int ensure_libssh2_initialized() {
     std::call_once(g_libssh2_init_once,
                    []() { g_libssh2_init_result = libssh2_init(0); });
     return g_libssh2_init_result;
@@ -703,7 +704,7 @@ static int ensure_libssh2_initialized() {
 #ifndef _WIN32
 // Compute OpenSSH hashed hostname token: |1|base64(salt)|base64(HMAC_SHA1(salt,
 // host))
-static std::string openssh_hash_hostname(const std::string &host) {
+std::string openssh_hash_hostname(const std::string &host) {
     unsigned char salt[20];
     if (RAND_bytes(salt, sizeof(salt)) != 1) {
         // fallback: pseudo-random
@@ -734,12 +735,12 @@ struct KbdIntCtx {
 
 // Keyboard-interactive callback: respond to prompts with username/password
 // based on the text
-static void
-kbint_password_callback(const char *name, int name_len, const char *instruction,
-                        int instruction_len, int num_prompts,
-                        const LIBSSH2_USERAUTH_KBDINT_PROMPT *prompts,
-                        LIBSSH2_USERAUTH_KBDINT_RESPONSE *responses,
-                        void **abstract) {
+void kbint_password_callback(const char *name, int name_len,
+                             const char *instruction, int instruction_len,
+                             int num_prompts,
+                             const LIBSSH2_USERAUTH_KBDINT_PROMPT *prompts,
+                             LIBSSH2_USERAUTH_KBDINT_RESPONSE *responses,
+                             void **abstract) {
     if (!abstract || !*abstract)
         return;
     const KbdIntCtx *ctx = static_cast<const KbdIntCtx *>(*abstract);
@@ -793,8 +794,12 @@ kbint_password_callback(const char *name, int name_len, const char *instruction,
     }
     if (prompts) {
         for (int i = 0; i < num_prompts; ++i) {
-            promptViews[static_cast<std::size_t>(i)] = {prompts[i].text,
-                                                        prompts[i].length};
+            auto &promptView = promptViews[static_cast<std::size_t>(i)];
+            // libssh2 1.10 exposed prompt text as char*, while newer releases
+            // use unsigned char*. Normalize both public API variants here.
+            promptView.text =
+                reinterpret_cast<const unsigned char *>(prompts[i].text);
+            promptView.length = static_cast<std::size_t>(prompts[i].length);
         }
     }
     if (!libssh2detail::copyKeyboardInteractivePrompts(
@@ -917,6 +922,8 @@ kbint_password_callback(const char *name, int name_len, const char *instruction,
         responses[i].length = static_cast<unsigned int>(alen);
     }
 }
+
+} // namespace
 
 Libssh2SftpClient::StructuredErrorScope::StructuredErrorScope(
     Libssh2SftpClient &owner, std::string &error, bool mutation)

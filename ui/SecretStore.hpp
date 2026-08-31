@@ -1,21 +1,18 @@
-// Secret storage abstraction for the UI.
-// On macOS uses Keychain; on other OSes an insecure fallback may be enabled via
-// env var.
+// Secret storage abstraction for the UI. It uses Keychain on macOS, DPAPI on
+// Windows, Secret Service on Linux, or an explicitly enabled fallback when no
+// secure platform backend is available.
 #pragma once
 #include <QString>
 
-#include <optional>
-
-// Minimal secret store abstraction.
-// Current implementation: fallback with QSettings (not secure),
-// designed to be replaceable by Keychain (macOS) / Secret Service (Linux).
+// Minimal platform secret-store abstraction.
 class SecretStore {
     public:
     enum class PersistStatus {
         Stored,
         Unavailable,
         PermissionDenied,
-        BackendError
+        BackendError,
+        Corrupt
     };
 
     struct PersistResult {
@@ -24,17 +21,51 @@ class SecretStore {
         bool isStored() const { return status == PersistStatus::Stored; }
     };
 
+    enum class LoadStatus {
+        Loaded,
+        Missing,
+        Unavailable,
+        PermissionDenied,
+        BackendError,
+        Corrupt
+    };
+
+    struct LoadResult {
+        LoadStatus status = LoadStatus::Missing;
+        QString value;
+        QString detail;
+        [[nodiscard]] bool isLoaded() const {
+            return status == LoadStatus::Loaded;
+        }
+    };
+
+    enum class DeleteStatus {
+        Removed,
+        Missing,
+        Unavailable,
+        PermissionDenied,
+        BackendError
+    };
+
+    struct DeleteResult {
+        DeleteStatus status = DeleteStatus::Missing;
+        QString detail;
+        [[nodiscard]] bool isRemovedOrMissing() const {
+            return status == DeleteStatus::Removed ||
+                   status == DeleteStatus::Missing;
+        }
+    };
+
     // Store a secret under a logical key (e.g. "site-id:<uuid>:password").
     PersistResult setSecret(const QString &key, const QString &value);
 
     // Retrieve a secret if present.
-    std::optional<QString> getSecret(const QString &key) const;
+    [[nodiscard]] LoadResult getSecret(const QString &key) const;
 
-    // Remove a secret (optional).
-    void removeSecret(const QString &key);
+    // Remove a secret and report whether cleanup actually succeeded.
+    [[nodiscard]] DeleteResult removeSecret(const QString &key);
 
-    // Whether the insecure fallback is active (only for environments without
-    // Keychain/Secret Service). On macOS always returns false. On other OSes
-    // depends on build macro and env var.
+    // Whether the insecure fallback is active. Secure platform backends always
+    // return false.
     static bool insecureFallbackActive();
 };

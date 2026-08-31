@@ -1,7 +1,7 @@
 Bibliotheques tierces utilisees par OpenSCP
 (Les frameworks du systeme d'exploitation comme Security, AppKit, etc. sont exclus.)
 
-- Qt 6.8.3 (Qt Widgets, Qt Gui, Qt Core)
+- Qt 6 (Qt 6.8.3 comme base de version recommandee; Qt Widgets, Qt Gui, Qt Core, Qt Svg)
   Description: framework multiplateforme pour interfaces graphiques et utilitaires.
   Licence: LGPL-3.0 / GPL-3.0 / Commerciale (multi-licence)
   Site: https://www.qt.io/

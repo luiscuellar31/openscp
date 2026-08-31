@@ -42,14 +42,16 @@
 #include <memory>
 #include <utility>
 
+namespace {
+
 // Best-effort memory scrubbing helpers for sensitive data
-static inline void secureClear(QString &text) {
+inline void secureClear(QString &text) {
     const qsizetype charCount = text.size();
     for (qsizetype charIndex = 0; charIndex < charCount; ++charIndex)
         text[charIndex] = QChar(u'\0');
     text.clear();
 }
-static inline void secureClear(QByteArray &bytes) {
+inline void secureClear(QByteArray &bytes) {
     if (bytes.isEmpty())
         return;
     volatile char *bytePtr = reinterpret_cast<volatile char *>(bytes.data());
@@ -59,77 +61,73 @@ static inline void secureClear(QByteArray &bytes) {
     bytes.clear();
     bytes.squeeze();
 }
-static QString newQuickSiteId() {
+QString newQuickSiteId() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
 
-static QString normalizedIdentityHost(const std::string &host) {
+QString normalizedIdentityHost(const std::string &host) {
     return QString::fromStdString(host).trimmed().toLower();
 }
 
-static QString normalizedIdentityUser(const std::string &user) {
+QString normalizedIdentityUser(const std::string &user) {
     return QString::fromStdString(user).trimmed();
 }
 
-static QString normalizedIdentityProtocol(openscp::Protocol protocol) {
+QString normalizedIdentityProtocol(openscp::Protocol protocol) {
     return QString::fromLatin1(openscp::protocolStorageName(protocol));
 }
 
-static openscp::ScpTransferMode
+openscp::ScpTransferMode
 normalizedIdentityScpMode(const openscp::SessionOptions &opt) {
     if (opt.protocol != openscp::Protocol::Scp)
         return openscp::ScpTransferMode::Auto;
     return opt.scp_transfer_mode;
 }
 
-static QString normalizedIdentityProxyHost(const std::string &host) {
+QString normalizedIdentityProxyHost(const std::string &host) {
     return QString::fromStdString(host).trimmed().toLower();
 }
 
-static QString
-normalizedIdentityProxyUser(const std::optional<std::string> &user) {
+QString normalizedIdentityProxyUser(const std::optional<std::string> &user) {
     if (!user || user->empty())
         return {};
     return QString::fromStdString(*user).trimmed();
 }
 
-static QString
-normalizedIdentityJumpHost(const std::optional<std::string> &host) {
+QString normalizedIdentityJumpHost(const std::optional<std::string> &host) {
     if (!host || host->empty())
         return {};
     return QString::fromStdString(*host).trimmed().toLower();
 }
 
-static QString
-normalizedIdentityJumpUser(const std::optional<std::string> &user) {
+QString normalizedIdentityJumpUser(const std::optional<std::string> &user) {
     if (!user || user->empty())
         return {};
     return QString::fromStdString(*user).trimmed();
 }
 
-static QString protocolDisplayLabel(openscp::Protocol protocol) {
+QString protocolDisplayLabel(openscp::Protocol protocol) {
     return QString::fromLatin1(openscp::protocolDisplayName(protocol));
 }
 
-static QString
-normalizedIdentityKeyPath(const std::optional<std::string> &keyPath) {
+QString normalizedIdentityKeyPath(const std::optional<std::string> &keyPath) {
     if (!keyPath || keyPath->empty())
         return {};
     return QDir::cleanPath(
         QDir::fromNativeSeparators(QString::fromStdString(*keyPath).trimmed()));
 }
 
-static bool hasConfiguredJumpHost(const openscp::SessionOptions &opt) {
+bool hasConfiguredJumpHost(const openscp::SessionOptions &opt) {
     return opt.jump_host.has_value() && !opt.jump_host->empty();
 }
 
-static bool hasTransportSelectionConflict(const openscp::SessionOptions &opt) {
+bool hasTransportSelectionConflict(const openscp::SessionOptions &opt) {
     return opt.proxy_type != openscp::ProxyType::None &&
            hasConfiguredJumpHost(opt);
 }
 
-static bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
-                                  const openscp::SessionOptions &b) {
+bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
+                           const openscp::SessionOptions &b) {
     const bool compareFtpsTls =
         (a.protocol != openscp::Protocol::Ftps) ||
         (openscp::normalizeFtpsMode(a.ftps_mode) ==
@@ -176,7 +174,7 @@ struct QuickSitesLoadResult {
     SiteCredentialMigrationResult legacyMigration;
 };
 
-static QuickSitesLoadResult loadSavedSitesForQuickConnect() {
+QuickSitesLoadResult loadSavedSitesForQuickConnect() {
     const SavedSitesPersistence::LoadResult loaded =
         SavedSitesPersistence::loadSites({
             .trimSiteNames = true,
@@ -190,12 +188,12 @@ static QuickSitesLoadResult loadSavedSitesForQuickConnect() {
     return result;
 }
 
-static SavedSitesPersistence::SaveResult
+SavedSitesPersistence::SaveResult
 saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
     return SavedSitesPersistence::saveSites(sites, true);
 }
 
-static QString defaultQuickSiteName(const openscp::SessionOptions &opt) {
+QString defaultQuickSiteName(const openscp::SessionOptions &opt) {
     const QString user = normalizedIdentityUser(opt.username);
     const QString host = normalizedIdentityHost(opt.host);
     const QString protocol = protocolDisplayLabel(opt.protocol);
@@ -216,8 +214,8 @@ static QString defaultQuickSiteName(const openscp::SessionOptions &opt) {
     return out;
 }
 
-static QString ensureUniqueQuickSiteName(const QVector<SiteEntry> &sites,
-                                         const QString &preferred) {
+QString ensureUniqueQuickSiteName(const QVector<SiteEntry> &sites,
+                                  const QString &preferred) {
     QString base = preferred.trimmed();
     if (base.isEmpty())
         base = QObject::tr("New site");
@@ -241,7 +239,7 @@ static QString ensureUniqueQuickSiteName(const QVector<SiteEntry> &sites,
                QUuid::createUuid().toString(QUuid::WithoutBraces).left(6));
 }
 
-static void refreshOpenSiteManagerWidget(QPointer<QWidget> siteManager) {
+void refreshOpenSiteManagerWidget(QPointer<QWidget> siteManager) {
     if (!siteManager)
         return;
     auto *dlg = qobject_cast<SiteManagerDialog *>(siteManager.data());
@@ -249,6 +247,8 @@ static void refreshOpenSiteManagerWidget(QPointer<QWidget> siteManager) {
         return;
     dlg->reloadFromSettings();
 }
+
+} // namespace
 
 bool MainWindow::isLikelyRemoteTransportError(const QString &rawError) const {
     const QString lower = rawError.trimmed().toLower();
@@ -312,11 +312,11 @@ void MainWindow::openConnectDialogWithPreset(
         openscpui::AppSettings securitySettings;
         sessionOptions.known_hosts_hash_names =
             securitySettings
-                .value(openscpui::settingskeys::KnownHostsHashed, true)
+                .value(openscpui::settingskeys::kKnownHostsHashed, true)
                 .toBool();
         sessionOptions.show_fp_hex =
             securitySettings
-                .value(openscpui::settingskeys::FingerprintHex, false)
+                .value(openscpui::settingskeys::kFingerprintHex, false)
                 .toBool();
     }
     if (hasTransportSelectionConflict(sessionOptions)) {
@@ -660,7 +660,7 @@ void MainWindow::setOpenSiteManagerOnDisconnect(bool enabled) {
         return;
     openSiteManagerOnDisconnect_ = enabled;
     openscpui::AppSettings settings;
-    settings.setValue(openscpui::settingskeys::UiOpenSiteManagerOnDisconnect,
+    settings.setValue(openscpui::settingskeys::kUiOpenSiteManagerOnDisconnect,
                       enabled);
     settings.sync();
 }
@@ -704,7 +704,7 @@ void MainWindow::setOpenSiteManagerOnStartup(bool enabled) {
         return;
     openSiteManagerOnStartup_ = enabled;
     openscpui::AppSettings settings;
-    settings.setValue(openscpui::settingskeys::UiShowConnectionOnStart,
+    settings.setValue(openscpui::settingskeys::kUiShowConnectionOnStart,
                       enabled);
     settings.sync();
 }
@@ -831,7 +831,7 @@ QString MainWindow::defaultDownloadDirFromSettings(const QSettings &settings) {
     if (fallback.isEmpty())
         fallback = QDir::homePath() + "/Downloads";
     QString configured = QDir::cleanPath(
-        settings.value(openscpui::settingskeys::UiDefaultDownloadDir, fallback)
+        settings.value(openscpui::settingskeys::kUiDefaultDownloadDir, fallback)
             .toString()
             .trimmed());
     if (configured.isEmpty())

@@ -97,7 +97,9 @@ class SiteListModel final : public QAbstractTableModel {
     const QVector<SiteEntry> *sites_ = nullptr;
 };
 
-static void showPersistIssues(QWidget *parent, const QStringList &issues) {
+namespace {
+
+void showPersistIssues(QWidget *parent, const QStringList &issues) {
     if (issues.isEmpty())
         return;
     UiAlerts::warning(parent, QObject::tr("Credentials not saved"),
@@ -106,13 +108,12 @@ static void showPersistIssues(QWidget *parent, const QStringList &issues) {
                           .arg(issues.join("\n")));
 }
 
-static QString normalizedSiteName(const QString &name) {
+QString normalizedSiteName(const QString &name) {
     return name.trimmed();
 }
 
-static bool hasDuplicateSiteName(const QVector<SiteEntry> &sites,
-                                 const QString &candidate,
-                                 int ignoreIndex = -1) {
+bool hasDuplicateSiteName(const QVector<SiteEntry> &sites,
+                          const QString &candidate, int ignoreIndex = -1) {
     const QString normalizedCandidate = normalizedSiteName(candidate);
     if (normalizedCandidate.isEmpty())
         return false;
@@ -127,22 +128,24 @@ static bool hasDuplicateSiteName(const QVector<SiteEntry> &sites,
     return false;
 }
 
-static void showDuplicateNameIssue(QWidget *parent, const QString &name) {
+void showDuplicateNameIssue(QWidget *parent, const QString &name) {
     UiAlerts::warning(
         parent, QObject::tr("Duplicate name"),
         QObject::tr("A site named \"%1\" already exists. Use a different name.")
             .arg(name));
 }
 
-static void showMissingNameIssue(QWidget *parent) {
+void showMissingNameIssue(QWidget *parent) {
     UiAlerts::warning(
         parent, QObject::tr("Name required"),
         QObject::tr("Enter a site name to save this connection."));
 }
 
-static QString newSiteId() {
+QString newSiteId() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
+
+} // namespace
 
 SiteManagerDialog::SiteManagerDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle(tr("Site Manager"));
@@ -379,8 +382,10 @@ void SiteManagerDialog::onEdit() {
     selectSiteIndex(modelIndex);
     showPersistIssues(
         this, credentials.save(editedEntry, editedOptions).issueMessages());
-    if (!oldName.isEmpty() && oldName != name)
-        credentials.removeLegacyNameKeys(oldName);
+    if (!oldName.isEmpty() && oldName != name) {
+        showPersistIssues(
+            this, credentials.removeLegacyNameKeys(oldName).issueMessages());
+    }
 }
 
 void SiteManagerDialog::onDuplicate() {
@@ -456,10 +461,12 @@ void SiteManagerDialog::onRemove() {
     openscpui::AppSettings settings;
     const bool deleteSecrets =
         settings
-            .value(openscpui::settingskeys::SitesDeleteSecretsOnRemove, false)
+            .value(openscpui::settingskeys::kSitesDeleteSecretsOnRemove, false)
             .toBool();
     if (deleteSecrets) {
-        SiteCredentialRepository().removeAll(removed);
+        showPersistIssues(
+            this,
+            SiteCredentialRepository().removeAll(removed).issueMessages());
         // Also remove known_hosts entry if we know the file and host
         // Derive effective known_hosts path from the entry we just removed (if
         // available), falling back to ~/.ssh/known_hosts.
@@ -491,10 +498,10 @@ bool SiteManagerDialog::selectedOptions(openscp::SessionOptions &out) const {
     {
         openscpui::AppSettings settings;
         out.known_hosts_hash_names =
-            settings.value(openscpui::settingskeys::KnownHostsHashed, true)
+            settings.value(openscpui::settingskeys::kKnownHostsHashed, true)
                 .toBool();
         out.show_fp_hex =
-            settings.value(openscpui::settingskeys::FingerprintHex, false)
+            settings.value(openscpui::settingskeys::kFingerprintHex, false)
                 .toBool();
     }
     const SiteEntry &selected = sites_[modelIndex];

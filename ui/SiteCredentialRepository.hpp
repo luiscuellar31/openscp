@@ -39,8 +39,8 @@ class SiteCredentialRepository {
         std::function<SecretStore::PersistResult(const QString &,
                                                  const QString &)>
             store;
-        std::function<std::optional<QString>(const QString &)> load;
-        std::function<void(const QString &)> remove;
+        std::function<SecretStore::LoadResult(const QString &)> load;
+        std::function<SecretStore::DeleteResult(const QString &)> remove;
     };
 
     explicit SiteCredentialRepository(Backend backend = systemBackend());
@@ -54,8 +54,10 @@ class SiteCredentialRepository {
     [[nodiscard]] SiteCredentialOperationResult copy(const SiteEntry &source,
                                                      const SiteEntry &target);
 
-    void removeAll(const SiteEntry &site, bool includeLegacyNameKeys = true);
-    void removeLegacyNameKeys(const QString &siteName);
+    [[nodiscard]] SiteCredentialOperationResult
+    removeAll(const SiteEntry &site, bool includeLegacyNameKeys = true);
+    [[nodiscard]] SiteCredentialOperationResult
+    removeLegacyNameKeys(const QString &siteName);
 
     [[nodiscard]] static QString stableKey(const SiteEntry &site,
                                            SiteCredentialKind kind);

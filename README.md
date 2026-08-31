@@ -30,6 +30,12 @@ https://github.com/luiscuellar31/openscp/releases
 
 ## Quick Start
 
+OpenSCP 1.0.0 supports macOS and Linux. Windows code is intentionally limited
+to modular porting foundations (including the DPAPI credential backend); no
+Windows artifact or runtime support is promised for 1.0.0.
+Windows port developers must opt into the non-release scaffold explicitly with
+`-DOPENSCP_ENABLE_EXPERIMENTAL_WINDOWS_PORT=ON`.
+
 ```bash
 git clone https://github.com/luiscuellar31/openscp.git
 cd openscp
@@ -127,6 +133,7 @@ cmake --build build -j
 - Optional cleanup of stored credentials and related `known_hosts` entries when deleting sites.
 - Secure backends:
     - macOS: Keychain
+    - Windows porting foundation: DPAPI (not a supported 1.0.0 platform)
     - Linux: libsecret (when available)
 - Proxy passwords are stored in the secure backend (never in plaintext site settings).
 - Clear persistence feedback in secure-only builds.
@@ -186,7 +193,8 @@ cmake --build build -j
 
 ## Requirements
 
-- Qt `6.x` (tested with `6.8.3`)
+- A compatible Qt `6.x`; Qt `6.8.3` is recommended and pinned for official
+  self-contained releases
 - libssh2 (OpenSSL 3 recommended)
 - libcurl (optional; required for FTP/FTPS/WebDAV backends)
 - tinyxml2 (optional; required for WebDAV backend XML parsing)
@@ -196,6 +204,7 @@ cmake --build build -j
 Optional:
 
 - macOS: Keychain (native)
+- Future Windows port: DPAPI module (not a supported 1.0.0 target)
 - Linux: libsecret / Secret Service
 - OpenSSH client (`ssh`) for SSH jump host tunneling.
 - FTP/FTPS backend can be disabled explicitly with
@@ -361,11 +370,10 @@ bundle verifier is for the packaged app: it checks that Qt frameworks and the
 machine-local paths remain in its linkage. This local flow does not require
 Apple signing or notarization.
 
-When packaging for macOS 12, every bundled third-party library must also
-support macOS 12 or older. A recent Homebrew bottle may target the host's newer
-macOS version; the linker reports that mismatch and the bundle verifier rejects
-the artifact. Use dependencies built for the intended deployment target or set
-`MINIMUM_SYSTEM_VERSION` to the actual minimum supported by the artifact.
+Official arm64 and x86_64 artifacts target macOS 12. CI builds the bundled
+OpenSSL, libssh2, and tinyxml2 from pinned, checksummed sources with that
+deployment target; it does not ship recent Homebrew bottles. The bundle
+verifier rejects any included Mach-O that requires a newer system.
 
 If Qt is outside the default path (`$HOME/Qt/<version>/macos`):
 
@@ -380,6 +388,10 @@ Full packaging details: [assets/macos/README.md](assets/macos/README.md)
 ### Linux
 
 Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/README.md](assets/linux/README.md)
+
+The complete release contract, including the x86_64 AppImage glibc 2.28 floor,
+the current arm64 baseline, and Windows status, is documented in
+[docs/PLATFORM_COMPATIBILITY.md](docs/PLATFORM_COMPATIBILITY.md).
 
 ## Runtime Environment Variables
 
@@ -404,7 +416,8 @@ Linux build and packaging details (AppImage, Snap, Flatpak): [assets/linux/READM
 
 ## Roadmap
 
-- Windows support is planned for future releases.
+- Complete and validate the modular Windows port after 1.0.0; the current
+  Windows-specific pieces are scaffolding, not release support.
 - Protocols: broader WebDAV interoperability coverage.
 - Broader enterprise proxy/jump auth flows (for example, non-batch/interactive jump auth).
 - More UX features: command palette and themes.

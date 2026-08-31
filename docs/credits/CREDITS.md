@@ -2,10 +2,12 @@
 
 OpenSCP bundles or links against:
 
-## Qt 6.8.3
+## Qt 6 (6.8.3 release baseline)
 - License: LGPL-3.0
 - Project: [https://code.qt.io](https://code.qt.io)
-- Notes: Dynamically linked; no local modifications.
+- Notes: Dynamically linked; no local modifications. Self-contained official
+  artifacts pin 6.8.3; Snap/Flatpak may use a compatible Qt 6 from their
+  external runtime.
 - License file: [LICENSES/Qt-LGPL-3.0.txt](LICENSES/Qt-LGPL-3.0.txt)
 
 ## libssh2

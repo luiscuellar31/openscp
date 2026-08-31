@@ -42,17 +42,19 @@
 Q_LOGGING_CATEGORY(ocEnum, "openscp.enum")
 Q_LOGGING_CATEGORY(ocDrag, "openscp.drag")
 
-static QString stagingRootFromSettings() {
+namespace {
+
+QString stagingRootFromSettings() {
     openscpui::AppSettings settings;
     QString root =
-        settings.value(openscpui::settingskeys::StagingRoot).toString();
+        settings.value(openscpui::settingskeys::kStagingRoot).toString();
     if (root.isEmpty()) {
         root = QDir::homePath() + "/Downloads/OpenSCP-Dragged";
     }
     return root;
 }
 
-static QString normalizeStagingName(const QString &value) {
+QString normalizeStagingName(const QString &value) {
 #if defined(Q_OS_MAC)
     return value.normalized(QString::NormalizationForm_C);
 #else
@@ -60,30 +62,32 @@ static QString normalizeStagingName(const QString &value) {
 #endif
 }
 
-static QPair<QString, QString> splitNameMultiExt(const QString &fileName) {
+QPair<QString, QString> splitNameMultiExt(const QString &fileName) {
     const qsizetype firstDot = fileName.indexOf('.', 1);
     if (firstDot <= 0)
         return qMakePair(fileName, QString());
     return qMakePair(fileName.left(firstDot), fileName.mid(firstDot));
 }
 
-static QPair<int, quint64> loadStagingConfirmThresholds() {
+QPair<int, quint64> loadStagingConfirmThresholds() {
     openscpui::AppSettings settings;
     int itemThreshold =
         settings
-            .value(openscpui::settingskeys::StagingConfirmationItems, 100000)
+            .value(openscpui::settingskeys::kStagingConfirmationItems, 100000)
             .toInt();
     if (itemThreshold < 1)
         itemThreshold = 100000;
     int mibThreshold =
         settings
-            .value(openscpui::settingskeys::StagingConfirmationMiB, 100 * 1024)
+            .value(openscpui::settingskeys::kStagingConfirmationMiB, 100 * 1024)
             .toInt();
     if (mibThreshold < 1)
         mibThreshold = 100 * 1024;
     return qMakePair(itemThreshold,
                      static_cast<quint64>(mibThreshold) * 1024ull * 1024ull);
 }
+
+} // namespace
 
 struct DragAwareTreeView::RemoteDragStagingState {
     QVector<RemoteDragTarget> targets;
@@ -174,7 +178,7 @@ void DragAwareTreeView::startDrag(Qt::DropActions supportedActions) {
 
     openscpui::AppSettings settings;
     const bool autoClean =
-        settings.value(openscpui::settingskeys::AutoCleanStaging, true)
+        settings.value(openscpui::settingskeys::kAutoCleanStaging, true)
             .toBool();
 
     if (dragResult == Qt::IgnoreAction) {
@@ -273,7 +277,7 @@ void DragAwareTreeView::scheduleAutoCleanup(const QString &batchDir,
 QString DragAwareTreeView::buildStagingRoot() const {
     openscpui::AppSettings settings;
     QString root =
-        settings.value(openscpui::settingskeys::StagingRoot).toString();
+        settings.value(openscpui::settingskeys::kStagingRoot).toString();
     if (root.isEmpty())
         root = QDir::homePath() + "/Downloads/OpenSCP-Dragged";
     return root;
@@ -617,7 +621,7 @@ void DragAwareTreeView::startRemoteDragStaging(
     openscpui::AppSettings settings;
     int timeoutMs =
         settings
-            .value(openscpui::settingskeys::StagingPreparationTimeoutMs, 2000)
+            .value(openscpui::settingskeys::kStagingPreparationTimeoutMs, 2000)
             .toInt();
     timeoutMs = qBound(250, timeoutMs, 60000);
     waitTimer_->setInterval(timeoutMs);
@@ -982,7 +986,7 @@ void DragAwareTreeView::finishRemoteDragStaging(
 
     openscpui::AppSettings settings;
     const bool autoClean =
-        settings.value(openscpui::settingskeys::AutoCleanStaging, true)
+        settings.value(openscpui::settingskeys::kAutoCleanStaging, true)
             .toBool();
     if (result == Qt::IgnoreAction) {
         showKeepMessage(currentBatchDir_);
@@ -1154,7 +1158,8 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *remoteModel) {
     const QString remoteRoot = remoteModel->rootPath();
     openscpui::AppSettings settings;
     int maxDepth =
-        settings.value(openscpui::settingskeys::MaximumFolderDepth, 32).toInt();
+        settings.value(openscpui::settingskeys::kMaximumFolderDepth, 32)
+            .toInt();
     if (maxDepth < 1)
         maxDepth = 32;
 

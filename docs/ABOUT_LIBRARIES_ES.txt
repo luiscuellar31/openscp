@@ -1,7 +1,7 @@
 Librerías de terceros utilizadas por OpenSCP
 (Se excluyen los frameworks del sistema operativo como Security, AppKit, etc.)
 
-- Qt 6.8.3 (Qt Widgets, Qt Gui, Qt Core)
+- Qt 6 (Qt 6.8.3 como base recomendada de release; Qt Widgets, Qt Gui, Qt Core, Qt Svg)
   Descripción: framework multiplataforma para interfaces gráficas y utilidades.
   Licencia: LGPL-3.0 / GPL-3.0 / Comercial (multi-licenciamiento)
   Sitio: https://www.qt.io/
@@ -44,6 +44,7 @@ Librerías de terceros utilizadas por OpenSCP
   Copyright: Jean-loup Gailly y Mark Adler
 
 Notas:
+- Los artefactos oficiales autocontenidos fijan Qt 6.8.3. Snap y Flatpak usan la Qt 6 compatible suministrada por su runtime externo.
 - Las versiones concretas pueden variar según la plataforma/paquete de distribución.
 - Se agradece a los autores y comunidades de cada proyecto por su trabajo.
 

@@ -11,8 +11,10 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QSaveFile>
+#include <QSet>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <optional>
 
@@ -20,6 +22,9 @@ namespace {
 
 using Policy = TransferConflictPolicy;
 using Status = TransferTask::Status;
+
+constexpr qint64 kMaxPersistenceBytes = 16 * 1024 * 1024;
+constexpr qsizetype kMaxPersistedTasks = 100'000;
 
 QString translate(const char *text) {
     return QCoreApplication::translate("TransferManager", text);
@@ -43,7 +48,7 @@ QString policyName(Policy policy) {
     return QStringLiteral("ask");
 }
 
-Policy policyFromName(const QString &name) {
+std::optional<Policy> policyFromName(const QString &name) {
     if (name == QStringLiteral("overwrite"))
         return Policy::Overwrite;
     if (name == QStringLiteral("skip"))
@@ -54,7 +59,9 @@ Policy policyFromName(const QString &name) {
         return Policy::Rename;
     if (name == QStringLiteral("newer-only"))
         return Policy::NewerOnly;
-    return Policy::Ask;
+    if (name == QStringLiteral("ask"))
+        return Policy::Ask;
+    return std::nullopt;
 }
 
 QString operationName(TransferOperation operation) {
@@ -62,9 +69,12 @@ QString operationName(TransferOperation operation) {
                                                 : QStringLiteral("copy");
 }
 
-TransferOperation operationFromName(const QString &name) {
-    return name == QStringLiteral("move") ? TransferOperation::Move
-                                          : TransferOperation::Copy;
+std::optional<TransferOperation> operationFromName(const QString &name) {
+    if (name == QStringLiteral("copy"))
+        return TransferOperation::Copy;
+    if (name == QStringLiteral("move"))
+        return TransferOperation::Move;
+    return std::nullopt;
 }
 
 QString phaseName(TransferPhase phase) {
@@ -79,12 +89,14 @@ QString phaseName(TransferPhase phase) {
     return QStringLiteral("transfer");
 }
 
-TransferPhase phaseFromName(const QString &name) {
+std::optional<TransferPhase> phaseFromName(const QString &name) {
     if (name == QStringLiteral("delete-source"))
         return TransferPhase::DeleteSource;
     if (name == QStringLiteral("finished"))
         return TransferPhase::Finished;
-    return TransferPhase::Transfer;
+    if (name == QStringLiteral("transfer"))
+        return TransferPhase::Transfer;
+    return std::nullopt;
 }
 
 std::optional<quint64> parseTaskId(const QJsonValue &value) {
@@ -94,14 +106,20 @@ std::optional<quint64> parseTaskId(const QJsonValue &value) {
         parsed = value.toString().toULongLong(&parsedSuccessfully);
     } else if (value.isDouble()) {
         const double number = value.toDouble(-1);
-        if (number >= 0 &&
-            number <= double(std::numeric_limits<qint64>::max())) {
+        // JSON numbers are IEEE-754 doubles. Accept legacy numeric IDs only
+        // while they are positive, integral and exactly representable.
+        constexpr double maxExactJsonInteger = 9007199254740991.0;
+        if (std::isfinite(number) && number > 0 &&
+            number <= maxExactJsonInteger && std::trunc(number) == number) {
             parsed = static_cast<quint64>(number);
             parsedSuccessfully = true;
         }
     }
-    return parsedSuccessfully && parsed != 0 ? std::optional<quint64>(parsed)
-                                             : std::nullopt;
+    constexpr quint64 maxRestorableId =
+        static_cast<quint64>((std::numeric_limits<qint64>::max)()) - 1;
+    return parsedSuccessfully && parsed != 0 && parsed <= maxRestorableId
+               ? std::optional<quint64>(parsed)
+               : std::nullopt;
 }
 
 QString typeName(TransferTask::Type type) {
@@ -126,7 +144,7 @@ QString typeName(TransferTask::Type type) {
     return QStringLiteral("download");
 }
 
-TransferTask::Type typeFromName(const QString &name) {
+std::optional<TransferTask::Type> typeFromName(const QString &name) {
     if (name == QStringLiteral("upload"))
         return TransferTask::Type::Upload;
     if (name == QStringLiteral("local-directory"))
@@ -141,19 +159,57 @@ TransferTask::Type typeFromName(const QString &name) {
         return TransferTask::Type::DeleteRemoteFile;
     if (name == QStringLiteral("delete-remote-directory"))
         return TransferTask::Type::DeleteRemoteDirectory;
-    return TransferTask::Type::Download;
+    if (name == QStringLiteral("download"))
+        return TransferTask::Type::Download;
+    return std::nullopt;
 }
 
-TransferTask deserializeTask(const QJsonObject &object, quint64 taskId,
-                             const QString &currentSessionKey) {
+std::optional<TransferTask> deserializeTask(const QJsonObject &object,
+                                            quint64 taskId,
+                                            const QString &currentSessionKey) {
+    const auto type =
+        typeFromName(object.value(QStringLiteral("type")).toString());
+    const QJsonValue operationValue = object.value(QStringLiteral("operation"));
+    const auto operation =
+        operationValue.isUndefined()
+            ? std::optional<TransferOperation>(TransferOperation::Copy)
+            : operationFromName(operationValue.toString());
+    const QJsonValue conflictPolicyValue =
+        object.value(QStringLiteral("conflictPolicy"));
+    const auto conflictPolicy =
+        conflictPolicyValue.isUndefined()
+            ? std::optional<Policy>(Policy::Ask)
+            : policyFromName(conflictPolicyValue.toString());
+    const QJsonValue phaseValue = object.value(QStringLiteral("phase"));
+    const auto phase =
+        phaseValue.isUndefined()
+            ? std::optional<TransferPhase>(TransferPhase::Transfer)
+            : phaseFromName(phaseValue.toString());
+    if (!type || !operation || !conflictPolicy || !phase)
+        return std::nullopt;
+
+    const QJsonValue batchIdValue = object.value(QStringLiteral("batchId"));
+    const auto batchId = batchIdValue.isUndefined()
+                             ? std::optional<quint64>(taskId)
+                             : parseTaskId(batchIdValue);
+    if (!batchId)
+        return std::nullopt;
+
+    quint64 dependencyId = 0;
+    const QJsonValue dependencyValue =
+        object.value(QStringLiteral("dependsOnTaskId"));
+    if (!dependencyValue.isUndefined()) {
+        const auto parsedDependency = parseTaskId(dependencyValue);
+        if (!parsedDependency || *parsedDependency == taskId)
+            return std::nullopt;
+        dependencyId = *parsedDependency;
+    }
+
     TransferTask task{};
-    task.type = typeFromName(object.value(QStringLiteral("type")).toString());
+    task.type = *type;
     task.taskId = taskId;
-    task.batchId =
-        parseTaskId(object.value(QStringLiteral("batchId"))).value_or(taskId);
-    task.dependsOnTaskId =
-        parseTaskId(object.value(QStringLiteral("dependsOnTaskId")))
-            .value_or(0);
+    task.batchId = *batchId;
+    task.dependsOnTaskId = dependencyId;
     task.sessionKey = object.value(QStringLiteral("sessionKey")).toString();
     task.src = object.value(QStringLiteral("source")).toString();
     task.dst = object.value(QStringLiteral("destination")).toString();
@@ -163,15 +219,12 @@ TransferTask deserializeTask(const QJsonObject &object, quint64 taskId,
     task.attempts =
         std::clamp(object.value(QStringLiteral("attempts")).toInt(), 0, 3);
     task.maxAttempts = 3;
-    task.operation =
-        operationFromName(object.value(QStringLiteral("operation")).toString());
-    task.conflictPolicy = policyFromName(
-        object.value(QStringLiteral("conflictPolicy")).toString());
+    task.operation = *operation;
+    task.conflictPolicy = *conflictPolicy;
     task.postAction = task.operation == TransferOperation::Move
                           ? TransferPostAction::DeleteSource
                           : TransferPostAction::None;
-    task.phase =
-        phaseFromName(object.value(QStringLiteral("phase")).toString());
+    task.phase = *phase;
     task.commitUncertain =
         object.value(QStringLiteral("commitUncertain")).toBool(false);
     task.queuedAtMs =
@@ -184,6 +237,14 @@ TransferTask deserializeTask(const QJsonObject &object, quint64 taskId,
                       ? Status::WaitingForConnection
                       : Status::Paused;
     return task;
+}
+
+void markCorrupt(TransferQueuePersistence::LoadResult &result) {
+    result.status = TransferQueuePersistence::LoadStatus::Corrupt;
+    result.tasks.clear();
+    result.warning = translate(
+        "The saved transfer queue is corrupt and was preserved without "
+        "changes.");
 }
 
 QJsonObject serializeTask(const TransferTask &task) {
@@ -229,9 +290,26 @@ TransferQueuePersistence::load(const QString &path,
         return result;
     }
 
+    if (file.size() > kMaxPersistenceBytes) {
+        markCorrupt(result);
+        return result;
+    }
+    const QByteArray serialized = file.read(kMaxPersistenceBytes + 1);
+    if (serialized.size() > kMaxPersistenceBytes) {
+        markCorrupt(result);
+        return result;
+    }
+    if (file.error() != QFileDevice::NoError) {
+        result.status = LoadStatus::IoError;
+        result.warning =
+            translate("The saved transfer queue could not be read: %1")
+                .arg(file.errorString());
+        return result;
+    }
+
     QJsonParseError parseError;
     const QJsonDocument document =
-        QJsonDocument::fromJson(file.readAll(), &parseError);
+        QJsonDocument::fromJson(serialized, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
         result.status = LoadStatus::Corrupt;
         result.warning = translate(
@@ -248,21 +326,42 @@ TransferQueuePersistence::load(const QString &path,
         return result;
     }
 
-    const QJsonArray tasks = root.value(QStringLiteral("tasks")).toArray();
+    const QJsonValue tasksValue = root.value(QStringLiteral("tasks"));
+    if (!tasksValue.isArray()) {
+        markCorrupt(result);
+        return result;
+    }
+    const QJsonArray tasks = tasksValue.toArray();
+    if (tasks.size() > kMaxPersistedTasks) {
+        markCorrupt(result);
+        return result;
+    }
     result.tasks.reserve(tasks.size());
+    QSet<quint64> taskIds;
     for (const auto &value : tasks) {
-        if (!value.isObject())
-            continue;
+        if (!value.isObject()) {
+            markCorrupt(result);
+            return result;
+        }
         const QJsonObject object = value.toObject();
         const auto taskId = parseTaskId(object.value(QStringLiteral("id")));
-        if (!taskId)
-            continue;
-        TransferTask task = deserializeTask(object, *taskId, currentSessionKey);
-        const bool requiresSource = task.type == TransferTask::Type::Upload ||
-                                    task.type == TransferTask::Type::Download;
-        if (task.dst.isEmpty() || (requiresSource && task.src.isEmpty()))
-            continue;
-        result.tasks.push_back(std::move(task));
+        if (!taskId || taskIds.contains(*taskId)) {
+            markCorrupt(result);
+            return result;
+        }
+        auto task = deserializeTask(object, *taskId, currentSessionKey);
+        if (!task) {
+            markCorrupt(result);
+            return result;
+        }
+        const bool requiresSource = task->type == TransferTask::Type::Upload ||
+                                    task->type == TransferTask::Type::Download;
+        if (task->dst.isEmpty() || (requiresSource && task->src.isEmpty())) {
+            markCorrupt(result);
+            return result;
+        }
+        taskIds.insert(*taskId);
+        result.tasks.push_back(std::move(*task));
     }
     result.status = LoadStatus::Loaded;
     return result;
@@ -278,7 +377,22 @@ TransferQueuePersistence::save(const QString &path,
                                     task.phase == TransferPhase::DeleteSource;
         if (isTerminalTransferStatus(task.status) && !cleanupPending)
             continue;
+        if (serialized.size() >= kMaxPersistedTasks) {
+            result.warning = translate(
+                "The transfer queue exceeds the persistence safety limit.");
+            return result;
+        }
         serialized.append(serializeTask(task));
+    }
+
+    QJsonObject root;
+    root.insert(QStringLiteral("schemaVersion"), 1);
+    root.insert(QStringLiteral("tasks"), serialized);
+    const QByteArray data = QJsonDocument(root).toJson(QJsonDocument::Compact);
+    if (data.size() > kMaxPersistenceBytes) {
+        result.warning = translate(
+            "The transfer queue exceeds the persistence safety limit.");
+        return result;
     }
 
     const QFileInfo fileInfo(path);
@@ -295,10 +409,6 @@ TransferQueuePersistence::save(const QString &path,
         return result;
     }
     saveFile.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    QJsonObject root;
-    root.insert(QStringLiteral("schemaVersion"), 1);
-    root.insert(QStringLiteral("tasks"), serialized);
-    const QByteArray data = QJsonDocument(root).toJson(QJsonDocument::Compact);
     if (saveFile.write(data) != data.size() || !saveFile.commit()) {
         result.warning = translate("The transfer queue could not be saved: %1")
                              .arg(saveFile.errorString());

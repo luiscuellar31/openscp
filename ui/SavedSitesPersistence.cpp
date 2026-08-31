@@ -6,8 +6,10 @@
 
 #include <QSet>
 #include <QUuid>
+#include <QVariant>
 
 #include <cstdint>
+#include <limits>
 
 namespace {
 
@@ -19,11 +21,30 @@ std::uint16_t defaultJumpPort() {
     return 22;
 }
 
+std::uint16_t loadPort(QSettings &settings, const char *key,
+                       std::uint16_t fallback, bool allowZero,
+                       bool &needsSave) {
+    const bool wasPersisted = settings.contains(key);
+    bool converted = false;
+    const qulonglong raw =
+        settings.value(key, static_cast<unsigned int>(fallback))
+            .toULongLong(&converted);
+    const bool valid = converted &&
+                       raw <= std::numeric_limits<std::uint16_t>::max() &&
+                       (allowZero || raw != 0);
+    if (!valid) {
+        if (wasPersisted)
+            needsSave = true;
+        return fallback;
+    }
+    return static_cast<std::uint16_t>(raw);
+}
+
 openscp::ScpTransferMode
 loadDefaultScpTransferModeFromSettings(const QSettings &settings) {
     return openscp::scpTransferModeFromStorageName(
         settings
-            .value(openscpui::settingskeys::DefaultScpTransferMode,
+            .value(openscpui::settingskeys::kDefaultScpTransferMode,
                    QString::fromLatin1(openscp::scpTransferModeStorageName(
                        openscp::ScpTransferMode::Auto)))
             .toString()
@@ -69,16 +90,24 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
     const auto defaultScpMode =
         loadDefaultScpTransferModeFromSettings(settings);
     const bool defaultFtpsVerifyPeer =
-        settings.value(openscpui::settingskeys::FtpsVerifyPeerDefault, true)
+        settings.value(openscpui::settingskeys::kFtpsVerifyPeerDefault, true)
             .toBool();
     const QString defaultFtpsCaPath =
         settings
-            .value(openscpui::settingskeys::FtpsCaCertPathDefault, QString())
+            .value(openscpui::settingskeys::kFtpsCaCertPathDefault, QString())
+            .toString()
+            .trimmed();
+    const bool defaultWebDavVerifyPeer =
+        settings.value(openscpui::settingskeys::kWebDavVerifyPeerDefault, true)
+            .toBool();
+    const QString defaultWebDavCaPath =
+        settings
+            .value(openscpui::settingskeys::kWebDavCaCertPathDefault, QString())
             .toString()
             .trimmed();
 
     const int siteCount =
-        settings.beginReadArray(openscpui::settingskeys::Sites);
+        settings.beginReadArray(openscpui::settingskeys::kSites);
     QSet<QString> usedIds;
     for (int siteIndex = 0; siteIndex < siteCount; ++siteIndex) {
         settings.setArrayIndex(siteIndex);
@@ -144,11 +173,10 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
             result.needsSave = true;
 
         site.opt.host = settings.value("host").toString().toStdString();
-        site.opt.port = static_cast<std::uint16_t>(
-            settings
-                .value("port", static_cast<int>(openscp::defaultPortForProtocol(
-                                   site.opt.protocol)))
-                .toUInt());
+        site.opt.port =
+            loadPort(settings, "port",
+                     openscp::defaultPortForProtocol(site.opt.protocol), false,
+                     result.needsSave);
 
         const bool hasWebDavSchemeKey = settings.contains("webdavScheme");
         if (hasWebDavSchemeKey) {
@@ -175,17 +203,29 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
         if (!keyPath.isEmpty())
             site.opt.private_key_path = keyPath.toStdString();
 
-        site.opt.proxy_type = openscp::proxyTypeFromStorageValue(
+        bool proxyTypeConverted = false;
+        const int rawProxyType =
             settings
                 .value("proxyType", static_cast<int>(openscp::ProxyType::None))
-                .toInt());
+                .toInt(&proxyTypeConverted);
+        const auto storedProxyType =
+            static_cast<openscp::ProxyType>(rawProxyType);
+        site.opt.proxy_type = openscp::normalizeProxyType(storedProxyType);
+        if (settings.contains("proxyType") &&
+            (!proxyTypeConverted ||
+             !openscp::isValidProxyType(storedProxyType))) {
+            result.needsSave = true;
+        }
         site.opt.proxy_host =
             settings.value("proxyHost").toString().trimmed().toStdString();
-        site.opt.proxy_port = static_cast<std::uint16_t>(
-            settings
-                .value("proxyPort",
-                       static_cast<int>(defaultProxyPort(site.opt.proxy_type)))
-                .toUInt());
+        site.opt.proxy_port = loadPort(
+            settings, "proxyPort", defaultProxyPort(site.opt.proxy_type),
+            site.opt.proxy_type == openscp::ProxyType::None, result.needsSave);
+        if (site.opt.proxy_type == openscp::ProxyType::None &&
+            site.opt.proxy_port != 0) {
+            site.opt.proxy_port = 0;
+            result.needsSave = true;
+        }
 
         const QString proxyUser =
             settings.value("proxyUser").toString().trimmed();
@@ -196,9 +236,8 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
             settings.value("jumpHost").toString().trimmed();
         if (!jumpHost.isEmpty())
             site.opt.jump_host = jumpHost.toStdString();
-        site.opt.jump_port = static_cast<std::uint16_t>(
-            settings.value("jumpPort", static_cast<int>(defaultJumpPort()))
-                .toUInt());
+        site.opt.jump_port = loadPort(settings, "jumpPort", defaultJumpPort(),
+                                      false, result.needsSave);
 
         const QString jumpUser =
             settings.value("jumpUser").toString().trimmed();
@@ -213,18 +252,38 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
         if (!knownHostsPath.isEmpty())
             site.opt.known_hosts_path = knownHostsPath.toStdString();
 
-        site.opt.known_hosts_policy = static_cast<openscp::KnownHostsPolicy>(
+        bool knownHostsPolicyConverted = false;
+        const int rawKnownHostsPolicy =
             settings
                 .value("khPolicy",
                        static_cast<int>(openscp::KnownHostsPolicy::Strict))
-                .toInt());
+                .toInt(&knownHostsPolicyConverted);
+        const auto storedKnownHostsPolicy =
+            static_cast<openscp::KnownHostsPolicy>(rawKnownHostsPolicy);
+        site.opt.known_hosts_policy =
+            openscp::normalizeKnownHostsPolicy(storedKnownHostsPolicy);
+        if (settings.contains("khPolicy") &&
+            (!knownHostsPolicyConverted ||
+             !openscp::isValidKnownHostsPolicy(storedKnownHostsPolicy))) {
+            result.needsSave = true;
+        }
+
+        bool integrityPolicyConverted = false;
+        const int rawIntegrityPolicy =
+            settings
+                .value("integrityPolicy",
+                       static_cast<int>(
+                           openscp::TransferIntegrityPolicy::Optional))
+                .toInt(&integrityPolicyConverted);
+        const auto storedIntegrityPolicy =
+            static_cast<openscp::TransferIntegrityPolicy>(rawIntegrityPolicy);
         site.opt.transfer_integrity_policy =
-            static_cast<openscp::TransferIntegrityPolicy>(
-                settings
-                    .value("integrityPolicy",
-                           static_cast<int>(
-                               openscp::TransferIntegrityPolicy::Optional))
-                    .toInt());
+            openscp::normalizeTransferIntegrityPolicy(storedIntegrityPolicy);
+        if (settings.contains("integrityPolicy") &&
+            (!integrityPolicyConverted ||
+             !openscp::isValidTransferIntegrityPolicy(storedIntegrityPolicy))) {
+            result.needsSave = true;
+        }
 
         site.opt.ftps_verify_peer =
             settings.value("ftpsVerifyPeer", defaultFtpsVerifyPeer).toBool();
@@ -245,7 +304,8 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
             site.opt.ftps_ca_cert_path = ftpsCaPath.toStdString();
 
         site.opt.webdav_verify_peer =
-            settings.value("webdavVerifyPeer", true).toBool();
+            settings.value("webdavVerifyPeer", defaultWebDavVerifyPeer)
+                .toBool();
         const bool hasWebDavBasePathKey = settings.contains("webdavBasePath");
         site.opt.webdav_base_path = openscp::normalizeWebDavBasePath(
             settings.value("webdavBasePath", QStringLiteral("/"))
@@ -255,7 +315,9 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
         if (!hasWebDavBasePathKey)
             result.needsSave = true;
         const QString webDavCaPath =
-            settings.value("webdavCaCertPath", QString()).toString().trimmed();
+            settings.value("webdavCaCertPath", defaultWebDavCaPath)
+                .toString()
+                .trimmed();
         if (!webDavCaPath.isEmpty())
             site.opt.webdav_ca_cert_path = webDavCaPath.toStdString();
 
@@ -292,8 +354,8 @@ SavedSitesPersistence::SaveResult
 SavedSitesPersistence::saveSites(const QVector<SiteEntry> &sites,
                                  bool syncToDisk) {
     openscpui::AppSettings settings;
-    settings.remove(openscpui::settingskeys::Sites);
-    settings.beginWriteArray(openscpui::settingskeys::Sites);
+    settings.remove(openscpui::settingskeys::kSites);
+    settings.beginWriteArray(openscpui::settingskeys::kSites);
     for (int siteIndex = 0; siteIndex < sites.size(); ++siteIndex) {
         settings.setArrayIndex(siteIndex);
         const SiteEntry &site = sites[siteIndex];
@@ -311,7 +373,11 @@ SavedSitesPersistence::saveSites(const QVector<SiteEntry> &sites,
             QString::fromLatin1(openscp::scpTransferModeStorageName(
                 site.opt.scp_transfer_mode)));
         settings.setValue("host", QString::fromStdString(site.opt.host));
-        settings.setValue("port", static_cast<int>(site.opt.port));
+        settings.setValue(
+            "port", static_cast<int>(site.opt.port != 0
+                                         ? site.opt.port
+                                         : openscp::defaultPortForProtocol(
+                                               site.opt.protocol)));
         settings.setValue("webdavScheme",
                           QString::fromLatin1(openscp::webDavSchemeStorageName(
                               site.opt.webdav_scheme)));
@@ -320,10 +386,19 @@ SavedSitesPersistence::saveSites(const QVector<SiteEntry> &sites,
             "keyPath", site.opt.private_key_path
                            ? QString::fromStdString(*site.opt.private_key_path)
                            : QString());
-        settings.setValue("proxyType", static_cast<int>(site.opt.proxy_type));
+        const openscp::ProxyType proxyType =
+            openscp::normalizeProxyType(site.opt.proxy_type);
+        settings.setValue("proxyType", static_cast<int>(proxyType));
         settings.setValue("proxyHost",
                           QString::fromStdString(site.opt.proxy_host));
-        settings.setValue("proxyPort", static_cast<int>(site.opt.proxy_port));
+        settings.setValue(
+            "proxyPort",
+            static_cast<int>(
+                proxyType == openscp::ProxyType::None
+                    ? 0
+                    : (site.opt.proxy_port != 0
+                           ? site.opt.proxy_port
+                           : openscp::defaultPortForProxyType(proxyType))));
         settings.setValue("proxyUser",
                           site.opt.proxy_username
                               ? QString::fromStdString(*site.opt.proxy_username)
@@ -332,7 +407,10 @@ SavedSitesPersistence::saveSites(const QVector<SiteEntry> &sites,
                           site.opt.jump_host
                               ? QString::fromStdString(*site.opt.jump_host)
                               : QString());
-        settings.setValue("jumpPort", static_cast<int>(site.opt.jump_port));
+        settings.setValue("jumpPort",
+                          static_cast<int>(site.opt.jump_port != 0
+                                               ? site.opt.jump_port
+                                               : defaultJumpPort()));
         settings.setValue("jumpUser",
                           site.opt.jump_username
                               ? QString::fromStdString(*site.opt.jump_username)
@@ -347,9 +425,12 @@ SavedSitesPersistence::saveSites(const QVector<SiteEntry> &sites,
                                                   *site.opt.known_hosts_path)
                                             : QString());
         settings.setValue("khPolicy",
-                          static_cast<int>(site.opt.known_hosts_policy));
-        settings.setValue("integrityPolicy",
-                          static_cast<int>(site.opt.transfer_integrity_policy));
+                          static_cast<int>(openscp::normalizeKnownHostsPolicy(
+                              site.opt.known_hosts_policy)));
+        settings.setValue(
+            "integrityPolicy",
+            static_cast<int>(openscp::normalizeTransferIntegrityPolicy(
+                site.opt.transfer_integrity_policy)));
         settings.setValue("ftpsVerifyPeer", site.opt.ftps_verify_peer);
         settings.setValue(
             "ftpsMode", QString::fromLatin1(

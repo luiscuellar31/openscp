@@ -22,7 +22,7 @@ int main(int argc, char *argv[]) {
     // Load translation if available (supports resources and disk)
     openscpui::AppSettings settings;
     const QString languageCode =
-        settings.value(openscpui::settingskeys::UiLanguage, "en")
+        settings.value(openscpui::settingskeys::kUiLanguage, "en")
             .toString()
             .trimmed()
             .toLower();

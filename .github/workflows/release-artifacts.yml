@@ -12,6 +12,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  OPENSCP_QT_VERSION: "6.8.3"
+
 jobs:
   verify-tag:
     name: Verify Tag (main + version)
@@ -71,8 +74,10 @@ jobs:
         include:
           - runner: macos-14
             arch: arm64
+            minimum_macos: "12.0"
           - runner: macos-15-intel
             arch: x86_64
+            minimum_macos: "12.0"
 
     steps:
       - name: Checkout tag
@@ -82,14 +87,34 @@ jobs:
           fetch-depth: 0
           ref: ${{ needs.verify-tag.outputs.tag_name }}
 
-      - name: Install macOS dependencies
+      - name: Install pinned Qt release SDK
+        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+        with:
+          version: ${{ env.OPENSCP_QT_VERSION }}
+          host: mac
+          target: desktop
+          arch: clang_64
+          modules: "qtsvg qttools"
+          cache: true
+          aqtversion: "==3.3.0"
+          py7zrversion: "==1.1.0"
+
+      - name: Install macOS build tools
         run: |
-          brew update
-          brew install qt libssh2 openssl@3 tinyxml2 pkg-config
-          echo "$(brew --prefix qt)/bin" >> "$GITHUB_PATH"
-          echo "CMAKE_PREFIX_PATH=$(brew --prefix qt)" >> "$GITHUB_ENV"
-          echo "Qt6_DIR=$(brew --prefix qt)/lib/cmake/Qt6" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=$(brew --prefix libssh2)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig:${PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+          brew install pkg-config
+
+      - name: Build pinned macOS dependencies for the deployment target
+        env:
+          CMAKE_OSX_ARCHITECTURES: ${{ matrix.arch }}
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.minimum_macos }}
+        run: |
+          set -euo pipefail
+          deps_prefix="$RUNNER_TEMP/openscp-release-deps"
+          ./scripts/ci/build_macos_release_deps.sh "$deps_prefix"
+          echo "OPENSCP_DEPENDENCY_PREFIX=$deps_prefix" >> "$GITHUB_ENV"
+          echo "OPENSSL_ROOT_DIR=$deps_prefix" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$deps_prefix:${CMAKE_PREFIX_PATH:-}" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$deps_prefix/lib/pkgconfig:$deps_prefix/lib64/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
 
       - name: Build macOS release artifacts
         run: |
@@ -99,6 +124,8 @@ jobs:
           DO_ADHOC_SIGN=1 \
           MACDEPLOYQT_DISABLE_PLUGIN_SCAN=1 \
           PACKAGE_FORMATS=app,pkg,dmg \
+          OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=ON \
+          MINIMUM_SYSTEM_VERSION="${{ matrix.minimum_macos }}" \
           CMAKE_OSX_ARCHITECTURES="${{ matrix.arch }}" \
           ./scripts/package_mac.sh
 
@@ -145,8 +172,12 @@ jobs:
         include:
           - runner: ubuntu-24.04
             arch_name: x86_64
+            qt_host: linux
+            qt_arch: linux_gcc_64
           - runner: ubuntu-24.04-arm
             arch_name: aarch64
+            qt_host: linux_arm64
+            qt_arch: linux_gcc_arm64
 
     steps:
       - name: Checkout tag
@@ -156,13 +187,24 @@ jobs:
           fetch-depth: 0
           ref: ${{ needs.verify-tag.outputs.tag_name }}
 
+      - name: Install pinned Qt release SDK
+        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+        with:
+          version: ${{ env.OPENSCP_QT_VERSION }}
+          host: ${{ matrix.qt_host }}
+          target: desktop
+          arch: ${{ matrix.qt_arch }}
+          modules: "qtsvg qttools"
+          cache: true
+          aqtversion: "==3.3.0"
+          py7zrversion: "==1.1.0"
+
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             cmake ninja-build pkg-config curl file \
             libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev libsecret-1-dev \
-            qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools \
             libgl1-mesa-dev \
             flatpak flatpak-builder \
             squashfs-tools
@@ -225,9 +267,39 @@ jobs:
         run: |
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
-      - name: Build AppImage
+      - name: Build AppImage (glibc 2.28 baseline)
+        if: matrix.arch_name == 'x86_64'
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
+          OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION: "ON"
+        run: |
+          set -euo pipefail
+          rm -rf dist build
+          docker build --platform linux/amd64 \
+            --tag openscp-appimage-glibc228 \
+            --file packaging/linux/appimage-glibc228.Dockerfile \
+            packaging/linux
+          docker run --rm --platform linux/amd64 \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+            --volume "$QT_ROOT_DIR:$QT_ROOT_DIR:ro" \
+            --volume "$HOME/.local/bin:$HOME/.local/bin:ro" \
+            --workdir "$GITHUB_WORKSPACE" \
+            --env APPIMAGE_EXTRACT_AND_RUN=1 \
+            --env OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=ON \
+            --env OPENSCP_MAX_GLIBC_VERSION=2.28 \
+            --env "CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH:-}" \
+            --env "Qt6_DIR=${Qt6_DIR:-}" \
+            --env "PATH=$QT_ROOT_DIR/bin:$HOME/.local/bin:/opt/rh/gcc-toolset-13/root/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+            openscp-appimage-glibc228 \
+            ./scripts/package_appimage.sh
+          sudo chown -R "$(id -u):$(id -g)" build dist
+
+      - name: Build AppImage (Ubuntu 24.04 arm64 baseline)
+        if: matrix.arch_name == 'aarch64'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION: "ON"
+          OPENSCP_MAX_GLIBC_VERSION: "2.39"
         run: |
           rm -rf dist build
           ./scripts/package_appimage.sh

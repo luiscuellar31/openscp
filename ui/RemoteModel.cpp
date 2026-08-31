@@ -17,55 +17,36 @@
 #include <algorithm>
 #include <array>
 
-RemoteModel::RemoteModel(QObject *parent) : QAbstractTableModel(parent) {
-    iconCache_.setMaxCost(128);
+namespace {
+
+QIcon remoteFolderIcon() {
+    QIcon themed = QIcon::fromTheme(QStringLiteral("folder"));
+    if (!themed.isNull())
+        return themed;
+    return QApplication::style()
+               ? QApplication::style()->standardIcon(QStyle::SP_DirIcon)
+               : QIcon();
 }
 
-int RemoteModel::rowCount(const QModelIndex &parent) const {
-    if (parent.isValid())
-        return 0;
-    if (loading_)
-        return 1;
-    return static_cast<int>(items_.size());
+QIcon remoteFileIcon() {
+    QIcon themed = QIcon::fromTheme(QStringLiteral("text-x-generic"));
+    if (!themed.isNull())
+        return themed;
+    return QApplication::style()
+               ? QApplication::style()->standardIcon(QStyle::SP_FileIcon)
+               : QIcon();
 }
 
-static QIcon remoteFolderIcon() {
-    static const QIcon icon = [] {
-        QIcon themed = QIcon::fromTheme(QStringLiteral("folder"));
-        if (!themed.isNull())
-            return themed;
-        return QApplication::style()
-                   ? QApplication::style()->standardIcon(QStyle::SP_DirIcon)
-                   : QIcon();
-    }();
-    return icon;
+QIcon remoteLinkIcon() {
+    QIcon themed = QIcon::fromTheme(QStringLiteral("emblem-symbolic-link"));
+    if (!themed.isNull())
+        return themed;
+    return QApplication::style()
+               ? QApplication::style()->standardIcon(QStyle::SP_FileLinkIcon)
+               : QIcon();
 }
 
-static QIcon remoteFileIcon() {
-    static const QIcon icon = [] {
-        QIcon themed = QIcon::fromTheme(QStringLiteral("text-x-generic"));
-        if (!themed.isNull())
-            return themed;
-        return QApplication::style()
-                   ? QApplication::style()->standardIcon(QStyle::SP_FileIcon)
-                   : QIcon();
-    }();
-    return icon;
-}
-
-static QIcon remoteLinkIcon() {
-    static const QIcon icon = [] {
-        QIcon themed = QIcon::fromTheme(QStringLiteral("emblem-symbolic-link"));
-        if (!themed.isNull())
-            return themed;
-        return QApplication::style() ? QApplication::style()->standardIcon(
-                                           QStyle::SP_FileLinkIcon)
-                                     : QIcon();
-    }();
-    return icon;
-}
-
-static QIcon iconFromMimeTheme(const QString &name) {
+QIcon iconFromMimeTheme(const QString &name) {
     static QMimeDatabase mimeDb;
     const QMimeType mt =
         mimeDb.mimeTypeForFile(name, QMimeDatabase::MatchExtension);
@@ -79,7 +60,7 @@ static QIcon iconFromMimeTheme(const QString &name) {
     return icon;
 }
 
-static QString permissionText(bool isDir, bool isLink, quint32 mode) {
+QString permissionText(bool isDir, bool isLink, quint32 mode) {
     QString permissions(10, '-');
     permissions[0] = isLink ? 'l' : (isDir ? 'd' : '-');
     constexpr std::array<std::pair<quint32, char>, 9> bits{{
@@ -100,6 +81,20 @@ static QString permissionText(bool isDir, bool isLink, quint32 mode) {
         ++position;
     }
     return permissions;
+}
+
+} // namespace
+
+RemoteModel::RemoteModel(QObject *parent) : QAbstractTableModel(parent) {
+    iconCache_.setMaxCost(128);
+}
+
+int RemoteModel::rowCount(const QModelIndex &parent) const {
+    if (parent.isValid())
+        return 0;
+    if (loading_)
+        return 1;
+    return static_cast<int>(items_.size());
 }
 
 QIcon RemoteModel::iconForRemoteEntry(const Item &item) const {

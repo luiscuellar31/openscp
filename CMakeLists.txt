@@ -9,13 +9,25 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
         set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING
             "Minimum macOS version" FORCE)
     endif()
-    if(NOT CMAKE_OSX_ARCHITECTURES)
-        set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING
-            "Target architectures" FORCE)
-    endif()
 endif()
 
 project(OpenSCP_hello LANGUAGES CXX VERSION 1.0.0)
+
+if(WIN32)
+    option(OPENSCP_ENABLE_EXPERIMENTAL_WINDOWS_PORT
+        "Allow configuration of the unsupported post-1.0 Windows scaffold"
+        OFF)
+    if(NOT OPENSCP_ENABLE_EXPERIMENTAL_WINDOWS_PORT)
+        message(FATAL_ERROR
+            "OpenSCP 1.0.0 does not support Windows. The modular Windows "
+            "port is intentionally gated to prevent accidental release "
+            "builds. Port developers may opt in with "
+            "-DOPENSCP_ENABLE_EXPERIMENTAL_WINDOWS_PORT=ON.")
+    endif()
+    message(WARNING
+        "Experimental Windows scaffold enabled: this configuration is not "
+        "a supported OpenSCP 1.0.0 release target.")
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -93,13 +105,53 @@ if(MSVC)
         /NXCOMPAT
     )
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    set(OPENSCP_FORTIFY_SOURCE_LEVEL "AUTO" CACHE STRING
+        "Linux _FORTIFY_SOURCE level (AUTO, 0, 1, 2, or 3)")
+    set_property(CACHE OPENSCP_FORTIFY_SOURCE_LEVEL PROPERTY STRINGS
+        AUTO 0 1 2 3)
+    set(_openscp_fortify_source_level 0)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        if(OPENSCP_FORTIFY_SOURCE_LEVEL STREQUAL "AUTO")
+            include(CheckCXXSourceCompiles)
+            set(_openscp_saved_required_definitions
+                "${CMAKE_REQUIRED_DEFINITIONS}")
+            set(_openscp_saved_required_flags "${CMAKE_REQUIRED_FLAGS}")
+            set(CMAKE_REQUIRED_DEFINITIONS "-D_FORTIFY_SOURCE=3")
+            set(CMAKE_REQUIRED_FLAGS "-O2 -Werror")
+            check_cxx_source_compiles([[
+                #include <features.h>
+                #if !defined(__USE_FORTIFY_LEVEL) || __USE_FORTIFY_LEVEL < 3
+                #error _FORTIFY_SOURCE=3 is not fully supported
+                #endif
+                int main() { return 0; }
+            ]] OPENSCP_HAS_FORTIFY_SOURCE_3)
+            set(CMAKE_REQUIRED_DEFINITIONS
+                "${_openscp_saved_required_definitions}")
+            set(CMAKE_REQUIRED_FLAGS "${_openscp_saved_required_flags}")
+            if(OPENSCP_HAS_FORTIFY_SOURCE_3)
+                set(_openscp_fortify_source_level 3)
+            else()
+                set(_openscp_fortify_source_level 2)
+            endif()
+        elseif(OPENSCP_FORTIFY_SOURCE_LEVEL MATCHES "^[0-3]$")
+            set(_openscp_fortify_source_level
+                "${OPENSCP_FORTIFY_SOURCE_LEVEL}")
+        else()
+            message(FATAL_ERROR
+                "OPENSCP_FORTIFY_SOURCE_LEVEL must be AUTO, 0, 1, 2, or 3")
+        endif()
+        message(STATUS
+            "OpenSCP: _FORTIFY_SOURCE=${_openscp_fortify_source_level}")
+    endif()
     target_compile_options(openscp_project_hardening INTERFACE
         -fstack-protector-strong
         $<$<PLATFORM_ID:Linux>:-fPIE>
     )
-    target_compile_definitions(openscp_project_hardening INTERFACE
-        $<$<AND:$<PLATFORM_ID:Linux>,$<NOT:$<CONFIG:Debug>>>:_FORTIFY_SOURCE=3>
-    )
+    if(_openscp_fortify_source_level GREATER 0)
+        target_compile_definitions(openscp_project_hardening INTERFACE
+            $<$<AND:$<PLATFORM_ID:Linux>,$<NOT:$<CONFIG:Debug>>>:_FORTIFY_SOURCE=${_openscp_fortify_source_level}>
+        )
+    endif()
     target_link_options(openscp_project_hardening INTERFACE
         $<$<PLATFORM_ID:Linux>:-pie>
         $<$<PLATFORM_ID:Linux>:-Wl,-z,relro,-z,now,-z,noexecstack>
@@ -110,7 +162,23 @@ endif()
 # declared below, including targets created by core and tests subdirectories.
 link_libraries(openscp_project_warnings openscp_project_hardening)
 
+set(OPENSCP_RECOMMENDED_QT_VERSION "6.8.3" CACHE STRING
+    "Qt version used for official self-contained OpenSCP artifacts")
+option(OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION
+       "Reject a Qt version other than OPENSCP_RECOMMENDED_QT_VERSION" OFF)
+
 find_package(Qt6 REQUIRED COMPONENTS Widgets Svg LinguistTools)
+if(OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION AND
+   NOT Qt6_VERSION VERSION_EQUAL OPENSCP_RECOMMENDED_QT_VERSION)
+    message(FATAL_ERROR
+        "Official OpenSCP artifacts require Qt "
+        "${OPENSCP_RECOMMENDED_QT_VERSION}, but CMake found Qt "
+        "${Qt6_VERSION}. Community builds may use a compatible Qt 6 by "
+        "leaving OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=OFF.")
+endif()
+message(STATUS
+    "OpenSCP: Qt ${Qt6_VERSION} (official artifact baseline: "
+    "${OPENSCP_RECOMMENDED_QT_VERSION})")
 include(GNUInstallDirs)
 
 add_custom_target(openscp_format_check
@@ -367,6 +435,10 @@ if (APPLE)
         "-framework CoreFoundation"
         "-framework Security"
     )
+elseif(WIN32)
+    # CryptProtectData/CryptUnprotectData provide per-user encrypted secret
+    # storage without placing plaintext credentials in application settings.
+    target_link_libraries(openscp_ui_logic PRIVATE Crypt32)
 endif()
 
 ###############################################################################

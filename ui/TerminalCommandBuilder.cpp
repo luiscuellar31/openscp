@@ -44,7 +44,9 @@ QString defaultKnownHostsPath() {
 
 void appendHostKeyArguments(QStringList &arguments,
                             const openscp::SessionOptions &session) {
-    if (session.known_hosts_policy == openscp::KnownHostsPolicy::Off) {
+    const openscp::KnownHostsPolicy policy =
+        openscp::normalizeKnownHostsPolicy(session.known_hosts_policy);
+    if (policy == openscp::KnownHostsPolicy::Off) {
         arguments << QStringLiteral("-o")
                   << QStringLiteral("StrictHostKeyChecking=no")
                   << QStringLiteral("-o")
@@ -52,10 +54,9 @@ void appendHostKeyArguments(QStringList &arguments,
         return;
     }
 
-    const QString strictValue =
-        session.known_hosts_policy == openscp::KnownHostsPolicy::AcceptNew
-            ? QStringLiteral("accept-new")
-            : QStringLiteral("yes");
+    const QString strictValue = policy == openscp::KnownHostsPolicy::AcceptNew
+                                    ? QStringLiteral("accept-new")
+                                    : QStringLiteral("yes");
     arguments << QStringLiteral("-o")
               << QStringLiteral("StrictHostKeyChecking=%1").arg(strictValue);
 

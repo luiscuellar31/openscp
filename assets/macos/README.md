@@ -11,14 +11,18 @@ This guide explains how to build the `.app` and create unsigned macOS artifacts 
 
 ## Prerequisites
 
-- Qt 6.x (official installer), not Conda. The script prioritizes:
+- A compatible Qt 6.x from the official installer, not Conda. Qt 6.8.3 is
+  recommended and pinned for official self-contained artifacts. The script
+  prioritizes:
     - `QT_PREFIX` / `Qt6_DIR` if provided
     - or auto-detection under `$HOME/Qt/<version>/macos`
 - If your Qt is in another location, set:
     - `QT_PREFIX=/path/to/Qt/<version>/macos`
     - or `Qt6_DIR=/path/to/Qt/<version>/macos/lib/cmake/Qt6`
-- Homebrew libraries for build/runtime (copied into the bundle and rewritten):
+- Non-Qt development libraries. Homebrew is convenient for local builds:
     - `brew install libssh2 openssl@3 tinyxml2`
+  Official artifacts instead use `scripts/ci/build_macos_release_deps.sh` so
+  every included library has the macOS 12 deployment target.
 - CMake 3.22+, a C++20 compiler.
 
 Tip: The script clears env vars like `QT_PLUGIN_PATH` and `DYLD_*` to avoid pulling plugins from Conda/Homebrew.
@@ -71,7 +75,8 @@ orchestrator rather than invoking those internal modules directly.
 
 ## Architectures (Intel vs Apple Silicon)
 
-Default build targets `arm64`. To build for Intel Macs (`x86_64`) or a universal binary, set the architecture before running the script:
+By default the build uses the current Mac's native architecture. To build for
+another architecture or a universal binary, set it before running the script:
 
 ```bash
 # Intel-only
@@ -121,6 +126,10 @@ Expect library references to be `@executable_path/../Frameworks/...`.
       dependency for the intended deployment target or raise
       `MINIMUM_SYSTEM_VERSION` to the artifact's actual minimum. The bundle
       verifier intentionally rejects an inconsistent package.
+    - To reproduce the official macOS 12 dependency baseline, run
+      `MACOSX_DEPLOYMENT_TARGET=12.0 CMAKE_OSX_ARCHITECTURES=$(uname -m) ./scripts/ci/build_macos_release_deps.sh /absolute/prefix`
+      and export `OPENSCP_DEPENDENCY_PREFIX`, `OPENSSL_ROOT_DIR`,
+      `CMAKE_PREFIX_PATH`, and `PKG_CONFIG_PATH` for that prefix.
 - Still seeing Homebrew/Conda absolute paths in the binary:
     - Re‑run the script; it rewrites to `@executable_path/../Frameworks` where possible.
 

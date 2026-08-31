@@ -1608,6 +1608,38 @@ OPENSCP_TEST(testFuturePersistenceIsPreserved, test) {
                "future persistence schema should never be overwritten");
 }
 
+OPENSCP_TEST(testStructurallyInvalidPersistenceFailsClosed, test) {
+    QTemporaryDir root;
+    const QString queuePath = root.filePath("transfer-queue-v1.json");
+    const std::array<QByteArray, 3> invalidDocuments{
+        QByteArray(
+            R"({"schemaVersion":1,"tasks":[{"id":"1","batchId":"1","type":"download","source":"/a","destination":"/b","operation":"copy","conflictPolicy":"ask","phase":"transfer"},{"id":"1","batchId":"1","type":"download","source":"/c","destination":"/d","operation":"copy","conflictPolicy":"ask","phase":"transfer"}]})"),
+        QByteArray(
+            R"({"schemaVersion":1,"tasks":[{"id":1.5,"batchId":"1","type":"download","source":"/a","destination":"/b","operation":"copy","conflictPolicy":"ask","phase":"transfer"}]})"),
+        QByteArray(
+            R"({"schemaVersion":1,"tasks":[{"id":"1","batchId":"1","type":"future-task","source":"/a","destination":"/b","operation":"copy","conflictPolicy":"ask","phase":"transfer"}]})")};
+
+    for (const QByteArray &invalid : invalidDocuments) {
+        QFile file(queuePath);
+        test.check(file.open(QIODevice::WriteOnly | QIODevice::Truncate),
+                   "invalid queue fixture should be writable");
+        file.write(invalid);
+        file.close();
+
+        TransferManager manager;
+        test.check(!manager.enablePersistence(queuePath),
+                   "invalid queue structure should fail closed without "
+                   "throwing");
+        test.check(manager.tasksSnapshot().isEmpty(),
+                   "an invalid queue must not be partially restored");
+        manager.enqueueDownload(QStringLiteral("/remote/new"),
+                                root.filePath("new"));
+        manager.persistNow();
+        test.check(file.open(QIODevice::ReadOnly) && file.readAll() == invalid,
+                   "invalid queue persistence must remain untouched");
+    }
+}
+
 OPENSCP_TEST(testPersistenceUsesDebouncedAutomaticSave, test) {
     QTemporaryDir root;
     const QString queuePath = root.filePath("transfer-queue-v1.json");

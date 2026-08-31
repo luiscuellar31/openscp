@@ -10,6 +10,7 @@ Minimal map of repository helper scripts.
 | [`ci/setup_protocol_services.sh`](./ci/setup_protocol_services.sh) | Starts isolated FTP, explicit/implicit FTPS, and HTTPS WebDAV services on Ubuntu. | Generates an ephemeral localhost CA/certificate and serves WebDAV at `/openscp-dav`. |
 | [`ci/run_protocol_integration.sh`](./ci/run_protocol_integration.sh) | Runs the FTP, both FTPS modes, and WebDAV integration binaries directly. | A missing binary or unavailable service is a hard failure rather than a CTest skip. |
 | [`generate_release_notes.sh`](./generate_release_notes.sh) | Generates release notes from Conventional Commits. | Used by release workflow tooling. |
+| [`ci/build_macos_release_deps.sh`](./ci/build_macos_release_deps.sh) | Builds pinned OpenSSL, libssh2, and tinyxml2 sources for the selected macOS deployment target. | Used by official macOS releases. |
 
 ## Platform Scripts
 
@@ -27,6 +28,7 @@ Minimal map of repository helper scripts.
 | --- | --- |
 | [`check_cpp_quality.sh`](./check_cpp_quality.sh) | Discovers all tracked first-party C++ files and runs repository-wide clang-format, clang-tidy, and cppcheck gates. |
 | [`check_linux_hardening.sh`](./check_linux_hardening.sh) | Uses `readelf` to verify PIE, RELRO, immediate binding, and a non-executable stack for the Linux executable. |
+| [`check_linux_abi.sh`](./check_linux_abi.sh) | Audits every packaged ELF object's GLIBC requirement and bundled GLIBCXX provider. |
 | [`verify_qt_svg_plugins.sh`](./verify_qt_svg_plugins.sh) | Validates required Qt SVG plugins in packaged trees. |
 | [`verify_macos_bundle.sh`](./verify_macos_bundle.sh) | Validates macOS app bundle linkage/layout. |
 

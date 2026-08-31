@@ -82,6 +82,12 @@ CurlClientState::Operation::~Operation() {
         owner_->interrupted_.store(false);
 }
 
+CurlClientState::ConnectedOperation::ConnectedOperation(
+    Operation operation, CurlConnectionSnapshot connection, RemoteError failure)
+    : operation_(std::move(operation)), connection_(std::move(connection)),
+      failure_(std::move(failure)) {
+}
+
 bool CurlClientState::Operation::disconnecting() const noexcept {
     return owner_ && owner_->disconnecting_.load();
 }
@@ -99,6 +105,42 @@ CurlClientState::~CurlClientState() = default;
 
 CurlClientState::Operation CurlClientState::beginOperation() {
     return Operation(*this);
+}
+
+CurlClientState::ConnectedOperation CurlClientState::beginConnectedOperation(
+    std::string &err, const char *backendLabel,
+    std::initializer_list<std::string_view> remotePaths,
+    std::string_view semanticError) {
+    auto operation = beginOperation();
+    err.clear();
+
+    const auto failure = [&](RemoteErrorKind kind, std::string message,
+                             std::int64_t nativeCode = 0) {
+        err = message;
+        RemoteError error;
+        error.kind = kind;
+        error.message = std::move(message);
+        error.native_code = nativeCode;
+        return ConnectedOperation(std::move(operation), {}, std::move(error));
+    };
+
+    if (operation.disconnecting())
+        return failure(RemoteErrorKind::Canceled, "Interrupted");
+    for (const std::string_view remotePath : remotePaths) {
+        if (!validateRemotePath(std::string(remotePath), backendLabel, err)) {
+            return failure(RemoteErrorKind::InvalidRequest, err);
+        }
+    }
+    if (!semanticError.empty())
+        return failure(RemoteErrorKind::InvalidRequest,
+                       std::string(semanticError));
+
+    CurlConnectionSnapshot connection = snapshot(operation);
+    if (!connection)
+        return failure(RemoteErrorKind::Connection, "Not connected.");
+    if (!ensureCurlInitialized(err))
+        return failure(RemoteErrorKind::LocalIo, err);
+    return ConnectedOperation(std::move(operation), std::move(connection));
 }
 
 void CurlClientState::prepareForConnect() {

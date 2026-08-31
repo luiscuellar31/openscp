@@ -74,6 +74,44 @@ QString formatIssue(SiteCredentialKind kind,
     return message;
 }
 
+SecretStore::PersistResult
+issueFromLoadResult(const SecretStore::LoadResult &result) {
+    using LoadStatus = SecretStore::LoadStatus;
+    using PersistStatus = SecretStore::PersistStatus;
+    switch (result.status) {
+    case LoadStatus::Loaded:
+    case LoadStatus::Missing:
+        return {PersistStatus::Stored, result.detail};
+    case LoadStatus::Unavailable:
+        return {PersistStatus::Unavailable, result.detail};
+    case LoadStatus::PermissionDenied:
+        return {PersistStatus::PermissionDenied, result.detail};
+    case LoadStatus::Corrupt:
+        return {PersistStatus::Corrupt, result.detail};
+    case LoadStatus::BackendError:
+        return {PersistStatus::BackendError, result.detail};
+    }
+    return {PersistStatus::BackendError, result.detail};
+}
+
+SecretStore::PersistResult
+issueFromDeleteResult(const SecretStore::DeleteResult &result) {
+    using DeleteStatus = SecretStore::DeleteStatus;
+    using PersistStatus = SecretStore::PersistStatus;
+    switch (result.status) {
+    case DeleteStatus::Removed:
+    case DeleteStatus::Missing:
+        return {PersistStatus::Stored, result.detail};
+    case DeleteStatus::Unavailable:
+        return {PersistStatus::Unavailable, result.detail};
+    case DeleteStatus::PermissionDenied:
+        return {PersistStatus::PermissionDenied, result.detail};
+    case DeleteStatus::BackendError:
+        return {PersistStatus::BackendError, result.detail};
+    }
+    return {PersistStatus::BackendError, result.detail};
+}
+
 } // namespace
 
 QStringList SiteCredentialOperationResult::issueMessages() const {
@@ -95,7 +133,7 @@ SiteCredentialRepository::Backend SiteCredentialRepository::systemBackend() {
             return store->setSecret(key, value);
         },
         [store](const QString &key) { return store->getSecret(key); },
-        [store](const QString &key) { store->removeSecret(key); },
+        [store](const QString &key) { return store->removeSecret(key); },
     };
 }
 
@@ -142,6 +180,9 @@ SiteCredentialRepository::statusLabel(SecretStore::PersistStatus status) {
     case SecretStore::PersistStatus::BackendError:
         return QCoreApplication::translate("SiteCredentialRepository",
                                            "backend error");
+    case SecretStore::PersistStatus::Corrupt:
+        return QCoreApplication::translate("SiteCredentialRepository",
+                                           "corrupt credential");
     }
     return QCoreApplication::translate("SiteCredentialRepository", "unknown");
 }
@@ -173,8 +214,14 @@ SiteCredentialRepository::save(const SiteEntry &site,
     for (SiteCredentialKind kind : kCredentialKinds) {
         const openscp::SecureString *value = credentialValue(options, kind);
         if (!value || value->empty()) {
-            if (removeMissing)
-                backend_.remove(stableKey(site, kind));
+            if (removeMissing) {
+                const SecretStore::DeleteResult deleteResult =
+                    backend_.remove(stableKey(site, kind));
+                if (!deleteResult.isRemovedOrMissing()) {
+                    result.issues.push_back(
+                        {kind, issueFromDeleteResult(deleteResult)});
+                }
+            }
             continue;
         }
 
@@ -194,25 +241,40 @@ std::optional<QString> SiteCredentialRepository::readWithLegacyFallback(
     const SiteEntry &site, SiteCredentialKind kind, bool migrateLegacyNameKeys,
     SiteCredentialOperationResult &result) {
     const QString stable = stableKey(site, kind);
-    if (std::optional<QString> value = backend_.load(stable))
-        return value;
+    const SecretStore::LoadResult stableResult = backend_.load(stable);
+    if (stableResult.isLoaded())
+        return stableResult.value;
+    if (stableResult.status != SecretStore::LoadStatus::Missing) {
+        result.issues.push_back({kind, issueFromLoadResult(stableResult)});
+        return std::nullopt;
+    }
 
     const QString legacy = legacyNameKey(site.name, kind);
     if (legacy == stable)
         return std::nullopt;
-    std::optional<QString> value = backend_.load(legacy);
-    if (!value)
+    const SecretStore::LoadResult legacyResult = backend_.load(legacy);
+    if (!legacyResult.isLoaded()) {
+        if (legacyResult.status != SecretStore::LoadStatus::Missing) {
+            result.issues.push_back({kind, issueFromLoadResult(legacyResult)});
+        }
         return std::nullopt;
+    }
 
     if (migrateLegacyNameKeys) {
         const SecretStore::PersistResult persistResult =
-            backend_.store(stable, *value);
-        if (persistResult.isStored())
-            backend_.remove(legacy);
-        else
+            backend_.store(stable, legacyResult.value);
+        if (persistResult.isStored()) {
+            const SecretStore::DeleteResult deleteResult =
+                backend_.remove(legacy);
+            if (!deleteResult.isRemovedOrMissing()) {
+                result.issues.push_back(
+                    {kind, issueFromDeleteResult(deleteResult)});
+            }
+        } else {
             result.issues.push_back({kind, persistResult});
+        }
     }
-    return value;
+    return legacyResult.value;
 }
 
 SiteCredentialOperationResult SiteCredentialRepository::load(
@@ -295,7 +357,17 @@ void SiteCredentialRepository::loadLegacyPlaintext(
     for (const QString &key : keysToRemove)
         settings.remove(key);
     settings.endArray();
-    settings.sync();
+    const openscpui::SettingsSyncResult syncResult = settings.syncSecure();
+    if (!syncResult.ok) {
+        for (const LegacyValue &legacy : legacyValues) {
+            if (keysToRemove.contains(legacy.settingsKey)) {
+                result.issues.push_back(
+                    {legacy.kind,
+                     {SecretStore::PersistStatus::BackendError,
+                      syncResult.error}});
+            }
+        }
+    }
 }
 
 SiteCredentialOperationResult
@@ -311,19 +383,44 @@ SiteCredentialRepository::copy(const SiteEntry &source,
     return result;
 }
 
-void SiteCredentialRepository::removeLegacyNameKeys(const QString &siteName) {
+SiteCredentialOperationResult
+SiteCredentialRepository::removeLegacyNameKeys(const QString &siteName) {
+    SiteCredentialOperationResult result;
     if (siteName.isEmpty())
-        return;
-    for (SiteCredentialKind kind : kCredentialKinds)
-        backend_.remove(legacyNameKey(siteName, kind));
+        return result;
+    for (SiteCredentialKind kind : kCredentialKinds) {
+        const SecretStore::DeleteResult deleteResult =
+            backend_.remove(legacyNameKey(siteName, kind));
+        if (deleteResult.status == SecretStore::DeleteStatus::Removed)
+            result.anyCredentialHandled = true;
+        else if (!deleteResult.isRemovedOrMissing())
+            result.issues.push_back(
+                {kind, issueFromDeleteResult(deleteResult)});
+    }
+    return result;
 }
 
-void SiteCredentialRepository::removeAll(const SiteEntry &site,
-                                         bool includeLegacyNameKeys) {
-    for (SiteCredentialKind kind : kCredentialKinds)
-        backend_.remove(stableKey(site, kind));
-    if (includeLegacyNameKeys)
-        removeLegacyNameKeys(site.name);
+SiteCredentialOperationResult
+SiteCredentialRepository::removeAll(const SiteEntry &site,
+                                    bool includeLegacyNameKeys) {
+    SiteCredentialOperationResult result;
+    for (SiteCredentialKind kind : kCredentialKinds) {
+        const SecretStore::DeleteResult deleteResult =
+            backend_.remove(stableKey(site, kind));
+        if (deleteResult.status == SecretStore::DeleteStatus::Removed)
+            result.anyCredentialHandled = true;
+        else if (!deleteResult.isRemovedOrMissing())
+            result.issues.push_back(
+                {kind, issueFromDeleteResult(deleteResult)});
+    }
+    if (includeLegacyNameKeys) {
+        SiteCredentialOperationResult legacyResult =
+            removeLegacyNameKeys(site.name);
+        result.anyCredentialHandled =
+            result.anyCredentialHandled || legacyResult.anyCredentialHandled;
+        result.issues += legacyResult.issues;
+    }
+    return result;
 }
 
 void SiteCredentialRepository::clearCredentialFields(
@@ -362,8 +459,17 @@ SiteCredentialMigrationResult SiteCredentialRepository::migrateLegacyPlaintext(
             site.opt.proxy_type == openscp::ProxyType::None) {
             continue;
         }
-        if (repository.backend_.load(stableKey(site, *kind)))
+        const SecretStore::LoadResult loadResult =
+            repository.backend_.load(stableKey(site, *kind));
+        if (loadResult.isLoaded())
             continue;
+        if (loadResult.status != SecretStore::LoadStatus::Missing) {
+            migration.complete = false;
+            migration.issues.push_back(QStringLiteral("%1 — %2").arg(
+                site.name,
+                formatIssue(*kind, issueFromLoadResult(loadResult))));
+            continue;
+        }
 
         const SecretStore::PersistResult result =
             repository.storeValue(site, *kind, legacy.value);
