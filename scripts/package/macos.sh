@@ -1004,6 +1004,7 @@ main() {
     mkdir -p "$RESOURCES_DIR/licenses"
     cp -R "${REPO_DIR}/docs/credits/LICENSES" "$RESOURCES_DIR/licenses/"
     [[ -f "${REPO_DIR}/docs/credits/CREDITS.md" ]] && cp "${REPO_DIR}/docs/credits/CREDITS.md" "$RESOURCES_DIR/licenses/"
+    [[ -f "${REPO_DIR}/docs/credits/LGPL_COMPLIANCE.md" ]] && cp "${REPO_DIR}/docs/credits/LGPL_COMPLIANCE.md" "$RESOURCES_DIR/licenses/"
   fi
 
   # Clean env to avoid picking up conda/Homebrew plugin paths

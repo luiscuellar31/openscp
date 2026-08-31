@@ -1,27 +1,30 @@
-# OpenSCP — Licensing
+# Licensing
 
 Copyright (C) 2025  Luis Cuellar
 
-OpenSCP is dual-licensed:
+OpenSCP is available under two licenses:
 
 - **GPLv3-only** — See the full text in [LICENSE](../LICENSE).
-- **Commercial license** — Available for entities that wish to use OpenSCP in proprietary products without GPL copyleft obligations.  
-  *Scope:* Covers **only** OpenSCP’s own code. Third-party libraries keep their original licenses and must be complied with when redistributing binaries.
+- **Commercial license** — Available to organizations that want to use OpenSCP
+  in proprietary products without GPL copyleft obligations. It covers only
+  OpenSCP's own code; third-party components keep their original licenses.
 
 **Commercial inquiries:** luiscuellar31@proton.me
 
----
+## Third-party components
 
-## Third-party notices (pointer)
-Full attributions and license texts for bundled/linked third-party components (Qt, libssh2, libcurl, OpenSSL, zlib, etc.) are provided in:
-- `docs/credits/CREDITS.md`
-- `docs/credits/LICENSES/`
-- `docs/credits/LGPL_COMPLIANCE.md` (Qt LGPLv3 source offer & relinking notes)
+Attributions and license texts for Qt, libssh2, libcurl, tinyxml2, OpenSSL, and
+zlib are available in:
 
----
+- [CREDITS.md](credits/CREDITS.md)
+- [LICENSES](credits/LICENSES/)
+- [LGPL_COMPLIANCE.md](credits/LGPL_COMPLIANCE.md) for Qt source and relinking
+  information
 
 ## No warranty
-OpenSCP under GPLv3 is provided **“as is”**, without any warranty (see GPLv3 §§15–16).
+
+OpenSCP under GPLv3 is provided **“as is”**, without any warranty. See GPLv3
+sections 15 and 16.
 
 ## Contributions
 

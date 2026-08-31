@@ -1,141 +1,87 @@
-# Qt (LGPLv3) Compliance — OpenSCP
+# Qt and the LGPLv3
 
-OpenSCP recommends Qt 6.8.3 under the GNU LGPL v3. Self-contained official
-artifacts use that exact version; community builds may use another compatible
-Qt 6. Snap and Flatpak consume Qt from their separately distributed runtimes,
-so their exact patch version is controlled and disclosed by the runtime
-provider. This document explains how we comply with the license and how you can
-exercise your rights (to obtain source code, replace the Qt libraries, and
-relink).
+OpenSCP uses the open-source edition of Qt under the GNU LGPL version 3. This
+page explains what ships with OpenSCP and how to obtain, replace, or rebuild the
+Qt libraries. The license text remains the authoritative source.
 
----
+## What OpenSCP provides
 
-## 1) Summary of obligations and compliance
+Official self-contained macOS and AppImage packages use Qt 6.8.3 and link to Qt
+dynamically. Snap and Flatpak use the compatible Qt 6 libraries supplied by
+their external runtimes.
 
-- License text: We include the full LGPLv3 text (`docs/credits/LICENSES/Qt-LGPL-3.0.txt`).
-- Dynamic linking: OpenSCP is built to dynamically link against Qt (LGPL‑compatible).
-- No tivoization: We do not use technical measures that prevent you from replacing Qt.
-- Source offer: We provide the corresponding source for the LGPL‑covered Qt libraries we use.
-- Relinking: You can rebuild OpenSCP against your own Qt build (instructions below).
-- Modifications to Qt: We do not distribute a modified Qt. If we ever do, we will publish the corresponding source/patches as required by the LGPL.
+OpenSCP packages provide:
 
----
+- a notice that identifies the Qt modules in use;
+- the complete LGPLv3 license text;
+- access to the corresponding Qt source; and
+- a way to rebuild OpenSCP or replace compatible Qt libraries.
 
-## 2) Qt version and modules
+OpenSCP currently uses Qt Core, Gui, Widgets, and SVG. We do not ship modified
+Qt libraries. If that changes, the corresponding source or patches will be
+provided with the affected release.
 
-- Qt version used in self-contained releases (`.app`, `.dmg`, `.pkg`, and
-  AppImage): 6.8.3 (LTS). CI rejects a different version for these artifacts.
-- Snap and Flatpak use a compatible dynamic Qt 6 supplied by their external
-  runtime. Consult the runtime metadata for its exact corresponding source.
-- Typical modules in this project: `Qt6Core`, `Qt6Gui`, `Qt6Widgets`, and
-  `Qt6Svg` (plus translation tools for build). No local modifications.
-- Verify which Qt libraries your binary uses:
-  - Linux: `ldd ./build/openscp | grep Qt6`
-  - macOS: `otool -L OpenSCP.app/Contents/MacOS/OpenSCP | grep Qt` (if using a bundled `.app`)
+See [CREDITS.md](CREDITS.md) for the complete third-party component list and
+[Qt-LGPL-3.0.txt](LICENSES/Qt-LGPL-3.0.txt) for the license text.
 
----
+## Qt source
 
-## 3) Obtaining the corresponding Qt source code
+For official packages that bundle Qt 6.8.3, the matching upstream source is:
 
-For the Qt binaries that OpenSCP bundles, we link to the exact matching source.
-For Qt 6.8.3:
+- [Qt 6.8.3 source archive](https://download.qt.io/official_releases/qt/6.8/6.8.3/single/qt-everywhere-src-6.8.3.tar.xz)
 
-- Official source tarball: https://download.qt.io/official_releases/qt/6.8/6.8.3/single/qt-everywhere-src-6.8.3.tar.xz
-
-If the URL ever changes, contact us and we will provide a copy. You may also request the corresponding source by email within 3 years of the release:
+You may also request a copy of the corresponding source for at least three
+years after the OpenSCP release that included it:
 
 - Email: luiscuellar31@proton.me
 
-No charge applies other than reasonable media/shipping costs, if any.
+The source is provided at no charge other than reasonable media or shipping
+costs, if any. For Snap and Flatpak, consult the package runtime metadata for
+the exact Qt build and its corresponding source.
 
-Tip: If you prefer to build from distro packages, use the distro’s Qt source matching the Qt binaries you use to run OpenSCP.
+## Rebuilding with another Qt
 
----
-
-## 4) Relinking OpenSCP with your own Qt build
-
-You are entitled to replace the Qt libraries and relink OpenSCP against them.
-
-### 4.1 Linux
-
-Build or install your Qt (Qt 6.x) and rebuild OpenSCP against it:
+The simplest way to use a compatible or modified Qt build is to rebuild
+OpenSCP against it:
 
 ```bash
-# Example: building Qt from source
-tar xf qt-everywhere-src-<version>.tar.xz
-cd qt-everywhere-src-<version>
-./configure -prefix "$HOME/qt-<version>" -release
-cmake --build . --parallel
-cmake --install .
-
-# Rebuild OpenSCP against your Qt
-git clone https://github.com/tuusuario/openscp.git
+git clone https://github.com/luiscuellar31/openscp.git
 cd openscp
-cmake -S . -B build -DCMAKE_PREFIX_PATH="$HOME/qt-<version>"
+cmake -S . -B build -DCMAKE_PREFIX_PATH=/path/to/Qt
 cmake --build build --parallel
-
-# Run with your Qt (if installed in a non-standard location)
-LD_LIBRARY_PATH="$HOME/qt-<version>/lib:$LD_LIBRARY_PATH" ./build/openscp
 ```
 
-If you use AppImage, you can extract, replace the `libQt6*.so.*` inside `squashfs-root/usr/lib/`, and repack with `appimagetool`. Alternatively, run from the extracted tree with an updated `LD_LIBRARY_PATH`.
-
-We do not encrypt or lock the shipped libraries; replacement is not technically restricted.
-
-### 4.2 macOS (.app bundle)
-
-Install Qt (Qt 6.x, e.g., 6.8.3, via Homebrew, the official installer, or build from source) and rebuild OpenSCP:
+On Linux, run the rebuilt application with the Qt library path you selected if
+it is not installed system-wide:
 
 ```bash
-cmake -S . -B build -DCMAKE_PREFIX_PATH="/path/to/Qt/<version>/macos"
+LD_LIBRARY_PATH=/path/to/Qt/lib:$LD_LIBRARY_PATH ./build/openscp
+```
+
+An AppImage can also be extracted with `--appimage-extract`. Its Qt libraries
+and plugins can then be replaced with ABI-compatible versions before running
+the extracted `AppRun` or repacking the image.
+
+On macOS, point CMake to the selected Qt installation:
+
+```bash
+cmake -S . -B build -DCMAKE_PREFIX_PATH=/path/to/Qt/6.x/macos
 cmake --build build --parallel
 ```
 
-If using a prebuilt `.app`, it is dynamically linked and may embed Qt Frameworks (via `macdeployqt`). You can replace frameworks in `OpenSCP.app/Contents/Frameworks/` with your own Qt frameworks. After replacement, the system code signature may be invalidated; re‑sign locally:
+A packaged application keeps its Qt frameworks in
+`OpenSCP.app/Contents/Frameworks`. Compatible replacements may invalidate the
+existing code signature; an ad-hoc local signature can be applied afterward:
 
 ```bash
 codesign --force --deep --sign - OpenSCP.app
 ```
 
-To inspect/tweak library paths:
+OpenSCP does not use technical measures to prevent these replacements. For the
+general LGPL requirements, see
+[Qt's open-source licensing guidance](https://www.qt.io/development/open-source-lgpl-obligations).
 
-```bash
-otool -L OpenSCP.app/Contents/MacOS/OpenSCP | grep Qt
-install_name_tool -add_rpath "@executable_path/../Frameworks" OpenSCP.app/Contents/MacOS/OpenSCP
-```
+## Contact
 
-We do not impose any technical measures to prevent relinking. On standard macOS systems, re‑signing your modified app is sufficient to run it.
-
----
-
-## 5) Modifications to Qt
-
-We currently do not ship a modified Qt. If we ever distribute OpenSCP with modified Qt libraries, we will provide the corresponding modified Qt source code and/or patches alongside the binaries or in this repository under `docs/credits/qt-patches/`.
-
----
-
-## 6) License texts shipped
-
-- `docs/credits/LICENSES/Qt-LGPL-3.0.txt` — Qt’s LGPLv3
-- Project’s main license: `LICENSE` (GPLv3‑only) and `docs/LICENSING.md`
-
----
-
-## 7) FAQ (quick)
-
-- Why pin to an exact 6.x instead of “6.x”?  
-  To ensure the “corresponding source” matches the exact binaries you ship.
-
-- Do you statically link Qt?  
-  No. We dynamically link Qt. If we ever shipped static builds, we would provide the object files (or an equivalent means) to allow relinking, per LGPLv3 §6.
-
-- Can I use a newer/different Qt to run OpenSCP?  
-  Yes, as long as ABI is compatible and you can satisfy runtime dependencies. The relinking section above should help.
-
----
-
-## 8) Contact
-
-Questions or source requests (Qt corresponding source):
-
-Email: luiscuellar31@proton.me
+For Qt source requests or questions about the files shipped with OpenSCP,
+contact luiscuellar31@proton.me.

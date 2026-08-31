@@ -568,6 +568,7 @@ qt_add_resources(openscp credits
     BASE docs/credits
     FILES
         docs/credits/CREDITS.md
+        docs/credits/LGPL_COMPLIANCE.md
         docs/credits/LICENSES/OpenSSL-Apache-2.0.txt
         docs/credits/LICENSES/Qt-LGPL-3.0.txt
         docs/credits/LICENSES/libcurl-curl-license.txt

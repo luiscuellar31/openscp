@@ -159,6 +159,7 @@ copy_licenses() {
     mkdir -p "$destdir"
     cp -R "${REPO_DIR}/docs/credits/LICENSES" "$destdir/"
     [[ -f "${REPO_DIR}/docs/credits/CREDITS.md" ]] && cp "${REPO_DIR}/docs/credits/CREDITS.md" "$destdir/"
+    [[ -f "${REPO_DIR}/docs/credits/LGPL_COMPLIANCE.md" ]] && cp "${REPO_DIR}/docs/credits/LGPL_COMPLIANCE.md" "$destdir/"
   fi
 }
 
