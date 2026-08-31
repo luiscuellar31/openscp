@@ -41,6 +41,7 @@ parts:
       - -DOPENSCP_ENABLE_FTP_BACKEND=OFF
       - -DOPENSCP_ENABLE_WEBDAV_BACKEND=OFF
     build-packages:
+      - g++
       - pkg-config
       - libssh2-1-dev
       - libssl-dev
