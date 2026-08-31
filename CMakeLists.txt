@@ -391,12 +391,14 @@ add_executable(openscp_hello
 # Libsecret (Linux): link if available to store secrets securely
 find_package(PkgConfig QUIET)
 if (PkgConfig_FOUND)
-    pkg_check_modules(LIBSECRET QUIET libsecret-1)
-    if (LIBSECRET_FOUND)
-        target_include_directories(openscp_ui_logic PRIVATE
+    pkg_check_modules(LIBSECRET QUIET IMPORTED_TARGET libsecret-1)
+    if (TARGET PkgConfig::LIBSECRET)
+        # libsecret pulls in GLib C headers that legitimately use C-style casts.
+        # Keep third-party diagnostics out of the first-party -Werror policy.
+        target_include_directories(openscp_ui_logic SYSTEM PRIVATE
             ${LIBSECRET_INCLUDE_DIRS})
         target_link_libraries(openscp_ui_logic PRIVATE
-            ${LIBSECRET_LIBRARIES})
+            PkgConfig::LIBSECRET)
         target_compile_definitions(openscp_ui_logic PUBLIC HAVE_LIBSECRET=1)
     endif()
 endif()
