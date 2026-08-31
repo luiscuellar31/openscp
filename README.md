@@ -2,7 +2,7 @@
   <img src="assets/program/icon-openscp-2048.png" alt="OpenSCP icon" width="128">
   <h1>OpenSCP</h1>
 
-  <p><strong>A clear, two-panel client for SFTP, SCP, FTP, FTPS, and WebDAV.</strong></p>
+  <p><strong>A lightweight, cross-platform file transfer client inspired by WinSCP.</strong></p>
   <p><a href="README_ES.md">Leer en español</a></p>
 
   <img src="assets/screenshots/screenshot-main-window.png" alt="OpenSCP main window" width="900">
@@ -10,15 +10,13 @@
 
 OpenSCP is a C++20 and Qt 6 desktop application for moving and managing files
 between local and remote systems. It focuses on predictable behavior, secure
-defaults, and a familiar commander-style workflow. OpenSCP is inspired by
-WinSCP and aims to provide a lightweight, cross-platform alternative focused on
-simplicity, security, clarity, and extensibility.
+defaults, and a familiar commander-style workflow.
 
 ## Quick start
 
 OpenSCP currently supports Linux and macOS. A compatible Qt 6 installation,
-CMake 3.22+, libssh2, and OpenSSL are required. libcurl and tinyxml2 enable the
-optional FTP/FTPS and WebDAV backends.
+CMake 3.22+, libssh2, and OpenSSL are required. libcurl enables optional FTP
+and FTPS support; WebDAV also requires tinyxml2.
 
 ```bash
 git clone https://github.com/luiscuellar31/openscp.git
@@ -91,14 +89,12 @@ a controlled development environment.
 
 ## Roadmap
 
-- Complete and validate the Windows port. The existing Windows-specific code is
-  experimental scaffolding, not supported runtime or release functionality.
-- Broaden WebDAV interoperability coverage beyond the currently tested server
-  environment.
-- Support more enterprise proxy and SSH jump-host authentication flows,
-  including interactive, non-batch jump authentication.
-- Add user-facing customization such as a command palette and selectable
-  themes.
+- Finish and validate Windows support; the current Windows code is still
+  experimental.
+- Test WebDAV with a wider range of servers.
+- Support interactive authentication and more enterprise proxy and SSH
+  jump-host setups.
+- Add a command palette and selectable themes.
 
 ## Releases and contributions
 
