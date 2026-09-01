@@ -9,7 +9,9 @@
 class QLineEdit;
 class QPushButton;
 class QSortFilterProxyModel;
+class QStackedWidget;
 class QTableView;
+class QWidget;
 class SiteListModel;
 
 class SiteManagerDialog : public QDialog {
@@ -38,8 +40,11 @@ class SiteManagerDialog : public QDialog {
     QVector<SiteEntry> sites_;
     SiteListModel *model_ = nullptr;
     QSortFilterProxyModel *proxy_ = nullptr;
+    QStackedWidget *contentStack_ = nullptr;
     QTableView *table_ = nullptr;
+    QWidget *emptyState_ = nullptr;
     QLineEdit *search_ = nullptr;
+    QPushButton *emptyAddButton_ = nullptr;
     QPushButton *btAdd_ = nullptr;
     QPushButton *btEdit_ = nullptr;
     QPushButton *btDuplicate_ = nullptr;

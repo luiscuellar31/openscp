@@ -3879,6 +3879,21 @@ Voulez-vous tout de même activer le repli non sécurisé ?</translation>
         <translation>Gestionnaire de sites</translation>
     </message>
     <message>
+        <location filename="../ui/SiteManagerDialog.cpp" line="213"/>
+        <source>No saved sites</source>
+        <translation>Aucun site enregistré</translation>
+    </message>
+    <message>
+        <location filename="../ui/SiteManagerDialog.cpp" line="225"/>
+        <source>Add a site to save its connection details and access it later.</source>
+        <translation>Ajoutez un site pour enregistrer ses informations de connexion et y accéder ultérieurement.</translation>
+    </message>
+    <message>
+        <location filename="../ui/SiteManagerDialog.cpp" line="238"/>
+        <source>Add Site</source>
+        <translation>Ajouter un site</translation>
+    </message>
+    <message>
         <location filename="../ui/SiteManagerDialog.cpp" line="186"/>
         <source>Add</source>
         <translation>Ajouter</translation>

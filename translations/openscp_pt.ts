@@ -3879,6 +3879,21 @@ Deseja ativar a alternativa insegura mesmo assim?</translation>
         <translation>Gerenciador de sites</translation>
     </message>
     <message>
+        <location filename="../ui/SiteManagerDialog.cpp" line="213"/>
+        <source>No saved sites</source>
+        <translation>Nenhum site salvo</translation>
+    </message>
+    <message>
+        <location filename="../ui/SiteManagerDialog.cpp" line="225"/>
+        <source>Add a site to save its connection details and access it later.</source>
+        <translation>Adicione um site para salvar os dados de conexão e acessá-lo mais tarde.</translation>
+    </message>
+    <message>
+        <location filename="../ui/SiteManagerDialog.cpp" line="238"/>
+        <source>Add Site</source>
+        <translation>Adicionar site</translation>
+    </message>
+    <message>
         <location filename="../ui/SiteManagerDialog.cpp" line="186"/>
         <source>Add</source>
         <translation>Adicionar</translation>

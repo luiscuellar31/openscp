@@ -13,12 +13,18 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFont>
+#include <QFrame>
 #include <QHeaderView>
 #include <QItemSelectionModel>
+#include <QLabel>
 #include <QLineEdit>
+#include <QPalette>
 #include <QPushButton>
 #include <QSaveFile>
+#include <QSizePolicy>
 #include <QSortFilterProxyModel>
+#include <QStackedWidget>
 #include <QTableView>
 #include <QUuid>
 #include <QVBoxLayout>
@@ -156,6 +162,7 @@ SiteManagerDialog::SiteManagerDialog(QWidget *parent) : QDialog(parent) {
     search_->setClearButtonEnabled(true);
     search_->setPlaceholderText(tr("Search by name, protocol, host, or user…"));
     search_->setAccessibleName(tr("Search saved sites"));
+    search_->setObjectName(QStringLiteral("siteManagerSearch"));
     mainLayout->addWidget(search_);
 
     model_ = new SiteListModel(&sites_, this);
@@ -167,6 +174,7 @@ SiteManagerDialog::SiteManagerDialog(QWidget *parent) : QDialog(parent) {
     proxy_->setDynamicSortFilter(true);
 
     table_ = new QTableView(this);
+    table_->setObjectName(QStringLiteral("savedSitesTable"));
     table_->setModel(proxy_);
     table_->verticalHeader()->setVisible(false);
     table_->horizontalHeader()->setStretchLastSection(true);
@@ -183,22 +191,81 @@ SiteManagerDialog::SiteManagerDialog(QWidget *parent) : QDialog(parent) {
     table_->setSelectionMode(QAbstractItemView::SingleSelection);
     table_->setSortingEnabled(true);
     table_->sortByColumn(0, Qt::AscendingOrder);
-    mainLayout->addWidget(table_);
+
+    contentStack_ = new QStackedWidget(this);
+    contentStack_->setObjectName(QStringLiteral("siteManagerContent"));
+    contentStack_->addWidget(table_);
+
+    auto *emptyFrame = new QFrame(contentStack_);
+    emptyState_ = emptyFrame;
+    emptyState_->setObjectName(QStringLiteral("siteManagerEmptyState"));
+    emptyFrame->setFrameShape(QFrame::StyledPanel);
+    emptyFrame->setAutoFillBackground(true);
+    QPalette emptyPalette = emptyFrame->palette();
+    emptyPalette.setColor(QPalette::Window, emptyPalette.color(QPalette::Base));
+    emptyFrame->setPalette(emptyPalette);
+
+    auto *emptyLayout = new QVBoxLayout(emptyFrame);
+    emptyLayout->setContentsMargins(32, 32, 32, 32);
+    emptyLayout->setSpacing(0);
+    emptyLayout->addStretch();
+
+    auto *emptyTitle = new QLabel(tr("No saved sites"), emptyFrame);
+    emptyTitle->setObjectName(QStringLiteral("siteManagerEmptyTitle"));
+    emptyTitle->setAlignment(Qt::AlignCenter);
+    QFont titleFont = emptyTitle->font();
+    titleFont.setBold(true);
+    if (titleFont.pointSizeF() > 0.0)
+        titleFont.setPointSizeF(titleFont.pointSizeF() + 2.0);
+    emptyTitle->setFont(titleFont);
+    emptyLayout->addWidget(emptyTitle);
+    emptyLayout->addSpacing(10);
+
+    auto *emptyDescription =
+        new QLabel(tr("Add a site to save its connection details and access "
+                      "it later."),
+                   emptyFrame);
+    emptyDescription->setObjectName(
+        QStringLiteral("siteManagerEmptyDescription"));
+    emptyDescription->setAlignment(Qt::AlignCenter);
+    emptyDescription->setWordWrap(true);
+    QSizePolicy descriptionPolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    descriptionPolicy.setHeightForWidth(true);
+    emptyDescription->setSizePolicy(descriptionPolicy);
+    emptyLayout->addWidget(emptyDescription);
+    emptyLayout->addSpacing(18);
+
+    emptyAddButton_ = new QPushButton(tr("Add Site"), emptyFrame);
+    emptyAddButton_->setObjectName(QStringLiteral("siteManagerEmptyAddButton"));
+    emptyLayout->addWidget(emptyAddButton_, 0, Qt::AlignHCenter);
+    emptyLayout->addStretch();
+
+    contentStack_->addWidget(emptyState_);
+    mainLayout->addWidget(contentStack_);
 
     auto *dialogButtons = new QDialogButtonBox(this);
     btAdd_ = dialogButtons->addButton(tr("Add"), QDialogButtonBox::ActionRole);
+    btAdd_->setObjectName(QStringLiteral("siteManagerAddButton"));
     btEdit_ =
         dialogButtons->addButton(tr("Edit"), QDialogButtonBox::ActionRole);
+    btEdit_->setObjectName(QStringLiteral("siteManagerEditButton"));
     btDuplicate_ =
         dialogButtons->addButton(tr("Duplicate"), QDialogButtonBox::ActionRole);
+    btDuplicate_->setObjectName(QStringLiteral("siteManagerDuplicateButton"));
     btDel_ =
         dialogButtons->addButton(tr("Delete"), QDialogButtonBox::ActionRole);
+    btDel_->setObjectName(QStringLiteral("siteManagerDeleteButton"));
     btConn_ =
         dialogButtons->addButton(tr("Connect"), QDialogButtonBox::AcceptRole);
+    btConn_->setObjectName(QStringLiteral("siteManagerConnectButton"));
     btClose_ = dialogButtons->addButton(QDialogButtonBox::Close);
-    if (btClose_)
+    if (btClose_) {
+        btClose_->setObjectName(QStringLiteral("siteManagerCloseButton"));
         btClose_->setText(tr("Close"));
+    }
     mainLayout->addWidget(dialogButtons);
+    connect(emptyAddButton_, &QPushButton::clicked, this,
+            &SiteManagerDialog::onAdd);
     connect(btAdd_, &QPushButton::clicked, this, &SiteManagerDialog::onAdd);
     connect(btEdit_, &QPushButton::clicked, this, &SiteManagerDialog::onEdit);
     connect(btDuplicate_, &QPushButton::clicked, this,
@@ -265,6 +332,22 @@ bool SiteManagerDialog::saveSites() {
 void SiteManagerDialog::refresh() {
     if (model_)
         model_->reload();
+    const bool isEmpty = sites_.isEmpty();
+    if (isEmpty && search_)
+        search_->clear();
+    if (search_)
+        search_->setVisible(!isEmpty);
+    if (contentStack_)
+        contentStack_->setCurrentWidget(isEmpty ? emptyState_ : table_);
+    for (QPushButton *siteAction :
+         {btAdd_, btEdit_, btDuplicate_, btDel_, btConn_}) {
+        if (siteAction)
+            siteAction->setVisible(!isEmpty);
+    }
+    if (emptyAddButton_)
+        emptyAddButton_->setDefault(isEmpty);
+    if (btConn_)
+        btConn_->setDefault(!isEmpty);
     updateButtons();
 }
 

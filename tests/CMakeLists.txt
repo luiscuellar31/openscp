@@ -100,6 +100,15 @@ openscp_add_test(openscp_ui_utilities_tests
     LINK_LIBRARIES Qt6::Core openscp_core
 )
 
+openscp_add_test(openscp_site_manager_dialog_tests
+    SOURCES site_manager_dialog_tests.cpp
+    LINK_LIBRARIES openscp_ui_widgets
+)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set_tests_properties(openscp_site_manager_dialog_tests PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
 openscp_add_test(openscp_sync_comparison_tests
     SOURCES sync_comparison_tests.cpp
     LINK_LIBRARIES openscp_sync_logic

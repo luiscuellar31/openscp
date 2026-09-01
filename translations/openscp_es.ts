@@ -3879,6 +3879,21 @@ En Linux, se recomienda instalar y usar libsecret/Secret Service para mayor segu
         <translation>Gestor de sitios</translation>
     </message>
     <message>
+        <location filename="../ui/SiteManagerDialog.cpp" line="213"/>
+        <source>No saved sites</source>
+        <translation>No hay sitios guardados</translation>
+    </message>
+    <message>
+        <location filename="../ui/SiteManagerDialog.cpp" line="225"/>
+        <source>Add a site to save its connection details and access it later.</source>
+        <translation>Añade un sitio para guardar sus datos de conexión y acceder a él más tarde.</translation>
+    </message>
+    <message>
+        <location filename="../ui/SiteManagerDialog.cpp" line="238"/>
+        <source>Add Site</source>
+        <translation>Añadir sitio</translation>
+    </message>
+    <message>
         <location filename="../ui/SiteManagerDialog.cpp" line="186"/>
         <source>Add</source>
         <translation>Añadir</translation>
