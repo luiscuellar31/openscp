@@ -380,6 +380,7 @@ void SiteManagerDialog::onAdd() {
     ConnectionDialog dlg(this);
     dlg.setWindowTitle(tr("Add site"));
     dlg.setSiteNameVisible(true);
+    dlg.setAcceptButtonText(tr("Add site"));
     if (dlg.exec() != QDialog::Accepted)
         return;
     auto sessionOptions = dlg.options();
@@ -425,6 +426,7 @@ void SiteManagerDialog::onEdit() {
     ConnectionDialog dlg(this);
     dlg.setWindowTitle(tr("Edit site"));
     dlg.setSiteNameVisible(true);
+    dlg.setAcceptButtonText(tr("Save"));
     dlg.setSiteName(editedEntry.name);
     dlg.setInitialLocalPath(editedEntry.initialLocalPath);
     dlg.setInitialRemotePath(editedEntry.initialRemotePath);

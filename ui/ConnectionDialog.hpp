@@ -3,7 +3,6 @@
 #include "openscp/SessionOptions.hpp"
 
 #include <QDialog>
-#include <QSize>
 #include <QString>
 
 class QLineEdit;
@@ -12,6 +11,10 @@ class QComboBox;
 class QToolButton;
 class QCheckBox;
 class QFormLayout;
+class QPushButton;
+class QScrollArea;
+class QDialogButtonBox;
+class ConnectionDisclosureHeader;
 
 class ConnectionDialog : public QDialog {
     Q_OBJECT
@@ -31,12 +34,20 @@ class ConnectionDialog : public QDialog {
     void setQuickConnectSaveOptionsVisible(bool visible);
     bool saveSiteRequested() const;
     bool saveCredentialsRequested() const;
+    void setAcceptButtonText(const QString &text);
 
     private:
     void updateProtocolUi(openscp::Protocol protocol, bool resetPort = true);
+    void updateSectionSummaries();
+    void updatePathSectionVisibility();
+    void adjustToContent();
 
     bool quickConnectSaveOptionsVisible_ = false;
+    bool siteOptionsVisible_ = false;
     QFormLayout *formLayout_ = nullptr;
+    QWidget *formContainer_ = nullptr;
+    QScrollArea *scrollArea_ = nullptr;
+    QDialogButtonBox *dialogButtons_ = nullptr;
     QComboBox *protocol_ = nullptr;
     QComboBox *scpMode_ = nullptr;
     QLineEdit *siteName_ = nullptr;
@@ -92,12 +103,13 @@ class ConnectionDialog : public QDialog {
     QWidget *jumpHostPortRow_ = nullptr;
     QWidget *jumpKeyPathRow_ = nullptr;
 
-    // Keep the compact dialog size when proxy rows are hidden (Direct mode).
-    QSize directModeSize_;
-    bool hasDirectModeSize_ = false;
-    bool proxyRowsVisible_ = false;
+    ConnectionDisclosureHeader *pathsSection_ = nullptr;
+    ConnectionDisclosureHeader *sshKeySection_ = nullptr;
+    ConnectionDisclosureHeader *networkSection_ = nullptr;
+    ConnectionDisclosureHeader *securitySection_ = nullptr;
+    QPushButton *acceptButton_ = nullptr;
+
     openscp::ProxyType lastProxyType_ = openscp::ProxyType::None;
     openscp::FtpsMode lastFtpsMode_ = openscp::FtpsMode::Auto;
     openscp::WebDavScheme lastWebDavScheme_ = openscp::WebDavScheme::Https;
-    bool jumpRowsVisible_ = false;
 };

@@ -10,18 +10,97 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QFrame>
+#include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QLabel>
 #include <QLineEdit>
+#include <QList>
+#include <QPalette>
 #include <QPointer>
 #include <QPushButton>
+#include <QScreen>
+#include <QScrollArea>
 #include <QSignalBlocker>
+#include <QSizePolicy>
 #include <QSpinBox>
+#include <QStringList>
+#include <QStyle>
 #include <QTimer>
 #include <QToolButton>
+#include <QVBoxLayout>
 #include <QWidget>
 #include <QtGlobal>
 
+#include <algorithm>
+#include <initializer_list>
 #include <string_view>
+
+class ConnectionDisclosureHeader final : public QWidget {
+    public:
+    ConnectionDisclosureHeader(const QString &title, const QString &objectName,
+                               QWidget *parent)
+        : QWidget(parent) {
+        setObjectName(objectName);
+        setBackgroundRole(QPalette::AlternateBase);
+        setAutoFillBackground(true);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+
+        auto *headerLayout = new QHBoxLayout(this);
+        headerLayout->setContentsMargins(6, 2, 8, 2);
+        headerLayout->setSpacing(8);
+
+        toggle_ = new QToolButton(this);
+        toggle_->setObjectName(objectName + QStringLiteral("Toggle"));
+        toggle_->setText(title);
+        toggle_->setAccessibleName(title);
+        toggle_->setCheckable(true);
+        toggle_->setFocusPolicy(Qt::TabFocus);
+        toggle_->setAutoRaise(true);
+        toggle_->setArrowType(Qt::RightArrow);
+        toggle_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        toggle_->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        toggle_->setStyleSheet(QStringLiteral(
+            "QToolButton { border: none; background: transparent; padding: "
+            "2px; }"
+            "QToolButton:focus { border: 1px solid palette(highlight); }"));
+        headerLayout->addWidget(toggle_);
+        headerLayout->addStretch(1);
+
+        summary_ = new QLabel(this);
+        summary_->setObjectName(objectName + QStringLiteral("Summary"));
+        summary_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        summary_->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        QPalette summaryPalette = summary_->palette();
+        QColor summaryColor = summaryPalette.color(QPalette::Text);
+        summaryColor.setAlphaF(0.65F);
+        summaryPalette.setColor(QPalette::WindowText, summaryColor);
+        summary_->setPalette(summaryPalette);
+        headerLayout->addWidget(summary_);
+
+        connect(toggle_, &QToolButton::toggled, this, [this](bool expanded) {
+            toggle_->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
+            summary_->setVisible(!expanded && !summary_->toolTip().isEmpty());
+        });
+    }
+
+    [[nodiscard]] bool isExpanded() const { return toggle_->isChecked(); }
+
+    void setExpanded(bool expanded) { toggle_->setChecked(expanded); }
+
+    void setSummary(const QString &summary) {
+        summary_->setText(summary);
+        summary_->setToolTip(summary);
+        toggle_->setAccessibleDescription(summary);
+        summary_->setVisible(!isExpanded() && !summary.isEmpty());
+    }
+
+    QToolButton *toggleButton() const { return toggle_; }
+
+    private:
+    QToolButton *toggle_ = nullptr;
+    QLabel *summary_ = nullptr;
+};
 
 namespace {
 
@@ -41,13 +120,50 @@ void setFormRowVisible(QFormLayout *layout, QWidget *field, bool visible) {
     field->setVisible(visible);
 }
 
+void setFormRowsVisible(QFormLayout *layout, bool visible,
+                        std::initializer_list<QWidget *> fields) {
+    for (QWidget *field : fields)
+        setFormRowVisible(layout, field, visible);
+}
+
+void stabilizeFormLabelColumn(QFormLayout *layout) {
+    if (!layout)
+        return;
+
+    QList<QWidget *> labels;
+    int widestLabel = 0;
+    for (int row = 0; row < layout->rowCount(); ++row) {
+        QLayoutItem *item = layout->itemAt(row, QFormLayout::LabelRole);
+        QWidget *label = item ? item->widget() : nullptr;
+        if (!label)
+            continue;
+        labels.push_back(label);
+        widestLabel = std::max(widestLabel, label->sizeHint().width());
+    }
+    for (QWidget *label : labels)
+        label->setMinimumWidth(widestLabel);
+}
+
 } // namespace
 
 ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle(tr("Connect"));
-    auto *lay = new QFormLayout(this);
+    auto *outerLayout = new QVBoxLayout(this);
+    formContainer_ = new QWidget();
+    auto *lay = new QFormLayout(formContainer_);
     formLayout_ = lay;
+    lay->setContentsMargins(0, 0, 0, 0);
+    lay->setVerticalSpacing(8);
     lay->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+
+    scrollArea_ = new QScrollArea(this);
+    scrollArea_->setObjectName(QStringLiteral("connectionOptionsScrollArea"));
+    scrollArea_->setWidgetResizable(true);
+    scrollArea_->setFrameShape(QFrame::NoFrame);
+    scrollArea_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scrollArea_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scrollArea_->setWidget(formContainer_);
+    outerLayout->addWidget(scrollArea_, 1);
 
     protocol_ = new QComboBox(this);
     protocol_->addItem(tr("SFTP"), static_cast<int>(openscp::Protocol::Sftp));
@@ -106,6 +222,10 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     initialRemotePath_ = new QLineEdit(this);
     rememberLastPaths_ =
         new QCheckBox(tr("Remember the last local and remote paths"), this);
+    initialRemotePath_->setObjectName(
+        QStringLiteral("connectionInitialRemotePath"));
+    rememberLastPaths_->setObjectName(
+        QStringLiteral("connectionRememberLastPaths"));
     host_ = new QLineEdit(this);
     port_ = new QSpinBox(this);
     user_ = new QLineEdit(this);
@@ -161,8 +281,9 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         tr("SSH jump host is currently unavailable on Windows."));
 #endif
 
-    // Make text inputs a bit wider by default for better readability.
-    const int kInputMinWidth = 360;
+    // Reserve enough room for useful values without letting a disclosed row
+    // dictate a different dialog width.
+    const int kInputMinWidth = 320;
     siteName_->setMinimumWidth(kInputMinWidth);
     initialLocalPath_->setMinimumWidth(kInputMinWidth);
     initialRemotePath_->setMinimumWidth(kInputMinWidth);
@@ -244,6 +365,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     keyPathRowLayout->addWidget(keyBrowseBtn);
 
     proxyType_ = new QComboBox(this);
+    proxyType_->setObjectName(QStringLiteral("connectionProxyType"));
     proxyType_->addItem(tr("Direct (no proxy)"),
                         static_cast<int>(openscp::ProxyType::None));
     proxyType_->addItem(tr("SOCKS5"),
@@ -280,26 +402,18 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     jumpKeyPathLayout->addWidget(jumpKeyBrowse_);
 
     initialLocalPathRow_ = new QWidget(this);
+    initialLocalPathRow_->setObjectName(
+        QStringLiteral("connectionInitialLocalPathRow"));
     auto *initialLocalPathLayout = new QHBoxLayout(initialLocalPathRow_);
     initialLocalPathLayout->setContentsMargins(0, 0, 0, 0);
     initialLocalPathLayout->setSpacing(6);
     initialLocalPathLayout->addWidget(initialLocalPath_);
     initialLocalPathLayout->addWidget(initialLocalPathBrowse_);
 
-    // Layout
-    lay->addRow(tr("Site name:"), siteName_);
-    siteNameLabel_ = lay->labelForField(siteName_);
-    lay->addRow(tr("Initial local path:"), initialLocalPathRow_);
-    lay->addRow(tr("Initial remote path:"), initialRemotePath_);
-    lay->addRow(QString(), rememberLastPaths_);
-    setSiteNameVisible(false);
     saveSite_ = new QCheckBox(tr("Save to saved sites"), this);
     saveSite_->setChecked(true);
     saveCredentials_ = new QCheckBox(tr("Save passwords/passphrases"), this);
     saveCredentials_->setChecked(false);
-    lay->addRow(QString(), saveSite_);
-    lay->addRow(QString(), saveCredentials_);
-    setQuickConnectSaveOptionsVisible(false);
     connect(saveSite_, &QCheckBox::toggled, this, [this](bool checked) {
         if (saveCredentials_) {
             saveCredentials_->setEnabled(checked);
@@ -310,21 +424,6 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
             setSiteNameVisible(checked);
         }
     });
-    lay->addRow(tr("Protocol:"), protocol_);
-    lay->addRow(tr("SCP mode:"), scpMode_);
-    lay->addRow(tr("Host / Port:"), hostPortRow);
-    lay->addRow(tr("User:"), user_);
-    lay->addRow(tr("Password:"), passRow);
-    lay->addRow(tr("Private key path:"), keyPathRow_);
-    lay->addRow(tr("Key passphrase:"), keyPassRow_);
-    lay->addRow(tr("Proxy:"), proxyType_);
-    lay->addRow(tr("Proxy host / port:"), proxyHostPortRow_);
-    lay->addRow(tr("Proxy user:"), proxyUser_);
-    lay->addRow(tr("Proxy password:"), proxyPassRow_);
-    lay->addRow(QString(), jumpEnabled_);
-    lay->addRow(tr("Jump host / port:"), jumpHostPortRow_);
-    lay->addRow(tr("Jump user:"), jumpUser_);
-    lay->addRow(tr("Jump private key:"), jumpKeyPathRow_);
 
     // known_hosts
     khPath_ = new QLineEdit(this);
@@ -465,16 +564,76 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         }
     }
 
-    lay->addRow(tr("known_hosts:"), khPathRow_);
-    lay->addRow(tr("Policy:"), khPolicy_);
-    lay->addRow(tr("Integrity:"), integrityPolicy_);
+    pathsSection_ = new ConnectionDisclosureHeader(
+        tr("Startup folders"), QStringLiteral("connectionPathsSection"), this);
+    sshKeySection_ = new ConnectionDisclosureHeader(
+        tr("SSH key"), QStringLiteral("connectionSshKeySection"), this);
+    networkSection_ = new ConnectionDisclosureHeader(
+        tr("Proxy and jump host"), QStringLiteral("connectionNetworkSection"),
+        this);
+    securitySection_ = new ConnectionDisclosureHeader(
+        tr("Security"), QStringLiteral("connectionSecuritySection"), this);
+
+    siteName_->setObjectName(QStringLiteral("connectionSiteName"));
+    protocol_->setObjectName(QStringLiteral("connectionProtocol"));
+    host_->setObjectName(QStringLiteral("connectionHost"));
+    port_->setObjectName(QStringLiteral("connectionPort"));
+    user_->setObjectName(QStringLiteral("connectionUser"));
+    pass_->setObjectName(QStringLiteral("connectionPassword"));
+    keyPathRow_->setObjectName(QStringLiteral("connectionSshKeyPathRow"));
+    keyPassRow_->setObjectName(QStringLiteral("connectionSshKeyPassphraseRow"));
+    proxyHostPortRow_->setObjectName(
+        QStringLiteral("connectionProxyHostPortRow"));
+    jumpEnabled_->setObjectName(QStringLiteral("connectionJumpEnabled"));
+    khPathRow_->setObjectName(QStringLiteral("connectionKnownHostsPathRow"));
+
+    lay->addRow(tr("Site name:"), siteName_);
+    siteNameLabel_ = lay->labelForField(siteName_);
+    lay->addRow(QString(), saveSite_);
+    lay->addRow(QString(), saveCredentials_);
+    lay->addRow(tr("Protocol:"), protocol_);
+    lay->addRow(tr("SCP mode:"), scpMode_);
     lay->addRow(tr("FTPS mode:"), ftpsMode_);
-    lay->addRow(QString(), ftpsVerifyPeer_);
-    lay->addRow(tr("FTPS CA bundle:"), ftpsCaPathRow_);
     lay->addRow(tr("WebDAV scheme:"), webDavScheme_);
     lay->addRow(tr("WebDAV base path:"), webDavBasePath_);
+    lay->addRow(tr("Host / Port:"), hostPortRow);
+    lay->addRow(tr("User:"), user_);
+    lay->addRow(tr("Password:"), passRow);
+
+    lay->addRow(pathsSection_);
+    lay->addRow(tr("Initial local path:"), initialLocalPathRow_);
+    lay->addRow(tr("Initial remote path:"), initialRemotePath_);
+    lay->addRow(QString(), rememberLastPaths_);
+
+    lay->addRow(sshKeySection_);
+    lay->addRow(tr("Private key path:"), keyPathRow_);
+    lay->addRow(tr("Key passphrase:"), keyPassRow_);
+
+    lay->addRow(networkSection_);
+    lay->addRow(tr("Proxy:"), proxyType_);
+    lay->addRow(tr("Proxy host / port:"), proxyHostPortRow_);
+    lay->addRow(tr("Proxy user:"), proxyUser_);
+    lay->addRow(tr("Proxy password:"), proxyPassRow_);
+    lay->addRow(QString(), jumpEnabled_);
+    lay->addRow(tr("Jump host / port:"), jumpHostPortRow_);
+    lay->addRow(tr("Jump user:"), jumpUser_);
+    lay->addRow(tr("Jump private key:"), jumpKeyPathRow_);
+
+    lay->addRow(securitySection_);
+    lay->addRow(tr("Known hosts file:"), khPathRow_);
+    lay->addRow(tr("Policy:"), khPolicy_);
+    lay->addRow(tr("Integrity:"), integrityPolicy_);
+    lay->addRow(QString(), ftpsVerifyPeer_);
+    lay->addRow(tr("FTPS CA bundle:"), ftpsCaPathRow_);
     lay->addRow(QString(), webDavVerifyPeer_);
     lay->addRow(tr("WebDAV CA bundle:"), webDavCaPathRow_);
+
+    // Hidden rows otherwise change QFormLayout's shared label column when
+    // opened. Reserving the widest translated label keeps every state aligned.
+    stabilizeFormLabelColumn(lay);
+
+    setSiteNameVisible(false);
+    setQuickConnectSaveOptionsVisible(false);
 
     auto updateProxyFields = [this, lay]() {
         const auto type = openscp::normalizeProxyType(
@@ -483,20 +642,17 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
                                               protocol_->currentData().toInt())
                                         : openscp::Protocol::Sftp;
         const auto caps = openscp::capabilitiesForProtocol(protocol);
-        const bool showProxyRows =
+        const bool proxyConfigured =
             caps.supports_proxy && (type != openscp::ProxyType::None);
+        const bool showProxyRows =
+            proxyConfigured && networkSection_ && networkSection_->isExpanded();
         const std::uint16_t defaultPortForType =
             openscp::defaultPortForProxyType(type);
         const std::uint16_t previousDefaultPort =
             openscp::defaultPortForProxyType(lastProxyType_);
-        if (showProxyRows && !proxyRowsVisible_) {
-            directModeSize_ = size();
-            hasDirectModeSize_ = true;
-        }
-        setFormRowVisible(lay, proxyHostPortRow_, showProxyRows);
-        setFormRowVisible(lay, proxyUser_, showProxyRows);
-        setFormRowVisible(lay, proxyPassRow_, showProxyRows);
-        if (!showProxyRows) {
+        setFormRowsVisible(lay, showProxyRows,
+                           {proxyHostPortRow_, proxyUser_, proxyPassRow_});
+        if (!proxyConfigured) {
             proxyPort_->setValue(static_cast<int>(
                 openscp::defaultPortForProxyType(openscp::ProxyType::Socks5)));
         } else {
@@ -513,29 +669,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
             }
         }
         lastProxyType_ = type;
-        const bool visibilityChanged = (showProxyRows != proxyRowsVisible_);
-        proxyRowsVisible_ = showProxyRows;
-        if (visibilityChanged) {
-            if (layout())
-                layout()->activate();
-            if (!showProxyRows && hasDirectModeSize_) {
-                resize(directModeSize_);
-            } else {
-                adjustSize();
-            }
-        }
     };
-    connect(proxyType_, &QComboBox::currentIndexChanged, this,
-            [this, updateProxyFields](int) {
-                const auto type =
-                    openscp::normalizeProxyType(static_cast<openscp::ProxyType>(
-                        proxyType_->currentData().toInt()));
-                if (type != openscp::ProxyType::None && jumpEnabled_ &&
-                    jumpEnabled_->isChecked()) {
-                    jumpEnabled_->setChecked(false);
-                }
-                updateProxyFields();
-            });
 
     auto updateJumpFields = [this, lay]() {
         const auto protocol = protocol_ ? static_cast<openscp::Protocol>(
@@ -546,32 +680,47 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
 #ifdef Q_OS_WIN
         jumpSupported = false;
 #endif
-        if (!jumpSupported && jumpEnabled_ && jumpEnabled_->isChecked())
+        if (!jumpSupported && jumpEnabled_ && jumpEnabled_->isChecked()) {
+            const QSignalBlocker blocker(jumpEnabled_);
             jumpEnabled_->setChecked(false);
-
-        const bool showJumpRows = jumpEnabled_ && jumpEnabled_->isVisible() &&
-                                  jumpEnabled_->isChecked();
-        setFormRowVisible(lay, jumpHostPortRow_, showJumpRows);
-        setFormRowVisible(lay, jumpUser_, showJumpRows);
-        setFormRowVisible(lay, jumpKeyPathRow_, showJumpRows);
-        const bool visibilityChanged = (showJumpRows != jumpRowsVisible_);
-        jumpRowsVisible_ = showJumpRows;
-        if (visibilityChanged) {
-            if (layout())
-                layout()->activate();
-            adjustSize();
         }
+
+        const bool showJumpRows =
+            jumpSupported && jumpEnabled_ && jumpEnabled_->isChecked() &&
+            networkSection_ && networkSection_->isExpanded();
+        setFormRowsVisible(lay, showJumpRows,
+                           {jumpHostPortRow_, jumpUser_, jumpKeyPathRow_});
     };
+    auto refreshNetworkFields = [this, updateProxyFields, updateJumpFields]() {
+        updateProxyFields();
+        updateJumpFields();
+        updateSectionSummaries();
+        adjustToContent();
+    };
+    connect(proxyType_, &QComboBox::currentIndexChanged, this,
+            [this, refreshNetworkFields](int) {
+                const auto type =
+                    openscp::normalizeProxyType(static_cast<openscp::ProxyType>(
+                        proxyType_->currentData().toInt()));
+                if (type != openscp::ProxyType::None && jumpEnabled_ &&
+                    jumpEnabled_->isChecked()) {
+                    const QSignalBlocker blocker(jumpEnabled_);
+                    jumpEnabled_->setChecked(false);
+                }
+                refreshNetworkFields();
+            });
     connect(jumpEnabled_, &QCheckBox::toggled, this,
-            [this, updateJumpFields](bool checked) {
+            [this, refreshNetworkFields](bool checked) {
                 if (checked && proxyType_) {
                     const int directIdx = proxyType_->findData(
                         static_cast<int>(openscp::ProxyType::None));
                     if (directIdx >= 0 &&
-                        proxyType_->currentIndex() != directIdx)
+                        proxyType_->currentIndex() != directIdx) {
+                        const QSignalBlocker blocker(proxyType_);
                         proxyType_->setCurrentIndex(directIdx);
+                    }
                 }
-                updateJumpFields();
+                refreshNetworkFields();
             });
     connect(ftpsMode_, &QComboBox::currentIndexChanged, this, [this](int) {
         if (!protocol_ || !port_ || !ftpsMode_)
@@ -612,7 +761,53 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
         }
         lastWebDavScheme_ = selectedScheme;
         updateProtocolUi(protocol, false);
+        adjustToContent();
     });
+
+    connect(pathsSection_->toggleButton(), &QToolButton::toggled, this,
+            [this](bool) {
+                updatePathSectionVisibility();
+                adjustToContent();
+            });
+    auto refreshProtocolDetails = [this](bool) {
+        if (protocol_) {
+            updateProtocolUi(static_cast<openscp::Protocol>(
+                                 protocol_->currentData().toInt()),
+                             false);
+        }
+        adjustToContent();
+    };
+    for (ConnectionDisclosureHeader *section :
+         {sshKeySection_, securitySection_}) {
+        connect(section->toggleButton(), &QToolButton::toggled, this,
+                refreshProtocolDetails);
+    }
+    connect(networkSection_->toggleButton(), &QToolButton::toggled, this,
+            [this, refreshNetworkFields](bool) {
+                if (protocol_) {
+                    updateProtocolUi(static_cast<openscp::Protocol>(
+                                         protocol_->currentData().toInt()),
+                                     false);
+                }
+                refreshNetworkFields();
+            });
+
+    connect(initialLocalPath_, &QLineEdit::textChanged, this,
+            &ConnectionDialog::updateSectionSummaries);
+    connect(initialRemotePath_, &QLineEdit::textChanged, this,
+            &ConnectionDialog::updateSectionSummaries);
+    connect(rememberLastPaths_, &QCheckBox::toggled, this,
+            &ConnectionDialog::updateSectionSummaries);
+    connect(keyPath_, &QLineEdit::textChanged, this,
+            &ConnectionDialog::updateSectionSummaries);
+    connect(khPolicy_, &QComboBox::currentIndexChanged, this,
+            &ConnectionDialog::updateSectionSummaries);
+    connect(integrityPolicy_, &QComboBox::currentIndexChanged, this,
+            &ConnectionDialog::updateSectionSummaries);
+    connect(ftpsVerifyPeer_, &QCheckBox::toggled, this,
+            &ConnectionDialog::updateSectionSummaries);
+    connect(webDavVerifyPeer_, &QCheckBox::toggled, this,
+            &ConnectionDialog::updateSectionSummaries);
 
     connect(protocol_, &QComboBox::currentIndexChanged, this,
             [this, updateProxyFields, updateJumpFields](int) {
@@ -624,6 +819,8 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
                 updateProtocolUi(protocol);
                 updateProxyFields();
                 updateJumpFields();
+                updateSectionSummaries();
+                adjustToContent();
                 if (host_ && previouslyFocused &&
                     previouslyFocused != protocol_ &&
                     previouslyFocused != host_ &&
@@ -638,6 +835,7 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     updateProtocolUi(initialProtocol);
     updateProxyFields();
     updateJumpFields();
+    updateSectionSummaries();
 
     connect(khBrowse_, &QToolButton::clicked, this, [this] {
         const QString selectedPath = QFileDialog::getOpenFileName(
@@ -682,27 +880,177 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
             initialLocalPath_->setText(QDir::cleanPath(selectedPath));
     });
 
-    auto *dialogButtons = new QDialogButtonBox(
+    dialogButtons_ = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    lay->addRow(dialogButtons);
-    connect(dialogButtons, &QDialogButtonBox::accepted, this, &QDialog::accept);
-    connect(dialogButtons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    dialogButtons_->setObjectName(QStringLiteral("connectionDialogButtons"));
+    acceptButton_ = dialogButtons_->button(QDialogButtonBox::Ok);
+    if (acceptButton_)
+        acceptButton_->setObjectName(QStringLiteral("connectionAcceptButton"));
+    outerLayout->addWidget(dialogButtons_);
+    connect(dialogButtons_, &QDialogButtonBox::accepted, this,
+            &QDialog::accept);
+    connect(dialogButtons_, &QDialogButtonBox::rejected, this,
+            &QDialog::reject);
 
     // Initial focus to guide users to provide an explicit target host.
     QTimer::singleShot(0, host_, [this] {
         if (host_)
             host_->setFocus(Qt::OtherFocusReason);
     });
+    adjustToContent();
+}
+
+void ConnectionDialog::updateSectionSummaries() {
+    if (pathsSection_) {
+        const bool remembersFolders =
+            rememberLastPaths_ && rememberLastPaths_->isChecked();
+        const bool hasCustomFolders =
+            (initialLocalPath_ &&
+             !initialLocalPath_->text().trimmed().isEmpty()) ||
+            (initialRemotePath_ &&
+             !initialRemotePath_->text().trimmed().isEmpty() &&
+             initialRemotePath_->text().trimmed() != QLatin1String("/"));
+        pathsSection_->setSummary(remembersFolders ? tr("Remember last folders")
+                                  : hasCustomFolders ? tr("Custom folders")
+                                                     : tr("Default folders"));
+    }
+
+    if (sshKeySection_) {
+        const QString keyPath =
+            keyPath_ ? keyPath_->text().trimmed() : QString();
+        sshKeySection_->setSummary(keyPath.isEmpty() ? tr("Not configured")
+                                                     : tr("Configured"));
+    }
+
+    if (networkSection_) {
+        QString networkSummary = tr("Direct connection");
+        if (jumpEnabled_ && jumpEnabled_->isChecked())
+            networkSummary = tr("SSH jump host");
+        else if (proxyType_) {
+            const auto proxyType =
+                openscp::normalizeProxyType(static_cast<openscp::ProxyType>(
+                    proxyType_->currentData().toInt()));
+            if (proxyType != openscp::ProxyType::None)
+                networkSummary = proxyType_->currentText();
+        }
+        networkSection_->setSummary(networkSummary);
+    }
+
+    if (securitySection_ && protocol_) {
+        const auto protocol =
+            static_cast<openscp::Protocol>(protocol_->currentData().toInt());
+        const auto caps = openscp::capabilitiesForProtocol(protocol);
+        QStringList securitySummary;
+        if (caps.supports_known_hosts && khPolicy_) {
+            const auto knownHostsPolicy = openscp::normalizeKnownHostsPolicy(
+                static_cast<openscp::KnownHostsPolicy>(
+                    khPolicy_->currentData().toInt()));
+            if (knownHostsPolicy == openscp::KnownHostsPolicy::AcceptNew)
+                securitySummary.push_back(tr("Accept new hosts"));
+            else if (knownHostsPolicy == openscp::KnownHostsPolicy::Off)
+                securitySummary.push_back(tr("No host verification"));
+        }
+        if (protocol == openscp::Protocol::Ftps && ftpsVerifyPeer_ &&
+            !ftpsVerifyPeer_->isChecked())
+            securitySummary.push_back(tr("Certificate verification off"));
+        if (protocol == openscp::Protocol::WebDav && webDavVerifyPeer_ &&
+            webDavScheme_) {
+            const auto scheme = openscp::normalizeWebDavScheme(
+                static_cast<openscp::WebDavScheme>(
+                    webDavScheme_->currentData().toInt()));
+            if (scheme == openscp::WebDavScheme::Https &&
+                !webDavVerifyPeer_->isChecked())
+                securitySummary.push_back(tr("Certificate verification off"));
+        }
+        if (caps.can_checksum && integrityPolicy_) {
+            const auto integrityPolicy =
+                openscp::normalizeTransferIntegrityPolicy(
+                    static_cast<openscp::TransferIntegrityPolicy>(
+                        integrityPolicy_->currentData().toInt()));
+            if (integrityPolicy == openscp::TransferIntegrityPolicy::Required) {
+                securitySummary.push_back(tr("Integrity required"));
+            } else if (integrityPolicy ==
+                       openscp::TransferIntegrityPolicy::Off) {
+                securitySummary.push_back(tr("Integrity off"));
+            }
+        }
+        if (securitySummary.isEmpty())
+            securitySummary.push_back(tr("Default security"));
+        securitySection_->setSummary(
+            securitySummary.join(QStringLiteral(" · ")));
+    }
+}
+
+void ConnectionDialog::updatePathSectionVisibility() {
+    const bool showRows =
+        siteOptionsVisible_ && pathsSection_ && pathsSection_->isExpanded();
+    if (pathsSection_)
+        pathsSection_->setVisible(siteOptionsVisible_);
+    setFormRowsVisible(
+        formLayout_, showRows,
+        {initialLocalPathRow_, initialRemotePath_, rememberLastPaths_});
+    updateSectionSummaries();
+}
+
+void ConnectionDialog::adjustToContent() {
+    if (!formLayout_ || !formContainer_ || !scrollArea_ || !dialogButtons_ ||
+        !layout()) {
+        return;
+    }
+
+    const bool restoreUpdates = updatesEnabled();
+    if (restoreUpdates)
+        setUpdatesEnabled(false);
+
+    const int preservedWidth = width();
+    formLayout_->invalidate();
+    formLayout_->activate();
+    const QSize formMinimumSize = formLayout_->minimumSize();
+    const int contentHeight = formLayout_->sizeHint().height();
+    formContainer_->setMinimumSize(formMinimumSize.width(), contentHeight);
+
+    const QMargins margins = layout()->contentsMargins();
+    const int verticalScrollBarWidth =
+        style()->pixelMetric(QStyle::PM_ScrollBarExtent, nullptr, scrollArea_);
+    const int minimumDialogWidth =
+        formMinimumSize.width() + margins.left() + margins.right() +
+        (2 * scrollArea_->frameWidth()) + verticalScrollBarWidth;
+    setMinimumWidth(std::max(minimumWidth(), minimumDialogWidth));
+
+    QScreen *targetScreen = screen();
+    if (!targetScreen)
+        targetScreen = QGuiApplication::primaryScreen();
+    const int maximumFrameHeight =
+        targetScreen ? targetScreen->availableGeometry().height() * 4 / 5 : 720;
+    const int frameDecorationHeight =
+        std::max(0, frameGeometry().height() - height());
+    const int maximumDialogHeight =
+        std::max(320, maximumFrameHeight - frameDecorationHeight);
+    const int fixedChromeHeight = margins.top() + margins.bottom() +
+                                  std::max(0, layout()->spacing()) +
+                                  dialogButtons_->sizeHint().height();
+    scrollArea_->setFixedHeight(std::min(
+        contentHeight, std::max(200, maximumDialogHeight - fixedChromeHeight)));
+
+    layout()->invalidate();
+    layout()->activate();
+    resize(std::max(preservedWidth, minimumWidth()),
+           std::min(maximumDialogHeight, sizeHint().height()));
+
+    if (restoreUpdates) {
+        setUpdatesEnabled(true);
+        update();
+    }
 }
 
 void ConnectionDialog::setSiteNameVisible(bool visible) {
+    siteOptionsVisible_ = visible;
     if (siteName_)
         siteName_->setVisible(visible);
     if (siteNameLabel_)
         siteNameLabel_->setVisible(visible);
-    setFormRowVisible(formLayout_, initialLocalPathRow_, visible);
-    setFormRowVisible(formLayout_, initialRemotePath_, visible);
-    setFormRowVisible(formLayout_, rememberLastPaths_, visible);
+    updatePathSectionVisibility();
+    adjustToContent();
 }
 
 void ConnectionDialog::setSiteName(const QString &name) {
@@ -715,8 +1063,11 @@ QString ConnectionDialog::siteName() const {
 }
 
 void ConnectionDialog::setInitialLocalPath(const QString &path) {
-    if (initialLocalPath_)
+    if (initialLocalPath_) {
         initialLocalPath_->setText(path);
+        if (!path.trimmed().isEmpty() && pathsSection_)
+            pathsSection_->setExpanded(true);
+    }
 }
 
 QString ConnectionDialog::initialLocalPath() const {
@@ -732,6 +1083,8 @@ void ConnectionDialog::setInitialRemotePath(const QString &path) {
     if (!normalized.startsWith('/'))
         normalized.prepend('/');
     initialRemotePath_->setText(normalized);
+    if (normalized != QLatin1String("/") && pathsSection_)
+        pathsSection_->setExpanded(true);
 }
 
 QString ConnectionDialog::initialRemotePath() const {
@@ -745,8 +1098,11 @@ QString ConnectionDialog::initialRemotePath() const {
 }
 
 void ConnectionDialog::setRememberLastPaths(bool remember) {
-    if (rememberLastPaths_)
+    if (rememberLastPaths_) {
         rememberLastPaths_->setChecked(remember);
+        if (remember && pathsSection_)
+            pathsSection_->setExpanded(true);
+    }
 }
 
 bool ConnectionDialog::rememberLastPaths() const {
@@ -774,6 +1130,11 @@ bool ConnectionDialog::saveSiteRequested() const {
 bool ConnectionDialog::saveCredentialsRequested() const {
     return quickConnectSaveOptionsVisible_ && saveCredentials_ &&
            saveCredentials_->isChecked();
+}
+
+void ConnectionDialog::setAcceptButtonText(const QString &text) {
+    if (acceptButton_ && !text.trimmed().isEmpty())
+        acceptButton_->setText(text);
 }
 
 openscp::SessionOptions ConnectionDialog::options() const {
@@ -1045,6 +1406,40 @@ void ConnectionDialog::setOptions(const openscp::SessionOptions &options) {
         !options.jump_private_key_path->empty())
         jumpKeyPath_->setText(
             QString::fromStdString(*options.jump_private_key_path));
+
+    const bool sshAuthSupported =
+        effectiveProtocol == openscp::Protocol::Sftp ||
+        effectiveProtocol == openscp::Protocol::Scp;
+    const bool hasSshKey =
+        (options.private_key_path && !options.private_key_path->empty()) ||
+        (options.private_key_passphrase &&
+         !options.private_key_passphrase->empty());
+    if (sshKeySection_)
+        sshKeySection_->setExpanded(sshAuthSupported && hasSshKey);
+
+    if (networkSection_)
+        networkSection_->setExpanded(hasJump || effectiveProxyType !=
+                                                    openscp::ProxyType::None);
+
+    const bool hasCustomSecurity =
+        (options.known_hosts_path && !options.known_hosts_path->empty()) ||
+        options.known_hosts_policy != openscp::KnownHostsPolicy::Strict ||
+        options.transfer_integrity_policy !=
+            openscp::TransferIntegrityPolicy::Optional ||
+        (effectiveProtocol == openscp::Protocol::Ftps &&
+         (!options.ftps_verify_peer ||
+          (options.ftps_ca_cert_path &&
+           !options.ftps_ca_cert_path->empty()))) ||
+        (effectiveProtocol == openscp::Protocol::WebDav &&
+         (!options.webdav_verify_peer ||
+          (options.webdav_ca_cert_path &&
+           !options.webdav_ca_cert_path->empty())));
+    if (securitySection_)
+        securitySection_->setExpanded(hasCustomSecurity);
+
+    updateProtocolUi(effectiveProtocol, false);
+    updateSectionSummaries();
+    adjustToContent();
 }
 
 void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol,
@@ -1052,6 +1447,9 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol,
     if (!host_ || !port_)
         return;
     const bool isWebDavProtocol = (protocol == openscp::Protocol::WebDav);
+    const bool isFtpsProtocol = (protocol == openscp::Protocol::Ftps);
+    const bool securityExpanded =
+        securitySection_ && securitySection_->isExpanded();
     const auto selectedWebDavScheme =
         webDavScheme_
             ? openscp::normalizeWebDavScheme(static_cast<openscp::WebDavScheme>(
@@ -1062,15 +1460,16 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol,
         setFormRowVisible(formLayout_, scpMode_, isScpProtocol);
     }
     if (formLayout_) {
-        const bool isFtpsProtocol = (protocol == openscp::Protocol::Ftps);
         if (ftpsMode_) {
             setFormRowVisible(formLayout_, ftpsMode_, isFtpsProtocol);
         }
         if (ftpsVerifyPeer_) {
-            setFormRowVisible(formLayout_, ftpsVerifyPeer_, isFtpsProtocol);
+            setFormRowVisible(formLayout_, ftpsVerifyPeer_,
+                              isFtpsProtocol && securityExpanded);
         }
         if (ftpsCaPathRow_) {
-            setFormRowVisible(formLayout_, ftpsCaPathRow_, isFtpsProtocol);
+            setFormRowVisible(formLayout_, ftpsCaPathRow_,
+                              isFtpsProtocol && securityExpanded);
         }
         if (webDavScheme_) {
             setFormRowVisible(formLayout_, webDavScheme_, isWebDavProtocol);
@@ -1079,7 +1478,7 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol,
             setFormRowVisible(formLayout_, webDavBasePath_, isWebDavProtocol);
         }
         const bool showWebDavTlsRows =
-            isWebDavProtocol &&
+            isWebDavProtocol && securityExpanded &&
             (selectedWebDavScheme == openscp::WebDavScheme::Https);
         if (webDavVerifyPeer_) {
             setFormRowVisible(formLayout_, webDavVerifyPeer_,
@@ -1129,58 +1528,68 @@ void ConnectionDialog::updateProtocolUi(openscp::Protocol protocol,
 
     const bool sshAuthSupported = (protocol == openscp::Protocol::Sftp ||
                                    protocol == openscp::Protocol::Scp);
-    if (formLayout_ && keyPathRow_)
-        setFormRowVisible(formLayout_, keyPathRow_, sshAuthSupported);
-    if (formLayout_ && keyPassRow_)
-        setFormRowVisible(formLayout_, keyPassRow_, sshAuthSupported);
+    const bool sshKeyExpanded = sshKeySection_ && sshKeySection_->isExpanded();
+    if (sshKeySection_)
+        sshKeySection_->setVisible(sshAuthSupported);
+    setFormRowsVisible(formLayout_, sshAuthSupported && sshKeyExpanded,
+                       {keyPathRow_, keyPassRow_});
 
-    if (formLayout_ && khPathRow_)
-        setFormRowVisible(formLayout_, khPathRow_, caps.supports_known_hosts);
-    if (formLayout_ && khPolicy_)
-        setFormRowVisible(formLayout_, khPolicy_, caps.supports_known_hosts);
-    if (formLayout_ && integrityPolicy_)
-        setFormRowVisible(formLayout_, integrityPolicy_, caps.can_checksum);
-
-    if (proxyType_) {
-        if (!caps.supports_proxy) {
-            const int directIdx = proxyType_->findData(
-                static_cast<int>(openscp::ProxyType::None));
-            if (directIdx >= 0)
-                proxyType_->setCurrentIndex(directIdx);
-        }
-        if (formLayout_)
-            setFormRowVisible(formLayout_, proxyType_, caps.supports_proxy);
-        const auto selectedProxyType = openscp::normalizeProxyType(
-            static_cast<openscp::ProxyType>(proxyType_->currentData().toInt()));
-        const bool showProxyRows =
-            caps.supports_proxy &&
-            (selectedProxyType != openscp::ProxyType::None);
-        if (formLayout_) {
-            setFormRowVisible(formLayout_, proxyHostPortRow_, showProxyRows);
-            setFormRowVisible(formLayout_, proxyUser_, showProxyRows);
-            setFormRowVisible(formLayout_, proxyPassRow_, showProxyRows);
-        }
-    }
+    const bool securityAvailable = caps.supports_known_hosts ||
+                                   caps.can_checksum || isFtpsProtocol ||
+                                   isWebDavProtocol;
+    if (securitySection_)
+        securitySection_->setVisible(securityAvailable);
+    setFormRowsVisible(formLayout_,
+                       caps.supports_known_hosts && securityExpanded,
+                       {khPathRow_, khPolicy_});
+    setFormRowVisible(formLayout_, integrityPolicy_,
+                      caps.can_checksum && securityExpanded);
 
     bool jumpSupported = caps.supports_jump_host;
 #ifdef Q_OS_WIN
     jumpSupported = false;
 #endif
-    if (jumpEnabled_) {
-        if (!jumpSupported && jumpEnabled_->isChecked())
-            jumpEnabled_->setChecked(false);
+    const bool networkExpanded =
+        networkSection_ && networkSection_->isExpanded();
+    if (networkSection_)
+        networkSection_->setVisible(caps.supports_proxy || jumpSupported);
+
+    if (proxyType_) {
+        if (!caps.supports_proxy) {
+            const int directIdx = proxyType_->findData(
+                static_cast<int>(openscp::ProxyType::None));
+            if (directIdx >= 0 && proxyType_->currentIndex() != directIdx) {
+                const QSignalBlocker blocker(proxyType_);
+                proxyType_->setCurrentIndex(directIdx);
+            }
+        }
         if (formLayout_)
-            setFormRowVisible(formLayout_, jumpEnabled_, jumpSupported);
+            setFormRowVisible(formLayout_, proxyType_,
+                              caps.supports_proxy && networkExpanded);
+        const auto selectedProxyType = openscp::normalizeProxyType(
+            static_cast<openscp::ProxyType>(proxyType_->currentData().toInt()));
+        const bool showProxyRows =
+            caps.supports_proxy && networkExpanded &&
+            (selectedProxyType != openscp::ProxyType::None);
+        setFormRowsVisible(formLayout_, showProxyRows,
+                           {proxyHostPortRow_, proxyUser_, proxyPassRow_});
+    }
+
+    if (jumpEnabled_) {
+        if (!jumpSupported && jumpEnabled_->isChecked()) {
+            const QSignalBlocker blocker(jumpEnabled_);
+            jumpEnabled_->setChecked(false);
+        }
+        if (formLayout_)
+            setFormRowVisible(formLayout_, jumpEnabled_,
+                              jumpSupported && networkExpanded);
         jumpEnabled_->setToolTip(
             jumpSupported ? QString()
                           : tr("Not available for the selected protocol."));
-        const bool showJumpRows = jumpSupported && jumpEnabled_->isChecked();
-        if (formLayout_) {
-            setFormRowVisible(formLayout_, jumpHostPortRow_, showJumpRows);
-            setFormRowVisible(formLayout_, jumpUser_, showJumpRows);
-            setFormRowVisible(formLayout_, jumpKeyPathRow_, showJumpRows);
-        }
+        const bool showJumpRows =
+            jumpSupported && networkExpanded && jumpEnabled_->isChecked();
+        setFormRowsVisible(formLayout_, showJumpRows,
+                           {jumpHostPortRow_, jumpUser_, jumpKeyPathRow_});
     }
-    if (layout())
-        layout()->activate();
+    updateSectionSummaries();
 }
