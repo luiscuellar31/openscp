@@ -35,8 +35,9 @@ pasos manuales, empaquetado y solución de problemas.
 
 ## Características principales
 
-- Navegación local y remota de doble panel con rutas navegables, historial,
-  favoritos, búsqueda y la posibilidad de arrastrar y soltar.
+- Navegación local y remota de doble panel con rutas planas y clicables, diálogo
+  para abrir directorios, historial, favoritos, búsqueda y la posibilidad de
+  arrastrar y soltar.
 - SFTP y SCP mediante libssh2; FTP, FTPS y WebDAV opcionales mediante libcurl.
 - Cola persistente con transferencias en paralelo, pausa, reanudación,
   reintentos, políticas de conflicto, límites de ancho de banda y archivos
@@ -50,6 +51,19 @@ pasos manuales, empaquetado y solución de problemas.
   comprobación opcionales.
 - Interfaces en inglés, español, francés y portugués.
 
+## Navegación por rutas
+
+Cada panel presenta la ubicación actual como un campo de ruta convencional. Haz
+clic en cualquier directorio superior dentro de la ruta para abrirlo, o en el
+directorio actual para mostrar el diálogo **Abrir directorio**. También puedes
+usar `Ctrl+L` (`Cmd+L` también está disponible en macOS) o el atajo Abrir de
+la plataforma: `Ctrl+O` en Linux y `Cmd+O` en macOS.
+
+El diálogo permite escribir una ruta directamente y consultar las rutas
+recientes y los favoritos del panel local o de la sesión remota seleccionada.
+Consulta [Atajos de teclado](docs/KEYBOARD_SHORTCUTS.md) para conocer todos los
+atajos y cuándo dependen del panel activo.
+
 Los protocolos disponibles dependen del paquete. Consulta la
 [matriz de protocolos](docs/PLATFORM_COMPATIBILITY.md#protocol-availability-by-build)
 antes de elegir un paquete.
@@ -57,6 +71,7 @@ antes de elegir un paquete.
 ## Documentación
 
 - [Compilación y empaquetado](docs/BUILDING.md)
+- [Atajos de teclado](docs/KEYBOARD_SHORTCUTS.md)
 - [Contribuciones y traducciones](CONTRIBUTING.md)
 - [Arquitectura](docs/ARCHITECTURE.md)
 - [Compatibilidad de plataformas y protocolos](docs/PLATFORM_COMPATIBILITY.md)

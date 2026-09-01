@@ -34,8 +34,8 @@ troubleshooting, see [Building OpenSCP](docs/BUILDING.md).
 
 ## Highlights
 
-- Local/remote dual-panel navigation with breadcrumbs, history, favorites,
-  search, and drag-and-drop.
+- Local/remote dual-panel navigation with flat clickable paths, an Open
+  Directory dialog, history, favorites, search, and drag-and-drop.
 - SFTP and SCP through libssh2; optional FTP, FTPS, and WebDAV through libcurl.
 - A persistent transfer queue with parallel workers, pause, resume, retry,
   conflict policies, bandwidth limits, and resumable `.part` files.
@@ -45,6 +45,19 @@ troubleshooting, see [Building OpenSCP](docs/BUILDING.md).
 - One-way synchronization with preview, filters, and optional checksum checks.
 - Spanish, French, and Portuguese interfaces in addition to English.
 
+## Path navigation
+
+Each panel presents its current location as one conventional path field. Click
+any parent directory within the path to open it, or click the current directory
+to open the Open Directory dialog. You can also use `Ctrl+L` (`Cmd+L` is
+additionally supported on macOS) or the platform Open shortcut: `Ctrl+O` on
+Linux and `Cmd+O` on macOS.
+
+The dialog accepts a path directly and provides recent paths and the favorites
+for the selected local panel or remote session. See
+[Keyboard shortcuts](docs/KEYBOARD_SHORTCUTS.md) for the complete shortcut
+reference and panel-specific behavior.
+
 Protocol availability depends on how the application was packaged. Consult the
 [protocol matrix](docs/PLATFORM_COMPATIBILITY.md#protocol-availability-by-build)
 before selecting an artifact.
@@ -52,6 +65,7 @@ before selecting an artifact.
 ## Documentation
 
 - [Building and packaging](docs/BUILDING.md)
+- [Keyboard shortcuts](docs/KEYBOARD_SHORTCUTS.md)
 - [Contributing and translations](CONTRIBUTING.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Platform and protocol compatibility](docs/PLATFORM_COMPATIBILITY.md)

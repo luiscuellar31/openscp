@@ -86,6 +86,19 @@ Use these classes instead of reading or writing their settings directly. A new
 schema needs an explicit migration, and corrupt or newer data must not be
 silently overwritten.
 
+## Path navigation
+
+Path navigation is split by responsibility:
+
+- `PathNavigationModel` normalizes local and remote paths into testable segments
+  and parent targets without depending on widgets.
+- `PathNavigationBar` renders those segments as one conventional path field and
+  emits navigation or open-dialog requests.
+- `OpenPathDialog` collects a typed path and exposes recent paths and favorites;
+  it does not read settings or navigate by itself.
+- `MainWindow` selects the local or remote presentation, performs navigation,
+  and persists history and favorites through `NavigationStore`.
+
 ## Adding a change
 
 `MainWindow` connects the application pieces and owns visible UI policy. The
