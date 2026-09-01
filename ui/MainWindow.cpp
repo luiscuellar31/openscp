@@ -12,6 +12,7 @@
 #include "PaneController.hpp"
 #include "PathNavigationBar.hpp"
 #include "PermissionsDialog.hpp"
+#include "PlatformFilePicker.hpp"
 #include "RemoteActionController.hpp"
 #include "RemoteModel.hpp"
 #include "RemoteOperationController.hpp"
@@ -212,6 +213,7 @@ MainWindow::~MainWindow() {
 }
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
+    uploadSourcePicker_ = openscpui::createPlatformFilePicker();
     QPointer<MainWindow> self(this);
     hostKeyPromptCoordinator_.setPresentPrompt(
         [self](const openscpui::HostKeyPromptCoordinator::Prompt &prompt) {

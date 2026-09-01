@@ -4,6 +4,7 @@
 #include "MainWindowSharedUtils.hpp"
 #include "PathNavigationBar.hpp"
 #include "PermissionsDialog.hpp"
+#include "PlatformFilePicker.hpp"
 #include "RemoteActionController.hpp"
 #include "RemoteModel.hpp"
 #include "RemoteOperationController.hpp"
@@ -20,7 +21,6 @@
 #include <QFileInfo>
 #include <QInputDialog>
 #include <QLineEdit>
-#include <QListView>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPointer>
@@ -29,7 +29,6 @@
 #include <QSet>
 #include <QStandardPaths>
 #include <QStatusBar>
-#include <QTreeView>
 
 namespace {
 
@@ -534,20 +533,16 @@ void MainWindow::uploadViaDialog() {
         }
         return;
     }
-    QFileDialog dlg(this, tr("Select files or folders to upload"), startDir);
-    dlg.setFileMode(QFileDialog::ExistingFiles);
-    dlg.setOption(QFileDialog::DontUseNativeDialog, true);
-    dlg.setViewMode(QFileDialog::Detail);
-    if (auto *listView = dlg.findChild<QListView *>("listView"))
-        listView->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    if (auto *treeView = dlg.findChild<QTreeView *>())
-        treeView->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    if (dlg.exec() != QDialog::Accepted)
+    const openscpui::PlatformFilePickerResult selection =
+        uploadSourcePicker_->selectUploadSources(
+            this, tr("Select files or folders to upload"), startDir);
+    if (selection.failed()) {
+        UiAlerts::warning(this, tr("Upload"), selection.errorMessage);
         return;
-    const QStringList picks = dlg.selectedFiles();
+    }
+    const QStringList &picks = selection.paths;
     if (picks.isEmpty())
         return;
-    uploadDir_ = QFileInfo(picks.first()).dir().absolutePath();
     const QString remoteBase = rightRemoteModel_->rootPath();
     QVector<QPair<QString, QString>> roots;
     roots.reserve(picks.size());
@@ -555,6 +550,11 @@ void MainWindow::uploadViaDialog() {
         const QFileInfo selectedPathInfo(pickedPath);
         if (!selectedPathInfo.isDir() && !selectedPathInfo.isFile())
             continue;
+        if (roots.isEmpty()) {
+            uploadDir_ = selectedPathInfo.isDir()
+                             ? selectedPathInfo.absoluteFilePath()
+                             : selectedPathInfo.dir().absolutePath();
+        }
         roots.push_back(
             {selectedPathInfo.absoluteFilePath(),
              joinRemotePath(remoteBase, selectedPathInfo.fileName())});

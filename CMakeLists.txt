@@ -13,6 +13,12 @@ endif()
 
 project(OpenSCP LANGUAGES CXX VERSION 1.0.0)
 
+if(APPLE)
+    enable_language(OBJCXX)
+    set(CMAKE_OBJCXX_STANDARD 20)
+    set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
+endif()
+
 if(WIN32)
     option(OPENSCP_ENABLE_EXPERIMENTAL_WINDOWS_PORT
         "Allow configuration of the unsupported Windows port scaffold"
@@ -346,6 +352,9 @@ target_link_libraries(openscp_ui_logic
 )
 
 add_library(openscp_ui_widgets STATIC
+    ui/PlatformFilePicker.hpp
+    ui/PlatformFilePicker_p.hpp
+    ui/PlatformFilePicker.cpp
     ui/OpenPathDialog.hpp
     ui/OpenPathDialog.cpp
     ui/PathNavigationBar.hpp
@@ -368,6 +377,19 @@ add_library(openscp_ui_widgets STATIC
     ui/AboutDialog.hpp
     ui/AboutDialog.cpp
 )
+
+if(APPLE)
+    target_sources(openscp_ui_widgets PRIVATE
+        ui/PlatformFilePicker_mac.mm)
+    target_link_libraries(openscp_ui_widgets PRIVATE "-framework AppKit")
+elseif(WIN32)
+    target_sources(openscp_ui_widgets PRIVATE
+        ui/PlatformFilePicker_win.cpp)
+    target_link_libraries(openscp_ui_widgets PRIVATE Ole32 Shell32)
+else()
+    target_sources(openscp_ui_widgets PRIVATE
+        ui/PlatformFilePicker_qt.cpp)
+endif()
 
 target_include_directories(openscp_ui_widgets
     PUBLIC ${CMAKE_SOURCE_DIR}/ui

@@ -31,6 +31,7 @@ class SyncCoordinator;
 namespace openscpui {
 class PaneController;
 class PathNavigationBar;
+class PlatformFilePicker;
 class RemoteActionController;
 class SessionController;
 } // namespace openscpui
@@ -232,6 +233,7 @@ class MainWindow : public QMainWindow {
     // Downloads
     QString downloadDir_; // last local folder chosen for downloads
     QString uploadDir_;   // last local folder chosen for uploads
+    std::unique_ptr<openscpui::PlatformFilePicker> uploadSourcePicker_;
 
     void showHostKeyPrompt(
         const openscpui::HostKeyPromptCoordinator::Prompt &prompt);
