@@ -5055,4 +5055,62 @@ Destination : %3</translation>
         <translation>Retirer les tâches et les données partielles</translation>
     </message>
 </context>
+<context>
+    <name>openscpui::PathNavigationBar</name>
+    <message>
+        <location filename="../ui/PathNavigationBar.cpp" line="29"/>
+        <source>Current folder path</source>
+        <translation>Chemin du dossier actuel</translation>
+    </message>
+    <message>
+        <location filename="../ui/PathNavigationBar.cpp" line="31"/>
+        <location filename="../ui/PathNavigationBar.cpp" line="124"/>
+        <source>Click the current path or press %1 to open a directory.</source>
+        <translation>Cliquez sur le chemin actuel ou appuyez sur %1 pour ouvrir un dossier.</translation>
+    </message>
+    <message>
+        <location filename="../ui/PathNavigationBar.cpp" line="134"/>
+        <source>Open directory…</source>
+        <translation>Ouvrir un dossier…</translation>
+    </message>
+    <message>
+        <location filename="../ui/PathNavigationBar.cpp" line="135"/>
+        <source>Open %1</source>
+        <translation>Ouvrir %1</translation>
+    </message>
+</context>
+<context>
+    <name>openscpui::OpenPathDialog</name>
+    <message>
+        <location filename="../ui/OpenPathDialog.cpp" line="31"/>
+        <location filename="../ui/OpenPathDialog.cpp" line="43"/>
+        <source>Open directory</source>
+        <translation>Ouvrir un dossier</translation>
+    </message>
+    <message>
+        <location filename="../ui/OpenPathDialog.cpp" line="73"/>
+        <source>Favorites</source>
+        <translation>Favoris</translation>
+    </message>
+    <message>
+        <location filename="../ui/OpenPathDialog.cpp" line="82"/>
+        <source>Add</source>
+        <translation>Ajouter</translation>
+    </message>
+    <message>
+        <location filename="../ui/OpenPathDialog.cpp" line="83"/>
+        <source>Remove</source>
+        <translation>Retirer</translation>
+    </message>
+    <message>
+        <location filename="../ui/OpenPathDialog.cpp" line="97"/>
+        <source>Open</source>
+        <translation>Ouvrir</translation>
+    </message>
+    <message>
+        <location filename="../ui/OpenPathDialog.cpp" line="153"/>
+        <source>No favorites</source>
+        <translation>Aucun favori</translation>
+    </message>
+</context>
 </TS>

@@ -10,7 +10,6 @@
 #include <QAction>
 #include <QDir>
 #include <QFileSystemModel>
-#include <QLineEdit>
 #include <QMainWindow>
 #include <QPair>
 #include <QPointer>
@@ -31,6 +30,7 @@ class LocalTreeDiscovery;
 class SyncCoordinator;
 namespace openscpui {
 class PaneController;
+class PathNavigationBar;
 class RemoteActionController;
 class SessionController;
 } // namespace openscpui
@@ -74,8 +74,6 @@ class MainWindow : public QMainWindow {
     private slots:
     void chooseLeftDir();
     void chooseRightDir();
-    void leftPathEntered();
-    void rightPathEntered();
     void copyLeftToRight();         // F5
     void copyRightToLeft();         // remote -> left (no dialog)
     void moveRightToLeft();         // move selection from right panel to left
@@ -138,6 +136,7 @@ class MainWindow : public QMainWindow {
     void initializeSyncCoordinator();
     bool isScpTransferMode() const;
     void activateScpTransferModeUi(bool enabled);
+    void showOpenPathDialog(bool rightPane);
     void applyPreferences();
     // Remote state (a single active session)
     RemoteOperationController *remoteOps_ = nullptr;
@@ -168,10 +167,8 @@ class MainWindow : public QMainWindow {
     QPushButton *scpQuickUploadBtn_ = nullptr;
     QPushButton *scpQuickDownloadBtn_ = nullptr;
 
-    QLineEdit *leftPath_ = nullptr;
-    QLineEdit *rightPath_ = nullptr;
-    QToolBar *leftBreadcrumbsBar_ = nullptr;
-    QToolBar *rightBreadcrumbsBar_ = nullptr;
+    openscpui::PathNavigationBar *leftPath_ = nullptr;
+    openscpui::PathNavigationBar *rightPath_ = nullptr;
     QSplitter *mainSplitter_ = nullptr;
 
     // Actions
@@ -319,11 +316,8 @@ class MainWindow : public QMainWindow {
     void searchItemsInCurrentFolder(QTreeView *view, const QString &panelLabel);
     void rebuildContextMenu(QMenu *menu,
                             const QVector<QAction *> &entries) const;
-    void refreshLeftBreadcrumbs();
-    void refreshRightBreadcrumbs();
-    void rebuildLocalBreadcrumbs(QToolBar *bar, const QString &path,
-                                 bool rightPane);
-    void rebuildRemoteBreadcrumbs(const QString &path);
+    void refreshLeftPathNavigation();
+    void refreshRightPathNavigation();
     void restoreMainWindowUiState();
     void saveMainWindowUiState() const;
     void saveRightHeaderState(bool remoteMode) const;

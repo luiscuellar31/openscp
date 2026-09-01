@@ -2,6 +2,7 @@
 #include "AppSettings.hpp"
 #include "MainWindow.hpp"
 #include "MainWindowSharedUtils.hpp"
+#include "PathNavigationBar.hpp"
 #include "PermissionsDialog.hpp"
 #include "RemoteActionController.hpp"
 #include "RemoteModel.hpp"
@@ -49,7 +50,7 @@ void MainWindow::goUpRight() {
     if (rightIsRemote_) {
         QString cur = rightRemoteModel_
                           ? rightRemoteModel_->rootPath()
-                          : (rightPath_ ? rightPath_->text() : QString());
+                          : (rightPath_ ? rightPath_->path() : QString());
         cur = normalizeRemotePath(cur);
         if (cur == "/" || cur.isEmpty())
             return;
@@ -59,7 +60,7 @@ void MainWindow::goUpRight() {
         QString parent = (slash <= 0) ? "/" : cur.left(slash);
         setRightRemoteRoot(parent);
     } else {
-        QString cur = rightPath_->text();
+        QString cur = rightPath_->path();
         QDir currentDir(cur);
         if (!currentDir.cdUp())
             return;
@@ -91,7 +92,7 @@ void MainWindow::openRightRemoteTerminal() {
     const openscp::SessionOptions &sessionOptions = *options;
     const QString remotePath = normalizeRemotePath(
         rightRemoteModel_ ? rightRemoteModel_->rootPath()
-                          : (rightPath_ ? rightPath_->text() : QString()));
+                          : (rightPath_ ? rightPath_->path() : QString()));
     openscpui::AppSettings settings;
     const bool forceInteractiveLogin =
         settings
@@ -149,9 +150,9 @@ void MainWindow::setRightRemoteRoot(const QString &path) {
         return;
     if (!rightRemoteModel_) {
         const QString normalized = normalizeRemotePath(path);
-        rightPath_->setText(normalized);
+        rightPath_->setPath(normalized);
         addRecentRemotePath(normalized);
-        refreshRightBreadcrumbs();
+        refreshRightPathNavigation();
         updateDeleteShortcutEnables();
         statusBar()->showMessage(tr("Remote path: %1").arg(normalized), 3000);
         return;
@@ -207,8 +208,8 @@ void MainWindow::requestRemoteListing(const QString &path, bool refresh,
         initialRemoteFallbackAttempted_ = false;
     if (!refresh)
         rightRemoteModel_->setLoading(normalized);
-    rightPath_->setText(normalized);
-    refreshRightBreadcrumbs();
+    rightPath_->setPath(normalized);
+    refreshRightPathNavigation();
     rightView_->setEnabled(false);
     statusBar()->showMessage(refresh ? tr("Refreshing remote folder…")
                                      : tr("Opening remote folder…"),
@@ -326,7 +327,7 @@ void MainWindow::downloadRightToLeft() {
     }
     if (isScpTransferMode()) {
         const QString baseRemote = normalizeRemotePath(
-            rightPath_ ? rightPath_->text() : QStringLiteral("/"));
+            rightPath_ ? rightPath_->path() : QStringLiteral("/"));
         bool inputAccepted = false;
         QString remoteInput = QInputDialog::getText(
             this, tr("Download"),
@@ -401,7 +402,7 @@ void MainWindow::downloadRightToLeft() {
 // - Remote -> enqueue downloads (non-blocking).
 // - Local  -> local-to-local copy (with overwrite policy).
 void MainWindow::copyRightToLeft() {
-    QDir dst(leftPath_->text());
+    QDir dst(leftPath_->path());
     if (!dst.exists()) {
         UiAlerts::warning(
             this, tr("Invalid destination"),
@@ -459,7 +460,7 @@ void MainWindow::moveRightToLeft() {
         UiAlerts::information(this, tr("Move"), tr("Nothing selected."));
         return;
     }
-    QDir dst(leftPath_->text());
+    QDir dst(leftPath_->path());
     if (!dst.exists()) {
         UiAlerts::warning(
             this, tr("Invalid destination"),
@@ -515,7 +516,7 @@ void MainWindow::uploadViaDialog() {
             return;
         uploadDir_ = QFileInfo(picks.first()).dir().absolutePath();
         const QString remoteBase = normalizeRemotePath(
-            rightPath_ ? rightPath_->text() : QStringLiteral("/"));
+            rightPath_ ? rightPath_->path() : QStringLiteral("/"));
         int enqueuedCount = 0;
         for (const QString &localPath : picks) {
             const QFileInfo localFileInfo(localPath);
@@ -575,7 +576,7 @@ void MainWindow::newDirRight() {
         remoteActionController_->createDirectory(rightRemoteModel_->rootPath(),
                                                  name);
     } else {
-        QDir base(rightPath_->text());
+        QDir base(rightPath_->path());
         if (!base.mkpath(base.filePath(name))) {
             UiAlerts::critical(this, tr("Local"),
                                tr("Could not create folder."));
@@ -596,7 +597,7 @@ void MainWindow::newFileRight() {
         remoteActionController_->createFile(rightRemoteModel_->rootPath(),
                                             name);
     } else {
-        QDir base(rightPath_->text());
+        QDir base(rightPath_->path());
         const QString path = base.filePath(name);
         if (QFileInfo::exists(path)) {
             if (UiAlerts::question(
@@ -667,7 +668,7 @@ void MainWindow::renameRightSelected() {
             UiAlerts::critical(this, tr("Local"), tr("Could not rename."));
             return;
         }
-        setRightRoot(rightPath_->text());
+        setRightRoot(rightPath_->path());
     }
 }
 
@@ -712,7 +713,7 @@ void MainWindow::deleteRightSelected() {
     statusBar()->showMessage(
         tr("Deleted: %1  |  Failed: %2").arg(deletedCount).arg(failedCount),
         5000);
-    setRightRoot(rightPath_->text());
+    setRightRoot(rightPath_->path());
 }
 
 // Show context menu for the right pane based on current state.
@@ -730,10 +731,10 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
     if (rightIsRemote_) {
         const QString cur = normalizeRemotePath(
             rightRemoteModel_ ? rightRemoteModel_->rootPath()
-                              : (rightPath_ ? rightPath_->text() : QString()));
+                              : (rightPath_ ? rightPath_->path() : QString()));
         canGoUp = (!cur.isEmpty() && cur != "/");
     } else {
-        QDir currentDir(rightPath_ ? rightPath_->text() : QString());
+        QDir currentDir(rightPath_ ? rightPath_->path() : QString());
         canGoUp = currentDir.cdUp();
     }
 

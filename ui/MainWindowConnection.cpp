@@ -3,6 +3,7 @@
 #include "ConnectionDialog.hpp"
 #include "MainWindow.hpp"
 #include "MainWindowSharedUtils.hpp"
+#include "PathNavigationBar.hpp"
 #include "RemoteModel.hpp"
 #include "RemoteOperationController.hpp"
 #include "SavedSitesPersistence.hpp"
@@ -418,8 +419,8 @@ void MainWindow::applyDisconnectLocalUiState() {
     activateScpTransferModeUi(false);
     transferUiController_.reset();
     restoreRightHeaderState(false);
-    if (QDir(rightPath_->text()).exists()) {
-        setRightRoot(rightPath_->text());
+    if (QDir(rightPath_->path()).exists()) {
+        setRightRoot(rightPath_->path());
     } else {
         setRightRoot(QDir::homePath());
     }
@@ -584,12 +585,12 @@ void MainWindow::persistActiveSitePaths() {
             localPath = leftModel_->filePath(rootIndex).trimmed();
     }
     if (localPath.isEmpty() && leftPath_)
-        localPath = leftPath_->text().trimmed();
+        localPath = leftPath_->path().trimmed();
     QString remotePath;
     if (rightRemoteModel_)
         remotePath = rightRemoteModel_->rootPath().trimmed();
     if (remotePath.isEmpty() && rightPath_)
-        remotePath = rightPath_->text().trimmed();
+        remotePath = rightPath_->path().trimmed();
     if (remotePath.isEmpty())
         remotePath = QStringLiteral("/");
 
@@ -1546,9 +1547,9 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
                         return;
                     if (!loadOk)
                         return;
-                    rightPath_->setText(path);
+                    rightPath_->setPath(path);
                     addRecentRemotePath(path);
-                    refreshRightBreadcrumbs();
+                    refreshRightPathNavigation();
                     if (rightIsRemote_) {
                         updateRemoteMutationCapability();
                         updateDeleteShortcutEnables();
@@ -1573,7 +1574,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         const QString initialRemotePath =
             activeSavedSiteContext_ ? activeSavedSiteContext_->initialRemotePath
                                     : QStringLiteral("/");
-        rightPath_->setText(initialRemotePath.trimmed().isEmpty()
+        rightPath_->setPath(initialRemotePath.trimmed().isEmpty()
                                 ? QStringLiteral("/")
                                 : initialRemotePath);
         rightIsRemote_ = true;
@@ -1584,7 +1585,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
             transferMgr_->setClient(sessionController_->client());
             transferMgr_->setSessionOptions(opt);
         }
-        requestRemoteListing(rightPath_->text(), false, true);
+        requestRemoteListing(rightPath_->path(), false, true);
         applyConnectedActions(true);
         finishConnectedUi();
         updateRemoteMutationCapability();
@@ -1593,13 +1594,13 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     }
 
     rightView_->setModel(rightLocalModel_);
-    rightPath_->setText(QStringLiteral("/"));
+    rightPath_->setPath(QStringLiteral("/"));
     rightIsRemote_ = true;
     sessionController_->setOptions(opt);
     addRecentRemotePath(QStringLiteral("/"));
     activateScpTransferModeUi(true);
     transferUiController_.reset();
-    refreshRightBreadcrumbs();
+    refreshRightPathNavigation();
     rightRemoteMutationsSupported_ = false;
     if (transferMgr_) {
         transferMgr_->setSessionIdentity(remoteNavigationScope());

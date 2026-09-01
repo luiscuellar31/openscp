@@ -8,7 +8,9 @@
 #include "DragAwareTreeView.hpp"
 #include "MainWindowSharedUtils.hpp"
 #include "NavigationScope.hpp"
+#include "OpenPathDialog.hpp"
 #include "PaneController.hpp"
+#include "PathNavigationBar.hpp"
 #include "PermissionsDialog.hpp"
 #include "RemoteActionController.hpp"
 #include "RemoteModel.hpp"
@@ -171,15 +173,6 @@ QToolBar *createPaneIconToolbar(const QString &title, QWidget *parent) {
     return bar;
 }
 
-QToolBar *createBreadcrumbToolbar(const QString &title, QWidget *parent) {
-    auto *bar = new QToolBar(title, parent);
-    bar->setMovable(false);
-    bar->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    bar->setIconSize(QSize(14, 14));
-    bar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    return bar;
-}
-
 bool focusWithinWidget(QWidget *focus, QWidget *root) {
     if (!focus || !root)
         return false;
@@ -270,20 +263,30 @@ void MainWindow::initializePanels(const QString &home) {
     configurePanelDropTarget(rightView_, this);
     configurePanelDropTarget(leftView_, this);
 
-    // Path entries (top)
-    leftPath_ = new QLineEdit(home, this);
-    rightPath_ = new QLineEdit(home, this);
-    leftPath_->setClearButtonEnabled(true);
-    rightPath_->setClearButtonEnabled(true);
-    connect(leftPath_, &QLineEdit::returnPressed, this,
-            &MainWindow::leftPathEntered);
-    connect(rightPath_, &QLineEdit::returnPressed, this,
-            &MainWindow::rightPathEntered);
-
     // Central splitter with two panes
     mainSplitter_ = new QSplitter(this);
     auto *leftPane = new QWidget(this);
     auto *rightPane = new QWidget(this);
+
+    // Keep the path visually flat while allowing direct navigation through
+    // each parent segment. Manual entry lives in a dedicated dialog.
+    leftPath_ = new openscpui::PathNavigationBar(openscpui::PathFlavor::Local,
+                                                 home, leftPane);
+    rightPath_ = new openscpui::PathNavigationBar(openscpui::PathFlavor::Local,
+                                                  home, rightPane);
+    connect(leftPath_, &openscpui::PathNavigationBar::pathRequested, this,
+            [this](const QString &path) { setLeftRoot(path); });
+    connect(rightPath_, &openscpui::PathNavigationBar::pathRequested, this,
+            [this](const QString &path) {
+                if (rightIsRemote_)
+                    setRightRemoteRoot(path);
+                else
+                    setRightRoot(path);
+            });
+    connect(leftPath_, &openscpui::PathNavigationBar::openDialogRequested, this,
+            [this] { showOpenPathDialog(false); });
+    connect(rightPath_, &openscpui::PathNavigationBar::openDialogRequested,
+            this, [this] { showOpenPathDialog(true); });
 
     auto *leftLayout = new QVBoxLayout(leftPane);
     auto *rightLayout = new QVBoxLayout(rightPane);
@@ -322,8 +325,6 @@ void MainWindow::initializePanels(const QString &home) {
 
     // Left pane sub‑toolbar
     leftPaneBar_ = createPaneIconToolbar(QStringLiteral("LeftBar"), leftPane);
-    leftBreadcrumbsBar_ =
-        createBreadcrumbToolbar(QStringLiteral("LeftBreadcrumbs"), leftPane);
     // Helper for icons from local resources
     auto resIcon = [](const char *fname) -> QIcon {
         return QIcon(QStringLiteral(":/assets/icons/") + QLatin1String(fname));
@@ -410,16 +411,13 @@ void MainWindow::initializePanels(const QString &home) {
     leftPaneBar_->addAction(actNewDirLeft_);
     leftLayout->addWidget(leftPaneBar_);
 
-    // Left panel: toolbar -> breadcrumbs -> path -> view
-    leftLayout->addWidget(leftBreadcrumbsBar_);
+    // Left panel: toolbar -> flat path bar -> view
     leftLayout->addWidget(leftPath_);
     leftLayout->addWidget(leftView_);
 
     // Right pane sub‑toolbar
     rightPaneBar_ =
         createPaneIconToolbar(QStringLiteral("RightBar"), rightPane);
-    rightBreadcrumbsBar_ =
-        createBreadcrumbToolbar(QStringLiteral("RightBreadcrumbs"), rightPane);
     actUpRight_ =
         rightPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpRight);
     setActionIconAndTooltip(actUpRight_, resIcon("action-go-up.svg"));
@@ -556,18 +554,15 @@ void MainWindow::initializePanels(const QString &home) {
                 const bool inRightPanel =
                     focusWithinWidget(focus, rightView_) ||
                     focusWithinWidget(focus, rightPath_) ||
-                    focusWithinWidget(focus, rightPaneBar_) ||
-                    focusWithinWidget(focus, rightBreadcrumbsBar_);
+                    focusWithinWidget(focus, rightPaneBar_);
                 if (inRightPanel) {
                     searchItemsInCurrentFolder(rightView_, rightSearchLabel());
                     return;
                 }
 
-                const bool inLeftPanel =
-                    focusWithinWidget(focus, leftView_) ||
-                    focusWithinWidget(focus, leftPath_) ||
-                    focusWithinWidget(focus, leftPaneBar_) ||
-                    focusWithinWidget(focus, leftBreadcrumbsBar_);
+                const bool inLeftPanel = focusWithinWidget(focus, leftView_) ||
+                                         focusWithinWidget(focus, leftPath_) ||
+                                         focusWithinWidget(focus, leftPaneBar_);
                 if (inLeftPanel) {
                     searchItemsInCurrentFolder(leftView_, leftSearchLabel());
                     return;
@@ -578,6 +573,31 @@ void MainWindow::initializePanels(const QString &home) {
                 else
                     searchItemsInCurrentFolder(leftView_, leftSearchLabel());
             });
+
+    const auto openFocusedPath = [this] {
+        QWidget *focus = QApplication::focusWidget();
+        const bool inRightPanel = focusWithinWidget(focus, rightView_) ||
+                                  focusWithinWidget(focus, rightPath_) ||
+                                  focusWithinWidget(focus, rightPaneBar_);
+        if (inRightPanel) {
+            rightPath_->requestOpenDialog();
+            return;
+        }
+        leftPath_->requestOpenDialog();
+    };
+    auto *scEditPath =
+        new QShortcut(QKeySequence(QStringLiteral("Ctrl+L")), this);
+    scEditPath->setContext(Qt::WindowShortcut);
+    connect(scEditPath, &QShortcut::activated, this, openFocusedPath);
+#ifdef Q_OS_MACOS
+    auto *scEditPathMac =
+        new QShortcut(QKeySequence(QStringLiteral("Meta+L")), this);
+    scEditPathMac->setContext(Qt::WindowShortcut);
+    connect(scEditPathMac, &QShortcut::activated, this, openFocusedPath);
+#endif
+    auto *scOpenPath = new QShortcut(QKeySequence(QKeySequence::Open), this);
+    scOpenPath->setContext(Qt::WindowShortcut);
+    connect(scOpenPath, &QShortcut::activated, this, openFocusedPath);
     // Disable strictly-remote actions at startup
     if (actDownloadF7_)
         actDownloadF7_->setEnabled(false);
@@ -589,9 +609,8 @@ void MainWindow::initializePanels(const QString &home) {
     if (actNewFileRight_)
         actNewFileRight_->setEnabled(false);
 
-    // Right panel: toolbar -> breadcrumbs -> path -> view
+    // Right panel: toolbar -> flat path bar -> view
     rightLayout->addWidget(rightPaneBar_);
-    rightLayout->addWidget(rightBreadcrumbsBar_);
     rightLayout->addWidget(rightPath_);
     rightLayout->addWidget(rightContentStack_);
 
@@ -668,6 +687,7 @@ void MainWindow::initializeMainToolbar() {
                                              &MainWindow::showHistoryMenu);
     actShowHistory_->setIcon(mainWindowActionIcon("action-open-history.svg"));
     actShowHistory_->setToolTip(actShowHistory_->text());
+    mainToolbar->addSeparator();
     actShowFavorites_ = mainToolbar->addAction(
         tr("Favorites"), this, &MainWindow::showFavoritesDialog);
     actShowFavorites_->setObjectName(QStringLiteral("showFavoritesAction"));
@@ -847,8 +867,8 @@ void MainWindow::initializeRuntimeState() {
     statusBar()->showMessage(tr("Ready"));
     setWindowTitle(tr("OpenSCP — local/local (click Connect for remote)"));
     resize(1100, 650);
-    refreshLeftBreadcrumbs();
-    refreshRightBreadcrumbs();
+    refreshLeftPathNavigation();
+    refreshRightPathNavigation();
     restoreMainWindowUiState();
 
     remoteOps_ = new RemoteOperationController(this);
@@ -1423,106 +1443,20 @@ void MainWindow::restoreMainWindowUiState() {
     restoreRightHeaderState(false);
 }
 
-void MainWindow::rebuildLocalBreadcrumbs(QToolBar *bar, const QString &path,
-                                         bool rightPane) {
-    if (!bar)
-        return;
-    bar->clear();
-
-    QString normalized = QDir::fromNativeSeparators(path.trimmed());
-    if (normalized.isEmpty())
-        normalized = QDir::homePath();
-    if (!QFileInfo(normalized).isAbsolute()) {
-        normalized = QDir::current().absoluteFilePath(normalized);
-    }
-    normalized = QDir::cleanPath(normalized);
-
-    QVector<QPair<QString, QString>> crumbs;
-#ifdef Q_OS_WIN
-    if (normalized.size() >= 2 && normalized[1] == QLatin1Char(':')) {
-        const QString drive = normalized.left(2);
-        QString acc = drive + QLatin1Char('/');
-        crumbs.push_back({drive, acc});
-        const QStringList parts =
-            normalized.mid(2).split('/', Qt::SkipEmptyParts);
-        for (const QString &part : parts) {
-            if (!acc.endsWith('/'))
-                acc += QLatin1Char('/');
-            acc += part;
-            crumbs.push_back({part, acc});
-        }
-    } else
-#endif
-    {
-        QString acc = QStringLiteral("/");
-        crumbs.push_back({QStringLiteral("/"), acc});
-        const QStringList parts = normalized.split('/', Qt::SkipEmptyParts);
-        for (const QString &part : parts) {
-            if (!acc.endsWith('/'))
-                acc += QLatin1Char('/');
-            acc += part;
-            crumbs.push_back({part, acc});
-        }
-    }
-
-    for (int crumbIndex = 0; crumbIndex < crumbs.size(); ++crumbIndex) {
-        const QString label = crumbs[crumbIndex].first;
-        const QString target = crumbs[crumbIndex].second;
-        QAction *act = bar->addAction(label);
-        act->setToolTip(target);
-        connect(act, &QAction::triggered, this, [this, rightPane, target] {
-            if (rightPane)
-                setRightRoot(target);
-            else
-                setLeftRoot(target);
-        });
-        if (crumbIndex + 1 < crumbs.size())
-            bar->addSeparator();
-    }
-}
-
-void MainWindow::rebuildRemoteBreadcrumbs(const QString &path) {
-    if (!rightBreadcrumbsBar_)
-        return;
-    rightBreadcrumbsBar_->clear();
-
-    const QString normalized = normalizeRemotePath(path);
-
-    QVector<QPair<QString, QString>> crumbs;
-    QString acc = QStringLiteral("/");
-    crumbs.push_back({QStringLiteral("/"), acc});
-    const QStringList parts = normalized.split('/', Qt::SkipEmptyParts);
-    for (const QString &part : parts) {
-        if (!acc.endsWith('/'))
-            acc += QLatin1Char('/');
-        acc += part;
-        crumbs.push_back({part, acc});
-    }
-
-    for (int crumbIndex = 0; crumbIndex < crumbs.size(); ++crumbIndex) {
-        const QString label = crumbs[crumbIndex].first;
-        const QString target = crumbs[crumbIndex].second;
-        QAction *act = rightBreadcrumbsBar_->addAction(label);
-        act->setToolTip(target);
-        connect(act, &QAction::triggered, this,
-                [this, target] { setRightRemoteRoot(target); });
-        if (crumbIndex + 1 < crumbs.size())
-            rightBreadcrumbsBar_->addSeparator();
-    }
-}
-
-void MainWindow::refreshLeftBreadcrumbs() {
-    const QString path = leftPath_ ? leftPath_->text() : QString();
-    rebuildLocalBreadcrumbs(leftBreadcrumbsBar_, path, false);
+void MainWindow::refreshLeftPathNavigation() {
+    const QString path = leftPath_ ? leftPath_->path() : QString();
+    if (leftPath_)
+        leftPath_->setPathFlavor(openscpui::PathFlavor::Local);
     refreshFavoriteToggleAction(actFavoriteToggleLeft_, path, false);
 }
 
-void MainWindow::refreshRightBreadcrumbs() {
-    const QString path = rightPath_ ? rightPath_->text() : QString();
-    if (rightIsRemote_)
-        rebuildRemoteBreadcrumbs(path);
-    else
-        rebuildLocalBreadcrumbs(rightBreadcrumbsBar_, path, true);
+void MainWindow::refreshRightPathNavigation() {
+    const QString path = rightPath_ ? rightPath_->path() : QString();
+    if (rightPath_) {
+        rightPath_->setPathFlavor(rightIsRemote_
+                                      ? openscpui::PathFlavor::Remote
+                                      : openscpui::PathFlavor::Local);
+    }
     refreshFavoriteToggleAction(actFavoriteToggleRight_, path, rightIsRemote_);
 }
 
@@ -1538,8 +1472,8 @@ void MainWindow::searchItemsInCurrentFolder(QTreeView *view,
     context.remoteOperations = remoteOps_;
     context.panelLabel = panelLabel;
     context.localBasePath = view == leftView_
-                                ? (leftPath_ ? leftPath_->text() : QString())
-                                : (rightPath_ ? rightPath_->text() : QString());
+                                ? (leftPath_ ? leftPath_->path() : QString())
+                                : (rightPath_ ? rightPath_->path() : QString());
     context.isRemote = view == rightView_ && rightIsRemote_;
     context.includeHidden = prefShowHidden_;
     context.remoteActivitySucceeded = [this] {
@@ -1588,9 +1522,8 @@ void MainWindow::activateScpTransferModeUi(bool enabled) {
     if (enabled && scpTransferPanel_) {
         rightContentStack_->setCurrentWidget(scpTransferPanel_);
         if (rightPath_) {
-            rightPath_->setPlaceholderText(tr("/remote/folder"));
-            if (rightPath_->text().trimmed().isEmpty())
-                rightPath_->setText(QStringLiteral("/"));
+            if (rightPath_->path().trimmed().isEmpty())
+                rightPath_->setPath(QStringLiteral("/"));
         }
         if (scpModeHintLabel_) {
             scpModeHintLabel_->setText(
@@ -1602,8 +1535,6 @@ void MainWindow::activateScpTransferModeUi(bool enabled) {
     }
 
     rightContentStack_->setCurrentWidget(rightView_);
-    if (rightPath_)
-        rightPath_->setPlaceholderText(QString());
 }
 
 void MainWindow::applyPreferences() {
@@ -1760,6 +1691,76 @@ QString MainWindow::remoteNavigationScope() const {
     return openscpui::remoteEndpointScope(*options);
 }
 
+void MainWindow::showOpenPathDialog(bool rightPane) {
+    const bool remote = rightPane && rightIsRemote_;
+    const auto location = remote ? openscpui::NavigationStore::Location::Remote
+                                 : openscpui::NavigationStore::Location::Local;
+    const QString remoteScope = remote ? remoteNavigationScope() : QString();
+    const QString currentPath =
+        rightPane ? (rightPath_ ? rightPath_->path() : QString())
+                  : (leftPath_ ? leftPath_->path() : QString());
+    const QStringList recentPaths =
+        remote ? navigationStore_.recentRemotePaths(remoteScope)
+               : navigationStore_.recentLocalPaths();
+
+    openscpui::OpenPathDialog dialog(
+        currentPath, recentPaths,
+        navigationStore_.favorites(location, remoteScope),
+        remote ? Qt::CaseSensitive : Qt::CaseInsensitive,
+        mainWindowActionIcon(remote ? "action-open-folder-remote.svg"
+                                    : "action-open-folder.svg"),
+        this);
+
+    const auto refreshDialogFavorites = [&] {
+        dialog.setFavorites(navigationStore_.favorites(location, remoteScope));
+    };
+    connect(&dialog, &openscpui::OpenPathDialog::addFavoriteRequested, &dialog,
+            [&, location, remote, remoteScope](const QString &path) {
+                const QString normalized =
+                    remote
+                        ? openscpui::NavigationStore::normalizeRemotePath(path)
+                        : openscpui::NavigationStore::normalizeLocalPath(path);
+                if (normalized.isEmpty() || (remote && remoteScope.isEmpty())) {
+                    return;
+                }
+                if (!navigationStore_.isFavorite(location, normalized,
+                                                 remoteScope)) {
+                    navigationStore_.toggleFavorite(location, normalized,
+                                                    remoteScope);
+                    statusBar()->showMessage(tr("Favorite added"), 2500);
+                }
+                refreshFavoritesActions();
+                refreshDialogFavorites();
+            });
+    connect(
+        &dialog, &openscpui::OpenPathDialog::removeFavoriteRequested, &dialog,
+        [&, location, remote, remoteScope](const QString &path) {
+            const QString normalized =
+                remote ? openscpui::NavigationStore::normalizeRemotePath(path)
+                       : openscpui::NavigationStore::normalizeLocalPath(path);
+            if (normalized.isEmpty() ||
+                !navigationStore_.isFavorite(location, normalized,
+                                             remoteScope)) {
+                return;
+            }
+            navigationStore_.toggleFavorite(location, normalized, remoteScope);
+            refreshFavoritesActions();
+            refreshDialogFavorites();
+            statusBar()->showMessage(tr("Favorite removed"), 2500);
+        });
+
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    const QString selectedPath = dialog.selectedPath();
+    if (remote)
+        setRightRemoteRoot(selectedPath);
+    else if (rightPane)
+        setRightRoot(selectedPath);
+    else
+        setLeftRoot(selectedPath);
+}
+
 void MainWindow::toggleCurrentFavorite(bool rightPane) {
     const bool remote = rightPane && rightIsRemote_;
     const auto location = remote ? openscpui::NavigationStore::Location::Remote
@@ -1772,8 +1773,8 @@ void MainWindow::toggleCurrentFavorite(bool rightPane) {
     }
 
     const QString currentPath =
-        rightPane ? (rightPath_ ? rightPath_->text() : QString())
-                  : (leftPath_ ? leftPath_->text() : QString());
+        rightPane ? (rightPath_ ? rightPath_->path() : QString())
+                  : (leftPath_ ? leftPath_->path() : QString());
     const QString normalizedCurrent =
         remote ? openscpui::NavigationStore::normalizeRemotePath(currentPath)
                : openscpui::NavigationStore::normalizeLocalPath(currentPath);
@@ -1839,10 +1840,10 @@ void MainWindow::refreshFavoriteToggleAction(QAction *favoriteAction,
 
 void MainWindow::refreshFavoritesActions() {
     refreshFavoriteToggleAction(actFavoriteToggleLeft_,
-                                leftPath_ ? leftPath_->text() : QString(),
+                                leftPath_ ? leftPath_->path() : QString(),
                                 false);
     refreshFavoriteToggleAction(actFavoriteToggleRight_,
-                                rightPath_ ? rightPath_->text() : QString(),
+                                rightPath_ ? rightPath_->path() : QString(),
                                 rightIsRemote_);
 }
 
@@ -1973,8 +1974,7 @@ void MainWindow::showFavoritesDialog() {
             const bool inRightPanel =
                 focusWithinWidget(focusBeforeDialog, rightView_) ||
                 focusWithinWidget(focusBeforeDialog, rightPath_) ||
-                focusWithinWidget(focusBeforeDialog, rightPaneBar_) ||
-                focusWithinWidget(focusBeforeDialog, rightBreadcrumbsBar_);
+                focusWithinWidget(focusBeforeDialog, rightPaneBar_);
             if (!rightIsRemote_ && inRightPanel)
                 setRightRoot(path);
             else
@@ -2226,8 +2226,7 @@ void MainWindow::showHistoryMenu() {
             const bool inRightPanel =
                 focusWithinWidget(focusBeforeDialog, rightView_) ||
                 focusWithinWidget(focusBeforeDialog, rightPath_) ||
-                focusWithinWidget(focusBeforeDialog, rightPaneBar_) ||
-                focusWithinWidget(focusBeforeDialog, rightBreadcrumbsBar_);
+                focusWithinWidget(focusBeforeDialog, rightPaneBar_);
             if (!rightIsRemote_ && inRightPanel)
                 setRightRoot(value);
             else
@@ -2372,7 +2371,7 @@ void MainWindow::updateDeleteShortcutEnables() {
     if (actNewFileLeft_)
         actNewFileLeft_->setEnabled(true); // always enabled on local
     if (actUpLeft_) {
-        QDir leftDir(leftPath_ ? leftPath_->text() : QString());
+        QDir leftDir(leftPath_ ? leftPath_->path() : QString());
         bool canUp = leftDir.cdUp();
         actUpLeft_->setEnabled(canUp);
     }
@@ -2408,7 +2407,7 @@ void MainWindow::updateDeleteShortcutEnables() {
             actCopyRight_->setEnabled(false);
         if (actUpRight_) {
             const QString cur = normalizeRemotePath(
-                rightPath_ ? rightPath_->text() : QString());
+                rightPath_ ? rightPath_->path() : QString());
             actUpRight_->setEnabled(cur != "/");
         }
         return;
@@ -2443,7 +2442,7 @@ void MainWindow::updateDeleteShortcutEnables() {
         actSearchRight_->setEnabled(true);
     if (actUpRight_) {
         QString cur = rightRemoteModel_ ? rightRemoteModel_->rootPath()
-                                        : rightPath_->text();
+                                        : rightPath_->path();
         if (rightIsRemote_) {
             cur = normalizeRemotePath(cur);
             actUpRight_->setEnabled(!cur.isEmpty() && cur != "/");

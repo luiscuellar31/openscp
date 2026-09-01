@@ -1,4 +1,5 @@
 #include "MainWindow.hpp"
+#include "PathNavigationBar.hpp"
 #include "RemoteModel.hpp"
 #include "RemoteOperationController.hpp"
 #include "SessionController.hpp"
@@ -296,5 +297,5 @@ void MainWindow::showSyncDialog() {
     connect(progress, &QProgressDialog::canceled, syncCoordinator_,
             &SyncCoordinator::cancel);
     progress->show();
-    syncCoordinator_->start(leftPath_->text(), rightRemoteModel_->rootPath());
+    syncCoordinator_->start(leftPath_->path(), rightRemoteModel_->rootPath());
 }

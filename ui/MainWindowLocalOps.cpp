@@ -1,6 +1,7 @@
 // MainWindow local-side filesystem operations and local navigation.
 #include "MainWindow.hpp"
 #include "MainWindowSharedUtils.hpp"
+#include "PathNavigationBar.hpp"
 #include "RemoteModel.hpp"
 #include "RemoteOperationController.hpp"
 #include "SessionController.hpp"
@@ -254,7 +255,7 @@ void MainWindow::runLocalFsSelection(const QModelIndexList &rows,
 
 void MainWindow::chooseLeftDir() {
     const QString dir = QFileDialog::getExistingDirectory(
-        this, tr("Select left folder"), leftPath_->text());
+        this, tr("Select left folder"), leftPath_->path());
     if (!dir.isEmpty())
         setLeftRoot(dir);
 }
@@ -262,32 +263,19 @@ void MainWindow::chooseLeftDir() {
 // Browse and set the right pane root directory (local mode).
 void MainWindow::chooseRightDir() {
     const QString dir = QFileDialog::getExistingDirectory(
-        this, tr("Select right folder"), rightPath_->text());
+        this, tr("Select right folder"), rightPath_->path());
     if (!dir.isEmpty())
         setRightRoot(dir);
-}
-
-// Navigate left pane to the path typed by the user.
-void MainWindow::leftPathEntered() {
-    setLeftRoot(leftPath_->text());
-}
-
-// Navigate right pane (local or remote) to the path typed by the user.
-void MainWindow::rightPathEntered() {
-    if (rightIsRemote_)
-        setRightRemoteRoot(rightPath_->text());
-    else
-        setRightRoot(rightPath_->text());
 }
 
 // Set the left pane root, validating the path and updating view/status.
 void MainWindow::setLeftRoot(const QString &path) {
     if (QDir(path).exists()) {
         const QString normalized = QDir(path).absolutePath();
-        leftPath_->setText(normalized);
+        leftPath_->setPath(normalized);
         leftView_->setRootIndex(leftModel_->index(normalized));
         addRecentLocalPath(normalized);
-        refreshLeftBreadcrumbs();
+        refreshLeftPathNavigation();
         statusBar()->showMessage(tr("Left: ") + normalized, 3000);
         updateDeleteShortcutEnables();
     } else {
@@ -300,11 +288,11 @@ void MainWindow::setLeftRoot(const QString &path) {
 void MainWindow::setRightRoot(const QString &path) {
     if (QDir(path).exists()) {
         const QString normalized = QDir(path).absolutePath();
-        rightPath_->setText(normalized);
+        rightPath_->setPath(normalized);
         rightView_->setRootIndex(
             rightLocalModel_->index(normalized)); // <-- here
         addRecentLocalPath(normalized);
-        refreshRightBreadcrumbs();
+        refreshRightPathNavigation();
         statusBar()->showMessage(tr("Right: ") + normalized, 3000);
         updateDeleteShortcutEnables();
     } else {
@@ -383,9 +371,9 @@ void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
                 }
                 self->statusBar()->showMessage(statusMessage, 6000);
 
-                self->setLeftRoot(self->leftPath_->text());
+                self->setLeftRoot(self->leftPath_->path());
                 if (!self->rightIsRemote_) {
-                    self->setRightRoot(self->rightPath_->text());
+                    self->setRightRoot(self->rightPath_->path());
                 }
                 self->updateDeleteShortcutEnables();
             },
@@ -423,7 +411,7 @@ void MainWindow::copyLeftToRight() {
         }
 
         const QString remoteBase =
-            scpMode ? normalizeRemotePath(rightPath_ ? rightPath_->text()
+            scpMode ? normalizeRemotePath(rightPath_ ? rightPath_->path()
                                                      : QString())
                     : rightRemoteModel_->rootPath();
         QVector<QPair<QString, QString>> roots;
@@ -461,7 +449,7 @@ void MainWindow::copyLeftToRight() {
     }
 
     // ---- LOCAL→LOCAL branch: existing logic as-is ----
-    const QString dstDirPath = rightPath_->text();
+    const QString dstDirPath = rightPath_->path();
     QDir dstDir(dstDirPath);
     if (!dstDir.exists()) {
         UiAlerts::warning(this, tr("Invalid destination"),
@@ -522,7 +510,7 @@ void MainWindow::moveLeftToRight() {
     }
 
     // ---- Existing LOCAL→LOCAL branch ----
-    const QString dstDirPath = rightPath_->text();
+    const QString dstDirPath = rightPath_->path();
     QDir dstDir(dstDirPath);
     if (!dstDir.exists()) {
         UiAlerts::warning(this, tr("Invalid destination"),
@@ -576,7 +564,7 @@ void MainWindow::deleteFromLeft() {
 }
 
 void MainWindow::goUpLeft() {
-    QString currentPath = leftPath_->text();
+    QString currentPath = leftPath_->path();
     QDir currentDir(currentPath);
     if (!currentDir.cdUp())
         return;
@@ -656,7 +644,7 @@ void MainWindow::renameLeftSelected() {
         UiAlerts::critical(this, tr("Local"), tr("Could not rename."));
         return;
     }
-    setLeftRoot(leftPath_->text());
+    setLeftRoot(leftPath_->path());
 }
 
 // Create a new directory in the left (local) pane.
@@ -664,7 +652,7 @@ void MainWindow::newDirLeft() {
     QString name;
     if (!promptValidEntryName(this, tr("New folder"), tr("Name:"), {}, name))
         return;
-    QDir base(leftPath_->text());
+    QDir base(leftPath_->path());
     if (!base.mkpath(base.filePath(name))) {
         UiAlerts::critical(this, tr("Local"), tr("Could not create folder."));
         return;
@@ -677,7 +665,7 @@ void MainWindow::newFileLeft() {
     QString name;
     if (!promptValidEntryName(this, tr("New file"), tr("Name:"), {}, name))
         return;
-    QDir base(leftPath_->text());
+    QDir base(leftPath_->path());
     const QString path = base.filePath(name);
     if (QFileInfo::exists(path)) {
         if (UiAlerts::question(this, tr("File exists"),
@@ -704,7 +692,7 @@ void MainWindow::showLeftContextMenu(const QPoint &pos) {
     if (auto selectionModel = leftView_->selectionModel()) {
         hasSel = !selectionModel->selectedRows(kNameColumn).isEmpty();
     }
-    QDir currentDir(leftPath_ ? leftPath_->text() : QString());
+    QDir currentDir(leftPath_ ? leftPath_->path() : QString());
     bool canGoUp = currentDir.cdUp();
 
     QAction *copyToRight = nullptr;

@@ -105,6 +105,11 @@ openscp_add_test(openscp_sync_comparison_tests
     LINK_LIBRARIES openscp_sync_logic
 )
 
+openscp_add_test(openscp_path_navigation_model_tests
+    SOURCES path_navigation_model_tests.cpp
+    LINK_LIBRARIES openscp_ui_logic
+)
+
 openscp_add_test(openscp_sftp_integration_tests
     CUSTOM_MAIN
     SOURCES libssh2_integration_tests.cpp

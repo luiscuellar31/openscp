@@ -2,6 +2,7 @@
 #include "LocalTreeDiscovery.hpp"
 #include "MainWindow.hpp"
 #include "MainWindowSharedUtils.hpp"
+#include "PathNavigationBar.hpp"
 #include "RemoteModel.hpp"
 #include "RemoteOperationController.hpp"
 #include "SessionController.hpp"
@@ -723,7 +724,7 @@ void MainWindow::startLocalUploadDiscovery(
                 return left > right;
             });
         if (directories.isEmpty()) {
-            setLeftRoot(leftPath_->text());
+            setLeftRoot(leftPath_->path());
             return;
         }
         QPointer<MainWindow> safeThis(this);
@@ -738,7 +739,7 @@ void MainWindow::startLocalUploadDiscovery(
                     [safeThis] {
                         if (!safeThis)
                             return;
-                        safeThis->setLeftRoot(safeThis->leftPath_->text());
+                        safeThis->setLeftRoot(safeThis->leftPath_->path());
                     },
                     Qt::QueuedConnection);
             });
@@ -1168,7 +1169,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                 return true;
             } else {
                 // Local copy to the right panel directory
-                QDir dst(rightPath_->text());
+                QDir dst(rightPath_->path());
                 if (!dst.exists()) {
                     dropEvent->acceptProposedAction();
                     return true;
@@ -1214,7 +1215,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                                   : QList<QUrl>{};
             if (!urls.isEmpty()) {
                 // Local copy towards the left panel
-                QDir dst(leftPath_->text());
+                QDir dst(leftPath_->path());
                 if (!dst.exists()) {
                     dropEvent->acceptProposedAction();
                     return true;
@@ -1253,7 +1254,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                 QVector<RemoteDownloadSeed> seeds;
                 seeds.reserve(rows.size());
                 const QString remoteBase = rightRemoteModel_->rootPath();
-                QDir dst(leftPath_->text());
+                QDir dst(leftPath_->path());
                 for (const QModelIndex &idx : rows) {
                     const QString name = rightRemoteModel_->nameAt(idx);
                     {
