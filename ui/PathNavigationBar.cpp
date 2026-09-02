@@ -2,12 +2,53 @@
 
 #include <QDir>
 #include <QEvent>
+#include <QFocusEvent>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QKeySequence>
 #include <QLineEdit>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QPoint>
 #include <QSizePolicy>
+#include <QStyleOptionFocusRect>
+
+namespace {
+
+class PathLineEdit final : public QLineEdit {
+    public:
+    using QLineEdit::QLineEdit;
+
+    void setKeyboardFocusVisible(bool visible) {
+        if (keyboardFocusVisible_ == visible)
+            return;
+        keyboardFocusVisible_ = visible;
+        setProperty("keyboardFocusVisible", visible);
+        update();
+    }
+
+    protected:
+    void paintEvent(QPaintEvent *event) override {
+        QLineEdit::paintEvent(event);
+        if (!keyboardFocusVisible_)
+            return;
+
+        QStyleOptionFocusRect option;
+        option.initFrom(this);
+        option.rect = rect().adjusted(1, 1, -1, -1);
+        option.state |= QStyle::State_KeyboardFocusChange;
+        option.backgroundColor = palette().color(QPalette::Base);
+
+        QPainter painter(this);
+        style()->drawPrimitive(QStyle::PE_FrameFocusRect, &option, &painter,
+                               this);
+    }
+
+    private:
+    bool keyboardFocusVisible_ = false;
+};
+
+} // namespace
 
 namespace openscpui {
 
@@ -21,10 +62,11 @@ PathNavigationBar::PathNavigationBar(PathFlavor flavor,
     auto *layout = new QHBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
 
-    display_ = new QLineEdit(this);
+    display_ = new PathLineEdit(this);
     display_->setObjectName(QStringLiteral("pathDisplay"));
     display_->setReadOnly(true);
-    display_->setFocusPolicy(Qt::NoFocus);
+    display_->setFocusPolicy(Qt::StrongFocus);
+    display_->setAttribute(Qt::WA_MacShowFocusRect, false);
     display_->setMouseTracking(true);
     display_->setAccessibleName(tr("Current folder path"));
     defaultToolTip_ =
@@ -58,15 +100,66 @@ bool PathNavigationBar::eventFilter(QObject *watched, QEvent *event) {
     if (watched != display_)
         return QWidget::eventFilter(watched, event);
 
-    if (event->type() == QEvent::MouseMove) {
+    if (event->type() == QEvent::FocusIn) {
+        const auto *focusEvent = static_cast<QFocusEvent *>(event);
+        const bool keyboardTraversal =
+            focusEvent->reason() == Qt::TabFocusReason ||
+            focusEvent->reason() == Qt::BacktabFocusReason;
+        setKeyboardFocusVisible(keyboardTraversal);
+        if (keyboardTraversal ||
+            focusEvent->reason() == Qt::ShortcutFocusReason) {
+            focusedSegment_ = segments_.isEmpty() ? -1 : segments_.size() - 1;
+            updateSegmentPresentation(focusedSegment_, false);
+        }
+    } else if (event->type() == QEvent::FocusOut) {
+        setKeyboardFocusVisible(false);
+        if (hoveredSegment_ < 0)
+            updateSegmentPresentation(-1, false);
+    } else if (event->type() == QEvent::KeyPress) {
+        auto *keyEvent = static_cast<QKeyEvent *>(event);
+        if (segments_.isEmpty())
+            return true;
+        if (keyEvent->key() == Qt::Key_Left) {
+            focusedSegment_ = qMax<qsizetype>(0, focusedSegment_ - 1);
+            updateSegmentPresentation(focusedSegment_, false);
+            return true;
+        }
+        if (keyEvent->key() == Qt::Key_Right) {
+            focusedSegment_ =
+                qMin<qsizetype>(segments_.size() - 1, focusedSegment_ + 1);
+            updateSegmentPresentation(focusedSegment_, false);
+            return true;
+        }
+        if (keyEvent->key() == Qt::Key_Home) {
+            focusedSegment_ = 0;
+            updateSegmentPresentation(focusedSegment_, false);
+            return true;
+        }
+        if (keyEvent->key() == Qt::Key_End) {
+            focusedSegment_ = segments_.size() - 1;
+            updateSegmentPresentation(focusedSegment_, false);
+            return true;
+        }
+        if (keyEvent->key() == Qt::Key_Enter ||
+            keyEvent->key() == Qt::Key_Return ||
+            keyEvent->key() == Qt::Key_Space) {
+            activateSegment(focusedSegment_);
+            return true;
+        }
+    } else if (event->type() == QEvent::MouseMove) {
         const auto *mouseEvent = static_cast<QMouseEvent *>(event);
-        updateHoveredSegment(segmentAt(mouseEvent->position().toPoint()));
+        hoveredSegment_ = segmentAt(mouseEvent->position().toPoint());
+        updateSegmentPresentation(hoveredSegment_, true);
     } else if (event->type() == QEvent::Leave) {
-        updateHoveredSegment(-1);
+        hoveredSegment_ = -1;
+        updateSegmentPresentation(display_->hasFocus() ? focusedSegment_ : -1,
+                                  false);
     } else if (event->type() == QEvent::MouseButtonPress) {
         const auto *mouseEvent = static_cast<QMouseEvent *>(event);
-        if (mouseEvent->button() == Qt::LeftButton)
+        if (mouseEvent->button() == Qt::LeftButton) {
+            setKeyboardFocusVisible(false);
             return true;
+        }
     } else if (event->type() == QEvent::MouseButtonDblClick) {
         const auto *mouseEvent = static_cast<QMouseEvent *>(event);
         if (mouseEvent->button() == Qt::LeftButton) {
@@ -80,12 +173,8 @@ bool PathNavigationBar::eventFilter(QObject *watched, QEvent *event) {
                 suppressNextRelease_ = false;
                 return true;
             }
-            const qsizetype segment =
-                segmentAt(mouseEvent->position().toPoint());
-            if (segment >= 0 && segment + 1 < segments_.size())
-                emit pathRequested(segments_.at(segment).target);
-            else
-                requestOpenDialog();
+            focusedSegment_ = segmentAt(mouseEvent->position().toPoint());
+            activateSegment(focusedSegment_);
             return true;
         }
     }
@@ -102,8 +191,10 @@ void PathNavigationBar::rebuildDisplay() {
         displayPath_ = QDir::toNativeSeparators(displayPath_);
     display_->setText(displayPath_);
     display_->setCursorPosition(static_cast<int>(displayPath_.size()));
-    hoveredSegment_ = -2;
-    updateHoveredSegment(-1);
+    hoveredSegment_ = -1;
+    focusedSegment_ = segments_.isEmpty() ? -1 : segments_.size() - 1;
+    updateSegmentPresentation(display_->hasFocus() ? focusedSegment_ : -1,
+                              false);
 }
 
 qsizetype PathNavigationBar::segmentAt(const QPoint &position) const {
@@ -126,15 +217,27 @@ qsizetype PathNavigationBar::segmentAt(const QPoint &position) const {
     return segments_.size() - 1;
 }
 
-void PathNavigationBar::updateHoveredSegment(qsizetype segment) {
-    if (hoveredSegment_ == segment)
+void PathNavigationBar::activateSegment(qsizetype segment) {
+    if (segment >= 0 && segment + 1 < segments_.size()) {
+        emit pathRequested(segments_.at(segment).target);
         return;
-    hoveredSegment_ = segment;
+    }
+    requestOpenDialog();
+}
 
+void PathNavigationBar::setKeyboardFocusVisible(bool visible) {
+    static_cast<PathLineEdit *>(display_)->setKeyboardFocusVisible(visible);
+}
+
+void PathNavigationBar::updateSegmentPresentation(qsizetype segment,
+                                                  bool hovered) {
     if (segment < 0 || segment >= segments_.size()) {
         display_->deselect();
         display_->setCursor(Qt::ArrowCursor);
         display_->setToolTip(defaultToolTip_);
+        display_->setAccessibleDescription(
+            tr("Use Left and Right to choose a path segment, then press Enter "
+               "or Space to activate it."));
         return;
     }
 
@@ -142,10 +245,18 @@ void PathNavigationBar::updateHoveredSegment(qsizetype segment) {
     display_->setSelection(
         static_cast<int>(part.displayStart),
         static_cast<int>(part.displayEnd - part.displayStart));
-    display_->setCursor(Qt::PointingHandCursor);
-    display_->setToolTip(segment + 1 == segments_.size()
-                             ? tr("Open directory…")
-                             : tr("Open %1").arg(part.target));
+    display_->setCursor(hovered ? Qt::PointingHandCursor : Qt::ArrowCursor);
+    const bool current = segment + 1 == segments_.size();
+    const QString action =
+        current ? tr("Open directory…") : tr("Open %1").arg(part.target);
+    display_->setToolTip(action);
+    display_->setAccessibleDescription(
+        current ? tr("Current folder %1. Press Enter or Space to open path "
+                     "entry.")
+                      .arg(part.target)
+                : tr("Path segment %1. Press Enter or Space to navigate to "
+                     "it.")
+                      .arg(part.target));
 }
 
 } // namespace openscpui

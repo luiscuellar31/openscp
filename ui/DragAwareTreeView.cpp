@@ -2,6 +2,7 @@
 #include "DragAwareTreeView.hpp"
 
 #include "AppSettings.hpp"
+#include "KeyboardFocusIndicator.hpp"
 #include "MainWindowSharedUtils.hpp"
 #include "RemoteModel.hpp"
 #include "RemoteOperationController.hpp"
@@ -16,6 +17,8 @@
 #include <QDir>
 #include <QDrag>
 #include <QFileInfo>
+#include <QFocusEvent>
+#include <QFrame>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLocale>
@@ -23,6 +26,7 @@
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QPointer>
 #include <QProgressBar>
 #include <QPushButton>
@@ -115,6 +119,8 @@ struct DragAwareTreeView::RemoteDragStagingState {
 };
 
 DragAwareTreeView::DragAwareTreeView(QWidget *parent) : QTreeView(parent) {
+    setAttribute(Qt::WA_MacShowFocusRect, false);
+    keyboardFocusIndicator_ = new openscpui::KeyboardFocusIndicator(this);
 }
 
 void DragAwareTreeView::setTransferManager(TransferManager *mgr) {
@@ -135,6 +141,23 @@ DragAwareTreeView::~DragAwareTreeView() {
 void DragAwareTreeView::resizeEvent(QResizeEvent *resizeEventArg) {
     QTreeView::resizeEvent(resizeEventArg);
     updateOverlayGeometry();
+}
+
+void DragAwareTreeView::focusInEvent(QFocusEvent *event) {
+    QTreeView::focusInEvent(event);
+    const bool keyboardTraversal = event->reason() == Qt::TabFocusReason ||
+                                   event->reason() == Qt::BacktabFocusReason;
+    keyboardFocusIndicator_->setKeyboardFocusVisible(keyboardTraversal);
+}
+
+void DragAwareTreeView::focusOutEvent(QFocusEvent *event) {
+    keyboardFocusIndicator_->setKeyboardFocusVisible(false);
+    QTreeView::focusOutEvent(event);
+}
+
+void DragAwareTreeView::mousePressEvent(QMouseEvent *event) {
+    keyboardFocusIndicator_->setKeyboardFocusVisible(false);
+    QTreeView::mousePressEvent(event);
 }
 
 void DragAwareTreeView::startDrag(Qt::DropActions supportedActions) {
@@ -285,16 +308,20 @@ QString DragAwareTreeView::buildStagingRoot() const {
 
 void DragAwareTreeView::showPrepOverlay(const QString &text) {
     if (!overlay_) {
-        overlay_ = new QWidget(viewport());
+        overlay_ = new QFrame(viewport());
+        overlay_->setFrameShape(QFrame::NoFrame);
         overlay_->setAutoFillBackground(true);
-        overlay_->setStyleSheet("background: rgba(0,0,0,0.35); border: 1px "
-                                "solid rgba(255,255,255,0.25);");
-        overlay_->setAccessibleName(QStringLiteral("Preparing files overlay"));
+        overlay_->setAccessibleName(tr("Preparing files"));
         overlayLabel_ = new QLabel(overlay_);
-        overlayLabel_->setStyleSheet("color: white; font-weight: 600;");
+        QFont overlayFont = overlayLabel_->font();
+        overlayFont.setBold(true);
+        overlayLabel_->setFont(overlayFont);
         overlayProgress_ = new QProgressBar(overlay_);
         overlayProgress_->setRange(0, 100);
+        overlayProgress_->setAccessibleName(tr("File preparation progress"));
         overlayCancel_ = new QPushButton(tr("Cancel"), overlay_);
+        overlayCancel_->setAccessibleDescription(
+            tr("Cancel preparing files for drag and drop"));
         overlayCancel_->setCursor(Qt::PointingHandCursor);
         // ESC shortcut to cancel staging
         overlayEsc_ = new QShortcut(QKeySequence(Qt::Key_Escape), overlay_);
@@ -304,8 +331,11 @@ void DragAwareTreeView::showPrepOverlay(const QString &text) {
         // viewport
     }
     overlayLabel_->setText(text);
+    overlayLabel_->setAccessibleName(text);
+    overlay_->setAccessibleDescription(text);
     updateOverlayGeometry();
     overlay_->show();
+    overlayCancel_->setFocus(Qt::OtherFocusReason);
     // Ensure we cancel batch on app quit
     if (!quitConn_) {
         quitConn_ = QObject::connect(
@@ -315,8 +345,10 @@ void DragAwareTreeView::showPrepOverlay(const QString &text) {
 }
 
 void DragAwareTreeView::hidePrepOverlay() {
-    if (overlay_)
+    if (overlay_) {
         overlay_->hide();
+        setFocus(Qt::OtherFocusReason);
+    }
 }
 
 void DragAwareTreeView::updateOverlayGeometry() {

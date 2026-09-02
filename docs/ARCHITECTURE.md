@@ -92,8 +92,9 @@ Path navigation is split by responsibility:
 
 - `PathNavigationModel` normalizes local and remote paths into testable segments
   and parent targets without depending on widgets.
-- `PathNavigationBar` renders those segments as one conventional path field and
-  emits navigation or open-dialog requests.
+- `PathNavigationBar` preserves a conventional read-only path field while
+  using the model segments for mouse and keyboard navigation, and emits
+  navigation or open-dialog requests.
 - `OpenPathDialog` collects a typed path and exposes recent paths and favorites;
   it does not read settings or navigate by itself.
 - `MainWindow` selects the local or remote presentation, performs navigation,

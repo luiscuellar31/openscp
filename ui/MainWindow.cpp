@@ -20,6 +20,7 @@
 #include "SessionController.hpp"
 #include "SettingsDialog.hpp"
 #include "SiteManagerDialog.hpp"
+#include "ToolbarKeyboardNavigation.hpp"
 #include "TransferManager.hpp"
 #include "TransferQueueDialog.hpp"
 #include "UiAlerts.hpp"
@@ -42,6 +43,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFont>
 #include <QFrame>
 #include <QGuiApplication>
 #include <QHeaderView>
@@ -49,6 +51,7 @@
 #include <QItemSelectionModel>
 #include <QKeySequence>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListView>
 #include <QListWidget>
 #include <QLocale>
@@ -411,6 +414,7 @@ void MainWindow::initializePanels(const QString &home) {
     leftPaneBar_->addAction(actRenameLeft_);
     leftPaneBar_->addAction(actNewFileLeft_);
     leftPaneBar_->addAction(actNewDirLeft_);
+    openscpui::configureToolbarKeyboardNavigation(leftPaneBar_);
     leftLayout->addWidget(leftPaneBar_);
 
     // Left panel: toolbar -> flat path bar -> view
@@ -526,6 +530,7 @@ void MainWindow::initializePanels(const QString &home) {
     rightPaneBar_->addSeparator();
     rightPaneBar_->addAction(actRefreshRight_);
     rightPaneBar_->addAction(actOpenTerminalRight_);
+    openscpui::configureToolbarKeyboardNavigation(rightPaneBar_);
     // Delete shortcut also on right panel (limited to right panel widget)
     if (actDeleteRight_) {
         bindActionToPanelShortcut(actDeleteRight_, rightView_,
@@ -623,7 +628,8 @@ void MainWindow::initializePanels(const QString &home) {
 }
 
 void MainWindow::initializeMainToolbar() {
-    auto *mainToolbar = addToolBar("Main");
+    mainToolbar_ = addToolBar("Main");
+    auto *mainToolbar = mainToolbar_;
     mainToolbar->setObjectName("mainToolbar");
     mainToolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
     mainToolbar->setMovable(false);
@@ -752,6 +758,45 @@ void MainWindow::initializeMainToolbar() {
         mainWindowActionIcon("action-open-settings.svg"), tr("Settings"), this,
         &MainWindow::showSettingsDialog);
     actPrefsToolbar_->setToolTip(actPrefsToolbar_->text());
+    openscpui::configureToolbarKeyboardNavigation(mainToolbar);
+}
+
+bool MainWindow::focusNextPrevChild(bool next) {
+    QList<QWidget *> order;
+    const auto appendToolbar = [&order](QToolBar *toolbar) {
+        order.append(openscpui::toolbarKeyboardFocusWidgets(toolbar));
+    };
+    const auto appendPath = [&order](openscpui::PathNavigationBar *path) {
+        if (!path)
+            return;
+        if (auto *display =
+                path->findChild<QLineEdit *>(QStringLiteral("pathDisplay"))) {
+            order.push_back(display);
+        }
+    };
+
+    appendToolbar(mainToolbar_);
+    appendToolbar(leftPaneBar_);
+    appendPath(leftPath_);
+    order.push_back(leftView_);
+    appendToolbar(rightPaneBar_);
+    appendPath(rightPath_);
+    order.push_back(rightView_);
+    order.push_back(scpQuickUploadBtn_);
+    order.push_back(scpQuickDownloadBtn_);
+
+    QWidget *current = QApplication::focusWidget();
+    if (initialMainWindowTabNavigation_) {
+        // Qt may initially focus the first-created file view. Start the first
+        // explicit traversal at the beginning of our logical order instead,
+        // which is the Connect action.
+        initialMainWindowTabNavigation_ = false;
+        current = nullptr;
+    }
+
+    if (openscpui::moveKeyboardFocus(order, current, next))
+        return true;
+    return QMainWindow::focusNextPrevChild(next);
 }
 
 void MainWindow::initializeMenuBarActions() {
@@ -1124,12 +1169,15 @@ void MainWindow::initializeRuntimeState() {
     if (SecretStore::insecureFallbackActive()) {
         auto *warn = new QLabel(
             tr("Warning: unencrypted secrets storage active (fallback)"), this);
-        warn->setStyleSheet(
-            "QLabel{ color:#b00020; font-weight:bold; padding:2px 6px; }");
+        QFont warningFont = warn->font();
+        warningFont.setBold(true);
+        warn->setFont(warningFont);
+        warn->setContentsMargins(6, 2, 6, 2);
         warn->setToolTip(
             tr("You are using unencrypted credentials storage enabled via "
                "environment variable. Disable "
                "OPENSCP_ENABLE_INSECURE_FALLBACK to hide this warning."));
+        warn->setAccessibleDescription(warn->toolTip());
         statusBar()->addPermanentWidget(warn, 0);
     }
 
@@ -1236,14 +1284,14 @@ void MainWindow::initializeConnectionSessionIndicators() {
                 connectionTypeLabel_->setText(
                     insecure ? tr("Type: %1 • UNSAFE").arg(typeLabel)
                              : tr("Type: %1").arg(typeLabel));
-                connectionTypeLabel_->setStyleSheet(
-                    insecure ? QStringLiteral(
-                                   "QLabel { color: #B00020; font-weight: "
-                                   "700; }")
-                             : QString());
+                QFont connectionTypeFont = connectionTypeLabel_->font();
+                connectionTypeFont.setBold(insecure);
+                connectionTypeLabel_->setFont(connectionTypeFont);
                 connectionTypeLabel_->setToolTip(
                     insecure ? activeSecurityWarning_
                              : tr("Active connection method for this session"));
+                connectionTypeLabel_->setAccessibleDescription(
+                    connectionTypeLabel_->toolTip());
             }
 
             if (connectionElapsedLabel_) {

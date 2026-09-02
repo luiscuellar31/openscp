@@ -352,6 +352,8 @@ target_link_libraries(openscp_ui_logic
 )
 
 add_library(openscp_ui_widgets STATIC
+    ui/KeyboardFocusIndicator.hpp
+    ui/KeyboardFocusIndicator.cpp
     ui/PlatformFilePicker.hpp
     ui/PlatformFilePicker_p.hpp
     ui/PlatformFilePicker.cpp
@@ -359,6 +361,8 @@ add_library(openscp_ui_widgets STATIC
     ui/OpenPathDialog.cpp
     ui/PathNavigationBar.hpp
     ui/PathNavigationBar.cpp
+    ui/ToolbarKeyboardNavigation.hpp
+    ui/ToolbarKeyboardNavigation.cpp
     ui/SyncDialog.hpp
     ui/SyncDialog.cpp
     ui/DragAwareTreeView.hpp

@@ -546,18 +546,24 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     filterLayout->setContentsMargins(0, 0, 0, 0);
     filterLayout->setSpacing(6);
     filterLayout->addWidget(new QLabel(tr("Show:"), filters));
-    auto makeChip = [filters](const QString &text) {
+    auto makeChip = [filters](const QString &text,
+                              const QString &accessibleDescription) {
         auto *chipButton = new QToolButton(filters);
         chipButton->setText(text);
         chipButton->setCheckable(true);
         chipButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        chipButton->setAccessibleName(text);
+        chipButton->setAccessibleDescription(accessibleDescription);
         return chipButton;
     };
-    filterAllBtn_ = makeChip(tr("All"));
-    filterActiveBtn_ = makeChip(tr("Active"));
-    filterErrorsBtn_ = makeChip(tr("Errors"));
-    filterCompletedBtn_ = makeChip(tr("Completed"));
-    filterCanceledBtn_ = makeChip(tr("Canceled"));
+    filterAllBtn_ = makeChip(tr("All"), tr("Show all transfers"));
+    filterActiveBtn_ = makeChip(tr("Active"), tr("Show active transfers"));
+    filterErrorsBtn_ =
+        makeChip(tr("Errors"), tr("Show transfers with errors or warnings"));
+    filterCompletedBtn_ =
+        makeChip(tr("Completed"), tr("Show completed transfers"));
+    filterCanceledBtn_ =
+        makeChip(tr("Canceled"), tr("Show canceled transfers"));
     filterGroup_ = new QButtonGroup(this);
     filterGroup_->setExclusive(true);
     filterGroup_->addButton(filterAllBtn_, FilterAll);
@@ -580,12 +586,15 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     proxy_->setSourceModel(model_);
 
     table_ = new QTableView(this);
+    table_->setObjectName(QStringLiteral("transferQueueTable"));
+    table_->setAccessibleName(tr("Transfers"));
+    table_->setAccessibleDescription(
+        tr("Transfer queue. Select one or more rows to manage them."));
     table_->setModel(proxy_);
     table_->setSelectionBehavior(QAbstractItemView::SelectRows);
     table_->setSelectionMode(QAbstractItemView::ExtendedSelection);
     table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     table_->setAlternatingRowColors(true);
-    table_->setStyleSheet("QTableView::item:focus { outline: none; }");
     table_->setContextMenuPolicy(Qt::CustomContextMenu);
     table_->setWordWrap(false);
     table_->setTextElideMode(Qt::ElideMiddle);
@@ -640,27 +649,35 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
 
     // Row 3: summary badges
     auto *badges = new QWidget(this);
+    badges->setObjectName(QStringLiteral("transferQueueSummary"));
+    badges->setAccessibleName(tr("Transfer summary"));
     auto *hbBadges = new QHBoxLayout(badges);
     hbBadges->setContentsMargins(0, 0, 0, 0);
     hbBadges->setSpacing(6);
-    auto makeBadge = [badges](const QString &text, const QString &color) {
+    auto makeBadge = [badges](const QString &text, const QString &objectName) {
         auto *badgeLabel = new QLabel(text, badges);
-        badgeLabel->setStyleSheet(
-            QString("QLabel{border:1px solid %1;border-radius:10px;padding:3px "
-                    "8px;background:palette(base);}")
-                .arg(color));
+        badgeLabel->setObjectName(objectName);
+        badgeLabel->setMargin(4);
         return badgeLabel;
     };
-    badgeTotal_ = makeBadge(tr("Total: 0"), "#607D8B");
-    badgeActive_ = makeBadge(tr("Active: 0"), "#2E7D32");
-    badgeRunning_ = makeBadge(tr("Running: 0"), "#0277BD");
-    badgePaused_ = makeBadge(tr("Paused: 0"), "#795548");
-    badgeErrors_ = makeBadge(tr("Errors: 0"), "#C62828");
-    badgeCompleted_ = makeBadge(tr("Completed: 0"), "#2E7D32");
-    badgeCanceled_ = makeBadge(tr("Canceled: 0"), "#5D4037");
-    badgeParallel_ =
-        makeBadge(tr("Parallel: %1").arg(mgr_->maxConcurrent()), "#455A64");
-    badgeLimit_ = makeBadge(tr("Global limit: off"), "#616161");
+    badgeTotal_ =
+        makeBadge(tr("Total: 0"), QStringLiteral("transferBadgeTotal"));
+    badgeActive_ =
+        makeBadge(tr("Active: 0"), QStringLiteral("transferBadgeActive"));
+    badgeRunning_ =
+        makeBadge(tr("Running: 0"), QStringLiteral("transferBadgeRunning"));
+    badgePaused_ =
+        makeBadge(tr("Paused: 0"), QStringLiteral("transferBadgePaused"));
+    badgeErrors_ =
+        makeBadge(tr("Errors: 0"), QStringLiteral("transferBadgeErrors"));
+    badgeCompleted_ =
+        makeBadge(tr("Completed: 0"), QStringLiteral("transferBadgeCompleted"));
+    badgeCanceled_ =
+        makeBadge(tr("Canceled: 0"), QStringLiteral("transferBadgeCanceled"));
+    badgeParallel_ = makeBadge(tr("Parallel: %1").arg(mgr_->maxConcurrent()),
+                               QStringLiteral("transferBadgeParallel"));
+    badgeLimit_ = makeBadge(tr("Global limit: off"),
+                            QStringLiteral("transferBadgeLimit"));
     hbBadges->addWidget(badgeTotal_);
     hbBadges->addWidget(badgeActive_);
     hbBadges->addWidget(badgeRunning_);
@@ -700,6 +717,13 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     clearBtn_->setToolTip(tr("Remove completed transfers from the list"));
     clearFailedBtn_->setToolTip(
         tr("Remove failed and canceled transfers from the list"));
+    closeBtn_->setToolTip(tr("Close the transfer queue"));
+
+    for (QPushButton *button :
+         {pauseBtn_, resumeBtn_, pauseSelBtn_, resumeSelBtn_, stopSelBtn_,
+          stopAllBtn_, retryBtn_, clearBtn_, clearFailedBtn_, closeBtn_}) {
+        button->setAccessibleDescription(button->toolTip());
+    }
 
     controlsLayout->addWidget(pauseBtn_);
     controlsLayout->addWidget(resumeBtn_);
@@ -736,12 +760,24 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     autoClearMinutesSpin_->setRange(1, 1440);
     autoClearMinutesSpin_->setSuffix(tr(" min"));
 
-    hs2->addWidget(new QLabel(tr("Speed:"), speedRow));
+    auto *speedLabel = new QLabel(tr("Speed:"), speedRow);
+    speedLabel->setBuddy(speedSpin_);
+    speedSpin_->setAccessibleName(tr("Global speed limit"));
+    applySpeedBtn_->setAccessibleDescription(
+        tr("Apply the global speed limit to the transfer queue"));
+    limitSelBtn_->setAccessibleDescription(
+        tr("Set a speed limit for the selected transfers"));
+    auto *autoClearLabel = new QLabel(tr("Auto clear:"), speedRow);
+    autoClearLabel->setBuddy(autoClearModeCombo_);
+    autoClearModeCombo_->setAccessibleName(tr("Automatic queue cleanup"));
+    autoClearMinutesSpin_->setAccessibleName(tr("Automatic cleanup delay"));
+
+    hs2->addWidget(speedLabel);
     hs2->addWidget(speedSpin_);
     hs2->addWidget(applySpeedBtn_);
     hs2->addWidget(limitSelBtn_);
     hs2->addSpacing(16);
-    hs2->addWidget(new QLabel(tr("Auto clear:"), speedRow));
+    hs2->addWidget(autoClearLabel);
     hs2->addWidget(autoClearModeCombo_);
     hs2->addWidget(autoClearMinutesSpin_);
     hs2->addStretch();
@@ -1128,7 +1164,14 @@ QVector<quint64> TransferQueueDialog::selectedTaskIds() const {
 }
 
 void TransferQueueDialog::showContextMenu(const QPoint &pos) {
-    const QModelIndex clickedIndex = table_->indexAt(pos);
+    QModelIndex clickedIndex = table_->indexAt(pos);
+    QPoint menuPosition = pos;
+    // Keyboard context-menu requests may not carry a viewport position. Use
+    // the current row so Menu/Shift+F10 exposes the same actions as a click.
+    if (!clickedIndex.isValid() && table_->currentIndex().isValid()) {
+        clickedIndex = table_->currentIndex();
+        menuPosition = table_->visualRect(clickedIndex).center();
+    }
     if (!clickedIndex.isValid())
         return;
 
@@ -1170,7 +1213,7 @@ void TransferQueueDialog::showContextMenu(const QPoint &pos) {
     actRemove->setEnabled(selectedState.hasSelection);
     actRemoveWithPartial->setEnabled(selectedState.hasSelection);
 
-    QAction *chosen = menu.exec(table_->viewport()->mapToGlobal(pos));
+    QAction *chosen = menu.exec(table_->viewport()->mapToGlobal(menuPosition));
     if (!chosen)
         return;
     if (chosen == actPauseSel)

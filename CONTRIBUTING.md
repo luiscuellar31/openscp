@@ -52,6 +52,9 @@ database:
 
 Platform-specific changes must also be exercised on that platform. Complete
 dependency and packaging instructions are in [docs/BUILDING.md](docs/BUILDING.md).
+Changes to custom controls, focus behavior, or visual states must also follow
+the keyboard and screen-reader matrix in
+[docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md).
 
 ## Engineering rules
 

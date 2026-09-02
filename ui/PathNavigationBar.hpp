@@ -1,4 +1,4 @@
-// Flat, clickable path label shared by the local and remote file panels.
+// Flat, clickable path field shared by the local and remote file panels.
 #pragma once
 
 #include "PathNavigationModel.hpp"
@@ -35,7 +35,9 @@ class PathNavigationBar final : public QWidget {
     private:
     void rebuildDisplay();
     [[nodiscard]] qsizetype segmentAt(const QPoint &position) const;
-    void updateHoveredSegment(qsizetype segment);
+    void activateSegment(qsizetype segment);
+    void setKeyboardFocusVisible(bool visible);
+    void updateSegmentPresentation(qsizetype segment, bool hovered);
 
     PathFlavor flavor_ = PathFlavor::Local;
     QString committedPath_;
@@ -44,6 +46,7 @@ class PathNavigationBar final : public QWidget {
     QVector<PathSegment> segments_;
     QLineEdit *display_ = nullptr;
     qsizetype hoveredSegment_ = -1;
+    qsizetype focusedSegment_ = -1;
     bool suppressNextRelease_ = false;
 };
 

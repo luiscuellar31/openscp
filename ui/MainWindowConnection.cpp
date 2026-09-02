@@ -22,6 +22,7 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QDir>
+#include <QFont>
 #include <QHeaderView>
 #include <QInputDialog>
 #include <QLabel>
@@ -816,13 +817,16 @@ void MainWindow::updateHostPolicyRiskBanner() {
     }
     if (!hostPolicyRiskLabel_) {
         hostPolicyRiskLabel_ = new QLabel(this);
-        hostPolicyRiskLabel_->setStyleSheet(
-            "QLabel { color: #B00020; font-weight: 600; }");
+        QFont warningFont = hostPolicyRiskLabel_->font();
+        warningFont.setBold(true);
+        hostPolicyRiskLabel_->setFont(warningFont);
         statusBar()->addPermanentWidget(hostPolicyRiskLabel_);
     }
     hostPolicyRiskLabel_->setText(activeSecurityWarning_);
     hostPolicyRiskLabel_->setToolTip(
         tr("This security exception applies only to the current session."));
+    hostPolicyRiskLabel_->setAccessibleDescription(
+        hostPolicyRiskLabel_->toolTip());
     hostPolicyRiskLabel_->show();
 }
 

@@ -615,77 +615,92 @@ Utilisez un paquet officiel pour obtenir les informations de licence complètes.
 <context>
     <name>DragAwareTreeView</name>
     <message>
-        <location filename="../ui/DragAwareTreeView.cpp" line="144"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="145"/>
         <source>Preparation in progress; please wait.</source>
         <translation>Préparation en cours; veuillez patienter.</translation>
     </message>
     <message>
-        <location filename="../ui/DragAwareTreeView.cpp" line="207"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="208"/>
         <source>Staging kept at: &lt;a href=&quot;%1&quot;&gt;%2&lt;/a&gt;</source>
         <translation>Staging conservé à: &lt;a href=&quot;%1&quot;&gt;%2&lt;/a&gt;</translation>
     </message>
     <message>
-        <location filename="../ui/DragAwareTreeView.cpp" line="297"/>
-        <location filename="../ui/DragAwareTreeView.cpp" line="487"/>
-        <location filename="../ui/DragAwareTreeView.cpp" line="639"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="300"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="497"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="649"/>
         <source>Cancel</source>
         <translation>Annuler</translation>
     </message>
     <message>
-        <location filename="../ui/DragAwareTreeView.cpp" line="635"/>
-        <location filename="../ui/DragAwareTreeView.cpp" line="779"/>
-        <location filename="../ui/DragAwareTreeView.cpp" line="1056"/>
-        <location filename="../ui/DragAwareTreeView.cpp" line="1134"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="645"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="789"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="1066"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="1144"/>
         <source>Preparing files…</source>
         <translation>Préparation des fichiers…</translation>
     </message>
     <message>
-        <location filename="../ui/DragAwareTreeView.cpp" line="468"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="478"/>
         <source>Confirm staging</source>
         <translation>Confirmer le staging</translation>
     </message>
     <message>
-        <location filename="../ui/DragAwareTreeView.cpp" line="474"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="292"/>
+        <source>Preparing files</source>
+        <translation>Préparation des fichiers</translation>
+    </message>
+    <message>
+        <location filename="../ui/DragAwareTreeView.cpp" line="299"/>
+        <source>File preparation progress</source>
+        <translation>Progression de la préparation des fichiers</translation>
+    </message>
+    <message>
+        <location filename="../ui/DragAwareTreeView.cpp" line="302"/>
+        <source>Cancel preparing files for drag and drop</source>
+        <translation>Annuler la préparation des fichiers pour le glisser-déposer</translation>
+    </message>
+    <message>
+        <location filename="../ui/DragAwareTreeView.cpp" line="484"/>
         <source>~%1 (some unknown)</source>
         <translation>~%1 (certains inconnus)</translation>
     </message>
     <message>
-        <location filename="../ui/DragAwareTreeView.cpp" line="482"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="492"/>
         <source>You are about to prepare %1 items%2. Continue?</source>
         <translation>Vous allez préparer %1 éléments%2. Continuer ?</translation>
     </message>
     <message>
-        <location filename="../ui/DragAwareTreeView.cpp" line="486"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="496"/>
         <source>Continue</source>
         <translation>Continuer</translation>
     </message>
     <message>
-        <location filename="../ui/DragAwareTreeView.cpp" line="636"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="646"/>
         <source>Still preparing files for drag-out. Wait or cancel?</source>
         <translation>Préparation des fichiers pour glisser-déposer sortant toujours en cours. Attendre ou annuler ?</translation>
     </message>
     <message>
-        <location filename="../ui/DragAwareTreeView.cpp" line="637"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="647"/>
         <source>Wait</source>
         <translation>Attendre</translation>
     </message>
     <message>
-        <location filename="../ui/DragAwareTreeView.cpp" line="777"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="787"/>
         <source>Queue backpressure: waiting for pending tasks to drop below 1,000…</source>
         <translation>File saturée : attente que le nombre de tâches en attente passe sous 1 000…</translation>
     </message>
     <message>
-        <location filename="../ui/DragAwareTreeView.cpp" line="944"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="954"/>
         <source>%1 of %2 staging operations failed. Files kept at:</source>
         <translation>%1 opérations de préparation sur %2 ont échoué. Fichiers conservés dans :</translation>
     </message>
     <message>
-        <location filename="../ui/DragAwareTreeView.cpp" line="964"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="974"/>
         <source>No staged drag roots were available. Files kept at:</source>
         <translation>Aucune racine préparée pour le glisser-déposer n’était disponible. Fichiers conservés dans :</translation>
     </message>
     <message>
-        <location filename="../ui/DragAwareTreeView.cpp" line="1052"/>
+        <location filename="../ui/DragAwareTreeView.cpp" line="1062"/>
         <source>Could not create the drag staging directory.</source>
         <translation>Impossible de créer le dossier de préparation du glisser-déposer.</translation>
     </message>
@@ -824,25 +839,25 @@ Utilisez un paquet officiel pour obtenir les informations de licence complètes.
         <translation>L&apos;action Ouvrir dans le terminal n&apos;est pas prise en charge sur cette plateforme.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="341"/>
-        <location filename="../ui/MainWindow.cpp" line="424"/>
+        <location filename="../ui/MainWindow.cpp" line="344"/>
+        <location filename="../ui/MainWindow.cpp" line="428"/>
         <source>Up</source>
         <translation>Monter</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="348"/>
-        <location filename="../ui/MainWindow.cpp" line="431"/>
+        <location filename="../ui/MainWindow.cpp" line="351"/>
+        <location filename="../ui/MainWindow.cpp" line="435"/>
         <source>Home</source>
         <translation>Accueil</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="344"/>
+        <location filename="../ui/MainWindow.cpp" line="347"/>
         <source>Open left folder</source>
         <translation>Ouvrir le dossier gauche</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="365"/>
-        <location filename="../ui/MainWindow.cpp" line="503"/>
+        <location filename="../ui/MainWindow.cpp" line="368"/>
+        <location filename="../ui/MainWindow.cpp" line="507"/>
         <location filename="../ui/MainWindowLocalOps.cpp" line="403"/>
         <location filename="../ui/MainWindowLocalOps.cpp" line="408"/>
         <location filename="../ui/MainWindowLocalOps.cpp" line="462"/>
@@ -853,8 +868,8 @@ Utilisez un paquet officiel pour obtenir les informations de licence complètes.
         <translation>Copier</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="370"/>
-        <location filename="../ui/MainWindow.cpp" line="506"/>
+        <location filename="../ui/MainWindow.cpp" line="373"/>
+        <location filename="../ui/MainWindow.cpp" line="510"/>
         <location filename="../ui/MainWindowLocalOps.cpp" line="487"/>
         <location filename="../ui/MainWindowLocalOps.cpp" line="522"/>
         <location filename="../ui/MainWindowRemoteOps.cpp" line="459"/>
@@ -862,8 +877,8 @@ Utilisez un paquet officiel pour obtenir les informations de licence complètes.
         <translation>Déplacer</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="374"/>
-        <location filename="../ui/MainWindow.cpp" line="481"/>
+        <location filename="../ui/MainWindow.cpp" line="377"/>
+        <location filename="../ui/MainWindow.cpp" line="485"/>
         <location filename="../ui/MainWindowLocalOps.cpp" line="537"/>
         <location filename="../ui/MainWindowRemoteOps.cpp" line="681"/>
         <location filename="../ui/RemoteActionController.cpp" line="231"/>
@@ -871,26 +886,26 @@ Utilisez un paquet officiel pour obtenir les informations de licence complètes.
         <translation>Supprimer</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="380"/>
+        <location filename="../ui/MainWindow.cpp" line="383"/>
         <source>Copy to left panel</source>
         <translation>Copier vers le panneau gauche</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="386"/>
+        <location filename="../ui/MainWindow.cpp" line="389"/>
         <source>Move to left panel</source>
         <translation>Déplacer vers le panneau gauche</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="393"/>
-        <location filename="../ui/MainWindow.cpp" line="475"/>
+        <location filename="../ui/MainWindow.cpp" line="396"/>
+        <location filename="../ui/MainWindow.cpp" line="479"/>
         <location filename="../ui/MainWindowLocalOps.cpp" line="653"/>
         <location filename="../ui/MainWindowRemoteOps.cpp" line="571"/>
         <source>New folder</source>
         <translation>Nouveau dossier</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="395"/>
-        <location filename="../ui/MainWindow.cpp" line="478"/>
+        <location filename="../ui/MainWindow.cpp" line="398"/>
+        <location filename="../ui/MainWindow.cpp" line="482"/>
         <location filename="../ui/MainWindowLocalOps.cpp" line="624"/>
         <location filename="../ui/MainWindowLocalOps.cpp" line="632"/>
         <location filename="../ui/MainWindowRemoteOps.cpp" line="627"/>
@@ -900,20 +915,20 @@ Utilisez un paquet officiel pour obtenir les informations de licence complètes.
         <translation>Renommer</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="398"/>
-        <location filename="../ui/MainWindow.cpp" line="484"/>
+        <location filename="../ui/MainWindow.cpp" line="401"/>
+        <location filename="../ui/MainWindow.cpp" line="488"/>
         <location filename="../ui/MainWindowLocalOps.cpp" line="666"/>
         <location filename="../ui/MainWindowRemoteOps.cpp" line="592"/>
         <source>New file</source>
         <translation>Nouveau fichier</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="427"/>
+        <location filename="../ui/MainWindow.cpp" line="431"/>
         <source>Open right folder</source>
         <translation>Ouvrir le dossier droit</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="469"/>
+        <location filename="../ui/MainWindow.cpp" line="473"/>
         <location filename="../ui/MainWindowRemoteOps.cpp" line="86"/>
         <location filename="../ui/MainWindowRemoteOps.cpp" line="112"/>
         <location filename="../ui/MainWindowRemoteOps.cpp" line="122"/>
@@ -965,7 +980,7 @@ Utilisez un paquet officiel pour obtenir les informations de licence complètes.
 %1</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="308"/>
+        <location filename="../ui/MainWindow.cpp" line="311"/>
         <source>This protocol works in transfer-only mode.
 Use the remote path above as the target folder for uploads.
 For downloads, choose a remote file path explicitly.</source>
@@ -974,7 +989,7 @@ Utilisez le chemin distant ci-dessus comme dossier cible pour les téléversemen
 Pour les téléchargements, choisissez explicitement un chemin de fichier distant.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1532"/>
+        <location filename="../ui/MainWindow.cpp" line="1571"/>
         <source>This protocol works in transfer-only mode.
 Uploads use the remote folder path above.
 Downloads require entering a remote file path.</source>
@@ -993,28 +1008,28 @@ Les téléchargements exigent de saisir un chemin de fichier distant.</translati
         <translation>L&apos;actualisation n&apos;est pas disponible en mode transfert uniquement.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="359"/>
-        <location filename="../ui/MainWindow.cpp" line="442"/>
+        <location filename="../ui/MainWindow.cpp" line="362"/>
+        <location filename="../ui/MainWindow.cpp" line="446"/>
         <source>Search items</source>
         <translation>Rechercher des éléments</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="335"/>
+        <location filename="../ui/MainWindow.cpp" line="338"/>
         <source>Local panel</source>
         <translation>Panneau local</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="335"/>
+        <location filename="../ui/MainWindow.cpp" line="338"/>
         <source>Local panel - left</source>
         <translation>Panneau local - gauche</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="338"/>
+        <location filename="../ui/MainWindow.cpp" line="341"/>
         <source>Local panel - right</source>
         <translation>Panneau local - droit</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="338"/>
+        <location filename="../ui/MainWindow.cpp" line="341"/>
         <source>Remote panel</source>
         <translation>Panneau distant</translation>
     </message>
@@ -1127,12 +1142,12 @@ Continuer ?</translation>
         <translation>Le dossier actuel n&apos;existe pas.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="464"/>
+        <location filename="../ui/MainWindow.cpp" line="468"/>
         <source>Refresh</source>
         <translation>Actualiser</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="450"/>
+        <location filename="../ui/MainWindow.cpp" line="454"/>
         <location filename="../ui/MainWindowRemoteOps.cpp" line="307"/>
         <location filename="../ui/MainWindowRemoteOps.cpp" line="332"/>
         <location filename="../ui/MainWindowRemoteOps.cpp" line="347"/>
@@ -1141,237 +1156,237 @@ Continuer ?</translation>
         <translation>Télécharger</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="456"/>
+        <location filename="../ui/MainWindow.cpp" line="460"/>
         <source>Upload…</source>
         <translation>Téléverser…</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="544"/>
+        <location filename="../ui/MainWindow.cpp" line="549"/>
         <source>Select items to download</source>
         <translation>Sélectionner les éléments à télécharger</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="644"/>
-        <location filename="../ui/MainWindow.cpp" line="663"/>
+        <location filename="../ui/MainWindow.cpp" line="650"/>
+        <location filename="../ui/MainWindow.cpp" line="669"/>
         <source>Disconnect</source>
         <translation>Déconnecter</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="640"/>
-        <location filename="../ui/MainWindow.cpp" line="662"/>
+        <location filename="../ui/MainWindow.cpp" line="646"/>
+        <location filename="../ui/MainWindow.cpp" line="668"/>
         <source>Connect</source>
         <translation>Connecter</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="665"/>
-        <location filename="../ui/MainWindow.cpp" line="700"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="1461"/>
+        <location filename="../ui/MainWindow.cpp" line="671"/>
+        <location filename="../ui/MainWindow.cpp" line="706"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1465"/>
         <source>Saved sites</source>
         <translation>Sites enregistrés</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="676"/>
-        <location filename="../ui/MainWindow.cpp" line="701"/>
+        <location filename="../ui/MainWindow.cpp" line="682"/>
+        <location filename="../ui/MainWindow.cpp" line="707"/>
         <source>Transfers</source>
         <translation>Transferts</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="688"/>
-        <location filename="../ui/MainWindow.cpp" line="703"/>
-        <location filename="../ui/MainWindow.cpp" line="2049"/>
+        <location filename="../ui/MainWindow.cpp" line="694"/>
+        <location filename="../ui/MainWindow.cpp" line="709"/>
+        <location filename="../ui/MainWindow.cpp" line="2088"/>
         <source>History</source>
         <translation>Historique</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1884"/>
-        <location filename="../ui/MainWindow.cpp" line="2068"/>
+        <location filename="../ui/MainWindow.cpp" line="1923"/>
+        <location filename="../ui/MainWindow.cpp" line="2107"/>
         <source>Open selected</source>
         <translation>Ouvrir la sélection</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="2060"/>
+        <location filename="../ui/MainWindow.cpp" line="2099"/>
         <source>Recent local paths</source>
         <translation>Chemins locaux récents</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="2061"/>
+        <location filename="../ui/MainWindow.cpp" line="2100"/>
         <source>Recent remote paths</source>
         <translation>Chemins distants récents</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="2064"/>
+        <location filename="../ui/MainWindow.cpp" line="2103"/>
         <source>Recent servers</source>
         <translation>Serveurs récents</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="2241"/>
+        <location filename="../ui/MainWindow.cpp" line="2280"/>
         <source>Connect to a remote server to open remote path history.</source>
         <translation>Connectez-vous à un serveur distant pour ouvrir l&apos;historique des chemins distants.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="2272"/>
+        <location filename="../ui/MainWindow.cpp" line="2311"/>
         <source>Disconnect the current remote session before opening another server.</source>
         <translation>Déconnectez la session distante actuelle avant d&apos;ouvrir un autre serveur.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="2164"/>
-        <location filename="../ui/MainWindow.cpp" line="2178"/>
-        <location filename="../ui/MainWindow.cpp" line="2210"/>
+        <location filename="../ui/MainWindow.cpp" line="2203"/>
+        <location filename="../ui/MainWindow.cpp" line="2217"/>
+        <location filename="../ui/MainWindow.cpp" line="2249"/>
         <source>No recent history</source>
         <translation>Aucun historique récent</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="2072"/>
-        <location filename="../ui/MainWindow.cpp" line="2326"/>
+        <location filename="../ui/MainWindow.cpp" line="2111"/>
+        <location filename="../ui/MainWindow.cpp" line="2365"/>
         <source>Clear history</source>
         <translation>Effacer l&apos;historique</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1751"/>
-        <location filename="../ui/MainWindow.cpp" line="1792"/>
-        <location filename="../ui/MainWindow.cpp" line="2009"/>
-        <location filename="../ui/MainWindow.cpp" line="2321"/>
+        <location filename="../ui/MainWindow.cpp" line="1790"/>
+        <location filename="../ui/MainWindow.cpp" line="1831"/>
+        <location filename="../ui/MainWindow.cpp" line="2048"/>
+        <location filename="../ui/MainWindow.cpp" line="2360"/>
         <source>Favorite removed</source>
         <translation>Favori supprimé</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1732"/>
-        <location filename="../ui/MainWindow.cpp" line="1792"/>
-        <location filename="../ui/MainWindow.cpp" line="2321"/>
+        <location filename="../ui/MainWindow.cpp" line="1771"/>
+        <location filename="../ui/MainWindow.cpp" line="1831"/>
+        <location filename="../ui/MainWindow.cpp" line="2360"/>
         <source>Favorite added</source>
         <translation>Favori ajouté</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="2327"/>
+        <location filename="../ui/MainWindow.cpp" line="2366"/>
         <source>Remove all recent paths and servers from history?</source>
         <translation>Supprimer de l&apos;historique tous les chemins et serveurs récents ?</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="2332"/>
+        <location filename="../ui/MainWindow.cpp" line="2371"/>
         <source>History cleared</source>
         <translation>Historique effacé</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="719"/>
+        <location filename="../ui/MainWindow.cpp" line="725"/>
         <source>Full screen</source>
         <translation>Plein écran</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="683"/>
-        <location filename="../ui/MainWindow.cpp" line="702"/>
+        <location filename="../ui/MainWindow.cpp" line="689"/>
+        <location filename="../ui/MainWindow.cpp" line="708"/>
         <source>Sync</source>
         <translation>Synchroniser</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="685"/>
+        <location filename="../ui/MainWindow.cpp" line="691"/>
         <source>Compare and synchronize the current folders</source>
         <translation>Comparer et synchroniser les dossiers actuels</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="746"/>
-        <location filename="../ui/MainWindow.cpp" line="761"/>
-        <location filename="../ui/MainWindow.cpp" line="814"/>
+        <location filename="../ui/MainWindow.cpp" line="752"/>
+        <location filename="../ui/MainWindow.cpp" line="797"/>
+        <location filename="../ui/MainWindow.cpp" line="850"/>
         <source>About OpenSCP</source>
         <translation>À propos de OpenSCP</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="752"/>
+        <location filename="../ui/MainWindow.cpp" line="758"/>
         <source>Settings</source>
         <translation>Paramètres</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="760"/>
+        <location filename="../ui/MainWindow.cpp" line="796"/>
         <source>OpenSCP</source>
         <translation>OpenSCP</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="764"/>
+        <location filename="../ui/MainWindow.cpp" line="800"/>
         <source>Settings…</source>
         <translation>Paramètres…</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="771"/>
+        <location filename="../ui/MainWindow.cpp" line="807"/>
         <source>Quit</source>
         <translation>Quitter</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="776"/>
+        <location filename="../ui/MainWindow.cpp" line="812"/>
         <source>File</source>
         <translation>Fichier</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="797"/>
+        <location filename="../ui/MainWindow.cpp" line="833"/>
         <source>Help</source>
         <translation>Aide</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="821"/>
+        <location filename="../ui/MainWindow.cpp" line="857"/>
         <source>Report a bug</source>
         <translation>Signaler un bug</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="869"/>
+        <location filename="../ui/MainWindow.cpp" line="905"/>
         <source>Ready</source>
         <translation>Prêt</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1208"/>
+        <location filename="../ui/MainWindow.cpp" line="1247"/>
         <source>Type: HttpConnect</source>
         <translation>Type : HttpConnect</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1211"/>
-        <location filename="../ui/MainWindow.cpp" line="1246"/>
+        <location filename="../ui/MainWindow.cpp" line="1250"/>
+        <location filename="../ui/MainWindow.cpp" line="1283"/>
         <source>Active connection method for this session</source>
         <translation>Méthode de connexion active pour cette session</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1221"/>
+        <location filename="../ui/MainWindow.cpp" line="1260"/>
         <source>Session: 000:00:00</source>
         <translation>Session : 000:00:00</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1224"/>
+        <location filename="../ui/MainWindow.cpp" line="1263"/>
         <source>Elapsed time for the current connection session</source>
         <translation>Temps écoulé pour la session de connexion en cours</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1267"/>
+        <location filename="../ui/MainWindow.cpp" line="1306"/>
         <source>Unknown</source>
         <translation>Inconnu</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1233"/>
+        <location filename="../ui/MainWindow.cpp" line="1272"/>
         <source>None</source>
         <translation>Aucun</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1238"/>
+        <location filename="../ui/MainWindow.cpp" line="1277"/>
         <source>Type: %1</source>
         <translation>Type : %1</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1254"/>
+        <location filename="../ui/MainWindow.cpp" line="1293"/>
         <source>Session: --:--:--</source>
         <translation>Session : --:--:--</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1251"/>
+        <location filename="../ui/MainWindow.cpp" line="1290"/>
         <source>Session: %1</source>
         <translation>Session : %1</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="870"/>
+        <location filename="../ui/MainWindow.cpp" line="906"/>
         <source>OpenSCP — local/local (click Connect for remote)</source>
         <translation>OpenSCP — local/local (cliquez sur Connecter pour le mode distant)</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1126"/>
+        <location filename="../ui/MainWindow.cpp" line="1162"/>
         <source>Warning: unencrypted secrets storage active (fallback)</source>
         <translation>Avertissement : stockage des identifiants non chiffré actif (repli)</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1130"/>
+        <location filename="../ui/MainWindow.cpp" line="1168"/>
         <source>You are using unencrypted credentials storage enabled via environment variable. Disable OPENSCP_ENABLE_INSECURE_FALLBACK to hide this warning.</source>
         <translation>Vous utilisez un stockage d&apos;identifiants non chiffré activé via une variable d&apos;environnement. Désactivez OPENSCP_ENABLE_INSECURE_FALLBACK pour masquer cet avertissement.</translation>
     </message>
@@ -1518,38 +1533,38 @@ Continuer ?</translation>
         <translation>Supprimés : %1  |  Échecs : %2</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="647"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="648"/>
         <source>Disconnected</source>
         <translation>Déconnecté</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="452"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="453"/>
         <source>OpenSCP — local/local</source>
         <translation>OpenSCP — local/local</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="773"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="774"/>
         <source>Critical security risk</source>
         <translation>Risque critique de sécurité</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="783"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="784"/>
         <source>Additional confirmation required</source>
         <translation>Confirmation supplémentaire requise</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="784"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="785"/>
         <source>To confirm, type exactly %1</source>
         <translation>Pour confirmer, saisissez exactement %1</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="789"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="1323"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="790"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1327"/>
         <source>Connection canceled</source>
         <translation>Connexion annulée</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="790"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="791"/>
         <source>Risk confirmation was not completed correctly.</source>
         <translation>La confirmation de risque n&apos;a pas été effectuée correctement.</translation>
     </message>
@@ -1574,14 +1589,14 @@ Continuer ?</translation>
         <translation>Afficher le dossier</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="981"/>
+        <location filename="../ui/MainWindow.cpp" line="1017"/>
         <location filename="../ui/RemoteActionController.cpp" line="81"/>
         <location filename="../ui/RemoteActionController.cpp" line="155"/>
         <source>Remote error</source>
         <translation>Erreur distante</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="982"/>
+        <location filename="../ui/MainWindow.cpp" line="1018"/>
         <source>Could not open the remote folder.
 %1</source>
         <translation>Impossible d&apos;ouvrir le dossier distant.
@@ -1695,7 +1710,7 @@ Continuer ?</translation>
 %1</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1877"/>
+        <location filename="../ui/MainWindow.cpp" line="1916"/>
         <location filename="../ui/MainWindowLocalOps.cpp" line="644"/>
         <location filename="../ui/MainWindowLocalOps.cpp" line="657"/>
         <location filename="../ui/MainWindowLocalOps.cpp" line="679"/>
@@ -1846,12 +1861,12 @@ Continuer ?</translation>
         <translation>Erreur lors de l&apos;application des modifications.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="871"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="875"/>
         <source>Confirm SSH fingerprint</source>
         <translation>Confirmer l&apos;empreinte SSH</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="881"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="885"/>
         <source>Connect to %1
 Algorithm: %2
 Fingerprint: %3
@@ -1864,7 +1879,7 @@ Empreinte : %3
 Faire confiance et enregistrer dans known_hosts ?</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="874"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="878"/>
         <source>Connect to %1
 Algorithm: %2
 Fingerprint: %3
@@ -1877,18 +1892,18 @@ Empreinte : %3
 L&apos;empreinte ne peut pas être enregistrée. Connexion autorisée cette fois uniquement.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="888"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="892"/>
         <source>Trust</source>
         <translation>Faire confiance</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="888"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="892"/>
         <source>Connect without saving</source>
         <translation>Se connecter sans enregistrer</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="890"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="1030"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="894"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1034"/>
         <location filename="../ui/MainWindowSync.cpp" line="88"/>
         <location filename="../ui/MainWindowSync.cpp" line="136"/>
         <location filename="../ui/MainWindowSync.cpp" line="291"/>
@@ -1902,12 +1917,12 @@ L&apos;empreinte ne peut pas être enregistrée. Connexion autorisée cette fois
         <translation>Annuler</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="921"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="925"/>
         <source>Could not save fingerprint; allowing one-time connection</source>
         <translation>Impossible d&apos;enregistrer l&apos;empreinte ; connexion ponctuelle autorisée</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="925"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="929"/>
         <source>Connection cancelled: fingerprint not accepted</source>
         <translation>Connexion annulée : empreinte non acceptée</translation>
     </message>
@@ -1952,135 +1967,135 @@ Empreinte : %3</translation>
         <translation>En attente : %1 téléchargements (glisser-déposer)</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="952"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="956"/>
         <source>A connection is already in progress</source>
         <translation>Une connexion est déjà en cours</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1030"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1034"/>
         <source>Connecting…</source>
         <translation>Connexion…</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1037"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1041"/>
         <source>Canceling connection…</source>
         <translation>Annulation de la connexion…</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1141"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1145"/>
         <source>Password required</source>
         <translation>Mot de passe requis</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1156"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1160"/>
         <source>Verification code required</source>
         <translation>Code de vérification requis</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1166"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1170"/>
         <source>Information required</source>
         <translation>Information requise</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1326"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1330"/>
         <source>Connection error</source>
         <translation>Erreur de connexion</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1327"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1331"/>
         <source>Could not connect to the server.
 %1</source>
         <translation>Impossible de se connecter au serveur.
 %1</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1329"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1333"/>
         <source>Check host, port, and credentials.</source>
         <translation>Vérifiez l&apos;hôte, le port et les identifiants.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1446"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="1471"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1450"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1475"/>
         <source>Connected. Site saved.</source>
         <translation>Connecté. Site enregistré.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1447"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="1474"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1451"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1478"/>
         <source>Connected. Site already exists.</source>
         <translation>Connecté. Le site existe déjà.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1448"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="1477"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1452"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1481"/>
         <source>Site saved.</source>
         <translation>Site enregistré.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1448"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="1479"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1452"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1483"/>
         <source>Site already exists.</source>
         <translation>Le site existe déjà.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1462"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1466"/>
         <source>The site was saved, but some credentials could not be saved:
 %1</source>
         <translation>Le site a été enregistré, mais certains identifiants n&apos;ont pas pu être enregistrés :
 %1</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="370"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="371"/>
         <source>Please wait while active transfers are canceled</source>
         <translation>Veuillez patienter pendant l&apos;annulation des transferts actifs</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="383"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="384"/>
         <source>Disconnecting… waiting for active transfers to stop</source>
         <translation>Déconnexion… en attente de l&apos;arrêt des transferts actifs</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="462"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="463"/>
         <source>Disconnect timeout reached; forcing local mode while cleanup continues</source>
         <translation>Délai de déconnexion atteint ; mode local forcé pendant que le nettoyage continue</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="503"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="504"/>
         <source>Background transfer cleanup finished</source>
         <translation>Nettoyage des transferts en arrière-plan terminé</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="644"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="645"/>
         <source>Disconnected (transfer cleanup still finishing in background)</source>
         <translation>Déconnecté (le nettoyage des transferts se termine encore en arrière-plan)</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="946"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="950"/>
         <source>Please wait: previous transfer cleanup is still running (%1s)</source>
         <translation>Veuillez patienter : le nettoyage précédent des transferts est toujours en cours (%1 s)</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1470"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1474"/>
         <source>Connected. Site and credentials saved.</source>
         <translation>Connecté. Site et identifiants enregistrés.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1473"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1477"/>
         <source>Connected. Credentials updated.</source>
         <translation>Connecté. Identifiants mis à jour.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1476"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1480"/>
         <source>Site and credentials saved.</source>
         <translation>Site et identifiants enregistrés.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1478"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1482"/>
         <source>Credentials updated.</source>
         <translation>Identifiants mis à jour.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1521"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1525"/>
         <source>Not available in remote mode</source>
         <translation>Indisponible en mode distant</translation>
     </message>
@@ -2135,7 +2150,7 @@ Empreinte : %3</translation>
         <translation>Dossiers non listés : %1</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1373"/>
+        <location filename="../ui/MainWindow.cpp" line="1412"/>
         <source>Window layout restored to defaults</source>
         <translation>Disposition de la fenêtre rétablie par défaut</translation>
     </message>
@@ -2182,65 +2197,65 @@ Empreinte : %3</translation>
         <translation>%1 transferts terminés</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="325"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="993"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="326"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="997"/>
         <source>Invalid transport configuration</source>
         <translation>Configuration de transport invalide</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="326"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="327"/>
         <source>Proxy and SSH jump host cannot be used together in the same connection.
 Choose only one transport method.</source>
         <translation>Le proxy et l&apos;hôte de rebond SSH ne peuvent pas être utilisés ensemble dans la même connexion.
 Choisissez une seule méthode de transport.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="329"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="997"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="330"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1001"/>
         <source>Connection canceled: invalid transport configuration</source>
         <translation>Connexion annulée : configuration de transport invalide</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="335"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="966"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="1003"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="336"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="970"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1007"/>
         <source>Unsupported transport</source>
         <translation>Transport non pris en charge</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="981"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="985"/>
         <source>SSH jump host is not available for %1.</source>
         <translation>L&apos;hôte de rebond SSH n&apos;est pas disponible pour %1.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="982"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="986"/>
         <source>Connection canceled: SSH jump host is not supported for %1</source>
         <translation>Connexion annulée : l&apos;hôte de rebond SSH n&apos;est pas pris en charge pour %1</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="987"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="991"/>
         <source>Proxy settings are not available for %1.</source>
         <translation>Les paramètres proxy ne sont pas disponibles pour %1.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="988"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="992"/>
         <source>Connection canceled: proxy is not supported for %1</source>
         <translation>Connexion annulée : le proxy n&apos;est pas pris en charge pour %1</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="336"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="1004"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="337"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1008"/>
         <source>SSH jump host is currently unavailable on Windows.</source>
         <translation>L&apos;hôte de rebond SSH est actuellement indisponible sur Windows.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="338"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="1006"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="339"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1010"/>
         <source>Connection canceled: SSH jump host is unsupported on Windows</source>
         <translation>Connexion annulée : l&apos;hôte de rebond SSH n&apos;est pas pris en charge sur Windows</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="994"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="998"/>
         <source>Proxy and SSH jump host cannot be used together in the same connection.
 Edit the site and keep only one transport.</source>
         <translation>Le proxy et l&apos;hôte de rebond SSH ne peuvent pas être utilisés ensemble dans la même connexion.
@@ -2252,22 +2267,22 @@ Modifiez le site et conservez un seul transport.</translation>
         <translation>Dépôt ignoré : un glisser depuis le panneau distant ne peut pas être redéposé dans ce même panneau distant</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="901"/>
+        <location filename="../ui/MainWindow.cpp" line="937"/>
         <source>periodic</source>
         <translation>périodique</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="903"/>
+        <location filename="../ui/MainWindow.cpp" line="939"/>
         <source>resume (%1s)</source>
         <translation>reprendre (%1 s)</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="909"/>
+        <location filename="../ui/MainWindow.cpp" line="945"/>
         <source>Remote session validated (%1)</source>
         <translation>Session distante validée (%1)</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="923"/>
+        <location filename="../ui/MainWindow.cpp" line="959"/>
         <source>The remote session no longer responds (%1).
 OpenSCP will disconnect to avoid inconsistent operations.
 %2</source>
@@ -2276,12 +2291,12 @@ OpenSCP va se déconnecter pour éviter des opérations incohérentes.
 %2</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="922"/>
+        <location filename="../ui/MainWindow.cpp" line="958"/>
         <source>Connection lost</source>
         <translation>Connexion perdue</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="927"/>
+        <location filename="../ui/MainWindow.cpp" line="963"/>
         <source>Transport error.</source>
         <translation>Erreur de transport.</translation>
     </message>
@@ -2323,7 +2338,7 @@ OpenSCP va se déconnecter pour éviter des opérations incohérentes.
         <translation>Erreur inconnue.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1878"/>
+        <location filename="../ui/MainWindow.cpp" line="1917"/>
         <location filename="../ui/MainWindowLocalOps.cpp" line="389"/>
         <location filename="../ui/MainWindowLocalOps.cpp" line="395"/>
         <location filename="../ui/MainWindowLocalOps.cpp" line="479"/>
@@ -2357,42 +2372,42 @@ OpenSCP va se déconnecter pour éviter des opérations incohérentes.
         <translation>Aucune session distante active.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="957"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="961"/>
         <source>An active remote session already exists</source>
         <translation>Une session distante active existe déjà</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="972"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="976"/>
         <source>Protocol not available</source>
         <translation>Protocole indisponible</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="973"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="977"/>
         <source>%1 support is not implemented yet.</source>
         <translation>La prise en charge de %1 n&apos;est pas encore implémentée.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="975"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="979"/>
         <source>Connection canceled: unsupported protocol %1</source>
         <translation>Connexion annulée : protocole non pris en charge %1</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1528"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1532"/>
         <source>Connected (%1) to %2</source>
         <translation>Connecté (%1) à %2</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1532"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1536"/>
         <source>OpenSCP — local/remote (%1)</source>
         <translation>OpenSCP — local/distant (%1)</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="314"/>
+        <location filename="../ui/MainWindow.cpp" line="317"/>
         <source>Upload local files…</source>
         <translation>Téléverser des fichiers locaux…</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="316"/>
+        <location filename="../ui/MainWindow.cpp" line="319"/>
         <source>Download remote file…</source>
         <translation>Télécharger un fichier distant…</translation>
     </message>
@@ -2421,108 +2436,108 @@ OpenSCP va se déconnecter pour éviter des opérations incohérentes.
         <translation>Sélectionnez les fichiers à téléverser</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="978"/>
+        <location filename="../ui/MainWindow.cpp" line="1014"/>
         <source>Remote folder unavailable. The session remains connected; use Refresh to retry.</source>
         <translation>Le dossier distant n’est pas disponible. La session reste connectée ; utilisez Actualiser pour réessayer.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1054"/>
+        <location filename="../ui/MainWindow.cpp" line="1090"/>
         <source>Transfer queue</source>
         <translation>File d’attente des transferts</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1237"/>
+        <location filename="../ui/MainWindow.cpp" line="1276"/>
         <source>Type: %1 • UNSAFE</source>
         <translation>Type : %1 • NON SÉCURISÉ</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="694"/>
-        <location filename="../ui/MainWindow.cpp" line="704"/>
-        <location filename="../ui/MainWindow.cpp" line="1865"/>
+        <location filename="../ui/MainWindow.cpp" line="700"/>
+        <location filename="../ui/MainWindow.cpp" line="710"/>
+        <location filename="../ui/MainWindow.cpp" line="1904"/>
         <source>Favorites</source>
         <translation>Favoris</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1773"/>
-        <location filename="../ui/MainWindow.cpp" line="1810"/>
         <location filename="../ui/MainWindow.cpp" line="1812"/>
-        <location filename="../ui/MainWindow.cpp" line="1938"/>
-        <location filename="../ui/MainWindow.cpp" line="1970"/>
+        <location filename="../ui/MainWindow.cpp" line="1849"/>
+        <location filename="../ui/MainWindow.cpp" line="1851"/>
+        <location filename="../ui/MainWindow.cpp" line="1977"/>
+        <location filename="../ui/MainWindow.cpp" line="2009"/>
         <source>Connect to a remote server to use remote favorites</source>
         <translation>Connectez-vous à un serveur distant pour utiliser les favoris distants</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1832"/>
+        <location filename="../ui/MainWindow.cpp" line="1871"/>
         <source>Remove current path from favorites</source>
         <translation>Retirer le chemin actuel des favoris</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="351"/>
-        <location filename="../ui/MainWindow.cpp" line="434"/>
-        <location filename="../ui/MainWindow.cpp" line="1824"/>
-        <location filename="../ui/MainWindow.cpp" line="1825"/>
-        <location filename="../ui/MainWindow.cpp" line="1833"/>
+        <location filename="../ui/MainWindow.cpp" line="354"/>
+        <location filename="../ui/MainWindow.cpp" line="438"/>
+        <location filename="../ui/MainWindow.cpp" line="1863"/>
+        <location filename="../ui/MainWindow.cpp" line="1864"/>
+        <location filename="../ui/MainWindow.cpp" line="1872"/>
         <source>Add current path to favorites</source>
         <translation>Ajouter le chemin actuel aux favoris</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1932"/>
-        <location filename="../ui/MainWindow.cpp" line="1953"/>
+        <location filename="../ui/MainWindow.cpp" line="1971"/>
+        <location filename="../ui/MainWindow.cpp" line="1992"/>
         <source>No favorites</source>
         <translation>Aucun favori</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1888"/>
-        <location filename="../ui/MainWindow.cpp" line="2017"/>
+        <location filename="../ui/MainWindow.cpp" line="1927"/>
+        <location filename="../ui/MainWindow.cpp" line="2056"/>
         <source>Clear favorites</source>
         <translation>Effacer les favoris</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="2018"/>
+        <location filename="../ui/MainWindow.cpp" line="2057"/>
         <source>Remove all favorites in this section?</source>
         <translation>Retirer tous les favoris de cette section ?</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="2063"/>
+        <location filename="../ui/MainWindow.cpp" line="2102"/>
         <source>Unscoped legacy</source>
         <translation>Historique hérité non associé</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="2069"/>
-        <location filename="../ui/MainWindow.cpp" line="2099"/>
-        <location filename="../ui/MainWindow.cpp" line="2125"/>
-        <location filename="../ui/MainWindow.cpp" line="2133"/>
+        <location filename="../ui/MainWindow.cpp" line="2108"/>
+        <location filename="../ui/MainWindow.cpp" line="2138"/>
+        <location filename="../ui/MainWindow.cpp" line="2164"/>
+        <location filename="../ui/MainWindow.cpp" line="2172"/>
         <source>Add to favorites</source>
         <translation>Ajouter aux favoris</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="1885"/>
-        <location filename="../ui/MainWindow.cpp" line="2132"/>
+        <location filename="../ui/MainWindow.cpp" line="1924"/>
+        <location filename="../ui/MainWindow.cpp" line="2171"/>
         <source>Remove from favorites</source>
         <translation>Retirer des favoris</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="2187"/>
+        <location filename="../ui/MainWindow.cpp" line="2226"/>
         <source>Legacy path without a server identity: %1</source>
         <translation>Chemin hérité sans identité de serveur : %1</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="2194"/>
+        <location filename="../ui/MainWindow.cpp" line="2233"/>
         <source>No legacy history</source>
         <translation>Aucun historique hérité</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="2252"/>
+        <location filename="../ui/MainWindow.cpp" line="2291"/>
         <source>Connect to a remote server to open legacy remote history.</source>
         <translation>Connectez-vous à un serveur distant pour ouvrir l’historique distant hérité.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="2258"/>
+        <location filename="../ui/MainWindow.cpp" line="2297"/>
         <source>Open unscoped legacy path?</source>
         <translation>Ouvrir le chemin hérité non associé ?</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindow.cpp" line="2259"/>
+        <location filename="../ui/MainWindow.cpp" line="2298"/>
         <source>This path is not tied to a saved site or endpoint and may belong to another server.
 
 Open it on the current server?</source>
@@ -2531,50 +2546,50 @@ Open it on the current server?</source>
 L’ouvrir sur le serveur actuel ?</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="534"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="535"/>
         <source>Transfers are still active</source>
         <translation>Des transferts sont toujours actifs</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="536"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="537"/>
         <source>%1 transfer(s) are still active for this session.</source>
         <translation>%1 transfert(s) sont toujours actifs pour cette session.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="539"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="540"/>
         <source>Choose whether to keep their progress for the next connection, cancel them, or stay connected.</source>
         <translation>Choisissez de conserver leur progression pour la prochaine connexion, de les annuler ou de rester connecté.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="541"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="542"/>
         <source>Pause and disconnect</source>
         <translation>Mettre en pause et se déconnecter</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="543"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="544"/>
         <source>Cancel and disconnect</source>
         <translation>Annuler et se déconnecter</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="546"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="547"/>
         <source>Stay connected</source>
         <translation>Rester connecté</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="602"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="622"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="603"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="623"/>
         <source>Paths not saved</source>
         <translation>Chemins non enregistrés</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="603"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="604"/>
         <source>The last paths could not be saved because one or more legacy credentials could not be moved to the secure backend:
 %1</source>
         <translation>Les derniers chemins n’ont pas pu être enregistrés, car un ou plusieurs identifiants hérités n’ont pas pu être déplacés vers le backend sécurisé :
 %1</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="759"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="760"/>
         <source>This connection does not encrypt credentials, file names, or file contents. Anyone able to observe the network may read or modify them.
 
 Continue only for a trusted network or legacy server?</source>
@@ -2583,7 +2598,7 @@ Continue only for a trusted network or legacy server?</source>
 Continuer uniquement sur un réseau de confiance ou avec un serveur ancien ?</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="764"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="765"/>
         <source>TLS encryption is enabled, but the server certificate will not be verified. This allows server impersonation and man-in-the-middle attacks.
 
 Continue at your own risk?</source>
@@ -2592,7 +2607,7 @@ Continue at your own risk?</source>
 Continuer à vos risques et périls ?</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="768"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="769"/>
         <source>The SSH host key will not be verified. This allows server impersonation and man-in-the-middle attacks.
 
 Continue at your own risk?</source>
@@ -2601,67 +2616,67 @@ Continue at your own risk?</source>
 Continuer à vos risques et périls ?</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="773"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="774"/>
         <source>Insecure connection</source>
         <translation>Connexion non sécurisée</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="803"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="804"/>
         <source>Temporary security exception active until %1</source>
         <translation>Exception de sécurité temporaire active jusqu’à %1</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="825"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="827"/>
         <source>This security exception applies only to the current session.</source>
         <translation>Cette exception de sécurité s’applique uniquement à la session actuelle.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1013"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1017"/>
         <source>Connection canceled: security exception not confirmed</source>
         <translation>Connexion annulée : exception de sécurité non confirmée</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1338"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1342"/>
         <source>Insecure: FTP traffic is not encrypted</source>
         <translation>Non sécurisé : le trafic FTP n’est pas chiffré</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1342"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1346"/>
         <source>Insecure: WebDAV HTTP traffic is not encrypted</source>
         <translation>Non sécurisé : le trafic HTTP WebDAV n’est pas chiffré</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1348"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1352"/>
         <source>Risk: TLS certificate is not verified</source>
         <translation>Risque : le certificat TLS n’est pas vérifié</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1350"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1354"/>
         <source>Risk: SSH host key is not verified</source>
         <translation>Risque : la clé d’hôte SSH n’est pas vérifiée</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1417"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="1433"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1421"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1437"/>
         <source>Site not saved</source>
         <translation>Site non enregistré</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1418"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1422"/>
         <source>OpenSCP connected, but it did not rewrite saved sites because one or more legacy credentials could not be moved to the secure backend:
 %1</source>
         <translation>OpenSCP s’est connecté, mais n’a pas réécrit les sites enregistrés, car un ou plusieurs identifiants hérités n’ont pas pu être déplacés vers le backend sécurisé :
 %1</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1424"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="1435"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1428"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1439"/>
         <source>Connected. Site was not saved.</source>
         <translation>Connecté. Le site n’a pas été enregistré.</translation>
     </message>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="1425"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="1436"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1429"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="1440"/>
         <source>Site was not saved.</source>
         <translation>Le site n’a pas été enregistré.</translation>
     </message>
@@ -3159,8 +3174,8 @@ Les analyser de nouveau sans cette limite ?</translation>
 <context>
     <name>QObject</name>
     <message>
-        <location filename="../ui/MainWindowConnection.cpp" line="209"/>
-        <location filename="../ui/MainWindowConnection.cpp" line="222"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="210"/>
+        <location filename="../ui/MainWindowConnection.cpp" line="223"/>
         <source>New site</source>
         <translation>Nouveau site</translation>
     </message>
@@ -4781,8 +4796,8 @@ Destination : %3</translation>
     </message>
     <message>
         <location filename="../ui/TransferQueueDialog.cpp" line="50"/>
-        <location filename="../ui/TransferQueueDialog.cpp" line="559"/>
-        <location filename="../ui/TransferQueueDialog.cpp" line="731"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="564"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="755"/>
         <source>Completed</source>
         <translation>Terminé</translation>
     </message>
@@ -4794,7 +4809,7 @@ Destination : %3</translation>
     </message>
     <message>
         <location filename="../ui/TransferQueueDialog.cpp" line="54"/>
-        <location filename="../ui/TransferQueueDialog.cpp" line="560"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="566"/>
         <source>Canceled</source>
         <translation>Annulé</translation>
     </message>
@@ -4844,42 +4859,42 @@ Destination : %3</translation>
         <translation>File d&apos;attente des transferts</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="681"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="698"/>
         <source>Pause</source>
         <translation>Pause</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="682"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="699"/>
         <source>Resume</source>
         <translation>Reprendre</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="687"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="704"/>
         <source>Retry</source>
         <translation>Réessayer</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="690"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="707"/>
         <source>Close</source>
         <translation>Fermer</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="726"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="750"/>
         <source>Apply limit</source>
         <translation>Appliquer la limite</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="739"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="763"/>
         <source>Speed:</source>
         <translation>Vitesse :</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="896"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="932"/>
         <source>Limit for task(s)</source>
         <translation>Limite pour la/les tâche(s)</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="896"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="932"/>
         <source>KB/s (0 = no limit)</source>
         <translation>KB/s (0 = sans limite)</translation>
     </message>
@@ -4914,238 +4929,308 @@ Destination : %3</translation>
         <translation>Afficher :</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="556"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="559"/>
         <source>All</source>
         <translation>Tous</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="557"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="559"/>
+        <source>Show all transfers</source>
+        <translation>Afficher tous les transferts</translation>
+    </message>
+    <message>
+        <location filename="../ui/TransferQueueDialog.cpp" line="560"/>
         <source>Active</source>
         <translation>Actifs</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="558"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="560"/>
+        <source>Show active transfers</source>
+        <translation>Afficher les transferts actifs</translation>
+    </message>
+    <message>
+        <location filename="../ui/TransferQueueDialog.cpp" line="562"/>
         <source>Errors</source>
         <translation>Erreurs</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="654"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="562"/>
+        <source>Show transfers with errors or warnings</source>
+        <translation>Afficher les transferts avec des erreurs ou des avertissements</translation>
+    </message>
+    <message>
+        <location filename="../ui/TransferQueueDialog.cpp" line="564"/>
+        <source>Show completed transfers</source>
+        <translation>Afficher les transferts terminés</translation>
+    </message>
+    <message>
+        <location filename="../ui/TransferQueueDialog.cpp" line="566"/>
+        <source>Show canceled transfers</source>
+        <translation>Afficher les transferts annulés</translation>
+    </message>
+    <message>
+        <location filename="../ui/TransferQueueDialog.cpp" line="590"/>
+        <source>Transfers</source>
+        <translation>Transferts</translation>
+    </message>
+    <message>
+        <location filename="../ui/TransferQueueDialog.cpp" line="592"/>
+        <source>Transfer queue. Select one or more rows to manage them.</source>
+        <translation>File d’attente des transferts. Sélectionnez une ou plusieurs lignes pour les gérer.</translation>
+    </message>
+    <message>
+        <location filename="../ui/TransferQueueDialog.cpp" line="653"/>
+        <source>Transfer summary</source>
+        <translation>Résumé des transferts</translation>
+    </message>
+    <message>
+        <location filename="../ui/TransferQueueDialog.cpp" line="664"/>
         <source>Total: 0</source>
         <translation>Total : 0</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="655"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="666"/>
         <source>Active: 0</source>
         <translation>Actifs : 0</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="656"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="668"/>
         <source>Running: 0</source>
         <translation>En cours: 0</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="657"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="670"/>
         <source>Paused: 0</source>
         <translation>En pause: 0</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="658"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="672"/>
         <source>Errors: 0</source>
         <translation>Erreurs: 0</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="659"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="674"/>
         <source>Completed: 0</source>
         <translation>Terminé: 0</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="660"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="676"/>
         <source>Canceled: 0</source>
         <translation>Annulé: 0</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="662"/>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1065"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="677"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1101"/>
         <source>Parallel: %1</source>
         <translation>Parallèles : %1</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="663"/>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1070"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="679"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1106"/>
         <source>Global limit: off</source>
         <translation>Limite globale : désactivée</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="683"/>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1146"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="700"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1189"/>
         <source>Pause selected</source>
         <translation>Mettre en pause la sélection</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="684"/>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1147"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="701"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1190"/>
         <source>Resume selected</source>
         <translation>Reprendre la sélection</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="685"/>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1149"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="702"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1192"/>
         <source>Cancel selected</source>
         <translation>Annuler la sélection</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="686"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="703"/>
         <source>Cancel all</source>
         <translation>Tout annuler</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="688"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="705"/>
         <source>Clear completed</source>
         <translation>Nettoyer terminés</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="689"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="706"/>
         <source>Clear failed/canceled</source>
         <translation>Nettoyer échoués/annulés</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="692"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="709"/>
         <source>Pause all queued and running transfers</source>
         <translation>Mettre en pause tous les transferts en attente et en cours</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="693"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="710"/>
         <source>Resume the paused queue and paused tasks</source>
         <translation>Reprendre la file d&apos;attente en pause et les tâches en pause</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="694"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="711"/>
         <source>Pause the selected transfers</source>
         <translation>Mettre en pause les transferts sélectionnés</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="695"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="712"/>
         <source>Resume the selected transfers</source>
         <translation>Reprendre les transferts sélectionnés</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="696"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="713"/>
         <source>Cancel the selected transfers</source>
         <translation>Annuler les transferts sélectionnés</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="698"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="715"/>
         <source>Cancel all queued, running, and paused transfers</source>
         <translation>Annuler tous les transferts en attente, en cours et en pause</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="699"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="716"/>
         <source>Retry transfers with Error or Canceled status</source>
         <translation>Réessayer les transferts avec statut Erreur ou Annulé</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="700"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="717"/>
         <source>Remove completed transfers from the list</source>
         <translation>Supprimer les transferts terminés de la liste</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="702"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="719"/>
         <source>Remove failed and canceled transfers from the list</source>
         <translation>Supprimer les transferts échoués et annulés de la liste</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="727"/>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1148"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="720"/>
+        <source>Close the transfer queue</source>
+        <translation>Fermer la file d’attente des transferts</translation>
+    </message>
+    <message>
+        <location filename="../ui/TransferQueueDialog.cpp" line="751"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1191"/>
         <source>Limit selected</source>
         <translation>Limiter la sélection</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="730"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="754"/>
         <source>Off</source>
         <translation>Désactivé</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="732"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="756"/>
         <source>Failed/Canceled</source>
         <translation>Échoué/Annulé</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="734"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="758"/>
         <source>All finished</source>
         <translation>Tout terminé</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="737"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="761"/>
         <source> min</source>
         <translation> min</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="744"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="765"/>
+        <source>Global speed limit</source>
+        <translation>Limite globale de vitesse</translation>
+    </message>
+    <message>
+        <location filename="../ui/TransferQueueDialog.cpp" line="767"/>
+        <source>Apply the global speed limit to the transfer queue</source>
+        <translation>Appliquer la limite globale de vitesse à la file d’attente des transferts</translation>
+    </message>
+    <message>
+        <location filename="../ui/TransferQueueDialog.cpp" line="769"/>
+        <source>Set a speed limit for the selected transfers</source>
+        <translation>Définir une limite de vitesse pour les transferts sélectionnés</translation>
+    </message>
+    <message>
+        <location filename="../ui/TransferQueueDialog.cpp" line="770"/>
         <source>Auto clear:</source>
         <translation>Nettoyage automatique :</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1051"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="772"/>
+        <source>Automatic queue cleanup</source>
+        <translation>Nettoyage automatique de la file d’attente</translation>
+    </message>
+    <message>
+        <location filename="../ui/TransferQueueDialog.cpp" line="773"/>
+        <source>Automatic cleanup delay</source>
+        <translation>Délai de nettoyage automatique</translation>
+    </message>
+    <message>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1087"/>
         <source>Total: %1</source>
         <translation>Total : %1</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1053"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1089"/>
         <source>Active: %1</source>
         <translation>Actifs : %1</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1055"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1091"/>
         <source>Running: %1</source>
         <translation>En cours: %1</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1057"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1093"/>
         <source>Paused: %1</source>
         <translation>En pause: %1</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1059"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1095"/>
         <source>Errors: %1</source>
         <translation>Erreurs: %1</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1061"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1097"/>
         <source>Completed: %1</source>
         <translation>Terminé: %1</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1063"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1099"/>
         <source>Canceled: %1</source>
         <translation>Annulé: %1</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1069"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1105"/>
         <source>Global limit: %1 KB/s</source>
         <translation>Limite globale : %1 KB/s</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1150"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1193"/>
         <source>Retry selected</source>
         <translation>Réessayer la sélection</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1152"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1195"/>
         <source>Open destination</source>
         <translation>Ouvrir la destination</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1153"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1196"/>
         <source>Copy source path</source>
         <translation>Copier le chemin de la source</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1154"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1197"/>
         <source>Copy destination path</source>
         <translation>Copier le chemin de destination</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1156"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1199"/>
         <source>Clear finished</source>
         <translation>Nettoyer terminés</translation>
     </message>
@@ -5200,12 +5285,12 @@ Destination : %3</translation>
         <translation>Supprimer le dossier distant</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1157"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1200"/>
         <source>Remove selected tasks</source>
         <translation>Retirer les tâches sélectionnées</translation>
     </message>
     <message>
-        <location filename="../ui/TransferQueueDialog.cpp" line="1159"/>
+        <location filename="../ui/TransferQueueDialog.cpp" line="1202"/>
         <source>Remove tasks and partial data</source>
         <translation>Retirer les tâches et les données partielles</translation>
     </message>
@@ -5247,24 +5332,39 @@ Destination : %3</translation>
 <context>
     <name>openscpui::PathNavigationBar</name>
     <message>
-        <location filename="../ui/PathNavigationBar.cpp" line="29"/>
+        <location filename="../ui/PathNavigationBar.cpp" line="71"/>
         <source>Current folder path</source>
         <translation>Chemin du dossier actuel</translation>
     </message>
     <message>
-        <location filename="../ui/PathNavigationBar.cpp" line="31"/>
+        <location filename="../ui/PathNavigationBar.cpp" line="73"/>
         <source>Click the current path or press %1 to open a directory.</source>
         <translation>Cliquez sur le chemin actuel ou appuyez sur %1 pour ouvrir un dossier.</translation>
     </message>
     <message>
-        <location filename="../ui/PathNavigationBar.cpp" line="147"/>
+        <location filename="../ui/PathNavigationBar.cpp" line="239"/>
+        <source>Use Left and Right to choose a path segment, then press Enter or Space to activate it.</source>
+        <translation>Utilisez Gauche et Droite pour choisir un segment du chemin, puis appuyez sur Entrée ou Espace pour l’activer.</translation>
+    </message>
+    <message>
+        <location filename="../ui/PathNavigationBar.cpp" line="251"/>
         <source>Open directory…</source>
         <translation>Ouvrir un dossier…</translation>
     </message>
     <message>
-        <location filename="../ui/PathNavigationBar.cpp" line="148"/>
+        <location filename="../ui/PathNavigationBar.cpp" line="251"/>
         <source>Open %1</source>
         <translation>Ouvrir %1</translation>
+    </message>
+    <message>
+        <location filename="../ui/PathNavigationBar.cpp" line="254"/>
+        <source>Current folder %1. Press Enter or Space to open path entry.</source>
+        <translation>Dossier actuel %1. Appuyez sur Entrée ou Espace pour saisir un chemin.</translation>
+    </message>
+    <message>
+        <location filename="../ui/PathNavigationBar.cpp" line="257"/>
+        <source>Path segment %1. Press Enter or Space to navigate to it.</source>
+        <translation>Segment du chemin %1. Appuyez sur Entrée ou Espace pour y accéder.</translation>
     </message>
 </context>
 </TS>

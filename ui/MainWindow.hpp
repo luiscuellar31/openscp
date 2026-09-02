@@ -69,6 +69,7 @@ class MainWindow : public QMainWindow {
 
     protected:
     bool eventFilter(QObject *eventSource, QEvent *event) override;
+    bool focusNextPrevChild(bool next) override;
     void showEvent(QShowEvent *e) override;
     void closeEvent(QCloseEvent *e) override;
 
@@ -207,6 +208,7 @@ class MainWindow : public QMainWindow {
     QAction *actHomeRight_ = nullptr;
 
     // Sub-toolbars
+    QToolBar *mainToolbar_ = nullptr;
     QToolBar *leftPaneBar_ = nullptr;
     QToolBar *rightPaneBar_ = nullptr;
     QMenu *rightContextMenu_ = nullptr;
@@ -336,6 +338,7 @@ class MainWindow : public QMainWindow {
     void applyRemoteMutationActions();
 
     bool firstShow_ = true;
+    bool initialMainWindowTabNavigation_ = true;
     bool restoredWindowGeometry_ = false;
     openscpui::HostKeyPromptCoordinator hostKeyPromptCoordinator_;
     openscpui::SessionHealthMonitor sessionHealthMonitor_;
