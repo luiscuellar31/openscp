@@ -26,7 +26,6 @@
 #include <QPointer>
 #include <QProgressDialog>
 #include <QScrollBar>
-#include <QSet>
 #include <QStandardPaths>
 #include <QStatusBar>
 
@@ -254,14 +253,16 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
     const QString remotePath =
         joinRemotePath(rightRemoteModel_->rootPath(), name);
     const QString localPath = tempDownloadPathFor(name);
-    // Avoid duplicates: if there is already an active download with same
-    // src/dst, do not enqueue again
-    const bool alreadyActive = transferMgr_->hasActiveTaskForSource(
-        TransferTask::Type::Download, remotePath);
-    if (!alreadyActive) {
+    // Reuse the exact active transfer for this session so repeated activation
+    // opens the result once without creating process-global listener state.
+    const std::optional<quint64> activeTaskId =
+        transferMgr_->activeTaskIdForPaths(TransferTask::Type::Download,
+                                           remotePath, localPath);
+    quint64 taskId = activeTaskId.value_or(0);
+    if (taskId == 0) {
         // Enqueue download so it appears in the queue (instead of direct
         // download)
-        transferMgr_->enqueueDownload(remotePath, localPath);
+        taskId = transferMgr_->enqueueDownload(remotePath, localPath);
         statusBar()->showMessage(QString(tr("Queued: %1 downloads")).arg(1),
                                  3000);
         maybeShowTransferQueue();
@@ -270,35 +271,11 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
         maybeShowTransferQueue();
         statusBar()->showMessage(tr("Download already queued"), 2000);
     }
-    // Open the file when the corresponding task finishes (avoid duplicate
-    // listeners)
-    static QSet<QString> sOpenListeners;
-    const QString key = remotePath + "->" + localPath;
-    if (!sOpenListeners.contains(key)) {
-        sOpenListeners.insert(key);
-        auto connPtr = std::make_shared<QMetaObject::Connection>();
-        *connPtr = connect(
-            transferMgr_, &TransferManager::tasksUpdated, this,
-            [this, remotePath, localPath, key,
-             connPtr](const QVector<quint64> &taskIds) {
-                const auto tasks = transferMgr_->tasksSnapshot(taskIds);
-                for (const auto &task : tasks) {
-                    if (task.type == TransferTask::Type::Download &&
-                        task.src == remotePath && task.dst == localPath) {
-                        if (task.status == TransferTask::Status::Done) {
-                            openLocalPathWithPreference(localPath);
-                            statusBar()->showMessage(
-                                tr("Downloaded: ") + localPath, 5000);
-                            QObject::disconnect(*connPtr);
-                            sOpenListeners.remove(key);
-                        } else if (isTransferTaskFinalStatus(task.status)) {
-                            QObject::disconnect(*connPtr);
-                            sOpenListeners.remove(key);
-                        }
-                        break;
-                    }
-                }
-            });
+    if (taskId != 0) {
+        transferUiController_.openDownloadWhenCompleted(taskId, localPath);
+        // The task can complete very quickly, including before enqueueDownload
+        // returns. Reconcile its current snapshot after registering intent.
+        handleTransferUiUpdate({taskId}, {});
     }
 }
 

@@ -1546,6 +1546,10 @@ void MainWindow::handleTransferUiUpdate(const QVector<quint64> &upsertIds,
         upserts, removedIds, rightIsRemote_ && rightRemoteModel_, remoteRoot);
     if (!update.completionMessage.isEmpty())
         statusBar()->showMessage(update.completionMessage, 5000);
+    for (const QString &localPath : update.completedDownloadPathsToOpen) {
+        openLocalPathWithPreference(localPath);
+        statusBar()->showMessage(tr("Downloaded: ") + localPath, 5000);
+    }
     if (!update.scheduleRemoteRefresh)
         return;
 

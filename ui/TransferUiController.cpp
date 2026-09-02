@@ -23,9 +23,11 @@ void TransferUiController::initialize(const QVector<TransferTask> &snapshot) {
 TransferUiUpdate TransferUiController::observe(
     const QVector<TransferTask> &upserts, const QVector<quint64> &removedIds,
     bool remotePanelActive, const QString &remoteRoot) {
+    TransferUiUpdate update;
     for (const quint64 taskId : removedIds) {
         completedUploadIds_.remove(taskId);
         notifiedTaskIds_.remove(taskId);
+        downloadsToOpen_.remove(taskId);
     }
 
     bool newUploadInCurrentRoot = false;
@@ -33,6 +35,18 @@ TransferUiUpdate TransferUiController::observe(
     QString firstCompletionMessage;
 
     for (const TransferTask &task : upserts) {
+        auto pendingOpen = downloadsToOpen_.find(task.taskId);
+        if (pendingOpen != downloadsToOpen_.end() &&
+            isTerminalTransferStatus(task.status)) {
+            if (task.status == TransferTask::Status::Done &&
+                !update.completedDownloadPathsToOpen.contains(
+                    pendingOpen.value())) {
+                update.completedDownloadPathsToOpen.push_back(
+                    pendingOpen.value());
+            }
+            downloadsToOpen_.erase(pendingOpen);
+        }
+
         if (task.status != TransferTask::Status::Done)
             continue;
 
@@ -66,7 +80,6 @@ TransferUiUpdate TransferUiController::observe(
                          .arg(name);
     }
 
-    TransferUiUpdate update;
     if (newUploadInCurrentRoot && remotePanelActive && !refreshScheduled_) {
         refreshScheduled_ = true;
         update.scheduleRemoteRefresh = true;
@@ -81,6 +94,13 @@ TransferUiUpdate TransferUiController::observe(
     return update;
 }
 
+void TransferUiController::openDownloadWhenCompleted(quint64 taskId,
+                                                     const QString &localPath) {
+    if (taskId == 0 || localPath.isEmpty())
+        return;
+    downloadsToOpen_.insert(taskId, localPath);
+}
+
 void TransferUiController::completeScheduledRefresh() {
     refreshScheduled_ = false;
 }
@@ -89,6 +109,7 @@ void TransferUiController::reset() {
     refreshScheduled_ = false;
     completedUploadIds_.clear();
     notifiedTaskIds_.clear();
+    downloadsToOpen_.clear();
 }
 
 bool TransferUiController::pathIsInsideRemoteRoot(const QString &candidatePath,

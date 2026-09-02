@@ -225,6 +225,17 @@ OPENSCP_TEST(testBatchDownloadEnqueueAndGranularSignals, test) {
                 TransferTask::Type::Download,
                 QStringLiteral("/local/file-9999.dat")),
         "direct path queries should find active work in large queues");
+    const auto exactTaskId = manager.activeTaskIdForPaths(
+        TransferTask::Type::Download, QStringLiteral("/remote/file-4999.dat"),
+        QStringLiteral("/local/file-4999.dat"));
+    test.check(
+        exactTaskId == std::optional<quint64>{5000} &&
+            !manager
+                 .activeTaskIdForPaths(TransferTask::Type::Download,
+                                       QStringLiteral("/remote/file-4999.dat"),
+                                       QStringLiteral("/local/other.dat"))
+                 .has_value(),
+        "exact path queries should return the matching active task ID");
     test.check(
         !manager.hasActiveTaskForSource(TransferTask::Type::Upload,
                                         QStringLiteral("/remote/file-0.dat")) &&

@@ -23,6 +23,17 @@ TransferTask queuedUpload(quint64 id, const QString &destination) {
     return task;
 }
 
+TransferTask downloadWithStatus(quint64 id, const QString &destination,
+                                TransferTask::Status status) {
+    TransferTask task;
+    task.taskId = id;
+    task.type = TransferTask::Type::Download;
+    task.src = QStringLiteral("/remote/report.txt");
+    task.dst = destination;
+    task.status = status;
+    return task;
+}
+
 OPENSCP_TEST(testCompletionIsNotRepeated, test) {
     openscpui::TransferUiController controller;
     controller.initialize(
@@ -127,6 +138,58 @@ OPENSCP_TEST(testFrequentDeltasStayIncremental, test) {
         completed.scheduleRemoteRefresh &&
             !completed.completionMessage.isEmpty(),
         "one terminal delta should complete independently of queue size");
+}
+
+OPENSCP_TEST(testDownloadOpenIntentFollowsTaskLifecycle, test) {
+    openscpui::TransferUiController controller;
+    const QString localPath = QStringLiteral("/local/report.txt");
+    controller.openDownloadWhenCompleted(20, localPath);
+
+    const auto running = controller.observe(
+        {downloadWithStatus(20, localPath, TransferTask::Status::Running)}, {},
+        false, {});
+    test.check(running.completedDownloadPathsToOpen.isEmpty(),
+               "an active download must not open prematurely");
+
+    const auto completed = controller.observe(
+        {downloadWithStatus(20, localPath, TransferTask::Status::Done)}, {},
+        false, {});
+    test.check(completed.completedDownloadPathsToOpen == QStringList{localPath},
+               "a successful tracked task should request opening once");
+
+    const auto repeated = controller.observe(
+        {downloadWithStatus(20, localPath, TransferTask::Status::Done)}, {},
+        false, {});
+    test.check(repeated.completedDownloadPathsToOpen.isEmpty(),
+               "a completed task must not request opening twice");
+}
+
+OPENSCP_TEST(testDownloadOpenIntentClearsOnFailureRemovalAndReset, test) {
+    openscpui::TransferUiController controller;
+    const QString localPath = QStringLiteral("/local/report.txt");
+
+    controller.openDownloadWhenCompleted(21, localPath);
+    const auto failed = controller.observe(
+        {downloadWithStatus(21, localPath, TransferTask::Status::Error)}, {},
+        false, {});
+    test.check(failed.completedDownloadPathsToOpen.isEmpty(),
+               "failed downloads must clear intent without opening");
+
+    controller.openDownloadWhenCompleted(22, localPath);
+    (void)controller.observe({}, {22}, false, {});
+    const auto removedThenCompleted = controller.observe(
+        {downloadWithStatus(22, localPath, TransferTask::Status::Done)}, {},
+        false, {});
+    test.check(removedThenCompleted.completedDownloadPathsToOpen.isEmpty(),
+               "removed tasks must release their pending open intent");
+
+    controller.openDownloadWhenCompleted(23, localPath);
+    controller.reset();
+    const auto resetThenCompleted = controller.observe(
+        {downloadWithStatus(23, localPath, TransferTask::Status::Done)}, {},
+        false, {});
+    test.check(resetThenCompleted.completedDownloadPathsToOpen.isEmpty(),
+               "reset must not retain open intent across sessions");
 }
 
 } // namespace

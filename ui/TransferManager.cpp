@@ -700,6 +700,25 @@ bool TransferManager::hasActiveTaskForDestination(
                        });
 }
 
+std::optional<quint64>
+TransferManager::activeTaskIdForPaths(TransferTask::Type type,
+                                      const QString &source,
+                                      const QString &destination) const {
+    std::lock_guard<std::mutex> lock(mtx_);
+    for (const auto &taskNode : queueStore_.nodes()) {
+        const TransferTask &task = *taskNode;
+        const bool belongsToCurrentSession =
+            currentSessionKey_.isEmpty() || task.sessionKey.isEmpty() ||
+            task.sessionKey == currentSessionKey_;
+        if (belongsToCurrentSession && task.type == type &&
+            task.src == source && task.dst == destination &&
+            !isTerminalTransferStatus(task.status)) {
+            return task.taskId;
+        }
+    }
+    return std::nullopt;
+}
+
 QVector<quint64>
 TransferManager::activeTaskIdsForSession(const QString &sessionKey) const {
     QVector<quint64> result;

@@ -90,6 +90,11 @@ class TransferManager : public QObject {
     [[nodiscard]] bool
     hasActiveTaskForDestination(TransferTask::Type type,
                                 const QString &destination) const;
+    // Finds exact non-terminal work for the current (or unscoped) session
+    // without copying the queue snapshot.
+    [[nodiscard]] std::optional<quint64>
+    activeTaskIdForPaths(TransferTask::Type type, const QString &source,
+                         const QString &destination) const;
     [[nodiscard]] QVector<quint64>
     activeTaskIdsForSession(const QString &sessionKey) const;
     [[nodiscard]] bool isBatchTerminal(quint64 batchId) const;
