@@ -13,6 +13,12 @@
 
 inline constexpr int kNameColumn = 0;
 
+struct PathDepthComparator {
+    bool deepestFirst = false;
+
+    bool operator()(const QString &left, const QString &right) const;
+};
+
 bool isValidEntryName(const QString &name, QString *why = nullptr);
 bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
                           const QString &labelText, const QString &initialValue,

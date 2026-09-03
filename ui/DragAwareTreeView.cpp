@@ -24,7 +24,6 @@
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QMimeData>
-#include <QPointer>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSet>
@@ -573,15 +572,7 @@ void DragAwareTreeView::startRemoteDragStaging(
     }
     std::sort(state->orderedDirectories.begin(),
               state->orderedDirectories.end(),
-              [](const QString &left, const QString &right) {
-                  const qsizetype leftDepth =
-                      QDir::fromNativeSeparators(left).count(QLatin1Char('/'));
-                  const qsizetype rightDepth =
-                      QDir::fromNativeSeparators(right).count(QLatin1Char('/'));
-                  if (leftDepth != rightDepth)
-                      return leftDepth < rightDepth;
-                  return left < right;
-              });
+              PathDepthComparator{.deepestFirst = false});
     for (int index = 0; index < state->dragRoots.size(); ++index) {
         state->dragRootIndexes[QDir::cleanPath(state->dragRoots.at(index))]
             .push_back(index);

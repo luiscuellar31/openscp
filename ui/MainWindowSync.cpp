@@ -34,6 +34,19 @@ qint64 displayableByteCount(quint64 bytes) {
 
 } // namespace
 
+QProgressDialog *MainWindow::makeComparisonProgress(const QString &label) {
+    auto *progress = new QProgressDialog(label, tr("Cancel"), 0, 0, this);
+    progress->setWindowTitle(tr("Compare folders"));
+    progress->setWindowModality(Qt::NonModal);
+    progress->setMinimumDuration(0);
+    progress->setAutoClose(false);
+    syncProgress_ = progress;
+    connect(progress, &QProgressDialog::canceled, syncCoordinator_,
+            &SyncCoordinator::cancel);
+    progress->show();
+    return progress;
+}
+
 void MainWindow::initializeSyncCoordinator() {
     if (syncCoordinator_ || !remoteOps_ || !transferMgr_)
         return;
@@ -83,17 +96,7 @@ void MainWindow::initializeSyncCoordinator() {
                 syncCoordinator_->cancel();
                 return;
             }
-            auto *progress =
-                new QProgressDialog(tr("Preparing a large folder comparison…"),
-                                    tr("Cancel"), 0, 0, this);
-            progress->setWindowTitle(tr("Compare folders"));
-            progress->setWindowModality(Qt::NonModal);
-            progress->setMinimumDuration(0);
-            progress->setAutoClose(false);
-            syncProgress_ = progress;
-            connect(progress, &QProgressDialog::canceled, syncCoordinator_,
-                    &SyncCoordinator::cancel);
-            progress->show();
+            makeComparisonProgress(tr("Preparing a large folder comparison…"));
             syncCoordinator_->continueLargeTree();
         });
     connect(
@@ -287,15 +290,6 @@ void MainWindow::showSyncDialog() {
         return;
     }
 
-    auto *progress = new QProgressDialog(tr("Preparing folder comparison…"),
-                                         tr("Cancel"), 0, 0, this);
-    progress->setWindowTitle(tr("Compare folders"));
-    progress->setWindowModality(Qt::NonModal);
-    progress->setMinimumDuration(0);
-    progress->setAutoClose(false);
-    syncProgress_ = progress;
-    connect(progress, &QProgressDialog::canceled, syncCoordinator_,
-            &SyncCoordinator::cancel);
-    progress->show();
+    makeComparisonProgress(tr("Preparing folder comparison…"));
     syncCoordinator_->start(leftPath_->path(), rightRemoteModel_->rootPath());
 }

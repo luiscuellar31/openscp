@@ -49,6 +49,7 @@ class QStackedWidget; // fwd
 class QTimer;         // fwd
 class QSplitter;      // fwd
 class QPushButton;    // fwd
+class QProgressDialog;
 namespace openscp {
 class RemoteClient;
 struct SessionOptions;
@@ -130,6 +131,7 @@ class MainWindow : public QMainWindow {
     void initializePanelInteractions();
     void initializeRuntimeState();
     void initializeSyncCoordinator();
+    QProgressDialog *makeComparisonProgress(const QString &label);
     bool isScpTransferMode() const;
     void activateScpTransferModeUi(bool enabled);
     void showOpenPathDialog(bool rightPane);

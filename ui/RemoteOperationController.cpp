@@ -30,6 +30,18 @@ int safeBatchSize(int requested) {
     return std::clamp(requested, 1, 1000);
 }
 
+RemoteTreeWalker::Options
+walkerOptionsFrom(const openscp::remote_operation::TraversalOptions &traversal,
+                  RemoteTreeWalker::DepthPolicy depthPolicy =
+                      RemoteTreeWalker::DepthPolicy::StopBeforeLimit) {
+    RemoteTreeWalker::Options options;
+    options.includeHidden = traversal.includeHidden;
+    options.skipSymlinks = traversal.skipSymlinks;
+    options.maxDepth = traversal.maxDepth;
+    options.depthPolicy = depthPolicy;
+    return options;
+}
+
 QString operationError(const std::string &raw, const QString &fallback) {
     if (!raw.empty())
         return QString::fromStdString(raw);
@@ -1077,11 +1089,8 @@ class RemoteOperationController::Impl {
                                       std::stop_token stopToken) {
         RunSummary summary;
         RemoteTreeWalker walker(*client_);
-        RemoteTreeWalker::Options options;
-        options.includeHidden = request.traversal.includeHidden;
-        options.skipSymlinks = request.traversal.skipSymlinks;
-        options.maxDepth = request.traversal.maxDepth;
-        options.depthPolicy = RemoteTreeWalker::DepthPolicy::IncludeLimit;
+        const RemoteTreeWalker::Options options = walkerOptionsFrom(
+            request.traversal, RemoteTreeWalker::DepthPolicy::IncludeLimit);
 
         RemoteTreeWalker::Callbacks callbacks;
         callbacks.waitUntilReady = [this, &job, stopToken] {
@@ -1203,11 +1212,8 @@ class RemoteOperationController::Impl {
                                      std::stop_token stopToken) {
         RunSummary summary;
         RemoteTreeWalker walker(*client_);
-        RemoteTreeWalker::Options options;
-        options.includeHidden = request.traversal.includeHidden;
-        options.skipSymlinks = request.traversal.skipSymlinks;
-        options.maxDepth = request.traversal.maxDepth;
-        options.depthPolicy = RemoteTreeWalker::DepthPolicy::IncludeLimit;
+        const RemoteTreeWalker::Options options = walkerOptionsFrom(
+            request.traversal, RemoteTreeWalker::DepthPolicy::IncludeLimit);
 
         const auto applyMode = [this, &job, &request, &summary](
                                    const RemoteTreeWalker::Entry &entry) {
@@ -1326,10 +1332,8 @@ class RemoteOperationController::Impl {
         };
 
         RemoteTreeWalker walker(*client_);
-        RemoteTreeWalker::Options walkerOptions;
-        walkerOptions.includeHidden = options.includeHidden;
-        walkerOptions.skipSymlinks = options.skipSymlinks;
-        walkerOptions.maxDepth = options.maxDepth;
+        const RemoteTreeWalker::Options walkerOptions =
+            walkerOptionsFrom(options);
 
         RemoteTreeWalker::Callbacks callbacks;
         callbacks.waitUntilReady = [this, &job, stopToken] {

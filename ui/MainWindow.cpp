@@ -36,60 +36,42 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
-#include <QDirIterator>
-#include <QDragEnterEvent>
-#include <QDragMoveEvent>
-#include <QDropEvent>
-#include <QEasingCurve>
-#include <QFile>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
-#include <QFrame>
 #include <QGuiApplication>
 #include <QHeaderView>
 #include <QIcon>
 #include <QItemSelectionModel>
 #include <QKeySequence>
 #include <QLabel>
-#include <QListView>
 #include <QListWidget>
-#include <QLocale>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
-#include <QMimeData>
-#include <QParallelAnimationGroup>
-#include <QProcess>
-#include <QProgressDialog>
-#include <QPropertyAnimation>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScreen>
 #include <QScrollBar>
-#include <QSet>
 #include <QShortcut>
 #include <QShowEvent>
 #include <QSize>
 #include <QSizePolicy>
 #include <QSplitter>
 #include <QStackedWidget>
-#include <QStandardPaths>
 #include <QStatusBar>
 #include <QStyle>
 #include <QTabWidget>
-#include <QTemporaryFile>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
 #include <QUrl>
-#include <QUuid>
 #include <QVBoxLayout>
 
 #include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <thread>
 
 namespace {
@@ -2142,6 +2124,35 @@ void MainWindow::showHistoryMenu() {
         }
     };
 
+    struct ResolvedHistorySelection {
+        openscpui::NavigationStore::Location location;
+        QString normalized;
+        QString remoteScope;
+    };
+    auto resolveSelection =
+        [tabs, this](
+            const QString &value) -> std::optional<ResolvedHistorySelection> {
+        const bool localPath = tabs->currentIndex() == 0;
+        const bool remotePath = tabs->currentIndex() == 1;
+        if (!localPath && !remotePath)
+            return std::nullopt;
+
+        const auto location =
+            localPath ? openscpui::NavigationStore::Location::Local
+                      : openscpui::NavigationStore::Location::Remote;
+        const QString remoteScope =
+            remotePath ? remoteNavigationScope() : QString();
+        if (remotePath && remoteScope.isEmpty())
+            return std::nullopt;
+
+        const QString normalized =
+            localPath ? openscpui::NavigationStore::normalizeLocalPath(value)
+                      : openscpui::NavigationStore::normalizeRemotePath(value);
+        if (normalized.isEmpty())
+            return std::nullopt;
+        return ResolvedHistorySelection{location, normalized, remoteScope};
+    };
+
     auto updateActions = [=, this]() {
         if (!openBtn)
             return;
@@ -2160,28 +2171,15 @@ void MainWindow::showHistoryMenu() {
         if (!favoriteBtn)
             return;
 
-        const bool localPath = tabs->currentIndex() == 0;
-        const bool remotePath = tabs->currentIndex() == 1;
-        const auto location =
-            localPath ? openscpui::NavigationStore::Location::Local
-                      : openscpui::NavigationStore::Location::Remote;
-        const QString remoteScope =
-            remotePath ? remoteNavigationScope() : QString();
-        const QString normalized =
-            localPath
-                ? openscpui::NavigationStore::normalizeLocalPath(value)
-                : (remotePath
-                       ? openscpui::NavigationStore::normalizeRemotePath(value)
-                       : QString());
-        if ((!localPath && (!remotePath || remoteScope.isEmpty())) ||
-            normalized.isEmpty()) {
+        const auto selection = resolveSelection(value);
+        if (!selection) {
             favoriteBtn->setEnabled(false);
             favoriteBtn->setText(tr("Add to favorites"));
             return;
         }
 
-        const bool alreadyFavorite =
-            navigationStore_.isFavorite(location, normalized, remoteScope);
+        const bool alreadyFavorite = navigationStore_.isFavorite(
+            selection->location, selection->normalized, selection->remoteScope);
         favoriteBtn->setEnabled(true);
         favoriteBtn->setText(alreadyFavorite ? tr("Remove from favorites")
                                              : tr("Add to favorites"));
@@ -2350,26 +2348,12 @@ void MainWindow::showHistoryMenu() {
             return;
         const QString value =
             list->currentItem()->data(Qt::UserRole).toString();
-        const bool localPath = tabs->currentIndex() == 0;
-        const bool remotePath = tabs->currentIndex() == 1;
-        const auto location =
-            localPath ? openscpui::NavigationStore::Location::Local
-                      : openscpui::NavigationStore::Location::Remote;
-        const QString remoteScope =
-            remotePath ? remoteNavigationScope() : QString();
-        const QString normalized =
-            localPath
-                ? openscpui::NavigationStore::normalizeLocalPath(value)
-                : (remotePath
-                       ? openscpui::NavigationStore::normalizeRemotePath(value)
-                       : QString());
-        if ((!localPath && (!remotePath || remoteScope.isEmpty())) ||
-            normalized.isEmpty()) {
+        const auto selection = resolveSelection(value);
+        if (!selection)
             return;
-        }
 
-        const bool added =
-            navigationStore_.toggleFavorite(location, normalized, remoteScope);
+        const bool added = navigationStore_.toggleFavorite(
+            selection->location, selection->normalized, selection->remoteScope);
         refreshFavoritesActions();
         statusBar()->showMessage(
             added ? tr("Favorite added") : tr("Favorite removed"), 2500);

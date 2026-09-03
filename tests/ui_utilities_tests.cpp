@@ -1,3 +1,4 @@
+#include "MainWindowSharedUtils.hpp"
 #include "RemotePath.hpp"
 #include "TestHarness.hpp"
 #include "UiFormatters.hpp"
@@ -37,6 +38,24 @@ OPENSCP_TEST(testByteFormatting, test) {
                "transfer rates should reuse byte-size formatting");
     test.check(formatTransferRate(0.0) == QString::fromUtf8("—"),
                "unknown transfer rates should use an em dash");
+}
+
+OPENSCP_TEST(testPathDepthOrdering, test) {
+    const PathDepthComparator shallowestFirst{.deepestFirst = false};
+    test.check(
+        shallowestFirst(QStringLiteral("/root"), QStringLiteral("/root/child")),
+        "shallow ordering should place parent paths first");
+    test.check(
+        shallowestFirst(QStringLiteral("/root/a"), QStringLiteral("/root/b")),
+        "shallow ordering should break equal-depth ties ascending");
+
+    const PathDepthComparator deepestFirst{.deepestFirst = true};
+    test.check(
+        deepestFirst(QStringLiteral("/root/child"), QStringLiteral("/root")),
+        "deep ordering should place child paths first");
+    test.check(
+        deepestFirst(QStringLiteral("/root/b"), QStringLiteral("/root/a")),
+        "deep ordering should break equal-depth ties descending");
 }
 
 } // namespace

@@ -712,17 +712,8 @@ void MainWindow::startLocalUploadDiscovery(
         disconnectTaskTracking();
 
         QStringList directories = state->sourceDirectories;
-        std::sort(
-            directories.begin(), directories.end(),
-            [](const QString &left, const QString &right) {
-                const qsizetype leftDepth =
-                    QDir::fromNativeSeparators(left).count(QLatin1Char('/'));
-                const qsizetype rightDepth =
-                    QDir::fromNativeSeparators(right).count(QLatin1Char('/'));
-                if (leftDepth != rightDepth)
-                    return leftDepth > rightDepth;
-                return left > right;
-            });
+        std::sort(directories.begin(), directories.end(),
+                  PathDepthComparator{.deepestFirst = true});
         if (directories.isEmpty()) {
             setLeftRoot(leftPath_->path());
             return;

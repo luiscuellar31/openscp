@@ -10,6 +10,17 @@
 #include <QLineEdit>
 #include <QMessageBox>
 
+bool PathDepthComparator::operator()(const QString &left,
+                                     const QString &right) const {
+    const qsizetype leftDepth =
+        QDir::fromNativeSeparators(left).count(QLatin1Char('/'));
+    const qsizetype rightDepth =
+        QDir::fromNativeSeparators(right).count(QLatin1Char('/'));
+    if (leftDepth != rightDepth)
+        return deepestFirst ? leftDepth > rightDepth : leftDepth < rightDepth;
+    return deepestFirst ? left > right : left < right;
+}
+
 bool isValidEntryName(const QString &name, QString *why) {
     if (name == "." || name == "..") {
         if (why) {
