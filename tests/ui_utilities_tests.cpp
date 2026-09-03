@@ -5,6 +5,7 @@
 
 #include <QCoreApplication>
 
+#include <initializer_list>
 #include <iostream>
 
 namespace {
@@ -56,6 +57,21 @@ OPENSCP_TEST(testPathDepthOrdering, test) {
     test.check(
         deepestFirst(QStringLiteral("/root/b"), QStringLiteral("/root/a")),
         "deep ordering should break equal-depth ties descending");
+}
+
+OPENSCP_TEST(testTerminalTransferStatuses, test) {
+    using Status = TransferTask::Status;
+    for (const Status status : {Status::Done, Status::Error, Status::Canceled,
+                                Status::Skipped, Status::Warning}) {
+        test.check(isTerminalTransferStatus(status),
+                   "every completed outcome should be terminal");
+    }
+    for (const Status status :
+         {Status::Queued, Status::Running, Status::Paused,
+          Status::WaitingForConnection, Status::RetryWaiting}) {
+        test.check(!isTerminalTransferStatus(status),
+                   "an actionable transfer state should not be terminal");
+    }
 }
 
 } // namespace

@@ -39,24 +39,6 @@ namespace {
 
 constexpr char kStagingBatchMime[] = "application/x-openscp-staging-batch";
 
-bool isLocalUploadPreparationTerminal(TransferTask::Status status) {
-    switch (status) {
-    case TransferTask::Status::Done:
-    case TransferTask::Status::Error:
-    case TransferTask::Status::Canceled:
-    case TransferTask::Status::Skipped:
-    case TransferTask::Status::Warning:
-        return true;
-    case TransferTask::Status::Queued:
-    case TransferTask::Status::Running:
-    case TransferTask::Status::Paused:
-    case TransferTask::Status::WaitingForConnection:
-    case TransferTask::Status::RetryWaiting:
-        return false;
-    }
-    return false;
-}
-
 QRect centeredQueueRect(QWidget *dialog, QWidget *mainWindow) {
     if (!dialog)
         return {};
@@ -362,7 +344,7 @@ void MainWindow::runRemoteDownloadPrescan(
                     const auto tasks = transferMgr_->tasksSnapshot(taskIds);
                     for (const auto &task : tasks) {
                         if (task.batchId == state->batchOptions.batchId &&
-                            !isTransferTaskFinalStatus(task.status)) {
+                            !isTerminalTransferStatus(task.status)) {
                             state->pendingTransferTasks.insert(task.taskId);
                         }
                     }
@@ -383,7 +365,7 @@ void MainWindow::runRemoteDownloadPrescan(
                     QSet<quint64> observed;
                     for (const auto &task : tasks) {
                         observed.insert(task.taskId);
-                        if (isTransferTaskFinalStatus(task.status))
+                        if (isTerminalTransferStatus(task.status))
                             state->pendingTransferTasks.remove(task.taskId);
                     }
                     for (const quint64 taskId : relevant) {
@@ -754,8 +736,7 @@ void MainWindow::startLocalUploadDiscovery(
                     directoryFailed = true;
                 }
             }
-            if (removed || !task ||
-                isLocalUploadPreparationTerminal(task->status)) {
+            if (removed || !task || isTerminalTransferStatus(task->status)) {
                 state->pendingTasks.remove(taskId);
                 changed = true;
             }

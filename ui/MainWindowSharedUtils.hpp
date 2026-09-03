@@ -28,5 +28,3 @@ QString shortRemoteError(const QString &raw, const QString &fallback);
 QVector<QPair<QString, QString>> buildLocalDestinationPairsWithOverwritePrompt(
     QWidget *parent, const QVector<QFileInfo> &sources,
     const QDir &destinationDir, int *skippedCount = nullptr);
-
-bool isTransferTaskFinalStatus(TransferTask::Status status);

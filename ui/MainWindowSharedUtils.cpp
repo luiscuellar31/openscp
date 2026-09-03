@@ -172,9 +172,3 @@ QVector<QPair<QString, QString>> buildLocalDestinationPairsWithOverwritePrompt(
         *skippedCount = skipped;
     return pairs;
 }
-
-bool isTransferTaskFinalStatus(TransferTask::Status status) {
-    return status == TransferTask::Status::Done ||
-           status == TransferTask::Status::Error ||
-           status == TransferTask::Status::Canceled;
-}
