@@ -29,6 +29,35 @@ namespace {
 std::mutex activeDestinationMutex;
 std::unordered_set<std::string> activeDestinations;
 
+std::string localPartialPath(const std::string &destination) {
+    return destination + ".part";
+}
+
+std::string localDestinationKey(const std::string &path) {
+    std::error_code pathError;
+    const std::filesystem::path absolutePath =
+        std::filesystem::absolute(std::filesystem::path(path), pathError);
+    if (pathError)
+        return std::string("local:") + path;
+    return std::string("local:") + absolutePath.lexically_normal().string();
+}
+
+size_t writeFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
+    if (!userdata)
+        return 0;
+    std::FILE *file = static_cast<std::FILE *>(userdata);
+    const size_t total = size * nmemb;
+    return std::fwrite(ptr, 1, total, file);
+}
+
+size_t readFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
+    if (!userdata)
+        return 0;
+    std::FILE *file = static_cast<std::FILE *>(userdata);
+    const size_t total = size * nmemb;
+    return std::fread(ptr, 1, total, file);
+}
+
 RemoteError makeRemoteError(RemoteErrorKind kind, std::string message,
                             std::int64_t nativeCode = 0) {
     RemoteError error;
@@ -419,10 +448,6 @@ std::string encodeFtpUrlPath(std::string_view logicalPath, bool directory) {
     return encodeUrlPath(normalized);
 }
 
-std::string localPartialPath(const std::string &destination) {
-    return destination + ".part";
-}
-
 std::FILE *openFileForUpload(const std::string &path, std::uint64_t &fileSize,
                              std::string &err) {
     fileSize = 0;
@@ -565,15 +590,6 @@ ActiveDestinationLease::~ActiveDestinationLease() {
         return;
     std::lock_guard<std::mutex> lock(activeDestinationMutex);
     activeDestinations.erase(key_);
-}
-
-std::string localDestinationKey(const std::string &path) {
-    std::error_code pathError;
-    const std::filesystem::path absolutePath =
-        std::filesystem::absolute(std::filesystem::path(path), pathError);
-    if (pathError)
-        return std::string("local:") + path;
-    return std::string("local:") + absolutePath.lexically_normal().string();
 }
 
 bool configureBaseCurlHandle(CURL *curl, const char *backendLabel,
@@ -730,22 +746,6 @@ size_t appendStringCallback(char *ptr, size_t size, size_t nmemb,
         return 0;
     }
     return total;
-}
-
-size_t writeFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
-    if (!userdata)
-        return 0;
-    std::FILE *file = static_cast<std::FILE *>(userdata);
-    const size_t total = size * nmemb;
-    return std::fwrite(ptr, 1, total, file);
-}
-
-size_t readFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
-    if (!userdata)
-        return 0;
-    std::FILE *file = static_cast<std::FILE *>(userdata);
-    const size_t total = size * nmemb;
-    return std::fread(ptr, 1, total, file);
 }
 
 int seekFileCallback(void *userdata, curl_off_t offset, int origin) {

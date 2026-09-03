@@ -157,7 +157,6 @@ parseRetryAfter(std::string_view value, std::time_t now = std::time(nullptr));
 std::string encodeUrlPath(const std::string &path);
 std::string encodeFtpUrlPath(std::string_view logicalPath, bool directory);
 
-std::string localPartialPath(const std::string &destination);
 std::FILE *openFileForUpload(const std::string &path, std::uint64_t &fileSize,
                              std::string &err);
 
@@ -184,8 +183,6 @@ class ActiveDestinationLease {
     bool acquired_ = false;
 };
 
-std::string localDestinationKey(const std::string &path);
-
 bool configureBaseCurlHandle(CURL *curl, const char *backendLabel,
                              bool acceptCompressedResponses,
                              std::optional<long> responseTimeoutSeconds,
@@ -211,8 +208,6 @@ struct BoundedStringSink {
 
 size_t appendStringCallback(char *ptr, size_t size, size_t nmemb,
                             void *userdata);
-size_t writeFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata);
-size_t readFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata);
 int seekFileCallback(void *userdata, curl_off_t offset, int origin);
 
 struct TransferProgressContext {

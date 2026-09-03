@@ -9,20 +9,7 @@
 
 #include <algorithm>
 
-QString normalizeRemotePath(const QString &rawPath) {
-    const QByteArray utf8 = rawPath.trimmed().toUtf8();
-    const std::string normalized =
-        openscp::normalizeRemotePath(std::string_view(
-            utf8.constData(), static_cast<std::size_t>(utf8.size())));
-    return QString::fromUtf8(normalized.data(),
-                             static_cast<qsizetype>(normalized.size()));
-}
-
-QString joinRemotePath(const QString &base, const QString &relativePath) {
-    if (relativePath.isEmpty())
-        return normalizeRemotePath(base);
-    return normalizeRemotePath(base + QLatin1Char('/') + relativePath);
-}
+namespace {
 
 bool isSafeRemoteEntryName(const QString &name) {
     if (name.isEmpty() || name == QLatin1String(".") ||
@@ -36,6 +23,23 @@ bool isSafeRemoteEntryName(const QString &name) {
             return false;
     }
     return true;
+}
+
+} // namespace
+
+QString normalizeRemotePath(const QString &rawPath) {
+    const QByteArray utf8 = rawPath.trimmed().toUtf8();
+    const std::string normalized =
+        openscp::normalizeRemotePath(std::string_view(
+            utf8.constData(), static_cast<std::size_t>(utf8.size())));
+    return QString::fromUtf8(normalized.data(),
+                             static_cast<qsizetype>(normalized.size()));
+}
+
+QString joinRemotePath(const QString &base, const QString &relativePath) {
+    if (relativePath.isEmpty())
+        return normalizeRemotePath(base);
+    return normalizeRemotePath(base + QLatin1Char('/') + relativePath);
 }
 
 bool isSafeRemoteRelativePath(const QString &relativePath) {
