@@ -414,8 +414,7 @@ target_link_libraries(openscp_ui_widgets
         Qt6::Svg
 )
 
-add_executable(openscp
-    ui/main.cpp
+add_library(openscp_main_window STATIC
     ui/MainWindow.hpp
     ui/MainWindow.cpp
     ui/MainWindowConnection.cpp
@@ -423,6 +422,18 @@ add_executable(openscp
     ui/MainWindowRemoteOps.cpp
     ui/MainWindowSync.cpp
     ui/MainWindowTransfers.cpp
+)
+
+target_include_directories(openscp_main_window
+    PUBLIC ${CMAKE_SOURCE_DIR}/ui
+)
+
+target_link_libraries(openscp_main_window
+    PUBLIC openscp_ui_widgets
+)
+
+add_executable(openscp
+    ui/main.cpp
 )
 
 # Libsecret (Linux): link if available to store secrets securely
@@ -455,7 +466,7 @@ target_include_directories(openscp PRIVATE
 )
 
 target_link_libraries(openscp PRIVATE
-    openscp_ui_widgets
+    openscp_main_window
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

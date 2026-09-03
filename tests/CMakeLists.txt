@@ -95,14 +95,8 @@ openscp_add_test(openscp_platform_path_actions_tests
 )
 
 openscp_add_test(openscp_ui_utilities_tests
-    SOURCES
-        ui_utilities_tests.cpp
-        ${CMAKE_SOURCE_DIR}/ui/RemotePath.cpp
-        ${CMAKE_SOURCE_DIR}/ui/RemotePath.hpp
-        ${CMAKE_SOURCE_DIR}/ui/UiFormatters.cpp
-        ${CMAKE_SOURCE_DIR}/ui/UiFormatters.hpp
-    INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/ui
-    LINK_LIBRARIES Qt6::Core openscp_core
+    SOURCES ui_utilities_tests.cpp
+    LINK_LIBRARIES openscp_ui_logic
 )
 
 openscp_add_test(openscp_site_manager_dialog_tests
@@ -117,11 +111,16 @@ openscp_add_test(openscp_accessibility_widget_tests
     SOURCES accessibility_widget_tests.cpp
     LINK_LIBRARIES openscp_ui_widgets
 )
+openscp_add_test(openscp_main_window_navigation_tests
+    SOURCES main_window_navigation_tests.cpp
+    LINK_LIBRARIES openscp_main_window
+)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set_tests_properties(
         openscp_site_manager_dialog_tests
         openscp_connection_dialog_tests
         openscp_accessibility_widget_tests
+        openscp_main_window_navigation_tests
         PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
