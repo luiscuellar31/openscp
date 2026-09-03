@@ -86,23 +86,11 @@ std::string normalizeRemoteDirPath(std::string path) {
     return path;
 }
 
-std::string serverPathForLogicalPath(const SessionOptions &opt,
-                                     const std::string &remotePath) {
-    return curlcommon::webDavServerPath(opt.webdav_base_path, remotePath);
-}
-
-bool logicalPathForServerPath(const SessionOptions &opt,
-                              const std::string &serverPath,
-                              std::string &logicalPath) {
-    return curlcommon::webDavLogicalPath(opt.webdav_base_path, serverPath,
-                                         logicalPath);
-}
-
 std::string buildWebDavUrl(const SessionOptions &opt,
                            const std::string &remotePath) {
     const std::string host = curlcommon::normalizeHostAuthorityForUrl(opt.host);
-    const std::string path =
-        curlcommon::encodeUrlPath(serverPathForLogicalPath(opt, remotePath));
+    const std::string path = curlcommon::encodeUrlPath(
+        curlcommon::webDavServerPath(opt.webdav_base_path, remotePath));
     return std::string(webDavSchemeStorageName(
                normalizeWebDavScheme(opt.webdav_scheme))) +
            "://" + host + ":" + std::to_string(opt.port) + path;
@@ -407,7 +395,8 @@ bool parsePropfindResponse(const SessionOptions &opt, const std::string &xml,
         WebDavResource parsed;
         const std::string serverPath =
             normalizeRemotePath(decodePercent(extractPathFromHref(hrefRaw)));
-        if (!logicalPathForServerPath(opt, serverPath, parsed.path))
+        if (!curlcommon::webDavLogicalPath(opt.webdav_base_path, serverPath,
+                                           parsed.path))
             continue;
         if (hrefRaw.back() == '/')
             parsed.isDir = true;

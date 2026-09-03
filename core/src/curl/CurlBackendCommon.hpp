@@ -160,9 +160,6 @@ std::string encodeFtpUrlPath(std::string_view logicalPath, bool directory);
 std::string localPartialPath(const std::string &destination);
 std::FILE *openFileForUpload(const std::string &path, std::uint64_t &fileSize,
                              std::string &err);
-bool flushAndSyncFile(std::FILE *file, std::string &err);
-bool atomicReplaceLocalFile(const std::string &partial,
-                            const std::string &destination, std::string &err);
 
 RemoteError errorFromCurl(CURLcode code, std::string message,
                           long responseCode = 0, bool commitUncertain = false);

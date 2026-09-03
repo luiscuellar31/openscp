@@ -438,15 +438,6 @@ std::FILE *openFileForUpload(const std::string &path, std::uint64_t &fileSize,
     return file;
 }
 
-bool flushAndSyncFile(std::FILE *file, std::string &err) {
-    return localfiles::flushAndSync(file, err);
-}
-
-bool atomicReplaceLocalFile(const std::string &partial,
-                            const std::string &destination, std::string &err) {
-    return localfiles::atomicReplace(partial, destination, err);
-}
-
 RemoteError errorFromCurl(CURLcode code, std::string message, long responseCode,
                           bool commitUncertain) {
     RemoteError error;
@@ -952,7 +943,7 @@ bool downloadToLocalFile(CURL *curl, const std::string &destination,
             return false;
         }
     }
-    if (!flushAndSyncFile(localFile, err)) {
+    if (!localfiles::flushAndSync(localFile, err)) {
         const int flushCode = errno;
         localFileOwner.reset();
         failure = makeRemoteError(RemoteErrorKind::LocalIo, err, flushCode);
@@ -970,7 +961,7 @@ bool downloadToLocalFile(CURL *curl, const std::string &destination,
             static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
         return false;
     }
-    if (!atomicReplaceLocalFile(partial, destination, err)) {
+    if (!localfiles::atomicReplace(partial, destination, err)) {
         failure = makeRemoteError(RemoteErrorKind::LocalIo, err, errno);
         return false;
     }
