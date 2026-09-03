@@ -102,6 +102,7 @@ class Libssh2SftpClient : public RemoteClient {
                                                   bool mutation = false);
     RemoteError classifyStructuredFailure(const std::string &message,
                                           bool mutation) const;
+    bool rejectOversizedPath(const std::string &path, std::string &err);
 
     bool connected_ = false;
     int sock_ = -1;

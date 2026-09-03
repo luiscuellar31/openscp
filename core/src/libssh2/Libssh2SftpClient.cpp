@@ -2607,6 +2607,44 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
         auto hasMethod = [&](const char *m) {
             return !authlist.empty() && authlist.find(m) != std::string::npos;
         };
+        auto tryAgentAuth = [&]() {
+            bool authed = false;
+            if (hasMethod("publickey")) {
+                LIBSSH2_AGENT *agent = libssh2_agent_init(session_);
+                if (agent && libssh2_agent_connect(agent) == 0) {
+                    if (libssh2_agent_list_identities(agent) == 0) {
+                        struct libssh2_agent_publickey *identity = nullptr;
+                        struct libssh2_agent_publickey *prev = nullptr;
+                        int tries = 0;
+                        const int kMaxAgentTries = 3;
+                        while (libssh2_agent_get_identity(agent, &identity,
+                                                          prev) == 0 &&
+                               tries < kMaxAgentTries) {
+                            prev = identity;
+                            ++tries;
+                            int arc = -1;
+                            for (;;) {
+                                arc = libssh2_agent_userauth(
+                                    agent, opt.username.c_str(), identity);
+                                if (arc != LIBSSH2_ERROR_EAGAIN)
+                                    break;
+                                std::this_thread::sleep_for(
+                                    std::chrono::milliseconds(50));
+                            }
+                            if (arc == 0) {
+                                authed = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (agent) {
+                    libssh2_agent_disconnect(agent);
+                    libssh2_agent_free(agent);
+                }
+            }
+            return authed;
+        };
 
         // If the user provided a password: try it first to avoid exhausting
         // attempts with 'none' or agent.
@@ -2715,41 +2753,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                     authlist = methods ? std::string(methods) : std::string();
                 }
 
-                bool authed = false;
-                if (hasMethod("publickey")) {
-                    LIBSSH2_AGENT *agent = libssh2_agent_init(session_);
-                    if (agent && libssh2_agent_connect(agent) == 0) {
-                        if (libssh2_agent_list_identities(agent) == 0) {
-                            struct libssh2_agent_publickey *identity = nullptr;
-                            struct libssh2_agent_publickey *prev = nullptr;
-                            int tries = 0;
-                            const int kMaxAgentTries = 3; // conservative limit
-                            while (libssh2_agent_get_identity(agent, &identity,
-                                                              prev) == 0 &&
-                                   tries < kMaxAgentTries) {
-                                prev = identity;
-                                ++tries;
-                                int arc = -1;
-                                for (;;) {
-                                    arc = libssh2_agent_userauth(
-                                        agent, opt.username.c_str(), identity);
-                                    if (arc != LIBSSH2_ERROR_EAGAIN)
-                                        break;
-                                    std::this_thread::sleep_for(
-                                        std::chrono::milliseconds(50));
-                                }
-                                if (arc == 0) {
-                                    authed = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if (agent) {
-                        libssh2_agent_disconnect(agent);
-                        libssh2_agent_free(agent);
-                    }
-                }
+                const bool authed = tryAgentAuth();
 
                 if (!authed) {
                     // Save libssh2 error message for diagnostics
@@ -2791,41 +2795,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                 session_, opt.username.c_str(),
                 static_cast<unsigned>(opt.username.size()));
             authlist = methods ? std::string(methods) : std::string();
-            bool authed = false;
-            if (hasMethod("publickey")) {
-                LIBSSH2_AGENT *agent = libssh2_agent_init(session_);
-                if (agent && libssh2_agent_connect(agent) == 0) {
-                    if (libssh2_agent_list_identities(agent) == 0) {
-                        struct libssh2_agent_publickey *identity = nullptr;
-                        struct libssh2_agent_publickey *prev = nullptr;
-                        int tries = 0;
-                        const int kMaxAgentTries = 3;
-                        while (libssh2_agent_get_identity(agent, &identity,
-                                                          prev) == 0 &&
-                               tries < kMaxAgentTries) {
-                            prev = identity;
-                            ++tries;
-                            int arc = -1;
-                            for (;;) {
-                                arc = libssh2_agent_userauth(
-                                    agent, opt.username.c_str(), identity);
-                                if (arc != LIBSSH2_ERROR_EAGAIN)
-                                    break;
-                                std::this_thread::sleep_for(
-                                    std::chrono::milliseconds(50));
-                            }
-                            if (arc == 0) {
-                                authed = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if (agent) {
-                    libssh2_agent_disconnect(agent);
-                    libssh2_agent_free(agent);
-                }
-            }
+            const bool authed = tryAgentAuth();
             if (!authed) {
                 err = "Sin credenciales: clave/agent/password no disponibles";
                 return false;
@@ -3055,11 +3025,8 @@ bool Libssh2SftpClient::list(const std::string &remote_path,
         return false;
 
     std::string path = remote_path.empty() ? "/" : remote_path;
-    if (path.size() > std::numeric_limits<unsigned int>::max()) {
-        err = "Remote directory path exceeds the libssh2 size limit";
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+    if (rejectOversizedPath(path, err))
         return false;
-    }
 
     LIBSSH2_SFTP_HANDLE *dir = libssh2_sftp_open_ex(
         sftp_, path.c_str(), static_cast<unsigned int>(path.size()), 0, 0,
@@ -3716,11 +3683,8 @@ bool Libssh2SftpClient::mkdir(const std::string &remote_dir, std::string &err,
     auto structuredErrorScope = beginStructuredOperation(err, true);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
-    if (remote_dir.size() > std::numeric_limits<unsigned int>::max()) {
-        err = "Remote directory path exceeds the libssh2 size limit";
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+    if (rejectOversizedPath(remote_dir, err))
         return false;
-    }
     int rc = libssh2_sftp_mkdir_ex(sftp_, remote_dir.c_str(),
                                    static_cast<unsigned int>(remote_dir.size()),
                                    mode);
@@ -3751,11 +3715,8 @@ bool Libssh2SftpClient::removeDir(const std::string &remote_dir,
     auto structuredErrorScope = beginStructuredOperation(err, true);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
-    if (remote_dir.size() > std::numeric_limits<unsigned int>::max()) {
-        err = "Remote directory path exceeds the libssh2 size limit";
-        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+    if (rejectOversizedPath(remote_dir, err))
         return false;
-    }
     int rc =
         libssh2_sftp_rmdir_ex(sftp_, remote_dir.c_str(),
                               static_cast<unsigned int>(remote_dir.size()));
@@ -3763,6 +3724,15 @@ bool Libssh2SftpClient::removeDir(const std::string &remote_dir,
         err = "sftp_rmdir failed (directory not empty?)";
         return false;
     }
+    return true;
+}
+
+bool Libssh2SftpClient::rejectOversizedPath(const std::string &path,
+                                            std::string &err) {
+    if (path.size() <= std::numeric_limits<unsigned int>::max())
+        return false;
+    err = "Remote directory path exceeds the libssh2 size limit";
+    setLastOperationError(RemoteErrorKind::InvalidRequest, err);
     return true;
 }
 
