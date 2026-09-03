@@ -10,7 +10,6 @@
 #include <QMouseEvent>
 #include <QPalette>
 #include <QPushButton>
-#include <QScreen>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>

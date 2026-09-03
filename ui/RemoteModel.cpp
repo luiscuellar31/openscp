@@ -5,7 +5,6 @@
 #include "TimeUtils.hpp"
 
 #include <QApplication>
-#include <QDateTime>
 #include <QFileIconProvider>
 #include <QFileInfo>
 #include <QMimeData>

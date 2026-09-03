@@ -1,7 +1,5 @@
 #include "UiAlerts.hpp"
 
-#include <QDialog>
-
 namespace UiAlerts {
 namespace {
 QMessageBox::StandardButton

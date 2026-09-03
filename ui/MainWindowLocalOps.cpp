@@ -10,7 +10,6 @@
 #include "UiAlerts.hpp"
 
 #include <QCoreApplication>
-#include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -20,14 +19,9 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
-#include <QProgressDialog>
 #include <QPushButton>
-#include <QSet>
 #include <QStatusBar>
-#include <QTemporaryFile>
 #include <QThreadPool>
-#include <QTreeView>
-#include <QUrl>
 #include <QUuid>
 
 #include <algorithm>

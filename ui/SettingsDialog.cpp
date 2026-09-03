@@ -9,7 +9,6 @@
 #include <QComboBox>
 #include <QDir>
 #include <QFileDialog>
-#include <QFileInfo>
 #include <QFontMetrics>
 #include <QFormLayout>
 #include <QHBoxLayout>

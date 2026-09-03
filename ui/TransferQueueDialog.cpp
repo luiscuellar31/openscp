@@ -8,7 +8,6 @@
 
 #include <QAbstractItemView>
 #include <QAbstractTableModel>
-#include <QApplication>
 #include <QButtonGroup>
 #include <QClipboard>
 #include <QCloseEvent>

@@ -6,7 +6,6 @@
 
 #include <QSet>
 #include <QUuid>
-#include <QVariant>
 
 #include <cstdint>
 #include <limits>

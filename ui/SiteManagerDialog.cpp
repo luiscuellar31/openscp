@@ -11,7 +11,6 @@
 #include <QAbstractTableModel>
 #include <QDialogButtonBox>
 #include <QDir>
-#include <QFile>
 #include <QFileInfo>
 #include <QFont>
 #include <QFrame>
@@ -21,7 +20,6 @@
 #include <QLineEdit>
 #include <QPalette>
 #include <QPushButton>
-#include <QSaveFile>
 #include <QSizePolicy>
 #include <QSortFilterProxyModel>
 #include <QStackedWidget>

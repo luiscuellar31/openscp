@@ -13,8 +13,6 @@
 #include "TransferManager.hpp"
 #include "UiAlerts.hpp"
 
-#include <QCoreApplication>
-#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -23,8 +21,6 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
-#include <QPointer>
-#include <QProgressDialog>
 #include <QScrollBar>
 #include <QStandardPaths>
 #include <QStatusBar>
