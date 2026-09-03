@@ -115,10 +115,6 @@ QString shortRemoteError(const QString &raw, const QString &fallback) {
     return message;
 }
 
-QString shortRemoteError(const std::string &raw, const QString &fallback) {
-    return shortRemoteError(QString::fromStdString(raw), fallback);
-}
-
 QVector<QPair<QString, QString>> buildLocalDestinationPairsWithOverwritePrompt(
     QWidget *parent, const QVector<QFileInfo> &sources,
     const QDir &destinationDir, int *skippedCount) {
@@ -166,43 +162,8 @@ QVector<QPair<QString, QString>> buildLocalDestinationPairsWithOverwritePrompt(
     return pairs;
 }
 
-bool isTransferTaskActiveStatus(TransferTask::Status status) {
-    return status == TransferTask::Status::Queued ||
-           status == TransferTask::Status::Running ||
-           status == TransferTask::Status::Paused;
-}
-
 bool isTransferTaskFinalStatus(TransferTask::Status status) {
     return status == TransferTask::Status::Done ||
            status == TransferTask::Status::Error ||
            status == TransferTask::Status::Canceled;
-}
-
-const TransferTask *findTransferTask(const QVector<TransferTask> &tasks,
-                                     TransferTask::Type type,
-                                     const QString &src, const QString &dst) {
-    for (const auto &task : tasks) {
-        if (task.type == type && task.src == src && task.dst == dst)
-            return &task;
-    }
-    return nullptr;
-}
-
-bool hasActiveTransferTask(const QVector<TransferTask> &tasks,
-                           TransferTask::Type type, const QString &src,
-                           const QString &dst) {
-    const TransferTask *task = findTransferTask(tasks, type, src, dst);
-    return task && isTransferTaskActiveStatus(task->status);
-}
-
-bool areTransferPairsFinal(const QVector<TransferTask> &tasks,
-                           TransferTask::Type type,
-                           const QVector<QPair<QString, QString>> &pairs) {
-    for (const auto &pair : pairs) {
-        const TransferTask *task =
-            findTransferTask(tasks, type, pair.first, pair.second);
-        if (!task || !isTransferTaskFinalStatus(task->status))
-            return false;
-    }
-    return true;
 }

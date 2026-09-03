@@ -77,8 +77,6 @@ class LocalTreeDiscovery final : public QObject {
     largeTreeConfirmationRequired(const LocalTreeDiscoveryCounters &counters);
     void finished(const LocalTreeDiscoveryCounters &counters);
     void canceled(const LocalTreeDiscoveryCounters &counters);
-    void failed(const QString &message,
-                const LocalTreeDiscoveryCounters &counters);
 
     private:
     enum class LargeTreeDecision { Waiting, Continue, Cancel };

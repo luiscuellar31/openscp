@@ -515,16 +515,15 @@ void PaneController::search(const SearchContext &context) {
 
     const auto finalize = [this,
                            state](const LocalTreeDiscoveryCounters &counters,
-                                  bool canceled, const QString &error) {
+                                  bool canceled) {
         if (state->progress) {
             state->progress->hide();
             state->progress->deleteLater();
         }
         if (state->discovery)
             localSearches_.remove(state->discovery);
-        const int scanErrors =
-            static_cast<int>(counters.inaccessibleEntries +
-                             counters.depthLimits + (!error.isEmpty() ? 1 : 0));
+        const int scanErrors = static_cast<int>(counters.inaccessibleEntries +
+                                                counters.depthLimits);
         reportResults(state->context, state->basePath, state->matches,
                       scanErrors,
                       state->canceledByUser || (canceled && !state->truncated),
@@ -534,16 +533,11 @@ void PaneController::search(const SearchContext &context) {
     };
     connect(discovery, &LocalTreeDiscovery::finished, this,
             [finalize](const LocalTreeDiscoveryCounters &counters) {
-                finalize(counters, false, {});
+                finalize(counters, false);
             });
     connect(discovery, &LocalTreeDiscovery::canceled, this,
             [finalize](const LocalTreeDiscoveryCounters &counters) {
-                finalize(counters, true, {});
-            });
-    connect(discovery, &LocalTreeDiscovery::failed, this,
-            [finalize](const QString &error,
-                       const LocalTreeDiscoveryCounters &counters) {
-                finalize(counters, false, error);
+                finalize(counters, true);
             });
     connect(
         discovery, &LocalTreeDiscovery::largeTreeConfirmationRequired, this,

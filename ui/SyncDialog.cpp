@@ -274,7 +274,6 @@ class SyncComparisonTableModel final : public QAbstractTableModel {
 };
 
 SyncDialog::SyncDialog(QWidget *parent) : QDialog(parent) {
-    qRegisterMetaType<SyncExecutionPlan>("SyncExecutionPlan");
     buildUi();
     loadPresets();
     applyOptionsToControls();
@@ -460,14 +459,6 @@ void SyncDialog::setRootPaths(const QString &localRoot,
     localRoot_ = localRoot;
     remoteRoot_ = remoteRoot;
     updateRootLabels();
-}
-
-void SyncDialog::setComparisonOptions(const SyncComparisonOptions &options) {
-    options_ = options;
-    if (options_.modifiedToleranceMs < 0)
-        options_.modifiedToleranceMs = 0;
-    applyOptionsToControls();
-    rebuildComparison();
 }
 
 void SyncDialog::setChecksumAvailable(bool available) {
@@ -812,6 +803,5 @@ void SyncDialog::acceptRequested() {
             return;
     }
 
-    emit executionRequested(plan);
     QDialog::accept();
 }

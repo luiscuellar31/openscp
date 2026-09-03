@@ -55,7 +55,6 @@ class RemoteActionController final : public QObject {
     explicit RemoteActionController(QObject *parent = nullptr);
 
     void setContext(Context context);
-    void clearContext();
 
     void createDirectory(const QString &basePath, const QString &name);
     void createFile(const QString &basePath, const QString &name);

@@ -26,10 +26,6 @@ void RemoteActionController::setContext(Context context) {
     context_ = std::move(context);
 }
 
-void RemoteActionController::clearContext() {
-    context_ = {};
-}
-
 bool RemoteActionController::isReady() const {
     return context_.operations && context_.operations->hasRequestedSession() &&
            (!context_.isSessionActive || context_.isSessionActive());

@@ -29,7 +29,6 @@ class SyncDialog final : public QDialog {
     void setSnapshots(QVector<SyncSnapshotEntry> localSnapshot,
                       QVector<SyncSnapshotEntry> remoteSnapshot);
     void setRootPaths(const QString &localRoot, const QString &remoteRoot);
-    void setComparisonOptions(const SyncComparisonOptions &options);
     void setChecksumAvailable(bool available);
     void setChecksumBusy(bool busy);
 
@@ -38,10 +37,6 @@ class SyncDialog final : public QDialog {
     [[nodiscard]] SyncExecutionPlan executionPlan() const;
 
     signals:
-    // Emitted immediately before the dialog is accepted. The receiver can
-    // enqueue the plan or simply call executionPlan() after exec().
-    void executionRequested(const SyncExecutionPlan &plan);
-
     // The controller may calculate these asynchronously, update the supplied
     // snapshots with checksum metadata, and call setSnapshots() again.
     void checksumRequested(const QStringList &relativePaths);

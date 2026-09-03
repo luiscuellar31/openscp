@@ -80,7 +80,6 @@ class TransferManager : public QObject {
                      const TransferBatchOptions &options = {});
     quint64 createBatch(const TransferBatchOptions &options = {});
     void cancelBatch(quint64 batchId);
-    void setBatchConflictPolicy(quint64 batchId, TransferConflictPolicy policy);
 
     QVector<TransferTask> tasksSnapshot() const;
     QVector<TransferTask> tasksSnapshot(const QVector<quint64> &taskIds) const;
@@ -111,8 +110,6 @@ class TransferManager : public QObject {
     // Queue persistence is explicit so tests and embedders do not unexpectedly
     // touch user data. The application should call this once during startup.
     bool enablePersistence(const QString &path = {});
-    void disablePersistence();
-    QString persistencePath() const;
 
     signals:
     // Granular signals are the preferred hot-path interface.
@@ -123,7 +120,6 @@ class TransferManager : public QObject {
     void persistenceWarning(const QString &message);
 
     public slots:
-    void processNext();
     void schedule();
     void persistNow();
 

@@ -657,16 +657,6 @@ void MainWindow::completeDisconnectRemote(quint64 disconnectSeq, bool forced) {
     }
 }
 
-void MainWindow::setOpenSiteManagerOnDisconnect(bool enabled) {
-    if (openSiteManagerOnDisconnect_ == enabled)
-        return;
-    openSiteManagerOnDisconnect_ = enabled;
-    openscpui::AppSettings settings;
-    settings.setValue(openscpui::settingskeys::kUiOpenSiteManagerOnDisconnect,
-                      enabled);
-    settings.sync();
-}
-
 void MainWindow::showSiteManagerNonModal() {
     if (QApplication::activeModalWidget()) {
         pendingOpenSiteManager_ = true;
@@ -699,16 +689,6 @@ void MainWindow::showSiteManagerNonModal() {
         dlg->raise();
         dlg->activateWindow();
     });
-}
-
-void MainWindow::setOpenSiteManagerOnStartup(bool enabled) {
-    if (openSiteManagerOnStartup_ == enabled)
-        return;
-    openSiteManagerOnStartup_ = enabled;
-    openscpui::AppSettings settings;
-    settings.setValue(openscpui::settingskeys::kUiShowConnectionOnStart,
-                      enabled);
-    settings.sync();
 }
 
 void MainWindow::maybeOpenSiteManagerAfterModal() {

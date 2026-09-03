@@ -954,32 +954,20 @@ void MainWindow::startLocalUploadDiscovery(
 
     auto cancelFinished =
         [this, state, closeProgress, disconnectTaskTracking,
-         countersSummary](const LocalTreeDiscoveryCounters &counters,
-                          const QString &failure) {
+         countersSummary](const LocalTreeDiscoveryCounters &counters) {
             state->canceled = true;
             transferMgr_->cancelBatch(state->batchOptions.batchId);
             closeProgress();
             disconnectTaskTracking();
             if (state->discovery)
                 state->discovery->deleteLater();
-            QString message =
-                failure.isEmpty()
-                    ? tr("Upload preparation canceled.")
-                    : tr("Upload preparation failed: %1").arg(failure);
+            QString message = tr("Upload preparation canceled.");
             const QString notes = countersSummary(counters);
             if (!notes.isEmpty())
                 message += QStringLiteral("  |  ") + notes;
             statusBar()->showMessage(message, 7000);
         };
-    connect(discovery, &LocalTreeDiscovery::canceled, this,
-            [cancelFinished](const LocalTreeDiscoveryCounters &counters) {
-                cancelFinished(counters, {});
-            });
-    connect(discovery, &LocalTreeDiscovery::failed, this,
-            [cancelFinished](const QString &message,
-                             const LocalTreeDiscoveryCounters &counters) {
-                cancelFinished(counters, message);
-            });
+    connect(discovery, &LocalTreeDiscovery::canceled, this, cancelFinished);
 
     discovery->start(options);
 }

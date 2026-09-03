@@ -629,24 +629,6 @@ int TransferManager::enqueueDownloads(
     return static_cast<int>(ids.size());
 }
 
-void TransferManager::setBatchConflictPolicy(quint64 batchId, Policy policy) {
-    QVector<quint64> changed;
-    {
-        std::lock_guard<std::mutex> lock(mtx_);
-        conflictCoordinator_.setBatchPolicy(batchId, policy);
-        for (auto &taskNode : queueStore_.nodes()) {
-            auto &task = *taskNode;
-            if (task.batchId == batchId &&
-                !isTerminalTransferStatus(task.status)) {
-                task.conflictPolicy = policy;
-                changed.push_back(task.taskId);
-            }
-        }
-    }
-    if (!changed.isEmpty())
-        publishUpdated(changed);
-}
-
 QVector<TransferTask> TransferManager::tasksSnapshot() const {
     QVector<TransferTask> result;
     std::lock_guard<std::mutex> lock(mtx_);
@@ -1326,10 +1308,6 @@ void TransferManager::clearFinishedOlderThan(int minutes, bool clearDone,
               task.status == Status::Warning));
         return selected && task.finishedAtMs > 0 && task.finishedAtMs <= cutoff;
     });
-}
-
-void TransferManager::processNext() {
-    schedule();
 }
 
 void TransferManager::schedule() {
@@ -2427,18 +2405,6 @@ bool TransferManager::enablePersistence(const QString &path) {
     if (!warning.isEmpty())
         emit persistenceWarning(warning);
     return restored;
-}
-
-void TransferManager::disablePersistence() {
-    std::lock_guard<std::mutex> lock(persistenceMutex_);
-    persistenceEnabled_ = false;
-    if (persistenceTimer_)
-        persistenceTimer_->stop();
-}
-
-QString TransferManager::persistencePath() const {
-    std::lock_guard<std::mutex> lock(persistenceMutex_);
-    return persistencePath_;
 }
 
 bool TransferManager::restorePersistenceFile(QString &warning) {

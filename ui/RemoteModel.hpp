@@ -75,7 +75,6 @@ class RemoteModel : public QAbstractTableModel {
 
     const Item *itemForIndex(const QModelIndex &index) const;
     QIcon iconForRemoteEntry(const Item &item) const;
-    void replaceItems(std::vector<Item> &&nextItems, const QString &path);
     void sortItemsVector(std::vector<Item> &items, int column,
                          Qt::SortOrder order) const;
 };

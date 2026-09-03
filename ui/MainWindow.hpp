@@ -60,14 +60,6 @@ class MainWindow : public QMainWindow {
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
     Q_INVOKABLE void resetMainWindowLayoutToDefaults();
-    // Preference: open Site Manager automatically on disconnect (non‑modal)
-    void setOpenSiteManagerOnDisconnect(bool enabled);
-    bool openSiteManagerOnDisconnect() const {
-        return openSiteManagerOnDisconnect_;
-    }
-    // Preference: open Site Manager automatically on startup (non‑modal)
-    void setOpenSiteManagerOnStartup(bool enabled);
-    bool openSiteManagerOnStartup() const { return openSiteManagerOnStartup_; }
 
     protected:
     bool eventFilter(QObject *eventSource, QEvent *event) override;

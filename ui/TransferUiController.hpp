@@ -26,8 +26,6 @@ class TransferUiController {
     void completeScheduledRefresh();
     void reset();
 
-    bool hasScheduledRefresh() const { return refreshScheduled_; }
-
     private:
     static bool pathIsInsideRemoteRoot(const QString &candidatePath,
                                        const QString &rootPath);

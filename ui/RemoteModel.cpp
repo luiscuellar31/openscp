@@ -260,26 +260,6 @@ void RemoteModel::setEntries(const QString &path,
     emit rootPathLoaded(currentPath_, true, QString());
 }
 
-void RemoteModel::replaceItems(std::vector<Item> &&nextItems,
-                               const QString &path) {
-    loading_ = false;
-    const int oldCount = static_cast<int>(items_.size());
-    if (oldCount > 0) {
-        beginRemoveRows(QModelIndex(), 0, oldCount - 1);
-        items_.clear();
-        endRemoveRows();
-    } else {
-        items_.clear();
-    }
-    const int newCount = static_cast<int>(nextItems.size());
-    if (newCount > 0) {
-        beginInsertRows(QModelIndex(), 0, newCount - 1);
-        items_ = std::move(nextItems);
-        endInsertRows();
-    }
-    currentPath_ = path;
-}
-
 void RemoteModel::sortItemsVector(std::vector<Item> &items, int column,
                                   Qt::SortOrder order) const {
     const bool asc = (order == Qt::AscendingOrder);
