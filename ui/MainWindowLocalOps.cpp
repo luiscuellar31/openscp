@@ -2,6 +2,7 @@
 #include "MainWindow.hpp"
 #include "MainWindowSharedUtils.hpp"
 #include "PathNavigationBar.hpp"
+#include "PlatformPathActions.hpp"
 #include "RemoteModel.hpp"
 #include "RemoteOperationController.hpp"
 #include "SessionController.hpp"
@@ -10,7 +11,6 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
-#include <QDesktopServices>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -20,7 +20,6 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
-#include <QProcess>
 #include <QProgressDialog>
 #include <QPushButton>
 #include <QSet>
@@ -176,21 +175,6 @@ bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
     if (hadDestination)
         (void)removeEntry(backupPath);
     return true;
-}
-
-void revealInFolder(const QString &filePath) {
-#if defined(Q_OS_MAC)
-    // macOS: use 'open -R' to reveal in Finder
-    QProcess::startDetached("open", {"-R", filePath});
-#elif defined(Q_OS_WIN)
-    // Windows: explorer /select,<path>
-    QString arg = "/select," + QDir::toNativeSeparators(filePath);
-    QProcess::startDetached("explorer", {arg});
-#else
-    // Linux/others: try to open the containing directory
-    const QString dir = QFileInfo(filePath).dir().absolutePath();
-    QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
-#endif
 }
 
 QString buildLocalFsSummaryMessage(bool deleteSource, int successCount,
@@ -577,14 +561,25 @@ void MainWindow::goHomeLeft() {
     updateDeleteShortcutEnables();
 }
 
+void MainWindow::reportPathActionResult(
+    const openscpui::PathActionResult &result) {
+    if (result.failed())
+        UiAlerts::warning(this, tr("Open location"), result.error);
+}
+
 void MainWindow::openLocalPathWithPreference(const QString &localPath) {
+    if (localPath.isEmpty())
+        return;
+
     const QString mode = prefOpenBehaviorMode_.trimmed().toLower();
     if (mode == QStringLiteral("reveal")) {
-        revealInFolder(localPath);
+        reportPathActionResult(
+            openscpui::PlatformPathActions::revealPath(localPath));
         return;
     }
     if (mode == QStringLiteral("open")) {
-        QDesktopServices::openUrl(QUrl::fromLocalFile(localPath));
+        reportPathActionResult(
+            openscpui::PlatformPathActions::openFile(localPath));
         return;
     }
 
@@ -598,10 +593,13 @@ void MainWindow::openLocalPathWithPreference(const QString &localPath) {
         box.addButton(tr("Show folder"), QMessageBox::AcceptRole);
     box.setDefaultButton(btnReveal);
     box.exec();
-    if (box.clickedButton() == btnOpen)
-        QDesktopServices::openUrl(QUrl::fromLocalFile(localPath));
-    else
-        revealInFolder(localPath);
+    if (box.clickedButton() == btnOpen) {
+        reportPathActionResult(
+            openscpui::PlatformPathActions::openFile(localPath));
+        return;
+    }
+    reportPathActionResult(
+        openscpui::PlatformPathActions::revealPath(localPath));
 }
 
 void MainWindow::leftItemActivated(const QModelIndex &idx) {

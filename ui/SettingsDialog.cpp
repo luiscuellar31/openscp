@@ -1106,7 +1106,6 @@ void SettingsDialog::buildStagingPage(const PageBuildContext &ctx) {
     maxDepthSpin_->setToolTip(tr(
         "Limit for recursive folder drag-out to avoid deep trees and loops."));
     auto *hint = new QLabel(tr("Recommended: 32"), stagingPage);
-    hint->setStyleSheet("color: palette(window-text);");
     row->addWidget(maxDepthSpin_);
     row->addWidget(hint);
     row->addStretch(1);

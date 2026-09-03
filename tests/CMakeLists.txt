@@ -89,6 +89,11 @@ foreach(TEST_COMPONENT IN ITEMS
     )
 endforeach()
 
+openscp_add_test(openscp_platform_path_actions_tests
+    SOURCES platform_path_actions_tests.cpp
+    LINK_LIBRARIES openscp_ui_widgets
+)
+
 openscp_add_test(openscp_ui_utilities_tests
     SOURCES
         ui_utilities_tests.cpp

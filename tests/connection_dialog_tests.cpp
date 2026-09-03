@@ -5,7 +5,10 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QEventLoop>
+#include <QKeyEvent>
 #include <QLabel>
+#include <QMouseEvent>
+#include <QPalette>
 #include <QPushButton>
 #include <QScreen>
 #include <QScrollArea>
@@ -244,6 +247,68 @@ OPENSCP_TEST(testAcceptButtonCanDescribeTheAction, test) {
     test.check(acceptButton &&
                    acceptButton->text() == QStringLiteral("Add site"),
                "callers should be able to name the resulting action");
+}
+
+OPENSCP_TEST(testDisclosureHeadersFollowPaletteAndInputModality, test) {
+    clearSettings();
+    ConnectionDialog dialog;
+    dialog.setSiteNameVisible(true);
+
+    const QColor expectedTextColor(255, 255, 255);
+    QPalette highContrastPalette = dialog.palette();
+    highContrastPalette.setColor(QPalette::Active, QPalette::WindowText,
+                                 expectedTextColor);
+    highContrastPalette.setColor(QPalette::Inactive, QPalette::WindowText,
+                                 expectedTextColor);
+    dialog.setPalette(highContrastPalette);
+    dialog.show();
+    flushUiEvents();
+
+    auto *toggle = sectionToggle(dialog, "connectionPathsSectionToggle");
+    auto *summary = dialog.findChild<QLabel *>(
+        QStringLiteral("connectionPathsSectionSummary"));
+    QWidget *focusIndicator =
+        toggle ? toggle->findChild<QWidget *>(
+                     QStringLiteral("keyboardFocusIndicator"),
+                     Qt::FindDirectChildrenOnly)
+               : nullptr;
+    test.check(toggle && summary,
+               "a disclosure header should expose its toggle and summary");
+    if (!toggle || !summary)
+        return;
+
+    const QColor summaryTextColor =
+        summary->palette().color(QPalette::Active, QPalette::WindowText);
+    test.check(summaryTextColor == expectedTextColor &&
+                   summaryTextColor.alpha() == 255,
+               "summary text should inherit the full-opacity system palette");
+    test.check(focusIndicator &&
+                   !toggle->styleSheet().contains(QStringLiteral(":focus")) &&
+                   !toggle->testAttribute(Qt::WA_MacShowFocusRect),
+               "disclosure focus styling should use the shared indicator");
+
+    QKeyEvent keyboardPress(QEvent::KeyPress, Qt::Key_Left, Qt::NoModifier);
+    QApplication::sendEvent(toggle, &keyboardPress);
+    toggle->setFocus(Qt::TabFocusReason);
+    flushUiEvents();
+    test.check(toggle->hasFocus(),
+               "the disclosure toggle should accept keyboard focus");
+    test.check(toggle->property("keyboardFocusVisible").toBool() &&
+                   focusIndicator && focusIndicator->isVisible(),
+               "keyboard focus should show the disclosure outline");
+
+    const QPointF pointerPosition(2.0, 2.0);
+    const QPointF globalPointerPosition =
+        summary->mapToGlobal(pointerPosition.toPoint());
+    QMouseEvent pointerPress(QEvent::MouseButtonPress, pointerPosition,
+                             globalPointerPosition, Qt::LeftButton,
+                             Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(summary, &pointerPress);
+    flushUiEvents();
+    test.check(toggle->hasFocus() &&
+                   !toggle->property("keyboardFocusVisible").toBool() &&
+                   focusIndicator && !focusIndicator->isVisible(),
+               "pointer input should hide a retained keyboard-focus outline");
 }
 
 } // namespace

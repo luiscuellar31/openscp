@@ -36,7 +36,7 @@ class TransferQueueDialog : public QDialog {
     void onStopAll();          // cancel the whole queue in progress
     void onFilterChanged(int filterId);
     void onRetrySelected();
-    void onOpenDestination();
+    void onShowDestinationFolder();
     void onCopySourcePath();
     void onCopyDestinationPath();
     void onClearFinished();

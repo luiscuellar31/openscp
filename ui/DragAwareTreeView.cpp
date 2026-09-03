@@ -13,11 +13,9 @@
 #include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDateTime>
-#include <QDesktopServices>
 #include <QDir>
 #include <QDrag>
 #include <QFileInfo>
-#include <QFocusEvent>
 #include <QFrame>
 #include <QKeySequence>
 #include <QLabel>
@@ -26,7 +24,6 @@
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QMimeData>
-#include <QMouseEvent>
 #include <QPointer>
 #include <QProgressBar>
 #include <QPushButton>
@@ -119,7 +116,6 @@ struct DragAwareTreeView::RemoteDragStagingState {
 };
 
 DragAwareTreeView::DragAwareTreeView(QWidget *parent) : QTreeView(parent) {
-    setAttribute(Qt::WA_MacShowFocusRect, false);
     keyboardFocusIndicator_ = new openscpui::KeyboardFocusIndicator(this);
 }
 
@@ -141,23 +137,6 @@ DragAwareTreeView::~DragAwareTreeView() {
 void DragAwareTreeView::resizeEvent(QResizeEvent *resizeEventArg) {
     QTreeView::resizeEvent(resizeEventArg);
     updateOverlayGeometry();
-}
-
-void DragAwareTreeView::focusInEvent(QFocusEvent *event) {
-    QTreeView::focusInEvent(event);
-    const bool keyboardTraversal = event->reason() == Qt::TabFocusReason ||
-                                   event->reason() == Qt::BacktabFocusReason;
-    keyboardFocusIndicator_->setKeyboardFocusVisible(keyboardTraversal);
-}
-
-void DragAwareTreeView::focusOutEvent(QFocusEvent *event) {
-    keyboardFocusIndicator_->setKeyboardFocusVisible(false);
-    QTreeView::focusOutEvent(event);
-}
-
-void DragAwareTreeView::mousePressEvent(QMouseEvent *event) {
-    keyboardFocusIndicator_->setKeyboardFocusVisible(false);
-    QTreeView::mousePressEvent(event);
 }
 
 void DragAwareTreeView::startDrag(Qt::DropActions supportedActions) {

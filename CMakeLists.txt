@@ -352,11 +352,18 @@ target_link_libraries(openscp_ui_logic
 )
 
 add_library(openscp_ui_widgets STATIC
+    ui/InputModalityTracker.hpp
+    ui/InputModalityTracker.cpp
+    ui/FocusTraversalController.hpp
+    ui/FocusTraversalController.cpp
     ui/KeyboardFocusIndicator.hpp
     ui/KeyboardFocusIndicator.cpp
     ui/PlatformFilePicker.hpp
     ui/PlatformFilePicker_p.hpp
     ui/PlatformFilePicker.cpp
+    ui/PlatformPathActions.hpp
+    ui/PlatformPathActions_p.hpp
+    ui/PlatformPathActions.cpp
     ui/OpenPathDialog.hpp
     ui/OpenPathDialog.cpp
     ui/PathNavigationBar.hpp

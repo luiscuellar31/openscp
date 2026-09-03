@@ -16,8 +16,6 @@ class RemoteModel;
 class RemoteOperationController;
 class TransferManager;
 class QFrame;
-class QFocusEvent;
-class QMouseEvent;
 namespace openscpui {
 class KeyboardFocusIndicator;
 }
@@ -36,9 +34,6 @@ class DragAwareTreeView : public QTreeView {
     void startDrag(Qt::DropActions supportedActions) override;
     void resizeEvent(QResizeEvent *resizeEventArg) override;
     void closeEvent(QCloseEvent *closeEventArg) override;
-    void focusInEvent(QFocusEvent *event) override;
-    void focusOutEvent(QFocusEvent *event) override;
-    void mousePressEvent(QMouseEvent *event) override;
 
     private:
     void showKeepMessage(const QString &batchDir);

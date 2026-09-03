@@ -54,6 +54,26 @@ void sendKey(QWidget *target, Qt::Key key,
     flushUiEvents();
 }
 
+QPoint textPosition(QLineEdit *display, int cursorPosition) {
+    const int verticalCenter = display->height() / 2;
+    for (int horizontalPosition = 0; horizontalPosition < display->width();
+         ++horizontalPosition) {
+        const QPoint candidate(horizontalPosition, verticalCenter);
+        if (display->cursorPositionAt(candidate) == cursorPosition)
+            return candidate;
+    }
+    return display->rect().center();
+}
+
+void sendMouseEvent(QWidget *target, QEvent::Type type, const QPoint &position,
+                    Qt::MouseButton button, Qt::MouseButtons buttons) {
+    const QPoint globalPosition = target->mapToGlobal(position);
+    QMouseEvent event(type, QPointF(position), QPointF(globalPosition), button,
+                      buttons, Qt::NoModifier);
+    QApplication::sendEvent(target, &event);
+    flushUiEvents();
+}
+
 OPENSCP_TEST(testPathFieldPreservesAppearanceAndKeyboardNavigation, test) {
     openscpui::PathNavigationBar bar(openscpui::PathFlavor::Remote,
                                      QStringLiteral("/projects/reports"));
@@ -61,7 +81,7 @@ OPENSCP_TEST(testPathFieldPreservesAppearanceAndKeyboardNavigation, test) {
     bar.show();
     flushUiEvents();
 
-    auto *display = bar.findChild<QLineEdit *>(QStringLiteral("pathDisplay"));
+    auto *display = qobject_cast<QLineEdit *>(bar.keyboardFocusTarget());
     test.check(display &&
                    display->text() == QStringLiteral("/projects/reports"),
                "the complete path should remain visible in its field");
@@ -115,6 +135,22 @@ OPENSCP_TEST(testPathFieldPreservesAppearanceAndKeyboardNavigation, test) {
     test.check(display->property("keyboardFocusVisible").toBool(),
                "Shift+Tab focus should show the path focus frame");
 
+    const QPointF pointerPosition(2.0, 2.0);
+    const QPointF globalPointerPosition =
+        bar.mapToGlobal(pointerPosition.toPoint());
+    QMouseEvent pointerPress(QEvent::MouseButtonPress, pointerPosition,
+                             globalPointerPosition, Qt::LeftButton,
+                             Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(&bar, &pointerPress);
+    flushUiEvents();
+    test.check(display->hasFocus() &&
+                   !display->property("keyboardFocusVisible").toBool(),
+               "pointer input elsewhere should hide the path focus frame");
+
+    sendKey(display, Qt::Key_Left);
+    test.check(display->property("keyboardFocusVisible").toBool(),
+               "keyboard input should restore the path focus frame");
+
     const int initialFontHeight = display->fontMetrics().height();
     QFont largerFont = bar.font();
     largerFont.setPointSize(qMax(18, largerFont.pointSize() + 6));
@@ -130,7 +166,7 @@ OPENSCP_TEST(testPathFieldKeyboardCanReachTheRoot, test) {
     bar.show();
     flushUiEvents();
 
-    auto *display = bar.findChild<QLineEdit *>(QStringLiteral("pathDisplay"));
+    auto *display = qobject_cast<QLineEdit *>(bar.keyboardFocusTarget());
     if (!display) {
         test.check(false, "the path field should exist");
         return;
@@ -144,6 +180,118 @@ OPENSCP_TEST(testPathFieldKeyboardCanReachTheRoot, test) {
     sendKey(display, Qt::Key_Return);
     test.check(requestedPath == QStringLiteral("/"),
                "Home and Enter should navigate to the root segment");
+}
+
+OPENSCP_TEST(testPathFieldClickRequiresMatchingPressAndRelease, test) {
+    openscpui::PathNavigationBar bar(openscpui::PathFlavor::Remote,
+                                     QStringLiteral("/projects/reports"));
+    bar.resize(480, bar.sizeHint().height());
+    bar.show();
+    flushUiEvents();
+
+    auto *display = qobject_cast<QLineEdit *>(bar.keyboardFocusTarget());
+    test.check(display, "the path field should exist");
+    if (!display)
+        return;
+
+    int navigationRequests = 0;
+    QString requestedPath;
+    QObject::connect(&bar, &openscpui::PathNavigationBar::pathRequested, &bar,
+                     [&](const QString &path) {
+                         ++navigationRequests;
+                         requestedPath = path;
+                     });
+
+    const QPoint projects = textPosition(display, 4);
+    sendMouseEvent(display, QEvent::MouseButtonRelease, projects,
+                   Qt::LeftButton, Qt::NoButton);
+    test.check(navigationRequests == 0,
+               "a release without a matching press should do nothing");
+    navigationRequests = 0;
+    requestedPath.clear();
+
+    sendMouseEvent(display, QEvent::MouseButtonPress, projects, Qt::LeftButton,
+                   Qt::LeftButton);
+    sendMouseEvent(display, QEvent::MouseButtonRelease, projects,
+                   Qt::LeftButton, Qt::NoButton);
+    test.check(navigationRequests == 1 &&
+                   requestedPath == QStringLiteral("/projects"),
+               "a click should activate the segment where it began");
+}
+
+OPENSCP_TEST(testPathFieldDragCancelsActivation, test) {
+    openscpui::PathNavigationBar bar(openscpui::PathFlavor::Remote,
+                                     QStringLiteral("/projects/reports"));
+    bar.resize(480, bar.sizeHint().height());
+    bar.show();
+    flushUiEvents();
+
+    auto *display = qobject_cast<QLineEdit *>(bar.keyboardFocusTarget());
+    test.check(display, "the path field should exist");
+    if (!display)
+        return;
+
+    int navigationRequests = 0;
+    int openDialogRequests = 0;
+    QObject::connect(&bar, &openscpui::PathNavigationBar::pathRequested, &bar,
+                     [&](const QString &) { ++navigationRequests; });
+    QObject::connect(&bar, &openscpui::PathNavigationBar::openDialogRequested,
+                     &bar, [&] { ++openDialogRequests; });
+
+    const QPoint projects = textPosition(display, 4);
+    const QPoint reports = textPosition(display, 12);
+    sendMouseEvent(display, QEvent::MouseButtonPress, projects, Qt::LeftButton,
+                   Qt::LeftButton);
+    sendMouseEvent(display, QEvent::MouseMove, reports, Qt::NoButton,
+                   Qt::LeftButton);
+    sendMouseEvent(display, QEvent::MouseMove, projects, Qt::NoButton,
+                   Qt::LeftButton);
+    sendMouseEvent(display, QEvent::MouseButtonRelease, projects,
+                   Qt::LeftButton, Qt::NoButton);
+    test.check(navigationRequests == 0 && openDialogRequests == 0,
+               "dragging to another segment should cancel activation");
+
+    const QPoint outside(-4, display->height() / 2);
+    sendMouseEvent(display, QEvent::MouseButtonPress, projects, Qt::LeftButton,
+                   Qt::LeftButton);
+    sendMouseEvent(display, QEvent::MouseMove, outside, Qt::NoButton,
+                   Qt::LeftButton);
+    sendMouseEvent(display, QEvent::MouseMove, projects, Qt::NoButton,
+                   Qt::LeftButton);
+    sendMouseEvent(display, QEvent::MouseButtonRelease, projects,
+                   Qt::LeftButton, Qt::NoButton);
+    test.check(navigationRequests == 0 && openDialogRequests == 0,
+               "dragging outside the field should cancel activation");
+}
+
+OPENSCP_TEST(testPathFieldDoubleClickActivatesOnce, test) {
+    openscpui::PathNavigationBar bar(openscpui::PathFlavor::Remote,
+                                     QStringLiteral("/projects/reports"));
+    bar.resize(480, bar.sizeHint().height());
+    bar.show();
+    flushUiEvents();
+
+    auto *display = qobject_cast<QLineEdit *>(bar.keyboardFocusTarget());
+    test.check(display, "the path field should exist");
+    if (!display)
+        return;
+
+    int navigationRequests = 0;
+    QObject::connect(&bar, &openscpui::PathNavigationBar::pathRequested, &bar,
+                     [&](const QString &) { ++navigationRequests; });
+
+    const QPoint projects = textPosition(display, 4);
+    sendMouseEvent(display, QEvent::MouseButtonPress, projects, Qt::LeftButton,
+                   Qt::LeftButton);
+    sendMouseEvent(display, QEvent::MouseButtonRelease, projects,
+                   Qt::LeftButton, Qt::NoButton);
+    sendMouseEvent(display, QEvent::MouseButtonDblClick, projects,
+                   Qt::LeftButton, Qt::LeftButton);
+    sendMouseEvent(display, QEvent::MouseButtonRelease, projects,
+                   Qt::LeftButton, Qt::NoButton);
+
+    test.check(navigationRequests == 1,
+               "a double click should activate its segment exactly once");
 }
 
 OPENSCP_TEST(testToolbarActionsParticipateInKeyboardTraversal, test) {
@@ -287,6 +435,11 @@ OPENSCP_TEST(testFilePanelShowsKeyboardOnlyFocusOutline, test) {
     test.check(!panel->property("keyboardFocusVisible").toBool() &&
                    focusIndicator && !focusIndicator->isVisible(),
                "using the mouse should hide the panel focus outline");
+
+    sendKey(panel, Qt::Key_Down);
+    test.check(panel->property("keyboardFocusVisible").toBool() &&
+                   focusIndicator && focusIndicator->isVisible(),
+               "keyboard input should restore the panel focus outline");
 }
 
 OPENSCP_TEST(testTransferQueueUsesNativeFocusAndAccessibleState, test) {

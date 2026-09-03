@@ -1,5 +1,7 @@
 #include "PathNavigationBar.hpp"
 
+#include "InputModalityTracker.hpp"
+
 #include <QDir>
 #include <QEvent>
 #include <QFocusEvent>
@@ -75,6 +77,15 @@ PathNavigationBar::PathNavigationBar(PathFlavor flavor,
                      .toString(QKeySequence::NativeText));
     display_->setToolTip(defaultToolTip_);
     display_->installEventFilter(this);
+    if (InputModalityTracker *tracker = inputModalityTracker()) {
+        connect(tracker, &InputModalityTracker::modalityChanged, this,
+                [this](InputModality modality) {
+                    if (display_->hasFocus()) {
+                        setKeyboardFocusVisible(modality ==
+                                                InputModality::Keyboard);
+                    }
+                });
+    }
     layout->addWidget(display_);
 
     setPath(initialPath);
@@ -83,6 +94,10 @@ PathNavigationBar::PathNavigationBar(PathFlavor flavor,
 void PathNavigationBar::setPath(const QString &path) {
     committedPath_ = path;
     rebuildDisplay();
+}
+
+QWidget *PathNavigationBar::keyboardFocusTarget() const {
+    return display_;
 }
 
 void PathNavigationBar::setPathFlavor(PathFlavor flavor) {
@@ -102,12 +117,10 @@ bool PathNavigationBar::eventFilter(QObject *watched, QEvent *event) {
 
     if (event->type() == QEvent::FocusIn) {
         const auto *focusEvent = static_cast<QFocusEvent *>(event);
-        const bool keyboardTraversal =
-            focusEvent->reason() == Qt::TabFocusReason ||
-            focusEvent->reason() == Qt::BacktabFocusReason;
-        setKeyboardFocusVisible(keyboardTraversal);
-        if (keyboardTraversal ||
-            focusEvent->reason() == Qt::ShortcutFocusReason) {
+        const InputModalityTracker *tracker = inputModalityTracker();
+        const bool keyboardInput = tracker && tracker->isKeyboardActive();
+        setKeyboardFocusVisible(keyboardInput);
+        if (keyboardInput || focusEvent->reason() == Qt::ShortcutFocusReason) {
             focusedSegment_ = segments_.isEmpty() ? -1 : segments_.size() - 1;
             updateSegmentPresentation(focusedSegment_, false);
         }
@@ -118,7 +131,7 @@ bool PathNavigationBar::eventFilter(QObject *watched, QEvent *event) {
     } else if (event->type() == QEvent::KeyPress) {
         auto *keyEvent = static_cast<QKeyEvent *>(event);
         if (segments_.isEmpty())
-            return true;
+            return QWidget::eventFilter(watched, event);
         if (keyEvent->key() == Qt::Key_Left) {
             focusedSegment_ = qMax<qsizetype>(0, focusedSegment_ - 1);
             updateSegmentPresentation(focusedSegment_, false);
@@ -149,20 +162,27 @@ bool PathNavigationBar::eventFilter(QObject *watched, QEvent *event) {
     } else if (event->type() == QEvent::MouseMove) {
         const auto *mouseEvent = static_cast<QMouseEvent *>(event);
         hoveredSegment_ = segmentAt(mouseEvent->position().toPoint());
+        if ((mouseEvent->buttons() & Qt::LeftButton) &&
+            hoveredSegment_ != pressedSegment_) {
+            pressedSegment_ = -1;
+        }
         updateSegmentPresentation(hoveredSegment_, true);
     } else if (event->type() == QEvent::Leave) {
+        pressedSegment_ = -1;
         hoveredSegment_ = -1;
         updateSegmentPresentation(display_->hasFocus() ? focusedSegment_ : -1,
                                   false);
     } else if (event->type() == QEvent::MouseButtonPress) {
         const auto *mouseEvent = static_cast<QMouseEvent *>(event);
         if (mouseEvent->button() == Qt::LeftButton) {
-            setKeyboardFocusVisible(false);
+            suppressNextRelease_ = false;
+            pressedSegment_ = segmentAt(mouseEvent->position().toPoint());
             return true;
         }
     } else if (event->type() == QEvent::MouseButtonDblClick) {
         const auto *mouseEvent = static_cast<QMouseEvent *>(event);
         if (mouseEvent->button() == Qt::LeftButton) {
+            pressedSegment_ = -1;
             suppressNextRelease_ = true;
             return true;
         }
@@ -171,10 +191,17 @@ bool PathNavigationBar::eventFilter(QObject *watched, QEvent *event) {
         if (mouseEvent->button() == Qt::LeftButton) {
             if (suppressNextRelease_) {
                 suppressNextRelease_ = false;
+                pressedSegment_ = -1;
                 return true;
             }
-            focusedSegment_ = segmentAt(mouseEvent->position().toPoint());
-            activateSegment(focusedSegment_);
+            const qsizetype pressedSegment = pressedSegment_;
+            pressedSegment_ = -1;
+            const qsizetype releasedSegment =
+                segmentAt(mouseEvent->position().toPoint());
+            if (pressedSegment >= 0 && releasedSegment == pressedSegment) {
+                focusedSegment_ = pressedSegment;
+                activateSegment(focusedSegment_);
+            }
             return true;
         }
     }
@@ -193,13 +220,17 @@ void PathNavigationBar::rebuildDisplay() {
     display_->setCursorPosition(static_cast<int>(displayPath_.size()));
     hoveredSegment_ = -1;
     focusedSegment_ = segments_.isEmpty() ? -1 : segments_.size() - 1;
+    pressedSegment_ = -1;
+    suppressNextRelease_ = false;
     updateSegmentPresentation(display_->hasFocus() ? focusedSegment_ : -1,
                               false);
 }
 
 qsizetype PathNavigationBar::segmentAt(const QPoint &position) const {
-    if (segments_.isEmpty() || displayPath_.isEmpty())
+    if (segments_.isEmpty() || displayPath_.isEmpty() ||
+        !display_->rect().contains(position)) {
         return -1;
+    }
 
     const qsizetype cursorPosition = display_->cursorPositionAt(position);
     if (cursorPosition >= displayPath_.size())

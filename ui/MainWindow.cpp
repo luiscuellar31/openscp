@@ -6,6 +6,7 @@
 #include "AppSettings.hpp"
 #include "ConnectionDialog.hpp"
 #include "DragAwareTreeView.hpp"
+#include "FocusTraversalController.hpp"
 #include "MainWindowSharedUtils.hpp"
 #include "NavigationScope.hpp"
 #include "OpenPathDialog.hpp"
@@ -51,7 +52,6 @@
 #include <QItemSelectionModel>
 #include <QKeySequence>
 #include <QLabel>
-#include <QLineEdit>
 #include <QListView>
 #include <QListWidget>
 #include <QLocale>
@@ -216,6 +216,7 @@ MainWindow::~MainWindow() {
 }
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
+    focusTraversalController_ = new openscpui::FocusTraversalController(this);
     uploadSourcePicker_ = openscpui::createPlatformFilePicker();
     QPointer<MainWindow> self(this);
     hostKeyPromptCoordinator_.setPresentPrompt(
@@ -261,6 +262,8 @@ void MainWindow::initializePanels(const QString &home) {
     // Views
     leftView_ = new DragAwareTreeView(this);
     rightView_ = new DragAwareTreeView(this);
+    leftView_->setObjectName(QStringLiteral("leftFileView"));
+    rightView_->setObjectName(QStringLiteral("rightFileView"));
 
     configurePanelTreeView(leftView_, leftModel_, leftModel_->index(home));
     configurePanelTreeView(rightView_, rightLocalModel_,
@@ -279,6 +282,8 @@ void MainWindow::initializePanels(const QString &home) {
                                                  home, leftPane);
     rightPath_ = new openscpui::PathNavigationBar(openscpui::PathFlavor::Local,
                                                   home, rightPane);
+    leftPath_->setObjectName(QStringLiteral("leftPathNavigationBar"));
+    rightPath_->setObjectName(QStringLiteral("rightPathNavigationBar"));
     connect(leftPath_, &openscpui::PathNavigationBar::pathRequested, this,
             [this](const QString &path) { setLeftRoot(path); });
     connect(rightPath_, &openscpui::PathNavigationBar::pathRequested, this,
@@ -317,6 +322,9 @@ void MainWindow::initializePanels(const QString &home) {
         new QPushButton(tr("Upload local files…"), scpTransferPanel_);
     scpQuickDownloadBtn_ =
         new QPushButton(tr("Download remote file…"), scpTransferPanel_);
+    scpQuickUploadBtn_->setObjectName(QStringLiteral("scpQuickUploadButton"));
+    scpQuickDownloadBtn_->setObjectName(
+        QStringLiteral("scpQuickDownloadButton"));
     scpLay->addWidget(scpModeHintLabel_);
     scpLay->addWidget(scpQuickUploadBtn_);
     scpLay->addWidget(scpQuickDownloadBtn_);
@@ -330,6 +338,7 @@ void MainWindow::initializePanels(const QString &home) {
 
     // Left pane sub‑toolbar
     leftPaneBar_ = createPaneIconToolbar(QStringLiteral("LeftBar"), leftPane);
+    leftPaneBar_->setObjectName(QStringLiteral("leftPaneToolbar"));
     // Helper for icons from local resources
     auto resIcon = [](const char *fname) -> QIcon {
         return QIcon(QStringLiteral(":/assets/icons/") + QLatin1String(fname));
@@ -424,6 +433,7 @@ void MainWindow::initializePanels(const QString &home) {
     // Right pane sub‑toolbar
     rightPaneBar_ =
         createPaneIconToolbar(QStringLiteral("RightBar"), rightPane);
+    rightPaneBar_->setObjectName(QStringLiteral("rightPaneToolbar"));
     actUpRight_ =
         rightPaneBar_->addAction(tr("Up"), this, &MainWindow::goUpRight);
     setActionIconAndTooltip(actUpRight_, resIcon("action-go-up.svg"));
@@ -644,6 +654,7 @@ void MainWindow::initializeMainToolbar() {
     // Copy/move/delete actions now live in the left sub‑toolbar
     actConnect_ =
         mainToolbar->addAction(tr("Connect"), this, &MainWindow::connectRemote);
+    actConnect_->setObjectName(QStringLiteral("connectAction"));
     actConnect_->setIcon(mainWindowActionIcon("action-connect.svg"));
     actConnect_->setToolTip(actConnect_->text());
     mainToolbar->addSeparator();
@@ -769,10 +780,7 @@ bool MainWindow::focusNextPrevChild(bool next) {
     const auto appendPath = [&order](openscpui::PathNavigationBar *path) {
         if (!path)
             return;
-        if (auto *display =
-                path->findChild<QLineEdit *>(QStringLiteral("pathDisplay"))) {
-            order.push_back(display);
-        }
+        order.push_back(path->keyboardFocusTarget());
     };
 
     appendToolbar(mainToolbar_);
@@ -786,16 +794,10 @@ bool MainWindow::focusNextPrevChild(bool next) {
     order.push_back(scpQuickDownloadBtn_);
 
     QWidget *current = QApplication::focusWidget();
-    if (initialMainWindowTabNavigation_) {
-        // Qt may initially focus the first-created file view. Start the first
-        // explicit traversal at the beginning of our logical order instead,
-        // which is the Connect action.
-        initialMainWindowTabNavigation_ = false;
-        current = nullptr;
-    }
-
-    if (openscpui::moveKeyboardFocus(order, current, next))
+    if (focusTraversalController_ &&
+        focusTraversalController_->moveFocus(order, current, next)) {
         return true;
+    }
     return QMainWindow::focusNextPrevChild(next);
 }
 

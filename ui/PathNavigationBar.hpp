@@ -19,7 +19,7 @@ class PathNavigationBar final : public QWidget {
                                QWidget *parent = nullptr);
 
     [[nodiscard]] QString path() const { return committedPath_; }
-    [[nodiscard]] PathFlavor pathFlavor() const { return flavor_; }
+    [[nodiscard]] QWidget *keyboardFocusTarget() const;
 
     void setPath(const QString &path);
     void setPathFlavor(PathFlavor flavor);
@@ -47,6 +47,7 @@ class PathNavigationBar final : public QWidget {
     QLineEdit *display_ = nullptr;
     qsizetype hoveredSegment_ = -1;
     qsizetype focusedSegment_ = -1;
+    qsizetype pressedSegment_ = -1;
     bool suppressNextRelease_ = false;
 };
 

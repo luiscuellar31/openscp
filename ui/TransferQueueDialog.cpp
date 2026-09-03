@@ -2,6 +2,8 @@
 #include "TransferQueueDialog.hpp"
 
 #include "AppSettings.hpp"
+#include "PlatformPathActions.hpp"
+#include "UiAlerts.hpp"
 #include "UiFormatters.hpp"
 
 #include <QAbstractItemView>
@@ -12,8 +14,6 @@
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDateTime>
-#include <QDesktopServices>
-#include <QDir>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -23,12 +23,10 @@
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
-#include <QSet>
 #include <QSortFilterProxyModel>
 #include <QSpinBox>
 #include <QTableView>
 #include <QToolButton>
-#include <QUrl>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -139,7 +137,7 @@ struct SelectedActionsState {
     bool canLimit = false;
     bool canCancel = false;
     bool canRetry = false;
-    bool canOpenDestination = false;
+    bool canShowDestination = false;
 };
 
 using TaskIndexById = QHash<quint64, const TransferTask *>;
@@ -187,8 +185,8 @@ SelectedActionsState buildSelectedActionsState(const QVector<quint64> &ids,
         out.canLimit = out.canLimit || canLimitStatus(task.status);
         out.canCancel = out.canCancel || canCancelStatus(task.status);
         out.canRetry = out.canRetry || canRetryTask(task);
-        out.canOpenDestination =
-            out.canOpenDestination ||
+        out.canShowDestination =
+            out.canShowDestination ||
             task.type == TransferTask::Type::Download ||
             task.type == TransferTask::Type::CreateLocalDirectory;
     });
@@ -969,31 +967,26 @@ void TransferQueueDialog::onRetrySelected() {
                       });
 }
 
-void TransferQueueDialog::onOpenDestination() {
+void TransferQueueDialog::onShowDestinationFolder() {
     const auto ids = selectedTaskIds();
     if (ids.isEmpty())
         return;
 
-    QSet<QString> opened;
+    QStringList destinations;
     withSelectedTasks(mgr_, ids, [&](quint64, const TransferTask &task) {
         if (task.type != TransferTask::Type::Download &&
             task.type != TransferTask::Type::CreateLocalDirectory)
             return;
-
-        QString destinationPath = task.dst;
-        QFileInfo destinationInfo(destinationPath);
-        if (!destinationInfo.exists()) {
-            const QString parent = destinationInfo.dir().absolutePath();
-            if (!parent.isEmpty() && QDir(parent).exists())
-                destinationPath = parent;
-        }
-        const QString normalized =
-            QFileInfo(destinationPath).absoluteFilePath();
-        if (normalized.isEmpty() || opened.contains(normalized))
-            return;
-        opened.insert(normalized);
-        QDesktopServices::openUrl(QUrl::fromLocalFile(normalized));
+        if (!task.dst.isEmpty())
+            destinations.push_back(task.dst);
     });
+    if (destinations.isEmpty())
+        return;
+
+    const openscpui::PathActionResult result =
+        openscpui::PlatformPathActions::revealPaths(destinations);
+    if (result.failed())
+        UiAlerts::warning(this, tr("Show folder"), result.error);
 }
 
 void TransferQueueDialog::onCopySourcePath() {
@@ -1192,7 +1185,7 @@ void TransferQueueDialog::showContextMenu(const QPoint &pos) {
     QAction *actCancelSel = menu.addAction(tr("Cancel selected"));
     QAction *actRetrySel = menu.addAction(tr("Retry selected"));
     menu.addSeparator();
-    QAction *actOpenDest = menu.addAction(tr("Open destination"));
+    QAction *actShowDest = menu.addAction(tr("Show folder"));
     QAction *actCopySrc = menu.addAction(tr("Copy source path"));
     QAction *actCopyDst = menu.addAction(tr("Copy destination path"));
     menu.addSeparator();
@@ -1206,7 +1199,7 @@ void TransferQueueDialog::showContextMenu(const QPoint &pos) {
     actLimitSel->setEnabled(selectedState.canLimit);
     actCancelSel->setEnabled(selectedState.canCancel);
     actRetrySel->setEnabled(selectedState.canRetry);
-    actOpenDest->setEnabled(selectedState.canOpenDestination);
+    actShowDest->setEnabled(selectedState.canShowDestination);
     actCopySrc->setEnabled(selectedState.hasSelection);
     actCopyDst->setEnabled(selectedState.hasSelection);
     actClearFinished->setEnabled(true);
@@ -1226,8 +1219,8 @@ void TransferQueueDialog::showContextMenu(const QPoint &pos) {
         onStopSelected();
     else if (chosen == actRetrySel)
         onRetrySelected();
-    else if (chosen == actOpenDest)
-        onOpenDestination();
+    else if (chosen == actShowDest)
+        onShowDestinationFolder();
     else if (chosen == actCopySrc)
         onCopySourcePath();
     else if (chosen == actCopyDst)

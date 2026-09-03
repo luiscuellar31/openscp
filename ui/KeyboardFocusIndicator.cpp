@@ -1,5 +1,7 @@
 #include "KeyboardFocusIndicator.hpp"
 
+#include "InputModalityTracker.hpp"
+
 #include <QEvent>
 #include <QPainter>
 #include <QStyle>
@@ -14,6 +16,7 @@ namespace openscpui {
 
 KeyboardFocusIndicator::KeyboardFocusIndicator(QWidget *target)
     : QWidget(target), target_(target) {
+    target_->setAttribute(Qt::WA_MacShowFocusRect, false);
     setObjectName(QString::fromLatin1(FocusIndicatorObjectName));
     setAttribute(Qt::WA_TransparentForMouseEvents);
     setAttribute(Qt::WA_NoSystemBackground);
@@ -21,6 +24,15 @@ KeyboardFocusIndicator::KeyboardFocusIndicator(QWidget *target)
     setFocusPolicy(Qt::NoFocus);
     target_->setProperty("keyboardFocusVisible", false);
     target_->installEventFilter(this);
+    if (InputModalityTracker *tracker = inputModalityTracker()) {
+        connect(tracker, &InputModalityTracker::modalityChanged, this,
+                [this](InputModality modality) {
+                    if (target_->hasFocus()) {
+                        setKeyboardFocusVisible(modality ==
+                                                InputModality::Keyboard);
+                    }
+                });
+    }
     hide();
 }
 
@@ -38,8 +50,16 @@ void KeyboardFocusIndicator::setKeyboardFocusVisible(bool visible) {
 }
 
 bool KeyboardFocusIndicator::eventFilter(QObject *watched, QEvent *event) {
-    if (watched == target_ &&
-        (event->type() == QEvent::Resize || event->type() == QEvent::Show)) {
+    if (watched != target_)
+        return QWidget::eventFilter(watched, event);
+
+    if (event->type() == QEvent::FocusIn) {
+        const InputModalityTracker *tracker = inputModalityTracker();
+        setKeyboardFocusVisible(tracker && tracker->isKeyboardActive());
+    } else if (event->type() == QEvent::FocusOut) {
+        setKeyboardFocusVisible(false);
+    } else if (event->type() == QEvent::Resize ||
+               event->type() == QEvent::Show) {
         setGeometry(target_->rect());
         if (isVisible())
             raise();

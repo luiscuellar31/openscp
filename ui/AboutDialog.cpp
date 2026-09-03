@@ -2,11 +2,11 @@
 #include "AboutDialog.hpp"
 
 #include "AppVersion.hpp"
+#include "PlatformPathActions.hpp"
 #include "UiAlerts.hpp"
 
 #include <QClipboard>
 #include <QCoreApplication>
-#include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
@@ -180,7 +180,10 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
             : tr("Open the folder that contains third-party licenses."));
     connect(openLicensesBtn, &QPushButton::clicked, this, [this, licensesDir] {
         if (!licensesDir.isEmpty() && QFileInfo(licensesDir).isDir()) {
-            QDesktopServices::openUrl(QUrl::fromLocalFile(licensesDir));
+            const openscpui::PathActionResult result =
+                openscpui::PlatformPathActions::openFolder(licensesDir);
+            if (result.failed())
+                UiAlerts::warning(this, tr("Open location"), result.error);
             return;
         }
         UiAlerts::information(this, tr("Licenses folder not found"),

@@ -9,13 +9,13 @@ class KeyboardFocusIndicator final : public QWidget {
     public:
     explicit KeyboardFocusIndicator(QWidget *target);
 
-    void setKeyboardFocusVisible(bool visible);
-
     protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
 
     private:
+    void setKeyboardFocusVisible(bool visible);
+
     QWidget *target_ = nullptr;
 };
 

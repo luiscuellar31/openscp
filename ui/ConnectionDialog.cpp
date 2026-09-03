@@ -2,6 +2,7 @@
 #include "ConnectionDialog.hpp"
 
 #include "AppSettings.hpp"
+#include "KeyboardFocusIndicator.hpp"
 
 #include <QByteArray>
 #include <QCheckBox>
@@ -62,8 +63,8 @@ class ConnectionDisclosureHeader final : public QWidget {
         toggle_->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
         toggle_->setStyleSheet(QStringLiteral(
             "QToolButton { border: none; background: transparent; padding: "
-            "2px; }"
-            "QToolButton:focus { border: 1px solid palette(highlight); }"));
+            "2px; }"));
+        new openscpui::KeyboardFocusIndicator(toggle_);
         headerLayout->addWidget(toggle_);
         headerLayout->addStretch(1);
 
@@ -71,11 +72,6 @@ class ConnectionDisclosureHeader final : public QWidget {
         summary_->setObjectName(objectName + QStringLiteral("Summary"));
         summary_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         summary_->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
-        QPalette summaryPalette = summary_->palette();
-        QColor summaryColor = summaryPalette.color(QPalette::Text);
-        summaryColor.setAlphaF(0.65F);
-        summaryPalette.setColor(QPalette::WindowText, summaryColor);
-        summary_->setPalette(summaryPalette);
         headerLayout->addWidget(summary_);
 
         connect(toggle_, &QToolButton::toggled, this, [this](bool expanded) {

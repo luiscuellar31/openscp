@@ -3,8 +3,6 @@
 #include "KeyboardFocusIndicator.hpp"
 
 #include <QAction>
-#include <QApplication>
-#include <QFocusEvent>
 #include <QHash>
 #include <QKeyEvent>
 #include <QList>
@@ -20,26 +18,14 @@
 
 namespace {
 
-class ToolbarKeyboardController;
-
-void registerForGlobalPointerInput(ToolbarKeyboardController *controller);
-
 class ToolbarKeyboardController final : public QObject {
     public:
     explicit ToolbarKeyboardController(QToolBar *toolbar)
         : QObject(toolbar), toolbar_(toolbar) {
         toolbar_->installEventFilter(this);
-        registerForGlobalPointerInput(this);
     }
 
     void refreshButtons();
-
-    void hideAllIndicators() {
-        for (openscpui::KeyboardFocusIndicator *indicator : indicators_) {
-            if (indicator)
-                indicator->setKeyboardFocusVisible(false);
-        }
-    }
 
     protected:
     bool eventFilter(QObject *watched, QEvent *event) override {
@@ -49,19 +35,10 @@ class ToolbarKeyboardController final : public QObject {
         }
 
         auto *button = qobject_cast<QToolButton *>(watched);
-        openscpui::KeyboardFocusIndicator *indicator =
-            indicators_.value(button);
-        if (!button || !indicator)
+        if (!button || !indicators_.contains(button))
             return QObject::eventFilter(watched, event);
 
-        if (event->type() == QEvent::FocusIn) {
-            const auto *focusEvent = static_cast<QFocusEvent *>(event);
-            const bool keyboardTraversal =
-                focusEvent->reason() == Qt::TabFocusReason ||
-                focusEvent->reason() == Qt::BacktabFocusReason;
-            indicator->setKeyboardFocusVisible(keyboardTraversal);
-        } else if (event->type() == QEvent::FocusOut) {
-            indicator->setKeyboardFocusVisible(false);
+        if (event->type() == QEvent::FocusOut) {
             resetPopupExtensionState(button);
         } else if (event->type() == QEvent::KeyPress) {
             auto *keyEvent = static_cast<QKeyEvent *>(event);
@@ -100,7 +77,6 @@ class ToolbarKeyboardController final : public QObject {
             return;
 
         button->setFocusPolicy(Qt::TabFocus);
-        button->setAttribute(Qt::WA_MacShowFocusRect, false);
         if (button->accessibleName().trimmed().isEmpty() &&
             button->defaultAction()) {
             button->setAccessibleName(button->defaultAction()->text());
@@ -133,57 +109,6 @@ class ToolbarKeyboardController final : public QObject {
     QPointer<QToolBar> toolbar_;
     QHash<QToolButton *, openscpui::KeyboardFocusIndicator *> indicators_;
 };
-
-// Pointer input is application-wide, so exactly one monitor fans it out to
-// the toolbar-owned controllers. Focus and action events remain local to each
-// controller and are therefore processed only once.
-class ToolbarKeyboardInputMonitor final : public QObject {
-    public:
-    using QObject::QObject;
-
-    void registerController(ToolbarKeyboardController *controller) {
-        for (const auto &registered : controllers_) {
-            if (registered == controller)
-                return;
-        }
-        controllers_.push_back(controller);
-    }
-
-    protected:
-    bool eventFilter(QObject *watched, QEvent *event) override {
-        if (event->type() == QEvent::MouseButtonPress) {
-            for (auto iterator = controllers_.begin();
-                 iterator != controllers_.end();) {
-                if (!*iterator) {
-                    iterator = controllers_.erase(iterator);
-                    continue;
-                }
-                (*iterator)->hideAllIndicators();
-                ++iterator;
-            }
-        }
-        return QObject::eventFilter(watched, event);
-    }
-
-    private:
-    QList<QPointer<ToolbarKeyboardController>> controllers_;
-};
-
-void registerForGlobalPointerInput(ToolbarKeyboardController *controller) {
-    if (!qApp || !controller)
-        return;
-
-    constexpr auto MonitorProperty = "openscpToolbarKeyboardInputMonitor";
-    QObject *monitorObject = qApp->property(MonitorProperty).value<QObject *>();
-    auto *monitor = static_cast<ToolbarKeyboardInputMonitor *>(monitorObject);
-    if (!monitor) {
-        monitor = new ToolbarKeyboardInputMonitor(qApp);
-        qApp->installEventFilter(monitor);
-        qApp->setProperty(MonitorProperty,
-                          QVariant::fromValue<QObject *>(monitor));
-    }
-    monitor->registerController(controller);
-}
 
 } // namespace
 

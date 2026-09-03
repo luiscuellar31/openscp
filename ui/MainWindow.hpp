@@ -29,9 +29,11 @@ class RemoteOperationController;
 class LocalTreeDiscovery;
 class SyncCoordinator;
 namespace openscpui {
+class FocusTraversalController;
 class PaneController;
 class PathNavigationBar;
 class PlatformFilePicker;
+struct PathActionResult;
 class RemoteActionController;
 class SessionController;
 } // namespace openscpui
@@ -252,6 +254,7 @@ class MainWindow : public QMainWindow {
     void showTransferQueue();
     void maybeShowTransferQueue();
     void openLocalPathWithPreference(const QString &localPath);
+    void reportPathActionResult(const openscpui::PathActionResult &result);
     void openConnectDialogWithPreset(
         const std::optional<openscp::SessionOptions> &preset);
     void addRecentLocalPath(const QString &path);
@@ -338,12 +341,12 @@ class MainWindow : public QMainWindow {
     void applyRemoteMutationActions();
 
     bool firstShow_ = true;
-    bool initialMainWindowTabNavigation_ = true;
     bool restoredWindowGeometry_ = false;
     openscpui::HostKeyPromptCoordinator hostKeyPromptCoordinator_;
     openscpui::SessionHealthMonitor sessionHealthMonitor_;
     openscpui::ConnectionStatusCoordinator connectionStatusCoordinator_;
     openscpui::TransferUiController transferUiController_;
+    openscpui::FocusTraversalController *focusTraversalController_ = nullptr;
 
     // User preferences
     bool prefShowHidden_ = false;
