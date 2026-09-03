@@ -30,10 +30,6 @@ int safeBatchSize(int requested) {
     return std::clamp(requested, 1, 1000);
 }
 
-int safeMaxDepth(int requested) {
-    return std::clamp(requested, 1, 1024);
-}
-
 QString operationError(const std::string &raw, const QString &fallback) {
     if (!raw.empty())
         return QString::fromStdString(raw);
@@ -413,14 +409,12 @@ class RemoteOperationController::Impl {
                     });
                 } else {
                     QString source;
-                    QString destination;
                     if constexpr (std::is_same_v<T, RenameRequest>) {
                         source = normalizeRemotePath(request.from);
-                        destination = normalizeRemotePath(request.to);
                     } else {
                         source = normalizeRemotePath(request.path);
                     }
-                    const MutationResult result{header, source, destination,
+                    const MutationResult result{header, source,
                                                 summary.affectedEntries,
                                                 summary.failedEntries};
                     postToUi([result](RemoteOperationController *controller) {
@@ -761,7 +755,7 @@ class RemoteOperationController::Impl {
                                         "Could not create remote directory"));
         if (ok)
             summary.affectedEntries = 1;
-        postMutation(job, summary, path, {});
+        postMutation(job, summary, path);
         return summary;
     }
 
@@ -805,7 +799,7 @@ class RemoteOperationController::Impl {
                                         "Could not create remote file"));
         if (ok)
             summary.affectedEntries = 1;
-        postMutation(job, summary, path, {});
+        postMutation(job, summary, path);
         return summary;
     }
 
@@ -822,7 +816,7 @@ class RemoteOperationController::Impl {
                                         "Could not rename remote item"));
         if (ok)
             summary.affectedEntries = 1;
-        postMutation(job, summary, from, to);
+        postMutation(job, summary, from);
         return summary;
     }
 
@@ -841,7 +835,7 @@ class RemoteOperationController::Impl {
                                             "Could not delete remote item"));
             if (ok)
                 summary.affectedEntries = 1;
-            postMutation(job, summary, path, {});
+            postMutation(job, summary, path);
             return summary;
         }
         return executeRecursiveDelete(job, request, path, stopToken);
@@ -861,7 +855,7 @@ class RemoteOperationController::Impl {
                                     "Could not change remote permissions"));
             if (ok)
                 summary.affectedEntries = 1;
-            postMutation(job, summary, path, {});
+            postMutation(job, summary, path);
             return summary;
         }
         return executeRecursiveChmod(job, request, path, stopToken);
@@ -1061,9 +1055,9 @@ class RemoteOperationController::Impl {
     }
 
     void postMutation(const Job &job, const RunSummary &summary,
-                      const QString &source, const QString &destination) {
+                      const QString &source) {
         const MutationResult result{makeHeader(job.key, summary), source,
-                                    destination, summary.affectedEntries,
+                                    summary.affectedEntries,
                                     summary.failedEntries};
         postToUi([result](RemoteOperationController *controller) {
             emit controller->mutationCompleted(result);
@@ -1086,7 +1080,7 @@ class RemoteOperationController::Impl {
         RemoteTreeWalker::Options options;
         options.includeHidden = request.traversal.includeHidden;
         options.skipSymlinks = request.traversal.skipSymlinks;
-        options.maxDepth = safeMaxDepth(request.traversal.maxDepth);
+        options.maxDepth = request.traversal.maxDepth;
         options.depthPolicy = RemoteTreeWalker::DepthPolicy::IncludeLimit;
 
         RemoteTreeWalker::Callbacks callbacks;
@@ -1199,7 +1193,7 @@ class RemoteOperationController::Impl {
         if (summary.failedEntries > 0 && summary.affectedEntries > 0)
             summary.partial = true;
         populateRemoteError(summary, openscp::RemoteErrorKind::RemoteIo);
-        postMutation(job, summary, root, {});
+        postMutation(job, summary, root);
         return summary;
     }
 
@@ -1212,7 +1206,7 @@ class RemoteOperationController::Impl {
         RemoteTreeWalker::Options options;
         options.includeHidden = request.traversal.includeHidden;
         options.skipSymlinks = request.traversal.skipSymlinks;
-        options.maxDepth = safeMaxDepth(request.traversal.maxDepth);
+        options.maxDepth = request.traversal.maxDepth;
         options.depthPolicy = RemoteTreeWalker::DepthPolicy::IncludeLimit;
 
         const auto applyMode = [this, &job, &request, &summary](
@@ -1293,7 +1287,7 @@ class RemoteOperationController::Impl {
                 summary.failedEntries > 0 && summary.affectedEntries > 0;
         }
         populateRemoteError(summary, openscp::RemoteErrorKind::RemoteIo);
-        postMutation(job, summary, root, {});
+        postMutation(job, summary, root);
         return summary;
     }
 
@@ -1335,7 +1329,7 @@ class RemoteOperationController::Impl {
         RemoteTreeWalker::Options walkerOptions;
         walkerOptions.includeHidden = options.includeHidden;
         walkerOptions.skipSymlinks = options.skipSymlinks;
-        walkerOptions.maxDepth = safeMaxDepth(options.maxDepth);
+        walkerOptions.maxDepth = options.maxDepth;
 
         RemoteTreeWalker::Callbacks callbacks;
         callbacks.waitUntilReady = [this, &job, stopToken] {

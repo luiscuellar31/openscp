@@ -63,16 +63,19 @@ inline void secureClear(QByteArray &bytes) {
     bytes.clear();
     bytes.squeeze();
 }
-QString newQuickSiteId() {
-    return QUuid::createUuid().toString(QUuid::WithoutBraces);
-}
-
-QString normalizedIdentityHost(const std::string &host) {
+QString normalizedHost(const std::string &host) {
     return QString::fromStdString(host).trimmed().toLower();
 }
 
-QString normalizedIdentityUser(const std::string &user) {
+QString normalizedUser(const std::string &user) {
     return QString::fromStdString(user).trimmed();
+}
+
+QString normalizedOptionalIdentity(const std::optional<std::string> &value,
+                                   QString (*normalize)(const std::string &)) {
+    if (!value || value->empty())
+        return {};
+    return normalize(*value);
 }
 
 QString normalizedIdentityProtocol(openscp::Protocol protocol) {
@@ -84,28 +87,6 @@ normalizedIdentityScpMode(const openscp::SessionOptions &opt) {
     if (opt.protocol != openscp::Protocol::Scp)
         return openscp::ScpTransferMode::Auto;
     return opt.scp_transfer_mode;
-}
-
-QString normalizedIdentityProxyHost(const std::string &host) {
-    return QString::fromStdString(host).trimmed().toLower();
-}
-
-QString normalizedIdentityProxyUser(const std::optional<std::string> &user) {
-    if (!user || user->empty())
-        return {};
-    return QString::fromStdString(*user).trimmed();
-}
-
-QString normalizedIdentityJumpHost(const std::optional<std::string> &host) {
-    if (!host || host->empty())
-        return {};
-    return QString::fromStdString(*host).trimmed().toLower();
-}
-
-QString normalizedIdentityJumpUser(const std::optional<std::string> &user) {
-    if (!user || user->empty())
-        return {};
-    return QString::fromStdString(*user).trimmed();
 }
 
 QString protocolDisplayLabel(openscp::Protocol protocol) {
@@ -148,21 +129,19 @@ bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
     return normalizedIdentityProtocol(a.protocol) ==
                normalizedIdentityProtocol(b.protocol) &&
            normalizedIdentityScpMode(a) == normalizedIdentityScpMode(b) &&
-           normalizedIdentityHost(a.host) == normalizedIdentityHost(b.host) &&
+           normalizedHost(a.host) == normalizedHost(b.host) &&
            a.port == b.port &&
-           normalizedIdentityUser(a.username) ==
-               normalizedIdentityUser(b.username) &&
+           normalizedUser(a.username) == normalizedUser(b.username) &&
            a.proxy_type == b.proxy_type &&
-           normalizedIdentityProxyHost(a.proxy_host) ==
-               normalizedIdentityProxyHost(b.proxy_host) &&
+           normalizedHost(a.proxy_host) == normalizedHost(b.proxy_host) &&
            a.proxy_port == b.proxy_port &&
-           normalizedIdentityProxyUser(a.proxy_username) ==
-               normalizedIdentityProxyUser(b.proxy_username) &&
-           normalizedIdentityJumpHost(a.jump_host) ==
-               normalizedIdentityJumpHost(b.jump_host) &&
+           normalizedOptionalIdentity(a.proxy_username, normalizedUser) ==
+               normalizedOptionalIdentity(b.proxy_username, normalizedUser) &&
+           normalizedOptionalIdentity(a.jump_host, normalizedHost) ==
+               normalizedOptionalIdentity(b.jump_host, normalizedHost) &&
            a.jump_port == b.jump_port &&
-           normalizedIdentityJumpUser(a.jump_username) ==
-               normalizedIdentityJumpUser(b.jump_username) &&
+           normalizedOptionalIdentity(a.jump_username, normalizedUser) ==
+               normalizedOptionalIdentity(b.jump_username, normalizedUser) &&
            normalizedIdentityKeyPath(a.jump_private_key_path) ==
                normalizedIdentityKeyPath(b.jump_private_key_path) &&
            normalizedIdentityKeyPath(a.private_key_path) ==
@@ -178,10 +157,7 @@ struct QuickSitesLoadResult {
 
 QuickSitesLoadResult loadSavedSitesForQuickConnect() {
     const SavedSitesPersistence::LoadResult loaded =
-        SavedSitesPersistence::loadSites({
-            .trimSiteNames = true,
-            .createNewId = [] { return newQuickSiteId(); },
-        });
+        SavedSitesPersistence::loadSites({.trimSiteNames = true});
     QuickSitesLoadResult result;
     result.sites = loaded.sites;
     result.needsSave = loaded.needsSave;
@@ -196,8 +172,8 @@ saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
 }
 
 QString defaultQuickSiteName(const openscp::SessionOptions &opt) {
-    const QString user = normalizedIdentityUser(opt.username);
-    const QString host = normalizedIdentityHost(opt.host);
+    const QString user = normalizedUser(opt.username);
+    const QString host = normalizedHost(opt.host);
     const QString protocol = protocolDisplayLabel(opt.protocol);
     QString out;
     if (!user.isEmpty() && !host.isEmpty())
@@ -1379,7 +1355,7 @@ void MainWindow::maybePersistQuickConnectSite(
     bool created = false;
     if (matchIndex < 0) {
         SiteEntry newEntry;
-        newEntry.siteId = newQuickSiteId();
+        newEntry.siteId = SavedSitesPersistence::createSiteId();
         newEntry.name = ensureUniqueQuickSiteName(
             sites, req.siteName.trimmed().isEmpty() ? defaultQuickSiteName(opt)
                                                     : req.siteName.trimmed());

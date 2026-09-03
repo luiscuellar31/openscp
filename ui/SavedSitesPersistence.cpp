@@ -53,34 +53,34 @@ loadDefaultScpTransferModeFromSettings(const QSettings &settings) {
             .toStdString());
 }
 
-QString fallbackNewSiteId() {
-    return QUuid::createUuid().toString(QUuid::WithoutBraces);
-}
-
-QString newSiteId(const SavedSitesPersistence::LoadOptions &options) {
+QString generatedSiteId(const SavedSitesPersistence::LoadOptions &options) {
     if (options.createNewId) {
         const QString generated = options.createNewId().trimmed();
         if (!generated.isEmpty())
             return generated;
     }
-    return fallbackNewSiteId();
+    return SavedSitesPersistence::createSiteId();
 }
 
 QString uniqueSiteId(const SavedSitesPersistence::LoadOptions &options,
                      const QSet<QString> &usedIds) {
     // Keep deterministic behavior for custom generators, then fallback to UUID.
     for (int attempt = 0; attempt < 16; ++attempt) {
-        const QString candidate = newSiteId(options);
+        const QString candidate = generatedSiteId(options);
         if (!candidate.isEmpty() && !usedIds.contains(candidate))
             return candidate;
     }
-    QString candidate = fallbackNewSiteId();
+    QString candidate = SavedSitesPersistence::createSiteId();
     while (usedIds.contains(candidate))
-        candidate = fallbackNewSiteId();
+        candidate = SavedSitesPersistence::createSiteId();
     return candidate;
 }
 
 } // namespace
+
+QString SavedSitesPersistence::createSiteId() {
+    return QUuid::createUuid().toString(QUuid::WithoutBraces);
+}
 
 SavedSitesPersistence::LoadResult
 SavedSitesPersistence::loadSites(const LoadOptions &options) {

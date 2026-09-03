@@ -158,7 +158,7 @@ OPENSCP_TEST(testPersistentExecutionPlan, test) {
     SyncExecutionPlan plan;
     plan.direction = SyncDirection::LocalToRemote;
     plan.directoriesToCreate = {QStringLiteral("new/folder")};
-    plan.copies = {{QStringLiteral("new/folder/file.txt"), 12, false}};
+    plan.copies = {{QStringLiteral("new/folder/file.txt"), 12}};
     plan.deletes = {
         {QStringLiteral("old/file.txt"), SyncEntryType::File},
         {QStringLiteral("old"), SyncEntryType::Directory},

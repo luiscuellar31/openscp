@@ -1,7 +1,8 @@
 #include "SessionHealthMonitor.hpp"
 
+#include "TimeUtils.hpp"
+
 #include <QCoreApplication>
-#include <QDateTime>
 #include <QGuiApplication>
 
 #include <algorithm>
@@ -145,10 +146,6 @@ bool SessionHealthMonitor::hasProbeInFlight() const noexcept {
 
 quint64 SessionHealthMonitor::activeJobId() const noexcept {
     return activeProbe_.jobId;
-}
-
-qint64 SessionHealthMonitor::resolvedNow(qint64 nowMs) {
-    return nowMs >= 0 ? nowMs : QDateTime::currentMSecsSinceEpoch();
 }
 
 void SessionHealthMonitor::clearActiveProbe() {

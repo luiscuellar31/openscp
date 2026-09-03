@@ -69,7 +69,6 @@ struct SyncComparisonItem {
 struct SyncCopyOperation {
     QString relativePath;
     std::optional<quint64> size;
-    bool overwritesExisting = false;
 };
 
 struct SyncDeleteOperation {

@@ -26,7 +26,6 @@
 #include <QSortFilterProxyModel>
 #include <QStackedWidget>
 #include <QTableView>
-#include <QUuid>
 #include <QVBoxLayout>
 
 class SiteListModel final : public QAbstractTableModel {
@@ -145,10 +144,6 @@ void showMissingNameIssue(QWidget *parent) {
     UiAlerts::warning(
         parent, QObject::tr("Name required"),
         QObject::tr("Enter a site name to save this connection."));
-}
-
-QString newSiteId() {
-    return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
 
 } // namespace
@@ -299,10 +294,7 @@ void SiteManagerDialog::reloadFromSettings() {
 
 void SiteManagerDialog::loadSites() {
     const SavedSitesPersistence::LoadResult loaded =
-        SavedSitesPersistence::loadSites({
-            .trimSiteNames = false,
-            .createNewId = [] { return newSiteId(); },
-        });
+        SavedSitesPersistence::loadSites();
     sites_ = loaded.sites;
     const SiteCredentialMigrationResult migration =
         SiteCredentialRepository::migrateLegacyPlaintext(loaded);
@@ -399,7 +391,7 @@ void SiteManagerDialog::onAdd() {
         return;
     }
     SiteEntry newEntry;
-    newEntry.siteId = newSiteId();
+    newEntry.siteId = SavedSitesPersistence::createSiteId();
     newEntry.name = name;
     newEntry.opt = sessionOptions;
     SiteCredentialRepository::clearCredentialFields(newEntry.opt);
@@ -480,7 +472,7 @@ void SiteManagerDialog::onDuplicate() {
 
     const SiteEntry source = sites_.at(modelIndex);
     SiteEntry duplicate = source;
-    duplicate.siteId = newSiteId();
+    duplicate.siteId = SavedSitesPersistence::createSiteId();
     duplicate.opt.password.reset();
     duplicate.opt.private_key_passphrase.reset();
     duplicate.opt.proxy_password.reset();

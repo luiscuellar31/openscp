@@ -2321,10 +2321,6 @@ void TransferManager::recordCompletionMetrics(quint64 taskId, Status status,
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     std::lock_guard<std::mutex> lock(perfMtx_);
     ++perfCompletedTasks_;
-    perfCompletedBytes_ += bytesDone;
-    perfTotalQueueLatencyMs_ += queueLatencyMs;
-    perfTotalPrecheckMs_ += precheckMs;
-    perfTotalTransferMs_ += transferMs;
     if (now - perfLastLogAtMs_ < 10000 && perfCompletedTasks_ % 10 != 0) {
         return;
     }

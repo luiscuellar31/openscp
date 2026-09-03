@@ -177,10 +177,6 @@ class TransferManager : public QObject {
 
     mutable std::mutex perfMtx_;
     quint64 perfCompletedTasks_ = 0;
-    quint64 perfCompletedBytes_ = 0;
-    qint64 perfTotalQueueLatencyMs_ = 0;
-    qint64 perfTotalPrecheckMs_ = 0;
-    qint64 perfTotalTransferMs_ = 0;
     qint64 perfLastLogAtMs_ = 0;
 
     TransferTask *taskForIdLocked(quint64 taskId);

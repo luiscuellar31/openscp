@@ -302,7 +302,6 @@ void LocalTreeDiscovery::start(
                 entry.localPath = absolutePath;
                 entry.type = LocalTreeDiscoveryEntry::Type::File;
                 if (fileSize >= 0) {
-                    entry.hasKnownSize = true;
                     entry.size = quint64(fileSize);
                     addKnownBytes(counters, entry.size);
                 } else {
@@ -387,7 +386,6 @@ void LocalTreeDiscovery::start(
                         entry.type = LocalTreeDiscoveryEntry::Type::File;
                         const qint64 fileSize = child.size();
                         if (fileSize >= 0) {
-                            entry.hasKnownSize = true;
                             entry.size = quint64(fileSize);
                             addKnownBytes(counters, entry.size);
                         } else {

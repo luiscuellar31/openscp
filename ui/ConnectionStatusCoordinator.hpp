@@ -28,7 +28,6 @@ class ConnectionStatusCoordinator final {
     [[nodiscard]] bool isConnected() const { return connected_; }
 
     private:
-    static qint64 resolvedNow(qint64 nowMs);
     void publish(qint64 nowMs);
 
     QTimer timer_;

@@ -1,6 +1,6 @@
 #include "ConnectionStatusCoordinator.hpp"
 
-#include <QDateTime>
+#include "TimeUtils.hpp"
 
 #include <algorithm>
 #include <utility>
@@ -35,10 +35,6 @@ void ConnectionStatusCoordinator::reset() {
 
 void ConnectionStatusCoordinator::refresh(qint64 nowMs) {
     publish(resolvedNow(nowMs));
-}
-
-qint64 ConnectionStatusCoordinator::resolvedNow(qint64 nowMs) {
-    return nowMs >= 0 ? nowMs : QDateTime::currentMSecsSinceEpoch();
 }
 
 void ConnectionStatusCoordinator::publish(qint64 nowMs) {

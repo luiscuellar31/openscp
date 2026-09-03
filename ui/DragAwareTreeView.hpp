@@ -16,9 +16,6 @@ class RemoteModel;
 class RemoteOperationController;
 class TransferManager;
 class QFrame;
-namespace openscpui {
-class KeyboardFocusIndicator;
-}
 
 class DragAwareTreeView : public QTreeView {
     Q_OBJECT
@@ -84,7 +81,6 @@ class DragAwareTreeView : public QTreeView {
     // State
     QPointer<TransferManager> transferMgr_;         // not owned
     QPointer<RemoteOperationController> remoteOps_; // not owned
-    openscpui::KeyboardFocusIndicator *keyboardFocusIndicator_ = nullptr;
     QFrame *overlay_ = nullptr;            // owned by this (viewport child)
     class QLabel *overlayLabel_ = nullptr; // non-owning (child of overlay_)
     class QProgressBar *overlayProgress_ =

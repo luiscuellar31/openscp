@@ -107,15 +107,7 @@ bool canResumeStatus(TransferTask::Status s) {
            s == TransferTask::Status::WaitingForConnection;
 }
 
-bool canLimitStatus(TransferTask::Status s) {
-    return s == TransferTask::Status::Queued ||
-           s == TransferTask::Status::Running ||
-           s == TransferTask::Status::Paused ||
-           s == TransferTask::Status::RetryWaiting ||
-           s == TransferTask::Status::WaitingForConnection;
-}
-
-bool canCancelStatus(TransferTask::Status s) {
+bool canActOnStatus(TransferTask::Status s) {
     return s == TransferTask::Status::Queued ||
            s == TransferTask::Status::Running ||
            s == TransferTask::Status::Paused ||
@@ -182,8 +174,8 @@ SelectedActionsState buildSelectedActionsState(const QVector<quint64> &ids,
     forEachSelectedTask(ids, taskIndex, [&](quint64, const TransferTask &task) {
         out.canPause = out.canPause || canPauseStatus(task.status);
         out.canResume = out.canResume || canResumeStatus(task.status);
-        out.canLimit = out.canLimit || canLimitStatus(task.status);
-        out.canCancel = out.canCancel || canCancelStatus(task.status);
+        out.canLimit = out.canLimit || canActOnStatus(task.status);
+        out.canCancel = out.canCancel || canActOnStatus(task.status);
         out.canRetry = out.canRetry || canRetryTask(task);
         out.canShowDestination =
             out.canShowDestination ||
@@ -919,7 +911,7 @@ void TransferQueueDialog::onLimitSelected() {
     QVector<quint64> eligible;
     eligible.reserve(ids.size());
     withSelectedTasks(mgr_, ids, [&](quint64 taskId, const TransferTask &task) {
-        if (canLimitStatus(task.status))
+        if (canActOnStatus(task.status))
             eligible.push_back(taskId);
     });
     if (eligible.isEmpty())
@@ -939,7 +931,7 @@ void TransferQueueDialog::onStopSelected() {
     const auto ids = selectedTaskIds();
     withSelectedTasks(mgr_, ids,
                       [this](quint64 taskId, const TransferTask &task) {
-                          if (canCancelStatus(task.status))
+                          if (canActOnStatus(task.status))
                               mgr_->cancelTask(taskId);
                       });
 }

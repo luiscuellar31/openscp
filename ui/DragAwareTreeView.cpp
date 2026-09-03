@@ -116,7 +116,7 @@ struct DragAwareTreeView::RemoteDragStagingState {
 };
 
 DragAwareTreeView::DragAwareTreeView(QWidget *parent) : QTreeView(parent) {
-    keyboardFocusIndicator_ = new openscpui::KeyboardFocusIndicator(this);
+    new openscpui::KeyboardFocusIndicator(this);
 }
 
 void DragAwareTreeView::setTransferManager(TransferManager *mgr) {

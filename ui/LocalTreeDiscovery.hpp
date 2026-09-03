@@ -23,7 +23,6 @@ struct LocalTreeDiscoveryEntry {
     QString relativePath;
     Type type = Type::File;
     quint64 size = 0;
-    bool hasKnownSize = false;
 };
 
 struct LocalTreeDiscoveryCounters {

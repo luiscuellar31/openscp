@@ -51,7 +51,6 @@ class SessionHealthMonitor final : public QObject {
     [[nodiscard]] quint64 activeJobId() const noexcept;
 
     private:
-    [[nodiscard]] static qint64 resolvedNow(qint64 nowMs);
     void clearActiveProbe();
 
     QTimer timer_;

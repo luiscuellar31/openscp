@@ -173,7 +173,6 @@ struct StatResult {
 struct MutationResult {
     ResultHeader result;
     QString sourcePath;
-    QString destinationPath;
     quint64 affectedEntries = 0;
     quint64 failedEntries = 0;
 };

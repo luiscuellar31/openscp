@@ -6,6 +6,10 @@
 
 namespace openscpui {
 
+inline qint64 resolvedNow(qint64 nowMs) {
+    return nowMs >= 0 ? nowMs : QDateTime::currentMSecsSinceEpoch();
+}
+
 // Format epoch seconds for user-facing display in LOCAL time (short format),
 // using system locale so 12/24h and date formats match OS preferences.
 inline QString localShortTime(quint64 secs) {

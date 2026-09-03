@@ -38,6 +38,7 @@ struct SaveResult {
     [[nodiscard]] explicit operator bool() const noexcept { return ok; }
 };
 
+[[nodiscard]] QString createSiteId();
 LoadResult loadSites(const LoadOptions &options = {});
 SaveResult saveSites(const QVector<SiteEntry> &sites, bool syncToDisk);
 

@@ -483,7 +483,6 @@ SyncExecutionPlan SyncComparisonEngine::makeExecutionPlan(
             copy.relativePath = path;
             if (item.source)
                 copy.size = item.source->size;
-            copy.overwritesExisting = item.destination.has_value();
             plan.copies.push_back(std::move(copy));
 
             QString parent = parentRelativePath(path);
