@@ -136,7 +136,8 @@ jobs:
 
       - name: Verify macOS bundle linkage
         run: |
-          bash ./scripts/verify/macos-bundle.sh build/OpenSCP.app
+          MAX_BUNDLE_SIZE_MIB=64 \
+            bash ./scripts/verify/macos-bundle.sh build/OpenSCP.app
 
       - name: Collect macOS artifacts
         run: |

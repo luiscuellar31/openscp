@@ -29,8 +29,10 @@ set -euo pipefail
 #   PACKAGE_FORMATS        Comma-separated outputs: app,pkg,dmg (default: dmg)
 #   MACDEPLOYQT_DISABLE_PLUGIN_SCAN
 #                          Set to 1 to pass -no-plugins to macdeployqt.
-#                          Default: 0 (recommended). When disabled, the script
+#                          Default: 1. When disabled, the script
 #                          still stages required plugin families manually.
+#                          Set to 0 only to retain macdeployqt's full plugin
+#                          scan for diagnostic or custom-build purposes.
 #   PRUNE_OPTIONAL_QT_PLUGINS
 #                          Set to 1 (default) to remove optional Qt plugins
 #                          that OpenSCP does not use but may pull unresolved
@@ -572,30 +574,92 @@ copy_from_dependency_prefix() {
   rewrite_external_refs_to_bundle "$exe"
 }
 
-# Copy a Qt *.framework from a source lib dir into the app bundle Frameworks
-copy_qt_framework() {
+# Copy only the runtime portion of a missing Qt framework. macdeployqt remains
+# authoritative whenever it has already staged a usable framework.
+copy_missing_qt_runtime_framework() {
   local src_root="$1"   # e.g., /Users/.../Qt/<version>/macos/lib
   local fw_name="$2"    # e.g., QtWidgets
   local src="$src_root/${fw_name}.framework"
   local dst="$FRAMEWORKS_DIR/${fw_name}.framework"
-  [[ -d "$src" ]] || return 0
-  rm -rf "$dst"
-  # Use ditto if available to preserve framework structure; fallback to cp -R
-  if command -v ditto >/dev/null 2>&1; then
-    ditto "$src" "$dst"
+  local dst_binary="$dst/Versions/A/${fw_name}"
+  if [[ -f "$dst_binary" || -f "$dst/${fw_name}" ]]; then
+    return 0
+  fi
+  [[ -d "$src" ]] || return 1
+
+  local src_version_dir=""
+  local src_binary=""
+  if [[ -f "$src/Versions/A/${fw_name}" ]]; then
+    src_version_dir="$src/Versions/A"
+    src_binary="$src_version_dir/${fw_name}"
+  elif [[ -f "$src/${fw_name}" ]]; then
+    src_version_dir="$src"
+    src_binary="$src/${fw_name}"
   else
-    cp -R "$src" "$dst"
+    return 1
   fi
-  # Fix install name id to use @rpath
-  local binpath
-  if [[ -f "$dst/Versions/A/${fw_name}" ]]; then
-    binpath="$dst/Versions/A/${fw_name}"
-  elif [[ -f "$dst/${fw_name}" ]]; then
-    binpath="$dst/${fw_name}"
+
+  log "Staging missing Qt runtime framework: ${fw_name}"
+  rm -rf "$dst"
+  mkdir -p "$dst/Versions/A"
+  cp -L "$src_binary" "$dst_binary"
+  if [[ -d "$src_version_dir/Resources" ]]; then
+    if command -v ditto >/dev/null 2>&1; then
+      ditto "$src_version_dir/Resources" "$dst/Versions/A/Resources"
+    else
+      cp -R "$src_version_dir/Resources" "$dst/Versions/A/Resources"
+    fi
   fi
-  if [[ -n "$binpath" ]]; then
-    install_name_tool -id "@rpath/${fw_name}.framework/Versions/A/${fw_name}" "$binpath" || true
+
+  ln -s "A" "$dst/Versions/Current"
+  ln -s "Versions/Current/${fw_name}" "$dst/${fw_name}"
+  if [[ -d "$dst/Versions/A/Resources" ]]; then
+    ln -s "Versions/Current/Resources" "$dst/Resources"
   fi
+
+  install_name_tool -id \
+    "@rpath/${fw_name}.framework/Versions/A/${fw_name}" "$dst_binary" || true
+  rewrite_external_refs_to_bundle "$dst_binary"
+}
+
+list_direct_qt_frameworks() {
+  local dep=""
+  while IFS= read -r dep; do
+    if [[ "$dep" =~ /((Qt[A-Za-z0-9_]+)\.framework)/Versions/ ]]; then
+      printf '%s\n' "${BASH_REMATCH[2]}"
+    fi
+  done < <(list_deps "$MACOS_DIR/${APP_NAME}") | sort -u
+}
+
+ensure_direct_qt_runtime_frameworks() {
+  local -a source_roots=()
+  if [[ -n "$QTPREFIX" && -d "$QTPREFIX/lib" ]]; then
+    source_roots+=("$QTPREFIX/lib")
+  fi
+  if command -v brew >/dev/null 2>&1; then
+    local homebrew_qt=""
+    homebrew_qt="$(brew --prefix qt 2>/dev/null || brew --prefix qt@6 2>/dev/null || true)"
+    if [[ -n "$homebrew_qt" && -d "$homebrew_qt/lib" &&
+          "$homebrew_qt/lib" != "${source_roots[0]:-}" ]]; then
+      source_roots+=("$homebrew_qt/lib")
+    fi
+  fi
+
+  local framework=""
+  while IFS= read -r framework; do
+    [[ -n "$framework" ]] || continue
+    local staged=0
+    local source_root=""
+    for source_root in "${source_roots[@]}"; do
+      if copy_missing_qt_runtime_framework "$source_root" "$framework"; then
+        staged=1
+        break
+      fi
+    done
+    if [[ $staged -ne 1 ]]; then
+      die "Missing required Qt runtime framework: ${framework}"
+    fi
+  done < <(list_direct_qt_frameworks)
 }
 
 # Ensure critical Qt runtime plugin families are present in the bundle.
@@ -1018,7 +1082,7 @@ main() {
   [[ -x "$mqt" ]] || die "Resolved macdeployqt is not executable: $mqt"
   log "Running macdeployqt at: $mqt"
   local disable_plugin_scan=0
-  if [[ "${MACDEPLOYQT_DISABLE_PLUGIN_SCAN:-0}" == "1" ]]; then
+  if [[ "${MACDEPLOYQT_DISABLE_PLUGIN_SCAN:-1}" == "1" ]]; then
     if find_qt_plugins_root >/dev/null 2>&1; then
       disable_plugin_scan=1
       warn "MACDEPLOYQT_DISABLE_PLUGIN_SCAN=1: disabling macdeployqt plugin scan"
@@ -1026,7 +1090,7 @@ main() {
       warn "MACDEPLOYQT_DISABLE_PLUGIN_SCAN=1 but Qt plugins root was not found; keeping macdeployqt plugin scan enabled"
     fi
   else
-    log "Using macdeployqt plugin scan (default)"
+    log "MACDEPLOYQT_DISABLE_PLUGIN_SCAN=0: using full macdeployqt plugin scan"
   fi
   # Build macdeployqt command safely even with set -u and possibly empty extra args
   local libarg=()
@@ -1054,26 +1118,9 @@ main() {
     "${cmd_x86[@]}" || die "macdeployqt failed (native and Rosetta fallback)"
   fi
 
-  # Force-copy essential Qt frameworks into the bundle from known prefixes
-  if [[ -n "$QTPREFIX" && -d "$QTPREFIX/lib" ]]; then
-    warn "Ensuring Qt frameworks from: $QTPREFIX/lib"
-    for fw in QtCore QtGui QtWidgets QtPrintSupport; do
-      copy_qt_framework "$QTPREFIX/lib" "$fw"
-    done
-  fi
-  # Homebrew fallback if official prefix missing
-  if [[ ! -e "$FRAMEWORKS_DIR/QtWidgets.framework/QtWidgets" && ! -e "$FRAMEWORKS_DIR/QtWidgets.framework/Versions/A/QtWidgets" ]]; then
-    if command -v brew >/dev/null 2>&1; then
-      local hbqt
-      hbqt=$(brew --prefix qt 2>/dev/null || brew --prefix qt@6 2>/dev/null || true)
-      if [[ -n "$hbqt" && -d "$hbqt/lib" ]]; then
-        warn "Ensuring Qt frameworks from Homebrew: $hbqt/lib"
-        for fw in QtCore QtGui QtWidgets QtPrintSupport; do
-          copy_qt_framework "$hbqt/lib" "$fw"
-        done
-      fi
-    fi
-  fi
+  # macdeployqt owns deployed frameworks. Fill only missing direct dependencies
+  # from known Qt prefixes, and copy runtime content rather than SDK headers.
+  ensure_direct_qt_runtime_frameworks
 
   # Ensure the specific plugin families we depend on are present in the bundle.
   ensure_qt_support_plugins
@@ -1091,6 +1138,11 @@ main() {
   log "Validating linkage for internal libraries"
   otool -L "$MACOS_DIR/${APP_NAME}" | grep -E 'libssh2|libcrypto|libssl|tinyxml2|@executable_path' || true
   rewrite_external_refs_to_bundle "$MACOS_DIR/${APP_NAME}"
+
+  # Reject incomplete, development-heavy, or non-relocatable bundles before
+  # signing and artifact creation. CI repeats this check with a size budget.
+  log "Verifying completed macOS bundle"
+  bash "${REPO_DIR}/scripts/verify/macos-bundle.sh" "$APP_DIR"
 
   # Sign (hardened runtime) — skipped entirely when SKIP_CODESIGN=1
   if [[ "${SKIP_CODESIGN:-0}" != "1" ]]; then

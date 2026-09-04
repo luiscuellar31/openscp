@@ -140,6 +140,15 @@ Outputs and their `.sha256` files are written under `dist/`. The packaging
 flow runs `macdeployqt`, bundles non-Qt dependencies, rewrites linkage, and
 verifies the completed bundle.
 
+Plugin scanning is disabled by default because the required macOS platform,
+SVG icon, and style plugins are staged explicitly. Set
+`MACDEPLOYQT_DISABLE_PLUGIN_SCAN=0` only for custom builds that need Qt's full
+plugin scan.
+
+The release workflow also rejects development-only Qt framework content,
+unreachable Mach-O files, and bundles larger than its configured
+`MAX_BUNDLE_SIZE_MIB` budget.
+
 By default it builds the current architecture. Set
 `CMAKE_OSX_ARCHITECTURES=x86_64` for Intel or
 `CMAKE_OSX_ARCHITECTURES='arm64;x86_64'` for a universal build; Qt and every

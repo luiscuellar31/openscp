@@ -17,8 +17,11 @@ Validates:
 - Info.plist contains a valid minimum macOS version and every bundled Mach-O
   supports that version
 - Required Qt runtime files are present (including qcocoa platform plugin)
+- Qt frameworks contain runtime files only, without SDK headers/modules
 - App, plugin, and framework dependencies avoid machine-local absolute paths
 - @rpath/@loader_path/@executable_path dependencies resolve within the bundle
+- Every bundled framework/library Mach-O is reachable from the app or a plugin
+- Bundle size stays within MAX_BUNDLE_SIZE_MIB when that variable is set
 EOF
 }
 
@@ -61,6 +64,15 @@ require_file() {
 require_file "${FRAMEWORKS_DIR}/QtCore.framework/Versions/A/QtCore"
 require_file "${FRAMEWORKS_DIR}/QtGui.framework/Versions/A/QtGui"
 require_file "${FRAMEWORKS_DIR}/QtWidgets.framework/Versions/A/QtWidgets"
+
+development_content="$({
+  find "$FRAMEWORKS_DIR" -type d \( -name Headers -o -name Modules \) -print
+} | sort)"
+if [[ -n "$development_content" ]]; then
+  err "Development-only Qt framework content is bundled:"
+  printf '%s\n' "$development_content" >&2
+  die "Qt frameworks must contain runtime content only"
+fi
 
 path_exists() {
   local p="$1"
@@ -235,8 +247,10 @@ check_linkage() {
 }
 
 targets=("$EXE_PATH")
+runtime_roots=("$EXE_PATH")
 while IFS= read -r plugin_dylib; do
   targets+=("$plugin_dylib")
+  runtime_roots+=("$plugin_dylib")
 done < <(find "$PLUGINS_DIR" -type f -name '*.dylib' | sort)
 
 while IFS= read -r framework_file; do
@@ -245,6 +259,99 @@ while IFS= read -r framework_file; do
     targets+=("$framework_file")
   fi
 done < <(find "$FRAMEWORKS_DIR" -type f | sort)
+
+array_contains() {
+  local needle="$1"
+  shift
+  local candidate=""
+  for candidate in "$@"; do
+    [[ "$candidate" == "$needle" ]] && return 0
+  done
+  return 1
+}
+
+canonical_path() {
+  local path="$1"
+  local directory=""
+  directory="$(dirname "$path")"
+  local filename=""
+  filename="$(basename "$path")"
+  (cd "$directory" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$filename") ||
+    printf '%s\n' "$path"
+}
+
+check_macho_reachability() {
+  # Bash 3.2 with `set -u` treats expansion of an empty array as unbound.
+  # A non-path sentinel keeps the membership helper portable to stock macOS.
+  local -a reachable=("__openscp_no_reachable_path__")
+  local -a pending=("${runtime_roots[@]}")
+  local owner="" owner_path="" dep="" resolved="" resolved_path=""
+  local frameworks_path="" plugins_path=""
+  frameworks_path="$(canonical_path "$FRAMEWORKS_DIR")"
+  plugins_path="$(canonical_path "$PLUGINS_DIR")"
+
+  while ((${#pending[@]})); do
+    owner="${pending[0]}"
+    if ((${#pending[@]} == 1)); then
+      pending=()
+    else
+      pending=("${pending[@]:1}")
+    fi
+    owner_path="$(canonical_path "$owner")"
+    if array_contains "$owner_path" "${reachable[@]}"; then
+      continue
+    fi
+    reachable+=("$owner_path")
+
+    while IFS= read -r dep; do
+      [[ -n "$dep" ]] || continue
+      resolved="$(resolve_dep_path "$dep" "$owner")"
+      [[ -e "$resolved" ]] || continue
+      resolved_path="$(canonical_path "$resolved")"
+      case "$resolved_path" in
+        "$frameworks_path"/*|"$plugins_path"/*)
+          if /usr/bin/file -b "$resolved_path" | grep -q 'Mach-O' &&
+             ! array_contains "$resolved_path" "${reachable[@]}"; then
+            pending+=("$resolved_path")
+          fi
+          ;;
+        *) ;;
+      esac
+    done < <(list_deps "$owner")
+  done
+
+  local -a unreachable=()
+  local binary="" binary_path=""
+  for binary in "${targets[@]}"; do
+    binary_path="$(canonical_path "$binary")"
+    if ! array_contains "$binary_path" "${reachable[@]}"; then
+      unreachable+=("$binary")
+    fi
+  done
+
+  if ((${#unreachable[@]})); then
+    err "Unreachable Mach-O binaries are bundled:"
+    printf '%s\n' "${unreachable[@]}" >&2
+    die "Bundle contains runtime binaries that the app cannot reach"
+  fi
+}
+
+check_bundle_size_budget() {
+  local maximum_mib="${MAX_BUNDLE_SIZE_MIB:-0}"
+  [[ "$maximum_mib" =~ ^[0-9]+$ ]] ||
+    die "MAX_BUNDLE_SIZE_MIB must be a non-negative integer"
+  ((maximum_mib > 0)) || return 0
+
+  local total_bytes=""
+  total_bytes="$(find "$APP_DIR" -type f -exec stat -f '%z' {} + |
+    awk '{ total += $1 } END { printf "%.0f", total }')"
+  local maximum_bytes=$((maximum_mib * 1024 * 1024))
+  local actual_mib=""
+  actual_mib="$(awk -v bytes="$total_bytes" 'BEGIN { printf "%.1f", bytes / 1048576 }')"
+  log "Bundle size: ${actual_mib} MiB (budget: ${maximum_mib} MiB)"
+  ((total_bytes <= maximum_bytes)) ||
+    die "Bundle size ${actual_mib} MiB exceeds ${maximum_mib} MiB budget"
+}
 
 log "Checking deployment targets for ${#targets[@]} Mach-O binaries"
 for bin in "${targets[@]}"; do
@@ -257,5 +364,9 @@ for bin in "${targets[@]}"; do
   check_forbidden_rpaths "$bin"
   check_linkage "$bin"
 done
+
+log "Checking Mach-O reachability"
+check_macho_reachability
+check_bundle_size_budget
 
 log "macOS bundle validation passed: $APP_DIR"
