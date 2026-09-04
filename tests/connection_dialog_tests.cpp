@@ -1,10 +1,10 @@
 #include "ConnectionDialog.hpp"
+#include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 
 #include <QApplication>
 #include <QComboBox>
 #include <QDialogButtonBox>
-#include <QEventLoop>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMouseEvent>
@@ -20,17 +20,14 @@
 
 namespace {
 
+using openscp::testsupport::flushUiEvents;
+
 QToolButton *sectionToggle(ConnectionDialog &dialog, const char *name) {
     return dialog.findChild<QToolButton *>(QString::fromLatin1(name));
 }
 
 void clearSettings() {
     QSettings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP")).clear();
-}
-
-void flushUiEvents() {
-    for (int pass = 0; pass < 3; ++pass)
-        QApplication::processEvents(QEventLoop::AllEvents);
 }
 
 OPENSCP_TEST(testSavedSiteFormStartsCompact, test) {

@@ -1,4 +1,5 @@
 // Unit tests for the serialized remote-operation execution lane.
+#include "QtTestSupport.hpp"
 #include "RemoteOperationController.hpp"
 #include "TestHarness.hpp"
 #include "openscp/RemoteClient.hpp"
@@ -13,7 +14,6 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -24,14 +24,7 @@
 namespace {
 
 bool spinUntil(const std::function<bool()> &predicate, int timeoutMs = 3000) {
-    QElapsedTimer timer;
-    timer.start();
-    while (!predicate() && timer.elapsed() < timeoutMs) {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
-        QThread::msleep(1);
-    }
-    QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
-    return predicate();
+    return openscp::testsupport::spinUntil(predicate, timeoutMs);
 }
 
 struct FakeState {

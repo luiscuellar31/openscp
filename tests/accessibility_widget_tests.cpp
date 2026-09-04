@@ -1,6 +1,7 @@
 #include "ConnectionDialog.hpp"
 #include "DragAwareTreeView.hpp"
 #include "PathNavigationBar.hpp"
+#include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "ToolbarKeyboardNavigation.hpp"
 #include "TransferManager.hpp"
@@ -9,7 +10,6 @@
 #include <QAccessible>
 #include <QAction>
 #include <QApplication>
-#include <QEventLoop>
 #include <QFont>
 #include <QFrame>
 #include <QKeyEvent>
@@ -29,6 +29,8 @@
 
 namespace {
 
+using openscp::testsupport::flushUiEvents;
+
 class OrderedFocusWindow final : public QWidget {
     public:
     QList<QWidget *> order;
@@ -39,11 +41,6 @@ class OrderedFocusWindow final : public QWidget {
                                             next);
     }
 };
-
-void flushUiEvents() {
-    for (int pass = 0; pass < 3; ++pass)
-        QApplication::processEvents(QEventLoop::AllEvents);
-}
 
 void sendKey(QWidget *target, Qt::Key key,
              Qt::KeyboardModifiers modifiers = Qt::NoModifier) {

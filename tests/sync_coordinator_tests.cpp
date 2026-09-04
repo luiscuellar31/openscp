@@ -1,3 +1,4 @@
+#include "QtTestSupport.hpp"
 #include "RemoteOperationController.hpp"
 #include "SyncCoordinator.hpp"
 #include "TestHarness.hpp"
@@ -14,25 +15,12 @@
 #include <algorithm>
 #include <chrono>
 #include <functional>
-#include <iostream>
 #include <thread>
 
 namespace {
 
 using namespace std::chrono_literals;
-
-bool waitUntil(const std::function<bool()> &predicate,
-               std::chrono::milliseconds timeout = 5000ms) {
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-    while (std::chrono::steady_clock::now() < deadline) {
-        QCoreApplication::processEvents();
-        if (predicate())
-            return true;
-        std::this_thread::sleep_for(5ms);
-    }
-    QCoreApplication::processEvents();
-    return predicate();
-}
+using openscp::testsupport::waitUntil;
 
 std::unique_ptr<openscp::RemoteClient> connectedMock() {
     auto client = std::make_unique<openscp::MockSftpClient>();

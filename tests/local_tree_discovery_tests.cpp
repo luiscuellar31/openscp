@@ -1,4 +1,5 @@
 #include "LocalTreeDiscovery.hpp"
+#include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 
 #include <QCoreApplication>
@@ -13,19 +14,11 @@
 #include <algorithm>
 #include <chrono>
 #include <functional>
-#include <iostream>
 
 namespace {
 
 bool spinUntil(const std::function<bool()> &predicate, int timeoutMs = 5000) {
-    QElapsedTimer timer;
-    timer.start();
-    while (!predicate() && timer.elapsed() < timeoutMs) {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
-        QThread::msleep(1);
-    }
-    QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
-    return predicate();
+    return openscp::testsupport::spinUntil(predicate, timeoutMs);
 }
 
 bool writeFile(const QString &path, QByteArray contents = "x") {
