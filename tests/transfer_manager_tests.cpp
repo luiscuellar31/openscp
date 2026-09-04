@@ -1,5 +1,6 @@
 // Transfer queue tests without an external test framework.
 #include "ConflictCoordinator.hpp"
+#include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "TransferManager.hpp"
 #include "openscp/MockSftpClient.hpp"
@@ -13,7 +14,6 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -34,25 +34,31 @@ struct TransferManagerTestAccess {
 namespace {
 
 using namespace std::chrono_literals;
-
-bool waitUntil(const std::function<bool()> &predicate,
-               std::chrono::milliseconds timeout = 5000ms) {
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-    while (std::chrono::steady_clock::now() < deadline) {
-        QCoreApplication::processEvents();
-        if (predicate())
-            return true;
-        std::this_thread::sleep_for(5ms);
-    }
-    QCoreApplication::processEvents();
-    return predicate();
-}
+using openscp::testsupport::waitUntil;
 
 openscp::SessionOptions testOptions() {
     openscp::SessionOptions options;
     options.host = "parallel.test";
     options.username = "tester";
     return options;
+}
+
+TransferBatchOptions testBatchOptions() {
+    TransferBatchOptions options;
+    options.sessionKey = QStringLiteral("test-session");
+    options.conflictPolicy = TransferConflictPolicy::Overwrite;
+    return options;
+}
+
+bool waitForStatus(
+    const TransferManager &manager, quint64 taskId, TransferTask::Status status,
+    std::chrono::milliseconds timeout = std::chrono::milliseconds(5000)) {
+    return waitUntil(
+        [&] {
+            const auto task = manager.taskSnapshot(taskId);
+            return task && task->status == status;
+        },
+        timeout);
 }
 
 OPENSCP_TEST(testConflictPoliciesAndUnsupportedFallback, test) {
@@ -407,9 +413,7 @@ OPENSCP_TEST(testPersistentWorkersRunConcurrently, test) {
             {QStringLiteral("/remote/parallel-%1.dat").arg(index),
              destination.filePath(QStringLiteral("file-%1.dat").arg(index))});
     }
-    TransferBatchOptions batch;
-    batch.sessionKey = QStringLiteral("test-session");
-    batch.conflictPolicy = TransferConflictPolicy::Overwrite;
+    auto batch = testBatchOptions();
     manager.enqueueDownloads(downloads, batch);
 
     const bool completed = waitUntil([&] {
@@ -436,9 +440,7 @@ OPENSCP_TEST(testSuccessfulWorkerConnectionReuse, test) {
     manager.setMaxConcurrent(1);
     configureManager(manager, baseClient, testOptions());
     QTemporaryDir destination;
-    TransferBatchOptions batch;
-    batch.sessionKey = QStringLiteral("test-session");
-    batch.conflictPolicy = TransferConflictPolicy::Overwrite;
+    auto batch = testBatchOptions();
     manager.enqueueDownloads(
         {{QStringLiteral("/remote/reuse-a"), destination.filePath("reuse-a")},
          {QStringLiteral("/remote/reuse-b"), destination.filePath("reuse-b")},
@@ -516,9 +518,7 @@ OPENSCP_TEST(testCanceledWorkerInvalidatesItsConnection, test) {
     manager.setMaxConcurrent(1);
     configureManager(manager, baseClient, testOptions());
     QTemporaryDir destination;
-    TransferBatchOptions batch;
-    batch.sessionKey = QStringLiteral("test-session");
-    batch.conflictPolicy = TransferConflictPolicy::Overwrite;
+    auto batch = testBatchOptions();
 
     const quint64 canceledId =
         manager.enqueueDownload(QStringLiteral("/remote/cancel"),
@@ -538,10 +538,7 @@ OPENSCP_TEST(testCanceledWorkerInvalidatesItsConnection, test) {
     const quint64 nextId =
         manager.enqueueDownload(QStringLiteral("/remote/after-cancel"),
                                 destination.filePath("after-cancel"), batch);
-    test.check(waitUntil([&] {
-                   const auto task = manager.taskSnapshot(nextId);
-                   return task && task->status == TransferTask::Status::Done;
-               }),
+    test.check(waitForStatus(manager, nextId, TransferTask::Status::Done),
                "the worker should recover after a canceled transfer");
     test.check(probe->connections.load() == 2,
                "the task after cancellation must use a fresh connection");
@@ -554,9 +551,7 @@ OPENSCP_TEST(testClearClientInvalidatesWorkerConnections, test) {
     manager.setMaxConcurrent(1);
     configureManager(manager, baseClient, testOptions());
     QTemporaryDir destination;
-    TransferBatchOptions batch;
-    batch.sessionKey = QStringLiteral("test-session");
-    batch.conflictPolicy = TransferConflictPolicy::Overwrite;
+    auto batch = testBatchOptions();
     const quint64 taskId =
         manager.enqueueDownload(QStringLiteral("/remote/disconnect"),
                                 destination.filePath("disconnect"), batch);
@@ -620,9 +615,7 @@ OPENSCP_TEST(testFinalTransportErrorInvalidatesConnection, test) {
     manager.setMaxConcurrent(1);
     configureManager(manager, baseClient, testOptions());
     QTemporaryDir destination;
-    TransferBatchOptions batch;
-    batch.sessionKey = QStringLiteral("test-session");
-    batch.conflictPolicy = TransferConflictPolicy::Overwrite;
+    auto batch = testBatchOptions();
 
     const quint64 failedId = manager.enqueueDownload(
         QStringLiteral("/remote/transport-failure"),
@@ -636,10 +629,7 @@ OPENSCP_TEST(testFinalTransportErrorInvalidatesConnection, test) {
     const quint64 nextId = manager.enqueueDownload(
         QStringLiteral("/remote/transport-recovery"),
         destination.filePath("transport-recovery"), batch);
-    test.check(waitUntil([&] {
-                   const auto task = manager.taskSnapshot(nextId);
-                   return task && task->status == TransferTask::Status::Done;
-               }),
+    test.check(waitForStatus(manager, nextId, TransferTask::Status::Done),
                "a later task should recover from a final transport failure");
     test.check(probe->connections.load() == 2,
                "recovery after a transport failure should reconnect");
@@ -655,9 +645,7 @@ OPENSCP_TEST(testPersistentTaskDependencies, test) {
     configureManager(manager, baseClient, options);
     QTemporaryDir destination;
 
-    TransferBatchOptions batch;
-    batch.sessionKey = QStringLiteral("test-session");
-    batch.conflictPolicy = TransferConflictPolicy::Overwrite;
+    auto batch = testBatchOptions();
     const quint64 first = manager.enqueueDownload(
         QStringLiteral("/remote/ordered-a"),
         destination.filePath(QStringLiteral("ordered-a")), batch);
@@ -687,9 +675,7 @@ OPENSCP_TEST(testDestinationReservation, test) {
 
     QTemporaryDir destination;
     const QString sameDestination = destination.filePath("same.dat");
-    TransferBatchOptions batch;
-    batch.sessionKey = QStringLiteral("test-session");
-    batch.conflictPolicy = TransferConflictPolicy::Overwrite;
+    auto batch = testBatchOptions();
     QVector<QPair<QString, QString>> downloads{
         {QStringLiteral("/remote/a.dat"), sameDestination},
         {QStringLiteral("/remote/b.dat"), sameDestination},
@@ -752,16 +738,11 @@ OPENSCP_TEST(testTransientRetries, test) {
     configureManager(manager, baseClient, options);
     QTemporaryDir destination;
 
-    TransferBatchOptions batch;
-    batch.sessionKey = QStringLiteral("test-session");
-    batch.conflictPolicy = TransferConflictPolicy::Overwrite;
+    auto batch = testBatchOptions();
     manager.enqueueDownload(QStringLiteral("/remote/retry.dat"),
                             destination.filePath("retry.dat"), batch);
 
-    test.check(waitUntil([&] {
-                   const auto task = manager.taskSnapshot(1);
-                   return task && task->status == TransferTask::Status::Done;
-               }),
+    test.check(waitForStatus(manager, 1, TransferTask::Status::Done),
                "transient failures should retry to completion");
     const auto task = manager.taskSnapshot(1);
     test.check(probe->attempts.load() == 3 && task && task->attempts == 3,
@@ -802,16 +783,11 @@ OPENSCP_TEST(testUnclassifiedErrorNeverRetries, test) {
     TransferManager manager;
     configureManager(manager, baseClient, testOptions());
     QTemporaryDir destination;
-    TransferBatchOptions batch;
-    batch.sessionKey = QStringLiteral("test-session");
-    batch.conflictPolicy = TransferConflictPolicy::Overwrite;
+    auto batch = testBatchOptions();
     manager.enqueueDownload(QStringLiteral("/remote/unclassified.dat"),
                             destination.filePath("unclassified.dat"), batch);
 
-    test.check(waitUntil([&] {
-                   const auto task = manager.taskSnapshot(1);
-                   return task && task->status == TransferTask::Status::Error;
-               }),
+    test.check(waitForStatus(manager, 1, TransferTask::Status::Error),
                "unclassified failures should become errors");
     test.check(attempts->load() == 1,
                "an error without transient evidence must not retry");
@@ -875,10 +851,8 @@ OPENSCP_TEST(testMoveDeleteSourcePhasePersistsWithoutRetransfer, test) {
                    "move-phase persistence fixture should initialize");
         manager.setMaxConcurrent(1);
         configureManager(manager, baseClient, testOptions());
-        TransferBatchOptions batch;
-        batch.sessionKey = QStringLiteral("test-session");
+        auto batch = testBatchOptions();
         batch.operation = TransferOperation::Move;
-        batch.conflictPolicy = TransferConflictPolicy::Overwrite;
         manager.enqueueDownload(QStringLiteral("/remote/move-source"),
                                 root.filePath("move-destination"), batch);
         test.check(waitUntil([&] {
@@ -907,10 +881,7 @@ OPENSCP_TEST(testMoveDeleteSourcePhasePersistsWithoutRetransfer, test) {
     restored.setMaxConcurrent(1);
     configureManager(restored, baseClient, testOptions());
     restored.resumeTask(1);
-    test.check(waitUntil([&] {
-                   const auto task = restored.taskSnapshot(1);
-                   return task && task->status == TransferTask::Status::Done;
-               }),
+    test.check(waitForStatus(restored, 1, TransferTask::Status::Done),
                "retrying a restored move should complete source cleanup");
     test.check(probe->downloads.load() == 1 && probe->sourceDeletes.load() == 2,
                "DeleteSource retry must not repeat the completed transfer");
@@ -943,15 +914,10 @@ OPENSCP_TEST(testCommitUncertainDoesNotRetry, test) {
     TransferManager manager;
     configureManager(manager, baseClient, options);
     QTemporaryDir destination;
-    TransferBatchOptions batch;
-    batch.sessionKey = QStringLiteral("test-session");
-    batch.conflictPolicy = TransferConflictPolicy::Overwrite;
+    auto batch = testBatchOptions();
     manager.enqueueDownload(QStringLiteral("/remote/uncertain.dat"),
                             destination.filePath("uncertain.dat"), batch);
-    test.check(waitUntil([&] {
-                   const auto task = manager.taskSnapshot(1);
-                   return task && task->status == TransferTask::Status::Warning;
-               }),
+    test.check(waitForStatus(manager, 1, TransferTask::Status::Warning),
                "commit-uncertain results should become warnings");
     const auto beforeRetry = manager.taskSnapshot(1);
     manager.retryTask(1);
@@ -999,15 +965,10 @@ OPENSCP_TEST(testPermanentStructuredErrorNeverRetries, test) {
     TransferManager manager;
     configureManager(manager, baseClient, options);
     QTemporaryDir destination;
-    TransferBatchOptions batch;
-    batch.sessionKey = QStringLiteral("test-session");
-    batch.conflictPolicy = TransferConflictPolicy::Overwrite;
+    auto batch = testBatchOptions();
     manager.enqueueDownload(QStringLiteral("/remote/auth.dat"),
                             destination.filePath("auth.dat"), batch);
-    test.check(waitUntil([&] {
-                   const auto task = manager.taskSnapshot(1);
-                   return task && task->status == TransferTask::Status::Error;
-               }),
+    test.check(waitForStatus(manager, 1, TransferTask::Status::Error),
                "permanent structured failures should become errors");
     test.check(attempts->load() == 1,
                "authentication failures must not retry even if marked "
@@ -1051,16 +1012,11 @@ OPENSCP_TEST(testInsufficientSpaceNeverRetries, test) {
     TransferManager manager;
     configureManager(manager, baseClient, options);
     QTemporaryDir destination;
-    TransferBatchOptions batch;
-    batch.sessionKey = QStringLiteral("test-session");
-    batch.conflictPolicy = TransferConflictPolicy::Overwrite;
+    auto batch = testBatchOptions();
     manager.enqueueDownload(QStringLiteral("/remote/full.dat"),
                             destination.filePath("full.dat"), batch);
 
-    test.check(waitUntil([&] {
-                   const auto task = manager.taskSnapshot(1);
-                   return task && task->status == TransferTask::Status::Error;
-               }),
+    test.check(waitForStatus(manager, 1, TransferTask::Status::Error),
                "insufficient-space failures should become errors");
     test.check(attempts->load() == 1,
                "insufficient-space failures must never retry");
@@ -1119,9 +1075,7 @@ OPENSCP_TEST(testOtherPermanentKindsNeverRetry, test) {
     manager.setMaxConcurrent(3);
     configureManager(manager, baseClient, testOptions());
     QTemporaryDir destination;
-    TransferBatchOptions batch;
-    batch.sessionKey = QStringLiteral("test-session");
-    batch.conflictPolicy = TransferConflictPolicy::Overwrite;
+    auto batch = testBatchOptions();
     manager.enqueueDownloads({{QStringLiteral("/remote/certificate"),
                                destination.filePath("certificate")},
                               {QStringLiteral("/remote/permission"),
@@ -1157,10 +1111,7 @@ OPENSCP_TEST(testFailedDependencySkipsFollowingWork, test) {
     batch.sessionKey = QStringLiteral("test-session");
     const quint64 first = manager.enqueueDownload(
         QStringLiteral("/remote/fails"), destination.filePath("fails"), batch);
-    test.check(waitUntil([&] {
-                   const auto task = manager.taskSnapshot(first);
-                   return task && task->status == TransferTask::Status::Error;
-               }),
+    test.check(waitForStatus(manager, first, TransferTask::Status::Error),
                "the prerequisite should fail before late dependents arrive");
     batch.dependsOnTaskId = first;
     const quint64 second = manager.enqueueRemoteDelete(
@@ -1193,9 +1144,7 @@ OPENSCP_TEST(testDependencySkipsKeepTerminalCounterAndHistoryBounded, test) {
     configureManager(manager, baseClient, testOptions());
     QTemporaryDir destination;
 
-    TransferBatchOptions batch;
-    batch.sessionKey = QStringLiteral("test-session");
-    batch.conflictPolicy = TransferConflictPolicy::Overwrite;
+    auto batch = testBatchOptions();
     const quint64 prerequisite =
         manager.enqueueDownload(QStringLiteral("/remote/root-failure"),
                                 destination.filePath("root-failure"), batch);
@@ -1259,9 +1208,7 @@ OPENSCP_TEST(testAggregateRateLimit, test) {
     manager.setGlobalSpeedLimitKBps(64);
     configureManager(manager, baseClient, options);
     QTemporaryDir destination;
-    TransferBatchOptions batch;
-    batch.sessionKey = QStringLiteral("test-session");
-    batch.conflictPolicy = TransferConflictPolicy::Overwrite;
+    auto batch = testBatchOptions();
 
     const auto started = std::chrono::steady_clock::now();
     manager.enqueueDownloads(
@@ -1312,10 +1259,7 @@ OPENSCP_TEST(testBatchCancellationAndDirectoryTasks, test) {
     TransferBatchOptions directoryBatch;
     directoryBatch.sessionKey = QStringLiteral("test-session");
     directoryManager.enqueueLocalDirectory(emptyDirectory, directoryBatch);
-    test.check(waitUntil([&] {
-                   const auto task = directoryManager.taskSnapshot(1);
-                   return task && task->status == TransferTask::Status::Done;
-               }) &&
+    test.check(waitForStatus(directoryManager, 1, TransferTask::Status::Done) &&
                    QFileInfo(emptyDirectory).isDir(),
                "empty local folders should be explicit queue tasks");
 }
