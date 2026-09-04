@@ -26,13 +26,16 @@
 #include <QMimeData>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QScrollBar>
 #include <QSet>
 #include <QShortcut>
+#include <QShowEvent>
 #include <QStatusBar>
 #include <QTimer>
 #include <QUrl>
 #include <QUuid>
 #include <QVector>
+#include <QWheelEvent>
 
 #include <algorithm>
 #include <functional>
@@ -43,6 +46,8 @@ Q_LOGGING_CATEGORY(ocEnum, "openscp.enum")
 Q_LOGGING_CATEGORY(ocDrag, "openscp.drag")
 
 namespace {
+
+constexpr int kScrollBarHideDelayMs = 1500;
 
 QString stagingRootFromSettings() {
     openscpui::AppSettings settings;
@@ -116,6 +121,28 @@ struct DragAwareTreeView::RemoteDragStagingState {
 
 DragAwareTreeView::DragAwareTreeView(QWidget *parent) : QTreeView(parent) {
     new openscpui::KeyboardFocusIndicator(this);
+
+    scrollBarHideTimer_ = new QTimer(this);
+    scrollBarHideTimer_->setInterval(kScrollBarHideDelayMs);
+    scrollBarHideTimer_->setSingleShot(true);
+    connect(scrollBarHideTimer_, &QTimer::timeout, this,
+            &DragAwareTreeView::hideScrollBars);
+
+    const auto observeScrollBar = [this](QScrollBar *scrollBar) {
+        connect(scrollBar, &QScrollBar::valueChanged, this,
+                [this] { showScrollBarsTemporarily(); });
+        connect(scrollBar, &QScrollBar::sliderPressed, this, [this] {
+            scrollBarInteractionActive_ = true;
+            scrollBarHideTimer_->stop();
+        });
+        connect(scrollBar, &QScrollBar::sliderReleased, this, [this] {
+            scrollBarInteractionActive_ = false;
+            showScrollBarsTemporarily();
+        });
+    };
+    observeScrollBar(verticalScrollBar());
+    observeScrollBar(horizontalScrollBar());
+    showScrollBarsTemporarily();
 }
 
 void DragAwareTreeView::setTransferManager(TransferManager *mgr) {
@@ -136,6 +163,39 @@ DragAwareTreeView::~DragAwareTreeView() {
 void DragAwareTreeView::resizeEvent(QResizeEvent *resizeEventArg) {
     QTreeView::resizeEvent(resizeEventArg);
     updateOverlayGeometry();
+}
+
+void DragAwareTreeView::showEvent(QShowEvent *event) {
+    QTreeView::showEvent(event);
+    showScrollBarsTemporarily();
+}
+
+void DragAwareTreeView::wheelEvent(QWheelEvent *event) {
+    showScrollBarsTemporarily();
+    QTreeView::wheelEvent(event);
+}
+
+void DragAwareTreeView::showScrollBarsTemporarily() {
+    if (updatingScrollBarVisibility_)
+        return;
+
+    updatingScrollBarVisibility_ = true;
+    setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    updatingScrollBarVisibility_ = false;
+
+    if (!scrollBarInteractionActive_)
+        scrollBarHideTimer_->start();
+}
+
+void DragAwareTreeView::hideScrollBars() {
+    if (scrollBarInteractionActive_ || updatingScrollBarVisibility_)
+        return;
+
+    updatingScrollBarVisibility_ = true;
+    setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    updatingScrollBarVisibility_ = false;
 }
 
 void DragAwareTreeView::startDrag(Qt::DropActions supportedActions) {

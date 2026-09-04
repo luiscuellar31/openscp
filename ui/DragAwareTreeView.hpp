@@ -16,6 +16,9 @@ class RemoteModel;
 class RemoteOperationController;
 class TransferManager;
 class QFrame;
+class QShowEvent;
+class QTimer;
+class QWheelEvent;
 
 class DragAwareTreeView : public QTreeView {
     Q_OBJECT
@@ -31,8 +34,12 @@ class DragAwareTreeView : public QTreeView {
     void startDrag(Qt::DropActions supportedActions) override;
     void resizeEvent(QResizeEvent *resizeEventArg) override;
     void closeEvent(QCloseEvent *closeEventArg) override;
+    void showEvent(QShowEvent *event) override;
+    void wheelEvent(QWheelEvent *event) override;
 
     private:
+    void showScrollBarsTemporarily();
+    void hideScrollBars();
     void showKeepMessage(const QString &batchDir);
     void showKeepMessageWithPrefix(const QString &prefix,
                                    const QString &batchDir);
@@ -88,8 +95,11 @@ class DragAwareTreeView : public QTreeView {
     class QPushButton *overlayCancel_ =
         nullptr; // non-owning (child of overlay_)
     class QShortcut *overlayEsc_ =
-        nullptr;                        // ESC shortcut while overlay visible
-    class QTimer *waitTimer_ = nullptr; // Wait/Cancel timer
+        nullptr;                  // ESC shortcut while overlay visible
+    QTimer *waitTimer_ = nullptr; // Wait/Cancel timer
+    QTimer *scrollBarHideTimer_ = nullptr;
+    bool updatingScrollBarVisibility_ = false;
+    bool scrollBarInteractionActive_ = false;
 
     // Drag state
     bool dragInProgress_ = false;

@@ -12,24 +12,29 @@
 #include <QApplication>
 #include <QFont>
 #include <QFrame>
+#include <QHeaderView>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QScrollBar>
 #include <QSettings>
+#include <QStandardItemModel>
 #include <QTableView>
 #include <QTemporaryDir>
 #include <QToolBar>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 
 #include <iostream>
 
 namespace {
 
 using openscp::testsupport::flushUiEvents;
+using openscp::testsupport::waitUntil;
 
 class OrderedFocusWindow final : public QWidget {
     public:
@@ -437,6 +442,55 @@ OPENSCP_TEST(testFilePanelShowsKeyboardOnlyFocusOutline, test) {
     test.check(panel->property("keyboardFocusVisible").toBool() &&
                    focusIndicator && focusIndicator->isVisible(),
                "keyboard input should restore the panel focus outline");
+}
+
+OPENSCP_TEST(testFilePanelScrollBarsFollowScrollActivity, test) {
+    QStandardItemModel model(80, 1);
+    for (int row = 0; row < model.rowCount(); ++row) {
+        model.setData(model.index(row, 0),
+                      QStringLiteral("long-file-name-%1.txt").arg(row));
+    }
+
+    DragAwareTreeView panel;
+    panel.setModel(&model);
+    panel.header()->setStretchLastSection(false);
+    panel.header()->setSectionResizeMode(QHeaderView::Fixed);
+    panel.header()->resizeSection(0, 600);
+    panel.resize(240, 160);
+    panel.show();
+    flushUiEvents();
+
+    test.check(panel.verticalScrollBar()->maximum() > 0 &&
+                   panel.horizontalScrollBar()->maximum() > 0,
+               "the fixture should require both file-panel scrollbars");
+    test.check(panel.verticalScrollBarPolicy() == Qt::ScrollBarAsNeeded &&
+                   panel.horizontalScrollBarPolicy() == Qt::ScrollBarAsNeeded,
+               "file-panel scrollbars should be available when shown");
+
+    const auto scrollBarsAreHidden = [&panel] {
+        return panel.verticalScrollBarPolicy() == Qt::ScrollBarAlwaysOff &&
+               panel.horizontalScrollBarPolicy() == Qt::ScrollBarAlwaysOff;
+    };
+    test.check(waitUntil(scrollBarsAreHidden, std::chrono::milliseconds(3000)),
+               "file-panel scrollbars should hide after inactivity");
+
+    const int initialScrollPosition = panel.verticalScrollBar()->value();
+    const QPoint localPosition = panel.viewport()->rect().center();
+    QWheelEvent wheelEvent(
+        QPointF(localPosition),
+        QPointF(panel.viewport()->mapToGlobal(localPosition)), QPoint(),
+        QPoint(0, -120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase,
+        false);
+    QApplication::sendEvent(panel.viewport(), &wheelEvent);
+    flushUiEvents();
+
+    test.check(panel.verticalScrollBar()->value() > initialScrollPosition,
+               "hiding the scrollbars should not disable file-panel scrolling");
+    test.check(panel.verticalScrollBarPolicy() == Qt::ScrollBarAsNeeded &&
+                   panel.horizontalScrollBarPolicy() == Qt::ScrollBarAsNeeded,
+               "scrolling should reveal both file-panel scrollbars");
+    test.check(waitUntil(scrollBarsAreHidden, std::chrono::milliseconds(3000)),
+               "file-panel scrollbars should hide again after scrolling");
 }
 
 OPENSCP_TEST(testTransferQueueUsesNativeFocusAndAccessibleState, test) {
