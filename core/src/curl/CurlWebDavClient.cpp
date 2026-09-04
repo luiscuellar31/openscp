@@ -1,5 +1,5 @@
 // WebDAV backend implementation based on libcurl and tinyxml2.
-#include "openscp/CurlWebDavClient.hpp"
+#include "curl/CurlWebDavClient.hpp"
 
 #include "CurlBackendCommon.hpp"
 #include "openscp/RemotePath.hpp"

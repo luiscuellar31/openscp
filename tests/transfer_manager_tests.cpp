@@ -3,7 +3,7 @@
 #include "TestHarness.hpp"
 #include "logic/transfers/ConflictCoordinator.hpp"
 #include "logic/transfers/TransferManager.hpp"
-#include "openscp/MockSftpClient.hpp"
+#include "mock/MockSftpClient.hpp"
 
 #include <QCoreApplication>
 #include <QFile>
@@ -341,7 +341,17 @@ struct ConcurrencyProbe {
     std::atomic<int> transfers{0};
 };
 
-class ConcurrentMockClient : public openscp::MockSftpClient {
+class DownloadMockClient : public openscp::MockSftpClient {
+    public:
+    openscp::ProtocolCapabilities capabilities() const override {
+        openscp::ProtocolCapabilities result =
+            openscp::MockSftpClient::capabilities();
+        result.can_download = true;
+        return result;
+    }
+};
+
+class ConcurrentMockClient : public DownloadMockClient {
     public:
     explicit ConcurrentMockClient(std::shared_ptr<ConcurrencyProbe> probe)
         : probe_(std::move(probe)) {}
@@ -467,7 +477,7 @@ struct LifecycleProbe {
     std::atomic<int> gets{0};
 };
 
-class CancelLifecycleClient final : public openscp::MockSftpClient {
+class CancelLifecycleClient final : public DownloadMockClient {
     public:
     explicit CancelLifecycleClient(std::shared_ptr<LifecycleProbe> probe)
         : probe_(std::move(probe)) {}
@@ -567,7 +577,7 @@ OPENSCP_TEST(testClearClientInvalidatesWorkerConnections, test) {
                "clearClient should interrupt and invalidate worker clients");
 }
 
-class FinalTransportFailureClient final : public openscp::MockSftpClient {
+class FinalTransportFailureClient final : public DownloadMockClient {
     public:
     explicit FinalTransportFailureClient(std::shared_ptr<LifecycleProbe> probe)
         : probe_(std::move(probe)) {}
@@ -695,7 +705,7 @@ struct RetryProbe {
     std::atomic<int> attempts{0};
 };
 
-class RetryMockClient final : public openscp::MockSftpClient {
+class RetryMockClient final : public DownloadMockClient {
     public:
     explicit RetryMockClient(std::shared_ptr<RetryProbe> probe)
         : probe_(std::move(probe)) {}
@@ -749,7 +759,7 @@ OPENSCP_TEST(testTransientRetries, test) {
                "retry attempts should include the initial transfer");
 }
 
-class UnclassifiedErrorMockClient final : public openscp::MockSftpClient {
+class UnclassifiedErrorMockClient final : public DownloadMockClient {
     public:
     explicit UnclassifiedErrorMockClient(
         std::shared_ptr<std::atomic<int>> attempts)
@@ -798,7 +808,7 @@ struct MovePhaseProbe {
     std::atomic<int> sourceDeletes{0};
 };
 
-class MovePhaseMockClient final : public openscp::MockSftpClient {
+class MovePhaseMockClient final : public DownloadMockClient {
     public:
     explicit MovePhaseMockClient(std::shared_ptr<MovePhaseProbe> probe)
         : probe_(std::move(probe)) {}
@@ -887,7 +897,7 @@ OPENSCP_TEST(testMoveDeleteSourcePhasePersistsWithoutRetransfer, test) {
                "DeleteSource retry must not repeat the completed transfer");
 }
 
-class CommitUncertainMockClient final : public openscp::MockSftpClient {
+class CommitUncertainMockClient final : public DownloadMockClient {
     public:
     bool get(const std::string &, const std::string &, std::string &err,
              std::function<void(std::size_t, std::size_t)>,
@@ -928,7 +938,7 @@ OPENSCP_TEST(testCommitUncertainDoesNotRetry, test) {
                "commit-uncertain operations must never retry blindly");
 }
 
-class PermanentErrorMockClient final : public openscp::MockSftpClient {
+class PermanentErrorMockClient final : public DownloadMockClient {
     public:
     explicit PermanentErrorMockClient(
         std::shared_ptr<std::atomic<int>> attempts)
@@ -975,7 +985,7 @@ OPENSCP_TEST(testPermanentStructuredErrorNeverRetries, test) {
                "transient");
 }
 
-class InsufficientSpaceMockClient final : public openscp::MockSftpClient {
+class InsufficientSpaceMockClient final : public DownloadMockClient {
     public:
     explicit InsufficientSpaceMockClient(
         std::shared_ptr<std::atomic<int>> attempts)
@@ -1028,7 +1038,7 @@ struct PermanentKindsProbe {
     std::atomic<int> integrity{0};
 };
 
-class PermanentKindsMockClient final : public openscp::MockSftpClient {
+class PermanentKindsMockClient final : public DownloadMockClient {
     public:
     explicit PermanentKindsMockClient(
         std::shared_ptr<PermanentKindsProbe> probe)
@@ -1179,7 +1189,7 @@ OPENSCP_TEST(testDependencySkipsKeepTerminalCounterAndHistoryBounded, test) {
                "skipped dependents must not execute after their prerequisite");
 }
 
-class RateMockClient final : public openscp::MockSftpClient {
+class RateMockClient final : public DownloadMockClient {
     public:
     bool get(const std::string &, const std::string &, std::string &err,
              std::function<void(std::size_t, std::size_t)> progress,

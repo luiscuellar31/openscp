@@ -1,6 +1,6 @@
-// FTP/FTPS backend using libcurl for basic file transfers.
+// Internal FTP/FTPS backend using libcurl for basic file transfers.
 #pragma once
-#include "RemoteClient.hpp"
+#include "openscp/RemoteClient.hpp"
 
 #include <memory>
 

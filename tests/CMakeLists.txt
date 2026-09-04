@@ -60,10 +60,7 @@ endfunction()
 
 openscp_add_test(openscp_core_tests
     SOURCES core_mock_tests.cpp
-    INCLUDE_DIRECTORIES
-        ${CMAKE_SOURCE_DIR}/core/include
-        ${CMAKE_SOURCE_DIR}/core/src/common
-        ${CMAKE_SOURCE_DIR}/core/src/libssh2/detail
+    INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/src
     LINK_LIBRARIES openscp_core
 )
 
@@ -88,6 +85,12 @@ foreach(TEST_COMPONENT IN ITEMS
         LINK_LIBRARIES openscp_ui_logic
     )
 endforeach()
+
+# These tests intentionally exercise the test-only mock implementation.
+target_include_directories(openscp_transfer_manager_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src)
+target_include_directories(openscp_sync_coordinator_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src)
 
 openscp_add_test(openscp_platform_path_actions_tests
     SOURCES platform_path_actions_tests.cpp
@@ -138,7 +141,7 @@ openscp_add_test(openscp_path_navigation_model_tests
 openscp_add_test(openscp_sftp_integration_tests
     CUSTOM_MAIN
     SOURCES libssh2_integration_tests.cpp
-    INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/include
+    INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/src
     LINK_LIBRARIES openscp_core
     LABELS integration sftp
     SKIP_RETURN_CODE 77
@@ -147,7 +150,7 @@ openscp_add_test(openscp_sftp_integration_tests
 openscp_add_test(openscp_scp_integration_tests
     CUSTOM_MAIN
     SOURCES libssh2_scp_integration_tests.cpp
-    INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/include
+    INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/src
     LINK_LIBRARIES openscp_core
     LABELS integration scp
     SKIP_RETURN_CODE 77
@@ -183,9 +186,7 @@ get_target_property(OPENSCP_CORE_HAS_CURL_WEBDAV
 if(OPENSCP_CORE_HAS_CURL_FTP OR OPENSCP_CORE_HAS_CURL_WEBDAV)
     openscp_add_test(openscp_curl_backend_common_tests
         SOURCES curl_backend_common_tests.cpp
-        INCLUDE_DIRECTORIES
-            ${CMAKE_SOURCE_DIR}/core/include
-            ${CMAKE_SOURCE_DIR}/core/src/curl
+        INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/src
         LINK_LIBRARIES openscp_core
     )
 endif()

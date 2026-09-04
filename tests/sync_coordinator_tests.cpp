@@ -3,7 +3,7 @@
 #include "logic/remote/RemoteOperationController.hpp"
 #include "logic/sync/SyncCoordinator.hpp"
 #include "logic/transfers/TransferManager.hpp"
-#include "openscp/MockSftpClient.hpp"
+#include "mock/MockSftpClient.hpp"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>

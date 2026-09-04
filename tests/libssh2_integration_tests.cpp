@@ -3,8 +3,8 @@
 // exist.
 #include "IntegrationTestSupport.hpp"
 #include "TestHarness.hpp"
-#include "openscp/Libssh2SftpClient.hpp"
-#include "openscp/UniqueFile.hpp"
+#include "common/UniqueFile.hpp"
+#include "libssh2/Libssh2SftpClient.hpp"
 
 #include <algorithm>
 #include <cctype>

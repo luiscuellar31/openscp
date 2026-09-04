@@ -1,10 +1,10 @@
 // SCP backend module using libssh2 scp_send/scp_recv channels for file
 // transfers over SSH.
-#include "openscp/Libssh2ScpClient.hpp"
+#include "libssh2/Libssh2ScpClient.hpp"
 
 #include "../common/SafeLocalFile.hpp"
+#include "common/UniqueFile.hpp"
 #include "detail/Libssh2ErrorClassifier.hpp"
-#include "openscp/UniqueFile.hpp"
 
 #include <libssh2.h>
 

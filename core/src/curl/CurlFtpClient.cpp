@@ -1,5 +1,5 @@
 // FTP/FTPS backend implementation based on libcurl.
-#include "openscp/CurlFtpClient.hpp"
+#include "curl/CurlFtpClient.hpp"
 
 #include "CurlBackendCommon.hpp"
 #include "openscp/RemotePath.hpp"

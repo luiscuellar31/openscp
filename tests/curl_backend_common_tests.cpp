@@ -1,13 +1,13 @@
 // Focused unit tests for security-sensitive libcurl backend helpers.
-#include "CurlBackendCommon.hpp"
 #include "TestHarness.hpp"
+#include "common/UniqueFile.hpp"
+#include "curl/CurlBackendCommon.hpp"
 #include "openscp/RemotePath.hpp"
-#include "openscp/UniqueFile.hpp"
 #if OPENSCP_HAS_CURL_FTP
-#include "openscp/CurlFtpClient.hpp"
+#include "curl/CurlFtpClient.hpp"
 #endif
 #if OPENSCP_HAS_CURL_WEBDAV
-#include "openscp/CurlWebDavClient.hpp"
+#include "curl/CurlWebDavClient.hpp"
 #endif
 
 #include <cstdint>

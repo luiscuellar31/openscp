@@ -1,23 +1,23 @@
 // Core unit tests without external framework (run via CTest).
-#include "Libssh2ErrorClassifier.hpp"
-#include "Libssh2InputSafety.hpp"
-#include "RemoteListingLimits.hpp"
-#include "SafeLocalFile.hpp"
 #include "TestHarness.hpp"
+#include "common/RemoteListingLimits.hpp"
+#include "common/SafeLocalFile.hpp"
+#include "common/UniqueFile.hpp"
+#include "libssh2/Libssh2ScpClient.hpp"
+#include "libssh2/Libssh2SftpClient.hpp"
+#include "libssh2/detail/Libssh2ErrorClassifier.hpp"
+#include "libssh2/detail/Libssh2InputSafety.hpp"
+#include "mock/MockSftpClient.hpp"
 #include "openscp/ClientFactory.hpp"
-#include "openscp/Libssh2ScpClient.hpp"
-#include "openscp/Libssh2SftpClient.hpp"
-#include "openscp/MockSftpClient.hpp"
 #include "openscp/SecureString.hpp"
-#include "openscp/UniqueFile.hpp"
 #if OPENSCP_HAS_CURL_FTP
-#include "openscp/CurlFtpClient.hpp"
+#include "curl/CurlFtpClient.hpp"
 #endif
 #if OPENSCP_HAS_CURL_WEBDAV
-#include "openscp/CurlWebDavClient.hpp"
+#include "curl/CurlWebDavClient.hpp"
 #endif
 #if OPENSCP_HAS_CURL_FTP || OPENSCP_HAS_CURL_WEBDAV
-#include "../core/src/curl/CurlBackendCommon.hpp"
+#include "curl/CurlBackendCommon.hpp"
 #endif
 
 #include <cerrno>
@@ -566,6 +566,8 @@ OPENSCP_TEST(test_list_requires_connection, t) {
     std::string err;
     t.check(!c.list("/", out, err), "list should fail when disconnected");
     t.check(!err.empty(), "list should provide error when disconnected");
+    t.check(c.lastOperationError().kind == openscp::RemoteErrorKind::Connection,
+            "disconnected mock operations should expose a connection error");
 }
 
 OPENSCP_TEST(test_list_sorting_and_known_path, t) {
@@ -628,29 +630,37 @@ OPENSCP_TEST(test_missing_path_error, t) {
     t.check(!err.empty(), "missing path should report non-empty error");
 }
 
-OPENSCP_TEST(test_unsupported_methods_report_error, t) {
+OPENSCP_TEST(test_mock_capabilities_match_implemented_operations, t) {
+    openscp::MockSftpClient c;
+    const openscp::ProtocolCapabilities caps = c.capabilities();
+
+    t.check(caps.implemented && caps.can_list && caps.can_stat &&
+                caps.can_mkdir && caps.can_delete && caps.can_rename &&
+                caps.can_read_metadata && caps.can_set_permissions &&
+                caps.can_set_ownership && caps.can_set_timestamps,
+            "mock should advertise its in-memory filesystem operations");
+    t.check(!caps.can_upload && !caps.can_download && !caps.can_resume_upload &&
+                !caps.can_resume_download && !caps.can_checksum,
+            "mock should not advertise unimplemented transfer operations");
+    t.check(!caps.supports_proxy && !caps.supports_jump_host &&
+                !caps.supports_known_hosts && !caps.supports_transfer_integrity,
+            "mock should not advertise real transport features");
+}
+
+OPENSCP_TEST(test_mock_transfer_methods_report_structured_errors, t) {
     openscp::MockSftpClient c;
     std::string err;
-    bool isDir = true;
-    openscp::FileInfo info;
 
     auto expectUnsupported = [&](const std::string &operation, auto &&invoke) {
         err.clear();
         t.check(!invoke(), operation + " should be unsupported in mock");
-        t.checkContains(err, "Mock no soporta",
+        t.checkContains(err, "does not implement",
                         operation + " should expose unsupported message");
+        t.check(c.lastOperationError().kind ==
+                    openscp::RemoteErrorKind::Unsupported,
+                operation + " should expose a structured unsupported error");
     };
 
-    expectUnsupported("exists", [&] { return c.exists("/x", isDir, err); });
-    t.check(!isDir, "exists should reset isDir to false in mock");
-    expectUnsupported("stat", [&] { return c.stat("/x", info, err); });
-    expectUnsupported("mkdir", [&] { return c.mkdir("/x", err); });
-    expectUnsupported("removeFile", [&] { return c.removeFile("/x", err); });
-    expectUnsupported("removeDir", [&] { return c.removeDir("/x", err); });
-    expectUnsupported("rename",
-                      [&] { return c.rename("/a", "/b", err, true); });
-    expectUnsupported("chmod", [&] { return c.chmod("/x", 0644, err); });
-    expectUnsupported("chown", [&] { return c.chown("/x", 1000, 1000, err); });
     expectUnsupported(
         "get", [&] { return c.get("/remote", "/local", err, {}, {}, false); });
     expectUnsupported(
@@ -669,6 +679,106 @@ OPENSCP_TEST(test_unsupported_methods_report_error, t) {
             "a mock without hashing must not advertise checksum support");
 }
 
+OPENSCP_TEST(test_mock_filesystem_crud_and_metadata, t) {
+    openscp::MockSftpClient c;
+    c.resetFilesystem();
+
+    openscp::FileInfo directory;
+    directory.is_dir = true;
+    directory.mode = 0750;
+    t.check(c.addEntry("/workspace", directory),
+            "fixture API should add a directory below the mock root");
+
+    openscp::FileInfo file;
+    file.size = 42;
+    file.has_size = true;
+    file.mtime = 100;
+    file.mode = 0640;
+    file.uid = 10;
+    file.gid = 20;
+    t.check(c.addEntry("/workspace/report.txt", file),
+            "fixture API should add a file with metadata");
+    t.check(!c.addEntry("/missing/file.txt", file),
+            "fixture API should reject entries with a missing parent");
+
+    std::string err;
+    t.check(c.connect(validOptions(), err),
+            "connect should succeed before mock filesystem operations");
+
+    bool isDirectory = true;
+    t.check(c.exists("/workspace/report.txt", isDirectory, err) &&
+                !isDirectory && err.empty(),
+            "exists should find configured files without an error");
+
+    openscp::FileInfo info;
+    t.check(c.stat("/workspace/report.txt", info, err) &&
+                info.name == "report.txt" && info.size == 42 && info.has_size &&
+                info.mtime == 100 && info.mode == 0640 && info.uid == 10 &&
+                info.gid == 20,
+            "stat should return configured file metadata");
+
+    t.check(c.chmod("/workspace/report.txt", 0600, err) &&
+                c.chown("/workspace/report.txt", 1000, 1001, err) &&
+                c.setTimes("/workspace/report.txt", 200, 300, err),
+            "metadata mutations should succeed for existing entries");
+    t.check(c.stat("/workspace/report.txt", info, err) && info.mode == 0600 &&
+                info.uid == 1000 && info.gid == 1001 && info.mtime == 300,
+            "metadata mutations should persist in the mock filesystem");
+
+    t.check(c.mkdir("/workspace/archive", err, 0700),
+            "mkdir should create a directory in the mock filesystem");
+    t.check(
+        c.rename("/workspace/report.txt", "/workspace/archive/report.txt", err),
+        "rename should move an entry in the mock filesystem");
+    t.check(c.rename("/workspace/archive", "/workspace/finished", err),
+            "rename should move directories together with their children");
+    t.check(c.stat("/workspace/finished/report.txt", info, err) &&
+                info.size == 42,
+            "renamed directory children should keep their metadata");
+    t.check(c.removeFile("/workspace/finished/report.txt", err),
+            "removeFile should remove a file from the mock filesystem");
+    t.check(c.removeDir("/workspace/finished", err),
+            "removeDir should remove an empty directory");
+
+    isDirectory = true;
+    err = "stale";
+    t.check(!c.exists("/workspace/finished", isDirectory, err) &&
+                !isDirectory && err.empty(),
+            "a missing entry should be a normal negative exists result");
+    t.check(c.lastOperationError().kind == openscp::RemoteErrorKind::NotFound,
+            "a missing entry should retain structured not-found metadata");
+}
+
+OPENSCP_TEST(test_mock_rejects_invalid_mutations, t) {
+    openscp::MockSftpClient c;
+    std::string err;
+    t.check(c.connect(validOptions(), err),
+            "connect should succeed before invalid mutation checks");
+
+    t.check(!c.removeDir("/home", err),
+            "removeDir should reject a non-empty directory");
+    t.check(c.lastOperationError().kind == openscp::RemoteErrorKind::Conflict,
+            "non-empty directory removal should expose a conflict");
+
+    err.clear();
+    t.check(!c.rename("/home/notes.md", "/readme.txt", err),
+            "rename should not replace an entry unless requested");
+    t.check(c.lastOperationError().kind == openscp::RemoteErrorKind::Conflict,
+            "an occupied rename destination should expose a conflict");
+    t.check(c.rename("/home/notes.md", "/readme.txt", err, true),
+            "rename should replace a same-type destination when requested");
+    openscp::FileInfo replaced;
+    t.check(c.stat("/readme.txt", replaced, err) && replaced.size == 2048,
+            "overwrite rename should preserve the source metadata");
+
+    err.clear();
+    t.check(!c.removeFile("/home", err),
+            "removeFile should reject directory targets");
+    t.check(c.lastOperationError().kind ==
+                openscp::RemoteErrorKind::InvalidRequest,
+            "a wrong entry type should expose an invalid request");
+}
+
 OPENSCP_TEST(test_new_connection_like, t) {
     openscp::MockSftpClient c;
     auto opt = validOptions();
@@ -678,6 +788,16 @@ OPENSCP_TEST(test_new_connection_like, t) {
             "newConnectionLike should return a client");
     t.check(conn && conn->isConnected(),
             "newConnectionLike client should be connected");
+
+    t.check(conn && conn->mkdir("/shared", err),
+            "worker connection should mutate its simulated server");
+    std::vector<openscp::FileInfo> entries;
+    t.check(c.connect(opt, err) && c.list("/", entries, err) &&
+                std::any_of(entries.cbegin(), entries.cend(),
+                            [](const openscp::FileInfo &entry) {
+                                return entry.is_dir && entry.name == "shared";
+                            }),
+            "connections created alike should share simulated server state");
 }
 
 OPENSCP_TEST(test_new_connection_like_validation, t) {
@@ -741,14 +861,6 @@ OPENSCP_TEST(test_client_factory, t) {
     t.check(!webdav,
             "factory should return null for WebDAV when backend is disabled");
 #endif
-}
-
-OPENSCP_TEST(test_set_times, t) {
-    openscp::MockSftpClient c;
-    std::string err;
-    const bool ok = c.setTimes("/home/luis/foto.jpg", 10, 20, err);
-    t.check(ok, "setTimes should be supported by mock client");
-    t.check(err.empty(), "setTimes should not set an error in mock client");
 }
 
 OPENSCP_TEST(test_libssh2_rejects_conflicting_proxy_and_jump, t) {

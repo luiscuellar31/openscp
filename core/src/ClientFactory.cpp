@@ -1,13 +1,13 @@
 // Protocol-aware backend factory.
 #include "openscp/ClientFactory.hpp"
 #if defined(OPENSCP_HAS_CURL_FTP) && OPENSCP_HAS_CURL_FTP
-#include "openscp/CurlFtpClient.hpp"
+#include "curl/CurlFtpClient.hpp"
 #endif
 #if defined(OPENSCP_HAS_CURL_WEBDAV) && OPENSCP_HAS_CURL_WEBDAV
-#include "openscp/CurlWebDavClient.hpp"
+#include "curl/CurlWebDavClient.hpp"
 #endif
-#include "openscp/Libssh2ScpClient.hpp"
-#include "openscp/Libssh2SftpClient.hpp"
+#include "libssh2/Libssh2ScpClient.hpp"
+#include "libssh2/Libssh2SftpClient.hpp"
 
 namespace openscp {
 

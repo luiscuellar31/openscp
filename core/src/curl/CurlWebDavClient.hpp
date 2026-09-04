@@ -1,20 +1,22 @@
-// SCP backend module. Uses real libssh2 SCP send/recv channels and reuses the
-// authenticated SSH transport setup from Libssh2SftpClient.
+// Internal WebDAV backend using libcurl + tinyxml2 for PROPFIND parsing.
 #pragma once
-#include "Libssh2SftpClient.hpp"
+#include "openscp/RemoteClient.hpp"
 
-#include <optional>
+#include <memory>
 
 namespace openscp {
+namespace curlcommon {
+class CurlClientState;
+}
 
-class Libssh2ScpClient : public RemoteClient {
+class CurlWebDavClient : public RemoteClient {
     public:
-    Libssh2ScpClient() = default;
-    ~Libssh2ScpClient() override = default;
+    CurlWebDavClient();
+    ~CurlWebDavClient() override;
 
-    Protocol protocol() const override { return Protocol::Scp; }
+    Protocol protocol() const override { return Protocol::WebDav; }
     ProtocolCapabilities capabilities() const override {
-        return capabilitiesForProtocol(Protocol::Scp);
+        return capabilitiesForProtocol(Protocol::WebDav);
     }
 
     bool connect(const SessionOptions &opt, std::string &err) override;
@@ -64,37 +66,7 @@ class Libssh2ScpClient : public RemoteClient {
                                                     std::string &err) override;
 
     private:
-    class StructuredErrorScope {
-        public:
-        StructuredErrorScope(Libssh2ScpClient &owner, std::string &error,
-                             bool mutation);
-        ~StructuredErrorScope();
-        StructuredErrorScope(const StructuredErrorScope &) = delete;
-        StructuredErrorScope &operator=(const StructuredErrorScope &) = delete;
-
-        private:
-        Libssh2ScpClient &owner_;
-        std::string &error_;
-        bool mutation_ = false;
-    };
-
-    StructuredErrorScope beginStructuredOperation(std::string &err,
-                                                  bool mutation = false);
-    RemoteError classifyStructuredFailure(const std::string &message,
-                                          bool mutation) const;
-
-    bool transferViaSftpFallbackGet(
-        const std::string &remote, const std::string &local, std::string &err,
-        std::function<void(std::size_t, std::size_t)> progress,
-        std::function<bool()> shouldCancel);
-    bool transferViaSftpFallbackPut(
-        const std::string &local, const std::string &remote, std::string &err,
-        std::function<void(std::size_t, std::size_t)> progress,
-        std::function<bool()> shouldCancel);
-    bool sftpFallbackEnabled() const;
-
-    Libssh2SftpClient delegate_;
-    std::optional<SessionOptions> sessionOptions_;
+    std::unique_ptr<curlcommon::CurlClientState> state_;
 };
 
 } // namespace openscp

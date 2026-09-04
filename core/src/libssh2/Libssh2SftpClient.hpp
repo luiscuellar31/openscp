@@ -1,8 +1,8 @@
-// RemoteClient implementation using libssh2 for SSH/SFTP.
+// Internal RemoteClient implementation using libssh2 for SSH/SFTP.
 // Encapsulates the SSH session, SFTP channel, and TCP socket.
 #pragma once
-#include "KnownHostsUtils.hpp"
-#include "RemoteClient.hpp"
+#include "openscp/KnownHostsUtils.hpp"
+#include "openscp/RemoteClient.hpp"
 
 #include <mutex>
 #include <string>

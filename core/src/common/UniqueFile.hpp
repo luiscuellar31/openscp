@@ -1,3 +1,4 @@
+// Internal RAII owner for C FILE handles.
 #pragma once
 
 #include <cstdio>

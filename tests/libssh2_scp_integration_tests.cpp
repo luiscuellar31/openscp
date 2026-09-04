@@ -3,7 +3,7 @@
 // exist.
 #include "IntegrationTestSupport.hpp"
 #include "TestHarness.hpp"
-#include "openscp/Libssh2ScpClient.hpp"
+#include "libssh2/Libssh2ScpClient.hpp"
 
 #include <cstdint>
 #include <cstdlib>

@@ -1,13 +1,13 @@
 // libssh2 backend: manages TCP socket, SSH session, and SFTP channel.
 // Includes keepalive, known_hosts validation, and resume support.
-#include "openscp/Libssh2SftpClient.hpp"
+#include "libssh2/Libssh2SftpClient.hpp"
 
 #include "../common/RemoteListingLimits.hpp"
 #include "../common/SafeLocalFile.hpp"
+#include "common/UniqueFile.hpp"
 #include "detail/Libssh2ErrorClassifier.hpp"
 #include "detail/Libssh2InputSafety.hpp"
 #include "openscp/RuntimeLogging.hpp"
-#include "openscp/UniqueFile.hpp"
 
 #include <libssh2.h>
 #include <libssh2_sftp.h>

@@ -2,8 +2,8 @@
 #include "CurlBackendCommon.hpp"
 
 #include "../common/SafeLocalFile.hpp"
+#include "common/UniqueFile.hpp"
 #include "openscp/RemotePath.hpp"
-#include "openscp/UniqueFile.hpp"
 
 #include <algorithm>
 #include <cctype>
