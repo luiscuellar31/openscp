@@ -9,8 +9,6 @@
 
 #include <algorithm>
 
-namespace {
-
 bool isSafeRemoteEntryName(const QString &name) {
     if (name.isEmpty() || name == QLatin1String(".") ||
         name == QLatin1String("..") || name.contains(QLatin1Char('/')) ||
@@ -24,8 +22,6 @@ bool isSafeRemoteEntryName(const QString &name) {
     }
     return true;
 }
-
-} // namespace
 
 QString normalizeRemotePath(const QString &rawPath) {
     const QByteArray utf8 = rawPath.trimmed().toUtf8();

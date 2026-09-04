@@ -30,6 +30,20 @@ OPENSCP_TEST(testRemotePaths, test) {
                "joining should normalize traversal segments");
 }
 
+OPENSCP_TEST(testRemoteEntryNameSafety, test) {
+    test.check(isSafeRemoteEntryName(QStringLiteral("report.txt")),
+               "ordinary remote entry names should be accepted");
+    test.check(isSafeRemoteEntryName(QString::fromUtf8("résumé 2026")),
+               "Unicode and spaces should be accepted in remote names");
+    for (const QString &name :
+         {QString(), QStringLiteral("."), QStringLiteral(".."),
+          QStringLiteral("folder/file"), QStringLiteral("folder\\file"),
+          QStringLiteral("line\nbreak"), QString(QChar(0x7f))}) {
+        test.check(!isSafeRemoteEntryName(name),
+                   "unsafe remote entry names should be rejected");
+    }
+}
+
 OPENSCP_TEST(testByteFormatting, test) {
     test.check(formatByteSize(0) == QStringLiteral("0 B"),
                "zero bytes should use the byte unit");

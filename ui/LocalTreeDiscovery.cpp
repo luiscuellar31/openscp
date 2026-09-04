@@ -1,5 +1,7 @@
 #include "LocalTreeDiscovery.hpp"
 
+#include "RemotePath.hpp"
+
 #include <QDir>
 #include <QFileInfo>
 #include <QMetaObject>
@@ -11,18 +13,6 @@
 #include <vector>
 
 namespace {
-
-bool validRemoteEntryName(const QString &name) {
-    if (name.isEmpty() || name == QStringLiteral(".") ||
-        name == QStringLiteral("..") || name.contains(QLatin1Char('/')) ||
-        name.contains(QLatin1Char('\\'))) {
-        return false;
-    }
-    return std::none_of(name.cbegin(), name.cend(), [](QChar character) {
-        const ushort codePoint = character.unicode();
-        return codePoint < 0x20u || codePoint == 0x7fu;
-    });
-}
 
 void addKnownBytes(LocalTreeDiscoveryCounters &counters, quint64 bytes) {
     if (bytes > std::numeric_limits<quint64>::max() - counters.knownBytes) {
@@ -275,7 +265,7 @@ void LocalTreeDiscovery::start(
                 ++counters.inaccessibleEntries;
                 continue;
             }
-            if (!validRemoteEntryName(info.fileName())) {
+            if (!isSafeRemoteEntryName(info.fileName())) {
                 ++counters.invalidNames;
                 continue;
             }
@@ -360,7 +350,7 @@ void LocalTreeDiscovery::start(
                         ++counters.skippedSymlinks;
                         continue;
                     }
-                    if (!validRemoteEntryName(child.fileName())) {
+                    if (!isSafeRemoteEntryName(child.fileName())) {
                         ++counters.invalidNames;
                         continue;
                     }
