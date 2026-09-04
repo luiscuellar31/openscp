@@ -50,6 +50,27 @@ database:
   --build-dir build-ci-local
 ```
 
+Clang/libFuzzer harnesses cover the untrusted FTP and WebDAV listing parsers.
+They are opt-in and never enter normal application or release builds:
+
+```bash
+CC=clang CXX=clang++ cmake -S . -B build-fuzz -G Ninja \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DOPENSCP_BUILD_FUZZERS=ON
+cmake --build build-fuzz --target \
+  openscp_ftp_listing_fuzzer openscp_webdav_listing_fuzzer
+mkdir -p build-fuzz/corpus/ftp build-fuzz/corpus/webdav
+./build-fuzz/fuzz/openscp_ftp_listing_fuzzer \
+  build-fuzz/corpus/ftp fuzz/corpus/ftp \
+  -max_total_time=60 -timeout=5 -rss_limit_mb=2048
+./build-fuzz/fuzz/openscp_webdav_listing_fuzzer \
+  build-fuzz/corpus/webdav fuzz/corpus/webdav \
+  -max_total_time=60 -timeout=5 -rss_limit_mb=2048
+```
+
+The first corpus directory is disposable working storage; the checked-in seed
+corpus is passed second and remains unchanged.
+
 Platform-specific changes must also be exercised on that platform. Complete
 dependency and packaging instructions are in [docs/BUILDING.md](docs/BUILDING.md).
 Changes to custom controls, focus behavior, or visual states must also follow

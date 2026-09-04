@@ -1,0 +1,9 @@
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/report.txt</d:href>
+    <d:propstat>
+      <d:status>HTTP/1.1 200 OK</d:status>
+      <d:prop><d:getcontentlength>12</d:getcontentlength></d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>

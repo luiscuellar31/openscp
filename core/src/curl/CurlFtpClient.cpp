@@ -2,6 +2,7 @@
 #include "curl/CurlFtpClient.hpp"
 
 #include "CurlBackendCommon.hpp"
+#include "CurlListingParser.hpp"
 #include "openscp/RemotePath.hpp"
 
 #include <curl/curl.h>
@@ -49,13 +50,6 @@ using curlcommon::parseUnsignedDec;
 using curlcommon::toLowerAscii;
 using curlcommon::trimAscii;
 
-std::string trimAsciiLeft(std::string s) {
-    auto isWs = [](unsigned char c) { return std::isspace(c) != 0; };
-    while (!s.empty() && isWs(static_cast<unsigned char>(s.front())))
-        s.erase(s.begin());
-    return s;
-}
-
 bool normalizeFtpCommandRoot(const char *entryPath, std::string &root,
                              std::string &err) {
     root = "/";
@@ -65,67 +59,6 @@ bool normalizeFtpCommandRoot(const char *entryPath, std::string &root,
     if (!curlcommon::validateRemotePath(path, "FTP login root", err))
         return false;
     root = normalizeRemotePath(path);
-    return true;
-}
-
-std::uint32_t parseUnixPermBits(const std::string &perm) {
-    if (perm.empty())
-        return 0;
-    std::uint32_t mode = 0;
-    if (perm[0] == 'd')
-        mode |= 0040000u;
-    else if (perm[0] == 'l')
-        mode |= 0120000u;
-    else if (perm[0] == '-')
-        mode |= 0100000u;
-
-    if (perm.size() < 10)
-        return mode;
-
-    const std::uint32_t bits[9] = {0400u, 0200u, 0100u, 040u, 020u,
-                                   010u,  04u,   02u,   01u};
-    for (std::size_t i = 0; i < 9; ++i) {
-        const char c = perm[1 + i];
-        if (c != '-' && c != '\0')
-            mode |= bits[i];
-    }
-    return mode;
-}
-
-bool parseMlsdUtcTimestamp(const std::string &raw, std::uint64_t &outEpoch) {
-    if (raw.size() < 14)
-        return false;
-    std::uint64_t y = 0, mon = 0, day = 0, hh = 0, mm = 0, ss = 0;
-    if (!parseUnsignedDec(std::string_view(raw).substr(0, 4), y) ||
-        !parseUnsignedDec(std::string_view(raw).substr(4, 2), mon) ||
-        !parseUnsignedDec(std::string_view(raw).substr(6, 2), day) ||
-        !parseUnsignedDec(std::string_view(raw).substr(8, 2), hh) ||
-        !parseUnsignedDec(std::string_view(raw).substr(10, 2), mm) ||
-        !parseUnsignedDec(std::string_view(raw).substr(12, 2), ss)) {
-        return false;
-    }
-    if (mon < 1 || mon > 12 || day < 1 || day > 31 || hh > 23 || mm > 59 ||
-        ss > 60 || y < 1970 || y > 9999) {
-        return false;
-    }
-    std::tm tm{};
-    tm.tm_year = static_cast<int>(y - 1900);
-    tm.tm_mon = static_cast<int>(mon - 1);
-    tm.tm_mday = static_cast<int>(day);
-    tm.tm_hour = static_cast<int>(hh);
-    tm.tm_min = static_cast<int>(mm);
-    tm.tm_sec = static_cast<int>(ss);
-    tm.tm_isdst = 0;
-    std::tm localCopy = tm;
-#ifdef _WIN32
-    // MLSD timestamps are UTC; _mkgmtime/timegm convert tm as UTC.
-    const std::time_t tt = _mkgmtime(&localCopy);
-#else
-    const std::time_t tt = timegm(&localCopy);
-#endif
-    if (tt < 0)
-        return false;
-    outEpoch = static_cast<std::uint64_t>(tt);
     return true;
 }
 
@@ -405,229 +338,6 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
     return true;
 }
 
-bool parseMlsdLine(const std::string &raw, FileInfo &info, bool &emit) {
-    emit = false;
-    std::string line = raw;
-    if (!line.empty() && line.back() == '\r')
-        line.pop_back();
-    line = trimAscii(line);
-    if (line.empty())
-        return true;
-
-    const std::size_t sep = line.find_first_of(" \t");
-    if (sep == std::string::npos)
-        return false;
-
-    const std::string factsPart = line.substr(0, sep);
-    std::string name = trimAsciiLeft(line.substr(sep + 1));
-    if (name.empty())
-        return false;
-    if (name == "." || name == "..")
-        return true;
-
-    FileInfo parsed{};
-    parsed.name = name;
-    std::string type;
-
-    std::size_t start = 0;
-    // Parse MLSD "facts" section: key=value;key=value;...
-    while (start < factsPart.size()) {
-        const std::size_t end = factsPart.find(';', start);
-        const std::string fact = (end == std::string::npos)
-                                     ? factsPart.substr(start)
-                                     : factsPart.substr(start, end - start);
-        start = (end == std::string::npos) ? factsPart.size() : end + 1;
-        if (fact.empty())
-            continue;
-        const std::size_t eq = fact.find('=');
-        if (eq == std::string::npos)
-            continue;
-        const std::string key = toLowerAscii(fact.substr(0, eq));
-        const std::string value = fact.substr(eq + 1);
-        if (key == "type") {
-            type = toLowerAscii(value);
-        } else if (key == "size") {
-            std::uint64_t sz = 0;
-            if (parseUnsignedDec(value, sz)) {
-                parsed.size = sz;
-                parsed.has_size = true;
-            }
-        } else if (key == "modify") {
-            std::uint64_t ts = 0;
-            if (parseMlsdUtcTimestamp(value, ts))
-                parsed.mtime = ts;
-        } else if (key == "unix.mode") {
-            char *endp = nullptr;
-            errno = 0;
-            const unsigned long mode = std::strtoul(value.c_str(), &endp, 8);
-            if (errno == 0 && endp && *endp == '\0') {
-                parsed.mode = static_cast<std::uint32_t>(mode & 07777u);
-            }
-        } else if (key == "unix.uid") {
-            std::uint64_t uid = 0;
-            if (parseUnsignedDec(value, uid))
-                parsed.uid = static_cast<std::uint32_t>(std::min<std::uint64_t>(
-                    uid, std::numeric_limits<std::uint32_t>::max()));
-        } else if (key == "unix.gid") {
-            std::uint64_t gid = 0;
-            if (parseUnsignedDec(value, gid))
-                parsed.gid = static_cast<std::uint32_t>(std::min<std::uint64_t>(
-                    gid, std::numeric_limits<std::uint32_t>::max()));
-        }
-    }
-
-    if (type.empty())
-        return false;
-    if (type == "cdir" || type == "pdir")
-        return true;
-
-    parsed.is_dir = (type == "dir");
-    if (parsed.is_dir) {
-        parsed.has_size = false;
-        parsed.size = 0;
-        if ((parsed.mode & 0170000u) == 0)
-            parsed.mode |= 0040000u;
-    } else if ((parsed.mode & 0170000u) == 0) {
-        parsed.mode |= 0100000u;
-    }
-
-    info = std::move(parsed);
-    emit = true;
-    return true;
-}
-
-bool parseMlsdListing(const std::string &payload, std::vector<FileInfo> &out) {
-    out.clear();
-    std::istringstream iss(payload);
-    std::string line;
-    while (std::getline(iss, line)) {
-        const std::string normalized = trimAscii(line);
-        if (normalized.empty())
-            continue;
-        FileInfo info{};
-        bool emit = false;
-        if (!parseMlsdLine(line, info, emit))
-            return false;
-        if (emit)
-            out.push_back(std::move(info));
-    }
-    return true;
-}
-
-bool parseUnixListLine(const std::string &line, FileInfo &info, bool &emit) {
-    emit = false;
-    std::istringstream iss(line);
-    std::string perm, links, owner, group, sizeTok, month, day, timeOrYear;
-    if (!(iss >> perm >> links >> owner >> group >> sizeTok >> month >> day >>
-          timeOrYear)) {
-        return false;
-    }
-    std::string name;
-    std::getline(iss, name);
-    name = trimAscii(name);
-    if (name.empty())
-        return false;
-    const std::size_t arrowPos = name.find(" -> ");
-    if (arrowPos != std::string::npos)
-        name.erase(arrowPos);
-    if (name == "." || name == "..")
-        return true;
-
-    FileInfo parsed{};
-    parsed.name = name;
-    parsed.mode = parseUnixPermBits(perm);
-    parsed.is_dir = !perm.empty() && perm[0] == 'd';
-    if (!parsed.is_dir) {
-        std::uint64_t sz = 0;
-        if (parseUnsignedDec(sizeTok, sz)) {
-            parsed.size = sz;
-            parsed.has_size = true;
-        }
-    }
-    info = std::move(parsed);
-    emit = true;
-    return true;
-}
-
-bool parseDosListLine(const std::string &line, FileInfo &info, bool &emit) {
-    emit = false;
-    std::istringstream iss(line);
-    std::string dateTok, timeTok, sizeOrDir;
-    if (!(iss >> dateTok >> timeTok >> sizeOrDir))
-        return false;
-    std::string name;
-    std::getline(iss, name);
-    name = trimAscii(name);
-    if (name.empty())
-        return false;
-    if (name == "." || name == "..")
-        return true;
-
-    FileInfo parsed{};
-    parsed.name = name;
-    const std::string kind = toLowerAscii(sizeOrDir);
-    parsed.is_dir = (kind == "<dir>");
-    if (parsed.is_dir) {
-        parsed.mode = 0040000u;
-    } else {
-        std::string normalizedSize = sizeOrDir;
-        normalizedSize.erase(
-            std::remove(normalizedSize.begin(), normalizedSize.end(), ','),
-            normalizedSize.end());
-        std::uint64_t sz = 0;
-        if (!parseUnsignedDec(normalizedSize, sz))
-            return false;
-        parsed.size = sz;
-        parsed.has_size = true;
-        parsed.mode = 0100000u;
-    }
-    info = std::move(parsed);
-    emit = true;
-    return true;
-}
-
-bool parseListListing(const std::string &payload, std::vector<FileInfo> &out) {
-    out.clear();
-    std::istringstream iss(payload);
-    std::string line;
-    bool sawContent = false;
-    bool parsedAny = false;
-    bool sawUnparsedLine = false;
-    while (std::getline(iss, line)) {
-        const std::string normalized = trimAscii(line);
-        if (normalized.empty())
-            continue;
-        const std::string lowered = toLowerAscii(normalized);
-        if (lowered.rfind("total ", 0) == 0)
-            continue;
-        sawContent = true;
-
-        FileInfo info{};
-        bool emit = false;
-        bool ok = false;
-        // Try UNIX style first, then DOS style as compatibility fallback.
-        if (normalized.front() == 'd' || normalized.front() == '-' ||
-            normalized.front() == 'l' || normalized.front() == 'c' ||
-            normalized.front() == 'b' || normalized.front() == 's' ||
-            normalized.front() == 'p') {
-            ok = parseUnixListLine(normalized, info, emit);
-        }
-        if (!ok)
-            ok = parseDosListLine(normalized, info, emit);
-        if (!ok) {
-            sawUnparsedLine = true;
-            continue;
-        }
-        if (emit) {
-            out.push_back(std::move(info));
-            parsedAny = true;
-        }
-    }
-    if (!sawContent)
-        return true;
-    return parsedAny || !sawUnparsedLine;
-}
-
 bool fetchFtpListing(CURL *curl, const SessionOptions &opt,
                      const std::string &remotePath,
                      const std::atomic<bool> *interrupted,
@@ -640,8 +350,23 @@ bool fetchFtpListing(CURL *curl, const SessionOptions &opt,
     const bool mlsdOk =
         runDirectoryListingCommand(curl, opt, remotePath, "MLSD", mlsdPayload,
                                    interrupted, mlsdResult, mlsdErr);
-    if (mlsdOk && parseMlsdListing(mlsdPayload, out))
-        return true;
+    if (mlsdOk) {
+        const curlparser::ListingParseStatus parseStatus =
+            curlparser::parseFtpMlsdListing(mlsdPayload, out);
+        if (parseStatus == curlparser::ListingParseStatus::Success)
+            return true;
+        if (parseStatus ==
+            curlparser::ListingParseStatus::ResourceLimitExceeded) {
+            if (lastCurlCode)
+                *lastCurlCode = CURLE_WEIRD_SERVER_REPLY;
+            if (lastResponseCode)
+                *lastResponseCode = mlsdResult.responseCode;
+            err = std::string(protocolLabel(opt.protocol)) +
+                  " directory listing exceeded the entry or filename-byte "
+                  "safety limit.";
+            return false;
+        }
+    }
     if (interrupted && interrupted->load()) {
         if (lastCurlCode)
             *lastCurlCode = CURLE_ABORTED_BY_CALLBACK;
@@ -661,8 +386,21 @@ bool fetchFtpListing(CURL *curl, const SessionOptions &opt,
         *lastCurlCode = listOk ? CURLE_OK : listResult.curlCode;
     if (lastResponseCode)
         *lastResponseCode = listResult.responseCode;
-    if (listOk && parseListListing(listPayload, out))
-        return true;
+    if (listOk) {
+        const curlparser::ListingParseStatus parseStatus =
+            curlparser::parseFtpListListing(listPayload, out);
+        if (parseStatus == curlparser::ListingParseStatus::Success)
+            return true;
+        if (parseStatus ==
+            curlparser::ListingParseStatus::ResourceLimitExceeded) {
+            if (lastCurlCode)
+                *lastCurlCode = CURLE_WEIRD_SERVER_REPLY;
+            err = std::string(protocolLabel(opt.protocol)) +
+                  " directory listing exceeded the entry or filename-byte "
+                  "safety limit.";
+            return false;
+        }
+    }
 
     if (!mlsdOk && !listOk) {
         err = std::string(protocolLabel(opt.protocol)) +

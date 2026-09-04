@@ -73,6 +73,40 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(OPENSCP_BUILD_TESTS "Build and run automated tests (CTest)" OFF)
 option(OPENSCP_WERROR "Treat first-party compiler warnings as errors" OFF)
+option(OPENSCP_BUILD_FUZZERS
+       "Build Clang libFuzzer targets for untrusted protocol parsers" OFF)
+
+if(OPENSCP_BUILD_FUZZERS AND
+   NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR
+        "OPENSCP_BUILD_FUZZERS requires Clang with libFuzzer support")
+endif()
+if(OPENSCP_BUILD_FUZZERS)
+    include(CheckCXXSourceCompiles)
+    set(_openscp_saved_required_flags "${CMAKE_REQUIRED_FLAGS}")
+    set(_openscp_saved_required_link_options
+        "${CMAKE_REQUIRED_LINK_OPTIONS}")
+    set(CMAKE_REQUIRED_FLAGS
+        "-fsanitize=fuzzer-no-link,address,undefined")
+    set(CMAKE_REQUIRED_LINK_OPTIONS
+        "-fsanitize=fuzzer,address,undefined")
+    check_cxx_source_compiles([[
+        #include <cstddef>
+        #include <cstdint>
+        extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t*,
+                                               std::size_t) {
+            return 0;
+        }
+    ]] OPENSCP_HAS_LIBFUZZER)
+    set(CMAKE_REQUIRED_FLAGS "${_openscp_saved_required_flags}")
+    set(CMAKE_REQUIRED_LINK_OPTIONS
+        "${_openscp_saved_required_link_options}")
+    if(NOT OPENSCP_HAS_LIBFUZZER)
+        message(FATAL_ERROR
+            "OPENSCP_BUILD_FUZZERS requires a usable Clang libFuzzer, "
+            "AddressSanitizer, and UndefinedBehaviorSanitizer runtime")
+    endif()
+endif()
 
 add_library(openscp_project_warnings INTERFACE)
 if(MSVC)
@@ -262,6 +296,10 @@ if (OPENSCP_BUILD_TESTS)
 endif()
 
 add_subdirectory(core)
+
+if(OPENSCP_BUILD_FUZZERS)
+    add_subdirectory(fuzz)
+endif()
 
 add_library(openscp_sync_logic STATIC
     ui/sync/SyncTypes.hpp

@@ -1,0 +1,2 @@
+0type=file;size=12;modify=20260102030405; report.txt
+type=dir;modify=20260102030405; archive

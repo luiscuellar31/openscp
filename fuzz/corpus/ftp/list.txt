@@ -1,0 +1,2 @@
+1-rw-r--r-- 1 user group 12 Jan 02 2026 report.txt
+drwxr-xr-x 2 user group 64 Jan 02 2026 archive

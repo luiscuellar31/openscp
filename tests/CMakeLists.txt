@@ -189,6 +189,11 @@ if(OPENSCP_CORE_HAS_CURL_FTP OR OPENSCP_CORE_HAS_CURL_WEBDAV)
         INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/src
         LINK_LIBRARIES openscp_core
     )
+    openscp_add_test(openscp_curl_listing_parser_tests
+        SOURCES curl_listing_parser_tests.cpp
+        INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/src
+        LINK_LIBRARIES openscp_core
+    )
 endif()
 
 if(OPENSCP_CORE_HAS_CURL_WEBDAV)

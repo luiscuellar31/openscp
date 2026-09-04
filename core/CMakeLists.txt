@@ -49,6 +49,7 @@ if (_openscp_need_curl)
         list(APPEND OPENSCP_CORE_SRCS
             src/curl/CurlBackendCommon.cpp
             src/curl/CurlBackendCommon.hpp
+            src/curl/CurlListingParser.hpp
         )
     endif()
 endif()
@@ -58,6 +59,7 @@ if (OPENSCP_ENABLE_FTP_BACKEND)
         list(APPEND OPENSCP_CORE_SRCS
             src/curl/CurlFtpClient.cpp        # FTP/FTPS backend module
             src/curl/CurlFtpClient.hpp
+            src/curl/FtpListingParser.cpp
         )
         set(OPENSCP_HAS_CURL_FTP 1)
         message(STATUS "OpenSCP: FTP/FTPS backend enabled (libcurl found)")
@@ -105,6 +107,7 @@ if (OPENSCP_ENABLE_WEBDAV_BACKEND)
             list(APPEND OPENSCP_CORE_SRCS
                 src/curl/CurlWebDavClient.cpp   # WebDAV backend module
                 src/curl/CurlWebDavClient.hpp
+                src/curl/WebDavListingParser.cpp
             )
             set(OPENSCP_HAS_CURL_WEBDAV 1)
             message(STATUS
@@ -135,6 +138,19 @@ add_library(openscp_core STATIC
     ${OPENSCP_CORE_PUBLIC_HEADERS}
     ${OPENSCP_CORE_SRCS}
 )
+
+if(OPENSCP_BUILD_FUZZERS)
+    # Instrument production parser code while leaving libFuzzer's main()
+    # exclusive to the dedicated harness executables.
+    target_compile_options(openscp_core PRIVATE
+        -g
+        -fno-omit-frame-pointer
+        -fsanitize=fuzzer-no-link,address,undefined
+    )
+    target_link_options(openscp_core INTERFACE
+        -fsanitize=address,undefined
+    )
+endif()
 
 target_include_directories(openscp_core
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
