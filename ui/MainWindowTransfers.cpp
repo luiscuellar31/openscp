@@ -11,7 +11,6 @@
 
 #include <QAbstractAnimation>
 #include <QCoreApplication>
-#include <QDateTime>
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>

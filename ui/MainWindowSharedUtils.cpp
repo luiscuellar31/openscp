@@ -5,7 +5,6 @@
 
 #include <QCoreApplication>
 #include <QDir>
-#include <QFile>
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QMessageBox>

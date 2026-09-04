@@ -26,9 +26,7 @@
 #include "TransferQueueDialog.hpp"
 #include "UiAlerts.hpp"
 
-#include <QAbstractButton>
 #include <QApplication>
-#include <QCheckBox>
 #include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDateTime>

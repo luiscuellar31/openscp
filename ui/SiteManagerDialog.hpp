@@ -3,7 +3,6 @@
 #include "SiteEntry.hpp"
 
 #include <QDialog>
-#include <QString>
 #include <QVector>
 
 class QLineEdit;
