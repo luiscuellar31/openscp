@@ -634,61 +634,27 @@ OPENSCP_TEST(test_unsupported_methods_report_error, t) {
     bool isDir = true;
     openscp::FileInfo info;
 
-    const bool ex = c.exists("/x", isDir, err);
-    t.check(!ex, "exists should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta",
-                    "exists should expose unsupported message");
+    auto expectUnsupported = [&](const std::string &operation, auto &&invoke) {
+        err.clear();
+        t.check(!invoke(), operation + " should be unsupported in mock");
+        t.checkContains(err, "Mock no soporta",
+                        operation + " should expose unsupported message");
+    };
+
+    expectUnsupported("exists", [&] { return c.exists("/x", isDir, err); });
     t.check(!isDir, "exists should reset isDir to false in mock");
-
-    err.clear();
-    t.check(!c.stat("/x", info, err), "stat should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta",
-                    "stat should expose unsupported message");
-
-    err.clear();
-    t.check(!c.mkdir("/x", err), "mkdir should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta",
-                    "mkdir should expose unsupported message");
-
-    err.clear();
-    t.check(!c.removeFile("/x", err),
-            "removeFile should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta",
-                    "removeFile should expose unsupported message");
-
-    err.clear();
-    t.check(!c.removeDir("/x", err), "removeDir should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta",
-                    "removeDir should expose unsupported message");
-
-    err.clear();
-    t.check(!c.rename("/a", "/b", err, true),
-            "rename should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta",
-                    "rename should expose unsupported message");
-
-    err.clear();
-    t.check(!c.chmod("/x", 0644, err), "chmod should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta",
-                    "chmod should expose unsupported message");
-
-    err.clear();
-    t.check(!c.chown("/x", 1000, 1000, err),
-            "chown should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta",
-                    "chown should expose unsupported message");
-
-    err.clear();
-    t.check(!c.get("/remote", "/local", err, {}, {}, false),
-            "get should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta",
-                    "get should expose unsupported message");
-
-    err.clear();
-    t.check(!c.put("/local", "/remote", err, {}, {}, false),
-            "put should be unsupported in mock");
-    t.checkContains(err, "Mock no soporta",
-                    "put should expose unsupported message");
+    expectUnsupported("stat", [&] { return c.stat("/x", info, err); });
+    expectUnsupported("mkdir", [&] { return c.mkdir("/x", err); });
+    expectUnsupported("removeFile", [&] { return c.removeFile("/x", err); });
+    expectUnsupported("removeDir", [&] { return c.removeDir("/x", err); });
+    expectUnsupported("rename",
+                      [&] { return c.rename("/a", "/b", err, true); });
+    expectUnsupported("chmod", [&] { return c.chmod("/x", 0644, err); });
+    expectUnsupported("chown", [&] { return c.chown("/x", 1000, 1000, err); });
+    expectUnsupported(
+        "get", [&] { return c.get("/remote", "/local", err, {}, {}, false); });
+    expectUnsupported(
+        "put", [&] { return c.put("/local", "/remote", err, {}, {}, false); });
 
     std::vector<std::uint8_t> digest{1, 2, 3};
     err.clear();

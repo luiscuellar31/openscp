@@ -4,7 +4,6 @@
 
 #include <QCoreApplication>
 
-#include <iostream>
 #include <optional>
 
 namespace {
@@ -48,31 +47,33 @@ OPENSCP_TEST(testPathAndGlobHelpers, test) {
                    "/root/file.txt")) == QStringLiteral("root/file.txt"),
                "snapshot paths should be made root-relative");
 
-    test.check(SyncComparisonEngine::globMatches(QStringLiteral("src/main.cpp"),
-                                                 QStringLiteral("**/*.cpp")),
-               "double-star should match nested paths");
-    test.check(SyncComparisonEngine::globMatches(QStringLiteral("main.cpp"),
-                                                 QStringLiteral("**/*.cpp")),
-               "double-star slash should also match the root");
-    test.check(SyncComparisonEngine::globMatches(
-                   QStringLiteral("assets/icons/open.svg"),
-                   QStringLiteral("assets/**")),
-               "trailing double-star should match descendants");
-    test.check(SyncComparisonEngine::globMatches(QStringLiteral("assets"),
-                                                 QStringLiteral("assets/**")),
-               "trailing double-star should match the folder itself");
-    test.check(
-        SyncComparisonEngine::globMatches(
-            QStringLiteral("nested/cache/file.bin"), QStringLiteral("cache")),
-        "a slashless pattern should match a path segment");
-    test.check(
-        SyncComparisonEngine::globMatches(QStringLiteral("nested/readme.md"),
-                                          QStringLiteral("readme.??")),
-        "question marks should match one non-separator character");
-    test.check(
-        !SyncComparisonEngine::globMatches(QStringLiteral("nested/readme.txt"),
-                                           QStringLiteral("*.cpp")),
-        "single-star should not match unrelated suffixes");
+    struct GlobCase {
+        QString path;
+        QString pattern;
+        bool expected;
+        const char *message;
+    };
+    const GlobCase globCases[] = {
+        {QStringLiteral("src/main.cpp"), QStringLiteral("**/*.cpp"), true,
+         "double-star should match nested paths"},
+        {QStringLiteral("main.cpp"), QStringLiteral("**/*.cpp"), true,
+         "double-star slash should also match the root"},
+        {QStringLiteral("assets/icons/open.svg"), QStringLiteral("assets/**"),
+         true, "trailing double-star should match descendants"},
+        {QStringLiteral("assets"), QStringLiteral("assets/**"), true,
+         "trailing double-star should match the folder itself"},
+        {QStringLiteral("nested/cache/file.bin"), QStringLiteral("cache"), true,
+         "a slashless pattern should match a path segment"},
+        {QStringLiteral("nested/readme.md"), QStringLiteral("readme.??"), true,
+         "question marks should match one non-separator character"},
+        {QStringLiteral("nested/readme.txt"), QStringLiteral("*.cpp"), false,
+         "single-star should not match unrelated suffixes"},
+    };
+    for (const GlobCase &globCase : globCases) {
+        test.check(SyncComparisonEngine::globMatches(
+                       globCase.path, globCase.pattern) == globCase.expected,
+                   globCase.message);
+    }
 
     const QStringList parsed = SyncComparisonEngine::parsePatterns(
         QStringLiteral(" **/*.cpp ; assets/**\n**/*.cpp\r\n "));
