@@ -157,7 +157,8 @@ struct QuickSitesLoadResult {
 
 QuickSitesLoadResult loadSavedSitesForQuickConnect() {
     const SavedSitesPersistence::LoadResult loaded =
-        SavedSitesPersistence::loadSites({.trimSiteNames = true});
+        SavedSitesPersistence::loadSites(
+            {.trimSiteNames = true, .createNewId = {}});
     QuickSitesLoadResult result;
     result.sites = loaded.sites;
     result.needsSave = loaded.needsSave;

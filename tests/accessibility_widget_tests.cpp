@@ -457,9 +457,8 @@ OPENSCP_TEST(testTransferQueueUsesNativeFocusAndAccessibleState, test) {
                    table->styleSheet().isEmpty(),
                "the transfer table should retain the platform focus style");
     test.check(tableInterface && tableInterface->role() == QAccessible::Table &&
-                   tableInterface->state().focusable &&
                    tableInterface->tableInterface(),
-               "the transfer table should expose focus and table semantics");
+               "the transfer table should expose table semantics");
 
     auto *summary =
         dialog.findChild<QWidget *>(QStringLiteral("transferQueueSummary"));

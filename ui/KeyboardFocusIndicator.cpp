@@ -5,6 +5,7 @@
 #include <QEvent>
 #include <QPainter>
 #include <QStyle>
+#include <QVariant>
 
 namespace {
 

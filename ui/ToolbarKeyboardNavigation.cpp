@@ -135,8 +135,8 @@ QToolButton *toolbarPopupExtensionButton(QToolBar *toolbar) {
     if (!toolbar)
         return nullptr;
 
-    const auto directButtons =
-        toolbar->findChildren<QToolButton *>(Qt::FindDirectChildrenOnly);
+    const auto directButtons = toolbar->findChildren<QToolButton *>(
+        QString(), Qt::FindDirectChildrenOnly);
     for (QToolButton *button : directButtons) {
         if (!button || !button->menu())
             continue;

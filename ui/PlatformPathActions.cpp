@@ -32,12 +32,14 @@ QString openFailedError(const QString &path) {
         .arg(path);
 }
 
+#if defined(Q_OS_MAC) || defined(Q_OS_WIN)
 QString fileManagerError(const QString &path) {
     return QCoreApplication::translate(
                "PlatformPathActions",
                "Could not open the file manager to show %1.")
         .arg(path);
 }
+#endif
 
 PathActionResult failure(const QString &error) {
     PathActionResult result;

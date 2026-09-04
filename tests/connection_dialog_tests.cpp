@@ -87,6 +87,8 @@ OPENSCP_TEST(testSavedSiteFormStartsCompact, test) {
                "default section summaries should fit without truncation");
 
     const QSize compactSize = dialog.size();
+    const int compactFrameHeight = dialog.frameGeometry().height();
+    const int compactContentHeight = scrollArea->widget()->minimumHeight();
     const QPoint compactPosition = dialog.pos();
     const int compactHeaderWidth = pathsSection->width();
     const int compactToggleX = pathsToggle->mapTo(&dialog, QPoint()).x();
@@ -116,8 +118,15 @@ OPENSCP_TEST(testSavedSiteFormStartsCompact, test) {
     test.check(!pathRow->isHidden() && !keyRow->isHidden() &&
                    !proxyType->isHidden() && !knownHostsRow->isHidden(),
                "expanding sections should reveal their detailed fields");
-    test.check(dialog.height() > compactSize.height(),
-               "progressive disclosure should reduce the initial height");
+    const bool compactAtScreenLimit =
+        dialog.screen() &&
+        compactFrameHeight >=
+            dialog.screen()->availableGeometry().height() * 4 / 5;
+    test.check(compactAtScreenLimit ? scrollArea->widget()->minimumHeight() >
+                                          compactContentHeight
+                                    : dialog.height() > compactSize.height(),
+               "progressive disclosure should grow the dialog or its "
+               "scrollable content");
     test.check(dialog.width() == compactSize.width(),
                "opening every section should not widen the dialog");
     if (dialog.screen()) {

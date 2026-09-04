@@ -156,10 +156,10 @@ OPENSCP_TEST(testDuplicateIdsAreRepaired, test) {
     settings.sync();
 
     int generated = 0;
-    const auto loaded =
-        SavedSitesPersistence::loadSites({.createNewId = [&generated] {
-            return QStringLiteral("replacement-%1").arg(++generated);
-        }});
+    const auto loaded = SavedSitesPersistence::loadSites(
+        {.trimSiteNames = false, .createNewId = [&generated] {
+             return QStringLiteral("replacement-%1").arg(++generated);
+         }});
     test.check(loaded.needsSave,
                "duplicate saved-site IDs should request a rewrite");
     test.check(loaded.sites.size() == 2 &&
@@ -184,7 +184,8 @@ OPENSCP_TEST(testLegacySecretsRemainAvailableForSecureMigration, test) {
     settings.sync();
 
     const auto loaded = SavedSitesPersistence::loadSites(
-        {.createNewId = [] { return QStringLiteral("migrated-id"); }});
+        {.trimSiteNames = false,
+         .createNewId = [] { return QStringLiteral("migrated-id"); }});
     test.check(loaded.needsSave,
                "plaintext legacy secrets should request a secure rewrite");
     test.check(loaded.legacySecrets.size() == 3,
