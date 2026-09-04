@@ -22,6 +22,56 @@ never run inside a model or widget.
 Tests should link the closest target that owns the behavior. Integration tests
 use the same protocol implementations as the application.
 
+## Core source layout
+
+The core keeps its public API small and puts everything else close to the
+backend or helper that owns it:
+
+| Directory | Built into | What belongs here |
+| --- | --- | --- |
+| `core/include/openscp/` | Public interface of `openscp_core` | Contracts and types shared with other targets, such as `RemoteClient`, `ClientFactory`, protocol values, remote errors, session options, and shared services. |
+| `core/src/` | `openscp_core` | Backend composition that does not belong to one protocol family, currently `ClientFactory.cpp`. |
+| `core/src/common/` | `openscp_core` | Private helpers shared by more than one backend. |
+| `core/src/libssh2/` | `openscp_core` | SFTP and SCP implementations, with lower-level helpers under `detail/`. |
+| `core/src/curl/` | `openscp_core` | FTP, FTPS, and WebDAV implementations and their shared curl plumbing. |
+| `core/src/mock/` | `openscp_core` in test builds | The in-memory remote client used by unit tests. |
+
+Public includes use the `openscp/` prefix, for example
+`#include "openscp/RemoteClient.hpp"`. Production targets should create clients
+through `ClientFactory` and work against `RemoteClient`; they should not include
+a concrete backend. Tests may include `core/src/` when they are deliberately
+testing an implementation detail, but that private include path must not leak
+into production targets.
+
+When adding a core file, first ask whether another target truly needs to include
+it. If it does, it belongs in `core/include/openscp/`; otherwise, keep it under
+the most specific `core/src/` directory. List both headers and sources in
+`core/CMakeLists.txt` so they also appear correctly in IDE project trees.
+
+## UI source layout
+
+The UI follows the same ownership rule, first by target layer and then by
+product domain or widget role:
+
+| Directory | Built into | What belongs here |
+| --- | --- | --- |
+| `ui/app/` | `openscp`, `openscp_main_window` | Entry point and application composition. |
+| `ui/widgets/` | `openscp_ui_widgets` | Dialogs and reusable visual components, grouped by widget role. |
+| `ui/logic/` | `openscp_ui_logic` | UI-facing behavior, grouped by product domain. |
+| `ui/sync/` | `openscp_sync_logic` | Data-only comparison and synchronization planning. |
+
+UI includes name the owning directory, for example
+`#include "logic/transfers/TransferManager.hpp"` or
+`#include "widgets/dialogs/ConnectionDialog.hpp"`. The shared include root is
+`ui/`; do not add every domain directory separately. Keeping the path visible
+makes ownership clear and avoids ambiguous filenames. The generated
+`AppVersion.hpp` is the only flat UI include.
+
+When adding a UI file, start with the target that should own it, then choose the
+closest product domain or widget role. List both headers and sources in that
+target's `CMakeLists.txt` entry so they also appear correctly in IDE project
+trees.
+
 ## Connections and remote work
 
 All protocols implement `openscp::RemoteClient`. `ClientFactory` chooses the
