@@ -9,7 +9,6 @@
 #include <QHash>
 #include <QUuid>
 
-#include <iostream>
 #include <memory>
 
 namespace {

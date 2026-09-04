@@ -6,7 +6,6 @@
 #include <QCoreApplication>
 
 #include <initializer_list>
-#include <iostream>
 
 namespace {
 

@@ -3,8 +3,6 @@
 
 #include <QCoreApplication>
 
-#include <iostream>
-
 namespace {
 
 openscp::SessionOptions session() {

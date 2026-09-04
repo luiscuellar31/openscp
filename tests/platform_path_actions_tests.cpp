@@ -8,8 +8,6 @@
 #include <QFileInfo>
 #include <QTemporaryDir>
 
-#include <iostream>
-
 namespace {
 
 using openscpui::detail::collapseTargetsToDirectories;

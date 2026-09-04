@@ -3,8 +3,6 @@
 
 #include <QCoreApplication>
 
-#include <iostream>
-
 namespace {
 
 void testConnectionCancellation(TestContext &test,

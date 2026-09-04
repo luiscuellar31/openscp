@@ -9,7 +9,6 @@
 #include <chrono>
 #include <condition_variable>
 #include <future>
-#include <iostream>
 #include <mutex>
 #include <string>
 #include <thread>

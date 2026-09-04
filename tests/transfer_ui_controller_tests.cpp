@@ -3,8 +3,6 @@
 
 #include <QCoreApplication>
 
-#include <iostream>
-
 namespace {
 
 TransferTask completedUpload(quint64 id, const QString &destination) {

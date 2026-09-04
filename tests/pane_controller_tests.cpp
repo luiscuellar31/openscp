@@ -3,8 +3,6 @@
 
 #include <QCoreApplication>
 
-#include <iostream>
-
 namespace {
 
 OPENSCP_TEST(testLiteralPattern, test) {
