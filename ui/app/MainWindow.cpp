@@ -1178,25 +1178,9 @@ void MainWindow::initializeRuntimeState() {
     applyPreferences();
     updateDeleteShortcutEnables();
 
-    // Startup preferences and migration
+    // Startup preferences
     {
         openscpui::AppSettings settings;
-        // One-shot migration: if only showConnOnStart exists, copy to
-        // openSiteManagerOnDisconnect
-        if (!settings.contains(
-                openscpui::settingskeys::kUiOpenSiteManagerOnDisconnect) &&
-            settings.contains(
-                openscpui::settingskeys::kUiShowConnectionOnStart)) {
-            const bool showSiteManagerOnStart =
-                settings
-                    .value(openscpui::settingskeys::kUiShowConnectionOnStart,
-                           true)
-                    .toBool();
-            settings.setValue(
-                openscpui::settingskeys::kUiOpenSiteManagerOnDisconnect,
-                showSiteManagerOnStart);
-            settings.sync();
-        }
         openSiteManagerOnStartup_ =
             settings
                 .value(openscpui::settingskeys::kUiShowConnectionOnStart, true)
@@ -1591,18 +1575,12 @@ void MainWindow::applyPreferences() {
     const bool singleClick =
         settings.value(openscpui::settingskeys::kUiSingleClick, false).toBool();
     QString openBehaviorMode =
-        settings.value(openscpui::settingskeys::kUiOpenBehaviorMode)
+        settings
+            .value(openscpui::settingskeys::kUiOpenBehaviorMode,
+                   QStringLiteral("ask"))
             .toString()
             .trimmed()
             .toLower();
-    if (openBehaviorMode.isEmpty()) {
-        const bool revealLegacy =
-            settings
-                .value(openscpui::settingskeys::kUiOpenRevealInFolder, false)
-                .toBool();
-        openBehaviorMode =
-            revealLegacy ? QStringLiteral("reveal") : QStringLiteral("ask");
-    }
     if (openBehaviorMode != QStringLiteral("ask") &&
         openBehaviorMode != QStringLiteral("reveal") &&
         openBehaviorMode != QStringLiteral("open")) {
@@ -2104,8 +2082,6 @@ void MainWindow::showHistoryMenu() {
 
     auto *localList = createNavigationTabList(tabs, tr("Recent local paths"));
     auto *remoteList = createNavigationTabList(tabs, tr("Recent remote paths"));
-    auto *legacyRemoteList =
-        createNavigationTabList(tabs, tr("Unscoped legacy"));
     auto *serverList = createNavigationTabList(tabs, tr("Recent servers"));
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
@@ -2117,7 +2093,7 @@ void MainWindow::showHistoryMenu() {
         buttons->addButton(tr("Clear history"), QDialogButtonBox::ActionRole);
     layout->addWidget(buttons);
 
-    auto activeList = [tabs, localList, remoteList, legacyRemoteList,
+    auto activeList = [tabs, localList, remoteList,
                        serverList]() -> QListWidget * {
         switch (tabs->currentIndex()) {
         case 0:
@@ -2125,8 +2101,6 @@ void MainWindow::showHistoryMenu() {
         case 1:
             return remoteList;
         case 2:
-            return legacyRemoteList;
-        case 3:
             return serverList;
         default:
             return nullptr;
@@ -2197,14 +2171,11 @@ void MainWindow::showHistoryMenu() {
     auto populate = [=, this]() {
         localList->clear();
         remoteList->clear();
-        legacyRemoteList->clear();
         serverList->clear();
 
         const QStringList localPaths = navigationStore_.recentLocalPaths();
         const QStringList remotePaths =
             navigationStore_.recentRemotePaths(remoteNavigationScope());
-        const QStringList legacyRemotePaths =
-            navigationStore_.legacyRemotePaths();
         const QStringList recentServers = navigationStore_.recentServers();
 
         bool hasEntries = false;
@@ -2237,22 +2208,6 @@ void MainWindow::showHistoryMenu() {
         }
         if (remoteList->count() == 0)
             addDisabledListPlaceholder(remoteList, tr("No recent history"));
-
-        for (const QString &rawPath : legacyRemotePaths) {
-            const QString normalized =
-                openscpui::NavigationStore::normalizeRemotePath(rawPath);
-            if (normalized.isEmpty())
-                continue;
-            auto *item = new QListWidgetItem(trimNavigationLabel(normalized),
-                                             legacyRemoteList);
-            item->setToolTip(tr("Legacy path without a server identity: %1")
-                                 .arg(normalized));
-            item->setData(Qt::UserRole, normalized);
-            hasEntries = true;
-        }
-        if (legacyRemoteList->count() == 0)
-            addDisabledListPlaceholder(legacyRemoteList,
-                                       tr("No legacy history"));
 
         for (const QString &encoded : recentServers) {
             openscp::SessionOptions preset;
@@ -2307,27 +2262,7 @@ void MainWindow::showHistoryMenu() {
             setRightRemoteRoot(value);
             dlg.accept();
             break;
-        case 2:
-            if (!rightIsRemote_) {
-                statusBar()->showMessage(
-                    tr("Connect to a remote server to open legacy remote "
-                       "history."),
-                    3500);
-                return;
-            }
-            if (UiAlerts::question(
-                    this, tr("Open unscoped legacy path?"),
-                    tr("This path is not tied to a saved site or endpoint and "
-                       "may belong to another server.\n\n"
-                       "Open it on the current server?"),
-                    QMessageBox::Yes | QMessageBox::No,
-                    QMessageBox::No) != QMessageBox::Yes) {
-                return;
-            }
-            setRightRemoteRoot(value);
-            dlg.accept();
-            break;
-        case 3: {
+        case 2: {
             if (rightIsRemote_) {
                 statusBar()->showMessage(
                     tr("Disconnect the current remote session before opening "
@@ -2380,8 +2315,7 @@ void MainWindow::showHistoryMenu() {
         populate();
     });
 
-    for (QListWidget *list :
-         {localList, remoteList, legacyRemoteList, serverList}) {
+    for (QListWidget *list : {localList, remoteList, serverList}) {
         connect(list, &QListWidget::itemDoubleClicked, &dlg,
                 [openSelected](QListWidgetItem *) { openSelected(); });
         connect(list, &QListWidget::currentRowChanged, &dlg,

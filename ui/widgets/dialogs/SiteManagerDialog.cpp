@@ -294,24 +294,12 @@ void SiteManagerDialog::loadSites() {
     const SavedSitesPersistence::LoadResult loaded =
         SavedSitesPersistence::loadSites();
     sites_ = loaded.sites;
-    const SiteCredentialMigrationResult migration =
-        SiteCredentialRepository::migrateLegacyPlaintext(loaded);
-    legacySecretMigrationBlocked_ = !migration.complete;
-    showPersistIssues(this, migration.issues);
-    if (loaded.needsSave && migration.complete)
+    if (loaded.needsSave)
         (void)saveSites();
 }
 
 bool SiteManagerDialog::saveSites() {
-    if (legacySecretMigrationBlocked_) {
-        UiAlerts::warning(
-            this, tr("Sites not saved"),
-            tr("OpenSCP could not migrate one or more legacy credentials to "
-               "the secure backend. Saved-site changes were not written, so "
-               "the existing credentials remain recoverable."));
-        return false;
-    }
-    const auto result = SavedSitesPersistence::saveSites(sites_, false);
+    const auto result = SavedSitesPersistence::saveSites(sites_);
     if (!result.ok) {
         UiAlerts::warning(this, tr("Sites not saved"), result.error);
         return false;
@@ -444,7 +432,6 @@ void SiteManagerDialog::onEdit() {
         return;
     }
     const SiteEntry previousEntry = sites_[modelIndex];
-    const QString oldName = previousEntry.name;
     editedEntry.name = name;
     sites_[modelIndex] = editedEntry;
     if (!saveSites()) {
@@ -457,10 +444,6 @@ void SiteManagerDialog::onEdit() {
     selectSiteIndex(modelIndex);
     showPersistIssues(
         this, credentials.save(editedEntry, editedOptions).issueMessages());
-    if (!oldName.isEmpty() && oldName != name) {
-        showPersistIssues(
-            this, credentials.removeLegacyNameKeys(oldName).issueMessages());
-    }
 }
 
 void SiteManagerDialog::onDuplicate() {
@@ -581,9 +564,8 @@ bool SiteManagerDialog::selectedOptions(openscp::SessionOptions &out) const {
     }
     const SiteEntry &selected = sites_[modelIndex];
     SiteCredentialRepository credentials;
-    showPersistIssues(
-        const_cast<SiteManagerDialog *>(this),
-        credentials.load(selected, out, true, modelIndex).issueMessages());
+    showPersistIssues(const_cast<SiteManagerDialog *>(this),
+                      credentials.load(selected, out).issueMessages());
     return true;
 }
 

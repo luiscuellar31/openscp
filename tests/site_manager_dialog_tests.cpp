@@ -98,7 +98,7 @@ OPENSCP_TEST(testReloadSwitchesBetweenEmptyStateAndTable, test) {
     SiteManagerDialog dialog;
 
     const auto saveResult =
-        SavedSitesPersistence::saveSites({savedSiteFixture()}, true);
+        SavedSitesPersistence::saveSites({savedSiteFixture()});
     test.check(saveResult.ok,
                std::string("the saved-site fixture should persist: ") +
                    saveResult.error.toStdString());
@@ -145,7 +145,7 @@ OPENSCP_TEST(testReloadSwitchesBetweenEmptyStateAndTable, test) {
                    !footerConnectButton->isHidden(),
                "site actions should return with the populated table");
 
-    const auto clearResult = SavedSitesPersistence::saveSites({}, true);
+    const auto clearResult = SavedSitesPersistence::saveSites({});
     test.check(clearResult.ok, "the saved-site fixture should be removable");
     if (!clearResult.ok)
         return;

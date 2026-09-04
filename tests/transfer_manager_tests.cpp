@@ -1571,13 +1571,17 @@ OPENSCP_TEST(testFuturePersistenceIsPreserved, test) {
 OPENSCP_TEST(testStructurallyInvalidPersistenceFailsClosed, test) {
     QTemporaryDir root;
     const QString queuePath = root.filePath("transfer-queue-v1.json");
-    const std::array<QByteArray, 3> invalidDocuments{
+    const std::array<QByteArray, 5> invalidDocuments{
         QByteArray(
             R"({"schemaVersion":1,"tasks":[{"id":"1","batchId":"1","type":"download","source":"/a","destination":"/b","operation":"copy","conflictPolicy":"ask","phase":"transfer"},{"id":"1","batchId":"1","type":"download","source":"/c","destination":"/d","operation":"copy","conflictPolicy":"ask","phase":"transfer"}]})"),
         QByteArray(
             R"({"schemaVersion":1,"tasks":[{"id":1.5,"batchId":"1","type":"download","source":"/a","destination":"/b","operation":"copy","conflictPolicy":"ask","phase":"transfer"}]})"),
         QByteArray(
-            R"({"schemaVersion":1,"tasks":[{"id":"1","batchId":"1","type":"future-task","source":"/a","destination":"/b","operation":"copy","conflictPolicy":"ask","phase":"transfer"}]})")};
+            R"({"schemaVersion":1,"tasks":[{"id":"1","batchId":"1","type":"future-task","source":"/a","destination":"/b","operation":"copy","conflictPolicy":"ask","phase":"transfer"}]})"),
+        QByteArray(
+            R"({"schemaVersion":1,"tasks":[{"id":1,"batchId":"1","type":"download","sessionKey":"site","source":"/a","destination":"/b","resumeHint":false,"speedLimitKBps":0,"attempts":0,"maxAttempts":3,"operation":"copy","conflictPolicy":"ask","phase":"transfer","commitUncertain":false,"queuedAtMs":"1"}]})"),
+        QByteArray(
+            R"({"schemaVersion":1,"tasks":[{"id":"1","batchId":"1","type":"download","sessionKey":"site","source":"/a","destination":"/b","resumeHint":false,"speedLimitKBps":0,"attempts":0,"maxAttempts":3,"conflictPolicy":"ask","phase":"transfer","commitUncertain":false,"queuedAtMs":"1"}]})")};
 
     for (const QByteArray &invalid : invalidDocuments) {
         QFile file(queuePath);

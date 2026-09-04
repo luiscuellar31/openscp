@@ -79,6 +79,18 @@ OPENSCP_TEST(testServerRoundTripDoesNotPersistSecrets, test) {
                "decoded history must never manufacture credentials");
     test.check(label.contains(QStringLiteral("alice@dav.example:8443")),
                "the user-facing endpoint label should remain descriptive");
+
+    const QString incomplete =
+        QStringLiteral("protocol=webdav&host=dav.example&port=443&user=alice");
+    test.check(!openscpui::NavigationStore::decodeRecentServer(incomplete),
+               "pre-release server entries with missing fields must be "
+               "discarded");
+
+    const QString numericFallback =
+        QStringLiteral("protocol=sftp&host=ssh.example&port=invalid&user=bob");
+    test.check(!openscpui::NavigationStore::decodeRecentServer(numericFallback),
+               "invalid current server entries must not invent a default "
+               "port");
 }
 
 } // namespace

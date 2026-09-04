@@ -91,26 +91,17 @@ OPENSCP_TEST(testSaveLoadAndRemoval, test) {
                "saving absent credentials should remove stale values");
 }
 
-OPENSCP_TEST(testLegacyNameMigrationAndCopy, test) {
+OPENSCP_TEST(testStableCredentialCopy, test) {
     FakeSecretBackend backend;
     SiteCredentialRepository repository(backend.interface());
     const SiteEntry source =
-        site(QStringLiteral("source-id"), QStringLiteral("Legacy"));
-    backend.values.insert(SiteCredentialRepository::legacyNameKey(
-                              source.name, SiteCredentialKind::Password),
-                          QStringLiteral("legacy-password"));
+        site(QStringLiteral("source-id"), QStringLiteral("Source"));
 
     openscp::SessionOptions options = source.opt;
-    const auto loaded = repository.load(source, options);
-    const QString stable = SiteCredentialRepository::stableKey(
-        source, SiteCredentialKind::Password);
-    test.check(loaded.issues.isEmpty() &&
-                   options.password == "legacy-password" &&
-                   backend.values.contains(stable),
-               "legacy name keys should migrate to stable site IDs");
-    test.check(!backend.values.contains(SiteCredentialRepository::legacyNameKey(
-                   source.name, SiteCredentialKind::Password)),
-               "successful migration should remove the legacy key");
+    options.password = "source-password";
+    const auto saved = repository.save(source, options);
+    test.check(saved.issues.isEmpty(),
+               "source credentials should be stored by stable site ID");
 
     SiteEntry target =
         site(QStringLiteral("target-id"), QStringLiteral("Duplicate"));
@@ -118,7 +109,7 @@ OPENSCP_TEST(testLegacyNameMigrationAndCopy, test) {
     test.check(copied.issues.isEmpty() &&
                    backend.values.value(SiteCredentialRepository::stableKey(
                        target, SiteCredentialKind::Password)) ==
-                       QStringLiteral("legacy-password"),
+                       QStringLiteral("source-password"),
                "copy should duplicate credentials under the target identity");
 }
 
@@ -152,9 +143,8 @@ OPENSCP_TEST(testLoadAndDeleteFailureReporting, test) {
     backend.missingLoadStatus = SecretStore::LoadStatus::Missing;
     backend.deleteStatus = SecretStore::DeleteStatus::PermissionDenied;
     const auto removed = repository.removeAll(entry);
-    test.check(removed.issues.size() == 6,
-               "stable and legacy credential cleanup failures should be "
-               "reported");
+    test.check(removed.issues.size() == 3,
+               "stable credential cleanup failures should be reported");
 }
 
 #ifdef Q_OS_WIN

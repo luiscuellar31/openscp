@@ -30,9 +30,8 @@ QString savedSiteNavigationScope(const QString &siteId) {
         });
     if (settingsSafe)
         return QStringLiteral("site-") + normalized;
-    // IDs loaded from older builds were not guaranteed to be UUIDs. Hash only
-    // unsafe values so existing UUID-based queue/session identities stay
-    // compatible while separators cannot escape the QSettings scope.
+    // Keep the QSettings hierarchy confined even if a malformed identifier
+    // reaches this boundary. Valid UUID-style identifiers remain readable.
     return hashedScope(QStringLiteral("site-"), {normalized});
 }
 

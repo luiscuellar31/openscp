@@ -21,8 +21,6 @@ inline constexpr char kUiOpenSiteManagerOnDisconnect[] =
     "UI/openSiteManagerOnDisconnect";
 inline constexpr char kUiSingleClick[] = "UI/singleClick";
 inline constexpr char kUiOpenBehaviorMode[] = "UI/openBehaviorMode";
-inline constexpr char kUiOpenRevealInFolder[] = "UI/openRevealInFolder";
-inline constexpr char kUiOpenBehaviorChosen[] = "UI/openBehaviorChosen";
 inline constexpr char kUiShowQueueOnEnqueue[] = "UI/showQueueOnEnqueue";
 inline constexpr char kUiDefaultDownloadDir[] = "UI/defaultDownloadDir";
 inline constexpr char kMainWindowGeometry[] = "UI/mainWindow/geometry";
@@ -99,7 +97,6 @@ inline constexpr char kShortcutOpenHistory[] = "Shortcuts/openHistory";
 
 inline constexpr char kSyncFilterPresets[] = "SyncDialog/filterPresetsV1";
 inline constexpr char kRecentLocalPaths[] = "History/recentLocalPaths";
-inline constexpr char kLegacyRecentRemotePaths[] = "History/recentRemotePaths";
 inline constexpr char kRecentServers[] = "History/recentServers";
 inline constexpr char kRemoteScopes[] = "History/remoteScopes";
 inline constexpr char kRemoteScopeRecentPathsPattern[] =

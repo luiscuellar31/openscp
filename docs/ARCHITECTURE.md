@@ -126,15 +126,16 @@ Each kind of persisted data has one owner:
 | Owner | Data |
 | --- | --- |
 | `AppSettings` | Application identity and settings keys. |
-| `SavedSitesPersistence` | Saved sites and schema migrations. |
-| `SiteCredentialRepository` | Credential keys and secure-storage migration. |
+| `SavedSitesPersistence` | Current saved-site format and validation. |
+| `SiteCredentialRepository` | Stable credential keys and secure storage. |
 | `SecretStore` | Keychain, Secret Service/libsecret, and platform encryption. |
 | `NavigationStore` | Local history and session-scoped remote history and favorites. |
 | `TransferQueuePersistence` | Versioned, atomic storage for unfinished transfers. |
 
-Use these classes instead of reading or writing their settings directly. A new
-schema needs an explicit migration, and corrupt or newer data must not be
-silently overwritten.
+Use these classes instead of reading or writing their settings directly.
+OpenSCP 1.0 is the persistence baseline: pre-1.0 incomplete formats are not
+migrated. Changes after that baseline require an explicit versioning decision,
+and corrupt or newer data must not be silently overwritten.
 
 ## Path navigation
 

@@ -1,8 +1,8 @@
-// Centralized saved-site credential storage and legacy migration.
+// Centralized saved-site credential storage.
 #pragma once
 
-#include "logic/persistence/SavedSitesPersistence.hpp"
 #include "logic/persistence/SecretStore.hpp"
+#include "logic/persistence/SiteEntry.hpp"
 
 #include <QStringList>
 #include <QVector>
@@ -28,11 +28,6 @@ struct SiteCredentialOperationResult {
     [[nodiscard]] QStringList issueMessages() const;
 };
 
-struct SiteCredentialMigrationResult {
-    bool complete = true;
-    QStringList issues;
-};
-
 class SiteCredentialRepository {
     public:
     struct Backend {
@@ -49,39 +44,27 @@ class SiteCredentialRepository {
     save(const SiteEntry &site, const openscp::SessionOptions &options,
          bool removeMissing = true);
     [[nodiscard]] SiteCredentialOperationResult
-    load(const SiteEntry &site, openscp::SessionOptions &options,
-         bool migrateLegacyNameKeys = true, int legacySettingsIndex = -1);
+    load(const SiteEntry &site, openscp::SessionOptions &options);
     [[nodiscard]] SiteCredentialOperationResult copy(const SiteEntry &source,
                                                      const SiteEntry &target);
 
     [[nodiscard]] SiteCredentialOperationResult
-    removeAll(const SiteEntry &site, bool includeLegacyNameKeys = true);
-    [[nodiscard]] SiteCredentialOperationResult
-    removeLegacyNameKeys(const QString &siteName);
+    removeAll(const SiteEntry &site);
 
     [[nodiscard]] static QString stableKey(const SiteEntry &site,
                                            SiteCredentialKind kind);
-    [[nodiscard]] static QString legacyNameKey(const QString &siteName,
-                                               SiteCredentialKind kind);
     [[nodiscard]] static QString itemName(SiteCredentialKind kind);
     [[nodiscard]] static QString itemLabel(SiteCredentialKind kind);
     [[nodiscard]] static QString statusLabel(SecretStore::PersistStatus status);
     static void clearCredentialFields(openscp::SessionOptions &options);
-    [[nodiscard]] static SiteCredentialMigrationResult
-    migrateLegacyPlaintext(const SavedSitesPersistence::LoadResult &loaded);
     [[nodiscard]] static Backend systemBackend();
 
     private:
     [[nodiscard]] std::optional<QString>
-    readWithLegacyFallback(const SiteEntry &site, SiteCredentialKind kind,
-                           bool migrateLegacyNameKeys,
-                           SiteCredentialOperationResult &result);
+    readValue(const SiteEntry &site, SiteCredentialKind kind,
+              SiteCredentialOperationResult &result);
     [[nodiscard]] SecretStore::PersistResult storeValue(const SiteEntry &site,
                                                         SiteCredentialKind kind,
                                                         const QString &value);
-    void loadLegacyPlaintext(const SiteEntry &site, int settingsIndex,
-                             openscp::SessionOptions &options,
-                             SiteCredentialOperationResult &result);
-
     Backend backend_;
 };

@@ -296,19 +296,12 @@ SettingsDialog::buildSettingBindings() const {
         QString::fromLatin1(openscpui::settingskeys::kUiOpenBehaviorMode),
         [](const QSettings &settings) {
             QString mode =
-                settings.value(openscpui::settingskeys::kUiOpenBehaviorMode)
+                settings
+                    .value(openscpui::settingskeys::kUiOpenBehaviorMode,
+                           QStringLiteral("ask"))
                     .toString()
                     .trimmed()
                     .toLower();
-            if (mode.isEmpty()) {
-                const bool revealLegacy =
-                    settings
-                        .value(openscpui::settingskeys::kUiOpenRevealInFolder,
-                               false)
-                        .toBool();
-                mode = revealLegacy ? QStringLiteral("reveal")
-                                    : QStringLiteral("ask");
-            }
             return mode;
         },
         [this] {
@@ -326,23 +319,8 @@ SettingsDialog::buildSettingBindings() const {
                 openBehaviorMode_->setCurrentIndex(modeIdx);
         },
         [](QSettings &settings, const QVariant &value) {
-            const QString openMode = value.toString();
             settings.setValue(openscpui::settingskeys::kUiOpenBehaviorMode,
-                              openMode);
-            if (openMode == QStringLiteral("reveal")) {
-                settings.setValue(
-                    openscpui::settingskeys::kUiOpenRevealInFolder, true);
-                settings.setValue(
-                    openscpui::settingskeys::kUiOpenBehaviorChosen, true);
-            } else if (openMode == QStringLiteral("open")) {
-                settings.setValue(
-                    openscpui::settingskeys::kUiOpenRevealInFolder, false);
-                settings.setValue(
-                    openscpui::settingskeys::kUiOpenBehaviorChosen, true);
-            } else {
-                settings.setValue(
-                    openscpui::settingskeys::kUiOpenBehaviorChosen, false);
-            }
+                              value.toString());
         },
     });
 

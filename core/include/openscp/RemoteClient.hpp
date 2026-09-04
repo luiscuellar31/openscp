@@ -80,8 +80,8 @@ class RemoteClient {
 
     // Calculates a digest without downloading the remote file. Backends must
     // only advertise can_checksum when they implement this operation. The
-    // default keeps third-party/legacy clients source compatible and fails
-    // safely with a structured Unsupported error.
+    // default lets derived clients omit unsupported checksum behavior and
+    // fails safely with a structured Unsupported error.
     virtual bool
     checksum(const std::string &remote_path, const std::string &algorithm,
              std::vector<std::uint8_t> &digest, std::string &err,

@@ -2012,8 +2012,9 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
                 (task.type == TransferTask::Type::DeleteRemoteFile ||
                  task.type == TransferTask::Type::DeleteRemoteDirectory) &&
                 operationError.kind == openscp::RemoteErrorKind::None) {
-                // A legacy backend cannot prove whether a failed remote
-                // mutation reached the server. Never retry it blindly.
+                // A backend without structured failure metadata cannot prove
+                // whether a failed remote mutation reached the server. Never
+                // retry it blindly.
                 operationError.kind = openscp::RemoteErrorKind::RemoteIo;
                 operationError.message = error;
                 operationError.commit_uncertain = true;

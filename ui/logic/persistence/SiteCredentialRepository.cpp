@@ -1,7 +1,5 @@
 #include "logic/persistence/SiteCredentialRepository.hpp"
 
-#include "logic/common/AppSettings.hpp"
-
 #include <QByteArray>
 #include <QCoreApplication>
 
@@ -52,16 +50,6 @@ void assignCredential(openscp::SessionOptions &options, SiteCredentialKind kind,
         break;
     }
     utf8Value.fill('\0');
-}
-
-std::optional<SiteCredentialKind> kindFromItem(const QString &item) {
-    if (item == QLatin1String("password"))
-        return SiteCredentialKind::Password;
-    if (item == QLatin1String("keypass"))
-        return SiteCredentialKind::KeyPassphrase;
-    if (item == QLatin1String("proxypass"))
-        return SiteCredentialKind::ProxyPassword;
-    return std::nullopt;
 }
 
 QString formatIssue(SiteCredentialKind kind,
@@ -189,16 +177,8 @@ SiteCredentialRepository::statusLabel(SecretStore::PersistStatus status) {
 
 QString SiteCredentialRepository::stableKey(const SiteEntry &site,
                                             SiteCredentialKind kind) {
-    const QString item = itemName(kind);
-    if (!site.siteId.trimmed().isEmpty()) {
-        return QStringLiteral("site-id:%1:%2").arg(site.siteId.trimmed(), item);
-    }
-    return legacyNameKey(site.name, kind);
-}
-
-QString SiteCredentialRepository::legacyNameKey(const QString &siteName,
-                                                SiteCredentialKind kind) {
-    return QStringLiteral("site:%1:%2").arg(siteName, itemName(kind));
+    return QStringLiteral("site-id:%1:%2")
+        .arg(site.siteId.trimmed(), itemName(kind));
 }
 
 SecretStore::PersistResult SiteCredentialRepository::storeValue(
@@ -237,49 +217,23 @@ SiteCredentialRepository::save(const SiteEntry &site,
     return result;
 }
 
-std::optional<QString> SiteCredentialRepository::readWithLegacyFallback(
-    const SiteEntry &site, SiteCredentialKind kind, bool migrateLegacyNameKeys,
-    SiteCredentialOperationResult &result) {
+std::optional<QString>
+SiteCredentialRepository::readValue(const SiteEntry &site,
+                                    SiteCredentialKind kind,
+                                    SiteCredentialOperationResult &result) {
     const QString stable = stableKey(site, kind);
     const SecretStore::LoadResult stableResult = backend_.load(stable);
     if (stableResult.isLoaded())
         return stableResult.value;
     if (stableResult.status != SecretStore::LoadStatus::Missing) {
         result.issues.push_back({kind, issueFromLoadResult(stableResult)});
-        return std::nullopt;
     }
-
-    const QString legacy = legacyNameKey(site.name, kind);
-    if (legacy == stable)
-        return std::nullopt;
-    const SecretStore::LoadResult legacyResult = backend_.load(legacy);
-    if (!legacyResult.isLoaded()) {
-        if (legacyResult.status != SecretStore::LoadStatus::Missing) {
-            result.issues.push_back({kind, issueFromLoadResult(legacyResult)});
-        }
-        return std::nullopt;
-    }
-
-    if (migrateLegacyNameKeys) {
-        const SecretStore::PersistResult persistResult =
-            backend_.store(stable, legacyResult.value);
-        if (persistResult.isStored()) {
-            const SecretStore::DeleteResult deleteResult =
-                backend_.remove(legacy);
-            if (!deleteResult.isRemovedOrMissing()) {
-                result.issues.push_back(
-                    {kind, issueFromDeleteResult(deleteResult)});
-            }
-        } else {
-            result.issues.push_back({kind, persistResult});
-        }
-    }
-    return legacyResult.value;
+    return std::nullopt;
 }
 
-SiteCredentialOperationResult SiteCredentialRepository::load(
-    const SiteEntry &site, openscp::SessionOptions &options,
-    bool migrateLegacyNameKeys, int legacySettingsIndex) {
+SiteCredentialOperationResult
+SiteCredentialRepository::load(const SiteEntry &site,
+                               openscp::SessionOptions &options) {
     SiteCredentialOperationResult result;
     for (SiteCredentialKind kind : kCredentialKinds) {
         if (kind == SiteCredentialKind::ProxyPassword &&
@@ -287,94 +241,20 @@ SiteCredentialOperationResult SiteCredentialRepository::load(
             options.proxy_password.reset();
             continue;
         }
-        const std::optional<QString> value =
-            readWithLegacyFallback(site, kind, migrateLegacyNameKeys, result);
+        const std::optional<QString> value = readValue(site, kind, result);
         if (!value)
             continue;
         assignCredential(options, kind, *value);
         result.anyCredentialHandled = true;
     }
-    if (legacySettingsIndex >= 0)
-        loadLegacyPlaintext(site, legacySettingsIndex, options, result);
     return result;
-}
-
-void SiteCredentialRepository::loadLegacyPlaintext(
-    const SiteEntry &site, int settingsIndex, openscp::SessionOptions &options,
-    SiteCredentialOperationResult &result) {
-    openscpui::AppSettings settings;
-    const int siteCount = settings.beginReadArray(QStringLiteral("sites"));
-    if (settingsIndex < 0 || settingsIndex >= siteCount) {
-        settings.endArray();
-        return;
-    }
-    settings.setArrayIndex(settingsIndex);
-
-    struct LegacyValue {
-        SiteCredentialKind kind;
-        QString settingsKey;
-        QString value;
-    };
-    const std::array<LegacyValue, 3> legacyValues{{
-        {SiteCredentialKind::Password, QStringLiteral("password"),
-         settings.value(QStringLiteral("password")).toString()},
-        {SiteCredentialKind::KeyPassphrase, QStringLiteral("keyPass"),
-         settings.value(QStringLiteral("keyPass")).toString()},
-        {SiteCredentialKind::ProxyPassword, QStringLiteral("proxyPass"),
-         settings.value(QStringLiteral("proxyPass")).toString()},
-    }};
-    settings.endArray();
-
-    QStringList keysToRemove;
-    for (const LegacyValue &legacy : legacyValues) {
-        if (legacy.value.isEmpty())
-            continue;
-        if (legacy.kind == SiteCredentialKind::ProxyPassword &&
-            options.proxy_type == openscp::ProxyType::None) {
-            keysToRemove.push_back(legacy.settingsKey);
-            continue;
-        }
-
-        const openscp::SecureString *existing =
-            credentialValue(options, legacy.kind);
-        if (!existing || existing->empty()) {
-            assignCredential(options, legacy.kind, legacy.value);
-            result.anyCredentialHandled = true;
-        }
-
-        const SecretStore::PersistResult persistResult =
-            storeValue(site, legacy.kind, legacy.value);
-        if (persistResult.isStored())
-            keysToRemove.push_back(legacy.settingsKey);
-        else
-            result.issues.push_back({legacy.kind, persistResult});
-    }
-
-    if (keysToRemove.isEmpty())
-        return;
-    settings.beginWriteArray(QStringLiteral("sites"));
-    settings.setArrayIndex(settingsIndex);
-    for (const QString &key : keysToRemove)
-        settings.remove(key);
-    settings.endArray();
-    const openscpui::SettingsSyncResult syncResult = settings.syncSecure();
-    if (!syncResult.ok) {
-        for (const LegacyValue &legacy : legacyValues) {
-            if (keysToRemove.contains(legacy.settingsKey)) {
-                result.issues.push_back(
-                    {legacy.kind,
-                     {SecretStore::PersistStatus::BackendError,
-                      syncResult.error}});
-            }
-        }
-    }
 }
 
 SiteCredentialOperationResult
 SiteCredentialRepository::copy(const SiteEntry &source,
                                const SiteEntry &target) {
     openscp::SessionOptions options = source.opt;
-    SiteCredentialOperationResult result = load(source, options, true);
+    SiteCredentialOperationResult result = load(source, options);
     const SiteCredentialOperationResult saveResult =
         save(target, options, true);
     result.anyCredentialHandled =
@@ -384,25 +264,7 @@ SiteCredentialRepository::copy(const SiteEntry &source,
 }
 
 SiteCredentialOperationResult
-SiteCredentialRepository::removeLegacyNameKeys(const QString &siteName) {
-    SiteCredentialOperationResult result;
-    if (siteName.isEmpty())
-        return result;
-    for (SiteCredentialKind kind : kCredentialKinds) {
-        const SecretStore::DeleteResult deleteResult =
-            backend_.remove(legacyNameKey(siteName, kind));
-        if (deleteResult.status == SecretStore::DeleteStatus::Removed)
-            result.anyCredentialHandled = true;
-        else if (!deleteResult.isRemovedOrMissing())
-            result.issues.push_back(
-                {kind, issueFromDeleteResult(deleteResult)});
-    }
-    return result;
-}
-
-SiteCredentialOperationResult
-SiteCredentialRepository::removeAll(const SiteEntry &site,
-                                    bool includeLegacyNameKeys) {
+SiteCredentialRepository::removeAll(const SiteEntry &site) {
     SiteCredentialOperationResult result;
     for (SiteCredentialKind kind : kCredentialKinds) {
         const SecretStore::DeleteResult deleteResult =
@@ -413,13 +275,6 @@ SiteCredentialRepository::removeAll(const SiteEntry &site,
             result.issues.push_back(
                 {kind, issueFromDeleteResult(deleteResult)});
     }
-    if (includeLegacyNameKeys) {
-        SiteCredentialOperationResult legacyResult =
-            removeLegacyNameKeys(site.name);
-        result.anyCredentialHandled =
-            result.anyCredentialHandled || legacyResult.anyCredentialHandled;
-        result.issues += legacyResult.issues;
-    }
     return result;
 }
 
@@ -428,57 +283,4 @@ void SiteCredentialRepository::clearCredentialFields(
     options.password.reset();
     options.private_key_passphrase.reset();
     options.proxy_password.reset();
-}
-
-SiteCredentialMigrationResult SiteCredentialRepository::migrateLegacyPlaintext(
-    const SavedSitesPersistence::LoadResult &loaded) {
-    SiteCredentialMigrationResult migration;
-    SiteCredentialRepository repository;
-    for (const SavedSitesPersistence::LegacySecret &legacy :
-         loaded.legacySecrets) {
-        if (legacy.siteIndex < 0 || legacy.siteIndex >= loaded.sites.size()) {
-            migration.complete = false;
-            migration.issues.push_back(QCoreApplication::translate(
-                "SiteCredentialRepository",
-                "A legacy credential could not be matched to its site."));
-            continue;
-        }
-
-        const std::optional<SiteCredentialKind> kind =
-            kindFromItem(legacy.item);
-        if (!kind) {
-            migration.complete = false;
-            migration.issues.push_back(QCoreApplication::translate(
-                "SiteCredentialRepository",
-                "A legacy credential has an unknown type."));
-            continue;
-        }
-
-        const SiteEntry &site = loaded.sites.at(legacy.siteIndex);
-        if (*kind == SiteCredentialKind::ProxyPassword &&
-            site.opt.proxy_type == openscp::ProxyType::None) {
-            continue;
-        }
-        const SecretStore::LoadResult loadResult =
-            repository.backend_.load(stableKey(site, *kind));
-        if (loadResult.isLoaded())
-            continue;
-        if (loadResult.status != SecretStore::LoadStatus::Missing) {
-            migration.complete = false;
-            migration.issues.push_back(QStringLiteral("%1 — %2").arg(
-                site.name,
-                formatIssue(*kind, issueFromLoadResult(loadResult))));
-            continue;
-        }
-
-        const SecretStore::PersistResult result =
-            repository.storeValue(site, *kind, legacy.value);
-        if (result.isStored())
-            continue;
-
-        migration.complete = false;
-        migration.issues.push_back(QStringLiteral("%1 — %2").arg(
-            site.name, formatIssue(*kind, result)));
-    }
-    return migration;
 }

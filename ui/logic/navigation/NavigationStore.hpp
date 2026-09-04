@@ -32,7 +32,6 @@ class NavigationStore {
 
     QStringList recentLocalPaths() const;
     QStringList recentRemotePaths(const QString &scope) const;
-    QStringList legacyRemotePaths() const;
     QStringList recentServers() const;
 
     QStringList favorites(Location location,

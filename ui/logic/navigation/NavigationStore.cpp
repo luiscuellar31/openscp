@@ -81,23 +81,62 @@ bool NavigationStore::decodeRecentServer(const QString &encoded,
                                          openscp::SessionOptions *session,
                                          QString *label) {
     const QUrlQuery query(encoded);
+    if (!query.hasQueryItem(QStringLiteral("protocol")) ||
+        !query.hasQueryItem(QStringLiteral("host")) ||
+        !query.hasQueryItem(QStringLiteral("port")) ||
+        !query.hasQueryItem(QStringLiteral("user"))) {
+        return false;
+    }
     const QString host =
         query.queryItemValue(QStringLiteral("host")).trimmed().toLower();
     if (host.isEmpty())
         return false;
 
-    const openscp::Protocol protocol = openscp::protocolFromStorageName(
-        query.queryItemValue(QStringLiteral("protocol"))
-            .trimmed()
-            .toLower()
-            .toStdString());
+    const QString protocolName =
+        query.queryItemValue(QStringLiteral("protocol")).trimmed().toLower();
+    const openscp::Protocol protocol =
+        openscp::protocolFromStorageName(protocolName.toStdString());
+    if (protocolName !=
+        QString::fromLatin1(openscp::protocolStorageName(protocol))) {
+        return false;
+    }
+    openscp::FtpsMode ftpsMode = openscp::FtpsMode::Auto;
+    if (protocol == openscp::Protocol::Ftps) {
+        if (!query.hasQueryItem(QStringLiteral("ftpsMode")))
+            return false;
+        const QString modeName =
+            query.queryItemValue(QStringLiteral("ftpsMode"))
+                .trimmed()
+                .toLower();
+        ftpsMode = openscp::ftpsModeFromStorageName(modeName.toStdString());
+        if (modeName !=
+            QString::fromLatin1(openscp::ftpsModeStorageName(ftpsMode))) {
+            return false;
+        }
+    }
+    openscp::WebDavScheme webDavScheme = openscp::WebDavScheme::Https;
+    if (protocol == openscp::Protocol::WebDav) {
+        if (!query.hasQueryItem(QStringLiteral("webdavScheme")) ||
+            !query.hasQueryItem(QStringLiteral("webdavBasePath"))) {
+            return false;
+        }
+        const QString schemeName =
+            query.queryItemValue(QStringLiteral("webdavScheme"))
+                .trimmed()
+                .toLower();
+        webDavScheme =
+            openscp::webDavSchemeFromStorageName(schemeName.toStdString());
+        if (schemeName != QString::fromLatin1(
+                              openscp::webDavSchemeStorageName(webDavScheme))) {
+            return false;
+        }
+    }
     bool validPort = false;
     int port = query.queryItemValue(QStringLiteral("port"))
                    .trimmed()
                    .toInt(&validPort);
-    if (!validPort || port <= 0 || port > 65535) {
-        port = static_cast<int>(openscp::defaultPortForProtocol(protocol));
-    }
+    if (!validPort || port <= 0 || port > 65535)
+        return false;
     const QString user = query.queryItemValue(QStringLiteral("user")).trimmed();
 
     if (session) {
@@ -106,25 +145,10 @@ bool NavigationStore::decodeRecentServer(const QString &encoded,
         decoded.host = host.toStdString();
         decoded.port = static_cast<std::uint16_t>(port);
         decoded.username = user.toStdString();
-        if (protocol == openscp::Protocol::Ftps) {
-            decoded.ftps_mode = openscp::ftpsModeFromStorageName(
-                query.queryItemValue(QStringLiteral("ftpsMode"))
-                    .trimmed()
-                    .toLower()
-                    .toStdString());
-        }
+        if (protocol == openscp::Protocol::Ftps)
+            decoded.ftps_mode = ftpsMode;
         if (protocol == openscp::Protocol::WebDav) {
-            const QString storedScheme =
-                query.queryItemValue(QStringLiteral("webdavScheme"))
-                    .trimmed()
-                    .toLower();
-            if (!storedScheme.isEmpty()) {
-                decoded.webdav_scheme = openscp::webDavSchemeFromStorageName(
-                    storedScheme.toStdString());
-            } else if (decoded.port == openscp::defaultPortForWebDavScheme(
-                                           openscp::WebDavScheme::Http)) {
-                decoded.webdav_scheme = openscp::WebDavScheme::Http;
-            }
+            decoded.webdav_scheme = webDavScheme;
             if (decoded.webdav_scheme == openscp::WebDavScheme::Http) {
                 decoded.webdav_verify_peer = false;
                 decoded.webdav_ca_cert_path.reset();
@@ -199,12 +223,6 @@ QStringList NavigationStore::recentRemotePaths(const QString &scope) const {
                          : createSettings()->value(key).toStringList();
 }
 
-QStringList NavigationStore::legacyRemotePaths() const {
-    return createSettings()
-        ->value(settingskeys::kLegacyRecentRemotePaths)
-        .toStringList();
-}
-
 QStringList NavigationStore::recentServers() const {
     return createSettings()->value(settingskeys::kRecentServers).toStringList();
 }
@@ -269,7 +287,6 @@ void NavigationStore::clearAllHistory() {
     settings->remove(settingskeys::kRecentLocalPaths);
     settings->remove(
         QString::fromLatin1(openscpui::settingskeys::kRemoteScopes));
-    settings->remove(settingskeys::kLegacyRecentRemotePaths);
     settings->remove(settingskeys::kRecentServers);
 }
 

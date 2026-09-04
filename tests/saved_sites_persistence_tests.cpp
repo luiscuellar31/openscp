@@ -8,25 +8,25 @@
 #include <QTemporaryDir>
 
 #include <iostream>
-#include <optional>
 #include <string>
 
 namespace {
 
-void writeLegacySites() {
+void writeIncompletePreReleaseSites() {
     QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
     settings.clear();
     settings.beginWriteArray(QStringLiteral("sites"));
 
     settings.setArrayIndex(0);
-    settings.setValue(QStringLiteral("name"), QStringLiteral("Legacy FTPS"));
+    settings.setValue(QStringLiteral("name"), QStringLiteral("Beta FTPS"));
     settings.setValue(QStringLiteral("protocol"), QStringLiteral("ftps"));
     settings.setValue(QStringLiteral("host"), QStringLiteral("ftp.example"));
     settings.setValue(QStringLiteral("port"), 21);
     settings.setValue(QStringLiteral("user"), QStringLiteral("alice"));
+    settings.setValue(QStringLiteral("password"), QStringLiteral("obsolete"));
 
     settings.setArrayIndex(1);
-    settings.setValue(QStringLiteral("name"), QStringLiteral("Legacy DAV"));
+    settings.setValue(QStringLiteral("name"), QStringLiteral("Beta DAV"));
     settings.setValue(QStringLiteral("protocol"), QStringLiteral("webdav"));
     settings.setValue(QStringLiteral("host"), QStringLiteral("dav.example"));
     settings.setValue(QStringLiteral("port"), 443);
@@ -36,38 +36,22 @@ void writeLegacySites() {
     settings.sync();
 }
 
-OPENSCP_TEST(testLegacyMigration, test) {
-    writeLegacySites();
-    int nextId = 0;
-    const auto loaded = SavedSitesPersistence::loadSites(
-        {.trimSiteNames = true, .createNewId = [&nextId] {
-             return QStringLiteral("generated-%1").arg(++nextId);
-         }});
+OPENSCP_TEST(testIncompletePreReleaseSitesAreDiscarded, test) {
+    writeIncompletePreReleaseSites();
+    const auto loaded = SavedSitesPersistence::loadSites();
 
     test.check(loaded.needsSave,
-               "legacy sites should request a normalized rewrite");
-    test.check(loaded.sites.size() == 2,
-               "all legacy sites should survive migration");
-    if (loaded.sites.size() != 2)
-        return;
+               "incomplete pre-release sites should request removal");
+    test.check(loaded.sites.isEmpty(),
+               "pre-release site formats must not be migrated into 1.0");
 
-    const SiteEntry &ftps = loaded.sites[0];
-    test.check(ftps.siteId == QStringLiteral("generated-1"),
-               "missing site IDs should be generated");
-    test.check(ftps.opt.ftps_mode == openscp::FtpsMode::Auto,
-               "legacy FTPS sites should migrate to Auto mode");
-    test.check(ftps.initialLocalPath.isEmpty(),
-               "legacy local roots should keep home/current semantics");
-    test.check(ftps.initialRemotePath == QStringLiteral("/"),
-               "legacy remote roots should migrate to slash");
-    test.check(!ftps.rememberLastPaths,
-               "legacy sites should not remember paths by default");
-
-    const SiteEntry &webdav = loaded.sites[1];
-    test.check(webdav.siteId == QStringLiteral("generated-2"),
-               "each migrated site should receive a distinct ID");
-    test.check(webdav.opt.webdav_base_path == "/",
-               "legacy WebDAV sites should migrate to a root base path");
+    const auto saveResult = SavedSitesPersistence::saveSites(loaded.sites);
+    test.check(saveResult.ok,
+               "discarded pre-release sites should be removable");
+    QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
+    test.check(settings.beginReadArray(QStringLiteral("sites")) == 0,
+               "rewriting must remove obsolete site data and plaintext");
+    settings.endArray();
 }
 
 OPENSCP_TEST(testRoundTrip, test) {
@@ -86,7 +70,7 @@ OPENSCP_TEST(testRoundTrip, test) {
     site.initialRemotePath = QStringLiteral("/releases/current");
     site.rememberLastPaths = true;
 
-    const auto saveResult = SavedSitesPersistence::saveSites({site}, true);
+    const auto saveResult = SavedSitesPersistence::saveSites({site});
     test.check(saveResult.ok,
                std::string("saved sites should report persistence success: ") +
                    saveResult.error.toStdString());
@@ -103,7 +87,7 @@ OPENSCP_TEST(testRoundTrip, test) {
 #endif
     const auto loaded = SavedSitesPersistence::loadSites();
     test.check(!loaded.needsSave,
-               "normalized saved sites should not require another migration");
+               "current saved sites should not require a normalized rewrite");
     test.check(loaded.sites.size() == 1,
                "a saved site should round-trip exactly once");
     if (loaded.sites.size() != 1)
@@ -134,26 +118,13 @@ OPENSCP_TEST(testRoundTrip, test) {
 }
 
 OPENSCP_TEST(testDuplicateIdsAreRepaired, test) {
-    QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
-    settings.clear();
-    settings.beginWriteArray(QStringLiteral("sites"));
-    for (int siteIndex = 0; siteIndex < 2; ++siteIndex) {
-        settings.setArrayIndex(siteIndex);
-        settings.setValue(QStringLiteral("id"), QStringLiteral("duplicate-id"));
-        settings.setValue(QStringLiteral("name"),
-                          QStringLiteral("Site %1").arg(siteIndex));
-        settings.setValue(QStringLiteral("initialLocalPath"), QString());
-        settings.setValue(QStringLiteral("initialRemotePath"),
-                          QStringLiteral("/"));
-        settings.setValue(QStringLiteral("rememberLastPaths"), false);
-        settings.setValue(QStringLiteral("scpTransferMode"),
-                          QStringLiteral("auto"));
-        settings.setValue(QStringLiteral("ftpsMode"), QStringLiteral("auto"));
-        settings.setValue(QStringLiteral("webdavBasePath"),
-                          QStringLiteral("/"));
-    }
-    settings.endArray();
-    settings.sync();
+    SiteEntry first;
+    first.siteId = QStringLiteral("duplicate-id");
+    first.name = QStringLiteral("Site 0");
+    SiteEntry second = first;
+    second.name = QStringLiteral("Site 1");
+    test.check(SavedSitesPersistence::saveSites({first, second}).ok,
+               "duplicate-ID fixture should use the current format");
 
     int generated = 0;
     const auto loaded = SavedSitesPersistence::loadSites(
@@ -169,68 +140,17 @@ OPENSCP_TEST(testDuplicateIdsAreRepaired, test) {
                "receive new identities");
 }
 
-OPENSCP_TEST(testLegacySecretsRemainAvailableForSecureMigration, test) {
-    QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
-    settings.clear();
-    settings.beginWriteArray(QStringLiteral("sites"));
-    settings.setArrayIndex(0);
-    settings.setValue(QStringLiteral("name"), QStringLiteral("Old site"));
-    settings.setValue(QStringLiteral("host"), QStringLiteral("old.example"));
-    settings.setValue(QStringLiteral("password"), QStringLiteral("password-1"));
-    settings.setValue(QStringLiteral("keyPass"), QStringLiteral("key-pass-1"));
-    settings.setValue(QStringLiteral("proxyPass"),
-                      QStringLiteral("proxy-pass-1"));
-    settings.endArray();
-    settings.sync();
-
-    const auto loaded = SavedSitesPersistence::loadSites(
-        {.trimSiteNames = false,
-         .createNewId = [] { return QStringLiteral("migrated-id"); }});
-    test.check(loaded.needsSave,
-               "plaintext legacy secrets should request a secure rewrite");
-    test.check(loaded.legacySecrets.size() == 3,
-               "all supported plaintext legacy secrets should remain available "
-               "for secure migration");
-    if (loaded.legacySecrets.size() == 3) {
-        test.check(
-            loaded.legacySecrets[0].siteIndex == 0 &&
-                loaded.legacySecrets[0].item == QStringLiteral("password") &&
-                loaded.legacySecrets[0].value == QStringLiteral("password-1"),
-            "password migration metadata should identify its site and item");
-        test.check(loaded.legacySecrets[1].item == QStringLiteral("keypass") &&
-                       loaded.legacySecrets[1].value ==
-                           QStringLiteral("key-pass-1"),
-                   "key passphrase should be captured for secure migration");
-        test.check(
-            loaded.legacySecrets[2].item == QStringLiteral("proxypass") &&
-                loaded.legacySecrets[2].value == QStringLiteral("proxy-pass-1"),
-            "proxy password should be captured for secure migration");
-    }
-
-    settings.beginReadArray(QStringLiteral("sites"));
-    settings.setArrayIndex(0);
-    test.check(settings.value(QStringLiteral("password")).toString() ==
-                   QStringLiteral("password-1"),
-               "loading alone must not destroy a legacy secret before secure "
-               "migration succeeds");
-    settings.endArray();
-}
-
 OPENSCP_TEST(testInitialRemotePathNormalization, test) {
+    SiteEntry site;
+    site.siteId = QStringLiteral("path-site");
+    site.name = QStringLiteral("Path site");
+    test.check(SavedSitesPersistence::saveSites({site}).ok,
+               "path fixture should use the current format");
     QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
-    settings.clear();
     settings.beginWriteArray(QStringLiteral("sites"));
     settings.setArrayIndex(0);
-    settings.setValue(QStringLiteral("id"), QStringLiteral("path-site"));
-    settings.setValue(QStringLiteral("name"), QStringLiteral("Path site"));
-    settings.setValue(QStringLiteral("initialLocalPath"), QString());
     settings.setValue(QStringLiteral("initialRemotePath"),
                       QStringLiteral("//projects/./alpha/tmp/../release/"));
-    settings.setValue(QStringLiteral("rememberLastPaths"), true);
-    settings.setValue(QStringLiteral("scpTransferMode"),
-                      QStringLiteral("auto"));
-    settings.setValue(QStringLiteral("ftpsMode"), QStringLiteral("auto"));
-    settings.setValue(QStringLiteral("webdavBasePath"), QStringLiteral("/"));
     settings.endArray();
     settings.sync();
 
@@ -249,9 +169,9 @@ OPENSCP_TEST(testInitialRemotePathNormalization, test) {
 
     if (loaded.sites.isEmpty())
         return;
-    SiteEntry site = loaded.sites.front();
-    site.initialRemotePath = QStringLiteral("/../../safe/../root");
-    const auto saveResult = SavedSitesPersistence::saveSites({site}, true);
+    SiteEntry normalizedSite = loaded.sites.front();
+    normalizedSite.initialRemotePath = QStringLiteral("/../../safe/../root");
+    const auto saveResult = SavedSitesPersistence::saveSites({normalizedSite});
     test.check(saveResult.ok,
                std::string("normalized paths should save successfully: ") +
                    saveResult.error.toStdString());
@@ -263,26 +183,20 @@ OPENSCP_TEST(testInitialRemotePathNormalization, test) {
 }
 
 OPENSCP_TEST(testCorruptSecurityAndPortValuesAreRepaired, test) {
+    SiteEntry site;
+    site.siteId = QStringLiteral("corrupt-site");
+    site.name = QStringLiteral("Corrupt site");
+    test.check(SavedSitesPersistence::saveSites({site}).ok,
+               "corruption fixture should use the current format");
     QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
-    settings.clear();
     settings.beginWriteArray(QStringLiteral("sites"));
     settings.setArrayIndex(0);
-    settings.setValue(QStringLiteral("id"), QStringLiteral("corrupt-site"));
-    settings.setValue(QStringLiteral("name"), QStringLiteral("Corrupt site"));
-    settings.setValue(QStringLiteral("protocol"), QStringLiteral("sftp"));
     settings.setValue(QStringLiteral("port"), -1);
     settings.setValue(QStringLiteral("proxyType"), 999);
     settings.setValue(QStringLiteral("proxyPort"), 70000);
     settings.setValue(QStringLiteral("jumpPort"), QStringLiteral("invalid"));
     settings.setValue(QStringLiteral("khPolicy"), 999);
     settings.setValue(QStringLiteral("integrityPolicy"), -9);
-    settings.setValue(QStringLiteral("initialLocalPath"), QString());
-    settings.setValue(QStringLiteral("initialRemotePath"), QStringLiteral("/"));
-    settings.setValue(QStringLiteral("rememberLastPaths"), false);
-    settings.setValue(QStringLiteral("scpTransferMode"),
-                      QStringLiteral("auto"));
-    settings.setValue(QStringLiteral("ftpsMode"), QStringLiteral("auto"));
-    settings.setValue(QStringLiteral("webdavBasePath"), QStringLiteral("/"));
     settings.endArray();
     settings.sync();
 
@@ -305,40 +219,6 @@ OPENSCP_TEST(testCorruptSecurityAndPortValuesAreRepaired, test) {
     test.check(options.transfer_integrity_policy ==
                    openscp::TransferIntegrityPolicy::Optional,
                "corrupt integrity policy should use its documented default");
-}
-
-OPENSCP_TEST(testWebDavSecurityDefaultsAreAppliedToLegacySites, test) {
-    QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
-    settings.clear();
-    settings.setValue(
-        QString::fromLatin1(openscpui::settingskeys::kWebDavVerifyPeerDefault),
-        false);
-    settings.setValue(
-        QString::fromLatin1(openscpui::settingskeys::kWebDavCaCertPathDefault),
-        QStringLiteral("/configured/ca.pem"));
-    settings.beginWriteArray(QStringLiteral("sites"));
-    settings.setArrayIndex(0);
-    settings.setValue(QStringLiteral("id"), QStringLiteral("legacy-dav"));
-    settings.setValue(QStringLiteral("name"), QStringLiteral("Legacy DAV"));
-    settings.setValue(QStringLiteral("protocol"), QStringLiteral("webdav"));
-    settings.setValue(QStringLiteral("port"), 443);
-    settings.setValue(QStringLiteral("initialLocalPath"), QString());
-    settings.setValue(QStringLiteral("initialRemotePath"), QStringLiteral("/"));
-    settings.setValue(QStringLiteral("rememberLastPaths"), false);
-    settings.setValue(QStringLiteral("scpTransferMode"),
-                      QStringLiteral("auto"));
-    settings.setValue(QStringLiteral("ftpsMode"), QStringLiteral("auto"));
-    settings.setValue(QStringLiteral("webdavBasePath"), QStringLiteral("/"));
-    settings.endArray();
-    settings.sync();
-
-    const auto loaded = SavedSitesPersistence::loadSites();
-    test.check(loaded.sites.size() == 1 &&
-                   !loaded.sites.front().opt.webdav_verify_peer &&
-                   loaded.sites.front().opt.webdav_ca_cert_path ==
-                       std::optional<std::string>("/configured/ca.pem"),
-               "legacy WebDAV sites should inherit both configured TLS "
-               "defaults");
 }
 
 } // namespace

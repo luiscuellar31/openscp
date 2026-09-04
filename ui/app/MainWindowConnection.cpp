@@ -152,7 +152,6 @@ bool sameSavedSiteIdentity(const openscp::SessionOptions &a,
 struct QuickSitesLoadResult {
     QVector<SiteEntry> sites;
     bool needsSave = false;
-    SiteCredentialMigrationResult legacyMigration;
 };
 
 QuickSitesLoadResult loadSavedSitesForQuickConnect() {
@@ -162,14 +161,12 @@ QuickSitesLoadResult loadSavedSitesForQuickConnect() {
     QuickSitesLoadResult result;
     result.sites = loaded.sites;
     result.needsSave = loaded.needsSave;
-    result.legacyMigration =
-        SiteCredentialRepository::migrateLegacyPlaintext(loaded);
     return result;
 }
 
 SavedSitesPersistence::SaveResult
 saveSavedSitesForQuickConnect(const QVector<SiteEntry> &sites) {
-    return SavedSitesPersistence::saveSites(sites, true);
+    return SavedSitesPersistence::saveSites(sites);
 }
 
 QString defaultQuickSiteName(const openscp::SessionOptions &opt) {
@@ -573,16 +570,6 @@ void MainWindow::persistActiveSitePaths() {
         remotePath = QStringLiteral("/");
 
     const auto loaded = SavedSitesPersistence::loadSites();
-    const SiteCredentialMigrationResult migration =
-        SiteCredentialRepository::migrateLegacyPlaintext(loaded);
-    if (!migration.complete) {
-        UiAlerts::warning(
-            this, tr("Paths not saved"),
-            tr("The last paths could not be saved because one or more legacy "
-               "credentials could not be moved to the secure backend:\n%1")
-                .arg(migration.issues.join(QLatin1Char('\n'))));
-        return;
-    }
     QVector<SiteEntry> sites = loaded.sites;
     bool updated = false;
     for (SiteEntry &site : sites) {
@@ -595,7 +582,7 @@ void MainWindow::persistActiveSitePaths() {
         break;
     }
     if (updated) {
-        const auto saveResult = SavedSitesPersistence::saveSites(sites, true);
+        const auto saveResult = SavedSitesPersistence::saveSites(sites);
         if (!saveResult.ok) {
             UiAlerts::warning(this, tr("Paths not saved"), saveResult.error);
         }
@@ -1370,22 +1357,6 @@ void MainWindow::maybePersistQuickConnectSite(
         sites.push_back(newEntry);
         matchIndex = static_cast<int>(sites.size() - 1);
         created = true;
-    }
-
-    if ((created || loadedSites.needsSave) &&
-        !loadedSites.legacyMigration.complete) {
-        UiAlerts::warning(
-            this, tr("Site not saved"),
-            tr("OpenSCP connected, but it did not rewrite saved sites because "
-               "one or more legacy credentials could not be moved to the "
-               "secure backend:\n%1")
-                .arg(loadedSites.legacyMigration.issues.join(
-                    QLatin1Char('\n'))));
-        statusBar()->showMessage(connectionEstablished
-                                     ? tr("Connected. Site was not saved.")
-                                     : tr("Site was not saved."),
-                                 6000);
-        return;
     }
 
     if (created || loadedSites.needsSave) {

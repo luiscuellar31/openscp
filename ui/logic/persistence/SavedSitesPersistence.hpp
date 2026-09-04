@@ -9,15 +9,6 @@
 
 namespace SavedSitesPersistence {
 
-// Plaintext credentials were used by early OpenSCP versions inside each
-// QSettings site entry. They are exposed only transiently while loading so the
-// credential repository can migrate them before rewriting the array.
-struct LegacySecret {
-    int siteIndex = -1;
-    QString item;
-    QString value;
-};
-
 struct LoadOptions {
     // Trim site names on read (used by quick-connect identity matching).
     bool trimSiteNames = false;
@@ -27,7 +18,6 @@ struct LoadOptions {
 
 struct LoadResult {
     QVector<SiteEntry> sites;
-    QVector<LegacySecret> legacySecrets;
     bool needsSave = false;
 };
 
@@ -40,6 +30,6 @@ struct SaveResult {
 
 [[nodiscard]] QString createSiteId();
 LoadResult loadSites(const LoadOptions &options = {});
-SaveResult saveSites(const QVector<SiteEntry> &sites, bool syncToDisk);
+SaveResult saveSites(const QVector<SiteEntry> &sites);
 
 } // namespace SavedSitesPersistence

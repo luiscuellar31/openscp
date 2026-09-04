@@ -50,5 +50,4 @@ class SiteManagerDialog : public QDialog {
     QPushButton *btDel_ = nullptr;
     QPushButton *btConn_ = nullptr;
     QPushButton *btClose_ = nullptr;
-    bool legacySecretMigrationBlocked_ = false;
 };

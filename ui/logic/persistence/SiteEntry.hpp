@@ -11,7 +11,7 @@ struct SiteEntry {
     openscp::SessionOptions opt;
     // An empty local path means the platform home/current directory.
     QString initialLocalPath;
-    // The remote namespace is always rooted; legacy entries migrate to "/".
+    // The remote namespace is always rooted.
     QString initialRemotePath = QStringLiteral("/");
     bool rememberLastPaths = false;
 };

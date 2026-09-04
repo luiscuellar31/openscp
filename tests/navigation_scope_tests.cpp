@@ -56,14 +56,14 @@ OPENSCP_TEST(testEndpointIsolation, test) {
 }
 
 OPENSCP_TEST(testSavedSiteScope, test) {
-    const QString rawId = QStringLiteral(" legacy/site\\id ");
+    const QString rawId = QStringLiteral(" malformed/site\\id ");
     const QString scope = openscpui::savedSiteNavigationScope(rawId);
     test.check(scope.startsWith(QStringLiteral("site-")) && scope.size() == 37,
                "saved-site scopes should be opaque fixed-length identifiers");
-    test.check(!scope.contains(QStringLiteral("legacy")) &&
+    test.check(!scope.contains(QStringLiteral("malformed")) &&
                    !scope.contains(QLatin1Char('/')) &&
                    !scope.contains(QLatin1Char('\\')),
-               "legacy site IDs must not create nested QSettings paths");
+               "unsafe site IDs must not create nested QSettings paths");
     test.check(openscpui::savedSiteNavigationScope(rawId.trimmed()) == scope,
                "surrounding whitespace should not split a saved-site scope");
     test.check(openscpui::savedSiteNavigationScope(QStringLiteral("other")) !=

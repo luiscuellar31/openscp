@@ -1,7 +1,6 @@
 #include "logic/transfers/TransferQueuePersistence.hpp"
 
 #include <QCoreApplication>
-#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileDevice>
@@ -13,8 +12,6 @@
 #include <QSaveFile>
 #include <QSet>
 
-#include <algorithm>
-#include <cmath>
 #include <limits>
 #include <optional>
 
@@ -100,26 +97,35 @@ std::optional<TransferPhase> phaseFromName(const QString &name) {
 }
 
 std::optional<quint64> parseTaskId(const QJsonValue &value) {
+    if (!value.isString())
+        return std::nullopt;
     bool parsedSuccessfully = false;
-    quint64 parsed = 0;
-    if (value.isString()) {
-        parsed = value.toString().toULongLong(&parsedSuccessfully);
-    } else if (value.isDouble()) {
-        const double number = value.toDouble(-1);
-        // JSON numbers are IEEE-754 doubles. Accept legacy numeric IDs only
-        // while they are positive, integral and exactly representable.
-        constexpr double maxExactJsonInteger = 9007199254740991.0;
-        if (std::isfinite(number) && number > 0 &&
-            number <= maxExactJsonInteger && std::trunc(number) == number) {
-            parsed = static_cast<quint64>(number);
-            parsedSuccessfully = true;
-        }
-    }
+    const quint64 parsed = value.toString().toULongLong(&parsedSuccessfully);
     constexpr quint64 maxRestorableId =
         static_cast<quint64>((std::numeric_limits<qint64>::max)()) - 1;
     return parsedSuccessfully && parsed != 0 && parsed <= maxRestorableId
                ? std::optional<quint64>(parsed)
                : std::nullopt;
+}
+
+bool hasCurrentTaskFormat(const QJsonObject &object) {
+    return object.value(QStringLiteral("id")).isString() &&
+           object.value(QStringLiteral("batchId")).isString() &&
+           object.value(QStringLiteral("type")).isString() &&
+           object.value(QStringLiteral("sessionKey")).isString() &&
+           object.value(QStringLiteral("source")).isString() &&
+           object.value(QStringLiteral("destination")).isString() &&
+           object.value(QStringLiteral("resumeHint")).isBool() &&
+           object.value(QStringLiteral("speedLimitKBps")).isDouble() &&
+           object.value(QStringLiteral("attempts")).isDouble() &&
+           object.value(QStringLiteral("maxAttempts")).isDouble() &&
+           object.value(QStringLiteral("operation")).isString() &&
+           object.value(QStringLiteral("conflictPolicy")).isString() &&
+           object.value(QStringLiteral("phase")).isString() &&
+           object.value(QStringLiteral("commitUncertain")).isBool() &&
+           object.value(QStringLiteral("queuedAtMs")).isString() &&
+           (!object.contains(QStringLiteral("dependsOnTaskId")) ||
+            object.value(QStringLiteral("dependsOnTaskId")).isString());
 }
 
 QString typeName(TransferTask::Type type) {
@@ -169,29 +175,16 @@ std::optional<TransferTask> deserializeTask(const QJsonObject &object,
                                             const QString &currentSessionKey) {
     const auto type =
         typeFromName(object.value(QStringLiteral("type")).toString());
-    const QJsonValue operationValue = object.value(QStringLiteral("operation"));
     const auto operation =
-        operationValue.isUndefined()
-            ? std::optional<TransferOperation>(TransferOperation::Copy)
-            : operationFromName(operationValue.toString());
-    const QJsonValue conflictPolicyValue =
-        object.value(QStringLiteral("conflictPolicy"));
-    const auto conflictPolicy =
-        conflictPolicyValue.isUndefined()
-            ? std::optional<Policy>(Policy::Ask)
-            : policyFromName(conflictPolicyValue.toString());
-    const QJsonValue phaseValue = object.value(QStringLiteral("phase"));
+        operationFromName(object.value(QStringLiteral("operation")).toString());
+    const auto conflictPolicy = policyFromName(
+        object.value(QStringLiteral("conflictPolicy")).toString());
     const auto phase =
-        phaseValue.isUndefined()
-            ? std::optional<TransferPhase>(TransferPhase::Transfer)
-            : phaseFromName(phaseValue.toString());
+        phaseFromName(object.value(QStringLiteral("phase")).toString());
     if (!type || !operation || !conflictPolicy || !phase)
         return std::nullopt;
 
-    const QJsonValue batchIdValue = object.value(QStringLiteral("batchId"));
-    const auto batchId = batchIdValue.isUndefined()
-                             ? std::optional<quint64>(taskId)
-                             : parseTaskId(batchIdValue);
+    const auto batchId = parseTaskId(object.value(QStringLiteral("batchId")));
     if (!batchId)
         return std::nullopt;
 
@@ -205,6 +198,20 @@ std::optional<TransferTask> deserializeTask(const QJsonObject &object,
         dependencyId = *parsedDependency;
     }
 
+    const int attempts = object.value(QStringLiteral("attempts")).toInt(-1);
+    const int maxAttempts =
+        object.value(QStringLiteral("maxAttempts")).toInt(-1);
+    const int speedLimit =
+        object.value(QStringLiteral("speedLimitKBps")).toInt(-1);
+    bool validQueuedAt = false;
+    const qint64 queuedAt = object.value(QStringLiteral("queuedAtMs"))
+                                .toString()
+                                .toLongLong(&validQueuedAt);
+    if (attempts < 0 || maxAttempts <= 0 || attempts > maxAttempts ||
+        speedLimit < 0 || !validQueuedAt || queuedAt <= 0) {
+        return std::nullopt;
+    }
+
     TransferTask task{};
     task.type = *type;
     task.taskId = taskId;
@@ -213,12 +220,10 @@ std::optional<TransferTask> deserializeTask(const QJsonObject &object,
     task.sessionKey = object.value(QStringLiteral("sessionKey")).toString();
     task.src = object.value(QStringLiteral("source")).toString();
     task.dst = object.value(QStringLiteral("destination")).toString();
-    task.resumeHint = object.value(QStringLiteral("resumeHint")).toBool(false);
-    task.speedLimitKBps =
-        std::max(0, object.value(QStringLiteral("speedLimitKBps")).toInt());
-    task.attempts =
-        std::clamp(object.value(QStringLiteral("attempts")).toInt(), 0, 3);
-    task.maxAttempts = 3;
+    task.resumeHint = object.value(QStringLiteral("resumeHint")).toBool();
+    task.speedLimitKBps = speedLimit;
+    task.attempts = attempts;
+    task.maxAttempts = maxAttempts;
     task.operation = *operation;
     task.conflictPolicy = *conflictPolicy;
     task.postAction = task.operation == TransferOperation::Move
@@ -226,11 +231,8 @@ std::optional<TransferTask> deserializeTask(const QJsonObject &object,
                           : TransferPostAction::None;
     task.phase = *phase;
     task.commitUncertain =
-        object.value(QStringLiteral("commitUncertain")).toBool(false);
-    task.queuedAtMs =
-        object.value(QStringLiteral("queuedAtMs")).toVariant().toLongLong();
-    if (task.queuedAtMs <= 0)
-        task.queuedAtMs = QDateTime::currentMSecsSinceEpoch();
+        object.value(QStringLiteral("commitUncertain")).toBool();
+    task.queuedAtMs = queuedAt;
     task.restored = true;
     task.status = !currentSessionKey.isEmpty() && !task.sessionKey.isEmpty() &&
                           task.sessionKey != currentSessionKey
@@ -344,6 +346,10 @@ TransferQueuePersistence::load(const QString &path,
             return result;
         }
         const QJsonObject object = value.toObject();
+        if (!hasCurrentTaskFormat(object)) {
+            markCorrupt(result);
+            return result;
+        }
         const auto taskId = parseTaskId(object.value(QStringLiteral("id")));
         if (!taskId || taskIds.contains(*taskId)) {
             markCorrupt(result);

@@ -89,7 +89,7 @@ OPENSCP_TEST(test_session_defaults, t) {
     t.check(o.webdav_verify_peer,
             "WebDAV TLS verification should default to enabled");
     t.check(o.ftps_mode == openscp::FtpsMode::Auto,
-            "default FTPS mode should preserve legacy auto behavior");
+            "default FTPS mode should use automatic negotiation");
     t.check((std::is_same_v<decltype(o.password),
                             std::optional<openscp::SecureString>>),
             "session passwords should use SecureString storage");
