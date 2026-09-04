@@ -1,5 +1,5 @@
-#include "RemoteActionController.hpp"
 #include "TestHarness.hpp"
+#include "logic/remote/RemoteActionController.hpp"
 
 #include <QCoreApplication>
 

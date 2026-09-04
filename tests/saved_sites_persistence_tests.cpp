@@ -1,6 +1,6 @@
-#include "AppSettings.hpp"
-#include "SavedSitesPersistence.hpp"
 #include "TestHarness.hpp"
+#include "logic/common/AppSettings.hpp"
+#include "logic/persistence/SavedSitesPersistence.hpp"
 
 #include <QCoreApplication>
 #include <QFileInfo>

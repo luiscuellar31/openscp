@@ -1,8 +1,8 @@
 // Data-model tests for remote listings. The model must remain independent of
 // network clients and expose stable Qt model semantics while controller jobs
 // run elsewhere.
-#include "RemoteModel.hpp"
 #include "TestHarness.hpp"
+#include "logic/remote/RemoteModel.hpp"
 
 #include <QCoreApplication>
 #include <QMimeData>

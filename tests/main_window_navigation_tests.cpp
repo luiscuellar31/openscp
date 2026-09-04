@@ -1,10 +1,10 @@
-#include "AppSettings.hpp"
-#include "DragAwareTreeView.hpp"
-#include "MainWindow.hpp"
-#include "PathNavigationBar.hpp"
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
-#include "ToolbarKeyboardNavigation.hpp"
+#include "app/MainWindow.hpp"
+#include "logic/common/AppSettings.hpp"
+#include "widgets/common/ToolbarKeyboardNavigation.hpp"
+#include "widgets/files/DragAwareTreeView.hpp"
+#include "widgets/navigation/PathNavigationBar.hpp"
 
 #include <QAction>
 #include <QApplication>

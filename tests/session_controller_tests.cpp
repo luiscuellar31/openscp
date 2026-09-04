@@ -1,5 +1,5 @@
-#include "SessionController.hpp"
 #include "TestHarness.hpp"
+#include "logic/connections/SessionController.hpp"
 
 #include <QCoreApplication>
 

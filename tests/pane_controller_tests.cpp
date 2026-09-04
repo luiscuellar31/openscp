@@ -1,5 +1,5 @@
-#include "PaneController.hpp"
 #include "TestHarness.hpp"
+#include "logic/navigation/PaneController.hpp"
 
 #include <QCoreApplication>
 

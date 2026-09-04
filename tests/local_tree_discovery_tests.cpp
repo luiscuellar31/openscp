@@ -1,6 +1,6 @@
-#include "LocalTreeDiscovery.hpp"
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
+#include "logic/remote/LocalTreeDiscovery.hpp"
 
 #include <QCoreApplication>
 #include <QDir>

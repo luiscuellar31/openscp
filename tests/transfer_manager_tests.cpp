@@ -1,8 +1,8 @@
 // Transfer queue tests without an external test framework.
-#include "ConflictCoordinator.hpp"
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
-#include "TransferManager.hpp"
+#include "logic/transfers/ConflictCoordinator.hpp"
+#include "logic/transfers/TransferManager.hpp"
 #include "openscp/MockSftpClient.hpp"
 
 #include <QCoreApplication>

@@ -1,7 +1,7 @@
-#include "MainWindowSharedUtils.hpp"
-#include "RemotePath.hpp"
 #include "TestHarness.hpp"
-#include "UiFormatters.hpp"
+#include "logic/common/MainWindowSharedUtils.hpp"
+#include "logic/common/UiFormatters.hpp"
+#include "logic/navigation/RemotePath.hpp"
 
 #include <QCoreApplication>
 

@@ -1,7 +1,7 @@
 // Unit tests for the serialized remote-operation execution lane.
 #include "QtTestSupport.hpp"
-#include "RemoteOperationController.hpp"
 #include "TestHarness.hpp"
+#include "logic/remote/RemoteOperationController.hpp"
 #include "openscp/RemoteClient.hpp"
 
 #include <QCoreApplication>

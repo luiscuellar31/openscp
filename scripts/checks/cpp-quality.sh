@@ -90,7 +90,7 @@ uncatalogued_settings_keys="$(
 )"
 if [[ -n "$uncatalogued_settings_keys" ]]; then
     printf '%s\n' \
-        "Fixed QSettings paths must be declared in ui/AppSettings.hpp:" \
+        "Fixed QSettings paths must be declared in ui/logic/common/AppSettings.hpp:" \
         "$uncatalogued_settings_keys" >&2
     exit 1
 fi

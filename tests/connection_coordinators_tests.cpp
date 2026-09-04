@@ -1,7 +1,7 @@
-#include "ConnectionStatusCoordinator.hpp"
-#include "HostKeyPromptCoordinator.hpp"
-#include "SessionHealthMonitor.hpp"
 #include "TestHarness.hpp"
+#include "logic/connections/ConnectionStatusCoordinator.hpp"
+#include "logic/connections/HostKeyPromptCoordinator.hpp"
+#include "logic/connections/SessionHealthMonitor.hpp"
 
 #include <QCoreApplication>
 #include <QVector>

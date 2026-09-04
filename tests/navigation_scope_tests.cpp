@@ -1,5 +1,5 @@
-#include "NavigationScope.hpp"
 #include "TestHarness.hpp"
+#include "logic/navigation/NavigationScope.hpp"
 
 #include <QCoreApplication>
 

@@ -1,6 +1,6 @@
-#include "SavedSitesPersistence.hpp"
-#include "SiteManagerDialog.hpp"
 #include "TestHarness.hpp"
+#include "logic/persistence/SavedSitesPersistence.hpp"
+#include "widgets/dialogs/SiteManagerDialog.hpp"
 
 #include <QApplication>
 #include <QLabel>

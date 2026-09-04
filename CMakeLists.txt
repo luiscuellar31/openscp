@@ -264,9 +264,9 @@ endif()
 add_subdirectory(core)
 
 add_library(openscp_sync_logic STATIC
-    ui/SyncTypes.hpp
-    ui/SyncComparisonEngine.hpp
-    ui/SyncComparisonEngine.cpp
+    ui/sync/SyncTypes.hpp
+    ui/sync/SyncComparisonEngine.hpp
+    ui/sync/SyncComparisonEngine.cpp
 )
 
 target_include_directories(openscp_sync_logic
@@ -276,66 +276,69 @@ target_include_directories(openscp_sync_logic
 target_link_libraries(openscp_sync_logic PUBLIC Qt6::Core)
 
 add_library(openscp_ui_logic STATIC
-    ui/AppSettings.hpp
-    ui/AppSettings.cpp
-    ui/ConnectionStatusCoordinator.hpp
-    ui/ConnectionStatusCoordinator.cpp
-    ui/HostKeyPromptCoordinator.hpp
-    ui/HostKeyPromptCoordinator.cpp
-    ui/RemotePath.hpp
-    ui/RemotePath.cpp
-    ui/MainWindowSharedUtils.hpp
-    ui/MainWindowSharedUtils.cpp
-    ui/NavigationScope.hpp
-    ui/NavigationScope.cpp
-    ui/NavigationStore.hpp
-    ui/NavigationStore.cpp
-    ui/PathNavigationModel.hpp
-    ui/PathNavigationModel.cpp
-    ui/PaneController.hpp
-    ui/PaneController.cpp
-    ui/RemoteActionController.hpp
-    ui/RemoteActionController.cpp
-    ui/SessionController.hpp
-    ui/SessionController.cpp
-    ui/SessionHealthMonitor.hpp
-    ui/SessionHealthMonitor.cpp
-    ui/TerminalCommandBuilder.hpp
-    ui/TerminalCommandBuilder.cpp
-    ui/TransferUiController.hpp
-    ui/TransferUiController.cpp
-    ui/RemoteOperationController.hpp
-    ui/RemoteOperationController.cpp
-    ui/RemoteOperationTypes.hpp
-    ui/RemoteTreeWalker.hpp
-    ui/RemoteTreeWalker.cpp
-    ui/LocalTreeDiscovery.hpp
-    ui/LocalTreeDiscovery.cpp
-    ui/SyncCoordinator.hpp
-    ui/SyncCoordinator.cpp
-    ui/SavedSitesPersistence.hpp
-    ui/SavedSitesPersistence.cpp
-    ui/SiteCredentialRepository.hpp
-    ui/SiteCredentialRepository.cpp
-    ui/SecretStore.hpp
-    ui/SecretStore.cpp
-    ui/UiAlerts.hpp
-    ui/UiAlerts.cpp
-    ui/UiFormatters.hpp
-    ui/UiFormatters.cpp
-    ui/RemoteModel.hpp
-    ui/RemoteModel.cpp
-    ui/TransferManager.hpp
-    ui/TransferManager.cpp
-    ui/TransferTypes.hpp
-    ui/BandwidthLimiter.hpp
-    ui/BandwidthLimiter.cpp
-    ui/TransferQueuePersistence.hpp
-    ui/TransferQueuePersistence.cpp
-    ui/TransferQueue.hpp
-    ui/TransferQueue.cpp
-    ui/TransferExecutor.hpp
-    ui/TransferExecutor.cpp
+    ui/logic/common/AppSettings.hpp
+    ui/logic/common/AppSettings.cpp
+    ui/logic/common/MainWindowSharedUtils.hpp
+    ui/logic/common/MainWindowSharedUtils.cpp
+    ui/logic/common/TimeUtils.hpp
+    ui/logic/common/UiAlerts.hpp
+    ui/logic/common/UiAlerts.cpp
+    ui/logic/common/UiFormatters.hpp
+    ui/logic/common/UiFormatters.cpp
+    ui/logic/connections/ConnectionStatusCoordinator.hpp
+    ui/logic/connections/ConnectionStatusCoordinator.cpp
+    ui/logic/connections/HostKeyPromptCoordinator.hpp
+    ui/logic/connections/HostKeyPromptCoordinator.cpp
+    ui/logic/connections/SessionController.hpp
+    ui/logic/connections/SessionController.cpp
+    ui/logic/connections/SessionHealthMonitor.hpp
+    ui/logic/connections/SessionHealthMonitor.cpp
+    ui/logic/connections/TerminalCommandBuilder.hpp
+    ui/logic/connections/TerminalCommandBuilder.cpp
+    ui/logic/navigation/NavigationScope.hpp
+    ui/logic/navigation/NavigationScope.cpp
+    ui/logic/navigation/NavigationStore.hpp
+    ui/logic/navigation/NavigationStore.cpp
+    ui/logic/navigation/PaneController.hpp
+    ui/logic/navigation/PaneController.cpp
+    ui/logic/navigation/PathNavigationModel.hpp
+    ui/logic/navigation/PathNavigationModel.cpp
+    ui/logic/navigation/RemotePath.hpp
+    ui/logic/navigation/RemotePath.cpp
+    ui/logic/persistence/SavedSitesPersistence.hpp
+    ui/logic/persistence/SavedSitesPersistence.cpp
+    ui/logic/persistence/SecretStore.hpp
+    ui/logic/persistence/SecretStore.cpp
+    ui/logic/persistence/SiteCredentialRepository.hpp
+    ui/logic/persistence/SiteCredentialRepository.cpp
+    ui/logic/persistence/SiteEntry.hpp
+    ui/logic/remote/LocalTreeDiscovery.hpp
+    ui/logic/remote/LocalTreeDiscovery.cpp
+    ui/logic/remote/RemoteActionController.hpp
+    ui/logic/remote/RemoteActionController.cpp
+    ui/logic/remote/RemoteModel.hpp
+    ui/logic/remote/RemoteModel.cpp
+    ui/logic/remote/RemoteOperationController.hpp
+    ui/logic/remote/RemoteOperationController.cpp
+    ui/logic/remote/RemoteOperationTypes.hpp
+    ui/logic/remote/RemoteTreeWalker.hpp
+    ui/logic/remote/RemoteTreeWalker.cpp
+    ui/logic/sync/SyncCoordinator.hpp
+    ui/logic/sync/SyncCoordinator.cpp
+    ui/logic/transfers/BandwidthLimiter.hpp
+    ui/logic/transfers/BandwidthLimiter.cpp
+    ui/logic/transfers/ConflictCoordinator.hpp
+    ui/logic/transfers/TransferExecutor.hpp
+    ui/logic/transfers/TransferExecutor.cpp
+    ui/logic/transfers/TransferManager.hpp
+    ui/logic/transfers/TransferManager.cpp
+    ui/logic/transfers/TransferQueue.hpp
+    ui/logic/transfers/TransferQueue.cpp
+    ui/logic/transfers/TransferQueuePersistence.hpp
+    ui/logic/transfers/TransferQueuePersistence.cpp
+    ui/logic/transfers/TransferTypes.hpp
+    ui/logic/transfers/TransferUiController.hpp
+    ui/logic/transfers/TransferUiController.cpp
 )
 
 target_include_directories(openscp_ui_logic
@@ -352,54 +355,53 @@ target_link_libraries(openscp_ui_logic
 )
 
 add_library(openscp_ui_widgets STATIC
-    ui/InputModalityTracker.hpp
-    ui/InputModalityTracker.cpp
-    ui/FocusTraversalController.hpp
-    ui/FocusTraversalController.cpp
-    ui/KeyboardFocusIndicator.hpp
-    ui/KeyboardFocusIndicator.cpp
-    ui/PlatformFilePicker.hpp
-    ui/PlatformFilePicker_p.hpp
-    ui/PlatformFilePicker.cpp
-    ui/PlatformPathActions.hpp
-    ui/PlatformPathActions_p.hpp
-    ui/PlatformPathActions.cpp
-    ui/OpenPathDialog.hpp
-    ui/OpenPathDialog.cpp
-    ui/PathNavigationBar.hpp
-    ui/PathNavigationBar.cpp
-    ui/ToolbarKeyboardNavigation.hpp
-    ui/ToolbarKeyboardNavigation.cpp
-    ui/SyncDialog.hpp
-    ui/SyncDialog.cpp
-    ui/DragAwareTreeView.hpp
-    ui/DragAwareTreeView.cpp
-    ui/ConnectionDialog.hpp
-    ui/ConnectionDialog.cpp
-    ui/PermissionsDialog.hpp
-    ui/PermissionsDialog.cpp
-    ui/TransferQueueDialog.hpp
-    ui/TransferQueueDialog.cpp
-    ui/SiteManagerDialog.hpp
-    ui/SiteManagerDialog.cpp
-    ui/SiteEntry.hpp
-    ui/SettingsDialog.hpp
-    ui/SettingsDialog.cpp
-    ui/AboutDialog.hpp
-    ui/AboutDialog.cpp
+    ui/widgets/common/FocusTraversalController.hpp
+    ui/widgets/common/FocusTraversalController.cpp
+    ui/widgets/common/InputModalityTracker.hpp
+    ui/widgets/common/InputModalityTracker.cpp
+    ui/widgets/common/KeyboardFocusIndicator.hpp
+    ui/widgets/common/KeyboardFocusIndicator.cpp
+    ui/widgets/common/ToolbarKeyboardNavigation.hpp
+    ui/widgets/common/ToolbarKeyboardNavigation.cpp
+    ui/widgets/dialogs/AboutDialog.hpp
+    ui/widgets/dialogs/AboutDialog.cpp
+    ui/widgets/dialogs/ConnectionDialog.hpp
+    ui/widgets/dialogs/ConnectionDialog.cpp
+    ui/widgets/dialogs/PermissionsDialog.hpp
+    ui/widgets/dialogs/PermissionsDialog.cpp
+    ui/widgets/dialogs/SettingsDialog.hpp
+    ui/widgets/dialogs/SettingsDialog.cpp
+    ui/widgets/dialogs/SiteManagerDialog.hpp
+    ui/widgets/dialogs/SiteManagerDialog.cpp
+    ui/widgets/dialogs/SyncDialog.hpp
+    ui/widgets/dialogs/SyncDialog.cpp
+    ui/widgets/dialogs/TransferQueueDialog.hpp
+    ui/widgets/dialogs/TransferQueueDialog.cpp
+    ui/widgets/files/DragAwareTreeView.hpp
+    ui/widgets/files/DragAwareTreeView.cpp
+    ui/widgets/navigation/OpenPathDialog.hpp
+    ui/widgets/navigation/OpenPathDialog.cpp
+    ui/widgets/navigation/PathNavigationBar.hpp
+    ui/widgets/navigation/PathNavigationBar.cpp
+    ui/widgets/platform/PlatformFilePicker.hpp
+    ui/widgets/platform/PlatformFilePicker_p.hpp
+    ui/widgets/platform/PlatformFilePicker.cpp
+    ui/widgets/platform/PlatformPathActions.hpp
+    ui/widgets/platform/PlatformPathActions_p.hpp
+    ui/widgets/platform/PlatformPathActions.cpp
 )
 
 if(APPLE)
     target_sources(openscp_ui_widgets PRIVATE
-        ui/PlatformFilePicker_mac.mm)
+        ui/widgets/platform/PlatformFilePicker_mac.mm)
     target_link_libraries(openscp_ui_widgets PRIVATE "-framework AppKit")
 elseif(WIN32)
     target_sources(openscp_ui_widgets PRIVATE
-        ui/PlatformFilePicker_win.cpp)
+        ui/widgets/platform/PlatformFilePicker_win.cpp)
     target_link_libraries(openscp_ui_widgets PRIVATE Ole32 Shell32)
 else()
     target_sources(openscp_ui_widgets PRIVATE
-        ui/PlatformFilePicker_qt.cpp)
+        ui/widgets/platform/PlatformFilePicker_qt.cpp)
 endif()
 
 target_include_directories(openscp_ui_widgets
@@ -415,13 +417,13 @@ target_link_libraries(openscp_ui_widgets
 )
 
 add_library(openscp_main_window STATIC
-    ui/MainWindow.hpp
-    ui/MainWindow.cpp
-    ui/MainWindowConnection.cpp
-    ui/MainWindowLocalOps.cpp
-    ui/MainWindowRemoteOps.cpp
-    ui/MainWindowSync.cpp
-    ui/MainWindowTransfers.cpp
+    ui/app/MainWindow.hpp
+    ui/app/MainWindow.cpp
+    ui/app/MainWindowConnection.cpp
+    ui/app/MainWindowLocalOps.cpp
+    ui/app/MainWindowRemoteOps.cpp
+    ui/app/MainWindowSync.cpp
+    ui/app/MainWindowTransfers.cpp
 )
 
 target_include_directories(openscp_main_window
@@ -433,7 +435,7 @@ target_link_libraries(openscp_main_window
 )
 
 add_executable(openscp
-    ui/main.cpp
+    ui/app/main.cpp
 )
 
 # Libsecret (Linux): link if available to store secrets securely
@@ -458,7 +460,8 @@ if (OPENSCP_BUILD_TESTS)
 endif()
 
 # Generate a header with the application version from CMake project version
-configure_file(ui/AppVersion.hpp.in ${CMAKE_CURRENT_BINARY_DIR}/AppVersion.hpp @ONLY)
+configure_file(ui/app/AppVersion.hpp.in
+               ${CMAKE_CURRENT_BINARY_DIR}/AppVersion.hpp @ONLY)
 
 target_include_directories(openscp PRIVATE
     ${CMAKE_SOURCE_DIR}/core/include

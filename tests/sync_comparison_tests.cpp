@@ -1,6 +1,6 @@
 // Pure comparison/filter/planning tests.
-#include "SyncComparisonEngine.hpp"
 #include "TestHarness.hpp"
+#include "sync/SyncComparisonEngine.hpp"
 
 #include <QCoreApplication>
 

@@ -1,6 +1,6 @@
-#include "PlatformPathActions.hpp"
-#include "PlatformPathActions_p.hpp"
 #include "TestHarness.hpp"
+#include "widgets/platform/PlatformPathActions.hpp"
+#include "widgets/platform/PlatformPathActions_p.hpp"
 
 #include <QCoreApplication>
 #include <QDir>

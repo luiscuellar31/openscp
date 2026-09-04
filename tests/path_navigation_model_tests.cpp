@@ -1,5 +1,5 @@
-#include "PathNavigationModel.hpp"
 #include "TestHarness.hpp"
+#include "logic/navigation/PathNavigationModel.hpp"
 
 #include <QCoreApplication>
 #include <QDir>

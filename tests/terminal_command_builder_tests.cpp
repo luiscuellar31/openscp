@@ -1,5 +1,5 @@
-#include "TerminalCommandBuilder.hpp"
 #include "TestHarness.hpp"
+#include "logic/connections/TerminalCommandBuilder.hpp"
 
 #include <QCoreApplication>
 

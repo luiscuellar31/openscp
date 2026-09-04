@@ -1,11 +1,11 @@
-#include "ConnectionDialog.hpp"
-#include "DragAwareTreeView.hpp"
-#include "PathNavigationBar.hpp"
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
-#include "ToolbarKeyboardNavigation.hpp"
-#include "TransferManager.hpp"
-#include "TransferQueueDialog.hpp"
+#include "logic/transfers/TransferManager.hpp"
+#include "widgets/common/ToolbarKeyboardNavigation.hpp"
+#include "widgets/dialogs/ConnectionDialog.hpp"
+#include "widgets/dialogs/TransferQueueDialog.hpp"
+#include "widgets/files/DragAwareTreeView.hpp"
+#include "widgets/navigation/PathNavigationBar.hpp"
 
 #include <QAccessible>
 #include <QAction>

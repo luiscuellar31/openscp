@@ -1,6 +1,6 @@
-#include "ConnectionDialog.hpp"
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
+#include "widgets/dialogs/ConnectionDialog.hpp"
 
 #include <QApplication>
 #include <QComboBox>

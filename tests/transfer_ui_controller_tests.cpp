@@ -1,5 +1,5 @@
 #include "TestHarness.hpp"
-#include "TransferUiController.hpp"
+#include "logic/transfers/TransferUiController.hpp"
 
 #include <QCoreApplication>
 

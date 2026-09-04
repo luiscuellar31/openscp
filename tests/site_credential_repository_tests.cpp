@@ -1,8 +1,8 @@
-#include "SiteCredentialRepository.hpp"
 #include "TestHarness.hpp"
+#include "logic/persistence/SiteCredentialRepository.hpp"
 
 #ifdef Q_OS_WIN
-#include "AppSettings.hpp"
+#include "logic/common/AppSettings.hpp"
 #endif
 
 #include <QCoreApplication>

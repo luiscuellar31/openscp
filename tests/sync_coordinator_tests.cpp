@@ -1,8 +1,8 @@
 #include "QtTestSupport.hpp"
-#include "RemoteOperationController.hpp"
-#include "SyncCoordinator.hpp"
 #include "TestHarness.hpp"
-#include "TransferManager.hpp"
+#include "logic/remote/RemoteOperationController.hpp"
+#include "logic/sync/SyncCoordinator.hpp"
+#include "logic/transfers/TransferManager.hpp"
 #include "openscp/MockSftpClient.hpp"
 
 #include <QCoreApplication>

@@ -1,5 +1,5 @@
-#include "NavigationStore.hpp"
 #include "TestHarness.hpp"
+#include "logic/navigation/NavigationStore.hpp"
 
 #include <QCoreApplication>
 #include <QDir>
