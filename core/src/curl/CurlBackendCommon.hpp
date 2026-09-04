@@ -188,14 +188,20 @@ bool configureBaseCurlHandle(CURL *curl, const char *backendLabel,
                              std::optional<long> responseTimeoutSeconds,
                              std::string &err);
 
+enum class CurlUrlScheme { Ftp, Ftps, Http, Https };
+
+bool configureAllowedProtocol(CURL *curl, CurlUrlScheme scheme,
+                              const char *backendLabel, std::string &err);
+
 bool configureProxy(CURL *curl, const SessionOptions &opt,
                     const char *backendLabel, const char *backendKindLabel,
                     std::string &err);
 
-bool configureTlsVerification(CURL *curl, bool verifyPeer,
-                              const std::optional<std::string> &caCertPath,
-                              const char *verificationError,
-                              const char *caPathError, std::string &err);
+bool configureTlsPolicy(CURL *curl, bool verifyPeer,
+                        const std::optional<std::string> &caCertPath,
+                        const char *minimumVersionError,
+                        const char *verificationError, const char *caPathError,
+                        std::string &err);
 
 inline constexpr std::size_t kMaxMetadataResponseBytes = 64 * 1024 * 1024;
 

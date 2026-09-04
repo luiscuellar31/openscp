@@ -140,6 +140,11 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
                                std::string &err) {
     if (!curlcommon::configureBaseCurlHandle(curl, "FTP", false, 30L, err))
         return false;
+    const curlcommon::CurlUrlScheme urlScheme =
+        useImplicitFtps(opt) ? curlcommon::CurlUrlScheme::Ftps
+                             : curlcommon::CurlUrlScheme::Ftp;
+    if (!curlcommon::configureAllowedProtocol(curl, urlScheme, "FTP", err))
+        return false;
 
     const std::string username =
         opt.username.empty() ? std::string("anonymous") : opt.username;
@@ -163,8 +168,9 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
             err = "Could not configure FTPS TLS mode.";
             return false;
         }
-        if (!curlcommon::configureTlsVerification(
+        if (!curlcommon::configureTlsPolicy(
                 curl, opt.ftps_verify_peer, opt.ftps_ca_cert_path,
+                "Could not enforce the FTPS TLS 1.2 minimum.",
                 "Could not configure FTPS certificate verification.",
                 "Could not configure FTPS CA certificate path.", err)) {
             return false;

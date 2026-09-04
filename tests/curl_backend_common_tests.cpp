@@ -18,6 +18,14 @@
 
 namespace {
 
+curl_socket_t rejectSocketOpen(void *userdata, curlsocktype,
+                               struct curl_sockaddr *) {
+    auto *attempts = static_cast<int *>(userdata);
+    if (attempts)
+        ++*attempts;
+    return CURL_SOCKET_BAD;
+}
+
 OPENSCP_TEST(testRetryAfter, test) {
     using openscp::curlcommon::parseRetryAfter;
 
@@ -272,6 +280,90 @@ OPENSCP_TEST(testBoundedStringSink, test) {
                "bounded response sinks should stop oversized responses");
     test.check(sink.limitExceeded && output == "abc",
                "oversized response chunks must not be partially appended");
+}
+
+OPENSCP_TEST(testCurlTransportPolicy, test) {
+    using openscp::curlcommon::configureAllowedProtocol;
+    using openscp::curlcommon::configureTlsPolicy;
+    using openscp::curlcommon::CurlUrlScheme;
+
+    openscp::curlcommon::CurlEasySession session;
+    std::string error;
+    test.check(session.initialize(error),
+               std::string("curl session should initialize: ") + error);
+    if (!session.get())
+        return;
+
+    struct AllowedCase {
+        CurlUrlScheme scheme;
+        const char *url;
+        bool tls;
+    };
+    constexpr AllowedCase allowedCases[] = {
+        {CurlUrlScheme::Ftp, "ftp://127.0.0.1:1/", false},
+        {CurlUrlScheme::Ftps, "ftps://127.0.0.1:1/", true},
+        {CurlUrlScheme::Http, "http://127.0.0.1:1/", false},
+        {CurlUrlScheme::Https, "https://127.0.0.1:1/", true},
+    };
+
+    for (const AllowedCase &allowed : allowedCases) {
+        session.reset();
+        error.clear();
+        const bool protocolConfigured = configureAllowedProtocol(
+            session.get(), allowed.scheme, "test", error);
+        test.check(protocolConfigured,
+                   std::string("allowed protocol should configure: ") + error);
+        if (allowed.tls) {
+            const std::optional<std::string> caPath = "openscp-test-ca.pem";
+            const bool tlsConfigured =
+                configureTlsPolicy(session.get(), true, caPath,
+                                   "Could not enforce test TLS minimum.",
+                                   "Could not configure test TLS verification.",
+                                   "Could not configure test CA path.", error);
+            test.check(tlsConfigured,
+                       std::string("TLS 1.2 policy should configure: ") +
+                           error);
+        }
+
+        int socketAttempts = 0;
+        const bool requestConfigured =
+            curl_easy_setopt(session.get(), CURLOPT_PROXY, "") == CURLE_OK &&
+            curl_easy_setopt(session.get(), CURLOPT_URL, allowed.url) ==
+                CURLE_OK &&
+            curl_easy_setopt(session.get(), CURLOPT_OPENSOCKETFUNCTION,
+                             rejectSocketOpen) == CURLE_OK &&
+            curl_easy_setopt(session.get(), CURLOPT_OPENSOCKETDATA,
+                             &socketAttempts) == CURLE_OK;
+        test.check(requestConfigured,
+                   "transport policy test request should configure");
+        if (!protocolConfigured || !requestConfigured)
+            continue;
+        const CURLcode result = curl_easy_perform(session.get());
+        test.check(result != CURLE_UNSUPPORTED_PROTOCOL && socketAttempts > 0,
+                   "the selected URL scheme should reach socket setup");
+    }
+
+    session.reset();
+    error.clear();
+    const bool restricted = configureAllowedProtocol(
+        session.get(), CurlUrlScheme::Https, "test", error);
+    int blockedSocketAttempts = 0;
+    const bool blockedRequestConfigured =
+        curl_easy_setopt(session.get(), CURLOPT_PROXY, "") == CURLE_OK &&
+        curl_easy_setopt(session.get(), CURLOPT_URL, "ftp://127.0.0.1:1/") ==
+            CURLE_OK &&
+        curl_easy_setopt(session.get(), CURLOPT_OPENSOCKETFUNCTION,
+                         rejectSocketOpen) == CURLE_OK &&
+        curl_easy_setopt(session.get(), CURLOPT_OPENSOCKETDATA,
+                         &blockedSocketAttempts) == CURLE_OK;
+    test.check(restricted && blockedRequestConfigured,
+               "blocked protocol test request should configure");
+    if (restricted && blockedRequestConfigured) {
+        const CURLcode result = curl_easy_perform(session.get());
+        test.check(result == CURLE_UNSUPPORTED_PROTOCOL &&
+                       blockedSocketAttempts == 0,
+                   "a disallowed URL scheme must fail before socket setup");
+    }
 }
 
 OPENSCP_TEST(testCurlTransferLifecycle, test) {

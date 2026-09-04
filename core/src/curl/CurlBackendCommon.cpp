@@ -67,6 +67,36 @@ RemoteError makeRemoteError(RemoteErrorKind kind, std::string message,
     return error;
 }
 
+#if LIBCURL_VERSION_NUM >= 0x075500
+const char *curlProtocolName(CurlUrlScheme scheme) {
+    switch (scheme) {
+    case CurlUrlScheme::Ftp:
+        return "ftp";
+    case CurlUrlScheme::Ftps:
+        return "ftps";
+    case CurlUrlScheme::Http:
+        return "http";
+    case CurlUrlScheme::Https:
+        return "https";
+    }
+    return "";
+}
+#else
+long curlProtocolMask(CurlUrlScheme scheme) {
+    switch (scheme) {
+    case CurlUrlScheme::Ftp:
+        return static_cast<long>(CURLPROTO_FTP);
+    case CurlUrlScheme::Ftps:
+        return static_cast<long>(CURLPROTO_FTPS);
+    case CurlUrlScheme::Http:
+        return static_cast<long>(CURLPROTO_HTTP);
+    case CurlUrlScheme::Https:
+        return static_cast<long>(CURLPROTO_HTTPS);
+    }
+    return 0L;
+}
+#endif
+
 } // namespace
 
 bool ensureCurlInitialized(std::string &err) {
@@ -624,6 +654,32 @@ bool configureBaseCurlHandle(CURL *curl, const char *backendLabel,
     return true;
 }
 
+bool configureAllowedProtocol(CURL *curl, CurlUrlScheme scheme,
+                              const char *backendLabel, std::string &err) {
+    if (!curl) {
+        err = "Could not create CURL handle.";
+        return false;
+    }
+
+    CURLcode result = CURLE_UNKNOWN_OPTION;
+#if LIBCURL_VERSION_NUM >= 0x075500
+    result =
+        curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, curlProtocolName(scheme));
+#else
+    // Ubuntu 22.04 ships curl 7.81, before CURLOPT_PROTOCOLS_STR. Keep the
+    // legacy bitmask isolated to old headers so new builds avoid deprecated
+    // APIs while retaining the same one-scheme policy.
+    result =
+        curl_easy_setopt(curl, CURLOPT_PROTOCOLS, curlProtocolMask(scheme));
+#endif
+    if (result != CURLE_OK) {
+        err = std::string("Could not restrict ") + backendLabel +
+              " client protocol.";
+        return false;
+    }
+    return true;
+}
+
 bool configureProxy(CURL *curl, const SessionOptions &opt,
                     const char *backendLabel, const char *backendKindLabel,
                     std::string &err) {
@@ -701,10 +757,21 @@ bool configureProxy(CURL *curl, const SessionOptions &opt,
     return true;
 }
 
-bool configureTlsVerification(CURL *curl, bool verifyPeer,
-                              const std::optional<std::string> &caCertPath,
-                              const char *verificationError,
-                              const char *caPathError, std::string &err) {
+bool configureTlsPolicy(CURL *curl, bool verifyPeer,
+                        const std::optional<std::string> &caCertPath,
+                        const char *minimumVersionError,
+                        const char *verificationError, const char *caPathError,
+                        std::string &err) {
+    if (!curl) {
+        err = "Could not create CURL handle.";
+        return false;
+    }
+    if (curl_easy_setopt(curl, CURLOPT_SSLVERSION,
+                         static_cast<long>(CURL_SSLVERSION_TLSv1_2)) !=
+        CURLE_OK) {
+        err = minimumVersionError;
+        return false;
+    }
     const long verifyPeerValue = verifyPeer ? 1L : 0L;
     const long verifyHostValue = verifyPeer ? 2L : 0L;
     if (curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, verifyPeerValue) !=

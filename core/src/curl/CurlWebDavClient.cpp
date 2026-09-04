@@ -122,6 +122,12 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
     if (!curlcommon::configureBaseCurlHandle(curl, "WebDAV", true, std::nullopt,
                                              err))
         return false;
+    const WebDavScheme webDavScheme = normalizeWebDavScheme(opt.webdav_scheme);
+    const curlcommon::CurlUrlScheme urlScheme =
+        webDavScheme == WebDavScheme::Https ? curlcommon::CurlUrlScheme::Https
+                                            : curlcommon::CurlUrlScheme::Http;
+    if (!curlcommon::configureAllowedProtocol(curl, urlScheme, "WebDAV", err))
+        return false;
 
     if (!opt.username.empty()) {
         if (curl_easy_setopt(curl, CURLOPT_USERNAME, opt.username.c_str()) !=
@@ -140,9 +146,10 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
         }
     }
 
-    if (normalizeWebDavScheme(opt.webdav_scheme) == WebDavScheme::Https) {
-        if (!curlcommon::configureTlsVerification(
+    if (webDavScheme == WebDavScheme::Https) {
+        if (!curlcommon::configureTlsPolicy(
                 curl, opt.webdav_verify_peer, opt.webdav_ca_cert_path,
+                "Could not enforce the WebDAV TLS 1.2 minimum.",
                 "Could not configure WebDAV TLS verification policy.",
                 "Could not configure WebDAV TLS CA bundle.", err)) {
             return false;
