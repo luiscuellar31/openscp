@@ -74,6 +74,8 @@
 
 namespace {
 
+constexpr int kPanelSplitterHandleWidth = 8;
+
 QIcon mainWindowActionIcon(const char *name) {
     return QIcon(QStringLiteral(":/assets/icons/") + QLatin1String(name));
 }
@@ -167,6 +169,13 @@ bool focusWithinWidget(QWidget *focus, QWidget *root) {
     return false;
 }
 
+void setEvenPanelSizes(QSplitter *splitter, int referenceWidth) {
+    if (!splitter)
+        return;
+    const int halfWidth = qMax(220, referenceWidth / 2);
+    splitter->setSizes({halfWidth, halfWidth});
+}
+
 QString formatConnectionElapsed(qint64 totalSeconds) {
     if (totalSeconds < 0)
         totalSeconds = 0;
@@ -253,6 +262,8 @@ void MainWindow::initializePanels(const QString &home) {
 
     // Central splitter with two panes
     mainSplitter_ = new QSplitter(this);
+    mainSplitter_->setHandleWidth(
+        qMax(kPanelSplitterHandleWidth, mainSplitter_->handleWidth()));
     auto *leftPane = new QWidget(this);
     auto *rightPane = new QWidget(this);
 
@@ -1323,6 +1334,8 @@ void MainWindow::showEvent(QShowEvent *e) {
     QMainWindow::showEvent(e);
     if (firstShow_) {
         firstShow_ = false;
+        if (!restoredSplitterState_)
+            setEvenPanelSizes(mainSplitter_, mainSplitter_->width());
         if (restoredWindowGeometry_)
             return;
         QRect avail;
@@ -1373,12 +1386,10 @@ void MainWindow::resetMainWindowLayoutToDefaults() {
     }
 
     restoredWindowGeometry_ = false;
+    restoredSplitterState_ = false;
 
     resize(1100, 650);
-    if (mainSplitter_) {
-        const int half = qMax(220, width() / 2);
-        mainSplitter_->setSizes({half, half});
-    }
+    setEvenPanelSizes(mainSplitter_, width());
 
     if (leftView_) {
         if (leftView_->header())
@@ -1463,7 +1474,7 @@ void MainWindow::restoreMainWindowUiState() {
             settings.value(openscpui::settingskeys::kMainWindowSplitterState)
                 .toByteArray();
         if (!splitterState.isEmpty())
-            mainSplitter_->restoreState(splitterState);
+            restoredSplitterState_ = mainSplitter_->restoreState(splitterState);
     }
     if (leftView_ && leftView_->header()) {
         const QByteArray leftHeader =

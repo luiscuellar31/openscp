@@ -2,6 +2,7 @@
 #include "DragAwareTreeView.hpp"
 #include "MainWindow.hpp"
 #include "PathNavigationBar.hpp"
+#include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "ToolbarKeyboardNavigation.hpp"
 
@@ -13,6 +14,8 @@
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QSettings>
+#include <QSplitter>
+#include <QSplitterHandle>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QToolBar>
@@ -114,6 +117,100 @@ bool hasAllFocusParts(const MainWindowFocusParts &parts) {
            parts.connectAction && parts.leftPath && parts.rightPath &&
            parts.leftView && parts.rightView && parts.scpUpload &&
            parts.scpDownload;
+}
+
+OPENSCP_TEST(testMainWindowSplitterPreservesAnEvenPanelResize, test) {
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    window.resize(900, 560);
+    window.show();
+    flushUiEvents();
+
+    auto *splitter = qobject_cast<QSplitter *>(window.centralWidget());
+    test.check(splitter && splitter->count() == 2,
+               "the main window should expose its two-panel splitter");
+    if (!splitter || splitter->count() != 2)
+        return;
+
+    const QList<int> initialSizes = splitter->sizes();
+    test.check(qAbs(initialSizes[0] - initialSizes[1]) <= 2,
+               "the default file panels should start with an even split");
+
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftView && parts.rightView,
+               "the splitter regression should use both file panels");
+    if (!parts.leftView || !parts.rightView)
+        return;
+
+    const bool scrollBarsHidden = openscp::testsupport::waitUntil(
+        [&parts] {
+            return parts.leftView->verticalScrollBarPolicy() ==
+                       Qt::ScrollBarAlwaysOff &&
+                   parts.rightView->verticalScrollBarPolicy() ==
+                       Qt::ScrollBarAlwaysOff;
+        },
+        std::chrono::milliseconds(3000));
+    test.check(scrollBarsHidden,
+               "the file-panel scrollbars should auto-hide in the main window");
+
+    const QList<int> sizesAfterScrollBarsHide = splitter->sizes();
+    test.check(
+        qAbs(sizesAfterScrollBarsHide[0] - sizesAfterScrollBarsHide[1]) <= 2,
+        "auto-hiding scrollbars should not change the panel split");
+
+    QSplitterHandle *handle = splitter->handle(1);
+    test.check(handle && handle->width() >= 8 &&
+                   handle->cursor().shape() == Qt::SplitHCursor,
+               "the panel divider should provide a usable resize-cursor area");
+
+    window.resize(1300, 760);
+    flushUiEvents();
+    const QList<int> resizedSizes = splitter->sizes();
+    test.check(
+        qAbs(resizedSizes[0] - resizedSizes[1]) <= 2,
+        "an even panel split should remain even when the window resizes");
+}
+
+OPENSCP_TEST(testMainWindowPreservesAnExplicitPanelSplit, test) {
+    configureMainWindowSettings(settingsRootPath);
+    QList<int> expectedSizes;
+    {
+        MainWindow window;
+        window.resize(1000, 600);
+        window.show();
+        flushUiEvents();
+
+        auto *splitter = qobject_cast<QSplitter *>(window.centralWidget());
+        test.check(
+            splitter && splitter->count() == 2,
+            "the custom-layout fixture should expose the panel splitter");
+        if (!splitter || splitter->count() != 2)
+            return;
+
+        splitter->setSizes({350, 650});
+        flushUiEvents();
+        expectedSizes = splitter->sizes();
+        window.close();
+        flushUiEvents();
+    }
+
+    MainWindow restoredWindow;
+    restoredWindow.show();
+    flushUiEvents();
+    auto *restoredSplitter =
+        qobject_cast<QSplitter *>(restoredWindow.centralWidget());
+    test.check(restoredSplitter && restoredSplitter->count() == 2,
+               "the restored window should expose the panel splitter");
+    if (!restoredSplitter || restoredSplitter->count() != 2)
+        return;
+
+    const QList<int> restoredSizes = restoredSplitter->sizes();
+    const double expectedRatio = static_cast<double>(expectedSizes[0]) /
+                                 (expectedSizes[0] + expectedSizes[1]);
+    const double restoredRatio = static_cast<double>(restoredSizes[0]) /
+                                 (restoredSizes[0] + restoredSizes[1]);
+    test.check(qAbs(restoredRatio - expectedRatio) < 0.01,
+               "an explicitly adjusted panel split should remain persisted");
 }
 
 OPENSCP_TEST(testMainWindowTraversesItsCompleteVisibleFocusOrder, test) {

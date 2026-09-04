@@ -336,6 +336,7 @@ class MainWindow : public QMainWindow {
 
     bool firstShow_ = true;
     bool restoredWindowGeometry_ = false;
+    bool restoredSplitterState_ = false;
     openscpui::HostKeyPromptCoordinator hostKeyPromptCoordinator_;
     openscpui::SessionHealthMonitor sessionHealthMonitor_;
     openscpui::ConnectionStatusCoordinator connectionStatusCoordinator_;
