@@ -1,16 +1,14 @@
 // Integration tests for real Libssh2ScpClient against an SSH server with SCP.
 // The test is skipped (exit code 77) unless required OPENSCP_IT_* env vars
 // exist.
+#include "IntegrationTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "openscp/Libssh2ScpClient.hpp"
 
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -20,68 +18,13 @@ namespace {
 
 constexpr int kSkipExitCode = 77;
 
-std::optional<std::string> envValue(const char *key) {
-    const char *raw = std::getenv(key);
-    if (!raw || !*raw)
-        return std::nullopt;
-    return std::string(raw);
-}
-
-std::optional<std::string> envValueWithFallback(const char *primary,
-                                                const char *fallback) {
-    auto v = envValue(primary);
-    if (v.has_value())
-        return v;
-    return envValue(fallback);
-}
-
-bool parsePort(const std::optional<std::string> &raw, std::uint16_t &out,
-               std::uint16_t fallback) {
-    if (!raw.has_value()) {
-        out = fallback;
-        return true;
-    }
-    try {
-        const int n = std::stoi(*raw);
-        if (n < 1 || n > 65535)
-            return false;
-        out = static_cast<std::uint16_t>(n);
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-std::string uniqueToken() {
-    const auto now =
-        std::chrono::steady_clock::now().time_since_epoch().count();
-    return std::to_string(static_cast<long long>(now));
-}
-
-std::string joinRemotePath(const std::string &base, const std::string &name) {
-    if (base.empty())
-        return std::string("/") + name;
-    if (base.back() == '/')
-        return base + name;
-    return base + "/" + name;
-}
-
-bool writeFile(const fs::path &path, const std::string &content) {
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out.is_open())
-        return false;
-    out << content;
-    return out.good();
-}
-
-bool readFile(const fs::path &path, std::string &out) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in.is_open())
-        return false;
-    out.assign(std::istreambuf_iterator<char>(in),
-               std::istreambuf_iterator<char>());
-    return true;
-}
+using openscp::testsupport::envValue;
+using openscp::testsupport::envValueWithFallback;
+using openscp::testsupport::joinRemotePath;
+using openscp::testsupport::parsePort;
+using openscp::testsupport::readFile;
+using openscp::testsupport::uniqueToken;
+using openscp::testsupport::writeFile;
 
 } // namespace
 
@@ -172,26 +115,19 @@ int main() {
     err.clear();
     t.check(client.put(
                 localUpload.string(), remotePath, err,
-                [&](std::size_t done, std::size_t total) {
-                    (void)done;
-                    (void)total;
-                    uploadProgressCalled = true;
-                },
+                [&](std::size_t, std::size_t) { uploadProgressCalled = true; },
                 {}, false),
             std::string("SCP upload should succeed: ") + err);
     t.check(uploadProgressCalled, "upload progress callback should be called");
 
     bool downloadProgressCalled = false;
     err.clear();
-    t.check(client.get(
-                remotePath, localDownload.string(), err,
-                [&](std::size_t done, std::size_t total) {
-                    (void)done;
-                    (void)total;
-                    downloadProgressCalled = true;
-                },
-                {}, false),
-            std::string("SCP download should succeed: ") + err);
+    t.check(
+        client.get(
+            remotePath, localDownload.string(), err,
+            [&](std::size_t, std::size_t) { downloadProgressCalled = true; },
+            {}, false),
+        std::string("SCP download should succeed: ") + err);
     t.check(downloadProgressCalled,
             "download progress callback should be called");
 

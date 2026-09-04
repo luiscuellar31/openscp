@@ -1,6 +1,7 @@
 // Integration tests for real Libssh2SftpClient against a test SFTP server.
 // The test is skipped (exit code 77) unless required OPENSCP_IT_* env vars
 // exist.
+#include "IntegrationTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "openscp/Libssh2SftpClient.hpp"
 #include "openscp/UniqueFile.hpp"
@@ -13,7 +14,6 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <iterator>
 #include <optional>
 #include <string>
 #include <thread>
@@ -25,64 +25,17 @@ namespace {
 
 constexpr int kSkipExitCode = 77;
 
-std::optional<std::string> envValue(const char *key) {
-    const char *raw = std::getenv(key);
-    if (!raw || !*raw)
-        return std::nullopt;
-    return std::string(raw);
-}
-
-std::string uniqueToken() {
-    const auto now =
-        std::chrono::steady_clock::now().time_since_epoch().count();
-    return std::to_string(static_cast<long long>(now));
-}
-
-std::string joinRemotePath(const std::string &base, const std::string &name) {
-    if (base.empty())
-        return std::string("/") + name;
-    if (base.back() == '/')
-        return base + name;
-    return base + "/" + name;
-}
+using openscp::testsupport::envValue;
+using openscp::testsupport::joinRemotePath;
+using openscp::testsupport::parsePort;
+using openscp::testsupport::readFile;
+using openscp::testsupport::uniqueToken;
+using openscp::testsupport::writeFile;
 
 std::string knownHostsHostToken(const std::string &host, std::uint16_t port) {
     if (port == 22)
         return host;
     return "[" + host + "]:" + std::to_string(port);
-}
-
-bool readFile(const fs::path &p, std::string &out) {
-    std::ifstream in(p, std::ios::binary);
-    if (!in.is_open())
-        return false;
-    out.assign(std::istreambuf_iterator<char>(in),
-               std::istreambuf_iterator<char>());
-    return true;
-}
-
-bool writeFile(const fs::path &p, const std::string &content) {
-    std::ofstream out(p, std::ios::binary | std::ios::trunc);
-    if (!out.is_open())
-        return false;
-    out << content;
-    return out.good();
-}
-
-bool parsePort(const std::optional<std::string> &raw, std::uint16_t &out) {
-    if (!raw.has_value()) {
-        out = 22;
-        return true;
-    }
-    try {
-        const int n = std::stoi(*raw);
-        if (n < 1 || n > 65535)
-            return false;
-        out = static_cast<std::uint16_t>(n);
-        return true;
-    } catch (...) {
-        return false;
-    }
 }
 
 bool parseProxyType(const std::optional<std::string> &raw,
@@ -109,15 +62,6 @@ bool parseProxyType(const std::optional<std::string> &raw,
         return true;
     }
     return false;
-}
-
-bool parsePortOrDefault(const std::optional<std::string> &raw,
-                        std::uint16_t fallback, std::uint16_t &out) {
-    if (!raw.has_value()) {
-        out = fallback;
-        return true;
-    }
-    return parsePort(raw, out);
 }
 
 bool listContainsName(const std::vector<openscp::FileInfo> &entries,
@@ -243,7 +187,7 @@ int main() {
     }
 
     std::uint16_t port = 22;
-    if (!parsePort(envValue("OPENSCP_IT_SFTP_PORT"), port)) {
+    if (!parsePort(envValue("OPENSCP_IT_SFTP_PORT"), port, 22)) {
         std::cerr << "[FAIL] OPENSCP_IT_SFTP_PORT is invalid\n";
         return EXIT_FAILURE;
     }
@@ -262,15 +206,15 @@ int main() {
         }
         const std::uint16_t defaultProxyPort =
             (proxyType == openscp::ProxyType::Socks5) ? 1080 : 8080;
-        if (!parsePortOrDefault(envValue("OPENSCP_IT_PROXY_PORT"),
-                                defaultProxyPort, proxyPort)) {
+        if (!parsePort(envValue("OPENSCP_IT_PROXY_PORT"), proxyPort,
+                       defaultProxyPort)) {
             std::cerr << "[FAIL] OPENSCP_IT_PROXY_PORT is invalid\n";
             return EXIT_FAILURE;
         }
     }
     std::uint16_t jumpPort = 22;
     if (jumpHost.has_value() &&
-        !parsePortOrDefault(envValue("OPENSCP_IT_JUMP_PORT"), 22, jumpPort)) {
+        !parsePort(envValue("OPENSCP_IT_JUMP_PORT"), jumpPort, 22)) {
         std::cerr << "[FAIL] OPENSCP_IT_JUMP_PORT is invalid\n";
         return EXIT_FAILURE;
     }

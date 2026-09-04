@@ -1,17 +1,14 @@
 // Integration tests for CurlFtpClient against a real FTPS server.
 // Skips with exit code 77 unless required OPENSCP_IT_FTPS_* vars exist.
+#include "IntegrationTestSupport.hpp"
 #include "TestHarness.hpp"
-#include "curl_integration_test_support.hpp"
 #include "openscp/ClientFactory.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -115,11 +112,7 @@ int main() {
     err.clear();
     t.check(client->put(
                 localUpload.string(), remotePath, err,
-                [&](std::size_t done, std::size_t total) {
-                    (void)done;
-                    (void)total;
-                    uploadProgressCalled = true;
-                },
+                [&](std::size_t, std::size_t) { uploadProgressCalled = true; },
                 {}, false),
             std::string("FTPS upload should succeed: ") + err);
     t.check(uploadProgressCalled, "upload progress callback should be called");
@@ -135,15 +128,12 @@ int main() {
 
     bool downloadProgressCalled = false;
     err.clear();
-    t.check(client->get(
-                renamedPath, localDownload.string(), err,
-                [&](std::size_t done, std::size_t total) {
-                    (void)done;
-                    (void)total;
-                    downloadProgressCalled = true;
-                },
-                {}, false),
-            std::string("FTPS download should succeed: ") + err);
+    t.check(
+        client->get(
+            renamedPath, localDownload.string(), err,
+            [&](std::size_t, std::size_t) { downloadProgressCalled = true; },
+            {}, false),
+        std::string("FTPS download should succeed: ") + err);
     t.check(downloadProgressCalled,
             "download progress callback should be called");
 

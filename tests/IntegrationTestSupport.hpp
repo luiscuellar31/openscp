@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <utility>
@@ -17,6 +18,14 @@ inline std::optional<std::string> envValue(const char *key) {
     if (!raw || !*raw)
         return std::nullopt;
     return std::string(raw);
+}
+
+inline std::optional<std::string> envValueWithFallback(const char *primary,
+                                                       const char *fallback) {
+    auto value = envValue(primary);
+    if (value.has_value())
+        return value;
+    return envValue(fallback);
 }
 
 inline bool parsePort(const std::optional<std::string> &raw, std::uint16_t &out,
