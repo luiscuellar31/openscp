@@ -3,6 +3,8 @@
 #include "logic/transfers/TransferManager.hpp"
 
 #include <QDialog>
+#include <QPointer>
+#include <QRect>
 
 class QLabel;
 class QPushButton;
@@ -10,7 +12,7 @@ class QTableView;
 class QButtonGroup;
 class QToolButton;
 class QComboBox;
-class QCloseEvent;
+class QParallelAnimationGroup;
 class TransferTaskTableModel;
 class TransferTaskFilterProxyModel;
 
@@ -21,6 +23,10 @@ class TransferQueueDialog : public QDialog {
     public:
     explicit TransferQueueDialog(TransferManager *mgr,
                                  QWidget *parent = nullptr);
+    void presentAnimated();
+
+    public slots:
+    void reject() override;
 
     private slots:
     void refresh();            // refresh table from manager
@@ -62,13 +68,15 @@ class TransferQueueDialog : public QDialog {
         AutoClearFailedCanceled = 2,
         AutoClearFinished = 3
     };
+    enum class WindowTransition { None, Showing, Hiding };
 
     void updateSummary();
     QVector<quint64> selectedTaskIds() const;
     void loadUiState();
     void saveUiState() const;
     void maybeAutoClear(const QVector<TransferTask> &snapshot);
-    void closeEvent(QCloseEvent *e) override;
+    void startWindowTransition(WindowTransition transition);
+    void stopWindowTransition();
 
     TransferManager *mgr_;        // source of truth for the queue
     QTableView *table_ = nullptr; // view of tasks
@@ -106,4 +114,7 @@ class TransferQueueDialog : public QDialog {
     QComboBox *autoClearModeCombo_ = nullptr;
     class QSpinBox *autoClearMinutesSpin_ = nullptr;
     bool suppressAutoClearSignal_ = false;
+    QPointer<QParallelAnimationGroup> windowTransitionAnimation_;
+    QRect restingGeometry_;
+    WindowTransition windowTransition_ = WindowTransition::None;
 };

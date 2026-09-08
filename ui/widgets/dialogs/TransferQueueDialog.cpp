@@ -10,9 +10,9 @@
 #include <QAbstractTableModel>
 #include <QButtonGroup>
 #include <QClipboard>
-#include <QCloseEvent>
 #include <QComboBox>
 #include <QDateTime>
+#include <QEasingCurve>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -21,6 +21,8 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QMenu>
+#include <QParallelAnimationGroup>
+#include <QPropertyAnimation>
 #include <QPushButton>
 #include <QSortFilterProxyModel>
 #include <QSpinBox>
@@ -34,6 +36,15 @@
 namespace {
 
 constexpr int kProgressColumnWidthPx = 84;
+constexpr int kWindowTransitionDurationMs = 190;
+
+QRect compactWindowRect(const QRect &restingGeometry) {
+    QRect compact = restingGeometry;
+    compact.setWidth(qMax(220, (restingGeometry.width() * 96) / 100));
+    compact.setHeight(qMax(140, (restingGeometry.height() * 96) / 100));
+    compact.moveCenter(restingGeometry.center() + QPoint(0, 10));
+    return compact;
+}
 
 QString statusText(TransferTask::Status s) {
     switch (s) {
@@ -795,7 +806,8 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
             &TransferQueueDialog::onClearDone);
     connect(clearFailedBtn_, &QPushButton::clicked, this,
             &TransferQueueDialog::onClearFailedCanceled);
-    connect(closeBtn_, &QPushButton::clicked, this, &QDialog::reject);
+    connect(closeBtn_, &QPushButton::clicked, this,
+            &TransferQueueDialog::reject);
     connect(filterGroup_, &QButtonGroup::idClicked, this,
             &TransferQueueDialog::onFilterChanged);
     connect(autoClearModeCombo_, &QComboBox::currentIndexChanged, this,
@@ -819,6 +831,96 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
 
     loadUiState();
     refresh();
+}
+
+void TransferQueueDialog::presentAnimated() {
+    if (isVisible() && windowTransition_ != WindowTransition::Hiding) {
+        raise();
+        activateWindow();
+        return;
+    }
+    startWindowTransition(WindowTransition::Showing);
+}
+
+void TransferQueueDialog::reject() {
+    if (!isVisible()) {
+        stopWindowTransition();
+        QDialog::reject();
+        return;
+    }
+    startWindowTransition(WindowTransition::Hiding);
+}
+
+void TransferQueueDialog::startWindowTransition(WindowTransition transition) {
+    const bool showing = transition == WindowTransition::Showing;
+    if (!showing && windowTransition_ == WindowTransition::Hiding)
+        return;
+
+    const bool wasVisible = isVisible();
+    if ((showing && !wasVisible) ||
+        (!showing && windowTransition_ == WindowTransition::None) ||
+        !restingGeometry_.isValid()) {
+        restingGeometry_ = geometry();
+    }
+
+    if (showing && !wasVisible) {
+        setGeometry(compactWindowRect(restingGeometry_));
+        setWindowOpacity(0.0);
+        show();
+    }
+    if (showing) {
+        raise();
+        activateWindow();
+    }
+
+    const QRect startGeometry = geometry();
+    const qreal startOpacity = windowOpacity();
+    const QRect endGeometry =
+        showing ? restingGeometry_ : compactWindowRect(restingGeometry_);
+    const qreal endOpacity = showing ? 1.0 : 0.0;
+
+    stopWindowTransition();
+    windowTransition_ = transition;
+
+    auto *group = new QParallelAnimationGroup(this);
+    auto *fade = new QPropertyAnimation(this, "windowOpacity", group);
+    fade->setDuration(kWindowTransitionDurationMs);
+    fade->setStartValue(startOpacity);
+    fade->setEndValue(endOpacity);
+    fade->setEasingCurve(QEasingCurve::OutCubic);
+
+    auto *geometryAnimation = new QPropertyAnimation(this, "geometry", group);
+    geometryAnimation->setDuration(kWindowTransitionDurationMs);
+    geometryAnimation->setStartValue(startGeometry);
+    geometryAnimation->setEndValue(endGeometry);
+    geometryAnimation->setEasingCurve(QEasingCurve::OutCubic);
+
+    windowTransitionAnimation_ = group;
+    connect(group, &QParallelAnimationGroup::finished, this,
+            [this, group, transition] {
+                if (windowTransitionAnimation_ != group) {
+                    group->deleteLater();
+                    return;
+                }
+                windowTransitionAnimation_.clear();
+                windowTransition_ = WindowTransition::None;
+                setGeometry(restingGeometry_);
+                setWindowOpacity(1.0);
+                group->deleteLater();
+                if (transition == WindowTransition::Hiding)
+                    QDialog::reject();
+            });
+    group->start();
+}
+
+void TransferQueueDialog::stopWindowTransition() {
+    QParallelAnimationGroup *animation = windowTransitionAnimation_.data();
+    windowTransitionAnimation_.clear();
+    windowTransition_ = WindowTransition::None;
+    if (!animation)
+        return;
+    animation->stop();
+    animation->deleteLater();
 }
 
 void TransferQueueDialog::refresh() {
@@ -1369,9 +1471,4 @@ void TransferQueueDialog::maybeAutoClear(
         mgr_->clearFinishedOlderThan(minutes, false, true);
     else if (mode == AutoClearFinished)
         mgr_->clearFinishedOlderThan(minutes, true, true);
-}
-
-void TransferQueueDialog::closeEvent(QCloseEvent *e) {
-    saveUiState();
-    QDialog::closeEvent(e);
 }

@@ -9,20 +9,16 @@
 #include "widgets/dialogs/TransferQueueDialog.hpp"
 #include "widgets/navigation/PathNavigationBar.hpp"
 
-#include <QAbstractAnimation>
 #include <QCoreApplication>
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
-#include <QEasingCurve>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QLocale>
 #include <QMimeData>
-#include <QParallelAnimationGroup>
 #include <QProgressDialog>
-#include <QPropertyAnimation>
 #include <QScreen>
 #include <QStatusBar>
 #include <QStringList>
@@ -954,54 +950,13 @@ void MainWindow::cancelLocalUploadDiscoveries() {
 void MainWindow::showTransferQueue() {
     if (!transferDlg_)
         transferDlg_ = new TransferQueueDialog(transferMgr_, this);
-    const bool wasVisible = transferDlg_->isVisible();
-    if (!wasVisible) {
-        const QRect endRect = centeredQueueRect(transferDlg_, this);
-        if (endRect.isValid())
-            transferDlg_->setGeometry(endRect);
-        // Modeless queue: smooth entrance (fade + slight scale/offset) for
-        // better perceived polish.
-        transferDlg_->show();
-        transferDlg_->raise();
-        transferDlg_->activateWindow();
-
-        QRect startRect = endRect;
-        startRect.setWidth(qMax(220, (endRect.width() * 96) / 100));
-        startRect.setHeight(qMax(140, (endRect.height() * 96) / 100));
-        startRect.moveCenter(endRect.center() + QPoint(0, 10));
-
-        transferDlg_->setGeometry(startRect);
-        transferDlg_->setWindowOpacity(0.0);
-
-        auto *group = new QParallelAnimationGroup(transferDlg_);
-
-        auto *fade =
-            new QPropertyAnimation(transferDlg_, "windowOpacity", group);
-        fade->setDuration(190);
-        fade->setStartValue(0.0);
-        fade->setEndValue(1.0);
-        fade->setEasingCurve(QEasingCurve::OutCubic);
-
-        auto *grow = new QPropertyAnimation(transferDlg_, "geometry", group);
-        grow->setDuration(190);
-        grow->setStartValue(startRect);
-        grow->setEndValue(endRect);
-        grow->setEasingCurve(QEasingCurve::OutCubic);
-
-        connect(group, &QParallelAnimationGroup::finished, transferDlg_,
-                [this, endRect] {
-                    if (transferDlg_)
-                        transferDlg_->setWindowOpacity(1.0);
-                    if (transferDlg_)
-                        transferDlg_->setGeometry(endRect);
-                });
-        group->start(QAbstractAnimation::DeleteWhenStopped);
-        return;
+    if (!transferDlg_->isVisible()) {
+        const QRect centeredRect = centeredQueueRect(transferDlg_, this);
+        if (centeredRect.isValid())
+            transferDlg_->setGeometry(centeredRect);
     }
 
-    transferDlg_->show();
-    transferDlg_->raise();
-    transferDlg_->activateWindow();
+    transferDlg_->presentAnimated();
 }
 
 void MainWindow::maybeShowTransferQueue() {
