@@ -14,8 +14,10 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QListWidget>
 #include <QPixmap>
 #include <QPushButton>
+#include <QSplitter>
 #include <QStringConverter>
 #include <QStringList>
 #include <QSysInfo>
@@ -24,6 +26,7 @@
 #include <QTextStream>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QVector>
 
 namespace {
 
@@ -91,16 +94,43 @@ QString buildDiagnosticsText() {
              QString::fromUtf8(OPENSCP_REPOSITORY_URL));
 }
 
+struct CreditSection {
+    QString title;
+    QString details;
+};
+
+QVector<CreditSection> splitCreditSections(const QString &markdown) {
+    QVector<CreditSection> sections;
+    CreditSection current;
+    const QStringList lines = markdown.split(QLatin1Char('\n'));
+    for (const QString &line : lines) {
+        if (line.startsWith(QStringLiteral("## "))) {
+            if (!current.title.isEmpty()) {
+                current.details = current.details.trimmed();
+                sections.push_back(current);
+            }
+            current = {line.mid(3).trimmed(), QString()};
+        } else if (!current.title.isEmpty()) {
+            current.details += line;
+            current.details += QLatin1Char('\n');
+        }
+    }
+    if (!current.title.isEmpty()) {
+        current.details = current.details.trimmed();
+        sections.push_back(current);
+    }
+    return sections;
+}
+
 } // namespace
 
 AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle(tr("About OpenSCP"));
-    // Layout-driven sizing: we'll compute the minimum size after creating
-    // widgets
 
-    auto *lay = new QVBoxLayout(this);
+    auto *root = new QVBoxLayout(this);
+    root->setContentsMargins(12, 12, 12, 12);
+    root->setSpacing(10);
 
-    // Top row: title/author on the left, app icon on the right
     auto *topRow = new QHBoxLayout();
     auto *leftCol = new QVBoxLayout();
 
@@ -141,56 +171,129 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     }
     iconLabel->setAlignment(Qt::AlignRight | Qt::AlignTop);
     topRow->addWidget(iconLabel, 0);
+    root->addLayout(topRow);
+    root->addStretch(1);
 
-    lay->addLayout(topRow);
-
-    auto *libsTitle = new QLabel(tr("Used libraries:"), this);
-    lay->addWidget(libsTitle);
-
-    auto *libsText = new QTextBrowser(this);
-    libsText->setReadOnly(true);
-    libsText->setOpenExternalLinks(true);
-    libsText->setMinimumHeight(180);
-
-    QString content;
+    QString creditsContent;
     QFile creditsFile(QStringLiteral(":/credits/CREDITS.md"));
-    if (creditsFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    QUrl creditsBaseUrl(QStringLiteral("qrc:/credits/"));
+    if (!creditsFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        const QString creditsPath = findFromCandidates(
+            {QStringLiteral("docs/credits/CREDITS.md")}, false);
+        if (!creditsPath.isEmpty()) {
+            creditsFile.setFileName(creditsPath);
+            creditsFile.open(QIODevice::ReadOnly | QIODevice::Text);
+            creditsBaseUrl = QUrl::fromLocalFile(
+                QFileInfo(creditsPath).absolutePath() + QDir::separator());
+        }
+    }
+    if (creditsFile.isOpen()) {
         QTextStream creditsStream(&creditsFile);
         creditsStream.setEncoding(QStringConverter::Utf8);
-        content = creditsStream.readAll();
+        creditsContent = creditsStream.readAll();
     }
-    if (content.isEmpty()) {
-        content = tr("No third-party license details were found in this "
-                     "installation.\n"
-                     "Use an official package for full license information.");
+    if (creditsContent.isEmpty()) {
+        creditsContent =
+            tr("No third-party license details were found in this "
+               "installation.\n"
+               "Use an official package for full license information.");
     }
-    libsText->document()->setBaseUrl(QUrl(QStringLiteral("qrc:/credits/")));
-    libsText->setMarkdown(content);
-    lay->addWidget(libsText);
-
+    QVector<CreditSection> creditSections = splitCreditSections(creditsContent);
+    if (creditSections.isEmpty())
+        creditSections.push_back({tr("Credits"), creditsContent});
     const QString licensesDir = findLicensesDir();
 
     auto *actionsRow = new QHBoxLayout();
+    auto *creditsButton = new QPushButton(tr("Credits…"), this);
+    creditsButton->setObjectName(QStringLiteral("aboutCreditsButton"));
+    connect(
+        creditsButton, &QPushButton::clicked, this,
+        [this, creditsBaseUrl, creditSections, licensesDir] {
+            QDialog creditsDialog(this);
+            creditsDialog.setObjectName(QStringLiteral("creditsDialog"));
+            creditsDialog.setWindowTitle(tr("Credits"));
 
-    auto *openLicensesBtn = new QPushButton(tr("Open Licenses Folder"), this);
-    openLicensesBtn->setEnabled(!licensesDir.isEmpty());
-    openLicensesBtn->setToolTip(
-        licensesDir.isEmpty()
-            ? tr("License files are not available in this installation.")
-            : tr("Open the folder that contains third-party licenses."));
-    connect(openLicensesBtn, &QPushButton::clicked, this, [this, licensesDir] {
-        if (!licensesDir.isEmpty() && QFileInfo(licensesDir).isDir()) {
-            const openscpui::PathActionResult result =
-                openscpui::PlatformPathActions::openFolder(licensesDir);
-            if (result.failed())
-                UiAlerts::warning(this, tr("Open location"), result.error);
-            return;
-        }
-        UiAlerts::information(this, tr("Licenses folder not found"),
-                              tr("No license files were found in this "
-                                 "installation."));
-    });
-    actionsRow->addWidget(openLicensesBtn);
+            auto *creditsLayout = new QVBoxLayout(&creditsDialog);
+            creditsLayout->setContentsMargins(12, 12, 12, 12);
+            creditsLayout->setSpacing(10);
+
+            auto *splitter = new QSplitter(Qt::Horizontal, &creditsDialog);
+            auto *componentList = new QListWidget(splitter);
+            componentList->setObjectName(QStringLiteral("creditComponentList"));
+            componentList->setAccessibleName(tr("Credits"));
+            componentList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+            componentList->setTextElideMode(Qt::ElideRight);
+            componentList->setMinimumWidth(170);
+            componentList->setMaximumWidth(230);
+
+            auto *details = new QTextBrowser(splitter);
+            details->setObjectName(QStringLiteral("creditDetailsBrowser"));
+            details->setAccessibleName(tr("Credits"));
+            details->setOpenExternalLinks(true);
+            details->document()->setDocumentMargin(12.0);
+            details->document()->setBaseUrl(creditsBaseUrl);
+
+            for (const CreditSection &section : creditSections) {
+                auto *item = new QListWidgetItem(section.title, componentList);
+                item->setToolTip(section.title);
+            }
+
+            connect(componentList, &QListWidget::currentRowChanged,
+                    &creditsDialog, [details, creditSections](int row) {
+                        if (row < 0 || row >= creditSections.size()) {
+                            details->clear();
+                            return;
+                        }
+                        details->setMarkdown(creditSections.at(row).details);
+                    });
+
+            splitter->setStretchFactor(0, 0);
+            splitter->setStretchFactor(1, 1);
+            splitter->setSizes({190, 410});
+            creditsLayout->addWidget(splitter, 1);
+
+            auto *buttons =
+                new QDialogButtonBox(QDialogButtonBox::Close, &creditsDialog);
+            auto *openLicensesButton = buttons->addButton(
+                tr("Open Licenses Folder"), QDialogButtonBox::ActionRole);
+            openLicensesButton->setEnabled(!licensesDir.isEmpty());
+            openLicensesButton->setToolTip(
+                licensesDir.isEmpty()
+                    ? tr("License files are not available in this "
+                         "installation.")
+                    : tr("Open the folder that contains third-party "
+                         "licenses."));
+            connect(openLicensesButton, &QPushButton::clicked, &creditsDialog,
+                    [&creditsDialog, licensesDir] {
+                        if (!licensesDir.isEmpty() &&
+                            QFileInfo(licensesDir).isDir()) {
+                            const openscpui::PathActionResult result =
+                                openscpui::PlatformPathActions::openFolder(
+                                    licensesDir);
+                            if (result.failed()) {
+                                UiAlerts::warning(&creditsDialog,
+                                                  tr("Open location"),
+                                                  result.error);
+                            }
+                            return;
+                        }
+                        UiAlerts::information(
+                            &creditsDialog, tr("Licenses folder not found"),
+                            tr("No license files were found in this "
+                               "installation."));
+                    });
+            connect(buttons, &QDialogButtonBox::rejected, &creditsDialog,
+                    &QDialog::reject);
+            creditsLayout->addWidget(buttons);
+
+            componentList->setCurrentRow(0);
+            const QSize creditsMinimum =
+                QSize(520, 340).expandedTo(creditsDialog.minimumSizeHint());
+            creditsDialog.setMinimumSize(creditsMinimum);
+            creditsDialog.resize(QSize(560, 360).expandedTo(creditsMinimum));
+            creditsDialog.exec();
+        });
+    actionsRow->addWidget(creditsButton);
 
     auto *copyDiagnosticsBtn = new QPushButton(tr("Copy diagnostics"), this);
     copyDiagnosticsBtn->setToolTip(
@@ -208,31 +311,23 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     });
     actionsRow->addWidget(copyDiagnosticsBtn);
     actionsRow->addStretch(1);
-    lay->addLayout(actionsRow);
+    root->addLayout(actionsRow);
 
-    // Report an issue link at the bottom (opens Issues page)
-    {
-        const QString linkText = tr("Report an issue");
-        auto *report = new QLabel(
-            QString("<a href=\"%1\">%2</a>")
-                .arg(issuesUrl.toHtmlEscaped(), linkText.toHtmlEscaped()),
-            this);
-        report->setTextFormat(Qt::RichText);
-        report->setOpenExternalLinks(true);
-        report->setWordWrap(true);
-        lay->addWidget(report);
-    }
+    const QString linkText = tr("Report an issue");
+    auto *report = new QLabel(
+        QString("<a href=\"%1\">%2</a>")
+            .arg(issuesUrl.toHtmlEscaped(), linkText.toHtmlEscaped()),
+        this);
+    report->setTextFormat(Qt::RichText);
+    report->setOpenExternalLinks(true);
+    report->setWordWrap(true);
+    root->addWidget(report);
 
     auto *btns = new QDialogButtonBox(QDialogButtonBox::Close, this);
     connect(btns, &QDialogButtonBox::rejected, this, &AboutDialog::reject);
     connect(btns, &QDialogButtonBox::accepted, this, &AboutDialog::accept);
-    lay->addWidget(btns);
+    root->addWidget(btns);
 
-    // Enforce a dynamic minimum size so controls never overlap when shrinking
-    lay->setSizeConstraint(QLayout::SetMinimumSize);
-    const QSize layMin = lay->minimumSize();
-    const int minW = qMax(560, layMin.width());
-    const int minH = qMax(360, layMin.height());
-    this->setMinimumSize(minW, minH);
-    this->resize(qMax(620, minW), qMax(460, minH));
+    setMinimumSize(QSize(440, 260).expandedTo(minimumSizeHint()));
+    resize(QSize(460, 270).expandedTo(minimumSize()));
 }
