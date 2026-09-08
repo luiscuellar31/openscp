@@ -133,9 +133,8 @@ Each kind of persisted data has one owner:
 | `TransferQueuePersistence` | Versioned, atomic storage for unfinished transfers. |
 
 Use these classes instead of reading or writing their settings directly.
-OpenSCP 1.0 is the persistence baseline: pre-1.0 incomplete formats are not
-migrated. Changes after that baseline require an explicit versioning decision,
-and corrupt or newer data must not be silently overwritten.
+Changes to persisted formats require explicit decisions about schema and
+versioning, and corrupt or unsupported data must not be silently overwritten.
 
 ## Path navigation
 

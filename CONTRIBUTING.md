@@ -88,9 +88,8 @@ the keyboard and screen-reader matrix in
   direction is described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - Do not call remote clients, presentation callbacks, or emit Qt signals while
   holding queue/state mutexes.
-- Do not add migrations for pre-1.0 persisted formats. Treat 1.0 as the
-  persistence baseline; later format changes require an explicit compatibility
-  and versioning decision.
+- Changes to persisted formats require explicit decisions about schema and
+  versioning, together with tests for the resulting behavior.
 - Never persist passwords, passphrases, or proxy credentials in plain settings
   or transfer-queue data.
 - Add tests for success, failure, cancellation, malformed input, and concurrent
