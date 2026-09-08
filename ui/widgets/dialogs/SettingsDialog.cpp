@@ -1109,6 +1109,7 @@ void SettingsDialog::buildBottomButtons(QVBoxLayout *root) {
     buttonLayout->addStretch();
     closeBtn_ = new QPushButton(tr("Close"), btnRow);
     applyBtn_ = new QPushButton(tr("Apply"), btnRow);
+    closeBtn_->setObjectName(QStringLiteral("settingsCloseButton"));
     buttonLayout->addWidget(closeBtn_);
     buttonLayout->addWidget(applyBtn_);
     root->addWidget(btnRow);

@@ -3,11 +3,14 @@
 #include "app/MainWindow.hpp"
 #include "logic/common/AppSettings.hpp"
 #include "widgets/common/ToolbarKeyboardNavigation.hpp"
+#include "widgets/dialogs/TransferQueueDialog.hpp"
 #include "widgets/files/DragAwareTreeView.hpp"
 #include "widgets/navigation/PathNavigationBar.hpp"
 
+#include <QAbstractAnimation>
 #include <QAction>
 #include <QApplication>
+#include <QDialog>
 #include <QDir>
 #include <QEventLoop>
 #include <QKeyEvent>
@@ -18,6 +21,7 @@
 #include <QSplitterHandle>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
 
@@ -301,6 +305,154 @@ OPENSCP_TEST(testPointerInteractionCancelsInitialConnectOverride, test) {
                    QApplication::focusWidget() != connectButton,
                "Tab after a pointer interaction should continue from the "
                "panel instead of restarting at Connect");
+}
+
+OPENSCP_TEST(testSettingsCloseRestoresPointerFocusWithoutOutline, test) {
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    window.resize(900, 560);
+    window.show();
+    flushUiEvents();
+
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftView != nullptr,
+               "the settings focus regression needs the left panel");
+    if (!parts.leftView)
+        return;
+
+    const QPointF localPosition(4.0, 4.0);
+    const QPointF globalPosition =
+        parts.leftView->viewport()->mapToGlobal(localPosition.toPoint());
+    QMouseEvent panelPress(QEvent::MouseButtonPress, localPosition,
+                           globalPosition, Qt::LeftButton, Qt::LeftButton,
+                           Qt::NoModifier);
+    QApplication::sendEvent(parts.leftView->viewport(), &panelPress);
+    parts.leftView->setFocus(Qt::MouseFocusReason);
+
+    bool foundSettingsDialog = false;
+    QTimer::singleShot(0, &window, [&foundSettingsDialog] {
+        auto *dialog =
+            qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        if (!dialog)
+            return;
+        auto *closeButton = dialog->findChild<QPushButton *>(
+            QStringLiteral("settingsCloseButton"));
+        if (!closeButton)
+            return;
+        foundSettingsDialog = true;
+        const QPointF buttonPosition = closeButton->rect().center();
+        const QPointF buttonGlobalPosition =
+            closeButton->mapToGlobal(buttonPosition.toPoint());
+        QMouseEvent closePress(QEvent::MouseButtonPress, buttonPosition,
+                               buttonGlobalPosition, Qt::LeftButton,
+                               Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(closeButton, &closePress);
+        closeButton->click();
+    });
+
+    const bool invoked = QMetaObject::invokeMethod(
+        &window, "showSettingsDialog", Qt::DirectConnection);
+    flushUiEvents();
+
+    test.check(invoked && foundSettingsDialog,
+               "the production Settings dialog should open and close");
+    test.check(QApplication::focusWidget() == parts.leftView,
+               "closing Settings should restore the previous focus target");
+    test.check(!parts.leftView->property("keyboardFocusVisible").toBool(),
+               "closing Settings with the pointer should not add a keyboard "
+               "focus outline");
+}
+
+OPENSCP_TEST(testTransferQueueUsesAnimatedModelessWindowLifecycle, test) {
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    window.resize(900, 560);
+    window.show();
+    flushUiEvents();
+
+    QAction *transfersAction = nullptr;
+    for (QAction *action : window.findChildren<QAction *>()) {
+        if (action->shortcut() == QKeySequence(Qt::Key_F12)) {
+            transfersAction = action;
+            break;
+        }
+    }
+    test.check(transfersAction != nullptr,
+               "the transfer queue action should be available");
+    if (!transfersAction)
+        return;
+
+    transfersAction->trigger();
+    flushUiEvents();
+    auto *dialog = window.findChild<TransferQueueDialog *>();
+    test.check(dialog && dialog->isVisible() && !dialog->isModal(),
+               "the transfer queue should open as a modeless window");
+    if (!dialog)
+        return;
+
+    const auto hasRunningTransition = [dialog] {
+        for (QAbstractAnimation *animation :
+             dialog->findChildren<QAbstractAnimation *>()) {
+            if (animation->state() == QAbstractAnimation::Running)
+                return true;
+        }
+        return false;
+    };
+    test.check(hasRunningTransition(),
+               "the transfer queue should animate its opening");
+    const bool openingFinished = openscp::testsupport::waitUntil(
+        [dialog, &hasRunningTransition] {
+            return dialog->isVisible() &&
+                   qFuzzyCompare(dialog->windowOpacity(), 1.0) &&
+                   !hasRunningTransition();
+        },
+        std::chrono::milliseconds(1000));
+    test.check(openingFinished,
+               "the transfer queue opening should reach its resting state");
+    const QRect restingGeometry = dialog->geometry();
+
+    dialog->reject();
+    flushUiEvents();
+    test.check(dialog->isVisible() && hasRunningTransition(),
+               "rejecting the transfer queue should animate its closing");
+    const bool closingFinished = openscp::testsupport::waitUntil(
+        [dialog] { return !dialog->isVisible(); },
+        std::chrono::milliseconds(1000));
+    test.check(closingFinished && dialog->geometry() == restingGeometry &&
+                   qFuzzyCompare(dialog->windowOpacity(), 1.0),
+               "closing should hide the queue and restore reusable state");
+
+    transfersAction->trigger();
+    const bool reopened = openscp::testsupport::waitUntil(
+        [dialog] {
+            return dialog->isVisible() &&
+                   qFuzzyCompare(dialog->windowOpacity(), 1.0);
+        },
+        std::chrono::milliseconds(1000));
+    test.check(window.findChild<TransferQueueDialog *>() == dialog && reopened,
+               "reopening should reuse the animated queue");
+
+    dialog->close();
+    flushUiEvents();
+    test.check(dialog->isVisible() && hasRunningTransition(),
+               "the window close control should use the closing animation");
+    transfersAction->trigger();
+    const bool closeWasReversed = openscp::testsupport::waitUntil(
+        [dialog, &hasRunningTransition] {
+            return dialog->isVisible() &&
+                   qFuzzyCompare(dialog->windowOpacity(), 1.0) &&
+                   !hasRunningTransition();
+        },
+        std::chrono::milliseconds(1000));
+    test.check(closeWasReversed,
+               "reopening during close should safely reverse the transition");
+
+    dialog->close();
+    const bool nativeCloseFinished = openscp::testsupport::waitUntil(
+        [dialog] { return !dialog->isVisible(); },
+        std::chrono::milliseconds(1000));
+    test.check(nativeCloseFinished,
+               "the window close control should eventually hide the queue");
 }
 
 } // namespace

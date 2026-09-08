@@ -1,7 +1,9 @@
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "logic/transfers/TransferManager.hpp"
+#include "widgets/common/InputModalityTracker.hpp"
 #include "widgets/common/ToolbarKeyboardNavigation.hpp"
+#include "widgets/dialogs/AboutDialog.hpp"
 #include "widgets/dialogs/ConnectionDialog.hpp"
 #include "widgets/dialogs/TransferQueueDialog.hpp"
 #include "widgets/files/DragAwareTreeView.hpp"
@@ -10,12 +12,14 @@
 #include <QAccessible>
 #include <QAction>
 #include <QApplication>
+#include <QDialog>
 #include <QFont>
 #include <QFrame>
 #include <QHeaderView>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPushButton>
@@ -24,6 +28,8 @@
 #include <QStandardItemModel>
 #include <QTableView>
 #include <QTemporaryDir>
+#include <QTextBrowser>
+#include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -491,6 +497,123 @@ OPENSCP_TEST(testFilePanelScrollBarsFollowScrollActivity, test) {
                "scrolling should reveal both file-panel scrollbars");
     test.check(waitUntil(scrollBarsAreHidden, std::chrono::milliseconds(3000)),
                "file-panel scrollbars should hide again after scrolling");
+}
+
+OPENSCP_TEST(testPointerDialogCloseDoesNotCreateKeyboardFocus, test) {
+    QWidget window;
+    auto *layout = new QVBoxLayout(&window);
+    auto *beforePanel = new QLineEdit(&window);
+    auto *panel = new DragAwareTreeView(&window);
+    layout->addWidget(beforePanel);
+    layout->addWidget(panel);
+    window.show();
+    flushUiEvents();
+
+    auto *tracker = openscpui::inputModalityTracker();
+    test.check(tracker != nullptr,
+               "the input modality tracker should be available");
+    if (!tracker)
+        return;
+
+    sendKey(beforePanel, Qt::Key_F1);
+    test.check(tracker->isKeyboardActive(),
+               "keyboard input should activate keyboard focus cues");
+
+    const QPointF titleBarPosition(4.0, 4.0);
+    const QPointF titleBarGlobalPosition =
+        window.mapToGlobal(titleBarPosition.toPoint());
+    QMouseEvent nativeTitleBarPress(
+        QEvent::NonClientAreaMouseButtonPress, titleBarPosition,
+        titleBarGlobalPosition, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(&window, &nativeTitleBarPress);
+    beforePanel->setFocus(Qt::OtherFocusReason);
+    panel->setFocus(Qt::TabFocusReason);
+    flushUiEvents();
+
+    test.check(!tracker->isKeyboardActive(),
+               "a native title-bar click should activate pointer modality");
+    test.check(!panel->property("keyboardFocusVisible").toBool(),
+               "focus restoration after a pointer close should not look like "
+               "Tab navigation");
+}
+
+OPENSCP_TEST(testAboutDialogOpensCompactStructuredCredits, test) {
+    AboutDialog dialog;
+    dialog.show();
+    flushUiEvents();
+
+    auto *creditsButton =
+        dialog.findChild<QPushButton *>(QStringLiteral("aboutCreditsButton"));
+    test.check(creditsButton != nullptr,
+               "the About dialog should expose its credits on demand");
+    if (!creditsButton)
+        return;
+
+    const QSize aboutMinimum = dialog.minimumSize();
+    test.check(aboutMinimum.width() >= 440 && aboutMinimum.height() >= 260,
+               "the About dialog should enforce its compact minimum size");
+    test.check(dialog.size() == QSize(460, 270).expandedTo(aboutMinimum),
+               "the About dialog should open at its compact preferred size");
+    dialog.resize(1, 1);
+    flushUiEvents();
+    test.check(dialog.size() == aboutMinimum && creditsButton->isVisible() &&
+                   dialog.contentsRect().contains(creditsButton->geometry()),
+               "the About dialog should keep its actions usable at minimum "
+               "size");
+
+    bool structuredCreditsFound = false;
+    bool compactCreditsFound = false;
+    bool minimumCreditsFound = false;
+    bool readableCreditsFound = false;
+    QTimer::singleShot(
+        0, &dialog,
+        [&dialog, &structuredCreditsFound, &compactCreditsFound,
+         &minimumCreditsFound, &readableCreditsFound] {
+            auto *creditsDialog =
+                dialog.findChild<QDialog *>(QStringLiteral("creditsDialog"));
+            if (!creditsDialog)
+                return;
+            auto *componentList = creditsDialog->findChild<QListWidget *>(
+                QStringLiteral("creditComponentList"));
+            auto *details = creditsDialog->findChild<QTextBrowser *>(
+                QStringLiteral("creditDetailsBrowser"));
+            structuredCreditsFound = componentList &&
+                                     componentList->count() > 0 && details &&
+                                     !details->toPlainText().isEmpty();
+            readableCreditsFound =
+                componentList &&
+                componentList
+                        ->findItems(QStringLiteral("Qt 6"), Qt::MatchExactly)
+                        .size() == 1 &&
+                details && !details->toHtml().contains(QStringLiteral("<ul")) &&
+                !details->toHtml().contains(QStringLiteral("<li"));
+            const QSize creditsMinimum = creditsDialog->minimumSize();
+            compactCreditsFound =
+                creditsMinimum.width() >= 520 &&
+                creditsMinimum.height() >= 340 &&
+                creditsDialog->size() ==
+                    QSize(560, 360).expandedTo(creditsMinimum);
+            creditsDialog->resize(1, 1);
+            flushUiEvents();
+            minimumCreditsFound =
+                creditsDialog->size() == creditsMinimum && componentList &&
+                componentList->width() >= componentList->minimumWidth() &&
+                details && details->width() > 0;
+            creditsDialog->reject();
+        });
+    creditsButton->click();
+
+    test.check(structuredCreditsFound,
+               "credits should use a component list with focused details");
+    test.check(compactCreditsFound,
+               "the credits browser should open at its compact preferred "
+               "size");
+    test.check(minimumCreditsFound,
+               "the credits browser should preserve both panes at minimum "
+               "size");
+    test.check(readableCreditsFound,
+               "credits should use concise component names and field rows, "
+               "not Markdown bullets");
 }
 
 OPENSCP_TEST(testTransferQueueUsesNativeFocusAndAccessibleState, test) {
