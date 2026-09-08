@@ -638,16 +638,22 @@ void MainWindow::showSiteManagerNonModal() {
         return;
     }
     auto *dlg = new SiteManagerDialog(this);
+    QPointer<QWidget> previousFocus = QApplication::focusWidget();
+    if (previousFocus && previousFocus->window() != this)
+        previousFocus.clear();
     siteManager_ = dlg;
     dlg->setAttribute(Qt::WA_DeleteOnClose, true);
     connect(dlg, &QObject::destroyed, this, [this] { siteManager_.clear(); });
-    connect(dlg, &QDialog::finished, this, [this, dlg](int dialogResult) {
-        if (dialogResult == QDialog::Accepted && dlg) {
-            SiteEntry site;
-            if (dlg->selectedSite(site))
-                startSavedSiteConnect(site);
-        }
-    });
+    connect(dlg, &QDialog::finished, this,
+            [this, dlg, previousFocus](int dialogResult) {
+                if (dialogResult == QDialog::Accepted && dlg) {
+                    SiteEntry site;
+                    if (dlg->selectedSite(site))
+                        startSavedSiteConnect(site);
+                } else {
+                    restoreFocusAfterDialog(previousFocus);
+                }
+            });
     QTimer::singleShot(0, dlg, [dlg] {
         dlg->show();
         dlg->raise();

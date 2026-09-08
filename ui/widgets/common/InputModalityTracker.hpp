@@ -32,6 +32,7 @@ class InputModalityTracker final : public QObject {
     void setModality(InputModality modality);
 
     InputModality modality_ = InputModality::Pointer;
+    bool explicitInputObserved_ = false;
 };
 
 [[nodiscard]] InputModalityTracker *inputModalityTracker();

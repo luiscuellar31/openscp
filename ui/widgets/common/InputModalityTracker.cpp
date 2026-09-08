@@ -30,6 +30,7 @@ bool InputModalityTracker::eventFilter(QObject *watched, QEvent *event) {
             (keyEvent->key() == Qt::Key_Backtab &&
              (keyEvent->modifiers() == Qt::NoModifier ||
               keyEvent->modifiers() == Qt::ShiftModifier));
+        explicitInputObserved_ = true;
         setModality(InputModality::Keyboard);
         emit inputObserved(focusTraversalKey ? UserInputKind::FocusTraversal
                                              : UserInputKind::Keyboard,
@@ -37,6 +38,8 @@ bool InputModalityTracker::eventFilter(QObject *watched, QEvent *event) {
         break;
     }
     case QEvent::FocusIn: {
+        if (explicitInputObserved_)
+            break;
         const auto *focusEvent = static_cast<QFocusEvent *>(event);
         if (focusEvent->reason() == Qt::TabFocusReason ||
             focusEvent->reason() == Qt::BacktabFocusReason) {
@@ -48,9 +51,12 @@ bool InputModalityTracker::eventFilter(QObject *watched, QEvent *event) {
     }
     case QEvent::MouseButtonPress:
     case QEvent::MouseButtonDblClick:
+    case QEvent::NonClientAreaMouseButtonPress:
+    case QEvent::NonClientAreaMouseButtonDblClick:
     case QEvent::TabletPress:
     case QEvent::TouchBegin:
     case QEvent::Wheel:
+        explicitInputObserved_ = true;
         setModality(InputModality::Pointer);
         emit inputObserved(UserInputKind::Pointer, watched);
         break;

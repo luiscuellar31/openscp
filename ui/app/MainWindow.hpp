@@ -239,6 +239,7 @@ class MainWindow : public QMainWindow {
     bool consumeTofuDialogDecision(int result);
     void showSiteManagerNonModal();
     void maybeOpenSiteManagerAfterModal();
+    void restoreFocusAfterDialog(const QPointer<QWidget> &previousFocus);
     bool
     confirmInsecureHostPolicyForSession(const openscp::SessionOptions &opt);
     void updateHostPolicyRiskBanner();

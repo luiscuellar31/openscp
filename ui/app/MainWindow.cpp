@@ -14,6 +14,7 @@
 #include "logic/remote/RemoteOperationController.hpp"
 #include "logic/transfers/TransferManager.hpp"
 #include "widgets/common/FocusTraversalController.hpp"
+#include "widgets/common/InputModalityTracker.hpp"
 #include "widgets/common/ToolbarKeyboardNavigation.hpp"
 #include "widgets/dialogs/AboutDialog.hpp"
 #include "widgets/dialogs/ConnectionDialog.hpp"
@@ -671,12 +672,18 @@ void MainWindow::initializeMainToolbar() {
     setTextBesideIcon(actDisconnect_, tr("Disconnect"));
     mainToolbar->addSeparator();
     actSites_ = mainToolbar->addAction(tr("Saved sites"), [this] {
+        const QPointer<QWidget> previousFocus = QApplication::focusWidget();
         SiteManagerDialog dlg(this);
+        bool connectionStarted = false;
         if (dlg.exec() == QDialog::Accepted) {
             SiteEntry site;
-            if (dlg.selectedSite(site))
+            if (dlg.selectedSite(site)) {
                 startSavedSiteConnect(site);
+                connectionStarted = true;
+            }
         }
+        if (!connectionStarted)
+            restoreFocusAfterDialog(previousFocus);
     });
     actSites_->setIcon(mainWindowActionIcon("action-open-saved-sites.svg"));
     actSites_->setToolTip(actSites_->text());
@@ -1300,18 +1307,47 @@ void MainWindow::resetConnectionSessionIndicators() {
 
 // Show the application About dialog.
 void MainWindow::showAboutDialog() {
+    const QPointer<QWidget> previousFocus = QApplication::focusWidget();
     AboutDialog dlg(this);
     dlg.exec();
+    restoreFocusAfterDialog(previousFocus);
 }
 
 // Open the Settings dialog and apply changes when accepted.
 void MainWindow::showSettingsDialog() {
+    const QPointer<QWidget> previousFocus = QApplication::focusWidget();
     SettingsDialog dlg(this);
     connect(&dlg, &SettingsDialog::settingsApplied, this,
             &MainWindow::applyPreferences);
     dlg.exec();
     // Reflect any applied changes in the running UI
     applyPreferences();
+    restoreFocusAfterDialog(previousFocus);
+}
+
+void MainWindow::restoreFocusAfterDialog(
+    const QPointer<QWidget> &previousFocus) {
+    QTimer::singleShot(0, this, [this, previousFocus] {
+        if (previousFocus && previousFocus->window() == this &&
+            previousFocus->isVisibleTo(this) && previousFocus->isEnabled()) {
+            previousFocus->setFocus(Qt::OtherFocusReason);
+            return;
+        }
+
+        const auto *tracker = openscpui::inputModalityTracker();
+        if (tracker && tracker->isKeyboardActive() && mainToolbar_ &&
+            actConnect_) {
+            if (QWidget *connectButton =
+                    mainToolbar_->widgetForAction(actConnect_)) {
+                connectButton->setFocus(Qt::OtherFocusReason);
+                return;
+            }
+        }
+
+        QWidget *currentFocus = QApplication::focusWidget();
+        if (currentFocus && currentFocus->window() == this)
+            currentFocus->clearFocus();
+    });
 }
 
 void MainWindow::showEvent(QShowEvent *e) {
