@@ -14,6 +14,7 @@ class QCheckBox;
 class QResizeEvent;
 class QFontMetrics;
 class QKeySequenceEdit;
+class QLabel;
 class QSettings;
 
 class SettingsDialog : public QDialog {
@@ -60,26 +61,36 @@ class SettingsDialog : public QDialog {
     void setupSectionList(class QListWidget *sectionList) const;
     void recalcSectionListWidth(class QListWidget *sectionList) const;
     QWidget *createFormPage(const PageBuildContext &ctx, const QString &title,
-                            class QFormLayout *&outForm) const;
+                            class QFormLayout *&outForm);
     void setFieldWidth(QWidget *field) const;
+    void setCompactFieldWidth(QWidget *field, int minWidth) const;
+    void setPathFieldWidth(QWidget *field) const;
+    void configureInlineAction(QPushButton *button) const;
+    void normalizeFormLabelWidths();
     void addLabeledRow(class QFormLayout *target, QWidget *parent,
-                       const QString &labelText, QWidget *field) const;
+                       const QString &labelText, QWidget *field,
+                       QWidget *buddy = nullptr);
+    void addSectionHeading(class QFormLayout *target, QWidget *parent,
+                           const QString &text, bool separated = true) const;
     void addTrackedCheckRows(
         class QFormLayout *target, QWidget *parent,
         std::initializer_list<QPair<QCheckBox **, QString>> rows);
     QComboBox *addComboRow(class QFormLayout *target, QWidget *parent,
-                           const QString &labelText) const;
+                           const QString &labelText);
     class QSpinBox *addSpinRow(class QFormLayout *target, QWidget *parent,
                                const QString &labelText, int minValue,
                                int maxValue, int defaultValue,
                                const QString &suffix = QString(),
                                int minWidth = 100, int step = 1,
-                               const QString &toolTip = QString()) const;
+                               const QString &toolTip = QString());
     void addBrowsePathRow(class QFormLayout *target, QWidget *parent,
                           const QString &labelText, const QString &dialogTitle,
                           bool pickFile, class QLineEdit *&editOut,
                           QPushButton *&browseButtonOut,
-                          const QString &placeholder = QString());
+                          const QString &placeholder = QString(),
+                          const QString &restorePath = QString(),
+                          const QString &restoreText = QString(),
+                          QPushButton **restoreButtonOut = nullptr);
     void buildGeneralPage(const PageBuildContext &ctx);
     void buildShortcutsPage(const PageBuildContext &ctx);
     void buildTransfersPage(const PageBuildContext &ctx);
@@ -157,6 +168,7 @@ class SettingsDialog : public QDialog {
         nullptr; // default auto-clear delay in minutes
     class QLineEdit *stagingRootEdit_ = nullptr; // staging folder path
     class QPushButton *stagingBrowseBtn_ = nullptr;
+    QPushButton *stagingRestoreDefaultBtn_ = nullptr;
     QCheckBox *autoCleanStaging_ =
         nullptr; // Auto-clean staging after successful drag-out
     class QSpinBox *stagingRetentionDaysSpin_ =
@@ -174,4 +186,5 @@ class SettingsDialog : public QDialog {
         nullptr; // Apply button (enabled only when modified)
     QPushButton *closeBtn_ = nullptr;    // Close button (never primary/default)
     QVector<QCheckBox *> wrappedChecks_; // checkboxes with auto text wrapping
+    QVector<QLabel *> formLabels_;       // shared form-label alignment axis
 };

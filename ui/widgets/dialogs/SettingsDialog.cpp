@@ -28,6 +28,8 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include <utility>
+
 namespace {
 
 QString defaultDownloadDirPath() {
@@ -42,8 +44,13 @@ constexpr int kQueueAutoClearOff = 0;
 constexpr int kQueueAutoClearCompleted = 1;
 constexpr int kQueueAutoClearFailedCanceled = 2;
 constexpr int kQueueAutoClearFinished = 3;
-constexpr int kFieldMinWidth = 320;
+constexpr int kFieldMinWidth = 280;
 constexpr int kFieldMaxWidth = 520;
+constexpr int kPathFieldMinWidth = 120;
+constexpr int kCompactFieldMaxWidth = 180;
+constexpr int kFormLabelMinWidth = 150;
+constexpr int kFormLabelMaxWidth = 190;
+constexpr int kFormSpacing = 10;
 
 using ComboItem = QPair<QString, QVariant>;
 
@@ -121,23 +128,33 @@ SettingsDialog::buildSettingBindings() const {
 
     auto makeLineEditBinding = [](const QString &key,
                                   const QString &defaultValue, QLineEdit *edit,
-                                  const StringNormalizer &normalize = {}) {
+                                  const StringNormalizer &normalize = {},
+                                  bool removeWhenDefault = false) {
+        const QString normalizedDefault =
+            normalize ? normalize(defaultValue) : defaultValue;
         return SettingBinding{
             key,
-            [key, defaultValue, normalize](const QSettings &settings) {
-                QString value = settings.value(key, defaultValue).toString();
+            [key, normalizedDefault, normalize](const QSettings &settings) {
+                QString value =
+                    settings.value(key, normalizedDefault).toString();
                 return normalize ? normalize(value) : value;
             },
-            [edit, defaultValue, normalize] {
-                QString value = edit ? edit->text() : defaultValue;
+            [edit, normalizedDefault, normalize] {
+                QString value = edit ? edit->text() : normalizedDefault;
                 return normalize ? normalize(value) : value;
             },
             [edit](const QVariant &value) {
                 if (edit)
                     edit->setText(value.toString());
             },
-            [key](QSettings &settings, const QVariant &value) {
-                settings.setValue(key, value);
+            [key, normalizedDefault, removeWhenDefault](QSettings &settings,
+                                                        const QVariant &value) {
+                if (removeWhenDefault &&
+                    value.toString() == normalizedDefault) {
+                    settings.remove(key);
+                } else {
+                    settings.setValue(key, value);
+                }
             },
         };
     };
@@ -244,9 +261,11 @@ SettingsDialog::buildSettingBindings() const {
     };
     auto addLineEdit = [&](const char *key, const QString &defaultValue,
                            QLineEdit *edit,
-                           const StringNormalizer &normalize = {}) {
+                           const StringNormalizer &normalize = {},
+                           bool removeWhenDefault = false) {
         bindings.push_back(makeLineEditBinding(QString::fromLatin1(key),
-                                               defaultValue, edit, normalize));
+                                               defaultValue, edit, normalize,
+                                               removeWhenDefault));
     };
     auto addShortcut = [&](const char *key, const QString &defaultValue,
                            QKeySequenceEdit *editor) {
@@ -515,8 +534,8 @@ SettingsDialog::buildSettingBindings() const {
     }
 
     addLineEdit(openscpui::settingskeys::kStagingRoot,
-                QDir::homePath() + "/Downloads/OpenSCP-Dragged",
-                stagingRootEdit_);
+                openscpui::defaultStagingRootPath(), stagingRootEdit_,
+                StringNormalizer{}, true);
     addBool(openscpui::settingskeys::kAutoCleanStaging, true,
             autoCleanStaging_);
 
@@ -691,7 +710,7 @@ void SettingsDialog::recalcSectionListWidth(QListWidget *sectionList) const {
 
 QWidget *SettingsDialog::createFormPage(const PageBuildContext &ctx,
                                         const QString &title,
-                                        QFormLayout *&outForm) const {
+                                        QFormLayout *&outForm) {
     auto *scroll = new QScrollArea(ctx.pages);
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
@@ -699,13 +718,15 @@ QWidget *SettingsDialog::createFormPage(const PageBuildContext &ctx,
     auto *page = new QWidget(scroll);
     auto *pageLay = new QVBoxLayout(page);
     pageLay->setContentsMargins(12, 12, 12, 12);
-    pageLay->setSpacing(8);
+    pageLay->setSpacing(kFormSpacing);
 
     auto *form = new QFormLayout();
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     form->setRowWrapPolicy(QFormLayout::WrapLongRows);
-    form->setHorizontalSpacing(8);
-    form->setVerticalSpacing(8);
+    form->setLabelAlignment(Qt::AlignRight | Qt::AlignTop);
+    form->setFormAlignment(Qt::AlignLeft | Qt::AlignTop);
+    form->setHorizontalSpacing(kFormSpacing);
+    form->setVerticalSpacing(kFormSpacing);
     pageLay->addLayout(form);
     pageLay->addStretch(1);
 
@@ -725,15 +746,74 @@ void SettingsDialog::setFieldWidth(QWidget *field) const {
         return;
     field->setMinimumWidth(kFieldMinWidth);
     field->setMaximumWidth(kFieldMaxWidth);
+    field->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+}
+
+void SettingsDialog::setCompactFieldWidth(QWidget *field, int minWidth) const {
+    if (!field)
+        return;
+    field->setMinimumWidth(minWidth);
+    field->setMaximumWidth(kCompactFieldMaxWidth);
+    field->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+}
+
+void SettingsDialog::setPathFieldWidth(QWidget *field) const {
+    if (!field)
+        return;
+    field->setMinimumWidth(kPathFieldMinWidth);
+    field->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+}
+
+void SettingsDialog::configureInlineAction(QPushButton *button) const {
+    if (!button)
+        return;
+    button->setProperty("settingsInlineAction", true);
+    button->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+    button->setAutoDefault(false);
+    button->setDefault(false);
+}
+
+void SettingsDialog::normalizeFormLabelWidths() {
+    int sharedWidth = kFormLabelMinWidth;
+    for (const QLabel *label : std::as_const(formLabels_)) {
+        if (!label)
+            continue;
+        sharedWidth =
+            qMax(sharedWidth,
+                 QFontMetrics(label->font()).horizontalAdvance(label->text()));
+    }
+    sharedWidth = qBound(kFormLabelMinWidth, sharedWidth, kFormLabelMaxWidth);
+
+    for (QLabel *label : std::as_const(formLabels_)) {
+        if (!label)
+            continue;
+        label->setFixedWidth(sharedWidth);
+        label->setAlignment(Qt::AlignRight | Qt::AlignTop);
+    }
 }
 
 void SettingsDialog::addLabeledRow(QFormLayout *target, QWidget *parent,
-                                   const QString &labelText,
-                                   QWidget *field) const {
+                                   const QString &labelText, QWidget *field,
+                                   QWidget *buddy) {
     auto *label = new QLabel(labelText, parent);
     label->setWordWrap(true);
     label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+    label->setProperty("settingsFormLabel", true);
+    label->setBuddy(buddy ? buddy : field);
+    formLabels_.push_back(label);
     target->addRow(label, field);
+}
+
+void SettingsDialog::addSectionHeading(QFormLayout *target, QWidget *parent,
+                                       const QString &text,
+                                       bool separated) const {
+    auto *heading = new QLabel(text, parent);
+    QFont headingFont = heading->font();
+    headingFont.setBold(true);
+    heading->setFont(headingFont);
+    heading->setProperty("settingsSectionHeading", true);
+    heading->setContentsMargins(0, separated ? kFormSpacing : 0, 0, 2);
+    target->addRow(QString(), heading);
 }
 
 void SettingsDialog::addTrackedCheckRows(
@@ -750,7 +830,7 @@ void SettingsDialog::addTrackedCheckRows(
 }
 
 QComboBox *SettingsDialog::addComboRow(QFormLayout *target, QWidget *parent,
-                                       const QString &labelText) const {
+                                       const QString &labelText) {
     auto *combo = new QComboBox(parent);
     setFieldWidth(combo);
     addLabeledRow(target, parent, labelText, combo);
@@ -761,41 +841,65 @@ QSpinBox *SettingsDialog::addSpinRow(QFormLayout *target, QWidget *parent,
                                      const QString &labelText, int minValue,
                                      int maxValue, int defaultValue,
                                      const QString &suffix, int minWidth,
-                                     int step, const QString &toolTip) const {
+                                     int step, const QString &toolTip) {
     auto *spin = new QSpinBox(parent);
     spin->setRange(minValue, maxValue);
     spin->setValue(defaultValue);
     if (!suffix.isEmpty())
         spin->setSuffix(suffix);
-    spin->setMinimumWidth(minWidth);
     if (step > 1)
         spin->setSingleStep(step);
     if (!toolTip.isEmpty())
         spin->setToolTip(toolTip);
+    setCompactFieldWidth(spin, minWidth);
     addLabeledRow(target, parent, labelText, spin);
     return spin;
 }
 
-void SettingsDialog::addBrowsePathRow(QFormLayout *target, QWidget *parent,
-                                      const QString &labelText,
-                                      const QString &dialogTitle, bool pickFile,
-                                      QLineEdit *&editOut,
-                                      QPushButton *&browseButtonOut,
-                                      const QString &placeholder) {
+void SettingsDialog::addBrowsePathRow(
+    QFormLayout *target, QWidget *parent, const QString &labelText,
+    const QString &dialogTitle, bool pickFile, QLineEdit *&editOut,
+    QPushButton *&browseButtonOut, const QString &placeholder,
+    const QString &restorePath, const QString &restoreText,
+    QPushButton **restoreButtonOut) {
     auto *rowWidget = new QWidget(parent);
     auto *row = new QHBoxLayout(rowWidget);
     row->setContentsMargins(0, 0, 0, 0);
     row->setSpacing(6);
 
     auto *edit = new QLineEdit(parent);
-    setFieldWidth(edit);
+    setPathFieldWidth(edit);
     if (!placeholder.isEmpty())
         edit->setPlaceholderText(placeholder);
 
     auto *browseButton = new QPushButton(tr("Choose…"), parent);
+    configureInlineAction(browseButton);
     row->addWidget(edit, 1);
     row->addWidget(browseButton);
-    addLabeledRow(target, parent, labelText, rowWidget);
+
+    if (restoreButtonOut) {
+        auto *restoreButton = new QPushButton(tr("Restore default"), parent);
+        configureInlineAction(restoreButton);
+        restoreButton->setToolTip(restoreText);
+        restoreButton->setAccessibleName(restoreText);
+        restoreButton->setAccessibleDescription(
+            tr("Set this path to %1")
+                .arg(QDir::toNativeSeparators(restorePath)));
+        row->addWidget(restoreButton);
+
+        const auto updateRestoreState = [edit, restoreButton, restorePath] {
+            restoreButton->setEnabled(QDir::cleanPath(edit->text()) !=
+                                      QDir::cleanPath(restorePath));
+        };
+        connect(
+            edit, &QLineEdit::textChanged, restoreButton,
+            [updateRestoreState](const QString &) { updateRestoreState(); });
+        connect(restoreButton, &QPushButton::clicked, edit,
+                [edit, restorePath] { edit->setText(restorePath); });
+        updateRestoreState();
+        *restoreButtonOut = restoreButton;
+    }
+    addLabeledRow(target, parent, labelText, rowWidget, edit);
 
     connect(browseButton, &QPushButton::clicked, this,
             [this, edit, dialogTitle, pickFile] {
@@ -844,6 +948,9 @@ void SettingsDialog::buildGeneralPage(const PageBuildContext &ctx) {
 
     resetMainLayoutBtn_ =
         new QPushButton(tr("Restore default sizes"), generalPage);
+    configureInlineAction(resetMainLayoutBtn_);
+    resetMainLayoutBtn_->setObjectName(
+        QStringLiteral("settingsRestoreDefaultLayout"));
     addLabeledRow(generalForm, generalPage, tr("Window layout:"),
                   resetMainLayoutBtn_);
     connect(resetMainLayoutBtn_, &QPushButton::clicked, this, [this] {
@@ -882,7 +989,6 @@ void SettingsDialog::buildShortcutsPage(const PageBuildContext &ctx) {
     QFormLayout *shortcutsForm = nullptr;
     QWidget *shortcutsPage =
         createFormPage(ctx, tr("Shortcuts"), shortcutsForm);
-    shortcutsForm->setVerticalSpacing(8);
     auto *shortcutsHint = new QLabel(
         tr("Select an action and press the new key combination directly in the "
            "field."),
@@ -903,13 +1009,15 @@ void SettingsDialog::buildTransfersPage(const PageBuildContext &ctx) {
     QFormLayout *transfersForm = nullptr;
     QWidget *transfersPage =
         createFormPage(ctx, tr("Transfers"), transfersForm);
-    transfersForm->setVerticalSpacing(10);
+    addSectionHeading(transfersForm, transfersPage, tr("Concurrency and speed"),
+                      false);
     maxConcurrentSpin_ = addSpinRow(
         transfersForm, transfersPage, tr("Parallel tasks:"), 1, 8, 2, QString(),
         90, 1, tr("Maximum number of concurrent transfers."));
     globalSpeedDefaultSpin_ = addSpinRow(
         transfersForm, transfersPage, tr("Default global limit:"), 0, 1'000'000,
         0, tr(" KB/s"), 120, 1, tr("0 = no global speed limit."));
+    addSectionHeading(transfersForm, transfersPage, tr("Automatic cleanup"));
     queueAutoClearModeDefault_ = new QComboBox(transfersPage);
     setFieldWidth(queueAutoClearModeDefault_);
     addComboItems(queueAutoClearModeDefault_,
@@ -932,7 +1040,6 @@ void SettingsDialog::buildTransfersPage(const PageBuildContext &ctx) {
 void SettingsDialog::buildSitesPage(const PageBuildContext &ctx) {
     QFormLayout *sitesForm = nullptr;
     QWidget *sitesPage = createFormPage(ctx, tr("Sites"), sitesForm);
-    sitesForm->setVerticalSpacing(8);
     defaultProtocol_ = new QComboBox(sitesPage);
     setFieldWidth(defaultProtocol_);
     addComboItems(
@@ -972,7 +1079,8 @@ void SettingsDialog::buildSitesPage(const PageBuildContext &ctx) {
 void SettingsDialog::buildSecurityPage(const PageBuildContext &ctx) {
     QFormLayout *securityForm = nullptr;
     QWidget *securityPage = createFormPage(ctx, tr("Security"), securityForm);
-    securityForm->setVerticalSpacing(8);
+    addSectionHeading(securityForm, securityPage, tr("Connection policies"),
+                      false);
     defaultKnownHostsPolicy_ = new QComboBox(securityPage);
     setFieldWidth(defaultKnownHostsPolicy_);
     addComboItems(
@@ -996,6 +1104,12 @@ void SettingsDialog::buildSecurityPage(const PageBuildContext &ctx) {
           static_cast<int>(openscp::TransferIntegrityPolicy::Off)}});
     addLabeledRow(securityForm, securityPage, tr("Default integrity policy:"),
                   defaultIntegrityPolicy_);
+    noHostVerifyTtlMinSpin_ = addSpinRow(
+        securityForm, securityPage, tr("No-verification TTL:"), 1, 120, 15,
+        tr(" min"), 100, 1,
+        tr("Duration of the temporary exception for no host-key verification "
+           "policy."));
+    addSectionHeading(securityForm, securityPage, tr("FTPS"));
     addTrackedCheckRows(
         securityForm, securityPage,
         {{&ftpsVerifyPeerDefault_,
@@ -1004,6 +1118,8 @@ void SettingsDialog::buildSecurityPage(const PageBuildContext &ctx) {
                      tr("Select FTPS CA bundle"), true,
                      ftpsCaCertPathDefaultEdit_,
                      ftpsCaCertPathDefaultBrowseBtn_, tr("System CA bundle"));
+    addSectionHeading(securityForm, securityPage,
+                      tr("Credentials and terminal"));
     addTrackedCheckRows(
         securityForm, securityPage,
         {{&knownHostsHashed_,
@@ -1029,17 +1145,11 @@ void SettingsDialog::buildSecurityPage(const PageBuildContext &ctx) {
         {{&insecureFallback_,
           tr("Allow insecure credentials fallback (not recommended).")}});
 #endif
-    noHostVerifyTtlMinSpin_ = addSpinRow(
-        securityForm, securityPage, tr("No-verification TTL:"), 1, 120, 15,
-        tr(" min"), 100, 1,
-        tr("Duration of the temporary exception for no host-key verification "
-           "policy."));
 }
 
 void SettingsDialog::buildNetworkPage(const PageBuildContext &ctx) {
     QFormLayout *networkForm = nullptr;
     QWidget *networkPage = createFormPage(ctx, tr("Network"), networkForm);
-    networkForm->setVerticalSpacing(8);
     sessionHealthIntervalSecSpin_ = addSpinRow(
         networkForm, networkPage, tr("Session health check interval:"), 60,
         86400, 600, tr(" s"));
@@ -1049,10 +1159,19 @@ void SettingsDialog::buildStagingPage(const PageBuildContext &ctx) {
     QFormLayout *stagingForm = nullptr;
     QWidget *stagingPage =
         createFormPage(ctx, tr("Staging and drag-out"), stagingForm);
-    stagingForm->setVerticalSpacing(8);
+    addSectionHeading(stagingForm, stagingPage, tr("Folder and cleanup"),
+                      false);
+    const QString defaultStagingRoot = openscpui::defaultStagingRootPath();
     addBrowsePathRow(stagingForm, stagingPage, tr("Staging folder:"),
                      tr("Select staging folder"), false, stagingRootEdit_,
-                     stagingBrowseBtn_);
+                     stagingBrowseBtn_, QString(), defaultStagingRoot,
+                     tr("Restore default staging folder"),
+                     &stagingRestoreDefaultBtn_);
+    stagingRootEdit_->setObjectName(QStringLiteral("settingsStagingRoot"));
+    stagingBrowseBtn_->setObjectName(
+        QStringLiteral("settingsChooseStagingRoot"));
+    stagingRestoreDefaultBtn_->setObjectName(
+        QStringLiteral("settingsRestoreDefaultStagingRoot"));
     addTrackedCheckRows(
         stagingForm, stagingPage,
         {{&autoCleanStaging_,
@@ -1060,6 +1179,7 @@ void SettingsDialog::buildStagingPage(const PageBuildContext &ctx) {
     stagingRetentionDaysSpin_ =
         addSpinRow(stagingForm, stagingPage, tr("Startup cleanup retention:"),
                    1, 365, 7, tr(" days"), 110);
+    addSectionHeading(stagingForm, stagingPage, tr("Safety limits"));
     stagingPrepTimeoutMsSpin_ = addSpinRow(
         stagingForm, stagingPage, tr("Preparation timeout:"), 250, 60000, 2000,
         tr(" ms"), 110, 250, tr("Time before showing the Wait/Cancel dialog."));
@@ -1079,14 +1199,15 @@ void SettingsDialog::buildStagingPage(const PageBuildContext &ctx) {
     maxDepthSpin_ = new QSpinBox(stagingPage);
     maxDepthSpin_->setRange(4, 256);
     maxDepthSpin_->setValue(32);
-    maxDepthSpin_->setMinimumWidth(90);
+    setCompactFieldWidth(maxDepthSpin_, 90);
     maxDepthSpin_->setToolTip(tr(
         "Limit for recursive folder drag-out to avoid deep trees and loops."));
     auto *hint = new QLabel(tr("Recommended: 32"), stagingPage);
     row->addWidget(maxDepthSpin_);
     row->addWidget(hint);
     row->addStretch(1);
-    addLabeledRow(stagingForm, stagingPage, tr("Maximum depth:"), rowWidget);
+    addLabeledRow(stagingForm, stagingPage, tr("Maximum depth:"), rowWidget,
+                  maxDepthSpin_);
 }
 
 void SettingsDialog::setupSectionNavigation(const PageBuildContext &ctx) {
@@ -1110,6 +1231,7 @@ void SettingsDialog::buildBottomButtons(QVBoxLayout *root) {
     closeBtn_ = new QPushButton(tr("Close"), btnRow);
     applyBtn_ = new QPushButton(tr("Apply"), btnRow);
     closeBtn_->setObjectName(QStringLiteral("settingsCloseButton"));
+    applyBtn_->setObjectName(QStringLiteral("settingsApplyButton"));
     buttonLayout->addWidget(closeBtn_);
     buttonLayout->addWidget(applyBtn_);
     root->addWidget(btnRow);
@@ -1248,6 +1370,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     buildSecurityPage(ctx);
     buildNetworkPage(ctx);
     buildStagingPage(ctx);
+    normalizeFormLabelWidths();
     setupSectionNavigation(ctx);
     buildBottomButtons(root);
     loadPersistedSettings();

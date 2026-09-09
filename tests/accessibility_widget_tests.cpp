@@ -1,10 +1,12 @@
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
+#include "logic/common/AppSettings.hpp"
 #include "logic/transfers/TransferManager.hpp"
 #include "widgets/common/InputModalityTracker.hpp"
 #include "widgets/common/ToolbarKeyboardNavigation.hpp"
 #include "widgets/dialogs/AboutDialog.hpp"
 #include "widgets/dialogs/ConnectionDialog.hpp"
+#include "widgets/dialogs/SettingsDialog.hpp"
 #include "widgets/dialogs/TransferQueueDialog.hpp"
 #include "widgets/files/DragAwareTreeView.hpp"
 #include "widgets/navigation/PathNavigationBar.hpp"
@@ -14,6 +16,7 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QDialog>
+#include <QDir>
 #include <QFont>
 #include <QFrame>
 #include <QHeaderView>
@@ -26,6 +29,7 @@
 #include <QPushButton>
 #include <QScrollBar>
 #include <QSettings>
+#include <QSizePolicy>
 #include <QSpinBox>
 #include <QStandardItemModel>
 #include <QTableView>
@@ -775,6 +779,175 @@ OPENSCP_TEST(testTransferQueueUsesNativeFocusAndAccessibleState, test) {
                "queue options should open as a compact modal dialog");
     test.check(allActionLabelsFit,
                "queue action labels should fit at the minimum window size");
+}
+
+OPENSCP_TEST(testSettingsRestoresDefaultStagingFolderOnApply, test) {
+    const QString customRoot =
+        QDir(QDir::tempPath())
+            .filePath(QStringLiteral("openscp-custom-staging-test"));
+    const QString defaultRoot = openscpui::defaultStagingRootPath();
+    {
+        openscpui::AppSettings settings;
+        settings.clear();
+        settings.setValue(openscpui::settingskeys::kStagingRoot, customRoot);
+        settings.sync();
+    }
+
+    {
+        SettingsDialog dialog;
+        auto *path = dialog.findChild<QLineEdit *>(
+            QStringLiteral("settingsStagingRoot"));
+        auto *choose = dialog.findChild<QPushButton *>(
+            QStringLiteral("settingsChooseStagingRoot"));
+        auto *restore = dialog.findChild<QPushButton *>(
+            QStringLiteral("settingsRestoreDefaultStagingRoot"));
+        auto *apply = dialog.findChild<QPushButton *>(
+            QStringLiteral("settingsApplyButton"));
+        auto *sections = dialog.findChild<QListWidget *>();
+        dialog.show();
+        if (sections)
+            sections->setCurrentRow(sections->count() - 1);
+        flushUiEvents();
+        test.check(path && choose && restore && apply &&
+                       path->text() == customRoot && restore->isEnabled() &&
+                       !apply->isEnabled() && !choose->autoDefault() &&
+                       !choose->isDefault() && !restore->autoDefault() &&
+                       !restore->isDefault() &&
+                       !restore->text().trimmed().isEmpty() &&
+                       restore->icon().isNull() && !restore->isFlat() &&
+                       restore->style() == choose->style() &&
+                       !restore->accessibleName().trimmed().isEmpty() &&
+                       !restore->accessibleDescription().trimmed().isEmpty(),
+                   "staging actions should use matching native push buttons "
+                   "without taking the dialog default action");
+        if (path && choose && restore && apply) {
+            restore->click();
+            test.check(path->text() == defaultRoot && !restore->isEnabled() &&
+                           apply->isEnabled() && apply->isDefault() &&
+                           !choose->isDefault(),
+                       "restoring should update only the field and mark "
+                       "settings as modified");
+        }
+        dialog.reject();
+    }
+
+    {
+        openscpui::AppSettings settings;
+        test.check(
+            settings.value(openscpui::settingskeys::kStagingRoot).toString() ==
+                customRoot,
+            "closing without Apply should preserve the custom path");
+    }
+
+    {
+        SettingsDialog dialog;
+        auto *restore = dialog.findChild<QPushButton *>(
+            QStringLiteral("settingsRestoreDefaultStagingRoot"));
+        auto *apply = dialog.findChild<QPushButton *>(
+            QStringLiteral("settingsApplyButton"));
+        if (restore && apply) {
+            restore->click();
+            apply->click();
+        }
+    }
+
+    {
+        openscpui::AppSettings settings;
+        test.check(!settings.contains(openscpui::settingskeys::kStagingRoot) &&
+                       openscpui::effectiveStagingRootPath(settings) ==
+                           defaultRoot,
+                   "Apply should remove the override and restore the central "
+                   "default without touching the filesystem");
+        settings.clear();
+        settings.sync();
+    }
+}
+
+OPENSCP_TEST(testSettingsUsesConsistentLayoutRoles, test) {
+    SettingsDialog dialog;
+    dialog.show();
+    flushUiEvents();
+
+    int sharedLabelWidth = -1;
+    int formLabelCount = 0;
+    int sectionHeadingCount = 0;
+    bool labelsShareAxis = true;
+    bool sectionHeadingsAreSubtle = true;
+    for (QLabel *label : dialog.findChildren<QLabel *>()) {
+        if (label->property("settingsFormLabel").toBool()) {
+            ++formLabelCount;
+            if (sharedLabelWidth < 0)
+                sharedLabelWidth = label->width();
+            labelsShareAxis = labelsShareAxis &&
+                              label->minimumWidth() == sharedLabelWidth &&
+                              label->maximumWidth() == sharedLabelWidth &&
+                              label->alignment().testFlag(Qt::AlignRight) &&
+                              label->alignment().testFlag(Qt::AlignTop);
+        }
+        if (label->property("settingsSectionHeading").toBool()) {
+            ++sectionHeadingCount;
+            sectionHeadingsAreSubtle =
+                sectionHeadingsAreSubtle && label->font().bold();
+        }
+    }
+
+    bool numericFieldsAreCompact = true;
+    const auto numericFields = dialog.findChildren<QSpinBox *>();
+    for (const QSpinBox *spin : numericFields) {
+        numericFieldsAreCompact =
+            numericFieldsAreCompact && spin->maximumWidth() <= 180 &&
+            spin->sizePolicy().horizontalPolicy() == QSizePolicy::Preferred;
+    }
+
+    bool standardFieldsShareWidthRole = true;
+    const auto standardFields = dialog.findChildren<QComboBox *>();
+    for (const QComboBox *combo : standardFields) {
+        standardFieldsShareWidthRole =
+            standardFieldsShareWidthRole && combo->minimumWidth() == 280 &&
+            combo->maximumWidth() == 520 &&
+            combo->sizePolicy().horizontalPolicy() == QSizePolicy::Expanding;
+    }
+
+    int inlineActionCount = 0;
+    bool inlineActionsAreSecondary = true;
+    for (const QPushButton *button : dialog.findChildren<QPushButton *>()) {
+        if (!button->property("settingsInlineAction").toBool())
+            continue;
+        ++inlineActionCount;
+        inlineActionsAreSecondary =
+            inlineActionsAreSecondary && !button->autoDefault() &&
+            !button->isDefault() &&
+            button->sizePolicy().horizontalPolicy() == QSizePolicy::Maximum;
+    }
+
+    auto *path =
+        dialog.findChild<QLineEdit *>(QStringLiteral("settingsStagingRoot"));
+    auto *apply =
+        dialog.findChild<QPushButton *>(QStringLiteral("settingsApplyButton"));
+    const bool pathFieldIsFlexible =
+        path && path->minimumWidth() == 120 &&
+        path->maximumWidth() == QWIDGETSIZE_MAX &&
+        path->sizePolicy().horizontalPolicy() == QSizePolicy::Expanding;
+
+    test.check(formLabelCount >= 15 && sharedLabelWidth >= 150 &&
+                   labelsShareAxis,
+               "settings labels should share one bounded alignment axis");
+    test.check(sectionHeadingCount == 7 && sectionHeadingsAreSubtle,
+               "dense settings pages should use consistent section headings");
+    test.check(!numericFields.isEmpty() && numericFieldsAreCompact,
+               "numeric settings should keep a compact width role");
+    test.check(!standardFields.isEmpty() && standardFieldsShareWidthRole,
+               "standard settings fields should share one width role");
+    test.check(inlineActionCount >= 5 && inlineActionsAreSecondary,
+               "inline settings actions should stay compact and secondary");
+    test.check(pathFieldIsFlexible,
+               "path settings should flex before their rows wrap");
+
+    if (path && apply) {
+        path->setText(path->text() + QStringLiteral("-modified"));
+        test.check(apply->isEnabled() && apply->isDefault(),
+                   "Apply should become the only default action when dirty");
+    }
 }
 
 OPENSCP_TEST(testDisclosureSectionsExposeStateAndAction, test) {
