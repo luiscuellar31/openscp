@@ -356,14 +356,14 @@ OPENSCP_TEST(testSettingsCloseRestoresPointerFocusWithoutOutline, test) {
 
     test.check(invoked && foundSettingsDialog,
                "the production Settings dialog should open and close");
-    test.check(QApplication::focusWidget() == parts.leftView,
+    test.check(window.focusWidget() == parts.leftView,
                "closing Settings should restore the previous focus target");
     test.check(!parts.leftView->property("keyboardFocusVisible").toBool(),
                "closing Settings with the pointer should not add a keyboard "
                "focus outline");
 }
 
-OPENSCP_TEST(testTransferQueueUsesAnimatedModelessWindowLifecycle, test) {
+OPENSCP_TEST(testTransferQueueUsesSupportedModelessWindowLifecycle, test) {
     configureMainWindowSettings(settingsRootPath);
     MainWindow window;
     window.resize(900, 560);
@@ -398,12 +398,18 @@ OPENSCP_TEST(testTransferQueueUsesAnimatedModelessWindowLifecycle, test) {
         }
         return false;
     };
-    test.check(hasRunningTransition(),
-               "the transfer queue should animate its opening");
+    const QString platformName = QGuiApplication::platformName();
+    const bool transitionsSupported =
+        platformName != QStringLiteral("offscreen") &&
+        platformName != QStringLiteral("minimal");
+    test.check(hasRunningTransition() == transitionsSupported,
+               "the transfer queue should animate only on supported window "
+               "systems");
     const bool openingFinished = openscp::testsupport::waitUntil(
-        [dialog, &hasRunningTransition] {
+        [dialog, &hasRunningTransition, transitionsSupported] {
             return dialog->isVisible() &&
-                   qFuzzyCompare(dialog->windowOpacity(), 1.0) &&
+                   (!transitionsSupported ||
+                    qFuzzyCompare(dialog->windowOpacity(), 1.0)) &&
                    !hasRunningTransition();
         },
         std::chrono::milliseconds(1000));
@@ -413,20 +419,28 @@ OPENSCP_TEST(testTransferQueueUsesAnimatedModelessWindowLifecycle, test) {
 
     dialog->reject();
     flushUiEvents();
-    test.check(dialog->isVisible() && hasRunningTransition(),
-               "rejecting the transfer queue should animate its closing");
+    test.check(transitionsSupported
+                   ? dialog->isVisible() && hasRunningTransition()
+                   : !dialog->isVisible() && !hasRunningTransition(),
+               "rejecting the transfer queue should use the supported close "
+               "path");
     const bool closingFinished = openscp::testsupport::waitUntil(
         [dialog] { return !dialog->isVisible(); },
         std::chrono::milliseconds(1000));
-    test.check(closingFinished && dialog->geometry() == restingGeometry &&
+    test.check(closingFinished,
+               "closing should eventually hide the transfer queue");
+    test.check(dialog->geometry() == restingGeometry,
+               "closing should restore the transfer queue geometry");
+    test.check(!transitionsSupported ||
                    qFuzzyCompare(dialog->windowOpacity(), 1.0),
-               "closing should hide the queue and restore reusable state");
+               "closing should restore the transfer queue opacity");
 
     transfersAction->trigger();
     const bool reopened = openscp::testsupport::waitUntil(
-        [dialog] {
+        [dialog, transitionsSupported] {
             return dialog->isVisible() &&
-                   qFuzzyCompare(dialog->windowOpacity(), 1.0);
+                   (!transitionsSupported ||
+                    qFuzzyCompare(dialog->windowOpacity(), 1.0));
         },
         std::chrono::milliseconds(1000));
     test.check(window.findChild<TransferQueueDialog *>() == dialog && reopened,
@@ -434,18 +448,28 @@ OPENSCP_TEST(testTransferQueueUsesAnimatedModelessWindowLifecycle, test) {
 
     dialog->close();
     flushUiEvents();
-    test.check(dialog->isVisible() && hasRunningTransition(),
-               "the window close control should use the closing animation");
-    transfersAction->trigger();
-    const bool closeWasReversed = openscp::testsupport::waitUntil(
-        [dialog, &hasRunningTransition] {
-            return dialog->isVisible() &&
-                   qFuzzyCompare(dialog->windowOpacity(), 1.0) &&
-                   !hasRunningTransition();
-        },
-        std::chrono::milliseconds(1000));
-    test.check(closeWasReversed,
-               "reopening during close should safely reverse the transition");
+    if (transitionsSupported) {
+        test.check(dialog->isVisible() && hasRunningTransition(),
+                   "the window close control should use the closing animation");
+        transfersAction->trigger();
+        const bool closeWasReversed = openscp::testsupport::waitUntil(
+            [dialog, &hasRunningTransition] {
+                return dialog->isVisible() &&
+                       qFuzzyCompare(dialog->windowOpacity(), 1.0) &&
+                       !hasRunningTransition();
+            },
+            std::chrono::milliseconds(1000));
+        test.check(
+            closeWasReversed,
+            "reopening during close should safely reverse the transition");
+    } else {
+        test.check(!dialog->isVisible() && !hasRunningTransition(),
+                   "unsupported window systems should close immediately");
+        transfersAction->trigger();
+        flushUiEvents();
+        test.check(dialog->isVisible() && !hasRunningTransition(),
+                   "unsupported window systems should reopen immediately");
+    }
 
     dialog->close();
     const bool nativeCloseFinished = openscp::testsupport::waitUntil(
