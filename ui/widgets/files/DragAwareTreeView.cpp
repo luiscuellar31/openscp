@@ -51,12 +51,7 @@ constexpr int kScrollBarHideDelayMs = 1500;
 
 QString stagingRootFromSettings() {
     openscpui::AppSettings settings;
-    QString root =
-        settings.value(openscpui::settingskeys::kStagingRoot).toString();
-    if (root.isEmpty()) {
-        root = QDir::homePath() + "/Downloads/OpenSCP-Dragged";
-    }
-    return root;
+    return openscpui::effectiveStagingRootPath(settings);
 }
 
 QString normalizeStagingName(const QString &value) {
@@ -336,12 +331,7 @@ void DragAwareTreeView::scheduleAutoCleanup(const QString &batchDir,
 }
 
 QString DragAwareTreeView::buildStagingRoot() const {
-    openscpui::AppSettings settings;
-    QString root =
-        settings.value(openscpui::settingskeys::kStagingRoot).toString();
-    if (root.isEmpty())
-        root = QDir::homePath() + "/Downloads/OpenSCP-Dragged";
-    return root;
+    return stagingRootFromSettings();
 }
 
 void DragAwareTreeView::showPrepOverlay(const QString &text) {

@@ -1,5 +1,6 @@
 #include "logic/common/AppSettings.hpp"
 
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 
@@ -25,6 +26,17 @@ QString statusError(QSettings::Status status) {
 }
 
 } // namespace
+
+QString defaultStagingRootPath() {
+    return QDir(QDir::homePath())
+        .filePath(QStringLiteral("Downloads/OpenSCP-Dragged"));
+}
+
+QString effectiveStagingRootPath(const QSettings &settings) {
+    const QString configuredRoot =
+        settings.value(settingskeys::kStagingRoot).toString();
+    return configuredRoot.isEmpty() ? defaultStagingRootPath() : configuredRoot;
+}
 
 AppSettings::AppSettings(Store store)
     : QSettings(QStringLiteral("OpenSCP"), storeApplicationName(store)) {

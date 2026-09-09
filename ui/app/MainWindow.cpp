@@ -1133,10 +1133,7 @@ void MainWindow::initializeRuntimeState() {
                 .toBool();
         if (!autoClean)
             return;
-        QString root =
-            settings.value(openscpui::settingskeys::kStagingRoot).toString();
-        if (root.isEmpty())
-            root = QDir::homePath() + "/Downloads/OpenSCP-Dragged";
+        const QString root = openscpui::effectiveStagingRootPath(settings);
         QDir stagingRootDir(root);
         if (!stagingRootDir.exists())
             return;

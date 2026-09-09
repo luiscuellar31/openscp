@@ -107,6 +107,9 @@ inline constexpr char kRemoteScopeFavoritesPattern[] =
 
 } // namespace settingskeys
 
+QString defaultStagingRootPath();
+QString effectiveStagingRootPath(const QSettings &settings);
+
 struct SettingsSyncResult {
     bool ok = false;
     QString error;
