@@ -12,6 +12,7 @@ class QTableView;
 class QButtonGroup;
 class QToolButton;
 class QComboBox;
+class QAction;
 class QParallelAnimationGroup;
 class TransferTaskTableModel;
 class TransferTaskFilterProxyModel;
@@ -48,6 +49,7 @@ class TransferQueueDialog : public QDialog {
     void onClearFinished();
     void onClearFailedCanceled();
     void onAutoClearChanged();
+    void onOpenQueueOptions();
     void onTasksAdded(const QVector<quint64> &taskIds);
     void onTasksUpdated(const QVector<quint64> &taskIds);
     void onTasksRemoved(const QVector<quint64> &taskIds);
@@ -75,6 +77,7 @@ class TransferQueueDialog : public QDialog {
     void loadUiState();
     void saveUiState() const;
     void maybeAutoClear(const QVector<TransferTask> &snapshot);
+    void buildQueueOptionsDialog();
     void startWindowTransition(WindowTransition transition);
     void stopWindowTransition();
 
@@ -92,19 +95,21 @@ class TransferQueueDialog : public QDialog {
     QLabel *badgeCanceled_ = nullptr;
     QLabel *badgeParallel_ = nullptr;
     QLabel *badgeLimit_ = nullptr;
-    QPushButton *pauseBtn_ = nullptr;       // global pause
-    QPushButton *resumeBtn_ = nullptr;      // global resume
-    QPushButton *retryBtn_ = nullptr;       // retry
-    QPushButton *clearBtn_ = nullptr;       // clear completed
-    QPushButton *clearFailedBtn_ = nullptr; // clear failed/canceled
-    QPushButton *closeBtn_ = nullptr;       // close dialog
-    QPushButton *pauseSelBtn_ = nullptr;    // pause selected
-    QPushButton *resumeSelBtn_ = nullptr;   // resume selected
-    QPushButton *limitSelBtn_ = nullptr;    // limit selected
-    QPushButton *stopSelBtn_ = nullptr;     // cancel selected
-    QPushButton *stopAllBtn_ = nullptr;     // cancel all
-    class QSpinBox *speedSpin_ = nullptr;   // global limit value
-    QPushButton *applySpeedBtn_ = nullptr;  // apply global limit
+    QLabel *emptyStateLabel_ = nullptr;
+    QPushButton *pauseBtn_ = nullptr;     // global pause
+    QPushButton *resumeBtn_ = nullptr;    // global resume
+    QPushButton *retryBtn_ = nullptr;     // retry
+    QPushButton *closeBtn_ = nullptr;     // close dialog
+    QPushButton *pauseSelBtn_ = nullptr;  // pause selected
+    QPushButton *resumeSelBtn_ = nullptr; // resume selected
+    QPushButton *limitSelBtn_ = nullptr;  // limit selected
+    QPushButton *stopSelBtn_ = nullptr;   // cancel selected
+    QPushButton *stopAllBtn_ = nullptr;   // cancel all
+    QPushButton *clearMenuBtn_ = nullptr;
+    QAction *clearCompletedAction_ = nullptr;
+    QAction *clearFailedAction_ = nullptr;
+    QDialog *queueOptionsDialog_ = nullptr;
+    class QSpinBox *speedSpin_ = nullptr; // global limit value
     QButtonGroup *filterGroup_ = nullptr;
     QToolButton *filterAllBtn_ = nullptr;
     QToolButton *filterActiveBtn_ = nullptr;

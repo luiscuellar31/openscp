@@ -12,6 +12,7 @@
 #include <QAccessible>
 #include <QAction>
 #include <QApplication>
+#include <QComboBox>
 #include <QDialog>
 #include <QFont>
 #include <QFrame>
@@ -25,6 +26,7 @@
 #include <QPushButton>
 #include <QScrollBar>
 #include <QSettings>
+#include <QSpinBox>
 #include <QStandardItemModel>
 #include <QTableView>
 #include <QTemporaryDir>
@@ -619,6 +621,7 @@ OPENSCP_TEST(testAboutDialogOpensCompactStructuredCredits, test) {
 OPENSCP_TEST(testTransferQueueUsesNativeFocusAndAccessibleState, test) {
     TransferManager manager;
     TransferQueueDialog dialog(&manager);
+    dialog.resize(dialog.minimumSize());
     dialog.show();
     flushUiEvents();
 
@@ -639,6 +642,12 @@ OPENSCP_TEST(testTransferQueueUsesNativeFocusAndAccessibleState, test) {
 
     auto *summary =
         dialog.findChild<QWidget *>(QStringLiteral("transferQueueSummary"));
+    auto *selectionActions = dialog.findChild<QWidget *>(
+        QStringLiteral("transferQueueSelectionActions"));
+    auto *globalActions = dialog.findChild<QWidget *>(
+        QStringLiteral("transferQueueGlobalActions"));
+    auto *emptyState =
+        dialog.findChild<QLabel *>(QStringLiteral("transferQueueEmptyState"));
     auto *badge =
         dialog.findChild<QLabel *>(QStringLiteral("transferBadgeErrors"));
     test.check(summary && !summary->accessibleName().trimmed().isEmpty(),
@@ -648,13 +657,23 @@ OPENSCP_TEST(testTransferQueueUsesNativeFocusAndAccessibleState, test) {
                    !badge->testAttribute(Qt::WA_SetPalette),
                "summary badges should be borderless and use the platform "
                "palette");
+    test.check(selectionActions && globalActions &&
+                   selectionActions->y() < summary->y() &&
+                   summary->y() < globalActions->y(),
+               "selection, summary, and queue actions should form a compact "
+               "visual hierarchy");
+    test.check(emptyState && emptyState->isVisible() &&
+                   !emptyState->text().trimmed().isEmpty() &&
+                   !emptyState->accessibleName().trimmed().isEmpty(),
+               "an empty queue should explain the otherwise blank table");
 
     QToolButton *allFilter = nullptr;
+    QToolButton *completedFilter = nullptr;
     for (QToolButton *button : dialog.findChildren<QToolButton *>()) {
-        if (button->text() == TransferQueueDialog::tr("All")) {
+        if (button->text() == TransferQueueDialog::tr("All"))
             allFilter = button;
-            break;
-        }
+        else if (button->text() == TransferQueueDialog::tr("Completed"))
+            completedFilter = button;
     }
     QAccessibleInterface *filterInterface =
         allFilter ? QAccessible::queryAccessibleInterface(allFilter) : nullptr;
@@ -665,16 +684,97 @@ OPENSCP_TEST(testTransferQueueUsesNativeFocusAndAccessibleState, test) {
                    !allFilter->accessibleDescription().trimmed().isEmpty(),
                "queue filters should expose their checked state and action");
 
-    QPushButton *closeButton = nullptr;
+    manager.enqueueUpload(QStringLiteral("/tmp/source.txt"),
+                          QStringLiteral("/remote/source.txt"));
+    flushUiEvents();
+    test.check(emptyState && table->model()->rowCount() == 1 &&
+                   !emptyState->isVisible(),
+               "the empty state should disappear when a transfer is added");
+    if (completedFilter && allFilter && emptyState) {
+        completedFilter->click();
+        flushUiEvents();
+        test.check(table->model()->rowCount() == 0 && emptyState->isVisible(),
+                   "an empty filter should show its own explanatory state");
+        allFilter->click();
+        flushUiEvents();
+    }
+
+    auto *closeButton = dialog.findChild<QPushButton *>(
+        QStringLiteral("transferQueueCloseButton"));
+    auto *clearButton = dialog.findChild<QPushButton *>(
+        QStringLiteral("transferQueueClearButton"));
+    auto *optionsButton = dialog.findChild<QPushButton *>(
+        QStringLiteral("transferQueueOptionsButton"));
+    auto *optionsDialog = dialog.findChild<QDialog *>(
+        QStringLiteral("transferQueueOptionsDialog"));
+    auto *speedLimit =
+        dialog.findChild<QSpinBox *>(QStringLiteral("transferQueueSpeedLimit"));
+    auto *applyLimit = dialog.findChild<QPushButton *>(
+        QStringLiteral("transferQueueApplyLimit"));
+    auto *autoClearMode = dialog.findChild<QComboBox *>(
+        QStringLiteral("transferQueueAutoClearMode"));
+    auto *autoClearDelay = dialog.findChild<QSpinBox *>(
+        QStringLiteral("transferQueueAutoClearDelay"));
+    bool allActionLabelsFit = true;
     for (QPushButton *button : dialog.findChildren<QPushButton *>()) {
-        if (button->text() == TransferQueueDialog::tr("Close")) {
-            closeButton = button;
-            break;
-        }
+        if (!button->isVisible())
+            continue;
+        allActionLabelsFit =
+            allActionLabelsFit && button->width() >= button->sizeHint().width();
     }
     test.check(closeButton &&
                    !closeButton->accessibleDescription().trimmed().isEmpty(),
                "queue actions should explain their effect to assistive tools");
+    test.check(clearButton && clearButton->menu() &&
+                   clearButton->menu()->actions().size() == 2 &&
+                   !clearButton->accessibleDescription().trimmed().isEmpty(),
+               "infrequent cleanup actions should share an accessible menu");
+    test.check(optionsButton && optionsDialog && optionsDialog->layout() &&
+                   optionsDialog->layout()->sizeConstraint() ==
+                       QLayout::SetFixedSize &&
+                   speedLimit && applyLimit && autoClearMode && autoClearDelay,
+               "queue settings should live in a compact reusable dialog");
+    if (speedLimit && applyLimit) {
+        speedLimit->setValue(128);
+        applyLimit->click();
+        test.check(manager.globalSpeedLimitKBps() == 128,
+                   "the relocated global speed control should remain wired");
+        manager.setGlobalSpeedLimitKBps(0);
+    }
+    if (autoClearMode && autoClearDelay) {
+        const int completedIndex = autoClearMode->findText(
+            TransferQueueDialog::tr("Completed"), Qt::MatchExactly);
+        autoClearMode->setCurrentIndex(completedIndex);
+        flushUiEvents();
+        test.check(completedIndex >= 0 && autoClearDelay->isEnabled(),
+                   "automatic cleanup should still control its delay field");
+    }
+    bool optionsOpenedCompactly = false;
+    if (optionsButton && optionsDialog) {
+        const QString platformName = QGuiApplication::platformName();
+        const bool canPresentModalWindow =
+            platformName != QStringLiteral("offscreen") &&
+            platformName != QStringLiteral("minimal");
+        if (canPresentModalWindow) {
+            optionsButton->click();
+            flushUiEvents();
+            optionsOpenedCompactly =
+                optionsDialog->isVisible() && optionsDialog->isModal() &&
+                optionsDialog->size().width() < dialog.size().width() &&
+                optionsDialog->size().height() < dialog.size().height();
+            optionsDialog->reject();
+            flushUiEvents();
+        } else {
+            const QSize optionsSize = optionsDialog->sizeHint();
+            optionsOpenedCompactly =
+                optionsSize.width() < dialog.size().width() &&
+                optionsSize.height() < dialog.size().height();
+        }
+    }
+    test.check(optionsOpenedCompactly,
+               "queue options should open as a compact modal dialog");
+    test.check(allActionLabelsFit,
+               "queue action labels should fit at the minimum window size");
 }
 
 OPENSCP_TEST(testDisclosureSectionsExposeStateAndAction, test) {

@@ -12,8 +12,10 @@
 #include <QClipboard>
 #include <QComboBox>
 #include <QDateTime>
+#include <QDialogButtonBox>
 #include <QEasingCurve>
 #include <QFileInfo>
+#include <QFormLayout>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHash>
@@ -37,6 +39,12 @@ namespace {
 
 constexpr int kProgressColumnWidthPx = 84;
 constexpr int kWindowTransitionDurationMs = 190;
+
+bool supportsTopLevelWindowTransitions() {
+    const QString platformName = QGuiApplication::platformName();
+    return platformName != QStringLiteral("offscreen") &&
+           platformName != QStringLiteral("minimal");
+}
 
 QRect compactWindowRect(const QRect &restingGeometry) {
     QRect compact = restingGeometry;
@@ -647,7 +655,51 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     }
     lay->addWidget(table_, 1);
 
-    // Row 3: summary badges
+    emptyStateLabel_ = new QLabel(table_->viewport());
+    emptyStateLabel_->setObjectName(QStringLiteral("transferQueueEmptyState"));
+    emptyStateLabel_->setAlignment(Qt::AlignCenter);
+    emptyStateLabel_->setWordWrap(true);
+    emptyStateLabel_->setForegroundRole(QPalette::PlaceholderText);
+    emptyStateLabel_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    auto *emptyStateLayout = new QVBoxLayout(table_->viewport());
+    emptyStateLayout->setContentsMargins(24, 24, 24, 24);
+    emptyStateLayout->addWidget(emptyStateLabel_, 0, Qt::AlignCenter);
+
+    // Row 3: actions for the current selection
+    auto *selectionActions = new QWidget(this);
+    selectionActions->setObjectName(
+        QStringLiteral("transferQueueSelectionActions"));
+    selectionActions->setAccessibleName(tr("Selected transfers"));
+    auto *selectionActionsLayout = new QHBoxLayout(selectionActions);
+    selectionActionsLayout->setContentsMargins(0, 0, 0, 0);
+    selectionActionsLayout->setSpacing(6);
+
+    auto *selectionLabel = new QLabel(tr("Selected:"), selectionActions);
+    pauseSelBtn_ = new QPushButton(tr("Pause"), selectionActions);
+    resumeSelBtn_ = new QPushButton(tr("Resume"), selectionActions);
+    stopSelBtn_ = new QPushButton(tr("Cancel"), selectionActions);
+    limitSelBtn_ = new QPushButton(tr("Limit…"), selectionActions);
+    selectionLabel->setBuddy(pauseSelBtn_);
+
+    pauseSelBtn_->setToolTip(tr("Pause the selected transfers"));
+    resumeSelBtn_->setToolTip(tr("Resume the selected transfers"));
+    stopSelBtn_->setToolTip(tr("Cancel the selected transfers"));
+    limitSelBtn_->setToolTip(
+        tr("Set a speed limit for the selected transfers"));
+    for (QPushButton *button :
+         {pauseSelBtn_, resumeSelBtn_, stopSelBtn_, limitSelBtn_}) {
+        button->setAccessibleDescription(button->toolTip());
+    }
+
+    selectionActionsLayout->addWidget(selectionLabel);
+    selectionActionsLayout->addWidget(pauseSelBtn_);
+    selectionActionsLayout->addWidget(resumeSelBtn_);
+    selectionActionsLayout->addWidget(stopSelBtn_);
+    selectionActionsLayout->addWidget(limitSelBtn_);
+    selectionActionsLayout->addStretch();
+    lay->addWidget(selectionActions);
+
+    // Row 4: summary badges
     auto *badges = new QWidget(this);
     badges->setObjectName(QStringLiteral("transferQueueSummary"));
     badges->setAccessibleName(tr("Transfer summary"));
@@ -690,102 +742,64 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     hbBadges->addWidget(badgeLimit_);
     lay->addWidget(badges);
 
-    // Row 4: controls
-    auto *controls = new QWidget(this);
-    auto *controlsLayout = new QHBoxLayout(controls);
-    controlsLayout->setContentsMargins(0, 0, 0, 0);
+    // Row 5: queue-wide and maintenance actions
+    auto *queueActions = new QWidget(this);
+    queueActions->setObjectName(QStringLiteral("transferQueueGlobalActions"));
+    queueActions->setAccessibleName(tr("Transfer queue actions"));
+    auto *queueActionsLayout = new QHBoxLayout(queueActions);
+    queueActionsLayout->setContentsMargins(0, 0, 0, 0);
+    queueActionsLayout->setSpacing(6);
 
-    pauseBtn_ = new QPushButton(tr("Pause"), controls);
-    resumeBtn_ = new QPushButton(tr("Resume"), controls);
-    pauseSelBtn_ = new QPushButton(tr("Pause selected"), controls);
-    resumeSelBtn_ = new QPushButton(tr("Resume selected"), controls);
-    stopSelBtn_ = new QPushButton(tr("Cancel selected"), controls);
-    stopAllBtn_ = new QPushButton(tr("Cancel all"), controls);
-    retryBtn_ = new QPushButton(tr("Retry"), controls);
-    clearBtn_ = new QPushButton(tr("Clear completed"), controls);
-    clearFailedBtn_ = new QPushButton(tr("Clear failed/canceled"), controls);
-    closeBtn_ = new QPushButton(tr("Close"), controls);
+    auto *queueLabel = new QLabel(tr("Queue:"), queueActions);
+    pauseBtn_ = new QPushButton(tr("Pause"), queueActions);
+    resumeBtn_ = new QPushButton(tr("Resume"), queueActions);
+    retryBtn_ = new QPushButton(tr("Retry"), queueActions);
+    stopAllBtn_ = new QPushButton(tr("Cancel all"), queueActions);
+    clearMenuBtn_ = new QPushButton(tr("Clear"), queueActions);
+    clearMenuBtn_->setObjectName(QStringLiteral("transferQueueClearButton"));
+    auto *queueOptionsButton = new QPushButton(tr("Options…"), queueActions);
+    queueOptionsButton->setObjectName(
+        QStringLiteral("transferQueueOptionsButton"));
+    closeBtn_ = new QPushButton(tr("Close"), queueActions);
+    closeBtn_->setObjectName(QStringLiteral("transferQueueCloseButton"));
+    queueLabel->setBuddy(pauseBtn_);
 
     pauseBtn_->setToolTip(tr("Pause all queued and running transfers"));
     resumeBtn_->setToolTip(tr("Resume the paused queue and paused tasks"));
-    pauseSelBtn_->setToolTip(tr("Pause the selected transfers"));
-    resumeSelBtn_->setToolTip(tr("Resume the selected transfers"));
-    stopSelBtn_->setToolTip(tr("Cancel the selected transfers"));
     stopAllBtn_->setToolTip(
         tr("Cancel all queued, running, and paused transfers"));
     retryBtn_->setToolTip(tr("Retry transfers with Error or Canceled status"));
-    clearBtn_->setToolTip(tr("Remove completed transfers from the list"));
-    clearFailedBtn_->setToolTip(
-        tr("Remove failed and canceled transfers from the list"));
+    clearMenuBtn_->setToolTip(tr("Remove finished transfers from the list"));
+    clearMenuBtn_->setAccessibleName(tr("Clear transfers"));
+    clearMenuBtn_->setAccessibleDescription(clearMenuBtn_->toolTip());
+    queueOptionsButton->setToolTip(
+        tr("Configure speed limits and automatic cleanup"));
     closeBtn_->setToolTip(tr("Close the transfer queue"));
 
-    for (QPushButton *button :
-         {pauseBtn_, resumeBtn_, pauseSelBtn_, resumeSelBtn_, stopSelBtn_,
-          stopAllBtn_, retryBtn_, clearBtn_, clearFailedBtn_, closeBtn_}) {
+    for (QPushButton *button : {pauseBtn_, resumeBtn_, retryBtn_, stopAllBtn_,
+                                queueOptionsButton, closeBtn_}) {
         button->setAccessibleDescription(button->toolTip());
     }
 
-    controlsLayout->addWidget(pauseBtn_);
-    controlsLayout->addWidget(resumeBtn_);
-    controlsLayout->addWidget(pauseSelBtn_);
-    controlsLayout->addWidget(resumeSelBtn_);
-    controlsLayout->addWidget(stopAllBtn_);
-    controlsLayout->addWidget(stopSelBtn_);
-    controlsLayout->addWidget(retryBtn_);
-    controlsLayout->addWidget(clearBtn_);
-    controlsLayout->addWidget(clearFailedBtn_);
-    controlsLayout->addWidget(closeBtn_);
-    controlsLayout->addStretch();
-    lay->addWidget(controls);
+    auto *clearMenu = new QMenu(clearMenuBtn_);
+    clearCompletedAction_ = clearMenu->addAction(tr("Clear completed"));
+    clearFailedAction_ = clearMenu->addAction(tr("Clear failed/canceled"));
+    clearMenuBtn_->setMenu(clearMenu);
 
-    // Row 5: limits + auto clear
-    auto *speedRow = new QWidget(this);
-    auto *hs2 = new QHBoxLayout(speedRow);
-    hs2->setContentsMargins(0, 0, 0, 0);
+    queueActionsLayout->addWidget(queueLabel);
+    queueActionsLayout->addWidget(pauseBtn_);
+    queueActionsLayout->addWidget(resumeBtn_);
+    queueActionsLayout->addWidget(retryBtn_);
+    queueActionsLayout->addWidget(stopAllBtn_);
+    queueActionsLayout->addWidget(clearMenuBtn_);
+    queueActionsLayout->addWidget(queueOptionsButton);
+    queueActionsLayout->addStretch();
+    queueActionsLayout->addWidget(closeBtn_);
+    lay->addWidget(queueActions);
 
-    speedSpin_ = new QSpinBox(speedRow);
-    speedSpin_->setRange(0, 1'000'000);
-    speedSpin_->setValue(mgr_->globalSpeedLimitKBps());
-    speedSpin_->setSuffix(" KB/s");
-    applySpeedBtn_ = new QPushButton(tr("Apply limit"), speedRow);
-    limitSelBtn_ = new QPushButton(tr("Limit selected"), speedRow);
-
-    autoClearModeCombo_ = new QComboBox(speedRow);
-    autoClearModeCombo_->addItem(tr("Off"), AutoClearOff);
-    autoClearModeCombo_->addItem(tr("Completed"), AutoClearCompleted);
-    autoClearModeCombo_->addItem(tr("Failed/Canceled"),
-                                 AutoClearFailedCanceled);
-    autoClearModeCombo_->addItem(tr("All finished"), AutoClearFinished);
-    autoClearMinutesSpin_ = new QSpinBox(speedRow);
-    autoClearMinutesSpin_->setRange(1, 1440);
-    autoClearMinutesSpin_->setSuffix(tr(" min"));
-
-    auto *speedLabel = new QLabel(tr("Speed:"), speedRow);
-    speedLabel->setBuddy(speedSpin_);
-    speedSpin_->setAccessibleName(tr("Global speed limit"));
-    applySpeedBtn_->setAccessibleDescription(
-        tr("Apply the global speed limit to the transfer queue"));
-    limitSelBtn_->setAccessibleDescription(
-        tr("Set a speed limit for the selected transfers"));
-    auto *autoClearLabel = new QLabel(tr("Auto clear:"), speedRow);
-    autoClearLabel->setBuddy(autoClearModeCombo_);
-    autoClearModeCombo_->setAccessibleName(tr("Automatic queue cleanup"));
-    autoClearMinutesSpin_->setAccessibleName(tr("Automatic cleanup delay"));
-
-    hs2->addWidget(speedLabel);
-    hs2->addWidget(speedSpin_);
-    hs2->addWidget(applySpeedBtn_);
-    hs2->addWidget(limitSelBtn_);
-    hs2->addSpacing(16);
-    hs2->addWidget(autoClearLabel);
-    hs2->addWidget(autoClearModeCombo_);
-    hs2->addWidget(autoClearMinutesSpin_);
-    hs2->addStretch();
-    lay->addWidget(speedRow);
+    buildQueueOptionsDialog();
 
     // Connections
-    connect(applySpeedBtn_, &QPushButton::clicked, this,
-            &TransferQueueDialog::onApplyGlobalSpeed);
     connect(pauseBtn_, &QPushButton::clicked, this,
             &TransferQueueDialog::onPause);
     connect(resumeBtn_, &QPushButton::clicked, this,
@@ -802,19 +816,16 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
             &TransferQueueDialog::onStopAll);
     connect(retryBtn_, &QPushButton::clicked, this,
             &TransferQueueDialog::onRetry);
-    connect(clearBtn_, &QPushButton::clicked, this,
+    connect(clearCompletedAction_, &QAction::triggered, this,
             &TransferQueueDialog::onClearDone);
-    connect(clearFailedBtn_, &QPushButton::clicked, this,
+    connect(clearFailedAction_, &QAction::triggered, this,
             &TransferQueueDialog::onClearFailedCanceled);
+    connect(queueOptionsButton, &QPushButton::clicked, this,
+            &TransferQueueDialog::onOpenQueueOptions);
     connect(closeBtn_, &QPushButton::clicked, this,
             &TransferQueueDialog::reject);
     connect(filterGroup_, &QButtonGroup::idClicked, this,
             &TransferQueueDialog::onFilterChanged);
-    connect(autoClearModeCombo_, &QComboBox::currentIndexChanged, this,
-            &TransferQueueDialog::onAutoClearChanged);
-    connect(autoClearMinutesSpin_, &QSpinBox::valueChanged, this,
-            &TransferQueueDialog::onAutoClearChanged);
-
     connect(mgr_, &TransferManager::tasksAdded, this,
             &TransferQueueDialog::onTasksAdded);
     connect(mgr_, &TransferManager::tasksUpdated, this,
@@ -833,7 +844,79 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     refresh();
 }
 
+void TransferQueueDialog::buildQueueOptionsDialog() {
+    queueOptionsDialog_ = new QDialog(this);
+    queueOptionsDialog_->setObjectName(
+        QStringLiteral("transferQueueOptionsDialog"));
+    queueOptionsDialog_->setWindowTitle(tr("Queue options"));
+    queueOptionsDialog_->setModal(true);
+    queueOptionsDialog_->setSizeGripEnabled(false);
+
+    auto *optionsLayout = new QVBoxLayout(queueOptionsDialog_);
+    optionsLayout->setSizeConstraint(QLayout::SetFixedSize);
+    auto *optionsForm = new QFormLayout;
+    optionsForm->setFieldGrowthPolicy(QFormLayout::FieldsStayAtSizeHint);
+    optionsForm->setVerticalSpacing(10);
+
+    auto *speedField = new QWidget(queueOptionsDialog_);
+    auto *speedFieldLayout = new QHBoxLayout(speedField);
+    speedFieldLayout->setContentsMargins(0, 0, 0, 0);
+    speedFieldLayout->setSpacing(6);
+    speedSpin_ = new QSpinBox(speedField);
+    speedSpin_->setObjectName(QStringLiteral("transferQueueSpeedLimit"));
+    speedSpin_->setRange(0, 1'000'000);
+    speedSpin_->setValue(mgr_->globalSpeedLimitKBps());
+    speedSpin_->setSuffix(QStringLiteral(" KB/s"));
+    speedSpin_->setAccessibleName(tr("Global speed limit"));
+    auto *applySpeedButton = new QPushButton(tr("Apply limit"), speedField);
+    applySpeedButton->setObjectName(QStringLiteral("transferQueueApplyLimit"));
+    applySpeedButton->setAccessibleDescription(
+        tr("Apply the global speed limit to the transfer queue"));
+    speedFieldLayout->addWidget(speedSpin_);
+    speedFieldLayout->addWidget(applySpeedButton);
+    optionsForm->addRow(tr("Global speed limit:"), speedField);
+
+    autoClearModeCombo_ = new QComboBox(queueOptionsDialog_);
+    autoClearModeCombo_->setObjectName(
+        QStringLiteral("transferQueueAutoClearMode"));
+    autoClearModeCombo_->addItem(tr("Off"), AutoClearOff);
+    autoClearModeCombo_->addItem(tr("Completed"), AutoClearCompleted);
+    autoClearModeCombo_->addItem(tr("Failed/Canceled"),
+                                 AutoClearFailedCanceled);
+    autoClearModeCombo_->addItem(tr("All finished"), AutoClearFinished);
+    autoClearModeCombo_->setAccessibleName(tr("Automatic queue cleanup"));
+    optionsForm->addRow(tr("Automatic cleanup:"), autoClearModeCombo_);
+
+    autoClearMinutesSpin_ = new QSpinBox(queueOptionsDialog_);
+    autoClearMinutesSpin_->setObjectName(
+        QStringLiteral("transferQueueAutoClearDelay"));
+    autoClearMinutesSpin_->setRange(1, 1440);
+    autoClearMinutesSpin_->setSuffix(tr(" min"));
+    autoClearMinutesSpin_->setAccessibleName(tr("Automatic cleanup delay"));
+    optionsForm->addRow(tr("Cleanup delay:"), autoClearMinutesSpin_);
+    optionsLayout->addLayout(optionsForm);
+
+    auto *buttons =
+        new QDialogButtonBox(QDialogButtonBox::Close, queueOptionsDialog_);
+    connect(buttons, &QDialogButtonBox::rejected, queueOptionsDialog_,
+            &QDialog::reject);
+    optionsLayout->addWidget(buttons);
+
+    connect(applySpeedButton, &QPushButton::clicked, this,
+            &TransferQueueDialog::onApplyGlobalSpeed);
+    connect(autoClearModeCombo_, &QComboBox::currentIndexChanged, this,
+            &TransferQueueDialog::onAutoClearChanged);
+    connect(autoClearMinutesSpin_, &QSpinBox::valueChanged, this,
+            &TransferQueueDialog::onAutoClearChanged);
+}
+
 void TransferQueueDialog::presentAnimated() {
+    if (!supportsTopLevelWindowTransitions()) {
+        stopWindowTransition();
+        show();
+        return;
+    }
+
     if (isVisible() && windowTransition_ != WindowTransition::Hiding) {
         raise();
         activateWindow();
@@ -843,6 +926,12 @@ void TransferQueueDialog::presentAnimated() {
 }
 
 void TransferQueueDialog::reject() {
+    if (!supportsTopLevelWindowTransitions()) {
+        stopWindowTransition();
+        QDialog::reject();
+        return;
+    }
+
     if (!isVisible()) {
         stopWindowTransition();
         QDialog::reject();
@@ -966,6 +1055,10 @@ void TransferQueueDialog::onTasksRemoved(const QVector<quint64> &taskIds) {
 }
 
 void TransferQueueDialog::onQueueSettingsChanged() {
+    if (speedSpin_ && queueOptionsDialog_ &&
+        !queueOptionsDialog_->isVisible()) {
+        speedSpin_->setValue(mgr_->globalSpeedLimitKBps());
+    }
     updateSummary();
 }
 
@@ -1122,6 +1215,13 @@ void TransferQueueDialog::onAutoClearChanged() {
     updateSummary();
 }
 
+void TransferQueueDialog::onOpenQueueOptions() {
+    if (!queueOptionsDialog_ || !speedSpin_)
+        return;
+    speedSpin_->setValue(mgr_->globalSpeedLimitKBps());
+    queueOptionsDialog_->open();
+}
+
 void TransferQueueDialog::updateSummary() {
     if (!model_)
         return;
@@ -1169,6 +1269,16 @@ void TransferQueueDialog::updateSummary() {
     }
 
     const int active = queued + running + paused + waiting + retrying;
+    if (emptyStateLabel_) {
+        const bool hasVisibleTasks = proxy_ && proxy_->rowCount() > 0;
+        const QString emptyText =
+            tasks.isEmpty() ? tr("No transfers in the queue\nTransfers "
+                                 "will appear here when they start.")
+                            : tr("No transfers match this filter");
+        emptyStateLabel_->setText(emptyText);
+        emptyStateLabel_->setAccessibleName(emptyText);
+        emptyStateLabel_->setVisible(!hasVisibleTasks);
+    }
     if (badgeTotal_)
         badgeTotal_->setText(tr("Total: %1").arg(tasks.size()));
     if (badgeActive_)
@@ -1210,10 +1320,12 @@ void TransferQueueDialog::updateSummary() {
         resumeBtn_->setEnabled(hasAny && canResume);
     if (retryBtn_)
         retryBtn_->setEnabled(hasAny && canRetry);
-    if (clearBtn_)
-        clearBtn_->setEnabled(hasAny && canClearDone);
-    if (clearFailedBtn_)
-        clearFailedBtn_->setEnabled(hasAny && canClearFailed);
+    if (clearCompletedAction_)
+        clearCompletedAction_->setEnabled(hasAny && canClearDone);
+    if (clearFailedAction_)
+        clearFailedAction_->setEnabled(hasAny && canClearFailed);
+    if (clearMenuBtn_)
+        clearMenuBtn_->setEnabled(canClearDone || canClearFailed);
     if (pauseSelBtn_)
         pauseSelBtn_->setEnabled(selectedState.canPause);
     if (resumeSelBtn_)

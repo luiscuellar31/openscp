@@ -26,27 +26,27 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
         <translation>Créditos…</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="259"/>
+        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="258"/>
         <source>Open Licenses Folder</source>
         <translation>Abrir pasta de licenças</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="276"/>
+        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="275"/>
         <source>Open location</source>
         <translation>Abrir localização</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="282"/>
+        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="281"/>
         <source>Licenses folder not found</source>
         <translation>Pasta de licenças não encontrada</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="283"/>
+        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="282"/>
         <source>No license files were found in this installation.</source>
         <translation>Nenhum arquivo de licença foi encontrado nesta instalação.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="317"/>
+        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="316"/>
         <source>Report an issue</source>
         <translation>Reportar um problema</translation>
     </message>
@@ -59,42 +59,42 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
         <translation>Créditos</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="263"/>
+        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="262"/>
         <source>License files are not available in this installation.</source>
         <translation>Os arquivos de licença não estão disponíveis nesta instalação.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="265"/>
+        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="264"/>
         <source>Open the folder that contains third-party licenses.</source>
         <translation>Abrir a pasta que contém as licenças de terceiros.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="299"/>
+        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="298"/>
         <source>Copy diagnostics</source>
         <translation>Copiar diagnóstico</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="301"/>
+        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="300"/>
         <source>Copy version and environment details for support.</source>
         <translation>Copiar versão e detalhes do ambiente para suporte.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="304"/>
+        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="303"/>
         <source>Diagnostics unavailable</source>
         <translation>Diagnóstico indisponível</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="305"/>
+        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="304"/>
         <source>Could not access the system clipboard.</source>
         <translation>Não foi possível acessar a área de transferência do sistema.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="310"/>
+        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="309"/>
         <source>Diagnostics copied</source>
         <translation>Diagnóstico copiado</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="311"/>
+        <location filename="../ui/widgets/dialogs/AboutDialog.cpp" line="310"/>
         <source>Diagnostic information was copied to your clipboard.</source>
         <translation>As informações de diagnóstico foram copiadas para a área de transferência.</translation>
     </message>
@@ -4709,518 +4709,583 @@ Destino: %3</translation>
 <context>
     <name>TransferQueueDialog</name>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="52"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="60"/>
         <source>Queued</source>
         <translation>Na fila</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="54"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="62"/>
         <source>Running</source>
         <translation>Em andamento</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="56"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="64"/>
         <source>Paused</source>
         <translation>Pausado</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="58"/>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="564"/>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="755"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="66"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="572"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="883"/>
         <source>Completed</source>
         <translation>Concluído</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="60"/>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="270"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="68"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="278"/>
         <source>Error</source>
         <translation>Erro</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="62"/>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="566"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="70"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="574"/>
         <source>Canceled</source>
         <translation>Cancelado</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="262"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="270"/>
         <source>Type</source>
         <translation>Tipo</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="264"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="272"/>
         <source>Source</source>
         <translation>Origem</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="266"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="274"/>
         <source>Destination</source>
         <translation>Destino</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="252"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="260"/>
         <source>Status</source>
         <translation>Estado</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="254"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="262"/>
         <source>Progress</source>
         <translation>Progresso</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="268"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="276"/>
         <source>Attempts</source>
         <translation>Tentativas</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="341"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="349"/>
         <source>Upload</source>
         <translation>Upload</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="343"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="351"/>
         <source>Download</source>
         <translation>Download</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="536"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="544"/>
         <source>Transfer queue</source>
         <translation>Fila de transferências</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="698"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="678"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="754"/>
         <source>Pause</source>
         <translation>Pausar</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="699"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="679"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="755"/>
         <source>Resume</source>
         <translation>Retomar</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="704"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="756"/>
         <source>Retry</source>
         <translation>Tentar novamente</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="707"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="763"/>
         <source>Close</source>
         <translation>Fechar</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="750"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="871"/>
         <source>Apply limit</source>
         <translation>Aplicar limite</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="763"/>
-        <source>Speed:</source>
-        <translation>Velocidade:</translation>
-    </message>
-    <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1023"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1116"/>
         <source>Limit for task(s)</source>
         <translation>Limite para tarefa(s)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1023"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1116"/>
         <source>KB/s (0 = no limit)</source>
         <translation>KB/s (0 = sem limite)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="92"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="100"/>
         <source>(unnamed)</source>
         <translation>(sem nome)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="250"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="258"/>
         <source>Name</source>
         <translation>Nome</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="256"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="264"/>
         <source>Transferred</source>
         <translation>Transferido</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="258"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="266"/>
         <source>Speed</source>
         <translation>Velocidade</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="260"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="268"/>
         <source>ETA</source>
         <translation>ETA</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="548"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="556"/>
         <source>Show:</source>
         <translation>Mostrar:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="559"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="567"/>
         <source>All</source>
         <translation>Todos</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="559"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="567"/>
         <source>Show all transfers</source>
         <translation>Mostrar todas as transferências</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="560"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="568"/>
         <source>Active</source>
         <translation>Ativas</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="560"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="568"/>
         <source>Show active transfers</source>
         <translation>Mostrar as transferências ativas</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="562"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="570"/>
         <source>Errors</source>
         <translation>Erros</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="562"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="570"/>
         <source>Show transfers with errors or warnings</source>
         <translation>Mostrar transferências com erros ou avisos</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="564"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="572"/>
         <source>Show completed transfers</source>
         <translation>Mostrar as transferências concluídas</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="566"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="574"/>
         <source>Show canceled transfers</source>
         <translation>Mostrar as transferências canceladas</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="590"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="598"/>
         <source>Transfers</source>
         <translation>Transferências</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="592"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="600"/>
         <source>Transfer queue. Select one or more rows to manage them.</source>
         <translation>Fila de transferências. Selecione uma ou mais linhas para gerenciá-las.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="653"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="672"/>
+        <source>Selected transfers</source>
+        <translation>Transferências selecionadas</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="677"/>
+        <source>Selected:</source>
+        <translation>Selecionadas:</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="680"/>
+        <source>Cancel</source>
+        <translation>Cancelar</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="681"/>
+        <source>Limit…</source>
+        <translation>Limitar…</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="705"/>
         <source>Transfer summary</source>
         <translation>Resumo das transferências</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="664"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="716"/>
         <source>Total: 0</source>
         <translation>Total: 0</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="666"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="718"/>
         <source>Active: 0</source>
         <translation>Ativas: 0</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="668"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="720"/>
         <source>Running: 0</source>
         <translation>Em andamento: 0</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="670"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="722"/>
         <source>Paused: 0</source>
         <translation>Pausadas: 0</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="672"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="724"/>
         <source>Errors: 0</source>
         <translation>Erros: 0</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="674"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="726"/>
         <source>Completed: 0</source>
         <translation>Concluídas: 0</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="676"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="728"/>
         <source>Canceled: 0</source>
         <translation>Canceladas: 0</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="677"/>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1187"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="729"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1297"/>
         <source>Parallel: %1</source>
         <translation>Simultâneas: %1</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="679"/>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1192"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="731"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1302"/>
         <source>Global limit: off</source>
         <translation>Limite global: sem limite</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="700"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="748"/>
+        <source>Transfer queue actions</source>
+        <translation>Ações da fila de transferências</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="753"/>
+        <source>Queue:</source>
+        <translation>Fila:</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="758"/>
+        <source>Clear</source>
+        <translation>Limpar</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="760"/>
+        <source>Options…</source>
+        <translation>Opções…</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="772"/>
+        <source>Remove finished transfers from the list</source>
+        <translation>Remover transferências finalizadas da lista</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="773"/>
+        <source>Clear transfers</source>
+        <translation>Limpar transferências</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="776"/>
+        <source>Configure speed limits and automatic cleanup</source>
+        <translation>Configurar limites de velocidade e limpeza automática</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="851"/>
+        <source>Queue options</source>
+        <translation>Opções da fila</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="877"/>
+        <source>Global speed limit:</source>
+        <translation>Limite global de velocidade:</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="888"/>
+        <source>Automatic cleanup:</source>
+        <translation>Limpeza automática:</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="896"/>
+        <source>Cleanup delay:</source>
+        <translation>Atraso da limpeza:</translation>
+    </message>
+    <message>
         <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1275"/>
+        <source>No transfers in the queue
+Transfers will appear here when they start.</source>
+        <translation>Não há transferências na fila
+As transferências aparecerão aqui quando forem iniciadas.</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1277"/>
+        <source>No transfers match this filter</source>
+        <translation>Nenhuma transferência corresponde a este filtro</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1387"/>
         <source>Pause selected</source>
         <translation>Pausar seleção</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="701"/>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1276"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1388"/>
         <source>Resume selected</source>
         <translation>Retomar seleção</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="702"/>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1278"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1390"/>
         <source>Cancel selected</source>
         <translation>Cancelar seleção</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="703"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="757"/>
         <source>Cancel all</source>
         <translation>Cancelar tudo</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="705"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="785"/>
         <source>Clear completed</source>
         <translation>Limpar concluídas</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="706"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="786"/>
         <source>Clear failed/canceled</source>
         <translation>Limpar falhas/canceladas</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="709"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="767"/>
         <source>Pause all queued and running transfers</source>
         <translation>Pausar todas as transferências na fila e em andamento</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="710"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="768"/>
         <source>Resume the paused queue and paused tasks</source>
         <translation>Retomar a fila pausada e as tarefas pausadas</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="711"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="684"/>
         <source>Pause the selected transfers</source>
         <translation>Pausar transferências selecionadas</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="712"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="685"/>
         <source>Resume the selected transfers</source>
         <translation>Retomar transferências selecionadas</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="713"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="686"/>
         <source>Cancel the selected transfers</source>
         <translation>Cancelar transferências selecionadas</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="715"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="770"/>
         <source>Cancel all queued, running, and paused transfers</source>
         <translation>Cancelar todas as transferências na fila, em andamento e pausadas</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="716"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="771"/>
         <source>Retry transfers with Error or Canceled status</source>
         <translation>Tentar novamente transferências com status Erro ou Cancelado</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="717"/>
-        <source>Remove completed transfers from the list</source>
-        <translation>Remover transferências concluídas da lista</translation>
-    </message>
-    <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="719"/>
-        <source>Remove failed and canceled transfers from the list</source>
-        <translation>Remover transferências falhas e canceladas da lista</translation>
-    </message>
-    <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="720"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="777"/>
         <source>Close the transfer queue</source>
         <translation>Fechar a fila de transferências</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="751"/>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1277"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1389"/>
         <source>Limit selected</source>
         <translation>Limitar seleção</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="754"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="882"/>
         <source>Off</source>
         <translation>Desativado</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="756"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="884"/>
         <source>Failed/Canceled</source>
         <translation>Falhas/Canceladas</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="758"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="886"/>
         <source>All finished</source>
         <translation>Todos finalizado</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="761"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="894"/>
         <source> min</source>
         <translation> min</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="765"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="870"/>
         <source>Global speed limit</source>
         <translation>Limite global de velocidade</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="767"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="874"/>
         <source>Apply the global speed limit to the transfer queue</source>
         <translation>Aplicar o limite global de velocidade à fila de transferências</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="769"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="688"/>
         <source>Set a speed limit for the selected transfers</source>
         <translation>Definir um limite de velocidade para as transferências selecionadas</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="770"/>
-        <source>Auto clear:</source>
-        <translation>Limpeza automática:</translation>
-    </message>
-    <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="772"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="887"/>
         <source>Automatic queue cleanup</source>
         <translation>Limpeza automática da fila</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="773"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="895"/>
         <source>Automatic cleanup delay</source>
         <translation>Atraso da limpeza automática</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1082"/>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1281"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1175"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1393"/>
         <source>Show folder</source>
         <translation>Mostrar pasta</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1173"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1283"/>
         <source>Total: %1</source>
         <translation>Total: %1</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1175"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1285"/>
         <source>Active: %1</source>
         <translation>Ativas: %1</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1177"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1287"/>
         <source>Running: %1</source>
         <translation>Em andamento: %1</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1179"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1289"/>
         <source>Paused: %1</source>
         <translation>Pausadas: %1</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1181"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1291"/>
         <source>Errors: %1</source>
         <translation>Erros: %1</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1183"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1293"/>
         <source>Completed: %1</source>
         <translation>Concluídas: %1</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1185"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1295"/>
         <source>Canceled: %1</source>
         <translation>Canceladas: %1</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1191"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1301"/>
         <source>Global limit: %1 KB/s</source>
         <translation>Limite global: %1 KB/s</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1279"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1391"/>
         <source>Retry selected</source>
         <translation>Tentar novamente seleção</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1282"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1394"/>
         <source>Copy source path</source>
         <translation>Copiar caminho de origem</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1283"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1395"/>
         <source>Copy destination path</source>
         <translation>Copiar caminho de destino</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1285"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1397"/>
         <source>Clear finished</source>
         <translation>Limpar finalizadas</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="64"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="72"/>
         <source>Waiting for connection</source>
         <translation>Aguardando conexão</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="66"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="74"/>
         <source>Retrying</source>
         <translation>Tentando novamente</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="68"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="76"/>
         <source>Skipped</source>
         <translation>Ignorado</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="70"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="78"/>
         <source>Warning</source>
         <translation>Aviso</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="345"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="353"/>
         <source>Create local folder</source>
         <translation>Criar pasta local</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="347"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="355"/>
         <source>Create remote folder</source>
         <translation>Criar pasta remota</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="349"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="357"/>
         <source>Delete local file</source>
         <translation>Excluir arquivo local</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="351"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="359"/>
         <source>Delete local folder</source>
         <translation>Excluir pasta local</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="353"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="361"/>
         <source>Delete remote file</source>
         <translation>Excluir arquivo remoto</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="355"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="363"/>
         <source>Delete remote folder</source>
         <translation>Excluir pasta remota</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1286"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1398"/>
         <source>Remove selected tasks</source>
         <translation>Remover tarefas selecionadas</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1288"/>
+        <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1400"/>
         <source>Remove tasks and partial data</source>
         <translation>Remover tarefas e dados parciais</translation>
     </message>
