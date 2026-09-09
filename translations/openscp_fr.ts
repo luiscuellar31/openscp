@@ -3374,534 +3374,559 @@ Les analyser de nouveau sans cette limite ?</translation>
 <context>
     <name>SettingsDialog</name>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1345"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1445"/>
         <source>Settings</source>
         <translation>Paramètres</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="924"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1023"/>
         <source>General</source>
         <translation>Général</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="991"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1098"/>
         <source>Shortcuts</source>
         <translation>Raccourcis</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="993"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1103"/>
         <source>Select an action and press the new key combination directly in the field.</source>
         <translation>Sélectionnez une action et saisissez directement dans le champ la nouvelle combinaison de touches.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="925"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1025"/>
         <source>Language:</source>
         <translation>Langue :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="886"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="986"/>
         <source>Set this path to %1</source>
         <translation>Définir ce chemin sur %1</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="926"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1026"/>
         <source>Spanish</source>
         <translation>Espagnol</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="927"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1027"/>
         <source>English</source>
         <translation>Anglais</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="930"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1030"/>
         <source>Open with:</source>
         <translation>Ouvrir avec :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="932"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1032"/>
         <source>Double click</source>
         <translation>Double clic</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="932"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1032"/>
         <source>Single click</source>
         <translation>Simple clic</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="934"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1034"/>
         <source>On file open:</source>
         <translation>À l&apos;ouverture du fichier :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="936"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1036"/>
         <source>Always ask</source>
         <translation>Toujours demander</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="937"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1037"/>
         <source>Show folder</source>
         <translation>Afficher le dossier</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="938"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1038"/>
         <source>Open file</source>
         <translation>Ouvrir le fichier</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="941"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1041"/>
         <source>Show hidden files</source>
         <translation>Afficher les fichiers cachés</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="942"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1042"/>
         <source>Open Site Manager on startup</source>
         <translation>Ouvrir le gestionnaire de sites au démarrage</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="943"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1043"/>
         <source>Open Site Manager on disconnect</source>
         <translation>Ouvrir le gestionnaire de sites à la déconnexion</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="944"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1044"/>
         <source>Open queue when enqueuing transfers</source>
         <translation>Ouvrir la file d&apos;attente lors de l&apos;ajout des transferts</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1000"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1107"/>
         <source>Transfers shortcut:</source>
         <translation>Raccourci Transferts :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1004"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1111"/>
         <source>History shortcut:</source>
         <translation>Raccourci Historique :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="875"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="975"/>
         <source>Choose…</source>
         <translation>Choisir…</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="945"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1046"/>
         <source>Download folder:</source>
         <translation>Dossier de téléchargement :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="946"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1047"/>
         <source>Select download folder</source>
         <translation>Sélectionner le dossier de téléchargement</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="950"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1051"/>
         <source>Restore default sizes</source>
         <translation>Restaurer les tailles par défaut</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="954"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1063"/>
         <source>Window layout:</source>
         <translation>Disposition de la fenêtre :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="958"/>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="981"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1067"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1090"/>
         <source>Restore layout</source>
         <translation>Restaurer la disposition</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="959"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1068"/>
         <source>Restore the main window layout and column sizes to their defaults?</source>
         <translation>Restaurer la disposition de la fenêtre principale et les tailles de colonnes à leurs valeurs par défaut ?</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="982"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1091"/>
         <source>Default layout restored.</source>
         <translation>Disposition par défaut restaurée.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="983"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1092"/>
         <source>Default layout will be used the next time the app starts.</source>
         <translation>La disposition par défaut sera utilisée au prochain démarrage de l&apos;application.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1011"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1116"/>
         <source>Transfers</source>
         <translation>Transferts</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1016"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1121"/>
         <source>Maximum number of concurrent transfers.</source>
         <translation>Nombre maximal de transferts simultanés.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1015"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1120"/>
         <source>Parallel tasks:</source>
         <translation>Tâches parallèles :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1019"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1124"/>
         <source>0 = no global speed limit.</source>
         <translation>0 = aucune limite de vitesse globale.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1018"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1123"/>
         <source>Default global limit:</source>
         <translation>Limite globale par défaut :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1024"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1130"/>
         <source>Off</source>
         <translation>Désactivé</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1025"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1131"/>
         <source>Completed</source>
         <translation>Terminé</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1026"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1132"/>
         <source>Failed/Canceled</source>
         <translation>Échoué/Annulé</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1027"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1133"/>
         <source>All finished</source>
         <translation>Tout terminé</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1028"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1134"/>
         <source>Queue auto-clear default:</source>
         <translation>Nettoyage auto de la file d&apos;attente par défaut :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1031"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1137"/>
         <source>Queue auto-clear after:</source>
         <translation>Nettoyage auto de la file d&apos;attente après :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1042"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1147"/>
         <source>Sites</source>
         <translation>Sites</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1047"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1153"/>
         <source>SFTP</source>
         <translation>SFTP</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1048"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1154"/>
         <source>SCP</source>
         <translation>SCP</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1049"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1155"/>
         <source>FTP</source>
         <translation>FTP</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1052"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1158"/>
         <source>Default protocol:</source>
         <translation>Protocole par défaut :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1076"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1182"/>
         <source>When deleting a site, also remove its stored credentials.</source>
         <translation>Lors de la suppression d&apos;un site, supprimer aussi ses identifiants enregistrés.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1071"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1177"/>
         <source>Default SCP mode:</source>
         <translation>Mode SCP par défaut :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="881"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="981"/>
         <source>Restore default</source>
         <translation>Rétablir la valeur par défaut</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1012"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1024"/>
+        <source>Behavior</source>
+        <translation>Comportement</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1045"/>
+        <source>Files and window</source>
+        <translation>Fichiers et fenêtre</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1100"/>
+        <source>Keyboard shortcuts</source>
+        <translation>Raccourcis clavier</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1118"/>
         <source>Concurrency and speed</source>
         <translation>Simultanéité et vitesse</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1020"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1126"/>
         <source>Automatic cleanup</source>
         <translation>Nettoyage automatique</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1057"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1148"/>
+        <source>Connection defaults</source>
+        <translation>Paramètres de connexion par défaut</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1163"/>
         <source>Automatic (safe SFTP uploads)</source>
         <translation>Automatique (téléversements SFTP sécurisés)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1059"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1165"/>
         <source>SCP only (uploads are non-atomic)</source>
         <translation>SCP uniquement (téléversements non atomiques)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1063"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1169"/>
         <source>Uploads use a temporary remote file and atomic rename through SFTP.</source>
         <translation>Les téléversements utilisent un fichier distant temporaire et un renommage atomique via SFTP.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1068"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1174"/>
         <source>Classic SCP writes directly to the final remote path. A canceled or failed upload may leave a partial destination.</source>
         <translation>Le SCP classique écrit directement dans le chemin distant final. Un téléversement annulé ou échoué peut laisser une destination partielle.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1081"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1186"/>
         <source>Security</source>
         <translation>Sécurité</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1082"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1188"/>
         <source>Connection policies</source>
         <translation>Politiques de connexion</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1088"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1193"/>
         <source>Strict</source>
         <translation>Strict</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1089"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1194"/>
         <source>Accept new (TOFU)</source>
         <translation>Accepter les nouveaux (TOFU)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1091"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1196"/>
         <source>No verification (double confirmation, expires in 15 min)</source>
         <translation>Sans vérification (double confirmation, expire dans 15 min)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1093"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1198"/>
         <source>Default known_hosts policy:</source>
         <translation>Politique known_hosts par défaut :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1099"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1204"/>
         <source>Optional (recommended)</source>
         <translation>Optionnel (recommandé)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1101"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1206"/>
         <source>Required (strict)</source>
         <translation>Obligatoire (strict)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1103"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1208"/>
         <source>Off (not recommended)</source>
         <translation>Désactivé (non recommandé)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1105"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1210"/>
         <source>Default integrity policy:</source>
         <translation>Politique d&apos;intégrité par défaut :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1116"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1221"/>
         <source>Verify FTPS server certificate by default (recommended).</source>
         <translation>Vérifier le certificat serveur FTPS par défaut (recommandé).</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1120"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1225"/>
         <source>System CA bundle</source>
         <translation>Bundle CA système</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1117"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1222"/>
         <source>Default FTPS CA bundle:</source>
         <translation>Bundle CA FTPS par défaut :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1118"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1223"/>
         <source>Select FTPS CA bundle</source>
         <translation>Sélectionner le bundle CA FTPS</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1126"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1231"/>
         <source>Hash hostnames in known_hosts (recommended).</source>
         <translation>Hacher les noms d&apos;hôte dans known_hosts (recommandé).</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1127"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1232"/>
         <source>Show fingerprint in HEX (colon) format (visual only).</source>
         <translation>Afficher l&apos;empreinte au format HEX (avec deux-points) (visuel uniquement).</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1129"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1234"/>
         <source>Force interactive login when using Open in terminal (disable key/agent auth).</source>
         <translation>Forcer la connexion interactive lors de l&apos;utilisation de &quot;Ouvrir dans le terminal&quot; (désactive l&apos;authentification clé/agent).</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1132"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1237"/>
         <source>Enable automatic SFTP CLI fallback when using Open in terminal.</source>
         <translation>Activer le repli automatique vers SFTP CLI lors de l&apos;utilisation de &quot;Ouvrir dans le terminal&quot;.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1138"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1243"/>
         <source>Use stricter Keychain accessibility (this device only).</source>
         <translation>Utiliser une accessibilité Keychain plus stricte (cet appareil uniquement).</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1146"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1251"/>
         <source>Allow insecure credentials fallback (not recommended).</source>
         <translation>Autoriser le repli vers des identifiants non sécurisés (non recommandé).</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1032"/>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1109"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1138"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1214"/>
         <source> min</source>
         <translation> min</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1110"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1215"/>
         <source>Duration of the temporary exception for no host-key verification policy.</source>
         <translation>Durée de l&apos;exception temporaire pour la politique sans vérification de clé d&apos;hôte.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1108"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1213"/>
         <source>No-verification TTL:</source>
         <translation>TTL sans vérification :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1152"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1256"/>
         <source>Network</source>
         <translation>Réseau</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1155"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1260"/>
         <source> s</source>
         <translation> s</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1154"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1259"/>
         <source>Session health check interval:</source>
         <translation>Intervalle de vérification de santé de session :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1161"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1264"/>
         <source>Staging and drag-out</source>
         <translation>Staging et glisser-déposer sortant</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1165"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1267"/>
         <source>Staging folder:</source>
         <translation>Dossier de staging :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1166"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1268"/>
         <source>Select staging folder</source>
         <translation>Sélectionner le dossier de staging</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1178"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1280"/>
         <source>Auto-clean staging after successful drag-out (recommended).</source>
         <translation>Nettoyer automatiquement le staging après un glisser-déposer sortant réussi (recommandé).</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1181"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1283"/>
         <source> days</source>
         <translation> jours</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1180"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1282"/>
         <source>Startup cleanup retention:</source>
         <translation>Rétention du nettoyage au démarrage :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1185"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1287"/>
         <source> ms</source>
         <translation> ms</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1185"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1287"/>
         <source>Time before showing the Wait/Cancel dialog.</source>
         <translation>Délai avant l&apos;affichage de la boîte de dialogue Attendre/Annuler.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1184"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1286"/>
         <source>Preparation timeout:</source>
         <translation>Délai de préparation :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1189"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1291"/>
         <source>Item count threshold to request confirmation for large batches.</source>
         <translation>Seuil du nombre d&apos;éléments pour demander confirmation pour les lots volumineux.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1187"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1289"/>
         <source>Confirm from items:</source>
         <translation>Confirmer à partir du nombre d&apos;éléments :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1192"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1294"/>
         <source> MiB</source>
         <translation> MiB</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1193"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1295"/>
         <source>Estimated size threshold to request confirmation for large batches.</source>
         <translation>Seuil de taille estimée pour demander confirmation pour les lots volumineux.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1191"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1293"/>
         <source>Confirm from size:</source>
         <translation>Confirmer à partir de la taille :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1122"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1227"/>
         <source>Credentials and terminal</source>
         <translation>Identifiants et terminal</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1162"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1257"/>
+        <source>Session health</source>
+        <translation>État de la session</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1265"/>
         <source>Folder and cleanup</source>
         <translation>Dossier et nettoyage</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1168"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1270"/>
         <source>Restore default staging folder</source>
         <translation>Restaurer le dossier de staging par défaut</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1182"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1284"/>
         <source>Safety limits</source>
         <translation>Limites de sécurité</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1203"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1305"/>
         <source>Limit for recursive folder drag-out to avoid deep trees and loops.</source>
         <translation>Limite de récursion des dossiers lors du glisser-déposer sortant pour éviter les arborescences profondes et les boucles.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1205"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1307"/>
         <source>Recommended: 32</source>
         <translation>Recommandé : 32</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1209"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1311"/>
         <source>Maximum depth:</source>
         <translation>Profondeur maximale :</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1231"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1331"/>
         <source>Close</source>
         <translation>Fermer</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1232"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1332"/>
         <source>Apply</source>
         <translation>Appliquer</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1323"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1423"/>
         <source>Enable insecure fallback</source>
         <translation>Activer le repli non sécurisé</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1324"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1424"/>
         <source>This stores credentials unencrypted on disk using QSettings.
 On Linux, it is recommended to install and use libsecret/Secret Service for better security.
 
@@ -3912,38 +3937,38 @@ Sous Linux, il est recommandé d&apos;installer et d&apos;utiliser libsecret/Sec
 Voulez-vous tout de même activer le repli non sécurisé ?</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1410"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1510"/>
         <source>Language</source>
         <translation>Langue</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1411"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1511"/>
         <source>Language changes take effect after restart.</source>
         <translation>Les changements de langue prennent effet après redémarrage.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="928"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1028"/>
         <source>French</source>
         <translation>Français</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="929"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1029"/>
         <source>Portuguese</source>
         <translation>Portugais</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1050"/>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1112"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1156"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1217"/>
         <source>FTPS</source>
         <translation>FTPS</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1019"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1124"/>
         <source> KB/s</source>
         <translation> Kio/s</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1051"/>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1157"/>
         <source>WebDAV</source>
         <translation>WebDAV</translation>
     </message>

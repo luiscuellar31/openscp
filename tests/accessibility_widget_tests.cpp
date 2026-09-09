@@ -14,10 +14,12 @@
 #include <QAccessible>
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
 #include <QDir>
 #include <QFont>
+#include <QFormLayout>
 #include <QFrame>
 #include <QHeaderView>
 #include <QKeyEvent>
@@ -27,10 +29,12 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
 #include <QSizePolicy>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QStandardItemModel>
 #include <QTableView>
 #include <QTemporaryDir>
@@ -42,6 +46,7 @@
 #include <QWheelEvent>
 
 #include <iostream>
+#include <limits>
 
 namespace {
 
@@ -808,23 +813,26 @@ OPENSCP_TEST(testSettingsRestoresDefaultStagingFolderOnApply, test) {
         if (sections)
             sections->setCurrentRow(sections->count() - 1);
         flushUiEvents();
-        test.check(path && choose && restore && apply &&
-                       path->text() == customRoot && restore->isEnabled() &&
-                       !apply->isEnabled() && !choose->autoDefault() &&
-                       !choose->isDefault() && !restore->autoDefault() &&
-                       !restore->isDefault() &&
-                       !restore->text().trimmed().isEmpty() &&
-                       restore->icon().isNull() && !restore->isFlat() &&
-                       restore->style() == choose->style() &&
-                       !restore->accessibleName().trimmed().isEmpty() &&
-                       !restore->accessibleDescription().trimmed().isEmpty(),
-                   "staging actions should use matching native push buttons "
-                   "without taking the dialog default action");
+        test.check(
+            path && choose && restore && apply && path->text() == customRoot &&
+                path->toolTip() == customRoot && path->cursorPosition() == 0 &&
+                restore->isEnabled() && !apply->isEnabled() &&
+                !choose->autoDefault() && !choose->isDefault() &&
+                !restore->autoDefault() && !restore->isDefault() &&
+                !restore->text().trimmed().isEmpty() &&
+                restore->icon().isNull() && !restore->isFlat() &&
+                restore->style() == choose->style() &&
+                !restore->accessibleName().trimmed().isEmpty() &&
+                !restore->accessibleDescription().trimmed().isEmpty(),
+            "staging actions should use matching native push buttons "
+            "without taking the dialog default action");
         if (path && choose && restore && apply) {
             restore->click();
-            test.check(path->text() == defaultRoot && !restore->isEnabled() &&
-                           apply->isEnabled() && apply->isDefault() &&
-                           !choose->isDefault(),
+            test.check(path->text() == defaultRoot &&
+                           path->toolTip() == defaultRoot &&
+                           path->cursorPosition() == 0 &&
+                           !restore->isEnabled() && apply->isEnabled() &&
+                           apply->isDefault() && !choose->isDefault(),
                        "restoring should update only the field and mark "
                        "settings as modified");
         }
@@ -863,49 +871,445 @@ OPENSCP_TEST(testSettingsRestoresDefaultStagingFolderOnApply, test) {
     }
 }
 
-OPENSCP_TEST(testSettingsUsesConsistentLayoutRoles, test) {
+OPENSCP_TEST(testSettingsPagesUseSharedFormStructure, test) {
     SettingsDialog dialog;
     dialog.show();
     flushUiEvents();
 
+    auto *sections = dialog.findChild<QListWidget *>();
+    auto *pages = dialog.findChild<QStackedWidget *>();
+    const QList<int> expectedSectionCounts = {2, 1, 2, 1, 3, 1, 2};
+    int sectionCount = 0;
+    bool pageStructureMatches = true;
+    bool sectionStructureMatches = true;
+    bool contentIsIndented = true;
+    bool notesHaveExplicitSpanningRole = true;
+    bool checksHaveExplicitSpanningRole = true;
+    int noteCount = 0;
+    int checkCount = 0;
+    QMargins sharedPageMargins;
+    QMargins sharedFormMargins;
+    int sharedPageSpacing = -1;
+    int sharedSectionSpacing = -1;
+    int sharedHorizontalSpacing = -1;
+    int sharedVerticalSpacing = -1;
+
+    if (sections && pages) {
+        for (int pageIndex = 0; pageIndex < pages->count(); ++pageIndex) {
+            sections->setCurrentRow(pageIndex);
+            flushUiEvents();
+            auto *scroll = qobject_cast<QScrollArea *>(pages->currentWidget());
+            QWidget *page = scroll ? scroll->widget() : nullptr;
+            auto *pageLayout =
+                page ? qobject_cast<QVBoxLayout *>(page->layout()) : nullptr;
+            if (!scroll || !page || !pageLayout) {
+                pageStructureMatches = false;
+                continue;
+            }
+
+            QList<QWidget *> pageSections;
+            for (QWidget *child : page->findChildren<QWidget *>(
+                     QString(), Qt::FindDirectChildrenOnly)) {
+                if (child->property("settingsSection").toBool())
+                    pageSections.push_back(child);
+            }
+            if (pageIndex == 0) {
+                sharedPageMargins = pageLayout->contentsMargins();
+                sharedPageSpacing = pageLayout->spacing();
+            }
+            pageStructureMatches =
+                pageStructureMatches &&
+                scroll->property("settingsPageScroll").toBool() &&
+                scroll->horizontalScrollBarPolicy() == Qt::ScrollBarAlwaysOff &&
+                page->property("settingsFormPage").toBool() &&
+                pageLayout->contentsMargins() == sharedPageMargins &&
+                pageLayout->spacing() == sharedPageSpacing &&
+                pageIndex < expectedSectionCounts.size() &&
+                pageSections.size() == expectedSectionCounts.at(pageIndex);
+
+            for (QWidget *section : pageSections) {
+                ++sectionCount;
+                auto *sectionLayout =
+                    qobject_cast<QVBoxLayout *>(section->layout());
+                auto *form = section->findChild<QFormLayout *>();
+                QLabel *heading = nullptr;
+                for (QLabel *candidate : section->findChildren<QLabel *>(
+                         QString(), Qt::FindDirectChildrenOnly)) {
+                    if (candidate->property("settingsSectionHeading")
+                            .toBool()) {
+                        heading = candidate;
+                        break;
+                    }
+                }
+
+                if (!sectionLayout || !form || !heading) {
+                    sectionStructureMatches = false;
+                    continue;
+                }
+                if (sharedHorizontalSpacing < 0) {
+                    sharedFormMargins = form->contentsMargins();
+                    sharedSectionSpacing = sectionLayout->spacing();
+                    sharedHorizontalSpacing = form->horizontalSpacing();
+                    sharedVerticalSpacing = form->verticalSpacing();
+                }
+                const int expectedIndent =
+                    qMax(0, page->style()->pixelMetric(
+                                QStyle::PM_LayoutLeftMargin, nullptr, page));
+                sectionStructureMatches =
+                    sectionStructureMatches && heading->font().bold() &&
+                    sectionLayout->contentsMargins() == QMargins() &&
+                    sectionLayout->spacing() == sharedSectionSpacing &&
+                    sectionLayout->count() == 2 &&
+                    sectionLayout->itemAt(0)->widget() == heading &&
+                    sectionLayout->itemAt(1)->layout() == form &&
+                    form->property("settingsFormLayout").toBool() &&
+                    form->contentsMargins() == sharedFormMargins &&
+                    form->contentsMargins().left() == expectedIndent &&
+                    form->contentsMargins().top() == 0 &&
+                    form->contentsMargins().right() == 0 &&
+                    form->contentsMargins().bottom() == 0 &&
+                    form->property("settingsSectionIndent").toInt() ==
+                        expectedIndent &&
+                    form->horizontalSpacing() == sharedHorizontalSpacing &&
+                    form->verticalSpacing() == sharedVerticalSpacing &&
+                    form->fieldGrowthPolicy() ==
+                        QFormLayout::AllNonFixedFieldsGrow &&
+                    form->rowWrapPolicy() == QFormLayout::WrapLongRows &&
+                    form->labelAlignment().testFlag(Qt::AlignRight) &&
+                    form->labelAlignment().testFlag(Qt::AlignVCenter) &&
+                    form->formAlignment().testFlag(Qt::AlignLeft) &&
+                    form->formAlignment().testFlag(Qt::AlignTop);
+
+                int contentLeft = std::numeric_limits<int>::max();
+                for (int row = 0; row < form->rowCount(); ++row) {
+                    for (QFormLayout::ItemRole role :
+                         {QFormLayout::LabelRole, QFormLayout::FieldRole,
+                          QFormLayout::SpanningRole}) {
+                        QLayoutItem *item = form->itemAt(row, role);
+                        QWidget *widget = item ? item->widget() : nullptr;
+                        if (widget) {
+                            contentLeft =
+                                qMin(contentLeft,
+                                     widget->mapTo(&dialog, QPoint()).x());
+                        }
+                    }
+                    if (QLayoutItem *spanning =
+                            form->itemAt(row, QFormLayout::SpanningRole)) {
+                        QWidget *widget = spanning->widget();
+                        if (widget &&
+                            widget->property("settingsFormNote").toBool()) {
+                            ++noteCount;
+                            notesHaveExplicitSpanningRole =
+                                notesHaveExplicitSpanningRole &&
+                                qobject_cast<QLabel *>(widget);
+                        }
+                    }
+                }
+                for (QCheckBox *check : section->findChildren<QCheckBox *>()) {
+                    int checkRow = -1;
+                    QFormLayout::ItemRole checkRole = QFormLayout::LabelRole;
+                    form->getWidgetPosition(check, &checkRow, &checkRole);
+                    ++checkCount;
+                    checksHaveExplicitSpanningRole =
+                        checksHaveExplicitSpanningRole && checkRow >= 0 &&
+                        checkRole == QFormLayout::SpanningRole;
+                }
+                contentIsIndented =
+                    contentIsIndented &&
+                    contentLeft != std::numeric_limits<int>::max() &&
+                    heading->mapTo(&dialog, QPoint()).x() < contentLeft;
+            }
+        }
+    } else {
+        pageStructureMatches = false;
+    }
+
+    test.check(pages && pages->count() == 7 && pageStructureMatches,
+               "every settings page should use the same responsive form base");
+    test.check(sectionCount == 12 && sectionStructureMatches &&
+                   contentIsIndented,
+               "every section should lead one consistently indented form");
+    test.check(noteCount == 1 && notesHaveExplicitSpanningRole,
+               "settings guidance should use an explicit spanning note role");
+    test.check(checkCount > 0 && checksHaveExplicitSpanningRole,
+               "settings checks should span their indented section forms");
+}
+
+OPENSCP_TEST(testSettingsInlineActionPreservesNativeBounds, test) {
+    SettingsDialog dialog;
+    dialog.show();
+    flushUiEvents();
+
+    auto *button = dialog.findChild<QPushButton *>(
+        QStringLiteral("settingsRestoreDefaultLayout"));
+    QWidget *section = button ? button->parentWidget() : nullptr;
+    while (section && !section->property("settingsSection").toBool())
+        section = section->parentWidget();
+    QWidget *row = button ? button->parentWidget() : nullptr;
+    auto *rowLayout =
+        row ? qobject_cast<QHBoxLayout *>(row->layout()) : nullptr;
+    const QRect buttonInSection =
+        button && section
+            ? QRect(button->mapTo(section, QPoint()), button->size())
+            : QRect();
+
+    test.check(
+        button && section && row && row != section && rowLayout &&
+            rowLayout->contentsMargins() == QMargins() &&
+            row->rect().contains(button->geometry()) &&
+            section->rect().contains(buttonInSection) &&
+            button->visibleRegion().boundingRect().contains(button->rect()),
+        "native inline actions should remain fully inside their row "
+        "and section bounds");
+}
+
+OPENSCP_TEST(testSettingsPageSwitchKeepsWrappedRowsStable, test) {
+    SettingsDialog dialog;
+    dialog.show();
+    flushUiEvents();
+
+    auto *sections = dialog.findChild<QListWidget *>();
+    auto *pages = dialog.findChild<QStackedWidget *>();
+    QList<int> changes;
+    if (pages) {
+        QObject::connect(pages, &QStackedWidget::currentChanged, &dialog,
+                         [&changes](int index) { changes.push_back(index); });
+    }
+
+    bool switchesAreStable = sections && pages;
+    for (int index : {1, 5, 3, 6, 0, 4, 2}) {
+        changes.clear();
+        if (sections)
+            sections->setCurrentRow(index);
+
+        QList<QPair<QCheckBox *, int>> initialHeights;
+        if (pages && pages->currentWidget()) {
+            for (QCheckBox *check :
+                 pages->currentWidget()->findChildren<QCheckBox *>()) {
+                if (check->isVisible())
+                    initialHeights.push_back({check, check->height()});
+            }
+        }
+        switchesAreStable = switchesAreStable && pages &&
+                            pages->currentIndex() == index &&
+                            changes == QList<int>{index};
+
+        flushUiEvents();
+        for (const auto &[check, initialHeight] : initialHeights) {
+            switchesAreStable =
+                switchesAreStable && check && check->isVisible() &&
+                initialHeight <=
+                    check->height() + check->fontMetrics().lineSpacing();
+        }
+    }
+
+    test.check(switchesAreStable,
+               "switching settings pages should select only the requested "
+               "page without briefly exposing an oversized wrapped layout");
+}
+
+OPENSCP_TEST(testSettingsLabelsAndFieldsShareAxes, test) {
+    SettingsDialog dialog;
+    dialog.show();
+    flushUiEvents();
+
+    auto *sections = dialog.findChild<QListWidget *>();
+    auto *pages = dialog.findChild<QStackedWidget *>();
     int sharedLabelWidth = -1;
+    int sharedFieldAxis = -1;
     int formLabelCount = 0;
-    int sectionHeadingCount = 0;
     bool labelsShareAxis = true;
-    bool sectionHeadingsAreSubtle = true;
-    for (QLabel *label : dialog.findChildren<QLabel *>()) {
-        if (label->property("settingsFormLabel").toBool()) {
-            ++formLabelCount;
-            if (sharedLabelWidth < 0)
-                sharedLabelWidth = label->width();
-            labelsShareAxis = labelsShareAxis &&
-                              label->minimumWidth() == sharedLabelWidth &&
-                              label->maximumWidth() == sharedLabelWidth &&
-                              label->alignment().testFlag(Qt::AlignRight) &&
-                              label->alignment().testFlag(Qt::AlignTop);
+    bool fieldsShareAxis = true;
+    bool labelBuddiesMatch = true;
+    bool networkUsesSharedRoles = false;
+
+    for (int pageIndex = 0; sections && pages && pageIndex < pages->count();
+         ++pageIndex) {
+        sections->setCurrentRow(pageIndex);
+        flushUiEvents();
+        auto *scroll = qobject_cast<QScrollArea *>(pages->currentWidget());
+        QWidget *page = scroll ? scroll->widget() : nullptr;
+        const QList<QFormLayout *> forms =
+            page ? page->findChildren<QFormLayout *>() : QList<QFormLayout *>();
+        if (forms.isEmpty()) {
+            fieldsShareAxis = false;
+            continue;
         }
-        if (label->property("settingsSectionHeading").toBool()) {
-            ++sectionHeadingCount;
-            sectionHeadingsAreSubtle =
-                sectionHeadingsAreSubtle && label->font().bold();
+        for (QFormLayout *form : forms) {
+            for (int row = 0; row < form->rowCount(); ++row) {
+                QLayoutItem *labelItem =
+                    form->itemAt(row, QFormLayout::LabelRole);
+                QLayoutItem *fieldItem =
+                    form->itemAt(row, QFormLayout::FieldRole);
+                auto *label = labelItem
+                                  ? qobject_cast<QLabel *>(labelItem->widget())
+                                  : nullptr;
+                QWidget *field = fieldItem ? fieldItem->widget() : nullptr;
+                if (!label || !field ||
+                    !label->property("settingsFormLabel").toBool()) {
+                    continue;
+                }
+
+                ++formLabelCount;
+                if (sharedLabelWidth < 0)
+                    sharedLabelWidth = label->width();
+                labelsShareAxis =
+                    labelsShareAxis &&
+                    qAbs(label->width() - sharedLabelWidth) <= 1 &&
+                    label->minimumWidth() == label->maximumWidth() &&
+                    label->alignment().testFlag(Qt::AlignRight) &&
+                    label->alignment().testFlag(Qt::AlignVCenter) &&
+                    form->labelAlignment().testFlag(Qt::AlignVCenter);
+                QWidget *buddy = label->buddy();
+                labelBuddiesMatch =
+                    labelBuddiesMatch && buddy &&
+                    (buddy == field || field->isAncestorOf(buddy));
+
+                const int fieldAxis = field->mapTo(&dialog, QPoint()).x();
+                if (sharedFieldAxis < 0)
+                    sharedFieldAxis = fieldAxis;
+                fieldsShareAxis =
+                    fieldsShareAxis && qAbs(fieldAxis - sharedFieldAxis) <= 4;
+                if (label->text() ==
+                    SettingsDialog::tr("Session health check interval:")) {
+                    int labelRow = -1;
+                    QFormLayout::ItemRole labelRole = QFormLayout::SpanningRole;
+                    form->getWidgetPosition(label, &labelRow, &labelRole);
+                    networkUsesSharedRoles =
+                        labelRole == QFormLayout::LabelRole &&
+                        fieldItem ==
+                            form->itemAt(labelRow, QFormLayout::FieldRole) &&
+                        field->property("settingsFieldRole").toString() ==
+                            QStringLiteral("compact") &&
+                        label->alignment().testFlag(Qt::AlignRight) &&
+                        qAbs(fieldAxis - sharedFieldAxis) <= 4;
+                }
+            }
         }
     }
 
-    bool numericFieldsAreCompact = true;
-    const auto numericFields = dialog.findChildren<QSpinBox *>();
-    for (const QSpinBox *spin : numericFields) {
-        numericFieldsAreCompact =
-            numericFieldsAreCompact && spin->maximumWidth() <= 180 &&
-            spin->sizePolicy().horizontalPolicy() == QSizePolicy::Preferred;
+    test.check(formLabelCount >= 15 && sharedLabelWidth > 0 &&
+                   labelsShareAxis && fieldsShareAxis && labelBuddiesMatch,
+               "settings labels and fields should share common visual axes");
+    test.check(networkUsesSharedRoles,
+               "Network should use the shared label and field columns");
+}
+
+OPENSCP_TEST(testSettingsPathRowsUseNativeVerticalGeometry, test) {
+    SettingsDialog dialog;
+    dialog.show();
+    flushUiEvents();
+
+    auto *sections = dialog.findChild<QListWidget *>();
+    auto *pages = dialog.findChild<QStackedWidget *>();
+    for (int pageIndex = 0; sections && pages && pageIndex < pages->count();
+         ++pageIndex) {
+        sections->setCurrentRow(pageIndex);
+        flushUiEvents();
     }
 
-    bool standardFieldsShareWidthRole = true;
-    const auto standardFields = dialog.findChildren<QComboBox *>();
-    for (const QComboBox *combo : standardFields) {
-        standardFieldsShareWidthRole =
-            standardFieldsShareWidthRole && combo->minimumWidth() == 280 &&
-            combo->maximumWidth() == 520 &&
-            combo->sizePolicy().horizontalPolicy() == QSizePolicy::Expanding;
+    int pathCount = 0;
+    bool rowsAreAligned = true;
+    for (QWidget *widget : dialog.findChildren<QWidget *>()) {
+        if (widget->property("settingsFieldRole").toString() !=
+            QStringLiteral("path")) {
+            continue;
+        }
+        auto *edit = qobject_cast<QLineEdit *>(widget);
+        QWidget *rowWidget = edit ? edit->parentWidget() : nullptr;
+        auto *row = rowWidget ? qobject_cast<QHBoxLayout *>(rowWidget->layout())
+                              : nullptr;
+        QLabel *label = nullptr;
+        for (QLabel *candidate : dialog.findChildren<QLabel *>()) {
+            if (candidate->buddy() == edit) {
+                label = candidate;
+                break;
+            }
+        }
+        if (!edit || !rowWidget || !row || !label) {
+            rowsAreAligned = false;
+            continue;
+        }
+
+        ++pathCount;
+        QLineEdit reference;
+        reference.setFont(edit->font());
+        const auto centerTwice = [&dialog](const QWidget *control) {
+            return control->mapTo(&dialog, QPoint()).y() * 2 +
+                   control->height();
+        };
+        rowsAreAligned =
+            rowsAreAligned && row->contentsMargins() == QMargins() &&
+            label->alignment().testFlag(Qt::AlignVCenter) &&
+            edit->sizeHint().height() == reference.sizeHint().height() &&
+            edit->minimumSizeHint().height() ==
+                reference.minimumSizeHint().height() &&
+            qAbs(centerTwice(edit) - centerTwice(label)) <= 4;
+        for (QPushButton *button : rowWidget->findChildren<QPushButton *>()) {
+            rowsAreAligned =
+                rowsAreAligned &&
+                qAbs(centerTwice(edit) - centerTwice(button)) <= 4 &&
+                button->height() >= button->sizeHint().height();
+        }
+    }
+
+    test.check(pathCount == 3 && rowsAreAligned,
+               "path rows should preserve native heights and vertical centers");
+}
+
+OPENSCP_TEST(testSettingsControlsUseSharedWidthRoles, test) {
+    SettingsDialog dialog;
+    dialog.show();
+    flushUiEvents();
+    auto *sections = dialog.findChild<QListWidget *>();
+    auto *pages = dialog.findChild<QStackedWidget *>();
+    for (int pageIndex = 0; sections && pages && pageIndex < pages->count();
+         ++pageIndex) {
+        sections->setCurrentRow(pageIndex);
+        flushUiEvents();
+    }
+
+    int standardFieldCount = 0;
+    int compactFieldCount = 0;
+    int pathFieldCount = 0;
+    bool fieldRolesMatch = true;
+    for (QWidget *widget : dialog.findChildren<QWidget *>()) {
+        const QString role = widget->property("settingsFieldRole").toString();
+        if (role == QStringLiteral("standard")) {
+            ++standardFieldCount;
+            fieldRolesMatch = fieldRolesMatch &&
+                              widget->sizePolicy().horizontalPolicy() ==
+                                  QSizePolicy::Expanding &&
+                              widget->maximumWidth() < QWIDGETSIZE_MAX;
+        } else if (role == QStringLiteral("compact")) {
+            ++compactFieldCount;
+            fieldRolesMatch = fieldRolesMatch &&
+                              widget->sizePolicy().horizontalPolicy() ==
+                                  QSizePolicy::Preferred &&
+                              widget->maximumWidth() < QWIDGETSIZE_MAX;
+        } else if (role == QStringLiteral("path")) {
+            auto *edit = qobject_cast<QLineEdit *>(widget);
+            ++pathFieldCount;
+            fieldRolesMatch =
+                fieldRolesMatch && edit && edit->toolTip() == edit->text() &&
+                !edit->accessibleName().trimmed().isEmpty() &&
+                !edit->accessibleDescription().trimmed().isEmpty() &&
+                widget->sizePolicy().horizontalPolicy() ==
+                    QSizePolicy::Expanding &&
+                widget->maximumWidth() == QWIDGETSIZE_MAX &&
+                widget->property("settingsElidesPath").toBool();
+        }
+    }
+
+    int pathRowCount = 0;
+    bool pathRowsYieldWidth = true;
+    for (QWidget *widget : dialog.findChildren<QWidget *>()) {
+        if (!widget->property("settingsPathRow").toBool())
+            continue;
+        ++pathRowCount;
+        pathRowsYieldWidth =
+            pathRowsYieldWidth &&
+            widget->sizePolicy().horizontalPolicy() == QSizePolicy::Ignored;
     }
 
     int inlineActionCount = 0;
@@ -917,34 +1321,84 @@ OPENSCP_TEST(testSettingsUsesConsistentLayoutRoles, test) {
         inlineActionsAreSecondary =
             inlineActionsAreSecondary && !button->autoDefault() &&
             !button->isDefault() &&
-            button->sizePolicy().horizontalPolicy() == QSizePolicy::Maximum;
+            button->sizePolicy().horizontalPolicy() == QSizePolicy::Maximum &&
+            button->width() >= button->sizeHint().width();
     }
+
+    test.check(
+        standardFieldCount > 0 && compactFieldCount > 0 &&
+            pathFieldCount == 3 && pathRowCount == 3 && fieldRolesMatch &&
+            pathRowsYieldWidth,
+        "settings controls should use standard, compact, and path roles");
+    test.check(inlineActionCount >= 5 && inlineActionsAreSecondary,
+               "inline settings actions should fit and remain secondary");
+}
+
+OPENSCP_TEST(testSettingsPathsStayResponsiveAndPreserveValues, test) {
+    SettingsDialog dialog;
+    dialog.show();
+    flushUiEvents();
+
+    auto *sections = dialog.findChild<QListWidget *>();
+    auto *pages = dialog.findChild<QStackedWidget *>();
+    bool responsiveWithoutHorizontalScroll = sections && pages;
+    QLabel *longTranslatedLabel = nullptr;
+    for (QLabel *label : dialog.findChildren<QLabel *>()) {
+        if (label->text() ==
+            SettingsDialog::tr("Session health check interval:")) {
+            longTranslatedLabel = label;
+            label->setText(QStringLiteral(
+                "Long translated session health check interval setting:"));
+            break;
+        }
+    }
+    const QList<QSize> dialogSizes = {dialog.minimumSize(), QSize(860, 620),
+                                      QSize(1180, 760)};
+    for (const QSize &size : dialogSizes) {
+        dialog.resize(size);
+        for (int pageIndex = 0; sections && pages && pageIndex < pages->count();
+             ++pageIndex) {
+            sections->setCurrentRow(pageIndex);
+            flushUiEvents();
+            auto *scroll = qobject_cast<QScrollArea *>(pages->currentWidget());
+            responsiveWithoutHorizontalScroll =
+                responsiveWithoutHorizontalScroll && scroll &&
+                scroll->horizontalScrollBar()->maximum() == 0;
+        }
+    }
+    test.check(responsiveWithoutHorizontalScroll && longTranslatedLabel &&
+                   longTranslatedLabel->height() >
+                       longTranslatedLabel->fontMetrics().height(),
+               "settings pages should not need horizontal scrolling");
 
     auto *path =
         dialog.findChild<QLineEdit *>(QStringLiteral("settingsStagingRoot"));
     auto *apply =
         dialog.findChild<QPushButton *>(QStringLiteral("settingsApplyButton"));
-    const bool pathFieldIsFlexible =
-        path && path->minimumWidth() == 120 &&
-        path->maximumWidth() == QWIDGETSIZE_MAX &&
-        path->sizePolicy().horizontalPolicy() == QSizePolicy::Expanding;
-
-    test.check(formLabelCount >= 15 && sharedLabelWidth >= 150 &&
-                   labelsShareAxis,
-               "settings labels should share one bounded alignment axis");
-    test.check(sectionHeadingCount == 7 && sectionHeadingsAreSubtle,
-               "dense settings pages should use consistent section headings");
-    test.check(!numericFields.isEmpty() && numericFieldsAreCompact,
-               "numeric settings should keep a compact width role");
-    test.check(!standardFields.isEmpty() && standardFieldsShareWidthRole,
-               "standard settings fields should share one width role");
-    test.check(inlineActionCount >= 5 && inlineActionsAreSecondary,
-               "inline settings actions should stay compact and secondary");
-    test.check(pathFieldIsFlexible,
-               "path settings should flex before their rows wrap");
+    if (path) {
+        const QString longPath = QStringLiteral("/very/long/settings/path/") +
+                                 QString(240, QLatin1Char('x')) +
+                                 QStringLiteral("/folder");
+        if (auto *close = dialog.findChild<QPushButton *>(
+                QStringLiteral("settingsCloseButton"))) {
+            close->setFocus();
+        }
+        path->setText(longPath);
+        path->repaint();
+        flushUiEvents();
+        test.check(
+            path->fontMetrics().horizontalAdvance(longPath) >
+                    path->contentsRect().width() &&
+                path->property("settingsElidesPath").toBool() &&
+                path->text() == longPath && path->toolTip() == longPath &&
+                path->cursorPosition() == 0 && path->selectedText().isEmpty() &&
+                !path->accessibleName().trimmed().isEmpty() &&
+                !path->accessibleDescription().trimmed().isEmpty(),
+            "an elided path should preserve its full editable value and "
+            "accessible context");
+    }
 
     if (path && apply) {
-        path->setText(path->text() + QStringLiteral("-modified"));
         test.check(apply->isEnabled() && apply->isDefault(),
                    "Apply should become the only default action when dirty");
     }

@@ -60,8 +60,8 @@ class SettingsDialog : public QDialog {
 
     void setupSectionList(class QListWidget *sectionList) const;
     void recalcSectionListWidth(class QListWidget *sectionList) const;
-    QWidget *createFormPage(const PageBuildContext &ctx, const QString &title,
-                            class QFormLayout *&outForm);
+    QWidget *createFormPage(const PageBuildContext &ctx, const QString &title);
+    class QFormLayout *addSection(QWidget *page, const QString &title) const;
     void setFieldWidth(QWidget *field) const;
     void setCompactFieldWidth(QWidget *field, int minWidth) const;
     void setPathFieldWidth(QWidget *field) const;
@@ -70,8 +70,8 @@ class SettingsDialog : public QDialog {
     void addLabeledRow(class QFormLayout *target, QWidget *parent,
                        const QString &labelText, QWidget *field,
                        QWidget *buddy = nullptr);
-    void addSectionHeading(class QFormLayout *target, QWidget *parent,
-                           const QString &text, bool separated = true) const;
+    void addFormNote(class QFormLayout *target, QWidget *parent,
+                     const QString &text) const;
     void addTrackedCheckRows(
         class QFormLayout *target, QWidget *parent,
         std::initializer_list<QPair<QCheckBox **, QString>> rows);
