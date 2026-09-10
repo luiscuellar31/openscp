@@ -708,7 +708,8 @@ void MainWindow::initializeMainToolbar() {
     actShowFavorites_ = mainToolbar->addAction(
         tr("Favorites"), this, &MainWindow::showFavoritesDialog);
     actShowFavorites_->setObjectName(QStringLiteral("showFavoritesAction"));
-    actShowFavorites_->setIcon(mainWindowActionIcon("bookmark.svg"));
+    actShowFavorites_->setIcon(
+        mainWindowActionIcon("action-open-favorites.svg"));
     actShowFavorites_->setToolTip(actShowFavorites_->text());
 
     // Show text beside icon for Sites and Queue too

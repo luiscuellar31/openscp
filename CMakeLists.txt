@@ -619,6 +619,7 @@ set(ICON_FILES
     assets/icons/action-go-home.svg
     assets/icons/action-go-up.svg
     assets/icons/action-open-about-us.svg
+    assets/icons/action-open-favorites.svg
     assets/icons/action-move-to-left.svg
     assets/icons/action-move-to-right.svg
     assets/icons/action-new-file.svg
@@ -635,7 +636,6 @@ set(ICON_FILES
     assets/icons/action-rename.svg
     assets/icons/action-upload.svg
     assets/icons/app-openscp.png
-    assets/icons/bookmark.svg
 )
 
 # Aliases for stable paths: /assets/icons/<name>
