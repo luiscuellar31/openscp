@@ -297,7 +297,7 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="431"/>
         <source>Accept new (TOFU)</source>
-        <translation>Aceitar novo (TOFU)</translation>
+        <translation>Aceitar novas chaves (TOFU)</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="434"/>
@@ -322,7 +322,7 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="237"/>
         <source>Use SSH jump host (bastion)</source>
-        <translation>Usar host de salto SSH (bastion)</translation>
+        <translation>Usar host de salto SSH (bastião)</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="259"/>
@@ -357,7 +357,7 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="411"/>
         <source>Save passwords/passphrases</source>
-        <translation>Salvar senhas/passphrases</translation>
+        <translation>Salvar senhas e frases secretas</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="609"/>
@@ -402,12 +402,12 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="452"/>
         <source>Required (strict)</source>
-        <translation>Obrigatório (estrito)</translation>
+        <translation>Obrigatória (estrita)</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="455"/>
         <source>Off (not recommended)</source>
-        <translation>Desativado (não recomendado)</translation>
+        <translation>Desativada (não recomendada)</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="458"/>
@@ -428,17 +428,17 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="469"/>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="494"/>
         <source>System CA bundle</source>
-        <translation>Bundle CA do sistema</translation>
+        <translation>Pacote de CAs do sistema</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="623"/>
         <source>FTPS CA bundle:</source>
-        <translation>Bundle CA de FTPS:</translation>
+        <translation>Pacote de CAs para FTPS:</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="845"/>
         <source>Select FTPS CA bundle</source>
-        <translation>Selecione o bundle CA para FTPS</translation>
+        <translation>Selecione o pacote de CAs para FTPS</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="865"/>
@@ -503,7 +503,7 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="183"/>
         <source>Classic SCP writes directly to the final remote path. A canceled or failed upload may leave a partial destination.</source>
-        <translation>O SCP clássico grava diretamente no caminho remoto final. Um envio cancelado ou com falha pode deixar um destino parcial.</translation>
+        <translation>O SCP clássico grava diretamente no caminho remoto final. Um envio cancelado ou com falha pode deixar um arquivo de destino incompleto.</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="1494"/>
@@ -631,7 +631,7 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="263"/>
         <source>Staging kept at: &lt;a href=&quot;%1&quot;&gt;%2&lt;/a&gt;</source>
-        <translation>Staging mantido em: &lt;a href=&quot;%1&quot;&gt;%2&lt;/a&gt;</translation>
+        <translation>Arquivos temporários mantidos em: &lt;a href=&quot;%1&quot;&gt;%2&lt;/a&gt;</translation>
     </message>
     <message>
         <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="350"/>
@@ -651,7 +651,7 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="528"/>
         <source>Confirm staging</source>
-        <translation>Confirmar staging</translation>
+        <translation>Confirmar preparação temporária</translation>
     </message>
     <message>
         <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="342"/>
@@ -671,7 +671,7 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="534"/>
         <source>~%1 (some unknown)</source>
-        <translation>~%1 (algunos desconhecidos)</translation>
+        <translation>~%1 (alguns desconhecidos)</translation>
     </message>
     <message>
         <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="542"/>
@@ -701,7 +701,7 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="996"/>
         <source>%1 of %2 staging operations failed. Files kept at:</source>
-        <translation>%1 de %2 operações de preparação falharam. Arquivos mantidos em:</translation>
+        <translation>%1 de %2 operações de preparação temporária falharam. Arquivos mantidos em:</translation>
     </message>
     <message>
         <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="1016"/>
@@ -711,7 +711,7 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="1104"/>
         <source>Could not create the drag staging directory.</source>
-        <translation>Não foi possível criar o diretório de preparação para arrastar.</translation>
+        <translation>Não foi possível criar o diretório temporário para o arraste.</translation>
     </message>
 </context>
 <context>
@@ -974,12 +974,12 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="137"/>
         <source> (auto-fallback to SFTP CLI enabled)</source>
-        <translation> (fallback automático para SFTP CLI habilitado)</translation>
+        <translation> (uso automático da CLI do SFTP como alternativa ativado)</translation>
     </message>
     <message>
         <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="314"/>
         <source>OpenSCP: SSH shell was not available. Falling back to SFTP CLI.</source>
-        <translation>OpenSCP: O shell SSH não estava disponível. Aplicando fallback para SFTP CLI.</translation>
+        <translation>OpenSCP: o shell SSH não estava disponível. A CLI do SFTP será usada como alternativa.</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="118"/>
@@ -1392,7 +1392,7 @@ Continuar?</translation>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="1168"/>
         <source>Warning: unencrypted secrets storage active (fallback)</source>
-        <translation>Aviso: armazenamento de segredos sem criptografia ativado (fallback)</translation>
+        <translation>Aviso: armazenamento alternativo de credenciais sem criptografia ativado</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="1174"/>
@@ -1554,7 +1554,7 @@ Deseja continuar?</translation>
     <message>
         <location filename="../ui/app/MainWindowConnection.cpp" line="724"/>
         <source>Critical security risk</source>
-        <translation>Riesgo crítico de segurança</translation>
+        <translation>Risco crítico de segurança</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindowConnection.cpp" line="734"/>
@@ -1947,7 +1947,7 @@ Não foi possível salvar a impressão digital. Conexão permitida somente desta
     <message>
         <location filename="../ui/app/MainWindowLocalOps.cpp" line="192"/>
         <source>Copied: %1  |  Failed: %2</source>
-        <translation>Copiardos: %1  |  Fallidos: %2</translation>
+        <translation>Copiados: %1  |  Falhas: %2</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindowTransfers.cpp" line="124"/>
@@ -3007,7 +3007,7 @@ Verificá-las novamente sem esse limite?</translation>
     <message>
         <location filename="../ui/widgets/dialogs/PermissionsDialog.cpp" line="45"/>
         <source>Preset</source>
-        <translation>Preset</translation>
+        <translation>Predefinição</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/PermissionsDialog.cpp" line="47"/>
@@ -3562,12 +3562,12 @@ Verificá-las novamente sem esse limite?</translation>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1132"/>
         <source>Failed/Canceled</source>
-        <translation>Com falha/Canceladas</translation>
+        <translation>Com falha ou canceladas</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1133"/>
         <source>All finished</source>
-        <translation>Todas finalizadas</translation>
+        <translation>Todas concluídas</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1134"/>
@@ -3667,7 +3667,7 @@ Verificá-las novamente sem esse limite?</translation>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1174"/>
         <source>Classic SCP writes directly to the final remote path. A canceled or failed upload may leave a partial destination.</source>
-        <translation>O SCP clássico grava diretamente no caminho remoto final. Um envio cancelado ou com falha pode deixar um destino parcial.</translation>
+        <translation>O SCP clássico grava diretamente no caminho remoto final. Um envio cancelado ou com falha pode deixar um arquivo de destino incompleto.</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1186"/>
@@ -3687,7 +3687,7 @@ Verificá-las novamente sem esse limite?</translation>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1194"/>
         <source>Accept new (TOFU)</source>
-        <translation>Aceitar novos (TOFU)</translation>
+        <translation>Aceitar novas chaves (TOFU)</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1196"/>
@@ -3712,7 +3712,7 @@ Verificá-las novamente sem esse limite?</translation>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1208"/>
         <source>Off (not recommended)</source>
-        <translation>Desativada (não recomendado)</translation>
+        <translation>Desativada (não recomendada)</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1210"/>
@@ -3727,17 +3727,17 @@ Verificá-las novamente sem esse limite?</translation>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1225"/>
         <source>System CA bundle</source>
-        <translation>Bundle CA do sistema</translation>
+        <translation>Pacote de CAs do sistema</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1222"/>
         <source>Default FTPS CA bundle:</source>
-        <translation>Bundle CA FTPS padrão:</translation>
+        <translation>Pacote de CAs padrão para FTPS:</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1223"/>
         <source>Select FTPS CA bundle</source>
-        <translation>Selecione o bundle CA para FTPS</translation>
+        <translation>Selecione o pacote de CAs para FTPS</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1231"/>
@@ -3752,12 +3752,12 @@ Verificá-las novamente sem esse limite?</translation>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1234"/>
         <source>Force interactive login when using Open in terminal (disable key/agent auth).</source>
-        <translation>Forçar login interativo ao usar Open in terminal (desativa autenticação por chave/agente).</translation>
+        <translation>Forçar login interativo ao abrir no terminal (desativa a autenticação por chave/agente).</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1237"/>
         <source>Enable automatic SFTP CLI fallback when using Open in terminal.</source>
-        <translation>Ativar fallback automático para SFTP CLI ao usar Open in terminal.</translation>
+        <translation>Usar automaticamente a CLI do SFTP como alternativa ao abrir no terminal.</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1243"/>
@@ -3767,7 +3767,7 @@ Verificá-las novamente sem esse limite?</translation>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1251"/>
         <source>Allow insecure credentials fallback (not recommended).</source>
-        <translation>Permitir alternativa insegura para credenciais (não recomendado).</translation>
+        <translation>Permitir armazenamento alternativo não seguro de credenciais (não recomendado).</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1138"/>
@@ -3803,7 +3803,7 @@ Verificá-las novamente sem esse limite?</translation>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1264"/>
         <source>Staging and drag-out</source>
-        <translation>Área temporária e arrastar para fora</translation>
+        <translation>Área temporária e arraste para fora</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1267"/>
@@ -3818,7 +3818,7 @@ Verificá-las novamente sem esse limite?</translation>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1280"/>
         <source>Auto-clean staging after successful drag-out (recommended).</source>
-        <translation>Limpar automaticamente a pasta temporária após arrastar para fora com sucesso (recomendado).</translation>
+        <translation>Limpar automaticamente a pasta temporária após um arraste bem-sucedido para fora do aplicativo (recomendado).</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1283"/>
@@ -3843,7 +3843,7 @@ Verificá-las novamente sem esse limite?</translation>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1286"/>
         <source>Preparation timeout:</source>
-        <translation>Timeout de preparação:</translation>
+        <translation>Tempo limite de preparação:</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1291"/>
@@ -3898,7 +3898,7 @@ Verificá-las novamente sem esse limite?</translation>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1305"/>
         <source>Limit for recursive folder drag-out to avoid deep trees and loops.</source>
-        <translation>Limite para arrastar recursivamente e evitar árvores muito profundas e loops.</translation>
+        <translation>Limite do arraste recursivo de pastas para evitar estruturas muito profundas e ciclos.</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1307"/>
@@ -3923,7 +3923,7 @@ Verificá-las novamente sem esse limite?</translation>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1423"/>
         <source>Enable insecure fallback</source>
-        <translation>Ativar alternativa insegura</translation>
+        <translation>Ativar armazenamento alternativo não seguro</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1424"/>
@@ -3934,7 +3934,7 @@ Do you still want to enable insecure fallback?</source>
         <translation>Isto armazenará credenciais sem criptografia em disco usando QSettings.
 No Linux, recomenda-se instalar e usar libsecret/Secret Service para maior segurança.
 
-Deseja ativar a alternativa insegura mesmo assim?</translation>
+Deseja ativar o armazenamento alternativo não seguro mesmo assim?</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1510"/>
@@ -3953,6 +3953,11 @@ Deseja ativar a alternativa insegura mesmo assim?</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1029"/>
+        <source>German</source>
+        <translation>Alemão</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1030"/>
         <source>Portuguese</source>
         <translation>Português</translation>
     </message>
@@ -5197,12 +5202,12 @@ As transferências aparecerão aqui quando forem iniciadas.</translation>
     <message>
         <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="884"/>
         <source>Failed/Canceled</source>
-        <translation>Falhas/Canceladas</translation>
+        <translation>Com falha ou canceladas</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="886"/>
         <source>All finished</source>
-        <translation>Todos finalizado</translation>
+        <translation>Todas concluídas</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="894"/>
