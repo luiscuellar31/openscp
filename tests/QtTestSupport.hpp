@@ -3,6 +3,8 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QSettings>
+#include <QTemporaryDir>
 #include <QThread>
 
 #include <chrono>
@@ -10,6 +12,23 @@
 #include <thread>
 
 namespace openscp::testsupport {
+
+class IsolatedSettings final {
+    public:
+    IsolatedSettings() {
+        if (!directory_.isValid())
+            return;
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                           directory_.path());
+    }
+
+    bool isValid() const { return directory_.isValid(); }
+    QString path() const { return directory_.path(); }
+
+    private:
+    QTemporaryDir directory_;
+};
 
 inline bool
 waitUntil(const std::function<bool()> &predicate,
@@ -36,7 +55,7 @@ inline bool spinUntil(const std::function<bool()> &predicate, int timeoutMs) {
     return predicate();
 }
 
-inline void flushUiEvents(int passes = 3) {
+inline void flushUiEvents(int passes = 5) {
     for (int pass = 0; pass < passes; ++pass)
         QCoreApplication::processEvents(QEventLoop::AllEvents);
 }

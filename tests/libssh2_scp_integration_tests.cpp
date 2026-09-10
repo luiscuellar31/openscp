@@ -16,11 +16,10 @@ namespace fs = std::filesystem;
 
 namespace {
 
-constexpr int kSkipExitCode = 77;
-
 using openscp::testsupport::envValue;
 using openscp::testsupport::envValueWithFallback;
 using openscp::testsupport::joinRemotePath;
+using openscp::testsupport::kSkipExitCode;
 using openscp::testsupport::parsePort;
 using openscp::testsupport::readFile;
 using openscp::testsupport::uniqueToken;
@@ -170,11 +169,6 @@ int main() {
     client.disconnect();
     std::error_code ec;
     fs::remove_all(tempDir, ec);
-    if (t.failures != 0) {
-        std::cerr << "[FAIL] openscp_scp_integration_tests failures="
-                  << t.failures << "\n";
-        return EXIT_FAILURE;
-    }
-    std::cout << "[OK] openscp_scp_integration_tests\n";
-    return EXIT_SUCCESS;
+    return openscp::testsupport::finishIntegration(
+        "openscp_scp_integration_tests", t);
 }

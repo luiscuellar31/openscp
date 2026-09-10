@@ -4,27 +4,17 @@
 #include "TestHarness.hpp"
 #include "openscp/ClientFactory.hpp"
 
-#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
-#include <filesystem>
 #include <iostream>
 #include <string>
-#include <vector>
-
-namespace fs = std::filesystem;
 
 namespace {
 
-constexpr int kSkipExitCode = 77;
-
 using openscp::testsupport::envValue;
-using openscp::testsupport::joinRemotePath;
+using openscp::testsupport::kSkipExitCode;
 using openscp::testsupport::parseBool;
 using openscp::testsupport::parsePort;
-using openscp::testsupport::readFile;
-using openscp::testsupport::uniqueToken;
-using openscp::testsupport::writeFile;
 
 } // namespace
 
@@ -76,98 +66,8 @@ int main() {
     }
 
     TestContext t;
-    t.check(client->protocol() == openscp::Protocol::Ftps,
-            "FTPS client should report FTPS protocol");
-    const auto caps = client->capabilities();
-    t.check(caps.implemented, "FTPS should be marked implemented");
-    t.check(caps.can_upload && caps.can_download,
-            "FTPS should support transfers");
-    t.check(caps.can_list, "FTPS should support remote listing");
-    t.check(caps.can_stat && caps.can_mkdir && caps.can_delete &&
-                caps.can_rename,
-            "FTPS should advertise remote CRUD operations");
-
-    const std::string token = uniqueToken();
-    const fs::path tempDir =
-        fs::temp_directory_path() / ("openscp_ftps_" + token);
-    const fs::path localUpload = tempDir / "upload.txt";
-    const fs::path localDownload = tempDir / "download.txt";
-    fs::create_directories(tempDir);
-
-    const std::string payload =
-        "openscp ftps integration payload " + token + "\nline two\n";
-    t.check(writeFile(localUpload, payload), "should write local upload file");
-
-    const std::string remoteDir =
-        joinRemotePath(*remoteBase, "openscp_ftps_it_" + token);
-    const std::string remotePath = joinRemotePath(remoteDir, "upload file.txt");
-    const std::string renamedPath =
-        joinRemotePath(remoteDir, "renamed file.txt");
-
-    err.clear();
-    t.check(client->mkdir(remoteDir, err),
-            std::string("FTPS mkdir should succeed: ") + err);
-
-    bool uploadProgressCalled = false;
-    err.clear();
-    t.check(client->put(
-                localUpload.string(), remotePath, err,
-                [&](std::size_t, std::size_t) { uploadProgressCalled = true; },
-                {}, false),
-            std::string("FTPS upload should succeed: ") + err);
-    t.check(uploadProgressCalled, "upload progress callback should be called");
-
-    bool pathIsDir = true;
-    err.clear();
-    t.check(client->exists(remotePath, pathIsDir, err),
-            std::string("FTPS exists should find uploaded file: ") + err);
-    t.check(!pathIsDir, "FTPS exists should report a file");
-    err.clear();
-    t.check(client->rename(remotePath, renamedPath, err, false),
-            std::string("FTPS rename should succeed: ") + err);
-
-    bool downloadProgressCalled = false;
-    err.clear();
-    t.check(
-        client->get(
-            renamedPath, localDownload.string(), err,
-            [&](std::size_t, std::size_t) { downloadProgressCalled = true; },
-            {}, false),
-        std::string("FTPS download should succeed: ") + err);
-    t.check(downloadProgressCalled,
-            "download progress callback should be called");
-
-    std::string downloaded;
-    t.check(readFile(localDownload, downloaded),
-            "downloaded file should be readable");
-    t.check(downloaded == payload, "downloaded content should match uploaded");
-
-    std::vector<openscp::FileInfo> listing;
-    err.clear();
-    t.check(client->list(remoteDir, listing, err),
-            std::string("FTPS listing should succeed: ") + err);
-    const std::string remoteFileName = "renamed file.txt";
-    const auto listed = std::find_if(
-        listing.begin(), listing.end(),
-        [&](const openscp::FileInfo &f) { return f.name == remoteFileName; });
-    t.check(listed != listing.end(),
-            "FTPS listing should include the uploaded file");
-
-    err.clear();
-    t.check(client->removeFile(renamedPath, err),
-            std::string("FTPS file deletion should succeed: ") + err);
-    err.clear();
-    t.check(client->removeDir(remoteDir, err),
-            std::string("FTPS directory deletion should succeed: ") + err);
-
-    client->disconnect();
-    std::error_code ec;
-    fs::remove_all(tempDir, ec);
-    if (t.failures != 0) {
-        std::cerr << "[FAIL] openscp_ftps_integration_tests failures="
-                  << t.failures << "\n";
-        return EXIT_FAILURE;
-    }
-    std::cout << "[OK] openscp_ftps_integration_tests\n";
-    return EXIT_SUCCESS;
+    openscp::testsupport::runManagedFilesContract(
+        *client, openscp::Protocol::Ftps, "FTPS", *remoteBase, t);
+    return openscp::testsupport::finishIntegration(
+        "openscp_ftps_integration_tests", t);
 }

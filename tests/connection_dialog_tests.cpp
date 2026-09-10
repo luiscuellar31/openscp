@@ -13,7 +13,6 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
-#include <QTemporaryDir>
 #include <QToolButton>
 
 #include <iostream>
@@ -323,14 +322,11 @@ int main(int argc, char **argv) {
     QApplication::setOrganizationName(QStringLiteral("OpenSCP-tests"));
     QApplication::setApplicationName(QStringLiteral("connection-dialog-tests"));
 
-    QTemporaryDir settingsRoot;
+    openscp::testsupport::IsolatedSettings settingsRoot;
     if (!settingsRoot.isValid()) {
         std::cerr << "[FAIL] could not create isolated settings directory\n";
         return 1;
     }
-    QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
-                       settingsRoot.path());
 
     openscp::test::TestHarness harness("Connection dialog");
     const int result = harness.run();

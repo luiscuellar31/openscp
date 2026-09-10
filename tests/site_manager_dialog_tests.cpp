@@ -1,3 +1,4 @@
+#include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "logic/persistence/SavedSitesPersistence.hpp"
 #include "widgets/dialogs/SiteManagerDialog.hpp"
@@ -9,7 +10,6 @@
 #include <QSettings>
 #include <QStackedWidget>
 #include <QTableView>
-#include <QTemporaryDir>
 
 #include <iostream>
 #include <string>
@@ -167,14 +167,11 @@ int main(int argc, char **argv) {
     QApplication::setApplicationName(
         QStringLiteral("site-manager-dialog-tests"));
 
-    QTemporaryDir settingsRoot;
+    openscp::testsupport::IsolatedSettings settingsRoot;
     if (!settingsRoot.isValid()) {
         std::cerr << "[FAIL] could not create isolated settings directory\n";
         return 1;
     }
-    QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
-                       settingsRoot.path());
 
     openscp::test::TestHarness harness("Site Manager dialog");
     const int result = harness.run();

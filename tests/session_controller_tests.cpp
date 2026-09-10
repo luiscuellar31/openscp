@@ -5,8 +5,8 @@
 
 namespace {
 
-void testConnectionCancellation(TestContext &test,
-                                openscpui::SessionController &session) {
+OPENSCP_TEST(testConnectionCancellation, test) {
+    openscpui::SessionController session;
     auto canceled = std::make_shared<std::atomic<bool>>(false);
     test.check(session.beginConnection(canceled),
                "an idle controller should begin a connection");
@@ -21,8 +21,8 @@ void testConnectionCancellation(TestContext &test,
                "finishing should clear connection and cancellation state");
 }
 
-void testDisconnectGenerations(TestContext &test,
-                               openscpui::SessionController &session) {
+OPENSCP_TEST(testDisconnectGenerations, test) {
+    openscpui::SessionController session;
     const quint64 first = session.beginDisconnect();
     test.check(session.isCurrentDisconnect(first),
                "the new disconnect generation should be current");
@@ -41,8 +41,8 @@ void testDisconnectGenerations(TestContext &test,
                "the matching completion should finish the disconnect");
 }
 
-void testOptionsLifecycle(TestContext &test,
-                          openscpui::SessionController &session) {
+OPENSCP_TEST(testOptionsLifecycle, test) {
+    openscpui::SessionController session;
     openscp::SessionOptions options;
     options.protocol = openscp::Protocol::WebDav;
     options.host = "dav.example";
@@ -61,16 +61,6 @@ void testOptionsLifecycle(TestContext &test,
 
 int main(int argc, char **argv) {
     QCoreApplication application(argc, argv);
-    openscpui::SessionController session;
     openscp::test::TestHarness harness("session controller");
-    harness.add("connection cancellation", [&session](TestContext &test) {
-        testConnectionCancellation(test, session);
-    });
-    harness.add("disconnect generations", [&session](TestContext &test) {
-        testDisconnectGenerations(test, session);
-    });
-    harness.add("options lifecycle", [&session](TestContext &test) {
-        testOptionsLifecycle(test, session);
-    });
     return harness.run();
 }

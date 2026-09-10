@@ -31,13 +31,11 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
-#include <QSettings>
 #include <QSizePolicy>
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QStandardItemModel>
 #include <QTableView>
-#include <QTemporaryDir>
 #include <QTextBrowser>
 #include <QTimer>
 #include <QToolBar>
@@ -92,6 +90,43 @@ void sendMouseEvent(QWidget *target, QEvent::Type type, const QPoint &position,
     QApplication::sendEvent(target, &event);
     flushUiEvents();
 }
+
+class SettingsDialogFixture final {
+    public:
+    SettingsDialogFixture() {
+        dialog.show();
+        flushUiEvents();
+        sections = dialog.findChild<QListWidget *>();
+        pages = dialog.findChild<QStackedWidget *>();
+    }
+
+    bool valid() const { return sections && pages; }
+
+    bool selectPage(int index) {
+        if (!valid() || index < 0 || index >= sections->count() ||
+            index >= pages->count()) {
+            return false;
+        }
+        sections->setCurrentRow(index);
+        return pages->currentIndex() == index;
+    }
+
+    QWidget *currentPage() const {
+        QWidget *current = pages ? pages->currentWidget() : nullptr;
+        auto *scroll = qobject_cast<QScrollArea *>(current);
+        return scroll ? scroll->widget() : current;
+    }
+
+    QList<QFormLayout *> currentForms() const {
+        QWidget *page = currentPage();
+        return page ? page->findChildren<QFormLayout *>()
+                    : QList<QFormLayout *>();
+    }
+
+    SettingsDialog dialog;
+    QListWidget *sections = nullptr;
+    QStackedWidget *pages = nullptr;
+};
 
 OPENSCP_TEST(testPathFieldPreservesAppearanceAndKeyboardNavigation, test) {
     openscpui::PathNavigationBar bar(openscpui::PathFlavor::Remote,
@@ -872,12 +907,14 @@ OPENSCP_TEST(testSettingsRestoresDefaultStagingFolderOnApply, test) {
 }
 
 OPENSCP_TEST(testSettingsPagesUseSharedFormStructure, test) {
-    SettingsDialog dialog;
-    dialog.show();
-    flushUiEvents();
-
-    auto *sections = dialog.findChild<QListWidget *>();
-    auto *pages = dialog.findChild<QStackedWidget *>();
+    SettingsDialogFixture fixture;
+    test.check(fixture.valid(),
+               "the Settings dialog should expose sections and pages");
+    if (!fixture.valid())
+        return;
+    SettingsDialog &dialog = fixture.dialog;
+    auto *sections = fixture.sections;
+    auto *pages = fixture.pages;
     const QList<int> expectedSectionCounts = {2, 1, 2, 1, 3, 1, 2};
     int sectionCount = 0;
     bool pageStructureMatches = true;
@@ -896,10 +933,10 @@ OPENSCP_TEST(testSettingsPagesUseSharedFormStructure, test) {
 
     if (sections && pages) {
         for (int pageIndex = 0; pageIndex < pages->count(); ++pageIndex) {
-            sections->setCurrentRow(pageIndex);
+            fixture.selectPage(pageIndex);
             flushUiEvents();
             auto *scroll = qobject_cast<QScrollArea *>(pages->currentWidget());
-            QWidget *page = scroll ? scroll->widget() : nullptr;
+            QWidget *page = fixture.currentPage();
             auto *pageLayout =
                 page ? qobject_cast<QVBoxLayout *>(page->layout()) : nullptr;
             if (!scroll || !page || !pageLayout) {
@@ -1036,9 +1073,12 @@ OPENSCP_TEST(testSettingsPagesUseSharedFormStructure, test) {
 }
 
 OPENSCP_TEST(testSettingsInlineActionPreservesNativeBounds, test) {
-    SettingsDialog dialog;
-    dialog.show();
-    flushUiEvents();
+    SettingsDialogFixture fixture;
+    test.check(fixture.valid(),
+               "the Settings dialog should expose sections and pages");
+    if (!fixture.valid())
+        return;
+    SettingsDialog &dialog = fixture.dialog;
 
     auto *button = dialog.findChild<QPushButton *>(
         QStringLiteral("settingsRestoreDefaultLayout"));
@@ -1064,12 +1104,14 @@ OPENSCP_TEST(testSettingsInlineActionPreservesNativeBounds, test) {
 }
 
 OPENSCP_TEST(testSettingsPageSwitchKeepsWrappedRowsStable, test) {
-    SettingsDialog dialog;
-    dialog.show();
-    flushUiEvents();
-
-    auto *sections = dialog.findChild<QListWidget *>();
-    auto *pages = dialog.findChild<QStackedWidget *>();
+    SettingsDialogFixture fixture;
+    test.check(fixture.valid(),
+               "the Settings dialog should expose sections and pages");
+    if (!fixture.valid())
+        return;
+    SettingsDialog &dialog = fixture.dialog;
+    auto *sections = fixture.sections;
+    auto *pages = fixture.pages;
     QList<int> changes;
     if (pages) {
         QObject::connect(pages, &QStackedWidget::currentChanged, &dialog,
@@ -1079,8 +1121,7 @@ OPENSCP_TEST(testSettingsPageSwitchKeepsWrappedRowsStable, test) {
     bool switchesAreStable = sections && pages;
     for (int index : {1, 5, 3, 6, 0, 4, 2}) {
         changes.clear();
-        if (sections)
-            sections->setCurrentRow(index);
+        const bool selected = fixture.selectPage(index);
 
         QList<QPair<QCheckBox *, int>> initialHeights;
         if (pages && pages->currentWidget()) {
@@ -1090,7 +1131,7 @@ OPENSCP_TEST(testSettingsPageSwitchKeepsWrappedRowsStable, test) {
                     initialHeights.push_back({check, check->height()});
             }
         }
-        switchesAreStable = switchesAreStable && pages &&
+        switchesAreStable = switchesAreStable && selected &&
                             pages->currentIndex() == index &&
                             changes == QList<int>{index};
 
@@ -1109,12 +1150,14 @@ OPENSCP_TEST(testSettingsPageSwitchKeepsWrappedRowsStable, test) {
 }
 
 OPENSCP_TEST(testSettingsLabelsAndFieldsShareAxes, test) {
-    SettingsDialog dialog;
-    dialog.show();
-    flushUiEvents();
-
-    auto *sections = dialog.findChild<QListWidget *>();
-    auto *pages = dialog.findChild<QStackedWidget *>();
+    SettingsDialogFixture fixture;
+    test.check(fixture.valid(),
+               "the Settings dialog should expose sections and pages");
+    if (!fixture.valid())
+        return;
+    SettingsDialog &dialog = fixture.dialog;
+    auto *sections = fixture.sections;
+    auto *pages = fixture.pages;
     int sharedLabelWidth = -1;
     int sharedFieldAxis = -1;
     int formLabelCount = 0;
@@ -1125,12 +1168,9 @@ OPENSCP_TEST(testSettingsLabelsAndFieldsShareAxes, test) {
 
     for (int pageIndex = 0; sections && pages && pageIndex < pages->count();
          ++pageIndex) {
-        sections->setCurrentRow(pageIndex);
+        fixture.selectPage(pageIndex);
         flushUiEvents();
-        auto *scroll = qobject_cast<QScrollArea *>(pages->currentWidget());
-        QWidget *page = scroll ? scroll->widget() : nullptr;
-        const QList<QFormLayout *> forms =
-            page ? page->findChildren<QFormLayout *>() : QList<QFormLayout *>();
+        const QList<QFormLayout *> forms = fixture.currentForms();
         if (forms.isEmpty()) {
             fieldsShareAxis = false;
             continue;
@@ -1196,15 +1236,14 @@ OPENSCP_TEST(testSettingsLabelsAndFieldsShareAxes, test) {
 }
 
 OPENSCP_TEST(testSettingsPathRowsUseNativeVerticalGeometry, test) {
-    SettingsDialog dialog;
-    dialog.show();
-    flushUiEvents();
-
-    auto *sections = dialog.findChild<QListWidget *>();
-    auto *pages = dialog.findChild<QStackedWidget *>();
-    for (int pageIndex = 0; sections && pages && pageIndex < pages->count();
-         ++pageIndex) {
-        sections->setCurrentRow(pageIndex);
+    SettingsDialogFixture fixture;
+    test.check(fixture.valid(),
+               "the Settings dialog should expose sections and pages");
+    if (!fixture.valid())
+        return;
+    SettingsDialog &dialog = fixture.dialog;
+    for (int pageIndex = 0; pageIndex < fixture.pages->count(); ++pageIndex) {
+        fixture.selectPage(pageIndex);
         flushUiEvents();
     }
 
@@ -1258,14 +1297,14 @@ OPENSCP_TEST(testSettingsPathRowsUseNativeVerticalGeometry, test) {
 }
 
 OPENSCP_TEST(testSettingsControlsUseSharedWidthRoles, test) {
-    SettingsDialog dialog;
-    dialog.show();
-    flushUiEvents();
-    auto *sections = dialog.findChild<QListWidget *>();
-    auto *pages = dialog.findChild<QStackedWidget *>();
-    for (int pageIndex = 0; sections && pages && pageIndex < pages->count();
-         ++pageIndex) {
-        sections->setCurrentRow(pageIndex);
+    SettingsDialogFixture fixture;
+    test.check(fixture.valid(),
+               "the Settings dialog should expose sections and pages");
+    if (!fixture.valid())
+        return;
+    SettingsDialog &dialog = fixture.dialog;
+    for (int pageIndex = 0; pageIndex < fixture.pages->count(); ++pageIndex) {
+        fixture.selectPage(pageIndex);
         flushUiEvents();
     }
 
@@ -1335,13 +1374,14 @@ OPENSCP_TEST(testSettingsControlsUseSharedWidthRoles, test) {
 }
 
 OPENSCP_TEST(testSettingsPathsStayResponsiveAndPreserveValues, test) {
-    SettingsDialog dialog;
-    dialog.show();
-    flushUiEvents();
-
-    auto *sections = dialog.findChild<QListWidget *>();
-    auto *pages = dialog.findChild<QStackedWidget *>();
-    bool responsiveWithoutHorizontalScroll = sections && pages;
+    SettingsDialogFixture fixture;
+    test.check(fixture.valid(),
+               "the Settings dialog should expose sections and pages");
+    if (!fixture.valid())
+        return;
+    SettingsDialog &dialog = fixture.dialog;
+    auto *pages = fixture.pages;
+    bool responsiveWithoutHorizontalScroll = true;
     QLabel *longTranslatedLabel = nullptr;
     for (QLabel *label : dialog.findChildren<QLabel *>()) {
         if (label->text() ==
@@ -1356,9 +1396,8 @@ OPENSCP_TEST(testSettingsPathsStayResponsiveAndPreserveValues, test) {
                                       QSize(1180, 760)};
     for (const QSize &size : dialogSizes) {
         dialog.resize(size);
-        for (int pageIndex = 0; sections && pages && pageIndex < pages->count();
-             ++pageIndex) {
-            sections->setCurrentRow(pageIndex);
+        for (int pageIndex = 0; pageIndex < pages->count(); ++pageIndex) {
+            fixture.selectPage(pageIndex);
             flushUiEvents();
             auto *scroll = qobject_cast<QScrollArea *>(pages->currentWidget());
             responsiveWithoutHorizontalScroll =
@@ -1434,15 +1473,11 @@ int main(int argc, char **argv) {
     QApplication::setApplicationName(
         QStringLiteral("accessibility-widget-tests"));
 
-    QTemporaryDir settingsRoot;
+    openscp::testsupport::IsolatedSettings settingsRoot;
     if (!settingsRoot.isValid()) {
         std::cerr << "[FAIL] could not create isolated settings directory\n";
         return 1;
     }
-    QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
-                       settingsRoot.path());
-
     openscp::test::TestHarness harness("Accessible widgets");
     return harness.run();
 }

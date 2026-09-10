@@ -5,11 +5,16 @@
 #include <QDir>
 #include <QTemporaryDir>
 
-#include <iostream>
-
 namespace {
 
-void testScopedFavorites(TestContext &test, openscpui::NavigationStore &store) {
+OPENSCP_TEST(testScopedFavorites, test) {
+    QTemporaryDir directory;
+    test.check(directory.isValid(),
+               "scoped favorites should have a temporary settings directory");
+    if (!directory.isValid())
+        return;
+    auto store = openscpui::NavigationStore::forIniFile(
+        directory.filePath(QStringLiteral("navigation.ini")));
     using Location = openscpui::NavigationStore::Location;
 
     test.check(store.toggleFavorite(Location::Remote, QStringLiteral("/team"),
@@ -32,7 +37,14 @@ void testScopedFavorites(TestContext &test, openscpui::NavigationStore &store) {
                "local favorite matching should be case insensitive");
 }
 
-void testRecentHistory(TestContext &test, openscpui::NavigationStore &store) {
+OPENSCP_TEST(testRecentHistory, test) {
+    QTemporaryDir directory;
+    test.check(directory.isValid(),
+               "recent history should have a temporary settings directory");
+    if (!directory.isValid())
+        return;
+    auto store = openscpui::NavigationStore::forIniFile(
+        directory.filePath(QStringLiteral("navigation.ini")));
     for (int index = 0; index < 25; ++index) {
         store.addRecentRemotePath(QStringLiteral("server-a"),
                                   QStringLiteral("/entry-%1").arg(index));
@@ -97,20 +109,6 @@ OPENSCP_TEST(testServerRoundTripDoesNotPersistSecrets, test) {
 
 int main(int argc, char **argv) {
     QCoreApplication application(argc, argv);
-    QTemporaryDir directory;
-    if (!directory.isValid()) {
-        std::cerr << "[FAIL] could not create temporary settings directory\n";
-        return 1;
-    }
-
-    auto store = openscpui::NavigationStore::forIniFile(
-        directory.filePath(QStringLiteral("navigation.ini")));
     openscp::test::TestHarness harness("navigation store");
-    harness.add("scoped favorites", [&store](TestContext &test) {
-        testScopedFavorites(test, store);
-    });
-    harness.add("recent history", [&store](TestContext &test) {
-        testRecentHistory(test, store);
-    });
     return harness.run();
 }

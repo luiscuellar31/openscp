@@ -16,6 +16,8 @@
 #include <functional>
 #include <memory>
 #include <thread>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 struct TransferManagerTestAccess {
@@ -59,6 +61,16 @@ bool waitForStatus(
             return task && task->status == status;
         },
         timeout);
+}
+
+template <typename Client, typename... Args>
+std::unique_ptr<openscp::RemoteClient>
+makeConnectedWorker(const openscp::SessionOptions &options, std::string &error,
+                    Args &&...args) {
+    auto worker = std::make_unique<Client>(std::forward<Args>(args)...);
+    if (!worker->connect(options, error))
+        return nullptr;
+    return worker;
 }
 
 OPENSCP_TEST(testConflictPoliciesAndUnsupportedFallback, test) {
@@ -387,10 +399,7 @@ class ConcurrentMockClient : public DownloadMockClient {
     newConnectionLike(const openscp::SessionOptions &options,
                       std::string &err) override {
         probe_->connections.fetch_add(1);
-        auto worker = std::make_unique<ConcurrentMockClient>(probe_);
-        if (!worker->connect(options, err))
-            return nullptr;
-        return worker;
+        return makeConnectedWorker<ConcurrentMockClient>(options, err, probe_);
     }
 
     private:
@@ -511,10 +520,7 @@ class CancelLifecycleClient final : public DownloadMockClient {
     newConnectionLike(const openscp::SessionOptions &options,
                       std::string &err) override {
         probe_->connections.fetch_add(1);
-        auto worker = std::make_unique<CancelLifecycleClient>(probe_);
-        if (!worker->connect(options, err))
-            return nullptr;
-        return worker;
+        return makeConnectedWorker<CancelLifecycleClient>(options, err, probe_);
     }
 
     private:
@@ -608,10 +614,8 @@ class FinalTransportFailureClient final : public DownloadMockClient {
     newConnectionLike(const openscp::SessionOptions &options,
                       std::string &err) override {
         probe_->connections.fetch_add(1);
-        auto worker = std::make_unique<FinalTransportFailureClient>(probe_);
-        if (!worker->connect(options, err))
-            return nullptr;
-        return worker;
+        return makeConnectedWorker<FinalTransportFailureClient>(options, err,
+                                                                probe_);
     }
 
     private:
@@ -730,10 +734,7 @@ class RetryMockClient final : public DownloadMockClient {
     std::unique_ptr<openscp::RemoteClient>
     newConnectionLike(const openscp::SessionOptions &options,
                       std::string &err) override {
-        auto worker = std::make_unique<RetryMockClient>(probe_);
-        if (!worker->connect(options, err))
-            return nullptr;
-        return worker;
+        return makeConnectedWorker<RetryMockClient>(options, err, probe_);
     }
 
     private:
@@ -759,48 +760,97 @@ OPENSCP_TEST(testTransientRetries, test) {
                "retry attempts should include the initial transfer");
 }
 
-class UnclassifiedErrorMockClient final : public DownloadMockClient {
-    public:
-    explicit UnclassifiedErrorMockClient(
-        std::shared_ptr<std::atomic<int>> attempts)
-        : attempts_(std::move(attempts)) {}
+struct FailureScenario {
+    std::string name;
+    std::string remotePath;
+    openscp::RemoteErrorKind errorKind = openscp::RemoteErrorKind::Unknown;
+    std::string message;
+    bool hasStructuredError = true;
+    bool transient = false;
+    bool commitUncertain = false;
+    TransferTask::Status expectedStatus = TransferTask::Status::Error;
+    int expectedAutomaticAttempts = 1;
+    bool rejectManualRetry = false;
+};
 
-    bool get(const std::string &, const std::string &, std::string &err,
+class FailureDownloadState final {
+    public:
+    explicit FailureDownloadState(std::vector<FailureScenario> scenarios)
+        : scenarios_(std::move(scenarios)) {}
+
+    const FailureScenario *scenarioFor(const std::string &remotePath) const {
+        const auto found =
+            std::find_if(scenarios_.cbegin(), scenarios_.cend(),
+                         [&](const FailureScenario &scenario) {
+                             return scenario.remotePath == remotePath;
+                         });
+        return found == scenarios_.cend() ? nullptr : &*found;
+    }
+
+    void recordAttempt(const std::string &remotePath) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ++attempts_[remotePath];
+    }
+
+    int attemptsFor(const std::string &remotePath) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto found = attempts_.find(remotePath);
+        return found == attempts_.end() ? 0 : found->second;
+    }
+
+    const std::vector<FailureScenario> &scenarios() const { return scenarios_; }
+
+    private:
+    const std::vector<FailureScenario> scenarios_;
+    mutable std::mutex mutex_;
+    std::unordered_map<std::string, int> attempts_;
+};
+
+class FailureDownloadClient final : public DownloadMockClient {
+    public:
+    explicit FailureDownloadClient(std::shared_ptr<FailureDownloadState> state)
+        : state_(std::move(state)) {}
+
+    bool get(const std::string &remote, const std::string &, std::string &err,
              std::function<void(std::size_t, std::size_t)>,
              std::function<bool()>, bool) override {
-        attempts_->fetch_add(1);
-        err.clear();
-        clearLastOperationError();
+        const FailureScenario *scenario = state_->scenarioFor(remote);
+        if (!scenario) {
+            err = "Unexpected failure scenario: " + remote;
+            setLastOperationError(openscp::RemoteErrorKind::InvalidRequest,
+                                  err);
+            return false;
+        }
+        state_->recordAttempt(remote);
+        err = scenario->message;
+        if (scenario->hasStructuredError) {
+            setLastOperationError(scenario->errorKind, err, 0,
+                                  scenario->transient,
+                                  scenario->commitUncertain);
+        } else {
+            clearLastOperationError();
+        }
         return false;
     }
 
     std::unique_ptr<openscp::RemoteClient>
     newConnectionLike(const openscp::SessionOptions &options,
                       std::string &err) override {
-        auto worker = std::make_unique<UnclassifiedErrorMockClient>(attempts_);
-        if (!worker->connect(options, err))
-            return nullptr;
-        return worker;
+        return makeConnectedWorker<FailureDownloadClient>(options, err, state_);
     }
 
     private:
-    std::shared_ptr<std::atomic<int>> attempts_;
+    std::shared_ptr<FailureDownloadState> state_;
 };
 
-OPENSCP_TEST(testUnclassifiedErrorNeverRetries, test) {
-    auto attempts = std::make_shared<std::atomic<int>>(0);
-    UnclassifiedErrorMockClient baseClient(attempts);
-    TransferManager manager;
-    configureManager(manager, baseClient, testOptions());
-    QTemporaryDir destination;
-    auto batch = testBatchOptions();
-    manager.enqueueDownload(QStringLiteral("/remote/unclassified.dat"),
-                            destination.filePath("unclassified.dat"), batch);
-
-    test.check(waitForStatus(manager, 1, TransferTask::Status::Error),
-               "unclassified failures should become errors");
-    test.check(attempts->load() == 1,
-               "an error without transient evidence must not retry");
+std::shared_ptr<FailureDownloadState>
+authenticationFailureState(std::string remotePath) {
+    return std::make_shared<FailureDownloadState>(std::vector<FailureScenario>{
+        {.name = "authentication",
+         .remotePath = std::move(remotePath),
+         .errorKind = openscp::RemoteErrorKind::Authentication,
+         .message = "Authentication failed",
+         .transient = true}});
 }
 
 struct MovePhaseProbe {
@@ -840,10 +890,7 @@ class MovePhaseMockClient final : public DownloadMockClient {
     std::unique_ptr<openscp::RemoteClient>
     newConnectionLike(const openscp::SessionOptions &options,
                       std::string &err) override {
-        auto worker = std::make_unique<MovePhaseMockClient>(probe_);
-        if (!worker->connect(options, err))
-            return nullptr;
-        return worker;
+        return makeConnectedWorker<MovePhaseMockClient>(options, err, probe_);
     }
 
     private:
@@ -897,221 +944,108 @@ OPENSCP_TEST(testMoveDeleteSourcePhasePersistsWithoutRetransfer, test) {
                "DeleteSource retry must not repeat the completed transfer");
 }
 
-class CommitUncertainMockClient final : public DownloadMockClient {
-    public:
-    bool get(const std::string &, const std::string &, std::string &err,
-             std::function<void(std::size_t, std::size_t)>,
-             std::function<bool()>, bool) override {
-        err = "Connection lost after final server response";
-        setLastOperationError(openscp::RemoteErrorKind::Connection, err, 0,
-                              true, true);
-        return false;
-    }
-
-    std::unique_ptr<openscp::RemoteClient>
-    newConnectionLike(const openscp::SessionOptions &options,
-                      std::string &err) override {
-        auto worker = std::make_unique<CommitUncertainMockClient>();
-        if (!worker->connect(options, err))
-            return nullptr;
-        return worker;
-    }
-};
-
-OPENSCP_TEST(testCommitUncertainDoesNotRetry, test) {
-    CommitUncertainMockClient baseClient;
-    const auto options = testOptions();
+OPENSCP_TEST(testFailureScenariosDoNotRetry, test) {
+    auto state =
+        std::make_shared<FailureDownloadState>(std::vector<FailureScenario>{
+            {.name = "unclassified",
+             .remotePath = "/remote/unclassified.dat",
+             .hasStructuredError = false},
+            {.name = "authentication",
+             .remotePath = "/remote/auth.dat",
+             .errorKind = openscp::RemoteErrorKind::Authentication,
+             .message = "Authentication failed",
+             .transient = true},
+            {.name = "insufficient space",
+             .remotePath = "/remote/full.dat",
+             .errorKind = openscp::RemoteErrorKind::InsufficientSpace,
+             .message = "Remote filesystem has insufficient space",
+             .transient = true},
+            {.name = "certificate",
+             .remotePath = "/remote/certificate",
+             .errorKind = openscp::RemoteErrorKind::Certificate,
+             .message = "Certificate verification failed",
+             .transient = true},
+            {.name = "permission denied",
+             .remotePath = "/remote/permission",
+             .errorKind = openscp::RemoteErrorKind::PermissionDenied,
+             .message = "Permission denied",
+             .transient = true},
+            {.name = "integrity",
+             .remotePath = "/remote/integrity",
+             .errorKind = openscp::RemoteErrorKind::Integrity,
+             .message = "Checksum mismatch",
+             .transient = true},
+            {.name = "commit uncertain",
+             .remotePath = "/remote/uncertain.dat",
+             .errorKind = openscp::RemoteErrorKind::Connection,
+             .message = "Connection lost after final server response",
+             .transient = true,
+             .commitUncertain = true,
+             .expectedStatus = TransferTask::Status::Warning,
+             .rejectManualRetry = true},
+        });
+    FailureDownloadClient baseClient(state);
     TransferManager manager;
-    configureManager(manager, baseClient, options);
-    QTemporaryDir destination;
-    auto batch = testBatchOptions();
-    manager.enqueueDownload(QStringLiteral("/remote/uncertain.dat"),
-                            destination.filePath("uncertain.dat"), batch);
-    test.check(waitForStatus(manager, 1, TransferTask::Status::Warning),
-               "commit-uncertain results should become warnings");
-    const auto beforeRetry = manager.taskSnapshot(1);
-    manager.retryTask(1);
-    const auto afterRetry = manager.taskSnapshot(1);
-    test.check(beforeRetry && afterRetry && afterRetry->commitUncertain &&
-                   afterRetry->attempts == 1 &&
-                   afterRetry->status == TransferTask::Status::Warning,
-               "commit-uncertain operations must never retry blindly");
-}
-
-class PermanentErrorMockClient final : public DownloadMockClient {
-    public:
-    explicit PermanentErrorMockClient(
-        std::shared_ptr<std::atomic<int>> attempts)
-        : attempts_(std::move(attempts)) {}
-
-    bool get(const std::string &, const std::string &, std::string &err,
-             std::function<void(std::size_t, std::size_t)>,
-             std::function<bool()>, bool) override {
-        attempts_->fetch_add(1);
-        err = "Authentication failed";
-        // Even a malformed backend flag must not make this category retryable.
-        setLastOperationError(openscp::RemoteErrorKind::Authentication, err, 0,
-                              true);
-        return false;
-    }
-
-    std::unique_ptr<openscp::RemoteClient>
-    newConnectionLike(const openscp::SessionOptions &options,
-                      std::string &err) override {
-        auto worker = std::make_unique<PermanentErrorMockClient>(attempts_);
-        if (!worker->connect(options, err))
-            return nullptr;
-        return worker;
-    }
-
-    private:
-    std::shared_ptr<std::atomic<int>> attempts_;
-};
-
-OPENSCP_TEST(testPermanentStructuredErrorNeverRetries, test) {
-    auto attempts = std::make_shared<std::atomic<int>>(0);
-    PermanentErrorMockClient baseClient(attempts);
-    const auto options = testOptions();
-    TransferManager manager;
-    configureManager(manager, baseClient, options);
-    QTemporaryDir destination;
-    auto batch = testBatchOptions();
-    manager.enqueueDownload(QStringLiteral("/remote/auth.dat"),
-                            destination.filePath("auth.dat"), batch);
-    test.check(waitForStatus(manager, 1, TransferTask::Status::Error),
-               "permanent structured failures should become errors");
-    test.check(attempts->load() == 1,
-               "authentication failures must not retry even if marked "
-               "transient");
-}
-
-class InsufficientSpaceMockClient final : public DownloadMockClient {
-    public:
-    explicit InsufficientSpaceMockClient(
-        std::shared_ptr<std::atomic<int>> attempts)
-        : attempts_(std::move(attempts)) {}
-
-    bool get(const std::string &, const std::string &, std::string &err,
-             std::function<void(std::size_t, std::size_t)>,
-             std::function<bool()>, bool) override {
-        attempts_->fetch_add(1);
-        err = "Remote filesystem has insufficient space";
-        // A backend flag must never turn an out-of-space result transient.
-        setLastOperationError(openscp::RemoteErrorKind::InsufficientSpace, err,
-                              507, true);
-        return false;
-    }
-
-    std::unique_ptr<openscp::RemoteClient>
-    newConnectionLike(const openscp::SessionOptions &options,
-                      std::string &err) override {
-        auto worker = std::make_unique<InsufficientSpaceMockClient>(attempts_);
-        if (!worker->connect(options, err))
-            return nullptr;
-        return worker;
-    }
-
-    private:
-    std::shared_ptr<std::atomic<int>> attempts_;
-};
-
-OPENSCP_TEST(testInsufficientSpaceNeverRetries, test) {
-    auto attempts = std::make_shared<std::atomic<int>>(0);
-    InsufficientSpaceMockClient baseClient(attempts);
-    const auto options = testOptions();
-    TransferManager manager;
-    configureManager(manager, baseClient, options);
-    QTemporaryDir destination;
-    auto batch = testBatchOptions();
-    manager.enqueueDownload(QStringLiteral("/remote/full.dat"),
-                            destination.filePath("full.dat"), batch);
-
-    test.check(waitForStatus(manager, 1, TransferTask::Status::Error),
-               "insufficient-space failures should become errors");
-    test.check(attempts->load() == 1,
-               "insufficient-space failures must never retry");
-}
-
-struct PermanentKindsProbe {
-    std::atomic<int> certificate{0};
-    std::atomic<int> permission{0};
-    std::atomic<int> integrity{0};
-};
-
-class PermanentKindsMockClient final : public DownloadMockClient {
-    public:
-    explicit PermanentKindsMockClient(
-        std::shared_ptr<PermanentKindsProbe> probe)
-        : probe_(std::move(probe)) {}
-
-    bool get(const std::string &remote, const std::string &, std::string &err,
-             std::function<void(std::size_t, std::size_t)>,
-             std::function<bool()>, bool) override {
-        openscp::RemoteErrorKind kind = openscp::RemoteErrorKind::Integrity;
-        if (remote.find("certificate") != std::string::npos) {
-            probe_->certificate.fetch_add(1);
-            kind = openscp::RemoteErrorKind::Certificate;
-            err = "Certificate verification failed";
-        } else if (remote.find("permission") != std::string::npos) {
-            probe_->permission.fetch_add(1);
-            kind = openscp::RemoteErrorKind::PermissionDenied;
-            err = "Permission denied";
-        } else {
-            probe_->integrity.fetch_add(1);
-            err = "Checksum mismatch";
-        }
-        // Deliberately malformed transient=true verifies category precedence.
-        setLastOperationError(kind, err, 0, true);
-        return false;
-    }
-
-    std::unique_ptr<openscp::RemoteClient>
-    newConnectionLike(const openscp::SessionOptions &options,
-                      std::string &err) override {
-        auto worker = std::make_unique<PermanentKindsMockClient>(probe_);
-        if (!worker->connect(options, err))
-            return nullptr;
-        return worker;
-    }
-
-    private:
-    std::shared_ptr<PermanentKindsProbe> probe_;
-};
-
-OPENSCP_TEST(testOtherPermanentKindsNeverRetry, test) {
-    auto probe = std::make_shared<PermanentKindsProbe>();
-    PermanentKindsMockClient baseClient(probe);
-    TransferManager manager;
-    manager.setMaxConcurrent(3);
+    manager.setMaxConcurrent(static_cast<int>(state->scenarios().size()));
     configureManager(manager, baseClient, testOptions());
     QTemporaryDir destination;
     auto batch = testBatchOptions();
-    manager.enqueueDownloads({{QStringLiteral("/remote/certificate"),
-                               destination.filePath("certificate")},
-                              {QStringLiteral("/remote/permission"),
-                               destination.filePath("permission")},
-                              {QStringLiteral("/remote/integrity"),
-                               destination.filePath("integrity")}},
-                             batch);
-    test.check(waitUntil([&] {
-                   const auto tasks = manager.tasksSnapshot();
-                   return tasks.size() == 3 &&
-                          std::all_of(tasks.cbegin(), tasks.cend(),
-                                      [](const TransferTask &task) {
-                                          return task.status ==
-                                                 TransferTask::Status::Error;
-                                      });
-               }),
-               "certificate, permission and integrity failures should stop");
-    test.check(probe->certificate.load() == 1 &&
-                   probe->permission.load() == 1 &&
-                   probe->integrity.load() == 1,
-               "permanent structured error kinds must never be retried");
+    QVector<QPair<QString, QString>> downloads;
+    for (const FailureScenario &scenario : state->scenarios()) {
+        downloads.push_back(
+            {QString::fromStdString(scenario.remotePath),
+             destination.filePath(QString::fromStdString(scenario.name))});
+    }
+    manager.enqueueDownloads(downloads, batch);
+
+    test.check(
+        waitUntil([&] {
+            const auto tasks = manager.tasksSnapshot();
+            if (tasks.size() != downloads.size())
+                return false;
+            for (qsizetype index = 0; index < tasks.size(); ++index) {
+                if (tasks[index].status !=
+                    state->scenarios()[static_cast<std::size_t>(index)]
+                        .expectedStatus) {
+                    return false;
+                }
+            }
+            return true;
+        }),
+        "all failure scenarios should reach their expected final status");
+
+    const auto tasks = manager.tasksSnapshot();
+    for (std::size_t index = 0; index < state->scenarios().size() &&
+                                index < static_cast<std::size_t>(tasks.size());
+         ++index) {
+        const FailureScenario &scenario = state->scenarios()[index];
+        const TransferTask &task = tasks[static_cast<qsizetype>(index)];
+        const std::string label = scenario.name + ": ";
+        test.check(task.status == scenario.expectedStatus,
+                   label + "final status should match");
+        test.check(state->attemptsFor(scenario.remotePath) ==
+                           scenario.expectedAutomaticAttempts &&
+                       task.attempts == scenario.expectedAutomaticAttempts,
+                   label + "automatic attempt count should match");
+        test.check(task.commitUncertain == scenario.commitUncertain,
+                   label + "commit-uncertain state should match");
+        if (scenario.rejectManualRetry) {
+            manager.retryTask(task.taskId);
+            const auto afterRetry = manager.taskSnapshot(task.taskId);
+            test.check(afterRetry &&
+                           afterRetry->status == scenario.expectedStatus &&
+                           afterRetry->attempts ==
+                               scenario.expectedAutomaticAttempts &&
+                           state->attemptsFor(scenario.remotePath) ==
+                               scenario.expectedAutomaticAttempts,
+                       label + "manual retry should be rejected");
+        }
+    }
 }
 
 OPENSCP_TEST(testFailedDependencySkipsFollowingWork, test) {
-    auto attempts = std::make_shared<std::atomic<int>>(0);
-    PermanentErrorMockClient baseClient(attempts);
+    auto state = authenticationFailureState("/remote/fails");
+    FailureDownloadClient baseClient(state);
     const auto options = testOptions();
     TransferManager manager;
     configureManager(manager, baseClient, options);
@@ -1146,8 +1080,8 @@ OPENSCP_TEST(testFailedDependencySkipsFollowingWork, test) {
 }
 
 OPENSCP_TEST(testDependencySkipsKeepTerminalCounterAndHistoryBounded, test) {
-    auto attempts = std::make_shared<std::atomic<int>>(0);
-    PermanentErrorMockClient baseClient(attempts);
+    auto state = authenticationFailureState("/remote/root-failure");
+    FailureDownloadClient baseClient(state);
     TransferManager manager;
     manager.pauseAll();
     manager.setMaxConcurrent(1);
@@ -1185,7 +1119,7 @@ OPENSCP_TEST(testDependencySkipsKeepTerminalCounterAndHistoryBounded, test) {
             },
             8000ms),
         "dependency skips should count once and prune to 5000 terminals");
-    test.check(attempts->load() == 1,
+    test.check(state->attemptsFor("/remote/root-failure") == 1,
                "skipped dependents must not execute after their prerequisite");
 }
 
@@ -1203,10 +1137,7 @@ class RateMockClient final : public DownloadMockClient {
     std::unique_ptr<openscp::RemoteClient>
     newConnectionLike(const openscp::SessionOptions &options,
                       std::string &err) override {
-        auto worker = std::make_unique<RateMockClient>();
-        if (!worker->connect(options, err))
-            return nullptr;
-        return worker;
+        return makeConnectedWorker<RateMockClient>(options, err);
     }
 };
 
@@ -1377,10 +1308,8 @@ class RemotePartialCleanupClient final : public openscp::MockSftpClient {
     std::unique_ptr<openscp::RemoteClient>
     newConnectionLike(const openscp::SessionOptions &options,
                       std::string &err) override {
-        auto worker = std::make_unique<RemotePartialCleanupClient>(probe_);
-        if (!worker->connect(options, err))
-            return nullptr;
-        return worker;
+        return makeConnectedWorker<RemotePartialCleanupClient>(options, err,
+                                                               probe_);
     }
 
     private:

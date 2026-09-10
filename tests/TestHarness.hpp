@@ -51,14 +51,8 @@ class TestHarness {
     explicit TestHarness(std::string suiteName)
         : suiteName_(std::move(suiteName)) {}
 
-    void add(std::string name, TestCase testCase) {
-        cases_.push_back({std::move(name), std::move(testCase)});
-    }
-
     int run() {
         TestContext context;
-        for (const RegisteredCase &testCase : cases_)
-            runCase(testCase, context);
         for (const RegisteredCase &testCase : registeredTestCases())
             runCase(testCase, context);
         if (context.failures == 0)
@@ -84,7 +78,6 @@ class TestHarness {
     }
 
     std::string suiteName_;
-    std::vector<RegisteredCase> cases_;
 };
 
 } // namespace openscp::test

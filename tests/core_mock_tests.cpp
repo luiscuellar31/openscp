@@ -20,6 +20,7 @@
 #include "curl/CurlBackendCommon.hpp"
 #endif
 
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <cstdlib>
@@ -42,6 +43,10 @@ openscp::SessionOptions validOptions() {
     opt.username = "alice";
     return opt;
 }
+
+static_assert(std::is_same_v<decltype(openscp::SessionOptions{}.password),
+                             std::optional<openscp::SecureString>>,
+              "SessionOptions passwords must use SecureString storage");
 
 fs::path makeTempFilePath(const std::string &tag) {
     const auto now =
@@ -90,9 +95,6 @@ OPENSCP_TEST(test_session_defaults, t) {
             "WebDAV TLS verification should default to enabled");
     t.check(o.ftps_mode == openscp::FtpsMode::Auto,
             "default FTPS mode should use automatic negotiation");
-    t.check((std::is_same_v<decltype(o.password),
-                            std::optional<openscp::SecureString>>),
-            "session passwords should use SecureString storage");
 }
 
 OPENSCP_TEST(test_security_policy_normalization, t) {
@@ -267,70 +269,231 @@ OPENSCP_TEST(test_safe_local_partial_files, t) {
 }
 
 OPENSCP_TEST(test_protocol_helpers, t) {
-    t.check(openscp::protocolFromStorageName("sftp") == openscp::Protocol::Sftp,
-            "protocolFromStorageName should parse sftp");
-    t.check(openscp::protocolFromStorageName("SCP") == openscp::Protocol::Scp,
-            "protocolFromStorageName should parse scp case-insensitively");
-    t.check(openscp::protocolFromStorageName("FTPS") == openscp::Protocol::Ftps,
-            "protocolFromStorageName should parse ftps case-insensitively");
-    t.check(openscp::protocolFromStorageName("unknown") ==
-                openscp::Protocol::Sftp,
-            "protocolFromStorageName should fallback to sftp");
-    t.check(std::string(openscp::protocolStorageName(openscp::Protocol::Scp)) ==
-                "scp",
-            "protocolStorageName should serialize SCP");
-    t.check(std::string(openscp::protocolDisplayName(openscp::Protocol::Scp)) ==
-                "SCP",
-            "protocolDisplayName should expose SCP label");
-    t.check(openscp::scpTransferModeFromStorageName("auto") ==
-                openscp::ScpTransferMode::Auto,
-            "scpTransferModeFromStorageName should parse auto");
-    t.check(openscp::scpTransferModeFromStorageName("SCP-ONLY") ==
-                openscp::ScpTransferMode::ScpOnly,
-            "scpTransferModeFromStorageName should parse scp-only");
-    t.check(std::string(openscp::scpTransferModeStorageName(
-                openscp::ScpTransferMode::ScpOnly)) == "scp-only",
-            "scpTransferModeStorageName should serialize scp-only");
-    t.check(openscp::proxyTypeFromStorageValue(static_cast<int>(
-                openscp::ProxyType::Socks5)) == openscp::ProxyType::Socks5,
-            "proxyTypeFromStorageValue should parse SOCKS5");
-    t.check(openscp::proxyTypeFromStorageValue(
-                static_cast<int>(openscp::ProxyType::HttpConnect)) ==
-                openscp::ProxyType::HttpConnect,
-            "proxyTypeFromStorageValue should parse HTTP CONNECT");
-    t.check(openscp::proxyTypeFromStorageValue(999) == openscp::ProxyType::None,
-            "proxyTypeFromStorageValue should fallback invalid values to None");
-    t.check(openscp::defaultPortForProxyType(openscp::ProxyType::Socks5) ==
-                1080,
-            "default SOCKS5 proxy port should be 1080");
-    t.check(openscp::defaultPortForProxyType(openscp::ProxyType::HttpConnect) ==
-                8080,
-            "default HTTP CONNECT proxy port should be 8080");
-    t.check(openscp::webDavSchemeFromStorageName("http") ==
-                openscp::WebDavScheme::Http,
-            "webDavSchemeFromStorageName should parse http");
-    t.check(
-        openscp::webDavSchemeFromStorageName("HTTPS") ==
-            openscp::WebDavScheme::Https,
-        "webDavSchemeFromStorageName should parse https case-insensitively");
-    t.check(std::string(openscp::webDavSchemeStorageName(
-                openscp::WebDavScheme::Http)) == "http",
-            "webDavSchemeStorageName should serialize http");
-    t.check(openscp::defaultPortForWebDavScheme(openscp::WebDavScheme::Http) ==
-                80,
-            "default HTTP WebDAV port should be 80");
-    t.check(openscp::defaultPortForWebDavScheme(openscp::WebDavScheme::Https) ==
-                443,
-            "default HTTPS WebDAV port should be 443");
-    t.check(openscp::ftpsModeFromStorageName("EXPLICIT") ==
-                openscp::FtpsMode::ExplicitTls,
-            "FTPS mode parser should accept explicit TLS");
-    t.check(openscp::ftpsModeFromStorageName("implicit-tls") ==
-                openscp::FtpsMode::ImplicitTls,
-            "FTPS mode parser should accept implicit TLS");
-    t.check(std::string(openscp::ftpsModeStorageName(
-                openscp::FtpsMode::ImplicitTls)) == "implicit",
-            "FTPS mode serializer should persist implicit mode");
+    struct ProtocolFromStorageCase {
+        const char *input;
+        openscp::Protocol expected;
+    };
+    constexpr std::array protocolFromStorageCases{
+        ProtocolFromStorageCase{"sftp", openscp::Protocol::Sftp},
+        ProtocolFromStorageCase{"SCP", openscp::Protocol::Scp},
+        ProtocolFromStorageCase{"ftp", openscp::Protocol::Ftp},
+        ProtocolFromStorageCase{"FTPS", openscp::Protocol::Ftps},
+        ProtocolFromStorageCase{"webdav", openscp::Protocol::WebDav},
+        ProtocolFromStorageCase{"unknown", openscp::Protocol::Sftp},
+    };
+    for (const auto &[input, expected] : protocolFromStorageCases) {
+        t.check(openscp::protocolFromStorageName(input) == expected,
+                std::string("protocolFromStorageName: ") + input);
+    }
+
+    struct ProtocolStorageNameCase {
+        openscp::Protocol input;
+        const char *expected;
+        const char *name;
+    };
+    constexpr std::array protocolStorageNameCases{
+        ProtocolStorageNameCase{openscp::Protocol::Sftp, "sftp", "SFTP"},
+        ProtocolStorageNameCase{openscp::Protocol::Scp, "scp", "SCP"},
+        ProtocolStorageNameCase{openscp::Protocol::Ftp, "ftp", "FTP"},
+        ProtocolStorageNameCase{openscp::Protocol::Ftps, "ftps", "FTPS"},
+        ProtocolStorageNameCase{openscp::Protocol::WebDav, "webdav", "WebDAV"},
+        ProtocolStorageNameCase{static_cast<openscp::Protocol>(999), "sftp",
+                                "invalid"},
+    };
+    for (const auto &[input, expected, name] : protocolStorageNameCases) {
+        t.check(std::string(openscp::protocolStorageName(input)) == expected,
+                std::string("protocolStorageName: ") + name);
+    }
+
+    struct ProtocolDisplayNameCase {
+        openscp::Protocol input;
+        const char *expected;
+        const char *name;
+    };
+    constexpr std::array protocolDisplayNameCases{
+        ProtocolDisplayNameCase{openscp::Protocol::Sftp, "SFTP", "SFTP"},
+        ProtocolDisplayNameCase{openscp::Protocol::Scp, "SCP", "SCP"},
+        ProtocolDisplayNameCase{openscp::Protocol::Ftp, "FTP", "FTP"},
+        ProtocolDisplayNameCase{openscp::Protocol::Ftps, "FTPS", "FTPS"},
+        ProtocolDisplayNameCase{openscp::Protocol::WebDav, "WebDAV", "WebDAV"},
+        ProtocolDisplayNameCase{static_cast<openscp::Protocol>(999), "SFTP",
+                                "invalid"},
+    };
+    for (const auto &[input, expected, name] : protocolDisplayNameCases) {
+        t.check(std::string(openscp::protocolDisplayName(input)) == expected,
+                std::string("protocolDisplayName: ") + name);
+    }
+
+    struct ProtocolPortCase {
+        openscp::Protocol input;
+        std::uint16_t expected;
+        const char *name;
+    };
+    constexpr std::array protocolPortCases{
+        ProtocolPortCase{openscp::Protocol::Sftp, 22, "SFTP"},
+        ProtocolPortCase{openscp::Protocol::Scp, 22, "SCP"},
+        ProtocolPortCase{openscp::Protocol::Ftp, 21, "FTP"},
+        ProtocolPortCase{openscp::Protocol::Ftps, 990, "FTPS"},
+        ProtocolPortCase{openscp::Protocol::WebDav, 443, "WebDAV"},
+        ProtocolPortCase{static_cast<openscp::Protocol>(999), 22, "invalid"},
+    };
+    for (const auto &[input, expected, name] : protocolPortCases) {
+        t.check(openscp::defaultPortForProtocol(input) == expected,
+                std::string("defaultPortForProtocol: ") + name);
+    }
+
+    struct ScpTransferModeFromStorageCase {
+        const char *input;
+        openscp::ScpTransferMode expected;
+    };
+    constexpr std::array scpTransferModeFromStorageCases{
+        ScpTransferModeFromStorageCase{"auto", openscp::ScpTransferMode::Auto},
+        ScpTransferModeFromStorageCase{"SCP-ONLY",
+                                       openscp::ScpTransferMode::ScpOnly},
+        ScpTransferModeFromStorageCase{"unknown",
+                                       openscp::ScpTransferMode::Auto},
+    };
+    for (const auto &[input, expected] : scpTransferModeFromStorageCases) {
+        t.check(openscp::scpTransferModeFromStorageName(input) == expected,
+                std::string("scpTransferModeFromStorageName: ") + input);
+    }
+
+    struct ScpTransferModeStorageNameCase {
+        openscp::ScpTransferMode input;
+        const char *expected;
+        const char *name;
+    };
+    constexpr std::array scpTransferModeStorageNameCases{
+        ScpTransferModeStorageNameCase{openscp::ScpTransferMode::Auto, "auto",
+                                       "Auto"},
+        ScpTransferModeStorageNameCase{openscp::ScpTransferMode::ScpOnly,
+                                       "scp-only", "ScpOnly"},
+        ScpTransferModeStorageNameCase{
+            static_cast<openscp::ScpTransferMode>(999), "auto", "invalid"},
+    };
+    for (const auto &[input, expected, name] :
+         scpTransferModeStorageNameCases) {
+        t.check(std::string(openscp::scpTransferModeStorageName(input)) ==
+                    expected,
+                std::string("scpTransferModeStorageName: ") + name);
+    }
+
+    struct FtpsModeFromStorageCase {
+        const char *input;
+        openscp::FtpsMode expected;
+    };
+    constexpr std::array ftpsModeFromStorageCases{
+        FtpsModeFromStorageCase{"auto", openscp::FtpsMode::Auto},
+        FtpsModeFromStorageCase{"EXPLICIT", openscp::FtpsMode::ExplicitTls},
+        FtpsModeFromStorageCase{"implicit-tls", openscp::FtpsMode::ImplicitTls},
+        FtpsModeFromStorageCase{"unknown", openscp::FtpsMode::Auto},
+    };
+    for (const auto &[input, expected] : ftpsModeFromStorageCases) {
+        t.check(openscp::ftpsModeFromStorageName(input) == expected,
+                std::string("ftpsModeFromStorageName: ") + input);
+    }
+
+    struct FtpsModeStorageNameCase {
+        openscp::FtpsMode input;
+        const char *expected;
+        const char *name;
+    };
+    constexpr std::array ftpsModeStorageNameCases{
+        FtpsModeStorageNameCase{openscp::FtpsMode::Auto, "auto", "Auto"},
+        FtpsModeStorageNameCase{openscp::FtpsMode::ExplicitTls, "explicit",
+                                "ExplicitTls"},
+        FtpsModeStorageNameCase{openscp::FtpsMode::ImplicitTls, "implicit",
+                                "ImplicitTls"},
+        FtpsModeStorageNameCase{static_cast<openscp::FtpsMode>(999), "auto",
+                                "invalid"},
+    };
+    for (const auto &[input, expected, name] : ftpsModeStorageNameCases) {
+        t.check(std::string(openscp::ftpsModeStorageName(input)) == expected,
+                std::string("ftpsModeStorageName: ") + name);
+    }
+
+    struct WebDavSchemeFromStorageCase {
+        const char *input;
+        openscp::WebDavScheme expected;
+    };
+    constexpr std::array webDavSchemeFromStorageCases{
+        WebDavSchemeFromStorageCase{"http", openscp::WebDavScheme::Http},
+        WebDavSchemeFromStorageCase{"HTTPS", openscp::WebDavScheme::Https},
+        WebDavSchemeFromStorageCase{"unknown", openscp::WebDavScheme::Https},
+    };
+    for (const auto &[input, expected] : webDavSchemeFromStorageCases) {
+        t.check(openscp::webDavSchemeFromStorageName(input) == expected,
+                std::string("webDavSchemeFromStorageName: ") + input);
+    }
+
+    struct WebDavSchemeStorageNameCase {
+        openscp::WebDavScheme input;
+        const char *expected;
+        const char *name;
+    };
+    constexpr std::array webDavSchemeStorageNameCases{
+        WebDavSchemeStorageNameCase{openscp::WebDavScheme::Http, "http",
+                                    "HTTP"},
+        WebDavSchemeStorageNameCase{openscp::WebDavScheme::Https, "https",
+                                    "HTTPS"},
+        WebDavSchemeStorageNameCase{static_cast<openscp::WebDavScheme>(999),
+                                    "https", "invalid"},
+    };
+    for (const auto &[input, expected, name] : webDavSchemeStorageNameCases) {
+        t.check(std::string(openscp::webDavSchemeStorageName(input)) ==
+                    expected,
+                std::string("webDavSchemeStorageName: ") + name);
+    }
+
+    struct WebDavSchemePortCase {
+        openscp::WebDavScheme input;
+        std::uint16_t expected;
+        const char *name;
+    };
+    constexpr std::array webDavSchemePortCases{
+        WebDavSchemePortCase{openscp::WebDavScheme::Http, 80, "HTTP"},
+        WebDavSchemePortCase{openscp::WebDavScheme::Https, 443, "HTTPS"},
+        WebDavSchemePortCase{static_cast<openscp::WebDavScheme>(999), 443,
+                             "invalid"},
+    };
+    for (const auto &[input, expected, name] : webDavSchemePortCases) {
+        t.check(openscp::defaultPortForWebDavScheme(input) == expected,
+                std::string("defaultPortForWebDavScheme: ") + name);
+    }
+
+    struct ProxyTypeFromStorageCase {
+        int input;
+        openscp::ProxyType expected;
+        const char *name;
+    };
+    constexpr std::array proxyTypeFromStorageCases{
+        ProxyTypeFromStorageCase{static_cast<int>(openscp::ProxyType::Socks5),
+                                 openscp::ProxyType::Socks5, "Socks5"},
+        ProxyTypeFromStorageCase{
+            static_cast<int>(openscp::ProxyType::HttpConnect),
+            openscp::ProxyType::HttpConnect, "HttpConnect"},
+        ProxyTypeFromStorageCase{999, openscp::ProxyType::None, "invalid"},
+    };
+    for (const auto &[input, expected, name] : proxyTypeFromStorageCases) {
+        t.check(openscp::proxyTypeFromStorageValue(input) == expected,
+                std::string("proxyTypeFromStorageValue: ") + name);
+    }
+
+    struct ProxyTypePortCase {
+        openscp::ProxyType input;
+        std::uint16_t expected;
+        const char *name;
+    };
+    constexpr std::array proxyTypePortCases{
+        ProxyTypePortCase{openscp::ProxyType::None, 0, "None"},
+        ProxyTypePortCase{openscp::ProxyType::Socks5, 1080, "Socks5"},
+        ProxyTypePortCase{openscp::ProxyType::HttpConnect, 8080, "HttpConnect"},
+        ProxyTypePortCase{static_cast<openscp::ProxyType>(999), 0, "invalid"},
+    };
+    for (const auto &[input, expected, name] : proxyTypePortCases) {
+        t.check(openscp::defaultPortForProxyType(input) == expected,
+                std::string("defaultPortForProxyType: ") + name);
+    }
     t.check(
         openscp::normalizeWebDavBasePath("remote.php//dav/./files/alice/") ==
             "/remote.php/dav/files/alice",
@@ -339,108 +502,124 @@ OPENSCP_TEST(test_protocol_helpers, t) {
                 "/dav/files",
             "WebDAV base paths should resolve dot segments");
 
-    const auto sftpCaps =
-        openscp::capabilitiesForProtocol(openscp::Protocol::Sftp);
-    t.check(sftpCaps.implemented, "SFTP capabilities should be implemented");
-    t.check(sftpCaps.can_list, "SFTP capabilities should include listing");
-    t.check(sftpCaps.can_upload && sftpCaps.can_download && sftpCaps.can_stat &&
-                sftpCaps.can_mkdir && sftpCaps.can_delete &&
-                sftpCaps.can_rename,
-            "SFTP should advertise fine-grained remote operations");
-    t.check(sftpCaps.can_checksum,
-            "SFTP should advertise on-demand remote checksums");
+    [[maybe_unused]] const openscp::ProtocolCapabilities managedFiles{
+        .implemented = true,
+        .can_list = true,
+        .can_upload = true,
+        .can_download = true,
+        .can_stat = true,
+        .can_mkdir = true,
+        .can_delete = true,
+        .can_rename = true,
+        .can_read_metadata = true,
+        .supports_proxy = true,
+    };
+    const openscp::ProtocolCapabilities sftpExpected{
+        .implemented = true,
+        .can_list = true,
+        .can_upload = true,
+        .can_download = true,
+        .can_stat = true,
+        .can_mkdir = true,
+        .can_delete = true,
+        .can_rename = true,
+        .can_resume_download = true,
+        .can_resume_upload = true,
+        .can_read_metadata = true,
+        .can_set_permissions = true,
+        .can_set_ownership = true,
+        .can_set_timestamps = true,
+        .can_checksum = true,
+        .supports_proxy = true,
+        .supports_jump_host = true,
+        .supports_known_hosts = true,
+        .supports_transfer_integrity = true,
+    };
+    const openscp::ProtocolCapabilities scpExpected{
+        .implemented = true,
+        .can_upload = true,
+        .can_download = true,
+        .supports_proxy = true,
+        .supports_jump_host = true,
+        .supports_known_hosts = true,
+    };
 
-    const auto scpCaps =
-        openscp::capabilitiesForProtocol(openscp::Protocol::Scp);
-    t.check(scpCaps.implemented, "SCP capabilities should be implemented");
-    t.check(scpCaps.can_upload && scpCaps.can_download,
-            "SCP capabilities should include file transfers");
-    t.check(!scpCaps.can_list, "SCP capabilities should not include listing");
-    t.check(!scpCaps.can_resume_download && !scpCaps.can_resume_upload,
-            "SCP capabilities should not include resume");
-    t.check(!scpCaps.can_set_permissions,
-            "SCP capabilities should not include chmod/chown metadata edits");
-    t.check(scpCaps.can_upload && scpCaps.can_download && !scpCaps.can_list,
-            "SCP should advertise transfer-only fine-grained capabilities");
-    t.check(!scpCaps.can_checksum, "SCP should not advertise remote checksums");
-    t.check(scpCaps.supports_known_hosts,
-            "SCP capabilities should include known_hosts verification");
-
-    const auto webdavCaps =
-        openscp::capabilitiesForProtocol(openscp::Protocol::WebDav);
 #if OPENSCP_HAS_CURL_WEBDAV
-    t.check(webdavCaps.implemented,
-            "WebDAV capabilities should be implemented");
-    t.check(webdavCaps.can_list, "WebDAV capabilities should include listing");
-    t.check(webdavCaps.can_upload && webdavCaps.can_download,
-            "WebDAV capabilities should include file transfers");
-    t.check(webdavCaps.can_read_metadata,
-            "WebDAV capabilities should include metadata");
-    t.check(webdavCaps.supports_proxy,
-            "WebDAV capabilities should include proxy support");
-    t.check(webdavCaps.can_list && webdavCaps.can_upload &&
-                webdavCaps.can_download && webdavCaps.can_stat &&
-                webdavCaps.can_mkdir && webdavCaps.can_delete &&
-                webdavCaps.can_rename,
-            "WebDAV should advertise supported remote operations");
-    t.check(!webdavCaps.can_checksum,
-            "WebDAV should not advertise remote checksums");
+    const openscp::ProtocolCapabilities webdavExpected = managedFiles;
 #else
-    t.check(!webdavCaps.implemented,
-            "WebDAV capabilities should report not implemented");
-    t.check(!webdavCaps.can_list,
-            "WebDAV capabilities should not advertise listing when backend is "
-            "disabled");
-    t.check(!webdavCaps.can_upload && !webdavCaps.can_download,
-            "WebDAV capabilities should not advertise transfers when backend "
-            "is disabled");
+    const openscp::ProtocolCapabilities webdavExpected{};
+#endif
+#if OPENSCP_HAS_CURL_FTP
+    const openscp::ProtocolCapabilities ftpExpected = managedFiles;
+    const openscp::ProtocolCapabilities ftpsExpected = managedFiles;
+#else
+    const openscp::ProtocolCapabilities ftpExpected{};
+    const openscp::ProtocolCapabilities ftpsExpected{};
 #endif
 
-    const auto ftpCaps =
-        openscp::capabilitiesForProtocol(openscp::Protocol::Ftp);
-    const auto ftpsCaps =
-        openscp::capabilitiesForProtocol(openscp::Protocol::Ftps);
-#if OPENSCP_HAS_CURL_FTP
-    t.check(ftpCaps.implemented, "FTP capabilities should be implemented");
-    t.check(ftpCaps.can_upload && ftpCaps.can_download,
-            "FTP capabilities should include file transfers");
-    t.check(ftpCaps.can_list,
-            "FTP capabilities should include directory listing support");
-    t.check(!ftpCaps.supports_known_hosts,
-            "FTP should not advertise SSH known_hosts verification");
-    t.check(ftpCaps.can_list && ftpCaps.can_upload && ftpCaps.can_download &&
-                ftpCaps.can_stat && ftpCaps.can_mkdir && ftpCaps.can_delete &&
-                ftpCaps.can_rename,
-            "FTP should advertise implemented CRUD operations");
-    t.check(!ftpCaps.can_checksum && !ftpsCaps.can_checksum,
-            "FTP and FTPS should not advertise remote checksums");
-    t.check(ftpsCaps.implemented, "FTPS capabilities should be implemented");
-    t.check(ftpsCaps.can_upload && ftpsCaps.can_download,
-            "FTPS capabilities should include file transfers");
-    t.check(ftpsCaps.can_list,
-            "FTPS capabilities should include directory listing support");
-    t.check(!ftpsCaps.supports_known_hosts,
-            "FTPS should use TLS certificates, not SSH known_hosts");
-#else
-    t.check(!ftpCaps.implemented,
-            "FTP capabilities should report not implemented when backend is "
-            "disabled");
-    t.check(!ftpCaps.can_upload && !ftpCaps.can_download,
-            "FTP capabilities should not advertise transfers when backend is "
-            "disabled");
-    t.check(!ftpCaps.can_list,
-            "FTP capabilities should not advertise listing when backend is "
-            "disabled");
-    t.check(!ftpsCaps.implemented,
-            "FTPS capabilities should report not implemented when backend is "
-            "disabled");
-    t.check(!ftpsCaps.can_upload && !ftpsCaps.can_download,
-            "FTPS capabilities should not advertise transfers when backend is "
-            "disabled");
-    t.check(!ftpsCaps.can_list,
-            "FTPS capabilities should not advertise listing when backend is "
-            "disabled");
-#endif
+    struct ProtocolCapabilitiesCase {
+        const char *name;
+        openscp::Protocol input;
+        openscp::ProtocolCapabilities expected;
+    };
+    const std::array capabilityCases{
+        ProtocolCapabilitiesCase{"SFTP", openscp::Protocol::Sftp, sftpExpected},
+        ProtocolCapabilitiesCase{"SCP", openscp::Protocol::Scp, scpExpected},
+        ProtocolCapabilitiesCase{"FTP", openscp::Protocol::Ftp, ftpExpected},
+        ProtocolCapabilitiesCase{"FTPS", openscp::Protocol::Ftps, ftpsExpected},
+        ProtocolCapabilitiesCase{"WebDAV", openscp::Protocol::WebDav,
+                                 webdavExpected},
+    };
+    struct CapabilityField {
+        const char *name;
+        bool openscp::ProtocolCapabilities::*member;
+    };
+    constexpr std::array capabilityFields{
+        CapabilityField{"implemented",
+                        &openscp::ProtocolCapabilities::implemented},
+        CapabilityField{"can_list", &openscp::ProtocolCapabilities::can_list},
+        CapabilityField{"can_upload",
+                        &openscp::ProtocolCapabilities::can_upload},
+        CapabilityField{"can_download",
+                        &openscp::ProtocolCapabilities::can_download},
+        CapabilityField{"can_stat", &openscp::ProtocolCapabilities::can_stat},
+        CapabilityField{"can_mkdir", &openscp::ProtocolCapabilities::can_mkdir},
+        CapabilityField{"can_delete",
+                        &openscp::ProtocolCapabilities::can_delete},
+        CapabilityField{"can_rename",
+                        &openscp::ProtocolCapabilities::can_rename},
+        CapabilityField{"can_resume_download",
+                        &openscp::ProtocolCapabilities::can_resume_download},
+        CapabilityField{"can_resume_upload",
+                        &openscp::ProtocolCapabilities::can_resume_upload},
+        CapabilityField{"can_read_metadata",
+                        &openscp::ProtocolCapabilities::can_read_metadata},
+        CapabilityField{"can_set_permissions",
+                        &openscp::ProtocolCapabilities::can_set_permissions},
+        CapabilityField{"can_set_ownership",
+                        &openscp::ProtocolCapabilities::can_set_ownership},
+        CapabilityField{"can_set_timestamps",
+                        &openscp::ProtocolCapabilities::can_set_timestamps},
+        CapabilityField{"can_checksum",
+                        &openscp::ProtocolCapabilities::can_checksum},
+        CapabilityField{"supports_proxy",
+                        &openscp::ProtocolCapabilities::supports_proxy},
+        CapabilityField{"supports_jump_host",
+                        &openscp::ProtocolCapabilities::supports_jump_host},
+        CapabilityField{"supports_known_hosts",
+                        &openscp::ProtocolCapabilities::supports_known_hosts},
+        CapabilityField{
+            "supports_transfer_integrity",
+            &openscp::ProtocolCapabilities::supports_transfer_integrity},
+    };
+    for (const auto &testCase : capabilityCases) {
+        const auto actual = openscp::capabilitiesForProtocol(testCase.input);
+        for (const auto &field : capabilityFields) {
+            t.check(actual.*field.member == testCase.expected.*field.member,
+                    std::string(testCase.name) +
+                        " capabilities: " + field.name);
+        }
+    }
 }
 
 #if OPENSCP_HAS_CURL_FTP
@@ -570,64 +749,63 @@ OPENSCP_TEST(test_list_requires_connection, t) {
             "disconnected mock operations should expose a connection error");
 }
 
-OPENSCP_TEST(test_list_sorting_and_known_path, t) {
-    openscp::MockSftpClient c;
-    std::string err;
-    auto opt = validOptions();
-    t.check(c.connect(opt, err), "connect should succeed before list test");
+OPENSCP_TEST(test_mock_listings, t) {
+    struct ExpectedListingEntry {
+        const char *name;
+        bool isDirectory;
+    };
+    struct ListingScenario {
+        const char *name;
+        const char *path;
+        bool succeeds;
+        std::vector<ExpectedListingEntry> expected;
+    };
+    const std::array scenarios{
+        ListingScenario{"root",
+                        "/",
+                        true,
+                        {{"home", true}, {"var", true}, {"readme.txt", false}}},
+        ListingScenario{"empty path aliases root",
+                        "",
+                        true,
+                        {{"home", true}, {"var", true}, {"readme.txt", false}}},
+        ListingScenario{"home sorts directories before files",
+                        "/home",
+                        true,
+                        {{"guest", true}, {"luis", true}, {"notes.md", false}}},
+        ListingScenario{"missing path", "/does-not-exist", false, {}},
+    };
 
-    std::vector<openscp::FileInfo> out;
-    t.check(c.list("/home", out, err),
-            "list('/home') should succeed in mock FS");
-    t.check(out.size() == 3, "list('/home') should return 3 entries");
-    if (out.size() == 3) {
-        t.check(out[0].is_dir && out[0].name == "guest",
-                "first entry should be dir 'guest'");
-        t.check(out[1].is_dir && out[1].name == "luis",
-                "second entry should be dir 'luis'");
-        t.check(!out[2].is_dir && out[2].name == "notes.md",
-                "third entry should be file 'notes.md'");
+    for (const ListingScenario &scenario : scenarios) {
+        openscp::MockSftpClient client;
+        std::string error;
+        t.check(client.connect(validOptions(), error),
+                std::string(scenario.name) + ": connect should succeed");
+        std::vector<openscp::FileInfo> actual;
+        error.clear();
+        const bool listed = client.list(scenario.path, actual, error);
+        t.check(listed == scenario.succeeds,
+                std::string(scenario.name) + ": listing result should match");
+        if (!scenario.succeeds) {
+            t.check(!error.empty() && client.lastOperationError().kind ==
+                                          openscp::RemoteErrorKind::NotFound,
+                    std::string(scenario.name) +
+                        ": missing listing should expose a structured error");
+            continue;
+        }
+        t.check(actual.size() == scenario.expected.size(),
+                std::string(scenario.name) + ": entry count should match");
+        for (std::size_t index = 0;
+             index < actual.size() && index < scenario.expected.size();
+             ++index) {
+            t.check(actual[index].name == scenario.expected[index].name &&
+                        actual[index].is_dir ==
+                            scenario.expected[index].isDirectory,
+                    std::string(scenario.name) + ": entry " +
+                        std::to_string(index) + " should be " +
+                        scenario.expected[index].name);
+        }
     }
-}
-
-OPENSCP_TEST(test_list_root_and_empty_path, t) {
-    openscp::MockSftpClient c;
-    std::string err;
-    auto opt = validOptions();
-    t.check(c.connect(opt, err),
-            "connect should succeed before root listing test");
-
-    std::vector<openscp::FileInfo> root;
-    t.check(c.list("/", root, err), "list('/') should succeed");
-    t.check(root.size() == 3, "list('/') should return expected mock entries");
-    if (root.size() == 3) {
-        t.check(root[0].is_dir && root[0].name == "home",
-                "root[0] should be 'home' directory");
-        t.check(root[1].is_dir && root[1].name == "var",
-                "root[1] should be 'var' directory");
-        t.check(!root[2].is_dir && root[2].name == "readme.txt",
-                "root[2] should be 'readme.txt' file");
-    }
-
-    std::vector<openscp::FileInfo> emptyPath;
-    err.clear();
-    t.check(c.list("", emptyPath, err), "list('') should be treated as '/'");
-    t.check(emptyPath.size() == root.size(),
-            "list('') should match root entry count");
-}
-
-OPENSCP_TEST(test_missing_path_error, t) {
-    openscp::MockSftpClient c;
-    std::string err;
-    auto opt = validOptions();
-    t.check(c.connect(opt, err),
-            "connect should succeed before missing path test");
-
-    std::vector<openscp::FileInfo> out;
-    err.clear();
-    t.check(!c.list("/does-not-exist", out, err),
-            "list on missing path should fail");
-    t.check(!err.empty(), "missing path should report non-empty error");
 }
 
 OPENSCP_TEST(test_mock_capabilities_match_implemented_operations, t) {

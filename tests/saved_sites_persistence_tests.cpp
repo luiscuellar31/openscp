@@ -1,3 +1,4 @@
+#include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "logic/common/AppSettings.hpp"
 #include "logic/persistence/SavedSitesPersistence.hpp"
@@ -5,7 +6,6 @@
 #include <QCoreApplication>
 #include <QFileInfo>
 #include <QSettings>
-#include <QTemporaryDir>
 
 #include <iostream>
 #include <string>
@@ -229,15 +229,11 @@ int main(int argc, char **argv) {
     QCoreApplication::setApplicationName(
         QStringLiteral("saved-sites-persistence-tests"));
 
-    QTemporaryDir settingsRoot;
+    openscp::testsupport::IsolatedSettings settingsRoot;
     if (!settingsRoot.isValid()) {
         std::cerr << "[FAIL] could not create isolated settings directory\n";
         return 1;
     }
-    QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
-                       settingsRoot.path());
-
     openscp::test::TestHarness harness("saved-sites persistence");
     const int result = harness.run();
     QSettings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP")).clear();

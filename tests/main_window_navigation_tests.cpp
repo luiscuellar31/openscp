@@ -12,15 +12,12 @@
 #include <QApplication>
 #include <QDialog>
 #include <QDir>
-#include <QEventLoop>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPushButton>
-#include <QSettings>
 #include <QSplitter>
 #include <QSplitterHandle>
 #include <QStandardPaths>
-#include <QTemporaryDir>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -30,11 +27,7 @@
 namespace {
 
 QString settingsRootPath;
-
-void flushUiEvents() {
-    for (int pass = 0; pass < 5; ++pass)
-        QApplication::processEvents(QEventLoop::AllEvents);
-}
+using openscp::testsupport::flushUiEvents;
 
 void configureMainWindowSettings(const QString &runtimeRoot) {
     openscpui::AppSettings settings;
@@ -488,16 +481,12 @@ int main(int argc, char **argv) {
         QStringLiteral("main-window-navigation-tests"));
     QStandardPaths::setTestModeEnabled(true);
 
-    QTemporaryDir isolatedSettings;
+    openscp::testsupport::IsolatedSettings isolatedSettings;
     if (!isolatedSettings.isValid()) {
         std::cerr << "[FAIL] could not create isolated settings directory\n";
         return 1;
     }
     settingsRootPath = isolatedSettings.path();
-    QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
-                       isolatedSettings.path());
-
     openscp::test::TestHarness harness("MainWindow navigation");
     return harness.run();
 }

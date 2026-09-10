@@ -23,10 +23,9 @@ namespace fs = std::filesystem;
 
 namespace {
 
-constexpr int kSkipExitCode = 77;
-
 using openscp::testsupport::envValue;
 using openscp::testsupport::joinRemotePath;
+using openscp::testsupport::kSkipExitCode;
 using openscp::testsupport::parsePort;
 using openscp::testsupport::readFile;
 using openscp::testsupport::uniqueToken;
@@ -593,10 +592,6 @@ int main() {
     }
 #endif
 
-    if (t.failures != 0) {
-        std::cerr << "[FAILURES] " << t.failures << "\n";
-        return EXIT_FAILURE;
-    }
-    std::cout << "[OK] openscp_sftp_integration_tests\n";
-    return EXIT_SUCCESS;
+    return openscp::testsupport::finishIntegration(
+        "openscp_sftp_integration_tests", t);
 }

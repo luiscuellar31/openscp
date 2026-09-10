@@ -16,20 +16,23 @@
 #include <chrono>
 #include <functional>
 #include <thread>
+#include <utility>
 
 namespace {
 
 using namespace std::chrono_literals;
 using openscp::testsupport::waitUntil;
 
-std::unique_ptr<openscp::RemoteClient> connectedMock() {
-    auto client = std::make_unique<openscp::MockSftpClient>();
+template <typename Client, typename... Args>
+std::unique_ptr<openscp::RemoteClient> connectedClient(const std::string &host,
+                                                       Args &&...args) {
+    auto client = std::make_unique<Client>(std::forward<Args>(args)...);
     openscp::SessionOptions options;
-    options.host = "sync.test";
+    options.host = host;
     options.username = "tester";
     std::string error;
     if (!client->connect(options, error))
-        return {};
+        return nullptr;
     return client;
 }
 
@@ -74,17 +77,6 @@ class ChecksumMockClient final : public openscp::MockSftpClient {
     }
 };
 
-std::unique_ptr<openscp::RemoteClient> connectedChecksumMock() {
-    auto client = std::make_unique<ChecksumMockClient>();
-    openscp::SessionOptions options;
-    options.host = "checksum.test";
-    options.username = "tester";
-    std::string error;
-    if (!client->connect(options, error))
-        return {};
-    return client;
-}
-
 OPENSCP_TEST(testAsynchronousSnapshots, test) {
     QTemporaryDir localRoot;
     test.check(localRoot.isValid(), "local snapshot fixture should initialize");
@@ -97,7 +89,8 @@ OPENSCP_TEST(testAsynchronousSnapshots, test) {
                "local empty directory should be created");
 
     RemoteOperationController remote;
-    test.check(remote.installSession(connectedMock()) > 0,
+    test.check(remote.installSession(
+                   connectedClient<openscp::MockSftpClient>("sync.test")) > 0,
                "remote controller should accept a connected session");
     TransferManager transfers;
     SyncCoordinator coordinator(&remote, &transfers);
@@ -200,7 +193,7 @@ OPENSCP_TEST(testOnDemandChecksums, test) {
         "checksum fixture files should be writable");
 
     RemoteOperationController remote;
-    remote.installSession(connectedChecksumMock());
+    remote.installSession(connectedClient<ChecksumMockClient>("checksum.test"));
     TransferManager transfers;
     SyncCoordinator coordinator(&remote, &transfers);
     bool ready = false;
@@ -243,7 +236,7 @@ OPENSCP_TEST(testChecksumCancellation, test) {
     slowFile.close();
 
     RemoteOperationController remote;
-    remote.installSession(connectedChecksumMock());
+    remote.installSession(connectedClient<ChecksumMockClient>("checksum.test"));
     TransferManager transfers;
     SyncCoordinator coordinator(&remote, &transfers);
     bool remotePhaseStarted = false;
