@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QFile>
 #include <QLibraryInfo>
+#include <QLocale>
 #include <QTranslator>
 
 int main(int argc, char *argv[]) {
@@ -46,7 +47,9 @@ int main(int argc, char *argv[]) {
     const QString qtBaseName = QString("qtbase_%1").arg(languageCode);
     const QString qtTransPath =
         QLibraryInfo::path(QLibraryInfo::TranslationsPath);
-    if (qtTranslator.load(qtBaseName, qtTransPath)) {
+    if (qtTranslator.load(qtBaseName, qtTransPath) ||
+        qtTranslator.load(QLocale(languageCode), QStringLiteral("qtbase"),
+                          QStringLiteral("_"), qtTransPath)) {
         app.installTranslator(&qtTranslator);
     }
     MainWindow w;

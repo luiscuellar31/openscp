@@ -1026,6 +1026,7 @@ void SettingsDialog::buildGeneralPage(const PageBuildContext &ctx) {
     addComboItems(langCombo_, {{tr("Spanish"), QStringLiteral("es")},
                                {tr("English"), QStringLiteral("en")},
                                {tr("French"), QStringLiteral("fr")},
+                               {tr("German"), QStringLiteral("de")},
                                {tr("Portuguese"), QStringLiteral("pt")}});
     clickMode_ = addComboRow(behaviorForm, generalPage, tr("Open with:"));
     addComboItems(clickMode_,

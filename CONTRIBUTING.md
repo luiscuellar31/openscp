@@ -116,9 +116,9 @@ suppression needs a documented compatibility reason or false positive.
 
 ## Translations
 
-English strings live in the C++ sources. Spanish, French, and Portuguese Qt
-Linguist catalogs under `translations/` are tracked; generated `.qm` files are
-not.
+English strings live in the C++ sources. Spanish, Portuguese, French, and German
+Qt Linguist catalogs under `translations/` are tracked; generated `.qm` files
+are not.
 
 Use `lupdate` and `lrelease` from the same Qt 6 installation used for the build:
 
@@ -139,6 +139,7 @@ repository root:
   -source-language en \
   ui \
   -ts \
+  translations/openscp_de.ts \
   translations/openscp_es.ts \
   translations/openscp_fr.ts \
   translations/openscp_pt.ts
@@ -153,7 +154,7 @@ rg -n 'type="unfinished"' translations
 rg -n 'type="(vanished|obsolete)"' translations
 
 mkdir -p build/translations-check
-for locale in es fr pt; do
+for locale in de es fr pt; do
   "$QT_TOOLS_DIR/lrelease" -nounfinished \
     "translations/openscp_${locale}.ts" \
     -qm "build/translations-check/openscp_${locale}.qm"

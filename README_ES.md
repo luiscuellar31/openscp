@@ -49,7 +49,7 @@ pasos manuales, empaquetado y solución de problemas.
   protocolo lo permite.
 - Sincronización unidireccional con vista previa, filtros y sumas de
   comprobación opcionales.
-- Interfaces en inglés, español, francés y portugués.
+- Interfaces en español, inglés, portugués, francés y alemán.
 
 ## Navegación por rutas
 

@@ -43,7 +43,7 @@ troubleshooting, see [Building OpenSCP](docs/BUILDING.md).
 - Strict, accept-new, or explicitly disabled SSH host-key verification.
 - SOCKS5, HTTP CONNECT, and SSH jump-host support where the protocol allows it.
 - One-way synchronization with preview, filters, and optional checksum checks.
-- Spanish, French, and Portuguese interfaces in addition to English.
+- Spanish, English, Portuguese, French, and German interfaces.
 
 ## Path navigation
 

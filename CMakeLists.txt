@@ -593,6 +593,7 @@ endif()
 # Translations: compile TS catalogs to QM and embed as resources.
 # .ts files live in the top-level 'translations/' folder.
 qt_add_translation(QM_FILES
+    translations/openscp_de.ts
     translations/openscp_es.ts
     translations/openscp_fr.ts
     translations/openscp_pt.ts
