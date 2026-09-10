@@ -50,6 +50,20 @@ database:
   --build-dir build-ci-local
 ```
 
+FTP and WebDAV are optional backends selected at configure time. Changes to
+their `#if` branches must also build and pass tests with both disabled:
+
+```bash
+cmake -S . -B build-no-backends -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DOPENSCP_BUILD_TESTS=ON \
+  -DOPENSCP_ENABLE_FTP_BACKEND=OFF \
+  -DOPENSCP_ENABLE_WEBDAV_BACKEND=OFF
+cmake --build build-no-backends --target openscp_core_tests
+ctest --test-dir build-no-backends --output-on-failure \
+  -R '^openscp_core_tests$'
+```
+
 Clang/libFuzzer harnesses cover the untrusted FTP and WebDAV listing parsers.
 They are opt-in and never enter normal application or release builds:
 
