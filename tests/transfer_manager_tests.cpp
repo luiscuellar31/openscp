@@ -949,6 +949,7 @@ OPENSCP_TEST(testFailureScenariosDoNotRetry, test) {
         std::make_shared<FailureDownloadState>(std::vector<FailureScenario>{
             {.name = "unclassified",
              .remotePath = "/remote/unclassified.dat",
+             .message = {},
              .hasStructuredError = false},
             {.name = "authentication",
              .remotePath = "/remote/auth.dat",
