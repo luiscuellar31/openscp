@@ -277,12 +277,12 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="605"/>
         <source>Private key path:</source>
-        <translation>Ruta clave privada:</translation>
+        <translation>Ruta de la clave privada:</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="606"/>
         <source>Key passphrase:</source>
-        <translation>Passphrase clave:</translation>
+        <translation>Frase secreta de la clave:</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="426"/>
@@ -357,7 +357,7 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="411"/>
         <source>Save passwords/passphrases</source>
-        <translation>Guardar contraseñas/passphrases</translation>
+        <translation>Guardar contraseñas y frases secretas</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="609"/>
@@ -428,17 +428,17 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="469"/>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="494"/>
         <source>System CA bundle</source>
-        <translation>Bundle de CA del sistema</translation>
+        <translation>Paquete de CA del sistema</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="623"/>
         <source>FTPS CA bundle:</source>
-        <translation>Bundle CA de FTPS:</translation>
+        <translation>Paquete de CA para FTPS:</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="845"/>
         <source>Select FTPS CA bundle</source>
-        <translation>Selecciona bundle CA para FTPS</translation>
+        <translation>Selecciona el paquete de CA para FTPS</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="865"/>
@@ -631,7 +631,7 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     <message>
         <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="263"/>
         <source>Staging kept at: &lt;a href=&quot;%1&quot;&gt;%2&lt;/a&gt;</source>
-        <translation>Staging conservado en: &lt;a href=&quot;%1&quot;&gt;%2&lt;/a&gt;</translation>
+        <translation>Se conservó la carpeta de preparación en: &lt;a href=&quot;%1&quot;&gt;%2&lt;/a&gt;</translation>
     </message>
     <message>
         <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="350"/>
@@ -651,7 +651,7 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     <message>
         <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="528"/>
         <source>Confirm staging</source>
-        <translation>Confirmar staging</translation>
+        <translation>Confirmar preparación</translation>
     </message>
     <message>
         <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="342"/>
@@ -760,7 +760,7 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     <message>
         <location filename="../ui/app/MainWindowLocalOps.cpp" line="112"/>
         <source>Source entry is neither file nor folder.</source>
-        <translation>Entrada de origen ni archivo ni carpeta.</translation>
+        <translation>La entrada de origen no es un archivo ni una carpeta.</translation>
     </message>
     <message>
         <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="26"/>
@@ -974,12 +974,12 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     <message>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="137"/>
         <source> (auto-fallback to SFTP CLI enabled)</source>
-        <translation> (fallback automático a SFTP CLI habilitado)</translation>
+        <translation> (cambio automático a la CLI de SFTP habilitado)</translation>
     </message>
     <message>
         <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="314"/>
         <source>OpenSCP: SSH shell was not available. Falling back to SFTP CLI.</source>
-        <translation>OpenSCP: El shell SSH no estaba disponible. Se aplicará fallback a SFTP CLI.</translation>
+        <translation>OpenSCP: El shell SSH no estaba disponible. Se cambiará a la CLI de SFTP.</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="118"/>
@@ -1392,7 +1392,7 @@ Continue?</source>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="1168"/>
         <source>Warning: unencrypted secrets storage active (fallback)</source>
-        <translation>Advertencia: almacenamiento de secretos sin cifrar activado (fallback)</translation>
+        <translation>Advertencia: almacenamiento de secretos sin cifrar activo (modo alternativo)</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="1174"/>
@@ -1740,7 +1740,7 @@ Continue?</source>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="577"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="159"/>
         <source>File exists</source>
-        <translation>Archivo existe</translation>
+        <translation>El archivo ya existe</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindowLocalOps.cpp" line="664"/>
@@ -2308,7 +2308,7 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
     <message>
         <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="167"/>
         <source>Could not find a proxy helper for terminal mode (tried: nc, ncat).</source>
-        <translation>No se encontró un helper de proxy para el modo terminal (se intentó: nc, ncat).</translation>
+        <translation>No se encontró un programa auxiliar de proxy para el modo terminal (se intentó: nc, ncat).</translation>
     </message>
     <message>
         <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="180"/>
@@ -3007,7 +3007,7 @@ Scan them again without this limit?</source>
     <message>
         <location filename="../ui/widgets/dialogs/PermissionsDialog.cpp" line="45"/>
         <source>Preset</source>
-        <translation>Preset</translation>
+        <translation>Preajuste</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/PermissionsDialog.cpp" line="47"/>
@@ -3727,17 +3727,17 @@ Scan them again without this limit?</source>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1225"/>
         <source>System CA bundle</source>
-        <translation>Bundle de CA del sistema</translation>
+        <translation>Paquete de CA del sistema</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1222"/>
         <source>Default FTPS CA bundle:</source>
-        <translation>Bundle CA FTPS predeterminado:</translation>
+        <translation>Paquete de CA para FTPS predeterminado:</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1223"/>
         <source>Select FTPS CA bundle</source>
-        <translation>Selecciona bundle CA para FTPS</translation>
+        <translation>Selecciona el paquete de CA para FTPS</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1231"/>
@@ -3747,17 +3747,17 @@ Scan them again without this limit?</source>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1232"/>
         <source>Show fingerprint in HEX (colon) format (visual only).</source>
-        <translation>Mostrar huella en HEX colonado (solo visual).</translation>
+        <translation>Mostrar la huella en formato HEX separado por dos puntos (solo visual).</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1234"/>
         <source>Force interactive login when using Open in terminal (disable key/agent auth).</source>
-        <translation>Forzar inicio de sesión interactivo al usar Open in terminal (desactiva autenticación por clave/agente).</translation>
+        <translation>Forzar el inicio de sesión interactivo al usar «Abrir en terminal» (desactiva la autenticación por clave o agente).</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1237"/>
         <source>Enable automatic SFTP CLI fallback when using Open in terminal.</source>
-        <translation>Activar fallback automático a CLI SFTP al usar Open in terminal.</translation>
+        <translation>Activar el cambio automático a la CLI de SFTP al usar «Abrir en terminal».</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1243"/>
@@ -3767,7 +3767,7 @@ Scan them again without this limit?</source>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1251"/>
         <source>Allow insecure credentials fallback (not recommended).</source>
-        <translation>Permitir fallback inseguro de credenciales (no recomendado).</translation>
+        <translation>Permitir el almacenamiento alternativo inseguro de credenciales (no recomendado).</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1138"/>
@@ -3778,7 +3778,7 @@ Scan them again without this limit?</source>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1215"/>
         <source>Duration of the temporary exception for no host-key verification policy.</source>
-        <translation>Duración de la excepción temporal para la política sin verificación de host key.</translation>
+        <translation>Duración de la excepción temporal para la política sin verificación de la clave de host.</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1213"/>
@@ -3803,22 +3803,22 @@ Scan them again without this limit?</source>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1264"/>
         <source>Staging and drag-out</source>
-        <translation>Staging y arrastre</translation>
+        <translation>Preparación y arrastre</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1267"/>
         <source>Staging folder:</source>
-        <translation>Carpeta de staging:</translation>
+        <translation>Carpeta de preparación:</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1268"/>
         <source>Select staging folder</source>
-        <translation>Selecciona carpeta de staging</translation>
+        <translation>Selecciona la carpeta de preparación</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1280"/>
         <source>Auto-clean staging after successful drag-out (recommended).</source>
-        <translation>Eliminar automáticamente la carpeta staging tras completar el arrastre (recomendado).</translation>
+        <translation>Eliminar automáticamente la carpeta de preparación tras completar el arrastre (recomendado).</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1283"/>
@@ -3843,7 +3843,7 @@ Scan them again without this limit?</source>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1286"/>
         <source>Preparation timeout:</source>
-        <translation>Timeout preparación:</translation>
+        <translation>Tiempo de espera de preparación:</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1291"/>
@@ -3888,7 +3888,7 @@ Scan them again without this limit?</source>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1270"/>
         <source>Restore default staging folder</source>
-        <translation>Restablecer carpeta de staging predeterminada</translation>
+        <translation>Restablecer la carpeta de preparación predeterminada</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1284"/>
@@ -3923,7 +3923,7 @@ Scan them again without this limit?</source>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1423"/>
         <source>Enable insecure fallback</source>
-        <translation>Activar fallback inseguro</translation>
+        <translation>Activar el almacenamiento alternativo inseguro</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1424"/>
@@ -3934,7 +3934,7 @@ Do you still want to enable insecure fallback?</source>
         <translation>Esto almacenará credenciales sin cifrar en el disco usando QSettings.
 En Linux, se recomienda instalar y usar libsecret/Secret Service para mayor seguridad.
 
-¿Deseas activar el fallback inseguro igualmente?</translation>
+¿Deseas activar el almacenamiento alternativo inseguro igualmente?</translation>
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1510"/>
@@ -3953,6 +3953,11 @@ En Linux, se recomienda instalar y usar libsecret/Secret Service para mayor segu
     </message>
     <message>
         <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1029"/>
+        <source>German</source>
+        <translation>Alemán</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/SettingsDialog.cpp" line="1030"/>
         <source>Portuguese</source>
         <translation>Portugués</translation>
     </message>
