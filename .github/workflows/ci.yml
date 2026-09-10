@@ -86,6 +86,17 @@ jobs:
       - name: Test oldest native baseline
         run: ctest --test-dir build-compat --output-on-failure -LE integration
 
+      - name: Test core without FTP or WebDAV backends
+        run: |
+          cmake -S . -B build-no-backends -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOPENSCP_BUILD_TESTS=ON \
+            -DOPENSCP_ENABLE_FTP_BACKEND=OFF \
+            -DOPENSCP_ENABLE_WEBDAV_BACKEND=OFF
+          cmake --build build-no-backends --target openscp_core_tests
+          ctest --test-dir build-no-backends --output-on-failure \
+            -R '^openscp_core_tests$'
+
   quick-dev:
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/dev') ||

@@ -179,6 +179,9 @@ else()
     message(STATUS
         "OpenSCP tests: skipping FTP/FTPS integration tests "
         "(FTP/FTPS backend disabled)")
+    set_property(GLOBAL APPEND PROPERTY OPENSCP_REGISTERED_TEST_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/curl_ftp_integration_tests.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/curl_ftps_integration_tests.cpp")
 endif()
 
 get_target_property(OPENSCP_CORE_HAS_CURL_WEBDAV
@@ -194,6 +197,10 @@ if(OPENSCP_CORE_HAS_CURL_FTP OR OPENSCP_CORE_HAS_CURL_WEBDAV)
         INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/src
         LINK_LIBRARIES openscp_core
     )
+else()
+    set_property(GLOBAL APPEND PROPERTY OPENSCP_REGISTERED_TEST_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/curl_backend_common_tests.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/curl_listing_parser_tests.cpp")
 endif()
 
 if(OPENSCP_CORE_HAS_CURL_WEBDAV)
@@ -209,6 +216,8 @@ else()
     message(STATUS
         "OpenSCP tests: skipping WebDAV integration tests "
         "(WebDAV backend disabled)")
+    set_property(GLOBAL APPEND PROPERTY OPENSCP_REGISTERED_TEST_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/curl_webdav_integration_tests.cpp")
 endif()
 
 # A new test source must be registered above. CONFIGURE_DEPENDS makes CMake
