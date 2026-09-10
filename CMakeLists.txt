@@ -607,7 +607,7 @@ qt_add_resources(openscp i18n
     FILES ${QM_FILES}
 )
 
-# Application icons (SVG). Packaged as Qt resources.
+# Application icons. Packaged as Qt resources.
 set(ICON_FILES
     assets/icons/action-connect.svg
     assets/icons/action-copy.svg
@@ -634,10 +634,11 @@ set(ICON_FILES
     assets/icons/action-search-item.svg
     assets/icons/action-rename.svg
     assets/icons/action-upload.svg
+    assets/icons/app-openscp.png
     assets/icons/bookmark.svg
 )
 
-# Aliases for stable paths: /assets/icons/<name>.svg
+# Aliases for stable paths: /assets/icons/<name>
 foreach(icon ${ICON_FILES})
     get_filename_component(_name ${icon} NAME)
     set_source_files_properties(${icon} PROPERTIES QT_RESOURCE_ALIAS icons/${_name})
@@ -646,13 +647,6 @@ endforeach()
 qt_add_resources(openscp app_icons
     PREFIX "/assets"
     FILES ${ICON_FILES}
-)
-
-# Program assets (PNG icon for About dialog)
-qt_add_resources(openscp app_images
-    PREFIX "/assets/program"
-    FILES
-        assets/program/icon-openscp-2048.png
 )
 
 qt_add_resources(openscp credits
@@ -669,14 +663,10 @@ qt_add_resources(openscp credits
         docs/credits/LICENSES/zlib-license.txt
 )
 
-# Ensure predictable in-resource path for the program icon
-set_source_files_properties(assets/program/icon-openscp-2048.png
-    PROPERTIES QT_RESOURCE_ALIAS "icon-openscp-2048.png")
-
 if(UNIX AND NOT APPLE)
     # Desktop entry and app icon installation for Linux (XDG paths)
     set(APP_DESKTOP_FILE assets/linux/openscp.desktop)
-    set(APP_ICON_PNG     assets/program/icon-openscp-256.png)
+    set(APP_ICON_PNG     assets/linux/icon-openscp-256.png)
     set(APP_ICON_NAME    openscp) # must match Icon= in the .desktop
 
     # Install binary

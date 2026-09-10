@@ -156,15 +156,7 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     topRow->addLayout(leftCol, 1);
 
     auto *iconLabel = new QLabel(this);
-    QPixmap iconPix(QStringLiteral(":/assets/program/icon-openscp-2048.png"));
-    if (iconPix.isNull()) {
-        // Fallback for dev environments: search alongside source/build folders.
-        const QString iconPath = findFromCandidates(
-            {QStringLiteral("assets/program/icon-openscp-2048.png")}, false);
-        if (!iconPath.isEmpty()) {
-            iconPix.load(iconPath);
-        }
-    }
+    QPixmap iconPix(QStringLiteral(":/assets/icons/app-openscp.png"));
     if (!iconPix.isNull()) {
         iconLabel->setPixmap(iconPix.scaled(96, 96, Qt::KeepAspectRatio,
                                             Qt::SmoothTransformation));

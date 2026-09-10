@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/program/icon-openscp-2048.png" alt="OpenSCP icon" width="128">
+  <img src="assets/icons/app-openscp.png" alt="OpenSCP icon" width="128">
   <h1>OpenSCP</h1>
 
   <p><strong>A lightweight, cross-platform file transfer client inspired by WinSCP.</strong></p>

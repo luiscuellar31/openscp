@@ -1051,17 +1051,10 @@ main() {
   if [[ ! -f "$ICON_ICNS_PATH" ]]; then
     if [[ -f "${REPO_DIR}/assets/macos/${ICON_BASENAME}.icns" ]]; then
       cp "${REPO_DIR}/assets/macos/${ICON_BASENAME}.icns" "$ICON_ICNS_PATH"
-    elif [[ -f "${REPO_DIR}/assets/program/icon-openscp-2048.png" ]]; then
+    elif [[ -f "${REPO_DIR}/assets/icons/app-openscp.png" ]]; then
       log "Generating ${ICON_BASENAME}.icns from PNG"
-      generate_icns_from_png "${REPO_DIR}/assets/program/icon-openscp-2048.png" "$ICON_ICNS_PATH"
+      generate_icns_from_png "${REPO_DIR}/assets/icons/app-openscp.png" "$ICON_ICNS_PATH"
     fi
-  fi
-
-  # Also copy the original PNG into Resources/assets/program so AboutDialog's
-  # filesystem fallback can find it if needed.
-  if [[ -f "${REPO_DIR}/assets/program/icon-openscp-2048.png" ]]; then
-    mkdir -p "$RESOURCES_DIR/assets/program"
-    cp "${REPO_DIR}/assets/program/icon-openscp-2048.png" "$RESOURCES_DIR/assets/program/"
   fi
 
   # Copy licenses inside the bundle for user visibility

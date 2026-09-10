@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/program/icon-openscp-2048.png" alt="Icono de OpenSCP" width="128">
+  <img src="assets/icons/app-openscp.png" alt="Icono de OpenSCP" width="128">
   <h1>OpenSCP</h1>
 
   <p><strong>Un cliente ligero y multiplataforma de transferencia de archivos inspirado en WinSCP.</strong></p>

@@ -11,7 +11,7 @@ APP_ID="${APP_ID:-io.github.luiscuellar31.openscp}"
 BRANCH="${BRANCH:-stable}"
 RUNTIME_VERSION_OVERRIDE="${RUNTIME_VERSION_OVERRIDE:-}"
 CHECKER="${REPO_DIR}/scripts/verify/qt-svg-plugins.sh"
-APP_ICON="${APP_ICON:-${REPO_DIR}/assets/program/icon-openscp-256.png}"
+APP_ICON="${APP_ICON:-${REPO_DIR}/assets/linux/icon-openscp-256.png}"
 
 log() { printf "\033[1;34m[flatpak]\033[0m %s\n" "$*"; }
 err() { printf "\033[1;31m[err    ]\033[0m %s\n" "$*"; }

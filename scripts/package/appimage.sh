@@ -137,8 +137,8 @@ EOF
 }
 
 prepare_icon() {
-  local src_png_256="${REPO_DIR}/assets/program/icon-openscp-256.png"
-  local src_png_large="${REPO_DIR}/assets/program/icon-openscp-2048.png"
+  local src_png_256="${REPO_DIR}/assets/linux/icon-openscp-256.png"
+  local src_png_large="${REPO_DIR}/assets/icons/app-openscp.png"
   local dst_png="$1"
   mkdir -p "$(dirname "$dst_png")"
   if [[ -f "$src_png_256" ]]; then
@@ -162,15 +162,6 @@ copy_licenses() {
     cp -R "${REPO_DIR}/docs/credits/LICENSES" "$destdir/"
     [[ -f "${REPO_DIR}/docs/credits/CREDITS.md" ]] && cp "${REPO_DIR}/docs/credits/CREDITS.md" "$destdir/"
     [[ -f "${REPO_DIR}/docs/credits/LGPL_COMPLIANCE.md" ]] && cp "${REPO_DIR}/docs/credits/LGPL_COMPLIANCE.md" "$destdir/"
-  fi
-}
-
-# Copy the original about PNG under AppDir/assets/program so AboutDialog's
-# filesystem fallback can find it if resource loading fails.
-copy_about_png_fallback() {
-  if [[ -f "${REPO_DIR}/assets/program/icon-openscp-2048.png" ]]; then
-    mkdir -p "$APPDIR/assets/program"
-    cp "${REPO_DIR}/assets/program/icon-openscp-2048.png" "$APPDIR/assets/program/"
   fi
 }
 
@@ -301,7 +292,6 @@ main() {
   prepare_desktop "$APPDIR/usr/share/applications/openscp.desktop"
   prepare_icon "$APPDIR/usr/share/icons/hicolor/256x256/apps/openscp.png"
   copy_licenses
-  copy_about_png_fallback
 
   # Ensure tools
   ensure_cmd "$LINUXDEPLOY"
