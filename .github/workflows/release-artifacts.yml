@@ -72,12 +72,14 @@ jobs:
     name: Build macOS (${{ matrix.arch }})
     needs:
       - verify-tag
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-15
             arch: arm64
             minimum_macos: "12.0"
           - runner: macos-15-intel
@@ -92,6 +94,12 @@ jobs:
           fetch-depth: 0
           ref: ${{ needs.verify-tag.outputs.tag_name }}
 
+      - name: Verify pinned Xcode
+        run: |
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          clang++ --version
+
       - name: Install pinned Qt release SDK
         uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
         with:
@@ -99,7 +107,6 @@ jobs:
           host: mac
           target: desktop
           arch: clang_64
-          modules: "qtsvg qttools"
           cache: true
           aqtversion: "==3.3.0"
           py7zrversion: "==1.1.0"
@@ -132,6 +139,8 @@ jobs:
           OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=ON \
           MINIMUM_SYSTEM_VERSION="${{ matrix.minimum_macos }}" \
           CMAKE_OSX_ARCHITECTURES="${{ matrix.arch }}" \
+          QT_PREFIX="$QT_ROOT_DIR" \
+          Qt6_DIR="$QT_ROOT_DIR/lib/cmake/Qt6" \
           ./scripts/package/macos.sh
 
       - name: Verify macOS bundle linkage
@@ -198,7 +207,6 @@ jobs:
           host: ${{ matrix.qt_host }}
           target: desktop
           arch: ${{ matrix.qt_arch }}
-          modules: "qtsvg qttools"
           cache: true
           aqtversion: "==3.3.0"
           py7zrversion: "==1.1.0"
@@ -216,21 +224,23 @@ jobs:
       - name: Install AppImage tools
         run: |
           set -euo pipefail
-          # Digests come from GitHub's release-asset metadata and were reviewed
-          # on 2026-07-29. An upstream update must be reviewed explicitly.
+          # Pin immutable releases so the reviewed digests cannot change under us.
+          linuxdeploy_version="1-alpha-20251107-1"
+          qt_plugin_version="1-alpha-20250213-1"
+          appimagetool_version="1.9.1"
           arch="$(uname -m)"
           case "$arch" in
             x86_64)
               appimg_arch="x86_64"
-              linuxdeploy_sha="e87ee0815d109282fdda73e34c2361d64d02b0ffaea3674b18f1fd1f6a687dcf"
-              qt_plugin_sha="be1b7e166bf9975cfb694ebe6759ba40502ffc6196440d3e64aa90c4dbd67e9f"
-              appimagetool_sha="a6d71e2b6cd66f8e8d16c37ad164658985e0cf5fcaa950c90a482890cb9d13e0"
+              linuxdeploy_sha="c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d"
+              qt_plugin_sha="15106be885c1c48a021198e7e1e9a48ce9d02a86dd0a1848f00bdbf3c1c92724"
+              appimagetool_sha="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
               ;;
             aarch64|arm64)
               appimg_arch="aarch64"
-              linuxdeploy_sha="650ed1d045a09ab87855be1963f4f56ac7cf6defb6b2e2f4af0a3225f3d2d803"
-              qt_plugin_sha="5525e6c49c3c774c02b8864d2acc2ae4c5c0ccc3327f7dce626deaa36348e5c6"
-              appimagetool_sha="1b00524ba8c6b678dc15ef88a5c25ec24def36cdfc7e3abb32ddcd068e8007fe"
+              linuxdeploy_sha="620095110d693282b8ebeb244a95b5e911cf8f65f76c88b4b47d16ae6346fcff"
+              qt_plugin_sha="bf1c24aff6d749b5cf423afad6f15abd4440f81dec1aab95706b25f6667cdcf1"
+              appimagetool_sha="f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158"
               ;;
             *)
               echo "Unsupported Linux arch for AppImage tools: $arch"
@@ -239,11 +249,11 @@ jobs:
           esac
 
           mkdir -p "$HOME/.local/bin"
-          curl -fL "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${appimg_arch}.AppImage" \
+          curl -fL "https://github.com/linuxdeploy/linuxdeploy/releases/download/${linuxdeploy_version}/linuxdeploy-${appimg_arch}.AppImage" \
             -o "$HOME/.local/bin/linuxdeploy"
-          curl -fL "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-${appimg_arch}.AppImage" \
+          curl -fL "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/${qt_plugin_version}/linuxdeploy-plugin-qt-${appimg_arch}.AppImage" \
             -o "$HOME/.local/bin/linuxdeploy-plugin-qt"
-          curl -fL "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${appimg_arch}.AppImage" \
+          curl -fL "https://github.com/AppImage/appimagetool/releases/download/${appimagetool_version}/appimagetool-${appimg_arch}.AppImage" \
             -o "$HOME/.local/bin/appimagetool"
           echo "${linuxdeploy_sha}  $HOME/.local/bin/linuxdeploy" | sha256sum --check --strict
           echo "${qt_plugin_sha}  $HOME/.local/bin/linuxdeploy-plugin-qt" | sha256sum --check --strict

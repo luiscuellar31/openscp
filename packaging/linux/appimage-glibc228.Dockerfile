@@ -10,6 +10,8 @@ RUN dnf -y --setopt=install_weak_deps=False install epel-release dnf-plugins-cor
         cmake \
         file \
         findutils \
+        fontconfig-devel \
+        freetype-devel \
         gcc-toolset-13-gcc-c++ \
         libcurl-devel \
         libsecret-devel \
