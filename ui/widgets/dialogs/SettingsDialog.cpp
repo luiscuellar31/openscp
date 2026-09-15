@@ -22,6 +22,7 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
+#include <QShowEvent>
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QStandardPaths>
@@ -698,6 +699,7 @@ void SettingsDialog::trackWrappedCheck(QCheckBox *checkBox) {
 }
 
 void SettingsDialog::refreshWrappedCheckTexts() {
+    QVector<QWidget *> resettledPages;
     for (QCheckBox *checkBox : wrappedChecks_) {
         if (!checkBox || !checkBox->isVisible())
             continue;
@@ -734,16 +736,43 @@ void SettingsDialog::refreshWrappedCheckTexts() {
             qMax(100, widgetWidth - indicatorW - spacingW - 10);
         const QString wrapped =
             wrapTextToWidth(raw, QFontMetrics(checkBox->font()), textWidth);
+        bool reflowed = false;
         if (checkBox->text() != wrapped) {
             checkBox->setText(wrapped);
             checkBox->updateGeometry();
+            reflowed = true;
         }
         const int lineCount = static_cast<int>(wrapped.count('\n') + 1);
         const int textHeight =
             lineCount * QFontMetrics(checkBox->font()).lineSpacing();
         const int minHeight = qMax(indicatorH, textHeight) + 6;
-        if (checkBox->minimumHeight() != minHeight)
+        if (checkBox->minimumHeight() != minHeight) {
             checkBox->setMinimumHeight(minHeight);
+            reflowed = true;
+        }
+        if (!reflowed)
+            continue;
+        for (QWidget *ancestorWidget = checkBox->parentWidget();
+             ancestorWidget; ancestorWidget = ancestorWidget->parentWidget()) {
+            if (!ancestorWidget->property("settingsFormPage").toBool())
+                continue;
+            if (!resettledPages.contains(ancestorWidget))
+                resettledPages.push_back(ancestorWidget);
+            break;
+        }
+    }
+
+    // Qt would propagate the new heights one nesting level per event loop
+    // pass, so a page switched into view would be painted once at its stale
+    // size. Drop the cached sizes and lay the page out now instead.
+    for (QWidget *page : std::as_const(resettledPages)) {
+        for (QLayout *nestedLayout : page->findChildren<QLayout *>())
+            nestedLayout->invalidate();
+        QLayout *pageLayout = page->layout();
+        if (!pageLayout)
+            continue;
+        pageLayout->invalidate();
+        pageLayout->activate();
     }
 }
 
@@ -1349,6 +1378,9 @@ void SettingsDialog::setupSectionNavigation(const PageBuildContext &ctx) {
     connect(ctx.sectionList, &QListWidget::currentRowChanged, ctx.pages,
             &QStackedWidget::setCurrentIndex);
     connect(ctx.pages, &QStackedWidget::currentChanged, this, [this](int) {
+        // Wrap the incoming page before it is painted; the deferred pass then
+        // confirms the result once the page owns its final geometry.
+        refreshWrappedCheckTexts();
         QTimer::singleShot(0, this, [this] { refreshWrappedCheckTexts(); });
     });
     ctx.sectionList->setCurrentRow(0);
@@ -1517,6 +1549,12 @@ void SettingsDialog::resizeEvent(QResizeEvent *event) {
     QTimer::singleShot(0, this, [this] { refreshWrappedCheckTexts(); });
 }
 
+void SettingsDialog::showEvent(QShowEvent *event) {
+    QDialog::showEvent(event);
+    // Layouts are already active when this arrives, so wrapping here spares
+    // the first paint the reflow a deferred-only pass would expose.
+    refreshWrappedCheckTexts();
+}
 
 void SettingsDialog::onApply() {
     openscpui::AppSettings settings;

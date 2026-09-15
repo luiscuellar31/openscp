@@ -1127,16 +1127,21 @@ OPENSCP_TEST(testSettingsPageSwitchKeepsWrappedRowsStable, test) {
     }
 
     bool switchesAreStable = sections && pages;
-    for (int index : {1, 5, 3, 6, 0, 4, 2}) {
+    int inspectedSwitches = 0;
+    const auto switchToPage = [&](int index) {
         changes.clear();
         const bool selected = fixture.selectPage(index);
 
-        QList<QPair<QCheckBox *, int>> initialHeights;
+        // The wrap a page carries when it is switched in has to be its final
+        // one: a correction landing afterwards is the reflow users see.
+        QList<QPair<QCheckBox *, QPair<int, int>>> rowsOnArrival;
         if (pages && pages->currentWidget()) {
             for (QCheckBox *check :
                  pages->currentWidget()->findChildren<QCheckBox *>()) {
-                if (check->isVisible())
-                    initialHeights.push_back({check, check->height()});
+                if (check->isVisible()) {
+                    rowsOnArrival.push_back(
+                        {check, {check->minimumHeight(), check->height()}});
+                }
             }
         }
         switchesAreStable = switchesAreStable && selected &&
@@ -1144,17 +1149,53 @@ OPENSCP_TEST(testSettingsPageSwitchKeepsWrappedRowsStable, test) {
                             changes == QList<int>{index};
 
         flushUiEvents();
-        for (const auto &[check, initialHeight] : initialHeights) {
+        for (const auto &[check, onArrival] : rowsOnArrival) {
+            ++inspectedSwitches;
             switchesAreStable =
                 switchesAreStable && check && check->isVisible() &&
-                initialHeight <=
+                onArrival.first == check->minimumHeight() &&
+                onArrival.second <=
                     check->height() + check->fontMetrics().lineSpacing();
         }
+    };
+
+    for (int index : {1, 5, 3, 6, 0, 4, 2})
+        switchToPage(index);
+
+    // A resize leaves the pages that are off screen holding the wrap they had
+    // at the previous width, so switching after one is the harder case.
+    for (const QSize &size : {QSize(1180, 760), QSize(760, 560),
+                              QSize(860, 620)}) {
+        dialog.resize(size);
+        flushUiEvents();
+        for (int index : {4, 6, 0, 3})
+            switchToPage(index);
     }
 
-    test.check(switchesAreStable,
+    test.check(switchesAreStable && inspectedSwitches > 0,
                "switching settings pages should select only the requested "
-               "page without briefly exposing an oversized wrapped layout");
+               "page and paint it at its settled size");
+}
+
+OPENSCP_TEST(testSettingsOpensWithoutResettlingWrappedRows, test) {
+    SettingsDialog dialog;
+    dialog.resize(860, 620);
+    dialog.show();
+
+    QList<QPair<QCheckBox *, int>> paintedHeights;
+    for (QCheckBox *check : dialog.findChildren<QCheckBox *>()) {
+        if (check->isVisible())
+            paintedHeights.push_back({check, check->height()});
+    }
+    flushUiEvents();
+
+    bool opensSettled = !paintedHeights.isEmpty();
+    for (const auto &[check, paintedHeight] : paintedHeights)
+        opensSettled = opensSettled && check->height() == paintedHeight;
+
+    test.check(opensSettled,
+               "opening Settings should paint its wrapped rows at the size "
+               "they keep");
 }
 
 OPENSCP_TEST(testSettingsLabelsAndFieldsShareAxes, test) {

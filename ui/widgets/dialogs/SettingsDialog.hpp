@@ -12,6 +12,7 @@ class QComboBox;
 class QPushButton;
 class QCheckBox;
 class QResizeEvent;
+class QShowEvent;
 class QFontMetrics;
 class QKeySequenceEdit;
 class QLabel;
@@ -27,6 +28,7 @@ class SettingsDialog : public QDialog {
 
     protected:
     void resizeEvent(QResizeEvent *event) override;
+    void showEvent(QShowEvent *event) override;
 
     private slots:
     void onApply(); // save without closing; disable until further changes
