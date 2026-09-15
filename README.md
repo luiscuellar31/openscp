@@ -12,7 +12,76 @@ OpenSCP is a C++20 and Qt 6 desktop application for moving and managing files
 between local and remote systems. It focuses on predictable behavior, secure
 defaults, and a familiar commander-style workflow.
 
-## Quick start
+## Download
+
+Prebuilt binaries for every tagged release are on the
+[Releases page](https://github.com/luiscuellar31/openscp/releases/latest).
+
+| Platform | File |
+| --- | --- |
+| macOS, Apple Silicon | `OpenSCP-<version>-arm64-UNSIGNED.dmg` |
+| macOS, Intel | `OpenSCP-<version>-x86_64-UNSIGNED.dmg` |
+| Linux, x86_64 | `OpenSCP-<version>-x86_64.AppImage` |
+| Linux, ARM64 | `OpenSCP-<version>-aarch64.AppImage` |
+| Linux, Flatpak bundle | `OpenSCP-x86_64.flatpak`, `OpenSCP-aarch64.flatpak` |
+
+Every release ships a `SHA256SUMS.txt` covering all of the above. Download it
+next to the file you picked and check them together:
+
+```bash
+shasum -a 256 -c SHA256SUMS.txt --ignore-missing  # macOS
+sha256sum -c SHA256SUMS.txt --ignore-missing      # Linux
+```
+
+### Installing on macOS
+
+Open the DMG and drag OpenSCP onto the Applications folder, then launch it from
+Applications.
+
+The first launch is blocked: macOS reports that it cannot check the app for
+malicious software. That check is reserved for software signed with a paid
+Apple Developer ID, and OpenSCP is not enrolled in that program, so every build
+is flagged the same way regardless of what it contains. The published checksum
+is what lets you verify the download instead.
+
+To allow it, open **System Settings → Privacy & Security**, scroll down to the
+Security section, click **Open Anyway** next to the message about OpenSCP, and
+confirm. OpenSCP then starts normally, including after a restart. On macOS 12
+and 13 the same setting lives in **System Preferences → Security & Privacy →
+General**.
+
+The equivalent from a terminal:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/OpenSCP.app
+```
+
+Two consequences worth knowing about: on macOS 15 and later the older
+Control-click → Open shortcut no longer works, so the Privacy & Security route
+above is the only one in the interface; and because unsigned builds have no
+stable identity, macOS asks for keychain permission again after each update
+when OpenSCP reads your saved passwords.
+
+### Installing on Linux
+
+The AppImage needs no installation and runs on most distributions:
+
+```bash
+chmod +x OpenSCP-<version>-x86_64.AppImage
+./OpenSCP-<version>-x86_64.AppImage
+```
+
+The Flatpak bundle integrates with the desktop and runs confined:
+
+```bash
+flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak install --user ./OpenSCP-x86_64.flatpak
+flatpak run io.github.luiscuellar31.openscp
+```
+
+The Flathub remote is needed because the bundle depends on the KDE runtime.
+
+## Build from source
 
 OpenSCP currently supports Linux and macOS. A compatible Qt 6 installation,
 CMake 3.22+, libssh2, and OpenSSL are required. libcurl enables optional FTP

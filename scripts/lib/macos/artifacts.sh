@@ -12,6 +12,14 @@ create_dmg() {
   mkdir -p "$staging"
   cp -R "$source_app" "$staging/"
   ln -s /Applications "$staging/Applications"
+
+  # Ship the first-run instructions beside the app: without a Developer ID
+  # the first launch is blocked, and this is the moment the user needs to
+  # know how to get past it.
+  local first_run_notes="${REPO_DIR}/assets/macos/dmg-readme.txt"
+  if [[ -f "$first_run_notes" ]]; then
+    cp "$first_run_notes" "$staging/README.txt"
+  fi
   ensure_cmd hdiutil
 
   local attempt=1

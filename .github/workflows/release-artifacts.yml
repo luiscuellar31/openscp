@@ -128,7 +128,7 @@ jobs:
           SKIP_NOTARIZATION=1 \
           DO_ADHOC_SIGN=1 \
           MACDEPLOYQT_DISABLE_PLUGIN_SCAN=1 \
-          PACKAGE_FORMATS=app,pkg,dmg \
+          PACKAGE_FORMATS=app,dmg \
           OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=ON \
           MINIMUM_SYSTEM_VERSION="${{ matrix.minimum_macos }}" \
           CMAKE_OSX_ARCHITECTURES="${{ matrix.arch }}" \
@@ -147,8 +147,6 @@ jobs:
           files=(
             dist/*-${{ matrix.arch }}-UNSIGNED.zip
             dist/*-${{ matrix.arch }}-UNSIGNED.zip.sha256
-            dist/*-${{ matrix.arch }}-UNSIGNED.pkg
-            dist/*-${{ matrix.arch }}-UNSIGNED.pkg.sha256
             dist/*-${{ matrix.arch }}-UNSIGNED.dmg
             dist/*-${{ matrix.arch }}-UNSIGNED.dmg.sha256
           )
@@ -387,6 +385,30 @@ jobs:
         run: |
           find release-assets -type f | sort
 
+      - name: Select release files and build SHA256SUMS.txt
+        run: |
+          set -euo pipefail
+          # Per-file .sha256 sidecars are replaced by one combined list, and
+          # the snap is kept out of the release: sideloading it needs
+          # --dangerous plus manual interface connections, so it belongs in
+          # the store rather than on the download page. It stays available
+          # as a workflow artifact for store submission.
+          find release-assets -type f \
+            ! -name '*.sha256' ! -name '*.snap' | sort > publish-files.txt
+          if [[ ! -s publish-files.txt ]]; then
+            echo "No publishable artifacts found."
+            exit 1
+          fi
+          : > SHA256SUMS.txt
+          while IFS= read -r file; do
+            printf '%s  %s\n' \
+              "$(sha256sum "$file" | awk '{print $1}')" \
+              "$(basename "$file")" >> SHA256SUMS.txt
+          done < publish-files.txt
+          sort -k2 -o SHA256SUMS.txt SHA256SUMS.txt
+          echo SHA256SUMS.txt >> publish-files.txt
+          cat SHA256SUMS.txt
+
       - name: Generate draft release notes
         run: |
           set -euo pipefail
@@ -409,7 +431,7 @@ jobs:
           commit="${{ needs.verify-tag.outputs.tag_commit }}"
           title="OpenSCP v${version}"
           notes_file="$PWD/release-notes.md"
-          mapfile -t files < <(find release-assets -type f | sort)
+          mapfile -t files < publish-files.txt
           if [[ ${#files[@]} -eq 0 ]]; then
             echo "No files found to upload."
             exit 1

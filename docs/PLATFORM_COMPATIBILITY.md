@@ -5,11 +5,11 @@ builds. Community builds may use different baselines.
 
 | Target | Supported baseline | How it is checked |
 | --- | --- | --- |
-| macOS `.app` / `.dmg` / `.pkg` (arm64 and x86_64) | macOS 12.0+ | Qt 6.8.3 and pinned non-Qt dependencies are built for 12.0; every bundled Mach-O is checked before upload. |
+| macOS `.app` / `.dmg` (arm64 and x86_64) | macOS 12.0+ | Qt 6.8.3 and pinned non-Qt dependencies are built for 12.0; every bundled Mach-O is checked before upload. |
 | Linux AppImage x86_64 | glibc 2.28+ | Built in a digest-pinned Rocky Linux 8 container; all bundled ELF objects are audited for `GLIBC_*` and `GLIBCXX_*`. |
 | Linux AppImage aarch64 | glibc 2.39+ (Ubuntu 24.04 baseline) | Built on the Ubuntu 24.04 arm64 runner and audited before upload. |
 | Native Linux source build | Ubuntu 22.04 toolchain and newer | CMake configure, hardening, build, and unit tests run on Ubuntu 22.04 in CI. Other distributions are community-supported. |
-| Snap | `core24` plus the declared content runtime | Runtime-managed; it does not inherit the host's Qt or glibc in the same way as a native build. |
+| Snap (built in CI, not published yet) | `core24` plus the declared content runtime | Runtime-managed; it does not inherit the host's Qt or glibc in the same way as a native build. |
 | Flatpak | Manifest's KDE runtime branch | Runtime-managed and independent of most host libraries. |
 | Windows | Not supported | CMake rejects Windows unless a port developer explicitly enables the experimental scaffold. |
 
@@ -23,7 +23,7 @@ and WebDAV requires both libcurl and tinyxml2.
 | Build or package | Included protocols | Notes |
 | --- | --- | --- |
 | Native/community source build | SFTP and SCP; FTP/FTPS when libcurl is found; WebDAV when libcurl and tinyxml2 are found | CMake reports every enabled or disabled backend during configuration. `OPENSCP_ENABLE_FTP_BACKEND` and `OPENSCP_ENABLE_WEBDAV_BACKEND` may disable the optional backends explicitly. |
-| Official macOS `.app` / `.dmg` / `.pkg` | SFTP, SCP, FTP, FTPS, and WebDAV | The release build provides libcurl and builds the pinned tinyxml2 dependency before packaging. |
+| Official macOS `.app` / `.dmg` | SFTP, SCP, FTP, FTPS, and WebDAV | The release build provides libcurl and builds the pinned tinyxml2 dependency before packaging. |
 | Official Linux AppImage | SFTP, SCP, FTP, FTPS, and WebDAV | The release images install libcurl and tinyxml2 development files before configuring OpenSCP. |
 | Snap | SFTP and SCP | The manifest disables both optional libcurl backends explicitly so the package does not depend on incidental libraries from the build environment. |
 | Flatpak | SFTP and SCP | The manifest disables both optional libcurl backends explicitly; the declared modules guarantee libssh2 only. |

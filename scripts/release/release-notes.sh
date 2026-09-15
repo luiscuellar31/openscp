@@ -222,6 +222,50 @@ date_iso="$(date -u +%Y-%m-%d)"
   fi
   echo
 
+  cat <<EOF
+## Install
+
+Verify the download first. \`SHA256SUMS.txt\` is attached to this release:
+
+\`\`\`bash
+shasum -a 256 -c SHA256SUMS.txt --ignore-missing  # macOS
+sha256sum -c SHA256SUMS.txt --ignore-missing      # Linux
+\`\`\`
+
+### macOS
+
+Download \`OpenSCP-${VERSION}-arm64-UNSIGNED.dmg\` on Apple Silicon or
+\`OpenSCP-${VERSION}-x86_64-UNSIGNED.dmg\` on Intel, open it, and drag OpenSCP
+onto Applications.
+
+OpenSCP is not signed with an Apple Developer ID, so macOS blocks the first
+launch and reports that it cannot check the app for malicious software. To
+allow it, open **System Settings → Privacy & Security**, scroll down to the
+Security section, click **Open Anyway** next to the message about OpenSCP, and
+confirm. On macOS 12 and 13 the same setting lives in **System Preferences →
+Security & Privacy → General**. The DMG ships these steps as \`README.txt\`.
+
+### Linux
+
+AppImage, which runs on most distributions:
+
+\`\`\`bash
+chmod +x OpenSCP-${VERSION}-x86_64.AppImage
+./OpenSCP-${VERSION}-x86_64.AppImage
+\`\`\`
+
+Flatpak bundle:
+
+\`\`\`bash
+flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak install --user ./OpenSCP-x86_64.flatpak
+flatpak run io.github.luiscuellar31.openscp
+\`\`\`
+
+Replace \`x86_64\` with \`aarch64\` on ARM64 machines.
+
+EOF
+
   echo "## Breaking Changes"
   if [[ -n "$breaking_items" ]]; then
     printf '%s' "$breaking_items"

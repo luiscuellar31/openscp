@@ -1198,15 +1198,18 @@ main() {
 GitHub Release Notes
 ====================
 
-This macOS build is unsigned (for testing and advanced users).
+This macOS build is not signed with an Apple Developer ID.
 
 Install:
-- Open the DMG and drag OpenSCP.app into /Applications
-- First launch: Apple may block it because the developer is not identified.
+- Open the DMG and drag OpenSCP.app onto Applications
+- The first launch is blocked: macOS reports that it cannot check the
+  app for malicious software
 
 To open it anyway:
-- GUI: Right‑click OpenSCP.app → Open → Open
-- Terminal (to remove quarantine):
+- System Settings -> Privacy & Security -> Security section, then
+  "Open Anyway" next to the message about OpenSCP, and confirm.
+  On macOS 12 and 13: System Preferences -> Security & Privacy -> General.
+- Or from the terminal:
   xattr -dr com.apple.quarantine /Applications/OpenSCP.app
 
 SHA256 (DMG):
