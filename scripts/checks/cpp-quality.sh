@@ -84,9 +84,10 @@ done < <(
 }
 
 uncatalogued_settings_keys="$(
-    rg -n --pcre2 \
-        '"(?:UI|Advanced|Transfer|Security|Network|Protocol|Terminal|Sites|SyncDialog|Shortcuts|History|Favorites)/[A-Za-z0-9_/%.-]+"' \
-        ui --glob '*.{cpp,h,hpp}' --glob '!AppSettings.hpp' || true
+    grep -rEn \
+        '"(UI|Advanced|Transfer|Security|Network|Protocol|Terminal|Sites|SyncDialog|Shortcuts|History|Favorites)/[A-Za-z0-9_/%.-]+"' \
+        ui --include='*.cpp' --include='*.h' --include='*.hpp' \
+        --exclude='AppSettings.hpp' || true
 )"
 if [[ -n "$uncatalogued_settings_keys" ]]; then
     printf '%s\n' \
