@@ -1025,13 +1025,29 @@ void ConnectionDialog::adjustToContent() {
     const int fixedChromeHeight = margins.top() + margins.bottom() +
                                   std::max(0, layout()->spacing()) +
                                   dialogButtons_->sizeHint().height();
+    constexpr int kMinimumScrollHeight = 200;
     scrollArea_->setFixedHeight(std::min(
-        contentHeight, std::max(200, maximumDialogHeight - fixedChromeHeight)));
+        contentHeight, std::max(kMinimumScrollHeight,
+                                maximumDialogHeight - fixedChromeHeight)));
 
     layout()->invalidate();
     layout()->activate();
     resize(std::max(preservedWidth, minimumWidth()),
            std::min(maximumDialogHeight, sizeHint().height()));
+
+    // The frame decoration above is an estimate: the window manager reports
+    // its final size only after the resize, and on macOS it grows by a few
+    // pixels, which leaves the dialog just over the cap. Measure the real
+    // frame and take the overflow out of the scroll area, the part meant to
+    // absorb it.
+    const int frameOverflow = frameGeometry().height() - maximumFrameHeight;
+    if (frameOverflow > 0 && scrollArea_->height() > kMinimumScrollHeight) {
+        scrollArea_->setFixedHeight(std::max(
+            kMinimumScrollHeight, scrollArea_->height() - frameOverflow));
+        layout()->invalidate();
+        layout()->activate();
+        resize(width(), sizeHint().height());
+    }
 
     if (restoreUpdates) {
         setUpdatesEnabled(true);
