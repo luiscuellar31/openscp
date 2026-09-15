@@ -66,7 +66,7 @@ class SettingsDialog : public QDialog {
     void setCompactFieldWidth(QWidget *field, int minWidth) const;
     void setPathFieldWidth(QWidget *field) const;
     void configureInlineAction(QPushButton *button) const;
-    void normalizeFormLabelWidths();
+    void normalizeFormAxes();
     void addLabeledRow(class QFormLayout *target, QWidget *parent,
                        const QString &labelText, QWidget *field,
                        QWidget *buddy = nullptr);
@@ -187,4 +187,5 @@ class SettingsDialog : public QDialog {
     QPushButton *closeBtn_ = nullptr;    // Close button (never primary/default)
     QVector<QCheckBox *> wrappedChecks_; // checkboxes with auto text wrapping
     QVector<QLabel *> formLabels_;       // shared form-label alignment axis
+    QVector<QWidget *> checkRows_; // label-less rows kept on the field axis
 };

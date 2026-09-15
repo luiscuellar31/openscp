@@ -920,8 +920,8 @@ OPENSCP_TEST(testSettingsPagesUseSharedFormStructure, test) {
     bool pageStructureMatches = true;
     bool sectionStructureMatches = true;
     bool contentIsIndented = true;
-    bool notesHaveExplicitSpanningRole = true;
-    bool checksHaveExplicitSpanningRole = true;
+    bool notesShareTheHeadingAxis = true;
+    bool checksRideIndentedSpanningRows = true;
     int noteCount = 0;
     int checkCount = 0;
     QMargins sharedPageMargins;
@@ -996,9 +996,10 @@ OPENSCP_TEST(testSettingsPagesUseSharedFormStructure, test) {
                     sectionStructureMatches && heading->font().bold() &&
                     sectionLayout->contentsMargins() == QMargins() &&
                     sectionLayout->spacing() == sharedSectionSpacing &&
-                    sectionLayout->count() == 2 &&
+                    sectionLayout->count() >= 2 &&
                     sectionLayout->itemAt(0)->widget() == heading &&
-                    sectionLayout->itemAt(1)->layout() == form &&
+                    sectionLayout->itemAt(sectionLayout->count() - 1)
+                            ->layout() == form &&
                     form->property("settingsFormLayout").toBool() &&
                     form->contentsMargins() == sharedFormMargins &&
                     form->contentsMargins().left() == expectedIndent &&
@@ -1030,26 +1031,33 @@ OPENSCP_TEST(testSettingsPagesUseSharedFormStructure, test) {
                                      widget->mapTo(&dialog, QPoint()).x());
                         }
                     }
-                    if (QLayoutItem *spanning =
-                            form->itemAt(row, QFormLayout::SpanningRole)) {
-                        QWidget *widget = spanning->widget();
-                        if (widget &&
-                            widget->property("settingsFormNote").toBool()) {
-                            ++noteCount;
-                            notesHaveExplicitSpanningRole =
-                                notesHaveExplicitSpanningRole &&
-                                qobject_cast<QLabel *>(widget);
-                        }
-                    }
+                }
+                for (int index = 1; index + 1 < sectionLayout->count();
+                     ++index) {
+                    auto *note = qobject_cast<QLabel *>(
+                        sectionLayout->itemAt(index)->widget());
+                    ++noteCount;
+                    notesShareTheHeadingAxis =
+                        notesShareTheHeadingAxis && note &&
+                        note->property("settingsFormNote").toBool() &&
+                        note->wordWrap() &&
+                        note->mapTo(&dialog, QPoint()).x() ==
+                            heading->mapTo(&dialog, QPoint()).x();
                 }
                 for (QCheckBox *check : section->findChildren<QCheckBox *>()) {
-                    int checkRow = -1;
+                    QWidget *checkRow = check->parentWidget();
+                    int formRow = -1;
                     QFormLayout::ItemRole checkRole = QFormLayout::LabelRole;
-                    form->getWidgetPosition(check, &checkRow, &checkRole);
+                    if (checkRow &&
+                        checkRow->property("settingsCheckRow").toBool()) {
+                        form->getWidgetPosition(checkRow, &formRow, &checkRole);
+                    }
                     ++checkCount;
-                    checksHaveExplicitSpanningRole =
-                        checksHaveExplicitSpanningRole && checkRow >= 0 &&
-                        checkRole == QFormLayout::SpanningRole;
+                    checksRideIndentedSpanningRows =
+                        checksRideIndentedSpanningRows && formRow >= 0 &&
+                        checkRole == QFormLayout::SpanningRole &&
+                        check->mapTo(&dialog, QPoint()).x() >
+                            checkRow->mapTo(&dialog, QPoint()).x();
                 }
                 contentIsIndented =
                     contentIsIndented &&
@@ -1066,10 +1074,10 @@ OPENSCP_TEST(testSettingsPagesUseSharedFormStructure, test) {
     test.check(sectionCount == 12 && sectionStructureMatches &&
                    contentIsIndented,
                "every section should lead one consistently indented form");
-    test.check(noteCount == 1 && notesHaveExplicitSpanningRole,
-               "settings guidance should use an explicit spanning note role");
-    test.check(checkCount > 0 && checksHaveExplicitSpanningRole,
-               "settings checks should span their indented section forms");
+    test.check(noteCount == 1 && notesShareTheHeadingAxis,
+               "settings guidance should align with its section heading");
+    test.check(checkCount > 0 && checksRideIndentedSpanningRows,
+               "settings checks should span their forms from the field axis");
 }
 
 OPENSCP_TEST(testSettingsInlineActionPreservesNativeBounds, test) {
@@ -1165,6 +1173,8 @@ OPENSCP_TEST(testSettingsLabelsAndFieldsShareAxes, test) {
     bool fieldsShareAxis = true;
     bool labelBuddiesMatch = true;
     bool networkUsesSharedRoles = false;
+    bool checksShareTheFieldAxis = true;
+    int checkAxisCount = 0;
 
     for (int pageIndex = 0; sections && pages && pageIndex < pages->count();
          ++pageIndex) {
@@ -1226,11 +1236,25 @@ OPENSCP_TEST(testSettingsLabelsAndFieldsShareAxes, test) {
                 }
             }
         }
+
+        QWidget *page = fixture.currentPage();
+        for (QCheckBox *check :
+             page ? page->findChildren<QCheckBox *>() : QList<QCheckBox *>()) {
+            if (sharedFieldAxis < 0)
+                continue;
+            ++checkAxisCount;
+            checksShareTheFieldAxis =
+                checksShareTheFieldAxis &&
+                qAbs(check->mapTo(&dialog, QPoint()).x() - sharedFieldAxis) <=
+                    4;
+        }
     }
 
     test.check(formLabelCount >= 15 && sharedLabelWidth > 0 &&
                    labelsShareAxis && fieldsShareAxis && labelBuddiesMatch,
                "settings labels and fields should share common visual axes");
+    test.check(checkAxisCount > 0 && checksShareTheFieldAxis,
+               "label-less checks should start on the shared field axis");
     test.check(networkUsesSharedRoles,
                "Network should use the shared label and field columns");
 }
@@ -1311,6 +1335,7 @@ OPENSCP_TEST(testSettingsControlsUseSharedWidthRoles, test) {
     int standardFieldCount = 0;
     int compactFieldCount = 0;
     int pathFieldCount = 0;
+    int sharedCompactWidth = -1;
     bool fieldRolesMatch = true;
     for (QWidget *widget : dialog.findChildren<QWidget *>()) {
         const QString role = widget->property("settingsFieldRole").toString();
@@ -1322,10 +1347,13 @@ OPENSCP_TEST(testSettingsControlsUseSharedWidthRoles, test) {
                               widget->maximumWidth() < QWIDGETSIZE_MAX;
         } else if (role == QStringLiteral("compact")) {
             ++compactFieldCount;
+            if (sharedCompactWidth < 0)
+                sharedCompactWidth = widget->width();
             fieldRolesMatch = fieldRolesMatch &&
                               widget->sizePolicy().horizontalPolicy() ==
                                   QSizePolicy::Preferred &&
-                              widget->maximumWidth() < QWIDGETSIZE_MAX;
+                              widget->maximumWidth() < QWIDGETSIZE_MAX &&
+                              widget->width() == sharedCompactWidth;
         } else if (role == QStringLiteral("path")) {
             auto *edit = qobject_cast<QLineEdit *>(widget);
             ++pathFieldCount;

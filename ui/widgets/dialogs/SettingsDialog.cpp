@@ -691,7 +691,9 @@ void SettingsDialog::trackWrappedCheck(QCheckBox *checkBox) {
     if (!checkBox)
         return;
     checkBox->setProperty("rawText", checkBox->text());
-    checkBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    // Wrapped text is measured from the granted width, so the check must not
+    // push the page wider with the size hint of its longest line.
+    checkBox->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     wrappedChecks_.push_back(checkBox);
 }
 
@@ -873,7 +875,7 @@ void SettingsDialog::configureInlineAction(QPushButton *button) const {
     button->setDefault(false);
 }
 
-void SettingsDialog::normalizeFormLabelWidths() {
+void SettingsDialog::normalizeFormAxes() {
     int sharedWidth = kFormLabelMinWidth;
     for (const QLabel *label : std::as_const(formLabels_)) {
         if (!label)
@@ -888,6 +890,15 @@ void SettingsDialog::normalizeFormLabelWidths() {
         if (!label)
             continue;
         label->setFixedWidth(sharedWidth);
+    }
+
+    // Rows without a label (checks) start where the labelled fields do.
+    const int fieldAxisIndent = sharedWidth + kFormSpacing;
+    for (QWidget *checkRow : std::as_const(checkRows_)) {
+        if (!checkRow)
+            continue;
+        if (auto *rowLayout = qobject_cast<QHBoxLayout *>(checkRow->layout()))
+            rowLayout->setContentsMargins(fieldAxisIndent, 0, 0, 0);
     }
 }
 
@@ -909,6 +920,17 @@ void SettingsDialog::addFormNote(QFormLayout *target, QWidget *parent,
     auto *note = new QLabel(text, parent);
     note->setWordWrap(true);
     note->setProperty("settingsFormNote", true);
+
+    // A note describes the whole section, so it shares the heading axis
+    // instead of being indented into the form grid.
+    auto *sectionLayout = qobject_cast<QVBoxLayout *>(target->parent());
+    for (int index = 0; sectionLayout && index < sectionLayout->count();
+         ++index) {
+        if (sectionLayout->itemAt(index)->layout() != target)
+            continue;
+        sectionLayout->insertWidget(index, note);
+        return;
+    }
     target->addRow(note);
 }
 
@@ -920,7 +942,15 @@ void SettingsDialog::addTrackedCheckRows(
             continue;
         auto *check = new QCheckBox(row.second, parent);
         trackWrappedCheck(check);
-        target->addRow(check);
+        auto *checkRow = new QWidget(parent);
+        checkRow->setProperty("settingsCheckRow", true);
+        checkRow->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        auto *checkRowLayout = new QHBoxLayout(checkRow);
+        checkRowLayout->setContentsMargins(0, 0, 0, 0);
+        checkRowLayout->setSpacing(0);
+        checkRowLayout->addWidget(check, 1);
+        checkRows_.push_back(checkRow);
+        target->addRow(checkRow);
         *row.first = check;
     }
 }
@@ -1216,14 +1246,14 @@ void SettingsDialog::buildSecurityPage(const PageBuildContext &ctx) {
         tr("Duration of the temporary exception for no host-key verification "
            "policy."));
     QFormLayout *ftpsForm = addSection(securityPage, tr("FTPS"));
-    addTrackedCheckRows(
-        ftpsForm, securityPage,
-        {{&ftpsVerifyPeerDefault_,
-          tr("Verify FTPS server certificate by default (recommended).")}});
     addBrowsePathRow(ftpsForm, securityPage, tr("Default FTPS CA bundle:"),
                      tr("Select FTPS CA bundle"), true,
                      ftpsCaCertPathDefaultEdit_,
                      ftpsCaCertPathDefaultBrowseBtn_, tr("System CA bundle"));
+    addTrackedCheckRows(
+        ftpsForm, securityPage,
+        {{&ftpsVerifyPeerDefault_,
+          tr("Verify FTPS server certificate by default (recommended).")}});
     QFormLayout *credentialsForm =
         addSection(securityPage, tr("Credentials and terminal"));
     addTrackedCheckRows(
@@ -1302,7 +1332,7 @@ void SettingsDialog::buildStagingPage(const PageBuildContext &ctx) {
     maxDepthSpin_ = new QSpinBox(stagingPage);
     maxDepthSpin_->setRange(4, 256);
     maxDepthSpin_->setValue(32);
-    setCompactFieldWidth(maxDepthSpin_, 90);
+    setCompactFieldWidth(maxDepthSpin_, kCompactFieldMaxWidth);
     maxDepthSpin_->setToolTip(tr(
         "Limit for recursive folder drag-out to avoid deep trees and loops."));
     auto *hint = new QLabel(tr("Recommended: 32"), stagingPage);
@@ -1471,7 +1501,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     buildSecurityPage(ctx);
     buildNetworkPage(ctx);
     buildStagingPage(ctx);
-    normalizeFormLabelWidths();
+    normalizeFormAxes();
     setupSectionNavigation(ctx);
     buildBottomButtons(root);
     loadPersistedSettings();
@@ -1486,6 +1516,7 @@ void SettingsDialog::resizeEvent(QResizeEvent *event) {
     QDialog::resizeEvent(event);
     QTimer::singleShot(0, this, [this] { refreshWrappedCheckTexts(); });
 }
+
 
 void SettingsDialog::onApply() {
     openscpui::AppSettings settings;
