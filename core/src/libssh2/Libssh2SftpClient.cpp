@@ -3241,12 +3241,12 @@ bool Libssh2SftpClient::get(
 
     // Open local .part for writing
     std::string openError;
-    FILE *lf = localfiles::openRegularFileForWrite(
+    UniqueFile localFile(localfiles::openRegularFileForWrite(
         localPart,
         offset > 0 ? localfiles::WriteMode::Append
                    : localfiles::WriteMode::Truncate,
-        openError);
-    if (!lf) {
+        openError));
+    if (!localFile) {
         const int nativeError = errno;
         libssh2_sftp_close(rh);
         err = openError.empty()
@@ -3255,7 +3255,6 @@ bool Libssh2SftpClient::get(
         setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
         return false;
     }
-    UniqueFile localFile(lf);
 
     constexpr std::size_t kChunkSize = 64 * 1024;
     std::vector<char> buf(kChunkSize);
@@ -3272,8 +3271,8 @@ bool Libssh2SftpClient::get(
         ssize_t n =
             libssh2_sftp_read(rh, buf.data(), static_cast<size_t>(buf.size()));
         if (n > 0) {
-            if (std::fwrite(buf.data(), 1, static_cast<size_t>(n), lf) !=
-                static_cast<size_t>(n)) {
+            if (std::fwrite(buf.data(), 1, static_cast<size_t>(n),
+                            localFile.get()) != static_cast<size_t>(n)) {
                 const int nativeError = errno;
                 err = "Local write failed";
                 localFile.reset();
@@ -3302,7 +3301,7 @@ bool Libssh2SftpClient::get(
     }
 
     std::string syncErr;
-    if (!flush_local_file(lf, &syncErr)) {
+    if (!flush_local_file(localFile.get(), &syncErr)) {
         const int nativeError = errno;
         localFile.reset();
         libssh2_sftp_close(rh);
@@ -3348,18 +3347,17 @@ bool Libssh2SftpClient::put(
     const std::string remotePart = remote + ".part";
 
     // Open local for reading
-    FILE *lf = ::fopen(local.c_str(), "rb");
-    if (!lf) {
+    UniqueFile localFile(::fopen(local.c_str(), "rb"));
+    if (!localFile) {
         err = "Could not open local file for reading";
         setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
         return false;
     }
-    UniqueFile localFile(lf);
 
     // Local size
-    std::fseek(lf, 0, SEEK_END);
-    long fsz = std::ftell(lf);
-    std::fseek(lf, 0, SEEK_SET);
+    std::fseek(localFile.get(), 0, SEEK_END);
+    long fsz = std::ftell(localFile.get());
+    std::fseek(localFile.get(), 0, SEEK_SET);
     std::size_t total = fsz > 0 ? static_cast<std::size_t>(fsz) : 0;
 
     // Resume against remote .part (final destination is set via atomic rename).
@@ -3440,7 +3438,7 @@ bool Libssh2SftpClient::put(
     if (resume && startOffset > 0 &&
         static_cast<std::size_t>(startOffset) < total) {
         libssh2_sftp_seek64(wh, static_cast<libssh2_uint64_t>(startOffset));
-        if (std::fseek(lf, startOffset, SEEK_SET) != 0) {
+        if (std::fseek(localFile.get(), startOffset, SEEK_SET) != 0) {
             const int nativeError = errno;
             err = "Could not seek local file";
             libssh2_sftp_close(wh);
@@ -3452,7 +3450,7 @@ bool Libssh2SftpClient::put(
     }
 
     while (true) {
-        size_t n = std::fread(buf.data(), 1, buf.size(), lf);
+        size_t n = std::fread(buf.data(), 1, buf.size(), localFile.get());
         if (n > 0) {
             char *p = buf.data();
             size_t remain = n;
@@ -3485,7 +3483,7 @@ bool Libssh2SftpClient::put(
                     progress(done, total);
             }
         } else {
-            if (std::ferror(lf)) {
+            if (std::ferror(localFile.get())) {
                 const int nativeError = errno;
                 err = "Local read failed";
                 libssh2_sftp_close(wh);

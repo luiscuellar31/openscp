@@ -62,7 +62,8 @@ OPENSCP_TEST(testFtpListListingLimitsAndMalformedInput, test) {
 #endif
 
 #if OPENSCP_HAS_CURL_WEBDAV
-std::string webDavResponse(std::string path, std::string property) {
+std::string webDavResponse(const std::string &path,
+                           const std::string &property) {
     return "<d:response><d:href>" + path +
            "</d:href><d:propstat><d:status>HTTP/1.1 200 OK</d:status>"
            "<d:prop>" +
