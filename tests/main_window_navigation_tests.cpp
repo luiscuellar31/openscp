@@ -440,9 +440,13 @@ OPENSCP_TEST(testTransferQueueUsesSupportedModelessWindowLifecycle, test) {
                "reopening should reuse the animated queue");
 
     dialog->close();
+    // The transition starts synchronously inside close(), so sample it before
+    // pumping events: once the loop runs, a loaded machine can finish the
+    // animation before the check and the evidence is gone.
+    const bool closeWasAnimated = dialog->isVisible() && hasRunningTransition();
     flushUiEvents();
     if (transitionsSupported) {
-        test.check(dialog->isVisible() && hasRunningTransition(),
+        test.check(closeWasAnimated,
                    "the window close control should use the closing animation");
         transfersAction->trigger();
         const bool closeWasReversed = openscp::testsupport::waitUntil(
