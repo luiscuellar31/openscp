@@ -56,11 +56,11 @@ struct MockSftpClient::SharedState {
         entries.emplace("/home", directoryInfo("home"));
         entries.emplace("/var", directoryInfo("var"));
         entries.emplace("/readme.txt", fileInfo("readme.txt", 1280));
-        entries.emplace("/home/luis", directoryInfo("luis"));
+        entries.emplace("/home/demo", directoryInfo("demo"));
         entries.emplace("/home/guest", directoryInfo("guest"));
         entries.emplace("/home/notes.md", fileInfo("notes.md", 2048));
-        entries.emplace("/home/luis/proyectos", directoryInfo("proyectos"));
-        entries.emplace("/home/luis/foto.jpg", fileInfo("foto.jpg", 34567));
+        entries.emplace("/home/demo/projects", directoryInfo("projects"));
+        entries.emplace("/home/demo/photo.jpg", fileInfo("photo.jpg", 34567));
         entries.emplace("/var/log", directoryInfo("log"));
     }
 

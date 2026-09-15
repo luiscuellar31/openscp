@@ -772,7 +772,7 @@ OPENSCP_TEST(test_mock_listings, t) {
         ListingScenario{"home sorts directories before files",
                         "/home",
                         true,
-                        {{"guest", true}, {"luis", true}, {"notes.md", false}}},
+                        {{"demo", true}, {"guest", true}, {"notes.md", false}}},
         ListingScenario{"missing path", "/does-not-exist", false, {}},
     };
 

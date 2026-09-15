@@ -2,6 +2,9 @@
 #include "AppVersion.hpp"
 #include "app/MainWindow.hpp"
 #include "logic/common/AppSettings.hpp"
+#if defined(OPENSCP_DEMO_MODE) && OPENSCP_DEMO_MODE
+#include "logic/demo/DemoData.hpp"
+#endif
 
 #include <QApplication>
 #include <QDir>
@@ -12,8 +15,13 @@
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
+#if defined(OPENSCP_DEMO_MODE) && OPENSCP_DEMO_MODE
+    QCoreApplication::setApplicationName("OpenSCP Demo");
+#else
     QCoreApplication::setApplicationName("OpenSCP");
+#endif
     QCoreApplication::setOrganizationName("OpenSCP");
+
     QCoreApplication::setApplicationVersion(
         QStringLiteral(OPENSCP_APP_VERSION));
 
@@ -52,6 +60,10 @@ int main(int argc, char *argv[]) {
                           QStringLiteral("_"), qtTransPath)) {
         app.installTranslator(&qtTranslator);
     }
+#if defined(OPENSCP_DEMO_MODE) && OPENSCP_DEMO_MODE
+    openscpui::demo::seedSampleDataIfEmpty();
+#endif
+
     MainWindow w;
     w.show();
     return app.exec();

@@ -75,6 +75,8 @@ option(OPENSCP_BUILD_TESTS "Build and run automated tests (CTest)" OFF)
 option(OPENSCP_WERROR "Treat first-party compiler warnings as errors" OFF)
 option(OPENSCP_BUILD_FUZZERS
        "Build Clang libFuzzer targets for untrusted protocol parsers" OFF)
+option(OPENSCP_ENABLE_DEMO_MODE
+       "Build a demo application: offline backend and seeded sample data" OFF)
 
 if(OPENSCP_BUILD_FUZZERS AND
    NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -290,8 +292,9 @@ endif()
 
 option(OPENSCP_BUILD_SECURE_ONLY "Disable insecure fallback for secrets storage" ON)
 
-if (OPENSCP_BUILD_TESTS)
-    # Tests exercise MockSftpClient and require mock sources in openscp_core.
+if (OPENSCP_BUILD_TESTS OR OPENSCP_ENABLE_DEMO_MODE)
+    # Tests and demo builds answer from MockSftpClient, so openscp_core needs
+    # the mock sources.
     set(OPENSCP_ENABLE_MOCK ON CACHE BOOL "Build mock SFTP client" FORCE)
 endif()
 
@@ -588,6 +591,17 @@ endif()
 if (OPENSCP_BUILD_SECURE_ONLY)
     target_compile_definitions(openscp_ui_logic
         PUBLIC OPENSCP_BUILD_SECURE_ONLY=1)
+endif()
+
+if (OPENSCP_ENABLE_DEMO_MODE)
+    # PUBLIC so the application target sees it too: main() renames the app and
+    # seeds the sample data. Never set in a release build, which is why the
+    # demo backend cannot be reached from one.
+    target_compile_definitions(openscp_core PUBLIC OPENSCP_DEMO_MODE=1)
+    target_compile_definitions(openscp_ui_logic PUBLIC OPENSCP_DEMO_MODE=1)
+    target_sources(openscp_ui_logic PRIVATE ui/logic/demo/DemoData.cpp)
+    message(STATUS
+        "OpenSCP: demo mode ON. This build has no network backend.")
 endif()
 
 # Translations: compile TS catalogs to QM and embed as resources.

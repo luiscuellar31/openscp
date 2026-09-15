@@ -8,10 +8,19 @@
 #endif
 #include "libssh2/Libssh2ScpClient.hpp"
 #include "libssh2/Libssh2SftpClient.hpp"
+#if defined(OPENSCP_DEMO_MODE) && OPENSCP_DEMO_MODE
+#include "mock/MockSftpClient.hpp"
+#endif
 
 namespace openscp {
 
 std::unique_ptr<RemoteClient> CreateClientForProtocol(Protocol protocol) {
+#if defined(OPENSCP_DEMO_MODE) && OPENSCP_DEMO_MODE
+    // A demo build answers every protocol from the in-memory client: the point
+    // is to exercise the interface with no server and no network at all.
+    (void)protocol;
+    return std::make_unique<MockSftpClient>();
+#else
     if (protocol == Protocol::Sftp)
         return std::make_unique<Libssh2SftpClient>();
     if (protocol == Protocol::Scp)
@@ -25,6 +34,7 @@ std::unique_ptr<RemoteClient> CreateClientForProtocol(Protocol protocol) {
         return std::make_unique<CurlWebDavClient>();
 #endif
     return nullptr;
+#endif
 }
 
 std::unique_ptr<RemoteClient> CreateConnectedClient(const SessionOptions &opt,
