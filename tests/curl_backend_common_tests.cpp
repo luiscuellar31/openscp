@@ -1,0 +1,470 @@
+// Focused unit tests for security-sensitive libcurl backend helpers.
+#include "TestHarness.hpp"
+#include "common/UniqueFile.hpp"
+#include "curl/CurlBackendCommon.hpp"
+#include "openscp/RemotePath.hpp"
+#if OPENSCP_HAS_CURL_FTP
+#include "curl/CurlFtpClient.hpp"
+#endif
+#if OPENSCP_HAS_CURL_WEBDAV
+#include "curl/CurlWebDavClient.hpp"
+#endif
+
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <optional>
+#include <string>
+
+namespace {
+
+curl_socket_t rejectSocketOpen(void *userdata, curlsocktype,
+                               struct curl_sockaddr *) {
+    auto *attempts = static_cast<int *>(userdata);
+    if (attempts)
+        ++*attempts;
+    return CURL_SOCKET_BAD;
+}
+
+OPENSCP_TEST(testRetryAfter, test) {
+    using openscp::curlcommon::parseRetryAfter;
+
+    test.check(parseRetryAfter("15", 0) == std::optional<std::uint32_t>(15),
+               "Retry-After should parse delta seconds");
+    test.check(parseRetryAfter(" 120 ", 0) == std::optional<std::uint32_t>(60),
+               "Retry-After delta seconds should be capped at 60");
+
+    constexpr std::time_t beforeDate = 1445412450;
+    test.check(parseRetryAfter("Wed, 21 Oct 2015 07:28:00 GMT", beforeDate) ==
+                   std::optional<std::uint32_t>(30),
+               "Retry-After should parse an HTTP date relative to now");
+    test.check(
+        parseRetryAfter("Wed, 21 Oct 2015 07:28:00 GMT", beforeDate - 120) ==
+            std::optional<std::uint32_t>(60),
+        "HTTP-date Retry-After should also be capped at 60");
+    test.check(
+        parseRetryAfter("Wed, 21 Oct 2015 07:28:00 GMT", beforeDate + 60) ==
+            std::optional<std::uint32_t>(0),
+        "past Retry-After dates should request no additional wait");
+    test.check(!parseRetryAfter("not a retry date", beforeDate).has_value(),
+               "invalid Retry-After values should be ignored");
+}
+
+OPENSCP_TEST(testHostValidation, test) {
+    using openscp::curlcommon::validateUrlHost;
+
+    std::string err;
+    test.check(validateUrlHost("files.example.test", "Host", err),
+               "DNS hosts should be accepted");
+    err.clear();
+    test.check(validateUrlHost("[2001:db8::1]", "Host", err),
+               "bracketed IPv6 hosts should be accepted");
+    err.clear();
+    test.check(
+        validateUrlHost("2001:db8::1", "Host", err),
+        "unbracketed IPv6 hosts should be accepted and normalized later");
+
+    err.clear();
+    test.check(!validateUrlHost("trusted.example@127.0.0.1", "Host", err),
+               "userinfo delimiters must be rejected in hosts");
+    err.clear();
+    test.check(!validateUrlHost("example.test/path", "Host", err),
+               "path delimiters must be rejected in hosts");
+    err.clear();
+    test.check(!validateUrlHost("example.test:2121", "Host", err),
+               "ports must use the separate port field");
+    err.clear();
+    test.check(
+        !validateUrlHost("example.test\r\nX-Test: injected", "Host", err),
+        "control characters must be rejected in hosts");
+}
+
+OPENSCP_TEST(testClientsRejectAuthorityInjection, test) {
+#if OPENSCP_HAS_CURL_FTP
+    {
+        openscp::CurlFtpClient client(openscp::Protocol::Ftp);
+        openscp::SessionOptions options;
+        options.protocol = openscp::Protocol::Ftp;
+        options.host = "trusted.example@127.0.0.1";
+        options.port = 21;
+        std::string err;
+        test.check(!client.connect(options, err),
+                   "FTP should reject injected URL authority before I/O");
+        test.check(client.lastOperationError().kind ==
+                       openscp::RemoteErrorKind::InvalidRequest,
+                   "FTP authority rejection should be structured");
+    }
+#endif
+#if OPENSCP_HAS_CURL_WEBDAV
+    {
+        openscp::CurlWebDavClient client;
+        openscp::SessionOptions options;
+        options.protocol = openscp::Protocol::WebDav;
+        options.host = "trusted.example@127.0.0.1";
+        options.port = 443;
+        std::string err;
+        test.check(!client.connect(options, err),
+                   "WebDAV should reject injected URL authority before I/O");
+        test.check(client.lastOperationError().kind ==
+                       openscp::RemoteErrorKind::InvalidRequest,
+                   "WebDAV authority rejection should be structured");
+    }
+#endif
+}
+
+OPENSCP_TEST(testFtpCommandRoot, test) {
+    using openscp::curlcommon::encodeFtpUrlPath;
+    using openscp::curlcommon::ftpCommandPath;
+
+    test.check(ftpCommandPath("/", "/workspace/file.txt") ==
+                   "/workspace/file.txt",
+               "FTP commands should preserve paths for a root login");
+    test.check(
+        ftpCommandPath("/srv/ftp/alice", "/workspace/file.txt") ==
+            "/srv/ftp/alice/workspace/file.txt",
+        "FTP commands should resolve logical paths below the login root");
+    test.check(ftpCommandPath("/srv/ftp/alice/", "/") == "/srv/ftp/alice",
+               "FTP logical root should resolve to the PWD login directory");
+    test.check(ftpCommandPath("srv\\ftp\\alice", "../release/./file") ==
+                   "/srv/ftp/alice/release/file",
+               "FTP PWD roots and relative paths should share canonical "
+               "normalization");
+    test.check(encodeFtpUrlPath("/workspace/release notes", false) ==
+                   "/workspace/release%20notes",
+               "FTP file URLs should encode normalized logical paths");
+    test.check(encodeFtpUrlPath("/workspace/release notes/", true) ==
+                   "/workspace/release%20notes/",
+               "FTP directory URLs must retain their trailing slash");
+}
+
+OPENSCP_TEST(testRemotePathNormalization, test) {
+    using openscp::normalizeRemotePath;
+
+    test.check(normalizeRemotePath("") == "/" &&
+                   normalizeRemotePath("relative/path") == "/relative/path",
+               "remote paths should always be absolute");
+    test.check(normalizeRemotePath("//team\\alpha/./tmp/../release") ==
+                   "/team/alpha/release",
+               "remote paths should normalize separators and dot segments");
+    test.check(normalizeRemotePath("../../../../safe") == "/safe",
+               "remote paths must not escape above their logical root");
+}
+
+OPENSCP_TEST(testWebDavPaths, test) {
+    using openscp::curlcommon::webDavLogicalPath;
+    using openscp::curlcommon::webDavServerPath;
+
+    test.check(webDavServerPath("remote.php/dav/./files/alice/",
+                                "projects/../release") ==
+                   "/remote.php/dav/files/alice/release",
+               "WebDAV bases and relative paths should compose canonically");
+    test.check(webDavServerPath("/", "/release") == "/release",
+               "a root WebDAV base should preserve logical paths");
+
+    std::string logical;
+    test.check(webDavLogicalPath("/remote.php/dav/files/alice",
+                                 "/remote.php/dav/files/alice/team", logical) &&
+                   logical == "/team",
+               "WebDAV server paths should map back below their base");
+    test.check(!webDavLogicalPath("/remote.php/dav/files/alice",
+                                  "/remote.php/dav/files/bob", logical),
+               "WebDAV paths outside the configured base should be rejected");
+}
+
+OPENSCP_TEST(testWebDavCompletionStatuses, test) {
+    using openscp::curlcommon::isCompletedWebDavGetStatus;
+    using openscp::curlcommon::isCompletedWebDavWriteStatus;
+
+    test.check(isCompletedWebDavGetStatus(200),
+               "WebDAV GET 200 should be complete");
+    test.check(!isCompletedWebDavGetStatus(202),
+               "WebDAV GET 202 must not publish a local destination");
+    test.check(isCompletedWebDavWriteStatus(200) &&
+                   isCompletedWebDavWriteStatus(201) &&
+                   isCompletedWebDavWriteStatus(204),
+               "completed WebDAV writes should accept 200, 201 and 204");
+    test.check(!isCompletedWebDavWriteStatus(202) &&
+                   !isCompletedWebDavWriteStatus(206),
+               "asynchronous or partial WebDAV writes must not be committed");
+}
+
+OPENSCP_TEST(testCurlClientState, test) {
+    openscp::SessionOptions defaults;
+    defaults.protocol = openscp::Protocol::Ftp;
+    openscp::curlcommon::CurlClientState state(defaults);
+
+    std::shared_ptr<const openscp::SessionOptions> connectedOptions;
+    {
+        auto operation = state.beginOperation();
+        test.check(!operation.disconnecting() &&
+                       !operation.interrupted()->load(),
+                   "new curl operations should start ready to run");
+        state.prepareForConnect();
+
+        auto session = std::make_unique<openscp::curlcommon::CurlEasySession>();
+        std::string error;
+        test.check(session->initialize(error),
+                   std::string("curl session should initialize: ") + error);
+        auto mutableOptions =
+            std::make_shared<openscp::SessionOptions>(defaults);
+        mutableOptions->host = "ftp.example.test";
+        connectedOptions = mutableOptions;
+        state.commitConnection(connectedOptions, std::move(session),
+                               "srv\\ftp\\alice/./");
+
+        const auto snapshot = state.snapshot(operation);
+        test.check(snapshot && snapshot.options.get() == connectedOptions.get(),
+                   "curl snapshots should share immutable session options");
+        test.check(snapshot.commandRoot == "/srv/ftp/alice",
+                   "curl state should canonicalize the FTP PWD root");
+
+        state.requestInterrupt();
+        test.check(operation.interrupted()->load(),
+                   "curl state should publish interruption requests");
+    }
+
+    {
+        auto nextOperation = state.beginOperation();
+        test.check(!nextOperation.interrupted()->load(),
+                   "completed curl operations should clear interruption state");
+    }
+    {
+        std::string error;
+        auto operation = state.beginConnectedOperation(error, "FTP", {"/safe"});
+        test.check(operation && error.empty() &&
+                       operation.connection().options.get() ==
+                           connectedOptions.get(),
+                   "connected curl operations should expose the shared state");
+    }
+    state.disconnect(defaults);
+    test.check(!state.isConnected(),
+               "curl disconnect should clear the reusable session");
+    {
+        std::string error;
+        auto operation = state.beginConnectedOperation(error, "FTP", {"/safe"});
+        test.check(!operation && error == "Not connected." &&
+                       operation.failure().kind ==
+                           openscp::RemoteErrorKind::Connection,
+                   "disconnected curl operations should fail structurally");
+    }
+    {
+        std::string error;
+        auto operation = state.beginConnectedOperation(
+            error, "FTP", {std::string("/unsafe\npath")});
+        test.check(!operation && operation.failure().kind ==
+                                     openscp::RemoteErrorKind::InvalidRequest,
+                   "curl operations should validate paths before state");
+    }
+    {
+        std::string error;
+        auto operation = state.beginConnectedOperation(
+            error, "FTP", {"/"}, "Refusing a semantic root operation.");
+        test.check(!operation &&
+                       error == "Refusing a semantic root operation." &&
+                       operation.failure().kind ==
+                           openscp::RemoteErrorKind::InvalidRequest,
+                   "semantic preflight should run before connection state");
+    }
+}
+
+OPENSCP_TEST(testBoundedStringSink, test) {
+    std::string output;
+    openscp::curlcommon::BoundedStringSink sink{&output, 4};
+    char first[] = {'a', 'b', 'c'};
+    test.check(openscp::curlcommon::appendStringCallback(
+                   first, 1, sizeof(first), &sink) == sizeof(first),
+               "bounded response sinks should accept data within the limit");
+    char overflow[] = {'d', 'e'};
+    test.check(openscp::curlcommon::appendStringCallback(
+                   overflow, 1, sizeof(overflow), &sink) == 0,
+               "bounded response sinks should stop oversized responses");
+    test.check(sink.limitExceeded && output == "abc",
+               "oversized response chunks must not be partially appended");
+}
+
+OPENSCP_TEST(testCurlTransportPolicy, test) {
+    using openscp::curlcommon::configureAllowedProtocol;
+    using openscp::curlcommon::configureTlsPolicy;
+    using openscp::curlcommon::CurlUrlScheme;
+
+    openscp::curlcommon::CurlEasySession session;
+    std::string error;
+    test.check(session.initialize(error),
+               std::string("curl session should initialize: ") + error);
+    if (!session.get())
+        return;
+
+    struct AllowedCase {
+        CurlUrlScheme scheme;
+        const char *url;
+        bool tls;
+    };
+    constexpr AllowedCase allowedCases[] = {
+        {CurlUrlScheme::Ftp, "ftp://127.0.0.1:1/", false},
+        {CurlUrlScheme::Ftps, "ftps://127.0.0.1:1/", true},
+        {CurlUrlScheme::Http, "http://127.0.0.1:1/", false},
+        {CurlUrlScheme::Https, "https://127.0.0.1:1/", true},
+    };
+
+    for (const AllowedCase &allowed : allowedCases) {
+        session.reset();
+        error.clear();
+        const bool protocolConfigured = configureAllowedProtocol(
+            session.get(), allowed.scheme, "test", error);
+        test.check(protocolConfigured,
+                   std::string("allowed protocol should configure: ") + error);
+        if (allowed.tls) {
+            const std::optional<std::string> caPath = "openscp-test-ca.pem";
+            const bool tlsConfigured =
+                configureTlsPolicy(session.get(), true, caPath,
+                                   "Could not enforce test TLS minimum.",
+                                   "Could not configure test TLS verification.",
+                                   "Could not configure test CA path.", error);
+            test.check(tlsConfigured,
+                       std::string("TLS 1.2 policy should configure: ") +
+                           error);
+        }
+
+        int socketAttempts = 0;
+        const bool requestConfigured =
+            curl_easy_setopt(session.get(), CURLOPT_PROXY, "") == CURLE_OK &&
+            curl_easy_setopt(session.get(), CURLOPT_URL, allowed.url) ==
+                CURLE_OK &&
+            curl_easy_setopt(session.get(), CURLOPT_OPENSOCKETFUNCTION,
+                             rejectSocketOpen) == CURLE_OK &&
+            curl_easy_setopt(session.get(), CURLOPT_OPENSOCKETDATA,
+                             &socketAttempts) == CURLE_OK;
+        test.check(requestConfigured,
+                   "transport policy test request should configure");
+        if (!protocolConfigured || !requestConfigured)
+            continue;
+        const CURLcode result = curl_easy_perform(session.get());
+        test.check(result != CURLE_UNSUPPORTED_PROTOCOL && socketAttempts > 0,
+                   "the selected URL scheme should reach socket setup");
+    }
+
+    session.reset();
+    error.clear();
+    const bool restricted = configureAllowedProtocol(
+        session.get(), CurlUrlScheme::Https, "test", error);
+    int blockedSocketAttempts = 0;
+    const bool blockedRequestConfigured =
+        curl_easy_setopt(session.get(), CURLOPT_PROXY, "") == CURLE_OK &&
+        curl_easy_setopt(session.get(), CURLOPT_URL, "ftp://127.0.0.1:1/") ==
+            CURLE_OK &&
+        curl_easy_setopt(session.get(), CURLOPT_OPENSOCKETFUNCTION,
+                         rejectSocketOpen) == CURLE_OK &&
+        curl_easy_setopt(session.get(), CURLOPT_OPENSOCKETDATA,
+                         &blockedSocketAttempts) == CURLE_OK;
+    test.check(restricted && blockedRequestConfigured,
+               "blocked protocol test request should configure");
+    if (restricted && blockedRequestConfigured) {
+        const CURLcode result = curl_easy_perform(session.get());
+        test.check(result == CURLE_UNSUPPORTED_PROTOCOL &&
+                       blockedSocketAttempts == 0,
+                   "a disallowed URL scheme must fail before socket setup");
+    }
+}
+
+OPENSCP_TEST(testCurlTransferLifecycle, test) {
+    std::uint64_t missingSize = 42;
+    std::string missingError;
+    test.check(openscp::curlcommon::openFileForUpload(
+                   "openscp-definitely-missing-upload-file", missingSize,
+                   missingError) == nullptr &&
+                   missingSize == 0 && !missingError.empty(),
+               "upload preparation should reject missing local files");
+
+    openscp::curlcommon::CurlEasySession session;
+    std::string error;
+    test.check(session.initialize(error),
+               std::string("curl session should initialize: ") + error);
+    if (!session.get())
+        return;
+
+    openscp::curlcommon::TransferProgressContext progressContext;
+    const auto configurationFailure = openscp::curlcommon::performCurlTransfer(
+        session.get(), progressContext, "test transfer",
+        [](CURL *, std::string &) { return false; }, error);
+    test.check(configurationFailure.failure ==
+                   openscp::curlcommon::CurlTransferFailure::Configuration,
+               "the common transfer lifecycle should classify setup failures");
+    test.check(!error.empty(),
+               "setup failures should always produce a diagnostic");
+
+    error.clear();
+    progressContext.shouldCancel = [] { return true; };
+    const auto canceled = openscp::curlcommon::performCurlTransfer(
+        session.get(), progressContext, "test transfer",
+        [](CURL *curl, std::string &) {
+            return curl_easy_setopt(curl, CURLOPT_URL,
+                                    "https://example.invalid/") == CURLE_OK;
+        },
+        error);
+    test.check(canceled.failure ==
+                       openscp::curlcommon::CurlTransferFailure::Canceled &&
+                   canceled.curlCode == CURLE_ABORTED_BY_CALLBACK,
+               "cancellation should be observed before network I/O");
+    test.check(error == "Canceled by user",
+               "user cancellation should retain a stable diagnostic");
+    const openscp::RemoteError canceledError =
+        openscp::curlcommon::transferFailureError(canceled, error);
+    test.check(canceledError.kind == openscp::RemoteErrorKind::Canceled &&
+                   canceledError.native_code == CURLE_ABORTED_BY_CALLBACK,
+               "common transfer failures should preserve cancellation data");
+
+    const openscp::RemoteError configurationError =
+        openscp::curlcommon::transferFailureError(configurationFailure,
+                                                  "invalid setup");
+    test.check(configurationError.kind ==
+                       openscp::RemoteErrorKind::InvalidRequest &&
+                   configurationError.message == "invalid setup",
+               "common transfer failures should classify invalid setup");
+
+    bool cancelAtBoundary = false;
+    openscp::curlcommon::TransferProgressContext boundaryProgress{
+        [&](std::size_t done, std::size_t total) {
+            cancelAtBoundary = total > 0 && done >= total;
+        },
+        [&] { return cancelAtBoundary; }, nullptr, true};
+    test.check(openscp::curlcommon::transferProgressCallback(
+                   &boundaryProgress, 0, 0, 16, 16) == 0 &&
+                   boundaryProgress.payloadComplete && cancelAtBoundary,
+               "boundary cancellation should let the remote partial commit");
+    error.clear();
+    test.check(openscp::curlcommon::detectTransferCancellation(boundaryProgress,
+                                                               error) &&
+                   error == "Canceled by user",
+               "boundary cancellation should still prevent final publish");
+
+    openscp::curlcommon::TransferProgressContext incompleteProgress{
+        {}, [] { return true; }, nullptr, true};
+    test.check(openscp::curlcommon::transferProgressCallback(
+                   &incompleteProgress, 0, 0, 16, 8) == 1 &&
+                   !incompleteProgress.payloadComplete,
+               "incomplete transfers should abort immediately on cancel");
+
+    openscp::UniqueFile rewindable(std::tmpfile());
+    test.check(static_cast<bool>(rewindable),
+               "the upload rewind test should create a temporary file");
+    if (rewindable) {
+        constexpr char payload[] = "rewindable";
+        test.check(std::fwrite(payload, 1, sizeof(payload), rewindable.get()) ==
+                       sizeof(payload),
+                   "the upload rewind test should seed its file");
+        test.check(openscp::curlcommon::seekFileCallback(
+                       rewindable.get(), 0, SEEK_SET) == CURL_SEEKFUNC_OK,
+                   "curl uploads should rewind after authentication retries");
+        char firstByte = '\0';
+        test.check(std::fread(&firstByte, 1, 1, rewindable.get()) == 1 &&
+                       firstByte == payload[0],
+                   "rewound uploads should restart at the requested offset");
+    }
+}
+
+} // namespace
+
+int main() {
+    openscp::test::TestHarness harness("curl backend common");
+    return harness.run();
+}

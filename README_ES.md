@@ -1,302 +1,210 @@
 <div align="center">
-    <img src="assets/program/icon-openscp-2048.png" alt="Icono de OpenSCP" width="128">
-    <h1 align="center">OpenSCP</h1>
+  <img src="assets/icons/app-openscp.png" alt="Icono de OpenSCP" width="128">
+  <h1>OpenSCP</h1>
 
-<p>
-    <strong>Cliente SFTP/SCP/FTP/FTPS/WebDAV de doble panel enfocado en simplicidad y seguridad</strong>
-</p>
+  <p><strong>Un cliente ligero y multiplataforma para transferir archivos, con flujo de trabajo de doble panel, configuración segura por defecto y compatibilidad con SFTP, SCP, FTP, FTPS y WebDAV.</strong></p>
+  <p><a href="README.md">Read in English</a></p>
 
-<p>
-    <a href="README.md"><strong>Read in English</strong></a>
-</p>
-
-<p>
-    <strong>OpenSCP</strong> es un explorador de archivos estilo two-panel commander escrito en <strong>C++/Qt</strong>, con soporte <strong>SFTP</strong>, soporte inicial para <strong>SCP</strong>, soporte inicial para <strong>FTP/FTPS</strong> y soporte inicial para <strong>WebDAV</strong>. Busca ser una alternativa ligera a herramientas como WinSCP, enfocada en <strong>seguridad</strong>, <strong>claridad</strong> y <strong>extensibilidad</strong>.
-</p>
-
-<br>
-
-<img src="assets/screenshots/screenshot-main-window.png" alt="Ventana principal de OpenSCP con doble panel y cola de transferencias" width="900">
-
+  <img src="assets/screenshots/screenshot-main-window.png" alt="Ventana principal de OpenSCP" width="900">
 </div>
 
-## Lanzamientos y Ramas
+OpenSCP es una aplicación de escritorio escrita en C++20 y Qt 6 para mover y
+administrar archivos entre sistemas locales y remotos. Prioriza un
+comportamiento predecible, configuraciones seguras y una interfaz familiar de
+doble panel.
 
-Versiones estables etiquetadas:
-https://github.com/luiscuellar31/openscp/releases
+## Descarga
 
-- `main`: rama estable y probada
-- `dev`: rama de desarrollo activo (destino de PRs)
+Los binarios precompilados de cada versión etiquetada están en la
+[página de Releases](https://github.com/luiscuellar31/openscp/releases/latest).
 
-## Inicio Rapido
+| Plataforma | Archivo |
+| --- | --- |
+| macOS, Apple Silicon | `OpenSCP-<versión>-arm64-UNSIGNED.dmg` |
+| macOS, Intel | `OpenSCP-<versión>-x86_64-UNSIGNED.dmg` |
+| Linux, x86_64 | `OpenSCP-<versión>-x86_64.AppImage` |
+| Linux, ARM64 | `OpenSCP-<versión>-aarch64.AppImage` |
+| Linux, paquete Flatpak | `OpenSCP-x86_64.flatpak`, `OpenSCP-aarch64.flatpak` |
+
+Cada versión incluye un `SHA256SUMS.txt` que cubre todos esos archivos.
+Descárgalo junto al que hayas elegido y compruébalos juntos:
+
+```bash
+shasum -a 256 -c SHA256SUMS.txt --ignore-missing  # macOS
+sha256sum -c SHA256SUMS.txt --ignore-missing      # Linux
+```
+
+### Instalación en macOS
+
+Abre el DMG, arrastra OpenSCP a la carpeta Aplicaciones y ábrelo desde ahí.
+
+La primera apertura queda bloqueada: macOS indica que no puede comprobar si la
+aplicación contiene software malicioso. Esa comprobación está reservada al
+software firmado con un Apple Developer ID de pago, y OpenSCP no está inscrito
+en ese programa, así que todas sus compilaciones reciben el mismo aviso
+independientemente de su contenido. La suma de verificación publicada es lo que
+te permite validar la descarga.
+
+Para permitirla, abre **Ajustes del Sistema → Privacidad y seguridad**, baja
+hasta la sección Seguridad, pulsa **Abrir igualmente** junto al mensaje sobre
+OpenSCP y confirma. A partir de ahí OpenSCP se abre con normalidad, también
+después de reiniciar. En macOS 12 y 13 el mismo ajuste está en **Preferencias
+del Sistema → Seguridad y privacidad → General**.
+
+El equivalente desde la terminal:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/OpenSCP.app
+```
+
+Dos consecuencias que conviene conocer: en macOS 15 y posteriores el antiguo
+atajo de Control-clic → Abrir ya no funciona, por lo que la ruta de Privacidad
+y seguridad es la única disponible en la interfaz; y como las compilaciones sin
+firmar no tienen una identidad estable, macOS vuelve a pedir permiso de llavero
+después de cada actualización cuando OpenSCP lee tus contraseñas guardadas.
+
+### Instalación en Linux
+
+El AppImage no requiere instalación y funciona en la mayoría de distribuciones:
+
+```bash
+chmod +x OpenSCP-<versión>-x86_64.AppImage
+./OpenSCP-<versión>-x86_64.AppImage
+```
+
+El paquete Flatpak se integra con el escritorio y se ejecuta confinado:
+
+```bash
+flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak install --user ./OpenSCP-x86_64.flatpak
+flatpak run io.github.luiscuellar31.openscp
+```
+
+El remoto de Flathub es necesario porque el paquete depende del entorno de
+ejecución de KDE.
+
+## Compilar desde el código fuente
+
+OpenSCP es compatible actualmente con Linux y macOS. Requiere Qt 6, CMake
+3.22+, libssh2 y OpenSSL. libcurl habilita FTP y FTPS; WebDAV requiere libcurl
+y tinyxml2.
 
 ```bash
 git clone https://github.com/luiscuellar31/openscp.git
 cd openscp
-rm -rf build
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
 
 # Linux
-./build/openscp_hello
+./scripts/linux.sh dev
 
 # macOS
-open build/OpenSCP.app
-```
-
-## Lo que Ofrece OpenSCP (v0.9.0)
-
-### 1. Flujo de doble panel
-
-- Navegacion independiente local/remoto.
-- Navegacion rapida con boton `Home` en las barras de panel (siempre en panel local izquierdo; en el panel derecho usa `HOME` en modo local y fallback a `/` en modo remoto).
-- El panel derecho incluye `Open in terminal` en modo remoto para abrir una terminal SSH en la ruta remota actual usando el transporte activo (directo, proxy o jump host); si el shell SSH falla con error de sesion (por ejemplo PTY denegado), hace fallback automatico a `sftp` CLI en la misma terminal. Si ese transporte no se puede reproducir de forma segura, la app muestra un error explicito en lugar de degradar a un SSH directo basico. En `Ajustes > Seguridad` puedes forzar login interactivo (password/keyboard-interactive) y activar/desactivar el fallback automatico a `sftp` CLI para estos comandos.
-- Copia y movimiento entre paneles con drag-and-drop.
-- Operaciones remotas de contexto: descargar, subir, renombrar, eliminar, nueva carpeta/archivo y permisos.
-- Breadcrumbs clicables y busqueda por panel (boton de barra o `Ctrl/Cmd+F`) con patrones wildcard/regex y modo recursivo opcional.
-- El panel remoto usa deteccion de iconos por MIME (y proveedor nativo en macOS) para mayor paridad con iconos locales.
-
-### 2. Motor de transferencias y cola
-
-- Transferencias paralelas reales con conexiones aisladas por worker.
-- Los prechecks costosos de cola se ejecutan fuera del hilo UI; fairness de scheduling y metricas de cola reducen starvation en alta concurrencia.
-- Pausar/reanudar/cancelar/reintentar, limites por tarea/global y soporte de resume.
-- Acciones de cola segun estado: los controles solo se habilitan cuando la seleccion/tarea permite la accion (por ejemplo, reintentar en `Error`/`Canceled`, reanudar en `Paused`).
-- UI de cola con porcentaje de progreso por fila, filtros y columnas detalladas (`Speed`, `ETA`, `Transferred`, `Error`, etc.).
-- Acciones de contexto como reintentar seleccionadas, abrir destino, copiar rutas y politicas de limpieza.
-- Persistencia de ventana/layout/filtro de la cola.
-- La barra de estado principal muestra avisos de transferencias completadas (subidas/descargas exitosas).
-- Las transferencias usan sesiones de worker interrumpibles y tiempos de espera acotados de lectura/escritura en socket para evitar bloqueos indefinidos cuando la red se estanca.
-- El flujo de finalizacion de subidas esta endurecido y las vistas remotas se refrescan de forma confiable al terminar uploads.
-- Las operaciones remotas criticas ahora intentan una recuperacion automatica de sesion stale (reconexion + reintento) antes de fallar.
-- La sesion remota principal se valida de forma periodica y al volver de suspension/bloqueo; si el transporte ya no es valido, OpenSCP se desconecta de forma segura con aviso claro.
-
-### 3. Endurecimiento de seguridad de transporte SSH
-
-- Auth: contrasena, clave privada (+passphrase), keyboard-interactive (OTP/2FA), ssh-agent.
-- Selector de protocolo por sitio/sesion (`SFTP`, `SCP`, `FTP`, `FTPS`, `WebDAV`).
-- FTP/FTPS soportan listado remoto de directorios (MLSD con fallback a LIST).
-- WebDAV incluye listado remoto (`PROPFIND`) y operaciones basicas de archivos (`GET`, `PUT`, `MKCOL`, `DELETE`, `MOVE`).
-- Politica de modo SCP por sitio/sesion: `Automatico (SCP + fallback SFTP)` o
-  `Solo SCP` (sin fallback), con valor global por defecto para conexiones nuevas.
-- La verificacion de certificado FTPS (peer+host) viene activa por defecto, con CA bundle personalizado opcional por sitio/sesion.
-- Politicas de host-key: `Strict`, `Accept new (TOFU)`, `No verification` (endurecida).
-- El transporte por sitio puede usar TCP directo, proxy `SOCKS5` o tunel `HTTP CONNECT`.
-- Se soporta tunel por sitio via SSH jump host (`ProxyJump`/bastion).
-- La implementacion actual trata proxy y jump host como opciones mutuamente excluyentes por sesion.
-- Flujo endurecido para no-verificacion: doble confirmacion, excepcion temporal con TTL y banner de riesgo.
-- Persistencia atomica de `known_hosts` y permisos POSIX estrictos (`~/.ssh` 0700, archivo 0600).
-- Confirmacion explicita de conexion de una sola vez cuando falla persistir huella.
-- Cancelacion segura en keyboard-interactive (sin fallback accidental de contrasena).
-- Politica de integridad de transferencias (`off/optional|required`) por sitio/sesion (y sobrescritura por variable de entorno) con `.part` + finalize atomico.
-- Redaccion de datos sensibles en logs de produccion por defecto.
-
-### 4. Sitios guardados y credenciales
-
-- Sitios guardados con identidad estable por UUID.
-- Los sitios guardados persisten por sitio el tipo/endpoint/usuario de proxy.
-- Los sitios guardados persisten por sitio configuracion de jump host SSH (host/puerto/usuario/ruta de llave).
-- Los sitios guardados persisten por sitio la politica de modo SCP.
-- Los sitios guardados persisten por sitio la configuracion FTPS de certificado (toggle de verificacion y ruta de CA bundle opcional).
-- Bloqueo de nombres de sitio duplicados.
-- Flujos de renombrar/eliminar limpian secretos legacy o huerfanos.
-- Eliminacion opcional de credenciales guardadas y entradas relacionadas en `known_hosts` al borrar sitios.
-- Backends seguros:
-    - macOS: Keychain
-    - Linux: libsecret (si esta disponible)
-- Las contrasenas de proxy se guardan en backend seguro (nunca en texto plano en ajustes del sitio).
-- Feedback claro de persistencia en builds secure-only.
-- Quick Connect puede guardar/actualizar datos del sitio sin duplicados.
-
-### 5. Calidad de UX/UI
-
-- Dialogo de conexion mejorado (campos mas claros, selectores inline para key/known_hosts, mostrar/ocultar contrasena).
-- Dialogo de conexion con configuracion de proxy por sitio (`Direct`, `SOCKS5`, `HTTP CONNECT`) y auth opcional.
-- Dialogo de conexion con configuracion opcional de SSH jump host (bastion) por sitio.
-- Dialogo de conexion con controles FTPS de certificado (verificacion + selector opcional de CA bundle).
-- Selector de idioma de la UI con `Ingles`, `Español`, `Francés` y `Portugués`.
-- Ajustes redisenados en secciones enfocadas: `General`, `Transferencias`, `Sitios`, `Seguridad`, `Red` y `Staging y arrastre`.
-- Ajustes mantiene los controles visibles al redimensionar (tamano minimo + paginas con scroll).
-- Accion de un clic en Ajustes para restaurar layout/tamanos por defecto de la ventana principal.
-- Dialogo de permisos con vista octal y presets comunes.
-- Dialogo Acerca de con copia de diagnostico y mensajes fallback mas amigables.
-- La ventana de cola de transferencias abre centrada respecto a la ventana principal.
-- La barra de estado muestra el tipo de conexion activa y el tiempo transcurrido por sesion.
-- El flujo de desconexion se mantiene responsivo: la UI vuelve de inmediato a modo local mientras la limpieza de transferencias puede continuar en segundo plano con watchdog/feedback.
-- El reconectar se bloquea mientras la limpieza previa de transferencias siga en curso, evitando solapamientos de sesion.
-
-### 6. Linea base de calidad (CI y tests)
-
-- CI dividido por intencion:
-    - push a `dev`: build rapido Linux + tests no integracion
-    - PR a `main`: compuerta de integracion Linux y macOS
-- En integracion CI se levanta un servidor SFTP temporal para pruebas end-to-end.
-- La cobertura de integracion en PR valida variantes de transporte en CI: directo, tunel proxy `SOCKS5`, tunel proxy `HTTP CONNECT` (con auth) y tunel SSH jump host.
-- El workflow de release por tag genera automaticamente notas de draft release desde Conventional Commits (`feat`, `fix`, `BREAKING CHANGE`, etc.).
-- Workflow nocturno con `ASan`, `UBSan`, `TSan` y `cppcheck`.
-
-## Requisitos
-
-- Qt `6.x` (probado con `6.8.3`)
-- libssh2 (recomendado OpenSSL 3)
-- libcurl (opcional; requerido para backends FTP/FTPS/WebDAV)
-- tinyxml2 (opcional; requerido para parseo XML del backend WebDAV)
-- CMake `3.22+`
-- Compilador C++20
-
-Opcional:
-
-- macOS: Keychain (nativo)
-- Linux: libsecret / Secret Service
-- Cliente OpenSSH (`ssh`) para tunel de jump host SSH.
-- El backend FTP/FTPS se puede desactivar explicitamente con
-  `-DOPENSCP_ENABLE_FTP_BACKEND=OFF`.
-- El backend WebDAV se puede desactivar explicitamente con
-  `-DOPENSCP_ENABLE_WEBDAV_BACKEND=OFF`.
-
-## Probar Localmente
-
-```bash
-cmake -S . -B build -DOPENSCP_BUILD_TESTS=ON
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-```
-
-Script local de CI antes de push/PR:
-
-```bash
-./scripts/check_ci_local.sh --clean
-```
-
-Variantes utiles:
-
-```bash
-# Tambien construye el target GUI de la app
-./scripts/check_ci_local.sh --clean --full
-
-# Directorio de build personalizado + jobs en paralelo
-./scripts/check_ci_local.sh --clean --build-dir build-ci-local -j 8
-
-# Lo mismo via variables de entorno
-BUILD_DIR=build-ci-local JOBS=8 ./scripts/check_ci_local.sh --clean
-```
-
-Indice de scripts: [scripts/README.md](scripts/README.md)
-
-`openscp_sftp_integration_tests` se omite si no defines variables de integracion:
-
-- `OPENSCP_IT_SFTP_HOST`
-- `OPENSCP_IT_SFTP_PORT`
-- `OPENSCP_IT_SFTP_USER`
-- `OPENSCP_IT_SFTP_PASS` o `OPENSCP_IT_SFTP_KEY`
-- `OPENSCP_IT_SFTP_KEY_PASSPHRASE` (si aplica)
-- `OPENSCP_IT_REMOTE_BASE`
-- `OPENSCP_IT_PROXY_TYPE` (`socks5` o `http`, opcional)
-- `OPENSCP_IT_PROXY_HOST` (requerido cuando `OPENSCP_IT_PROXY_TYPE` esta definido)
-- `OPENSCP_IT_PROXY_PORT` (opcional; por defecto: `1080` para `socks5`, `8080` para `http`)
-- `OPENSCP_IT_PROXY_USER` (opcional)
-- `OPENSCP_IT_PROXY_PASS` (opcional)
-- `OPENSCP_IT_JUMP_HOST` (opcional)
-- `OPENSCP_IT_JUMP_PORT` (opcional; por defecto `22`)
-- `OPENSCP_IT_JUMP_USER` (opcional)
-- `OPENSCP_IT_JUMP_KEY` (opcional)
-
-`openscp_ftp_integration_tests` se omite si no defines variables de integracion:
-
-- `OPENSCP_IT_FTP_HOST`
-- `OPENSCP_IT_FTP_PORT` (opcional; por defecto `21`)
-- `OPENSCP_IT_FTP_USER` (opcional)
-- `OPENSCP_IT_FTP_PASS` (opcional)
-- `OPENSCP_IT_FTP_REMOTE_BASE`
-
-`openscp_ftps_integration_tests` se omite si no defines variables de integracion:
-
-- `OPENSCP_IT_FTPS_HOST`
-- `OPENSCP_IT_FTPS_PORT` (opcional; por defecto `990`)
-- `OPENSCP_IT_FTPS_USER` (opcional)
-- `OPENSCP_IT_FTPS_PASS` (opcional)
-- `OPENSCP_IT_FTPS_REMOTE_BASE`
-- `OPENSCP_IT_FTPS_VERIFY_PEER` (`1`/`0`, opcional; por defecto `1`)
-- `OPENSCP_IT_FTPS_CA_CERT` (opcional)
-
-## Flujos por Plataforma
-
-### macOS
-
-Bucle diario recomendado:
-
-```bash
 ./scripts/macos.sh dev
 ```
 
-Paso a paso:
+Consulta [Compilar OpenSCP](docs/BUILDING.md) para dependencias por plataforma,
+pasos manuales, empaquetado y solución de problemas.
 
-```bash
-./scripts/macos.sh configure
-./scripts/macos.sh build
-./scripts/macos.sh run
-```
+## Características principales
 
-Empaquetado local sin firma:
+- Navegación local y remota de doble panel con rutas planas y clicables, diálogo
+  para abrir directorios, historial, favoritos, búsqueda y la posibilidad de
+  arrastrar y soltar.
+- SFTP y SCP mediante libssh2; FTP, FTPS y WebDAV opcionales mediante libcurl.
+- Cola persistente con transferencias en paralelo, pausa, reanudación,
+  reintentos, políticas de conflicto, límites de ancho de banda y archivos
+  `.part`.
+- Sitios guardados con Keychain en macOS y Secret Service/libsecret en Linux.
+- Verificación estricta de claves SSH, con aceptación de claves nuevas o
+  deshabilitada explícitamente.
+- Proxies SOCKS5 y HTTP CONNECT, además de servidores de salto SSH cuando el
+  protocolo lo permite.
+- Sincronización unidireccional con vista previa, filtros y sumas de
+  comprobación opcionales.
+- Interfaces en español, inglés, portugués, francés y alemán.
 
-```bash
-./scripts/macos.sh app
-./scripts/macos.sh pkg
-./scripts/macos.sh dmg
-./scripts/macos.sh dist
-```
+## Navegación por rutas
 
-Si Qt esta fuera de la ruta por defecto (`$HOME/Qt/<version>/macos`):
+Cada panel presenta la ubicación actual como un campo de ruta convencional. Haz
+clic en cualquier directorio superior dentro de la ruta para abrirlo, o en el
+directorio actual para mostrar el diálogo **Abrir directorio**. También puedes
+usar `Ctrl+L` (`Cmd+L` también está disponible en macOS) o el atajo Abrir de
+la plataforma: `Ctrl+O` en Linux y `Cmd+O` en macOS.
 
-```bash
-export QT_PREFIX="/ruta/a/Qt/<version>/macos"
-# o
-export Qt6_DIR="/ruta/a/Qt/<version>/macos/lib/cmake/Qt6"
-```
+El diálogo permite escribir una ruta directamente y consultar las rutas
+recientes y los favoritos del panel local o de la sesión remota seleccionada.
+Consulta [Atajos de teclado](docs/KEYBOARD_SHORTCUTS.md) para conocer todos los
+atajos y cuándo dependen del panel activo.
 
-Detalles completos de empaquetado: [assets/macos/README.md](assets/macos/README.md)
+Los protocolos disponibles dependen del paquete. Consulta la
+[matriz de protocolos](docs/PLATFORM_COMPATIBILITY.md#protocol-availability-by-build)
+antes de elegir un paquete.
 
-### Linux
+## Documentación
 
-Detalles de build y empaquetado Linux (AppImage, Snap, Flatpak): [assets/linux/README.md](assets/linux/README.md)
+- [Compilación y empaquetado](docs/BUILDING.md)
+- [Atajos de teclado](docs/KEYBOARD_SHORTCUTS.md)
+- [Contribuciones y traducciones](CONTRIBUTING.md)
+- [Arquitectura](docs/ARCHITECTURE.md)
+- [Compatibilidad de plataformas y protocolos](docs/PLATFORM_COMPATIBILITY.md)
+- [Política de seguridad](SECURITY.md)
+- [Licenciamiento](docs/LICENSING.md)
 
-## Variables de Entorno en Runtime
+## Diagnóstico en ejecución
 
-- `OPENSCP_KNOWNHOSTS_PLAIN=1|0` - fuerza hostnames planos vs hasheados en `known_hosts`.
-- `OPENSCP_FP_HEX_ONLY=1` - muestra huellas en HEX con `:`.
-- `OPENSCP_TRANSFER_INTEGRITY=off|optional|required` - sobrescribe la politica de integridad de transferencias.
-- `OPENSCP_LOG_LEVEL=off|error|warn|info|debug` - ajusta la verbosidad de logs.
-- `OPENSCP_ENV=dev|prod` - selector de entorno runtime (`dev` habilita diagnosticos solo de desarrollo).
-- `OPENSCP_LOG_SENSITIVE=1` - habilita detalles sensibles de depuracion solo cuando `OPENSCP_ENV=dev` (apagado por defecto).
-- `OPENSCP_ENABLE_INSECURE_FALLBACK=1` - habilita fallback inseguro solo cuando el build/plataforma lo soporta.
+Estas variables opcionales ayudan a diagnosticar problemas:
 
-## Capturas
+- `OPENSCP_LOG_LEVEL=off|error|warn|info|debug`
+- `OPENSCP_TRANSFER_INTEGRITY=off|optional|required`
+- `OPENSCP_KNOWNHOSTS_PLAIN=1|0`
+- `OPENSCP_FP_HEX_ONLY=1`
+- `OPENSCP_ENV=dev|prod` selecciona el entorno de ejecución
+- `OPENSCP_LOG_SENSITIVE=1` permite detalles sensibles de diagnóstico solamente
+  junto con `OPENSCP_ENV=dev`
+- `OPENSCP_ENABLE_INSECURE_FALLBACK=1` solo cuando la compilación lo permite
+
+Los registros sensibles están deshabilitados por defecto y solo deberían
+activarse temporalmente en un entorno de desarrollo controlado.
+
+## Más capturas
 
 <p align="center">
-    <img src="assets/screenshots/screenshot-site-manager.png" alt="Gestor de sitios con servidores guardados" width="32%">
-    <img src="assets/screenshots/screenshot-connect.png" alt="Dialogo de conexion con opciones de autenticacion" width="32%">
-    <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Cola de transferencias con progreso, filtros y acciones" width="32%">
-    <br>
-    <img src="assets/screenshots/screenshot-history.png" alt="Panel de historial de conexiones con sitios recientes" width="32%">
-    <img src="assets/screenshots/screenshot-settings.png" alt="Dialogo de ajustes con opciones de seguridad y transferencias" width="32%">
+  <img src="assets/screenshots/screenshot-site-manager.png" alt="Sitios guardados" width="32%">
+  <img src="assets/screenshots/screenshot-connect.png" alt="Diálogo de conexión" width="32%">
+  <img src="assets/screenshots/screenshot-transfer-queue.png" alt="Cola de transferencias" width="32%">
 </p>
+
+<p align="center">
+  <img src="assets/screenshots/screenshot-history.png" alt="Historial de navegación" width="32%">
+  <img src="assets/screenshots/screenshot-favorites.png" alt="Rutas favoritas" width="32%">
+  <img src="assets/screenshots/screenshot-settings.png" alt="Ajustes de la aplicación" width="32%">
+</p>
+
+<details>
+  <summary>Opciones avanzadas de conexión</summary>
+  <p align="center">
+    <img src="assets/screenshots/screenshot-connect-extended.png" alt="Opciones avanzadas de conexión" width="60%">
+  </p>
+</details>
 
 ## Roadmap
 
-- El soporte para Windows esta planeado para futuras versiones.
-- Protocolos: ampliar cobertura de interoperabilidad WebDAV.
-- Flujos de autenticacion enterprise mas amplios para proxy/jump (por ejemplo, autenticacion jump interactiva fuera de modo batch).
-- Flujos de sincronizacion: comparar/sincronizar y keep-up-to-date con filtros/ignorados.
-- Persistencia de cola entre reinicios.
-- Mas UX: marcadores, historial, command palette y temas.
+- Completar y validar la compatibilidad con Windows; el código actual todavía
+  es experimental.
+- Probar WebDAV con una mayor variedad de servidores.
+- Ampliar la autenticación interactiva y las configuraciones empresariales de
+  proxies y servidores de salto SSH.
+- Añadir una paleta de comandos y temas seleccionables.
 
-## Creditos y Licencias
+## Lanzamientos y contribuciones
 
-- libssh2, libcurl, tinyxml2, OpenSSL, zlib y Qt pertenecen a sus respectivos autores.
-- Textos de licencia: [docs/credits/LICENSES/](docs/credits/LICENSES/)
-- Materiales Qt (LGPL): [docs/credits](docs/credits)
+Las versiones publicadas están disponibles en
+[GitHub Releases](https://github.com/luiscuellar31/openscp/releases).
+`main` contiene el trabajo estable y `dev` recibe los pull requests.
 
-## Contribuir
+Las contribuciones son bienvenidas. Lee [CONTRIBUTING.md](CONTRIBUTING.md)
+antes de abrir un pull request. Reporta vulnerabilidades de forma privada como
+indica [SECURITY.md](SECURITY.md).
 
-- Las contribuciones son bienvenidas. Revisa [CONTRIBUTING.md](CONTRIBUTING.md) para flujo y estandares.
-- Issues y pull requests son bienvenidos, especialmente en estabilidad macOS/Linux, i18n y robustez SFTP/SCP/FTP/FTPS/WebDAV.
+OpenSCP está disponible bajo GPLv3-only o una licencia comercial. Los
+componentes de terceros conservan sus propias licencias; consulta
+[Licenciamiento](docs/LICENSING.md) y los
+[créditos de terceros](docs/credits/CREDITS.md).
