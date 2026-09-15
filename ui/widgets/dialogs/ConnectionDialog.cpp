@@ -1020,8 +1020,8 @@ void ConnectionDialog::adjustToContent() {
         targetScreen ? targetScreen->availableGeometry().height() * 4 / 5 : 720;
     const int frameDecorationHeight =
         std::max(0, frameGeometry().height() - height());
-    const int maximumDialogHeight =
-        std::max(320, maximumFrameHeight - frameDecorationHeight);
+    const int maximumDialogHeight = std::max(
+        kMinimumUsableHeight, maximumFrameHeight - frameDecorationHeight);
     const int fixedChromeHeight = margins.top() + margins.bottom() +
                                   std::max(0, layout()->spacing()) +
                                   dialogButtons_->sizeHint().height();

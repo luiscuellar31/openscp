@@ -15,7 +15,9 @@
 #include <QSettings>
 #include <QToolButton>
 
+#include <algorithm>
 #include <iostream>
+#include <string>
 
 namespace {
 
@@ -129,10 +131,24 @@ OPENSCP_TEST(testSavedSiteFormStartsCompact, test) {
     test.check(dialog.width() == compactSize.width(),
                "opening every section should not widen the dialog");
     if (dialog.screen()) {
-        test.check(dialog.frameGeometry().height() <=
-                       dialog.screen()->availableGeometry().height() * 4 / 5,
-                   "expanded content should stay within the screen height "
-                   "limit");
+        // The dialog caps itself at four fifths of the screen, but keeps a
+        // usable minimum when that cap would leave it too short to operate.
+        // Both limits are deliberate, so the contract is the larger of the
+        // two. The numbers are reported so a failure says which one bound.
+        const int screenLimit =
+            dialog.screen()->availableGeometry().height() * 4 / 5;
+        const int frameDecoration =
+            std::max(0, dialog.frameGeometry().height() - dialog.height());
+        const int usableMinimum =
+            ConnectionDialog::kMinimumUsableHeight + frameDecoration;
+        test.check(
+            dialog.frameGeometry().height() <=
+                std::max(screenLimit, usableMinimum),
+            "expanded content should stay within the screen height limit "
+            "(frame " +
+                std::to_string(dialog.frameGeometry().height()) +
+                ", screen limit " + std::to_string(screenLimit) +
+                ", usable minimum " + std::to_string(usableMinimum) + ")");
     }
     test.check(scrollArea->verticalScrollBarPolicy() == Qt::ScrollBarAsNeeded,
                "overflowing optional fields should use internal scrolling");

@@ -19,6 +19,11 @@ class ConnectionDisclosureHeader;
 class ConnectionDialog : public QDialog {
     Q_OBJECT
     public:
+    // The dialog caps its height at four fifths of the screen, but never
+    // shrinks past this: on a very short screen staying usable matters more
+    // than honoring the cap.
+    static constexpr int kMinimumUsableHeight = 320;
+
     explicit ConnectionDialog(QWidget *parent = nullptr);
     openscp::SessionOptions options() const;
     void setOptions(const openscp::SessionOptions &opt);
