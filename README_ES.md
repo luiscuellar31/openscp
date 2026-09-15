@@ -2,7 +2,7 @@
   <img src="assets/icons/app-openscp.png" alt="Icono de OpenSCP" width="128">
   <h1>OpenSCP</h1>
 
-  <p><strong>Un cliente ligero y multiplataforma de transferencia de archivos inspirado en WinSCP.</strong></p>
+  <p><strong>Un cliente ligero y multiplataforma para transferir archivos, con flujo de trabajo de doble panel, configuración segura por defecto y compatibilidad con SFTP, SCP, FTP, FTPS y WebDAV.</strong></p>
   <p><a href="README.md">Read in English</a></p>
 
   <img src="assets/screenshots/screenshot-main-window.png" alt="Ventana principal de OpenSCP" width="900">
@@ -173,9 +173,17 @@ activarse temporalmente en un entorno de desarrollo controlado.
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/screenshot-history.png" alt="Historial de navegación" width="40%">
-  <img src="assets/screenshots/screenshot-settings.png" alt="Ajustes de la aplicación" width="40%">
+  <img src="assets/screenshots/screenshot-history.png" alt="Historial de navegación" width="32%">
+  <img src="assets/screenshots/screenshot-favorites.png" alt="Rutas favoritas" width="32%">
+  <img src="assets/screenshots/screenshot-settings.png" alt="Ajustes de la aplicación" width="32%">
 </p>
+
+<details>
+  <summary>Opciones avanzadas de conexión</summary>
+  <p align="center">
+    <img src="assets/screenshots/screenshot-connect-extended.png" alt="Opciones avanzadas de conexión" width="60%">
+  </p>
+</details>
 
 ## Roadmap
 
