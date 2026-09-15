@@ -752,8 +752,8 @@ void SettingsDialog::refreshWrappedCheckTexts() {
         }
         if (!reflowed)
             continue;
-        for (QWidget *ancestorWidget = checkBox->parentWidget();
-             ancestorWidget; ancestorWidget = ancestorWidget->parentWidget()) {
+        for (QWidget *ancestorWidget = checkBox->parentWidget(); ancestorWidget;
+             ancestorWidget = ancestorWidget->parentWidget()) {
             if (!ancestorWidget->property("settingsFormPage").toBool())
                 continue;
             if (!resettledPages.contains(ancestorWidget))

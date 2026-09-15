@@ -1164,8 +1164,8 @@ OPENSCP_TEST(testSettingsPageSwitchKeepsWrappedRowsStable, test) {
 
     // A resize leaves the pages that are off screen holding the wrap they had
     // at the previous width, so switching after one is the harder case.
-    for (const QSize &size : {QSize(1180, 760), QSize(760, 560),
-                              QSize(860, 620)}) {
+    for (const QSize &size :
+         {QSize(1180, 760), QSize(760, 560), QSize(860, 620)}) {
         dialog.resize(size);
         flushUiEvents();
         for (int index : {4, 6, 0, 3})
@@ -1284,10 +1284,9 @@ OPENSCP_TEST(testSettingsLabelsAndFieldsShareAxes, test) {
             if (sharedFieldAxis < 0)
                 continue;
             ++checkAxisCount;
-            checksShareTheFieldAxis =
-                checksShareTheFieldAxis &&
-                qAbs(check->mapTo(&dialog, QPoint()).x() - sharedFieldAxis) <=
-                    4;
+            checksShareTheFieldAxis = checksShareTheFieldAxis &&
+                                      qAbs(check->mapTo(&dialog, QPoint()).x() -
+                                           sharedFieldAxis) <= 4;
         }
     }
 
