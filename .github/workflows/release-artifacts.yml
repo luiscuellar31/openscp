@@ -99,7 +99,6 @@ jobs:
           host: mac
           target: desktop
           arch: clang_64
-          modules: "qtsvg qttools"
           cache: true
           aqtversion: "==3.3.0"
           py7zrversion: "==1.1.0"
@@ -198,7 +197,6 @@ jobs:
           host: ${{ matrix.qt_host }}
           target: desktop
           arch: ${{ matrix.qt_arch }}
-          modules: "qtsvg qttools"
           cache: true
           aqtversion: "==3.3.0"
           py7zrversion: "==1.1.0"
