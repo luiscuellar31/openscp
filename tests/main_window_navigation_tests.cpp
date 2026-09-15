@@ -411,10 +411,16 @@ OPENSCP_TEST(testTransferQueueUsesSupportedModelessWindowLifecycle, test) {
     const QRect restingGeometry = dialog->geometry();
 
     dialog->reject();
+    // Sampled before pumping events, for the reason spelled out at the close
+    // control below: the transition starts synchronously, and once the loop
+    // runs a loaded machine can finish it before the check reads the state.
+    const bool rejectStartedTransition =
+        dialog->isVisible() && hasRunningTransition();
+    const bool rejectClosedOutright =
+        !dialog->isVisible() && !hasRunningTransition();
     flushUiEvents();
-    test.check(transitionsSupported
-                   ? dialog->isVisible() && hasRunningTransition()
-                   : !dialog->isVisible() && !hasRunningTransition(),
+    test.check(transitionsSupported ? rejectStartedTransition
+                                    : rejectClosedOutright,
                "rejecting the transfer queue should use the supported close "
                "path");
     const bool closingFinished = openscp::testsupport::waitUntil(
