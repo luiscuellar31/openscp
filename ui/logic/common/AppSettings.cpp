@@ -1,5 +1,6 @@
 #include "logic/common/AppSettings.hpp"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -7,10 +8,19 @@
 namespace openscpui {
 namespace {
 
+// Settings follow whoever is running. A build that renames itself, such as
+// the demo, then keeps its own store instead of writing into a real
+// installation, and so does a test binary that names itself.
+QString runningName(const QString &name) {
+    return name.isEmpty() ? QStringLiteral("OpenSCP") : name;
+}
+
 QString storeApplicationName(AppSettings::Store store) {
+    // The secret fallback keeps its fixed name so existing installations go
+    // on finding the secrets they already stored.
     return store == AppSettings::Store::SecretFallback
                ? QStringLiteral("Secrets")
-               : QStringLiteral("OpenSCP");
+               : runningName(QCoreApplication::applicationName());
 }
 
 QString statusError(QSettings::Status status) {
@@ -39,7 +49,12 @@ QString effectiveStagingRootPath(const QSettings &settings) {
 }
 
 AppSettings::AppSettings(Store store)
-    : QSettings(QStringLiteral("OpenSCP"), storeApplicationName(store)) {
+    // Passing the format explicitly matters: the organization/application
+    // constructor always uses NativeFormat, so a caller that redirects
+    // settings, such as the test harness, would be ignored.
+    : QSettings(QSettings::defaultFormat(), QSettings::UserScope,
+                runningName(QCoreApplication::organizationName()),
+                storeApplicationName(store)) {
 }
 
 AppSettings::AppSettings(const QString &organization,

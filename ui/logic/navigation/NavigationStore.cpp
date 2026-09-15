@@ -2,6 +2,7 @@
 
 #include "logic/navigation/RemotePath.hpp"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
 #include <QUrl>
@@ -18,9 +19,21 @@ constexpr int kMaximumRecentEntries = 20;
 
 } // namespace
 
+namespace {
+
+QString runningScope(const QString &explicitName, const QString &running) {
+    if (!explicitName.isEmpty())
+        return explicitName;
+    return running.isEmpty() ? QStringLiteral("OpenSCP") : running;
+}
+
+} // namespace
+
 NavigationStore::NavigationStore(QString organization, QString application)
-    : organization_(std::move(organization)),
-      application_(std::move(application)) {
+    : organization_(
+          runningScope(organization, QCoreApplication::organizationName())),
+      application_(
+          runningScope(application, QCoreApplication::applicationName())) {
 }
 
 NavigationStore::NavigationStore(QString settingsFile,

@@ -17,7 +17,7 @@
 namespace {
 
 void clearSavedSites() {
-    QSettings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP")).clear();
+    QSettings().clear();
 }
 
 SiteEntry savedSiteFixture() {

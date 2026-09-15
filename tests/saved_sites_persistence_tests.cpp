@@ -13,7 +13,7 @@
 namespace {
 
 void writeIncompletePreReleaseSites() {
-    QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
+    QSettings settings;
     settings.clear();
     settings.beginWriteArray(QStringLiteral("sites"));
 
@@ -48,7 +48,7 @@ OPENSCP_TEST(testIncompletePreReleaseSitesAreDiscarded, test) {
     const auto saveResult = SavedSitesPersistence::saveSites(loaded.sites);
     test.check(saveResult.ok,
                "discarded pre-release sites should be removable");
-    QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
+    QSettings settings;
     test.check(settings.beginReadArray(QStringLiteral("sites")) == 0,
                "rewriting must remove obsolete site data and plaintext");
     settings.endArray();
@@ -107,7 +107,7 @@ OPENSCP_TEST(testRoundTrip, test) {
                "saved-site metadata must never round-trip credentials through "
                "QSettings");
 
-    QSettings raw(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
+    QSettings raw;
     raw.beginReadArray(QStringLiteral("sites"));
     raw.setArrayIndex(0);
     test.check(!raw.contains(QStringLiteral("password")) &&
@@ -146,7 +146,7 @@ OPENSCP_TEST(testInitialRemotePathNormalization, test) {
     site.name = QStringLiteral("Path site");
     test.check(SavedSitesPersistence::saveSites({site}).ok,
                "path fixture should use the current format");
-    QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
+    QSettings settings;
     settings.beginWriteArray(QStringLiteral("sites"));
     settings.setArrayIndex(0);
     settings.setValue(QStringLiteral("initialRemotePath"),
@@ -188,7 +188,7 @@ OPENSCP_TEST(testCorruptSecurityAndPortValuesAreRepaired, test) {
     site.name = QStringLiteral("Corrupt site");
     test.check(SavedSitesPersistence::saveSites({site}).ok,
                "corruption fixture should use the current format");
-    QSettings settings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP"));
+    QSettings settings;
     settings.beginWriteArray(QStringLiteral("sites"));
     settings.setArrayIndex(0);
     settings.setValue(QStringLiteral("port"), -1);
@@ -236,6 +236,6 @@ int main(int argc, char **argv) {
     }
     openscp::test::TestHarness harness("saved-sites persistence");
     const int result = harness.run();
-    QSettings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP")).clear();
+    QSettings().clear();
     return result;
 }

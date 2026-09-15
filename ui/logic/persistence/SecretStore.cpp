@@ -8,12 +8,14 @@
 #include "logic/common/AppSettings.hpp"
 
 #include <QByteArray>
+#include <QCoreApplication>
 #include <QString>
 #include <QVariant>
 
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <string>
 
 #ifdef Q_OS_WIN
 #include <wincrypt.h>
@@ -26,8 +28,17 @@
 
 namespace {
 
+// Derived from the running application so a build that renames itself keeps
+// its secrets in its own keychain service instead of the real one.
 CFStringRef kServiceNameCF() {
-    static CFStringRef s = CFSTR("OpenSCP");
+    static CFStringRef s = [] {
+        const QString name = QCoreApplication::applicationName();
+        const QString service =
+            name.isEmpty() ? QStringLiteral("OpenSCP") : name;
+        return CFStringCreateWithCharacters(
+            kCFAllocatorDefault,
+            reinterpret_cast<const UniChar *>(service.utf16()), service.size());
+    }();
     return s;
 }
 
@@ -438,9 +449,18 @@ bool SecretStore::insecureFallbackActive() {
 namespace {
 
 const SecretSchema *openscp_schema() {
+    // Same reasoning as the Apple service name: the schema identifies whose
+    // secrets these are, so it follows the running application.
+    static const std::string schemaName = [] {
+        QString name = QCoreApplication::applicationName();
+        if (name.isEmpty())
+            name = QStringLiteral("OpenSCP");
+        name = name.simplified().replace(QLatin1Char(' '), QLatin1Char('-'));
+        return QStringLiteral("%1.secret").arg(name.toLower()).toStdString();
+    }();
     static const SecretSchema schema = [] {
         SecretSchema value{};
-        value.name = "openscp.secret";
+        value.name = schemaName.c_str();
         value.flags = SECRET_SCHEMA_NONE;
         value.attributes[0].name = "key";
         value.attributes[0].type = SECRET_SCHEMA_ATTRIBUTE_STRING;

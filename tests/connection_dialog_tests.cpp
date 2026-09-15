@@ -28,7 +28,7 @@ QToolButton *sectionToggle(ConnectionDialog &dialog, const char *name) {
 }
 
 void clearSettings() {
-    QSettings(QStringLiteral("OpenSCP"), QStringLiteral("OpenSCP")).clear();
+    QSettings().clear();
 }
 
 OPENSCP_TEST(testSavedSiteFormStartsCompact, test) {

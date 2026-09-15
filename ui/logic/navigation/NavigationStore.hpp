@@ -14,8 +14,10 @@ class NavigationStore {
     public:
     enum class Location { Local, Remote };
 
-    NavigationStore(QString organization = QStringLiteral("OpenSCP"),
-                    QString application = QStringLiteral("OpenSCP"));
+    // Empty names follow the running application, matching AppSettings, so a
+    // build that renames itself keeps its history in its own store.
+    NavigationStore(QString organization = QString(),
+                    QString application = QString());
 
     static NavigationStore forIniFile(const QString &filePath);
 
