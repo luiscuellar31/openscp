@@ -26,6 +26,7 @@ RUN dnf -y --setopt=install_weak_deps=False install epel-release dnf-plugins-cor
         pkgconf-pkg-config \
         tinyxml2-devel \
         xcb-util \
+        xcb-util-cursor \
         xcb-util-image \
         xcb-util-keysyms \
         xcb-util-renderutil \
