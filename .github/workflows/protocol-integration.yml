@@ -1,0 +1,407 @@
+name: Protocol Integration and Sanitizers
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: protocol-integration-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-ssh-services:
+    name: SFTP and SCP
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install build and SSH service dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            cmake ninja-build netcat-openbsd openssh-server pkg-config \
+            libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev libsecret-1-dev \
+            qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools \
+            qt6-l10n-tools libgl1-mesa-dev
+
+      - name: Start isolated SSH service
+        run: |
+          set -euo pipefail
+          sudo install -d -m 755 /run/sshd
+          sudo ssh-keygen -A
+
+          sudo useradd --create-home --shell /bin/bash openscp_it || true
+          sudo usermod -U openscp_it || true
+          sudo passwd -d openscp_it || true
+          sudo chage -E -1 openscp_it || true
+
+          ssh-keygen -t ed25519 -N "" \
+            -f /tmp/openscp_it_linux_ed25519 -q
+          sudo install -d -o openscp_it -g openscp_it -m 700 \
+            /home/openscp_it/.ssh
+          sudo install -o openscp_it -g openscp_it -m 600 \
+            /tmp/openscp_it_linux_ed25519.pub \
+            /home/openscp_it/.ssh/authorized_keys
+          sudo install -d -o openscp_it -g openscp_it -m 700 \
+            /home/openscp_it/upload
+
+          sudo tee /tmp/openscp_sshd_config >/dev/null <<'EOF'
+          Port 2222
+          ListenAddress 127.0.0.1
+          Protocol 2
+          HostKey /etc/ssh/ssh_host_ed25519_key
+          HostKey /etc/ssh/ssh_host_rsa_key
+          PubkeyAuthentication yes
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          ChallengeResponseAuthentication no
+          UsePAM no
+          PermitRootLogin no
+          AllowUsers openscp_it
+          AuthorizedKeysFile .ssh/authorized_keys
+          Subsystem sftp internal-sftp
+          PidFile /tmp/openscp_sshd.pid
+          LogLevel VERBOSE
+          PrintMotd no
+          UseDNS no
+          EOF
+
+          sudo /usr/sbin/sshd -t -f /tmp/openscp_sshd_config
+          sudo /usr/sbin/sshd -f /tmp/openscp_sshd_config \
+            -E /tmp/openscp_sshd.log
+
+          for _ in {1..20}; do
+            if nc -z 127.0.0.1 2222; then
+              exit 0
+            fi
+            sleep 1
+          done
+          sudo cat /tmp/openscp_sshd.log || true
+          exit 1
+
+      - name: Configure SSH integration build
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOPENSCP_BUILD_TESTS=ON \
+            -DOPENSCP_WERROR=ON
+
+      - name: Build SFTP and SCP integration binaries
+        run: |
+          cmake --build build --parallel --target \
+            openscp_sftp_integration_tests \
+            openscp_scp_integration_tests 2>&1 | \
+            tee /tmp/openscp-ssh-build.log
+
+      - name: Report SSH build diagnostics
+        if: failure()
+        run: |
+          grep -E -i \
+            'error:|fatal:|undefined reference|no rule to make target' \
+            /tmp/openscp-ssh-build.log | tail -20 | \
+            while IFS= read -r line; do
+              echo "::error title=SSH integration build::${line}"
+            done
+
+      - name: Run SFTP and SCP integration binaries directly
+        env:
+          OPENSCP_IT_SFTP_HOST: 127.0.0.1
+          OPENSCP_IT_SFTP_PORT: "2222"
+          OPENSCP_IT_SFTP_USER: openscp_it
+          OPENSCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
+          OPENSCP_IT_REMOTE_BASE: /home/openscp_it/upload
+        run: |
+          ./build/tests/openscp_sftp_integration_tests 2>&1 | \
+            tee /tmp/openscp-ssh-tests.log
+          ./build/tests/openscp_scp_integration_tests 2>&1 | \
+            tee -a /tmp/openscp-ssh-tests.log
+
+      - name: Report SSH integration diagnostics
+        if: failure()
+        run: |
+          if [[ -f /tmp/openscp-ssh-tests.log ]]; then
+            grep -E -i '\[fail\]|error|failed|not found|command' \
+              /tmp/openscp-ssh-tests.log | tail -25 | \
+              while IFS= read -r line; do
+                echo "::error title=SSH integration::${line}"
+              done
+          fi
+
+      - name: Make SSH service log readable after failure
+        if: failure()
+        run: sudo chmod a+r /tmp/openscp_sshd.log || true
+
+      - name: Upload SSH service log on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ssh-service-log
+          path: /tmp/openscp_sshd.log
+          if-no-files-found: ignore
+
+  real-protocol-services:
+    name: FTP, FTPS, and WebDAV
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OPENSCP_PROTOCOL_IT_STATE_DIR: /tmp/openscp-protocol-it
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install build and protocol service dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            apache2 apache2-utils curl netcat-openbsd openssl shellcheck vsftpd \
+            cmake ninja-build pkg-config \
+            libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev libsecret-1-dev \
+            qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools \
+            qt6-l10n-tools libgl1-mesa-dev
+
+      - name: Validate service scripts
+        run: |
+          bash -n scripts/ci/setup_protocol_services.sh
+          bash -n scripts/ci/run_protocol_integration.sh
+          shellcheck scripts/ci/setup_protocol_services.sh
+          shellcheck scripts/ci/run_protocol_integration.sh
+
+      - name: Configure protocol integration build
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOPENSCP_BUILD_TESTS=ON \
+            -DOPENSCP_ENABLE_FTP_BACKEND=ON \
+            -DOPENSCP_ENABLE_WEBDAV_BACKEND=ON
+
+      - name: Build protocol integration binaries
+        run: |
+          cmake --build build --parallel --target \
+            openscp_ftp_integration_tests \
+            openscp_ftps_integration_tests \
+            openscp_webdav_integration_tests
+
+      - name: Start real protocol services
+        run: |
+          if ! ./scripts/ci/setup_protocol_services.sh \
+            >/tmp/openscp-protocol-setup.log 2>&1; then
+            cat /tmp/openscp-protocol-setup.log
+            grep -E -i 'error|failed|fatal|oops|denied|address already in use' \
+              /tmp/openscp-protocol-setup.log | tail -20 | \
+              while IFS= read -r line; do
+                line="${line//'%'/'%25'}"
+                printf '%s\n' \
+                  "::error file=scripts/ci/setup_protocol_services.sh,line=1,title=Protocol service setup::${line}"
+              done || true
+            {
+              printf '%s\n' '### Protocol service setup failure' '```text'
+              tail -100 /tmp/openscp-protocol-setup.log
+              printf '%s\n' '```'
+            } >>"$GITHUB_STEP_SUMMARY"
+            # Phase-specific codes remain visible through the public Checks
+            # API even when GitHub withholds unauthenticated workflow logs.
+            if grep -q 'smoke check: HTTPS WebDAV' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 48
+            elif grep -q 'smoke check: implicit FTPS' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 47
+            elif grep -q 'smoke check: explicit FTPS' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 46
+            elif grep -q 'smoke check: FTP' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 45
+            elif grep -q 'HTTPS WebDAV did not start' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 44
+            elif grep -q 'implicit FTPS did not start' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 43
+            elif grep -q 'explicit FTPS did not start' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 42
+            elif grep -q 'FTP did not start' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 41
+            elif grep -q 'Apache WebDAV process failed to launch' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 57
+            elif grep -q 'Apache WebDAV configuration validation failed' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 56
+            elif grep -q 'implicit FTPS process failed to launch' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 55
+            elif grep -q 'explicit FTPS process failed to launch' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 54
+            elif grep -q 'FTP process failed to launch' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 53
+            elif grep -q 'configuring Apache WebDAV' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 52
+            elif grep -q 'starting FTP, explicit FTPS, and implicit FTPS' \
+              /tmp/openscp-protocol-setup.log; then
+              exit 51
+            fi
+            exit 39
+          fi
+          cat /tmp/openscp-protocol-setup.log
+
+      - name: Report protocol service diagnostics
+        if: failure()
+        run: |
+          grep -E -i 'error|failed|fatal|oops|denied|address already in use' \
+            /tmp/openscp-protocol-setup.log | tail -20 | \
+            while IFS= read -r line; do
+              echo "::error title=Protocol service setup::${line}"
+            done
+
+      - name: Run protocol integration binaries directly
+        run: |
+          ./scripts/ci/run_protocol_integration.sh build 2>&1 | \
+            tee /tmp/openscp-protocol-tests.log
+
+      - name: Report protocol integration diagnostics
+        if: failure()
+        run: |
+          if [[ -f /tmp/openscp-protocol-tests.log ]]; then
+            grep -E -i '\[fail\]|error|failed|not found|command' \
+              /tmp/openscp-protocol-tests.log | tail -25 | \
+              while IFS= read -r line; do
+                echo "::error title=Protocol integration::${line}"
+              done
+          fi
+
+      - name: Make service logs readable after failure
+        if: failure()
+        run: sudo chmod -R a+rX /tmp/openscp-protocol-it/logs || true
+
+      - name: Upload service logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: protocol-service-logs
+          path: /tmp/openscp-protocol-it/logs
+          if-no-files-found: ignore
+
+  sanitizers:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ASan + UBSan
+            id: asan-ubsan
+            flags: address,undefined
+          - name: TSan
+            id: tsan
+            flags: thread
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install sanitizer build dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev libsecret-1-dev \
+            qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools \
+            qt6-l10n-tools libgl1-mesa-dev
+
+      - name: Configure instrumented build
+        env:
+          CC: clang
+          CXX: clang++
+          SANITIZERS: ${{ matrix.flags }}
+        run: |
+          SANITIZER_FLAGS="-fsanitize=${SANITIZERS} -fno-omit-frame-pointer"
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DOPENSCP_BUILD_TESTS=ON \
+            "-DCMAKE_C_FLAGS=${SANITIZER_FLAGS}" \
+            "-DCMAKE_CXX_FLAGS=${SANITIZER_FLAGS}" \
+            "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=${SANITIZERS}" \
+            "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=${SANITIZERS}"
+
+      - name: Build instrumented app and tests
+        run: |
+          cmake --build build --parallel 2>&1 | \
+            tee /tmp/openscp-sanitizer-build.log
+
+      - name: Report sanitizer build diagnostics
+        if: failure()
+        run: |
+          grep -E -i \
+            'error:|fatal:|undefined reference|no rule to make target' \
+            /tmp/openscp-sanitizer-build.log | tail -20 | \
+            while IFS= read -r line; do
+              echo "::error title=Sanitizer build::${line}"
+            done
+
+      - name: Test with ASan and UBSan
+        if: matrix.id == 'asan-ubsan'
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_init_order=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          ctest --test-dir build --output-on-failure \
+            -LE integration --timeout 180 2>&1 | \
+            tee /tmp/openscp-sanitizer-tests.log
+
+      - name: Explain TSan coverage boundary
+        if: matrix.id == 'tsan'
+        run: |
+          echo "::notice::OpenSCP and its Qt event-loop tests are TSan-instrumented. Ubuntu's prebuilt Qt shared libraries are not rebuilt with TSan, so this job cannot diagnose races wholly internal to Qt."
+
+      - name: Test with TSan
+        if: matrix.id == 'tsan'
+        env:
+          QT_QPA_PLATFORM: offscreen
+          TSAN_OPTIONS: suppressions=${{ github.workspace }}/.github/tsan-suppressions.txt:halt_on_error=1:second_deadlock_stack=1:history_size=7
+        run: |
+          ctest --test-dir build --output-on-failure \
+            -LE integration --timeout 180 2>&1 | \
+            tee /tmp/openscp-sanitizer-tests.log
+
+      - name: Report sanitizer test diagnostics
+        if: failure()
+        run: |
+          if [[ -f /tmp/openscp-sanitizer-tests.log ]]; then
+            grep -E \
+              'AddressSanitizer|ThreadSanitizer|runtime error:|tests FAILED|The following tests FAILED' \
+              /tmp/openscp-sanitizer-tests.log | tail -25 | \
+              while IFS= read -r line; do
+                echo "::error title=Sanitizer tests::${line}"
+              done
+          fi

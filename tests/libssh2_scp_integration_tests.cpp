@@ -1,15 +1,14 @@
 // Integration tests for real Libssh2ScpClient against an SSH server with SCP.
 // The test is skipped (exit code 77) unless required OPENSCP_IT_* env vars
 // exist.
-#include "openscp/Libssh2ScpClient.hpp"
+#include "IntegrationTestSupport.hpp"
+#include "TestHarness.hpp"
+#include "libssh2/Libssh2ScpClient.hpp"
 
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -17,81 +16,14 @@ namespace fs = std::filesystem;
 
 namespace {
 
-constexpr int kSkipExitCode = 77;
-
-struct TestContext {
-    int failures = 0;
-
-    void check(bool cond, const std::string &msg) {
-        if (!cond) {
-            ++failures;
-            std::cerr << "[FAIL] " << msg << "\n";
-        }
-    }
-};
-
-std::optional<std::string> envValue(const char *key) {
-    const char *raw = std::getenv(key);
-    if (!raw || !*raw)
-        return std::nullopt;
-    return std::string(raw);
-}
-
-std::optional<std::string> envValueWithFallback(const char *primary,
-                                                const char *fallback) {
-    auto v = envValue(primary);
-    if (v.has_value())
-        return v;
-    return envValue(fallback);
-}
-
-bool parsePort(const std::optional<std::string> &raw, std::uint16_t &out,
-               std::uint16_t fallback) {
-    if (!raw.has_value()) {
-        out = fallback;
-        return true;
-    }
-    try {
-        const int n = std::stoi(*raw);
-        if (n < 1 || n > 65535)
-            return false;
-        out = static_cast<std::uint16_t>(n);
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-std::string uniqueToken() {
-    const auto now =
-        std::chrono::steady_clock::now().time_since_epoch().count();
-    return std::to_string(static_cast<long long>(now));
-}
-
-std::string joinRemotePath(const std::string &base, const std::string &name) {
-    if (base.empty())
-        return std::string("/") + name;
-    if (base.back() == '/')
-        return base + name;
-    return base + "/" + name;
-}
-
-bool writeFile(const fs::path &path, const std::string &content) {
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out.is_open())
-        return false;
-    out << content;
-    return out.good();
-}
-
-bool readFile(const fs::path &path, std::string &out) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in.is_open())
-        return false;
-    out.assign(std::istreambuf_iterator<char>(in),
-               std::istreambuf_iterator<char>());
-    return true;
-}
+using openscp::testsupport::envValue;
+using openscp::testsupport::envValueWithFallback;
+using openscp::testsupport::joinRemotePath;
+using openscp::testsupport::kSkipExitCode;
+using openscp::testsupport::parsePort;
+using openscp::testsupport::readFile;
+using openscp::testsupport::uniqueToken;
+using openscp::testsupport::writeFile;
 
 } // namespace
 
@@ -104,8 +36,8 @@ int main() {
         envValueWithFallback("OPENSCP_IT_SCP_PASS", "OPENSCP_IT_SFTP_PASS");
     const auto keyPath =
         envValueWithFallback("OPENSCP_IT_SCP_KEY", "OPENSCP_IT_SFTP_KEY");
-    const auto keyPassphrase = envValueWithFallback("OPENSCP_IT_SCP_KEY_PASSPHRASE",
-                                                    "OPENSCP_IT_SFTP_KEY_PASSPHRASE");
+    const auto keyPassphrase = envValueWithFallback(
+        "OPENSCP_IT_SCP_KEY_PASSPHRASE", "OPENSCP_IT_SFTP_KEY_PASSPHRASE");
     const std::string remoteBase =
         envValue("OPENSCP_IT_SCP_REMOTE_BASE")
             .value_or(envValue("OPENSCP_IT_REMOTE_BASE").value_or("/tmp"));
@@ -126,9 +58,9 @@ int main() {
     }
 
     std::uint16_t port = 22;
-    if (!parsePort(envValueWithFallback("OPENSCP_IT_SCP_PORT",
-                                        "OPENSCP_IT_SFTP_PORT"),
-                   port, 22)) {
+    if (!parsePort(
+            envValueWithFallback("OPENSCP_IT_SCP_PORT", "OPENSCP_IT_SFTP_PORT"),
+            port, 22)) {
         std::cerr << "[FAIL] SCP port is invalid\n";
         return EXIT_FAILURE;
     }
@@ -158,19 +90,21 @@ int main() {
             "client should report SCP protocol");
     const auto caps = client.capabilities();
     t.check(caps.implemented, "SCP should be marked implemented");
-    t.check(caps.supports_file_transfers,
+    t.check(caps.can_upload && caps.can_download,
             "SCP should support file transfers");
-    t.check(!caps.supports_listing, "SCP should not support listing");
-    t.check(!caps.supports_resume, "SCP should not support resume");
+    t.check(!caps.can_list, "SCP should not support listing");
+    t.check(!caps.can_resume_download && !caps.can_resume_upload,
+            "SCP should not support resume");
 
     const std::string token = uniqueToken();
-    const fs::path tempDir = fs::temp_directory_path() / ("openscp_scp_" + token);
+    const fs::path tempDir =
+        fs::temp_directory_path() / ("openscp_scp_" + token);
     const fs::path localUpload = tempDir / "upload.txt";
     const fs::path localDownload = tempDir / "download.txt";
     fs::create_directories(tempDir);
 
-    const std::string payload = "openscp scp integration payload " + token +
-                                "\nline two\n";
+    const std::string payload =
+        "openscp scp integration payload " + token + "\nline two\n";
     t.check(writeFile(localUpload, payload), "should write local upload file");
 
     const std::string remotePath =
@@ -178,26 +112,21 @@ int main() {
 
     bool uploadProgressCalled = false;
     err.clear();
-    t.check(client.put(localUpload.string(), remotePath, err,
-                       [&](std::size_t done, std::size_t total) {
-                           (void)done;
-                           (void)total;
-                           uploadProgressCalled = true;
-                       },
-                       {}, false),
+    t.check(client.put(
+                localUpload.string(), remotePath, err,
+                [&](std::size_t, std::size_t) { uploadProgressCalled = true; },
+                {}, false),
             std::string("SCP upload should succeed: ") + err);
     t.check(uploadProgressCalled, "upload progress callback should be called");
 
     bool downloadProgressCalled = false;
     err.clear();
-    t.check(client.get(remotePath, localDownload.string(), err,
-                       [&](std::size_t done, std::size_t total) {
-                           (void)done;
-                           (void)total;
-                           downloadProgressCalled = true;
-                       },
-                       {}, false),
-            std::string("SCP download should succeed: ") + err);
+    t.check(
+        client.get(
+            remotePath, localDownload.string(), err,
+            [&](std::size_t, std::size_t) { downloadProgressCalled = true; },
+            {}, false),
+        std::string("SCP download should succeed: ") + err);
     t.check(downloadProgressCalled,
             "download progress callback should be called");
 
@@ -205,6 +134,19 @@ int main() {
     t.check(readFile(localDownload, downloaded),
             "downloaded file should be readable");
     t.check(downloaded == payload, "downloaded content should match uploaded");
+
+    const std::string preservedDestination = "preserve existing destination";
+    t.check(writeFile(localDownload, preservedDestination),
+            "should prepare an existing SCP download destination");
+    err.clear();
+    t.check(!client.get(
+                remotePath, localDownload.string(), err, {},
+                [] { return true; }, false),
+            "canceled SCP download should not report success");
+    downloaded.clear();
+    t.check(readFile(localDownload, downloaded) &&
+                downloaded == preservedDestination,
+            "canceled SCP download must preserve the existing destination");
 
     std::vector<openscp::FileInfo> listing;
     err.clear();
@@ -227,11 +169,6 @@ int main() {
     client.disconnect();
     std::error_code ec;
     fs::remove_all(tempDir, ec);
-    if (t.failures != 0) {
-        std::cerr << "[FAIL] openscp_scp_integration_tests failures="
-                  << t.failures << "\n";
-        return EXIT_FAILURE;
-    }
-    std::cout << "[OK] openscp_scp_integration_tests\n";
-    return EXIT_SUCCESS;
+    return openscp::testsupport::finishIntegration(
+        "openscp_scp_integration_tests", t);
 }

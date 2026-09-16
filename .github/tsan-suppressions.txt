@@ -1,0 +1,6 @@
+# Ubuntu's prebuilt Qt libraries are not instrumented with ThreadSanitizer.
+# Limit suppressions to the two synchronization hand-offs that cross that
+# boundary; races wholly inside OpenSCP remain reportable.
+race:qFormatLogMessage
+race:QtPrivate::QFunctorSlotObject
+race:QMetaObject::invokeMethodImpl

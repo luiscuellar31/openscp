@@ -6,10 +6,33 @@ option(OPENSCP_ENABLE_FTP_BACKEND
 option(OPENSCP_ENABLE_WEBDAV_BACKEND
        "Build WebDAV backend module (requires libcurl + tinyxml2 development files)" ON)
 
+set(OPENSCP_CORE_PUBLIC_HEADERS
+    include/openscp/ClientFactory.hpp
+    include/openscp/KnownHostsUtils.hpp
+    include/openscp/Protocol.hpp
+    include/openscp/RemoteClient.hpp
+    include/openscp/RemoteError.hpp
+    include/openscp/RemoteFileInfo.hpp
+    include/openscp/RemotePath.hpp
+    include/openscp/RuntimeLogging.hpp
+    include/openscp/SecureString.hpp
+    include/openscp/SessionOptions.hpp
+)
+
 set(OPENSCP_CORE_SRCS
-    src/libssh2/ClientFactory.cpp      # protocol -> backend factory
+    src/ClientFactory.cpp
+    src/common/RemoteListingLimits.hpp
+    src/common/RemotePath.cpp
+    src/common/SafeLocalFile.cpp
+    src/common/SafeLocalFile.hpp
+    src/common/UniqueFile.hpp
+    src/libssh2/detail/Libssh2ErrorClassifier.cpp
+    src/libssh2/detail/Libssh2ErrorClassifier.hpp
+    src/libssh2/detail/Libssh2InputSafety.hpp
     src/libssh2/Libssh2ScpClient.cpp   # SCP backend module
+    src/libssh2/Libssh2ScpClient.hpp
     src/libssh2/Libssh2SftpClient.cpp   # real implementation
+    src/libssh2/Libssh2SftpClient.hpp
 )
 
 set(OPENSCP_HAS_CURL_FTP 0)
@@ -22,12 +45,21 @@ endif()
 
 if (_openscp_need_curl)
     find_package(CURL QUIET)
+    if (CURL_FOUND)
+        list(APPEND OPENSCP_CORE_SRCS
+            src/curl/CurlBackendCommon.cpp
+            src/curl/CurlBackendCommon.hpp
+            src/curl/CurlListingParser.hpp
+        )
+    endif()
 endif()
 
 if (OPENSCP_ENABLE_FTP_BACKEND)
     if (CURL_FOUND)
         list(APPEND OPENSCP_CORE_SRCS
             src/curl/CurlFtpClient.cpp        # FTP/FTPS backend module
+            src/curl/CurlFtpClient.hpp
+            src/curl/FtpListingParser.cpp
         )
         set(OPENSCP_HAS_CURL_FTP 1)
         message(STATUS "OpenSCP: FTP/FTPS backend enabled (libcurl found)")
@@ -74,6 +106,8 @@ if (OPENSCP_ENABLE_WEBDAV_BACKEND)
         if (OPENSCP_TINYXML2_TARGET)
             list(APPEND OPENSCP_CORE_SRCS
                 src/curl/CurlWebDavClient.cpp   # WebDAV backend module
+                src/curl/CurlWebDavClient.hpp
+                src/curl/WebDavListingParser.cpp
             )
             set(OPENSCP_HAS_CURL_WEBDAV 1)
             message(STATUS
@@ -94,13 +128,33 @@ else()
 endif()
 
 if (OPENSCP_ENABLE_MOCK)
-    list(APPEND OPENSCP_CORE_SRCS src/mock/MockSftpClient.cpp)
+    list(APPEND OPENSCP_CORE_SRCS
+        src/mock/MockSftpClient.cpp
+        src/mock/MockSftpClient.hpp
+    )
 endif()
 
-add_library(openscp_core STATIC ${OPENSCP_CORE_SRCS})
+add_library(openscp_core STATIC
+    ${OPENSCP_CORE_PUBLIC_HEADERS}
+    ${OPENSCP_CORE_SRCS}
+)
+
+if(OPENSCP_BUILD_FUZZERS)
+    # Instrument production parser code while leaving libFuzzer's main()
+    # exclusive to the dedicated harness executables.
+    target_compile_options(openscp_core PRIVATE
+        -g
+        -fno-omit-frame-pointer
+        -fsanitize=fuzzer-no-link,address,undefined
+    )
+    target_link_options(openscp_core INTERFACE
+        -fsanitize=address,undefined
+    )
+endif()
 
 target_include_directories(openscp_core
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 target_compile_definitions(openscp_core
     PUBLIC OPENSCP_HAS_CURL_FTP=${OPENSCP_HAS_CURL_FTP}
@@ -161,6 +215,8 @@ else()
         target_include_directories(openscp_core PRIVATE ${LIBSSH2_INC})
         target_link_libraries(openscp_core PRIVATE ${LIBSSH2_LIB})
     else()
-        message(FATAL_ERROR "libssh2 no encontrado. Instala con 'brew install libssh2'.")
+        message(FATAL_ERROR
+            "libssh2 was not found. Install its development package "
+            "(for example, 'brew install libssh2').")
     endif()
 endif()

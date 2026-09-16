@@ -1,7 +1,10 @@
 // Integration tests for real Libssh2SftpClient against a test SFTP server.
 // The test is skipped (exit code 77) unless required OPENSCP_IT_* env vars
 // exist.
-#include "openscp/Libssh2SftpClient.hpp"
+#include "IntegrationTestSupport.hpp"
+#include "TestHarness.hpp"
+#include "common/UniqueFile.hpp"
+#include "libssh2/Libssh2SftpClient.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -11,7 +14,6 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <iterator>
 #include <optional>
 #include <string>
 #include <thread>
@@ -21,77 +23,18 @@ namespace fs = std::filesystem;
 
 namespace {
 
-constexpr int kSkipExitCode = 77;
-
-struct TestContext {
-    int failures = 0;
-
-    void check(bool cond, const std::string &msg) {
-        if (!cond) {
-            ++failures;
-            std::cerr << "[FAIL] " << msg << "\n";
-        }
-    }
-};
-
-std::optional<std::string> envValue(const char *key) {
-    const char *raw = std::getenv(key);
-    if (!raw || !*raw)
-        return std::nullopt;
-    return std::string(raw);
-}
-
-std::string uniqueToken() {
-    const auto now =
-        std::chrono::steady_clock::now().time_since_epoch().count();
-    return std::to_string(static_cast<long long>(now));
-}
-
-std::string joinRemotePath(const std::string &base, const std::string &name) {
-    if (base.empty())
-        return std::string("/") + name;
-    if (base.back() == '/')
-        return base + name;
-    return base + "/" + name;
-}
+using openscp::testsupport::envValue;
+using openscp::testsupport::joinRemotePath;
+using openscp::testsupport::kSkipExitCode;
+using openscp::testsupport::parsePort;
+using openscp::testsupport::readFile;
+using openscp::testsupport::uniqueToken;
+using openscp::testsupport::writeFile;
 
 std::string knownHostsHostToken(const std::string &host, std::uint16_t port) {
     if (port == 22)
         return host;
     return "[" + host + "]:" + std::to_string(port);
-}
-
-bool readFile(const fs::path &p, std::string &out) {
-    std::ifstream in(p, std::ios::binary);
-    if (!in.is_open())
-        return false;
-    out.assign(std::istreambuf_iterator<char>(in),
-               std::istreambuf_iterator<char>());
-    return true;
-}
-
-bool writeFile(const fs::path &p, const std::string &content) {
-    std::ofstream out(p, std::ios::binary | std::ios::trunc);
-    if (!out.is_open())
-        return false;
-    out << content;
-    return out.good();
-}
-
-bool parsePort(const std::optional<std::string> &raw, std::uint16_t &out) {
-    if (!raw.has_value()) {
-        out = 22;
-        return true;
-    }
-    try {
-        const int n = std::stoi(*raw);
-        if (n < 1 || n > 65535)
-            return false;
-        out = static_cast<std::uint16_t>(n);
-        return true;
-    } catch (...) {
-        return false;
-    }
 }
 
 bool parseProxyType(const std::optional<std::string> &raw,
@@ -120,26 +63,15 @@ bool parseProxyType(const std::optional<std::string> &raw,
     return false;
 }
 
-bool parsePortOrDefault(const std::optional<std::string> &raw,
-                        std::uint16_t fallback, std::uint16_t &out) {
-    if (!raw.has_value()) {
-        out = fallback;
-        return true;
-    }
-    return parsePort(raw, out);
-}
-
 bool listContainsName(const std::vector<openscp::FileInfo> &entries,
                       const std::string &name) {
-    return std::any_of(entries.begin(), entries.end(),
-                       [&name](const openscp::FileInfo &e) {
-                           return e.name == name;
-                       });
+    return std::any_of(
+        entries.begin(), entries.end(),
+        [&name](const openscp::FileInfo &e) { return e.name == name; });
 }
 
 bool removeRemoteFileIfExists(openscp::Libssh2SftpClient &client,
-                              const std::string &remotePath,
-                              std::string &err) {
+                              const std::string &remotePath, std::string &err) {
     bool isDir = false;
     err.clear();
     const bool exists = client.exists(remotePath, isDir, err);
@@ -155,8 +87,10 @@ bool removeRemoteFileIfExists(openscp::Libssh2SftpClient &client,
 }
 
 #ifndef _WIN32
-std::string formatHostPortAuthority(const std::string &host, std::uint16_t port) {
-    if (host.find(':') != std::string::npos && host.find(']') == std::string::npos)
+std::string formatHostPortAuthority(const std::string &host,
+                                    std::uint16_t port) {
+    if (host.find(':') != std::string::npos &&
+        host.find(']') == std::string::npos)
         return "[" + host + "]:" + std::to_string(port);
     return host + ":" + std::to_string(port);
 }
@@ -167,15 +101,16 @@ std::size_t countJumpTunnelProcesses(const std::string &targetHost,
                                      std::uint16_t jumpPort) {
     const std::string needleTarget =
         std::string("-W ") + formatHostPortAuthority(targetHost, targetPort);
-    const std::string needlePort = std::string("-p ") + std::to_string(jumpPort);
+    const std::string needlePort =
+        std::string("-p ") + std::to_string(jumpPort);
 
-    FILE *pipe = ::popen("ps -ax -o command=", "r");
+    openscp::UniqueFile pipe(::popen("ps -ax -o command=", "r"), &::pclose);
     if (!pipe)
         return 0;
 
     std::size_t matches = 0;
     char lineBuf[4096];
-    while (std::fgets(lineBuf, sizeof(lineBuf), pipe)) {
+    while (std::fgets(lineBuf, sizeof(lineBuf), pipe.get())) {
         std::string line(lineBuf);
         if (!line.empty() && line.back() == '\n')
             line.pop_back();
@@ -189,7 +124,6 @@ std::size_t countJumpTunnelProcesses(const std::string &targetHost,
             continue;
         ++matches;
     }
-    (void)::pclose(pipe);
     return matches;
 }
 
@@ -201,16 +135,16 @@ bool waitForJumpTunnelCountAtMost(const std::string &targetHost,
                                   std::chrono::milliseconds timeout) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     for (;;) {
-        if (countJumpTunnelProcesses(targetHost, targetPort, jumpHost, jumpPort) <=
-            baselineCount) {
+        if (countJumpTunnelProcesses(targetHost, targetPort, jumpHost,
+                                     jumpPort) <= baselineCount) {
             return true;
         }
         if (std::chrono::steady_clock::now() >= deadline)
             break;
         std::this_thread::sleep_for(std::chrono::milliseconds(120));
     }
-    return countJumpTunnelProcesses(targetHost, targetPort, jumpHost, jumpPort) <=
-           baselineCount;
+    return countJumpTunnelProcesses(targetHost, targetPort, jumpHost,
+                                    jumpPort) <= baselineCount;
 }
 #endif
 
@@ -252,7 +186,7 @@ int main() {
     }
 
     std::uint16_t port = 22;
-    if (!parsePort(envValue("OPENSCP_IT_SFTP_PORT"), port)) {
+    if (!parsePort(envValue("OPENSCP_IT_SFTP_PORT"), port, 22)) {
         std::cerr << "[FAIL] OPENSCP_IT_SFTP_PORT is invalid\n";
         return EXIT_FAILURE;
     }
@@ -271,15 +205,15 @@ int main() {
         }
         const std::uint16_t defaultProxyPort =
             (proxyType == openscp::ProxyType::Socks5) ? 1080 : 8080;
-        if (!parsePortOrDefault(envValue("OPENSCP_IT_PROXY_PORT"),
-                                defaultProxyPort, proxyPort)) {
+        if (!parsePort(envValue("OPENSCP_IT_PROXY_PORT"), proxyPort,
+                       defaultProxyPort)) {
             std::cerr << "[FAIL] OPENSCP_IT_PROXY_PORT is invalid\n";
             return EXIT_FAILURE;
         }
     }
     std::uint16_t jumpPort = 22;
     if (jumpHost.has_value() &&
-        !parsePortOrDefault(envValue("OPENSCP_IT_JUMP_PORT"), 22, jumpPort)) {
+        !parsePort(envValue("OPENSCP_IT_JUMP_PORT"), jumpPort, 22)) {
         std::cerr << "[FAIL] OPENSCP_IT_JUMP_PORT is invalid\n";
         return EXIT_FAILURE;
     }
@@ -327,6 +261,10 @@ int main() {
     const std::string remoteSrc = joinRemotePath(remoteSuiteDir, "payload.txt");
     const std::string remoteMoved =
         joinRemotePath(remoteSuiteDir, "payload-moved.txt");
+    const std::string remoteProtected =
+        joinRemotePath(remoteSuiteDir, "must-survive-failed-rename.txt");
+    const std::string remoteMissing =
+        joinRemotePath(remoteSuiteDir, "missing-rename-source.txt");
     const std::string remoteResumeDownload =
         joinRemotePath(remoteSuiteDir, "resume-download.txt");
     const std::string remoteResumeUpload =
@@ -373,7 +311,8 @@ int main() {
         localTmpRoot / "known_hosts_tofu_mismatch";
     {
         static constexpr const char *kFakeEd25519Key =
-            "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/qwU9iIfMHkUqPnwGwGZRuQQ3v1d";
+            "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/"
+            "qwU9iIfMHkUqPnwGwGZRuQQ3v1d";
         std::ofstream khOut(tofuMismatchKnownHosts,
                             std::ios::binary | std::ios::trunc);
         if (!khOut.is_open()) {
@@ -397,15 +336,17 @@ int main() {
                 return true;
             };
         std::string mismatchErr;
-        const bool mismatchOk = mismatchClient.connect(mismatchOpt, mismatchErr);
+        const bool mismatchOk =
+            mismatchClient.connect(mismatchOpt, mismatchErr);
         t.check(!mismatchOk,
                 "TOFU connect should fail when known_hosts entry mismatches");
         t.check(mismatchErr.find("does not match known_hosts") !=
                     std::string::npos,
                 std::string("TOFU mismatch should report host-key mismatch: ") +
                     mismatchErr);
-        t.check(!confirmCalled,
-                "TOFU mismatch should fail before invoking confirmation callback");
+        t.check(
+            !confirmCalled,
+            "TOFU mismatch should fail before invoking confirmation callback");
         mismatchClient.disconnect();
     }
 
@@ -423,6 +364,56 @@ int main() {
         err.clear();
         t.check(client.put(localSrc.string(), remoteSrc, err, {}, {}, false),
                 std::string("put should succeed: ") + err);
+    }
+    // A failed overwrite rename must never delete the existing destination.
+    if (t.failures == 0) {
+        err.clear();
+        t.check(
+            client.put(localSrc.string(), remoteProtected, err, {}, {}, false),
+            std::string("protected destination upload should succeed: ") + err);
+    }
+    std::vector<std::uint8_t> sourceChecksum;
+    if (t.failures == 0) {
+        std::vector<std::uint8_t> protectedChecksum;
+        std::size_t checksumDone = 0;
+        std::size_t checksumTotal = 0;
+        err.clear();
+        t.check(client.checksum(remoteSrc, "SHA-256", sourceChecksum, err,
+                                [&](std::size_t done, std::size_t total) {
+                                    checksumDone = done;
+                                    checksumTotal = total;
+                                }),
+                std::string("checksum(remoteSrc) should succeed: ") + err);
+        err.clear();
+        t.check(
+            client.checksum(remoteProtected, "sha256", protectedChecksum, err),
+            std::string("checksum(remoteProtected) should succeed: ") + err);
+        t.check(sourceChecksum.size() == 32 &&
+                    sourceChecksum == protectedChecksum,
+                "equal remote files should have equal SHA-256 checksums");
+        t.check(checksumDone == payload.size() &&
+                    (checksumTotal == 0 || checksumTotal == payload.size()),
+                "remote checksum should report byte progress");
+
+        std::vector<std::uint8_t> canceledDigest;
+        err.clear();
+        t.check(!client.checksum(remoteSrc, "SHA-256", canceledDigest, err, {},
+                                 [] { return true; }),
+                "a remote checksum should honor cancellation");
+        t.check(client.lastOperationError().kind ==
+                    openscp::RemoteErrorKind::Canceled,
+                "checksum cancellation should expose a structured error");
+    }
+    if (t.failures == 0) {
+        err.clear();
+        t.check(!client.rename(remoteMissing, remoteProtected, err, true),
+                "rename with a missing source should fail");
+        bool isDir = true;
+        std::string existsErr;
+        t.check(client.exists(remoteProtected, isDir, existsErr) && !isDir,
+                std::string("failed overwrite rename must preserve its "
+                            "destination: ") +
+                    existsErr);
     }
     if (t.failures == 0) {
         bool isDir = true;
@@ -471,14 +462,15 @@ int main() {
         t.check(writeFile(localPart, badPayload),
                 "local .part for download mismatch should be writable");
         err.clear();
-        const bool ok = client.get(remoteResumeDownload, localResumeDst.string(),
-                                   err, {}, {}, true);
+        const bool ok = client.get(remoteResumeDownload,
+                                   localResumeDst.string(), err, {}, {}, true);
         t.check(!ok,
                 "get resume with required integrity should fail on mismatch");
-        t.check(err.find("Integrity check failed in resume (download)") !=
-                    std::string::npos,
-                std::string("download mismatch should report integrity error: ") +
-                    err);
+        t.check(
+            err.find("Integrity check failed in resume (download)") !=
+                std::string::npos,
+            std::string("download mismatch should report integrity error: ") +
+                err);
     }
     // Regression: Required integrity must fail on resume mismatch (upload).
     if (t.failures == 0) {
@@ -487,6 +479,17 @@ int main() {
                            {}, false),
                 std::string("put(remoteResumeUploadSeed) should succeed: ") +
                     err);
+        std::vector<std::uint8_t> differentChecksum;
+        err.clear();
+        t.check(
+            client.checksum(remoteResumeUploadSeed, "SHA-256",
+                            differentChecksum, err),
+            std::string("checksum(different remote file) should succeed: ") +
+                err);
+        t.check(differentChecksum.size() == 32 &&
+                    differentChecksum != sourceChecksum,
+                "different remote files should have different SHA-256 "
+                "checksums");
     }
     if (t.failures == 0) {
         err.clear();
@@ -496,9 +499,8 @@ int main() {
     }
     if (t.failures == 0) {
         err.clear();
-        const bool ok =
-            client.put(localSrc.string(), remoteResumeUpload, err, {}, {},
-                       true);
+        const bool ok = client.put(localSrc.string(), remoteResumeUpload, err,
+                                   {}, {}, true);
         t.check(!ok,
                 "put resume with required integrity should fail on mismatch");
         t.check(err.find("Integrity check failed in resume (upload)") !=
@@ -519,6 +521,10 @@ int main() {
         err.clear();
         t.check(client.removeFile(remoteMoved, err),
                 std::string("removeFile should succeed: ") + err);
+        err.clear();
+        t.check(removeRemoteFileIfExists(client, remoteProtected, err),
+                std::string("remove protected destination should succeed: ") +
+                    err);
         err.clear();
         t.check(removeRemoteFileIfExists(client, remoteResumeDownload, err),
                 std::string("remove remoteResumeDownload should succeed: ") +
@@ -546,6 +552,8 @@ int main() {
     cleanupErr.clear();
     (void)removeRemoteFileIfExists(client, remoteMoved, cleanupErr);
     cleanupErr.clear();
+    (void)removeRemoteFileIfExists(client, remoteProtected, cleanupErr);
+    cleanupErr.clear();
     (void)removeRemoteFileIfExists(client, remoteResumeDownload, cleanupErr);
     cleanupErr.clear();
     (void)removeRemoteFileIfExists(client, remoteResumeUpload, cleanupErr);
@@ -560,7 +568,8 @@ int main() {
 
 #ifndef _WIN32
     // Dedicated lifecycle regression: when jump transport is in use, the
-    // helper ssh process must be torn down after disconnect (no leaked tunnels).
+    // helper ssh process must be torn down after disconnect (no leaked
+    // tunnels).
     if (jumpHost.has_value() && t.failures == 0) {
         const std::size_t baselineJumpCount =
             countJumpTunnelProcesses(*host, port, *jumpHost, jumpPort);
@@ -576,16 +585,13 @@ int main() {
             const bool drained = waitForJumpTunnelCountAtMost(
                 *host, port, *jumpHost, jumpPort, baselineJumpCount,
                 std::chrono::milliseconds(4000));
-            t.check(drained,
-                    "jump lifecycle should stop tunnel process after disconnect");
+            t.check(
+                drained,
+                "jump lifecycle should stop tunnel process after disconnect");
         }
     }
 #endif
 
-    if (t.failures != 0) {
-        std::cerr << "[FAILURES] " << t.failures << "\n";
-        return EXIT_FAILURE;
-    }
-    std::cout << "[OK] openscp_sftp_integration_tests\n";
-    return EXIT_SUCCESS;
+    return openscp::testsupport::finishIntegration(
+        "openscp_sftp_integration_tests", t);
 }

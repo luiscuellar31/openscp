@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 Luis Cuellar <luiscuellar31@proton.me>
+  SPDX-License-Identifier: CC0-1.0
+-->
+<component type="desktop-application">
+  <id>io.github.luiscuellar31.openscp</id>
+  <name>OpenSCP</name>
+  <summary>Lightweight two-panel client for remote file transfers</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+
+  <description>
+    <p>
+      OpenSCP is a lightweight, cross-platform file transfer client inspired by
+      WinSCP. Its two-panel interface makes it easy to work with local and remote
+      files side by side.
+    </p>
+    <p>This Flatpak includes SFTP and SCP support.</p>
+  </description>
+
+  <launchable type="desktop-id">io.github.luiscuellar31.openscp.desktop</launchable>
+  <url type="homepage">https://github.com/luiscuellar31/openscp</url>
+  <url type="bugtracker">https://github.com/luiscuellar31/openscp/issues</url>
+  <developer id="io.github.luiscuellar31">
+    <name>OpenSCP contributors</name>
+  </developer>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/luiscuellar31/openscp/dev/assets/screenshots/screenshot-main-window.png</image>
+      <caption>Browse local and remote files side by side</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/luiscuellar31/openscp/dev/assets/screenshots/screenshot-site-manager.png</image>
+      <caption>Save and organize remote sites</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/luiscuellar31/openscp/dev/assets/screenshots/screenshot-transfer-queue.png</image>
+      <caption>Follow active and completed transfers</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/luiscuellar31/openscp/dev/assets/screenshots/screenshot-settings.png</image>
+      <caption>Adjust transfer and interface settings</caption>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1"/>
+</component>

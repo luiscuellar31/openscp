@@ -5,12 +5,16 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${REPO_DIR}/build"
 APP_PATH="${BUILD_DIR}/OpenSCP.app"
+BUNDLE_ID="${BUNDLE_ID:-io.github.luiscuellar31.openscp}"
 EFFECTIVE_QT6_DIR=""
 EFFECTIVE_QT_PREFIX=""
+QT_HOST_WRAP_DIR=""
 
 log() { printf "\033[1;34m[macos]\033[0m %s\n" "$*"; }
 warn() { printf "\033[1;33m[warn]\033[0m %s\n" "$*"; }
 die() { printf "\033[1;31m[err ]\033[0m %s\n" "$*"; exit 1; }
+
+source "${REPO_DIR}/scripts/lib/macos/qt-host-tools.sh"
 
 list_rpaths() {
   local bin="$1"
@@ -107,6 +111,7 @@ resolve_qt_paths() {
   fi
 }
 
+
 usage() {
   cat <<'EOF'
 Usage: ./scripts/macos.sh <command>
@@ -127,6 +132,7 @@ Optional env vars:
   Qt6_DIR=/path/to/Qt/<ver>/macos/lib/cmake/Qt6
   QT6_DIR=/path/to/Qt/<ver>/macos/lib/cmake/Qt6
   CMAKE_OSX_ARCHITECTURES=arm64|x86_64|arm64;x86_64
+  BUNDLE_ID=io.github.example.OpenSCP
   SKIP_CODESIGN=1|0
   SKIP_NOTARIZATION=1|0
 
@@ -138,10 +144,22 @@ EOF
 resolve_qt_paths
 
 configure_release() {
+  setup_qt_host_wrappers_if_needed "$EFFECTIVE_QT_PREFIX" "$BUILD_DIR"
   local args=(
     -S "$REPO_DIR"
     -B "$BUILD_DIR"
     -DCMAKE_BUILD_TYPE=Release
+    "-DBUNDLE_ID=${BUNDLE_ID}"
+    # Packaging and development share build/. Release packaging can cache an
+    # ephemeral OPENSCP_DEPENDENCY_PREFIX there, so force local dependency
+    # discovery instead of reusing paths that may have been deleted.
+    -U "LIBSSH2_*"
+    -U "OPENSSL_CRYPTO_LIBRARY"
+    -U "OPENSSL_INCLUDE_DIR"
+    -U "OPENSSL_ROOT_DIR"
+    -U "OPENSSL_SSL_LIBRARY"
+    -U "OPENSCP_TINYXML2_*"
+    -U "tinyxml2_DIR"
   )
   if [[ -d "$EFFECTIVE_QT_PREFIX" ]]; then
     args+=("-DCMAKE_PREFIX_PATH=${EFFECTIVE_QT_PREFIX}")
@@ -151,6 +169,12 @@ configure_release() {
   fi
   if [[ -n "${CMAKE_OSX_ARCHITECTURES:-}" ]]; then
     args+=("-DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}")
+  fi
+  if [[ -n "$QT_HOST_WRAP_DIR" ]]; then
+    args+=("-DCMAKE_AUTOUIC_EXECUTABLE=${QT_HOST_WRAP_DIR}/uic")
+    args+=("-DCMAKE_AUTORCC_EXECUTABLE=${QT_HOST_WRAP_DIR}/rcc")
+    args+=("-DCMAKE_AUTOMOC_EXECUTABLE=${QT_HOST_WRAP_DIR}/moc")
+    args+=("-DOPENSCP_QT_HOST_TOOLS_DIR=${QT_HOST_WRAP_DIR}")
   fi
   log "Configuring Release build"
   cmake "${args[@]}"
@@ -192,14 +216,14 @@ run_app() {
 
 package_format() {
   local formats="$1"
-  [[ -x "${REPO_DIR}/scripts/package_mac.sh" ]] || die "Missing scripts/package_mac.sh"
+  [[ -x "${REPO_DIR}/scripts/package/macos.sh" ]] || die "Missing scripts/package/macos.sh"
   log "Packaging formats: ${formats}"
   SKIP_CODESIGN="${SKIP_CODESIGN:-1}" \
   SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-1}" \
   PACKAGE_FORMATS="${formats}" \
   Qt6_DIR="${EFFECTIVE_QT6_DIR}" \
-  CMAKE_OSX_ARCHITECTURES="${CMAKE_OSX_ARCHITECTURES:-arm64}" \
-  "${REPO_DIR}/scripts/package_mac.sh"
+  CMAKE_OSX_ARCHITECTURES="${CMAKE_OSX_ARCHITECTURES:-$(uname -m)}" \
+  "${REPO_DIR}/scripts/package/macos.sh"
 }
 
 cmd="${1:-help}"

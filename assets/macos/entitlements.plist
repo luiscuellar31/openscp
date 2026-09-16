@@ -4,7 +4,7 @@
 <!--
   Entitlements for signing with Hardened Runtime (non‑sandboxed).
   Notes:
-    - Hardened Runtime is enabled via `codesign --options runtime` (see scripts/package_mac.sh).
+    - Hardened Runtime is enabled via `codesign --options runtime` (see scripts/package/macos.sh).
     - `com.apple.security.network.client` is a sandbox entitlement; outside of the sandbox it has no effect,
       but keeping it here is harmless and documents intended capabilities if you later enable the sandbox.
     - Do NOT enable `com.apple.security.get-task-allow` for release builds (kept false below).
@@ -25,4 +25,3 @@
   <!-- No other hardened runtime exceptions requested. Add only if strictly necessary. -->
 </dict>
 </plist>
-

@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT_DIR="${PROJECT_DIR:-${REPO_DIR}/packaging/snap}"
+CHECKER="${REPO_DIR}/scripts/verify/qt-svg-plugins.sh"
+SNAPCRAFT="${SNAPCRAFT:-snapcraft}"
+
+log() { printf "\033[1;34m[snap]\033[0m %s\n" "$*"; }
+err() { printf "\033[1;31m[err ]\033[0m %s\n" "$*"; }
+die() { err "$*"; exit 1; }
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/package/snap.sh [snapcraft pack options]
+
+Builds and validates the Snap package. Additional arguments are forwarded to
+snapcraft pack; prerequisites are documented in docs/BUILDING.md.
+EOF
+}
+
+ensure_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "Missing required tool: $1"
+}
+
+validate_png_256() {
+  local icon_file="$1"
+  [[ -f "$icon_file" ]] || die "Required PNG icon not found: $icon_file"
+  local meta
+  meta="$(file -b "$icon_file" 2>/dev/null || true)"
+  [[ "$meta" == PNG\ image\ data,* ]] ||
+    die "Icon is not a PNG image: $icon_file"
+  if [[ ! "$meta" =~ ([0-9]+)[[:space:]]x[[:space:]]([0-9]+) ]]; then
+    die "Could not detect PNG dimensions for: $icon_file"
+  fi
+  local width="${BASH_REMATCH[1]}"
+  local height="${BASH_REMATCH[2]}"
+  if [[ "$width" != "256" || "$height" != "256" ]]; then
+    die "snap icon must be 256x256 (got ${width}x${height}): $icon_file"
+  fi
+}
+
+validate_snap_icon() {
+  local icon_file="${PROJECT_DIR}/icon.png"
+  [[ -f "$icon_file" ]] || die "Required snap icon not found: $icon_file"
+  validate_png_256 "$icon_file"
+  local size_bytes
+  size_bytes="$(wc -c < "$icon_file" | tr -d ' ')"
+  if [[ "$size_bytes" -gt 262144 ]]; then
+    die "snap icon exceeds 256KB (${size_bytes} bytes): $icon_file"
+  fi
+}
+
+uses_kde_neon_extension() {
+  local manifest="${PROJECT_DIR}/snapcraft.yaml"
+  [[ -f "$manifest" ]] || return 1
+  grep -q "kde-neon-6" "$manifest"
+}
+
+main() {
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    usage
+    return 0
+  fi
+
+  [[ "$(uname -s)" == "Linux" ]] || die "Snap packaging must run on Linux."
+  [[ -d "$PROJECT_DIR" ]] || die "Snap project directory not found: $PROJECT_DIR"
+  [[ -x "$CHECKER" ]] || die "Qt runtime checker not found/executable: $CHECKER"
+
+  ensure_cmd "$SNAPCRAFT"
+  ensure_cmd unsquashfs
+  ensure_cmd file
+  validate_snap_icon
+
+  log "Building snap from: $PROJECT_DIR"
+  pushd "$PROJECT_DIR" >/dev/null
+  "$SNAPCRAFT" pack "$@"
+
+  local snap_file
+  snap_file="$(ls -1t ./*.snap 2>/dev/null | head -n1 || true)"
+  [[ -n "$snap_file" ]] || die "No .snap artifact was produced."
+  log "Produced snap: $snap_file"
+  popd >/dev/null
+
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  trap '[[ -n "${tmp_dir:-}" ]] && rm -rf "${tmp_dir}"' EXIT
+
+  log "Extracting snap for Qt runtime validation"
+  unsquashfs -f -d "${tmp_dir}/root" "${PROJECT_DIR}/$(basename "$snap_file")" >/dev/null
+  if uses_kde_neon_extension; then
+    log "Detected kde-neon-6 extension; allowing runtime-provided Qt plugins."
+    "$CHECKER" --allow-runtime-provided --context snap "${tmp_dir}/root"
+  else
+    "$CHECKER" --context snap "${tmp_dir}/root"
+  fi
+
+  log "Done: ${PROJECT_DIR}/$(basename "$snap_file")"
+}
+
+main "$@"
