@@ -9,7 +9,7 @@ Usage:
 
 Options:
   --tag <tag>          Tag to generate notes for (e.g. vX.Y.Z). Required.
-  --version <version>  Version label to show in notes (default: tag without leading v).
+  --version <version>  Version used in artifact names (default: tag without leading v).
   --repo <owner/repo>  GitHub repository for compare links (optional).
   --range <A..B>       Explicit git range. If omitted, uses previous tag..tag.
   --output <file>      Output markdown path. If omitted, prints to stdout.
@@ -25,6 +25,13 @@ append_item() {
   local var_name="$1"
   local text="$2"
   printf -v "$var_name" '%s- %s\n' "${!var_name}" "$text"
+}
+
+print_section() {
+  local title="$1"
+  local items="$2"
+  [[ -n "$items" ]] || return 0
+  printf '## %s\n\n%s\n' "$title" "$items"
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -205,25 +212,24 @@ if [[ -n "$commits_raw" ]]; then
   done < <(printf '%s' "$commits_raw")
 fi
 
-date_iso="$(date -u +%Y-%m-%d)"
-
 {
-  echo "# OpenSCP v${VERSION}"
-  echo
-  echo "- Tag: \`${TAG}\`"
-  echo "- Date (UTC): ${date_iso}"
-  if [[ -n "$PREV_TAG" ]]; then
-    echo "- Range: \`${PREV_TAG}..${TAG}\`"
-    if [[ -n "$REPO" ]]; then
-      echo "- Compare: https://github.com/${REPO}/compare/${PREV_TAG}...${TAG}"
-    fi
-  else
-    echo "- Range: \`${TAG}\` (first tagged release or previous tag not found)"
-  fi
-  echo
+  cat <<EOF
+<!-- RELEASE OVERVIEW: edit this block before publishing. Highlights come from feat commits. -->
+# Release name (${TAG})
+
+_Add a short introduction for this release._
+
+<!-- END RELEASE OVERVIEW -->
+
+EOF
+
+  print_section "Highlights" "$feat_items"
 
   cat <<EOF
-## Install
+<details>
+<summary><strong>Download and install</strong></summary>
+
+## Verify downloads
 
 Verify the download first. \`SHA256SUMS.txt\` is attached to this release:
 
@@ -234,16 +240,9 @@ sha256sum -c SHA256SUMS.txt --ignore-missing      # Linux
 
 ### macOS
 
-Download \`OpenSCP-${VERSION}-arm64-UNSIGNED.dmg\` on Apple Silicon or
-\`OpenSCP-${VERSION}-x86_64-UNSIGNED.dmg\` on Intel, open it, and drag OpenSCP
-onto Applications.
+Download \`OpenSCP-${VERSION}-arm64-UNSIGNED.dmg\` on Apple Silicon or \`OpenSCP-${VERSION}-x86_64-UNSIGNED.dmg\` on Intel, open it, and drag OpenSCP onto Applications.
 
-OpenSCP is not signed with an Apple Developer ID, so macOS blocks the first
-launch and reports that it cannot check the app for malicious software. To
-allow it, open **System Settings → Privacy & Security**, scroll down to the
-Security section, click **Open Anyway** next to the message about OpenSCP, and
-confirm. On macOS 12 and 13 the same setting lives in **System Preferences →
-Security & Privacy → General**. The DMG ships these steps as \`README.txt\`.
+OpenSCP is not signed with an Apple Developer ID, so macOS blocks the first launch and reports that it cannot check the app for malicious software. To allow it, open **System Settings → Privacy & Security**, scroll down to the Security section, click **Open Anyway** next to the message about OpenSCP, and confirm. On macOS 12 and 13 the same setting lives in **System Preferences → Security & Privacy → General**. The DMG ships these steps as \`README.txt\`.
 
 ### Linux
 
@@ -264,68 +263,28 @@ flatpak run io.github.luiscuellar31.openscp
 
 Replace \`x86_64\` with \`aarch64\` on ARM64 machines.
 
+</details>
+
+<details>
+<summary><strong>Full changelog</strong></summary>
+
 EOF
 
-  echo "## Breaking Changes"
-  if [[ -n "$breaking_items" ]]; then
-    printf '%s' "$breaking_items"
-  else
-    echo "- None."
-  fi
-  echo
+  print_section "Breaking changes" "$breaking_items"
+  print_section "Fixes" "$fix_items"
+  print_section "Performance" "$perf_items"
+  print_section "Refactors" "$refactor_items"
+  print_section "Documentation" "$docs_items"
+  print_section "Maintenance" "$maintenance_items"
+  print_section "Other changes" "$other_items"
 
-  echo "## Features"
-  if [[ -n "$feat_items" ]]; then
-    printf '%s' "$feat_items"
-  else
-    echo "- None."
-  fi
+  echo "</details>"
   echo
-
-  echo "## Fixes"
-  if [[ -n "$fix_items" ]]; then
-    printf '%s' "$fix_items"
+  if [[ -n "$PREV_TAG" && -n "$REPO" ]]; then
+    echo "**Full comparison:** [\`${PREV_TAG}...${TAG}\`](https://github.com/${REPO}/compare/${PREV_TAG}...${TAG})"
+  elif [[ -n "$PREV_TAG" ]]; then
+    echo "**Commit range:** \`${PREV_TAG}..${TAG}\`"
   else
-    echo "- None."
-  fi
-  echo
-
-  echo "## Performance"
-  if [[ -n "$perf_items" ]]; then
-    printf '%s' "$perf_items"
-  else
-    echo "- None."
-  fi
-  echo
-
-  echo "## Refactors"
-  if [[ -n "$refactor_items" ]]; then
-    printf '%s' "$refactor_items"
-  else
-    echo "- None."
-  fi
-  echo
-
-  echo "## Documentation"
-  if [[ -n "$docs_items" ]]; then
-    printf '%s' "$docs_items"
-  else
-    echo "- None."
-  fi
-  echo
-
-  echo "## Maintenance"
-  if [[ -n "$maintenance_items" ]]; then
-    printf '%s' "$maintenance_items"
-  else
-    echo "- None."
-  fi
-  echo
-
-  echo "## Other Changes"
-  if [[ -n "$other_items" ]]; then
-    printf '%s' "$other_items"
-  else
-    echo "- None."
+    echo "**Commit range:** \`${TAG}\`"
   fi
 } >"${OUTPUT:-/dev/stdout}"
