@@ -437,9 +437,8 @@ jobs:
         run: |
           set -euo pipefail
           tag="${{ needs.verify-tag.outputs.tag_name }}"
-          version="${{ needs.verify-tag.outputs.version }}"
           commit="${{ needs.verify-tag.outputs.tag_commit }}"
-          title="OpenSCP v${version}"
+          title="$tag"
           notes_file="$PWD/release-notes.md"
           mapfile -t files < publish-files.txt
           if [[ ${#files[@]} -eq 0 ]]; then
