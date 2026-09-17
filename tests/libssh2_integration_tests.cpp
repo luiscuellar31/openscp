@@ -415,6 +415,25 @@ int main() {
                             "destination: ") +
                     existsErr);
     }
+    // An upload over an existing destination replaces it.
+    if (t.failures == 0) {
+        err.clear();
+        t.check(
+            client.put(localBad.string(), remoteProtected, err, {}, {}, false),
+            std::string("upload over an existing destination should "
+                        "succeed: ") +
+                err);
+        const fs::path localOverwritten = localTmpRoot / "overwritten.txt";
+        std::string downloaded;
+        err.clear();
+        t.check(client.get(remoteProtected, localOverwritten.string(), err, {},
+                           {}, false) &&
+                    readFile(localOverwritten, downloaded) &&
+                    downloaded == badPayload,
+                std::string("an overwritten destination should hold the new "
+                            "content: ") +
+                    err);
+    }
     if (t.failures == 0) {
         err.clear();
         t.check(!client.get(remoteMissing,
