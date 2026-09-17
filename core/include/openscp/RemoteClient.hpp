@@ -78,10 +78,12 @@ class RemoteClient {
     virtual bool rename(const std::string &from, const std::string &to,
                         std::string &err, bool overwrite = false) = 0;
 
-    // Calculates a digest without downloading the remote file. Backends must
-    // only advertise can_checksum when they implement this operation. The
-    // default lets derived clients omit unsupported checksum behavior and
-    // fails safely with a structured Unsupported error.
+    // Calculates a digest of a remote file. Backends without a server-side
+    // hash (SFTP, for example) read the whole file over the connection, but
+    // never store it locally. Backends must only advertise can_checksum when
+    // they implement this operation. The default lets derived clients omit
+    // unsupported checksum behavior and fails safely with a structured
+    // Unsupported error.
     virtual bool
     checksum(const std::string &remote_path, const std::string &algorithm,
              std::vector<std::uint8_t> &digest, std::string &err,
