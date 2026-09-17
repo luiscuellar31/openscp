@@ -26,6 +26,7 @@ set(OPENSCP_CORE_SRCS
     src/common/SafeLocalFile.cpp
     src/common/SafeLocalFile.hpp
     src/common/UniqueFile.hpp
+    src/libssh2/detail/Libssh2CipherPreference.hpp
     src/libssh2/detail/Libssh2ErrorClassifier.cpp
     src/libssh2/detail/Libssh2ErrorClassifier.hpp
     src/libssh2/detail/Libssh2InputSafety.hpp

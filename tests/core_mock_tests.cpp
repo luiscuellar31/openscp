@@ -5,6 +5,7 @@
 #include "common/UniqueFile.hpp"
 #include "libssh2/Libssh2ScpClient.hpp"
 #include "libssh2/Libssh2SftpClient.hpp"
+#include "libssh2/detail/Libssh2CipherPreference.hpp"
 #include "libssh2/detail/Libssh2ErrorClassifier.hpp"
 #include "libssh2/detail/Libssh2InputSafety.hpp"
 #include "libssh2/detail/Libssh2TransferIntegrity.hpp"
@@ -988,6 +989,37 @@ OPENSCP_TEST(test_connected_client_validation, t) {
     t.check(!conn, "CreateConnectedClient should fail with invalid options");
     t.check(!err.empty(),
             "CreateConnectedClient should report validation errors");
+}
+
+OPENSCP_TEST(test_ssh_cipher_preference_follows_aes_instructions, t) {
+    const auto sortedCiphers = [](const std::string &preference) {
+        std::vector<std::string> ciphers;
+        std::size_t start = 0;
+        while (start <= preference.size()) {
+            const std::size_t comma = preference.find(',', start);
+            const std::size_t end =
+                comma == std::string::npos ? preference.size() : comma;
+            ciphers.push_back(preference.substr(start, end - start));
+            start = end + 1;
+        }
+        std::sort(ciphers.begin(), ciphers.end());
+        return ciphers;
+    };
+    const std::string withAes =
+        openscp::libssh2detail::sshCipherPreference(true);
+    const std::string withoutAes =
+        openscp::libssh2detail::sshCipherPreference(false);
+    t.check(withAes.rfind("aes256-gcm@openssh.com,", 0) == 0,
+            "CPUs with AES-GCM instructions should prefer AES-GCM");
+    t.check(withoutAes.rfind("chacha20-poly1305@openssh.com,", 0) == 0,
+            "CPUs without AES-GCM instructions should prefer chacha20");
+    t.check(sortedCiphers(withAes) == sortedCiphers(withoutAes) &&
+                sortedCiphers(withAes).size() == 5,
+            "both cipher orders should offer the same ciphers");
+#if defined(__APPLE__) && defined(__aarch64__)
+    t.check(openscp::libssh2detail::cpuHasAesGcmInstructions(),
+            "Apple silicon should report AES-GCM instructions");
+#endif
 }
 
 OPENSCP_TEST(test_client_factory, t) {
