@@ -68,6 +68,11 @@ class CurlFtpClient : public RemoteClient {
     private:
     Protocol protocol_ = Protocol::Ftp;
     std::unique_ptr<curlcommon::CurlClientState> state_;
+    // Commands the connected server refused as unsupported, so they are not
+    // retried for every path. Reset on connect and accessed only under the
+    // operation lock.
+    bool mlstRejected_ = false;
+    bool mlsdRejected_ = false;
 };
 
 } // namespace openscp

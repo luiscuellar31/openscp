@@ -364,6 +364,33 @@ inline void runManagedFilesContract(
     client.disconnect();
 }
 
+// FTP answers stat, exists and rename conflicts through MLST when the server
+// offers it and through the parent listing otherwise; both must agree.
+inline void checkFtpEntryLookups(openscp::RemoteClient &client,
+                                 const std::string &remotePath,
+                                 TestContext &test) {
+    const std::string parent = remotePath.substr(0, remotePath.rfind('/'));
+    openscp::FileInfo info;
+    std::string error;
+    test.check(client.stat(parent, info, error) && info.is_dir,
+               "FTP: stat should report the parent as a directory: " + error);
+
+    error.clear();
+    test.check(!client.stat(remotePath + ".missing", info, error) &&
+                   error.empty() &&
+                   client.lastOperationError().kind ==
+                       openscp::RemoteErrorKind::NotFound,
+               "FTP: stat of a missing file should report NotFound: " + error);
+
+    error.clear();
+    test.check(!client.rename(remotePath, remotePath, error, false) &&
+                   client.lastOperationError().kind ==
+                       openscp::RemoteErrorKind::Conflict,
+               "FTP: rename without overwrite onto an existing file should "
+               "report a conflict: " +
+                   error);
+}
+
 inline int finishIntegration(std::string_view suiteName,
                              const TestContext &test) {
     if (test.failures != 0) {

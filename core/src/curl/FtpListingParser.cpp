@@ -93,29 +93,25 @@ bool parseMlsdUtcTimestamp(const std::string &raw, std::uint64_t &outEpoch) {
     return true;
 }
 
-bool parseMlsdLine(const std::string &raw, FileInfo &info, bool &emit) {
-    emit = false;
+// Splits an MLSD or MLST entry line ("fact=value;... name") and reads its
+// facts. The lowercased type fact is left for the caller to interpret.
+bool parseMlsxEntry(const std::string &raw, FileInfo &parsed,
+                    std::string &type) {
     std::string line = raw;
     if (!line.empty() && line.back() == '\r')
         line.pop_back();
     line = trimAscii(line);
-    if (line.empty())
-        return true;
 
     const std::size_t separator = line.find_first_of(" \t");
     if (separator == std::string::npos)
         return false;
 
     const std::string factsPart = line.substr(0, separator);
-    std::string name = trimAsciiLeft(line.substr(separator + 1));
-    if (name.empty())
+    parsed = FileInfo{};
+    parsed.name = trimAsciiLeft(line.substr(separator + 1));
+    if (parsed.name.empty())
         return false;
-    if (name == "." || name == "..")
-        return true;
-
-    FileInfo parsed{};
-    parsed.name = name;
-    std::string type;
+    type.clear();
 
     std::size_t start = 0;
     while (start < factsPart.size()) {
@@ -165,12 +161,11 @@ bool parseMlsdLine(const std::string &raw, FileInfo &info, bool &emit) {
         }
     }
 
-    if (type.empty())
-        return false;
-    if (type == "cdir" || type == "pdir")
-        return true;
+    return true;
+}
 
-    parsed.is_dir = type == "dir";
+void finishMlsxEntry(FileInfo &parsed, bool isDir) {
+    parsed.is_dir = isDir;
     if (parsed.is_dir) {
         parsed.has_size = false;
         parsed.size = 0;
@@ -179,7 +174,25 @@ bool parseMlsdLine(const std::string &raw, FileInfo &info, bool &emit) {
     } else if ((parsed.mode & 0170000u) == 0) {
         parsed.mode |= 0100000u;
     }
+}
 
+bool parseMlsdLine(const std::string &raw, FileInfo &info, bool &emit) {
+    emit = false;
+    if (trimAscii(raw).empty())
+        return true;
+
+    FileInfo parsed{};
+    std::string type;
+    if (!parseMlsxEntry(raw, parsed, type))
+        return false;
+    if (parsed.name == "." || parsed.name == "..")
+        return true;
+    if (type.empty())
+        return false;
+    if (type == "cdir" || type == "pdir")
+        return true;
+
+    finishMlsxEntry(parsed, type == "dir");
     info = std::move(parsed);
     emit = true;
     return true;
@@ -293,6 +306,26 @@ ListingParseStatus parseFtpMlsdListing(const std::string &payload,
         }
     }
     return ListingParseStatus::Success;
+}
+
+ListingParseStatus parseFtpMlstReply(const std::string &reply, FileInfo &out) {
+    // RFC 3659 marks the entry line of a multi-line MLST reply with a leading
+    // space; the other lines carry the reply code.
+    std::istringstream input(reply);
+    std::string line;
+    while (std::getline(input, line)) {
+        if (line.empty() || line.front() != ' ')
+            continue;
+        FileInfo parsed{};
+        std::string type;
+        if (!parseMlsxEntry(line, parsed, type) || type.empty())
+            return ListingParseStatus::Malformed;
+        finishMlsxEntry(parsed,
+                        type == "dir" || type == "cdir" || type == "pdir");
+        out = std::move(parsed);
+        return ListingParseStatus::Success;
+    }
+    return ListingParseStatus::Malformed;
 }
 
 ListingParseStatus parseFtpListListing(const std::string &payload,
