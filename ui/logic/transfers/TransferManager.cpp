@@ -3,6 +3,7 @@
 
 #include "logic/common/TimeUtils.hpp"
 #include "logic/common/UiAlerts.hpp"
+#include "logic/navigation/RemotePath.hpp"
 #include "openscp/RemoteClient.hpp"
 #include "openscp/RuntimeLogging.hpp"
 
@@ -1688,19 +1689,17 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
     resume = task.resumeHint;
     if (task.type == TransferTask::Type::Upload) {
         if (caps.can_stat && caps.can_read_metadata) {
-            bool isDirectory = false;
-            std::string existsError;
-            const bool exists = workerClient->exists(task.dst.toStdString(),
-                                                     isDirectory, existsError);
-            if (!existsError.empty()) {
-                err = existsError;
+            // stat() reports a missing path as false with an empty error, so
+            // one call both detects a conflict and describes the destination.
+            openscp::FileInfo remoteInfo{};
+            std::string statError;
+            const bool exists = workerClient->stat(task.dst.toStdString(),
+                                                   remoteInfo, statError);
+            if (!statError.empty()) {
+                err = statError;
                 return PrecheckOutcome::Error;
             }
             if (exists) {
-                openscp::FileInfo remoteInfo{};
-                std::string statError;
-                const bool hasRemoteInfo = workerClient->stat(
-                    task.dst.toStdString(), remoteInfo, statError);
                 const QFileInfo localInfo(task.src);
                 const QString sourceInfo = QStringLiteral("%1 bytes, %2")
                                                .arg(localInfo.size())
@@ -1719,9 +1718,8 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
                         ? std::optional<qint64>(
                               localInfo.lastModified().toSecsSinceEpoch())
                         : std::nullopt,
-                    hasRemoteInfo && remoteInfo.mtime
-                        ? std::optional<qint64>(remoteInfo.mtime)
-                        : std::nullopt);
+                    remoteInfo.mtime ? std::optional<qint64>(remoteInfo.mtime)
+                                     : std::nullopt);
                 if (decision.canceled)
                     return PrecheckOutcome::Canceled;
                 if (decision.policy == Policy::Skip)
@@ -1735,8 +1733,22 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
             }
 
             const QString parent = QFileInfo(task.dst).path();
+            // A completed directory task for this exact parent already proved
+            // it exists, so walking its path again would only repeat round
+            // trips. Any other dependency, or a pruned one, keeps the walk.
+            const bool parentCreatedByDependency = [&] {
+                std::lock_guard<std::mutex> lock(mtx_);
+                const TransferTask *dependency =
+                    taskForIdLocked(task.dependsOnTaskId);
+                return dependency &&
+                       dependency->type ==
+                           TransferTask::Type::CreateRemoteDirectory &&
+                       dependency->status == Status::Done &&
+                       normalizeRemotePath(dependency->dst) ==
+                           normalizeRemotePath(parent);
+            }();
             if (caps.can_mkdir && !parent.isEmpty() &&
-                parent != QStringLiteral(".")) {
+                parent != QStringLiteral(".") && !parentCreatedByDependency) {
                 QString current = QStringLiteral("/");
                 const QStringList pieces =
                     parent.split('/', Qt::SkipEmptyParts);

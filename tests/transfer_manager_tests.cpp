@@ -10,6 +10,7 @@
 #include <QFileDevice>
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -1346,6 +1347,101 @@ OPENSCP_TEST(testRemovingUploadCanQueueRemotePartialCleanup, test) {
     test.check(probe->removedPaths.size() == 1 &&
                    probe->removedPaths.front() == "/remote/upload.part",
                "remote cleanup should target the deterministic .part path");
+}
+
+struct RemoteLookupProbe {
+    std::mutex mutex;
+    std::vector<std::string> exists;
+    std::vector<std::string> stats;
+};
+
+// Records remote lookups. Every directory exists and no upload destination
+// does.
+class RemoteLookupClient final : public openscp::MockSftpClient {
+    public:
+    explicit RemoteLookupClient(std::shared_ptr<RemoteLookupProbe> probe)
+        : probe_(std::move(probe)) {}
+
+    bool exists(const std::string &remote, bool &isDir,
+                std::string &err) override {
+        record(probe_->exists, remote);
+        isDir = true;
+        clearLastOperationError();
+        err.clear();
+        return true;
+    }
+
+    bool stat(const std::string &remote, openscp::FileInfo &info,
+              std::string &err) override {
+        record(probe_->stats, remote);
+        info = openscp::FileInfo{};
+        clearLastOperationError();
+        err.clear();
+        return false;
+    }
+
+    bool put(const std::string &, const std::string &, std::string &err,
+             std::function<void(std::size_t, std::size_t)>,
+             std::function<bool()>, bool) override {
+        clearLastOperationError();
+        err.clear();
+        return true;
+    }
+
+    std::unique_ptr<openscp::RemoteClient>
+    newConnectionLike(const openscp::SessionOptions &options,
+                      std::string &err) override {
+        return makeConnectedWorker<RemoteLookupClient>(options, err, probe_);
+    }
+
+    private:
+    void record(std::vector<std::string> &calls, const std::string &remote) {
+        std::lock_guard<std::mutex> lock(probe_->mutex);
+        calls.push_back(remote);
+    }
+
+    std::shared_ptr<RemoteLookupProbe> probe_;
+};
+
+OPENSCP_TEST(testUploadPrecheckReusesCompletedParentDirectory, test) {
+    auto probe = std::make_shared<RemoteLookupProbe>();
+    RemoteLookupClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    configureManager(manager, baseClient, testOptions());
+
+    TransferBatchOptions batch = testBatchOptions();
+    const quint64 parent =
+        manager.enqueueRemoteDirectory(QStringLiteral("/remote/dir"), batch);
+    batch.dependsOnTaskId = parent;
+    const quint64 child =
+        manager.enqueueUpload(QStringLiteral("/local/child.txt"),
+                              QStringLiteral("/remote/dir/child.txt"), batch);
+    const quint64 other =
+        manager.enqueueRemoteDirectory(QStringLiteral("/remote/other"), batch);
+    batch.dependsOnTaskId = other;
+    const quint64 unrelated = manager.enqueueUpload(
+        QStringLiteral("/local/unrelated.txt"),
+        QStringLiteral("/remote/dir/unrelated.txt"), batch);
+
+    test.check(
+        waitForStatus(manager, child, TransferTask::Status::Done) &&
+            waitForStatus(manager, unrelated, TransferTask::Status::Done),
+        "uploads with directory dependencies should complete");
+
+    std::lock_guard<std::mutex> lock(probe->mutex);
+    const auto calls = [](const std::vector<std::string> &recorded,
+                          const std::string &path) {
+        return std::count(recorded.begin(), recorded.end(), path);
+    };
+    test.check(calls(probe->stats, "/remote/dir/child.txt") == 1 &&
+                   calls(probe->exists, "/remote/dir/child.txt") == 0,
+               "the upload conflict check should use one stat");
+    // Only the upload whose dependency created another directory walks the
+    // parent path.
+    test.check(calls(probe->exists, "/remote") == 1 &&
+                   calls(probe->exists, "/remote/dir") == 2,
+               "a completed parent directory task should skip the path walk");
 }
 
 OPENSCP_TEST(testPausedQueuePersistence, test) {
