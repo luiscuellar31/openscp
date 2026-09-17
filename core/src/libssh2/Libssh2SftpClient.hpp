@@ -4,6 +4,7 @@
 #include "openscp/KnownHostsUtils.hpp"
 #include "openscp/RemoteClient.hpp"
 
+#include <atomic>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -31,7 +32,7 @@ class Libssh2SftpClient : public RemoteClient {
     bool connectTransportOnly(const SessionOptions &opt, std::string &err);
     void disconnect() override;
     void interrupt() override;
-    bool isConnected() const override { return connected_; }
+    bool isConnected() const override { return connected_.load(); }
 
     bool list(const std::string &remote_path, std::vector<FileInfo> &out,
               std::string &err) override;
@@ -104,7 +105,8 @@ class Libssh2SftpClient : public RemoteClient {
                                           bool mutation) const;
     bool rejectOversizedPath(const std::string &path, std::string &err);
 
-    bool connected_ = false;
+    // Atomic because interrupt() clears it from another thread.
+    std::atomic_bool connected_{false};
     int sock_ = -1;
     _LIBSSH2_SESSION *session_ = nullptr; // <- uses internal libssh2 types
     _LIBSSH2_SFTP *sftp_ = nullptr;       // <- same

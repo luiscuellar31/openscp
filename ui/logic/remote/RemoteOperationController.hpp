@@ -59,6 +59,9 @@ class RemoteOperationController final : public QObject {
     // or clearing a session cancels all work from older generations. With
     // openConnection, long scans and searches may list directories on a few
     // extra connections; if one cannot be opened, the session stops trying.
+    // It also reopens the control connection when canceling an operation
+    // dropped it; if that fails, or without openConnection, later jobs fail as
+    // not connected.
     SessionGeneration
     installSession(std::unique_ptr<openscp::RemoteClient> connectedClient,
                    ConnectionFactory openConnection = {});

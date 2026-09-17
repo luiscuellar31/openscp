@@ -3080,6 +3080,9 @@ void Libssh2SftpClient::interrupt() {
     }
     if (sock == -1)
         return;
+    // libssh2 cannot abandon a blocking call, so the socket is shut down and
+    // the session cannot be used again.
+    connected_.store(false);
 #ifdef _WIN32
     (void)::shutdown(sock, SD_BOTH);
 #else

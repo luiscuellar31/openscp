@@ -34,6 +34,9 @@ class RemoteClient {
 
     virtual bool connect(const SessionOptions &opt, std::string &err) = 0;
     virtual void disconnect() = 0;
+    // Aborts the operation in progress; may be called from another thread. A
+    // backend that has to drop the connection to do so reports it through
+    // isConnected().
     virtual void interrupt() {}
     virtual bool isConnected() const = 0;
 

@@ -37,6 +37,8 @@ struct FakeState {
     std::atomic_int activeCalls{0};
     std::atomic_int maximumActiveCalls{0};
     std::atomic_bool interrupted{false};
+    // Makes interrupt() drop the connection, as the SFTP backend does.
+    std::atomic_bool interruptDropsConnection{false};
 };
 
 class ActiveCall {
@@ -89,6 +91,8 @@ class ControllerFakeClient final : public openscp::RemoteClient {
 
     void interrupt() override {
         state_->interrupted.store(true);
+        if (state_->interruptDropsConnection.load())
+            connected_.store(false);
         state_->wake.notify_all();
     }
 
@@ -916,6 +920,138 @@ OPENSCP_TEST(testLongScansListOnExtraConnections, test) {
     test.check(scanWide(), "a later scan should still finish");
     test.check(opened.load() == attemptsAfterRefusal,
                "a session must not retry extra connections after a refusal");
+}
+
+OPENSCP_TEST(testCanceledJobDroppingConnectionIsReopened, test) {
+    RemoteOperationController controller;
+    const auto state = std::make_shared<FakeState>();
+    state->interruptDropsConnection.store(true);
+    std::atomic_int opened{0};
+    RemoteOperationController::JobId slowJob = 0;
+    bool slowStarted = false;
+    std::optional<RemoteOperationController::ListResult> slowResult;
+
+    QObject::connect(&controller, &RemoteOperationController::jobStarted,
+                     &controller,
+                     [&](const RemoteOperationController::JobKey &job) {
+                         if (job.id == slowJob)
+                             slowStarted = true;
+                     });
+    QObject::connect(
+        &controller, &RemoteOperationController::listCompleted, &controller,
+        [&](const RemoteOperationController::ListResult &result) {
+            if (result.result.job.id == slowJob)
+                slowResult = result;
+        });
+
+    controller.installSession(
+        makeConnectedClient(state),
+        [&](std::string &) -> std::unique_ptr<openscp::RemoteClient> {
+            ++opened;
+            return makeConnectedClient(state);
+        });
+    const auto listRoot = [&] {
+        std::optional<RemoteOperationController::ListResult> root;
+        const RemoteOperationController::JobId job = controller.submit(
+            RemoteOperationController::ListRequest{"/", true});
+        QMetaObject::Connection connection = QObject::connect(
+            &controller, &RemoteOperationController::listCompleted,
+            &controller,
+            [&](const RemoteOperationController::ListResult &result) {
+                if (result.result.job.id == job)
+                    root = result;
+            });
+        const bool finished = spinUntil([&] { return root.has_value(); });
+        QObject::disconnect(connection);
+        return finished &&
+               root->result.outcome ==
+                   RemoteOperationController::Outcome::Succeeded &&
+               root->entries.size() == 2;
+    };
+
+    slowJob = controller.submit(
+        RemoteOperationController::ListRequest{"/slow", true});
+    test.check(spinUntil([&] { return slowStarted; }),
+               "the listing to cancel should start");
+    test.check(controller.cancel(slowJob), "cancel should find the listing");
+    test.check(spinUntil([&] { return slowResult.has_value(); }) &&
+                   slowResult->result.outcome ==
+                       RemoteOperationController::Outcome::Canceled,
+               "the interrupted listing should report cancellation");
+
+    test.check(listRoot(),
+               "the job after a dropped connection should run on a new one");
+    test.check(opened.load() == 1,
+               "a dropped control connection should be reopened once");
+    test.check(state->disconnectThread == state->workerThread,
+               "the dropped client should be disconnected on the lane");
+    test.check(listRoot() && opened.load() == 1,
+               "a healthy control connection must not be reopened");
+}
+
+OPENSCP_TEST(testRefusedReopenIsNotRetried, test) {
+    RemoteOperationController controller;
+    const auto state = std::make_shared<FakeState>();
+    state->interruptDropsConnection.store(true);
+    std::atomic_int opened{0};
+    RemoteOperationController::JobId slowJob = 0;
+    bool slowStarted = false;
+    bool slowFinished = false;
+
+    QObject::connect(&controller, &RemoteOperationController::jobStarted,
+                     &controller,
+                     [&](const RemoteOperationController::JobKey &job) {
+                         if (job.id == slowJob)
+                             slowStarted = true;
+                     });
+    QObject::connect(
+        &controller, &RemoteOperationController::jobFinished, &controller,
+        [&](const RemoteOperationController::Completion &completion) {
+            if (completion.result.job.id == slowJob)
+                slowFinished = true;
+        });
+
+    controller.installSession(
+        makeConnectedClient(state),
+        [&](std::string &error) -> std::unique_ptr<openscp::RemoteClient> {
+            ++opened;
+            error = "Authentication requires user interaction";
+            return nullptr;
+        });
+    const auto statFailsAsDisconnected = [&] {
+        std::optional<RemoteOperationController::StatResult> stat;
+        const RemoteOperationController::JobId job =
+            controller.submit(RemoteOperationController::StatRequest{"/"});
+        QMetaObject::Connection connection = QObject::connect(
+            &controller, &RemoteOperationController::statCompleted,
+            &controller,
+            [&](const RemoteOperationController::StatResult &result) {
+                if (result.result.job.id == job)
+                    stat = result;
+            });
+        const bool finished = spinUntil([&] { return stat.has_value(); });
+        QObject::disconnect(connection);
+        return finished &&
+               stat->result.outcome ==
+                   RemoteOperationController::Outcome::Failed &&
+               stat->result.remoteError.kind ==
+                   openscp::RemoteErrorKind::Connection;
+    };
+
+    slowJob = controller.submit(
+        RemoteOperationController::ListRequest{"/slow", true});
+    test.check(spinUntil([&] { return slowStarted; }),
+               "the listing to cancel should start");
+    test.check(controller.cancel(slowJob), "cancel should find the listing");
+    test.check(spinUntil([&] { return slowFinished; }),
+               "the interrupted listing should finish");
+
+    test.check(statFailsAsDisconnected(),
+               "a job should fail as disconnected when reopening is refused");
+    test.check(statFailsAsDisconnected(),
+               "later jobs should keep failing as disconnected");
+    test.check(opened.load() == 1,
+               "a refused reopen must not be retried for every job");
 }
 
 } // namespace

@@ -508,6 +508,23 @@ class RemoteOperationController::Impl {
         installedGeneration_ = 0;
     }
 
+    // A backend may drop its connection to honor interrupt(), as SFTP does.
+    // The next job then runs on a new connection instead of failing until the
+    // session is replaced. If it cannot be opened, the client is dropped so
+    // later jobs fail without each one making the server see another login.
+    void reopenControlConnection() {
+        client_->disconnect();
+        std::unique_ptr<openscp::RemoteClient> reopened;
+        if (openConnection_) {
+            std::string error;
+            reopened = openConnection_(error);
+        }
+        if (reopened && reopened->isConnected())
+            client_ = std::move(reopened);
+        else
+            client_.reset();
+    }
+
     void processInstall(InstallSessionCommand install) {
         bool initiallyDesired = false;
         {
@@ -574,6 +591,10 @@ class RemoteOperationController::Impl {
             postCompletion(job.key, summary);
             return;
         }
+        // The cancellation check below also covers a cancel or session
+        // replacement requested while the connection was being reopened.
+        if (!canceled(job, stopToken) && client_ && !client_->isConnected())
+            reopenControlConnection();
         if (canceled(job, stopToken)) {
             RunSummary summary;
             summary.outcome = Outcome::Canceled;
