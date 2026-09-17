@@ -454,6 +454,29 @@ void TransferManager::skipForFailedDependencyLocked(TransferTask &task,
     ++terminalTaskCount_;
 }
 
+QVector<quint64>
+TransferManager::skipDependentsOfFailedLocked(quint64 failedTaskId,
+                                              qint64 now) {
+    QVector<quint64> skipped;
+    QSet<quint64> failedPrerequisites{failedTaskId};
+    bool foundDependent = true;
+    while (foundDependent) {
+        foundDependent = false;
+        for (auto &candidateNode : queueStore_.nodes()) {
+            auto &candidate = *candidateNode;
+            if (isTerminalTransferStatus(candidate.status) ||
+                !failedPrerequisites.contains(candidate.dependsOnTaskId)) {
+                continue;
+            }
+            skipForFailedDependencyLocked(candidate, now);
+            skipped.push_back(candidate.taskId);
+            failedPrerequisites.insert(candidate.taskId);
+            foundDependent = true;
+        }
+    }
+    return skipped;
+}
+
 quint64 TransferManager::enqueueUpload(const QString &local,
                                        const QString &remote,
                                        const TransferBatchOptions &options) {
@@ -1104,22 +1127,30 @@ void TransferManager::resumeTask(quint64 taskId) {
 void TransferManager::cancelTask(quint64 taskId) {
     bool active = false;
     bool changed = false;
+    QVector<quint64> dependencySkipped;
     QVector<quint64> removed;
     {
         std::lock_guard<std::mutex> lock(mtx_);
         TransferTask *task = taskForIdLocked(taskId);
         if (task && !isTerminalTransferStatus(task->status)) {
+            const qint64 now = QDateTime::currentMSecsSinceEpoch();
             active = activeTaskIds_.count(taskId);
             canceledTasks_.insert(taskId);
             pausedTasks_.erase(taskId);
             resumeRequestedTasks_.erase(taskId);
-            transitionToCanceled(*task, QDateTime::currentMSecsSinceEpoch());
+            transitionToCanceled(*task, now);
+            // An active task reaches finishWorkerTask(), which skips its
+            // dependents once the worker stops.
+            if (!active)
+                dependencySkipped = skipDependentsOfFailedLocked(taskId, now);
             changed = true;
             removed = pruneTerminalHistoryLocked();
         }
     }
     if (changed)
         publishUpdated({taskId});
+    if (!dependencySkipped.isEmpty())
+        publishUpdated(dependencySkipped);
     if (!removed.isEmpty())
         publishRemoved(removed);
     if (active)
@@ -2268,24 +2299,8 @@ void TransferManager::finishWorkerTask(quint64 taskId, qint64 precheckMs,
         releaseDestinationLocked(taskId);
         if (finalStatus == Status::Error || finalStatus == Status::Canceled ||
             finalStatus == Status::Warning) {
-            QSet<quint64> failedPrerequisites{taskId};
-            bool foundDependent = true;
-            const qint64 now = QDateTime::currentMSecsSinceEpoch();
-            while (foundDependent) {
-                foundDependent = false;
-                for (auto &candidateNode : queueStore_.nodes()) {
-                    auto &candidate = *candidateNode;
-                    if (isTerminalTransferStatus(candidate.status) ||
-                        !failedPrerequisites.contains(
-                            candidate.dependsOnTaskId)) {
-                        continue;
-                    }
-                    skipForFailedDependencyLocked(candidate, now);
-                    dependencySkipped.push_back(candidate.taskId);
-                    failedPrerequisites.insert(candidate.taskId);
-                    foundDependent = true;
-                }
-            }
+            dependencySkipped = skipDependentsOfFailedLocked(
+                taskId, QDateTime::currentMSecsSinceEpoch());
         }
         int running = running_.load();
         while (running > 0 &&

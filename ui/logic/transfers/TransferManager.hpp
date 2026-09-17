@@ -194,6 +194,10 @@ class TransferManager : public QObject {
     void initializeConnectionStatusLocked(TransferTask &task) const;
     bool dependencyFailedLocked(const TransferTask &task) const;
     void skipForFailedDependencyLocked(TransferTask &task, qint64 now);
+    // Skips the queued work that depends, directly or through other skipped
+    // tasks, on a task that did not complete successfully.
+    QVector<quint64> skipDependentsOfFailedLocked(quint64 failedTaskId,
+                                                  qint64 now);
     quint64 enqueuePathTask(TransferTask::Type type, const QString &path,
                             const TransferBatchOptions &options);
     std::string destinationKey(const TransferTask &task) const;

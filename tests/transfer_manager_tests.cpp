@@ -1181,6 +1181,37 @@ OPENSCP_TEST(testFailedDependencySkipsFollowingWork, test) {
         "failed prerequisites should skip late dependency chains");
 }
 
+OPENSCP_TEST(testCancelingQueuedPrerequisiteSkipsDependents, test) {
+    // Without a connection factory nothing runs, so every task stays queued.
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    TransferBatchOptions batch;
+    batch.sessionKey = QStringLiteral("test-session");
+    const quint64 first =
+        manager.enqueueRemoteDelete(QStringLiteral("/first"), false, batch);
+    batch.dependsOnTaskId = first;
+    const quint64 second =
+        manager.enqueueRemoteDelete(QStringLiteral("/second"), false, batch);
+    batch.dependsOnTaskId = second;
+    const quint64 third =
+        manager.enqueueRemoteDelete(QStringLiteral("/third"), false, batch);
+    batch.dependsOnTaskId = 0;
+    const quint64 unrelated =
+        manager.enqueueRemoteDelete(QStringLiteral("/unrelated"), false, batch);
+
+    manager.cancelTask(first);
+    const auto skipped = [&](quint64 taskId) {
+        const auto task = manager.taskSnapshot(taskId);
+        return task && task->status == TransferTask::Status::Skipped &&
+               task->skippedByFailedDependency;
+    };
+    test.check(skipped(second) && skipped(third),
+               "canceling a queued prerequisite should skip its dependents");
+    const auto other = manager.taskSnapshot(unrelated);
+    test.check(other && other->status == TransferTask::Status::Queued,
+               "canceling a task should leave independent work queued");
+}
+
 OPENSCP_TEST(testDependencySkipsKeepTerminalCounterAndHistoryBounded, test) {
     auto state = authenticationFailureState("/remote/root-failure");
     FailureDownloadClient baseClient(state);
