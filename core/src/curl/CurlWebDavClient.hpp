@@ -67,6 +67,10 @@ class CurlWebDavClient : public RemoteClient {
 
     private:
     std::unique_ptr<curlcommon::CurlClientState> state_;
+    // Set on connect when the server offered only Basic authentication, so
+    // requests carry credentials without a 401 round trip. Accessed only
+    // under the operation lock.
+    bool basicAuthPinned_ = false;
 };
 
 } // namespace openscp

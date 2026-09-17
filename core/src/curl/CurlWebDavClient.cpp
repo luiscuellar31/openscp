@@ -118,7 +118,7 @@ RemoteError webDavMutationStatusError(
 }
 
 bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
-                               std::string &err) {
+                               bool basicAuthPinned, std::string &err) {
     if (!curlcommon::configureBaseCurlHandle(curl, "WebDAV", true, std::nullopt,
                                              err))
         return false;
@@ -130,10 +130,14 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
         return false;
 
     if (!opt.username.empty()) {
+        // Negotiating (CURLAUTH_ANY) sends every request once without
+        // credentials, because curl_easy_reset() forgets the method picked by
+        // the previous 401. A connection pinned to Basic sends it up front.
+        const unsigned long httpAuth =
+            basicAuthPinned ? CURLAUTH_BASIC : CURLAUTH_ANY;
         if (curl_easy_setopt(curl, CURLOPT_USERNAME, opt.username.c_str()) !=
                 CURLE_OK ||
-            curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY) !=
-                CURLE_OK) {
+            curl_easy_setopt(curl, CURLOPT_HTTPAUTH, httpAuth) != CURLE_OK) {
             err = "Could not configure WebDAV authentication username.";
             return false;
         }
@@ -159,17 +163,36 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
     return curlcommon::configureProxy(curl, opt, "WebDAV", "WebDAV", err);
 }
 
-bool performTextRequest(CURL *curl, const SessionOptions &opt,
-                        const WebDavTextRequest &request,
-                        const std::atomic<bool> *interrupted,
-                        WebDavResponse &response, std::string &err,
-                        CURLcode *curlCodeOut = nullptr) {
+// Returns true when a request sent with pinned Basic credentials was refused
+// while the server offers another method (such as Digest on one collection).
+// Negotiation is then restored for the connection so the caller can repeat
+// the request once.
+bool unpinBasicAuthAfterRejection(CURL *curl, bool &basicAuthPinned,
+                                  long statusCode) {
+    if (!basicAuthPinned || statusCode != 401)
+        return false;
+    long available = 0;
+    if (curl_easy_getinfo(curl, CURLINFO_HTTPAUTH_AVAIL, &available) !=
+            CURLE_OK ||
+        (static_cast<unsigned long>(available) & ~CURLAUTH_BASIC) == 0) {
+        return false;
+    }
+    basicAuthPinned = false;
+    return true;
+}
+
+bool performTextRequestOnce(CURL *curl, const SessionOptions &opt,
+                            bool basicAuthPinned,
+                            const WebDavTextRequest &request,
+                            const std::atomic<bool> *interrupted,
+                            WebDavResponse &response, std::string &err,
+                            CURLcode *curlCodeOut) {
     // Generic request helper for WebDAV verbs with text/XML payloads.
     response = WebDavResponse{};
     if (curlCodeOut)
         *curlCodeOut = CURLE_OK;
     curl_easy_reset(curl);
-    if (!configureCommonCurlHandle(curl, opt, err)) {
+    if (!configureCommonCurlHandle(curl, opt, basicAuthPinned, err)) {
         return false;
     }
 
@@ -247,6 +270,22 @@ bool performTextRequest(CURL *curl, const SessionOptions &opt,
     return true;
 }
 
+bool performTextRequest(CURL *curl, const SessionOptions &opt,
+                        bool &basicAuthPinned, const WebDavTextRequest &request,
+                        const std::atomic<bool> *interrupted,
+                        WebDavResponse &response, std::string &err,
+                        CURLcode *curlCodeOut = nullptr) {
+    const bool ok =
+        performTextRequestOnce(curl, opt, basicAuthPinned, request, interrupted,
+                               response, err, curlCodeOut);
+    if (!ok || !unpinBasicAuthAfterRejection(curl, basicAuthPinned,
+                                             response.statusCode)) {
+        return ok;
+    }
+    return performTextRequestOnce(curl, opt, basicAuthPinned, request,
+                                  interrupted, response, err, curlCodeOut);
+}
+
 bool isDirectChildPath(const std::string &parentPath, const std::string &path,
                        std::string &childName) {
     childName.clear();
@@ -285,8 +324,8 @@ const std::string &propfindBody() {
 }
 
 bool performPropfind(CURL *curl, const SessionOptions &opt,
-                     const std::string &remotePath, int depth,
-                     const std::atomic<bool> *interrupted,
+                     bool &basicAuthPinned, const std::string &remotePath,
+                     int depth, const std::atomic<bool> *interrupted,
                      WebDavResponse &response, std::string &err,
                      CURLcode *curlCodeOut = nullptr) {
     // PROPFIND drives both stat(depth=0) and list(depth=1).
@@ -296,7 +335,7 @@ bool performPropfind(CURL *curl, const SessionOptions &opt,
         "Content-Type: application/xml; charset=utf-8",
     };
     return performTextRequest(
-        curl, opt,
+        curl, opt, basicAuthPinned,
         WebDavTextRequest{"PROPFIND", remotePath, &body, std::move(headers)},
         interrupted, response, err, curlCodeOut);
 }
@@ -367,8 +406,9 @@ bool CurlWebDavClient::connect(const SessionOptions &opt, std::string &err) {
     CURL *curl = newEasySession->get();
     WebDavResponse probe;
     CURLcode probeCode = CURLE_OK;
-    if (!performPropfind(curl, normalized, "/", 0, operation.interrupted(),
-                         probe, err, &probeCode)) {
+    bool probeBasicAuthPinned = false;
+    if (!performPropfind(curl, normalized, probeBasicAuthPinned, "/", 0,
+                         operation.interrupted(), probe, err, &probeCode)) {
         setLastOperationError(
             curlcommon::errorFromCurl(probeCode, err, probe.statusCode));
         return false;
@@ -380,6 +420,14 @@ bool CurlWebDavClient::connect(const SessionOptions &opt, std::string &err) {
         return false;
     }
 
+    // The probe negotiated. If its 401 offered only Basic, the connection
+    // sends Basic up front from now on; with Digest or stronger methods on
+    // offer it keeps negotiating, as libcurl would pick those.
+    long authAvailable = 0;
+    basicAuthPinned_ =
+        curl_easy_getinfo(curl, CURLINFO_HTTPAUTH_AVAIL, &authAvailable) ==
+            CURLE_OK &&
+        static_cast<unsigned long>(authAvailable) == CURLAUTH_BASIC;
     state_->commitConnection(
         std::make_shared<const SessionOptions>(std::move(normalized)),
         std::move(newEasySession));
@@ -414,8 +462,9 @@ bool CurlWebDavClient::list(const std::string &remote_path,
     const std::string basePath = normalizeRemotePath(remote_path);
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
-    if (!performPropfind(connection.session->get(), opt, basePath, 1,
-                         operation.interrupted(), response, err, &rc)) {
+    if (!performPropfind(connection.session->get(), opt, basicAuthPinned_,
+                         basePath, 1, operation.interrupted(), response, err,
+                         &rc)) {
         if (rc == CURLE_ABORTED_BY_CALLBACK && operation.interrupted()->load())
             err = "Interrupted";
         setLastOperationError(
@@ -497,13 +546,16 @@ bool CurlWebDavClient::get(
     std::optional<std::uint32_t> retryAfter;
     const std::string url = buildWebDavUrl(opt, remote);
     RemoteError failure;
-    if (!curlcommon::downloadToLocalFile(
-            connection.session->get(), local, std::move(progress),
-            std::move(shouldCancel), operation.interrupted(), "WebDAV download",
+    long rejectedStatus = 0;
+    const auto download = [&] {
+        rejectedStatus = 0;
+        return curlcommon::downloadToLocalFile(
+            connection.session->get(), local, progress, shouldCancel,
+            operation.interrupted(), "WebDAV download",
             [&](CURL *curl, std::FILE *file,
                 curlcommon::TransferProgressContext &progressContext,
                 std::string &configurationError) {
-                return configureCommonCurlHandle(curl, opt,
+                return configureCommonCurlHandle(curl, opt, basicAuthPinned_,
                                                  configurationError) &&
                        curlcommon::configureFileDownload(
                            curl, file, progressContext, configurationError) &&
@@ -521,11 +573,21 @@ bool CurlWebDavClient::get(
                 std::string &responseError) -> std::optional<RemoteError> {
                 if (curlcommon::isCompletedWebDavGetStatus(responseCode))
                     return std::nullopt;
+                rejectedStatus = responseCode;
                 responseError = formatHttpFailure("WebDAV GET", responseCode);
                 return curlcommon::errorFromHttpStatus(
                     responseCode, responseError, false, retryAfter);
             },
-            failure, err)) {
+            failure, err);
+    };
+    bool downloaded = download();
+    if (!downloaded &&
+        unpinBasicAuthAfterRejection(connection.session->get(),
+                                     basicAuthPinned_, rejectedStatus)) {
+        err.clear();
+        downloaded = download();
+    }
+    if (!downloaded) {
         setLastOperationError(failure);
         return false;
     }
@@ -571,13 +633,17 @@ bool CurlWebDavClient::put(
     curlcommon::BoundedStringSink responseSink{&responseBody};
     const std::string uploadUrl = buildWebDavUrl(opt, remotePartial);
     RemoteError failure;
-    if (!curlcommon::uploadFromLocalFile(
-            connection.session->get(), local, std::move(progress),
-            std::move(shouldCancel), operation.interrupted(), "WebDAV upload",
+    long rejectedStatus = 0;
+    const auto upload = [&] {
+        rejectedStatus = 0;
+        responseBody.clear();
+        return curlcommon::uploadFromLocalFile(
+            connection.session->get(), local, progress, shouldCancel,
+            operation.interrupted(), "WebDAV upload",
             [&](CURL *curl, std::FILE *file, curl_off_t fileSize,
                 curlcommon::TransferProgressContext &progressContext,
                 std::string &configurationError) {
-                return configureCommonCurlHandle(curl, opt,
+                return configureCommonCurlHandle(curl, opt, basicAuthPinned_,
                                                  configurationError) &&
                        curlcommon::configureFileUpload(curl, file, fileSize,
                                                        progressContext,
@@ -601,11 +667,21 @@ bool CurlWebDavClient::put(
                 std::string &responseError) -> std::optional<RemoteError> {
                 if (curlcommon::isCompletedWebDavWriteStatus(responseCode))
                     return std::nullopt;
+                rejectedStatus = responseCode;
                 responseError = formatHttpFailure("WebDAV PUT", responseCode);
                 return curlcommon::errorFromHttpStatus(
                     responseCode, responseError, false, retryAfter);
             },
-            failure, err)) {
+            failure, err);
+    };
+    bool uploaded = upload();
+    if (!uploaded &&
+        unpinBasicAuthAfterRejection(connection.session->get(),
+                                     basicAuthPinned_, rejectedStatus)) {
+        err.clear();
+        uploaded = upload();
+    }
+    if (!uploaded) {
         setLastOperationError(failure);
         return false;
     }
@@ -617,7 +693,7 @@ bool CurlWebDavClient::put(
     };
     WebDavResponse moveResponse;
     CURLcode moveCode = CURLE_OK;
-    if (!performTextRequest(connection.session->get(), opt,
+    if (!performTextRequest(connection.session->get(), opt, basicAuthPinned_,
                             WebDavTextRequest{"MOVE", remotePartial, nullptr,
                                               std::move(headers)},
                             operation.interrupted(), moveResponse, err,
@@ -667,8 +743,9 @@ bool CurlWebDavClient::stat(const std::string &remote_path, FileInfo &info,
     const std::string target = normalizeRemotePath(remote_path);
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
-    if (!performPropfind(connection.session->get(), opt, target, 0,
-                         operation.interrupted(), response, err, &rc)) {
+    if (!performPropfind(connection.session->get(), opt, basicAuthPinned_,
+                         target, 0, operation.interrupted(), response, err,
+                         &rc)) {
         if (rc == CURLE_ABORTED_BY_CALLBACK && operation.interrupted()->load())
             err = "Interrupted";
         setLastOperationError(
@@ -770,7 +847,7 @@ bool CurlWebDavClient::mkdir(const std::string &remote_dir, std::string &err,
     const SessionOptions &opt = *connection.options;
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
-    if (!performTextRequest(connection.session->get(), opt,
+    if (!performTextRequest(connection.session->get(), opt, basicAuthPinned_,
                             WebDavTextRequest{"MKCOL", remote_dir, nullptr, {}},
                             operation.interrupted(), response, err, &rc)) {
         setLastOperationError(
@@ -786,9 +863,9 @@ bool CurlWebDavClient::mkdir(const std::string &remote_dir, std::string &err,
     if (response.statusCode == 405) {
         WebDavResponse verification;
         CURLcode verificationCode = CURLE_OK;
-        if (!performPropfind(connection.session->get(), opt, remote_dir, 0,
-                             operation.interrupted(), verification, err,
-                             &verificationCode)) {
+        if (!performPropfind(connection.session->get(), opt, basicAuthPinned_,
+                             remote_dir, 0, operation.interrupted(),
+                             verification, err, &verificationCode)) {
             setLastOperationError(curlcommon::errorFromCurl(
                 verificationCode, err, verification.statusCode));
             return false;
@@ -845,7 +922,7 @@ bool CurlWebDavClient::removeFile(const std::string &remote_path,
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
     if (!performTextRequest(
-            connection.session->get(), opt,
+            connection.session->get(), opt, basicAuthPinned_,
             WebDavTextRequest{"DELETE", remote_path, nullptr, {}},
             operation.interrupted(), response, err, &rc)) {
         setLastOperationError(
@@ -888,7 +965,7 @@ bool CurlWebDavClient::rename(const std::string &from, const std::string &to,
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
     if (!performTextRequest(
-            connection.session->get(), opt,
+            connection.session->get(), opt, basicAuthPinned_,
             WebDavTextRequest{"MOVE", from, nullptr, std::move(headers)},
             operation.interrupted(), response, err, &rc)) {
         setLastOperationError(
