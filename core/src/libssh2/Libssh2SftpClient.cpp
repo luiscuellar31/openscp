@@ -3221,18 +3221,8 @@ bool Libssh2SftpClient::get(
     const TransferIntegrityPolicy policy = transferIntegrityPolicy_;
     const std::string localPart = local + ".part";
 
-    // Remote size (for progress and sanity checks)
-    LIBSSH2_SFTP_ATTRIBUTES st{};
-    if (libssh2_sftp_stat_ex(sftp_, remote.c_str(),
-                             static_cast<unsigned>(remote.size()),
-                             LIBSSH2_SFTP_STAT, &st) != 0) {
-        err = "Could not stat remote path";
-        return false;
-    }
-    const bool hasTotal = (st.flags & LIBSSH2_SFTP_ATTR_SIZE) != 0;
-    std::size_t total = hasTotal ? static_cast<std::size_t>(st.filesize) : 0;
-
-    // Open remote for reading
+    // Open first and read the size from the handle: this saves the round trip
+    // of a separate stat, and the attributes describe the file actually read.
     LIBSSH2_SFTP_HANDLE *rh = libssh2_sftp_open_ex(
         sftp_, remote.c_str(), static_cast<unsigned>(remote.size()),
         LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
@@ -3240,6 +3230,17 @@ bool Libssh2SftpClient::get(
         err = "Could not open remote file for reading";
         return false;
     }
+    LIBSSH2_SFTP_ATTRIBUTES st{};
+    if (libssh2_sftp_fstat_ex(rh, &st, 0) != 0) {
+        err = "Could not stat remote path";
+        const RemoteError structuredFailure =
+            classifyStructuredFailure(err, false);
+        libssh2_sftp_close(rh);
+        setLastOperationError(structuredFailure);
+        return false;
+    }
+    const bool hasTotal = (st.flags & LIBSSH2_SFTP_ATTR_SIZE) != 0;
+    std::size_t total = hasTotal ? static_cast<std::size_t>(st.filesize) : 0;
 
     std::size_t offset = 0;
     if (resume) {

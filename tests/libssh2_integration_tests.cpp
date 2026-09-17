@@ -416,6 +416,17 @@ int main() {
                     existsErr);
     }
     if (t.failures == 0) {
+        err.clear();
+        t.check(!client.get(remoteMissing,
+                            (localTmpRoot / "missing.txt").string(), err, {},
+                            {}, false) &&
+                    client.lastOperationError().kind ==
+                        openscp::RemoteErrorKind::NotFound,
+                std::string("downloading a missing remote file should report "
+                            "NotFound: ") +
+                    err);
+    }
+    if (t.failures == 0) {
         bool isDir = true;
         err.clear();
         const bool ex = client.exists(remoteSrc, isDir, err);
