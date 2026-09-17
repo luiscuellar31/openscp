@@ -5,11 +5,18 @@
 
 #include <QString>
 
+#include <chrono>
 #include <functional>
+#include <memory>
 #include <string>
 
 class RemoteTreeWalker {
     public:
+    // Opens another connection to the walked session, or returns null with
+    // an error. Called from helper threads.
+    using ConnectionFactory =
+        std::function<std::unique_ptr<openscp::RemoteClient>(std::string &)>;
+
     enum class Control {
         Continue,
         SkipChildren,
@@ -26,6 +33,16 @@ class RemoteTreeWalker {
         bool skipSymlinks = true;
         int maxDepth = 32;
         DepthPolicy depthPolicy = DepthPolicy::StopBeforeLimit;
+
+        // A walk that is still running after parallelDelay may list
+        // directories on up to maxListingConnections extra connections.
+        // Callbacks keep running on the calling thread and a directory is
+        // still reported before its contents, but siblings are no longer
+        // visited depth first. Walks with onEnterDirectory or
+        // onLeaveDirectory rely on that order and always run serially.
+        ConnectionFactory openListingConnection;
+        int maxListingConnections = 0;
+        std::chrono::milliseconds parallelDelay{1000};
     };
 
     struct Entry {
@@ -74,5 +91,10 @@ class RemoteTreeWalker {
                               const Callbacks &callbacks) const;
 
     private:
+    Result walkSerial(Entry root, const Options &options,
+                      const Callbacks &callbacks) const;
+    Result walkParallel(Entry root, const Options &options,
+                        const Callbacks &callbacks) const;
+
     openscp::RemoteClient &client_;
 };

@@ -5,7 +5,9 @@
 
 #include <QObject>
 
+#include <functional>
 #include <memory>
+#include <string>
 
 class RemoteOperationController final : public QObject {
     Q_OBJECT
@@ -48,10 +50,18 @@ class RemoteOperationController final : public QObject {
     RemoteOperationController &
     operator=(const RemoteOperationController &) = delete;
 
+    // Opens another connection to the installed session, or returns null with
+    // an error. It may run on background threads.
+    using ConnectionFactory =
+        std::function<std::unique_ptr<openscp::RemoteClient>(std::string &)>;
+
     // The controller takes ownership of an already-connected client. Replacing
-    // or clearing a session cancels all work from older generations.
+    // or clearing a session cancels all work from older generations. With
+    // openConnection, long scans and searches may list directories on a few
+    // extra connections; if one cannot be opened, the session stops trying.
     SessionGeneration
-    installSession(std::unique_ptr<openscp::RemoteClient> connectedClient);
+    installSession(std::unique_ptr<openscp::RemoteClient> connectedClient,
+                   ConnectionFactory openConnection = {});
     SessionGeneration clearSession();
     SessionGeneration currentGeneration() const;
     bool hasRequestedSession() const;

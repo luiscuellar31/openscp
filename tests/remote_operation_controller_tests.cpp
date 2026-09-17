@@ -108,6 +108,21 @@ class ControllerFakeClient final : public openscp::RemoteClient {
             }
         }
 
+        if (remotePath.rfind("/wide", 0) == 0) {
+            // Slow enough that a scan of /wide outlasts the delay before
+            // extra listing connections are opened.
+            std::this_thread::sleep_for(std::chrono::milliseconds(40));
+            out.clear();
+            if (remotePath == "/wide") {
+                for (int index = 0; index < 40; ++index) {
+                    out.push_back({"d" + std::to_string(index), true, 0, false,
+                                   0, 0040755u, 1, 1});
+                }
+            }
+            err.clear();
+            return true;
+        }
+
         if (remotePath == "/") {
             out = {
                 {"docs", true, 0, false, 10, 0040755u, 1, 1},
@@ -847,6 +862,60 @@ OPENSCP_TEST(testDiscoverySummaryCountersAndConfinement, test) {
                              "list:/summary/deep") == state->calls.cend(),
                    "depth-limited directories must not issue a child listing");
     }
+}
+
+OPENSCP_TEST(testLongScansListOnExtraConnections, test) {
+    RemoteOperationController controller;
+    const auto state = std::make_shared<FakeState>();
+    std::atomic_int opened{0};
+    std::atomic_bool refuseConnections{false};
+    std::optional<RemoteOperationController::Completion> completion;
+    RemoteOperationController::JobId job = 0;
+
+    QObject::connect(
+        &controller, &RemoteOperationController::jobFinished, &controller,
+        [&](const RemoteOperationController::Completion &finished) {
+            if (finished.result.job.id == job)
+                completion = finished;
+        });
+
+    controller.installSession(
+        makeConnectedClient(state),
+        [&](std::string &error) -> std::unique_ptr<openscp::RemoteClient> {
+            ++opened;
+            if (refuseConnections.load()) {
+                error = "Too many connections";
+                return nullptr;
+            }
+            return makeConnectedClient(state);
+        });
+    const auto scanWide = [&] {
+        completion.reset();
+        RemoteOperationController::TraverseRequest traversal;
+        traversal.rootPath = QStringLiteral("/wide");
+        traversal.includeDirectories = true;
+        job = controller.submit(traversal);
+        return spinUntil([&] { return completion.has_value(); }, 10000) &&
+               completion->result.outcome ==
+                   RemoteOperationController::Outcome::Succeeded &&
+               completion->matchedEntries == 40;
+    };
+
+    test.check(scanWide(), "a long scan should report the whole tree");
+    test.check(opened.load() == 3 && state->maximumActiveCalls.load() > 1,
+               "a long scan should list on extra connections concurrently");
+
+    refuseConnections.store(true);
+    opened.store(0);
+    test.check(scanWide(),
+               "a scan should finish on the control connection when extra "
+               "connections are refused");
+    const int attemptsAfterRefusal = opened.load();
+    test.check(attemptsAfterRefusal >= 1,
+               "the refused scan should have tried an extra connection");
+    test.check(scanWide(), "a later scan should still finish");
+    test.check(opened.load() == attemptsAfterRefusal,
+               "a session must not retry extra connections after a refusal");
 }
 
 } // namespace

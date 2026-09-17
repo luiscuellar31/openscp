@@ -26,6 +26,9 @@
 
 namespace {
 
+// Extra connections a long scan or search may open to list directories.
+constexpr int kExtraListingConnections = 3;
+
 int safeBatchSize(int requested) {
     return std::clamp(requested, 1, 1000);
 }
@@ -70,6 +73,7 @@ class RemoteOperationController::Impl {
     struct InstallSessionCommand {
         SessionGeneration generation = 0;
         std::unique_ptr<openscp::RemoteClient> client;
+        ConnectionFactory openConnection;
     };
 
     struct JobRegistration {
@@ -103,7 +107,8 @@ class RemoteOperationController::Impl {
     ~Impl() { shutdown(); }
 
     SessionGeneration
-    installSession(std::unique_ptr<openscp::RemoteClient> client) {
+    installSession(std::unique_ptr<openscp::RemoteClient> client,
+                   ConnectionFactory openConnection) {
         std::unique_lock lock(mutex_);
         if (stopping_)
             return desiredGeneration_.load(std::memory_order_relaxed);
@@ -118,8 +123,8 @@ class RemoteOperationController::Impl {
         }
         interruptActiveLocked();
 
-        commands_.push_back(
-            InstallSessionCommand{generation, std::move(client)});
+        commands_.push_back(InstallSessionCommand{generation, std::move(client),
+                                                  std::move(openConnection)});
         lock.unlock();
         wake_.notify_one();
         return generation;
@@ -270,6 +275,11 @@ class RemoteOperationController::Impl {
     // client_ is created, used, disconnected, and destroyed by worker_.
     std::unique_ptr<openscp::RemoteClient> client_;
     SessionGeneration installedGeneration_ = 0;
+    // Used by worker_ only. The flag is shared with helper threads, which set
+    // it when an extra connection cannot be opened.
+    ConnectionFactory openConnection_;
+    std::shared_ptr<std::atomic_bool> extraConnectionsFailed_ =
+        std::make_shared<std::atomic_bool>(false);
 
     // The following active-operation fields are guarded by mutex_. A backend's
     // interrupt() is explicitly allowed to run concurrently with its operation.
@@ -494,6 +504,7 @@ class RemoteOperationController::Impl {
         if (client_)
             client_->disconnect();
         client_.reset();
+        openConnection_ = {};
         installedGeneration_ = 0;
     }
 
@@ -513,6 +524,8 @@ class RemoteOperationController::Impl {
 
         disconnectClient();
         client_ = std::move(install.client);
+        openConnection_ = std::move(install.openConnection);
+        extraConnectionsFailed_ = std::make_shared<std::atomic_bool>(false);
         const bool available = client_ && client_->isConnected();
         const openscp::Protocol protocol =
             client_ ? client_->protocol() : openscp::Protocol::Sftp;
@@ -1297,6 +1310,26 @@ class RemoteOperationController::Impl {
         return summary;
     }
 
+    // Extra listing connections for a discovery walk. Once one fails to open
+    // (connection limits, interactive authentication), the session keeps
+    // scanning on its control connection only.
+    RemoteTreeWalker::ConnectionFactory listingConnectionFactory() const {
+        if (!openConnection_ || extraConnectionsFailed_->load())
+            return {};
+        return
+            [open = openConnection_, failed = extraConnectionsFailed_](
+                std::string &error) -> std::unique_ptr<openscp::RemoteClient> {
+                if (failed->load())
+                    return nullptr;
+                std::unique_ptr<openscp::RemoteClient> client = open(error);
+                if (!client || !client->isConnected()) {
+                    failed->store(true);
+                    return nullptr;
+                }
+                return client;
+            };
+    }
+
     RunSummary executeDiscovery(const Job &job, const QString &requestedRoot,
                                 const TraversalOptions &options,
                                 bool includeDirectories, const QString &query,
@@ -1332,8 +1365,11 @@ class RemoteOperationController::Impl {
         };
 
         RemoteTreeWalker walker(*client_);
-        const RemoteTreeWalker::Options walkerOptions =
-            walkerOptionsFrom(options);
+        RemoteTreeWalker::Options walkerOptions = walkerOptionsFrom(options);
+        // A fixed pool size; make it a setting if servers that limit
+        // connections per user need fewer.
+        walkerOptions.openListingConnection = listingConnectionFactory();
+        walkerOptions.maxListingConnections = kExtraListingConnections;
 
         RemoteTreeWalker::Callbacks callbacks;
         callbacks.waitUntilReady = [this, &job, stopToken] {
@@ -1436,13 +1472,15 @@ RemoteOperationController::~RemoteOperationController() {
 
 RemoteOperationController::SessionGeneration
 RemoteOperationController::installSession(
-    std::unique_ptr<openscp::RemoteClient> connectedClient) {
-    return impl_->installSession(std::move(connectedClient));
+    std::unique_ptr<openscp::RemoteClient> connectedClient,
+    ConnectionFactory openConnection) {
+    return impl_->installSession(std::move(connectedClient),
+                                 std::move(openConnection));
 }
 
 RemoteOperationController::SessionGeneration
 RemoteOperationController::clearSession() {
-    return impl_->installSession(nullptr);
+    return impl_->installSession(nullptr, {});
 }
 
 RemoteOperationController::SessionGeneration

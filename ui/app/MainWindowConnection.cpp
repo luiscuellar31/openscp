@@ -1307,10 +1307,15 @@ void MainWindow::finalizeConnection(
     }
     sessionController_->installClient(std::move(guard));
     if (remoteOps_) {
-        if (controlGuard)
-            remoteOps_->installSession(std::move(controlGuard));
-        else
+        if (controlGuard) {
+            // Same options the transfer workers use for their connections.
+            remoteOps_->installSession(
+                std::move(controlGuard), [options = uiOpt](std::string &error) {
+                    return openscp::CreateConnectedClient(options, error);
+                });
+        } else {
             remoteOps_->clearSession();
+        }
     }
     if (pendingSavedSiteContext_) {
         activeSavedSiteContext_ = std::move(pendingSavedSiteContext_);

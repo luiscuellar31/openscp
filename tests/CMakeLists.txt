@@ -79,7 +79,8 @@ foreach(TEST_COMPONENT IN ITEMS
         transfer_ui_controller
         terminal_command_builder
         sync_coordinator
-        local_tree_discovery)
+        local_tree_discovery
+        remote_tree_walker)
     openscp_add_test(openscp_${TEST_COMPONENT}_tests
         SOURCES ${TEST_COMPONENT}_tests.cpp
         LINK_LIBRARIES openscp_ui_logic
@@ -90,6 +91,8 @@ endforeach()
 target_include_directories(openscp_transfer_manager_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src)
 target_include_directories(openscp_sync_coordinator_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src)
+target_include_directories(openscp_remote_tree_walker_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src)
 
 openscp_add_test(openscp_platform_path_actions_tests
