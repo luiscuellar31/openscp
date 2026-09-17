@@ -510,13 +510,21 @@ bool CurlWebDavClient::list(const std::string &remote_path,
         out.push_back(std::move(info));
     }
 
-    std::sort(out.begin(), out.end(), [](const FileInfo &a, const FileInfo &b) {
-        const std::string al = toLowerAscii(a.name);
-        const std::string bl = toLowerAscii(b.name);
-        if (al == bl)
+    // Case-insensitive order, ties broken by the exact name.
+    const auto lowerByte = [](char c) {
+        return std::tolower(static_cast<unsigned char>(c));
+    };
+    std::sort(
+        out.begin(), out.end(), [&](const FileInfo &a, const FileInfo &b) {
+            const auto [aEnd, bEnd] = std::mismatch(
+                a.name.begin(), a.name.end(), b.name.begin(), b.name.end(),
+                [&](char x, char y) { return lowerByte(x) == lowerByte(y); });
+            if (aEnd != a.name.end() && bEnd != b.name.end())
+                return lowerByte(*aEnd) < lowerByte(*bEnd);
+            if (aEnd != a.name.end() || bEnd != b.name.end())
+                return aEnd == a.name.end();
             return a.name < b.name;
-        return al < bl;
-    });
+        });
     return true;
 }
 
