@@ -145,6 +145,13 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
                              : curlcommon::CurlUrlScheme::Ftp;
     if (!curlcommon::configureAllowedProtocol(curl, urlScheme, "FTP", err))
         return false;
+    // One CWD with the whole directory instead of one per path level.
+    if (curl_easy_setopt(curl, CURLOPT_FTP_FILEMETHOD,
+                         static_cast<long>(CURLFTPMETHOD_SINGLECWD)) !=
+        CURLE_OK) {
+        err = "Could not configure FTP directory changes.";
+        return false;
+    }
 
     const std::string username =
         opt.username.empty() ? std::string("anonymous") : opt.username;
@@ -833,7 +840,13 @@ bool CurlFtpClient::put(const std::string &local, const std::string &remote,
                        curl_easy_setopt(handle, CURLOPT_URL, url.c_str()) ==
                            CURLE_OK &&
                        curl_easy_setopt(handle, CURLOPT_FTP_CREATE_MISSING_DIRS,
-                                        CURLFTP_CREATE_DIR_RETRY) == CURLE_OK;
+                                        CURLFTP_CREATE_DIR_RETRY) == CURLE_OK &&
+                       // A single CWD would create only the last missing
+                       // directory level.
+                       curl_easy_setopt(
+                           handle, CURLOPT_FTP_FILEMETHOD,
+                           static_cast<long>(CURLFTPMETHOD_MULTICWD)) ==
+                           CURLE_OK;
             },
             [](CURLcode code, long responseCode, const std::string &message) {
                 return ftpErrorFromResult(code, responseCode, message);
