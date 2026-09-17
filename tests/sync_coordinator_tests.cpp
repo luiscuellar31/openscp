@@ -164,10 +164,14 @@ OPENSCP_TEST(testPersistentExecutionPlan, test) {
                    tasks[1].src ==
                        QStringLiteral("/local/root/new/folder/file.txt"),
                "execution paths should remain confined to their roots");
-    test.check(tasks[1].dependsOnTaskId == tasks[0].taskId &&
-                   tasks[2].dependsOnTaskId == tasks[1].taskId &&
-                   tasks[3].dependsOnTaskId == tasks[2].taskId,
-               "persistent dependencies should preserve safe execution order");
+    test.check(tasks[0].dependsOnTaskId == 0 && !tasks[0].waitsForBatch &&
+                   tasks[1].dependsOnTaskId == tasks[0].taskId &&
+                   !tasks[1].waitsForBatch,
+               "copies should wait only for the directory that contains them");
+    test.check(tasks[2].dependsOnTaskId == 0 && tasks[2].waitsForBatch &&
+                   tasks[3].dependsOnTaskId == tasks[2].taskId &&
+                   tasks[3].waitsForBatch,
+               "deletes should run in order after the rest of the batch");
     test.check(std::all_of(tasks.cbegin(), tasks.cend(),
                            [batchId](const TransferTask &task) {
                                return task.batchId == batchId &&
@@ -175,6 +179,53 @@ OPENSCP_TEST(testPersistentExecutionPlan, test) {
                                           QStringLiteral("site-id");
                            }),
                "every sync task should retain batch and session identity");
+}
+
+OPENSCP_TEST(testExecutionPlanRunsIndependentWorkInParallel, test) {
+    RemoteOperationController remote;
+    TransferManager transfers;
+    transfers.setSessionIdentity(QStringLiteral("site-id"));
+    SyncCoordinator coordinator(&remote, &transfers);
+
+    SyncExecutionPlan plan;
+    plan.direction = SyncDirection::RemoteToLocal;
+    plan.directoriesToCreate = {QStringLiteral("a"), QStringLiteral("c"),
+                                QStringLiteral("a/b")};
+    plan.copies = {{QStringLiteral("a/b/x.txt"), 1},
+                   {QStringLiteral("c/y.txt"), 1},
+                   {QStringLiteral("z.txt"), 1}};
+
+    qsizetype taskCount = 0;
+    coordinator.enqueuePlan(plan, QStringLiteral("/local/root"),
+                            QStringLiteral("/remote/root"),
+                            QStringLiteral("site-id"), &taskCount);
+    const auto tasks = transfers.tasksSnapshot();
+    test.check(taskCount == 6 && tasks.size() == 6,
+               "every directory and copy should become a task");
+    if (tasks.size() != 6)
+        return;
+
+    const auto taskFor = [&](const QString &destination) {
+        const auto found = std::find_if(
+            tasks.cbegin(), tasks.cend(),
+            [&](const TransferTask &task) { return task.dst == destination; });
+        return found == tasks.cend() ? TransferTask{} : *found;
+    };
+    const TransferTask a = taskFor(QStringLiteral("/local/root/a"));
+    const TransferTask ab = taskFor(QStringLiteral("/local/root/a/b"));
+    const TransferTask c = taskFor(QStringLiteral("/local/root/c"));
+    const TransferTask x = taskFor(QStringLiteral("/local/root/a/b/x.txt"));
+    const TransferTask y = taskFor(QStringLiteral("/local/root/c/y.txt"));
+    const TransferTask z = taskFor(QStringLiteral("/local/root/z.txt"));
+    test.check(a.type == TransferTask::Type::CreateLocalDirectory &&
+                   x.type == TransferTask::Type::Download,
+               "remote-to-local plans should create local work");
+    test.check(a.dependsOnTaskId == 0 && c.dependsOnTaskId == 0 &&
+                   ab.dependsOnTaskId == a.taskId,
+               "directories should wait only for their parent directory");
+    test.check(x.dependsOnTaskId == ab.taskId &&
+                   y.dependsOnTaskId == c.taskId && z.dependsOnTaskId == 0,
+               "copies should wait only for the directory that contains them");
 }
 
 OPENSCP_TEST(testOnDemandChecksums, test) {
