@@ -661,9 +661,9 @@ OPENSCP_TEST(testConnectionOpenedAfterClearSessionIsDiscarded, test) {
         testBatchOptions());
     {
         std::unique_lock lock(gateMutex);
-        test.check(gateChanged.wait_for(lock, 5s,
-                                        [&] { return handshakeStarted; }),
-                   "the worker should start connecting");
+        test.check(
+            gateChanged.wait_for(lock, 5s, [&] { return handshakeStarted; }),
+            "the worker should start connecting");
     }
 
     // clearSession() waits for the connecting worker, so it runs aside.
@@ -678,8 +678,7 @@ OPENSCP_TEST(testConnectionOpenedAfterClearSessionIsDiscarded, test) {
     gateChanged.notify_all();
     clearing.join();
 
-    test.check(probe->connections.load() == 1 &&
-                   probe->disconnects.load() >= 1,
+    test.check(probe->connections.load() == 1 && probe->disconnects.load() >= 1,
                "a connection opened for a cleared session should be closed");
     test.check(probe->gets.load() == 0,
                "a cleared session must not transfer on a late connection");

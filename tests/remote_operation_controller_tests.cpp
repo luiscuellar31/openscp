@@ -928,12 +928,12 @@ OPENSCP_TEST(testCanceledJobDroppingConnectionIsReopened, test) {
                          if (job.id == slowJob)
                              slowStarted = true;
                      });
-    QObject::connect(
-        &controller, &RemoteOperationController::listCompleted, &controller,
-        [&](const RemoteOperationController::ListResult &result) {
-            if (result.result.job.id == slowJob)
-                slowResult = result;
-        });
+    QObject::connect(&controller, &RemoteOperationController::listCompleted,
+                     &controller,
+                     [&](const RemoteOperationController::ListResult &result) {
+                         if (result.result.job.id == slowJob)
+                             slowResult = result;
+                     });
 
     controller.installSession(
         makeConnectedClient(state),
@@ -946,8 +946,7 @@ OPENSCP_TEST(testCanceledJobDroppingConnectionIsReopened, test) {
         const RemoteOperationController::JobId job = controller.submit(
             RemoteOperationController::ListRequest{"/", true});
         QMetaObject::Connection connection = QObject::connect(
-            &controller, &RemoteOperationController::listCompleted,
-            &controller,
+            &controller, &RemoteOperationController::listCompleted, &controller,
             [&](const RemoteOperationController::ListResult &result) {
                 if (result.result.job.id == job)
                     root = result;
@@ -1014,8 +1013,7 @@ OPENSCP_TEST(testRefusedReopenIsNotRetried, test) {
         const RemoteOperationController::JobId job =
             controller.submit(RemoteOperationController::StatRequest{"/"});
         QMetaObject::Connection connection = QObject::connect(
-            &controller, &RemoteOperationController::statCompleted,
-            &controller,
+            &controller, &RemoteOperationController::statCompleted, &controller,
             [&](const RemoteOperationController::StatResult &result) {
                 if (result.result.job.id == job)
                     stat = result;

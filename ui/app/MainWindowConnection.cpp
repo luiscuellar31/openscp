@@ -1206,10 +1206,9 @@ void MainWindow::launchConnectionWorker(
                     }
                     return;
                 }
-                self->finalizeConnection(connectionSucceeded,
-                                         connectionErrorText, controlClient,
-                                         capabilities, uiOpt, saveRequest,
-                                         canceledByUser);
+                self->finalizeConnection(
+                    connectionSucceeded, connectionErrorText, controlClient,
+                    capabilities, uiOpt, saveRequest, canceledByUser);
             },
             Qt::QueuedConnection);
         if (queued)

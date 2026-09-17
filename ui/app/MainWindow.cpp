@@ -922,8 +922,8 @@ void MainWindow::initializeRuntimeState() {
     remoteOps_ = new RemoteOperationController(this);
     openscpui::SessionHealthMonitor::Callbacks healthCallbacks;
     healthCallbacks.canProbe = [this] {
-        return rightIsRemote_ && sessionController_->hasSession() && remoteOps_ &&
-               remoteOps_->hasRequestedSession() &&
+        return rightIsRemote_ && sessionController_->hasSession() &&
+               remoteOps_ && remoteOps_->hasRequestedSession() &&
                sessionController_->options().has_value() &&
                !sessionController_->isDisconnecting() &&
                !sessionController_->isConnecting();
