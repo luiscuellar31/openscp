@@ -3,6 +3,7 @@
 #include "TestHarness.hpp"
 #include "logic/transfers/ConflictCoordinator.hpp"
 #include "logic/transfers/TransferManager.hpp"
+#include "logic/transfers/TransferTaskControls.hpp"
 #include "mock/MockSftpClient.hpp"
 
 #include <QCoreApplication>
@@ -349,6 +350,41 @@ OPENSCP_TEST(testConcurrencyUpdates, test) {
                "concurrency should be clamped to the fixed worker pool");
 }
 
+OPENSCP_TEST(testRunningTaskSignalsMirrorQueueRequests, test) {
+    TransferTaskControls controls;
+    controls.pause(7);
+    controls.startRunning(7, 64);
+    const auto running = controls.runningSignals(7);
+    test.check(running && running->stopRequested.load() &&
+                   running->speedLimitKBps.load() == 64,
+               "a task should start with its pending requests and limit");
+
+    controls.resume(7);
+    test.check(!running->stopRequested.load(),
+               "resuming should clear the running task's stop request");
+    controls.cancel(7);
+    controls.resume(7);
+    test.check(running->stopRequested.load() && controls.isCanceled(7),
+               "resuming must not clear a cancellation");
+    controls.forget(7);
+    test.check(!running->stopRequested.load() && !controls.isCanceled(7),
+               "forgetting should clear every request");
+
+    controls.pause(7);
+    test.check(running->stopRequested.load(),
+               "pausing a running task should signal its worker");
+    controls.resume(7);
+
+    controls.setSpeedLimit(7, 128);
+    controls.setSpeedLimit(8, 256);
+    test.check(running->speedLimitKBps.load() == 128 &&
+                   !controls.runningSignals(8),
+               "speed limits should only reach running tasks");
+    controls.finishRunning(7);
+    test.check(!controls.runningSignals(7),
+               "a finished task should no longer have signals");
+}
+
 struct ConcurrencyProbe {
     std::atomic<int> active{0};
     std::atomic<int> maximum{0};
@@ -585,6 +621,120 @@ OPENSCP_TEST(testClearSessionInvalidatesWorkerConnections, test) {
                "clearing the session should leave active work waiting");
     test.check(probe->interrupts.load() >= 1 && probe->disconnects.load() >= 1,
                "clearSession should interrupt and invalidate worker clients");
+}
+
+OPENSCP_TEST(testPausingRunningTaskStopsItsTransfer, test) {
+    auto probe = std::make_shared<LifecycleProbe>();
+    CancelLifecycleClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+
+    const quint64 taskId = manager.enqueueDownload(
+        QStringLiteral("/remote/pause"), destination.filePath("pause"),
+        testBatchOptions());
+    test.check(waitUntil([&] { return probe->gets.load() == 1; }),
+               "the transfer to pause should start");
+    manager.pauseTask(taskId);
+    test.check(waitForStatus(manager, taskId, TransferTask::Status::Paused),
+               "pausing a running task should stop its transfer");
+    manager.resumeTask(taskId);
+    test.check(waitForStatus(manager, taskId, TransferTask::Status::Done),
+               "a resumed task should finish");
+}
+
+struct SpeedLimitProbe {
+    std::atomic_bool firstChunkReported{false};
+    std::atomic_bool limitSet{false};
+    std::atomic<qint64> limitedChunkMs{-1};
+};
+
+class SpeedLimitProbeClient final : public DownloadMockClient {
+    public:
+    explicit SpeedLimitProbeClient(std::shared_ptr<SpeedLimitProbe> probe)
+        : probe_(std::move(probe)) {}
+
+    bool get(const std::string &, const std::string &, std::string &err,
+             std::function<void(std::size_t, std::size_t)> progress,
+             std::function<bool()>, bool) override {
+        constexpr std::size_t kChunk = 256 * 1024;
+        progress(kChunk, 2 * kChunk);
+        probe_->firstChunkReported.store(true);
+        (void)waitUntil([this] { return probe_->limitSet.load(); });
+        const auto started = std::chrono::steady_clock::now();
+        progress(2 * kChunk, 2 * kChunk);
+        probe_->limitedChunkMs.store(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - started)
+                .count());
+        err.clear();
+        return true;
+    }
+
+    std::unique_ptr<openscp::RemoteClient>
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
+        return makeConnectedWorker<SpeedLimitProbeClient>(options, err, probe_);
+    }
+
+    private:
+    std::shared_ptr<SpeedLimitProbe> probe_;
+};
+
+OPENSCP_TEST(testSpeedLimitReachesRunningTask, test) {
+    auto probe = std::make_shared<SpeedLimitProbe>();
+    SpeedLimitProbeClient baseClient(probe);
+    TransferManager manager;
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+
+    const quint64 taskId = manager.enqueueDownload(
+        QStringLiteral("/remote/limited"), destination.filePath("limited"),
+        testBatchOptions());
+    test.check(waitUntil([&] { return probe->firstChunkReported.load(); }),
+               "the limited transfer should report its first chunk");
+    // 256 KiB at 512 KiB/s should hold the next chunk for about half a second.
+    manager.setTaskSpeedLimit(taskId, 512);
+    probe->limitSet.store(true);
+    test.check(waitForStatus(manager, taskId, TransferTask::Status::Done),
+               "the limited transfer should finish");
+    test.check(probe->limitedChunkMs.load() >= 250,
+               "a new speed limit should slow the running transfer");
+}
+
+class PartialProgressFailureClient final : public DownloadMockClient {
+    public:
+    bool get(const std::string &, const std::string &, std::string &err,
+             std::function<void(std::size_t, std::size_t)> progress,
+             std::function<bool()>, bool) override {
+        // The second report comes too soon after the first to be published.
+        progress(4096, 65536);
+        progress(8192, 65536);
+        err = "Authentication failed";
+        setLastOperationError(openscp::RemoteErrorKind::Authentication, err);
+        return false;
+    }
+
+    std::unique_ptr<openscp::RemoteClient>
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
+        return makeConnectedWorker<PartialProgressFailureClient>(options, err);
+    }
+};
+
+OPENSCP_TEST(testUnpublishedProgressIsStoredWhenAttemptEnds, test) {
+    PartialProgressFailureClient baseClient;
+    TransferManager manager;
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+
+    const quint64 taskId = manager.enqueueDownload(
+        QStringLiteral("/remote/partial"), destination.filePath("partial"),
+        testBatchOptions());
+    test.check(waitForStatus(manager, taskId, TransferTask::Status::Error),
+               "the partial transfer should fail");
+    const auto task = manager.taskSnapshot(taskId);
+    test.check(task && task->bytesDone == 8192,
+               "the last progress report should be stored with the task");
 }
 
 OPENSCP_TEST(testWorkersConnectInParallel, test) {

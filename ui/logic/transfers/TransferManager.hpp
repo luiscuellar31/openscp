@@ -5,6 +5,7 @@
 #include "logic/transfers/TransferExecutor.hpp"
 #include "logic/transfers/TransferQueue.hpp"
 #include "logic/transfers/TransferQueuePersistence.hpp"
+#include "logic/transfers/TransferTaskControls.hpp"
 #include "logic/transfers/TransferTypes.hpp"
 #include "openscp/Protocol.hpp"
 #include "openscp/RemoteError.hpp"
@@ -162,8 +163,8 @@ class TransferManager : public QObject {
     std::condition_variable retryCv_;
     std::vector<std::unique_ptr<WorkerSlot>> workerSlots_;
 
-    std::unordered_set<quint64> pausedTasks_;
-    std::unordered_set<quint64> canceledTasks_;
+    // Its running tasks are exactly activeTaskIds_.
+    TransferTaskControls taskControls_;
     std::unordered_set<quint64> activeTaskIds_;
     std::unordered_set<quint64> resumeRequestedTasks_;
     std::unordered_set<std::string> reservedDestinations_;
@@ -230,8 +231,9 @@ class TransferManager : public QObject {
                  std::string &err);
     bool runTransferAttempt(
         TransferTask &task,
-        const std::shared_ptr<openscp::RemoteClient> &workerClient, bool resume,
-        std::string &err);
+        const std::shared_ptr<openscp::RemoteClient> &workerClient,
+        const std::shared_ptr<const TransferTaskControls::Signals> &taskSignals,
+        bool resume, std::string &err);
     bool
     runPostAction(TransferTask &task,
                   const std::shared_ptr<openscp::RemoteClient> &workerClient,
