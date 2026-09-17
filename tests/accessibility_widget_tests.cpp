@@ -202,8 +202,11 @@ OPENSCP_TEST(testPathFieldPreservesAppearanceAndKeyboardNavigation, test) {
                "pointer input elsewhere should hide the path focus frame");
 
     sendKey(display, Qt::Key_Left);
+    test.check(!display->property("keyboardFocusVisible").toBool(),
+               "non-traversal keys should not reveal the path focus frame");
+    sendKey(display, Qt::Key_Escape, Qt::ShiftModifier);
     test.check(display->property("keyboardFocusVisible").toBool(),
-               "keyboard input should restore the path focus frame");
+               "Shift+Esc should reveal the current path focus frame");
 
     const int initialFontHeight = display->fontMetrics().height();
     QFont largerFont = bar.font();
@@ -491,9 +494,19 @@ OPENSCP_TEST(testFilePanelShowsKeyboardOnlyFocusOutline, test) {
                "using the mouse should hide the panel focus outline");
 
     sendKey(panel, Qt::Key_Down);
+    test.check(!panel->property("keyboardFocusVisible").toBool() &&
+                   focusIndicator && !focusIndicator->isVisible(),
+               "non-traversal keys should not reveal the panel focus outline");
+
+    sendKey(panel, Qt::Key_Escape);
+    test.check(!panel->property("keyboardFocusVisible").toBool() &&
+                   focusIndicator && !focusIndicator->isVisible(),
+               "Esc should not reveal the panel focus outline");
+
+    sendKey(panel, Qt::Key_Escape, Qt::ShiftModifier);
     test.check(panel->property("keyboardFocusVisible").toBool() &&
                    focusIndicator && focusIndicator->isVisible(),
-               "keyboard input should restore the panel focus outline");
+               "Shift+Esc should reveal the panel focus outline");
 }
 
 OPENSCP_TEST(testFilePanelScrollBarsFollowScrollActivity, test) {
@@ -561,9 +574,9 @@ OPENSCP_TEST(testPointerDialogCloseDoesNotCreateKeyboardFocus, test) {
     if (!tracker)
         return;
 
-    sendKey(beforePanel, Qt::Key_F1);
+    sendKey(beforePanel, Qt::Key_Escape, Qt::ShiftModifier);
     test.check(tracker->isKeyboardActive(),
-               "keyboard input should activate keyboard focus cues");
+               "Shift+Esc should activate keyboard focus cues");
 
     const QPointF titleBarPosition(4.0, 4.0);
     const QPointF titleBarGlobalPosition =
