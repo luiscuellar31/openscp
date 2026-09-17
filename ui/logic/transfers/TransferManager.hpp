@@ -6,8 +6,8 @@
 #include "logic/transfers/TransferQueue.hpp"
 #include "logic/transfers/TransferQueuePersistence.hpp"
 #include "logic/transfers/TransferTypes.hpp"
+#include "openscp/Protocol.hpp"
 #include "openscp/RemoteError.hpp"
-#include "openscp/SessionOptions.hpp"
 
 #include <QObject>
 #include <QPair>
@@ -22,6 +22,7 @@
 #include <mutex>
 #include <optional>
 #include <stop_token>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -41,11 +42,16 @@ class TransferManager : public QObject {
     explicit TransferManager(QObject *parent = nullptr);
     ~TransferManager() override;
 
-    // The control client is not owned. Worker slots create and retain isolated
-    // connections with newConnectionLike().
-    void setClient(openscp::RemoteClient *client);
-    void clearClient();
-    void setSessionOptions(const openscp::SessionOptions &opt);
+    // Opens a connection to the current session, or returns null with an
+    // error. Worker slots call it concurrently and without locks held, and
+    // retain the connections they open.
+    using ConnectionFactory =
+        std::function<std::unique_ptr<openscp::RemoteClient>(std::string &)>;
+
+    void setConnectionFactory(ConnectionFactory openConnection);
+    // Pauses the session's active work until another session is set, waiting
+    // for workers to stop, and closes their connections.
+    void clearSession();
     void setSessionIdentity(const QString &sessionKey);
     QString sessionIdentity() const;
 
@@ -130,8 +136,7 @@ class TransferManager : public QObject {
     struct WorkerSlot;
     enum class PrecheckOutcome { Continue, Skipped, Canceled, Error };
 
-    openscp::RemoteClient *client_ = nullptr;
-    std::optional<openscp::SessionOptions> sessionOpt_;
+    ConnectionFactory openConnection_;
     QString currentSessionKey_;
     quint64 sessionGeneration_ = 1;
 
@@ -146,17 +151,15 @@ class TransferManager : public QObject {
     std::atomic<int> running_{0};
     std::atomic<int> maxConcurrent_{2};
 
-    // Mutex hierarchy when nesting is unavoidable:
-    // connFactoryMutex_ -> mtx_. Worker-slot client mutexes and retry,
-    // persistence, and performance mutexes are independent and must be
-    // released before acquiring either mutex in that chain. External client
-    // calls and Qt signal emissions happen without these locks held.
+    // Worker-slot client mutexes and retry, persistence, and performance
+    // mutexes are independent of mtx_ and must be released before acquiring
+    // it. External client calls, connection handshakes, and Qt signal
+    // emissions happen without these locks held.
     mutable std::mutex mtx_;
     std::condition_variable workCv_;
     std::condition_variable idleCv_;
     std::mutex retryMutex_;
     std::condition_variable retryCv_;
-    std::mutex connFactoryMutex_;
     std::vector<std::unique_ptr<WorkerSlot>> workerSlots_;
 
     std::unordered_set<quint64> pausedTasks_;

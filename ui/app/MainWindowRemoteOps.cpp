@@ -281,7 +281,7 @@ void MainWindow::downloadRightToLeft() {
                               tr("The right panel is not remote."));
         return;
     }
-    if (!sessionController_->client()) {
+    if (!sessionController_->hasSession()) {
         UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
@@ -398,7 +398,7 @@ void MainWindow::copyRightToLeft() {
     }
 
     // Remote -> Local: enqueue downloads
-    if (!sessionController_->client() || !rightRemoteModel_) {
+    if (!sessionController_->hasSession() || !rightRemoteModel_) {
         UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
@@ -468,7 +468,7 @@ void MainWindow::moveRightToLeft() {
 }
 
 void MainWindow::uploadViaDialog() {
-    if (!rightIsRemote_ || !sessionController_->client()) {
+    if (!rightIsRemote_ || !sessionController_->hasSession()) {
         UiAlerts::information(
             this, tr("Upload"),
             tr("The right panel is not remote or there is no active session."));
@@ -820,9 +820,7 @@ void MainWindow::changeRemotePermissions() {
 
 void MainWindow::applyRemoteMutationActions() {
     const openscp::ProtocolCapabilities caps =
-        sessionController_->client()
-            ? sessionController_->client()->capabilities()
-            : openscp::ProtocolCapabilities{};
+        sessionController_->capabilities();
     const auto availability = openscpui::RemoteActionController::availability(
         caps, rightRemoteMutationsSupported_);
     if (actUploadRight_)
@@ -846,14 +844,14 @@ void MainWindow::applyRemoteMutationActions() {
 // checked by the real operation; probing with a temporary directory mutates
 // the server and can be both slow and misleading.
 void MainWindow::updateRemoteMutationCapability() {
-    if (!rightIsRemote_ || !sessionController_->client() ||
+    if (!rightIsRemote_ || !sessionController_->hasSession() ||
         !rightRemoteModel_) {
         rightRemoteMutationsSupported_ = false;
         applyRemoteMutationActions();
         return;
     }
     const openscp::ProtocolCapabilities caps =
-        sessionController_->client()->capabilities();
+        sessionController_->capabilities();
     rightRemoteMutationsSupported_ =
         openscpui::RemoteActionController::availability(caps).canMutate;
     applyRemoteMutationActions();

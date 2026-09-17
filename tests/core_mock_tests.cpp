@@ -979,6 +979,27 @@ OPENSCP_TEST(test_new_connection_like, t) {
             "connections created alike should share simulated server state");
 }
 
+OPENSCP_TEST(test_demo_server_clients_share_state, t) {
+    auto opt = validOptions();
+    std::string err;
+    auto first = openscp::MockSftpClient::onDemoServer();
+    auto second = openscp::MockSftpClient::onDemoServer();
+    t.check(first->connect(opt, err) && second->connect(opt, err),
+            "demo server clients should connect");
+    t.check(first->mkdir("/demo-shared", err),
+            "a demo server client should mutate the demo filesystem");
+    std::vector<openscp::FileInfo> entries;
+    t.check(second->list("/", entries, err) &&
+                std::any_of(entries.cbegin(), entries.cend(),
+                            [](const openscp::FileInfo &entry) {
+                                return entry.is_dir &&
+                                       entry.name == "demo-shared";
+                            }),
+            "separately created demo connections should see the same files");
+    t.check(second->removeDir("/demo-shared", err),
+            "the demo filesystem should be restored for later tests");
+}
+
 OPENSCP_TEST(test_new_connection_like_validation, t) {
     openscp::MockSftpClient c;
     openscp::SessionOptions bad;

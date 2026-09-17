@@ -279,8 +279,8 @@ class MainWindow : public QMainWindow {
         std::optional<PendingSiteSaveRequest> saveRequest,
         const std::shared_ptr<std::atomic<bool>> &cancelFlag);
     void finalizeConnection(bool connectionOk, const QString &errorText,
-                            openscp::RemoteClient *connectedClient,
-                            openscp::RemoteClient *remoteControlClient,
+                            openscp::RemoteClient *controlClient,
+                            const openscp::ProtocolCapabilities &capabilities,
                             const openscp::SessionOptions &uiOpt,
                             std::optional<PendingSiteSaveRequest> saveRequest,
                             bool canceledByUser);

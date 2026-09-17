@@ -922,7 +922,7 @@ void MainWindow::initializeRuntimeState() {
     remoteOps_ = new RemoteOperationController(this);
     openscpui::SessionHealthMonitor::Callbacks healthCallbacks;
     healthCallbacks.canProbe = [this] {
-        return rightIsRemote_ && sessionController_->client() && remoteOps_ &&
+        return rightIsRemote_ && sessionController_->hasSession() && remoteOps_ &&
                remoteOps_->hasRequestedSession() &&
                sessionController_->options().has_value() &&
                !sessionController_->isDisconnecting() &&
@@ -959,7 +959,7 @@ void MainWindow::initializeRuntimeState() {
     healthCallbacks.probeFailed =
         [this](const openscpui::SessionHealthMonitor::ProbeContext &context,
                const QString &error) {
-            if (!rightIsRemote_ || !sessionController_->client() ||
+            if (!rightIsRemote_ || !sessionController_->hasSession() ||
                 sessionController_->isDisconnecting() ||
                 !isLikelyRemoteTransportError(error)) {
                 return;
@@ -1212,7 +1212,7 @@ void MainWindow::initializeRuntimeState() {
                        true)
                 .toBool();
         if (openSiteManagerOnStartup_ && !QCoreApplication::closingDown() &&
-            !sessionController_->client()) {
+            !sessionController_->hasSession()) {
             QTimer::singleShot(0, this, [this] { showSiteManagerNonModal(); });
         }
     }

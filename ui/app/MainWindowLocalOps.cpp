@@ -363,7 +363,7 @@ void MainWindow::copyLeftToRight() {
     if (rightIsRemote_) {
         // ---- REMOTE branch: upload files (PUT) to the current remote
         // directory ----
-        if (!sessionController_->client()) {
+        if (!sessionController_->hasSession()) {
             UiAlerts::warning(this, tr("Remote"),
                               tr("No active remote session."));
             return;
@@ -453,7 +453,7 @@ void MainWindow::copyLeftToRight() {
 void MainWindow::moveLeftToRight() {
     if (rightIsRemote_) {
         if (!rightRemoteModel_ || !transferMgr_ ||
-            !sessionController_->client()) {
+            !sessionController_->hasSession()) {
             UiAlerts::warning(this, tr("Remote"),
                               tr("No active remote session."));
             return;

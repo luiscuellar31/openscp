@@ -14,8 +14,10 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -412,9 +414,10 @@ void configureManager(TransferManager &manager,
                       const openscp::SessionOptions &options) {
     std::string connectError;
     (void)baseClient.connect(options, connectError);
-    manager.setSessionOptions(options);
     manager.setSessionIdentity(QStringLiteral("test-session"));
-    manager.setClient(&baseClient);
+    manager.setConnectionFactory([&baseClient, options](std::string &error) {
+        return baseClient.newConnectionLike(options, error);
+    });
 }
 
 OPENSCP_TEST(testPersistentWorkersRunConcurrently, test) {
@@ -561,7 +564,7 @@ OPENSCP_TEST(testCanceledWorkerInvalidatesItsConnection, test) {
                "the task after cancellation must use a fresh connection");
 }
 
-OPENSCP_TEST(testClearClientInvalidatesWorkerConnections, test) {
+OPENSCP_TEST(testClearSessionInvalidatesWorkerConnections, test) {
     auto probe = std::make_shared<LifecycleProbe>();
     CancelLifecycleClient baseClient(probe);
     TransferManager manager;
@@ -575,13 +578,115 @@ OPENSCP_TEST(testClearClientInvalidatesWorkerConnections, test) {
     test.check(waitUntil([&] { return probe->gets.load() == 1; }),
                "disconnect fixture should start a worker transfer");
 
-    manager.clearClient();
+    manager.clearSession();
     const auto task = manager.taskSnapshot(taskId);
     test.check(task &&
                    task->status == TransferTask::Status::WaitingForConnection,
                "clearing the session should leave active work waiting");
     test.check(probe->interrupts.load() >= 1 && probe->disconnects.load() >= 1,
-               "clearClient should interrupt and invalidate worker clients");
+               "clearSession should interrupt and invalidate worker clients");
+}
+
+OPENSCP_TEST(testWorkersConnectInParallel, test) {
+    auto probe = std::make_shared<ConcurrencyProbe>();
+    ConcurrentMockClient baseClient(probe);
+    const auto options = testOptions();
+    std::mutex handshakeMutex;
+    std::condition_variable handshakeChanged;
+    int handshaking = 0;
+    int maximumHandshaking = 0;
+
+    TransferManager manager;
+    manager.setMaxConcurrent(2);
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    manager.setConnectionFactory([&](std::string &error) {
+        {
+            // Each handshake waits for a second one to overlap it, which can
+            // only happen when workers do not connect one at a time.
+            std::unique_lock lock(handshakeMutex);
+            ++handshaking;
+            maximumHandshaking = std::max(maximumHandshaking, handshaking);
+            handshakeChanged.notify_all();
+            handshakeChanged.wait_for(lock, 2s,
+                                      [&] { return maximumHandshaking >= 2; });
+            --handshaking;
+        }
+        return baseClient.newConnectionLike(options, error);
+    });
+
+    QTemporaryDir destination;
+    manager.enqueueDownloads(
+        {{QStringLiteral("/remote/parallel-a"), destination.filePath("a")},
+         {QStringLiteral("/remote/parallel-b"), destination.filePath("b")}},
+        testBatchOptions());
+    test.check(waitUntil([&] {
+                   const auto tasks = manager.tasksSnapshot();
+                   return tasks.size() == 2 &&
+                          std::all_of(tasks.cbegin(), tasks.cend(),
+                                      [](const TransferTask &task) {
+                                          return task.status ==
+                                                 TransferTask::Status::Done;
+                                      });
+               }),
+               "transfers should finish after their workers connect");
+    std::lock_guard lock(handshakeMutex);
+    test.check(maximumHandshaking == 2,
+               "workers should run their connection handshakes in parallel");
+}
+
+OPENSCP_TEST(testConnectionOpenedAfterClearSessionIsDiscarded, test) {
+    auto probe = std::make_shared<LifecycleProbe>();
+    CancelLifecycleClient baseClient(probe);
+    const auto options = testOptions();
+    std::mutex gateMutex;
+    std::condition_variable gateChanged;
+    bool handshakeStarted = false;
+    bool handshakeReleased = false;
+
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    manager.setConnectionFactory([&](std::string &error) {
+        {
+            std::unique_lock lock(gateMutex);
+            handshakeStarted = true;
+            gateChanged.notify_all();
+            gateChanged.wait_for(lock, 5s, [&] { return handshakeReleased; });
+        }
+        return baseClient.newConnectionLike(options, error);
+    });
+    QTemporaryDir destination;
+    const quint64 taskId = manager.enqueueDownload(
+        QStringLiteral("/remote/late"), destination.filePath("late"),
+        testBatchOptions());
+    {
+        std::unique_lock lock(gateMutex);
+        test.check(gateChanged.wait_for(lock, 5s,
+                                        [&] { return handshakeStarted; }),
+                   "the worker should start connecting");
+    }
+
+    // clearSession() waits for the connecting worker, so it runs aside.
+    std::thread clearing([&manager] { manager.clearSession(); });
+    test.check(waitForStatus(manager, taskId,
+                             TransferTask::Status::WaitingForConnection),
+               "clearing should not wait for a handshake to update tasks");
+    {
+        std::lock_guard lock(gateMutex);
+        handshakeReleased = true;
+    }
+    gateChanged.notify_all();
+    clearing.join();
+
+    test.check(probe->connections.load() == 1 &&
+                   probe->disconnects.load() >= 1,
+               "a connection opened for a cleared session should be closed");
+    test.check(probe->gets.load() == 0,
+               "a cleared session must not transfer on a late connection");
+    const auto task = manager.taskSnapshot(taskId);
+    test.check(task &&
+                   task->status == TransferTask::Status::WaitingForConnection,
+               "the task should keep waiting for a new session");
 }
 
 class FinalTransportFailureClient final : public DownloadMockClient {

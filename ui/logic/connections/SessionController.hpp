@@ -1,6 +1,7 @@
 #pragma once
 
-#include "openscp/RemoteClient.hpp"
+#include "openscp/Protocol.hpp"
+#include "openscp/SessionOptions.hpp"
 
 #include <QObject>
 
@@ -15,9 +16,15 @@ class SessionController final : public QObject {
     explicit SessionController(QObject *parent = nullptr);
     ~SessionController() override;
 
-    openscp::RemoteClient *client() const { return client_.get(); }
-    void installClient(std::unique_ptr<openscp::RemoteClient> client);
-    void disconnectClient();
+    // A session exists from a successful connection until its disconnect
+    // completes. Its connections belong to the remote operation lane and the
+    // transfer workers; this keeps what the connection reported.
+    bool hasSession() const { return capabilities_.has_value(); }
+    openscp::ProtocolCapabilities capabilities() const {
+        return capabilities_.value_or(openscp::ProtocolCapabilities{});
+    }
+    void beginSession(openscp::ProtocolCapabilities capabilities);
+    void endSession();
 
     const std::optional<openscp::SessionOptions> &options() const {
         return options_;
@@ -38,7 +45,7 @@ class SessionController final : public QObject {
     void finishDisconnect(quint64 sequence);
 
     private:
-    std::unique_ptr<openscp::RemoteClient> client_;
+    std::optional<openscp::ProtocolCapabilities> capabilities_;
     std::optional<openscp::SessionOptions> options_;
     std::shared_ptr<std::atomic<bool>> connectionCancelRequested_;
     bool connecting_ = false;

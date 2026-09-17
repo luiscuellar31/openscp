@@ -13,6 +13,10 @@ class MockSftpClient : public RemoteClient {
     MockSftpClient();
     ~MockSftpClient() override;
 
+    // Clients from here share one process-wide filesystem, so every connection
+    // a demo session opens sees the same files, as with a real server.
+    static std::unique_ptr<MockSftpClient> onDemoServer();
+
     ProtocolCapabilities capabilities() const override;
 
     bool connect(const SessionOptions &opt, std::string &err) override;

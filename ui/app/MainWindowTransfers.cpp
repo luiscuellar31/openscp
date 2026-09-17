@@ -578,7 +578,7 @@ void MainWindow::runRemoteDownloadPrescan(
 void MainWindow::startLocalUploadDiscovery(
     const QVector<QPair<QString, QString>> &localRemoteRoots, bool moveSources,
     bool dragAndDrop) {
-    if (!transferMgr_ || !sessionController_->client() || !rightIsRemote_) {
+    if (!transferMgr_ || !sessionController_->hasSession() || !rightIsRemote_) {
         UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
@@ -1058,7 +1058,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                     return true;
                 }
                 // Upload to remote
-                if (!sessionController_->client() || !rightRemoteModel_) {
+                if (!sessionController_->hasSession() || !rightRemoteModel_) {
                     dropEvent->acceptProposedAction();
                     return true;
                 }

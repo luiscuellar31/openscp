@@ -197,16 +197,6 @@ TransferManager::~TransferManager() {
 
 // Session and queue configuration
 
-void TransferManager::setSessionOptions(const openscp::SessionOptions &opt) {
-    {
-        std::lock_guard<std::mutex> factoryLock(connFactoryMutex_);
-        std::lock_guard<std::mutex> lock(mtx_);
-        sessionOpt_ = opt;
-        ++sessionGeneration_;
-    }
-    workCv_.notify_all();
-}
-
 void TransferManager::setSessionIdentity(const QString &sessionKey) {
     QVector<quint64> changed;
     {
@@ -243,23 +233,20 @@ QString TransferManager::sessionIdentity() const {
     return currentSessionKey_;
 }
 
-void TransferManager::setClient(openscp::RemoteClient *client) {
+void TransferManager::setConnectionFactory(ConnectionFactory openConnection) {
     {
-        std::lock_guard<std::mutex> factoryLock(connFactoryMutex_);
         std::lock_guard<std::mutex> lock(mtx_);
-        client_ = client;
+        openConnection_ = std::move(openConnection);
         ++sessionGeneration_;
     }
     workCv_.notify_all();
 }
 
-void TransferManager::clearClient() {
+void TransferManager::clearSession() {
     QVector<quint64> changed;
     {
-        std::lock_guard<std::mutex> factoryLock(connFactoryMutex_);
         std::lock_guard<std::mutex> lock(mtx_);
-        client_ = nullptr;
-        sessionOpt_.reset();
+        openConnection_ = {};
         ++sessionGeneration_;
         for (auto &taskNode : queueStore_.nodes()) {
             auto &task = *taskNode;
@@ -740,7 +727,7 @@ bool TransferManager::isBatchTerminal(quint64 batchId) const {
 bool TransferManager::hasRunnableTaskLocked(std::size_t slotIndex) {
     if (shuttingDown_.load() || paused_.load() ||
         slotIndex >= static_cast<std::size_t>(maxConcurrent_.load()) ||
-        !client_ || !sessionOpt_.has_value() || queueStore_.nodes().empty()) {
+        !openConnection_ || queueStore_.nodes().empty()) {
         return false;
     }
     for (const auto &taskNode : queueStore_.nodes()) {
@@ -828,38 +815,44 @@ TransferManager::workerClient(WorkerSlot &slot, quint64 taskId,
     }
     invalidateWorkerClient(slot);
 
-    std::unique_ptr<openscp::RemoteClient> created;
+    const auto stoppedError = [] {
+        return QCoreApplication::translate(
+                   "TransferManager", "Transfer queue paused or disconnected")
+            .toUtf8()
+            .toStdString();
+    };
+    ConnectionFactory openConnection;
     {
-        // This lock also guarantees clearClient() cannot return and allow the
-        // raw control client to be destroyed while newConnectionLike uses it.
-        std::lock_guard<std::mutex> factoryLock(connFactoryMutex_);
-        openscp::RemoteClient *base = nullptr;
-        std::optional<openscp::SessionOptions> options;
-        {
-            std::lock_guard<std::mutex> lock(mtx_);
-            if (generation != sessionGeneration_ || paused_.load() ||
-                canceledTasks_.count(taskId) || pausedTasks_.count(taskId)) {
-                err = QCoreApplication::translate(
-                          "TransferManager",
-                          "Transfer queue paused or disconnected")
-                          .toUtf8()
-                          .toStdString();
-                return {};
-            }
-            base = client_;
-            options = sessionOpt_;
-        }
-        if (!base || !options.has_value()) {
-            err = QCoreApplication::translate(
-                      "TransferManager", "No transfer connection is available")
-                      .toUtf8()
-                      .toStdString();
+        std::lock_guard<std::mutex> lock(mtx_);
+        if (generation != sessionGeneration_ || paused_.load() ||
+            canceledTasks_.count(taskId) || pausedTasks_.count(taskId)) {
+            err = stoppedError();
             return {};
         }
-        created = base->newConnectionLike(*options, err);
+        openConnection = openConnection_;
     }
+    if (!openConnection) {
+        err = QCoreApplication::translate("TransferManager",
+                                          "No transfer connection is available")
+                  .toUtf8()
+                  .toStdString();
+        return {};
+    }
+    // No lock is held during the handshake, so workers connect in parallel.
+    std::unique_ptr<openscp::RemoteClient> created = openConnection(err);
     if (!created)
         return {};
+    bool sessionChanged = false;
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        sessionChanged = generation != sessionGeneration_;
+    }
+    if (sessionChanged) {
+        // The session was cleared or replaced during the handshake.
+        created->disconnect();
+        err = stoppedError();
+        return {};
+    }
 
     auto shared = std::shared_ptr<openscp::RemoteClient>(std::move(created));
     {
