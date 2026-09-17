@@ -2163,16 +2163,18 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
         session_, LIBSSH2_METHOD_KEX,
         "curve25519-sha256,ecdh-sha2-nistp256,diffie-hellman-group14-sha256");
 #endif
+    // AES-GCM goes through the crypto backend, which uses the CPU's AES
+    // instructions, while libssh2 implements chacha20-poly1305 in portable C.
 #ifdef LIBSSH2_METHOD_CRYPT_CS
     (void)libssh2_session_method_pref(
         session_, LIBSSH2_METHOD_CRYPT_CS,
-        "chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@"
+        "aes256-gcm@openssh.com,aes128-gcm@openssh.com,chacha20-poly1305@"
         "openssh.com,aes256-ctr,aes128-ctr");
 #endif
 #ifdef LIBSSH2_METHOD_CRYPT_SC
     (void)libssh2_session_method_pref(
         session_, LIBSSH2_METHOD_CRYPT_SC,
-        "chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@"
+        "aes256-gcm@openssh.com,aes128-gcm@openssh.com,chacha20-poly1305@"
         "openssh.com,aes256-ctr,aes128-ctr");
 #endif
 #ifdef LIBSSH2_METHOD_MAC_CS
