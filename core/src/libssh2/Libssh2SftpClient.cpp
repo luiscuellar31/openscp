@@ -7,6 +7,7 @@
 #include "common/UniqueFile.hpp"
 #include "detail/Libssh2ErrorClassifier.hpp"
 #include "detail/Libssh2InputSafety.hpp"
+#include "detail/Libssh2TransferIntegrity.hpp"
 #include "openscp/RuntimeLogging.hpp"
 
 #include <libssh2.h>
@@ -3320,10 +3321,19 @@ bool Libssh2SftpClient::get(
     std::size_t done = offset;
 
     // Optional integrity hashes a whole-file transfer while it streams. A
-    // resumed transfer also depends on earlier data, so it keeps the full
-    // check.
+    // resumed transfer also depends on earlier data, and a recently modified
+    // file may change without new metadata, so both keep the full check.
+    const std::optional<std::uint64_t> remoteModified =
+        (st.flags & LIBSSH2_SFTP_ATTR_ACMODTIME) != 0
+            ? std::optional<std::uint64_t>(st.mtime)
+            : std::nullopt;
+    const std::int64_t nowSeconds =
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count();
     const bool streamIntegrity =
-        policy == TransferIntegrityPolicy::Optional && offset == 0;
+        policy == TransferIntegrityPolicy::Optional && offset == 0 &&
+        !libssh2detail::remoteFileMayBeChanging(remoteModified, nowSeconds);
     DigestContext streamDigest = start_stream_digest(streamIntegrity);
 
     while (true) {
@@ -3374,10 +3384,14 @@ bool Libssh2SftpClient::get(
                                    (libssh2_sftp_fstat_ex(rh, &after, 0) == 0 &&
                                     remote_file_changed(st, after));
         if (remoteChanged) {
-            err = "Final integrity check failed (download): remote size or "
-                  "modification time changed during transfer";
+            // The .part mixes versions of the file, so a retry must start
+            // over. The change is usually brief, so the queue may retry.
+            err = "Remote file changed during download (size or modification "
+                  "time differs)";
             localFile.reset();
             libssh2_sftp_close(rh);
+            (void)std::remove(localPart.c_str());
+            setLastOperationError(RemoteErrorKind::RemoteIo, err, 0, true);
             return false;
         }
     }

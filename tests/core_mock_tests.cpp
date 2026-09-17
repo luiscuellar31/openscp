@@ -7,6 +7,7 @@
 #include "libssh2/Libssh2SftpClient.hpp"
 #include "libssh2/detail/Libssh2ErrorClassifier.hpp"
 #include "libssh2/detail/Libssh2InputSafety.hpp"
+#include "libssh2/detail/Libssh2TransferIntegrity.hpp"
 #include "mock/MockSftpClient.hpp"
 #include "openscp/ClientFactory.hpp"
 #include "openscp/SecureString.hpp"
@@ -1110,6 +1111,27 @@ OPENSCP_TEST(test_shared_libssh2_error_classification, t) {
     t.check(local.kind == openscp::RemoteErrorKind::LocalIo ||
                 local.kind == openscp::RemoteErrorKind::InsufficientSpace,
             "shared libssh2 errors should classify local file failures");
+}
+
+OPENSCP_TEST(test_libssh2_recent_remote_modification, t) {
+    using openscp::libssh2detail::kRecentRemoteModificationSeconds;
+    using openscp::libssh2detail::remoteFileMayBeChanging;
+    constexpr std::int64_t now = 1'800'000'000;
+    const auto windowStart =
+        static_cast<std::uint64_t>(now - kRecentRemoteModificationSeconds);
+
+    t.check(!remoteFileMayBeChanging(windowStart - 1, now),
+            "a file modified before the window should use the streamed check");
+    t.check(remoteFileMayBeChanging(windowStart, now),
+            "a file modified at the window start should use the full check");
+    t.check(remoteFileMayBeChanging(static_cast<std::uint64_t>(now) + 60, now),
+            "a server clock ahead of the local clock should use the full "
+            "check");
+    t.check(remoteFileMayBeChanging(std::nullopt, now),
+            "an unknown modification time should use the full check");
+    t.check(
+        remoteFileMayBeChanging(std::numeric_limits<std::uint64_t>::max(), now),
+        "an out-of-range modification time should use the full check");
 }
 
 #ifdef _WIN32
