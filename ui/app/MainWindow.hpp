@@ -378,6 +378,7 @@ class MainWindow : public QMainWindow {
     QSet<LocalTreeDiscovery *> activeLocalUploadDiscoveries_;
     std::shared_ptr<std::atomic<bool>> remoteScanCancelRequested_;
     std::atomic<bool> remoteScanInProgress_{false};
+    QTimer *uploadRefreshTimer_ = nullptr;
     quint64 activeRemoteListJob_ = 0;
     QString requestedRemotePath_;
     QStringList remoteRefreshSelectionNames_;

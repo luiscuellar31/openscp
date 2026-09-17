@@ -393,6 +393,7 @@ void MainWindow::applyDisconnectLocalUiState() {
     rightIsRemote_ = false;
     activateScpTransferModeUi(false);
     transferUiController_.reset();
+    uploadRefreshTimer_->stop();
     restoreRightHeaderState(false);
     if (QDir(rightPath_->path()).exists()) {
         setRightRoot(rightPath_->path());

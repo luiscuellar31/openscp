@@ -80,10 +80,7 @@ TransferUiUpdate TransferUiController::observe(
                          .arg(name);
     }
 
-    if (newUploadInCurrentRoot && remotePanelActive && !refreshScheduled_) {
-        refreshScheduled_ = true;
-        update.scheduleRemoteRefresh = true;
-    }
+    update.scheduleRemoteRefresh = newUploadInCurrentRoot;
     if (newlyCompleted == 1) {
         update.completionMessage = firstCompletionMessage;
     } else if (newlyCompleted > 1) {
@@ -101,12 +98,7 @@ void TransferUiController::openDownloadWhenCompleted(quint64 taskId,
     downloadsToOpen_.insert(taskId, localPath);
 }
 
-void TransferUiController::completeScheduledRefresh() {
-    refreshScheduled_ = false;
-}
-
 void TransferUiController::reset() {
-    refreshScheduled_ = false;
     completedUploadIds_.clear();
     notifiedTaskIds_.clear();
     downloadsToOpen_.clear();

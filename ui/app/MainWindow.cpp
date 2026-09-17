@@ -1102,6 +1102,22 @@ void MainWindow::initializeRuntimeState() {
     (void)transferMgr_->enablePersistence();
     // A single cold snapshot seeds the delta-based UI observer at startup.
     transferUiController_.initialize(transferMgr_->tasksSnapshot());
+    // Uploads in a batch finish close together, so the visible folder is
+    // refreshed once they stop finishing rather than after each one.
+    uploadRefreshTimer_ = new QTimer(this);
+    uploadRefreshTimer_->setSingleShot(true);
+    uploadRefreshTimer_->setInterval(1000);
+    connect(uploadRefreshTimer_, &QTimer::timeout, this, [this] {
+        if (!rightIsRemote_ || !rightRemoteModel_)
+            return;
+        // Canceling a listing in flight interrupts the control connection,
+        // so wait for it to finish instead.
+        if (activeRemoteListJob_ != 0) {
+            uploadRefreshTimer_->start();
+            return;
+        }
+        requestRemoteListing(rightRemoteModel_->rootPath(), true);
+    });
     connect(transferMgr_, &TransferManager::tasksAdded, this,
             [this](const QVector<quint64> &ids) {
                 handleTransferUiUpdate(ids, {});
@@ -1561,15 +1577,8 @@ void MainWindow::handleTransferUiUpdate(const QVector<quint64> &upsertIds,
         openLocalPathWithPreference(localPath);
         statusBar()->showMessage(tr("Downloaded: ") + localPath, 5000);
     }
-    if (!update.scheduleRemoteRefresh)
-        return;
-
-    QTimer::singleShot(150, this, [this] {
-        transferUiController_.completeScheduledRefresh();
-        if (!rightIsRemote_ || !rightRemoteModel_)
-            return;
-        requestRemoteListing(rightRemoteModel_->rootPath(), true);
-    });
+    if (update.scheduleRemoteRefresh)
+        uploadRefreshTimer_->start();
 }
 
 bool MainWindow::isScpTransferMode() const {

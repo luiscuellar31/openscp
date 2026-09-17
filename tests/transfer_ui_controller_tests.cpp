@@ -45,7 +45,6 @@ OPENSCP_TEST(testCompletionIsNotRepeated, test) {
     test.check(!first.completionMessage.isEmpty(),
                "a newly completed transfer should produce one notification");
 
-    controller.completeScheduledRefresh();
     const auto repeated =
         controller.observe(completion, {}, true, QStringLiteral("/team"));
     test.check(!repeated.scheduleRemoteRefresh &&
