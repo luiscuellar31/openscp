@@ -18,6 +18,11 @@ class TransferQueueStore final {
     [[nodiscard]] const TransferTask *find(quint64 taskId) const;
 
     void append(TransferTask task);
+    // Removes the tasks shouldRemove selects in one pass and returns them;
+    // the rest keep their order. The predicate sees each task once, in queue
+    // order.
+    Nodes
+    removeIf(const std::function<bool(const TransferTask &)> &shouldRemove);
     void rebuildIndex();
 
     [[nodiscard]] Nodes &nodes() noexcept { return nodes_; }

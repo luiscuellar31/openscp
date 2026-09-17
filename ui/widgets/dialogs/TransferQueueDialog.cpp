@@ -437,9 +437,15 @@ class TransferTaskTableModel final : public QAbstractTableModel {
         }
         std::sort(rows.begin(), rows.end(), std::greater<int>());
         rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
-        for (int row : rows) {
-            beginRemoveRows({}, row, row);
-            tasks_.removeAt(row);
+        // Adjacent rows go out as one range, so removing a contiguous
+        // selection shifts the rows below it only once.
+        for (qsizetype index = 0; index < rows.size();) {
+            const int last = rows[index];
+            int first = last;
+            while (++index < rows.size() && rows[index] == first - 1)
+                first = rows[index];
+            beginRemoveRows({}, first, last);
+            tasks_.remove(first, last - first + 1);
             endRemoveRows();
         }
         if (!rows.isEmpty())
@@ -1432,13 +1438,10 @@ void TransferQueueDialog::showContextMenu(const QPoint &pos) {
         onCopyDestinationPath();
     else if (chosen == actClearFinished)
         onClearFinished();
-    else if (chosen == actRemove) {
-        for (quint64 taskId : ids)
-            mgr_->removeTask(taskId, false);
-    } else if (chosen == actRemoveWithPartial) {
-        for (quint64 taskId : ids)
-            mgr_->removeTask(taskId, true);
-    }
+    else if (chosen == actRemove)
+        mgr_->removeTasks(ids, false);
+    else if (chosen == actRemoveWithPartial)
+        mgr_->removeTasks(ids, true);
 }
 
 void TransferQueueDialog::loadUiState() {

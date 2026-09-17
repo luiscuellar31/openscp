@@ -1491,8 +1491,8 @@ OPENSCP_TEST(testDependencySkipsKeepTerminalCounterAndHistoryBounded, test) {
                                 destination.filePath("root-failure"), batch);
     batch.dependsOnTaskId = prerequisite;
     QVector<QPair<QString, QString>> dependent;
-    dependent.reserve(5101);
-    for (int index = 0; index < 5101; ++index) {
+    dependent.reserve(5501);
+    for (int index = 0; index < 5501; ++index) {
         dependent.push_back(
             {QStringLiteral("/remote/dependent-%1").arg(index),
              destination.filePath(QStringLiteral("dependent-%1").arg(index))});
@@ -1642,19 +1642,92 @@ OPENSCP_TEST(testPersistentDeletionTasks, test) {
 
 OPENSCP_TEST(testTerminalHistoryIsBounded, test) {
     TransferManager manager;
-    QVector<QPair<QString, QString>> downloads;
-    downloads.reserve(5100);
-    for (int index = 0; index < 5100; ++index) {
-        downloads.push_back({QStringLiteral("/remote/history-%1").arg(index),
-                             QStringLiteral("/local/history-%1").arg(index)});
-    }
-    manager.enqueueDownloads(downloads);
-    manager.cancelAll();
+    const auto enqueueFinished = [&manager](int first, int count) {
+        QVector<QPair<QString, QString>> downloads;
+        downloads.reserve(count);
+        for (int index = first; index < first + count; ++index) {
+            downloads.push_back(
+                {QStringLiteral("/remote/history-%1").arg(index),
+                 QStringLiteral("/local/history-%1").arg(index)});
+        }
+        manager.enqueueDownloads(downloads);
+        manager.cancelAll();
+    };
+
+    enqueueFinished(0, 5500);
+    test.check(manager.tasksSnapshot().size() == 5500,
+               "history should wait for a whole prune batch past its bound");
+    enqueueFinished(5500, 1);
     const auto tasks = manager.tasksSnapshot();
     test.check(tasks.size() == 5000,
-               "terminal queue history should be bounded to 5000 tasks");
-    test.check(tasks.front().taskId == 101 && tasks.back().taskId == 5100,
+               "terminal queue history should be pruned to 5000 tasks");
+    test.check(tasks.front().taskId == 502 && tasks.back().taskId == 5501,
                "history pruning should retain the newest terminal tasks");
+    test.check(!manager.taskSnapshot(501) && manager.taskSnapshot(502) &&
+                   manager.taskSnapshot(5501),
+               "pruning should keep the task index in step with the queue");
+    enqueueFinished(5501, 1);
+    test.check(manager.tasksSnapshot().size() == 5001,
+               "a pruned history should grow again before the next prune");
+}
+
+OPENSCP_TEST(testRemovingSelectedTasksReportsThemOnce, test) {
+    // Without a connection factory nothing runs, so every task stays queued.
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    TransferBatchOptions batch;
+    batch.sessionKey = QStringLiteral("test-session");
+    QVector<quint64> ids;
+    for (int index = 0; index < 6; ++index) {
+        ids.push_back(manager.enqueueRemoteDelete(
+            QStringLiteral("/remove-%1").arg(index), false, batch));
+    }
+    QVector<QVector<quint64>> removedSignals;
+    QObject::connect(&manager, &TransferManager::tasksRemoved, &manager,
+                     [&](const QVector<quint64> &removedIds) {
+                         removedSignals.push_back(removedIds);
+                     });
+
+    manager.removeTasks({ids[1], ids[3], ids[4], ids[3], 999'999});
+    test.check(removedSignals.size() == 1 &&
+                   removedSignals.front() ==
+                       QVector<quint64>{ids[1], ids[3], ids[4]},
+               "removing a selection should report each task once");
+    const auto remaining = manager.tasksSnapshot();
+    test.check(remaining.size() == 3 && remaining[0].taskId == ids[0] &&
+                   remaining[1].taskId == ids[2] &&
+                   remaining[2].taskId == ids[5],
+               "removing a selection should keep the rest in order");
+    manager.cancelTask(ids[5]);
+    const auto canceled = manager.taskSnapshot(ids[5]);
+    test.check(!manager.taskSnapshot(ids[3]) && canceled &&
+                   canceled->status == TransferTask::Status::Canceled,
+               "the task index should follow the removal");
+}
+
+OPENSCP_TEST(testRemovingSelectedTasksKeepsRunningWork, test) {
+    auto probe = std::make_shared<LifecycleProbe>();
+    CancelLifecycleClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+    const auto batch = testBatchOptions();
+
+    const quint64 running =
+        manager.enqueueDownload(QStringLiteral("/remote/running"),
+                                destination.filePath("running"), batch);
+    const quint64 queued =
+        manager.enqueueDownload(QStringLiteral("/remote/queued"),
+                                destination.filePath("queued"), batch);
+    test.check(waitUntil([&] { return probe->gets.load() == 1; }),
+               "the task to keep should start running");
+    manager.removeTasks({running, queued});
+    test.check(manager.taskSnapshot(running) && !manager.taskSnapshot(queued),
+               "removing a selection must leave running tasks in place");
+    manager.cancelTask(running);
+    test.check(waitForStatus(manager, running, TransferTask::Status::Canceled),
+               "the kept task should still be controllable");
 }
 
 OPENSCP_TEST(testRemovingTaskCanDeletePartialData, test) {

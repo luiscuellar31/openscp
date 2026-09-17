@@ -356,14 +356,34 @@ void TransferManager::rebuildTaskLookupLocked() {
     scheduler_.normalizeForSize(queueStore_.nodes().size());
 }
 
-void TransferManager::forgetBatchPolicyIfUnusedLocked(quint64 batchId) {
-    const bool stillUsed =
-        std::any_of(queueStore_.nodes().cbegin(), queueStore_.nodes().cend(),
-                    [batchId](const auto &taskNode) {
-                        return taskNode->batchId == batchId;
-                    });
-    if (!stillUsed)
+TransferQueueStore::Nodes TransferManager::removeInactiveTasksLocked(
+    const std::function<bool(const TransferTask &)> &shouldRemove) {
+    TransferQueueStore::Nodes removed =
+        queueStore_.removeIf([&](const TransferTask &task) {
+            return !activeTaskIds_.count(task.taskId) && shouldRemove(task);
+        });
+    if (removed.empty())
+        return removed;
+
+    QSet<quint64> unusedBatches;
+    for (const auto &taskNode : removed) {
+        const TransferTask &task = *taskNode;
+        if (isTerminalTransferStatus(task.status) && terminalTaskCount_ > 0)
+            --terminalTaskCount_;
+        taskControls_.forget(task.taskId);
+        resumeRequestedTasks_.erase(task.taskId);
+        releaseDestinationLocked(task.taskId);
+        unusedBatches.insert(task.batchId);
+    }
+    for (const auto &taskNode : queueStore_.nodes()) {
+        if (unusedBatches.isEmpty())
+            break;
+        unusedBatches.remove(taskNode->batchId);
+    }
+    for (quint64 batchId : std::as_const(unusedBatches))
         conflictCoordinator_.forgetBatch(batchId);
+    scheduler_.normalizeForSize(queueStore_.nodes().size());
+    return removed;
 }
 
 quint64 TransferManager::normalizedBatchIdLocked(quint64 requested) {
@@ -1284,66 +1304,58 @@ void TransferManager::retryTask(quint64 taskId) {
 }
 
 void TransferManager::removeTask(quint64 taskId, bool removePartialData) {
-    TransferTask removed{};
-    removed.type = TransferTask::Type::Download;
-    bool didRemove = false;
+    removeTasks({taskId}, removePartialData);
+}
+
+void TransferManager::removeTasks(const QVector<quint64> &taskIds,
+                                  bool removePartialData) {
+    if (taskIds.isEmpty())
+        return;
+    const QSet<quint64> selected(taskIds.cbegin(), taskIds.cend());
+    TransferQueueStore::Nodes removed;
     {
         std::lock_guard<std::mutex> lock(mtx_);
-        TransferTask *task = taskForIdLocked(taskId);
-        if (!task || activeTaskIds_.count(taskId))
-            return;
-        removed = *task;
-        const auto position = std::find_if(
-            queueStore_.nodes().begin(), queueStore_.nodes().end(),
-            [task](const auto &node) { return node.get() == task; });
-        if (position == queueStore_.nodes().end())
-            return;
-        queueStore_.nodes().erase(position);
-        taskControls_.forget(taskId);
-        resumeRequestedTasks_.erase(taskId);
-        releaseDestinationLocked(taskId);
-        rebuildTaskLookupLocked();
-        forgetBatchPolicyIfUnusedLocked(removed.batchId);
-        didRemove = true;
+        removed =
+            removeInactiveTasksLocked([&selected](const TransferTask &task) {
+                return selected.contains(task.taskId);
+            });
     }
-    if (!didRemove)
+    if (removed.empty())
         return;
-    if (removePartialData && removed.type == TransferTask::Type::Download)
-        QFile::remove(removed.dst + QStringLiteral(".part"));
-    publishRemoved({taskId});
-    if (removePartialData && removed.type == TransferTask::Type::Upload) {
+
+    QVector<quint64> removedIds;
+    removedIds.reserve(static_cast<qsizetype>(removed.size()));
+    for (const auto &taskNode : removed) {
+        removedIds.push_back(taskNode->taskId);
+        if (removePartialData &&
+            taskNode->type == TransferTask::Type::Download) {
+            QFile::remove(taskNode->dst + QStringLiteral(".part"));
+        }
+    }
+    publishRemoved(removedIds);
+    if (!removePartialData)
+        return;
+    for (const auto &taskNode : removed) {
+        const TransferTask &task = *taskNode;
+        if (task.type != TransferTask::Type::Upload)
+            continue;
         // Remote cleanup must stay off the UI thread. Represent it as a normal
         // persistent queue operation so it can wait for the matching session.
         TransferBatchOptions cleanup;
-        cleanup.batchId = removed.batchId;
-        cleanup.sessionKey = removed.sessionKey;
+        cleanup.batchId = task.batchId;
+        cleanup.sessionKey = task.sessionKey;
         cleanup.conflictPolicy = Policy::Skip;
-        enqueueRemoteDelete(removed.dst + QStringLiteral(".part"), false,
-                            cleanup);
+        enqueueRemoteDelete(task.dst + QStringLiteral(".part"), false, cleanup);
     }
 }
 
 void TransferManager::removeInactiveTasks(
     const std::function<bool(const TransferTask &)> &shouldRemove) {
     QVector<quint64> removed;
-    QSet<quint64> removedBatches;
     {
         std::lock_guard<std::mutex> lock(mtx_);
-        std::vector<std::unique_ptr<TransferTask>> kept;
-        kept.reserve(queueStore_.nodes().size());
-        for (auto &taskNode : queueStore_.nodes()) {
-            const auto &task = *taskNode;
-            if (shouldRemove(task) && !activeTaskIds_.count(task.taskId)) {
-                removed.push_back(task.taskId);
-                removedBatches.insert(task.batchId);
-            } else {
-                kept.push_back(std::move(taskNode));
-            }
-        }
-        queueStore_.nodes().swap(kept);
-        rebuildTaskLookupLocked();
-        for (quint64 batchId : removedBatches)
-            forgetBatchPolicyIfUnusedLocked(batchId);
+        for (const auto &taskNode : removeInactiveTasksLocked(shouldRemove))
+            removed.push_back(taskNode->taskId);
     }
     if (!removed.isEmpty())
         publishRemoved(removed);
@@ -2313,30 +2325,22 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
 }
 
 QVector<quint64> TransferManager::pruneTerminalHistoryLocked() {
-    if (terminalTaskCount_ <= kMaxTerminalHistory)
+    if (terminalTaskCount_ <= kMaxTerminalHistory + kTerminalHistoryPruneBatch)
         return {};
 
+    // Tasks are appended as they are queued, so the first terminal tasks in
+    // queue order are the oldest.
     int toRemove = terminalTaskCount_ - kMaxTerminalHistory;
     QVector<quint64> removed;
-    QSet<quint64> removedBatches;
-    std::vector<std::unique_ptr<TransferTask>> kept;
-    kept.reserve(queueStore_.nodes().size() -
-                 static_cast<std::size_t>(toRemove));
-    for (auto &taskNode : queueStore_.nodes()) {
-        const auto &task = *taskNode;
-        if (toRemove > 0 && isTerminalTransferStatus(task.status) &&
-            !activeTaskIds_.count(task.taskId)) {
-            removed.push_back(task.taskId);
-            removedBatches.insert(task.batchId);
-            --toRemove;
-        } else {
-            kept.push_back(std::move(taskNode));
-        }
+    for (const auto &taskNode :
+         removeInactiveTasksLocked([&toRemove](const TransferTask &task) {
+             if (toRemove == 0 || !isTerminalTransferStatus(task.status))
+                 return false;
+             --toRemove;
+             return true;
+         })) {
+        removed.push_back(taskNode->taskId);
     }
-    queueStore_.nodes().swap(kept);
-    rebuildTaskLookupLocked();
-    for (quint64 batchId : removedBatches)
-        forgetBatchPolicyIfUnusedLocked(batchId);
     return removed;
 }
 

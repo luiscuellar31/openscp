@@ -68,6 +68,10 @@ class TransferManager : public QObject {
     void cancelAll();
     void setTaskSpeedLimit(quint64 taskId, int kbps);
     void removeTask(quint64 taskId, bool removePartialData = false);
+    // Removes every inactive task among taskIds in one pass over the queue
+    // and reports them in a single tasksRemoved signal.
+    void removeTasks(const QVector<quint64> &taskIds,
+                     bool removePartialData = false);
 
     // A zero batchId is replaced with a stable generated ID.
     quint64 enqueueUpload(const QString &local, const QString &remote,
@@ -132,7 +136,11 @@ class TransferManager : public QObject {
 
     private:
     static constexpr int kWorkerSlots = 8;
+    // The queue keeps at least the newest kMaxTerminalHistory finished tasks
+    // and prunes the older ones once kTerminalHistoryPruneBatch more have
+    // finished, so pruning walks the queue once per batch, not per task.
     static constexpr int kMaxTerminalHistory = 5000;
+    static constexpr int kTerminalHistoryPruneBatch = kMaxTerminalHistory / 10;
 
     struct WorkerSlot;
     enum class PrecheckOutcome { Continue, Skipped, Canceled, Error };
@@ -190,7 +198,10 @@ class TransferManager : public QObject {
                                 const TransferBatchOptions &options,
                                 bool inheritBatchConflictPolicy);
     void rebuildTaskLookupLocked();
-    void forgetBatchPolicyIfUnusedLocked(quint64 batchId);
+    // Removes the inactive tasks shouldRemove selects in one pass, releases
+    // what the queue kept for them, and returns them.
+    TransferQueueStore::Nodes removeInactiveTasksLocked(
+        const std::function<bool(const TransferTask &)> &shouldRemove);
     quint64 normalizedBatchIdLocked(quint64 requested);
     void initializeConnectionStatusLocked(TransferTask &task) const;
     bool dependencyFailedLocked(const TransferTask &task) const;
