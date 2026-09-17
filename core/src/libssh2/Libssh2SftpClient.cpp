@@ -1493,6 +1493,14 @@ void configure_tcp_keepalive(int s) {
 #endif
 }
 
+// libssh2 sends each SSH packet with its own send() and queues SFTP read
+// requests back to back, so with Nagle's algorithm every request after the
+// first would wait for the server to acknowledge the one before it.
+void disable_nagle(int s) {
+    int opt = 1;
+    (void)::setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+}
+
 bool set_socket_timeout_ms(int sock, int timeoutMs) {
     if (sock < 0)
         return false;
@@ -1616,6 +1624,7 @@ bool connect_tcp_endpoint(const std::string &host, uint16_t port, int &sockOut,
         if (s == -1)
             continue;
         configure_tcp_keepalive(s);
+        disable_nagle(s);
         if (::connect(s, rp->ai_addr, rp->ai_addrlen) == 0) {
             sockOut = s;
             freeaddrinfo(res);
