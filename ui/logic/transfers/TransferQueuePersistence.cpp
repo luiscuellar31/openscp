@@ -22,6 +22,10 @@ using Status = TransferTask::Status;
 
 constexpr qint64 kMaxPersistenceBytes = 16 * 1024 * 1024;
 constexpr qsizetype kMaxPersistedTasks = 100'000;
+constexpr int kSchemaVersion = 1;
+// Written only when a task waits for its batch, so builds that predate batch
+// waiting preserve the file instead of running those tasks without waiting.
+constexpr int kBatchWaitSchemaVersion = 2;
 
 QString translate(const char *text) {
     return QCoreApplication::translate("TransferManager", text);
@@ -125,7 +129,9 @@ bool hasCurrentTaskFormat(const QJsonObject &object) {
            object.value(QStringLiteral("commitUncertain")).isBool() &&
            object.value(QStringLiteral("queuedAtMs")).isString() &&
            (!object.contains(QStringLiteral("dependsOnTaskId")) ||
-            object.value(QStringLiteral("dependsOnTaskId")).isString());
+            object.value(QStringLiteral("dependsOnTaskId")).isString()) &&
+           (!object.contains(QStringLiteral("waitsForBatch")) ||
+            object.value(QStringLiteral("waitsForBatch")).isBool());
 }
 
 QString typeName(TransferTask::Type type) {
@@ -217,6 +223,7 @@ std::optional<TransferTask> deserializeTask(const QJsonObject &object,
     task.taskId = taskId;
     task.batchId = *batchId;
     task.dependsOnTaskId = dependencyId;
+    task.waitsForBatch = object.value(QStringLiteral("waitsForBatch")).toBool();
     task.sessionKey = object.value(QStringLiteral("sessionKey")).toString();
     task.src = object.value(QStringLiteral("source")).toString();
     task.dst = object.value(QStringLiteral("destination")).toString();
@@ -257,6 +264,8 @@ QJsonObject serializeTask(const TransferTask &task) {
         object.insert(QStringLiteral("dependsOnTaskId"),
                       QString::number(task.dependsOnTaskId));
     }
+    if (task.waitsForBatch)
+        object.insert(QStringLiteral("waitsForBatch"), true);
     object.insert(QStringLiteral("type"), typeName(task.type));
     object.insert(QStringLiteral("sessionKey"), task.sessionKey);
     object.insert(QStringLiteral("source"), task.src);
@@ -320,7 +329,10 @@ TransferQueuePersistence::load(const QString &path,
         return result;
     }
     const QJsonObject root = document.object();
-    if (root.value(QStringLiteral("schemaVersion")).toInt(-1) != 1) {
+    const int schemaVersion =
+        root.value(QStringLiteral("schemaVersion")).toInt(-1);
+    if (schemaVersion != kSchemaVersion &&
+        schemaVersion != kBatchWaitSchemaVersion) {
         result.status = LoadStatus::UnsupportedSchema;
         result.warning = translate(
             "The saved transfer queue uses a newer format and was preserved "
@@ -378,6 +390,7 @@ TransferQueuePersistence::save(const QString &path,
                                const QVector<TransferTask> &tasks) {
     SaveResult result;
     QJsonArray serialized;
+    bool waitsForBatch = false;
     for (const TransferTask &task : tasks) {
         const bool cleanupPending = task.status == Status::Warning &&
                                     task.phase == TransferPhase::DeleteSource;
@@ -389,10 +402,12 @@ TransferQueuePersistence::save(const QString &path,
             return result;
         }
         serialized.append(serializeTask(task));
+        waitsForBatch = waitsForBatch || task.waitsForBatch;
     }
 
     QJsonObject root;
-    root.insert(QStringLiteral("schemaVersion"), 1);
+    root.insert(QStringLiteral("schemaVersion"),
+                waitsForBatch ? kBatchWaitSchemaVersion : kSchemaVersion);
     root.insert(QStringLiteral("tasks"), serialized);
     const QByteArray data = QJsonDocument(root).toJson(QJsonDocument::Compact);
     if (data.size() > kMaxPersistenceBytes) {

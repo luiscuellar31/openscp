@@ -15,6 +15,10 @@ struct TransferBatchOptions {
     TransferOperation operation = TransferOperation::Copy;
     TransferConflictPolicy conflictPolicy = TransferConflictPolicy::Ask;
     quint64 dependsOnTaskId = 0;
+    // The task runs only once every task of its batch that does not wait for
+    // the batch has succeeded, and is skipped if one of them fails. Tasks
+    // that wait for their batch do not wait for each other.
+    bool waitForBatch = false;
 };
 
 struct TransferTask {
@@ -32,6 +36,7 @@ struct TransferTask {
     quint64 taskId = 0;
     quint64 batchId = 0;
     quint64 dependsOnTaskId = 0;
+    bool waitsForBatch = false;
     QString sessionKey;
     QString src;
     QString dst;

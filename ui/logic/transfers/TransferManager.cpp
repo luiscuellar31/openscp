@@ -324,6 +324,7 @@ TransferManager::enqueuePreparedTask(TransferTask task,
         task.taskId = nextId_++;
         task.batchId = normalizedBatchIdLocked(options.batchId);
         task.dependsOnTaskId = options.dependsOnTaskId;
+        task.waitsForBatch = options.waitForBatch;
         task.sessionKey = options.sessionKey.isEmpty() ? currentSessionKey_
                                                        : options.sessionKey;
         initializeConnectionStatusLocked(task);
@@ -409,30 +410,59 @@ void TransferManager::releaseDestinationLocked(quint64 taskId) {
     reservationByTask_.erase(found);
 }
 
+namespace {
+
+bool succeeded(const TransferTask &task) {
+    return task.status == TransferTask::Status::Done ||
+           (task.status == TransferTask::Status::Skipped &&
+            !task.skippedByFailedDependency);
+}
+
+bool failed(const TransferTask &task) {
+    return task.status == TransferTask::Status::Error ||
+           task.status == TransferTask::Status::Canceled ||
+           task.status == TransferTask::Status::Warning ||
+           task.skippedByFailedDependency;
+}
+
+} // namespace
+
 bool TransferManager::dependencySatisfiedLocked(
     const TransferTask &task) const {
-    if (task.dependsOnTaskId == 0)
-        return true;
-    const TransferTask *dependency = taskForIdLocked(task.dependsOnTaskId);
-    if (!dependency) {
+    if (task.dependsOnTaskId != 0) {
         // Terminal prerequisites are intentionally pruned and are not written
         // to the non-terminal persistence file.
-        return true;
+        const TransferTask *dependency = taskForIdLocked(task.dependsOnTaskId);
+        if (dependency && !succeeded(*dependency))
+            return false;
     }
-    const Status status = dependency->status;
-    return status == Status::Done || (status == Status::Skipped &&
-                                      !dependency->skippedByFailedDependency);
+    return !task.waitsForBatch ||
+           batchWorkLocked(task.batchId) == BatchWork::Succeeded;
 }
 
 bool TransferManager::dependencyFailedLocked(const TransferTask &task) const {
-    if (task.dependsOnTaskId == 0)
-        return false;
-    const TransferTask *dependency = taskForIdLocked(task.dependsOnTaskId);
-    if (!dependency)
-        return false;
-    const Status status = dependency->status;
-    return status == Status::Error || status == Status::Canceled ||
-           status == Status::Warning || dependency->skippedByFailedDependency;
+    if (task.dependsOnTaskId != 0) {
+        const TransferTask *dependency = taskForIdLocked(task.dependsOnTaskId);
+        if (dependency && failed(*dependency))
+            return true;
+    }
+    return task.waitsForBatch &&
+           batchWorkLocked(task.batchId) == BatchWork::Failed;
+}
+
+TransferManager::BatchWork
+TransferManager::batchWorkLocked(quint64 batchId) const {
+    bool unfinished = false;
+    for (const auto &taskNode : queueStore_.nodes()) {
+        const TransferTask &task = *taskNode;
+        if (task.batchId != batchId || task.waitsForBatch)
+            continue;
+        if (failed(task))
+            return BatchWork::Failed;
+        if (!isTerminalTransferStatus(task.status))
+            unfinished = true;
+    }
+    return unfinished ? BatchWork::Unfinished : BatchWork::Succeeded;
 }
 
 void TransferManager::skipForFailedDependencyLocked(TransferTask &task,
@@ -459,18 +489,32 @@ TransferManager::skipDependentsOfFailedLocked(quint64 failedTaskId,
                                               qint64 now) {
     QVector<quint64> skipped;
     QSet<quint64> failedPrerequisites{failedTaskId};
+    QSet<quint64> failedBatches;
+    const auto recordFailure = [&](const TransferTask &task) {
+        failedPrerequisites.insert(task.taskId);
+        if (!task.waitsForBatch)
+            failedBatches.insert(task.batchId);
+    };
+    if (const TransferTask *failedTask = taskForIdLocked(failedTaskId))
+        recordFailure(*failedTask);
     bool foundDependent = true;
     while (foundDependent) {
         foundDependent = false;
         for (auto &candidateNode : queueStore_.nodes()) {
             auto &candidate = *candidateNode;
+            // A task that already started is left to finish.
             if (isTerminalTransferStatus(candidate.status) ||
-                !failedPrerequisites.contains(candidate.dependsOnTaskId)) {
+                activeTaskIds_.count(candidate.taskId)) {
+                continue;
+            }
+            if (!failedPrerequisites.contains(candidate.dependsOnTaskId) &&
+                !(candidate.waitsForBatch &&
+                  failedBatches.contains(candidate.batchId))) {
                 continue;
             }
             skipForFailedDependencyLocked(candidate, now);
             skipped.push_back(candidate.taskId);
-            failedPrerequisites.insert(candidate.taskId);
+            recordFailure(candidate);
             foundDependent = true;
         }
     }
@@ -621,6 +665,7 @@ int TransferManager::enqueueDownloads(
             task.taskId = nextId_++;
             task.batchId = batchId;
             task.dependsOnTaskId = options.dependsOnTaskId;
+            task.waitsForBatch = options.waitForBatch;
             task.sessionKey = sessionKey;
             initializeConnectionStatusLocked(task);
             task.src = pair.first;

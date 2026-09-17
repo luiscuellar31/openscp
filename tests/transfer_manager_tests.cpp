@@ -1212,6 +1212,120 @@ OPENSCP_TEST(testCancelingQueuedPrerequisiteSkipsDependents, test) {
                "canceling a task should leave independent work queued");
 }
 
+OPENSCP_TEST(testTasksWaitingForBatchRunAfterItSucceeds, test) {
+    auto probe = std::make_shared<ConcurrencyProbe>();
+    ConcurrentMockClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(3);
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+
+    TransferBatchOptions batch = testBatchOptions();
+    batch.batchId = manager.createBatch(batch);
+    const quint64 first = manager.enqueueDownload(
+        QStringLiteral("/remote/batch-a"), destination.filePath("a"), batch);
+    const quint64 second = manager.enqueueDownload(
+        QStringLiteral("/remote/batch-b"), destination.filePath("b"), batch);
+    TransferBatchOptions waiting = batch;
+    waiting.waitForBatch = true;
+    const quint64 last =
+        manager.enqueueDownload(QStringLiteral("/remote/batch-last"),
+                                destination.filePath("last"), waiting);
+
+    test.check(waitForStatus(manager, last, TransferTask::Status::Done),
+               "a task waiting for its batch should run once it succeeds");
+    const auto a = manager.taskSnapshot(first);
+    const auto b = manager.taskSnapshot(second);
+    const auto l = manager.taskSnapshot(last);
+    test.check(a && b && l && a->status == TransferTask::Status::Done &&
+                   b->status == TransferTask::Status::Done &&
+                   l->startedAtMs >= a->finishedAtMs &&
+                   l->startedAtMs >= b->finishedAtMs,
+               "a task waiting for its batch should start after the rest");
+    test.check(probe->maximum.load() == 2,
+               "the rest of the batch should still run in parallel");
+}
+
+OPENSCP_TEST(testFailedBatchWorkSkipsTasksWaitingForBatch, test) {
+    auto state = authenticationFailureState("/remote/fails");
+    FailureDownloadClient baseClient(state);
+    TransferManager manager;
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+
+    TransferBatchOptions batch = testBatchOptions();
+    batch.batchId = manager.createBatch(batch);
+    const quint64 failing = manager.enqueueDownload(
+        QStringLiteral("/remote/fails"), destination.filePath("fails"), batch);
+    TransferBatchOptions waiting = batch;
+    waiting.waitForBatch = true;
+    const quint64 firstDelete = manager.enqueueRemoteDelete(
+        QStringLiteral("/must-not-delete"), false, waiting);
+    waiting.dependsOnTaskId = firstDelete;
+    const quint64 secondDelete = manager.enqueueRemoteDelete(
+        QStringLiteral("/must-not-delete-either"), false, waiting);
+
+    const auto skipped = [&](quint64 taskId) {
+        const auto task = manager.taskSnapshot(taskId);
+        return task && task->status == TransferTask::Status::Skipped &&
+               task->skippedByFailedDependency;
+    };
+    test.check(waitForStatus(manager, failing, TransferTask::Status::Error),
+               "the batch work should fail");
+    test.check(waitUntil([&] {
+                   return skipped(firstDelete) && skipped(secondDelete);
+               }),
+               "a failure in the batch should skip the tasks waiting for it");
+
+    waiting.dependsOnTaskId = 0;
+    const quint64 late =
+        manager.enqueueRemoteDelete(QStringLiteral("/late"), false, waiting);
+    test.check(skipped(late),
+               "a task queued to wait for a failed batch should be skipped");
+}
+
+OPENSCP_TEST(testCancelingBatchWorkSkipsTasksWaitingForBatch, test) {
+    // Without a connection factory nothing runs, so every task stays queued.
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    const auto skipped = [&](quint64 taskId) {
+        const auto task = manager.taskSnapshot(taskId);
+        return task && task->status == TransferTask::Status::Skipped &&
+               task->skippedByFailedDependency;
+    };
+    const auto queued = [&](quint64 taskId) {
+        const auto task = manager.taskSnapshot(taskId);
+        return task && task->status == TransferTask::Status::Queued;
+    };
+
+    TransferBatchOptions batch;
+    batch.sessionKey = QStringLiteral("test-session");
+    batch.batchId = manager.createBatch(batch);
+    const quint64 work =
+        manager.enqueueRemoteDelete(QStringLiteral("/work"), false, batch);
+    batch.waitForBatch = true;
+    const quint64 waiter =
+        manager.enqueueRemoteDelete(QStringLiteral("/waiter"), false, batch);
+    const quint64 otherWaiter = manager.enqueueRemoteDelete(
+        QStringLiteral("/other-waiter"), false, batch);
+
+    TransferBatchOptions otherBatch;
+    otherBatch.sessionKey = QStringLiteral("test-session");
+    otherBatch.batchId = manager.createBatch(otherBatch);
+    otherBatch.waitForBatch = true;
+    const quint64 canceledWaiter = manager.enqueueRemoteDelete(
+        QStringLiteral("/canceled-waiter"), false, otherBatch);
+    const quint64 keptWaiter = manager.enqueueRemoteDelete(
+        QStringLiteral("/kept-waiter"), false, otherBatch);
+
+    manager.cancelTask(work);
+    test.check(skipped(waiter) && skipped(otherWaiter),
+               "canceling batch work should skip every task waiting for it");
+    manager.cancelTask(canceledWaiter);
+    test.check(queued(keptWaiter),
+               "tasks waiting for their batch should not wait for each other");
+}
+
 OPENSCP_TEST(testDependencySkipsKeepTerminalCounterAndHistoryBounded, test) {
     auto state = authenticationFailureState("/remote/root-failure");
     FailureDownloadClient baseClient(state);
@@ -1616,6 +1730,42 @@ OPENSCP_TEST(testPausedQueuePersistence, test) {
                "persistent tasks should retain move phase metadata");
 }
 
+OPENSCP_TEST(testBatchWaitingPersistence, test) {
+    QTemporaryDir root;
+    const QString queuePath = root.filePath("transfer-queue-v1.json");
+    {
+        TransferManager manager;
+        test.check(manager.enablePersistence(queuePath),
+                   "new persistence file should be accepted");
+        TransferBatchOptions batch;
+        batch.sessionKey = QStringLiteral("saved-site-id");
+        batch.batchId = manager.createBatch(batch);
+        manager.enqueueRemoteDelete(QStringLiteral("/remote/work"), false,
+                                    batch);
+        batch.waitForBatch = true;
+        manager.enqueueRemoteDelete(QStringLiteral("/remote/after"), false,
+                                    batch);
+        manager.persistNow();
+    }
+
+    QFile queueFile(queuePath);
+    test.check(queueFile.open(QIODevice::ReadOnly),
+               "queue persistence should create a readable file");
+    const QByteArray stored = queueFile.readAll();
+    queueFile.close();
+    test.check(stored.contains("\"schemaVersion\":2") &&
+                   stored.contains("\"waitsForBatch\":true"),
+               "tasks waiting for their batch should need the newer schema");
+
+    TransferManager restored;
+    test.check(restored.enablePersistence(queuePath),
+               "a queue with tasks waiting for their batch should restore");
+    const auto tasks = restored.tasksSnapshot();
+    test.check(tasks.size() == 2 && !tasks[0].waitsForBatch &&
+                   tasks[1].waitsForBatch,
+               "restored tasks should keep waiting for their batch");
+}
+
 OPENSCP_TEST(testDirectoryTaskPersistence, test) {
     QTemporaryDir root;
     const QString queuePath = root.filePath("transfer-queue-v1.json");
@@ -1706,7 +1856,7 @@ OPENSCP_TEST(testFuturePersistenceIsPreserved, test) {
     const QString queuePath = root.filePath("transfer-queue-v1.json");
     QFile file(queuePath);
     const QByteArray future(
-        "{\"schemaVersion\":2,\"tasks\":[{\"future\":true}]}");
+        "{\"schemaVersion\":3,\"tasks\":[{\"future\":true}]}");
     test.check(file.open(QIODevice::WriteOnly),
                "future queue fixture should be writable");
     file.write(future);
