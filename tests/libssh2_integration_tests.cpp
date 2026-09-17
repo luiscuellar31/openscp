@@ -272,6 +272,7 @@ int main() {
     const std::string remoteResumeUploadSeed =
         joinRemotePath(remoteSuiteDir, "resume-upload-seed.txt");
     const std::string remoteResumeUploadPart = remoteResumeUpload + ".part";
+    const std::string remoteLarge = joinRemotePath(remoteSuiteDir, "large.bin");
 
     const fs::path localTmpRoot =
         fs::temp_directory_path() / ("openscp-it-" + token);
@@ -478,6 +479,30 @@ int main() {
                 "downloaded file should be readable");
         t.check(downloaded == payload,
                 "downloaded content should match uploaded payload");
+    }
+    // A transfer larger than the 2 MiB SFTP buffer spans several pipelined
+    // batches and ends with a short request.
+    if (t.failures == 0) {
+        std::string largePayload(5 * 1024 * 1024 + 12345, '\0');
+        std::uint32_t state = 12345;
+        for (char &byte : largePayload) {
+            state = state * 1103515245u + 12345u;
+            byte = static_cast<char>(state >> 24);
+        }
+        const fs::path localLarge = localTmpRoot / "large.bin";
+        const fs::path localLargeDst = localTmpRoot / "large-downloaded.bin";
+        err.clear();
+        t.check(writeFile(localLarge, largePayload) &&
+                    client.put(localLarge.string(), remoteLarge, err, {}, {},
+                               false),
+                std::string("large upload should succeed: ") + err);
+        std::string downloaded;
+        err.clear();
+        t.check(client.get(remoteLarge, localLargeDst.string(), err, {}, {},
+                           false) &&
+                    readFile(localLargeDst, downloaded) &&
+                    downloaded == largePayload,
+                std::string("large download should match the upload: ") + err);
     }
     // Regression: Required integrity must fail on resume mismatch (download).
     if (t.failures == 0) {
@@ -729,6 +754,9 @@ int main() {
                             "succeed: ") +
                     err);
         err.clear();
+        t.check(removeRemoteFileIfExists(client, remoteLarge, err),
+                std::string("remove remoteLarge should succeed: ") + err);
+        err.clear();
         t.check(client.removeDir(remoteSuiteDir, err),
                 std::string("removeDir should succeed: ") + err);
     }
@@ -755,6 +783,8 @@ int main() {
     cleanupErr.clear();
     (void)removeRemoteFileIfExists(client, remoteOptionalChanged + ".part",
                                    cleanupErr);
+    cleanupErr.clear();
+    (void)removeRemoteFileIfExists(client, remoteLarge, cleanupErr);
     cleanupErr.clear();
     (void)client.removeDir(remoteSuiteDir, cleanupErr);
     optionalClient.disconnect();

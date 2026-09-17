@@ -482,6 +482,19 @@ bool fail_if_transfer_canceled(const std::function<bool()> *shouldCancel,
     return true;
 }
 
+// libssh2 splits SFTP reads and writes into 30000-byte requests and pipelines
+// as many as the buffer allows (reads ask for up to four buffers ahead), so on
+// high-latency links throughput follows the buffer size. At 2 MiB reads reach
+// libssh2's read-ahead cap of LIBSSH2_CHANNEL_WINDOW_DEFAULT * 4. Smaller
+// transfers get a buffer no larger than themselves so they do not queue reads
+// past their end.
+std::size_t sftp_transfer_buffer_size(std::uint64_t bytesToTransfer) {
+    constexpr std::uint64_t kMinBufferSize = 64 * 1024;
+    constexpr std::uint64_t kMaxBufferSize = 2 * 1024 * 1024;
+    return static_cast<std::size_t>(
+        std::clamp(bytesToTransfer, kMinBufferSize, kMaxBufferSize));
+}
+
 bool hash_local_range(const std::string &path, std::uint64_t offset,
                       std::uint64_t length, Sha256Digest &out, std::string *why,
                       const std::function<bool()> *shouldCancel = nullptr) {
@@ -660,7 +673,8 @@ bool hash_remote_full(
     std::size_t done = 0;
     if (progress && *progress)
         (*progress)(done, total);
-    std::array<unsigned char, 64 * 1024> buf{};
+    std::vector<unsigned char> buf(sftp_transfer_buffer_size(
+        hasTotal ? total : std::numeric_limits<std::uint64_t>::max()));
     while (true) {
         if (transfer_cancel_requested(shouldCancel)) {
             if (why)
@@ -3313,8 +3327,9 @@ bool Libssh2SftpClient::get(
         return false;
     }
 
-    constexpr std::size_t kChunkSize = 64 * 1024;
-    std::vector<char> buf(kChunkSize);
+    // Resume validation leaves offset <= total whenever the size is known.
+    std::vector<char> buf(sftp_transfer_buffer_size(
+        hasTotal ? total - offset : std::numeric_limits<std::uint64_t>::max()));
     std::size_t done = offset;
 
     // Optional integrity hashes a whole-file transfer while it streams. A
@@ -3527,8 +3542,6 @@ bool Libssh2SftpClient::put(
         return false;
     }
 
-    constexpr std::size_t kChunkSize = 64 * 1024;
-    std::vector<char> buf(kChunkSize);
     std::size_t done = 0;
 
     // If resuming, advance local and remote
@@ -3545,6 +3558,7 @@ bool Libssh2SftpClient::put(
         }
         done = static_cast<std::size_t>(startOffset);
     }
+    std::vector<char> buf(sftp_transfer_buffer_size(total - done));
 
     // Optional integrity hashes a whole-file transfer while it streams. A
     // resumed transfer also depends on earlier data, so it keeps the full
