@@ -77,9 +77,6 @@ class Libssh2SftpClient : public RemoteClient {
                   std::function<void(std::size_t, std::size_t)> progress = {},
                   std::function<bool()> shouldCancel = {}) override;
 
-    std::unique_ptr<RemoteClient> newConnectionLike(const SessionOptions &opt,
-                                                    std::string &err) override;
-
     // Exposed for protocol adapters that share the authenticated SSH transport
     // (for example, SCP channel operations).
     _LIBSSH2_SESSION *sessionHandle() const { return session_; }

@@ -107,9 +107,6 @@ class RemoteClient {
         return false;
     }
 
-    virtual std::unique_ptr<RemoteClient>
-    newConnectionLike(const SessionOptions &opt, std::string &err) = 0;
-
     protected:
     void clearLastOperationError() {
         std::lock_guard<std::mutex> lk(lastErrorMutex_);

@@ -3957,14 +3957,4 @@ bool RemoveKnownHostEntry(const std::string &khPath, const std::string &host,
     }
     return true;
 }
-
-std::unique_ptr<RemoteClient>
-Libssh2SftpClient::newConnectionLike(const SessionOptions &opt,
-                                     std::string &err) {
-    auto structuredErrorScope = beginStructuredOperation(err);
-    auto ptr = std::make_unique<Libssh2SftpClient>();
-    if (!ptr->connect(opt, err))
-        return nullptr;
-    return ptr;
-}
 } // namespace openscp

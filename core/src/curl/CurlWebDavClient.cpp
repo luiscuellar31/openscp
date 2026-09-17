@@ -990,15 +990,4 @@ bool CurlWebDavClient::rename(const std::string &from, const std::string &to,
     return false;
 }
 
-std::unique_ptr<RemoteClient>
-CurlWebDavClient::newConnectionLike(const SessionOptions &opt,
-                                    std::string &err) {
-    auto ptr = std::make_unique<CurlWebDavClient>();
-    SessionOptions normalized = opt;
-    normalized.protocol = Protocol::WebDav;
-    if (!ptr->connect(normalized, err))
-        return nullptr;
-    return ptr;
-}
-
 } // namespace openscp

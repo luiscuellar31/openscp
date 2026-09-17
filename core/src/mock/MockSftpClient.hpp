@@ -53,9 +53,6 @@ class MockSftpClient : public RemoteClient {
     bool rename(const std::string &from, const std::string &to,
                 std::string &err, bool overwrite = false) override;
 
-    std::unique_ptr<RemoteClient> newConnectionLike(const SessionOptions &opt,
-                                                    std::string &err) override;
-
     // Test fixture helpers. resetFilesystem() keeps an empty root directory;
     // addEntry() derives the entry name from remote_path and requires its
     // parent directory to exist.

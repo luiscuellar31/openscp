@@ -446,17 +446,6 @@ bool MockSftpClient::rename(const std::string &from, const std::string &to,
     return true;
 }
 
-std::unique_ptr<RemoteClient>
-MockSftpClient::newConnectionLike(const SessionOptions &opt, std::string &err) {
-    auto client = std::unique_ptr<MockSftpClient>(new MockSftpClient(state_));
-    if (!client->connect(opt, err)) {
-        setLastOperationError(client->lastOperationError());
-        return nullptr;
-    }
-    succeed(err);
-    return client;
-}
-
 void MockSftpClient::resetFilesystem() {
     std::lock_guard<std::mutex> lock(state_->mutex);
     state_->entries.clear();

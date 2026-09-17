@@ -62,9 +62,6 @@ class CurlWebDavClient : public RemoteClient {
     bool rename(const std::string &from, const std::string &to,
                 std::string &err, bool overwrite = false) override;
 
-    std::unique_ptr<RemoteClient> newConnectionLike(const SessionOptions &opt,
-                                                    std::string &err) override;
-
     private:
     std::unique_ptr<curlcommon::CurlClientState> state_;
     // Set on connect when the server offered only Basic authentication, so

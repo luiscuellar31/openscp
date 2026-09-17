@@ -1095,14 +1095,4 @@ bool CurlFtpClient::rename(const std::string &from, const std::string &to,
     return ok;
 }
 
-std::unique_ptr<RemoteClient>
-CurlFtpClient::newConnectionLike(const SessionOptions &opt, std::string &err) {
-    const Protocol nextProtocol =
-        isFtpFamilyProtocol(opt.protocol) ? opt.protocol : protocol_;
-    auto ptr = std::make_unique<CurlFtpClient>(nextProtocol);
-    if (!ptr->connect(opt, err))
-        return nullptr;
-    return ptr;
-}
-
 } // namespace openscp

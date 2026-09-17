@@ -534,16 +534,6 @@ bool Libssh2ScpClient::rename(const std::string &from, const std::string &to,
     return unsupportedScpOperation("rename", err);
 }
 
-std::unique_ptr<RemoteClient>
-Libssh2ScpClient::newConnectionLike(const SessionOptions &opt,
-                                    std::string &err) {
-    auto structuredErrorScope = beginStructuredOperation(err);
-    auto ptr = std::make_unique<Libssh2ScpClient>();
-    if (!ptr->connect(opt, err))
-        return nullptr;
-    return ptr;
-}
-
 bool Libssh2ScpClient::transferViaSftpFallbackGet(
     const std::string &remote, const std::string &local, std::string &err,
     std::function<void(std::size_t, std::size_t)> progress,

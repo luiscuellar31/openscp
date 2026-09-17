@@ -958,27 +958,6 @@ OPENSCP_TEST(test_mock_rejects_invalid_mutations, t) {
             "a wrong entry type should expose an invalid request");
 }
 
-OPENSCP_TEST(test_new_connection_like, t) {
-    openscp::MockSftpClient c;
-    auto opt = validOptions();
-    std::string err;
-    auto conn = c.newConnectionLike(opt, err);
-    t.check(static_cast<bool>(conn),
-            "newConnectionLike should return a client");
-    t.check(conn && conn->isConnected(),
-            "newConnectionLike client should be connected");
-
-    t.check(conn && conn->mkdir("/shared", err),
-            "worker connection should mutate its simulated server");
-    std::vector<openscp::FileInfo> entries;
-    t.check(c.connect(opt, err) && c.list("/", entries, err) &&
-                std::any_of(entries.cbegin(), entries.cend(),
-                            [](const openscp::FileInfo &entry) {
-                                return entry.is_dir && entry.name == "shared";
-                            }),
-            "connections created alike should share simulated server state");
-}
-
 OPENSCP_TEST(test_demo_server_clients_share_state, t) {
     auto opt = validOptions();
     std::string err;
@@ -1000,15 +979,15 @@ OPENSCP_TEST(test_demo_server_clients_share_state, t) {
             "the demo filesystem should be restored for later tests");
 }
 
-OPENSCP_TEST(test_new_connection_like_validation, t) {
-    openscp::MockSftpClient c;
+OPENSCP_TEST(test_connected_client_validation, t) {
     openscp::SessionOptions bad;
     bad.host = "";
     bad.username = "alice";
     std::string err;
-    auto conn = c.newConnectionLike(bad, err);
-    t.check(!conn, "newConnectionLike should fail with invalid options");
-    t.check(!err.empty(), "newConnectionLike should report validation errors");
+    auto conn = openscp::CreateConnectedClient(bad, err);
+    t.check(!conn, "CreateConnectedClient should fail with invalid options");
+    t.check(!err.empty(),
+            "CreateConnectedClient should report validation errors");
 }
 
 OPENSCP_TEST(test_client_factory, t) {

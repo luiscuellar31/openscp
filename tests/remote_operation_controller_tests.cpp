@@ -270,15 +270,6 @@ class ControllerFakeClient final : public openscp::RemoteClient {
         return true;
     }
 
-    std::unique_ptr<openscp::RemoteClient>
-    newConnectionLike(const openscp::SessionOptions &options,
-                      std::string &err) override {
-        auto client = std::make_unique<ControllerFakeClient>(state_);
-        if (!client->connect(options, err))
-            return nullptr;
-        return client;
-    }
-
     private:
     std::shared_ptr<FakeState> state_;
     std::atomic_bool connected_{false};

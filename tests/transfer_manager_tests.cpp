@@ -399,8 +399,7 @@ class ConcurrentMockClient : public DownloadMockClient {
     }
 
     std::unique_ptr<openscp::RemoteClient>
-    newConnectionLike(const openscp::SessionOptions &options,
-                      std::string &err) override {
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
         probe_->connections.fetch_add(1);
         return makeConnectedWorker<ConcurrentMockClient>(options, err, probe_);
     }
@@ -409,14 +408,16 @@ class ConcurrentMockClient : public DownloadMockClient {
     std::shared_ptr<ConcurrencyProbe> probe_;
 };
 
-void configureManager(TransferManager &manager,
-                      openscp::RemoteClient &baseClient,
+// Each fixture client opens the session's worker connections: new clients of
+// its own type that share its probe or scripted state.
+template <typename Client>
+void configureManager(TransferManager &manager, Client &baseClient,
                       const openscp::SessionOptions &options) {
     std::string connectError;
     (void)baseClient.connect(options, connectError);
     manager.setSessionIdentity(QStringLiteral("test-session"));
     manager.setConnectionFactory([&baseClient, options](std::string &error) {
-        return baseClient.newConnectionLike(options, error);
+        return baseClient.openConnection(options, error);
     });
 }
 
@@ -521,8 +522,7 @@ class CancelLifecycleClient final : public DownloadMockClient {
     }
 
     std::unique_ptr<openscp::RemoteClient>
-    newConnectionLike(const openscp::SessionOptions &options,
-                      std::string &err) override {
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
         probe_->connections.fetch_add(1);
         return makeConnectedWorker<CancelLifecycleClient>(options, err, probe_);
     }
@@ -611,7 +611,7 @@ OPENSCP_TEST(testWorkersConnectInParallel, test) {
                                       [&] { return maximumHandshaking >= 2; });
             --handshaking;
         }
-        return baseClient.newConnectionLike(options, error);
+        return baseClient.openConnection(options, error);
     });
 
     QTemporaryDir destination;
@@ -653,7 +653,7 @@ OPENSCP_TEST(testConnectionOpenedAfterClearSessionIsDiscarded, test) {
             gateChanged.notify_all();
             gateChanged.wait_for(lock, 5s, [&] { return handshakeReleased; });
         }
-        return baseClient.newConnectionLike(options, error);
+        return baseClient.openConnection(options, error);
     });
     QTemporaryDir destination;
     const quint64 taskId = manager.enqueueDownload(
@@ -717,8 +717,7 @@ class FinalTransportFailureClient final : public DownloadMockClient {
     }
 
     std::unique_ptr<openscp::RemoteClient>
-    newConnectionLike(const openscp::SessionOptions &options,
-                      std::string &err) override {
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
         probe_->connections.fetch_add(1);
         return makeConnectedWorker<FinalTransportFailureClient>(options, err,
                                                                 probe_);
@@ -838,8 +837,7 @@ class RetryMockClient final : public DownloadMockClient {
     }
 
     std::unique_ptr<openscp::RemoteClient>
-    newConnectionLike(const openscp::SessionOptions &options,
-                      std::string &err) override {
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
         return makeConnectedWorker<RetryMockClient>(options, err, probe_);
     }
 
@@ -940,8 +938,7 @@ class FailureDownloadClient final : public DownloadMockClient {
     }
 
     std::unique_ptr<openscp::RemoteClient>
-    newConnectionLike(const openscp::SessionOptions &options,
-                      std::string &err) override {
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
         return makeConnectedWorker<FailureDownloadClient>(options, err, state_);
     }
 
@@ -994,8 +991,7 @@ class MovePhaseMockClient final : public DownloadMockClient {
     }
 
     std::unique_ptr<openscp::RemoteClient>
-    newConnectionLike(const openscp::SessionOptions &options,
-                      std::string &err) override {
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
         return makeConnectedWorker<MovePhaseMockClient>(options, err, probe_);
     }
 
@@ -1242,8 +1238,7 @@ class RateMockClient final : public DownloadMockClient {
     }
 
     std::unique_ptr<openscp::RemoteClient>
-    newConnectionLike(const openscp::SessionOptions &options,
-                      std::string &err) override {
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
         return makeConnectedWorker<RateMockClient>(options, err);
     }
 };
@@ -1413,8 +1408,7 @@ class RemotePartialCleanupClient final : public openscp::MockSftpClient {
     }
 
     std::unique_ptr<openscp::RemoteClient>
-    newConnectionLike(const openscp::SessionOptions &options,
-                      std::string &err) override {
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
         return makeConnectedWorker<RemotePartialCleanupClient>(options, err,
                                                                probe_);
     }
@@ -1494,8 +1488,7 @@ class RemoteLookupClient final : public openscp::MockSftpClient {
     }
 
     std::unique_ptr<openscp::RemoteClient>
-    newConnectionLike(const openscp::SessionOptions &options,
-                      std::string &err) override {
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
         return makeConnectedWorker<RemoteLookupClient>(options, err, probe_);
     }
 
