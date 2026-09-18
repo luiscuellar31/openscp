@@ -385,6 +385,12 @@ TransferQueuePersistence::load(const QString &path,
     return result;
 }
 
+bool TransferQueuePersistence::isPersisted(const TransferTask &task) {
+    const bool cleanupPending = task.status == Status::Warning &&
+                                task.phase == TransferPhase::DeleteSource;
+    return !isTerminalTransferStatus(task.status) || cleanupPending;
+}
+
 TransferQueuePersistence::SaveResult
 TransferQueuePersistence::save(const QString &path,
                                const QVector<TransferTask> &tasks) {
@@ -392,9 +398,7 @@ TransferQueuePersistence::save(const QString &path,
     QJsonArray serialized;
     bool waitsForBatch = false;
     for (const TransferTask &task : tasks) {
-        const bool cleanupPending = task.status == Status::Warning &&
-                                    task.phase == TransferPhase::DeleteSource;
-        if (isTerminalTransferStatus(task.status) && !cleanupPending)
+        if (!isPersisted(task))
             continue;
         if (serialized.size() >= kMaxPersistedTasks) {
             result.warning = translate(

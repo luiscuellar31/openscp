@@ -145,11 +145,19 @@ struct TransferManager::WorkerSlot {
 TransferManager::TransferManager(QObject *parent) : QObject(parent) {
     qRegisterMetaType<QVector<quint64>>("QVector<quint64>");
 
+    persistenceWriter_.setWarningHandler([this](const QString &warning) {
+        QMetaObject::invokeMethod(
+            this, [this, warning] { emit persistenceWarning(warning); },
+            Qt::QueuedConnection);
+    });
     persistenceTimer_ = new QTimer(this);
     persistenceTimer_->setSingleShot(true);
     persistenceTimer_->setInterval(250);
-    connect(persistenceTimer_, &QTimer::timeout, this,
-            &TransferManager::persistNow);
+    connect(persistenceTimer_, &QTimer::timeout, this, [this] {
+        // The writer thread serializes and writes, so this only copies.
+        if (auto snapshot = persistedSnapshot())
+            persistenceWriter_.save(std::move(*snapshot));
+    });
     workerSlots_.reserve(kWorkerSlots);
     for (int index = 0; index < kWorkerSlots; ++index)
         workerSlots_.push_back(std::make_unique<WorkerSlot>(index));
@@ -168,6 +176,7 @@ TransferManager::~TransferManager() {
 
     // Persist a recoverable paused representation before stopping workers.
     persistNow();
+    persistenceWriter_.shutdown();
     {
         std::lock_guard<std::mutex> lock(mtx_);
         for (quint64 taskId : activeTaskIds_)
@@ -2491,6 +2500,7 @@ bool TransferManager::enablePersistence(const QString &path) {
         persistencePath_ = QDir::cleanPath(resolved);
         persistenceEnabled_ = true;
         persistenceBlocked_ = false;
+        persistenceWriter_.setPath(persistencePath_);
     }
 
     QString warning;
@@ -2543,29 +2553,23 @@ bool TransferManager::restorePersistenceFile(QString &warning) {
     return true;
 }
 
-bool TransferManager::writePersistenceFile(QString &warning) {
-    QString path;
+std::optional<QVector<TransferTask>>
+TransferManager::persistedSnapshot() const {
     {
         std::lock_guard<std::mutex> lock(persistenceMutex_);
         if (!persistenceEnabled_ || persistenceBlocked_)
-            return true;
-        path = persistencePath_;
+            return std::nullopt;
     }
-
     QVector<TransferTask> snapshot;
-    {
-        std::lock_guard<std::mutex> lock(mtx_);
-        snapshot.reserve(static_cast<qsizetype>(queueStore_.nodes().size()));
-        for (const auto &taskNode : queueStore_.nodes())
+    std::lock_guard<std::mutex> lock(mtx_);
+    for (const auto &taskNode : queueStore_.nodes()) {
+        if (TransferQueuePersistence::isPersisted(*taskNode))
             snapshot.push_back(*taskNode);
     }
-    const auto result = TransferQueuePersistence::save(path, snapshot);
-    warning = result.warning;
-    return result.succeeded;
+    return snapshot;
 }
 
 void TransferManager::persistNow() {
-    QString warning;
-    if (!writePersistenceFile(warning) && !warning.isEmpty())
-        emit persistenceWarning(warning);
+    if (auto snapshot = persistedSnapshot())
+        persistenceWriter_.saveAndWait(std::move(*snapshot));
 }

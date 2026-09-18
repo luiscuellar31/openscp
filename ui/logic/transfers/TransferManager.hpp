@@ -5,6 +5,7 @@
 #include "logic/transfers/TransferExecutor.hpp"
 #include "logic/transfers/TransferQueue.hpp"
 #include "logic/transfers/TransferQueuePersistence.hpp"
+#include "logic/transfers/TransferQueueWriter.hpp"
 #include "logic/transfers/TransferTaskControls.hpp"
 #include "logic/transfers/TransferTypes.hpp"
 #include "openscp/Protocol.hpp"
@@ -182,6 +183,7 @@ class TransferManager : public QObject {
     BandwidthLimiter bandwidthLimiter_;
 
     QTimer *persistenceTimer_ = nullptr;
+    TransferQueueWriter persistenceWriter_;
     QString persistencePath_;
     bool persistenceEnabled_ = false;
     bool persistenceBlocked_ = false;
@@ -287,7 +289,8 @@ class TransferManager : public QObject {
     void publishRemoved(const QVector<quint64> &ids);
     void schedulePersistence();
     bool restorePersistenceFile(QString &warning);
-    bool writePersistenceFile(QString &warning);
+    // The tasks the queue would save, or nullopt when it saves nothing.
+    std::optional<QVector<TransferTask>> persistedSnapshot() const;
 
     friend struct TransferManagerTestAccess;
 };

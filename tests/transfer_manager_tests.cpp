@@ -3,6 +3,8 @@
 #include "TestHarness.hpp"
 #include "logic/transfers/ConflictCoordinator.hpp"
 #include "logic/transfers/TransferManager.hpp"
+#include "logic/transfers/TransferQueuePersistence.hpp"
+#include "logic/transfers/TransferQueueWriter.hpp"
 #include "logic/transfers/TransferTaskControls.hpp"
 #include "mock/MockSftpClient.hpp"
 
@@ -1907,6 +1909,92 @@ OPENSCP_TEST(testUploadPrecheckReusesCompletedParentDirectory, test) {
     test.check(calls(probe->exists, "/remote") == 1 &&
                    calls(probe->exists, "/remote/dir") == 2,
                "a completed parent directory task should skip the path walk");
+}
+
+TransferTask persistableTask(quint64 taskId, const QString &destination) {
+    TransferTask task;
+    task.taskId = taskId;
+    task.batchId = 1;
+    task.type = TransferTask::Type::Download;
+    task.sessionKey = QStringLiteral("writer-session");
+    task.src = QStringLiteral("/remote/source");
+    task.dst = destination;
+    task.queuedAtMs = 1;
+    task.status = TransferTask::Status::Paused;
+    return task;
+}
+
+QStringList savedDestinations(const QString &path) {
+    QStringList destinations;
+    const auto loaded =
+        TransferQueuePersistence::load(path, QStringLiteral("writer-session"));
+    for (const TransferTask &task : loaded.tasks)
+        destinations.push_back(task.dst);
+    return destinations;
+}
+
+OPENSCP_TEST(testQueueWriterWritesTheNewestSnapshot, test) {
+    QTemporaryDir root;
+    const QString path = root.filePath("writer.json");
+    {
+        TransferQueueWriter writer;
+        writer.setPath(path);
+        writer.saveAndWait({persistableTask(1, QStringLiteral("/first"))});
+        test.check(savedDestinations(path) ==
+                       QStringList{QStringLiteral("/first")},
+                   "saveAndWait should leave the snapshot on disk");
+
+        writer.save({persistableTask(2, QStringLiteral("/queued"))});
+        writer.saveAndWait({persistableTask(3, QStringLiteral("/newest"))});
+        test.check(savedDestinations(path) ==
+                       QStringList{QStringLiteral("/newest")},
+                   "the newest snapshot should win over a waiting one");
+    }
+    test.check(savedDestinations(path) ==
+                   QStringList{QStringLiteral("/newest")},
+               "closing the writer should leave the last snapshot in place");
+}
+
+OPENSCP_TEST(testQueueWriterFinishesPendingWorkOnShutdown, test) {
+    QTemporaryDir root;
+    const QString path = root.filePath("shutdown.json");
+    TransferQueueWriter writer;
+    writer.setPath(path);
+    writer.save({persistableTask(1, QStringLiteral("/pending"))});
+    writer.shutdown();
+    test.check(savedDestinations(path) ==
+                   QStringList{QStringLiteral("/pending")},
+               "a pending snapshot should still be written while stopping");
+
+    writer.save({persistableTask(2, QStringLiteral("/after-shutdown"))});
+    writer.saveAndWait({persistableTask(3, QStringLiteral("/also-after"))});
+    test.check(savedDestinations(path) ==
+                   QStringList{QStringLiteral("/pending")},
+               "snapshots handed over after shutdown should be dropped");
+}
+
+OPENSCP_TEST(testQueueWriterReportsFailures, test) {
+    QTemporaryDir root;
+    const QString unwritable = root.filePath("file-as-directory/queue.json");
+    QFile blocker(root.filePath("file-as-directory"));
+    test.check(blocker.open(QIODevice::WriteOnly),
+               "the failure fixture should be writable");
+    blocker.close();
+
+    std::mutex warningMutex;
+    QString warning;
+    TransferQueueWriter writer;
+    writer.setWarningHandler([&](const QString &reported) {
+        std::lock_guard<std::mutex> lock(warningMutex);
+        warning = reported;
+    });
+    writer.setPath(unwritable);
+    writer.saveAndWait({persistableTask(1, QStringLiteral("/nowhere"))});
+    test.check(waitUntil([&] {
+                   std::lock_guard<std::mutex> lock(warningMutex);
+                   return !warning.isEmpty();
+               }),
+               "a snapshot that cannot be written should report a warning");
 }
 
 OPENSCP_TEST(testPausedQueuePersistence, test) {
