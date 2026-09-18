@@ -174,9 +174,10 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
             {QStringLiteral("docs/credits/CREDITS.md")}, false);
         if (!creditsPath.isEmpty()) {
             creditsFile.setFileName(creditsPath);
-            creditsFile.open(QIODevice::ReadOnly | QIODevice::Text);
-            creditsBaseUrl = QUrl::fromLocalFile(
-                QFileInfo(creditsPath).absolutePath() + QDir::separator());
+            if (creditsFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                creditsBaseUrl = QUrl::fromLocalFile(
+                    QFileInfo(creditsPath).absolutePath() + QDir::separator());
+            }
         }
     }
     if (creditsFile.isOpen()) {

@@ -79,7 +79,7 @@ The packagers validate the required Qt SVG plugins. Official AppImages also
 audit the bundled ELF ABI; the check can be run directly against an AppDir:
 
 ```bash
-./scripts/verify/linux-abi.sh dist/OpenSCP.AppDir 2.28
+./scripts/verify/linux-abi.sh dist/OpenSCP.AppDir 2.34
 ```
 
 Snap and Flatpak intentionally build only SFTP and SCP. AppImage release builds

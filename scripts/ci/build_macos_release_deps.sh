@@ -18,7 +18,7 @@ TINYXML2_SHA256="5556deb5081fb246ee92afae73efd943c889cef0cafea92b0b82422d6a18f28
 
 PREFIX="${1:-${OPENSCP_DEPS_PREFIX:-}}"
 ARCH="${CMAKE_OSX_ARCHITECTURES:-$(uname -m)}"
-DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-12.0}"
+DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
 
 log() { printf '\033[1;34m[mac-deps]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[mac-deps]\033[0m %s\n' "$*" >&2; exit 1; }

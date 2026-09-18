@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 env:
-  OPENSCP_QT_VERSION: "6.8.3"
+  OPENSCP_QT_VERSION: "6.11.2"
 
 jobs:
   verify-tag:
@@ -81,10 +81,10 @@ jobs:
         include:
           - runner: macos-15
             arch: arm64
-            minimum_macos: "12.0"
+            minimum_macos: "13.0"
           - runner: macos-15-intel
             arch: x86_64
-            minimum_macos: "12.0"
+            minimum_macos: "13.0"
 
     steps:
       - name: Checkout tag
@@ -281,7 +281,7 @@ jobs:
         run: |
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
-      - name: Build AppImage (glibc 2.28 baseline)
+      - name: Build AppImage (glibc 2.34 baseline)
         if: matrix.arch_name == 'x86_64'
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
@@ -290,8 +290,8 @@ jobs:
           set -euo pipefail
           rm -rf dist build build-appimage
           docker build --platform linux/amd64 \
-            --tag openscp-appimage-glibc228 \
-            --file packaging/linux/appimage-glibc228.Dockerfile \
+            --tag openscp-appimage-glibc234 \
+            --file packaging/linux/appimage-glibc234.Dockerfile \
             packaging/linux
           docker run --rm --platform linux/amd64 \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
@@ -300,11 +300,11 @@ jobs:
             --workdir "$GITHUB_WORKSPACE" \
             --env APPIMAGE_EXTRACT_AND_RUN=1 \
             --env OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=ON \
-            --env OPENSCP_MAX_GLIBC_VERSION=2.28 \
+            --env OPENSCP_MAX_GLIBC_VERSION=2.34 \
             --env "CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH:-}" \
             --env "Qt6_DIR=${Qt6_DIR:-}" \
             --env "PATH=$QT_ROOT_DIR/bin:$HOME/.local/bin:/opt/rh/gcc-toolset-13/root/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-            openscp-appimage-glibc228 \
+            openscp-appimage-glibc234 \
             ./scripts/package/appimage.sh
           sudo chown -R "$(id -u):$(id -g)" build-appimage dist
 

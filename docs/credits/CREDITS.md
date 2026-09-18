@@ -25,7 +25,7 @@ source artwork under descriptive OpenSCP resource names.
 **Project:** [https://code.qt.io](https://code.qt.io)
 
 **Notes:** Dynamically linked; no local modifications. Self-contained official
-artifacts pin 6.8.3; Snap/Flatpak may use a compatible Qt 6 from their external
+artifacts pin 6.11.2; Snap/Flatpak may use a compatible Qt 6 from their external
 runtime.
 
 **License file:** [LICENSES/Qt-LGPL-3.0.txt](LICENSES/Qt-LGPL-3.0.txt)

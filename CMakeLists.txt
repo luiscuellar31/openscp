@@ -6,7 +6,7 @@ cmake_minimum_required(VERSION 3.22)
 # in the generated Info.plist.
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
     if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
-        set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING
             "Minimum macOS version" FORCE)
     endif()
 endif()
@@ -204,7 +204,7 @@ endif()
 # declared below, including targets created by core and tests subdirectories.
 link_libraries(openscp_project_warnings openscp_project_hardening)
 
-set(OPENSCP_RECOMMENDED_QT_VERSION "6.8.3" CACHE STRING
+set(OPENSCP_RECOMMENDED_QT_VERSION "6.11.2" CACHE STRING
     "Qt version used for official self-contained OpenSCP artifacts")
 option(OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION
        "Reject a Qt version other than OPENSCP_RECOMMENDED_QT_VERSION" OFF)
@@ -272,7 +272,8 @@ if(OPENSCP_QT_HOST_TOOLS_DIR)
         "OpenSCP: using Qt host-tool wrappers from ${OPENSCP_QT_HOST_TOOLS_DIR}")
 endif()
 
-# Qt 6.8.x on recent macOS SDKs may expose legacy AGL through WrapOpenGL.
+# Older Qt 6 SDKs on recent macOS versions may expose legacy AGL through
+# WrapOpenGL.
 # AGL no longer ships a linkable binary, so strip it to avoid link errors.
 if (APPLE AND TARGET WrapOpenGL::WrapOpenGL)
     get_target_property(_wrapogl_libs WrapOpenGL::WrapOpenGL INTERFACE_LINK_LIBRARIES)
