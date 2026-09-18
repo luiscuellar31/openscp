@@ -21,9 +21,11 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QPushButton>
 #include <QSortFilterProxyModel>
 #include <QTableView>
+#include <QThreadPool>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QVariantList>
@@ -472,8 +474,10 @@ void SyncDialog::setChecksumBusy(bool busy) {
     checksumButton_->setEnabled(checksumAvailable_ && !busy);
     checksumButton_->setText(busy ? tr("Calculating checksums…")
                                   : tr("Compare checksums…"));
-    if (buttonBox_ && buttonBox_->button(QDialogButtonBox::Ok))
-        buttonBox_->button(QDialogButtonBox::Ok)->setEnabled(!busy);
+    if (buttonBox_ && buttonBox_->button(QDialogButtonBox::Ok)) {
+        buttonBox_->button(QDialogButtonBox::Ok)
+            ->setEnabled(!busy && !comparisonBusy_);
+    }
 }
 
 SyncComparisonOptions SyncDialog::comparisonOptions() const {
@@ -506,10 +510,51 @@ SyncExecutionPlan SyncDialog::executionPlan() const {
 
 void SyncDialog::rebuildComparison() {
     syncOptionsFromControls();
-    comparisonModel_->setItems(SyncComparisonEngine::compare(
-        localSnapshot_, remoteSnapshot_, options_));
     updateRootLabels();
+    ++comparisonGeneration_;
+    if (localSnapshot_.isEmpty() && remoteSnapshot_.isEmpty()) {
+        // Nothing to compare, so the empty preview is ready right away.
+        applyComparison({});
+        return;
+    }
+
+    // Comparing tens of thousands of entries takes longer than a frame, so it
+    // runs off this thread and only the newest result reaches the preview.
+    setComparisonBusy(true);
+    QPointer<SyncDialog> self(this);
+    const quint64 generation = comparisonGeneration_;
+    const QVector<SyncSnapshotEntry> local = localSnapshot_;
+    const QVector<SyncSnapshotEntry> remote = remoteSnapshot_;
+    const SyncComparisonOptions options = options_;
+    QThreadPool::globalInstance()->start(
+        [self, generation, local, remote, options] {
+            QVector<SyncComparisonItem> items =
+                SyncComparisonEngine::compare(local, remote, options);
+            QMetaObject::invokeMethod(
+                qApp,
+                [self, generation, items = std::move(items)]() mutable {
+                    if (!self || generation != self->comparisonGeneration_)
+                        return;
+                    self->applyComparison(std::move(items));
+                },
+                Qt::QueuedConnection);
+        });
+}
+
+void SyncDialog::applyComparison(QVector<SyncComparisonItem> items) {
+    comparisonModel_->setItems(std::move(items));
+    setComparisonBusy(false);
     updateSummary();
+}
+
+void SyncDialog::setComparisonBusy(bool busy) {
+    comparisonBusy_ = busy;
+    if (buttonBox_ && buttonBox_->button(QDialogButtonBox::Ok)) {
+        buttonBox_->button(QDialogButtonBox::Ok)
+            ->setEnabled(!busy && !checksumBusy_);
+    }
+    if (busy && summaryLabel_)
+        summaryLabel_->setText(tr("Comparing folders…"));
 }
 
 void SyncDialog::scheduleRebuild() {

@@ -103,13 +103,16 @@ class CompiledGlobSet {
 };
 
 bool isHiddenPath(const QString &relativePath) {
-    const auto segments =
-        relativePath.split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    return std::any_of(
-        segments.cbegin(), segments.cend(), [](const QString &segment) {
-            return segment.size() > 1 ? segment.startsWith(QLatin1Char('.'))
-                                      : segment == QStringLiteral(".");
-        });
+    // A path is hidden when any of its segments starts with a dot, including a
+    // segment that is just ".". Scanning it avoids splitting a string that is
+    // checked for every path and every folder above it.
+    for (qsizetype index = 0; index < relativePath.size(); ++index) {
+        if (relativePath[index] != QLatin1Char('.'))
+            continue;
+        if (index == 0 || relativePath[index - 1] == QLatin1Char('/'))
+            return true;
+    }
+    return false;
 }
 
 QString parentRelativePath(const QString &relativePath) {
@@ -123,11 +126,6 @@ int pathDepth(const QString &relativePath) {
     return relativePath.isEmpty()
                ? 0
                : static_cast<int>(relativePath.count(QLatin1Char('/')) + 1);
-}
-
-bool isPathInside(const QString &path, const QString &directory) {
-    return path.size() > directory.size() && path.startsWith(directory) &&
-           path.at(directory.size()) == QLatin1Char('/');
 }
 
 bool isNewerBeyondTolerance(qint64 candidate, qint64 baseline,
@@ -394,6 +392,10 @@ SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
         visiblePaths.insert(path);
         QString parent = parentRelativePath(path);
         while (!parent.isEmpty()) {
+            // A folder that is already visible brought its own parents with
+            // it, so there is nothing left to walk or match above it.
+            if (visiblePaths.contains(parent))
+                break;
             if ((!options.includeHidden && isHiddenPath(parent)) ||
                 excludeGlobs.matches(parent)) {
                 break;
@@ -506,28 +508,32 @@ SyncExecutionPlan SyncComparisonEngine::makeExecutionPlan(
         }
     }
 
+    // Folders that hold something the sync is about to write, so a mirror
+    // deletion that would take one of them with it is recognized by name
+    // instead of by comparing it against every incoming path.
+    QSet<QString> foldersWithIncomingItems;
+    const auto rememberFoldersAbove =
+        [&foldersWithIncomingItems](const QString &path) {
+            QString parent = parentRelativePath(path);
+            while (!parent.isEmpty() &&
+                   !foldersWithIncomingItems.contains(parent)) {
+                foldersWithIncomingItems.insert(parent);
+                parent = parentRelativePath(parent);
+            }
+        };
+    for (const SyncCopyOperation &copy : std::as_const(plan.copies))
+        rememberFoldersAbove(copy.relativePath);
+    for (const QString &directory : std::as_const(directoriesToCreate)) {
+        foldersWithIncomingItems.insert(directory);
+        rememberFoldersAbove(directory);
+    }
+
     QVector<SyncDeleteOperation> safeDeletes;
     safeDeletes.reserve(plan.deletes.size());
     for (const SyncDeleteOperation &deletion : std::as_const(plan.deletes)) {
-        bool conflictsWithIncoming = false;
-        if (deletion.type == SyncEntryType::Directory) {
-            for (const SyncCopyOperation &copy : std::as_const(plan.copies)) {
-                if (isPathInside(copy.relativePath, deletion.relativePath)) {
-                    conflictsWithIncoming = true;
-                    break;
-                }
-            }
-            if (!conflictsWithIncoming) {
-                for (const QString &directory :
-                     std::as_const(directoriesToCreate)) {
-                    if (directory == deletion.relativePath ||
-                        isPathInside(directory, deletion.relativePath)) {
-                        conflictsWithIncoming = true;
-                        break;
-                    }
-                }
-            }
-        }
+        const bool conflictsWithIncoming =
+            deletion.type == SyncEntryType::Directory &&
+            foldersWithIncomingItems.contains(deletion.relativePath);
         if (conflictsWithIncoming) {
             plan.warnings.push_back(
                 QCoreApplication::translate("SyncDialog",

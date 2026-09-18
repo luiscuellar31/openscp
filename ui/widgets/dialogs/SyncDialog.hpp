@@ -44,6 +44,10 @@ class SyncDialog final : public QDialog {
     private:
     void buildUi();
     void rebuildComparison();
+    // Applies a comparison that finished in the background, and reports
+    // whether one is still running.
+    void applyComparison(QVector<SyncComparisonItem> items);
+    void setComparisonBusy(bool busy);
     void scheduleRebuild();
     void updateRootLabels();
     void updateSummary();
@@ -66,6 +70,9 @@ class SyncDialog final : public QDialog {
     bool applyingControls_ = false;
     bool checksumAvailable_ = false;
     bool checksumBusy_ = false;
+    bool comparisonBusy_ = false;
+    // Only the newest comparison is applied; older ones are discarded.
+    quint64 comparisonGeneration_ = 0;
 
     QComboBox *directionCombo_ = nullptr;
     QLabel *sourceRootLabel_ = nullptr;
