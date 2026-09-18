@@ -142,6 +142,10 @@ class TransferManager : public QObject {
     // finished, so pruning walks the queue once per batch, not per task.
     static constexpr int kMaxTerminalHistory = 5000;
     static constexpr int kTerminalHistoryPruneBatch = kMaxTerminalHistory / 10;
+    // A save waits for a pause in queue changes, but never longer than the
+    // deadline, so a busy queue is still saved regularly.
+    static constexpr int kPersistenceDelayMs = 250;
+    static constexpr int kPersistenceDeadlineMs = 2000;
 
     struct WorkerSlot;
     enum class PrecheckOutcome { Continue, Skipped, Canceled, Error };
@@ -185,6 +189,7 @@ class TransferManager : public QObject {
     QTimer *persistenceTimer_ = nullptr;
     TransferQueueWriter persistenceWriter_;
     QString persistencePath_;
+    qint64 persistencePendingSinceMs_ = 0;
     bool persistenceEnabled_ = false;
     bool persistenceBlocked_ = false;
     mutable std::mutex persistenceMutex_;
@@ -286,8 +291,14 @@ class TransferManager : public QObject {
 
     void publishAdded(const QVector<quint64> &ids);
     void publishUpdated(const QVector<quint64> &ids);
+    // Progress is not part of what the queue saves, so reporting it must not
+    // schedule a save.
+    void publishProgress(const QVector<quint64> &ids);
     void publishRemoved(const QVector<quint64> &ids);
     void schedulePersistence();
+    // Both run on the manager's thread.
+    void restartPersistenceTimer();
+    void writeQueueSnapshot();
     bool restorePersistenceFile(QString &warning);
     // The tasks the queue would save, or nullopt when it saves nothing.
     std::optional<QVector<TransferTask>> persistedSnapshot() const;

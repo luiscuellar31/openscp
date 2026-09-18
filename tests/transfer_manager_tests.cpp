@@ -11,6 +11,7 @@
 #include <QCoreApplication>
 #include <QFile>
 #include <QFileDevice>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 #include <algorithm>
@@ -1931,6 +1932,87 @@ QStringList savedDestinations(const QString &path) {
     for (const TransferTask &task : loaded.tasks)
         destinations.push_back(task.dst);
     return destinations;
+}
+
+class SlowProgressClient final : public DownloadMockClient {
+    public:
+    explicit SlowProgressClient(std::shared_ptr<std::atomic_bool> reporting)
+        : reporting_(std::move(reporting)) {}
+
+    bool get(const std::string &, const std::string &, std::string &err,
+             std::function<void(std::size_t, std::size_t)> progress,
+             std::function<bool()> shouldCancel, bool) override {
+        for (std::size_t chunk = 1; chunk <= 2000; ++chunk) {
+            if (shouldCancel && shouldCancel()) {
+                err = "Canceled";
+                return false;
+            }
+            if (progress)
+                progress(chunk * 1024, 2000 * 1024);
+            reporting_->store(true);
+            std::this_thread::sleep_for(5ms);
+        }
+        err.clear();
+        return true;
+    }
+
+    std::unique_ptr<openscp::RemoteClient>
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
+        return makeConnectedWorker<SlowProgressClient>(options, err,
+                                                       reporting_);
+    }
+
+    private:
+    std::shared_ptr<std::atomic_bool> reporting_;
+};
+
+OPENSCP_TEST(testReportedProgressDoesNotDelayQueueSaves, test) {
+    auto reporting = std::make_shared<std::atomic_bool>(false);
+    SlowProgressClient baseClient(reporting);
+    QTemporaryDir root;
+    const QString queuePath = root.filePath("progress-queue.json");
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    test.check(manager.enablePersistence(queuePath),
+               "new persistence file should be accepted");
+    configureManager(manager, baseClient, testOptions());
+
+    auto batch = testBatchOptions();
+    manager.enqueueDownload(QStringLiteral("/remote/progress"),
+                            root.filePath("progress.bin"), batch);
+    test.check(waitUntil([&] { return reporting->load(); }),
+               "the transfer should start reporting progress");
+    // Reported progress must not push the save past its usual short wait,
+    // which is well under the deadline that would let it through anyway.
+    test.check(
+        waitUntil([&] { return QFileInfo::exists(queuePath); }, 1200ms) &&
+            reporting->load(),
+        "a queue change should be saved while progress is reported");
+}
+
+OPENSCP_TEST(testBusyQueueIsSavedWithinTheDeadline, test) {
+    QTemporaryDir root;
+    const QString queuePath = root.filePath("busy-queue.json");
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    test.check(manager.enablePersistence(queuePath),
+               "new persistence file should be accepted");
+    TransferBatchOptions batch;
+    batch.sessionKey = QStringLiteral("test-session");
+
+    // Queue changes every 50 ms keep restarting the save timer; the deadline
+    // has to let a save through anyway.
+    const auto started = std::chrono::steady_clock::now();
+    bool saved = false;
+    while (!saved && std::chrono::steady_clock::now() - started < 4000ms) {
+        manager.enqueueRemoteDelete(QStringLiteral("/busy"), false, batch);
+        saved = waitUntil([&] { return QFileInfo::exists(queuePath); }, 50ms);
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+    test.check(saved, "a queue that keeps changing should still be saved");
+    test.check(elapsed < 3500ms,
+               "the save should not wait much past its deadline");
 }
 
 OPENSCP_TEST(testQueueWriterWritesTheNewestSnapshot, test) {

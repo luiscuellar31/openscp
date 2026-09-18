@@ -152,12 +152,9 @@ TransferManager::TransferManager(QObject *parent) : QObject(parent) {
     });
     persistenceTimer_ = new QTimer(this);
     persistenceTimer_->setSingleShot(true);
-    persistenceTimer_->setInterval(250);
-    connect(persistenceTimer_, &QTimer::timeout, this, [this] {
-        // The writer thread serializes and writes, so this only copies.
-        if (auto snapshot = persistedSnapshot())
-            persistenceWriter_.save(std::move(*snapshot));
-    });
+    persistenceTimer_->setInterval(kPersistenceDelayMs);
+    connect(persistenceTimer_, &QTimer::timeout, this,
+            &TransferManager::writeQueueSnapshot);
     workerSlots_.reserve(kWorkerSlots);
     for (int index = 0; index < kWorkerSlots; ++index)
         workerSlots_.push_back(std::make_unique<WorkerSlot>(index));
@@ -1990,7 +1987,7 @@ bool TransferManager::runTransferAttempt(
         if (!publishNow)
             return;
         updateProgress(taskId, done, total, latest.measuredKBps, etaSeconds);
-        publishUpdated({taskId});
+        publishProgress({taskId});
     };
     const bool succeeded =
         TransferExecutor::run(task, workerClient, resume, err, callbacks);
@@ -2452,6 +2449,12 @@ void TransferManager::publishUpdated(const QVector<quint64> &ids) {
     schedulePersistence();
 }
 
+void TransferManager::publishProgress(const QVector<quint64> &ids) {
+    if (ids.isEmpty())
+        return;
+    emit tasksUpdated(ids);
+}
+
 void TransferManager::publishRemoved(const QVector<quint64> &ids) {
     if (ids.isEmpty())
         return;
@@ -2467,19 +2470,33 @@ void TransferManager::schedulePersistence() {
         }
     }
     if (QThread::currentThread() == thread()) {
-        persistenceTimer_->start();
+        restartPersistenceTimer();
         return;
     }
     QMetaObject::invokeMethod(
-        this,
-        [this] {
-            std::lock_guard<std::mutex> lock(persistenceMutex_);
-            if (persistenceEnabled_ && !persistenceBlocked_ &&
-                persistenceTimer_) {
-                persistenceTimer_->start();
-            }
-        },
-        Qt::QueuedConnection);
+        this, [this] { restartPersistenceTimer(); }, Qt::QueuedConnection);
+}
+
+void TransferManager::restartPersistenceTimer() {
+    std::lock_guard<std::mutex> lock(persistenceMutex_);
+    if (!persistenceEnabled_ || persistenceBlocked_ || !persistenceTimer_)
+        return;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (!persistenceTimer_->isActive()) {
+        persistencePendingSinceMs_ = now;
+        persistenceTimer_->start();
+        return;
+    }
+    // Waiting for a pause in the changes, unless the deadline has passed and
+    // the save that is already due should just happen.
+    if (now - persistencePendingSinceMs_ < kPersistenceDeadlineMs)
+        persistenceTimer_->start();
+}
+
+void TransferManager::writeQueueSnapshot() {
+    // The writer thread serializes and writes, so this only copies.
+    if (auto snapshot = persistedSnapshot())
+        persistenceWriter_.save(std::move(*snapshot));
 }
 
 bool TransferManager::enablePersistence(const QString &path) {
