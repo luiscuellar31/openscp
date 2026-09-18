@@ -1400,7 +1400,8 @@ void kbint_password_callback(const char *name, int name_len,
 
 Libssh2SftpClient::StructuredErrorScope::StructuredErrorScope(
     Libssh2SftpClient &owner, std::string &error, bool mutation)
-    : owner_(owner), error_(error), mutation_(mutation) {
+    : owner_(owner), error_(error), mutation_(mutation),
+      ioLock_(owner.ioMutex_) {
     error_.clear();
     owner_.clearLastOperationError();
 }
@@ -2928,18 +2929,36 @@ bool Libssh2SftpClient::connectTransportOnly(const SessionOptions &opt,
 }
 
 void Libssh2SftpClient::disconnect() {
-    _LIBSSH2_SFTP *sftp = nullptr;
-    _LIBSSH2_SESSION *session = nullptr;
     bool wasConnected = false;
     int sock = -1;
+    {
+        std::lock_guard<std::mutex> lk(stateMutex_);
+        wasConnected = connected_;
+        connected_ = false;
+        sock = sock_;
+    }
+
+    // Force the transport down first so libssh2 teardown calls fail fast
+    // and any in-flight operation on another thread unblocks immediately.
+    if (sock != -1) {
+#ifdef _WIN32
+        (void)::shutdown(sock, SD_BOTH);
+#else
+        (void)::shutdown(sock, SHUT_RDWR);
+#endif
+    }
+
+    // Wait for any in-flight I/O operation to finish using session_ and sftp_.
+    std::lock_guard<std::recursive_mutex> ioLock(ioMutex_);
+
+    _LIBSSH2_SFTP *sftp = nullptr;
+    _LIBSSH2_SESSION *session = nullptr;
 #ifndef _WIN32
     int jumpPid = -1;
     int jumpStderrFd = -1;
 #endif
     {
         std::lock_guard<std::mutex> lk(stateMutex_);
-        wasConnected = connected_;
-        connected_ = false;
         sftp = sftp_;
         session = session_;
         sock = sock_;
@@ -2954,14 +2973,7 @@ void Libssh2SftpClient::disconnect() {
 #endif
     }
 
-    // Force the transport down first so libssh2 teardown calls fail fast
-    // instead of waiting indefinitely on a peer that no longer responds.
     if (sock != -1) {
-#ifdef _WIN32
-        (void)::shutdown(sock, SD_BOTH);
-#else
-        (void)::shutdown(sock, SHUT_RDWR);
-#endif
         ::close(sock);
     }
 #ifndef _WIN32

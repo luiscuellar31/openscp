@@ -126,6 +126,7 @@ bool Libssh2ScpClient::get(
     const std::string &remote, const std::string &local, std::string &err,
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
+    auto ioLock = delegate_.lockIo();
     auto structuredErrorScope = beginStructuredOperation(err);
     if (resume) {
         err = "SCP downloads do not support resume.";
@@ -318,6 +319,7 @@ bool Libssh2ScpClient::put(
     const std::string &local, const std::string &remote, std::string &err,
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
+    auto ioLock = delegate_.lockIo();
     auto structuredErrorScope = beginStructuredOperation(err, true);
     if (resume) {
         err = "SCP uploads do not support resume.";

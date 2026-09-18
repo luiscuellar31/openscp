@@ -23,6 +23,7 @@
 #endif
 
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstdlib>
@@ -32,6 +33,7 @@
 #include <iterator>
 #include <optional>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
@@ -1161,6 +1163,51 @@ OPENSCP_TEST(test_libssh2_backends_expose_structured_errors, t) {
                 scpError.transient,
             "disconnected SCP transfers should expose a transient connection "
             "error");
+}
+
+OPENSCP_TEST(test_libssh2_disconnect_is_thread_safe_and_idempotent, t) {
+    openscp::Libssh2SftpClient client;
+    std::vector<std::thread> threads;
+    threads.reserve(8);
+    for (int i = 0; i < 8; ++i) {
+        threads.emplace_back([&client] {
+            client.interrupt();
+            client.disconnect();
+        });
+    }
+    for (auto &th : threads) {
+        th.join();
+    }
+    t.check(!client.isConnected(), "client should be disconnected");
+}
+
+OPENSCP_TEST(test_libssh2_concurrent_disconnect_and_operations_safe, t) {
+    openscp::Libssh2SftpClient client;
+    std::atomic<bool> stop{false};
+
+    std::thread worker([&client, &stop] {
+        std::vector<openscp::FileInfo> entries;
+        std::string err;
+        openscp::FileInfo info;
+        while (!stop.load()) {
+            (void)client.list("/test", entries, err);
+            (void)client.stat("/test/file", info, err);
+            (void)client.get("/test/file", "/tmp/nonexistent", err, {}, {}, false);
+        }
+    });
+
+    std::thread disconnector([&client, &stop] {
+        for (int i = 0; i < 100; ++i) {
+            client.interrupt();
+            client.disconnect();
+            std::this_thread::yield();
+        }
+        stop.store(true);
+    });
+
+    disconnector.join();
+    worker.join();
+    t.check(!client.isConnected(), "client should remain disconnected");
 }
 
 OPENSCP_TEST(test_shared_libssh2_error_classification, t) {
