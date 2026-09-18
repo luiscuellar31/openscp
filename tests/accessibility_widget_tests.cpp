@@ -919,6 +919,43 @@ OPENSCP_TEST(testSettingsRestoresDefaultStagingFolderOnApply, test) {
     }
 }
 
+OPENSCP_TEST(testSettingsDownloadDurabilityFailsSafeAndPersists, test) {
+    {
+        openscpui::AppSettings settings;
+        settings.clear();
+        settings.setValue(openscpui::settingskeys::kTransferLocalFileDurability,
+                          999);
+        settings.sync();
+    }
+
+    SettingsDialog dialog;
+    auto *durability = dialog.findChild<QComboBox *>(
+        QStringLiteral("settingsLocalFileDurability"));
+    auto *apply =
+        dialog.findChild<QPushButton *>(QStringLiteral("settingsApplyButton"));
+    const int maximum =
+        static_cast<int>(openscp::LocalFileDurability::FileAndDirectory);
+    const int buffered =
+        static_cast<int>(openscp::LocalFileDurability::Buffered);
+    test.check(durability && apply &&
+                   durability->currentData().toInt() == maximum,
+               "invalid persisted durability should load as the safest mode");
+    if (durability && apply) {
+        durability->setCurrentIndex(durability->findData(buffered));
+        test.check(apply->isEnabled(),
+                   "changing download durability should enable Apply");
+        apply->click();
+    }
+
+    openscpui::AppSettings settings;
+    test.check(
+        settings.value(openscpui::settingskeys::kTransferLocalFileDurability)
+                .toInt() == buffered,
+        "Apply should persist the selected download durability");
+    settings.clear();
+    settings.sync();
+}
+
 OPENSCP_TEST(testSettingsPagesUseSharedFormStructure, test) {
     SettingsDialogFixture fixture;
     test.check(fixture.valid(),

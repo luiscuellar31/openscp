@@ -109,6 +109,8 @@ class Libssh2SftpClient : public RemoteClient {
     _LIBSSH2_SFTP *sftp_ = nullptr;       // <- same
     TransferIntegrityPolicy transferIntegrityPolicy_ =
         TransferIntegrityPolicy::Optional;
+    LocalFileDurability localFileDurability_ =
+        LocalFileDurability::FileAndDirectory;
     mutable std::mutex stateMutex_;
 #ifndef _WIN32
     int jumpProxyPid_ = -1;

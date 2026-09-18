@@ -86,6 +86,9 @@ OPENSCP_TEST(test_session_defaults, t) {
     t.check(o.transfer_integrity_policy ==
                 openscp::TransferIntegrityPolicy::Optional,
             "transfer_integrity_policy should default to Optional");
+    t.check(o.local_file_durability ==
+                openscp::LocalFileDurability::FileAndDirectory,
+            "local downloads should default to maximum durability");
     t.check(!o.password.has_value(), "password should be empty by default");
     t.check(!o.private_key_path.has_value(),
             "private_key_path should be empty by default");
@@ -103,6 +106,8 @@ OPENSCP_TEST(test_security_policy_normalization, t) {
     const auto invalidKnownHosts = static_cast<openscp::KnownHostsPolicy>(999);
     const auto invalidIntegrity =
         static_cast<openscp::TransferIntegrityPolicy>(-7);
+    const auto invalidDurability =
+        static_cast<openscp::LocalFileDurability>(999);
 
     t.check(!openscp::isValidKnownHostsPolicy(invalidKnownHosts) &&
                 openscp::normalizeKnownHostsPolicy(invalidKnownHosts) ==
@@ -116,6 +121,10 @@ OPENSCP_TEST(test_security_policy_normalization, t) {
                     openscp::TransferIntegrityPolicy::Optional,
             "invalid integrity policies must normalize to the documented "
             "default");
+    t.check(!openscp::isValidLocalFileDurability(invalidDurability) &&
+                openscp::localFileDurabilityFromStorageValue(999) ==
+                    openscp::LocalFileDurability::FileAndDirectory,
+            "corrupt durability settings must preserve the strongest mode");
 
     openscp::SessionOptions options = validOptions();
     options.known_hosts_policy = invalidKnownHosts;
@@ -127,6 +136,15 @@ OPENSCP_TEST(test_security_policy_normalization, t) {
             "the SSH trust boundary must reject invalid security policies");
 
     options.known_hosts_policy = openscp::KnownHostsPolicy::Strict;
+    options.local_file_durability = invalidDurability;
+    error.clear();
+    t.check(!client.connect(options, error) &&
+                client.lastOperationError().kind ==
+                    openscp::RemoteErrorKind::InvalidRequest,
+            "the SSH trust boundary must reject invalid durability policies");
+
+    options.local_file_durability =
+        openscp::LocalFileDurability::FileAndDirectory;
     options.port = 0;
     error.clear();
     t.check(!client.connect(options, error) &&
@@ -266,6 +284,28 @@ OPENSCP_TEST(test_safe_local_partial_files, t) {
     t.check(readTextFile(target, targetContents) &&
                 targetContents == "replacement",
             "atomic replacement should publish complete partial contents");
+
+    error.clear();
+    file.reset(openscp::localfiles::openRegularFileForWrite(
+        partial.string(), openscp::localfiles::WriteMode::Truncate, error));
+    if (file) {
+        const char bufferedPayload[] = "buffered";
+        t.check(
+            std::fwrite(bufferedPayload, 1, sizeof(bufferedPayload) - 1,
+                        file.get()) == sizeof(bufferedPayload) - 1 &&
+                openscp::localfiles::flushAndSync(
+                    file.get(), error, openscp::LocalFileDurability::Buffered),
+            "buffered durability should still flush userspace writes");
+        file.reset();
+        t.check(openscp::localfiles::atomicReplace(
+                    partial.string(), target.string(), error,
+                    openscp::LocalFileDurability::Buffered),
+                "buffered durability should still publish atomically");
+    }
+    targetContents.clear();
+    t.check(readTextFile(target, targetContents) &&
+                targetContents == "buffered",
+            "buffered durability should publish complete contents");
     fs::remove(target, ec);
     fs::remove_all(target.parent_path(), ec);
 }

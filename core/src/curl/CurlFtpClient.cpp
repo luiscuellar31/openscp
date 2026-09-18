@@ -753,8 +753,9 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
     const std::string url = buildFtpUrl(opt, remote);
     RemoteError failure;
     if (!curlcommon::downloadToLocalFile(
-            connection.session->get(), local, std::move(progress),
-            std::move(shouldCancel), operation.interrupted(),
+            connection.session->get(), local, opt.local_file_durability,
+            std::move(progress), std::move(shouldCancel),
+            operation.interrupted(),
             std::string(protocolLabel(opt.protocol)) + " download",
             [&](CURL *curl, std::FILE *file,
                 curlcommon::TransferProgressContext &progressContext,

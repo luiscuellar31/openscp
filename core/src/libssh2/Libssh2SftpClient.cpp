@@ -359,52 +359,6 @@ bool get_local_file_size(const std::string &path, std::uint64_t &out,
 #endif
 }
 
-bool flush_local_file(FILE *f, std::string *why) {
-    if (std::fflush(f) != 0) {
-        if (why)
-            *why = "fflush(local) failed";
-        return false;
-    }
-#ifdef _WIN32
-    const int fd = _fileno(f);
-    if (fd >= 0 && _commit(fd) != 0) {
-        if (why)
-            *why = "commit(local) failed";
-        return false;
-    }
-#else
-    const int fd = fileno(f);
-    if (fd >= 0 && ::fsync(fd) != 0) {
-        if (why)
-            *why = posix_err("fsync(local)");
-        return false;
-    }
-#endif
-    return true;
-}
-
-bool replace_local_file_atomic(const std::string &from, const std::string &to,
-                               std::string *why) {
-#ifndef _WIN32
-    if (::rename(from.c_str(), to.c_str()) != 0) {
-        if (why)
-            *why = posix_err("rename(.part->dest)");
-        return false;
-    }
-    if (!fsync_parent_dir(to, why))
-        return false;
-    return true;
-#else
-    if (!MoveFileExA(from.c_str(), to.c_str(),
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) {
-        if (why)
-            *why = win_err("MoveFileEx(.part->dest)", GetLastError());
-        return false;
-    }
-    return true;
-#endif
-}
-
 void describe_rename_failure(const char *attempt, int rc, unsigned long sftpErr,
                              std::string *why) {
     if (!why)
@@ -2900,7 +2854,8 @@ bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
                                         std::string &err,
                                         bool initializeSftpSubsystem) {
     if (!isValidKnownHostsPolicy(opt.known_hosts_policy) ||
-        !isValidTransferIntegrityPolicy(opt.transfer_integrity_policy)) {
+        !isValidTransferIntegrityPolicy(opt.transfer_integrity_policy) ||
+        !isValidLocalFileDurability(opt.local_file_durability)) {
         err = "Invalid SSH security policy.";
         setLastOperationError(RemoteErrorKind::InvalidRequest, err);
         return false;
@@ -2926,6 +2881,7 @@ bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
 
     transferIntegrityPolicy_ =
         integrity_policy_from_env(opt.transfer_integrity_policy);
+    localFileDurability_ = opt.local_file_durability;
 
     // Defensive: ensure no leftover state from any previous partial attempt.
     disconnect();
@@ -3422,7 +3378,8 @@ bool Libssh2SftpClient::get(
     }
 
     std::string syncErr;
-    if (!flush_local_file(localFile.get(), &syncErr)) {
+    if (!localfiles::flushAndSync(localFile.get(), syncErr,
+                                  localFileDurability_)) {
         const int nativeError = errno;
         localFile.reset();
         libssh2_sftp_close(rh);
@@ -3449,7 +3406,8 @@ bool Libssh2SftpClient::get(
         return false;
 
     std::string replaceErr;
-    if (!replace_local_file_atomic(localPart, local, &replaceErr)) {
+    if (!localfiles::atomicReplace(localPart, local, replaceErr,
+                                   localFileDurability_)) {
         err = std::string("Could not finalize atomic download: ") + replaceErr;
         return false;
     }

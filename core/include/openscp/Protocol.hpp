@@ -20,6 +20,7 @@ namespace openscp {
 
 enum class KnownHostsPolicy { Strict, AcceptNew, Off };
 enum class TransferIntegrityPolicy { Off, Optional, Required };
+enum class LocalFileDurability { Buffered, File, FileAndDirectory };
 enum class ProxyType { None, Socks5, HttpConnect };
 enum class Protocol { Sftp, Scp, Ftp, Ftps, WebDav };
 enum class WebDavScheme { Https, Http };
@@ -84,6 +85,24 @@ inline TransferIntegrityPolicy
 transferIntegrityPolicyFromStorageValue(int raw) {
     return normalizeTransferIntegrityPolicy(
         static_cast<TransferIntegrityPolicy>(raw));
+}
+
+inline constexpr bool isValidLocalFileDurability(LocalFileDurability policy) {
+    return policy == LocalFileDurability::Buffered ||
+           policy == LocalFileDurability::File ||
+           policy == LocalFileDurability::FileAndDirectory;
+}
+
+// Corrupt persisted values must preserve the strongest durability guarantee.
+inline constexpr LocalFileDurability
+normalizeLocalFileDurability(LocalFileDurability policy) {
+    return isValidLocalFileDurability(policy)
+               ? policy
+               : LocalFileDurability::FileAndDirectory;
+}
+
+inline LocalFileDurability localFileDurabilityFromStorageValue(int raw) {
+    return normalizeLocalFileDurability(static_cast<LocalFileDurability>(raw));
 }
 
 inline constexpr bool isValidProxyType(ProxyType type) {

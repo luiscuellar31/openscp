@@ -135,6 +135,9 @@ bool Libssh2ScpClient::get(
         err = "Not connected";
         return false;
     }
+    const LocalFileDurability localFileDurability =
+        sessionOptions_ ? sessionOptions_->local_file_durability
+                        : LocalFileDurability::FileAndDirectory;
     _LIBSSH2_SESSION *session = delegate_.sessionHandle();
     if (!session) {
         err = "Not connected";
@@ -274,7 +277,7 @@ bool Libssh2ScpClient::get(
     }
 
     std::string syncError;
-    if (!localfiles::flushAndSync(localFile, syncError)) {
+    if (!localfiles::flushAndSync(localFile, syncError, localFileDurability)) {
         const int nativeError = errno;
         localFileOwner.reset();
         closeScpChannel(channel, false);
@@ -297,7 +300,8 @@ bool Libssh2ScpClient::get(
         return false;
     }
     std::string replaceError;
-    if (!localfiles::atomicReplace(partial, local, replaceError)) {
+    if (!localfiles::atomicReplace(partial, local, replaceError,
+                                   localFileDurability)) {
         const int nativeError = errno;
         err = replaceError.empty()
                   ? "Could not atomically finalize local SCP download"

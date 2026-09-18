@@ -233,6 +233,16 @@ auto sessionConnectionFactory(openscp::SessionOptions options) {
     };
 }
 
+openscp::LocalFileDurability configuredLocalFileDurability() {
+    openscpui::AppSettings settings;
+    return openscp::localFileDurabilityFromStorageValue(
+        settings
+            .value(openscpui::settingskeys::kTransferLocalFileDurability,
+                   static_cast<int>(
+                       openscp::LocalFileDurability::FileAndDirectory))
+            .toInt());
+}
+
 } // namespace
 
 bool MainWindow::isLikelyRemoteTransportError(const QString &rawError) const {
@@ -1232,6 +1242,7 @@ void MainWindow::startSavedSiteConnect(const SiteEntry &site) {
 bool MainWindow::startRemoteConnection(
     openscp::SessionOptions opt,
     std::optional<PendingSiteSaveRequest> saveRequest) {
+    opt.local_file_durability = configuredLocalFileDurability();
     if (!validateConnectionStart(opt))
         return false;
 
@@ -1244,6 +1255,21 @@ bool MainWindow::startRemoteConnection(
     launchConnectionWorker(std::move(opt), uiOpt, std::move(saveRequest),
                            cancelFlag);
     return true;
+}
+
+void MainWindow::applyLocalFileDurabilityPreference() {
+    if (!transferMgr_ || !sessionController_ ||
+        !sessionController_->options()) {
+        return;
+    }
+    openscp::SessionOptions options = *sessionController_->options();
+    const openscp::LocalFileDurability configured =
+        configuredLocalFileDurability();
+    if (options.local_file_durability == configured)
+        return;
+    options.local_file_durability = configured;
+    sessionController_->setOptions(options);
+    transferMgr_->setConnectionFactory(sessionConnectionFactory(options));
 }
 
 void MainWindow::finalizeConnection(

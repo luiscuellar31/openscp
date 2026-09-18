@@ -558,8 +558,8 @@ bool CurlWebDavClient::get(
     const auto download = [&] {
         rejectedStatus = 0;
         return curlcommon::downloadToLocalFile(
-            connection.session->get(), local, progress, shouldCancel,
-            operation.interrupted(), "WebDAV download",
+            connection.session->get(), local, opt.local_file_durability,
+            progress, shouldCancel, operation.interrupted(), "WebDAV download",
             [&](CURL *curl, std::FILE *file,
                 curlcommon::TransferProgressContext &progressContext,
                 std::string &configurationError) {

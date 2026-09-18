@@ -6,6 +6,9 @@
 #include "logic/remote/RemoteModel.hpp"
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
 
 #include <algorithm>
 #include <initializer_list>
@@ -75,6 +78,43 @@ OPENSCP_TEST(testPathDepthOrdering, test) {
     test.check(
         deepestFirst(QStringLiteral("/root/b"), QStringLiteral("/root/a")),
         "deep ordering should break equal-depth ties descending");
+}
+
+OPENSCP_TEST(testLocalRenameUsesTheFilesystemMove, test) {
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(),
+               "the local rename test should have a temporary directory");
+    if (!temporary.isValid())
+        return;
+
+    const QString source = temporary.filePath(QStringLiteral("source.txt"));
+    const QString destination =
+        temporary.filePath(QStringLiteral("destination.txt"));
+    QFile sourceFile(source);
+    test.check(sourceFile.open(QIODevice::WriteOnly) &&
+                   sourceFile.write("payload") == 7,
+               "the local rename fixture should be writable");
+    sourceFile.close();
+
+    QString error;
+    test.check(renameLocalEntry(source, destination, &error) ==
+                       LocalRenameResult::Moved &&
+                   !QFile::exists(source) && QFile::exists(destination),
+               "a same-volume rename should move the entry without copying");
+
+    QFile movedFile(destination);
+    test.check(movedFile.open(QIODevice::ReadOnly) &&
+                   movedFile.readAll() == QByteArrayLiteral("payload"),
+               "a native rename should preserve the file contents");
+
+    const QString missingParentTarget =
+        temporary.filePath(QStringLiteral("missing/target.txt"));
+    error.clear();
+    test.check(renameLocalEntry(destination, missingParentTarget, &error) ==
+                       LocalRenameResult::Failed &&
+                   QFile::exists(destination) && !error.isEmpty(),
+               "non-volume rename failures should preserve the source and "
+               "report an error");
 }
 
 OPENSCP_TEST(testTerminalTransferStatuses, test) {

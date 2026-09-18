@@ -1746,6 +1746,7 @@ void MainWindow::applyTransferPreferences() {
                .toInt());
     transferMgr_->setMaxConcurrent(maxConcurrent);
     transferMgr_->setGlobalSpeedLimitKBps(globalSpeed);
+    applyLocalFileDurabilityPreference();
     if (transferDlg_)
         QMetaObject::invokeMethod(transferDlg_, "refresh",
                                   Qt::QueuedConnection);

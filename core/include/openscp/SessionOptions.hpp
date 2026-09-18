@@ -36,6 +36,8 @@ struct SessionOptions {
     bool show_fp_hex = false;
     TransferIntegrityPolicy transfer_integrity_policy =
         TransferIntegrityPolicy::Optional;
+    LocalFileDurability local_file_durability =
+        LocalFileDurability::FileAndDirectory;
 
     FtpsMode ftps_mode = FtpsMode::Auto;
     bool ftps_verify_peer = true;

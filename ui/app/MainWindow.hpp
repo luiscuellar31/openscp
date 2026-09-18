@@ -261,6 +261,7 @@ class MainWindow : public QMainWindow {
                                      const QString &currentPath, bool remote);
     void refreshFavoritesActions();
     void applyTransferPreferences();
+    void applyLocalFileDurabilityPreference();
     static QString
     defaultDownloadDirFromSettings(const class QSettings &settings);
 

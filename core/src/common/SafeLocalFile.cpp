@@ -179,7 +179,8 @@ std::FILE *openRegularFileForWrite(const std::string &path, WriteMode mode,
 #endif
 }
 
-bool flushAndSync(std::FILE *file, std::string &error) {
+bool flushAndSync(std::FILE *file, std::string &error,
+                  LocalFileDurability durability) {
     if (!file) {
         error = "Invalid local file handle.";
         errno = EINVAL;
@@ -189,6 +190,9 @@ bool flushAndSync(std::FILE *file, std::string &error) {
         error = ioError("Could not flush local file");
         return false;
     }
+    durability = normalizeLocalFileDurability(durability);
+    if (durability == LocalFileDurability::Buffered)
+        return true;
 #ifdef _WIN32
     if (_commit(_fileno(file)) != 0) {
 #else
@@ -201,10 +205,13 @@ bool flushAndSync(std::FILE *file, std::string &error) {
 }
 
 bool atomicReplace(const std::string &temporary, const std::string &destination,
-                   std::string &error) {
+                   std::string &error, LocalFileDurability durability) {
+    durability = normalizeLocalFileDurability(durability);
 #ifdef _WIN32
-    if (!MoveFileExA(temporary.c_str(), destination.c_str(),
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    DWORD flags = MOVEFILE_REPLACE_EXISTING;
+    if (durability == LocalFileDurability::FileAndDirectory)
+        flags |= MOVEFILE_WRITE_THROUGH;
+    if (!MoveFileExA(temporary.c_str(), destination.c_str(), flags)) {
         error = "Could not atomically finalize local file.";
         return false;
     }
@@ -214,7 +221,8 @@ bool atomicReplace(const std::string &temporary, const std::string &destination,
         error = ioError("Could not atomically finalize local file");
         return false;
     }
-    return syncParentDirectory(destination, error);
+    return durability != LocalFileDurability::FileAndDirectory ||
+           syncParentDirectory(destination, error);
 #endif
 }
 

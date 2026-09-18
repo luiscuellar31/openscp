@@ -19,6 +19,14 @@ struct PathDepthComparator {
     bool operator()(const QString &left, const QString &right) const;
 };
 
+enum class LocalRenameResult { Moved, CrossDevice, Failed };
+
+// Attempts only the filesystem's native rename operation. Callers can choose
+// whether a cross-volume move should fall back to copying.
+LocalRenameResult renameLocalEntry(const QString &sourcePath,
+                                   const QString &targetPath,
+                                   QString *error = nullptr);
+
 bool isValidEntryName(const QString &name, QString *why = nullptr);
 bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
                           const QString &labelText, const QString &initialValue,
