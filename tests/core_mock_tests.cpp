@@ -1351,6 +1351,40 @@ OPENSCP_TEST(test_remove_known_hosts_entry_non_default_port, t) {
     fs::remove_all(khPath.parent_path(), ec);
 }
 
+OPENSCP_TEST(test_local_file_64bit_seek_and_size_large_offsets, t) {
+    const fs::path tempPath = makeTempFilePath("openscp-large-seek-test");
+    std::FILE *f = std::fopen(tempPath.string().c_str(), "w+b");
+    t.check(f != nullptr, "temporary file should open for write");
+    if (!f)
+        return;
+
+    // Offset greater than 2 GiB (3 GiB = 3 * 1024 * 1024 * 1024)
+    constexpr std::uint64_t largeOffset = 3ULL * 1024 * 1024 * 1024;
+    std::string seekErr;
+    const bool seekOk =
+        openscp::libssh2detail::seekLocalFile(f, largeOffset, &seekErr);
+    t.check(seekOk, "seekLocalFile should succeed beyond 2 GiB boundary");
+
+    // Write 1 byte at 3 GiB to establish file size without allocating 3GB of disk blocks (sparse file)
+    const char byte = 'X';
+    const size_t written = std::fwrite(&byte, 1, 1, f);
+    t.check(written == 1, "fwrite at large offset should succeed");
+    std::fflush(f);
+    std::fclose(f);
+
+    std::uint64_t measuredSize = 0;
+    std::string sizeErr;
+    const bool sizeOk = openscp::libssh2detail::getLocalFileSize(
+        tempPath.string(), measuredSize, &sizeErr);
+    t.check(sizeOk, "getLocalFileSize should succeed for files > 2 GiB");
+    t.check(measuredSize == largeOffset + 1,
+            "measured size should accurately reflect 64-bit file size (> 2 GiB)");
+
+    std::error_code ec;
+    fs::remove(tempPath, ec);
+    fs::remove_all(tempPath.parent_path(), ec);
+}
+
 } // namespace
 
 int main() {
