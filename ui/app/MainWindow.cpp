@@ -204,6 +204,11 @@ QString trimNavigationLabel(const QString &raw, int maxLen = 96) {
 MainWindow::~MainWindow() {
     hostKeyPromptCoordinator_.cancel();
     sessionHealthMonitor_.stop();
+    if (transferCleanupFuture_.valid()) {
+        if (transferMgr_)
+            transferMgr_->shutdown();
+        transferCleanupFuture_.wait();
+    }
 }
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
@@ -815,7 +820,7 @@ void MainWindow::initializeMenuBarActions() {
     // Linux/Windows)
     actPrefs_->setShortcut(QKeySequence::Preferences);
     appMenu_->addSeparator();
-    actQuit_ = appMenu_->addAction(tr("Quit"), qApp, &QApplication::quit);
+    actQuit_ = appMenu_->addAction(tr("Quit"), this, &QWidget::close);
     actQuit_->setMenuRole(QAction::QuitRole);
     // Standard quit shortcut (Cmd+Q / Ctrl+Q)
     actQuit_->setShortcut(QKeySequence::Quit);

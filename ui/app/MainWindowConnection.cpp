@@ -40,7 +40,9 @@
 #include <QtGlobal>
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
+#include <future>
 #include <memory>
 #include <utility>
 
@@ -466,9 +468,18 @@ bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
     // active workers and can block while they unwind.
     if (!transferMgr_)
         return false;
+    if (transferCleanupFuture_.valid() &&
+        transferCleanupFuture_.wait_for(std::chrono::seconds(0)) !=
+            std::future_status::ready) {
+        return true;
+    }
+
+    auto promise = std::make_shared<std::promise<void>>();
+    transferCleanupFuture_ = promise->get_future();
+
     QPointer<MainWindow> self(this);
     TransferManager *mgr = transferMgr_;
-    QThreadPool::globalInstance()->start([self, mgr, disconnectSeq]() {
+    QThreadPool::globalInstance()->start([self, mgr, disconnectSeq, promise]() {
         try {
             mgr->clearSession();
         } catch (...) {
@@ -476,6 +487,8 @@ bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
             // throws unexpectedly.
             qWarning() << "Transfer cleanup threw during disconnect";
         }
+        promise->set_value();
+
         QObject *app = QCoreApplication::instance();
         if (!app)
             return;

@@ -2315,6 +2315,42 @@ OPENSCP_TEST(testPersistenceUsesDebouncedAutomaticSave, test) {
                "the 250 ms debounce should automatically persist the queue");
 }
 
+OPENSCP_TEST(testShutdownUnblocksConcurrentClearSessionWithoutRace, test) {
+    auto probe = std::make_shared<LifecycleProbe>();
+    CancelLifecycleClient baseClient(probe);
+    auto manager = std::make_unique<TransferManager>();
+    manager->setMaxConcurrent(1);
+    configureManager(*manager, baseClient, testOptions());
+    QTemporaryDir destination;
+
+    const quint64 taskId = manager->enqueueDownload(
+        QStringLiteral("/remote/shutdown-race"), destination.filePath("shutdown"),
+        testBatchOptions());
+    test.check(taskId > 0, "enqueued task ID should be valid");
+    test.check(waitUntil([&] { return probe->gets.load() == 1; }),
+               "worker transfer should start");
+
+    std::atomic<bool> clearFinished{false};
+    std::thread clearing([&] {
+        manager->clearSession();
+        clearFinished.store(true);
+    });
+
+    // Concurrently invoke shutdown while clearSession is in flight
+    manager->shutdown();
+    test.check(manager->isShuttingDown(), "manager should report shuttingDown");
+
+    // Multiple calls to shutdown must be idempotent and safe
+    manager->shutdown();
+
+    clearing.join();
+    test.check(clearFinished.load(),
+               "clearSession should unblock quickly on shutdown");
+
+    // Destructor of manager should run cleanly after shutdown
+    manager.reset();
+}
+
 } // namespace
 
 int main(int argc, char **argv) {

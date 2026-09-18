@@ -167,8 +167,10 @@ TransferManager::TransferManager(QObject *parent) : QObject(parent) {
     }
 }
 
-TransferManager::~TransferManager() {
-    shuttingDown_.store(true);
+void TransferManager::shutdown() {
+    bool expected = false;
+    if (!shuttingDown_.compare_exchange_strong(expected, true))
+        return;
     paused_.store(true);
 
     // Persist a recoverable paused representation before stopping workers.
@@ -184,6 +186,7 @@ TransferManager::~TransferManager() {
         slot->thread.request_stop();
     workCv_.notify_all();
     retryCv_.notify_all();
+    idleCv_.notify_all();
     bandwidthLimiter_.wakeAll();
 
     // Destroying jthread joins it. Do this while every manager member used by a
@@ -200,6 +203,10 @@ TransferManager::~TransferManager() {
         if (cached)
             cached->disconnect();
     }
+}
+
+TransferManager::~TransferManager() {
+    shutdown();
     workerSlots_.clear();
 }
 
@@ -251,6 +258,8 @@ void TransferManager::setConnectionFactory(ConnectionFactory openConnection) {
 }
 
 void TransferManager::clearSession() {
+    if (shuttingDown_.load())
+        return;
     QVector<quint64> changed;
     {
         std::lock_guard<std::mutex> lock(mtx_);
@@ -283,6 +292,9 @@ void TransferManager::clearSession() {
             return activeTaskIds_.empty() || shuttingDown_.load();
         });
     }
+
+    if (shuttingDown_.load())
+        return;
 
     for (auto &slot : workerSlots_)
         invalidateWorkerClient(*slot);

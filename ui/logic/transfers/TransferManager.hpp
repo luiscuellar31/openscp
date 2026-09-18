@@ -54,6 +54,10 @@ class TransferManager : public QObject {
     // Pauses the session's active work until another session is set, waiting
     // for workers to stop, and closes their connections.
     void clearSession();
+    // Signals worker threads to stop, wakes condition variables, and waits
+    // for workers to join. Safe to call multiple times or during teardown.
+    void shutdown();
+    bool isShuttingDown() const { return shuttingDown_.load(); }
     void setSessionIdentity(const QString &sessionKey);
     QString sessionIdentity() const;
 

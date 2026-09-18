@@ -20,6 +20,7 @@
 
 #include <atomic>
 #include <functional>
+#include <future>
 #include <memory>
 #include <optional>
 #include <string>
@@ -357,6 +358,7 @@ class MainWindow : public QMainWindow {
     // Reentrancy guards and dialog pointers
     bool transferCleanupInProgress_ = false;
     qint64 transferCleanupStartedAtMs_ = 0;
+    std::future<void> transferCleanupFuture_;
     QPointer<class QMessageBox> tofuBox_;
     QPointer<class QWidget> siteManager_;
     bool openSiteManagerOnDisconnect_ = true;
