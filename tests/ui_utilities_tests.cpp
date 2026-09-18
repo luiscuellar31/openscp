@@ -1,11 +1,16 @@
 #include "TestHarness.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
+#include "logic/common/RowSelection.hpp"
 #include "logic/common/UiFormatters.hpp"
 #include "logic/navigation/RemotePath.hpp"
+#include "logic/remote/RemoteModel.hpp"
 
 #include <QCoreApplication>
 
+#include <algorithm>
 #include <initializer_list>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -85,6 +90,56 @@ OPENSCP_TEST(testTerminalTransferStatuses, test) {
         test.check(!isTerminalTransferStatus(status),
                    "an actionable transfer state should not be terminal");
     }
+}
+
+void fillModel(RemoteModel &model, int rows) {
+    std::vector<openscp::FileInfo> entries;
+    entries.reserve(static_cast<std::size_t>(rows));
+    for (int row = 0; row < rows; ++row) {
+        openscp::FileInfo info;
+        info.name = "entry-" + std::to_string(row);
+        info.has_size = true;
+        info.mode = 0100644u;
+        entries.push_back(info);
+    }
+    model.setEntries(QStringLiteral("/"), entries);
+}
+
+OPENSCP_TEST(testRowSelectionMergesConsecutiveRows, test) {
+    RemoteModel model;
+    fillModel(model, 10);
+    const QItemSelection selection =
+        openscpui::rowSelection(model, {}, {4, 1, 2, 3, 7, 1});
+    test.check(selection.size() == 2,
+               "consecutive rows should become one range each");
+    if (selection.size() != 2)
+        return;
+    test.check(selection[0].top() == 1 && selection[0].bottom() == 4 &&
+                   selection[1].top() == 7 && selection[1].bottom() == 7,
+               "ranges should cover the rows that were asked for, in order");
+    test.check(selection[0].left() == 0 &&
+                   selection[0].right() == model.columnCount() - 1,
+               "each range should cover the whole row");
+    QVector<int> selectedRows;
+    for (const QModelIndex &index : selection.indexes()) {
+        if (index.column() == 0)
+            selectedRows.push_back(index.row());
+    }
+    std::sort(selectedRows.begin(), selectedRows.end());
+    test.check(selectedRows == QVector<int>({1, 2, 3, 4, 7}),
+               "the selection should hold every requested row once");
+}
+
+OPENSCP_TEST(testRowSelectionIgnoresRowsOutsideTheModel, test) {
+    RemoteModel model;
+    fillModel(model, 3);
+    test.check(openscpui::rowSelection(model, {}, {}).isEmpty(),
+               "no rows should give an empty selection");
+    const QItemSelection selection =
+        openscpui::rowSelection(model, {}, {-1, 0, 1, 3, 99});
+    test.check(selection.size() == 1 && selection[0].top() == 0 &&
+                   selection[0].bottom() == 1,
+               "rows outside the model should be left out");
 }
 
 } // namespace

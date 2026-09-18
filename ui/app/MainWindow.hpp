@@ -381,7 +381,7 @@ class MainWindow : public QMainWindow {
     QTimer *uploadRefreshTimer_ = nullptr;
     quint64 activeRemoteListJob_ = 0;
     QString requestedRemotePath_;
-    QStringList remoteRefreshSelectionNames_;
+    QSet<QString> remoteRefreshSelectionNames_;
     int remoteRefreshScrollValue_ = 0;
     bool activeRemoteListIsRefresh_ = false;
     bool activeRemoteListIsInitial_ = false;

@@ -4,6 +4,7 @@
 
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
+#include "logic/common/RowSelection.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "logic/connections/SessionController.hpp"
 #include "logic/navigation/NavigationScope.hpp"
@@ -1042,16 +1043,23 @@ void MainWindow::initializeRuntimeState() {
                 QItemSelectionModel *selection = rightView_->selectionModel();
                 selection->clearSelection();
                 QModelIndex first;
+                QVector<int> restoredRows;
                 for (int row = 0; row < rightRemoteModel_->rowCount(); ++row) {
                     const QModelIndex index = rightRemoteModel_->index(row, 0);
                     if (!remoteRefreshSelectionNames_.contains(
                             rightRemoteModel_->nameAt(index))) {
                         continue;
                     }
-                    selection->select(index, QItemSelectionModel::Select |
-                                                 QItemSelectionModel::Rows);
+                    restoredRows.push_back(row);
                     if (!first.isValid())
                         first = index;
+                }
+                if (!restoredRows.isEmpty()) {
+                    selection->select(
+                        openscpui::rowSelection(*rightRemoteModel_, {},
+                                                std::move(restoredRows)),
+                        QItemSelectionModel::Select |
+                            QItemSelectionModel::Rows);
                 }
                 if (first.isValid())
                     selection->setCurrentIndex(first,
@@ -2372,10 +2380,11 @@ void MainWindow::showHistoryMenu() {
 }
 
 void MainWindow::updateDeleteShortcutEnables() {
+    // The panes select whole rows, so any selection is a row selection, and
+    // asking for the selected rows would walk the whole selection.
     auto hasColSel = [&](QTreeView *treeView) -> bool {
-        if (!treeView || !treeView->selectionModel())
-            return false;
-        return !treeView->selectionModel()->selectedRows(kNameColumn).isEmpty();
+        return treeView && treeView->selectionModel() &&
+               treeView->selectionModel()->hasSelection();
     };
     const bool leftHasSel = hasColSel(leftView_);
     const bool rightHasSel = hasColSel(rightView_);

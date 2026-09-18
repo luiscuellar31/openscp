@@ -187,7 +187,7 @@ void MainWindow::requestRemoteListing(const QString &path, bool refresh,
         for (const QModelIndex &index : selected) {
             const QString name = rightRemoteModel_->nameAt(index);
             if (!name.isEmpty())
-                remoteRefreshSelectionNames_.push_back(name);
+                remoteRefreshSelectionNames_.insert(name);
         }
         if (rightView_->verticalScrollBar()) {
             remoteRefreshScrollValue_ =

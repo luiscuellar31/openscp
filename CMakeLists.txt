@@ -321,6 +321,8 @@ add_library(openscp_ui_logic STATIC
     ui/logic/common/AppSettings.cpp
     ui/logic/common/MainWindowSharedUtils.hpp
     ui/logic/common/MainWindowSharedUtils.cpp
+    ui/logic/common/RowSelection.hpp
+    ui/logic/common/RowSelection.cpp
     ui/logic/common/TimeUtils.hpp
     ui/logic/common/UiAlerts.hpp
     ui/logic/common/UiAlerts.cpp
