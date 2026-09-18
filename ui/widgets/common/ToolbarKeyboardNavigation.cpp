@@ -29,7 +29,7 @@ class ToolbarKeyboardController final : public QObject {
 
     protected:
     bool eventFilter(QObject *watched, QEvent *event) override {
-        if (watched == toolbar_ && event->type() == QEvent::ActionAdded) {
+        if (watched == parent() && event->type() == QEvent::ActionAdded) {
             QTimer::singleShot(0, this, [this] { refreshButtons(); });
             return QObject::eventFilter(watched, event);
         }

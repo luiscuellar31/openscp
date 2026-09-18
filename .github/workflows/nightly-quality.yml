@@ -21,7 +21,7 @@ jobs:
   listing-fuzzers:
     if: github.event_name != 'pull_request'
     name: Listing parser fuzz smoke
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -33,7 +33,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            clang cmake ninja-build pkg-config libclang-rt-dev \
+            clang cmake ninja-build pkg-config libclang-rt-18-dev \
             libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev \
             qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools \
             qt6-l10n-tools libgl1-mesa-dev
