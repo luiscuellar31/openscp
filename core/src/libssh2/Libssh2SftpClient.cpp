@@ -34,11 +34,19 @@
 #include <fcntl.h>
 #include <pwd.h>
 #include <signal.h>
+#include <spawn.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <crt_externs.h>
+#define openscp_environ (*_NSGetEnviron())
+#else
+extern char **environ;
+#define openscp_environ (environ)
+#endif
 // OpenSSL RNG for hashed known_hosts hostnames fallback.
 #include <openssl/rand.h>
 #else
@@ -1710,9 +1718,47 @@ bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut, int &pidOut,
         return false;
     }
 
-    const pid_t pid = ::fork();
-    if (pid < 0) {
-        err = std::string("fork failed: ") + std::strerror(errno);
+    std::vector<std::string> args;
+    args.reserve(24);
+    args.emplace_back("ssh");
+    args.emplace_back("-o");
+    args.emplace_back("BatchMode=yes");
+    args.emplace_back("-o");
+    args.emplace_back("IdentitiesOnly=yes");
+    args.emplace_back("-o");
+    args.emplace_back("ExitOnForwardFailure=yes");
+    args.emplace_back("-o");
+    args.emplace_back("ConnectTimeout=20");
+    args.emplace_back("-o");
+    args.emplace_back("ServerAliveInterval=30");
+    args.emplace_back("-o");
+    args.emplace_back("ServerAliveCountMax=2");
+    if (opt.jump_username && !opt.jump_username->empty()) {
+        args.emplace_back("-l");
+        args.emplace_back(*opt.jump_username);
+    }
+    if (opt.jump_private_key_path && !opt.jump_private_key_path->empty()) {
+        args.emplace_back("-i");
+        args.emplace_back(*opt.jump_private_key_path);
+    }
+    args.emplace_back("-p");
+    args.emplace_back(std::to_string(opt.jump_port));
+    args.emplace_back("-W");
+    args.emplace_back(format_host_port_authority(opt.host, opt.port));
+    args.emplace_back(*opt.jump_host);
+
+    std::vector<char *> argv;
+    argv.reserve(args.size() + 1);
+    for (const auto &a : args) {
+        argv.push_back(const_cast<char *>(a.c_str()));
+    }
+    argv.push_back(nullptr);
+
+    posix_spawn_file_actions_t actions;
+    if (const int actionErr = posix_spawn_file_actions_init(&actions);
+        actionErr != 0) {
+        err = std::string("posix_spawn_file_actions_init failed: ") +
+              std::strerror(actionErr);
         ::close(pairfd[0]);
         ::close(pairfd[1]);
         ::close(stderrPipe[0]);
@@ -1720,65 +1766,35 @@ bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut, int &pidOut,
         return false;
     }
 
-    if (pid == 0) {
-        ::close(pairfd[0]);
-        ::close(stderrPipe[0]);
-        if (::dup2(pairfd[1], STDIN_FILENO) < 0 ||
-            ::dup2(pairfd[1], STDOUT_FILENO) < 0) {
-            _exit(127);
-        }
-        if (pairfd[1] != STDIN_FILENO && pairfd[1] != STDOUT_FILENO)
-            ::close(pairfd[1]);
-        if (::dup2(stderrPipe[1], STDERR_FILENO) < 0) {
-            _exit(127);
-        }
-        if (stderrPipe[1] != STDERR_FILENO)
-            ::close(stderrPipe[1]);
+    struct ActionsGuard {
+        posix_spawn_file_actions_t *act;
+        ~ActionsGuard() { posix_spawn_file_actions_destroy(act); }
+    } actionsGuard{&actions};
 
-        std::vector<std::string> args;
-        args.reserve(24);
-        args.emplace_back("ssh");
-        args.emplace_back("-o");
-        args.emplace_back("BatchMode=yes");
-        args.emplace_back("-o");
-        args.emplace_back("IdentitiesOnly=yes");
-        args.emplace_back("-o");
-        args.emplace_back("ExitOnForwardFailure=yes");
-        args.emplace_back("-o");
-        args.emplace_back("ConnectTimeout=20");
-        args.emplace_back("-o");
-        args.emplace_back("ServerAliveInterval=30");
-        args.emplace_back("-o");
-        args.emplace_back("ServerAliveCountMax=2");
-        if (opt.jump_username && !opt.jump_username->empty()) {
-            args.emplace_back("-l");
-            args.emplace_back(*opt.jump_username);
-        }
-        if (opt.jump_private_key_path && !opt.jump_private_key_path->empty()) {
-            args.emplace_back("-i");
-            args.emplace_back(*opt.jump_private_key_path);
-        }
-        args.emplace_back("-p");
-        args.emplace_back(std::to_string(opt.jump_port));
-        args.emplace_back("-W");
-        args.emplace_back(format_host_port_authority(opt.host, opt.port));
-        args.emplace_back(*opt.jump_host);
+    posix_spawn_file_actions_adddup2(&actions, pairfd[1], STDIN_FILENO);
+    posix_spawn_file_actions_adddup2(&actions, pairfd[1], STDOUT_FILENO);
+    posix_spawn_file_actions_adddup2(&actions, stderrPipe[1], STDERR_FILENO);
+    posix_spawn_file_actions_addclose(&actions, pairfd[0]);
+    posix_spawn_file_actions_addclose(&actions, stderrPipe[0]);
+    if (pairfd[1] > STDERR_FILENO)
+        posix_spawn_file_actions_addclose(&actions, pairfd[1]);
+    if (stderrPipe[1] > STDERR_FILENO)
+        posix_spawn_file_actions_addclose(&actions, stderrPipe[1]);
 
-        std::vector<char *> argv;
-        argv.reserve(args.size() + 1);
-        std::transform(
-            args.begin(), args.end(), std::back_inserter(argv),
-            [](const std::string &a) { return const_cast<char *>(a.c_str()); });
-        argv.push_back(nullptr);
-        ::execvp("ssh", argv.data());
-        const std::string execErr =
-            std::string("exec ssh failed: ") + std::strerror(errno);
-        write_best_effort(STDERR_FILENO, execErr.c_str(), execErr.size());
-        _exit(127);
-    }
+    pid_t pid = -1;
+    const int spawnRes = posix_spawnp(&pid, "ssh", &actions, nullptr,
+                                      argv.data(), openscp_environ);
 
     ::close(pairfd[1]);
     ::close(stderrPipe[1]);
+
+    if (spawnRes != 0) {
+        err = std::string("posix_spawnp failed: ") + std::strerror(spawnRes);
+        ::close(pairfd[0]);
+        ::close(stderrPipe[0]);
+        return false;
+    }
+
     const int fdFlags = ::fcntl(pairfd[0], F_GETFD);
     if (fdFlags >= 0)
         (void)::fcntl(pairfd[0], F_SETFD, fdFlags | FD_CLOEXEC);

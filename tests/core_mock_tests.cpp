@@ -1266,6 +1266,21 @@ OPENSCP_TEST(test_libssh2_rejects_jump_on_windows, t) {
     t.checkContains(err, "not supported on this platform",
                     "connect should explain jump is unsupported on Windows");
 }
+#else
+OPENSCP_TEST(test_libssh2_jump_host_spawn_posix, t) {
+    openscp::Libssh2SftpClient c;
+    openscp::SessionOptions opt = validOptions();
+    opt.jump_host = std::string("127.0.0.1");
+    opt.jump_port = 65534;
+    opt.host = "127.0.0.1";
+    opt.port = 22;
+
+    std::string err;
+    const bool ok = c.connect(opt, err);
+    t.check(!ok, "connect should fail when jump bastion cannot connect");
+    t.check(!err.empty(), "connect error should not be empty");
+    t.check(!c.isConnected(), "client should remain disconnected");
+}
 #endif
 
 OPENSCP_TEST(test_remove_known_hosts_entry_plain_and_hashed, t) {
