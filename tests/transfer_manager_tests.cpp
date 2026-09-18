@@ -1,6 +1,7 @@
 // Transfer queue tests without an external test framework.
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
+#include "logic/transfers/BandwidthLimiter.hpp"
 #include "logic/transfers/ConflictCoordinator.hpp"
 #include "logic/transfers/TransferManager.hpp"
 #include "logic/transfers/TransferQueuePersistence.hpp"
@@ -22,6 +23,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -2349,6 +2351,80 @@ OPENSCP_TEST(testShutdownUnblocksConcurrentClearSessionWithoutRace, test) {
 
     // Destructor of manager should run cleanly after shutdown
     manager.reset();
+}
+
+OPENSCP_TEST(testBandwidthLimiterExceptionSafetyAndCleanup, test) {
+    BandwidthLimiter limiter;
+    limiter.setLimitKBps(32);
+    test.check(limiter.queuedWaiters() == 0, "initial queue should be empty");
+
+    // 1. Exception thrown during shouldCancel unwinds stack and cleans up waiter via RAII
+    bool exceptionCaught = false;
+    try {
+        [[maybe_unused]] const bool ignored =
+            limiter.acquire(1, 1024 * 1024, [](std::uint64_t) -> bool {
+                throw std::runtime_error("Simulated cancel callback exception");
+            });
+    } catch (const std::runtime_error &) {
+        exceptionCaught = true;
+    }
+    test.check(exceptionCaught, "exception should propagate out of acquire");
+    test.check(limiter.queuedWaiters() == 0,
+               "waiter should be removed from queue on exception unwind");
+
+    // 2. Cancellation via shouldCancel returning true cleans up waiter
+    const bool acquiredCanceled =
+        limiter.acquire(2, 1024 * 1024, [](std::uint64_t) { return true; });
+    test.check(!acquiredCanceled, "canceled task should return false");
+    test.check(limiter.queuedWaiters() == 0,
+               "canceled waiter should be cleaned up from queue");
+
+    // 3. Dynamic limit disable unblocks queued waiters cleanly
+    std::atomic<bool> workerFinished{false};
+    std::thread worker([&] {
+        const bool ok = limiter.acquire(3, 512 * 1024,
+                                        [](std::uint64_t) { return false; });
+        workerFinished.store(ok);
+    });
+
+    test.check(waitUntil([&] { return limiter.queuedWaiters() > 0; }),
+               "worker should be queued waiting for rate tokens");
+
+    limiter.setLimitKBps(0);
+    worker.join();
+    test.check(workerFinished.load(),
+               "worker should finish successfully after limit set to 0");
+    test.check(limiter.queuedWaiters() == 0,
+               "queue should be empty after unblocking");
+}
+
+OPENSCP_TEST(testBandwidthLimiterConcurrentFifoFairness, test) {
+    BandwidthLimiter limiter;
+    limiter.setLimitKBps(64);
+
+    constexpr int kWorkerCount = 4;
+    std::atomic<int> completedWorkers{0};
+    std::vector<std::thread> workers;
+    workers.reserve(kWorkerCount);
+
+    for (int i = 0; i < kWorkerCount; ++i) {
+        workers.emplace_back(
+            [&, taskId = static_cast<std::uint64_t>(i + 1)] {
+                if (limiter.acquire(taskId, 4096,
+                                    [](std::uint64_t) { return false; })) {
+                    completedWorkers.fetch_add(1);
+                }
+            });
+    }
+
+    for (auto &w : workers) {
+        w.join();
+    }
+
+    test.check(completedWorkers.load() == kWorkerCount,
+               "all concurrent workers should acquire tokens successfully");
+    test.check(limiter.queuedWaiters() == 0,
+               "queue should be completely empty after all workers finish");
 }
 
 } // namespace
