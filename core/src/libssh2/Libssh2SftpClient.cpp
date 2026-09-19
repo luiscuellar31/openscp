@@ -3066,7 +3066,7 @@ bool Libssh2SftpClient::list(const std::string &remote_path,
     out.reserve(64);
     RemoteListingBudget listingBudget;
 
-    char filename[512];
+    char filename[1024];
     char longentry[1024];
     LIBSSH2_SFTP_ATTRIBUTES attrs;
 
@@ -3075,9 +3075,24 @@ bool Libssh2SftpClient::list(const std::string &remote_path,
         int rc = libssh2_sftp_readdir_ex(dir, filename, sizeof(filename),
                                          longentry, sizeof(longentry), &attrs);
         if (rc > 0) {
+            if (static_cast<std::size_t>(rc) > sizeof(filename)) {
+                err = "SFTP directory entry name exceeds buffer limit.";
+                (void)libssh2_sftp_closedir(dir);
+                out.clear();
+                setLastOperationError(RemoteErrorKind::Protocol, err);
+                return false;
+            }
+            const std::size_t nameLen = static_cast<std::size_t>(rc);
+            if (std::memchr(filename, '\0', nameLen) != nullptr) {
+                err = "SFTP directory entry name contains embedded null byte.";
+                (void)libssh2_sftp_closedir(dir);
+                out.clear();
+                setLastOperationError(RemoteErrorKind::Protocol, err);
+                return false;
+            }
             // rc = name length
             FileInfo fi{};
-            fi.name = std::string(filename, static_cast<std::size_t>(rc));
+            fi.name.assign(filename, nameLen);
             fi.is_dir = (attrs.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS)
                             ? ((attrs.permissions & LIBSSH2_SFTP_S_IFMT) ==
                                LIBSSH2_SFTP_S_IFDIR)
