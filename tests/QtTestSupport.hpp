@@ -6,6 +6,7 @@
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QThreadPool>
 
 #include <chrono>
 #include <functional>
@@ -58,6 +59,12 @@ inline bool spinUntil(const std::function<bool()> &predicate, int timeoutMs) {
 inline void flushUiEvents(int passes = 5) {
     for (int pass = 0; pass < passes; ++pass)
         QCoreApplication::processEvents(QEventLoop::AllEvents);
+}
+
+inline void drainThreadPool(int timeoutMs = 2000) {
+    if (auto *pool = QThreadPool::globalInstance()) {
+        pool->waitForDone(timeoutMs);
+    }
 }
 
 } // namespace openscp::testsupport

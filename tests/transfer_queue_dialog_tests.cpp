@@ -146,5 +146,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     openscp::test::TestHarness harness("Transfer queue dialog");
-    return harness.run();
+    const int result = harness.run();
+    openscp::testsupport::drainThreadPool();
+    return result;
 }

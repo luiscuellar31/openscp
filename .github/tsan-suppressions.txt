@@ -6,3 +6,14 @@ race:QtPrivate::QFunctorSlotObject
 race:QMetaObject::invokeMethodImpl
 race:QThreadPoolPrivate::enqueueTask
 race:QArrayData::reallocateUnaligned
+called_from_lib:libQt6Core.so*
+called_from_lib:libQt6Gui.so*
+called_from_lib:libQt6Widgets.so*
+called_from_lib:libQt6Svg.so*
+called_from_lib:libQt6DBus.so*
+race:libQt6Core.so*
+race:libQt6Gui.so*
+race:libQt6Widgets.so*
+race:libQt6Svg.so*
+race:libQt6DBus.so*
+

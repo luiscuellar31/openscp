@@ -498,5 +498,7 @@ int main(int argc, char **argv) {
     }
     settingsRootPath = isolatedSettings.path();
     openscp::test::TestHarness harness("MainWindow navigation");
-    return harness.run();
+    const int result = harness.run();
+    openscp::testsupport::drainThreadPool();
+    return result;
 }
