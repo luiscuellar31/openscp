@@ -32,7 +32,7 @@ class SiteCredentialRepository {
     public:
     struct Backend {
         std::function<SecretStore::PersistResult(const QString &,
-                                                 const QString &)>
+                                                 const openscp::SecureString &)>
             store;
         std::function<SecretStore::LoadResult(const QString &)> load;
         std::function<SecretStore::DeleteResult(const QString &)> remove;
@@ -52,7 +52,7 @@ class SiteCredentialRepository {
     removeAll(const SiteEntry &site);
 
     [[nodiscard]] static QString stableKey(const SiteEntry &site,
-                                           SiteCredentialKind kind);
+                                            SiteCredentialKind kind);
     [[nodiscard]] static QString itemName(SiteCredentialKind kind);
     [[nodiscard]] static QString itemLabel(SiteCredentialKind kind);
     [[nodiscard]] static QString statusLabel(SecretStore::PersistStatus status);
@@ -60,11 +60,11 @@ class SiteCredentialRepository {
     [[nodiscard]] static Backend systemBackend();
 
     private:
-    [[nodiscard]] std::optional<QString>
+    [[nodiscard]] std::optional<openscp::SecureString>
     readValue(const SiteEntry &site, SiteCredentialKind kind,
               SiteCredentialOperationResult &result);
-    [[nodiscard]] SecretStore::PersistResult storeValue(const SiteEntry &site,
-                                                        SiteCredentialKind kind,
-                                                        const QString &value);
+    [[nodiscard]] SecretStore::PersistResult
+    storeValue(const SiteEntry &site, SiteCredentialKind kind,
+               const openscp::SecureString &value);
     Backend backend_;
 };

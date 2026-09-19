@@ -33,23 +33,19 @@ credentialValue(const openscp::SessionOptions &options,
 }
 
 void assignCredential(openscp::SessionOptions &options, SiteCredentialKind kind,
-                      const QString &value) {
-    QByteArray utf8Value = value.toUtf8();
-    const std::string_view valueView(
-        utf8Value.constData(), static_cast<std::size_t>(utf8Value.size()));
+                      const openscp::SecureString &value) {
     switch (kind) {
     case SiteCredentialKind::Password:
-        options.password.emplace(valueView);
+        options.password.emplace(value);
         break;
     case SiteCredentialKind::KeyPassphrase:
-        options.private_key_passphrase.emplace(valueView);
+        options.private_key_passphrase.emplace(value);
         break;
     case SiteCredentialKind::ProxyPassword:
         if (options.proxy_type != openscp::ProxyType::None)
-            options.proxy_password.emplace(valueView);
+            options.proxy_password.emplace(value);
         break;
     }
-    utf8Value.fill('\0');
 }
 
 QString formatIssue(SiteCredentialKind kind,
@@ -117,7 +113,7 @@ SiteCredentialRepository::SiteCredentialRepository(Backend backend)
 SiteCredentialRepository::Backend SiteCredentialRepository::systemBackend() {
     auto store = std::make_shared<SecretStore>();
     return {
-        [store](const QString &key, const QString &value) {
+        [store](const QString &key, const openscp::SecureString &value) {
             return store->setSecret(key, value);
         },
         [store](const QString &key) { return store->getSecret(key); },
@@ -182,7 +178,8 @@ QString SiteCredentialRepository::stableKey(const SiteEntry &site,
 }
 
 SecretStore::PersistResult SiteCredentialRepository::storeValue(
-    const SiteEntry &site, SiteCredentialKind kind, const QString &value) {
+    const SiteEntry &site, SiteCredentialKind kind,
+    const openscp::SecureString &value) {
     return backend_.store(stableKey(site, kind), value);
 }
 
@@ -205,10 +202,8 @@ SiteCredentialRepository::save(const SiteEntry &site,
             continue;
         }
 
-        const SecretStore::PersistResult persistResult = storeValue(
-            site, kind,
-            QString::fromUtf8(value->data(),
-                              static_cast<qsizetype>(value->size())));
+        const SecretStore::PersistResult persistResult =
+            storeValue(site, kind, *value);
         if (persistResult.isStored())
             result.anyCredentialHandled = true;
         else
@@ -217,7 +212,7 @@ SiteCredentialRepository::save(const SiteEntry &site,
     return result;
 }
 
-std::optional<QString>
+std::optional<openscp::SecureString>
 SiteCredentialRepository::readValue(const SiteEntry &site,
                                     SiteCredentialKind kind,
                                     SiteCredentialOperationResult &result) {
@@ -241,7 +236,8 @@ SiteCredentialRepository::load(const SiteEntry &site,
             options.proxy_password.reset();
             continue;
         }
-        const std::optional<QString> value = readValue(site, kind, result);
+        const std::optional<openscp::SecureString> value =
+            readValue(site, kind, result);
         if (!value)
             continue;
         assignCredential(options, kind, *value);

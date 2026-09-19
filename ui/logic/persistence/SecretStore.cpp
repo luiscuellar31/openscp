@@ -104,19 +104,17 @@ SecretStore::DeleteResult mapAppleDeleteStatus(OSStatus status) {
 } // namespace
 
 SecretStore::PersistResult SecretStore::setSecret(const QString &key,
-                                                  const QString &value) {
+                                                  const openscp::SecureString &value) {
     if (key.isEmpty()) {
         return {PersistStatus::BackendError,
                 QStringLiteral("Secret key is empty")};
     }
     CFStringRef account = cfAccount(key);
-    QByteArray dataBytes = value.toUtf8();
     CFDataRef data =
         CFDataCreate(kCFAllocatorDefault,
-                     reinterpret_cast<const UInt8 *>(dataBytes.constData()),
-                     dataBytes.size());
+                     reinterpret_cast<const UInt8 *>(value.data()),
+                     static_cast<CFIndex>(value.size()));
     if (!account || !data) {
-        dataBytes.fill('\0');
         if (data)
             CFRelease(data);
         if (account)
@@ -140,7 +138,6 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
         kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
         &kCFTypeDictionaryValueCallBacks);
     if (!query) {
-        dataBytes.fill('\0');
         CFRelease(data);
         CFRelease(account);
         return {PersistStatus::BackendError,
@@ -155,7 +152,6 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
         kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
         &kCFTypeDictionaryValueCallBacks);
     if (!attrs) {
-        dataBytes.fill('\0');
         CFRelease(query);
         CFRelease(data);
         CFRelease(account);
@@ -183,7 +179,6 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
         CFRelease(data);
     if (account)
         CFRelease(account);
-    dataBytes.fill('\0');
 
     return mapApplePersistStatus(finalStatus);
 }
@@ -243,10 +238,11 @@ SecretStore::LoadResult SecretStore::getSecret(const QString &key) const {
                 {},
                 QStringLiteral("Keychain item contains invalid data")};
     }
-    const QString out = QString::fromUtf8(reinterpret_cast<const char *>(bytes),
-                                          static_cast<int>(len));
+    openscp::SecureString out(
+        std::string_view(reinterpret_cast<const char *>(bytes),
+                         static_cast<std::size_t>(len)));
     CFRelease(result);
-    return {LoadStatus::Loaded, out, {}};
+    return {LoadStatus::Loaded, std::move(out), {}};
 }
 
 SecretStore::DeleteResult SecretStore::removeSecret(const QString &key) {
@@ -324,28 +320,35 @@ SecretStore::LoadStatus dpapiLoadStatus(DWORD errorCode) {
 } // namespace
 
 SecretStore::PersistResult SecretStore::setSecret(const QString &key,
-                                                  const QString &value) {
+                                                  const openscp::SecureString &value) {
     if (key.isEmpty()) {
         return {PersistStatus::BackendError,
                 QStringLiteral("Secret key is empty")};
     }
 
-    QByteArray plaintext = value.toUtf8();
-    QByteArray entropy(kDpapiEntropy);
-    if (!fitsDataBlob(plaintext) || !fitsDataBlob(entropy)) {
-        eraseByteArray(plaintext);
+    if (static_cast<std::uint64_t>(value.size()) >
+        static_cast<std::uint64_t>((std::numeric_limits<DWORD>::max)())) {
         return {PersistStatus::BackendError,
                 QStringLiteral("Secret is too large for Windows DPAPI")};
     }
 
-    DATA_BLOB plaintextBlob = byteArrayBlob(plaintext);
+    QByteArray entropy(kDpapiEntropy);
+    if (!fitsDataBlob(entropy)) {
+        eraseByteArray(entropy);
+        return {PersistStatus::BackendError,
+                QStringLiteral("Secret is too large for Windows DPAPI")};
+    }
+
+    DATA_BLOB plaintextBlob{
+        static_cast<DWORD>(value.size()),
+        const_cast<BYTE *>(reinterpret_cast<const BYTE *>(value.data()))};
     DATA_BLOB entropyBlob = byteArrayBlob(entropy);
     DATA_BLOB protectedBlob{};
     const BOOL protectedOk = CryptProtectData(
         &plaintextBlob, L"OpenSCP saved credential", &entropyBlob, nullptr,
         nullptr, CRYPTPROTECT_UI_FORBIDDEN, &protectedBlob);
     const DWORD protectError = protectedOk ? ERROR_SUCCESS : GetLastError();
-    eraseByteArray(plaintext);
+    eraseByteArray(entropy);
     if (!protectedOk) {
         return {dpapiPersistStatus(protectError),
                 dpapiError("CryptProtectData", protectError)};
@@ -390,7 +393,7 @@ SecretStore::LoadResult SecretStore::getSecret(const QString &key) const {
 
     QByteArray protectedBytes =
         QByteArray::fromBase64(stored.sliced(sizeof(kDpapiPrefix) - 1),
-                               QByteArray::AbortOnBase64DecodingErrors);
+                                QByteArray::AbortOnBase64DecodingErrors);
     eraseByteArray(stored);
     QByteArray entropy(kDpapiEntropy);
     if (protectedBytes.isEmpty() || !fitsDataBlob(protectedBytes) ||
@@ -415,14 +418,14 @@ SecretStore::LoadResult SecretStore::getSecret(const QString &key) const {
                 dpapiError("CryptUnprotectData", unprotectError)};
     }
 
-    const QString secret =
-        QString::fromUtf8(reinterpret_cast<const char *>(plaintextBlob.pbData),
-                          static_cast<qsizetype>(plaintextBlob.cbData));
+    openscp::SecureString secret(std::string_view(
+        reinterpret_cast<const char *>(plaintextBlob.pbData),
+        static_cast<std::size_t>(plaintextBlob.cbData)));
     if (plaintextBlob.pbData) {
         SecureZeroMemory(plaintextBlob.pbData, plaintextBlob.cbData);
         LocalFree(plaintextBlob.pbData);
     }
-    return {LoadStatus::Loaded, secret, {}};
+    return {LoadStatus::Loaded, std::move(secret), {}};
 }
 
 SecretStore::DeleteResult SecretStore::removeSecret(const QString &key) {
@@ -472,19 +475,17 @@ const SecretSchema *openscp_schema() {
 } // namespace
 
 SecretStore::PersistResult SecretStore::setSecret(const QString &key,
-                                                  const QString &value) {
+                                                  const openscp::SecureString &value) {
     if (key.isEmpty()) {
         return {PersistStatus::BackendError,
                 QStringLiteral("Secret key is empty")};
     }
     QByteArray keyUtf8 = key.toUtf8();
-    QByteArray secretValueUtf8 = value.toUtf8();
     GError *gerr = nullptr;
     const gboolean ok = secret_password_store_sync(
         openscp_schema(), SECRET_COLLECTION_DEFAULT, "OpenSCP secret",
-        secretValueUtf8.constData(), nullptr, &gerr, "key", keyUtf8.constData(),
+        value.c_str(), nullptr, &gerr, "key", keyUtf8.constData(),
         nullptr);
-    secretValueUtf8.fill('\0');
     if (ok)
         return {PersistStatus::Stored, QString()};
     QString detail = gerr ? QString::fromUtf8(gerr->message)
@@ -511,11 +512,19 @@ SecretStore::LoadResult SecretStore::getSecret(const QString &key) const {
         }
         return {LoadStatus::Missing, {}, {}};
     }
-    QString out = QString::fromUtf8(pw);
-    secret_password_free(pw);
+    openscp::SecureString out(pw ? pw : "");
+    if (pw) {
+        volatile unsigned char *cursor =
+            reinterpret_cast<volatile unsigned char *>(pw);
+        std::size_t pwLen = std::strlen(pw);
+        while (pwLen-- > 0)
+            *cursor++ = 0;
+        std::atomic_signal_fence(std::memory_order_seq_cst);
+        secret_password_free(pw);
+    }
     if (gerr)
         g_error_free(gerr);
-    return {LoadStatus::Loaded, out, {}};
+    return {LoadStatus::Loaded, std::move(out), {}};
 }
 
 SecretStore::DeleteResult SecretStore::removeSecret(const QString &key) {
@@ -564,7 +573,7 @@ bool fallbackEnabled() {
 #endif
 
 SecretStore::PersistResult SecretStore::setSecret(const QString &key,
-                                                  const QString &value) {
+                                                  const openscp::SecureString &value) {
 #ifdef OPENSCP_BUILD_SECURE_ONLY
     Q_UNUSED(key);
     Q_UNUSED(value);
@@ -582,7 +591,9 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
     }
     openscpui::AppSettings settings(
         openscpui::AppSettings::Store::SecretFallback);
-    settings.setValue(key, value);
+    settings.setValue(key,
+                      QString::fromUtf8(value.data(),
+                                        static_cast<qsizetype>(value.size())));
     const auto syncResult = settings.syncSecure();
     if (!syncResult.ok)
         return {PersistStatus::BackendError, syncResult.error};
@@ -612,7 +623,12 @@ SecretStore::LoadResult SecretStore::getSecret(const QString &key) const {
     QVariant storedValue = settings.value(key);
     if (!storedValue.isValid())
         return {LoadStatus::Missing, {}, {}};
-    return {LoadStatus::Loaded, storedValue.toString(), {}};
+    QString str = storedValue.toString();
+    QByteArray utf8 = str.toUtf8();
+    openscp::SecureString out(
+        std::string_view(utf8.constData(), static_cast<std::size_t>(utf8.size())));
+    utf8.fill('\0');
+    return {LoadStatus::Loaded, std::move(out), {}};
 #endif
 }
 
@@ -651,3 +667,12 @@ bool SecretStore::insecureFallbackActive() {
 }
 
 #endif
+
+SecretStore::PersistResult SecretStore::setSecret(const QString &key,
+                                                  const QString &value) {
+    QByteArray utf8 = value.toUtf8();
+    openscp::SecureString sec(
+        std::string_view(utf8.constData(), static_cast<std::size_t>(utf8.size())));
+    utf8.fill('\0');
+    return setSecret(key, sec);
+}

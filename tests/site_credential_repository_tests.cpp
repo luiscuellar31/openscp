@@ -14,7 +14,7 @@
 namespace {
 
 struct FakeSecretBackend {
-    QHash<QString, QString> values;
+    QHash<QString, openscp::SecureString> values;
     SecretStore::PersistStatus saveStatus = SecretStore::PersistStatus::Stored;
     SecretStore::LoadStatus missingLoadStatus =
         SecretStore::LoadStatus::Missing;
@@ -22,7 +22,7 @@ struct FakeSecretBackend {
 
     SiteCredentialRepository::Backend interface() {
         return {
-            [this](const QString &key, const QString &value) {
+            [this](const QString &key, const openscp::SecureString &value) {
                 if (saveStatus == SecretStore::PersistStatus::Stored)
                     values.insert(key, value);
                 return SecretStore::PersistResult{saveStatus, {}};
@@ -109,7 +109,7 @@ OPENSCP_TEST(testStableCredentialCopy, test) {
     test.check(copied.issues.isEmpty() &&
                    backend.values.value(SiteCredentialRepository::stableKey(
                        target, SiteCredentialKind::Password)) ==
-                       QStringLiteral("source-password"),
+                       "source-password",
                "copy should duplicate credentials under the target identity");
 }
 
@@ -152,7 +152,7 @@ OPENSCP_TEST(testWindowsDpapiSecretRoundTrip, test) {
     SecretStore store;
     const QString key = QStringLiteral("test/dpapi/%1")
                             .arg(QUuid::createUuid().toString(QUuid::Id128));
-    const QString value = QStringLiteral("s3cret-\u2713-\u00f1");
+    const openscp::SecureString value("s3cret-\u2713-\u00f1");
 
     const auto stored = store.setSecret(key, value);
     test.check(stored.isStored(),
@@ -161,7 +161,7 @@ OPENSCP_TEST(testWindowsDpapiSecretRoundTrip, test) {
         openscpui::AppSettings::Store::SecretFallback);
     const QByteArray rawValue = rawSettings.value(key).toByteArray();
     test.check(rawValue.startsWith("dpapi-v1:") &&
-                   !rawValue.contains(value.toUtf8()),
+                   !rawValue.contains(value.data()),
                "Windows settings should contain only versioned ciphertext");
     const auto restored = store.getSecret(key);
     test.check(restored.isLoaded() && restored.value == value,

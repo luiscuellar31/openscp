@@ -2,6 +2,7 @@
 // Windows, Secret Service on Linux, or an explicitly enabled fallback when no
 // secure platform backend is available.
 #pragma once
+#include "openscp/SecureString.hpp"
 #include <QString>
 
 // Minimal platform secret-store abstraction.
@@ -32,7 +33,7 @@ class SecretStore {
 
     struct LoadResult {
         LoadStatus status = LoadStatus::Missing;
-        QString value;
+        openscp::SecureString value;
         QString detail;
         [[nodiscard]] bool isLoaded() const {
             return status == LoadStatus::Loaded;
@@ -57,6 +58,7 @@ class SecretStore {
     };
 
     // Store a secret under a logical key (e.g. "site-id:<uuid>:password").
+    PersistResult setSecret(const QString &key, const openscp::SecureString &value);
     PersistResult setSecret(const QString &key, const QString &value);
 
     // Retrieve a secret if present.
