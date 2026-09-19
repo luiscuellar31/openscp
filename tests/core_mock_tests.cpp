@@ -9,6 +9,7 @@
 #include "libssh2/detail/Libssh2ErrorClassifier.hpp"
 #include "libssh2/detail/Libssh2InputSafety.hpp"
 #include "libssh2/detail/Libssh2TransferIntegrity.hpp"
+#include "libssh2/detail/UniqueSftpHandle.hpp"
 #include "mock/MockSftpClient.hpp"
 #include "openscp/ClientFactory.hpp"
 #include "openscp/SecureString.hpp"
@@ -1423,6 +1424,81 @@ OPENSCP_TEST(test_unique_file_self_reset_and_move_prevent_double_close, t) {
     std::error_code ec;
     fs::remove(tempPath, ec);
     fs::remove_all(tempPath.parent_path(), ec);
+}
+
+OPENSCP_TEST(test_unique_sftp_handle_lifecycle_and_leak_prevention, t) {
+    static int closeCallCount = 0;
+    static LIBSSH2_SFTP_HANDLE *lastClosedHandle = nullptr;
+    closeCallCount = 0;
+    lastClosedHandle = nullptr;
+
+    auto testCloser = [](LIBSSH2_SFTP_HANDLE *h) -> int {
+        ++closeCallCount;
+        lastClosedHandle = h;
+        return 0;
+    };
+
+    auto dummy1 = reinterpret_cast<LIBSSH2_SFTP_HANDLE *>(static_cast<std::uintptr_t>(0x1000));
+    auto dummy2 = reinterpret_cast<LIBSSH2_SFTP_HANDLE *>(static_cast<std::uintptr_t>(0x2000));
+
+    // 1. RAII destruction closes the handle
+    {
+        openscp::libssh2detail::UniqueSftpHandle h(dummy1, testCloser);
+        t.check(static_cast<bool>(h), "handle should evaluate to true when set");
+        t.check(h.get() == dummy1, "handle get() should return raw handle");
+    }
+    t.check(closeCallCount == 1, "destruction must close remote handle");
+    t.check(lastClosedHandle == dummy1, "closed handle should match dummy1");
+
+    // 2. Manual close() closes immediately and destructor is a no-op
+    {
+        openscp::libssh2detail::UniqueSftpHandle h(dummy1, testCloser);
+        t.check(h.close() == 0, "close() should return closer result");
+        t.check(closeCallCount == 2, "explicit close() should invoke closer");
+        t.check(!h, "closed handle should evaluate to false");
+        t.check(h.get() == nullptr, "closed handle get() should be null");
+    }
+    t.check(closeCallCount == 2, "destructor after close() must not double close");
+
+    // 3. Self-reset must be a no-op and NOT close
+    {
+        openscp::libssh2detail::UniqueSftpHandle h(dummy1, testCloser);
+        h.reset(dummy1);
+        t.check(closeCallCount == 2, "self-reset must not invoke closer");
+        t.check(h.get() == dummy1, "handle should remain unchanged after self-reset");
+    }
+    t.check(closeCallCount == 3, "destruction after self-reset should close once");
+
+    // 4. Move construction transfers ownership without closing
+    {
+        openscp::libssh2detail::UniqueSftpHandle h1(dummy1, testCloser);
+        openscp::libssh2detail::UniqueSftpHandle h2(std::move(h1));
+        t.check(h1.get() == nullptr, "moved-from handle must be null");
+        t.check(h2.get() == dummy1, "moved-to handle must hold dummy1");
+        t.check(closeCallCount == 3, "move constructor must not invoke closer");
+    }
+    t.check(closeCallCount == 4, "destruction of moved-to handle should close once");
+
+    // 5. Move assignment closes destination's existing handle and transfers
+    {
+        openscp::libssh2detail::UniqueSftpHandle h1(dummy1, testCloser);
+        openscp::libssh2detail::UniqueSftpHandle h2(dummy2, testCloser);
+        h2 = std::move(h1);
+        t.check(closeCallCount == 5, "move assignment must close old destination handle");
+        t.check(lastClosedHandle == dummy2, "closed old destination handle should be dummy2");
+        t.check(h2.get() == dummy1, "moved-to handle should now hold dummy1");
+        t.check(h1.get() == nullptr, "moved-from handle should now be null");
+    }
+    t.check(closeCallCount == 6, "destruction of h2 should close dummy1");
+
+    // 6. release() abandons ownership without invoking closer
+    {
+        openscp::libssh2detail::UniqueSftpHandle h(dummy1, testCloser);
+        LIBSSH2_SFTP_HANDLE *rel = h.release();
+        t.check(rel == dummy1, "release() must return raw handle");
+        t.check(h.get() == nullptr, "handle after release must be null");
+    }
+    t.check(closeCallCount == 6, "destructor after release() must not invoke closer");
 }
 
 } // namespace
