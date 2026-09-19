@@ -18,6 +18,8 @@
 
 namespace {
 
+constexpr auto PopupExtensionProperty = "openscpIsToolbarPopupExtension";
+
 class ToolbarKeyboardController final : public QObject {
     public:
     explicit ToolbarKeyboardController(QToolBar *toolbar)
@@ -25,12 +27,25 @@ class ToolbarKeyboardController final : public QObject {
         toolbar_->installEventFilter(this);
     }
 
+    ~ToolbarKeyboardController() override {
+        if (auto *tb = qobject_cast<QToolBar *>(parent())) {
+            tb->removeEventFilter(this);
+        }
+    }
+
     void refreshButtons();
 
     protected:
     bool eventFilter(QObject *watched, QEvent *event) override {
-        if (watched == parent() && event->type() == QEvent::ActionAdded) {
-            QTimer::singleShot(0, this, [this] { refreshButtons(); });
+        if (watched == parent()) {
+            if (event->type() == QEvent::Destroy) {
+                watched->removeEventFilter(this);
+                toolbar_ = nullptr;
+                return false;
+            }
+            if (event->type() == QEvent::ActionAdded) {
+                QTimer::singleShot(0, this, [this] { refreshButtons(); });
+            }
             return QObject::eventFilter(watched, event);
         }
 
@@ -60,6 +75,10 @@ class ToolbarKeyboardController final : public QObject {
 
     private:
     [[nodiscard]] bool isPopupExtensionButton(QToolButton *button) const {
+        if (!button)
+            return false;
+        if (button->property(PopupExtensionProperty).toBool())
+            return true;
         return toolbar_ &&
                button == openscpui::toolbarPopupExtensionButton(toolbar_);
     }
@@ -86,6 +105,7 @@ class ToolbarKeyboardController final : public QObject {
         indicators_.insert(button, indicator);
         button->installEventFilter(this);
         if (isPopupExtensionButton(button)) {
+            button->setProperty(PopupExtensionProperty, true);
             // Qt's toolbar extension is checkable because a QMainWindow
             // toolbar can expand in place. Pane toolbars use a popup menu
             // instead, where retaining that checked state leaves a stale dark
