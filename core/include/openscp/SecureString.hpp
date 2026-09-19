@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -93,18 +94,28 @@ class SecureString {
         std::atomic_signal_fence(std::memory_order_seq_cst);
     }
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
+#endif
     void assign(std::string_view value) {
-        if (value.empty()) {
+        if (value.empty() ||
+            value.size() >= static_cast<std::size_t>(
+                                (std::numeric_limits<std::ptrdiff_t>::max)())) {
             clear();
             return;
         }
-        auto replacement = std::make_unique<char[]>(value.size() + 1);
-        std::memcpy(replacement.get(), value.data(), value.size());
-        replacement[value.size()] = '\0';
+        const std::size_t len = value.size();
+        auto replacement = std::make_unique<char[]>(len + 1);
+        std::memcpy(replacement.get(), value.data(), len);
+        replacement[len] = '\0';
         clear();
         data_ = std::move(replacement);
-        size_ = value.size();
+        size_ = len;
     }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
     std::unique_ptr<char[]> data_;
     std::size_t size_ = 0;

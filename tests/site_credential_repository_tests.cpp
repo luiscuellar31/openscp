@@ -106,10 +106,11 @@ OPENSCP_TEST(testStableCredentialCopy, test) {
     SiteEntry target =
         site(QStringLiteral("target-id"), QStringLiteral("Duplicate"));
     const auto copied = repository.copy(source, target);
-    test.check(copied.issues.isEmpty() &&
-                   backend.values.value(SiteCredentialRepository::stableKey(
-                       target, SiteCredentialKind::Password)) ==
-                       "source-password",
+    const auto targetKey = SiteCredentialRepository::stableKey(
+        target, SiteCredentialKind::Password);
+    const auto iterator = backend.values.constFind(targetKey);
+    test.check(copied.issues.isEmpty() && iterator != backend.values.cend() &&
+                   iterator.value() == "source-password",
                "copy should duplicate credentials under the target identity");
 }
 
