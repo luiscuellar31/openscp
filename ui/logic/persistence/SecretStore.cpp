@@ -103,17 +103,16 @@ SecretStore::DeleteResult mapAppleDeleteStatus(OSStatus status) {
 
 } // namespace
 
-SecretStore::PersistResult SecretStore::setSecret(const QString &key,
-                                                  const openscp::SecureString &value) {
+SecretStore::PersistResult
+SecretStore::setSecret(const QString &key, const openscp::SecureString &value) {
     if (key.isEmpty()) {
         return {PersistStatus::BackendError,
                 QStringLiteral("Secret key is empty")};
     }
     CFStringRef account = cfAccount(key);
-    CFDataRef data =
-        CFDataCreate(kCFAllocatorDefault,
-                     reinterpret_cast<const UInt8 *>(value.data()),
-                     static_cast<CFIndex>(value.size()));
+    CFDataRef data = CFDataCreate(kCFAllocatorDefault,
+                                  reinterpret_cast<const UInt8 *>(value.data()),
+                                  static_cast<CFIndex>(value.size()));
     if (!account || !data) {
         if (data)
             CFRelease(data);
@@ -238,9 +237,8 @@ SecretStore::LoadResult SecretStore::getSecret(const QString &key) const {
                 {},
                 QStringLiteral("Keychain item contains invalid data")};
     }
-    openscp::SecureString out(
-        std::string_view(reinterpret_cast<const char *>(bytes),
-                         static_cast<std::size_t>(len)));
+    openscp::SecureString out(std::string_view(
+        reinterpret_cast<const char *>(bytes), static_cast<std::size_t>(len)));
     CFRelease(result);
     return {LoadStatus::Loaded, std::move(out), {}};
 }
@@ -319,8 +317,8 @@ SecretStore::LoadStatus dpapiLoadStatus(DWORD errorCode) {
 
 } // namespace
 
-SecretStore::PersistResult SecretStore::setSecret(const QString &key,
-                                                  const openscp::SecureString &value) {
+SecretStore::PersistResult
+SecretStore::setSecret(const QString &key, const openscp::SecureString &value) {
     if (key.isEmpty()) {
         return {PersistStatus::BackendError,
                 QStringLiteral("Secret key is empty")};
@@ -393,7 +391,7 @@ SecretStore::LoadResult SecretStore::getSecret(const QString &key) const {
 
     QByteArray protectedBytes =
         QByteArray::fromBase64(stored.sliced(sizeof(kDpapiPrefix) - 1),
-                                QByteArray::AbortOnBase64DecodingErrors);
+                               QByteArray::AbortOnBase64DecodingErrors);
     eraseByteArray(stored);
     QByteArray entropy(kDpapiEntropy);
     if (protectedBytes.isEmpty() || !fitsDataBlob(protectedBytes) ||
@@ -418,9 +416,9 @@ SecretStore::LoadResult SecretStore::getSecret(const QString &key) const {
                 dpapiError("CryptUnprotectData", unprotectError)};
     }
 
-    openscp::SecureString secret(std::string_view(
-        reinterpret_cast<const char *>(plaintextBlob.pbData),
-        static_cast<std::size_t>(plaintextBlob.cbData)));
+    openscp::SecureString secret(
+        std::string_view(reinterpret_cast<const char *>(plaintextBlob.pbData),
+                         static_cast<std::size_t>(plaintextBlob.cbData)));
     if (plaintextBlob.pbData) {
         SecureZeroMemory(plaintextBlob.pbData, plaintextBlob.cbData);
         LocalFree(plaintextBlob.pbData);
@@ -474,8 +472,8 @@ const SecretSchema *openscp_schema() {
 
 } // namespace
 
-SecretStore::PersistResult SecretStore::setSecret(const QString &key,
-                                                  const openscp::SecureString &value) {
+SecretStore::PersistResult
+SecretStore::setSecret(const QString &key, const openscp::SecureString &value) {
     if (key.isEmpty()) {
         return {PersistStatus::BackendError,
                 QStringLiteral("Secret key is empty")};
@@ -484,8 +482,7 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
     GError *gerr = nullptr;
     const gboolean ok = secret_password_store_sync(
         openscp_schema(), SECRET_COLLECTION_DEFAULT, "OpenSCP secret",
-        value.c_str(), nullptr, &gerr, "key", keyUtf8.constData(),
-        nullptr);
+        value.c_str(), nullptr, &gerr, "key", keyUtf8.constData(), nullptr);
     if (ok)
         return {PersistStatus::Stored, QString()};
     QString detail = gerr ? QString::fromUtf8(gerr->message)
@@ -572,8 +569,8 @@ bool fallbackEnabled() {
 } // namespace
 #endif
 
-SecretStore::PersistResult SecretStore::setSecret(const QString &key,
-                                                  const openscp::SecureString &value) {
+SecretStore::PersistResult
+SecretStore::setSecret(const QString &key, const openscp::SecureString &value) {
 #ifdef OPENSCP_BUILD_SECURE_ONLY
     Q_UNUSED(key);
     Q_UNUSED(value);
@@ -591,9 +588,9 @@ SecretStore::PersistResult SecretStore::setSecret(const QString &key,
     }
     openscpui::AppSettings settings(
         openscpui::AppSettings::Store::SecretFallback);
-    settings.setValue(key,
-                      QString::fromUtf8(value.data(),
-                                        static_cast<qsizetype>(value.size())));
+    settings.setValue(
+        key,
+        QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size())));
     const auto syncResult = settings.syncSecure();
     if (!syncResult.ok)
         return {PersistStatus::BackendError, syncResult.error};
@@ -625,8 +622,8 @@ SecretStore::LoadResult SecretStore::getSecret(const QString &key) const {
         return {LoadStatus::Missing, {}, {}};
     QString str = storedValue.toString();
     QByteArray utf8 = str.toUtf8();
-    openscp::SecureString out(
-        std::string_view(utf8.constData(), static_cast<std::size_t>(utf8.size())));
+    openscp::SecureString out(std::string_view(
+        utf8.constData(), static_cast<std::size_t>(utf8.size())));
     utf8.fill('\0');
     return {LoadStatus::Loaded, std::move(out), {}};
 #endif
@@ -671,8 +668,8 @@ bool SecretStore::insecureFallbackActive() {
 SecretStore::PersistResult SecretStore::setSecret(const QString &key,
                                                   const QString &value) {
     QByteArray utf8 = value.toUtf8();
-    openscp::SecureString sec(
-        std::string_view(utf8.constData(), static_cast<std::size_t>(utf8.size())));
+    openscp::SecureString sec(std::string_view(
+        utf8.constData(), static_cast<std::size_t>(utf8.size())));
     utf8.fill('\0');
     return setSecret(key, sec);
 }

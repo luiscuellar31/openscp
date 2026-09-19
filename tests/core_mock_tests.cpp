@@ -1193,7 +1193,8 @@ OPENSCP_TEST(test_libssh2_concurrent_disconnect_and_operations_safe, t) {
         while (!stop.load()) {
             (void)client.list("/test", entries, err);
             (void)client.stat("/test/file", info, err);
-            (void)client.get("/test/file", "/tmp/nonexistent", err, {}, {}, false);
+            (void)client.get("/test/file", "/tmp/nonexistent", err, {}, {},
+                             false);
         }
     });
 
@@ -1366,7 +1367,8 @@ OPENSCP_TEST(test_local_file_64bit_seek_and_size_large_offsets, t) {
         openscp::libssh2detail::seekLocalFile(f, largeOffset, &seekErr);
     t.check(seekOk, "seekLocalFile should succeed beyond 2 GiB boundary");
 
-    // Write 1 byte at 3 GiB to establish file size without allocating 3GB of disk blocks (sparse file)
+    // Write 1 byte at 3 GiB to establish file size without allocating 3GB of
+    // disk blocks (sparse file)
     const char byte = 'X';
     const size_t written = std::fwrite(&byte, 1, 1, f);
     t.check(written == 1, "fwrite at large offset should succeed");
@@ -1378,8 +1380,9 @@ OPENSCP_TEST(test_local_file_64bit_seek_and_size_large_offsets, t) {
     const bool sizeOk = openscp::libssh2detail::getLocalFileSize(
         tempPath.string(), measuredSize, &sizeErr);
     t.check(sizeOk, "getLocalFileSize should succeed for files > 2 GiB");
-    t.check(measuredSize == largeOffset + 1,
-            "measured size should accurately reflect 64-bit file size (> 2 GiB)");
+    t.check(
+        measuredSize == largeOffset + 1,
+        "measured size should accurately reflect 64-bit file size (> 2 GiB)");
 
     std::error_code ec;
     fs::remove(tempPath, ec);
@@ -1438,13 +1441,16 @@ OPENSCP_TEST(test_unique_sftp_handle_lifecycle_and_leak_prevention, t) {
         return 0;
     };
 
-    auto dummy1 = reinterpret_cast<LIBSSH2_SFTP_HANDLE *>(static_cast<std::uintptr_t>(0x1000));
-    auto dummy2 = reinterpret_cast<LIBSSH2_SFTP_HANDLE *>(static_cast<std::uintptr_t>(0x2000));
+    auto dummy1 = reinterpret_cast<LIBSSH2_SFTP_HANDLE *>(
+        static_cast<std::uintptr_t>(0x1000));
+    auto dummy2 = reinterpret_cast<LIBSSH2_SFTP_HANDLE *>(
+        static_cast<std::uintptr_t>(0x2000));
 
     // 1. RAII destruction closes the handle
     {
         openscp::libssh2detail::UniqueSftpHandle h(dummy1, testCloser);
-        t.check(static_cast<bool>(h), "handle should evaluate to true when set");
+        t.check(static_cast<bool>(h),
+                "handle should evaluate to true when set");
         t.check(h.get() == dummy1, "handle get() should return raw handle");
     }
     t.check(closeCallCount == 1, "destruction must close remote handle");
@@ -1458,16 +1464,19 @@ OPENSCP_TEST(test_unique_sftp_handle_lifecycle_and_leak_prevention, t) {
         t.check(!h, "closed handle should evaluate to false");
         t.check(h.get() == nullptr, "closed handle get() should be null");
     }
-    t.check(closeCallCount == 2, "destructor after close() must not double close");
+    t.check(closeCallCount == 2,
+            "destructor after close() must not double close");
 
     // 3. Self-reset must be a no-op and NOT close
     {
         openscp::libssh2detail::UniqueSftpHandle h(dummy1, testCloser);
         h.reset(dummy1);
         t.check(closeCallCount == 2, "self-reset must not invoke closer");
-        t.check(h.get() == dummy1, "handle should remain unchanged after self-reset");
+        t.check(h.get() == dummy1,
+                "handle should remain unchanged after self-reset");
     }
-    t.check(closeCallCount == 3, "destruction after self-reset should close once");
+    t.check(closeCallCount == 3,
+            "destruction after self-reset should close once");
 
     // 4. Move construction transfers ownership without closing
     {
@@ -1477,15 +1486,18 @@ OPENSCP_TEST(test_unique_sftp_handle_lifecycle_and_leak_prevention, t) {
         t.check(h2.get() == dummy1, "moved-to handle must hold dummy1");
         t.check(closeCallCount == 3, "move constructor must not invoke closer");
     }
-    t.check(closeCallCount == 4, "destruction of moved-to handle should close once");
+    t.check(closeCallCount == 4,
+            "destruction of moved-to handle should close once");
 
     // 5. Move assignment closes destination's existing handle and transfers
     {
         openscp::libssh2detail::UniqueSftpHandle h1(dummy1, testCloser);
         openscp::libssh2detail::UniqueSftpHandle h2(dummy2, testCloser);
         h2 = std::move(h1);
-        t.check(closeCallCount == 5, "move assignment must close old destination handle");
-        t.check(lastClosedHandle == dummy2, "closed old destination handle should be dummy2");
+        t.check(closeCallCount == 5,
+                "move assignment must close old destination handle");
+        t.check(lastClosedHandle == dummy2,
+                "closed old destination handle should be dummy2");
         t.check(h2.get() == dummy1, "moved-to handle should now hold dummy1");
         t.check(h1.get() == nullptr, "moved-from handle should now be null");
     }
@@ -1498,7 +1510,8 @@ OPENSCP_TEST(test_unique_sftp_handle_lifecycle_and_leak_prevention, t) {
         t.check(rel == dummy1, "release() must return raw handle");
         t.check(h.get() == nullptr, "handle after release must be null");
     }
-    t.check(closeCallCount == 6, "destructor after release() must not invoke closer");
+    t.check(closeCallCount == 6,
+            "destructor after release() must not invoke closer");
 }
 
 } // namespace

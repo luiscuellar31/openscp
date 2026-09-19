@@ -2326,8 +2326,8 @@ OPENSCP_TEST(testShutdownUnblocksConcurrentClearSessionWithoutRace, test) {
     QTemporaryDir destination;
 
     const quint64 taskId = manager->enqueueDownload(
-        QStringLiteral("/remote/shutdown-race"), destination.filePath("shutdown"),
-        testBatchOptions());
+        QStringLiteral("/remote/shutdown-race"),
+        destination.filePath("shutdown"), testBatchOptions());
     test.check(taskId > 0, "enqueued task ID should be valid");
     test.check(waitUntil([&] { return probe->gets.load() == 1; }),
                "worker transfer should start");
@@ -2358,7 +2358,8 @@ OPENSCP_TEST(testBandwidthLimiterExceptionSafetyAndCleanup, test) {
     limiter.setLimitKBps(32);
     test.check(limiter.queuedWaiters() == 0, "initial queue should be empty");
 
-    // 1. Exception thrown during shouldCancel unwinds stack and cleans up waiter via RAII
+    // 1. Exception thrown during shouldCancel unwinds stack and cleans up
+    // waiter via RAII
     bool exceptionCaught = false;
     try {
         [[maybe_unused]] const bool ignored =
@@ -2382,8 +2383,8 @@ OPENSCP_TEST(testBandwidthLimiterExceptionSafetyAndCleanup, test) {
     // 3. Dynamic limit disable unblocks queued waiters cleanly
     std::atomic<bool> workerFinished{false};
     std::thread worker([&] {
-        const bool ok = limiter.acquire(3, 512 * 1024,
-                                        [](std::uint64_t) { return false; });
+        const bool ok =
+            limiter.acquire(3, 512 * 1024, [](std::uint64_t) { return false; });
         workerFinished.store(ok);
     });
 
@@ -2408,13 +2409,12 @@ OPENSCP_TEST(testBandwidthLimiterConcurrentFifoFairness, test) {
     workers.reserve(kWorkerCount);
 
     for (int i = 0; i < kWorkerCount; ++i) {
-        workers.emplace_back(
-            [&, taskId = static_cast<std::uint64_t>(i + 1)] {
-                if (limiter.acquire(taskId, 4096,
-                                    [](std::uint64_t) { return false; })) {
-                    completedWorkers.fetch_add(1);
-                }
-            });
+        workers.emplace_back([&, taskId = static_cast<std::uint64_t>(i + 1)] {
+            if (limiter.acquire(taskId, 4096,
+                                [](std::uint64_t) { return false; })) {
+                completedWorkers.fetch_add(1);
+            }
+        });
     }
 
     for (auto &w : workers) {

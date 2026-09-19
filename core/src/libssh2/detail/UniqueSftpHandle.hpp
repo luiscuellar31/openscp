@@ -11,11 +11,11 @@ namespace openscp::libssh2detail {
 int defaultCloseSftpHandle(LIBSSH2_SFTP_HANDLE *handle) noexcept;
 
 /// RAII wrapper for LIBSSH2_SFTP_HANDLE*.
-/// Automatically closes the remote SFTP handle upon destruction or reassignment,
-/// ensuring remote handles are never leaked on cancellation, transfer errors,
-/// or early exits.
+/// Automatically closes the remote SFTP handle upon destruction or
+/// reassignment, ensuring remote handles are never leaked on cancellation,
+/// transfer errors, or early exits.
 class UniqueSftpHandle {
-public:
+    public:
     using CloseFunction = int (*)(LIBSSH2_SFTP_HANDLE *);
 
     UniqueSftpHandle() noexcept = default;
@@ -72,7 +72,7 @@ public:
             (void)closer_(old);
     }
 
-private:
+    private:
     LIBSSH2_SFTP_HANDLE *handle_ = nullptr;
     CloseFunction closer_ = &defaultCloseSftpHandle;
 };

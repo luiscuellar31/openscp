@@ -79,10 +79,10 @@ namespace openscp {
 
 namespace {
 
-template <typename Container>
-class CleanseOnScopeExit {
-public:
-    explicit CleanseOnScopeExit(Container &container, bool active = true) noexcept
+template <typename Container> class CleanseOnScopeExit {
+    public:
+    explicit CleanseOnScopeExit(Container &container,
+                                bool active = true) noexcept
         : container_(container), active_(active) {}
 
     ~CleanseOnScopeExit() { triggerNow(); }
@@ -101,7 +101,7 @@ public:
     CleanseOnScopeExit(const CleanseOnScopeExit &) = delete;
     CleanseOnScopeExit &operator=(const CleanseOnScopeExit &) = delete;
 
-private:
+    private:
     Container &container_;
     bool active_;
 };
@@ -1997,7 +1997,8 @@ bool establish_http_connect_tunnel(int sock, const SessionOptions &opt,
 
     std::string req;
     req.reserve(256 + (hasProxyAuth ? 128 : 0));
-    // Automatically wipe any sensitive Authorization header from RAM upon scope exit
+    // Automatically wipe any sensitive Authorization header from RAM upon scope
+    // exit
     CleanseOnScopeExit reqCleanse(req, hasProxyAuth);
 
     req += "CONNECT ";
@@ -2028,9 +2029,9 @@ bool establish_http_connect_tunnel(int sock, const SessionOptions &opt,
     }
     req += "\r\n";
 
-    if (!socket_send_all(
-            sock, reinterpret_cast<const unsigned char *>(req.data()),
-            req.size(), "HTTP CONNECT", err)) {
+    if (!socket_send_all(sock,
+                         reinterpret_cast<const unsigned char *>(req.data()),
+                         req.size(), "HTTP CONNECT", err)) {
         return false;
     }
 
@@ -3404,9 +3405,10 @@ bool Libssh2SftpClient::get(
 
     if (streamIntegrity) {
         LIBSSH2_SFTP_ATTRIBUTES after{};
-        const bool remoteChanged = (hasTotal && done != total) ||
-                                   (libssh2_sftp_fstat_ex(rh.get(), &after, 0) == 0 &&
-                                    remote_file_changed(st, after));
+        const bool remoteChanged =
+            (hasTotal && done != total) ||
+            (libssh2_sftp_fstat_ex(rh.get(), &after, 0) == 0 &&
+             remote_file_changed(st, after));
         if (remoteChanged) {
             // The .part mixes versions of the file, so a retry must start
             // over. The change is usually brief, so the queue may retry.
@@ -3561,7 +3563,8 @@ bool Libssh2SftpClient::put(
 
     // If resuming, advance local and remote
     if (resume && startOffset > 0 && startOffset < localSize) {
-        libssh2_sftp_seek64(wh.get(), static_cast<libssh2_uint64_t>(startOffset));
+        libssh2_sftp_seek64(wh.get(),
+                            static_cast<libssh2_uint64_t>(startOffset));
         std::string seekErr;
         if (!seek_local_file(localFile.get(), startOffset, &seekErr)) {
             const int nativeError = errno;
@@ -3626,9 +3629,10 @@ bool Libssh2SftpClient::put(
     if (streamIntegrity) {
         LIBSSH2_SFTP_ATTRIBUTES written{};
         const bool sizeChanged =
-            done != total || (libssh2_sftp_fstat_ex(wh.get(), &written, 0) == 0 &&
-                              (written.flags & LIBSSH2_SFTP_ATTR_SIZE) != 0 &&
-                              written.filesize != done);
+            done != total ||
+            (libssh2_sftp_fstat_ex(wh.get(), &written, 0) == 0 &&
+             (written.flags & LIBSSH2_SFTP_ATTR_SIZE) != 0 &&
+             written.filesize != done);
         if (sizeChanged) {
             err = "Final integrity check failed (upload): local or remote "
                   "size changed during transfer";

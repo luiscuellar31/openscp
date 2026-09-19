@@ -52,7 +52,7 @@ class SiteCredentialRepository {
     removeAll(const SiteEntry &site);
 
     [[nodiscard]] static QString stableKey(const SiteEntry &site,
-                                            SiteCredentialKind kind);
+                                           SiteCredentialKind kind);
     [[nodiscard]] static QString itemName(SiteCredentialKind kind);
     [[nodiscard]] static QString itemLabel(SiteCredentialKind kind);
     [[nodiscard]] static QString statusLabel(SecretStore::PersistStatus status);

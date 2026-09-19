@@ -177,9 +177,10 @@ QString SiteCredentialRepository::stableKey(const SiteEntry &site,
         .arg(site.siteId.trimmed(), itemName(kind));
 }
 
-SecretStore::PersistResult SiteCredentialRepository::storeValue(
-    const SiteEntry &site, SiteCredentialKind kind,
-    const openscp::SecureString &value) {
+SecretStore::PersistResult
+SiteCredentialRepository::storeValue(const SiteEntry &site,
+                                     SiteCredentialKind kind,
+                                     const openscp::SecureString &value) {
     return backend_.store(stableKey(site, kind), value);
 }
 

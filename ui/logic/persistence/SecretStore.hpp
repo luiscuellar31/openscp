@@ -3,6 +3,7 @@
 // secure platform backend is available.
 #pragma once
 #include "openscp/SecureString.hpp"
+
 #include <QString>
 
 // Minimal platform secret-store abstraction.
@@ -58,7 +59,8 @@ class SecretStore {
     };
 
     // Store a secret under a logical key (e.g. "site-id:<uuid>:password").
-    PersistResult setSecret(const QString &key, const openscp::SecureString &value);
+    PersistResult setSecret(const QString &key,
+                            const openscp::SecureString &value);
     PersistResult setSecret(const QString &key, const QString &value);
 
     // Retrieve a secret if present.
