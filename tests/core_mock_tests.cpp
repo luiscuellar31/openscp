@@ -1385,6 +1385,46 @@ OPENSCP_TEST(test_local_file_64bit_seek_and_size_large_offsets, t) {
     fs::remove_all(tempPath.parent_path(), ec);
 }
 
+OPENSCP_TEST(test_unique_file_self_reset_and_move_prevent_double_close, t) {
+    static int closeCallCount = 0;
+    closeCallCount = 0;
+
+    auto testCloser = [](std::FILE *fp) -> int {
+        ++closeCallCount;
+        return std::fclose(fp);
+    };
+
+    const fs::path tempPath = makeTempFilePath("openscp-uniquefile-test");
+    std::FILE *rawFile = std::fopen(tempPath.string().c_str(), "w+b");
+    t.check(rawFile != nullptr, "file should open for UniqueFile test");
+    if (!rawFile)
+        return;
+
+    {
+        openscp::UniqueFile uf(rawFile, testCloser);
+        t.check(uf.get() == rawFile, "UniqueFile should manage raw file");
+
+        // Self-reset: must be a no-op and NOT close or double-free the handle
+        uf.reset(uf.get());
+        t.check(closeCallCount == 0, "self-reset must not invoke closer");
+        t.check(uf.get() == rawFile, "self-reset must preserve file handle");
+
+        // Another self-reset with closer
+        uf.reset(uf.get(), testCloser);
+        t.check(closeCallCount == 0,
+                "self-reset with closer must not invoke closer");
+        t.check(uf.get() == rawFile, "file handle must remain valid");
+    }
+
+    // Now uf went out of scope: closer should have been called exactly once
+    t.check(closeCallCount == 1,
+            "closer should be called exactly once upon UniqueFile destruction");
+
+    std::error_code ec;
+    fs::remove(tempPath, ec);
+    fs::remove_all(tempPath.parent_path(), ec);
+}
+
 } // namespace
 
 int main() {
