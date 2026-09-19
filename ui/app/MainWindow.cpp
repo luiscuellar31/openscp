@@ -218,6 +218,8 @@ MainWindow::~MainWindow() {
 }
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
+    Q_INIT_RESOURCE(app_icons);
+    Q_INIT_RESOURCE(credits);
     focusTraversalController_ = new openscpui::FocusTraversalController(this);
     uploadSourcePicker_ = openscpui::createPlatformFilePicker();
     QPointer<MainWindow> self(this);

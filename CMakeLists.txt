@@ -666,12 +666,12 @@ foreach(icon ${ICON_FILES})
     set_source_files_properties(${icon} PROPERTIES QT_RESOURCE_ALIAS icons/${_name})
 endforeach()
 
-qt_add_resources(openscp app_icons
+qt_add_resources(openscp_ui_widgets app_icons
     PREFIX "/assets"
     FILES ${ICON_FILES}
 )
 
-qt_add_resources(openscp credits
+qt_add_resources(openscp_ui_widgets credits
     PREFIX "/credits"
     BASE docs/credits
     FILES

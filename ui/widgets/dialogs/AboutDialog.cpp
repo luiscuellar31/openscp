@@ -125,6 +125,8 @@ QVector<CreditSection> splitCreditSections(const QString &markdown) {
 } // namespace
 
 AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
+    Q_INIT_RESOURCE(app_icons);
+    Q_INIT_RESOURCE(credits);
     setWindowTitle(tr("About OpenSCP"));
 
     auto *root = new QVBoxLayout(this);
