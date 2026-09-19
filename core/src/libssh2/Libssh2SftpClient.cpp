@@ -53,6 +53,7 @@ extern char **environ;
 #else
 #include <windows.h>
 #endif
+#include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
@@ -77,6 +78,33 @@ extern char **environ;
 namespace openscp {
 
 namespace {
+
+template <typename Container>
+class CleanseOnScopeExit {
+public:
+    explicit CleanseOnScopeExit(Container &container, bool active = true) noexcept
+        : container_(container), active_(active) {}
+
+    ~CleanseOnScopeExit() { triggerNow(); }
+
+    void dismiss() noexcept { active_ = false; }
+
+    void triggerNow() noexcept {
+        if (active_ && container_.capacity() > 0) {
+            OPENSSL_cleanse(container_.data(),
+                            container_.capacity() *
+                                sizeof(typename Container::value_type));
+            active_ = false;
+        }
+    }
+
+    CleanseOnScopeExit(const CleanseOnScopeExit &) = delete;
+    CleanseOnScopeExit &operator=(const CleanseOnScopeExit &) = delete;
+
+private:
+    Container &container_;
+    bool active_;
+};
 
 enum class CoreLogLevel : int {
     Off = 0,
@@ -986,12 +1014,12 @@ bool persist_text_atomic(const std::string &path, const std::string &content,
 }
 #endif
 
-// Simple Base64 encoder (standard, with '=' padding)
-std::string b64encode(const unsigned char *data, std::size_t len) {
+// Simple Base64 encoder appending directly to output string
+void b64encode_append(const unsigned char *data, std::size_t len,
+                      std::string &out) {
     static constexpr char kTable[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string out;
-    out.reserve(((len + 2) / 3) * 4);
+    out.reserve(out.size() + ((len + 2) / 3) * 4);
     std::size_t i = 0;
     while (i + 3 <= len) {
         const unsigned int v = (static_cast<unsigned int>(data[i]) << 16U) |
@@ -1017,6 +1045,12 @@ std::string b64encode(const unsigned char *data, std::size_t len) {
         out.push_back(kTable[(v >> 6) & 0x3F]);
         out.push_back('=');
     }
+}
+
+// Simple Base64 encoder (standard, with '=' padding)
+std::string b64encode(const unsigned char *data, std::size_t len) {
+    std::string out;
+    b64encode_append(data, len, out);
     return out;
 }
 
@@ -1273,10 +1307,8 @@ void kbint_password_callback(const char *name, int name_len,
         }
         auto scrubAnswers = [&answers]() {
             for (std::string &answer : answers) {
-                if (!answer.empty()) {
-                    volatile char *bytes = answer.data();
-                    for (std::size_t i = 0; i < answer.size(); ++i)
-                        bytes[i] = 0;
+                if (answer.capacity() > 0) {
+                    OPENSSL_cleanse(answer.data(), answer.capacity());
                     answer.clear();
                 }
             }
@@ -1858,13 +1890,16 @@ bool establish_socks5_tunnel(int sock, const SessionOptions &opt,
         }
         std::vector<unsigned char> authReq;
         authReq.reserve(3 + user.size() + pass.size());
+        CleanseOnScopeExit authCleanse(authReq);
         authReq.push_back(0x01);
         authReq.push_back(static_cast<unsigned char>(user.size()));
         authReq.insert(authReq.end(), user.begin(), user.end());
         authReq.push_back(static_cast<unsigned char>(pass.size()));
         authReq.insert(authReq.end(), pass.begin(), pass.end());
-        if (!socket_send_all(sock, authReq.data(), authReq.size(),
-                             "SOCKS5 auth", err)) {
+        const bool sent = socket_send_all(sock, authReq.data(), authReq.size(),
+                                          "SOCKS5 auth", err);
+        authCleanse.triggerNow();
+        if (!sent) {
             return false;
         }
         unsigned char authResp[2] = {0, 0};
@@ -1955,13 +1990,26 @@ bool establish_http_connect_tunnel(int sock, const SessionOptions &opt,
     }
     const std::string authority =
         format_host_port_authority(opt.host, opt.port);
-    std::ostringstream req;
-    req << "CONNECT " << authority << " HTTP/1.1\r\n";
-    req << "Host: " << authority << "\r\n";
-    req << "Proxy-Connection: Keep-Alive\r\n";
-    req << "User-Agent: OpenSCP\r\n";
-    if ((opt.proxy_username && !opt.proxy_username->empty()) ||
-        (opt.proxy_password && !opt.proxy_password->empty())) {
+
+    const bool hasProxyAuth =
+        (opt.proxy_username && !opt.proxy_username->empty()) ||
+        (opt.proxy_password && !opt.proxy_password->empty());
+
+    std::string req;
+    req.reserve(256 + (hasProxyAuth ? 128 : 0));
+    // Automatically wipe any sensitive Authorization header from RAM upon scope exit
+    CleanseOnScopeExit reqCleanse(req, hasProxyAuth);
+
+    req += "CONNECT ";
+    req += authority;
+    req += " HTTP/1.1\r\n";
+    req += "Host: ";
+    req += authority;
+    req += "\r\n";
+    req += "Proxy-Connection: Keep-Alive\r\n";
+    req += "User-Agent: OpenSCP\r\n";
+
+    if (hasProxyAuth) {
         const std::string user =
             opt.proxy_username ? *opt.proxy_username : std::string();
         std::string creds = user + ":";
@@ -1969,17 +2017,20 @@ bool establish_http_connect_tunnel(int sock, const SessionOptions &opt,
             creds.append(opt.proxy_password->data(),
                          opt.proxy_password->size());
         }
-        req << "Proxy-Authorization: Basic "
-            << b64encode(reinterpret_cast<const unsigned char *>(creds.data()),
-                         creds.size())
-            << "\r\n";
-        std::fill(creds.begin(), creds.end(), '\0');
+        CleanseOnScopeExit credsCleanse(creds);
+
+        req += "Proxy-Authorization: Basic ";
+        b64encode_append(reinterpret_cast<const unsigned char *>(creds.data()),
+                         creds.size(), req);
+        req += "\r\n";
+
+        credsCleanse.triggerNow();
     }
-    req << "\r\n";
-    const std::string payload = req.str();
+    req += "\r\n";
+
     if (!socket_send_all(
-            sock, reinterpret_cast<const unsigned char *>(payload.data()),
-            payload.size(), "HTTP CONNECT", err)) {
+            sock, reinterpret_cast<const unsigned char *>(req.data()),
+            req.size(), "HTTP CONNECT", err)) {
         return false;
     }
 
