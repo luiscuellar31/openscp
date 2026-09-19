@@ -61,6 +61,7 @@
 #include <QStatusBar>
 #include <QStyle>
 #include <QTabWidget>
+#include <QThreadPool>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -204,11 +205,16 @@ QString trimNavigationLabel(const QString &raw, int maxLen = 96) {
 MainWindow::~MainWindow() {
     hostKeyPromptCoordinator_.cancel();
     sessionHealthMonitor_.stop();
-    if (transferCleanupFuture_.valid()) {
-        if (transferMgr_)
-            transferMgr_->shutdown();
+    if (sessionController_)
+        sessionController_->requestConnectionCancellation();
+    cancelLocalUploadDiscoveries();
+    if (remoteScanCancelRequested_)
+        remoteScanCancelRequested_->store(true);
+    if (transferMgr_)
+        transferMgr_->shutdown();
+    if (transferCleanupFuture_.valid())
         transferCleanupFuture_.wait();
-    }
+    QThreadPool::globalInstance()->waitForDone();
 }
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
@@ -1409,6 +1415,9 @@ void MainWindow::closeEvent(QCloseEvent *e) {
         pendingCloseAfterDisconnect_ = true;
         e->ignore();
         return;
+    }
+    if (sessionController_->isConnecting()) {
+        sessionController_->requestConnectionCancellation();
     }
     if (rightIsRemote_) {
         pendingCloseAfterDisconnect_ = true;
