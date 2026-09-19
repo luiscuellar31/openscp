@@ -39,7 +39,7 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             cmake ninja-build netcat-openbsd openssh-server pkg-config \
             libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev libsecret-1-dev \
-            qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools \
+            qt6-base-dev libqt6svg6-dev qt6-tools-dev qt6-tools-dev-tools \
             qt6-l10n-tools libgl1-mesa-dev
 
       - name: Start isolated SSH service
@@ -177,7 +177,7 @@ jobs:
             apache2 apache2-utils curl netcat-openbsd openssl shellcheck vsftpd \
             cmake ninja-build pkg-config \
             libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev libsecret-1-dev \
-            qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools \
+            qt6-base-dev libqt6svg6-dev qt6-tools-dev qt6-tools-dev-tools \
             qt6-l10n-tools libgl1-mesa-dev
 
       - name: Validate service scripts
@@ -335,7 +335,7 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             clang cmake ninja-build pkg-config \
             libssh2-1-dev libssl-dev libcurl4-openssl-dev libtinyxml2-dev libsecret-1-dev \
-            qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools \
+            qt6-base-dev libqt6svg6-dev qt6-tools-dev qt6-tools-dev-tools \
             qt6-l10n-tools libgl1-mesa-dev
 
       - name: Configure instrumented build
