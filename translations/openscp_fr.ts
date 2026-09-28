@@ -4302,6 +4302,12 @@ Copier ses identifiants enregistrés vers le duplicata ?</translation>
 <context>
     <name>SyncDialog</name>
     <message>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="242"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="558"/>
+        <source>Source scan did not verify this path; mirror deletion was omitted</source>
+        <translation>L’analyse de la source n’a pas vérifié ce chemin ; sa suppression par miroir a été ignorée</translation>
+    </message>
+    <message>
         <location filename="../ui/widgets/dialogs/SyncDialog.cpp" line="286"/>
         <source>Compare and synchronize directories</source>
         <translation>Comparer et synchroniser des dossiers</translation>

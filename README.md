@@ -119,6 +119,10 @@ folders. Synchronization resolves a linked local root to its physical path and
 rejects linked folders below that root. Choose the physical destination folder
 when a download path contains a link.
 
+Mirror proposes deletions only where the source scan verified that items are
+absent. Skipped links, unreadable folders, and depth limits keep destination
+items in those unverified subtrees.
+
 ## Path navigation
 
 Each panel presents its current location as one conventional path field. Click

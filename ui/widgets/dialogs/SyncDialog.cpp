@@ -456,6 +456,12 @@ void SyncDialog::setSnapshots(QVector<SyncSnapshotEntry> localSnapshot,
     rebuildComparison();
 }
 
+void SyncDialog::setScanCoverage(SyncScanCoverage coverage) {
+    coverage_ = std::move(coverage);
+    if (!localSnapshot_.isEmpty() || !remoteSnapshot_.isEmpty())
+        rebuildComparison();
+}
+
 void SyncDialog::setRootPaths(const QString &localRoot,
                               const QString &remoteRoot) {
     localRoot_ = localRoot;
@@ -504,8 +510,8 @@ QVector<SyncComparisonItem> SyncDialog::comparisonItems() const {
 }
 
 SyncExecutionPlan SyncDialog::executionPlan() const {
-    return SyncComparisonEngine::makeExecutionPlan(comparisonItems(),
-                                                   comparisonOptions());
+    return SyncComparisonEngine::makeExecutionPlan(
+        comparisonItems(), comparisonOptions(), coverage_);
 }
 
 void SyncDialog::rebuildComparison() {
@@ -527,10 +533,11 @@ void SyncDialog::rebuildComparison() {
     const QVector<SyncSnapshotEntry> local = localSnapshot_;
     const QVector<SyncSnapshotEntry> remote = remoteSnapshot_;
     const SyncComparisonOptions options = options_;
+    const SyncScanCoverage coverage = coverage_;
     QThreadPool::globalInstance()->start(
-        [self, generation, local, remote, options] {
+        [self, generation, local, remote, options, coverage] {
             QVector<SyncComparisonItem> items =
-                SyncComparisonEngine::compare(local, remote, options);
+                SyncComparisonEngine::compare(local, remote, options, coverage);
             QMetaObject::invokeMethod(
                 qApp,
                 [self, generation, items = std::move(items)]() mutable {

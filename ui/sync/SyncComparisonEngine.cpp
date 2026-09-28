@@ -122,6 +122,32 @@ QString parentRelativePath(const QString &relativePath) {
                                  : relativePath.left(separatorPosition);
 }
 
+QSet<QString> unscannedSourceAncestors(const QSet<QString> &unscannedPaths) {
+    QSet<QString> ancestors;
+    for (const QString &unscanned : unscannedPaths) {
+        QString parent = parentRelativePath(unscanned);
+        while (!parent.isEmpty()) {
+            ancestors.insert(parent);
+            parent = parentRelativePath(parent);
+        }
+    }
+    return ancestors;
+}
+
+bool sourcePathUnscanned(const QString &path,
+                         const QSet<QString> &unscannedPaths,
+                         const QSet<QString> &unscannedAncestors) {
+    if (unscannedPaths.contains(QString()) || unscannedAncestors.contains(path))
+        return true;
+    QString current = path;
+    while (!current.isEmpty()) {
+        if (unscannedPaths.contains(current))
+            return true;
+        current = parentRelativePath(current);
+    }
+    return false;
+}
+
 int pathDepth(const QString &relativePath) {
     return relativePath.isEmpty()
                ? 0
@@ -179,7 +205,8 @@ std::optional<bool> equalComparableChecksums(const SyncSnapshotEntry &source,
 SyncComparisonItem classifyItem(const QString &relativePath,
                                 std::optional<SyncSnapshotEntry> source,
                                 std::optional<SyncSnapshotEntry> destination,
-                                const SyncComparisonOptions &options) {
+                                const SyncComparisonOptions &options,
+                                bool sourceUnscanned) {
     SyncComparisonItem item;
     item.relativePath = relativePath;
     item.source = std::move(source);
@@ -208,6 +235,12 @@ SyncComparisonItem classifyItem(const QString &relativePath,
             item.action = SyncAction::Keep;
             item.reason = QCoreApplication::translate(
                 "SyncDialog", "Only in the destination; mirror is disabled");
+        } else if (sourceUnscanned) {
+            item.action = SyncAction::Keep;
+            item.reason = QCoreApplication::translate(
+                "SyncDialog",
+                "Source scan did not verify this path; mirror deletion was "
+                "omitted");
         } else if (item.destination->type == SyncEntryType::Directory) {
             item.action = SyncAction::DeleteDirectory;
             item.reason = QCoreApplication::translate(
@@ -363,9 +396,16 @@ bool SyncComparisonEngine::globMatches(const QString &relativePath,
 QVector<SyncComparisonItem>
 SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
                               const QVector<SyncSnapshotEntry> &remoteSnapshot,
-                              const SyncComparisonOptions &options) {
+                              const SyncComparisonOptions &options,
+                              const SyncScanCoverage &coverage) {
     const EntryIndex local = buildEntryIndex(localSnapshot);
     const EntryIndex remote = buildEntryIndex(remoteSnapshot);
+    const QSet<QString> &unscannedPaths =
+        options.direction == SyncDirection::LocalToRemote
+            ? coverage.localUnscannedPaths
+            : coverage.remoteUnscannedPaths;
+    const QSet<QString> unscannedAncestors =
+        unscannedSourceAncestors(unscannedPaths);
 
     QSet<QString> allPaths;
     allPaths.reserve(local.size() + remote.size());
@@ -432,18 +472,28 @@ SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
             if (localEntry != local.cend())
                 destination = *localEntry;
         }
+        const bool sourceUnscanned =
+            options.mirror && !source && destination &&
+            sourcePathUnscanned(path, unscannedPaths, unscannedAncestors);
         result.push_back(classifyItem(path, std::move(source),
-                                      std::move(destination), options));
+                                      std::move(destination), options,
+                                      sourceUnscanned));
     }
     return result;
 }
 
 SyncExecutionPlan SyncComparisonEngine::makeExecutionPlan(
     const QVector<SyncComparisonItem> &items,
-    const SyncComparisonOptions &options) {
+    const SyncComparisonOptions &options, const SyncScanCoverage &coverage) {
     SyncExecutionPlan plan;
     plan.direction = options.direction;
     plan.mirror = options.mirror;
+    const QSet<QString> &unscannedPaths =
+        options.direction == SyncDirection::LocalToRemote
+            ? coverage.localUnscannedPaths
+            : coverage.remoteUnscannedPaths;
+    const QSet<QString> unscannedAncestors =
+        unscannedSourceAncestors(unscannedPaths);
 
     QSet<QString> destinationDirectories;
     QSet<QString> directoriesToCreate;
@@ -497,6 +547,15 @@ SyncExecutionPlan SyncComparisonEngine::makeExecutionPlan(
         }
         if (options.mirror && (item.action == SyncAction::DeleteFile ||
                                item.action == SyncAction::DeleteDirectory)) {
+            if (sourcePathUnscanned(path, unscannedPaths, unscannedAncestors)) {
+                plan.warnings.push_back(
+                    QCoreApplication::translate(
+                        "SyncDialog",
+                        "Source scan did not verify this path; mirror deletion "
+                        "was omitted") +
+                    QStringLiteral(": ") + path);
+                continue;
+            }
             if (deletedPaths.contains(path))
                 continue;
             deletedPaths.insert(path);

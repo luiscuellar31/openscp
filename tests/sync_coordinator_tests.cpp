@@ -4,6 +4,7 @@
 #include "logic/sync/SyncCoordinator.hpp"
 #include "logic/transfers/TransferManager.hpp"
 #include "mock/MockSftpClient.hpp"
+#include "sync/SyncComparisonEngine.hpp"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -78,6 +79,19 @@ class ChecksumMockClient final : public openscp::MockSftpClient {
     }
 };
 
+class IncompleteListingMockClient final : public openscp::MockSftpClient {
+    public:
+    bool list(const std::string &remotePath,
+              std::vector<openscp::FileInfo> &entries,
+              std::string &error) override {
+        if (remotePath == "/home") {
+            error = "Could not read /home";
+            return false;
+        }
+        return MockSftpClient::list(remotePath, entries, error);
+    }
+};
+
 OPENSCP_TEST(testAsynchronousSnapshots, test) {
     QTemporaryDir localRoot;
     test.check(localRoot.isValid(), "local snapshot fixture should initialize");
@@ -146,6 +160,178 @@ OPENSCP_TEST(testAsynchronousSnapshots, test) {
                "local files and empty folders should enter the snapshot");
     test.check(contains(prepared.remoteSnapshot, QStringLiteral("readme.txt")),
                "remote controller batches should enter the snapshot");
+}
+
+OPENSCP_TEST(testMirrorDoesNotDeleteSkippedSourceLink, test) {
+#ifndef _WIN32
+    QTemporaryDir localRoot;
+    QTemporaryDir outside;
+    test.check(localRoot.isValid() && outside.isValid(),
+               "mirror scan fixtures should initialize");
+    test.check(QFile::link(outside.path(), localRoot.filePath("readme.txt")),
+               "source link should be created");
+
+    RemoteOperationController remote;
+    test.check(remote.installSession(
+                   connectedClient<openscp::MockSftpClient>("sync.test")) > 0,
+               "remote controller should accept a connected session");
+    TransferManager transfers;
+    SyncCoordinator coordinator(&remote, &transfers);
+    bool ready = false;
+    SyncPreparationResult prepared;
+    QObject::connect(&coordinator, &SyncCoordinator::preparationReady,
+                     &coordinator, [&](const SyncPreparationResult &result) {
+                         prepared = result;
+                         ready = true;
+                     });
+    coordinator.start(localRoot.path(), QStringLiteral("/"));
+    test.check(waitUntil([&] { return ready; }),
+               "scan with a skipped source link should complete");
+    test.check(prepared.skippedSymlinks > 0,
+               "scan should report the skipped source link");
+    test.check(prepared.coverage.localUnscannedPaths.contains(
+                   QStringLiteral("readme.txt")),
+               "scan should retain the exact unverified source path");
+
+    SyncComparisonOptions options;
+    options.mirror = true;
+    const auto items = SyncComparisonEngine::compare(
+        prepared.localSnapshot, prepared.remoteSnapshot, options,
+        prepared.coverage);
+    const auto deleted = std::find_if(
+        items.cbegin(), items.cend(), [](const SyncComparisonItem &item) {
+            return item.relativePath == QStringLiteral("readme.txt") &&
+                   item.action == SyncAction::DeleteFile;
+        });
+    test.check(deleted == items.cend(),
+               "mirror must not infer absence from a skipped source link");
+    const auto healthySibling = std::find_if(
+        items.cbegin(), items.cend(), [](const SyncComparisonItem &item) {
+            return item.relativePath == QStringLiteral("home") &&
+                   item.action == SyncAction::DeleteDirectory;
+        });
+    test.check(healthySibling != items.cend(),
+               "mirror can still propose a deletion outside the skipped path");
+
+    const auto staleItems = SyncComparisonEngine::compare(
+        prepared.localSnapshot, prepared.remoteSnapshot, options);
+    const auto plan = SyncComparisonEngine::makeExecutionPlan(
+        staleItems, options, prepared.coverage);
+    test.check(std::none_of(plan.deletes.cbegin(), plan.deletes.cend(),
+                            [](const SyncDeleteOperation &deletion) {
+                                return deletion.relativePath ==
+                                       QStringLiteral("readme.txt");
+                            }),
+               "the execution plan must also reject a stale unsafe deletion");
+#endif
+}
+
+OPENSCP_TEST(testMirrorDoesNotDeleteUnlistedRemoteSubtree, test) {
+    QTemporaryDir localRoot;
+    test.check(localRoot.isValid(), "local mirror fixture should initialize");
+    test.check(QDir().mkpath(localRoot.filePath("home")),
+               "local destination folder should be created");
+    for (const QString &path :
+         {QStringLiteral("home/notes.md"), QStringLiteral("unrelated.txt")}) {
+        QFile file(localRoot.filePath(path));
+        test.check(file.open(QIODevice::WriteOnly),
+                   "local destination file should be created");
+    }
+
+    RemoteOperationController remote;
+    test.check(remote.installSession(
+                   connectedClient<IncompleteListingMockClient>("sync.test")) >
+                   0,
+               "remote controller should accept a connected session");
+    TransferManager transfers;
+    SyncCoordinator coordinator(&remote, &transfers);
+    bool ready = false;
+    SyncPreparationResult prepared;
+    QObject::connect(&coordinator, &SyncCoordinator::preparationReady,
+                     &coordinator, [&](const SyncPreparationResult &result) {
+                         prepared = result;
+                         ready = true;
+                     });
+    coordinator.start(localRoot.path(), QStringLiteral("/"));
+    test.check(waitUntil([&] { return ready; }),
+               "a partially listed remote tree should produce a preview");
+    test.check(
+        prepared.coverage.remoteUnscannedPaths.contains(QStringLiteral("home")),
+        "the failed remote subtree should be recorded");
+
+    SyncComparisonOptions options;
+    options.direction = SyncDirection::RemoteToLocal;
+    options.mirror = true;
+    const auto items = SyncComparisonEngine::compare(
+        prepared.localSnapshot, prepared.remoteSnapshot, options,
+        prepared.coverage);
+    const auto actionFor = [&items](const QString &path) {
+        const auto found =
+            std::find_if(items.cbegin(), items.cend(),
+                         [&path](const SyncComparisonItem &item) {
+                             return item.relativePath == path;
+                         });
+        return found == items.cend() ? SyncAction::Unknown : found->action;
+    };
+    test.check(
+        actionFor(QStringLiteral("home/notes.md")) == SyncAction::Keep,
+        "mirror must preserve entries under an unreadable source folder");
+    test.check(actionFor(QStringLiteral("unrelated.txt")) ==
+                   SyncAction::DeleteFile,
+               "mirror can still delete verified destination extras");
+}
+
+OPENSCP_TEST(testMirrorDoesNotDeleteUnreadableLocalSubtree, test) {
+#ifndef _WIN32
+    QTemporaryDir localRoot;
+    test.check(localRoot.isValid(), "local mirror fixture should initialize");
+    const QString locked = localRoot.filePath("home");
+    test.check(QDir().mkpath(locked), "local source folder should be created");
+    test.check(QFile::setPermissions(locked, QFileDevice::Permissions{}),
+               "local source folder should become unreadable");
+
+    RemoteOperationController remote;
+    test.check(remote.installSession(
+                   connectedClient<openscp::MockSftpClient>("sync.test")) > 0,
+               "remote controller should accept a connected session");
+    TransferManager transfers;
+    SyncCoordinator coordinator(&remote, &transfers);
+    bool ready = false;
+    SyncPreparationResult prepared;
+    QObject::connect(&coordinator, &SyncCoordinator::preparationReady,
+                     &coordinator, [&](const SyncPreparationResult &result) {
+                         prepared = result;
+                         ready = true;
+                     });
+    coordinator.start(localRoot.path(), QStringLiteral("/"));
+    const bool completed = waitUntil([&] { return ready; });
+    QFile::setPermissions(locked, QFileDevice::ReadOwner |
+                                      QFileDevice::WriteOwner |
+                                      QFileDevice::ExeOwner);
+    test.check(completed, "scan with an unreadable local folder should finish");
+    test.check(
+        prepared.coverage.localUnscannedPaths.contains(QStringLiteral("home")),
+        "unreadable local subtree should be recorded");
+
+    SyncComparisonOptions options;
+    options.mirror = true;
+    const auto items = SyncComparisonEngine::compare(
+        prepared.localSnapshot, prepared.remoteSnapshot, options,
+        prepared.coverage);
+    const auto actionFor = [&items](const QString &path) {
+        const auto found =
+            std::find_if(items.cbegin(), items.cend(),
+                         [&path](const SyncComparisonItem &item) {
+                             return item.relativePath == path;
+                         });
+        return found == items.cend() ? SyncAction::Unknown : found->action;
+    };
+    test.check(actionFor(QStringLiteral("home/demo")) == SyncAction::Keep,
+               "mirror must preserve remote children of an unreadable source");
+    test.check(actionFor(QStringLiteral("readme.txt")) ==
+                   SyncAction::DeleteFile,
+               "unrelated verified destination extras can still be deleted");
+#endif
 }
 
 OPENSCP_TEST(testPersistentExecutionPlan, test) {

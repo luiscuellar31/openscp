@@ -6,6 +6,7 @@
 #include <QByteArray>
 #include <QMetaType>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include <QtGlobal>
 
@@ -208,6 +209,7 @@ struct Completion {
     quint64 depthLimits = 0;
     quint64 invalidNames = 0;
     quint64 unknownSizes = 0;
+    QStringList unscannedPaths;
 };
 
 } // namespace openscp::remote_operation

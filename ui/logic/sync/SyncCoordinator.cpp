@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -99,6 +100,7 @@ SyncCoordinator::SyncCoordinator(RemoteOperationController *remoteOperations,
                         entry.relativePath);
                 if (relative.isEmpty()) {
                     ++state->result.invalidNames;
+                    state->result.coverage.remoteUnscannedPaths.insert({});
                     continue;
                 }
 
@@ -158,34 +160,50 @@ SyncCoordinator::SyncCoordinator(RemoteOperationController *remoteOperations,
                                      progress.currentPath);
             });
 
-    connect(remoteOperations_, &RemoteOperationController::jobFinished, this,
-            [this](const RemoteOperationController::Completion &completion) {
-                const auto state = state_;
-                if (!state || completion.result.job.id != state->remoteJobId ||
-                    state->generation != generation_) {
-                    return;
-                }
-                state->remoteDone = true;
-                state->result.inaccessibleFolders += completion.failedEntries;
-                state->result.skippedSymlinks += completion.skippedSymlinks;
-                state->result.depthLimits += completion.depthLimits;
-                state->result.invalidNames += completion.invalidNames;
-                state->result.unknownSizes += completion.unknownSizes;
-                if (completion.result.partial) {
-                    state->result.warnings.push_back(
-                        tr("Some remote folders could not be read; the "
-                           "comparison is partial."));
-                }
-                if (completion.result.outcome ==
-                        RemoteOperationController::Outcome::Failed &&
-                    !completion.result.partial && !state->limitExceeded) {
-                    state->fatalError =
-                        completion.result.error.isEmpty()
-                            ? tr("Could not scan the remote folder.")
-                            : completion.result.error;
-                }
-                maybeFinish(state);
-            });
+    connect(
+        remoteOperations_, &RemoteOperationController::jobFinished, this,
+        [this](const RemoteOperationController::Completion &completion) {
+            const auto state = state_;
+            if (!state || completion.result.job.id != state->remoteJobId ||
+                state->generation != generation_) {
+                return;
+            }
+            state->remoteDone = true;
+            state->result.inaccessibleFolders += completion.failedEntries;
+            state->result.skippedSymlinks += completion.skippedSymlinks;
+            state->result.depthLimits += completion.depthLimits;
+            state->result.invalidNames += completion.invalidNames;
+            state->result.unknownSizes += completion.unknownSizes;
+            for (const QString &path : completion.unscannedPaths) {
+                const QString normalized =
+                    SyncComparisonEngine::normalizeRelativePath(path);
+                state->result.coverage.remoteUnscannedPaths.insert(
+                    path.isEmpty() || normalized.isEmpty() ? QString()
+                                                           : normalized);
+            }
+            if (completion.result.outcome ==
+                RemoteOperationController::Outcome::Canceled) {
+                state->result.coverage.remoteUnscannedPaths.insert({});
+            }
+            if (completion.unscannedPaths.isEmpty() &&
+                (completion.result.partial || completion.failedEntries > 0)) {
+                state->result.coverage.remoteUnscannedPaths.insert({});
+            }
+            if (completion.result.partial) {
+                state->result.warnings.push_back(
+                    tr("Some remote folders could not be read; the "
+                       "comparison is partial."));
+            }
+            if (completion.result.outcome ==
+                    RemoteOperationController::Outcome::Failed &&
+                !completion.result.partial && !state->limitExceeded) {
+                state->fatalError =
+                    completion.result.error.isEmpty()
+                        ? tr("Could not scan the remote folder.")
+                        : completion.result.error;
+            }
+            maybeFinish(state);
+        });
 
     connect(remoteOperations_, &RemoteOperationController::checksumCompleted,
             this,
@@ -584,6 +602,7 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
         quint64 invalidNames = 0;
         quint64 unknownSizes = 0;
         quint64 depthLimits = 0;
+        QSet<QString> unscannedPaths;
         bool limitExceeded = false;
 
         auto canceled = [&] {
@@ -612,15 +631,42 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
             const QFileInfo directoryInfo(node.absolutePath);
             if (!directoryInfo.isReadable()) {
                 ++inaccessible;
+                unscannedPaths.insert(node.relativePath);
                 continue;
             }
 
-            QDir directory(node.absolutePath);
-            const QFileInfoList entries = directory.entryInfoList(
-                QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden |
-                    QDir::System,
-                QDir::DirsFirst | QDir::Name);
-            for (const QFileInfo &info : entries) {
+            // QFileInfo::isReadable() is only a precheck. A directory can
+            // become unreadable during enumeration, so retain iterator errors
+            // as incomplete coverage instead of treating them as an empty tree.
+#ifdef _WIN32
+            const std::filesystem::path nativePath(
+                node.absolutePath.toStdWString());
+#else
+            const std::filesystem::path nativePath(
+                QFile::encodeName(node.absolutePath).constData());
+#endif
+            std::error_code listError;
+            std::filesystem::directory_iterator directoryEntry(nativePath,
+                                                               listError);
+            if (listError) {
+                ++inaccessible;
+                unscannedPaths.insert(node.relativePath);
+                continue;
+            }
+            const QDir directory(node.absolutePath);
+            const std::filesystem::directory_iterator end;
+            for (; directoryEntry != end && !canceled();
+                 directoryEntry.increment(listError)) {
+                if (listError)
+                    break;
+#ifdef _WIN32
+                const QString name = QString::fromStdWString(
+                    directoryEntry->path().filename().wstring());
+#else
+                const QString name = QFile::decodeName(
+                    directoryEntry->path().filename().string().c_str());
+#endif
+                const QFileInfo info(directory.filePath(name));
                 if (canceled())
                     break;
                 const QString relative = node.relativePath.isEmpty()
@@ -632,10 +678,12 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
                     SyncComparisonEngine::normalizeRelativePath(relative);
                 if (normalized.isEmpty()) {
                     ++invalidNames;
+                    unscannedPaths.insert(node.relativePath);
                     continue;
                 }
                 if (info.isSymLink()) {
                     ++skippedSymlinks;
+                    unscannedPaths.insert(normalized);
                     continue;
                 }
 
@@ -666,6 +714,7 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
                 if (info.isDir()) {
                     if (node.depth + 1 >= kMaximumDepth) {
                         ++depthLimits;
+                        unscannedPaths.insert(normalized);
                     } else {
                         stack.push_back({info.absoluteFilePath(), normalized,
                                          node.depth + 1});
@@ -680,6 +729,10 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
                 if ((itemCount % kBatchSize) == 0)
                     postProgress(info.absoluteFilePath());
             }
+            if (listError) {
+                ++inaccessible;
+                unscannedPaths.insert(node.relativePath);
+            }
         }
 
         if (!safeThis)
@@ -688,7 +741,9 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
             safeThis,
             [safeThis, state, snapshot = std::move(snapshot), itemCount,
              knownBytes, skippedSymlinks, inaccessible, invalidNames,
-             unknownSizes, depthLimits, limitExceeded]() mutable {
+             unknownSizes, depthLimits,
+             unscannedPaths = std::move(unscannedPaths),
+             limitExceeded]() mutable {
                 if (!safeThis || safeThis->state_ != state ||
                     state->generation != safeThis->generation_) {
                     return;
@@ -707,6 +762,8 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
                 state->result.invalidNames += invalidNames;
                 state->result.unknownSizes += unknownSizes;
                 state->result.depthLimits += depthLimits;
+                state->result.coverage.localUnscannedPaths =
+                    std::move(unscannedPaths);
                 state->limitExceeded = state->limitExceeded || limitExceeded;
                 state->localDone = true;
                 if (state->limitExceeded && safeThis->remoteOperations_)

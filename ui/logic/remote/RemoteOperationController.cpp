@@ -97,6 +97,7 @@ class RemoteOperationController::Impl {
         quint64 depthLimits = 0;
         quint64 invalidNames = 0;
         quint64 unknownSizes = 0;
+        QStringList unscannedPaths;
     };
 
     explicit Impl(RemoteOperationController *owner) : owner_(owner) {
@@ -374,7 +375,7 @@ class RemoteOperationController::Impl {
             summary.matchedEntries,   summary.affectedEntries,
             summary.failedEntries,    summary.skippedSymlinks,
             summary.depthLimits,      summary.invalidNames,
-            summary.unknownSizes,
+            summary.unknownSizes,     summary.unscannedPaths,
         };
         postToUi([completion](RemoteOperationController *controller) {
             emit controller->jobFinished(completion);
@@ -1403,10 +1404,11 @@ class RemoteOperationController::Impl {
                 maybePostProgress(directory.path, false);
                 return RemoteTreeWalker::Control::Continue;
             };
-        callbacks.onListError = [this, &job, stopToken, &summary,
-                                 &rootListed](const RemoteTreeWalker::Entry &,
-                                              const std::string &listError) {
+        callbacks.onListError = [this, &job, stopToken, &summary, &rootListed](
+                                    const RemoteTreeWalker::Entry &entry,
+                                    const std::string &listError) {
             ++summary.failedEntries;
+            summary.unscannedPaths.push_back(entry.relativePath);
             summary.partial = rootListed;
             summary.error = operationError(
                 listError, QCoreApplication::translate(
@@ -1419,21 +1421,26 @@ class RemoteOperationController::Impl {
             }
             return RemoteTreeWalker::Control::Continue;
         };
-        callbacks.onInvalidName = [&summary](const RemoteTreeWalker::Entry &,
-                                             const openscp::FileInfo &) {
-            ++summary.invalidNames;
-            return RemoteTreeWalker::Control::Continue;
-        };
-        callbacks.onSkippedSymlink =
-            [&summary](const RemoteTreeWalker::Entry &) {
-                ++summary.visitedEntries;
-                ++summary.skippedSymlinks;
+        callbacks.onInvalidName =
+            [&summary](const RemoteTreeWalker::Entry &directory,
+                       const openscp::FileInfo &) {
+                ++summary.invalidNames;
+                summary.unscannedPaths.push_back(directory.relativePath);
                 return RemoteTreeWalker::Control::Continue;
             };
-        callbacks.onDepthLimit = [&summary](const RemoteTreeWalker::Entry &) {
-            ++summary.depthLimits;
-            return RemoteTreeWalker::Control::Continue;
-        };
+        callbacks.onSkippedSymlink =
+            [&summary](const RemoteTreeWalker::Entry &entry) {
+                ++summary.visitedEntries;
+                ++summary.skippedSymlinks;
+                summary.unscannedPaths.push_back(entry.relativePath);
+                return RemoteTreeWalker::Control::Continue;
+            };
+        callbacks.onDepthLimit =
+            [&summary](const RemoteTreeWalker::Entry &entry) {
+                ++summary.depthLimits;
+                summary.unscannedPaths.push_back(entry.relativePath);
+                return RemoteTreeWalker::Control::Continue;
+            };
         callbacks.onEntry =
             [&summary, &batch, &flushBatch, batchSize, includeDirectories,
              searchMode, &query,

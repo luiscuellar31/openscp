@@ -4302,6 +4302,12 @@ Gespeicherte Anmeldedaten in das Duplikat kopieren?</translation>
 <context>
     <name>SyncDialog</name>
     <message>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="242"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="558"/>
+        <source>Source scan did not verify this path; mirror deletion was omitted</source>
+        <translation>Die Quellprüfung konnte diesen Pfad nicht verifizieren; die Löschung durch Spiegelung wurde ausgelassen</translation>
+    </message>
+    <message>
         <location filename="../ui/sync/SyncComparisonEngine.cpp" line="191"/>
         <source>Folder exists only in the source</source>
         <translation>Ordner ist nur in der Quelle vorhanden</translation>

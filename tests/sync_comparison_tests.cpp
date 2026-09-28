@@ -4,6 +4,7 @@
 
 #include <QCoreApplication>
 
+#include <algorithm>
 #include <optional>
 
 namespace {
@@ -266,6 +267,71 @@ OPENSCP_TEST(testDisabledMirrorCannotPlanStaleDeletions, test) {
         SyncComparisonEngine::makeExecutionPlan(mirrorItems, options);
     test.check(plan.deletes.isEmpty() && !plan.requiresMirrorConfirmation,
                "a plan with mirror disabled must discard stale deletions");
+}
+
+OPENSCP_TEST(testMirrorOnlyDeletesVerifiedPaths, test) {
+    SyncComparisonOptions options;
+    options.mirror = true;
+    const QVector<SyncSnapshotEntry> destination = {
+        directory(QStringLiteral("locked")),
+        file(QStringLiteral("locked/child.txt"), 1, 1),
+        file(QStringLiteral("locked/healthy.txt"), 1, 1),
+        file(QStringLiteral("locked-sibling.txt"), 1, 1),
+    };
+    SyncScanCoverage coverage;
+    coverage.localUnscannedPaths.insert(QStringLiteral("locked"));
+
+    const auto preview =
+        SyncComparisonEngine::compare({}, destination, options, coverage);
+    test.check(
+        findItem(preview, QStringLiteral("locked"))->action ==
+                SyncAction::Keep &&
+            findItem(preview, QStringLiteral("locked/child.txt"))->action ==
+                SyncAction::Keep &&
+            findItem(preview, QStringLiteral("locked-sibling.txt"))->action ==
+                SyncAction::DeleteFile,
+        "an unscanned subtree must not hide verified sibling deletes");
+
+    const auto stalePreview =
+        SyncComparisonEngine::compare({}, destination, options);
+    const auto plan = SyncComparisonEngine::makeExecutionPlan(
+        stalePreview, options, coverage);
+    test.check(plan.deletes.size() == 1 &&
+                   plan.deletes.front().relativePath ==
+                       QStringLiteral("locked-sibling.txt"),
+               "planning must recheck coverage before enqueuing deletions");
+
+    coverage.localUnscannedPaths.insert(QString());
+    const auto rootUnverified = SyncComparisonEngine::makeExecutionPlan(
+        stalePreview, options, coverage);
+    test.check(rootUnverified.deletes.isEmpty(),
+               "an unverified source root must block all mirror deletions");
+
+    coverage.localUnscannedPaths.clear();
+    coverage.localUnscannedPaths.insert(QStringLiteral("locked/child.txt"));
+    const auto parentPlan = SyncComparisonEngine::makeExecutionPlan(
+        stalePreview, options, coverage);
+    test.check(
+        parentPlan.deletes.size() == 2 &&
+            std::any_of(parentPlan.deletes.cbegin(), parentPlan.deletes.cend(),
+                        [](const SyncDeleteOperation &deletion) {
+                            return deletion.relativePath ==
+                                   QStringLiteral("locked/healthy.txt");
+                        }),
+        "an unverified child protects its parent without hiding verified "
+        "siblings");
+
+    options.direction = SyncDirection::RemoteToLocal;
+    coverage.localUnscannedPaths.clear();
+    coverage.remoteUnscannedPaths.insert(QStringLiteral("locked"));
+    const auto reverse =
+        SyncComparisonEngine::compare(destination, {}, options, coverage);
+    test.check(
+        findItem(reverse, QStringLiteral("locked/child.txt"))->action ==
+                SyncAction::Keep &&
+            findItem(reverse, QStringLiteral("locked-sibling.txt"))->action ==
+                SyncAction::DeleteFile,
+        "coverage must follow the selected source direction");
 }
 
 SyncComparisonItem plannedItem(const QString &path, SyncAction action,

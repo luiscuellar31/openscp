@@ -125,6 +125,10 @@ Synchronization has three steps:
 2. `SyncComparisonEngine` creates a data-only plan.
 3. The accepted actions enter `TransferManager` as one ordered batch.
 
+The coordinator records paths that either scan could not verify. The comparison
+keeps destination-only entries under unscanned source paths, and plan creation
+checks that coverage again before accepting mirror deletions.
+
 ## Saved data
 
 Each kind of persisted data has one owner:

@@ -28,6 +28,7 @@ class SyncDialog final : public QDialog {
 
     void setSnapshots(QVector<SyncSnapshotEntry> localSnapshot,
                       QVector<SyncSnapshotEntry> remoteSnapshot);
+    void setScanCoverage(SyncScanCoverage coverage);
     void setRootPaths(const QString &localRoot, const QString &remoteRoot);
     void setChecksumAvailable(bool available);
     void setChecksumBusy(bool busy);
@@ -64,6 +65,7 @@ class SyncDialog final : public QDialog {
 
     QVector<SyncSnapshotEntry> localSnapshot_;
     QVector<SyncSnapshotEntry> remoteSnapshot_;
+    SyncScanCoverage coverage_;
     SyncComparisonOptions options_;
     QString localRoot_;
     QString remoteRoot_;

@@ -3,6 +3,7 @@
 
 #include <QByteArray>
 #include <QMetaType>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -55,6 +56,13 @@ struct SyncComparisonOptions {
     bool includeHidden = false;
     bool mirror = false;
     qint64 modifiedToleranceMs = 2000;
+};
+
+// A path marks an entry whose presence or descendants were not fully scanned.
+// An empty path marks the whole root as unverified.
+struct SyncScanCoverage {
+    QSet<QString> localUnscannedPaths;
+    QSet<QString> remoteUnscannedPaths;
 };
 
 struct SyncComparisonItem {

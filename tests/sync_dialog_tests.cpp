@@ -146,6 +146,42 @@ OPENSCP_TEST(testPendingMirrorChangeCannotAcceptStalePreview, test) {
                "the refreshed preview should contain no deletions");
 }
 
+OPENSCP_TEST(testMirrorPreviewKeepsUnverifiedSourcePaths, test) {
+    SyncDialog dialog;
+    SyncScanCoverage coverage;
+    coverage.localUnscannedPaths.insert(QStringLiteral("shared/protected.dat"));
+    dialog.setScanCoverage(coverage);
+    auto remote = snapshotWith(QStringLiteral("protected.dat"), 0);
+    SyncSnapshotEntry healthy;
+    healthy.relativePath = QStringLiteral("shared/healthy.dat");
+    remote.push_back(healthy);
+    dialog.setSnapshots({}, remote);
+    QCheckBox *mirror = mirrorCheck(dialog);
+    QPushButton *synchronize = synchronizeButton(dialog);
+    test.check(mirror && synchronize, "mirror controls should exist");
+    if (!mirror || !synchronize)
+        return;
+
+    mirror->setChecked(true);
+    test.check(waitUntil([&] {
+                   return synchronize->isEnabled() &&
+                          dialog.executionPlan().deletes.size() == 1;
+               }),
+               "mirror preview should finish with one verified deletion");
+    const auto plan = dialog.executionPlan();
+    test.check(plan.deletes.front().relativePath ==
+                   QStringLiteral("shared/healthy.dat"),
+               "dialog must pass source coverage to the final plan");
+    const auto items = dialog.comparisonItems();
+    const auto protectedItem = std::find_if(
+        items.cbegin(), items.cend(), [](const SyncComparisonItem &item) {
+            return item.relativePath == QStringLiteral("shared/protected.dat");
+        });
+    test.check(protectedItem != items.cend() &&
+                   protectedItem->action == SyncAction::Keep,
+               "preview should explain that an unverified path is kept");
+}
+
 OPENSCP_TEST(testPendingChangeIgnoresEarlierQueuedComparison, test) {
     SyncDialog dialog;
     dialog.setSnapshots({}, snapshotWith(QStringLiteral("extra.dat"), 0));

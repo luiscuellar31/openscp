@@ -4302,6 +4302,12 @@ Copiar suas credenciais salvas para a duplicata?</translation>
 <context>
     <name>SyncDialog</name>
     <message>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="242"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="558"/>
+        <source>Source scan did not verify this path; mirror deletion was omitted</source>
+        <translation>A análise da origem não verificou este caminho; a exclusão pelo espelhamento foi ignorada</translation>
+    </message>
+    <message>
         <location filename="../ui/widgets/dialogs/SyncDialog.cpp" line="286"/>
         <source>Compare and synchronize directories</source>
         <translation>Comparar e sincronizar pastas</translation>
