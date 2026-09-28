@@ -2409,7 +2409,7 @@ OPENSCP_TEST(testBandwidthLimiterConcurrentFifoFairness, test) {
     workers.reserve(kWorkerCount);
 
     for (int i = 0; i < kWorkerCount; ++i) {
-        workers.emplace_back([&, taskId = static_cast<std::uint64_t>(i + 1)] {
+        workers.emplace_back([&, taskId = static_cast<std::uint64_t>(i) + 1] {
             if (limiter.acquire(taskId, 4096,
                                 [](std::uint64_t) { return false; })) {
                 completedWorkers.fetch_add(1);

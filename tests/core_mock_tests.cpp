@@ -1441,10 +1441,10 @@ OPENSCP_TEST(test_unique_sftp_handle_lifecycle_and_leak_prevention, t) {
         return 0;
     };
 
-    auto dummy1 = reinterpret_cast<LIBSSH2_SFTP_HANDLE *>(
-        static_cast<std::uintptr_t>(0x1000));
-    auto dummy2 = reinterpret_cast<LIBSSH2_SFTP_HANDLE *>(
-        static_cast<std::uintptr_t>(0x2000));
+    int dummy1Storage = 0;
+    int dummy2Storage = 0;
+    auto *dummy1 = reinterpret_cast<LIBSSH2_SFTP_HANDLE *>(&dummy1Storage);
+    auto *dummy2 = reinterpret_cast<LIBSSH2_SFTP_HANDLE *>(&dummy2Storage);
 
     // 1. RAII destruction closes the handle
     {
@@ -1482,6 +1482,7 @@ OPENSCP_TEST(test_unique_sftp_handle_lifecycle_and_leak_prevention, t) {
     {
         openscp::libssh2detail::UniqueSftpHandle h1(dummy1, testCloser);
         openscp::libssh2detail::UniqueSftpHandle h2(std::move(h1));
+        // NOLINTNEXTLINE(bugprone-use-after-move): source is null by contract.
         t.check(h1.get() == nullptr, "moved-from handle must be null");
         t.check(h2.get() == dummy1, "moved-to handle must hold dummy1");
         t.check(closeCallCount == 3, "move constructor must not invoke closer");
@@ -1499,6 +1500,7 @@ OPENSCP_TEST(test_unique_sftp_handle_lifecycle_and_leak_prevention, t) {
         t.check(lastClosedHandle == dummy2,
                 "closed old destination handle should be dummy2");
         t.check(h2.get() == dummy1, "moved-to handle should now hold dummy1");
+        // NOLINTNEXTLINE(bugprone-use-after-move): source is null by contract.
         t.check(h1.get() == nullptr, "moved-from handle should now be null");
     }
     t.check(closeCallCount == 6, "destruction of h2 should close dummy1");
