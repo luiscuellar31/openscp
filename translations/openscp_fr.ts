@@ -4714,6 +4714,11 @@ Copier ses identifiants enregistrés vers le duplicata ?</translation>
 <context>
     <name>TransferManager</name>
     <message>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="82"/>
+        <source>A local transfer path contains a symbolic link. Choose the physical folder and retry.</source>
+        <translation>Un chemin local de transfert contient un lien symbolique. Choisissez le dossier physique et réessayez.</translation>
+    </message>
+    <message>
         <location filename="../ui/logic/transfers/TransferManager.cpp" line="1617"/>
         <source>Conflict</source>
         <translation>Conflit</translation>

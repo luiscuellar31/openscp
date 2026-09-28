@@ -1606,6 +1606,30 @@ OPENSCP_TEST(testBatchCancellationAndDirectoryTasks, test) {
                "empty local folders should be explicit queue tasks");
 }
 
+OPENSCP_TEST(testLocalDirectoryTaskRejectsSymlinkParent, test) {
+#ifndef _WIN32
+    auto probe = std::make_shared<ConcurrencyProbe>();
+    ConcurrentMockClient baseClient(probe);
+    TransferManager manager;
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir selected;
+    QTemporaryDir outside;
+    test.check(selected.isValid() && outside.isValid(),
+               "local directory fixtures should initialize");
+    const QString linked = selected.filePath("linked");
+    test.check(QFile::link(outside.path(), linked),
+               "a parent directory symlink should be created");
+
+    TransferBatchOptions batch;
+    batch.sessionKey = QStringLiteral("test-session");
+    manager.enqueueLocalDirectory(QDir(linked).filePath("created"), batch);
+    test.check(waitForStatus(manager, 1, TransferTask::Status::Error) &&
+                   !QFileInfo(outside.filePath("created")).exists(),
+               "a local directory task must not create outside its chosen "
+               "folder through a symlink");
+#endif
+}
+
 OPENSCP_TEST(testPersistentDeletionTasks, test) {
     auto probe = std::make_shared<ConcurrencyProbe>();
     ConcurrentMockClient baseClient(probe);

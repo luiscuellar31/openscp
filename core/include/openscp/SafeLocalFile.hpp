@@ -2,6 +2,7 @@
 
 #include "openscp/Protocol.hpp"
 
+#include <cstdint>
 #include <cstdio>
 #include <string>
 
@@ -11,6 +12,16 @@ enum class WriteMode {
     Truncate,
     Append,
 };
+
+// On supported POSIX platforms, local path operations reject symlinks below
+// user-writable directories. Each parent component is opened through a
+// directory descriptor, so replacing a parent with a symlink cannot redirect
+// a later operation.
+bool ensureLocalDirectories(const std::string &path, std::string &error);
+bool removeLocalPath(const std::string &path, bool directory,
+                     std::string &error);
+bool setLocalModificationTime(const std::string &path,
+                              std::int64_t modifiedSeconds, std::string &error);
 
 // Opens a user-owned regular file without following a final-component symlink.
 // The descriptor is opened with close-on-exec and restricted permissions.

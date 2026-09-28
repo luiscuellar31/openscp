@@ -1,9 +1,9 @@
 // Shared internal helpers for libcurl-based backends (FTP/WebDAV).
 #include "CurlBackendCommon.hpp"
 
-#include "../common/SafeLocalFile.hpp"
 #include "common/UniqueFile.hpp"
 #include "openscp/RemotePath.hpp"
+#include "openscp/SafeLocalFile.hpp"
 
 #include <algorithm>
 #include <cctype>

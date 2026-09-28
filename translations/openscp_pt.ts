@@ -4714,6 +4714,11 @@ Copiar suas credenciais salvas para a duplicata?</translation>
 <context>
     <name>TransferManager</name>
     <message>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="82"/>
+        <source>A local transfer path contains a symbolic link. Choose the physical folder and retry.</source>
+        <translation>Um caminho local de transferência contém um link simbólico. Escolha a pasta física e tente novamente.</translation>
+    </message>
+    <message>
         <location filename="../ui/logic/transfers/TransferManager.cpp" line="1617"/>
         <source>Conflict</source>
         <translation>Conflito</translation>

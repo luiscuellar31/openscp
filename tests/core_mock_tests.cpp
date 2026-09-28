@@ -1,7 +1,6 @@
 // Core unit tests without external framework (run via CTest).
 #include "TestHarness.hpp"
 #include "common/RemoteListingLimits.hpp"
-#include "common/SafeLocalFile.hpp"
 #include "common/UniqueFile.hpp"
 #include "libssh2/Libssh2ScpClient.hpp"
 #include "libssh2/Libssh2SftpClient.hpp"
@@ -12,6 +11,7 @@
 #include "libssh2/detail/UniqueSftpHandle.hpp"
 #include "mock/MockSftpClient.hpp"
 #include "openscp/ClientFactory.hpp"
+#include "openscp/SafeLocalFile.hpp"
 #include "openscp/SecureString.hpp"
 #if OPENSCP_HAS_CURL_FTP
 #include "curl/CurlFtpClient.hpp"
@@ -311,6 +311,71 @@ OPENSCP_TEST(test_safe_local_partial_files, t) {
             "buffered durability should publish complete contents");
     fs::remove(target, ec);
     fs::remove_all(target.parent_path(), ec);
+}
+
+OPENSCP_TEST(test_safe_local_parent_symlinks, t) {
+#ifndef _WIN32
+    const fs::path base = makeTempFilePath("parent-symlink").parent_path();
+    const fs::path selected = base / "selected";
+    const fs::path outside = base / "outside";
+    std::error_code ec;
+    fs::create_directories(selected, ec);
+    fs::create_directories(outside, ec);
+    fs::create_directory_symlink(outside, selected / "linked", ec);
+    t.check(!ec, "parent symlink fixture should be created");
+
+    std::string error;
+    openscp::UniqueFile escaped(openscp::localfiles::openRegularFileForWrite(
+        (selected / "linked" / "escape.part").string(),
+        openscp::localfiles::WriteMode::Truncate, error));
+    t.check(!escaped && !fs::exists(outside / "escape.part"),
+            "opening a partial file must reject a parent symlink");
+    escaped.reset();
+
+    error.clear();
+    t.check(!openscp::localfiles::ensureLocalDirectories(
+                (selected / "linked" / "created").string(), error) &&
+                !fs::exists(outside / "created"),
+            "creating local folders must reject a parent symlink");
+    error.clear();
+    t.check(openscp::localfiles::ensureLocalDirectories(
+                (selected / "created" / "child").string(), error) &&
+                fs::is_directory(selected / "created" / "child"),
+            "creating local folders should still work without symlinks");
+
+    {
+        std::ofstream outsideFile(outside / "keep.txt");
+        outsideFile << "preserve";
+    }
+    error.clear();
+    t.check(!openscp::localfiles::removeLocalPath(
+                (selected / "linked" / "keep.txt").string(), false, error) &&
+                fs::exists(outside / "keep.txt"),
+            "removing a local file must reject a parent symlink");
+    error.clear();
+    t.check(!openscp::localfiles::setLocalModificationTime(
+                (selected / "linked" / "keep.txt").string(), 1, error),
+            "changing a local timestamp must reject a parent symlink");
+
+    fs::create_directories(selected / "real", ec);
+    {
+        std::ofstream partial(selected / "real" / "item.part");
+        partial << "original";
+        std::ofstream outsidePartial(outside / "item.part");
+        outsidePartial << "outside";
+    }
+    fs::rename(selected / "real", selected / "moved", ec);
+    fs::create_directory_symlink(outside, selected / "real", ec);
+    t.check(!ec, "swapped parent symlink fixture should be created");
+    error.clear();
+    t.check(!openscp::localfiles::atomicReplace(
+                (selected / "real" / "item.part").string(),
+                (selected / "real" / "item").string(), error) &&
+                !fs::exists(outside / "item") &&
+                fs::exists(outside / "item.part"),
+            "publishing a partial file must reject a swapped parent symlink");
+    fs::remove_all(base, ec);
+#endif
 }
 
 OPENSCP_TEST(test_protocol_helpers, t) {

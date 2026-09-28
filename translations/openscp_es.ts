@@ -4714,6 +4714,11 @@ Copy its saved credentials to the duplicate?</source>
 <context>
     <name>TransferManager</name>
     <message>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="82"/>
+        <source>A local transfer path contains a symbolic link. Choose the physical folder and retry.</source>
+        <translation>Una ruta local de transferencia contiene un enlace simbólico. Elige la carpeta física y vuelve a intentarlo.</translation>
+    </message>
+    <message>
         <location filename="../ui/logic/transfers/TransferManager.cpp" line="1617"/>
         <source>Conflict</source>
         <translation>Conflicto</translation>

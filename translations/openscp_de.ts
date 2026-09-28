@@ -4714,6 +4714,11 @@ Gespeicherte Anmeldedaten in das Duplikat kopieren?</translation>
 <context>
     <name>TransferManager</name>
     <message>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="82"/>
+        <source>A local transfer path contains a symbolic link. Choose the physical folder and retry.</source>
+        <translation>Ein lokaler Übertragungspfad enthält einen symbolischen Link. Wählen Sie den tatsächlichen Ordner und versuchen Sie es erneut.</translation>
+    </message>
+    <message>
         <location filename="../ui/logic/transfers/TransferManager.cpp" line="81"/>
         <source>Integrity mismatch detected: local and remote checksums differ. Transfer was stopped to prevent corrupted data.</source>
         <translation>Integritätsabweichung erkannt: Lokale und Remote-Prüfsumme unterscheiden sich. Die Übertragung wurde angehalten, um beschädigte Daten zu vermeiden.</translation>

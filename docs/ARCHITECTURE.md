@@ -104,6 +104,12 @@ persistence, and notifications. The supporting classes have narrower jobs:
 - `BandwidthLimiter` applies speed limits.
 - `TransferQueuePersistence` saves unfinished tasks safely.
 
+`SafeLocalFile` in the core owns local download publication and descriptor-based
+path operations for transfer tasks. The queue uses it to create or remove local
+entries without following symbolic links in user-writable parent directories.
+`SyncCoordinator` resolves the selected local root before scanning and queuing
+paths, so a root reached through a system link keeps one physical location.
+
 There is one allowed nested lock order inside the manager:
 
 ```text

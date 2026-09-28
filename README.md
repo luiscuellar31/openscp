@@ -114,6 +114,11 @@ troubleshooting, see [Building OpenSCP](docs/BUILDING.md).
 - One-way synchronization with preview, filters, and optional checksum checks.
 - Spanish, English, Portuguese, French, and German interfaces.
 
+Local downloads reject symbolic links in user-writable destination parent
+folders. Synchronization resolves a linked local root to its physical path and
+rejects linked folders below that root. Choose the physical destination folder
+when a download path contains a link.
+
 ## Path navigation
 
 Each panel presents its current location as one conventional path field. Click

@@ -2,9 +2,9 @@
 // transfers over SSH.
 #include "libssh2/Libssh2ScpClient.hpp"
 
-#include "../common/SafeLocalFile.hpp"
 #include "common/UniqueFile.hpp"
 #include "detail/Libssh2ErrorClassifier.hpp"
+#include "openscp/SafeLocalFile.hpp"
 
 #include <libssh2.h>
 

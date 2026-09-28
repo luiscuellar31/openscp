@@ -9,6 +9,7 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 #include <QTimer>
 
@@ -80,6 +81,14 @@ class ChecksumMockClient final : public openscp::MockSftpClient {
 OPENSCP_TEST(testAsynchronousSnapshots, test) {
     QTemporaryDir localRoot;
     test.check(localRoot.isValid(), "local snapshot fixture should initialize");
+#ifndef _WIN32
+    QTemporaryDir linkedRootParent;
+    test.check(linkedRootParent.isValid(),
+               "linked local snapshot fixture should initialize");
+    const QString linkedRoot = linkedRootParent.filePath("linked-root");
+    test.check(QFile::link(localRoot.path(), linkedRoot),
+               "a linked local root should be created");
+#endif
     QFile localFile(localRoot.filePath("readme.txt"));
     test.check(localFile.open(QIODevice::WriteOnly),
                "local snapshot file should be writable");
@@ -108,13 +117,22 @@ OPENSCP_TEST(testAsynchronousSnapshots, test) {
                      &coordinator, [&](const QString &) { failed = true; });
     QTimer::singleShot(0, &coordinator, [&] { eventLoopAdvanced = true; });
 
+#ifndef _WIN32
+    coordinator.start(linkedRoot, QStringLiteral("/"));
+#else
     coordinator.start(localRoot.path(), QStringLiteral("/"));
+#endif
     test.check(waitUntil([&] { return ready || failed; }),
                "local and remote snapshots should complete asynchronously");
     test.check(ready && !failed,
                "partial child-list errors should still produce a preview");
     test.check(eventLoopAdvanced,
                "snapshot preparation must not block the Qt event loop");
+#ifndef _WIN32
+    test.check(
+        prepared.localRoot == QFileInfo(localRoot.path()).canonicalFilePath(),
+        "linked local roots should use their physical path for queued work");
+#endif
 
     const auto contains = [](const QVector<SyncSnapshotEntry> &entries,
                              const QString &path) {

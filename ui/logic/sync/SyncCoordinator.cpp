@@ -532,6 +532,11 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
         emit preparationFailed(tr("The current local folder is unavailable."));
         return;
     }
+    const QString canonicalLocalRoot = localInfo.canonicalFilePath();
+    if (canonicalLocalRoot.isEmpty()) {
+        emit preparationFailed(tr("The current local folder is unavailable."));
+        return;
+    }
     if (!remoteOperations_ || !remoteOperations_->hasRequestedSession()) {
         emit preparationFailed(tr("No remote session is available."));
         return;
@@ -539,7 +544,7 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
 
     auto state = std::make_shared<PreparationState>();
     state->generation = generation_;
-    state->localRoot = QDir(localInfo.absoluteFilePath()).absolutePath();
+    state->localRoot = canonicalLocalRoot;
     state->remoteRoot = normalizeRemotePath(remoteRoot);
     state->allowLargeTree = allowLargeTree;
     state->result.localRoot = state->localRoot;

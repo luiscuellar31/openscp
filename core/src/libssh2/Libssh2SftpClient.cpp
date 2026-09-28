@@ -3,7 +3,6 @@
 #include "libssh2/Libssh2SftpClient.hpp"
 
 #include "../common/RemoteListingLimits.hpp"
-#include "../common/SafeLocalFile.hpp"
 #include "common/UniqueFile.hpp"
 #include "detail/Libssh2CipherPreference.hpp"
 #include "detail/Libssh2ErrorClassifier.hpp"
@@ -11,6 +10,7 @@
 #include "detail/Libssh2TransferIntegrity.hpp"
 #include "detail/UniqueSftpHandle.hpp"
 #include "openscp/RuntimeLogging.hpp"
+#include "openscp/SafeLocalFile.hpp"
 
 #include <libssh2.h>
 #include <libssh2_sftp.h>
@@ -3415,7 +3415,8 @@ bool Libssh2SftpClient::get(
             err = "Remote file changed during download (size or modification "
                   "time differs)";
             localFile.reset();
-            (void)std::remove(localPart.c_str());
+            std::string cleanupError;
+            (void)localfiles::removeLocalPath(localPart, false, cleanupError);
             setLastOperationError(RemoteErrorKind::RemoteIo, err, 0, true);
             return false;
         }

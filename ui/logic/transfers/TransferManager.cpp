@@ -6,6 +6,7 @@
 #include "logic/navigation/RemotePath.hpp"
 #include "openscp/RemoteClient.hpp"
 #include "openscp/RuntimeLogging.hpp"
+#include "openscp/SafeLocalFile.hpp"
 
 #include <QAbstractButton>
 #include <QCheckBox>
@@ -77,6 +78,12 @@ QString errorForUi(const std::string &rawError) {
         return message;
 
     const QString lower = message.toLower();
+    if (lower.contains("untrusted symbolic link")) {
+        return QCoreApplication::translate(
+            "TransferManager",
+            "A local transfer path contains a symbolic link. Choose the "
+            "physical folder and retry.");
+    }
     if (lower.contains("checksum mismatch")) {
         return QCoreApplication::translate(
             "TransferManager",
@@ -1347,7 +1354,10 @@ void TransferManager::removeTasks(const QVector<quint64> &taskIds,
         removedIds.push_back(taskNode->taskId);
         if (removePartialData &&
             taskNode->type == TransferTask::Type::Download) {
-            QFile::remove(taskNode->dst + QStringLiteral(".part"));
+            std::string cleanupError;
+            (void)openscp::localfiles::removeLocalPath(
+                (taskNode->dst + QStringLiteral(".part")).toStdString(), false,
+                cleanupError);
         }
     }
     publishRemoved(removedIds);
@@ -1922,12 +1932,16 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
             }
             resume = decision.policy == Policy::Resume;
         }
-        if (!QDir().mkpath(QFileInfo(task.dst).dir().absolutePath())) {
+        std::string directoryError;
+        if (!openscp::localfiles::ensureLocalDirectories(
+                QFileInfo(task.dst).dir().absolutePath().toStdString(),
+                directoryError)) {
             err = QCoreApplication::translate(
                       "TransferManager",
                       "Could not create local destination directory")
                       .toUtf8()
-                      .toStdString();
+                      .toStdString() +
+                  ": " + directoryError;
             return PrecheckOutcome::Error;
         }
     }
