@@ -29,6 +29,8 @@ set -euo pipefail
 #   LINUXDEPLOY         Path or command name (default: linuxdeploy)
 #   LINUXDEPLOY_QT      Path or command name (default: linuxdeploy-plugin-qt)
 #   APPIMAGETOOL        Path or command name (default: appimagetool)
+#   APPIMAGE_UPDATE_INFORMATION
+#                       Optional update information for published AppImages
 #   SKIP_QT_PLUGIN      Set to 1 to skip the qt plugin (not recommended)
 #   OPENSCP_BUNDLE_GNU_RUNTIME
 #                       Copy libstdc++ and libgcc_s into the AppDir (default: 1)
@@ -310,7 +312,7 @@ main() {
   # order ensures manually staged plugins and runtimes are actually included.
   pushd "$DIST_DIR" >/dev/null
   # Clean old file with same name
-  rm -f "$out_name"
+  rm -f "$out_name" "${out_name}.zsync"
 
   export VERSION="$version"
   local cmd=("$LINUXDEPLOY" --appdir "$APPDIR" -e "$exe" -d "$APPDIR/usr/share/applications/openscp.desktop" -i "$APPDIR/usr/share/icons/hicolor/256x256/apps/openscp.png")
@@ -326,8 +328,19 @@ main() {
   verify_linux_abi_if_requested
 
   log "Creating AppImage: $out_name"
-  ARCH="$arch" "$APPIMAGETOOL" "$APPDIR" "$out_name"
+  local -a appimagetool_args=()
+  if [[ -n "${APPIMAGE_UPDATE_INFORMATION:-}" ]]; then
+    appimagetool_args=(-u "$APPIMAGE_UPDATE_INFORMATION")
+  fi
+  ARCH="$arch" "$APPIMAGETOOL" "${appimagetool_args[@]}" "$APPDIR" "$out_name"
   [[ -f "$out_name" ]] || die "appimagetool did not produce: $out_name"
+  if [[ -n "${APPIMAGE_UPDATE_INFORMATION:-}" ]]; then
+    local actual_update_information
+    actual_update_information="$("./$out_name" --appimage-updateinformation)"
+    [[ "$actual_update_information" == "$APPIMAGE_UPDATE_INFORMATION" ]] ||
+      die "Unexpected AppImage update information: $actual_update_information"
+    [[ -s "${out_name}.zsync" ]] || die "Missing or empty zsync file: ${out_name}.zsync"
+  fi
 
   # Generate SHA256
   if command -v sha256sum >/dev/null 2>&1; then

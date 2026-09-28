@@ -178,6 +178,8 @@ jobs:
     name: Build Linux (${{ matrix.arch_name }})
     needs:
       - verify-tag
+    env:
+      APPIMAGE_UPDATE_INFORMATION: gh-releases-zsync|luiscuellar31|openscp|latest|OpenSCP-*-${{ matrix.arch_name }}.AppImage.zsync
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -299,6 +301,7 @@ jobs:
             --volume "$HOME/.local/bin:$HOME/.local/bin:ro" \
             --workdir "$GITHUB_WORKSPACE" \
             --env APPIMAGE_EXTRACT_AND_RUN=1 \
+            --env APPIMAGE_UPDATE_INFORMATION \
             --env OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=ON \
             --env OPENSCP_MAX_GLIBC_VERSION=2.34 \
             --env "CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH:-}" \
@@ -334,7 +337,7 @@ jobs:
           arch="$(uname -m)"
 
           shopt -s nullglob
-          appimage_files=(dist/*.AppImage dist/*.AppImage.sha256)
+          appimage_files=(dist/*.AppImage dist/*.AppImage.zsync dist/*.AppImage.sha256)
           snap_files=(packaging/snap/*.snap)
           if [[ ${#appimage_files[@]} -gt 0 ]]; then
             cp "${appimage_files[@]}" out/
@@ -398,6 +401,14 @@ jobs:
       - name: Select release files and build SHA256SUMS.txt
         run: |
           set -euo pipefail
+          version="${{ needs.verify-tag.outputs.version }}"
+          for arch in x86_64 aarch64; do
+            appimage="release-assets/linux-${arch}/OpenSCP-${version}-${arch}.AppImage"
+            [[ -s "$appimage" && -s "${appimage}.zsync" ]] || {
+              echo "Missing AppImage or zsync file for ${arch}"
+              exit 1
+            }
+          done
           # Per-file .sha256 sidecars are replaced by one combined list, and
           # the snap is kept out of the release: sideloading it needs
           # --dangerous plus manual interface connections, so it belongs in
