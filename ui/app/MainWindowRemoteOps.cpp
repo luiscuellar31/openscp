@@ -550,11 +550,8 @@ void MainWindow::newDirRight() {
                                                  name);
     } else {
         QDir base(rightPath_->path());
-        if (!base.mkpath(base.filePath(name))) {
-            UiAlerts::critical(this, tr("Local"),
-                               tr("Could not create folder."));
+        if (!createLocalDirectory(base, name))
             return;
-        }
         setRightRoot(base.absolutePath());
     }
 }
@@ -571,22 +568,11 @@ void MainWindow::newFileRight() {
                                             name);
     } else {
         QDir base(rightPath_->path());
-        const QString path = base.filePath(name);
-        if (QFileInfo::exists(path)) {
-            if (UiAlerts::question(
-                    this, tr("File exists"),
-                    tr("«%1» already exists.\nOverwrite?").arg(name),
-                    QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
-                return;
-        }
-        QFile newFile(path);
-        if (!newFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            UiAlerts::critical(this, tr("Local"), tr("Could not create file."));
+        if (!createLocalFile(base, name))
             return;
-        }
-        newFile.close();
         setRightRoot(base.absolutePath());
-        statusBar()->showMessage(tr("File created: ") + path, 4000);
+        statusBar()->showMessage(tr("File created: ") + base.filePath(name),
+                                 4000);
     }
 }
 

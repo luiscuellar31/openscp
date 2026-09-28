@@ -689,16 +689,39 @@ void MainWindow::renameLeftSelected() {
     setLeftRoot(leftPath_->path());
 }
 
+bool MainWindow::createLocalDirectory(const QDir &base, const QString &name) {
+    if (base.mkpath(base.filePath(name)))
+        return true;
+    UiAlerts::critical(this, tr("Local"), tr("Could not create folder."));
+    return false;
+}
+
+bool MainWindow::createLocalFile(const QDir &base, const QString &name) {
+    const QString path = base.filePath(name);
+    if (QFileInfo::exists(path) &&
+        UiAlerts::question(this, tr("File exists"),
+                           tr("«%1» already exists.\nOverwrite?").arg(name),
+                           QMessageBox::Yes | QMessageBox::No) !=
+            QMessageBox::Yes) {
+        return false;
+    }
+    QFile newFile(path);
+    if (!newFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        UiAlerts::critical(this, tr("Local"), tr("Could not create file."));
+        return false;
+    }
+    newFile.close();
+    return true;
+}
+
 // Create a new directory in the left (local) pane.
 void MainWindow::newDirLeft() {
     QString name;
     if (!promptValidEntryName(this, tr("New folder"), tr("Name:"), {}, name))
         return;
     QDir base(leftPath_->path());
-    if (!base.mkpath(base.filePath(name))) {
-        UiAlerts::critical(this, tr("Local"), tr("Could not create folder."));
+    if (!createLocalDirectory(base, name))
         return;
-    }
     setLeftRoot(base.absolutePath());
 }
 
@@ -708,22 +731,10 @@ void MainWindow::newFileLeft() {
     if (!promptValidEntryName(this, tr("New file"), tr("Name:"), {}, name))
         return;
     QDir base(leftPath_->path());
-    const QString path = base.filePath(name);
-    if (QFileInfo::exists(path)) {
-        if (UiAlerts::question(this, tr("File exists"),
-                               tr("«%1» already exists.\nOverwrite?").arg(name),
-                               QMessageBox::Yes | QMessageBox::No) !=
-            QMessageBox::Yes)
-            return;
-    }
-    QFile newFile(path);
-    if (!newFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        UiAlerts::critical(this, tr("Local"), tr("Could not create file."));
+    if (!createLocalFile(base, name))
         return;
-    }
-    newFile.close();
     setLeftRoot(base.absolutePath());
-    statusBar()->showMessage(tr("File created: ") + path, 4000);
+    statusBar()->showMessage(tr("File created: ") + base.filePath(name), 4000);
 }
 
 void MainWindow::showLeftContextMenu(const QPoint &pos) {

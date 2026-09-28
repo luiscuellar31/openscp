@@ -149,6 +149,8 @@ class MainWindow : public QMainWindow {
     void setLeftRoot(const QString &path);
     void setRightRoot(const QString &path);       // local
     void setRightRemoteRoot(const QString &path); // remote
+    bool createLocalDirectory(const QDir &base, const QString &name);
+    bool createLocalFile(const QDir &base, const QString &name);
     void requestRemoteListing(const QString &path, bool refresh,
                               bool initialLoad = false);
 
