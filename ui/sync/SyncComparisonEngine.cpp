@@ -393,16 +393,6 @@ QStringList SyncComparisonEngine::parsePatterns(const QString &text) {
     return patterns;
 }
 
-bool SyncComparisonEngine::globMatches(const QString &relativePath,
-                                       const QString &rawPattern) {
-    const QString path = normalizeRelativePath(relativePath);
-    if (path.isEmpty())
-        return false;
-    const QRegularExpression regex = compiledGlob(rawPattern);
-    return regex.isValid() && !regex.pattern().isEmpty() &&
-           regex.match(path).hasMatch();
-}
-
 QVector<SyncComparisonItem>
 SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
                               const QVector<SyncSnapshotEntry> &remoteSnapshot,

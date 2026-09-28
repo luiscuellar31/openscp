@@ -22,6 +22,4 @@ class SyncComparisonEngine final {
     [[nodiscard]] static QString
     normalizeRelativePath(const QString &relativePath);
     [[nodiscard]] static QStringList parsePatterns(const QString &text);
-    [[nodiscard]] static bool globMatches(const QString &relativePath,
-                                          const QString &pattern);
 };

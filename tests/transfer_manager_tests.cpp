@@ -291,29 +291,22 @@ OPENSCP_TEST(testBatchDownloadEnqueueAndGranularSignals, test) {
                "indexed snapshots should preserve requested ID order");
 
     const quint64 batchId = snapshot.front().batchId;
-    test.check(
-        manager.hasActiveTaskForSource(TransferTask::Type::Download,
-                                       QStringLiteral("/remote/file-0.dat")) &&
-            manager.hasActiveTaskForDestination(
-                TransferTask::Type::Download,
-                QStringLiteral("/local/file-9999.dat")),
-        "direct path queries should find active work in large queues");
     const auto exactTaskId = manager.activeTaskIdForPaths(
         TransferTask::Type::Download, QStringLiteral("/remote/file-4999.dat"),
         QStringLiteral("/local/file-4999.dat"));
     test.check(
         exactTaskId == std::optional<quint64>{5000} &&
             !manager
+                 .activeTaskIdForPaths(TransferTask::Type::Upload,
+                                       QStringLiteral("/remote/file-4999.dat"),
+                                       QStringLiteral("/local/file-4999.dat"))
+                 .has_value() &&
+            !manager
                  .activeTaskIdForPaths(TransferTask::Type::Download,
                                        QStringLiteral("/remote/file-4999.dat"),
                                        QStringLiteral("/local/other.dat"))
                  .has_value(),
-        "exact path queries should return the matching active task ID");
-    test.check(
-        !manager.hasActiveTaskForSource(TransferTask::Type::Upload,
-                                        QStringLiteral("/remote/file-0.dat")) &&
-            !manager.isBatchTerminal(batchId),
-        "direct queries should preserve task type and terminal state");
+        "exact path queries should match both paths and task type");
     const QVector<quint64> activeIds =
         manager.activeTaskIdsForSession(QStringLiteral("site-a"));
     test.check(activeIds.size() == downloads.size() && activeIds.front() == 1 &&
@@ -322,15 +315,12 @@ OPENSCP_TEST(testBatchDownloadEnqueueAndGranularSignals, test) {
                "large queue");
 
     manager.cancelBatch(batchId);
-    test.check(manager.isBatchTerminal(batchId) &&
-                   !manager.hasActiveTaskForDestination(
-                       TransferTask::Type::Download,
-                       QStringLiteral("/local/file-9999.dat")) &&
-                   manager.activeTaskIdsForSession({}).isEmpty(),
-               "batch cancellation should become visible without snapshots");
-    test.check(!manager.isBatchTerminal(0) &&
-                   !manager.isBatchTerminal(batchId + 1000),
-               "empty and unknown batches should not report terminal");
+    const auto canceledTaskId = manager.activeTaskIdForPaths(
+        TransferTask::Type::Download, QStringLiteral("/remote/file-4999.dat"),
+        QStringLiteral("/local/file-4999.dat"));
+    test.check(manager.activeTaskIdsForSession({}).isEmpty() &&
+                   !canceledTaskId.has_value(),
+               "batch cancellation should remove active work from queries");
 
     TransferManager sessionManager;
     sessionManager.setSessionIdentity(QStringLiteral("site-a"));

@@ -37,7 +37,7 @@ const SyncComparisonItem *findItem(const QVector<SyncComparisonItem> &items,
     return nullptr;
 }
 
-OPENSCP_TEST(testPathAndGlobHelpers, test) {
+OPENSCP_TEST(testPathAndGlobFiltering, test) {
     test.check(SyncComparisonEngine::normalizeRelativePath(QStringLiteral(
                    "./src/../main.cpp")) == QStringLiteral("main.cpp"),
                "relative paths should resolve dot segments");
@@ -72,8 +72,12 @@ OPENSCP_TEST(testPathAndGlobHelpers, test) {
          "single-star should not match unrelated suffixes"},
     };
     for (const GlobCase &globCase : globCases) {
-        test.check(SyncComparisonEngine::globMatches(
-                       globCase.path, globCase.pattern) == globCase.expected,
+        SyncComparisonOptions options;
+        options.includePatterns = {globCase.pattern};
+        const auto result = SyncComparisonEngine::compare(
+            {file(globCase.path, 1, 1)}, {}, options);
+        test.check((findItem(result, globCase.path) != nullptr) ==
+                       globCase.expected,
                    globCase.message);
     }
 

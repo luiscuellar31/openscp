@@ -880,28 +880,6 @@ TransferManager::taskSnapshot(quint64 taskId) const {
     return *task;
 }
 
-bool TransferManager::hasActiveTaskForSource(TransferTask::Type type,
-                                             const QString &source) const {
-    std::lock_guard<std::mutex> lock(mtx_);
-    return std::any_of(queueStore_.nodes().cbegin(), queueStore_.nodes().cend(),
-                       [&](const auto &taskNode) {
-                           return taskNode->type == type &&
-                                  taskNode->src == source &&
-                                  !isTerminalTransferStatus(taskNode->status);
-                       });
-}
-
-bool TransferManager::hasActiveTaskForDestination(
-    TransferTask::Type type, const QString &destination) const {
-    std::lock_guard<std::mutex> lock(mtx_);
-    return std::any_of(queueStore_.nodes().cbegin(), queueStore_.nodes().cend(),
-                       [&](const auto &taskNode) {
-                           return taskNode->type == type &&
-                                  taskNode->dst == destination &&
-                                  !isTerminalTransferStatus(taskNode->status);
-                       });
-}
-
 std::optional<quint64>
 TransferManager::activeTaskIdForPaths(TransferTask::Type type,
                                       const QString &source,
@@ -937,21 +915,6 @@ TransferManager::activeTaskIdsForSession(const QString &sessionKey) const {
             result.push_back(task.taskId);
     }
     return result;
-}
-
-bool TransferManager::isBatchTerminal(quint64 batchId) const {
-    if (batchId == 0)
-        return false;
-    std::lock_guard<std::mutex> lock(mtx_);
-    bool found = false;
-    for (const auto &taskNode : queueStore_.nodes()) {
-        if (taskNode->batchId != batchId)
-            continue;
-        found = true;
-        if (!isTerminalTransferStatus(taskNode->status))
-            return false;
-    }
-    return found;
 }
 
 // Worker scheduling and cancellation
