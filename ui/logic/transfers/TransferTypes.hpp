@@ -2,8 +2,11 @@
 #pragma once
 
 #include "logic/transfers/ConflictCoordinator.hpp"
+#include "openscp/SafeLocalFile.hpp"
 
 #include <QString>
+
+#include <optional>
 
 enum class TransferOperation { Copy, Move };
 enum class TransferPostAction { None, DeleteSource };
@@ -57,6 +60,9 @@ struct TransferTask {
     TransferConflictPolicy conflictPolicy = TransferConflictPolicy::Ask;
     TransferPostAction postAction = TransferPostAction::None;
     TransferPhase phase = TransferPhase::Transfer;
+    // Process-local proof for a completed upload. Restored cleanup fails
+    // closed because filesystem identities can be reused after a restart.
+    std::optional<openscp::localfiles::LocalFileIdentity> localSourceIdentity;
     bool restored = false;
     bool commitUncertain = false;
     bool skippedByFailedDependency = false;

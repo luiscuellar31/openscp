@@ -13,6 +13,18 @@ enum class WriteMode {
     Append,
 };
 
+struct LocalFileIdentity {
+    std::uint64_t device = 0;
+    std::uint64_t inode = 0;
+    std::uint64_t size = 0;
+    std::int64_t modifiedSeconds = 0;
+    std::int64_t modifiedNanoseconds = 0;
+    std::int64_t changedSeconds = 0;
+    std::int64_t changedNanoseconds = 0;
+
+    bool operator==(const LocalFileIdentity &) const = default;
+};
+
 // On supported POSIX platforms, local path operations reject symlinks below
 // user-writable directories. Each parent component is opened through a
 // directory descriptor, so replacing a parent with a symlink cannot redirect
@@ -20,6 +32,13 @@ enum class WriteMode {
 bool ensureLocalDirectories(const std::string &path, std::string &error);
 bool removeLocalPath(const std::string &path, bool directory,
                      std::string &error);
+bool localFileIdentity(const std::string &path, LocalFileIdentity &identity,
+                       std::string &error);
+// Compares the entry immediately before unlinking it. Other processes can
+// still replace the entry between those two filesystem calls.
+bool removeLocalFileIfUnchanged(const std::string &path,
+                                const LocalFileIdentity &identity,
+                                std::string &error);
 bool setLocalModificationTime(const std::string &path,
                               std::int64_t modifiedSeconds, std::string &error);
 

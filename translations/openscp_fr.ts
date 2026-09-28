@@ -4853,6 +4853,16 @@ Destination : %3</translation>
         <source>Skipped because a prerequisite task did not complete successfully.</source>
         <translation>Ignoré, car une tâche préalable ne s’est pas terminée correctement.</translation>
     </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="236"/>
+        <source>The completed upload cannot safely remove its local source after a restart. Review the source manually.</source>
+        <translation>Le téléversement est terminé, mais le fichier source local ne peut pas être supprimé en toute sécurité après un redémarrage. Vérifiez-le manuellement.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="249"/>
+        <source>The local source changed after upload and was not removed. Review it manually.</source>
+        <translation>Le fichier source local a changé après le téléversement et n’a pas été supprimé. Vérifiez-le manuellement.</translation>
+    </message>
 </context>
 <context>
     <name>TransferQueueDialog</name>

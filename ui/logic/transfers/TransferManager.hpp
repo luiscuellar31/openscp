@@ -184,8 +184,8 @@ class TransferManager : public QObject {
     TransferTaskControls taskControls_;
     std::unordered_set<quint64> activeTaskIds_;
     std::unordered_set<quint64> resumeRequestedTasks_;
-    std::unordered_set<std::string> reservedDestinations_;
-    std::unordered_map<quint64, std::string> reservationByTask_;
+    std::unordered_set<std::string> reservedPaths_;
+    std::unordered_map<quint64, std::vector<std::string>> reservationByTask_;
     ConflictCoordinator conflictCoordinator_;
 
     BandwidthLimiter bandwidthLimiter_;
@@ -228,8 +228,12 @@ class TransferManager : public QObject {
     quint64 enqueuePathTask(TransferTask::Type type, const QString &path,
                             const TransferBatchOptions &options);
     std::string destinationKey(const TransferTask &task) const;
-    bool reserveDestinationLocked(const TransferTask &task);
-    void releaseDestinationLocked(quint64 taskId);
+    std::string localUploadSourceKey(const TransferTask &task) const;
+    bool hasOtherLocalSourceUserLocked(const TransferTask &task) const;
+    bool canReserveTaskLocked(const TransferTask &task) const;
+    bool reserveTaskPathsLocked(const TransferTask &task);
+    void reserveCleanupSourceLocked(const TransferTask &task);
+    void releaseTaskPathsLocked(quint64 taskId);
     bool dependencySatisfiedLocked(const TransferTask &task) const;
     bool hasRunnableTaskLocked(std::size_t slotIndex);
     std::optional<TransferTask> pickRunnableTaskLocked(std::size_t slotIndex);

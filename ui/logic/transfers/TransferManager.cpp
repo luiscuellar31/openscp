@@ -397,7 +397,7 @@ TransferQueueStore::Nodes TransferManager::removeInactiveTasksLocked(
             --terminalTaskCount_;
         taskControls_.forget(task.taskId);
         resumeRequestedTasks_.erase(task.taskId);
-        releaseDestinationLocked(task.taskId);
+        releaseTaskPathsLocked(task.taskId);
         unusedBatches.insert(task.batchId);
     }
     for (const auto &taskNode : queueStore_.nodes()) {
@@ -440,20 +440,86 @@ std::string TransferManager::destinationKey(const TransferTask &task) const {
     return ("local:" + local).toStdString();
 }
 
-bool TransferManager::reserveDestinationLocked(const TransferTask &task) {
-    const std::string key = destinationKey(task);
-    if (reservedDestinations_.count(key))
+std::string
+TransferManager::localUploadSourceKey(const TransferTask &task) const {
+    return ("local:" + QDir::cleanPath(QFileInfo(task.src).absoluteFilePath()))
+        .toStdString();
+}
+
+bool TransferManager::hasOtherLocalSourceUserLocked(
+    const TransferTask &task) const {
+    const std::string source = localUploadSourceKey(task);
+    // ponytail: This scans the queue for each cleanup; index local paths if
+    // large queues of moves make cleanup scheduling a measured bottleneck.
+    for (const auto &node : queueStore_.nodes()) {
+        const TransferTask &other = *node;
+        if (other.taskId == task.taskId ||
+            other.phase != TransferPhase::Transfer ||
+            (isTerminalTransferStatus(other.status) &&
+             !activeTaskIds_.count(other.taskId)))
+            continue;
+        if (!((other.type == TransferTask::Type::Upload &&
+               localUploadSourceKey(other) == source) ||
+              destinationKey(other) == source))
+            continue;
+        // A task waiting for this move cannot read the source before the move
+        // finishes, so waiting for it here would deadlock the queue.
+        if (other.waitsForBatch && other.batchId == task.batchId)
+            continue;
+        quint64 dependency = other.dependsOnTaskId;
+        bool waitsForMove = false;
+        for (std::size_t depth = 0;
+             dependency != 0 && depth < queueStore_.nodes().size(); ++depth) {
+            if (dependency == task.taskId) {
+                waitsForMove = true;
+                break;
+            }
+            const TransferTask *parent = taskForIdLocked(dependency);
+            dependency = parent ? parent->dependsOnTaskId : 0;
+        }
+        if (waitsForMove)
+            continue;
+        return true;
+    }
+    return false;
+}
+
+bool TransferManager::canReserveTaskLocked(const TransferTask &task) const {
+    if (reservedPaths_.count(destinationKey(task)))
         return false;
-    reservedDestinations_.insert(key);
-    reservationByTask_[task.taskId] = key;
+    if (task.type != TransferTask::Type::Upload)
+        return true;
+    const std::string source = localUploadSourceKey(task);
+    if (reservedPaths_.count(source))
+        return false;
+    return task.phase != TransferPhase::DeleteSource ||
+           !hasOtherLocalSourceUserLocked(task);
+}
+
+bool TransferManager::reserveTaskPathsLocked(const TransferTask &task) {
+    if (!canReserveTaskLocked(task))
+        return false;
+    auto &keys = reservationByTask_[task.taskId];
+    keys.push_back(destinationKey(task));
+    reservedPaths_.insert(keys.back());
+    if (task.type == TransferTask::Type::Upload &&
+        task.phase == TransferPhase::DeleteSource)
+        reserveCleanupSourceLocked(task);
     return true;
 }
 
-void TransferManager::releaseDestinationLocked(quint64 taskId) {
+void TransferManager::reserveCleanupSourceLocked(const TransferTask &task) {
+    auto &keys = reservationByTask_[task.taskId];
+    keys.push_back(localUploadSourceKey(task));
+    reservedPaths_.insert(keys.back());
+}
+
+void TransferManager::releaseTaskPathsLocked(quint64 taskId) {
     const auto found = reservationByTask_.find(taskId);
     if (found == reservationByTask_.end())
         return;
-    reservedDestinations_.erase(found->second);
+    for (const auto &key : found->second)
+        reservedPaths_.erase(key);
     reservationByTask_.erase(found);
 }
 
@@ -853,7 +919,7 @@ bool TransferManager::hasRunnableTaskLocked(std::size_t slotIndex) {
             task.sessionKey != currentSessionKey_) {
             continue;
         }
-        if (!reservedDestinations_.count(destinationKey(task)))
+        if (canReserveTaskLocked(task))
             return true;
     }
     return false;
@@ -874,7 +940,7 @@ TransferManager::pickRunnableTaskLocked(std::size_t slotIndex) {
                 task.status = Status::WaitingForConnection;
                 return false;
             }
-            return reserveDestinationLocked(task);
+            return reserveTaskPathsLocked(task);
         });
     if (!taskIndex)
         return std::nullopt;
@@ -1765,11 +1831,11 @@ bool TransferManager::chooseRenamedDestination(
         candidateTask.type = task.type;
         candidateTask.dst = candidate;
         const std::string key = destinationKey(candidateTask);
-        if (reservedDestinations_.count(key))
+        if (reservedPaths_.count(key))
             continue;
-        releaseDestinationLocked(task.taskId);
+        releaseTaskPathsLocked(task.taskId);
         task.dst = candidate;
-        if (!reserveDestinationLocked(task)) {
+        if (!reserveTaskPathsLocked(task)) {
             err =
                 QCoreApplication::translate(
                     "TransferManager", "Could not reserve renamed destination")
@@ -2174,10 +2240,40 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
                 task.phase = task.postAction == TransferPostAction::DeleteSource
                                  ? TransferPhase::DeleteSource
                                  : TransferPhase::Finished;
-                std::lock_guard<std::mutex> lock(mtx_);
-                TransferTask *storedTask = taskForIdLocked(task.taskId);
-                if (storedTask)
-                    storedTask->phase = task.phase;
+                bool deferredCleanup = false;
+                {
+                    std::lock_guard<std::mutex> lock(mtx_);
+                    TransferTask *storedTask = taskForIdLocked(task.taskId);
+                    if (storedTask) {
+                        storedTask->phase = task.phase;
+                        storedTask->localSourceIdentity =
+                            task.localSourceIdentity;
+                        if (task.type == TransferTask::Type::Upload &&
+                            task.phase == TransferPhase::DeleteSource) {
+                            const std::string source =
+                                localUploadSourceKey(task);
+                            if (reservedPaths_.count(source) ||
+                                hasOtherLocalSourceUserLocked(task)) {
+                                // Let queued and running users finish before
+                                // the move can remove their local source.
+                                storedTask->attempts = 0;
+                                transitionToQueued(
+                                    *storedTask,
+                                    QDateTime::currentMSecsSinceEpoch(), false);
+                                deferredCleanup = true;
+                            } else {
+                                reserveCleanupSourceLocked(task);
+                            }
+                        }
+                    }
+                }
+                if (deferredCleanup) {
+                    // The worker releases its destination reservation before
+                    // the cleanup phase is scheduled again.
+                    publishUpdated({task.taskId});
+                    finish();
+                    return;
+                }
             }
         }
 
@@ -2404,7 +2500,7 @@ void TransferManager::finishWorkerTask(quint64 taskId, qint64 precheckMs,
         }
         activeTaskIds_.erase(taskId);
         taskControls_.finishRunning(taskId);
-        releaseDestinationLocked(taskId);
+        releaseTaskPathsLocked(taskId);
         if (finalStatus == Status::Error || finalStatus == Status::Canceled ||
             finalStatus == Status::Warning) {
             dependencySkipped = skipDependentsOfFailedLocked(
@@ -2429,8 +2525,9 @@ void TransferManager::finishWorkerTask(quint64 taskId, qint64 precheckMs,
         transferStartedMs > 0
             ? QDateTime::currentMSecsSinceEpoch() - transferStartedMs
             : 0;
-    recordCompletionMetrics(taskId, finalStatus, bytesDone, queueLatency,
-                            precheckMs, transferMs);
+    if (finalStatus != Status::Queued)
+        recordCompletionMetrics(taskId, finalStatus, bytesDone, queueLatency,
+                                precheckMs, transferMs);
 }
 
 void TransferManager::recordCompletionMetrics(quint64 taskId, Status status,

@@ -1200,6 +1200,254 @@ OPENSCP_TEST(testMoveDeleteSourcePhasePersistsWithoutRetransfer, test) {
                "DeleteSource retry must not repeat the completed transfer");
 }
 
+#ifndef _WIN32
+struct SourceUploadProbe {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool holdMove = false;
+    bool moveEntered = false;
+    bool releaseMove = false;
+    bool holdCopy = false;
+    bool copyEntered = false;
+    bool releaseCopy = false;
+    bool replaceMove = false;
+    std::unordered_map<std::string, std::string> uploaded;
+};
+
+class SourceUploadClient final : public openscp::MockSftpClient {
+    public:
+    explicit SourceUploadClient(std::shared_ptr<SourceUploadProbe> probe)
+        : probe_(std::move(probe)) {}
+
+    bool put(const std::string &local, const std::string &remote,
+             std::string &err,
+             std::function<void(std::size_t, std::size_t)> progress,
+             std::function<bool()>, bool) override {
+        QFile input(QString::fromStdString(local));
+        if (!input.open(QIODevice::ReadOnly)) {
+            err = "Could not read local source";
+            return false;
+        }
+        const QByteArray contents = input.readAll();
+        input.close();
+        {
+            std::unique_lock<std::mutex> lock(probe_->mutex);
+            probe_->uploaded[remote] = contents.toStdString();
+            if (remote == "/home/demo/move") {
+                probe_->moveEntered = true;
+                probe_->changed.notify_all();
+                if (probe_->holdMove &&
+                    !probe_->changed.wait_for(
+                        lock, 5s, [&] { return probe_->releaseMove; })) {
+                    err = "Timed out waiting for the move fixture";
+                    return false;
+                }
+            } else if (remote == "/home/demo/copy") {
+                probe_->copyEntered = true;
+                probe_->changed.notify_all();
+                if (probe_->holdCopy &&
+                    !probe_->changed.wait_for(
+                        lock, 5s, [&] { return probe_->releaseCopy; })) {
+                    err = "Timed out waiting for the copy fixture";
+                    return false;
+                }
+            }
+        }
+        if (remote == "/home/demo/move" && probe_->replaceMove) {
+            const QString source = QString::fromStdString(local);
+            if (!QFile::rename(source, source + QStringLiteral(".original"))) {
+                err = "Could not move original fixture file";
+                return false;
+            }
+            QFile replacement(source);
+            if (!replacement.open(QIODevice::WriteOnly) ||
+                replacement.write("replacement") != 11) {
+                err = "Could not write replacement fixture file";
+                return false;
+            }
+        }
+        if (progress)
+            progress(static_cast<std::size_t>(contents.size()),
+                     static_cast<std::size_t>(contents.size()));
+        clearLastOperationError();
+        err.clear();
+        return true;
+    }
+
+    std::unique_ptr<openscp::RemoteClient>
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
+        return makeConnectedWorker<SourceUploadClient>(options, err, probe_);
+    }
+
+    private:
+    std::shared_ptr<SourceUploadProbe> probe_;
+};
+
+OPENSCP_TEST(testMoveUploadPreservesReplacedLocalSource, test) {
+    QTemporaryDir root;
+    const QString source = root.filePath("source.txt");
+    QFile initial(source);
+    test.check(initial.open(QIODevice::WriteOnly) &&
+                   initial.write("original") == 8,
+               "move fixture should create the original source");
+    initial.close();
+
+    auto probe = std::make_shared<SourceUploadProbe>();
+    probe->replaceMove = true;
+    SourceUploadClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    configureManager(manager, baseClient, testOptions());
+    auto batch = testBatchOptions();
+    batch.operation = TransferOperation::Move;
+    const quint64 id =
+        manager.enqueueUpload(source, QStringLiteral("/home/demo/move"), batch);
+    test.check(waitForStatus(manager, id, TransferTask::Status::Warning),
+               "a replaced source should produce a cleanup warning");
+    QFile replacement(source);
+    test.check(replacement.open(QIODevice::ReadOnly) &&
+                   replacement.readAll() == "replacement",
+               "move cleanup must preserve the replacement file");
+}
+
+OPENSCP_TEST(testMoveCleanupWithoutIdentityPreservesSource, test) {
+    QTemporaryDir root;
+    const QString source = root.filePath("source.txt");
+    QFile initial(source);
+    test.check(initial.open(QIODevice::WriteOnly) &&
+                   initial.write("source") == 6,
+               "restored cleanup fixture should create the source");
+    initial.close();
+
+    TransferTask restored;
+    restored.type = TransferTask::Type::Upload;
+    restored.src = source;
+    restored.phase = TransferPhase::DeleteSource;
+    restored.postAction = TransferPostAction::DeleteSource;
+    std::string error;
+    test.check(!TransferExecutor::runPostAction(restored, nullptr, error) &&
+                   error.find("restart") != std::string::npos &&
+                   QFileInfo::exists(source),
+               "cleanup without a process-local identity must fail closed");
+}
+
+OPENSCP_TEST(testMoveCleanupWaitsForQueuedSourceReader, test) {
+    QTemporaryDir root;
+    const QString source = root.filePath("source.txt");
+    QFile initial(source);
+    test.check(initial.open(QIODevice::WriteOnly) &&
+                   initial.write("original") == 8,
+               "shared-source fixture should create the source");
+    initial.close();
+
+    auto probe = std::make_shared<SourceUploadProbe>();
+    probe->holdMove = true;
+    SourceUploadClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    configureManager(manager, baseClient, testOptions());
+    auto moveBatch = testBatchOptions();
+    moveBatch.operation = TransferOperation::Move;
+    const quint64 move = manager.enqueueUpload(
+        source, QStringLiteral("/home/demo/move"), moveBatch);
+    {
+        std::unique_lock<std::mutex> lock(probe->mutex);
+        test.check(probe->changed.wait_for(lock, 5s,
+                                           [&] { return probe->moveEntered; }),
+                   "move fixture should enter its upload");
+    }
+    const quint64 copy = manager.enqueueUpload(
+        source, QStringLiteral("/home/demo/copy"), testBatchOptions());
+    {
+        std::lock_guard<std::mutex> lock(probe->mutex);
+        probe->releaseMove = true;
+    }
+    probe->changed.notify_all();
+    test.check(waitForStatus(manager, copy, TransferTask::Status::Done) &&
+                   waitForStatus(manager, move, TransferTask::Status::Done),
+               "copy should read the shared source before move cleanup");
+    {
+        std::lock_guard<std::mutex> lock(probe->mutex);
+        test.check(probe->uploaded["/home/demo/copy"] == "original",
+                   "queued copy should upload the original source bytes");
+    }
+    test.check(!QFileInfo::exists(source),
+               "move should remove its source after the queued copy finishes");
+}
+
+OPENSCP_TEST(testMoveCleanupWaitsForRunningSourceReader, test) {
+    QTemporaryDir root;
+    const QString source = root.filePath("source.txt");
+    QFile initial(source);
+    test.check(initial.open(QIODevice::WriteOnly) &&
+                   initial.write("original") == 8,
+               "concurrent fixture should create the source");
+    initial.close();
+
+    auto probe = std::make_shared<SourceUploadProbe>();
+    probe->holdCopy = true;
+    SourceUploadClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(2);
+    auto moveBatch = testBatchOptions();
+    moveBatch.operation = TransferOperation::Move;
+    const quint64 move = manager.enqueueUpload(
+        source, QStringLiteral("/home/demo/move"), moveBatch);
+    const quint64 copy = manager.enqueueUpload(
+        source, QStringLiteral("/home/demo/copy"), testBatchOptions());
+    configureManager(manager, baseClient, testOptions());
+    {
+        std::unique_lock<std::mutex> lock(probe->mutex);
+        test.check(probe->changed.wait_for(lock, 5s,
+                                           [&] { return probe->copyEntered; }),
+                   "copy should be reading when move cleanup is considered");
+    }
+    test.check(waitUntil([&] {
+                   const auto task = manager.taskSnapshot(move);
+                   return task && task->phase == TransferPhase::DeleteSource;
+               }) &&
+                   QFileInfo::exists(source),
+               "move must keep the source while another worker reads it");
+    {
+        std::lock_guard<std::mutex> lock(probe->mutex);
+        probe->releaseCopy = true;
+    }
+    probe->changed.notify_all();
+    test.check(waitForStatus(manager, copy, TransferTask::Status::Done) &&
+                   waitForStatus(manager, move, TransferTask::Status::Done),
+               "move should finish cleanup after the active copy completes");
+}
+
+OPENSCP_TEST(testMoveCleanupDoesNotWaitForItsDependentTask, test) {
+    QTemporaryDir root;
+    const QString source = root.filePath("source.txt");
+    QFile initial(source);
+    test.check(initial.open(QIODevice::WriteOnly) &&
+                   initial.write("original") == 8,
+               "dependency fixture should create the source");
+    initial.close();
+
+    auto probe = std::make_shared<SourceUploadProbe>();
+    SourceUploadClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    auto moveBatch = testBatchOptions();
+    moveBatch.operation = TransferOperation::Move;
+    const quint64 move = manager.enqueueUpload(
+        source, QStringLiteral("/home/demo/move"), moveBatch);
+    auto dependent = testBatchOptions();
+    dependent.dependsOnTaskId = move;
+    const quint64 copy = manager.enqueueUpload(
+        source, QStringLiteral("/home/demo/copy"), dependent);
+    configureManager(manager, baseClient, testOptions());
+
+    test.check(waitForStatus(manager, move, TransferTask::Status::Done),
+               "move cleanup must not wait for a task depending on that move");
+    test.check(waitForStatus(manager, copy, TransferTask::Status::Error),
+               "dependent copy should report that its source was moved");
+}
+#endif
+
 OPENSCP_TEST(testFailureScenariosDoNotRetry, test) {
     auto state =
         std::make_shared<FailureDownloadState>(std::vector<FailureScenario>{

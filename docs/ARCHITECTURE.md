@@ -96,8 +96,10 @@ kept separate from blocking network operations.
 ## Transfers and synchronization
 
 `TransferManager` is the entry point for the transfer queue. It coordinates
-worker connections, task state, retries, conflicts, destination reservations,
-persistence, and notifications. The supporting classes have narrower jobs:
+worker connections, task state, retries, conflicts, path reservations,
+persistence, and notifications. For a local upload move, it defers source
+cleanup while another queued task needs that path and reserves the source
+during cleanup. The supporting classes have narrower jobs:
 
 - `TransferQueue` stores tasks and selects work fairly.
 - `TransferExecutor` runs a selected transfer.
@@ -107,6 +109,9 @@ persistence, and notifications. The supporting classes have narrower jobs:
 `SafeLocalFile` in the core owns local download publication and descriptor-based
 path operations for transfer tasks. The queue uses it to create or remove local
 entries without following symbolic links in user-writable parent directories.
+Upload moves also use it to capture local file identity before transfer and
+check that identity before source cleanup. The identity is process-local; a
+restored cleanup without it requires manual review.
 `SyncCoordinator` resolves the selected local root before scanning and queuing
 paths, so a root reached through a system link keeps one physical location.
 

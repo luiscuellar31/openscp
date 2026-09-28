@@ -138,6 +138,35 @@ bool syncParentDirectory(int descriptor, std::string &error) {
     }
     return true;
 }
+
+bool readRegularFileIdentity(int parent, const std::filesystem::path &name,
+                             LocalFileIdentity &identity, std::string &error) {
+    struct stat metadata {};
+    if (::fstatat(parent, name.c_str(), &metadata, AT_SYMLINK_NOFOLLOW) != 0) {
+        error = ioError("Could not inspect local source file");
+        return false;
+    }
+    if (!S_ISREG(metadata.st_mode)) {
+        errno = EINVAL;
+        error = "Local source is not a regular file.";
+        return false;
+    }
+#ifdef __APPLE__
+    const auto modified = metadata.st_mtimespec;
+    const auto changed = metadata.st_ctimespec;
+#else
+    const auto modified = metadata.st_mtim;
+    const auto changed = metadata.st_ctim;
+#endif
+    identity = {static_cast<std::uint64_t>(metadata.st_dev),
+                static_cast<std::uint64_t>(metadata.st_ino),
+                static_cast<std::uint64_t>(metadata.st_size),
+                static_cast<std::int64_t>(modified.tv_sec),
+                static_cast<std::int64_t>(modified.tv_nsec),
+                static_cast<std::int64_t>(changed.tv_sec),
+                static_cast<std::int64_t>(changed.tv_nsec)};
+    return true;
+}
 #endif
 
 } // namespace
@@ -190,6 +219,78 @@ bool removeLocalPath(const std::string &path, bool directory,
         return true;
     errno = savedError;
     error = ioError("Could not safely remove local path");
+    return false;
+#endif
+}
+
+bool localFileIdentity(const std::string &path, LocalFileIdentity &identity,
+                       std::string &error) {
+    error.clear();
+#ifdef _WIN32
+    (void)path;
+    (void)identity;
+    error = "Safe local source inspection is unavailable on Windows.";
+    return false;
+#else
+    const std::filesystem::path requested(path);
+    const auto name = requested.filename();
+    if (name.empty() || name == "." || name == "..") {
+        error = "Local source path does not identify a file.";
+        return false;
+    }
+    const int parent = openSafeDirectory(requested.parent_path(), false, error);
+    if (parent < 0)
+        return false;
+    const bool result = readRegularFileIdentity(parent, name, identity, error);
+    ::close(parent);
+    return result;
+#endif
+}
+
+bool removeLocalFileIfUnchanged(const std::string &path,
+                                const LocalFileIdentity &identity,
+                                std::string &error) {
+    error.clear();
+#ifdef _WIN32
+    (void)path;
+    (void)identity;
+    error = "Safe local source removal is unavailable on Windows.";
+    return false;
+#else
+    const std::filesystem::path requested(path);
+    const auto name = requested.filename();
+    if (name.empty() || name == "." || name == "..") {
+        error = "Local source path does not identify a file.";
+        return false;
+    }
+    const int parent = openSafeDirectory(requested.parent_path(), false, error);
+    if (parent < 0) {
+        if (errno == ENOENT) {
+            error.clear();
+            return true;
+        }
+        return false;
+    }
+    LocalFileIdentity current;
+    const bool found = readRegularFileIdentity(parent, name, current, error);
+    if (!found && errno == ENOENT) {
+        ::close(parent);
+        error.clear();
+        return true;
+    }
+    if (!found || current != identity) {
+        ::close(parent);
+        if (found)
+            error = "Local source changed after transfer; it was not removed.";
+        return false;
+    }
+    const int result = ::unlinkat(parent, name.c_str(), 0);
+    const int savedError = errno;
+    ::close(parent);
+    if (result == 0 || savedError == ENOENT)
+        return true;
+    errno = savedError;
+    error = ioError("Could not safely remove local source");
     return false;
 #endif
 }

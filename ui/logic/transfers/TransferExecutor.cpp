@@ -203,6 +203,15 @@ bool TransferExecutor::run(
         previousTick = Clock::now();
     };
 
+    if (task.type == TransferTask::Type::Upload &&
+        task.postAction == TransferPostAction::DeleteSource) {
+        openscp::localfiles::LocalFileIdentity identity;
+        if (!openscp::localfiles::localFileIdentity(task.src.toStdString(),
+                                                    identity, error))
+            return false;
+        task.localSourceIdentity = identity;
+    }
+
     const bool succeeded =
         task.type == TransferTask::Type::Upload
             ? remoteClient->put(task.src.toStdString(), task.dst.toStdString(),
@@ -221,9 +230,28 @@ bool TransferExecutor::runPostAction(
     if (task.postAction != TransferPostAction::DeleteSource)
         return true;
     if (task.type == TransferTask::Type::Upload) {
-        if (openscp::localfiles::removeLocalPath(task.src.toStdString(), false,
-                                                 error))
+        if (!task.localSourceIdentity) {
+            error = QCoreApplication::translate(
+                        "TransferManager",
+                        "The completed upload cannot safely remove its local "
+                        "source after a restart. Review the source manually.")
+                        .toUtf8()
+                        .toStdString();
+            return false;
+        }
+        if (openscp::localfiles::removeLocalFileIfUnchanged(
+                task.src.toStdString(), *task.localSourceIdentity, error))
             return true;
+        if (error ==
+            "Local source changed after transfer; it was not removed.") {
+            error = QCoreApplication::translate(
+                        "TransferManager",
+                        "The local source changed after upload and was not "
+                        "removed. Review it manually.")
+                        .toUtf8()
+                        .toStdString();
+            return false;
+        }
         error = translatedError(
                     "Transfer completed, but the local source could not be "
                     "removed") +

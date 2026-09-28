@@ -4853,6 +4853,16 @@ Ziel: %3</translation>
         <source>The saved transfer queue was not restored because the current queue is not empty.</source>
         <translation>Die gespeicherte Übertragungswarteschlange wurde nicht wiederhergestellt, weil die aktuelle Warteschlange nicht leer ist.</translation>
     </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="236"/>
+        <source>The completed upload cannot safely remove its local source after a restart. Review the source manually.</source>
+        <translation>Der Upload ist abgeschlossen, aber die lokale Quelldatei kann nach einem Neustart nicht sicher entfernt werden. Prüfen Sie die Datei manuell.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="249"/>
+        <source>The local source changed after upload and was not removed. Review it manually.</source>
+        <translation>Die lokale Quelldatei wurde nach dem Upload verändert und nicht entfernt. Prüfen Sie die Datei manuell.</translation>
+    </message>
 </context>
 <context>
     <name>TransferQueueDialog</name>
