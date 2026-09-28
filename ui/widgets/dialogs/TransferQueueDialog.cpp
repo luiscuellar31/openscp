@@ -179,7 +179,8 @@ void withSelectedTasks(TransferManager *manager, const QVector<quint64> &ids,
         return;
     // Use one immutable, ID-scoped snapshot so selected operations see the
     // same state without copying the complete queue.
-    const auto taskIndex = buildTaskIndexById(manager->tasksSnapshot(ids));
+    const auto snapshot = manager->tasksSnapshot(ids);
+    const auto taskIndex = buildTaskIndexById(snapshot);
     forEachSelectedTask(ids, taskIndex, callback);
 }
 

@@ -6,6 +6,9 @@
 
 #include <QAbstractItemModel>
 #include <QApplication>
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QItemSelectionModel>
 #include <QLabel>
 #include <QTableView>
 
@@ -130,6 +133,63 @@ OPENSCP_TEST(testQueueTableFollowsRemovedTasks, test) {
                "the table should still find the rows it added later");
     test.check(manager.taskSnapshot(later).has_value(),
                "removing by id should not touch the other task");
+}
+
+OPENSCP_TEST(testSelectedActionsUseTaskSnapshots, test) {
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    TransferBatchOptions batch;
+    batch.sessionKey = QStringLiteral("test-session");
+    const quint64 first = manager.enqueueRemoteDelete(
+        QStringLiteral("/selected-first"), false, batch);
+    const quint64 unselected = manager.enqueueRemoteDelete(
+        QStringLiteral("/unselected"), false, batch);
+    const quint64 last = manager.enqueueRemoteDelete(
+        QStringLiteral("/selected-last"), false, batch);
+
+    TransferQueueDialog dialog(&manager);
+    dialog.show();
+    flushUiEvents();
+    auto *table =
+        dialog.findChild<QTableView *>(QStringLiteral("transferQueueTable"));
+    test.check(table && table->model() && table->model()->rowCount() == 3,
+               "all queued tasks should appear for selection");
+    if (!table || !table->model() || table->model()->rowCount() != 3)
+        return;
+
+    auto *selection = table->selectionModel();
+    selection->select(table->model()->index(0, 0),
+                      QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    selection->select(table->model()->index(2, 0),
+                      QItemSelectionModel::Select | QItemSelectionModel::Rows);
+
+    test.check(QMetaObject::invokeMethod(&dialog, "onCopyDestinationPath"),
+               "copy selected paths should be callable");
+    test.check(QGuiApplication::clipboard()->text() ==
+                   QStringLiteral("/selected-first\n/selected-last"),
+               "copy should use only selected task destinations in row order");
+
+    test.check(QMetaObject::invokeMethod(&dialog, "onPauseSelected"),
+               "pause selected should be callable");
+    const auto pausedFirst = manager.taskSnapshot(first);
+    const auto pausedLast = manager.taskSnapshot(last);
+    const auto untouched = manager.taskSnapshot(unselected);
+    test.check(pausedFirst && pausedLast && untouched &&
+                   pausedFirst->status == TransferTask::Status::Paused &&
+                   pausedLast->status == TransferTask::Status::Paused &&
+                   untouched->status != TransferTask::Status::Paused,
+               "pause should affect only selected tasks");
+
+    test.check(QMetaObject::invokeMethod(&dialog, "onStopSelected"),
+               "cancel selected should be callable");
+    const auto canceledFirst = manager.taskSnapshot(first);
+    const auto canceledLast = manager.taskSnapshot(last);
+    const auto stillUntouched = manager.taskSnapshot(unselected);
+    test.check(canceledFirst && canceledLast && stillUntouched &&
+                   canceledFirst->status == TransferTask::Status::Canceled &&
+                   canceledLast->status == TransferTask::Status::Canceled &&
+                   stillUntouched->status != TransferTask::Status::Canceled,
+               "cancel should affect only selected tasks");
 }
 
 } // namespace
