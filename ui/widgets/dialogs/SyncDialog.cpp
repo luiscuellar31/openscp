@@ -509,6 +509,7 @@ SyncExecutionPlan SyncDialog::executionPlan() const {
 }
 
 void SyncDialog::rebuildComparison() {
+    rebuildTimer_->stop();
     syncOptionsFromControls();
     updateRootLabels();
     ++comparisonGeneration_;
@@ -558,8 +559,12 @@ void SyncDialog::setComparisonBusy(bool busy) {
 }
 
 void SyncDialog::scheduleRebuild() {
-    if (!applyingControls_ && rebuildTimer_)
-        rebuildTimer_->start();
+    if (applyingControls_ || !rebuildTimer_)
+        return;
+    // Invalidate a result already in flight as soon as its options change.
+    ++comparisonGeneration_;
+    setComparisonBusy(true);
+    rebuildTimer_->start();
 }
 
 void SyncDialog::updateRootLabels() {
@@ -818,12 +823,8 @@ void SyncDialog::requestChecksums() {
 }
 
 void SyncDialog::acceptRequested() {
-    if (checksumBusy_)
+    if (checksumBusy_ || comparisonBusy_ || rebuildTimer_->isActive())
         return;
-    if (rebuildTimer_->isActive()) {
-        rebuildTimer_->stop();
-        rebuildComparison();
-    }
     const SyncExecutionPlan plan = executionPlan();
     if (plan.empty()) {
         QMessageBox::information(

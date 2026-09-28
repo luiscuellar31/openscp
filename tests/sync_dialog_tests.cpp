@@ -4,8 +4,13 @@
 #include "widgets/dialogs/SyncDialog.hpp"
 
 #include <QApplication>
+#include <QCheckBox>
+#include <QComboBox>
 #include <QDialogButtonBox>
+#include <QEvent>
+#include <QPlainTextEdit>
 #include <QPushButton>
+#include <QThreadPool>
 
 #include <algorithm>
 #include <chrono>
@@ -13,7 +18,6 @@
 
 namespace {
 
-using openscp::testsupport::flushUiEvents;
 using openscp::testsupport::waitUntil;
 
 QVector<SyncSnapshotEntry> snapshotWith(const QString &uniqueName, int files) {
@@ -50,6 +54,22 @@ bool hasItemFor(const SyncDialog &dialog, const QString &relativePath) {
 QPushButton *synchronizeButton(const SyncDialog &dialog) {
     auto *buttons = dialog.findChild<QDialogButtonBox *>();
     return buttons ? buttons->button(QDialogButtonBox::Ok) : nullptr;
+}
+
+QCheckBox *mirrorCheck(const SyncDialog &dialog) {
+    for (QCheckBox *check : dialog.findChildren<QCheckBox *>()) {
+        if (check->text().startsWith(QStringLiteral("Mirror destination")))
+            return check;
+    }
+    return nullptr;
+}
+
+QComboBox *directionCombo(const SyncDialog &dialog) {
+    for (QComboBox *combo : dialog.findChildren<QComboBox *>()) {
+        if (combo->findText(QStringLiteral("Remote → Local")) >= 0)
+            return combo;
+    }
+    return nullptr;
 }
 
 OPENSCP_TEST(testComparisonWithoutSnapshotsIsReadyAtOnce, test) {
@@ -93,6 +113,106 @@ OPENSCP_TEST(testOnlyTheNewestComparisonReachesThePreview, test) {
         std::chrono::milliseconds(2000));
     test.check(!staleArrived,
                "a superseded comparison should not overwrite the newest one");
+}
+
+OPENSCP_TEST(testPendingMirrorChangeCannotAcceptStalePreview, test) {
+    SyncDialog dialog;
+    dialog.setSnapshots({}, snapshotWith(QStringLiteral("extra.dat"), 0));
+    QCheckBox *mirror = mirrorCheck(dialog);
+    QPushButton *synchronize = synchronizeButton(dialog);
+    auto *buttons = dialog.findChild<QDialogButtonBox *>();
+    test.check(mirror && synchronize && buttons,
+               "mirror control and accept button should exist");
+    if (!mirror || !synchronize || !buttons)
+        return;
+
+    mirror->setChecked(true);
+    test.check(waitUntil([&] {
+                   return !dialog.executionPlan().deletes.isEmpty() &&
+                          synchronize->isEnabled();
+               }),
+               "mirror deletion should reach the ready preview");
+
+    mirror->setChecked(false);
+    test.check(!synchronize->isEnabled(),
+               "changing mirror should immediately disable synchronization");
+    QMetaObject::invokeMethod(buttons, "accepted", Qt::DirectConnection);
+    test.check(dialog.result() != QDialog::Accepted,
+               "accepting during the debounce must not execute stale items");
+    test.check(waitUntil([&] {
+                   return synchronize->isEnabled() &&
+                          dialog.executionPlan().deletes.isEmpty();
+               }),
+               "the refreshed preview should contain no deletions");
+}
+
+OPENSCP_TEST(testPendingChangeIgnoresEarlierQueuedComparison, test) {
+    SyncDialog dialog;
+    dialog.setSnapshots({}, snapshotWith(QStringLiteral("extra.dat"), 0));
+    QCheckBox *mirror = mirrorCheck(dialog);
+    QPushButton *synchronize = synchronizeButton(dialog);
+    test.check(mirror && synchronize, "mirror controls should exist");
+    if (!mirror || !synchronize)
+        return;
+
+    // The worker has finished, but its result is still queued for the UI.
+    test.check(QThreadPool::globalInstance()->waitForDone(5000),
+               "the earlier comparison should finish before delivering it");
+    mirror->setChecked(true);
+    QCoreApplication::sendPostedEvents(qApp, QEvent::MetaCall);
+    test.check(!synchronize->isEnabled(),
+               "a superseded result must not enable synchronization");
+    test.check(waitUntil([&] {
+                   return synchronize->isEnabled() &&
+                          !dialog.executionPlan().deletes.isEmpty();
+               }),
+               "only the comparison with the current options should apply");
+}
+
+OPENSCP_TEST(testPendingDirectionAndFilterChangesCannotAccept, test) {
+    SyncDialog dialog;
+    dialog.setSnapshots(snapshotWith(QStringLiteral("local-only.dat"), 0),
+                        snapshotWith(QStringLiteral("remote-only.dat"), 0));
+    QComboBox *direction = directionCombo(dialog);
+    QPushButton *synchronize = synchronizeButton(dialog);
+    auto *buttons = dialog.findChild<QDialogButtonBox *>();
+    auto *exclude = dialog.findChild<QPlainTextEdit *>();
+    test.check(direction && synchronize && buttons && exclude,
+               "direction, filter and accept controls should exist");
+    if (!direction || !synchronize || !buttons || !exclude)
+        return;
+    test.check(waitUntil([&] {
+                   return synchronize->isEnabled() &&
+                          dialog.executionPlan().copies.size() == 1;
+               }),
+               "initial comparison should be ready");
+
+    direction->setCurrentIndex(
+        direction->findData(static_cast<int>(SyncDirection::RemoteToLocal)));
+    test.check(!synchronize->isEnabled(),
+               "changing direction should immediately disable synchronization");
+    QMetaObject::invokeMethod(buttons, "accepted", Qt::DirectConnection);
+    test.check(dialog.result() != QDialog::Accepted,
+               "pending direction must not accept the old copy operation");
+    test.check(waitUntil([&] {
+                   const auto plan = dialog.executionPlan();
+                   return synchronize->isEnabled() && plan.copies.size() == 1 &&
+                          plan.copies.front().relativePath ==
+                              QStringLiteral("shared/remote-only.dat");
+               }),
+               "reverse direction should show the remote source file");
+
+    exclude->setPlainText(QStringLiteral("remote-only.dat"));
+    test.check(!synchronize->isEnabled(),
+               "changing filters should immediately disable synchronization");
+    QMetaObject::invokeMethod(buttons, "accepted", Qt::DirectConnection);
+    test.check(dialog.result() != QDialog::Accepted,
+               "pending filter must not accept a now excluded copy");
+    test.check(waitUntil([&] {
+                   return synchronize->isEnabled() &&
+                          dialog.executionPlan().copies.isEmpty();
+               }),
+               "refreshed filter should exclude the remote source file");
 }
 
 } // namespace

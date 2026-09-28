@@ -252,6 +252,22 @@ OPENSCP_TEST(testExecutionPlanOrdering, test) {
                "unchecked preview rows must not enter the execution plan");
 }
 
+OPENSCP_TEST(testDisabledMirrorCannotPlanStaleDeletions, test) {
+    SyncComparisonOptions options;
+    options.mirror = true;
+    const auto mirrorItems = SyncComparisonEngine::compare(
+        {}, {file(QStringLiteral("destination-only.txt"), 8, 1)}, options);
+    test.check(mirrorItems.size() == 1 &&
+                   mirrorItems.front().action == SyncAction::DeleteFile,
+               "mirror comparison should propose deleting destination extras");
+
+    options.mirror = false;
+    const SyncExecutionPlan plan =
+        SyncComparisonEngine::makeExecutionPlan(mirrorItems, options);
+    test.check(plan.deletes.isEmpty() && !plan.requiresMirrorConfirmation,
+               "a plan with mirror disabled must discard stale deletions");
+}
+
 SyncComparisonItem plannedItem(const QString &path, SyncAction action,
                                SyncEntryType type = SyncEntryType::File) {
     SyncComparisonItem item;

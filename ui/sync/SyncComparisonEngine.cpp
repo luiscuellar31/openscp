@@ -495,8 +495,8 @@ SyncExecutionPlan SyncComparisonEngine::makeExecutionPlan(
             }
             continue;
         }
-        if (item.action == SyncAction::DeleteFile ||
-            item.action == SyncAction::DeleteDirectory) {
+        if (options.mirror && (item.action == SyncAction::DeleteFile ||
+                               item.action == SyncAction::DeleteDirectory)) {
             if (deletedPaths.contains(path))
                 continue;
             deletedPaths.insert(path);
@@ -581,6 +581,6 @@ SyncExecutionPlan SyncComparisonEngine::makeExecutionPlan(
             plan.knownCopyBytes += *copy.size;
         }
     }
-    plan.requiresMirrorConfirmation = plan.mirror && !plan.deletes.isEmpty();
+    plan.requiresMirrorConfirmation = !plan.deletes.isEmpty();
     return plan;
 }
