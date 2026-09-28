@@ -606,27 +606,10 @@ void MainWindow::renameRightSelected() {
         remoteActionController_->rename(rightRemoteModel_->rootPath(), oldName,
                                         newName);
     } else {
-        const QModelIndex selectedIndex = rows.first();
         const QFileInfo selectedFileInfo =
-            rightLocalModel_->fileInfo(selectedIndex);
-        bool inputAccepted = false;
-        const QString newName = QInputDialog::getText(
-            this, tr("Rename"), tr("New name:"), QLineEdit::Normal,
-            selectedFileInfo.fileName(), &inputAccepted);
-        if (!inputAccepted || newName.isEmpty() ||
-            newName == selectedFileInfo.fileName())
+            rightLocalModel_->fileInfo(rows.first());
+        if (!renameLocalSelectedEntry(selectedFileInfo))
             return;
-        const QString newPath =
-            QDir(selectedFileInfo.absolutePath()).filePath(newName);
-        bool renamed =
-            QFile::rename(selectedFileInfo.absoluteFilePath(), newPath);
-        if (!renamed)
-            renamed = QDir(selectedFileInfo.absolutePath())
-                          .rename(selectedFileInfo.absoluteFilePath(), newPath);
-        if (!renamed) {
-            UiAlerts::critical(this, tr("Local"), tr("Could not rename."));
-            return;
-        }
         setRightRoot(rightPath_->path());
     }
 }

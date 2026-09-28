@@ -38,8 +38,9 @@ struct PathActionResult;
 class RemoteActionController;
 class SessionController;
 } // namespace openscpui
-struct SiteEntry;     // fwd
-class QModelIndex;    // fwd for slot signatures
+struct SiteEntry;  // fwd
+class QModelIndex; // fwd for slot signatures
+class QFileInfo;
 class QToolBar;       // fwd
 class QMenu;          // fwd
 class QEvent;         // fwd for eventFilter
@@ -151,6 +152,7 @@ class MainWindow : public QMainWindow {
     void setRightRemoteRoot(const QString &path); // remote
     bool createLocalDirectory(const QDir &base, const QString &name);
     bool createLocalFile(const QDir &base, const QString &name);
+    bool renameLocalSelectedEntry(const QFileInfo &selectedFileInfo);
     void requestRemoteListing(const QString &path, bool refresh,
                               bool initialLoad = false);
 

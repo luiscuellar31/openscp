@@ -15,8 +15,6 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QInputDialog>
-#include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
@@ -657,6 +655,25 @@ void MainWindow::leftItemActivated(const QModelIndex &idx) {
     }
 }
 
+bool MainWindow::renameLocalSelectedEntry(const QFileInfo &selectedFileInfo) {
+    QString newName;
+    if (!promptValidEntryName(this, tr("Rename"), tr("New name:"),
+                              selectedFileInfo.fileName(), newName) ||
+        newName == selectedFileInfo.fileName())
+        return false;
+    const QString newPath =
+        QDir(selectedFileInfo.absolutePath()).filePath(newName);
+    bool renamed = QFile::rename(selectedFileInfo.absoluteFilePath(), newPath);
+    if (!renamed)
+        renamed = QDir(selectedFileInfo.absolutePath())
+                      .rename(selectedFileInfo.absoluteFilePath(), newPath);
+    if (!renamed) {
+        UiAlerts::critical(this, tr("Local"), tr("Could not rename."));
+        return false;
+    }
+    return true;
+}
+
 void MainWindow::renameLeftSelected() {
     auto selectionModel = leftView_->selectionModel();
     if (!selectionModel)
@@ -667,25 +684,9 @@ void MainWindow::renameLeftSelected() {
                               tr("Select exactly one item."));
         return;
     }
-    const QModelIndex selectedIndex = rows.first();
-    const QFileInfo selectedFileInfo = leftModel_->fileInfo(selectedIndex);
-    bool inputAccepted = false;
-    const QString newName = QInputDialog::getText(
-        this, tr("Rename"), tr("New name:"), QLineEdit::Normal,
-        selectedFileInfo.fileName(), &inputAccepted);
-    if (!inputAccepted || newName.isEmpty() ||
-        newName == selectedFileInfo.fileName())
+    const QFileInfo selectedFileInfo = leftModel_->fileInfo(rows.first());
+    if (!renameLocalSelectedEntry(selectedFileInfo))
         return;
-    const QString newPath =
-        QDir(selectedFileInfo.absolutePath()).filePath(newName);
-    bool renamed = QFile::rename(selectedFileInfo.absoluteFilePath(), newPath);
-    if (!renamed)
-        renamed = QDir(selectedFileInfo.absolutePath())
-                      .rename(selectedFileInfo.absoluteFilePath(), newPath);
-    if (!renamed) {
-        UiAlerts::critical(this, tr("Local"), tr("Could not rename."));
-        return;
-    }
     setLeftRoot(leftPath_->path());
 }
 
