@@ -122,11 +122,16 @@ QString parentRelativePath(const QString &relativePath) {
                                  : relativePath.left(separatorPosition);
 }
 
-QSet<QString> unscannedSourceAncestors(const QSet<QString> &unscannedPaths) {
+QSet<QString> unscannedSourceAncestors(const QSet<QString> &unscannedPaths,
+                                       std::stop_token stopToken = {}) {
     QSet<QString> ancestors;
     for (const QString &unscanned : unscannedPaths) {
+        if (stopToken.stop_requested())
+            return {};
         QString parent = parentRelativePath(unscanned);
         while (!parent.isEmpty()) {
+            if (stopToken.stop_requested())
+                return {};
             ancestors.insert(parent);
             parent = parentRelativePath(parent);
         }
@@ -165,10 +170,15 @@ bool isNewerBeyondTolerance(qint64 candidate, qint64 baseline,
 
 using EntryIndex = QHash<QString, SyncSnapshotEntry>;
 
-EntryIndex buildEntryIndex(const QVector<SyncSnapshotEntry> &snapshot) {
+EntryIndex buildEntryIndex(const QVector<SyncSnapshotEntry> &snapshot,
+                           std::stop_token stopToken) {
     EntryIndex index;
+    if (stopToken.stop_requested())
+        return index;
     index.reserve(snapshot.size());
     for (const SyncSnapshotEntry &original : snapshot) {
+        if (stopToken.stop_requested())
+            return {};
         const QString normalized =
             SyncComparisonEngine::normalizeRelativePath(original.relativePath);
         if (normalized.isEmpty())
@@ -397,22 +407,36 @@ QVector<SyncComparisonItem>
 SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
                               const QVector<SyncSnapshotEntry> &remoteSnapshot,
                               const SyncComparisonOptions &options,
-                              const SyncScanCoverage &coverage) {
-    const EntryIndex local = buildEntryIndex(localSnapshot);
-    const EntryIndex remote = buildEntryIndex(remoteSnapshot);
+                              const SyncScanCoverage &coverage,
+                              std::stop_token stopToken) {
+    if (stopToken.stop_requested())
+        return {};
+    const EntryIndex local = buildEntryIndex(localSnapshot, stopToken);
+    if (stopToken.stop_requested())
+        return {};
+    const EntryIndex remote = buildEntryIndex(remoteSnapshot, stopToken);
+    if (stopToken.stop_requested())
+        return {};
     const QSet<QString> &unscannedPaths =
         options.direction == SyncDirection::LocalToRemote
             ? coverage.localUnscannedPaths
             : coverage.remoteUnscannedPaths;
     const QSet<QString> unscannedAncestors =
-        unscannedSourceAncestors(unscannedPaths);
+        unscannedSourceAncestors(unscannedPaths, stopToken);
+    if (stopToken.stop_requested())
+        return {};
 
     QSet<QString> allPaths;
     allPaths.reserve(local.size() + remote.size());
-    for (auto iterator = local.cbegin(); iterator != local.cend(); ++iterator)
+    for (auto iterator = local.cbegin(); iterator != local.cend(); ++iterator) {
+        if (stopToken.stop_requested())
+            return {};
         allPaths.insert(iterator.key());
+    }
     for (auto iterator = remote.cbegin(); iterator != remote.cend();
          ++iterator) {
+        if (stopToken.stop_requested())
+            return {};
         allPaths.insert(iterator.key());
     }
 
@@ -425,6 +449,8 @@ SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
     QSet<QString> visiblePaths;
     visiblePaths.reserve(allPaths.size());
     for (const QString &path : allPaths) {
+        if (stopToken.stop_requested())
+            return {};
         if ((!options.includeHidden && isHiddenPath(path)) ||
             excludeGlobs.matches(path) || !includeGlobs.matches(path)) {
             continue;
@@ -445,15 +471,21 @@ SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
         }
     }
 
+    if (stopToken.stop_requested())
+        return {};
     QStringList sortedPaths = visiblePaths.values();
     std::sort(sortedPaths.begin(), sortedPaths.end(),
               [](const QString &left, const QString &right) {
                   return left.compare(right, Qt::CaseSensitive) < 0;
               });
+    if (stopToken.stop_requested())
+        return {};
 
     QVector<SyncComparisonItem> result;
     result.reserve(sortedPaths.size());
     for (const QString &path : sortedPaths) {
+        if (stopToken.stop_requested())
+            return {};
         const auto localEntry = local.constFind(path);
         const auto remoteEntry = remote.constFind(path);
         if (localEntry == local.cend() && remoteEntry == remote.cend())
@@ -479,6 +511,8 @@ SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
                                       std::move(destination), options,
                                       sourceUnscanned));
     }
+    if (stopToken.stop_requested())
+        return {};
     return result;
 }
 

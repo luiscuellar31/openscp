@@ -8,6 +8,8 @@
 #include <QString>
 #include <QVector>
 
+#include <stop_token>
+
 class QCheckBox;
 class QComboBox;
 class QDialogButtonBox;
@@ -25,6 +27,7 @@ class SyncDialog final : public QDialog {
 
     public:
     explicit SyncDialog(QWidget *parent = nullptr);
+    ~SyncDialog() override;
 
     void setSnapshots(QVector<SyncSnapshotEntry> localSnapshot,
                       QVector<SyncSnapshotEntry> remoteSnapshot);
@@ -75,6 +78,7 @@ class SyncDialog final : public QDialog {
     bool comparisonBusy_ = false;
     // Only the newest comparison is applied; older ones are discarded.
     quint64 comparisonGeneration_ = 0;
+    std::stop_source comparisonStopSource_;
 
     QComboBox *directionCombo_ = nullptr;
     QLabel *sourceRootLabel_ = nullptr;

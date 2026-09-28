@@ -282,6 +282,10 @@ SyncDialog::SyncDialog(QWidget *parent) : QDialog(parent) {
     rebuildComparison();
 }
 
+SyncDialog::~SyncDialog() {
+    comparisonStopSource_.request_stop();
+}
+
 void SyncDialog::buildUi() {
     setWindowTitle(tr("Compare and synchronize directories"));
     resize(1120, 680);
@@ -519,6 +523,7 @@ void SyncDialog::rebuildComparison() {
     syncOptionsFromControls();
     updateRootLabels();
     ++comparisonGeneration_;
+    comparisonStopSource_.request_stop();
     if (localSnapshot_.isEmpty() && remoteSnapshot_.isEmpty()) {
         // Nothing to compare, so the empty preview is ready right away.
         applyComparison({});
@@ -528,25 +533,32 @@ void SyncDialog::rebuildComparison() {
     // Comparing tens of thousands of entries takes longer than a frame, so it
     // runs off this thread and only the newest result reaches the preview.
     setComparisonBusy(true);
+    comparisonStopSource_ = std::stop_source{};
+    const std::stop_token stopToken = comparisonStopSource_.get_token();
     QPointer<SyncDialog> self(this);
     const quint64 generation = comparisonGeneration_;
     const QVector<SyncSnapshotEntry> local = localSnapshot_;
     const QVector<SyncSnapshotEntry> remote = remoteSnapshot_;
     const SyncComparisonOptions options = options_;
     const SyncScanCoverage coverage = coverage_;
-    QThreadPool::globalInstance()->start(
-        [self, generation, local, remote, options, coverage] {
-            QVector<SyncComparisonItem> items =
-                SyncComparisonEngine::compare(local, remote, options, coverage);
-            QMetaObject::invokeMethod(
-                qApp,
-                [self, generation, items = std::move(items)]() mutable {
-                    if (!self || generation != self->comparisonGeneration_)
-                        return;
-                    self->applyComparison(std::move(items));
-                },
-                Qt::QueuedConnection);
-        });
+    QThreadPool::globalInstance()->start([self, generation, local, remote,
+                                          options, coverage, stopToken] {
+        if (stopToken.stop_requested())
+            return;
+        QVector<SyncComparisonItem> items = SyncComparisonEngine::compare(
+            local, remote, options, coverage, stopToken);
+        if (stopToken.stop_requested())
+            return;
+        QMetaObject::invokeMethod(
+            qApp,
+            [self, generation, stopToken, items = std::move(items)]() mutable {
+                if (stopToken.stop_requested() || !self ||
+                    generation != self->comparisonGeneration_)
+                    return;
+                self->applyComparison(std::move(items));
+            },
+            Qt::QueuedConnection);
+    });
 }
 
 void SyncDialog::applyComparison(QVector<SyncComparisonItem> items) {
@@ -570,6 +582,7 @@ void SyncDialog::scheduleRebuild() {
         return;
     // Invalidate a result already in flight as soon as its options change.
     ++comparisonGeneration_;
+    comparisonStopSource_.request_stop();
     setComparisonBusy(true);
     rebuildTimer_->start();
 }

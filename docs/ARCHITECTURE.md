@@ -132,6 +132,10 @@ Synchronization has three steps:
 2. `SyncComparisonEngine` creates a data-only plan.
 3. The accepted actions enter `TransferManager` as one ordered batch.
 
+`SyncDialog` cancels superseded comparisons when options or snapshots change.
+The engine checks cancellation while building and classifying the preview; the
+dialog applies only the newest completed result.
+
 The coordinator records paths that either scan could not verify. The comparison
 keeps destination-only entries under unscanned source paths, and plan creation
 checks that coverage again before accepting mirror deletions.

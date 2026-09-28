@@ -99,8 +99,7 @@ OPENSCP_TEST(testComparisonRunsWithoutBlockingTheDialog, test) {
 
 OPENSCP_TEST(testOnlyTheNewestComparisonReachesThePreview, test) {
     SyncDialog dialog;
-    // The superseded comparison is far larger, so it finishes after the one
-    // that replaced it.
+    // Replacing a large comparison should cancel it and show the new snapshot.
     dialog.setSnapshots(snapshotWith(QStringLiteral("stale.dat"), 100'000), {});
     dialog.setSnapshots(snapshotWith(QStringLiteral("newest.dat"), 50), {});
     test.check(waitUntil([&] {

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <stop_token>
 
 namespace {
 
@@ -162,6 +163,17 @@ OPENSCP_TEST(testComparisonRules, test) {
     test.check(findItem(reverse, QStringLiteral("local-only.txt"))->action ==
                    SyncAction::Keep,
                "reversing direction should keep local destination extras");
+}
+
+OPENSCP_TEST(testPreCanceledComparisonReturnsNoItems, test) {
+    std::stop_source stopSource;
+    stopSource.request_stop();
+    const auto result = SyncComparisonEngine::compare(
+        {file(QStringLiteral("source.txt"), 10, 1)},
+        {file(QStringLiteral("destination.txt"), 10, 1)}, {}, {},
+        stopSource.get_token());
+    test.check(result.isEmpty(),
+               "a canceled comparison must not start building a preview");
 }
 
 OPENSCP_TEST(testIncludePatternsPreserveParents, test) {
