@@ -99,7 +99,9 @@ kept separate from blocking network operations.
 worker connections, task state, retries, conflicts, path reservations,
 persistence, and notifications. For a local upload move, it defers source
 cleanup while another queued task needs that path and reserves the source
-during cleanup. The supporting classes have narrower jobs:
+during cleanup. It keeps pending and failed task counts per batch so worker
+selection does not rescan a batch for each waiting task. The supporting classes
+have narrower jobs:
 
 - `TransferQueue` stores tasks and selects work fairly.
 - `TransferExecutor` runs a selected transfer.

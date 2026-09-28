@@ -159,6 +159,11 @@ class TransferManager : public QObject {
     quint64 sessionGeneration_ = 1;
 
     TransferQueueStore queueStore_;
+    struct BatchWorkState {
+        std::size_t unfinished = 0;
+        std::size_t failed = 0;
+    };
+    std::unordered_map<quint64, BatchWorkState> batchWorkById_;
     quint64 nextId_ = 1;
     quint64 nextBatchId_ = 1;
     int terminalTaskCount_ = 0;
@@ -223,6 +228,10 @@ class TransferManager : public QObject {
     QVector<quint64> skipDependentsOfFailedLocked(quint64 failedTaskId,
                                                   qint64 now);
     enum class BatchWork { Unfinished, Failed, Succeeded };
+    void adjustBatchWorkLocked(const TransferTask &task, bool add);
+    void setTaskStatusLocked(
+        TransferTask &task, TransferTask::Status status,
+        std::optional<bool> skippedByFailedDependency = std::nullopt);
     // State of the batch's tasks that do not wait for the batch.
     BatchWork batchWorkLocked(quint64 batchId) const;
     quint64 enqueuePathTask(TransferTask::Type type, const QString &path,
@@ -235,7 +244,6 @@ class TransferManager : public QObject {
     void reserveCleanupSourceLocked(const TransferTask &task);
     void releaseTaskPathsLocked(quint64 taskId);
     bool dependencySatisfiedLocked(const TransferTask &task) const;
-    bool hasRunnableTaskLocked(std::size_t slotIndex);
     std::optional<TransferTask> pickRunnableTaskLocked(std::size_t slotIndex);
     void workerLoop(std::size_t slotIndex, std::stop_token stopToken);
     std::shared_ptr<openscp::RemoteClient> workerClient(WorkerSlot &slot,

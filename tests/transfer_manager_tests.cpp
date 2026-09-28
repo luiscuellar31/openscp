@@ -40,6 +40,52 @@ struct TransferManagerTestAccess {
         std::lock_guard<std::mutex> lock(manager.mtx_);
         return manager.queueStore_.capacity();
     }
+
+    static std::chrono::microseconds blockedBatchScan(TransferManager &manager,
+                                                      int repetitions) {
+        std::lock_guard<std::mutex> lock(manager.mtx_);
+        manager.openConnection_ = [](std::string &) {
+            return std::unique_ptr<openscp::RemoteClient>{};
+        };
+        const auto start = std::chrono::steady_clock::now();
+        for (int index = 0; index < repetitions; ++index)
+            (void)manager.pickRunnableTaskLocked(0);
+        const auto duration =
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - start);
+        manager.openConnection_ = {};
+        return duration;
+    }
+
+    static std::chrono::microseconds
+    runnableTailSelection(TransferManager &manager, int repetitions) {
+        std::lock_guard<std::mutex> lock(manager.mtx_);
+        for (std::size_t index = 0;
+             index + 1 < manager.queueStore_.nodes().size(); ++index) {
+            manager.setTaskStatusLocked(*manager.queueStore_.nodes()[index],
+                                        TransferTask::Status::Paused);
+        }
+        manager.openConnection_ = [](std::string &) {
+            return std::unique_ptr<openscp::RemoteClient>{};
+        };
+        const auto start = std::chrono::steady_clock::now();
+        for (int index = 0; index < repetitions; ++index) {
+            const auto selected = manager.pickRunnableTaskLocked(0);
+            if (!selected)
+                break;
+            manager.releaseTaskPathsLocked(selected->taskId);
+            manager.activeTaskIds_.erase(selected->taskId);
+            manager.taskControls_.finishRunning(selected->taskId);
+            manager.running_.fetch_sub(1);
+            auto *stored = manager.taskForIdLocked(selected->taskId);
+            manager.setTaskStatusLocked(*stored, TransferTask::Status::Queued);
+        }
+        const auto duration =
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - start);
+        manager.openConnection_ = {};
+        return duration;
+    }
 };
 
 namespace {
@@ -328,6 +374,54 @@ OPENSCP_TEST(testTaskNodesStayStableAcrossQueueGrowth, test) {
     test.check(firstSnapshot.has_value() &&
                    firstSnapshot->src == QStringLiteral("/remote/first"),
                "O(1) task lookup should remain valid after 10,000 inserts");
+}
+
+OPENSCP_TEST(testBlockedBatchSchedulerBenchmark, test) {
+    if (!qEnvironmentVariableIsSet("OPENSCP_BENCH_TRANSFERS"))
+        return;
+
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    auto batch = testBatchOptions();
+    batch.batchId = manager.createBatch(batch);
+    const quint64 prerequisite = manager.enqueueRemoteDirectory(
+        QStringLiteral("/remote/prerequisite"), batch);
+    manager.pauseTask(prerequisite);
+    batch.waitForBatch = true;
+    QVector<QPair<QString, QString>> downloads;
+    downloads.reserve(5000);
+    for (int index = 0; index < 5000; ++index) {
+        downloads.push_back({QStringLiteral("/remote/file-%1").arg(index),
+                             QStringLiteral("/local/file-%1").arg(index)});
+    }
+    manager.enqueueDownloads(downloads, batch);
+    const auto elapsed =
+        TransferManagerTestAccess::blockedBatchScan(manager, 3);
+    std::cout << "BENCH blocked_batch_5000_scan_3_us=" << elapsed.count()
+              << '\n';
+    test.check(elapsed.count() > 0,
+               "blocked-batch benchmark should execute scheduler checks");
+}
+
+OPENSCP_TEST(testRunnableTailSchedulerBenchmark, test) {
+    if (!qEnvironmentVariableIsSet("OPENSCP_BENCH_TRANSFERS"))
+        return;
+
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    QVector<QPair<QString, QString>> downloads;
+    downloads.reserve(5000);
+    for (int index = 0; index < 5000; ++index) {
+        downloads.push_back({QStringLiteral("/remote/file-%1").arg(index),
+                             QStringLiteral("/local/file-%1").arg(index)});
+    }
+    manager.enqueueDownloads(downloads, testBatchOptions());
+    const auto elapsed =
+        TransferManagerTestAccess::runnableTailSelection(manager, 3);
+    std::cout << "BENCH runnable_tail_5000_select_3_us=" << elapsed.count()
+              << '\n';
+    test.check(elapsed.count() > 0,
+               "runnable-tail benchmark should select queued work");
 }
 
 OPENSCP_TEST(testConcurrencyUpdates, test) {
@@ -1729,6 +1823,41 @@ OPENSCP_TEST(testCancelingBatchWorkSkipsTasksWaitingForBatch, test) {
                "tasks waiting for their batch should not wait for each other");
 }
 
+OPENSCP_TEST(testBatchWaitersTrackRetryAndRemovedFailure, test) {
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    auto batch = testBatchOptions();
+    batch.batchId = manager.createBatch(batch);
+    const quint64 work = manager.enqueueRemoteDelete(
+        QStringLiteral("/remote/work"), false, batch);
+
+    manager.cancelTask(work);
+    manager.retryTask(work);
+    batch.waitForBatch = true;
+    const quint64 waiting = manager.enqueueRemoteDelete(
+        QStringLiteral("/remote/waiting"), false, batch);
+    const auto pending = manager.taskSnapshot(waiting);
+    test.check(pending && pending->status == TransferTask::Status::Queued,
+               "a retried prerequisite should leave batch waiters pending");
+
+    manager.cancelTask(work);
+    const auto skipped = manager.taskSnapshot(waiting);
+    test.check(skipped && skipped->status == TransferTask::Status::Skipped,
+               "a second prerequisite failure should skip its waiter");
+    manager.removeTask(work);
+
+    const quint64 late = manager.enqueueRemoteDelete(
+        QStringLiteral("/remote/late"), false, batch);
+    const auto ready = manager.taskSnapshot(late);
+    test.check(ready && ready->status == TransferTask::Status::Queued,
+               "removing failed batch work should clear its failure state");
+
+    ConcurrentMockClient baseClient(std::make_shared<ConcurrencyProbe>());
+    configureManager(manager, baseClient, testOptions());
+    test.check(waitForStatus(manager, late, TransferTask::Status::Done),
+               "a waiter should run once no batch work remains");
+}
+
 OPENSCP_TEST(testDependencySkipsKeepTerminalCounterAndHistoryBounded, test) {
     auto state = authenticationFailureState("/remote/root-failure");
     FailureDownloadClient baseClient(state);
@@ -2431,6 +2560,25 @@ OPENSCP_TEST(testBatchWaitingPersistence, test) {
     test.check(tasks.size() == 2 && !tasks[0].waitsForBatch &&
                    tasks[1].waitsForBatch,
                "restored tasks should keep waiting for their batch");
+    if (tasks.size() != 2)
+        return;
+
+    restored.setSessionIdentity(QStringLiteral("saved-site-id"));
+    ConcurrentMockClient baseClient(std::make_shared<ConcurrencyProbe>());
+    const auto options = testOptions();
+    restored.setConnectionFactory([&baseClient, options](std::string &error) {
+        return baseClient.openConnection(options, error);
+    });
+    restored.resumeTask(tasks[1].taskId);
+    restored.resumeTask(tasks[0].taskId);
+    test.check(
+        waitForStatus(restored, tasks[1].taskId, TransferTask::Status::Done),
+        "restored batch waiter should run after its prerequisite");
+    const auto work = restored.taskSnapshot(tasks[0].taskId);
+    const auto waiter = restored.taskSnapshot(tasks[1].taskId);
+    test.check(work && waiter && work->status == TransferTask::Status::Done &&
+                   waiter->startedAtMs >= work->finishedAtMs,
+               "restored batch counts should preserve execution order");
 }
 
 OPENSCP_TEST(testDirectoryTaskPersistence, test) {
