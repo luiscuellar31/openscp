@@ -48,14 +48,13 @@
 extern char **environ;
 #define openscp_environ (environ)
 #endif
-// OpenSSL RNG for hashed known_hosts hostnames fallback.
-#include <openssl/rand.h>
 #else
 #include <windows.h>
 #endif
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
+#include <openssl/rand.h>
 #include <openssl/sha.h>
 
 #include <array>
@@ -372,10 +371,90 @@ void describe_rename_failure(const char *attempt, int rc, unsigned long sftpErr,
     *why = oss.str();
 }
 
+int rename_sftp_v3(LIBSSH2_SFTP *sftp, const std::string &from,
+                   const std::string &to) {
+    return libssh2_sftp_rename_ex(
+        sftp, from.c_str(), static_cast<unsigned>(from.size()), to.c_str(),
+        static_cast<unsigned>(to.size()), 0);
+}
+
+bool is_regular_remote_file(LIBSSH2_SFTP *sftp, const std::string &path) {
+    LIBSSH2_SFTP_ATTRIBUTES attrs{};
+    return libssh2_sftp_stat_ex(sftp, path.c_str(),
+                                static_cast<unsigned>(path.size()),
+                                LIBSSH2_SFTP_LSTAT, &attrs) == 0 &&
+           (attrs.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS) != 0 &&
+           (attrs.permissions & LIBSSH2_SFTP_S_IFMT) == LIBSSH2_SFTP_S_IFREG;
+}
+
+// Older libssh2 releases cannot send posix-rename@openssh.com. Move the old
+// regular file aside before the v3 rename, and restore it if that rename fails.
+// This fallback is not atomic, but never deletes the old file first.
+bool rename_remote_with_backup(LIBSSH2_SFTP *sftp, const std::string &from,
+                               const std::string &to, std::string *why) {
+    std::array<unsigned char, 12> nonce{};
+    if (RAND_bytes(nonce.data(), static_cast<int>(nonce.size())) != 1) {
+        if (why)
+            *why = "Could not generate remote replacement backup name";
+        return false;
+    }
+    constexpr char hex[] = "0123456789abcdef";
+    std::string backup = to + ".openscp-backup-";
+    for (unsigned char byte : nonce) {
+        backup.push_back(hex[byte >> 4]);
+        backup.push_back(hex[byte & 0x0f]);
+    }
+    if (backup.size() > std::numeric_limits<unsigned>::max()) {
+        if (why)
+            *why = "Remote replacement backup path is too long";
+        return false;
+    }
+
+    LIBSSH2_SFTP_ATTRIBUTES attrs{};
+    const int backupStat = libssh2_sftp_stat_ex(
+        sftp, backup.c_str(), static_cast<unsigned>(backup.size()),
+        LIBSSH2_SFTP_LSTAT, &attrs);
+    if (backupStat == 0 ||
+        libssh2_sftp_last_error(sftp) != LIBSSH2_FX_NO_SUCH_FILE) {
+        if (why)
+            *why = "Could not reserve a remote replacement backup path";
+        return false;
+    }
+
+    const int backupRc = rename_sftp_v3(sftp, to, backup);
+    if (backupRc != 0) {
+        describe_rename_failure("backup", backupRc,
+                                libssh2_sftp_last_error(sftp), why);
+        return false;
+    }
+
+    const int replaceRc = rename_sftp_v3(sftp, from, to);
+    if (replaceRc != 0) {
+        const unsigned long replaceErr = libssh2_sftp_last_error(sftp);
+        const int restoreRc = rename_sftp_v3(sftp, backup, to);
+        describe_rename_failure("replace", replaceRc, replaceErr, why);
+        if (restoreRc != 0) {
+            if (why)
+                *why += " [old destination remains at " + backup + "]";
+        } else if (why) {
+            *why += " [old destination restored]";
+        }
+        return false;
+    }
+
+    if (libssh2_sftp_unlink_ex(sftp, backup.c_str(),
+                               static_cast<unsigned>(backup.size())) != 0) {
+        core_logf(CoreLogLevel::Warn,
+                  "SFTP replacement succeeded but old backup remains at %s",
+                  backup.c_str());
+    }
+    return true;
+}
+
 // libssh2 negotiates SFTP v3, where RENAME carries no flags, so retrying with
 // other flag sets only repeats the same request. A v3 RENAME refuses an
-// existing destination on OpenSSH, so overwriting uses the atomic
-// posix-rename@openssh.com extension when the server offers it.
+// existing destination on OpenSSH. Prefer the atomic posix-rename@openssh.com
+// extension when available; otherwise use a backup and v3 rename.
 bool rename_remote(LIBSSH2_SFTP *sftp, const std::string &from,
                    const std::string &to, bool overwrite, std::string *why) {
     if (!sftp) {
@@ -411,7 +490,15 @@ bool rename_remote(LIBSSH2_SFTP *sftp, const std::string &from,
         static_cast<unsigned>(to.size()), flags);
     if (rc == 0)
         return true;
-    describe_rename_failure("rename", rc, libssh2_sftp_last_error(sftp), why);
+    const unsigned long sftpErr = libssh2_sftp_last_error(sftp);
+    if (overwrite && from != to &&
+        (sftpErr == LIBSSH2_FX_FAILURE ||
+         sftpErr == LIBSSH2_FX_FILE_ALREADY_EXISTS) &&
+        is_regular_remote_file(sftp, from) &&
+        is_regular_remote_file(sftp, to)) {
+        return rename_remote_with_backup(sftp, from, to, why);
+    }
+    describe_rename_failure("rename", rc, sftpErr, why);
     return false;
 }
 
@@ -3491,7 +3578,7 @@ bool Libssh2SftpClient::put(
     }
     const std::size_t total = static_cast<std::size_t>(localSize);
 
-    // Resume against remote .part (final destination is set via atomic rename).
+    // Resume against remote .part; finalize with a remote rename.
     std::uint64_t startOffset = 0;
     if (resume) {
         LIBSSH2_SFTP_ATTRIBUTES stR{};
