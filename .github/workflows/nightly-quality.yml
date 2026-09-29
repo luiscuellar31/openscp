@@ -62,7 +62,7 @@ jobs:
 
   sanitizers:
     if: github.event_name != 'pull_request'
-    name: Sanitizers (${{ matrix.sanitizer }})
+    # A skipped job has no matrix value to interpolate into its display name.
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
