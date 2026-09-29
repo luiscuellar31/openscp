@@ -547,11 +547,15 @@ void SyncDialog::rebuildComparison() {
             return;
         QVector<SyncComparisonItem> items = SyncComparisonEngine::compare(
             local, remote, options, coverage, stopToken);
+        // The token can change while compare() runs on this worker.
+        // cppcheck-suppress identicalConditionAfterEarlyExit
         if (stopToken.stop_requested())
             return;
         QMetaObject::invokeMethod(
             qApp,
             [self, generation, stopToken, items = std::move(items)]() mutable {
+                // Stop can be requested while this callback waits in the queue.
+                // cppcheck-suppress identicalConditionAfterEarlyExit
                 if (stopToken.stop_requested() || !self ||
                     generation != self->comparisonGeneration_)
                     return;
