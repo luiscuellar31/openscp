@@ -11,7 +11,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
     endif()
 endif()
 
-project(OpenSCP LANGUAGES CXX VERSION 1.0.0)
+project(OpenSCP LANGUAGES CXX VERSION 1.1.0)
 
 if(APPLE)
     enable_language(OBJCXX)
