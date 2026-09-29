@@ -334,7 +334,9 @@ main() {
   [[ -f "$out_name" ]] || die "appimagetool did not produce: $out_name"
   if [[ -n "${APPIMAGE_UPDATE_INFORMATION:-}" ]]; then
     local actual_update_information
-    actual_update_information="$("./$out_name" --appimage-updateinformation)"
+    # The extraction override takes precedence over runtime metadata options
+    # and would launch the GUI on headless builders. Metadata needs no FUSE.
+    actual_update_information="$(env -u APPIMAGE_EXTRACT_AND_RUN "./$out_name" --appimage-updateinformation)"
     [[ "$actual_update_information" == "$APPIMAGE_UPDATE_INFORMATION" ]] ||
       die "Unexpected AppImage update information: $actual_update_information"
     [[ -s "${out_name}.zsync" ]] || die "Missing or empty zsync file: ${out_name}.zsync"

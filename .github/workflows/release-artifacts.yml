@@ -212,9 +212,14 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      # Python 3.12 can misidentify Qt's ARM qttools .7z as a ZIP because of
+      # embedded ZIP signatures. Python 3.14 validates the ZIP directory first.
+      - name: Install pinned Python for the Qt installer
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.14.7"
+
       - name: Install pinned Qt release SDK
-        id: install_qt
-        continue-on-error: ${{ matrix.arch_name == 'aarch64' }}
         uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
         with:
           version: ${{ env.OPENSCP_QT_VERSION }}
@@ -222,22 +227,7 @@ jobs:
           target: desktop
           arch: ${{ matrix.qt_arch }}
           cache: true
-          aqtversion: "==3.3.0"
-          py7zrversion: "==1.1.0"
-
-      - name: Clear partial Qt installation after ARM archive failure
-        if: matrix.arch_name == 'aarch64' && steps.install_qt.outcome == 'failure'
-        run: rm -rf "$RUNNER_WORKSPACE/Qt/$OPENSCP_QT_VERSION"
-
-      - name: Retry pinned Qt release SDK on ARM
-        if: matrix.arch_name == 'aarch64' && steps.install_qt.outcome == 'failure'
-        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
-        with:
-          version: ${{ env.OPENSCP_QT_VERSION }}
-          host: ${{ matrix.qt_host }}
-          target: desktop
-          arch: ${{ matrix.qt_arch }}
-          cache: true
+          setup-python: false
           aqtversion: "==3.3.0"
           py7zrversion: "==1.1.0"
 
