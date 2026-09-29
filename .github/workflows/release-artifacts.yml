@@ -112,7 +112,7 @@ jobs:
           clang++ --version
 
       - name: Install pinned Qt release SDK
-        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
         with:
           version: ${{ env.OPENSCP_QT_VERSION }}
           host: mac
@@ -220,7 +220,7 @@ jobs:
           python-version: "3.14.7"
 
       - name: Install pinned Qt release SDK
-        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
         with:
           version: ${{ env.OPENSCP_QT_VERSION }}
           host: ${{ matrix.qt_host }}
