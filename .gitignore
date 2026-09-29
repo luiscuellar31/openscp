@@ -6,6 +6,9 @@ cmake-build-*/
 # IDEs
 .idea/
 
+# clangd
+/.cache/
+
 # Release artifacts (if created outside dist/)
 *.AppImage
 *.dmg

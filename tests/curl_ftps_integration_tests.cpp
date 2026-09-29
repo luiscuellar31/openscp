@@ -66,8 +66,10 @@ int main() {
     }
 
     TestContext t;
+    openscp::testsupport::ManagedFilesContractHooks hooks;
+    hooks.afterUpload = openscp::testsupport::checkFtpEntryLookups;
     openscp::testsupport::runManagedFilesContract(
-        *client, openscp::Protocol::Ftps, "FTPS", *remoteBase, t);
+        *client, openscp::Protocol::Ftps, "FTPS", *remoteBase, t, hooks);
     return openscp::testsupport::finishIntegration(
         "openscp_ftps_integration_tests", t);
 }

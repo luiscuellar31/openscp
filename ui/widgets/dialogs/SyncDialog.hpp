@@ -8,6 +8,8 @@
 #include <QString>
 #include <QVector>
 
+#include <stop_token>
+
 class QCheckBox;
 class QComboBox;
 class QDialogButtonBox;
@@ -25,9 +27,11 @@ class SyncDialog final : public QDialog {
 
     public:
     explicit SyncDialog(QWidget *parent = nullptr);
+    ~SyncDialog() override;
 
     void setSnapshots(QVector<SyncSnapshotEntry> localSnapshot,
                       QVector<SyncSnapshotEntry> remoteSnapshot);
+    void setScanCoverage(SyncScanCoverage coverage);
     void setRootPaths(const QString &localRoot, const QString &remoteRoot);
     void setChecksumAvailable(bool available);
     void setChecksumBusy(bool busy);
@@ -44,6 +48,10 @@ class SyncDialog final : public QDialog {
     private:
     void buildUi();
     void rebuildComparison();
+    // Applies a comparison that finished in the background, and reports
+    // whether one is still running.
+    void applyComparison(QVector<SyncComparisonItem> items);
+    void setComparisonBusy(bool busy);
     void scheduleRebuild();
     void updateRootLabels();
     void updateSummary();
@@ -60,12 +68,17 @@ class SyncDialog final : public QDialog {
 
     QVector<SyncSnapshotEntry> localSnapshot_;
     QVector<SyncSnapshotEntry> remoteSnapshot_;
+    SyncScanCoverage coverage_;
     SyncComparisonOptions options_;
     QString localRoot_;
     QString remoteRoot_;
     bool applyingControls_ = false;
     bool checksumAvailable_ = false;
     bool checksumBusy_ = false;
+    bool comparisonBusy_ = false;
+    // Only the newest comparison is applied; older ones are discarded.
+    quint64 comparisonGeneration_ = 0;
+    std::stop_source comparisonStopSource_;
 
     QComboBox *directionCombo_ = nullptr;
     QLabel *sourceRootLabel_ = nullptr;

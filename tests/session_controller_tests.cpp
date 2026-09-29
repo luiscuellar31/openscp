@@ -57,6 +57,19 @@ OPENSCP_TEST(testOptionsLifecycle, test) {
                "clearing a session should also clear endpoint metadata");
 }
 
+OPENSCP_TEST(testSessionLifecycle, test) {
+    openscpui::SessionController session;
+    test.check(!session.hasSession() && !session.capabilities().can_list,
+               "a new controller should have no session");
+    session.beginSession(
+        openscp::capabilitiesForProtocol(openscp::Protocol::Sftp));
+    test.check(session.hasSession() && session.capabilities().can_list,
+               "a session should keep what its connection reported");
+    session.endSession();
+    test.check(!session.hasSession() && !session.capabilities().can_list,
+               "ending a session should forget its capabilities");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {

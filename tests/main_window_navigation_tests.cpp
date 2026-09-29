@@ -12,12 +12,18 @@
 #include <QApplication>
 #include <QDialog>
 #include <QDir>
+#include <QFile>
+#include <QFileSystemModel>
+#include <QInputDialog>
+#include <QItemSelectionModel>
 #include <QKeyEvent>
+#include <QMessageBox>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QSplitter>
 #include <QSplitterHandle>
 #include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -256,6 +262,133 @@ OPENSCP_TEST(testMainWindowTraversesItsCompleteVisibleFocusOrder, test) {
     sendTab(receiver);
     test.check(QApplication::focusWidget() == expected.first(),
                "the complete MainWindow focus order should wrap once");
+}
+
+OPENSCP_TEST(testLocalRenameValidatesNamesInBothPanes, test) {
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(), "local rename needs a temporary directory");
+    if (!temporary.isValid())
+        return;
+
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    window.show();
+    flushUiEvents();
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftPath && parts.rightPath && parts.leftView &&
+                   parts.rightView,
+               "local rename needs both file panels");
+    if (!parts.leftPath || !parts.rightPath || !parts.leftView ||
+        !parts.rightView)
+        return;
+
+    const auto checkPane = [&](openscpui::PathNavigationBar *pathBar,
+                               DragAwareTreeView *view, const char *renameSlot,
+                               const QString &folderName) {
+        const QString folder = QDir(temporary.path()).filePath(folderName);
+        const bool folderCreated = QDir().mkpath(folder);
+        test.check(folderCreated, "create local rename fixture folder");
+        if (!folderCreated)
+            return;
+        const QString sourcePath = QDir(folder).filePath("source.txt");
+        QFile source(sourcePath);
+        const bool sourceCreated = source.open(QIODevice::WriteOnly);
+        test.check(sourceCreated, "create local rename fixture file");
+        if (!sourceCreated)
+            return;
+        source.close();
+
+        pathBar->pathRequested(folder);
+        auto *model = qobject_cast<QFileSystemModel *>(view->model());
+        const auto renameSelected = [&](const QString &selectedPath,
+                                        const QString &newName,
+                                        QMessageBox::Icon &alertIcon,
+                                        bool acceptInput) {
+            const bool selectedVisible =
+                model &&
+                openscp::testsupport::waitUntil(
+                    [&] { return model->index(selectedPath).isValid(); },
+                    std::chrono::milliseconds(3000));
+            test.check(selectedVisible,
+                       "local file should appear in the panel");
+            if (!selectedVisible)
+                return false;
+            view->selectionModel()->select(model->index(selectedPath),
+                                           QItemSelectionModel::ClearAndSelect |
+                                               QItemSelectionModel::Rows);
+
+            QTimer::singleShot(0, &window, [&] {
+                auto *prompt = qobject_cast<QInputDialog *>(
+                    QApplication::activeModalWidget());
+                if (!prompt)
+                    return;
+                if (!acceptInput) {
+                    prompt->reject();
+                    return;
+                }
+                prompt->setTextValue(newName);
+                QTimer::singleShot(0, &window, [&] {
+                    auto *alert = qobject_cast<QMessageBox *>(
+                        QApplication::activeModalWidget());
+                    if (alert) {
+                        alertIcon = alert->icon();
+                        alert->accept();
+                    }
+                });
+                prompt->accept();
+            });
+            const bool invoked = QMetaObject::invokeMethod(
+                &window, renameSlot, Qt::DirectConnection);
+            flushUiEvents();
+            return invoked;
+        };
+
+        QMessageBox::Icon alertIcon = QMessageBox::NoIcon;
+        const bool invoked = renameSelected(
+            sourcePath, "../escaped-" + folderName + ".txt", alertIcon, true);
+        const QString escapedPath =
+            QDir(temporary.path()).filePath("escaped-" + folderName + ".txt");
+        test.check(invoked && alertIcon == QMessageBox::Warning &&
+                       QFile::exists(sourcePath) && !QFile::exists(escapedPath),
+                   "local rename should reject parent traversal before moving "
+                   "a selected file");
+
+        alertIcon = QMessageBox::NoIcon;
+        const bool canceled =
+            renameSelected(sourcePath, "unused.txt", alertIcon, false);
+        test.check(canceled && alertIcon == QMessageBox::NoIcon &&
+                       QFile::exists(sourcePath),
+                   "canceling local rename should leave the file in place");
+
+        alertIcon = QMessageBox::NoIcon;
+        const QString renamedPath = QDir(folder).filePath("renamed.txt");
+        const bool validInvoked =
+            renameSelected(sourcePath, "renamed.txt", alertIcon, true);
+        test.check(validInvoked && alertIcon == QMessageBox::NoIcon &&
+                       QFile::exists(renamedPath) && !QFile::exists(sourcePath),
+                   "local rename should still accept a valid name");
+
+        const QString occupiedPath = QDir(folder).filePath("occupied.txt");
+        QFile occupied(occupiedPath);
+        const bool occupiedCreated = occupied.open(QIODevice::WriteOnly);
+        test.check(occupiedCreated, "create existing local rename target");
+        if (!occupiedCreated)
+            return;
+        occupied.write("existing");
+        occupied.close();
+        alertIcon = QMessageBox::NoIcon;
+        const bool occupiedInvoked =
+            renameSelected(renamedPath, "occupied.txt", alertIcon, true);
+        test.check(occupiedInvoked && alertIcon == QMessageBox::Critical &&
+                       QFile::exists(renamedPath) &&
+                       occupied.open(QIODevice::ReadOnly) &&
+                       occupied.readAll() == "existing",
+                   "local rename should keep an existing target unchanged");
+        occupied.close();
+    };
+
+    checkPane(parts.leftPath, parts.leftView, "renameLeftSelected", "left");
+    checkPane(parts.rightPath, parts.rightView, "renameRightSelected", "right");
 }
 
 OPENSCP_TEST(testPointerInteractionCancelsInitialConnectOverride, test) {
@@ -498,5 +631,7 @@ int main(int argc, char **argv) {
     }
     settingsRootPath = isolatedSettings.path();
     openscp::test::TestHarness harness("MainWindow navigation");
-    return harness.run();
+    const int result = harness.run();
+    openscp::testsupport::drainThreadPool();
+    return result;
 }

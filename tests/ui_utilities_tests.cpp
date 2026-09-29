@@ -1,11 +1,19 @@
 #include "TestHarness.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
+#include "logic/common/RowSelection.hpp"
 #include "logic/common/UiFormatters.hpp"
 #include "logic/navigation/RemotePath.hpp"
+#include "logic/remote/RemoteModel.hpp"
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
 
+#include <algorithm>
 #include <initializer_list>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -72,6 +80,43 @@ OPENSCP_TEST(testPathDepthOrdering, test) {
         "deep ordering should break equal-depth ties descending");
 }
 
+OPENSCP_TEST(testLocalRenameUsesTheFilesystemMove, test) {
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(),
+               "the local rename test should have a temporary directory");
+    if (!temporary.isValid())
+        return;
+
+    const QString source = temporary.filePath(QStringLiteral("source.txt"));
+    const QString destination =
+        temporary.filePath(QStringLiteral("destination.txt"));
+    QFile sourceFile(source);
+    test.check(sourceFile.open(QIODevice::WriteOnly) &&
+                   sourceFile.write("payload") == 7,
+               "the local rename fixture should be writable");
+    sourceFile.close();
+
+    QString error;
+    test.check(renameLocalEntry(source, destination, &error) ==
+                       LocalRenameResult::Moved &&
+                   !QFile::exists(source) && QFile::exists(destination),
+               "a same-volume rename should move the entry without copying");
+
+    QFile movedFile(destination);
+    test.check(movedFile.open(QIODevice::ReadOnly) &&
+                   movedFile.readAll() == QByteArrayLiteral("payload"),
+               "a native rename should preserve the file contents");
+
+    const QString missingParentTarget =
+        temporary.filePath(QStringLiteral("missing/target.txt"));
+    error.clear();
+    test.check(renameLocalEntry(destination, missingParentTarget, &error) ==
+                       LocalRenameResult::Failed &&
+                   QFile::exists(destination) && !error.isEmpty(),
+               "non-volume rename failures should preserve the source and "
+               "report an error");
+}
+
 OPENSCP_TEST(testTerminalTransferStatuses, test) {
     using Status = TransferTask::Status;
     for (const Status status : {Status::Done, Status::Error, Status::Canceled,
@@ -85,6 +130,56 @@ OPENSCP_TEST(testTerminalTransferStatuses, test) {
         test.check(!isTerminalTransferStatus(status),
                    "an actionable transfer state should not be terminal");
     }
+}
+
+void fillModel(RemoteModel &model, int rows) {
+    std::vector<openscp::FileInfo> entries;
+    entries.reserve(static_cast<std::size_t>(rows));
+    for (int row = 0; row < rows; ++row) {
+        openscp::FileInfo info;
+        info.name = "entry-" + std::to_string(row);
+        info.has_size = true;
+        info.mode = 0100644u;
+        entries.push_back(info);
+    }
+    model.setEntries(QStringLiteral("/"), entries);
+}
+
+OPENSCP_TEST(testRowSelectionMergesConsecutiveRows, test) {
+    RemoteModel model;
+    fillModel(model, 10);
+    const QItemSelection selection =
+        openscpui::rowSelection(model, {}, {4, 1, 2, 3, 7, 1});
+    test.check(selection.size() == 2,
+               "consecutive rows should become one range each");
+    if (selection.size() != 2)
+        return;
+    test.check(selection[0].top() == 1 && selection[0].bottom() == 4 &&
+                   selection[1].top() == 7 && selection[1].bottom() == 7,
+               "ranges should cover the rows that were asked for, in order");
+    test.check(selection[0].left() == 0 &&
+                   selection[0].right() == model.columnCount() - 1,
+               "each range should cover the whole row");
+    QVector<int> selectedRows;
+    for (const QModelIndex &index : selection.indexes()) {
+        if (index.column() == 0)
+            selectedRows.push_back(index.row());
+    }
+    std::sort(selectedRows.begin(), selectedRows.end());
+    test.check(selectedRows == QVector<int>({1, 2, 3, 4, 7}),
+               "the selection should hold every requested row once");
+}
+
+OPENSCP_TEST(testRowSelectionIgnoresRowsOutsideTheModel, test) {
+    RemoteModel model;
+    fillModel(model, 3);
+    test.check(openscpui::rowSelection(model, {}, {}).isEmpty(),
+               "no rows should give an empty selection");
+    const QItemSelection selection =
+        openscpui::rowSelection(model, {}, {-1, 0, 1, 3, 99});
+    test.check(selection.size() == 1 && selection[0].top() == 0 &&
+                   selection[0].bottom() == 1,
+               "rows outside the model should be left out");
 }
 
 } // namespace

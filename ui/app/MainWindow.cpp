@@ -4,6 +4,7 @@
 
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
+#include "logic/common/RowSelection.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "logic/connections/SessionController.hpp"
 #include "logic/navigation/NavigationScope.hpp"
@@ -60,6 +61,7 @@
 #include <QStatusBar>
 #include <QStyle>
 #include <QTabWidget>
+#include <QThreadPool>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -203,9 +205,21 @@ QString trimNavigationLabel(const QString &raw, int maxLen = 96) {
 MainWindow::~MainWindow() {
     hostKeyPromptCoordinator_.cancel();
     sessionHealthMonitor_.stop();
+    if (sessionController_)
+        sessionController_->requestConnectionCancellation();
+    cancelLocalUploadDiscoveries();
+    if (remoteScanCancelRequested_)
+        remoteScanCancelRequested_->store(true);
+    if (transferMgr_)
+        transferMgr_->shutdown();
+    if (transferCleanupFuture_.valid())
+        transferCleanupFuture_.wait();
+    QThreadPool::globalInstance()->waitForDone();
 }
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
+    Q_INIT_RESOURCE(app_icons);
+    Q_INIT_RESOURCE(credits);
     focusTraversalController_ = new openscpui::FocusTraversalController(this);
     uploadSourcePicker_ = openscpui::createPlatformFilePicker();
     QPointer<MainWindow> self(this);
@@ -814,7 +828,7 @@ void MainWindow::initializeMenuBarActions() {
     // Linux/Windows)
     actPrefs_->setShortcut(QKeySequence::Preferences);
     appMenu_->addSeparator();
-    actQuit_ = appMenu_->addAction(tr("Quit"), qApp, &QApplication::quit);
+    actQuit_ = appMenu_->addAction(tr("Quit"), this, &QWidget::close);
     actQuit_->setMenuRole(QAction::QuitRole);
     // Standard quit shortcut (Cmd+Q / Ctrl+Q)
     actQuit_->setShortcut(QKeySequence::Quit);
@@ -922,8 +936,8 @@ void MainWindow::initializeRuntimeState() {
     remoteOps_ = new RemoteOperationController(this);
     openscpui::SessionHealthMonitor::Callbacks healthCallbacks;
     healthCallbacks.canProbe = [this] {
-        return rightIsRemote_ && sessionController_->client() && remoteOps_ &&
-               remoteOps_->hasRequestedSession() &&
+        return rightIsRemote_ && sessionController_->hasSession() &&
+               remoteOps_ && remoteOps_->hasRequestedSession() &&
                sessionController_->options().has_value() &&
                !sessionController_->isDisconnecting() &&
                !sessionController_->isConnecting();
@@ -959,7 +973,7 @@ void MainWindow::initializeRuntimeState() {
     healthCallbacks.probeFailed =
         [this](const openscpui::SessionHealthMonitor::ProbeContext &context,
                const QString &error) {
-            if (!rightIsRemote_ || !sessionController_->client() ||
+            if (!rightIsRemote_ || !sessionController_->hasSession() ||
                 sessionController_->isDisconnecting() ||
                 !isLikelyRemoteTransportError(error)) {
                 return;
@@ -1042,16 +1056,23 @@ void MainWindow::initializeRuntimeState() {
                 QItemSelectionModel *selection = rightView_->selectionModel();
                 selection->clearSelection();
                 QModelIndex first;
+                QVector<int> restoredRows;
                 for (int row = 0; row < rightRemoteModel_->rowCount(); ++row) {
                     const QModelIndex index = rightRemoteModel_->index(row, 0);
                     if (!remoteRefreshSelectionNames_.contains(
                             rightRemoteModel_->nameAt(index))) {
                         continue;
                     }
-                    selection->select(index, QItemSelectionModel::Select |
-                                                 QItemSelectionModel::Rows);
+                    restoredRows.push_back(row);
                     if (!first.isValid())
                         first = index;
+                }
+                if (!restoredRows.isEmpty()) {
+                    selection->select(
+                        openscpui::rowSelection(*rightRemoteModel_, {},
+                                                std::move(restoredRows)),
+                        QItemSelectionModel::Select |
+                            QItemSelectionModel::Rows);
                 }
                 if (first.isValid())
                     selection->setCurrentIndex(first,
@@ -1102,6 +1123,22 @@ void MainWindow::initializeRuntimeState() {
     (void)transferMgr_->enablePersistence();
     // A single cold snapshot seeds the delta-based UI observer at startup.
     transferUiController_.initialize(transferMgr_->tasksSnapshot());
+    // Uploads in a batch finish close together, so the visible folder is
+    // refreshed once they stop finishing rather than after each one.
+    uploadRefreshTimer_ = new QTimer(this);
+    uploadRefreshTimer_->setSingleShot(true);
+    uploadRefreshTimer_->setInterval(1000);
+    connect(uploadRefreshTimer_, &QTimer::timeout, this, [this] {
+        if (!rightIsRemote_ || !rightRemoteModel_)
+            return;
+        // Canceling a listing in flight interrupts the control connection,
+        // so wait for it to finish instead.
+        if (activeRemoteListJob_ != 0) {
+            uploadRefreshTimer_->start();
+            return;
+        }
+        requestRemoteListing(rightRemoteModel_->rootPath(), true);
+    });
     connect(transferMgr_, &TransferManager::tasksAdded, this,
             [this](const QVector<quint64> &ids) {
                 handleTransferUiUpdate(ids, {});
@@ -1196,7 +1233,7 @@ void MainWindow::initializeRuntimeState() {
                        true)
                 .toBool();
         if (openSiteManagerOnStartup_ && !QCoreApplication::closingDown() &&
-            !sessionController_->client()) {
+            !sessionController_->hasSession()) {
             QTimer::singleShot(0, this, [this] { showSiteManagerNonModal(); });
         }
     }
@@ -1381,6 +1418,9 @@ void MainWindow::closeEvent(QCloseEvent *e) {
         e->ignore();
         return;
     }
+    if (sessionController_->isConnecting()) {
+        sessionController_->requestConnectionCancellation();
+    }
     if (rightIsRemote_) {
         pendingCloseAfterDisconnect_ = true;
         disconnectRemote();
@@ -1561,15 +1601,8 @@ void MainWindow::handleTransferUiUpdate(const QVector<quint64> &upsertIds,
         openLocalPathWithPreference(localPath);
         statusBar()->showMessage(tr("Downloaded: ") + localPath, 5000);
     }
-    if (!update.scheduleRemoteRefresh)
-        return;
-
-    QTimer::singleShot(150, this, [this] {
-        transferUiController_.completeScheduledRefresh();
-        if (!rightIsRemote_ || !rightRemoteModel_)
-            return;
-        requestRemoteListing(rightRemoteModel_->rootPath(), true);
-    });
+    if (update.scheduleRemoteRefresh)
+        uploadRefreshTimer_->start();
 }
 
 bool MainWindow::isScpTransferMode() const {
@@ -1729,6 +1762,7 @@ void MainWindow::applyTransferPreferences() {
                .toInt());
     transferMgr_->setMaxConcurrent(maxConcurrent);
     transferMgr_->setGlobalSpeedLimitKBps(globalSpeed);
+    applyLocalFileDurabilityPreference();
     if (transferDlg_)
         QMetaObject::invokeMethod(transferDlg_, "refresh",
                                   Qt::QueuedConnection);
@@ -2363,10 +2397,11 @@ void MainWindow::showHistoryMenu() {
 }
 
 void MainWindow::updateDeleteShortcutEnables() {
+    // The panes select whole rows, so any selection is a row selection, and
+    // asking for the selected rows would walk the whole selection.
     auto hasColSel = [&](QTreeView *treeView) -> bool {
-        if (!treeView || !treeView->selectionModel())
-            return false;
-        return !treeView->selectionModel()->selectedRows(kNameColumn).isEmpty();
+        return treeView && treeView->selectionModel() &&
+               treeView->selectionModel()->hasSelection();
     };
     const bool leftHasSel = hasColSel(leftView_);
     const bool rightHasSel = hasColSel(rightView_);

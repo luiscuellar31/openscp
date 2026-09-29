@@ -6,7 +6,7 @@ Qt libraries. The license text remains the authoritative source.
 
 ## What OpenSCP provides
 
-Official self-contained macOS and AppImage packages use Qt 6.8.3 and link to Qt
+Official self-contained macOS and AppImage packages use Qt 6.11.2 and link to Qt
 dynamically. Snap and Flatpak use the compatible Qt 6 libraries supplied by
 their external runtimes.
 
@@ -26,9 +26,9 @@ See [CREDITS.md](CREDITS.md) for the complete third-party component list and
 
 ## Qt source
 
-For official packages that bundle Qt 6.8.3, the matching upstream source is:
+For official packages that bundle Qt 6.11.2, the matching upstream source is:
 
-- [Qt 6.8.3 source archive](https://download.qt.io/official_releases/qt/6.8/6.8.3/single/qt-everywhere-src-6.8.3.tar.xz)
+- [Qt 6.11.2 source archive](https://download.qt.io/official_releases/qt/6.11/6.11.2/single/qt-everywhere-src-6.11.2.tar.xz)
 
 You may also request a copy of the corresponding source for at least three
 years after the OpenSCP release that included it:

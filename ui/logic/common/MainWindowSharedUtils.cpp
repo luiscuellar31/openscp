@@ -5,9 +5,38 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QMessageBox>
+
+#include <filesystem>
+
+namespace {
+
+std::filesystem::path localFilesystemPath(const QString &path) {
+#ifdef Q_OS_WIN
+    return std::filesystem::path(path.toStdWString());
+#else
+    return std::filesystem::path(QFile::encodeName(path).constData());
+#endif
+}
+
+} // namespace
+
+LocalRenameResult renameLocalEntry(const QString &sourcePath,
+                                   const QString &targetPath, QString *error) {
+    std::error_code nativeError;
+    std::filesystem::rename(localFilesystemPath(sourcePath),
+                            localFilesystemPath(targetPath), nativeError);
+    if (!nativeError)
+        return LocalRenameResult::Moved;
+    if (nativeError == std::errc::cross_device_link)
+        return LocalRenameResult::CrossDevice;
+    if (error)
+        *error = QString::fromStdString(nativeError.message());
+    return LocalRenameResult::Failed;
+}
 
 bool PathDepthComparator::operator()(const QString &left,
                                      const QString &right) const {

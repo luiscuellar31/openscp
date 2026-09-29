@@ -143,7 +143,7 @@ QVector<SettingsDialog::SettingBinding>
 SettingsDialog::buildSettingBindings() const {
     // Build a single source of truth for settings I/O and control sync.
     QVector<SettingBinding> bindings;
-    bindings.reserve(40);
+    bindings.reserve(41);
 
     using StringNormalizer = std::function<QString(const QString &)>;
     using IntNormalizer = std::function<int(int)>;
@@ -574,6 +574,14 @@ SettingsDialog::buildSettingBindings() const {
     };
     for (const SpinBindingSpec &spec : plainSpinBindings)
         addSpin(spec.key, spec.defaultValue, spec.spin);
+
+    const int maximumDurability =
+        static_cast<int>(openscp::LocalFileDurability::FileAndDirectory);
+    addIntCombo(openscpui::settingskeys::kTransferLocalFileDurability,
+                maximumDurability, localFileDurability_, [](int value) {
+                    return static_cast<int>(
+                        openscp::localFileDurabilityFromStorageValue(value));
+                });
 
     addIntCombo(openscpui::settingskeys::kTransferDefaultQueueAutoClearMode,
                 kQueueAutoClearOff, queueAutoClearModeDefault_, [](int value) {
@@ -1182,6 +1190,33 @@ void SettingsDialog::buildTransfersPage(const PageBuildContext &ctx) {
     globalSpeedDefaultSpin_ = addSpinRow(
         concurrencyForm, transfersPage, tr("Default global limit:"), 0,
         1'000'000, 0, tr(" KB/s"), 120, 1, tr("0 = no global speed limit."));
+    localFileDurability_ = new QComboBox(transfersPage);
+    localFileDurability_->setObjectName(
+        QStringLiteral("settingsLocalFileDurability"));
+    setFieldWidth(localFileDurability_);
+    addComboItems(
+        localFileDurability_,
+        {{tr("Maximum (file and folder)"),
+          static_cast<int>(openscp::LocalFileDurability::FileAndDirectory)},
+         {tr("File only"),
+          static_cast<int>(openscp::LocalFileDurability::File)},
+         {tr("Fast (operating-system buffers)"),
+          static_cast<int>(openscp::LocalFileDurability::Buffered)}});
+    localFileDurability_->setItemData(
+        0,
+        tr("Synchronizes each downloaded file and its parent folder. This "
+           "best protects completed downloads against sudden power loss."),
+        Qt::ToolTipRole);
+    localFileDurability_->setItemData(
+        1, tr("Synchronizes each downloaded file but not its parent folder."),
+        Qt::ToolTipRole);
+    localFileDurability_->setItemData(
+        2,
+        tr("Relies on operating-system writeback. Faster for many small "
+           "files, but recent downloads can be lost after sudden power loss."),
+        Qt::ToolTipRole);
+    addLabeledRow(concurrencyForm, transfersPage, tr("Download durability:"),
+                  localFileDurability_);
     QFormLayout *cleanupForm =
         addSection(transfersPage, tr("Automatic cleanup"));
     queueAutoClearModeDefault_ = new QComboBox(transfersPage);
@@ -1436,7 +1471,7 @@ void SettingsDialog::connectDirtyTracking() {
     for (QComboBox *combo :
          {langCombo_, clickMode_, openBehaviorMode_, defaultProtocol_,
           scpModeDefault_, defaultKnownHostsPolicy_, defaultIntegrityPolicy_,
-          queueAutoClearModeDefault_}) {
+          localFileDurability_, queueAutoClearModeDefault_}) {
         bindDirtyFlag(combo, qOverload<int>(&QComboBox::currentIndexChanged));
     }
     for (QCheckBox *check :

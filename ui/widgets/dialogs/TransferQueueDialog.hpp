@@ -73,6 +73,12 @@ class TransferQueueDialog : public QDialog {
     enum class WindowTransition { None, Showing, Hiding };
 
     void updateSummary();
+    // Queue changes arrive in bursts, so the summary and the auto-clear check
+    // run once per short window instead of once per signal.
+    void scheduleSummaryUpdate();
+    // Rows appear and disappear at once, so their placeholder cannot wait for
+    // the summary window.
+    void updateEmptyState();
     QVector<quint64> selectedTaskIds() const;
     void loadUiState();
     void saveUiState() const;
@@ -119,6 +125,8 @@ class TransferQueueDialog : public QDialog {
     QComboBox *autoClearModeCombo_ = nullptr;
     class QSpinBox *autoClearMinutesSpin_ = nullptr;
     bool suppressAutoClearSignal_ = false;
+    class QTimer *summaryTimer_ = nullptr;
+    bool autoClearPending_ = false;
     QPointer<QParallelAnimationGroup> windowTransitionAnimation_;
     QRect restingGeometry_;
     WindowTransition windowTransition_ = WindowTransition::None;

@@ -96,13 +96,26 @@ kept separate from blocking network operations.
 ## Transfers and synchronization
 
 `TransferManager` is the entry point for the transfer queue. It coordinates
-worker connections, task state, retries, conflicts, destination reservations,
-persistence, and notifications. The supporting classes have narrower jobs:
+worker connections, task state, retries, conflicts, path reservations,
+persistence, and notifications. For a local upload move, it defers source
+cleanup while another queued task needs that path and reserves the source
+during cleanup. It keeps pending and failed task counts per batch so worker
+selection does not rescan a batch for each waiting task. The supporting classes
+have narrower jobs:
 
 - `TransferQueue` stores tasks and selects work fairly.
 - `TransferExecutor` runs a selected transfer.
 - `BandwidthLimiter` applies speed limits.
 - `TransferQueuePersistence` saves unfinished tasks safely.
+
+`SafeLocalFile` in the core owns local download publication and descriptor-based
+path operations for transfer tasks. The queue uses it to create or remove local
+entries without following symbolic links in user-writable parent directories.
+Upload moves also use it to capture local file identity before transfer and
+check that identity before source cleanup. The identity is process-local; a
+restored cleanup without it requires manual review.
+`SyncCoordinator` resolves the selected local root before scanning and queuing
+paths, so a root reached through a system link keeps one physical location.
 
 There is one allowed nested lock order inside the manager:
 
@@ -118,6 +131,14 @@ Synchronization has three steps:
 1. `SyncCoordinator` collects bounded local and remote snapshots.
 2. `SyncComparisonEngine` creates a data-only plan.
 3. The accepted actions enter `TransferManager` as one ordered batch.
+
+`SyncDialog` cancels superseded comparisons when options or snapshots change.
+The engine checks cancellation while building and classifying the preview; the
+dialog applies only the newest completed result.
+
+The coordinator records paths that either scan could not verify. The comparison
+keeps destination-only entries under unscanned source paths, and plan creation
+checks that coverage again before accepting mirror deletions.
 
 ## Saved data
 

@@ -10,12 +10,14 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QMetaObject>
 #include <QPointer>
 #include <QSet>
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -36,6 +38,11 @@ QString joinedLocalPath(const QString &root, const QString &relativePath) {
 
 bool exceedsLargeTreeThreshold(quint64 itemCount, quint64 knownBytes) {
     return itemCount > kLargeTreeItems || knownBytes > kLargeTreeKnownBytes;
+}
+
+QString parentRelativePath(const QString &relativePath) {
+    const qsizetype separator = relativePath.lastIndexOf(QLatin1Char('/'));
+    return separator < 0 ? QString() : relativePath.left(separator);
 }
 
 } // namespace
@@ -93,6 +100,7 @@ SyncCoordinator::SyncCoordinator(RemoteOperationController *remoteOperations,
                         entry.relativePath);
                 if (relative.isEmpty()) {
                     ++state->result.invalidNames;
+                    state->result.coverage.remoteUnscannedPaths.insert({});
                     continue;
                 }
 
@@ -152,34 +160,50 @@ SyncCoordinator::SyncCoordinator(RemoteOperationController *remoteOperations,
                                      progress.currentPath);
             });
 
-    connect(remoteOperations_, &RemoteOperationController::jobFinished, this,
-            [this](const RemoteOperationController::Completion &completion) {
-                const auto state = state_;
-                if (!state || completion.result.job.id != state->remoteJobId ||
-                    state->generation != generation_) {
-                    return;
-                }
-                state->remoteDone = true;
-                state->result.inaccessibleFolders += completion.failedEntries;
-                state->result.skippedSymlinks += completion.skippedSymlinks;
-                state->result.depthLimits += completion.depthLimits;
-                state->result.invalidNames += completion.invalidNames;
-                state->result.unknownSizes += completion.unknownSizes;
-                if (completion.result.partial) {
-                    state->result.warnings.push_back(
-                        tr("Some remote folders could not be read; the "
-                           "comparison is partial."));
-                }
-                if (completion.result.outcome ==
-                        RemoteOperationController::Outcome::Failed &&
-                    !completion.result.partial && !state->limitExceeded) {
-                    state->fatalError =
-                        completion.result.error.isEmpty()
-                            ? tr("Could not scan the remote folder.")
-                            : completion.result.error;
-                }
-                maybeFinish(state);
-            });
+    connect(
+        remoteOperations_, &RemoteOperationController::jobFinished, this,
+        [this](const RemoteOperationController::Completion &completion) {
+            const auto state = state_;
+            if (!state || completion.result.job.id != state->remoteJobId ||
+                state->generation != generation_) {
+                return;
+            }
+            state->remoteDone = true;
+            state->result.inaccessibleFolders += completion.failedEntries;
+            state->result.skippedSymlinks += completion.skippedSymlinks;
+            state->result.depthLimits += completion.depthLimits;
+            state->result.invalidNames += completion.invalidNames;
+            state->result.unknownSizes += completion.unknownSizes;
+            for (const QString &path : completion.unscannedPaths) {
+                const QString normalized =
+                    SyncComparisonEngine::normalizeRelativePath(path);
+                state->result.coverage.remoteUnscannedPaths.insert(
+                    path.isEmpty() || normalized.isEmpty() ? QString()
+                                                           : normalized);
+            }
+            if (completion.result.outcome ==
+                RemoteOperationController::Outcome::Canceled) {
+                state->result.coverage.remoteUnscannedPaths.insert({});
+            }
+            if (completion.unscannedPaths.isEmpty() &&
+                (completion.result.partial || completion.failedEntries > 0)) {
+                state->result.coverage.remoteUnscannedPaths.insert({});
+            }
+            if (completion.result.partial) {
+                state->result.warnings.push_back(
+                    tr("Some remote folders could not be read; the "
+                       "comparison is partial."));
+            }
+            if (completion.result.outcome ==
+                    RemoteOperationController::Outcome::Failed &&
+                !completion.result.partial && !state->limitExceeded) {
+                state->fatalError =
+                    completion.result.error.isEmpty()
+                        ? tr("Could not scan the remote folder.")
+                        : completion.result.error;
+            }
+            maybeFinish(state);
+        });
 
     connect(remoteOperations_, &RemoteOperationController::checksumCompleted,
             this,
@@ -526,6 +550,11 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
         emit preparationFailed(tr("The current local folder is unavailable."));
         return;
     }
+    const QString canonicalLocalRoot = localInfo.canonicalFilePath();
+    if (canonicalLocalRoot.isEmpty()) {
+        emit preparationFailed(tr("The current local folder is unavailable."));
+        return;
+    }
     if (!remoteOperations_ || !remoteOperations_->hasRequestedSession()) {
         emit preparationFailed(tr("No remote session is available."));
         return;
@@ -533,7 +562,7 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
 
     auto state = std::make_shared<PreparationState>();
     state->generation = generation_;
-    state->localRoot = QDir(localInfo.absoluteFilePath()).absolutePath();
+    state->localRoot = canonicalLocalRoot;
     state->remoteRoot = normalizeRemotePath(remoteRoot);
     state->allowLargeTree = allowLargeTree;
     state->result.localRoot = state->localRoot;
@@ -573,6 +602,7 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
         quint64 invalidNames = 0;
         quint64 unknownSizes = 0;
         quint64 depthLimits = 0;
+        QSet<QString> unscannedPaths;
         bool limitExceeded = false;
 
         auto canceled = [&] {
@@ -601,15 +631,42 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
             const QFileInfo directoryInfo(node.absolutePath);
             if (!directoryInfo.isReadable()) {
                 ++inaccessible;
+                unscannedPaths.insert(node.relativePath);
                 continue;
             }
 
-            QDir directory(node.absolutePath);
-            const QFileInfoList entries = directory.entryInfoList(
-                QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden |
-                    QDir::System,
-                QDir::DirsFirst | QDir::Name);
-            for (const QFileInfo &info : entries) {
+            // QFileInfo::isReadable() is only a precheck. A directory can
+            // become unreadable during enumeration, so retain iterator errors
+            // as incomplete coverage instead of treating them as an empty tree.
+#ifdef _WIN32
+            const std::filesystem::path nativePath(
+                node.absolutePath.toStdWString());
+#else
+            const std::filesystem::path nativePath(
+                QFile::encodeName(node.absolutePath).constData());
+#endif
+            std::error_code listError;
+            std::filesystem::directory_iterator directoryEntry(nativePath,
+                                                               listError);
+            if (listError) {
+                ++inaccessible;
+                unscannedPaths.insert(node.relativePath);
+                continue;
+            }
+            const QDir directory(node.absolutePath);
+            const std::filesystem::directory_iterator end;
+            for (; directoryEntry != end && !canceled();
+                 directoryEntry.increment(listError)) {
+                if (listError)
+                    break;
+#ifdef _WIN32
+                const QString name = QString::fromStdWString(
+                    directoryEntry->path().filename().wstring());
+#else
+                const QString name = QFile::decodeName(
+                    directoryEntry->path().filename().string().c_str());
+#endif
+                const QFileInfo info(directory.filePath(name));
                 if (canceled())
                     break;
                 const QString relative = node.relativePath.isEmpty()
@@ -621,10 +678,12 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
                     SyncComparisonEngine::normalizeRelativePath(relative);
                 if (normalized.isEmpty()) {
                     ++invalidNames;
+                    unscannedPaths.insert(node.relativePath);
                     continue;
                 }
                 if (info.isSymLink()) {
                     ++skippedSymlinks;
+                    unscannedPaths.insert(normalized);
                     continue;
                 }
 
@@ -655,6 +714,7 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
                 if (info.isDir()) {
                     if (node.depth + 1 >= kMaximumDepth) {
                         ++depthLimits;
+                        unscannedPaths.insert(normalized);
                     } else {
                         stack.push_back({info.absoluteFilePath(), normalized,
                                          node.depth + 1});
@@ -669,6 +729,10 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
                 if ((itemCount % kBatchSize) == 0)
                     postProgress(info.absoluteFilePath());
             }
+            if (listError) {
+                ++inaccessible;
+                unscannedPaths.insert(node.relativePath);
+            }
         }
 
         if (!safeThis)
@@ -677,7 +741,9 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
             safeThis,
             [safeThis, state, snapshot = std::move(snapshot), itemCount,
              knownBytes, skippedSymlinks, inaccessible, invalidNames,
-             unknownSizes, depthLimits, limitExceeded]() mutable {
+             unknownSizes, depthLimits,
+             unscannedPaths = std::move(unscannedPaths),
+             limitExceeded]() mutable {
                 if (!safeThis || safeThis->state_ != state ||
                     state->generation != safeThis->generation_) {
                     return;
@@ -696,6 +762,8 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
                 state->result.invalidNames += invalidNames;
                 state->result.unknownSizes += unknownSizes;
                 state->result.depthLimits += depthLimits;
+                state->result.coverage.localUnscannedPaths =
+                    std::move(unscannedPaths);
                 state->limitExceeded = state->limitExceeded || limitExceeded;
                 state->localDone = true;
                 if (state->limitExceeded && safeThis->remoteOperations_)
@@ -782,13 +850,19 @@ quint64 SyncCoordinator::enqueuePlan(const SyncExecutionPlan &plan,
     options.batchId = transfers_->createBatch(options);
 
     qsizetype taskCount = 0;
-    quint64 prerequisite = 0;
-    auto prepareDependency = [&] { options.dependsOnTaskId = prerequisite; };
-    auto record = [&](quint64 taskId) {
-        if (taskId == 0)
-            return;
-        prerequisite = taskId;
-        ++taskCount;
+    const auto record = [&](quint64 taskId) {
+        if (taskId != 0)
+            ++taskCount;
+        return taskId;
+    };
+
+    // Directories and copies wait only for the directory task that creates
+    // their parent, so a sync runs as many of them at once as the queue
+    // allows. SyncComparisonEngine orders directories parents-first.
+    QHash<QString, quint64> directoryTasks;
+    const auto dependOnParentDirectory = [&](const QString &relative) {
+        options.dependsOnTaskId =
+            directoryTasks.value(parentRelativePath(relative), 0);
     };
 
     for (const QString &rawRelative : plan.directoriesToCreate) {
@@ -796,14 +870,15 @@ quint64 SyncCoordinator::enqueuePlan(const SyncExecutionPlan &plan,
             SyncComparisonEngine::normalizeRelativePath(rawRelative);
         if (relative.isEmpty())
             continue;
-        prepareDependency();
-        if (plan.direction == SyncDirection::LocalToRemote) {
-            record(transfers_->enqueueRemoteDirectory(
-                joinRemotePath(remoteRoot, relative), options));
-        } else {
-            record(transfers_->enqueueLocalDirectory(
-                joinedLocalPath(localRoot, relative), options));
-        }
+        dependOnParentDirectory(relative);
+        const quint64 taskId =
+            plan.direction == SyncDirection::LocalToRemote
+                ? record(transfers_->enqueueRemoteDirectory(
+                      joinRemotePath(remoteRoot, relative), options))
+                : record(transfers_->enqueueLocalDirectory(
+                      joinedLocalPath(localRoot, relative), options));
+        if (taskId != 0)
+            directoryTasks.insert(relative, taskId);
     }
 
     for (const SyncCopyOperation &copy : plan.copies) {
@@ -811,7 +886,7 @@ quint64 SyncCoordinator::enqueuePlan(const SyncExecutionPlan &plan,
             SyncComparisonEngine::normalizeRelativePath(copy.relativePath);
         if (relative.isEmpty())
             continue;
-        prepareDependency();
+        dependOnParentDirectory(relative);
         if (plan.direction == SyncDirection::LocalToRemote) {
             record(transfers_->enqueueUpload(
                 joinedLocalPath(localRoot, relative),
@@ -823,22 +898,27 @@ quint64 SyncCoordinator::enqueuePlan(const SyncExecutionPlan &plan,
         }
     }
 
-    // SyncComparisonEngine already orders deletes deepest-first. Chaining the
-    // persistent tasks preserves that order even with multiple worker slots.
+    // Deletes wait for the rest of the batch, so a failed directory or copy
+    // leaves every destination extra in place. SyncComparisonEngine orders
+    // them deepest-first, and chaining them keeps that order.
+    options.waitForBatch = true;
+    quint64 previousDelete = 0;
     for (const SyncDeleteOperation &deletion : plan.deletes) {
         const QString relative =
             SyncComparisonEngine::normalizeRelativePath(deletion.relativePath);
         if (relative.isEmpty())
             continue;
         const bool directory = deletion.type == SyncEntryType::Directory;
-        prepareDependency();
-        if (plan.direction == SyncDirection::LocalToRemote) {
-            record(transfers_->enqueueRemoteDelete(
-                joinRemotePath(remoteRoot, relative), directory, options));
-        } else {
-            record(transfers_->enqueueLocalDelete(
-                joinedLocalPath(localRoot, relative), directory, options));
-        }
+        options.dependsOnTaskId = previousDelete;
+        const quint64 taskId =
+            plan.direction == SyncDirection::LocalToRemote
+                ? record(transfers_->enqueueRemoteDelete(
+                      joinRemotePath(remoteRoot, relative), directory, options))
+                : record(transfers_->enqueueLocalDelete(
+                      joinedLocalPath(localRoot, relative), directory,
+                      options));
+        if (taskId != 0)
+            previousDelete = taskId;
     }
 
     if (taskCountOut)

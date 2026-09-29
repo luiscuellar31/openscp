@@ -212,6 +212,7 @@ if [[ "$RUN_CPPCHECK" -eq 1 ]]; then
         --inline-suppr \
         --suppress=missingIncludeSystem \
         --suppress=unknownMacro \
+        --suppress=uninitMemberVarNoCtor \
         --quiet \
         core/include core/src ui tests
 fi

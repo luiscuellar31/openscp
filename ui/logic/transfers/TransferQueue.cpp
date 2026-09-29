@@ -26,6 +26,26 @@ void TransferQueueStore::append(TransferTask task) {
     }
 }
 
+TransferQueueStore::Nodes TransferQueueStore::removeIf(
+    const std::function<bool(const TransferTask &)> &shouldRemove) {
+    Nodes removed;
+    std::size_t kept = 0;
+    for (std::size_t index = 0; index < nodes_.size(); ++index) {
+        Node &node = nodes_[index];
+        if (node && shouldRemove(*node)) {
+            byId_.erase(node->taskId);
+            removed.push_back(std::move(node));
+            continue;
+        }
+        // Moving the owning pointer keeps the indexed address valid.
+        if (kept != index)
+            nodes_[kept] = std::move(node);
+        ++kept;
+    }
+    nodes_.resize(kept);
+    return removed;
+}
+
 void TransferQueueStore::rebuildIndex() {
     byId_.clear();
     byId_.reserve(nodes_.size());

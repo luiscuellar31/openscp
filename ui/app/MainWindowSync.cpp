@@ -119,6 +119,7 @@ void MainWindow::initializeSyncCoordinator() {
             QVector<SyncSnapshotEntry> localSnapshot = prepared.localSnapshot;
             QVector<SyncSnapshotEntry> remoteSnapshot = prepared.remoteSnapshot;
             dialog.setRootPaths(localRoot, remoteRoot);
+            dialog.setScanCoverage(prepared.coverage);
             dialog.setSnapshots(localSnapshot, remoteSnapshot);
             const openscp::ProtocolCapabilities capabilities =
                 sessionController_->options()

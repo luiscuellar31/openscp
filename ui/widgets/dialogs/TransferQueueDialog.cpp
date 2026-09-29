@@ -29,6 +29,7 @@
 #include <QSortFilterProxyModel>
 #include <QSpinBox>
 #include <QTableView>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -178,7 +179,8 @@ void withSelectedTasks(TransferManager *manager, const QVector<quint64> &ids,
         return;
     // Use one immutable, ID-scoped snapshot so selected operations see the
     // same state without copying the complete queue.
-    const auto taskIndex = buildTaskIndexById(manager->tasksSnapshot(ids));
+    const auto snapshot = manager->tasksSnapshot(ids);
+    const auto taskIndex = buildTaskIndexById(snapshot);
     forEachSelectedTask(ids, taskIndex, callback);
 }
 
@@ -376,6 +378,25 @@ class TransferTaskTableModel final : public QAbstractTableModel {
         }
     }
 
+    // Kept as rows change, so the dialog never counts the whole queue again
+    // to refresh its summary.
+    struct Counts {
+        int total = 0;
+        int queued = 0;
+        int running = 0;
+        int paused = 0;
+        int waiting = 0;
+        int retrying = 0;
+        int done = 0;
+        int skipped = 0;
+        int error = 0;
+        int warning = 0;
+        int canceled = 0;
+        int retryable = 0;
+    };
+
+    const Counts &counts() const { return counts_; }
+
     void sync(const QVector<TransferTask> &incoming) {
         if (tasks_.size() != incoming.size()) {
             beginResetModel();
@@ -420,10 +441,14 @@ class TransferTaskTableModel final : public QAbstractTableModel {
             const int first = static_cast<int>(tasks_.size());
             const int last = first + static_cast<int>(missing.size()) - 1;
             beginInsertRows({}, first, last);
-            for (const auto &task : missing)
+            for (const auto &task : missing) {
+                // Appending leaves the other rows where they are, so only the
+                // new rows reach the index.
+                rowById_.insert(task.taskId, static_cast<int>(tasks_.size()));
                 tasks_.push_back(task);
+                countTask(task, 1);
+            }
             endInsertRows();
-            rebuildIndex();
         }
     }
 
@@ -437,9 +462,15 @@ class TransferTaskTableModel final : public QAbstractTableModel {
         }
         std::sort(rows.begin(), rows.end(), std::greater<int>());
         rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
-        for (int row : rows) {
-            beginRemoveRows({}, row, row);
-            tasks_.removeAt(row);
+        // Adjacent rows go out as one range, so removing a contiguous
+        // selection shifts the rows below it only once.
+        for (qsizetype index = 0; index < rows.size();) {
+            const int last = rows[index];
+            int first = last;
+            while (++index < rows.size() && rows[index] == first - 1)
+                first = rows[index];
+            beginRemoveRows({}, first, last);
+            tasks_.remove(first, last - first + 1);
             endRemoveRows();
         }
         if (!rows.isEmpty())
@@ -462,10 +493,50 @@ class TransferTaskTableModel final : public QAbstractTableModel {
                prev.error != next.error || prev.phase != next.phase;
     }
 
+    void countTask(const TransferTask &task, int delta) {
+        counts_.total += delta;
+        if (canRetryTask(task))
+            counts_.retryable += delta;
+        switch (task.status) {
+        case TransferTask::Status::Queued:
+            counts_.queued += delta;
+            break;
+        case TransferTask::Status::Running:
+            counts_.running += delta;
+            break;
+        case TransferTask::Status::Paused:
+            counts_.paused += delta;
+            break;
+        case TransferTask::Status::WaitingForConnection:
+            counts_.waiting += delta;
+            break;
+        case TransferTask::Status::RetryWaiting:
+            counts_.retrying += delta;
+            break;
+        case TransferTask::Status::Done:
+            counts_.done += delta;
+            break;
+        case TransferTask::Status::Skipped:
+            counts_.skipped += delta;
+            break;
+        case TransferTask::Status::Error:
+            counts_.error += delta;
+            break;
+        case TransferTask::Status::Warning:
+            counts_.warning += delta;
+            break;
+        case TransferTask::Status::Canceled:
+            counts_.canceled += delta;
+            break;
+        }
+    }
+
     void updateRow(int row, const TransferTask &next) {
         if (row < 0 || row >= tasks_.size())
             return;
         const bool changed = differs(tasks_[row], next);
+        countTask(tasks_[row], -1);
+        countTask(next, 1);
         tasks_[row] = next;
         if (changed) {
             emit dataChanged(index(row, 0), index(row, ColCount - 1),
@@ -479,12 +550,16 @@ class TransferTaskTableModel final : public QAbstractTableModel {
     void rebuildIndex() {
         rowById_.clear();
         rowById_.reserve(tasks_.size());
-        for (int row = 0; row < tasks_.size(); ++row)
+        counts_ = {};
+        for (int row = 0; row < tasks_.size(); ++row) {
             rowById_.insert(tasks_[row].taskId, row);
+            countTask(tasks_[row], 1);
+        }
     }
 
     QVector<TransferTask> tasks_;
     QHash<quint64, int> rowById_;
+    Counts counts_;
 };
 
 class TransferTaskFilterProxyModel final : public QSortFilterProxyModel {
@@ -826,6 +901,11 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
             &TransferQueueDialog::reject);
     connect(filterGroup_, &QButtonGroup::idClicked, this,
             &TransferQueueDialog::onFilterChanged);
+    summaryTimer_ = new QTimer(this);
+    summaryTimer_->setSingleShot(true);
+    summaryTimer_->setInterval(100);
+    connect(summaryTimer_, &QTimer::timeout, this,
+            &TransferQueueDialog::updateSummary);
     connect(mgr_, &TransferManager::tasksAdded, this,
             &TransferQueueDialog::onTasksAdded);
     connect(mgr_, &TransferManager::tasksUpdated, this,
@@ -1026,7 +1106,7 @@ void TransferQueueDialog::onTasksAdded(const QVector<quint64> &taskIds) {
     if (!model_)
         return;
     model_->upsert(mgr_->tasksSnapshot(taskIds));
-    updateSummary();
+    scheduleSummaryUpdate();
 }
 
 void TransferQueueDialog::onTasksUpdated(const QVector<quint64> &taskIds) {
@@ -1042,16 +1122,15 @@ void TransferQueueDialog::onTasksUpdated(const QVector<quint64> &taskIds) {
                    task.status == TransferTask::Status::Skipped ||
                    task.status == TransferTask::Status::Warning;
         });
-    if (hasTerminalUpdate)
-        maybeAutoClear(model_->tasks());
-    updateSummary();
+    autoClearPending_ = autoClearPending_ || hasTerminalUpdate;
+    scheduleSummaryUpdate();
 }
 
 void TransferQueueDialog::onTasksRemoved(const QVector<quint64> &taskIds) {
     if (!model_)
         return;
     model_->removeTaskIds(taskIds);
-    updateSummary();
+    scheduleSummaryUpdate();
 }
 
 void TransferQueueDialog::onQueueSettingsChanged() {
@@ -1222,65 +1301,55 @@ void TransferQueueDialog::onOpenQueueOptions() {
     queueOptionsDialog_->open();
 }
 
+void TransferQueueDialog::updateEmptyState() {
+    if (!emptyStateLabel_ || !model_)
+        return;
+    const bool hasVisibleTasks = proxy_ && proxy_->rowCount() > 0;
+    const QString emptyText = model_->counts().total == 0
+                                  ? tr("No transfers in the queue\nTransfers "
+                                       "will appear here when they start.")
+                                  : tr("No transfers match this filter");
+    emptyStateLabel_->setText(emptyText);
+    emptyStateLabel_->setAccessibleName(emptyText);
+    emptyStateLabel_->setVisible(!hasVisibleTasks);
+}
+
+void TransferQueueDialog::scheduleSummaryUpdate() {
+    if (!summaryTimer_)
+        return;
+    // The first change in a window is shown after it, and the ones that
+    // follow ride along with it.
+    if (!summaryTimer_->isActive())
+        summaryTimer_->start();
+    updateEmptyState();
+}
+
 void TransferQueueDialog::updateSummary() {
     if (!model_)
         return;
-
-    // Summary counts drive both badges and action enablement.
-    const auto &tasks = model_->tasks();
-    int queued = 0, running = 0, paused = 0, waiting = 0, retrying = 0;
-    int done = 0, skipped = 0, error = 0, warning = 0, canceled = 0;
-    int retryable = 0;
-    for (const auto &task : tasks) {
-        if (canRetryTask(task))
-            ++retryable;
-        switch (task.status) {
-        case TransferTask::Status::Queued:
-            ++queued;
-            break;
-        case TransferTask::Status::Running:
-            ++running;
-            break;
-        case TransferTask::Status::Paused:
-            ++paused;
-            break;
-        case TransferTask::Status::Done:
-            ++done;
-            break;
-        case TransferTask::Status::Error:
-            ++error;
-            break;
-        case TransferTask::Status::Canceled:
-            ++canceled;
-            break;
-        case TransferTask::Status::WaitingForConnection:
-            ++waiting;
-            break;
-        case TransferTask::Status::RetryWaiting:
-            ++retrying;
-            break;
-        case TransferTask::Status::Skipped:
-            ++skipped;
-            break;
-        case TransferTask::Status::Warning:
-            ++warning;
-            break;
-        }
+    if (autoClearPending_) {
+        autoClearPending_ = false;
+        maybeAutoClear(model_->tasks());
     }
+
+    // The model counts rows as they change, so the badges and the action
+    // enablement never walk the queue.
+    const auto &counts = model_->counts();
+    const int queued = counts.queued;
+    const int running = counts.running;
+    const int paused = counts.paused;
+    const int waiting = counts.waiting;
+    const int retrying = counts.retrying;
+    const int done = counts.done;
+    const int skipped = counts.skipped;
+    const int error = counts.error;
+    const int warning = counts.warning;
+    const int canceled = counts.canceled;
+    const int retryable = counts.retryable;
 
     const int active = queued + running + paused + waiting + retrying;
-    if (emptyStateLabel_) {
-        const bool hasVisibleTasks = proxy_ && proxy_->rowCount() > 0;
-        const QString emptyText =
-            tasks.isEmpty() ? tr("No transfers in the queue\nTransfers "
-                                 "will appear here when they start.")
-                            : tr("No transfers match this filter");
-        emptyStateLabel_->setText(emptyText);
-        emptyStateLabel_->setAccessibleName(emptyText);
-        emptyStateLabel_->setVisible(!hasVisibleTasks);
-    }
     if (badgeTotal_)
-        badgeTotal_->setText(tr("Total: %1").arg(tasks.size()));
+        badgeTotal_->setText(tr("Total: %1").arg(counts.total));
     if (badgeActive_)
         badgeActive_->setText(tr("Active: %1").arg(active));
     if (badgeRunning_)
@@ -1302,7 +1371,8 @@ void TransferQueueDialog::updateSummary() {
                                      : tr("Global limit: off"));
     }
 
-    const bool hasAny = !tasks.isEmpty();
+    updateEmptyState();
+    const bool hasAny = counts.total > 0;
     const bool queuePaused = mgr_ && mgr_->isQueuePaused();
     const bool canPause =
         !queuePaused && (queued + running + retrying + waiting) > 0;
@@ -1311,8 +1381,11 @@ void TransferQueueDialog::updateSummary() {
     const bool canClearDone = (done + skipped) > 0;
     const bool canClearFailed = (error + warning + canceled) > 0;
     const bool canCancelAll = active > 0;
-    const auto selectedState =
-        buildSelectedActionsState(selectedTaskIds(), buildTaskIndexById(tasks));
+    const QVector<quint64> selectedIds = selectedTaskIds();
+    const QVector<TransferTask> selectedTasks =
+        mgr_->tasksSnapshot(selectedIds);
+    const auto selectedState = buildSelectedActionsState(
+        selectedIds, buildTaskIndexById(selectedTasks));
 
     if (pauseBtn_)
         pauseBtn_->setEnabled(hasAny && canPause);
@@ -1432,13 +1505,10 @@ void TransferQueueDialog::showContextMenu(const QPoint &pos) {
         onCopyDestinationPath();
     else if (chosen == actClearFinished)
         onClearFinished();
-    else if (chosen == actRemove) {
-        for (quint64 taskId : ids)
-            mgr_->removeTask(taskId, false);
-    } else if (chosen == actRemoveWithPartial) {
-        for (quint64 taskId : ids)
-            mgr_->removeTask(taskId, true);
-    }
+    else if (chosen == actRemove)
+        mgr_->removeTasks(ids, false);
+    else if (chosen == actRemoveWithPartial)
+        mgr_->removeTasks(ids, true);
 }
 
 void TransferQueueDialog::loadUiState() {

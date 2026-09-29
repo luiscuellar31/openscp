@@ -13,6 +13,10 @@ class MockSftpClient : public RemoteClient {
     MockSftpClient();
     ~MockSftpClient() override;
 
+    // Clients from here share one process-wide filesystem, so every connection
+    // a demo session opens sees the same files, as with a real server.
+    static std::unique_ptr<MockSftpClient> onDemoServer();
+
     ProtocolCapabilities capabilities() const override;
 
     bool connect(const SessionOptions &opt, std::string &err) override;
@@ -48,9 +52,6 @@ class MockSftpClient : public RemoteClient {
     bool removeDir(const std::string &remote_dir, std::string &err) override;
     bool rename(const std::string &from, const std::string &to,
                 std::string &err, bool overwrite = false) override;
-
-    std::unique_ptr<RemoteClient> newConnectionLike(const SessionOptions &opt,
-                                                    std::string &err) override;
 
     // Test fixture helpers. resetFilesystem() keeps an empty root directory;
     // addEntry() derives the entry name from remote_path and requires its

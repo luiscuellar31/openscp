@@ -1,14 +1,17 @@
 // Core unit tests without external framework (run via CTest).
 #include "TestHarness.hpp"
 #include "common/RemoteListingLimits.hpp"
-#include "common/SafeLocalFile.hpp"
 #include "common/UniqueFile.hpp"
 #include "libssh2/Libssh2ScpClient.hpp"
 #include "libssh2/Libssh2SftpClient.hpp"
+#include "libssh2/detail/Libssh2CipherPreference.hpp"
 #include "libssh2/detail/Libssh2ErrorClassifier.hpp"
 #include "libssh2/detail/Libssh2InputSafety.hpp"
+#include "libssh2/detail/Libssh2TransferIntegrity.hpp"
+#include "libssh2/detail/UniqueSftpHandle.hpp"
 #include "mock/MockSftpClient.hpp"
 #include "openscp/ClientFactory.hpp"
+#include "openscp/SafeLocalFile.hpp"
 #include "openscp/SecureString.hpp"
 #if OPENSCP_HAS_CURL_FTP
 #include "curl/CurlFtpClient.hpp"
@@ -21,6 +24,7 @@
 #endif
 
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstdlib>
@@ -30,6 +34,7 @@
 #include <iterator>
 #include <optional>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
@@ -84,6 +89,9 @@ OPENSCP_TEST(test_session_defaults, t) {
     t.check(o.transfer_integrity_policy ==
                 openscp::TransferIntegrityPolicy::Optional,
             "transfer_integrity_policy should default to Optional");
+    t.check(o.local_file_durability ==
+                openscp::LocalFileDurability::FileAndDirectory,
+            "local downloads should default to maximum durability");
     t.check(!o.password.has_value(), "password should be empty by default");
     t.check(!o.private_key_path.has_value(),
             "private_key_path should be empty by default");
@@ -101,6 +109,8 @@ OPENSCP_TEST(test_security_policy_normalization, t) {
     const auto invalidKnownHosts = static_cast<openscp::KnownHostsPolicy>(999);
     const auto invalidIntegrity =
         static_cast<openscp::TransferIntegrityPolicy>(-7);
+    const auto invalidDurability =
+        static_cast<openscp::LocalFileDurability>(999);
 
     t.check(!openscp::isValidKnownHostsPolicy(invalidKnownHosts) &&
                 openscp::normalizeKnownHostsPolicy(invalidKnownHosts) ==
@@ -114,6 +124,10 @@ OPENSCP_TEST(test_security_policy_normalization, t) {
                     openscp::TransferIntegrityPolicy::Optional,
             "invalid integrity policies must normalize to the documented "
             "default");
+    t.check(!openscp::isValidLocalFileDurability(invalidDurability) &&
+                openscp::localFileDurabilityFromStorageValue(999) ==
+                    openscp::LocalFileDurability::FileAndDirectory,
+            "corrupt durability settings must preserve the strongest mode");
 
     openscp::SessionOptions options = validOptions();
     options.known_hosts_policy = invalidKnownHosts;
@@ -125,6 +139,15 @@ OPENSCP_TEST(test_security_policy_normalization, t) {
             "the SSH trust boundary must reject invalid security policies");
 
     options.known_hosts_policy = openscp::KnownHostsPolicy::Strict;
+    options.local_file_durability = invalidDurability;
+    error.clear();
+    t.check(!client.connect(options, error) &&
+                client.lastOperationError().kind ==
+                    openscp::RemoteErrorKind::InvalidRequest,
+            "the SSH trust boundary must reject invalid durability policies");
+
+    options.local_file_durability =
+        openscp::LocalFileDurability::FileAndDirectory;
     options.port = 0;
     error.clear();
     t.check(!client.connect(options, error) &&
@@ -264,8 +287,95 @@ OPENSCP_TEST(test_safe_local_partial_files, t) {
     t.check(readTextFile(target, targetContents) &&
                 targetContents == "replacement",
             "atomic replacement should publish complete partial contents");
+
+    error.clear();
+    file.reset(openscp::localfiles::openRegularFileForWrite(
+        partial.string(), openscp::localfiles::WriteMode::Truncate, error));
+    if (file) {
+        const char bufferedPayload[] = "buffered";
+        t.check(
+            std::fwrite(bufferedPayload, 1, sizeof(bufferedPayload) - 1,
+                        file.get()) == sizeof(bufferedPayload) - 1 &&
+                openscp::localfiles::flushAndSync(
+                    file.get(), error, openscp::LocalFileDurability::Buffered),
+            "buffered durability should still flush userspace writes");
+        file.reset();
+        t.check(openscp::localfiles::atomicReplace(
+                    partial.string(), target.string(), error,
+                    openscp::LocalFileDurability::Buffered),
+                "buffered durability should still publish atomically");
+    }
+    targetContents.clear();
+    t.check(readTextFile(target, targetContents) &&
+                targetContents == "buffered",
+            "buffered durability should publish complete contents");
     fs::remove(target, ec);
     fs::remove_all(target.parent_path(), ec);
+}
+
+OPENSCP_TEST(test_safe_local_parent_symlinks, t) {
+#ifndef _WIN32
+    const fs::path base = makeTempFilePath("parent-symlink").parent_path();
+    const fs::path selected = base / "selected";
+    const fs::path outside = base / "outside";
+    std::error_code ec;
+    fs::create_directories(selected, ec);
+    fs::create_directories(outside, ec);
+    fs::create_directory_symlink(outside, selected / "linked", ec);
+    t.check(!ec, "parent symlink fixture should be created");
+
+    std::string error;
+    openscp::UniqueFile escaped(openscp::localfiles::openRegularFileForWrite(
+        (selected / "linked" / "escape.part").string(),
+        openscp::localfiles::WriteMode::Truncate, error));
+    t.check(!escaped && !fs::exists(outside / "escape.part"),
+            "opening a partial file must reject a parent symlink");
+    escaped.reset();
+
+    error.clear();
+    t.check(!openscp::localfiles::ensureLocalDirectories(
+                (selected / "linked" / "created").string(), error) &&
+                !fs::exists(outside / "created"),
+            "creating local folders must reject a parent symlink");
+    error.clear();
+    t.check(openscp::localfiles::ensureLocalDirectories(
+                (selected / "created" / "child").string(), error) &&
+                fs::is_directory(selected / "created" / "child"),
+            "creating local folders should still work without symlinks");
+
+    {
+        std::ofstream outsideFile(outside / "keep.txt");
+        outsideFile << "preserve";
+    }
+    error.clear();
+    t.check(!openscp::localfiles::removeLocalPath(
+                (selected / "linked" / "keep.txt").string(), false, error) &&
+                fs::exists(outside / "keep.txt"),
+            "removing a local file must reject a parent symlink");
+    error.clear();
+    t.check(!openscp::localfiles::setLocalModificationTime(
+                (selected / "linked" / "keep.txt").string(), 1, error),
+            "changing a local timestamp must reject a parent symlink");
+
+    fs::create_directories(selected / "real", ec);
+    {
+        std::ofstream partial(selected / "real" / "item.part");
+        partial << "original";
+        std::ofstream outsidePartial(outside / "item.part");
+        outsidePartial << "outside";
+    }
+    fs::rename(selected / "real", selected / "moved", ec);
+    fs::create_directory_symlink(outside, selected / "real", ec);
+    t.check(!ec, "swapped parent symlink fixture should be created");
+    error.clear();
+    t.check(!openscp::localfiles::atomicReplace(
+                (selected / "real" / "item.part").string(),
+                (selected / "real" / "item").string(), error) &&
+                !fs::exists(outside / "item") &&
+                fs::exists(outside / "item.part"),
+            "publishing a partial file must reject a swapped parent symlink");
+    fs::remove_all(base, ec);
+#endif
 }
 
 OPENSCP_TEST(test_protocol_helpers, t) {
@@ -957,36 +1067,67 @@ OPENSCP_TEST(test_mock_rejects_invalid_mutations, t) {
             "a wrong entry type should expose an invalid request");
 }
 
-OPENSCP_TEST(test_new_connection_like, t) {
-    openscp::MockSftpClient c;
+OPENSCP_TEST(test_demo_server_clients_share_state, t) {
     auto opt = validOptions();
     std::string err;
-    auto conn = c.newConnectionLike(opt, err);
-    t.check(static_cast<bool>(conn),
-            "newConnectionLike should return a client");
-    t.check(conn && conn->isConnected(),
-            "newConnectionLike client should be connected");
-
-    t.check(conn && conn->mkdir("/shared", err),
-            "worker connection should mutate its simulated server");
+    auto first = openscp::MockSftpClient::onDemoServer();
+    auto second = openscp::MockSftpClient::onDemoServer();
+    t.check(first->connect(opt, err) && second->connect(opt, err),
+            "demo server clients should connect");
+    t.check(first->mkdir("/demo-shared", err),
+            "a demo server client should mutate the demo filesystem");
     std::vector<openscp::FileInfo> entries;
-    t.check(c.connect(opt, err) && c.list("/", entries, err) &&
+    t.check(second->list("/", entries, err) &&
                 std::any_of(entries.cbegin(), entries.cend(),
                             [](const openscp::FileInfo &entry) {
-                                return entry.is_dir && entry.name == "shared";
+                                return entry.is_dir &&
+                                       entry.name == "demo-shared";
                             }),
-            "connections created alike should share simulated server state");
+            "separately created demo connections should see the same files");
+    t.check(second->removeDir("/demo-shared", err),
+            "the demo filesystem should be restored for later tests");
 }
 
-OPENSCP_TEST(test_new_connection_like_validation, t) {
-    openscp::MockSftpClient c;
+OPENSCP_TEST(test_connected_client_validation, t) {
     openscp::SessionOptions bad;
     bad.host = "";
     bad.username = "alice";
     std::string err;
-    auto conn = c.newConnectionLike(bad, err);
-    t.check(!conn, "newConnectionLike should fail with invalid options");
-    t.check(!err.empty(), "newConnectionLike should report validation errors");
+    auto conn = openscp::CreateConnectedClient(bad, err);
+    t.check(!conn, "CreateConnectedClient should fail with invalid options");
+    t.check(!err.empty(),
+            "CreateConnectedClient should report validation errors");
+}
+
+OPENSCP_TEST(test_ssh_cipher_preference_follows_aes_instructions, t) {
+    const auto sortedCiphers = [](const std::string &preference) {
+        std::vector<std::string> ciphers;
+        std::size_t start = 0;
+        while (start <= preference.size()) {
+            const std::size_t comma = preference.find(',', start);
+            const std::size_t end =
+                comma == std::string::npos ? preference.size() : comma;
+            ciphers.push_back(preference.substr(start, end - start));
+            start = end + 1;
+        }
+        std::sort(ciphers.begin(), ciphers.end());
+        return ciphers;
+    };
+    const std::string withAes =
+        openscp::libssh2detail::sshCipherPreference(true);
+    const std::string withoutAes =
+        openscp::libssh2detail::sshCipherPreference(false);
+    t.check(withAes.rfind("aes256-gcm@openssh.com,", 0) == 0,
+            "CPUs with AES-GCM instructions should prefer AES-GCM");
+    t.check(withoutAes.rfind("chacha20-poly1305@openssh.com,", 0) == 0,
+            "CPUs without AES-GCM instructions should prefer chacha20");
+    t.check(sortedCiphers(withAes) == sortedCiphers(withoutAes) &&
+                sortedCiphers(withAes).size() == 5,
+            "both cipher orders should offer the same ciphers");
+#if defined(__APPLE__) && defined(__aarch64__)
+    t.check(openscp::libssh2detail::cpuHasAesGcmInstructions(),
+            "Apple silicon should report AES-GCM instructions");
+#endif
 }
 
 OPENSCP_TEST(test_client_factory, t) {
@@ -1090,6 +1231,52 @@ OPENSCP_TEST(test_libssh2_backends_expose_structured_errors, t) {
             "error");
 }
 
+OPENSCP_TEST(test_libssh2_disconnect_is_thread_safe_and_idempotent, t) {
+    openscp::Libssh2SftpClient client;
+    std::vector<std::thread> threads;
+    threads.reserve(8);
+    for (int i = 0; i < 8; ++i) {
+        threads.emplace_back([&client] {
+            client.interrupt();
+            client.disconnect();
+        });
+    }
+    for (auto &th : threads) {
+        th.join();
+    }
+    t.check(!client.isConnected(), "client should be disconnected");
+}
+
+OPENSCP_TEST(test_libssh2_concurrent_disconnect_and_operations_safe, t) {
+    openscp::Libssh2SftpClient client;
+    std::atomic<bool> stop{false};
+
+    std::thread worker([&client, &stop] {
+        std::vector<openscp::FileInfo> entries;
+        std::string err;
+        openscp::FileInfo info;
+        while (!stop.load()) {
+            (void)client.list("/test", entries, err);
+            (void)client.stat("/test/file", info, err);
+            (void)client.get("/test/file", "/tmp/nonexistent", err, {}, {},
+                             false);
+        }
+    });
+
+    std::thread disconnector([&client, &stop] {
+        for (int i = 0; i < 100; ++i) {
+            client.interrupt();
+            client.disconnect();
+            std::this_thread::yield();
+        }
+        stop.store(true);
+    });
+
+    disconnector.join();
+    worker.join();
+    t.check(!client.isConnected(), "client should remain disconnected");
+}
+
 OPENSCP_TEST(test_shared_libssh2_error_classification, t) {
     const openscp::RemoteError authentication =
         openscp::libssh2detail::classifyFailure(
@@ -1112,6 +1299,27 @@ OPENSCP_TEST(test_shared_libssh2_error_classification, t) {
             "shared libssh2 errors should classify local file failures");
 }
 
+OPENSCP_TEST(test_libssh2_recent_remote_modification, t) {
+    using openscp::libssh2detail::kRecentRemoteModificationSeconds;
+    using openscp::libssh2detail::remoteFileMayBeChanging;
+    constexpr std::int64_t now = 1'800'000'000;
+    const auto windowStart =
+        static_cast<std::uint64_t>(now - kRecentRemoteModificationSeconds);
+
+    t.check(!remoteFileMayBeChanging(windowStart - 1, now),
+            "a file modified before the window should use the streamed check");
+    t.check(remoteFileMayBeChanging(windowStart, now),
+            "a file modified at the window start should use the full check");
+    t.check(remoteFileMayBeChanging(static_cast<std::uint64_t>(now) + 60, now),
+            "a server clock ahead of the local clock should use the full "
+            "check");
+    t.check(remoteFileMayBeChanging(std::nullopt, now),
+            "an unknown modification time should use the full check");
+    t.check(
+        remoteFileMayBeChanging(std::numeric_limits<std::uint64_t>::max(), now),
+        "an out-of-range modification time should use the full check");
+}
+
 #ifdef _WIN32
 OPENSCP_TEST(test_libssh2_rejects_jump_on_windows, t) {
     openscp::Libssh2SftpClient c;
@@ -1124,6 +1332,21 @@ OPENSCP_TEST(test_libssh2_rejects_jump_on_windows, t) {
     t.check(!ok, "connect should fail when jump is configured on Windows");
     t.checkContains(err, "not supported on this platform",
                     "connect should explain jump is unsupported on Windows");
+}
+#else
+OPENSCP_TEST(test_libssh2_jump_host_spawn_posix, t) {
+    openscp::Libssh2SftpClient c;
+    openscp::SessionOptions opt = validOptions();
+    opt.jump_host = std::string("127.0.0.1");
+    opt.jump_port = 65534;
+    opt.host = "127.0.0.1";
+    opt.port = 22;
+
+    std::string err;
+    const bool ok = c.connect(opt, err);
+    t.check(!ok, "connect should fail when jump bastion cannot connect");
+    t.check(!err.empty(), "connect error should not be empty");
+    t.check(!c.isConnected(), "client should remain disconnected");
 }
 #endif
 
@@ -1193,6 +1416,169 @@ OPENSCP_TEST(test_remove_known_hosts_entry_non_default_port, t) {
     std::error_code ec;
     fs::remove(khPath, ec);
     fs::remove_all(khPath.parent_path(), ec);
+}
+
+OPENSCP_TEST(test_local_file_64bit_seek_and_size_large_offsets, t) {
+    const fs::path tempPath = makeTempFilePath("openscp-large-seek-test");
+    std::FILE *f = std::fopen(tempPath.string().c_str(), "w+b");
+    t.check(f != nullptr, "temporary file should open for write");
+    if (!f)
+        return;
+
+    // Offset greater than 2 GiB (3 GiB = 3 * 1024 * 1024 * 1024)
+    constexpr std::uint64_t largeOffset = 3ULL * 1024 * 1024 * 1024;
+    std::string seekErr;
+    const bool seekOk =
+        openscp::libssh2detail::seekLocalFile(f, largeOffset, &seekErr);
+    t.check(seekOk, "seekLocalFile should succeed beyond 2 GiB boundary");
+
+    // Write 1 byte at 3 GiB to establish file size without allocating 3GB of
+    // disk blocks (sparse file)
+    const char byte = 'X';
+    const size_t written = std::fwrite(&byte, 1, 1, f);
+    t.check(written == 1, "fwrite at large offset should succeed");
+    std::fflush(f);
+    std::fclose(f);
+
+    std::uint64_t measuredSize = 0;
+    std::string sizeErr;
+    const bool sizeOk = openscp::libssh2detail::getLocalFileSize(
+        tempPath.string(), measuredSize, &sizeErr);
+    t.check(sizeOk, "getLocalFileSize should succeed for files > 2 GiB");
+    t.check(
+        measuredSize == largeOffset + 1,
+        "measured size should accurately reflect 64-bit file size (> 2 GiB)");
+
+    std::error_code ec;
+    fs::remove(tempPath, ec);
+    fs::remove_all(tempPath.parent_path(), ec);
+}
+
+OPENSCP_TEST(test_unique_file_self_reset_and_move_prevent_double_close, t) {
+    static int closeCallCount = 0;
+    closeCallCount = 0;
+
+    auto testCloser = [](std::FILE *fp) -> int {
+        ++closeCallCount;
+        return std::fclose(fp);
+    };
+
+    const fs::path tempPath = makeTempFilePath("openscp-uniquefile-test");
+    std::FILE *rawFile = std::fopen(tempPath.string().c_str(), "w+b");
+    t.check(rawFile != nullptr, "file should open for UniqueFile test");
+    if (!rawFile)
+        return;
+
+    {
+        openscp::UniqueFile uf(rawFile, testCloser);
+        t.check(uf.get() == rawFile, "UniqueFile should manage raw file");
+
+        // Self-reset: must be a no-op and NOT close or double-free the handle
+        uf.reset(uf.get());
+        t.check(closeCallCount == 0, "self-reset must not invoke closer");
+        t.check(uf.get() == rawFile, "self-reset must preserve file handle");
+
+        // Another self-reset with closer
+        uf.reset(uf.get(), testCloser);
+        t.check(closeCallCount == 0,
+                "self-reset with closer must not invoke closer");
+        t.check(uf.get() == rawFile, "file handle must remain valid");
+    }
+
+    // Now uf went out of scope: closer should have been called exactly once
+    t.check(closeCallCount == 1,
+            "closer should be called exactly once upon UniqueFile destruction");
+
+    std::error_code ec;
+    fs::remove(tempPath, ec);
+    fs::remove_all(tempPath.parent_path(), ec);
+}
+
+OPENSCP_TEST(test_unique_sftp_handle_lifecycle_and_leak_prevention, t) {
+    static int closeCallCount = 0;
+    static LIBSSH2_SFTP_HANDLE *lastClosedHandle = nullptr;
+    closeCallCount = 0;
+    lastClosedHandle = nullptr;
+
+    auto testCloser = [](LIBSSH2_SFTP_HANDLE *h) -> int {
+        ++closeCallCount;
+        lastClosedHandle = h;
+        return 0;
+    };
+
+    int dummy1Storage = 0;
+    int dummy2Storage = 0;
+    auto *dummy1 = reinterpret_cast<LIBSSH2_SFTP_HANDLE *>(&dummy1Storage);
+    auto *dummy2 = reinterpret_cast<LIBSSH2_SFTP_HANDLE *>(&dummy2Storage);
+
+    // 1. RAII destruction closes the handle
+    {
+        openscp::libssh2detail::UniqueSftpHandle h(dummy1, testCloser);
+        t.check(static_cast<bool>(h),
+                "handle should evaluate to true when set");
+        t.check(h.get() == dummy1, "handle get() should return raw handle");
+    }
+    t.check(closeCallCount == 1, "destruction must close remote handle");
+    t.check(lastClosedHandle == dummy1, "closed handle should match dummy1");
+
+    // 2. Manual close() closes immediately and destructor is a no-op
+    {
+        openscp::libssh2detail::UniqueSftpHandle h(dummy1, testCloser);
+        t.check(h.close() == 0, "close() should return closer result");
+        t.check(closeCallCount == 2, "explicit close() should invoke closer");
+        t.check(!h, "closed handle should evaluate to false");
+        t.check(h.get() == nullptr, "closed handle get() should be null");
+    }
+    t.check(closeCallCount == 2,
+            "destructor after close() must not double close");
+
+    // 3. Self-reset must be a no-op and NOT close
+    {
+        openscp::libssh2detail::UniqueSftpHandle h(dummy1, testCloser);
+        h.reset(dummy1);
+        t.check(closeCallCount == 2, "self-reset must not invoke closer");
+        t.check(h.get() == dummy1,
+                "handle should remain unchanged after self-reset");
+    }
+    t.check(closeCallCount == 3,
+            "destruction after self-reset should close once");
+
+    // 4. Move construction transfers ownership without closing
+    {
+        openscp::libssh2detail::UniqueSftpHandle h1(dummy1, testCloser);
+        openscp::libssh2detail::UniqueSftpHandle h2(std::move(h1));
+        // NOLINTNEXTLINE(bugprone-use-after-move): source is null by contract.
+        t.check(h1.get() == nullptr, "moved-from handle must be null");
+        t.check(h2.get() == dummy1, "moved-to handle must hold dummy1");
+        t.check(closeCallCount == 3, "move constructor must not invoke closer");
+    }
+    t.check(closeCallCount == 4,
+            "destruction of moved-to handle should close once");
+
+    // 5. Move assignment closes destination's existing handle and transfers
+    {
+        openscp::libssh2detail::UniqueSftpHandle h1(dummy1, testCloser);
+        openscp::libssh2detail::UniqueSftpHandle h2(dummy2, testCloser);
+        h2 = std::move(h1);
+        t.check(closeCallCount == 5,
+                "move assignment must close old destination handle");
+        t.check(lastClosedHandle == dummy2,
+                "closed old destination handle should be dummy2");
+        t.check(h2.get() == dummy1, "moved-to handle should now hold dummy1");
+        // NOLINTNEXTLINE(bugprone-use-after-move): source is null by contract.
+        t.check(h1.get() == nullptr, "moved-from handle should now be null");
+    }
+    t.check(closeCallCount == 6, "destruction of h2 should close dummy1");
+
+    // 6. release() abandons ownership without invoking closer
+    {
+        openscp::libssh2detail::UniqueSftpHandle h(dummy1, testCloser);
+        LIBSSH2_SFTP_HANDLE *rel = h.release();
+        t.check(rel == dummy1, "release() must return raw handle");
+        t.check(h.get() == nullptr, "handle after release must be null");
+    }
+    t.check(closeCallCount == 6,
+            "destructor after release() must not invoke closer");
 }
 
 } // namespace

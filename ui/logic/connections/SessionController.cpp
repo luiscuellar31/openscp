@@ -7,20 +7,15 @@ namespace openscpui {
 SessionController::SessionController(QObject *parent) : QObject(parent) {
 }
 
-SessionController::~SessionController() {
-    disconnectClient();
+SessionController::~SessionController() = default;
+
+void SessionController::beginSession(
+    openscp::ProtocolCapabilities capabilities) {
+    capabilities_ = capabilities;
 }
 
-void SessionController::installClient(
-    std::unique_ptr<openscp::RemoteClient> client) {
-    disconnectClient();
-    client_ = std::move(client);
-}
-
-void SessionController::disconnectClient() {
-    if (client_)
-        client_->disconnect();
-    client_.reset();
+void SessionController::endSession() {
+    capabilities_.reset();
 }
 
 void SessionController::setOptions(openscp::SessionOptions options) {

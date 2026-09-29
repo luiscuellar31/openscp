@@ -187,7 +187,7 @@ void MainWindow::requestRemoteListing(const QString &path, bool refresh,
         for (const QModelIndex &index : selected) {
             const QString name = rightRemoteModel_->nameAt(index);
             if (!name.isEmpty())
-                remoteRefreshSelectionNames_.push_back(name);
+                remoteRefreshSelectionNames_.insert(name);
         }
         if (rightView_->verticalScrollBar()) {
             remoteRefreshScrollValue_ =
@@ -281,7 +281,7 @@ void MainWindow::downloadRightToLeft() {
                               tr("The right panel is not remote."));
         return;
     }
-    if (!sessionController_->client()) {
+    if (!sessionController_->hasSession()) {
         UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
@@ -398,7 +398,7 @@ void MainWindow::copyRightToLeft() {
     }
 
     // Remote -> Local: enqueue downloads
-    if (!sessionController_->client() || !rightRemoteModel_) {
+    if (!sessionController_->hasSession() || !rightRemoteModel_) {
         UiAlerts::warning(this, tr("Remote"), tr("No active remote session."));
         return;
     }
@@ -468,7 +468,7 @@ void MainWindow::moveRightToLeft() {
 }
 
 void MainWindow::uploadViaDialog() {
-    if (!rightIsRemote_ || !sessionController_->client()) {
+    if (!rightIsRemote_ || !sessionController_->hasSession()) {
         UiAlerts::information(
             this, tr("Upload"),
             tr("The right panel is not remote or there is no active session."));
@@ -550,11 +550,8 @@ void MainWindow::newDirRight() {
                                                  name);
     } else {
         QDir base(rightPath_->path());
-        if (!base.mkpath(base.filePath(name))) {
-            UiAlerts::critical(this, tr("Local"),
-                               tr("Could not create folder."));
+        if (!createLocalDirectory(base, name))
             return;
-        }
         setRightRoot(base.absolutePath());
     }
 }
@@ -571,22 +568,11 @@ void MainWindow::newFileRight() {
                                             name);
     } else {
         QDir base(rightPath_->path());
-        const QString path = base.filePath(name);
-        if (QFileInfo::exists(path)) {
-            if (UiAlerts::question(
-                    this, tr("File exists"),
-                    tr("«%1» already exists.\nOverwrite?").arg(name),
-                    QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
-                return;
-        }
-        QFile newFile(path);
-        if (!newFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            UiAlerts::critical(this, tr("Local"), tr("Could not create file."));
+        if (!createLocalFile(base, name))
             return;
-        }
-        newFile.close();
         setRightRoot(base.absolutePath());
-        statusBar()->showMessage(tr("File created: ") + path, 4000);
+        statusBar()->showMessage(tr("File created: ") + base.filePath(name),
+                                 4000);
     }
 }
 
@@ -620,27 +606,10 @@ void MainWindow::renameRightSelected() {
         remoteActionController_->rename(rightRemoteModel_->rootPath(), oldName,
                                         newName);
     } else {
-        const QModelIndex selectedIndex = rows.first();
         const QFileInfo selectedFileInfo =
-            rightLocalModel_->fileInfo(selectedIndex);
-        bool inputAccepted = false;
-        const QString newName = QInputDialog::getText(
-            this, tr("Rename"), tr("New name:"), QLineEdit::Normal,
-            selectedFileInfo.fileName(), &inputAccepted);
-        if (!inputAccepted || newName.isEmpty() ||
-            newName == selectedFileInfo.fileName())
+            rightLocalModel_->fileInfo(rows.first());
+        if (!renameLocalSelectedEntry(selectedFileInfo))
             return;
-        const QString newPath =
-            QDir(selectedFileInfo.absolutePath()).filePath(newName);
-        bool renamed =
-            QFile::rename(selectedFileInfo.absoluteFilePath(), newPath);
-        if (!renamed)
-            renamed = QDir(selectedFileInfo.absolutePath())
-                          .rename(selectedFileInfo.absoluteFilePath(), newPath);
-        if (!renamed) {
-            UiAlerts::critical(this, tr("Local"), tr("Could not rename."));
-            return;
-        }
         setRightRoot(rightPath_->path());
     }
 }
@@ -820,9 +789,7 @@ void MainWindow::changeRemotePermissions() {
 
 void MainWindow::applyRemoteMutationActions() {
     const openscp::ProtocolCapabilities caps =
-        sessionController_->client()
-            ? sessionController_->client()->capabilities()
-            : openscp::ProtocolCapabilities{};
+        sessionController_->capabilities();
     const auto availability = openscpui::RemoteActionController::availability(
         caps, rightRemoteMutationsSupported_);
     if (actUploadRight_)
@@ -846,14 +813,14 @@ void MainWindow::applyRemoteMutationActions() {
 // checked by the real operation; probing with a temporary directory mutates
 // the server and can be both slow and misleading.
 void MainWindow::updateRemoteMutationCapability() {
-    if (!rightIsRemote_ || !sessionController_->client() ||
+    if (!rightIsRemote_ || !sessionController_->hasSession() ||
         !rightRemoteModel_) {
         rightRemoteMutationsSupported_ = false;
         applyRemoteMutationActions();
         return;
     }
     const openscp::ProtocolCapabilities caps =
-        sessionController_->client()->capabilities();
+        sessionController_->capabilities();
     rightRemoteMutationsSupported_ =
         openscpui::RemoteActionController::availability(caps).canMutate;
     applyRemoteMutationActions();

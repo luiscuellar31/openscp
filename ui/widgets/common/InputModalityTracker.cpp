@@ -30,8 +30,12 @@ bool InputModalityTracker::eventFilter(QObject *watched, QEvent *event) {
             (keyEvent->key() == Qt::Key_Backtab &&
              (keyEvent->modifiers() == Qt::NoModifier ||
               keyEvent->modifiers() == Qt::ShiftModifier));
+        const bool focusCueKey =
+            focusTraversalKey || (keyEvent->key() == Qt::Key_Escape &&
+                                  keyEvent->modifiers() == Qt::ShiftModifier);
         explicitInputObserved_ = true;
-        setModality(InputModality::Keyboard);
+        if (focusCueKey)
+            setModality(InputModality::Keyboard);
         emit inputObserved(focusTraversalKey ? UserInputKind::FocusTraversal
                                              : UserInputKind::Keyboard,
                            watched);

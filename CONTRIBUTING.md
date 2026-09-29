@@ -20,9 +20,23 @@ git fetch upstream
 git switch -c feature/short-name upstream/dev
 ```
 
-Use descriptive commits, preferably following Conventional Commits. Before
-updating an existing pull request, rebase on `upstream/dev` and use
+Before updating an existing pull request, rebase on `upstream/dev` and use
 `git push --force-with-lease` if the rebased branch was already published.
+
+## Commits
+
+Write commit messages in English using Conventional Commits. Use an optional
+scope when it clarifies the affected area, and keep each commit focused on one
+logical change:
+
+```text
+type(scope): imperative summary
+type: imperative summary
+```
+
+Common types include `feat`, `fix`, `refactor`, `docs`, `test`, `ci`, and `chore`.
+For a breaking change, add `!` after the type or scope and explain the impact
+and migration in the commit body with a `BREAKING CHANGE:` footer.
 
 ## Build and test
 
@@ -37,10 +51,17 @@ Run the local CI baseline before opening a pull request:
 
 ```bash
 ./scripts/check_ci_local.sh --clean --full --werror
-./scripts/checks/cpp-quality.sh --format
+./scripts/checks/cpp-quality.sh --format --cppcheck
 ./scripts/checks/shell-quality.sh
 git diff --check
 ```
+
+`check_ci_local.sh` configures, builds, and runs the tests in the ignored
+`build-ci-local/` directory by default. Its `--build-dir` option changes that
+path.
+
+For documentation-only changes, check the links and run `git diff --check`;
+compiling the application is not needed to validate Markdown.
 
 Static analysis is available after configuring a build with a compilation
 database:
@@ -175,6 +196,14 @@ For an existing SFTP server, set `OPENSCP_IT_SFTP_HOST`,
 password or private key before running CTest. See each integration test source
 for the full list of variables it accepts.
 
+For code and release pull requests, both commands in the
+[pull request template](.github/pull_request_template.md) must pass. The local
+CI script covers `openscp_sync_dialog_tests`, but SFTP may skip without a
+configured server. A passing local script with SFTP skipped is acceptable only
+if `openscp_sftp_integration_tests` runs and passes in GitHub Actions. An SFTP
+skip in both places does not satisfy the requirement. Add any other commands
+actually run to the PR's Verification block.
+
 > [!WARNING]
 > `scripts/ci/setup_protocol_services.sh` is intended only for a disposable
 > Ubuntu VM or dedicated ephemeral runner. It uses `sudo`, creates or reuses a
@@ -185,13 +214,23 @@ for the full list of variables it accepts.
 The controlled Linux service flow is documented in
 [docs/BUILDING.md](docs/BUILDING.md#protocol-integration-services).
 
-## Pull-request checklist
+## Pull requests and AI assistance
+
+AI tools are welcome. Review the full diff and make sure you understand all
+changes you submit, including AI-assisted work. Use the
+[pull request template](.github/pull_request_template.md) to record why the
+change is needed, what changed, and which checks you actually ran.
 
 - Target `dev`, explain the motivation, and link related issues.
 - Keep behavior changes separate from broad mechanical formatting.
 - Include tests or explain why the change cannot be tested automatically.
-- Update user-facing documentation only where the source of truth changed.
-- Confirm the relevant local checks and platform builds in the description.
+- Review [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for each change. Update it
+  in the same change if responsibilities, important flows, persistence, or
+  navigation paths change; otherwise, no architecture edit is needed.
+- Update user-facing documentation when behavior changes, and translation
+  catalogs when user-visible strings change.
+- List the relevant local checks and platform builds actually run, and explain
+  any relevant checks not run.
 
 ## Licensing
 

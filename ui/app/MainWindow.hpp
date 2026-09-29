@@ -20,6 +20,7 @@
 
 #include <atomic>
 #include <functional>
+#include <future>
 #include <memory>
 #include <optional>
 #include <string>
@@ -37,8 +38,9 @@ struct PathActionResult;
 class RemoteActionController;
 class SessionController;
 } // namespace openscpui
-struct SiteEntry;     // fwd
-class QModelIndex;    // fwd for slot signatures
+struct SiteEntry;  // fwd
+class QModelIndex; // fwd for slot signatures
+class QFileInfo;
 class QToolBar;       // fwd
 class QMenu;          // fwd
 class QEvent;         // fwd for eventFilter
@@ -148,6 +150,9 @@ class MainWindow : public QMainWindow {
     void setLeftRoot(const QString &path);
     void setRightRoot(const QString &path);       // local
     void setRightRemoteRoot(const QString &path); // remote
+    bool createLocalDirectory(const QDir &base, const QString &name);
+    bool createLocalFile(const QDir &base, const QString &name);
+    bool renameLocalSelectedEntry(const QFileInfo &selectedFileInfo);
     void requestRemoteListing(const QString &path, bool refresh,
                               bool initialLoad = false);
 
@@ -261,6 +266,7 @@ class MainWindow : public QMainWindow {
                                      const QString &currentPath, bool remote);
     void refreshFavoritesActions();
     void applyTransferPreferences();
+    void applyLocalFileDurabilityPreference();
     static QString
     defaultDownloadDirFromSettings(const class QSettings &settings);
 
@@ -279,8 +285,8 @@ class MainWindow : public QMainWindow {
         std::optional<PendingSiteSaveRequest> saveRequest,
         const std::shared_ptr<std::atomic<bool>> &cancelFlag);
     void finalizeConnection(bool connectionOk, const QString &errorText,
-                            openscp::RemoteClient *connectedClient,
-                            openscp::RemoteClient *remoteControlClient,
+                            openscp::RemoteClient *controlClient,
+                            const openscp::ProtocolCapabilities &capabilities,
                             const openscp::SessionOptions &uiOpt,
                             std::optional<PendingSiteSaveRequest> saveRequest,
                             bool canceledByUser);
@@ -356,6 +362,7 @@ class MainWindow : public QMainWindow {
     // Reentrancy guards and dialog pointers
     bool transferCleanupInProgress_ = false;
     qint64 transferCleanupStartedAtMs_ = 0;
+    std::future<void> transferCleanupFuture_;
     QPointer<class QMessageBox> tofuBox_;
     QPointer<class QWidget> siteManager_;
     bool openSiteManagerOnDisconnect_ = true;
@@ -378,9 +385,10 @@ class MainWindow : public QMainWindow {
     QSet<LocalTreeDiscovery *> activeLocalUploadDiscoveries_;
     std::shared_ptr<std::atomic<bool>> remoteScanCancelRequested_;
     std::atomic<bool> remoteScanInProgress_{false};
+    QTimer *uploadRefreshTimer_ = nullptr;
     quint64 activeRemoteListJob_ = 0;
     QString requestedRemotePath_;
-    QStringList remoteRefreshSelectionNames_;
+    QSet<QString> remoteRefreshSelectionNames_;
     int remoteRefreshScrollValue_ = 0;
     bool activeRemoteListIsRefresh_ = false;
     bool activeRemoteListIsInitial_ = false;

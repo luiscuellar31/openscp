@@ -1,9 +1,9 @@
 // Shared internal helpers for libcurl-based backends (FTP/WebDAV).
 #include "CurlBackendCommon.hpp"
 
-#include "../common/SafeLocalFile.hpp"
 #include "common/UniqueFile.hpp"
 #include "openscp/RemotePath.hpp"
+#include "openscp/SafeLocalFile.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -958,6 +958,7 @@ transferFailureError(const CurlTransferResult &result, std::string message,
 }
 
 bool downloadToLocalFile(CURL *curl, const std::string &destination,
+                         LocalFileDurability durability,
                          std::function<void(std::size_t, std::size_t)> progress,
                          std::function<bool()> shouldCancel,
                          const std::atomic<bool> *interrupted,
@@ -1010,7 +1011,7 @@ bool downloadToLocalFile(CURL *curl, const std::string &destination,
             return false;
         }
     }
-    if (!localfiles::flushAndSync(localFile, err)) {
+    if (!localfiles::flushAndSync(localFile, err, durability)) {
         const int flushCode = errno;
         localFileOwner.reset();
         failure = makeRemoteError(RemoteErrorKind::LocalIo, err, flushCode);
@@ -1028,7 +1029,7 @@ bool downloadToLocalFile(CURL *curl, const std::string &destination,
             static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
         return false;
     }
-    if (!localfiles::atomicReplace(partial, destination, err)) {
+    if (!localfiles::atomicReplace(partial, destination, err, durability)) {
         failure = makeRemoteError(RemoteErrorKind::LocalIo, err, errno);
         return false;
     }

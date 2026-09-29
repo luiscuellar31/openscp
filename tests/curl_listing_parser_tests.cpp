@@ -59,6 +59,40 @@ OPENSCP_TEST(testFtpListListingLimitsAndMalformedInput, test) {
                    "not a listing", entries) == ListingParseStatus::Malformed,
                "fully malformed LIST output should be rejected");
 }
+
+OPENSCP_TEST(testFtpMlstReplyReadsTheEntryLine, test) {
+    openscp::FileInfo info;
+    test.check(openscp::curlparser::parseFtpMlstReply(
+                   "250-Listing /dir/a file.txt\r\n"
+                   " modify=20240102030405;size=42;type=file;UNIX.mode=0640; "
+                   "/dir/a file.txt\r\n"
+                   "250 End\r\n",
+                   info) == ListingParseStatus::Success,
+               "MLST should parse a file entry");
+    test.check(!info.is_dir && info.has_size && info.size == 42 &&
+                   info.mtime == 1704164645u && info.mode == 0100640u &&
+                   info.name == "/dir/a file.txt",
+               "MLST should keep the file facts and echoed pathname");
+
+    for (const char *type : {"dir", "cdir", "pdir"}) {
+        info = {};
+        test.check(openscp::curlparser::parseFtpMlstReply(
+                       std::string("250-Listing /dir\r\n type=") + type +
+                           ";size=4096; /dir\r\n250 End\r\n",
+                       info) == ListingParseStatus::Success &&
+                       info.is_dir && !info.has_size,
+                   std::string("MLST should report type=") + type +
+                       " as a directory");
+    }
+
+    test.check(openscp::curlparser::parseFtpMlstReply(
+                   "250-Listing /x\r\n size=1; /x\r\n250 End\r\n", info) ==
+                   ListingParseStatus::Malformed,
+               "MLST without a type fact should be rejected");
+    test.check(openscp::curlparser::parseFtpMlstReply("250 End\r\n", info) ==
+                   ListingParseStatus::Malformed,
+               "MLST without an entry line should be rejected");
+}
 #endif
 
 #if OPENSCP_HAS_CURL_WEBDAV

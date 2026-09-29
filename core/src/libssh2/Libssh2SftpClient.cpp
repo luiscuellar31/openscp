@@ -3,11 +3,14 @@
 #include "libssh2/Libssh2SftpClient.hpp"
 
 #include "../common/RemoteListingLimits.hpp"
-#include "../common/SafeLocalFile.hpp"
 #include "common/UniqueFile.hpp"
+#include "detail/Libssh2CipherPreference.hpp"
 #include "detail/Libssh2ErrorClassifier.hpp"
 #include "detail/Libssh2InputSafety.hpp"
+#include "detail/Libssh2TransferIntegrity.hpp"
+#include "detail/UniqueSftpHandle.hpp"
 #include "openscp/RuntimeLogging.hpp"
+#include "openscp/SafeLocalFile.hpp"
 
 #include <libssh2.h>
 #include <libssh2_sftp.h>
@@ -22,6 +25,7 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -31,18 +35,26 @@
 #include <fcntl.h>
 #include <pwd.h>
 #include <signal.h>
+#include <spawn.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-// OpenSSL RNG for hashed known_hosts hostnames fallback.
-#include <openssl/rand.h>
+#if defined(__APPLE__)
+#include <crt_externs.h>
+#define openscp_environ (*_NSGetEnviron())
+#else
+extern char **environ;
+#define openscp_environ (environ)
+#endif
 #else
 #include <windows.h>
 #endif
+#include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
+#include <openssl/rand.h>
 #include <openssl/sha.h>
 
 #include <array>
@@ -65,6 +77,33 @@
 namespace openscp {
 
 namespace {
+
+template <typename Container> class CleanseOnScopeExit {
+    public:
+    explicit CleanseOnScopeExit(Container &container,
+                                bool active = true) noexcept
+        : container_(container), active_(active) {}
+
+    ~CleanseOnScopeExit() { triggerNow(); }
+
+    void dismiss() noexcept { active_ = false; }
+
+    void triggerNow() noexcept {
+        if (active_ && container_.capacity() > 0) {
+            OPENSSL_cleanse(container_.data(),
+                            container_.capacity() *
+                                sizeof(typename Container::value_type));
+            active_ = false;
+        }
+    }
+
+    CleanseOnScopeExit(const CleanseOnScopeExit &) = delete;
+    CleanseOnScopeExit &operator=(const CleanseOnScopeExit &) = delete;
+
+    private:
+    Container &container_;
+    bool active_;
+};
 
 enum class CoreLogLevel : int {
     Off = 0,
@@ -308,160 +347,158 @@ void apply_transfer_socket_timeouts(int sock) {
 }
 
 bool seek_local_file(FILE *f, std::uint64_t off, std::string *why) {
-#ifdef _WIN32
-    if (_fseeki64(f, (__int64)off, SEEK_SET) != 0) {
-        if (why)
-            *why = "local seek failed";
-        return false;
-    }
-#else
-    if (fseeko(f, static_cast<off_t>(off), SEEK_SET) != 0) {
-        if (why)
-            *why = posix_err("fseeko(local)");
-        return false;
-    }
-#endif
-    return true;
+    return openscp::libssh2detail::seekLocalFile(f, off, why);
 }
 
 bool get_local_file_size(const std::string &path, std::uint64_t &out,
                          std::string *why) {
-#ifndef _WIN32
-    struct ::stat st {};
-    if (::stat(path.c_str(), &st) != 0) {
-        if (why)
-            *why = posix_err("stat(local)");
-        return false;
-    }
-    out = static_cast<std::uint64_t>(st.st_size);
-    return true;
-#else
-    HANDLE h = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL,
-                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (h == INVALID_HANDLE_VALUE) {
-        if (why)
-            *why = win_err("CreateFile(local-size)", GetLastError());
-        return false;
-    }
-    LARGE_INTEGER sz{};
-    if (!GetFileSizeEx(h, &sz)) {
-        if (why)
-            *why = win_err("GetFileSizeEx(local)", GetLastError());
-        CloseHandle(h);
-        return false;
-    }
-    CloseHandle(h);
-    out = static_cast<std::uint64_t>(sz.QuadPart);
-    return true;
-#endif
+    return openscp::libssh2detail::getLocalFileSize(path, out, why);
 }
 
-bool flush_local_file(FILE *f, std::string *why) {
-    if (std::fflush(f) != 0) {
+void describe_rename_failure(const char *attempt, int rc, unsigned long sftpErr,
+                             std::string *why) {
+    if (!why)
+        return;
+    std::ostringstream oss;
+    oss << "sftp_rename_ex failed (attempt=" << attempt << ", rc=" << rc
+        << ", sftp_err=" << sftpErr << ")";
+    if (sftpErr == LIBSSH2_FX_OP_UNSUPPORTED)
+        oss << " [server does not support requested rename mode]";
+    else if (sftpErr == LIBSSH2_FX_PERMISSION_DENIED)
+        oss << " [permission denied]";
+    else if (sftpErr == LIBSSH2_FX_FAILURE)
+        oss << " [generic failure]";
+    *why = oss.str();
+}
+
+int rename_sftp_v3(LIBSSH2_SFTP *sftp, const std::string &from,
+                   const std::string &to) {
+    return libssh2_sftp_rename_ex(
+        sftp, from.c_str(), static_cast<unsigned>(from.size()), to.c_str(),
+        static_cast<unsigned>(to.size()), 0);
+}
+
+bool is_regular_remote_file(LIBSSH2_SFTP *sftp, const std::string &path) {
+    LIBSSH2_SFTP_ATTRIBUTES attrs{};
+    return libssh2_sftp_stat_ex(sftp, path.c_str(),
+                                static_cast<unsigned>(path.size()),
+                                LIBSSH2_SFTP_LSTAT, &attrs) == 0 &&
+           (attrs.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS) != 0 &&
+           (attrs.permissions & LIBSSH2_SFTP_S_IFMT) == LIBSSH2_SFTP_S_IFREG;
+}
+
+// Older libssh2 releases cannot send posix-rename@openssh.com. Move the old
+// regular file aside before the v3 rename, and restore it if that rename fails.
+// This fallback is not atomic, but never deletes the old file first.
+bool rename_remote_with_backup(LIBSSH2_SFTP *sftp, const std::string &from,
+                               const std::string &to, std::string *why) {
+    std::array<unsigned char, 12> nonce{};
+    if (RAND_bytes(nonce.data(), static_cast<int>(nonce.size())) != 1) {
         if (why)
-            *why = "fflush(local) failed";
+            *why = "Could not generate remote replacement backup name";
         return false;
     }
-#ifdef _WIN32
-    const int fd = _fileno(f);
-    if (fd >= 0 && _commit(fd) != 0) {
+    constexpr char hex[] = "0123456789abcdef";
+    std::string backup = to + ".openscp-backup-";
+    for (unsigned char byte : nonce) {
+        backup.push_back(hex[byte >> 4]);
+        backup.push_back(hex[byte & 0x0f]);
+    }
+    if (backup.size() > std::numeric_limits<unsigned>::max()) {
         if (why)
-            *why = "commit(local) failed";
+            *why = "Remote replacement backup path is too long";
         return false;
     }
-#else
-    const int fd = fileno(f);
-    if (fd >= 0 && ::fsync(fd) != 0) {
+
+    LIBSSH2_SFTP_ATTRIBUTES attrs{};
+    const int backupStat = libssh2_sftp_stat_ex(
+        sftp, backup.c_str(), static_cast<unsigned>(backup.size()),
+        LIBSSH2_SFTP_LSTAT, &attrs);
+    if (backupStat == 0 ||
+        libssh2_sftp_last_error(sftp) != LIBSSH2_FX_NO_SUCH_FILE) {
         if (why)
-            *why = posix_err("fsync(local)");
+            *why = "Could not reserve a remote replacement backup path";
         return false;
     }
-#endif
+
+    const int backupRc = rename_sftp_v3(sftp, to, backup);
+    if (backupRc != 0) {
+        describe_rename_failure("backup", backupRc,
+                                libssh2_sftp_last_error(sftp), why);
+        return false;
+    }
+
+    const int replaceRc = rename_sftp_v3(sftp, from, to);
+    if (replaceRc != 0) {
+        const unsigned long replaceErr = libssh2_sftp_last_error(sftp);
+        const int restoreRc = rename_sftp_v3(sftp, backup, to);
+        describe_rename_failure("replace", replaceRc, replaceErr, why);
+        if (restoreRc != 0) {
+            if (why)
+                *why += " [old destination remains at " + backup + "]";
+        } else if (why) {
+            *why += " [old destination restored]";
+        }
+        return false;
+    }
+
+    if (libssh2_sftp_unlink_ex(sftp, backup.c_str(),
+                               static_cast<unsigned>(backup.size())) != 0) {
+        core_logf(CoreLogLevel::Warn,
+                  "SFTP replacement succeeded but old backup remains at %s",
+                  backup.c_str());
+    }
     return true;
 }
 
-bool replace_local_file_atomic(const std::string &from, const std::string &to,
-                               std::string *why) {
-#ifndef _WIN32
-    if (::rename(from.c_str(), to.c_str()) != 0) {
-        if (why)
-            *why = posix_err("rename(.part->dest)");
-        return false;
-    }
-    if (!fsync_parent_dir(to, why))
-        return false;
-    return true;
-#else
-    if (!MoveFileExA(from.c_str(), to.c_str(),
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) {
-        if (why)
-            *why = win_err("MoveFileEx(.part->dest)", GetLastError());
-        return false;
-    }
-    return true;
-#endif
-}
-
-bool rename_remote_with_fallback(LIBSSH2_SFTP *sftp, const std::string &from,
-                                 const std::string &to, bool overwrite,
-                                 std::string *why) {
+// libssh2 negotiates SFTP v3, where RENAME carries no flags, so retrying with
+// other flag sets only repeats the same request. A v3 RENAME refuses an
+// existing destination on OpenSSH. Prefer the atomic posix-rename@openssh.com
+// extension when available; otherwise use a backup and v3 rename.
+bool rename_remote(LIBSSH2_SFTP *sftp, const std::string &from,
+                   const std::string &to, bool overwrite, std::string *why) {
     if (!sftp) {
         if (why)
             *why = "SFTP handle is null";
         return false;
     }
 
-    struct Attempt {
-        long flags;
-        const char *name;
-    };
-    const std::vector<Attempt> attempts =
-        overwrite
-            ? std::vector<Attempt>{{LIBSSH2_SFTP_RENAME_ATOMIC |
-                                        LIBSSH2_SFTP_RENAME_NATIVE |
-                                        LIBSSH2_SFTP_RENAME_OVERWRITE,
-                                    "atomic+native+overwrite"},
-                                   {LIBSSH2_SFTP_RENAME_ATOMIC |
-                                        LIBSSH2_SFTP_RENAME_OVERWRITE,
-                                    "atomic+overwrite"},
-                                   {LIBSSH2_SFTP_RENAME_NATIVE |
-                                        LIBSSH2_SFTP_RENAME_OVERWRITE,
-                                    "native+overwrite"},
-                                   {LIBSSH2_SFTP_RENAME_OVERWRITE, "overwrite"},
-                                   {0, "plain"}}
-            : std::vector<Attempt>{
-                  {LIBSSH2_SFTP_RENAME_ATOMIC | LIBSSH2_SFTP_RENAME_NATIVE,
-                   "atomic+native"},
-                  {LIBSSH2_SFTP_RENAME_ATOMIC, "atomic"},
-                  {LIBSSH2_SFTP_RENAME_NATIVE, "native"},
-                  {0, "plain"}};
-
-    int lastRc = 0;
-    unsigned long lastSftpErr = 0;
-    const char *lastAttempt = "none";
-    for (const auto &a : attempts) {
-        const int rc = libssh2_sftp_rename_ex(
-            sftp, from.c_str(), static_cast<unsigned>(from.size()), to.c_str(),
-            static_cast<unsigned>(to.size()), a.flags);
+#ifdef libssh2_sftp_posix_rename
+    if (overwrite) {
+        const int rc = libssh2_sftp_posix_rename_ex(
+            sftp, from.c_str(), from.size(), to.c_str(), to.size());
         if (rc == 0)
             return true;
-        lastRc = rc;
-        lastSftpErr = libssh2_sftp_last_error(sftp);
-        lastAttempt = a.name;
+        const unsigned long sftpErr = libssh2_sftp_last_error(sftp);
+        // libssh2 returns LIBSSH2_FX_OP_UNSUPPORTED itself when the server did
+        // not advertise the extension.
+        const bool unsupported =
+            rc == static_cast<int>(LIBSSH2_FX_OP_UNSUPPORTED) ||
+            (rc == LIBSSH2_ERROR_SFTP_PROTOCOL &&
+             sftpErr == LIBSSH2_FX_OP_UNSUPPORTED);
+        if (!unsupported) {
+            describe_rename_failure("posix-rename", rc, sftpErr, why);
+            return false;
+        }
     }
+#endif
 
-    if (why) {
-        std::ostringstream oss;
-        oss << "sftp_rename_ex failed after fallback (attempt=" << lastAttempt
-            << ", rc=" << lastRc << ", sftp_err=" << lastSftpErr << ")";
-        if (lastSftpErr == LIBSSH2_FX_OP_UNSUPPORTED)
-            oss << " [server does not support requested rename mode]";
-        else if (lastSftpErr == LIBSSH2_FX_PERMISSION_DENIED)
-            oss << " [permission denied]";
-        else if (lastSftpErr == LIBSSH2_FX_FAILURE)
-            oss << " [generic failure]";
-        *why = oss.str();
+    const long flags = LIBSSH2_SFTP_RENAME_ATOMIC | LIBSSH2_SFTP_RENAME_NATIVE |
+                       (overwrite ? LIBSSH2_SFTP_RENAME_OVERWRITE : 0L);
+    const int rc = libssh2_sftp_rename_ex(
+        sftp, from.c_str(), static_cast<unsigned>(from.size()), to.c_str(),
+        static_cast<unsigned>(to.size()), flags);
+    if (rc == 0)
+        return true;
+    const unsigned long sftpErr = libssh2_sftp_last_error(sftp);
+    if (overwrite && from != to &&
+        (sftpErr == LIBSSH2_FX_FAILURE ||
+         sftpErr == LIBSSH2_FX_FILE_ALREADY_EXISTS) &&
+        is_regular_remote_file(sftp, from) &&
+        is_regular_remote_file(sftp, to)) {
+        return rename_remote_with_backup(sftp, from, to, why);
     }
+    describe_rename_failure("rename", rc, sftpErr, why);
     return false;
 }
 
@@ -482,6 +519,19 @@ bool fail_if_transfer_canceled(const std::function<bool()> *shouldCancel,
         return false;
     err = "Canceled by user";
     return true;
+}
+
+// libssh2 splits SFTP reads and writes into 30000-byte requests and pipelines
+// as many as the buffer allows (reads ask for up to four buffers ahead), so on
+// high-latency links throughput follows the buffer size. At 2 MiB reads reach
+// libssh2's read-ahead cap of LIBSSH2_CHANNEL_WINDOW_DEFAULT * 4. Smaller
+// transfers get a buffer no larger than themselves so they do not queue reads
+// past their end.
+std::size_t sftp_transfer_buffer_size(std::uint64_t bytesToTransfer) {
+    constexpr std::uint64_t kMinBufferSize = 64 * 1024;
+    constexpr std::uint64_t kMaxBufferSize = 2 * 1024 * 1024;
+    return static_cast<std::size_t>(
+        std::clamp(bytesToTransfer, kMinBufferSize, kMaxBufferSize));
 }
 
 bool hash_local_range(const std::string &path, std::uint64_t offset,
@@ -662,7 +712,8 @@ bool hash_remote_full(
     std::size_t done = 0;
     if (progress && *progress)
         (*progress)(done, total);
-    std::array<unsigned char, 64 * 1024> buf{};
+    std::vector<unsigned char> buf(sftp_transfer_buffer_size(
+        hasTotal ? total : std::numeric_limits<std::uint64_t>::max()));
     while (true) {
         if (transfer_cancel_requested(shouldCancel)) {
             if (why)
@@ -736,6 +787,64 @@ bool verify_final_transfer_integrity(
     if (localDigest != remoteDigest) {
         err = std::string("Final integrity check failed (") + transferKind +
               "): local/remote checksum mismatch";
+        return false;
+    }
+    return true;
+}
+
+using DigestContext = std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)>;
+
+// Returns an initialized SHA-256 context, or null when streaming is disabled
+// or OpenSSL cannot provide one.
+DigestContext start_stream_digest(bool enabled) {
+    DigestContext ctx(enabled ? EVP_MD_CTX_new() : nullptr, &EVP_MD_CTX_free);
+    if (ctx && EVP_DigestInit_ex(ctx.get(), EVP_sha256(), nullptr) != 1)
+        ctx.reset();
+    return ctx;
+}
+
+void update_stream_digest(DigestContext &ctx, const char *data,
+                          std::size_t size) {
+    if (ctx && EVP_DigestUpdate(ctx.get(), data, size) != 1)
+        ctx.reset();
+}
+
+bool remote_file_changed(const LIBSSH2_SFTP_ATTRIBUTES &before,
+                         const LIBSSH2_SFTP_ATTRIBUTES &after) {
+    const auto reportedByBoth = [&](unsigned long flag) {
+        return (before.flags & flag) != 0 && (after.flags & flag) != 0;
+    };
+    return (reportedByBoth(LIBSSH2_SFTP_ATTR_SIZE) &&
+            before.filesize != after.filesize) ||
+           (reportedByBoth(LIBSSH2_SFTP_ATTR_ACMODTIME) &&
+            before.mtime != after.mtime);
+}
+
+// Optional policy for a transfer that streamed the whole file: compares the
+// streamed bytes with the local file instead of reading the remote file again,
+// because SSH already protects the bytes in transit. As with the full check,
+// a digest that cannot be computed does not fail an Optional transfer.
+bool verify_streamed_transfer_integrity(
+    DigestContext &streamDigest, const std::string &localPath,
+    std::uint64_t size, const char *transferKind, std::string &err,
+    const std::function<bool()> *shouldCancel) {
+    Sha256Digest streamed{};
+    unsigned int streamedLength = 0;
+    if (!streamDigest ||
+        EVP_DigestFinal_ex(streamDigest.get(), streamed.data(),
+                           &streamedLength) != 1 ||
+        streamedLength != SHA256_DIGEST_LENGTH) {
+        return true;
+    }
+    Sha256Digest localDigest{};
+    std::string hashErr;
+    const bool localOk = hash_local_range(localPath, 0, size, localDigest,
+                                          &hashErr, shouldCancel);
+    if (fail_if_transfer_canceled(shouldCancel, err))
+        return false;
+    if (localOk && localDigest != streamed) {
+        err = std::string("Final integrity check failed (") + transferKind +
+              "): transferred data and local file checksum mismatch";
         return false;
     }
     return true;
@@ -992,12 +1101,12 @@ bool persist_text_atomic(const std::string &path, const std::string &content,
 }
 #endif
 
-// Simple Base64 encoder (standard, with '=' padding)
-std::string b64encode(const unsigned char *data, std::size_t len) {
+// Simple Base64 encoder appending directly to output string
+void b64encode_append(const unsigned char *data, std::size_t len,
+                      std::string &out) {
     static constexpr char kTable[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string out;
-    out.reserve(((len + 2) / 3) * 4);
+    out.reserve(out.size() + ((len + 2) / 3) * 4);
     std::size_t i = 0;
     while (i + 3 <= len) {
         const unsigned int v = (static_cast<unsigned int>(data[i]) << 16U) |
@@ -1023,6 +1132,12 @@ std::string b64encode(const unsigned char *data, std::size_t len) {
         out.push_back(kTable[(v >> 6) & 0x3F]);
         out.push_back('=');
     }
+}
+
+// Simple Base64 encoder (standard, with '=' padding)
+std::string b64encode(const unsigned char *data, std::size_t len) {
+    std::string out;
+    b64encode_append(data, len, out);
     return out;
 }
 
@@ -1279,10 +1394,8 @@ void kbint_password_callback(const char *name, int name_len,
         }
         auto scrubAnswers = [&answers]() {
             for (std::string &answer : answers) {
-                if (!answer.empty()) {
-                    volatile char *bytes = answer.data();
-                    for (std::size_t i = 0; i < answer.size(); ++i)
-                        bytes[i] = 0;
+                if (answer.capacity() > 0) {
+                    OPENSSL_cleanse(answer.data(), answer.capacity());
                     answer.clear();
                 }
             }
@@ -1375,7 +1488,8 @@ void kbint_password_callback(const char *name, int name_len,
 
 Libssh2SftpClient::StructuredErrorScope::StructuredErrorScope(
     Libssh2SftpClient &owner, std::string &error, bool mutation)
-    : owner_(owner), error_(error), mutation_(mutation) {
+    : owner_(owner), error_(error), mutation_(mutation),
+      ioLock_(owner.ioMutex_) {
     error_.clear();
     owner_.clearLastOperationError();
 }
@@ -1421,6 +1535,14 @@ void configure_tcp_keepalive(int s) {
     (void)::setsockopt(s, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl));
     (void)::setsockopt(s, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt));
 #endif
+}
+
+// libssh2 sends each SSH packet with its own send() and queues SFTP read
+// requests back to back, so with Nagle's algorithm every request after the
+// first would wait for the server to acknowledge the one before it.
+void disable_nagle(int s) {
+    int opt = 1;
+    (void)::setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 }
 
 bool set_socket_timeout_ms(int sock, int timeoutMs) {
@@ -1546,6 +1668,7 @@ bool connect_tcp_endpoint(const std::string &host, uint16_t port, int &sockOut,
         if (s == -1)
             continue;
         configure_tcp_keepalive(s);
+        disable_nagle(s);
         if (::connect(s, rp->ai_addr, rp->ai_addrlen) == 0) {
             sockOut = s;
             freeaddrinfo(res);
@@ -1675,9 +1798,47 @@ bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut, int &pidOut,
         return false;
     }
 
-    const pid_t pid = ::fork();
-    if (pid < 0) {
-        err = std::string("fork failed: ") + std::strerror(errno);
+    std::vector<std::string> args;
+    args.reserve(24);
+    args.emplace_back("ssh");
+    args.emplace_back("-o");
+    args.emplace_back("BatchMode=yes");
+    args.emplace_back("-o");
+    args.emplace_back("IdentitiesOnly=yes");
+    args.emplace_back("-o");
+    args.emplace_back("ExitOnForwardFailure=yes");
+    args.emplace_back("-o");
+    args.emplace_back("ConnectTimeout=20");
+    args.emplace_back("-o");
+    args.emplace_back("ServerAliveInterval=30");
+    args.emplace_back("-o");
+    args.emplace_back("ServerAliveCountMax=2");
+    if (opt.jump_username && !opt.jump_username->empty()) {
+        args.emplace_back("-l");
+        args.emplace_back(*opt.jump_username);
+    }
+    if (opt.jump_private_key_path && !opt.jump_private_key_path->empty()) {
+        args.emplace_back("-i");
+        args.emplace_back(*opt.jump_private_key_path);
+    }
+    args.emplace_back("-p");
+    args.emplace_back(std::to_string(opt.jump_port));
+    args.emplace_back("-W");
+    args.emplace_back(format_host_port_authority(opt.host, opt.port));
+    args.emplace_back(*opt.jump_host);
+
+    std::vector<char *> argv;
+    argv.reserve(args.size() + 1);
+    for (const auto &a : args) {
+        argv.push_back(const_cast<char *>(a.c_str()));
+    }
+    argv.push_back(nullptr);
+
+    posix_spawn_file_actions_t actions;
+    if (const int actionErr = posix_spawn_file_actions_init(&actions);
+        actionErr != 0) {
+        err = std::string("posix_spawn_file_actions_init failed: ") +
+              std::strerror(actionErr);
         ::close(pairfd[0]);
         ::close(pairfd[1]);
         ::close(stderrPipe[0]);
@@ -1685,65 +1846,35 @@ bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut, int &pidOut,
         return false;
     }
 
-    if (pid == 0) {
-        ::close(pairfd[0]);
-        ::close(stderrPipe[0]);
-        if (::dup2(pairfd[1], STDIN_FILENO) < 0 ||
-            ::dup2(pairfd[1], STDOUT_FILENO) < 0) {
-            _exit(127);
-        }
-        if (pairfd[1] != STDIN_FILENO && pairfd[1] != STDOUT_FILENO)
-            ::close(pairfd[1]);
-        if (::dup2(stderrPipe[1], STDERR_FILENO) < 0) {
-            _exit(127);
-        }
-        if (stderrPipe[1] != STDERR_FILENO)
-            ::close(stderrPipe[1]);
+    struct ActionsGuard {
+        posix_spawn_file_actions_t *act;
+        ~ActionsGuard() { posix_spawn_file_actions_destroy(act); }
+    } actionsGuard{&actions};
 
-        std::vector<std::string> args;
-        args.reserve(24);
-        args.emplace_back("ssh");
-        args.emplace_back("-o");
-        args.emplace_back("BatchMode=yes");
-        args.emplace_back("-o");
-        args.emplace_back("IdentitiesOnly=yes");
-        args.emplace_back("-o");
-        args.emplace_back("ExitOnForwardFailure=yes");
-        args.emplace_back("-o");
-        args.emplace_back("ConnectTimeout=20");
-        args.emplace_back("-o");
-        args.emplace_back("ServerAliveInterval=30");
-        args.emplace_back("-o");
-        args.emplace_back("ServerAliveCountMax=2");
-        if (opt.jump_username && !opt.jump_username->empty()) {
-            args.emplace_back("-l");
-            args.emplace_back(*opt.jump_username);
-        }
-        if (opt.jump_private_key_path && !opt.jump_private_key_path->empty()) {
-            args.emplace_back("-i");
-            args.emplace_back(*opt.jump_private_key_path);
-        }
-        args.emplace_back("-p");
-        args.emplace_back(std::to_string(opt.jump_port));
-        args.emplace_back("-W");
-        args.emplace_back(format_host_port_authority(opt.host, opt.port));
-        args.emplace_back(*opt.jump_host);
+    posix_spawn_file_actions_adddup2(&actions, pairfd[1], STDIN_FILENO);
+    posix_spawn_file_actions_adddup2(&actions, pairfd[1], STDOUT_FILENO);
+    posix_spawn_file_actions_adddup2(&actions, stderrPipe[1], STDERR_FILENO);
+    posix_spawn_file_actions_addclose(&actions, pairfd[0]);
+    posix_spawn_file_actions_addclose(&actions, stderrPipe[0]);
+    if (pairfd[1] > STDERR_FILENO)
+        posix_spawn_file_actions_addclose(&actions, pairfd[1]);
+    if (stderrPipe[1] > STDERR_FILENO)
+        posix_spawn_file_actions_addclose(&actions, stderrPipe[1]);
 
-        std::vector<char *> argv;
-        argv.reserve(args.size() + 1);
-        std::transform(
-            args.begin(), args.end(), std::back_inserter(argv),
-            [](const std::string &a) { return const_cast<char *>(a.c_str()); });
-        argv.push_back(nullptr);
-        ::execvp("ssh", argv.data());
-        const std::string execErr =
-            std::string("exec ssh failed: ") + std::strerror(errno);
-        write_best_effort(STDERR_FILENO, execErr.c_str(), execErr.size());
-        _exit(127);
-    }
+    pid_t pid = -1;
+    const int spawnRes = posix_spawnp(&pid, "ssh", &actions, nullptr,
+                                      argv.data(), openscp_environ);
 
     ::close(pairfd[1]);
     ::close(stderrPipe[1]);
+
+    if (spawnRes != 0) {
+        err = std::string("posix_spawnp failed: ") + std::strerror(spawnRes);
+        ::close(pairfd[0]);
+        ::close(stderrPipe[0]);
+        return false;
+    }
+
     const int fdFlags = ::fcntl(pairfd[0], F_GETFD);
     if (fdFlags >= 0)
         (void)::fcntl(pairfd[0], F_SETFD, fdFlags | FD_CLOEXEC);
@@ -1846,13 +1977,16 @@ bool establish_socks5_tunnel(int sock, const SessionOptions &opt,
         }
         std::vector<unsigned char> authReq;
         authReq.reserve(3 + user.size() + pass.size());
+        CleanseOnScopeExit authCleanse(authReq);
         authReq.push_back(0x01);
         authReq.push_back(static_cast<unsigned char>(user.size()));
         authReq.insert(authReq.end(), user.begin(), user.end());
         authReq.push_back(static_cast<unsigned char>(pass.size()));
         authReq.insert(authReq.end(), pass.begin(), pass.end());
-        if (!socket_send_all(sock, authReq.data(), authReq.size(),
-                             "SOCKS5 auth", err)) {
+        const bool sent = socket_send_all(sock, authReq.data(), authReq.size(),
+                                          "SOCKS5 auth", err);
+        authCleanse.triggerNow();
+        if (!sent) {
             return false;
         }
         unsigned char authResp[2] = {0, 0};
@@ -1943,13 +2077,27 @@ bool establish_http_connect_tunnel(int sock, const SessionOptions &opt,
     }
     const std::string authority =
         format_host_port_authority(opt.host, opt.port);
-    std::ostringstream req;
-    req << "CONNECT " << authority << " HTTP/1.1\r\n";
-    req << "Host: " << authority << "\r\n";
-    req << "Proxy-Connection: Keep-Alive\r\n";
-    req << "User-Agent: OpenSCP\r\n";
-    if ((opt.proxy_username && !opt.proxy_username->empty()) ||
-        (opt.proxy_password && !opt.proxy_password->empty())) {
+
+    const bool hasProxyAuth =
+        (opt.proxy_username && !opt.proxy_username->empty()) ||
+        (opt.proxy_password && !opt.proxy_password->empty());
+
+    std::string req;
+    req.reserve(256 + (hasProxyAuth ? 128 : 0));
+    // Automatically wipe any sensitive Authorization header from RAM upon scope
+    // exit
+    CleanseOnScopeExit reqCleanse(req, hasProxyAuth);
+
+    req += "CONNECT ";
+    req += authority;
+    req += " HTTP/1.1\r\n";
+    req += "Host: ";
+    req += authority;
+    req += "\r\n";
+    req += "Proxy-Connection: Keep-Alive\r\n";
+    req += "User-Agent: OpenSCP\r\n";
+
+    if (hasProxyAuth) {
         const std::string user =
             opt.proxy_username ? *opt.proxy_username : std::string();
         std::string creds = user + ":";
@@ -1957,17 +2105,20 @@ bool establish_http_connect_tunnel(int sock, const SessionOptions &opt,
             creds.append(opt.proxy_password->data(),
                          opt.proxy_password->size());
         }
-        req << "Proxy-Authorization: Basic "
-            << b64encode(reinterpret_cast<const unsigned char *>(creds.data()),
-                         creds.size())
-            << "\r\n";
-        std::fill(creds.begin(), creds.end(), '\0');
+        CleanseOnScopeExit credsCleanse(creds);
+
+        req += "Proxy-Authorization: Basic ";
+        b64encode_append(reinterpret_cast<const unsigned char *>(creds.data()),
+                         creds.size(), req);
+        req += "\r\n";
+
+        credsCleanse.triggerNow();
     }
-    req << "\r\n";
-    const std::string payload = req.str();
-    if (!socket_send_all(
-            sock, reinterpret_cast<const unsigned char *>(payload.data()),
-            payload.size(), "HTTP CONNECT", err)) {
+    req += "\r\n";
+
+    if (!socket_send_all(sock,
+                         reinterpret_cast<const unsigned char *>(req.data()),
+                         req.size(), "HTTP CONNECT", err)) {
         return false;
     }
 
@@ -2093,17 +2244,17 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
         session_, LIBSSH2_METHOD_KEX,
         "curve25519-sha256,ecdh-sha2-nistp256,diffie-hellman-group14-sha256");
 #endif
+    // The preferred AEAD depends on whether this CPU accelerates AES-GCM.
+    static const char *const cipherPreference =
+        libssh2detail::sshCipherPreference(
+            libssh2detail::cpuHasAesGcmInstructions());
 #ifdef LIBSSH2_METHOD_CRYPT_CS
-    (void)libssh2_session_method_pref(
-        session_, LIBSSH2_METHOD_CRYPT_CS,
-        "chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@"
-        "openssh.com,aes256-ctr,aes128-ctr");
+    (void)libssh2_session_method_pref(session_, LIBSSH2_METHOD_CRYPT_CS,
+                                      cipherPreference);
 #endif
 #ifdef LIBSSH2_METHOD_CRYPT_SC
-    (void)libssh2_session_method_pref(
-        session_, LIBSSH2_METHOD_CRYPT_SC,
-        "chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@"
-        "openssh.com,aes256-ctr,aes128-ctr");
+    (void)libssh2_session_method_pref(session_, LIBSSH2_METHOD_CRYPT_SC,
+                                      cipherPreference);
 #endif
 #ifdef LIBSSH2_METHOD_MAC_CS
     (void)libssh2_session_method_pref(session_, LIBSSH2_METHOD_MAC_CS,
@@ -2820,7 +2971,8 @@ bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
                                         std::string &err,
                                         bool initializeSftpSubsystem) {
     if (!isValidKnownHostsPolicy(opt.known_hosts_policy) ||
-        !isValidTransferIntegrityPolicy(opt.transfer_integrity_policy)) {
+        !isValidTransferIntegrityPolicy(opt.transfer_integrity_policy) ||
+        !isValidLocalFileDurability(opt.local_file_durability)) {
         err = "Invalid SSH security policy.";
         setLastOperationError(RemoteErrorKind::InvalidRequest, err);
         return false;
@@ -2846,6 +2998,7 @@ bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
 
     transferIntegrityPolicy_ =
         integrity_policy_from_env(opt.transfer_integrity_policy);
+    localFileDurability_ = opt.local_file_durability;
 
     // Defensive: ensure no leftover state from any previous partial attempt.
     disconnect();
@@ -2892,18 +3045,36 @@ bool Libssh2SftpClient::connectTransportOnly(const SessionOptions &opt,
 }
 
 void Libssh2SftpClient::disconnect() {
-    _LIBSSH2_SFTP *sftp = nullptr;
-    _LIBSSH2_SESSION *session = nullptr;
     bool wasConnected = false;
     int sock = -1;
+    {
+        std::lock_guard<std::mutex> lk(stateMutex_);
+        wasConnected = connected_;
+        connected_ = false;
+        sock = sock_;
+    }
+
+    // Force the transport down first so libssh2 teardown calls fail fast
+    // and any in-flight operation on another thread unblocks immediately.
+    if (sock != -1) {
+#ifdef _WIN32
+        (void)::shutdown(sock, SD_BOTH);
+#else
+        (void)::shutdown(sock, SHUT_RDWR);
+#endif
+    }
+
+    // Wait for any in-flight I/O operation to finish using session_ and sftp_.
+    std::lock_guard<std::recursive_mutex> ioLock(ioMutex_);
+
+    _LIBSSH2_SFTP *sftp = nullptr;
+    _LIBSSH2_SESSION *session = nullptr;
 #ifndef _WIN32
     int jumpPid = -1;
     int jumpStderrFd = -1;
 #endif
     {
         std::lock_guard<std::mutex> lk(stateMutex_);
-        wasConnected = connected_;
-        connected_ = false;
         sftp = sftp_;
         session = session_;
         sock = sock_;
@@ -2918,14 +3089,7 @@ void Libssh2SftpClient::disconnect() {
 #endif
     }
 
-    // Force the transport down first so libssh2 teardown calls fail fast
-    // instead of waiting indefinitely on a peer that no longer responds.
     if (sock != -1) {
-#ifdef _WIN32
-        (void)::shutdown(sock, SD_BOTH);
-#else
-        (void)::shutdown(sock, SHUT_RDWR);
-#endif
         ::close(sock);
     }
 #ifndef _WIN32
@@ -3010,6 +3174,9 @@ void Libssh2SftpClient::interrupt() {
     }
     if (sock == -1)
         return;
+    // libssh2 cannot abandon a blocking call, so the socket is shut down and
+    // the session cannot be used again.
+    connected_.store(false);
 #ifdef _WIN32
     (void)::shutdown(sock, SD_BOTH);
 #else
@@ -3039,7 +3206,7 @@ bool Libssh2SftpClient::list(const std::string &remote_path,
     out.reserve(64);
     RemoteListingBudget listingBudget;
 
-    char filename[512];
+    char filename[1024];
     char longentry[1024];
     LIBSSH2_SFTP_ATTRIBUTES attrs;
 
@@ -3048,9 +3215,24 @@ bool Libssh2SftpClient::list(const std::string &remote_path,
         int rc = libssh2_sftp_readdir_ex(dir, filename, sizeof(filename),
                                          longentry, sizeof(longentry), &attrs);
         if (rc > 0) {
+            if (static_cast<std::size_t>(rc) > sizeof(filename)) {
+                err = "SFTP directory entry name exceeds buffer limit.";
+                (void)libssh2_sftp_closedir(dir);
+                out.clear();
+                setLastOperationError(RemoteErrorKind::Protocol, err);
+                return false;
+            }
+            const std::size_t nameLen = static_cast<std::size_t>(rc);
+            if (std::memchr(filename, '\0', nameLen) != nullptr) {
+                err = "SFTP directory entry name contains embedded null byte.";
+                (void)libssh2_sftp_closedir(dir);
+                out.clear();
+                setLastOperationError(RemoteErrorKind::Protocol, err);
+                return false;
+            }
             // rc = name length
             FileInfo fi{};
-            fi.name = std::string(filename, static_cast<std::size_t>(rc));
+            fi.name.assign(filename, nameLen);
             fi.is_dir = (attrs.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS)
                             ? ((attrs.permissions & LIBSSH2_SFTP_S_IFMT) ==
                                LIBSSH2_SFTP_S_IFDIR)
@@ -3161,25 +3343,25 @@ bool Libssh2SftpClient::get(
     const TransferIntegrityPolicy policy = transferIntegrityPolicy_;
     const std::string localPart = local + ".part";
 
-    // Remote size (for progress and sanity checks)
-    LIBSSH2_SFTP_ATTRIBUTES st{};
-    if (libssh2_sftp_stat_ex(sftp_, remote.c_str(),
-                             static_cast<unsigned>(remote.size()),
-                             LIBSSH2_SFTP_STAT, &st) != 0) {
-        err = "Could not stat remote path";
-        return false;
-    }
-    const bool hasTotal = (st.flags & LIBSSH2_SFTP_ATTR_SIZE) != 0;
-    std::size_t total = hasTotal ? static_cast<std::size_t>(st.filesize) : 0;
-
-    // Open remote for reading
-    LIBSSH2_SFTP_HANDLE *rh = libssh2_sftp_open_ex(
+    // Open first and read the size from the handle: this saves the round trip
+    // of a separate stat, and the attributes describe the file actually read.
+    libssh2detail::UniqueSftpHandle rh(libssh2_sftp_open_ex(
         sftp_, remote.c_str(), static_cast<unsigned>(remote.size()),
-        LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE);
+        LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE));
     if (!rh) {
         err = "Could not open remote file for reading";
         return false;
     }
+    LIBSSH2_SFTP_ATTRIBUTES st{};
+    if (libssh2_sftp_fstat_ex(rh.get(), &st, 0) != 0) {
+        err = "Could not stat remote path";
+        const RemoteError structuredFailure =
+            classifyStructuredFailure(err, false);
+        setLastOperationError(structuredFailure);
+        return false;
+    }
+    const bool hasTotal = (st.flags & LIBSSH2_SFTP_ATTR_SIZE) != 0;
+    std::size_t total = hasTotal ? static_cast<std::size_t>(st.filesize) : 0;
 
     std::size_t offset = 0;
     if (resume) {
@@ -3190,7 +3372,6 @@ bool Libssh2SftpClient::get(
         }
         if (offset > 0 && hasTotal && offset > total) {
             if (policy == TransferIntegrityPolicy::Required) {
-                libssh2_sftp_close(rh);
                 err = "Invalid resume: local .part is larger than remote file";
                 return false;
             }
@@ -3210,13 +3391,11 @@ bool Libssh2SftpClient::get(
                 okLocal && hash_remote_range(sftp_, remote, start, window, rhh,
                                              &hErr, &shouldCancel);
             if (shouldCancel && shouldCancel()) {
-                libssh2_sftp_close(rh);
                 err = "Canceled by user";
                 return false;
             }
             if (!okLocal || !okRemote) {
                 if (policy == TransferIntegrityPolicy::Required) {
-                    libssh2_sftp_close(rh);
                     err = std::string("Could not validate resume integrity "
                                       "(download): ") +
                           hErr;
@@ -3225,7 +3404,6 @@ bool Libssh2SftpClient::get(
                 offset = 0; // optional: restart
             } else if (lh != rhh) {
                 if (policy == TransferIntegrityPolicy::Required) {
-                    libssh2_sftp_close(rh);
                     err = "Integrity check failed in resume (download): local "
                           "prefix does not match remote";
                     return false;
@@ -3236,7 +3414,7 @@ bool Libssh2SftpClient::get(
     }
 
     if (offset > 0) {
-        libssh2_sftp_seek64(rh, static_cast<libssh2_uint64_t>(offset));
+        libssh2_sftp_seek64(rh.get(), static_cast<libssh2_uint64_t>(offset));
     }
 
     // Open local .part for writing
@@ -3248,7 +3426,6 @@ bool Libssh2SftpClient::get(
         openError));
     if (!localFile) {
         const int nativeError = errno;
-        libssh2_sftp_close(rh);
         err = openError.empty()
                   ? "Could not open local file (.part) for writing"
                   : openError;
@@ -3256,31 +3433,47 @@ bool Libssh2SftpClient::get(
         return false;
     }
 
-    constexpr std::size_t kChunkSize = 64 * 1024;
-    std::vector<char> buf(kChunkSize);
+    // Resume validation leaves offset <= total whenever the size is known.
+    std::vector<char> buf(sftp_transfer_buffer_size(
+        hasTotal ? total - offset : std::numeric_limits<std::uint64_t>::max()));
     std::size_t done = offset;
+
+    // Optional integrity hashes a whole-file transfer while it streams. A
+    // resumed transfer also depends on earlier data, and a recently modified
+    // file may change without new metadata, so both keep the full check.
+    const std::optional<std::uint64_t> remoteModified =
+        (st.flags & LIBSSH2_SFTP_ATTR_ACMODTIME) != 0
+            ? std::optional<std::uint64_t>(st.mtime)
+            : std::nullopt;
+    const std::int64_t nowSeconds =
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count();
+    const bool streamIntegrity =
+        policy == TransferIntegrityPolicy::Optional && offset == 0 &&
+        !libssh2detail::remoteFileMayBeChanging(remoteModified, nowSeconds);
+    DigestContext streamDigest = start_stream_digest(streamIntegrity);
 
     while (true) {
         if (shouldCancel && shouldCancel()) {
             err = "Canceled by user";
             localFile.reset();
-            // Avoid a potentially blocking per-handle close on cancellation;
-            // the worker session teardown will release pending handles.
             return false;
         }
-        ssize_t n =
-            libssh2_sftp_read(rh, buf.data(), static_cast<size_t>(buf.size()));
+        ssize_t n = libssh2_sftp_read(rh.get(), buf.data(),
+                                      static_cast<size_t>(buf.size()));
         if (n > 0) {
             if (std::fwrite(buf.data(), 1, static_cast<size_t>(n),
                             localFile.get()) != static_cast<size_t>(n)) {
                 const int nativeError = errno;
                 err = "Local write failed";
                 localFile.reset();
-                libssh2_sftp_close(rh);
                 setLastOperationError(RemoteErrorKind::LocalIo, err,
                                       nativeError);
                 return false;
             }
+            update_stream_digest(streamDigest, buf.data(),
+                                 static_cast<std::size_t>(n));
             done = done + static_cast<std::size_t>(n);
             if (progress && total)
                 progress(done, total);
@@ -3292,39 +3485,60 @@ bool Libssh2SftpClient::get(
             const RemoteError structuredFailure =
                 classifyStructuredFailure(err, false);
             localFile.reset();
-            if (!canceledNow) {
-                (void)libssh2_sftp_close(rh);
-            }
             setLastOperationError(structuredFailure);
             return false;
         }
     }
 
+    if (streamIntegrity) {
+        LIBSSH2_SFTP_ATTRIBUTES after{};
+        const bool remoteChanged =
+            (hasTotal && done != total) ||
+            (libssh2_sftp_fstat_ex(rh.get(), &after, 0) == 0 &&
+             remote_file_changed(st, after));
+        if (remoteChanged) {
+            // The .part mixes versions of the file, so a retry must start
+            // over. The change is usually brief, so the queue may retry.
+            err = "Remote file changed during download (size or modification "
+                  "time differs)";
+            localFile.reset();
+            std::string cleanupError;
+            (void)localfiles::removeLocalPath(localPart, false, cleanupError);
+            setLastOperationError(RemoteErrorKind::RemoteIo, err, 0, true);
+            return false;
+        }
+    }
+
     std::string syncErr;
-    if (!flush_local_file(localFile.get(), &syncErr)) {
+    if (!localfiles::flushAndSync(localFile.get(), syncErr,
+                                  localFileDurability_)) {
         const int nativeError = errno;
         localFile.reset();
-        libssh2_sftp_close(rh);
         err = std::string("Could not sync local file (.part): ") + syncErr;
         setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
         return false;
     }
     localFile.reset();
-    libssh2_sftp_close(rh);
+    rh.close();
 
     if (fail_if_transfer_canceled(&shouldCancel, err))
         return false;
 
-    if (!verify_final_transfer_integrity(sftp_, localPart, remote, policy,
-                                         "download", err, &shouldCancel)) {
+    const bool integrityOk =
+        streamIntegrity
+            ? verify_streamed_transfer_integrity(streamDigest, localPart, done,
+                                                 "download", err, &shouldCancel)
+            : verify_final_transfer_integrity(sftp_, localPart, remote, policy,
+                                              "download", err, &shouldCancel);
+    if (!integrityOk)
         return false;
-    }
 
     if (fail_if_transfer_canceled(&shouldCancel, err))
         return false;
 
     std::string replaceErr;
-    if (!replace_local_file_atomic(localPart, local, &replaceErr)) {
+    if (!localfiles::atomicReplace(localPart, local, replaceErr,
+                                   localFileDurability_)) {
         err = std::string("Could not finalize atomic download: ") + replaceErr;
         return false;
     }
@@ -3355,24 +3569,28 @@ bool Libssh2SftpClient::put(
     }
 
     // Local size
-    std::fseek(localFile.get(), 0, SEEK_END);
-    long fsz = std::ftell(localFile.get());
-    std::fseek(localFile.get(), 0, SEEK_SET);
-    std::size_t total = fsz > 0 ? static_cast<std::size_t>(fsz) : 0;
+    std::uint64_t localSize = 0;
+    std::string sizeErr;
+    if (!get_local_file_size(local, localSize, &sizeErr)) {
+        err = sizeErr.empty() ? "Could not determine local file size" : sizeErr;
+        setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
+        return false;
+    }
+    const std::size_t total = static_cast<std::size_t>(localSize);
 
-    // Resume against remote .part (final destination is set via atomic rename).
-    long startOffset = 0;
+    // Resume against remote .part; finalize with a remote rename.
+    std::uint64_t startOffset = 0;
     if (resume) {
         LIBSSH2_SFTP_ATTRIBUTES stR{};
         if (libssh2_sftp_stat_ex(sftp_, remotePart.c_str(),
                                  static_cast<unsigned>(remotePart.size()),
                                  LIBSSH2_SFTP_STAT, &stR) == 0) {
             if (stR.flags & LIBSSH2_SFTP_ATTR_SIZE)
-                startOffset = static_cast<long>(stR.filesize);
+                startOffset = static_cast<std::uint64_t>(stR.filesize);
         }
     }
 
-    if (startOffset > 0 && static_cast<std::size_t>(startOffset) > total) {
+    if (startOffset > 0 && startOffset > localSize) {
         if (policy == TransferIntegrityPolicy::Required) {
             localFile.reset();
             err = "Invalid resume: remote .part is larger than local file";
@@ -3381,12 +3599,11 @@ bool Libssh2SftpClient::put(
         startOffset = 0;
     }
 
-    if (startOffset > 0 && static_cast<std::size_t>(startOffset) < total &&
+    if (startOffset > 0 && startOffset < localSize &&
         policy != TransferIntegrityPolicy::Off) {
-        const std::uint64_t window = std::min<std::uint64_t>(
-            static_cast<std::uint64_t>(startOffset), 64 * 1024);
-        const std::uint64_t start =
-            static_cast<std::uint64_t>(startOffset) - window;
+        const std::uint64_t window =
+            std::min<std::uint64_t>(startOffset, 64 * 1024);
+        const std::uint64_t start = startOffset - window;
         Sha256Digest lsum{}, rsum{};
         std::string herr;
         const bool lok =
@@ -3421,33 +3638,39 @@ bool Libssh2SftpClient::put(
 
     unsigned long flags = LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT |
                           ((startOffset > 0) ? 0 : LIBSSH2_FXF_TRUNC);
-    LIBSSH2_SFTP_HANDLE *wh = libssh2_sftp_open_ex(
+    libssh2detail::UniqueSftpHandle wh(libssh2_sftp_open_ex(
         sftp_, remotePart.c_str(), static_cast<unsigned>(remotePart.size()),
-        flags, 0644, LIBSSH2_SFTP_OPENFILE);
+        flags, 0644, LIBSSH2_SFTP_OPENFILE));
     if (!wh) {
         localFile.reset();
         err = "Could not open remote (.part) for writing";
         return false;
     }
 
-    constexpr std::size_t kChunkSize = 64 * 1024;
-    std::vector<char> buf(kChunkSize);
     std::size_t done = 0;
 
     // If resuming, advance local and remote
-    if (resume && startOffset > 0 &&
-        static_cast<std::size_t>(startOffset) < total) {
-        libssh2_sftp_seek64(wh, static_cast<libssh2_uint64_t>(startOffset));
-        if (std::fseek(localFile.get(), startOffset, SEEK_SET) != 0) {
+    if (resume && startOffset > 0 && startOffset < localSize) {
+        libssh2_sftp_seek64(wh.get(),
+                            static_cast<libssh2_uint64_t>(startOffset));
+        std::string seekErr;
+        if (!seek_local_file(localFile.get(), startOffset, &seekErr)) {
             const int nativeError = errno;
-            err = "Could not seek local file";
-            libssh2_sftp_close(wh);
+            err = seekErr.empty() ? "Could not seek local file" : seekErr;
             localFile.reset();
             setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
             return false;
         }
         done = static_cast<std::size_t>(startOffset);
     }
+    std::vector<char> buf(sftp_transfer_buffer_size(total - done));
+
+    // Optional integrity hashes a whole-file transfer while it streams. A
+    // resumed transfer also depends on earlier data, so it keeps the full
+    // check.
+    const bool streamIntegrity =
+        policy == TransferIntegrityPolicy::Optional && done == 0;
+    DigestContext streamDigest = start_stream_digest(streamIntegrity);
 
     while (true) {
         size_t n = std::fread(buf.data(), 1, buf.size(), localFile.get());
@@ -3458,20 +3681,15 @@ bool Libssh2SftpClient::put(
                 if (shouldCancel && shouldCancel()) {
                     err = "Canceled by user";
                     localFile.reset();
-                    // Avoid a potentially blocking per-handle close on
-                    // cancellation; worker disconnect will release it.
                     return false;
                 }
-                ssize_t w = libssh2_sftp_write(wh, p, remain);
+                ssize_t w = libssh2_sftp_write(wh.get(), p, remain);
                 if (w < 0) {
                     const bool canceledNow = (shouldCancel && shouldCancel());
                     err = canceledNow ? "Canceled by user"
                                       : "Remote write failed";
                     const RemoteError structuredFailure =
                         classifyStructuredFailure(err, false);
-                    if (!canceledNow) {
-                        (void)libssh2_sftp_close(wh);
-                    }
                     localFile.reset();
                     setLastOperationError(structuredFailure);
                     return false;
@@ -3482,11 +3700,11 @@ bool Libssh2SftpClient::put(
                 if (progress && total)
                     progress(done, total);
             }
+            update_stream_digest(streamDigest, buf.data(), n);
         } else {
             if (std::ferror(localFile.get())) {
                 const int nativeError = errno;
                 err = "Local read failed";
-                libssh2_sftp_close(wh);
                 localFile.reset();
                 setLastOperationError(RemoteErrorKind::LocalIo, err,
                                       nativeError);
@@ -3496,22 +3714,41 @@ bool Libssh2SftpClient::put(
         }
     }
 
-    libssh2_sftp_close(wh);
+    if (streamIntegrity) {
+        LIBSSH2_SFTP_ATTRIBUTES written{};
+        const bool sizeChanged =
+            done != total ||
+            (libssh2_sftp_fstat_ex(wh.get(), &written, 0) == 0 &&
+             (written.flags & LIBSSH2_SFTP_ATTR_SIZE) != 0 &&
+             written.filesize != done);
+        if (sizeChanged) {
+            err = "Final integrity check failed (upload): local or remote "
+                  "size changed during transfer";
+            localFile.reset();
+            return false;
+        }
+    }
+
+    wh.close();
     localFile.reset();
 
     if (fail_if_transfer_canceled(&shouldCancel, err))
         return false;
 
-    if (!verify_final_transfer_integrity(sftp_, local, remotePart, policy,
-                                         "upload", err, &shouldCancel)) {
+    const bool integrityOk =
+        streamIntegrity
+            ? verify_streamed_transfer_integrity(streamDigest, local, done,
+                                                 "upload", err, &shouldCancel)
+            : verify_final_transfer_integrity(sftp_, local, remotePart, policy,
+                                              "upload", err, &shouldCancel);
+    if (!integrityOk)
         return false;
-    }
 
     if (fail_if_transfer_canceled(&shouldCancel, err))
         return false;
 
     std::string rnErr;
-    if (!rename_remote_with_fallback(sftp_, remotePart, remote, true, &rnErr)) {
+    if (!rename_remote(sftp_, remotePart, remote, true, &rnErr)) {
         err =
             std::string("Could not finalize upload (.part -> destination): ") +
             rnErr;
@@ -3739,7 +3976,7 @@ bool Libssh2SftpClient::rename(const std::string &from, const std::string &to,
     auto structuredErrorScope = beginStructuredOperation(err, true);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
-    if (!rename_remote_with_fallback(sftp_, from, to, overwrite, &err)) {
+    if (!rename_remote(sftp_, from, to, overwrite, &err)) {
         if (err.empty())
             err = "sftp_rename_ex failed";
         return false;
@@ -3815,15 +4052,5 @@ bool RemoveKnownHostEntry(const std::string &khPath, const std::string &host,
         return false;
     }
     return true;
-}
-
-std::unique_ptr<RemoteClient>
-Libssh2SftpClient::newConnectionLike(const SessionOptions &opt,
-                                     std::string &err) {
-    auto structuredErrorScope = beginStructuredOperation(err);
-    auto ptr = std::make_unique<Libssh2SftpClient>();
-    if (!ptr->connect(opt, err))
-        return nullptr;
-    return ptr;
 }
 } // namespace openscp

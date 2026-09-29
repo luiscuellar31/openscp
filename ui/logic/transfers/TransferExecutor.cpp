@@ -1,17 +1,14 @@
 #include "logic/transfers/TransferExecutor.hpp"
 
 #include "openscp/RemoteClient.hpp"
+#include "openscp/SafeLocalFile.hpp"
 
 #include <QCoreApplication>
 #include <QDateTime>
-#include <QDir>
-#include <QFile>
-#include <QFileDevice>
-#include <QFileInfo>
-#include <QTimeZone>
 
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <thread>
 
 namespace {
@@ -54,8 +51,11 @@ bool runFilesystemOperation(
     const std::shared_ptr<openscp::RemoteClient> &remoteClient,
     std::string &error) {
     if (task.type == TransferTask::Type::CreateLocalDirectory) {
-        if (!QDir().mkpath(task.dst)) {
-            error = translatedError("Could not create local directory");
+        std::string localError;
+        if (!openscp::localfiles::ensureLocalDirectories(task.dst.toStdString(),
+                                                         localError)) {
+            error = translatedError("Could not create local directory") + ": " +
+                    localError;
             return false;
         }
         return true;
@@ -78,16 +78,19 @@ bool runFilesystemOperation(
                remoteClient->mkdir(task.dst.toStdString(), error, 0755);
     }
     if (task.type == TransferTask::Type::DeleteLocalFile) {
-        if (!QFileInfo::exists(task.dst) || QFile::remove(task.dst))
+        if (openscp::localfiles::removeLocalPath(task.dst.toStdString(), false,
+                                                 error))
             return true;
-        error = translatedError("Could not delete local file");
+        error = translatedError("Could not delete local file") + ": " + error;
         return false;
     }
     if (task.type == TransferTask::Type::DeleteLocalDirectory) {
-        if (!QFileInfo::exists(task.dst) || QDir().rmdir(task.dst))
+        if (openscp::localfiles::removeLocalPath(task.dst.toStdString(), true,
+                                                 error))
             return true;
         error = translatedError(
-            "Could not delete local directory (it may not be empty)");
+                    "Could not delete local directory (it may not be empty)") +
+                ": " + error;
         return false;
     }
     if (task.type == TransferTask::Type::DeleteRemoteFile ||
@@ -122,13 +125,13 @@ void preserveDownloadModificationTime(
     if (remoteInfo.mtime == 0)
         return;
 
-    QFile localFile(task.dst);
-    const QDateTime timestamp = QDateTime::fromSecsSinceEpoch(
-        qint64(remoteInfo.mtime), QTimeZone::utc());
-    if (localFile.exists()) {
-        (void)localFile.setFileTime(timestamp,
-                                    QFileDevice::FileModificationTime);
-    }
+    if (remoteInfo.mtime >
+        static_cast<quint64>(std::numeric_limits<std::int64_t>::max()))
+        return;
+    std::string ignoredError;
+    (void)openscp::localfiles::setLocalModificationTime(
+        task.dst.toStdString(), static_cast<std::int64_t>(remoteInfo.mtime),
+        ignoredError);
 }
 
 } // namespace
@@ -200,6 +203,15 @@ bool TransferExecutor::run(
         previousTick = Clock::now();
     };
 
+    if (task.type == TransferTask::Type::Upload &&
+        task.postAction == TransferPostAction::DeleteSource) {
+        openscp::localfiles::LocalFileIdentity identity;
+        if (!openscp::localfiles::localFileIdentity(task.src.toStdString(),
+                                                    identity, error))
+            return false;
+        task.localSourceIdentity = identity;
+    }
+
     const bool succeeded =
         task.type == TransferTask::Type::Upload
             ? remoteClient->put(task.src.toStdString(), task.dst.toStdString(),
@@ -218,10 +230,32 @@ bool TransferExecutor::runPostAction(
     if (task.postAction != TransferPostAction::DeleteSource)
         return true;
     if (task.type == TransferTask::Type::Upload) {
-        if (!QFileInfo::exists(task.src) || QFile::remove(task.src))
+        if (!task.localSourceIdentity) {
+            error = QCoreApplication::translate(
+                        "TransferManager",
+                        "The completed upload cannot safely remove its local "
+                        "source after a restart. Review the source manually.")
+                        .toUtf8()
+                        .toStdString();
+            return false;
+        }
+        if (openscp::localfiles::removeLocalFileIfUnchanged(
+                task.src.toStdString(), *task.localSourceIdentity, error))
             return true;
+        if (error ==
+            "Local source changed after transfer; it was not removed.") {
+            error = QCoreApplication::translate(
+                        "TransferManager",
+                        "The local source changed after upload and was not "
+                        "removed. Review it manually.")
+                        .toUtf8()
+                        .toStdString();
+            return false;
+        }
         error = translatedError(
-            "Transfer completed, but the local source could not be removed");
+                    "Transfer completed, but the local source could not be "
+                    "removed") +
+                ": " + error;
         return false;
     }
     if (remoteClient &&

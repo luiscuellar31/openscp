@@ -3,20 +3,23 @@
 
 #include "sync/SyncTypes.hpp"
 
+#include <stop_token>
+
 class SyncComparisonEngine final {
     public:
     [[nodiscard]] static QVector<SyncComparisonItem>
     compare(const QVector<SyncSnapshotEntry> &localSnapshot,
             const QVector<SyncSnapshotEntry> &remoteSnapshot,
-            const SyncComparisonOptions &options = {});
+            const SyncComparisonOptions &options = {},
+            const SyncScanCoverage &coverage = {},
+            std::stop_token stopToken = {});
 
     [[nodiscard]] static SyncExecutionPlan
     makeExecutionPlan(const QVector<SyncComparisonItem> &items,
-                      const SyncComparisonOptions &options);
+                      const SyncComparisonOptions &options,
+                      const SyncScanCoverage &coverage = {});
 
     [[nodiscard]] static QString
     normalizeRelativePath(const QString &relativePath);
     [[nodiscard]] static QStringList parsePatterns(const QString &text);
-    [[nodiscard]] static bool globMatches(const QString &relativePath,
-                                          const QString &pattern);
 };

@@ -26,8 +26,10 @@ Disconnect pointing devices while checking these paths:
    with `Tab` and `Shift+Tab`. The first `Tab` in the main window must focus
    **Connect**. Focus outlines must appear around toolbar actions and complete
    file panels only for keyboard traversal, and disappear when focus leaves or
-   the mouse is used. Enabled actions in the main, left, and right toolbars must
-   all participate in the traversal and respond to both `Space` and `Enter`.
+   the mouse is used. `Shift+Esc` must reveal the current focus without moving
+   it, while `Esc` and other non-traversal keys must not reveal a hidden focus
+   indicator. Enabled actions in the main, left, and right toolbars must all
+   participate in the traversal and respond to both `Space` and `Enter`.
 2. In a path field, use `Left`, `Right`, `Home`, and `End` to select a segment.
    Press `Space` or `Enter`; a parent must navigate to that folder and the
    current segment must open path entry.

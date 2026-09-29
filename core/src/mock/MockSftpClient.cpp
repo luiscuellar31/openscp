@@ -77,6 +77,11 @@ MockSftpClient::MockSftpClient(std::shared_ptr<SharedState> state)
 
 MockSftpClient::~MockSftpClient() = default;
 
+std::unique_ptr<MockSftpClient> MockSftpClient::onDemoServer() {
+    static const auto state = std::make_shared<SharedState>();
+    return std::unique_ptr<MockSftpClient>(new MockSftpClient(state));
+}
+
 ProtocolCapabilities MockSftpClient::capabilities() const {
     ProtocolCapabilities result;
     result.implemented = true;
@@ -439,17 +444,6 @@ bool MockSftpClient::rename(const std::string &from, const std::string &to,
         state_->entries.emplace(std::move(path), std::move(info));
     succeed(err);
     return true;
-}
-
-std::unique_ptr<RemoteClient>
-MockSftpClient::newConnectionLike(const SessionOptions &opt, std::string &err) {
-    auto client = std::unique_ptr<MockSftpClient>(new MockSftpClient(state_));
-    if (!client->connect(opt, err)) {
-        setLastOperationError(client->lastOperationError());
-        return nullptr;
-    }
-    succeed(err);
-    return client;
 }
 
 void MockSftpClient::resetFilesystem() {

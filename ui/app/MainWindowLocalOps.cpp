@@ -15,8 +15,6 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QInputDialog>
-#include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
@@ -171,6 +169,67 @@ bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
     return true;
 }
 
+bool moveEntry(const QString &srcPath, const QString &dstPath, QString &error) {
+    if (QDir::cleanPath(QFileInfo(srcPath).absoluteFilePath()) ==
+        QDir::cleanPath(QFileInfo(dstPath).absoluteFilePath())) {
+        return true;
+    }
+
+    const bool hadDestination = entryExists(dstPath);
+    QString backupPath;
+    if (hadDestination) {
+        const QString token =
+            QUuid::createUuid().toString(QUuid::WithoutBraces);
+        backupPath = QDir(QFileInfo(dstPath).dir())
+                         .filePath(QStringLiteral(".openscp-backup-") + token);
+        QString backupError;
+        if (renameLocalEntry(dstPath, backupPath, &backupError) !=
+            LocalRenameResult::Moved) {
+            error = QString(QCoreApplication::translate(
+                                "MainWindow",
+                                "Could not preserve existing destination: %1 "
+                                "(%2)"))
+                        .arg(dstPath, backupError);
+            return false;
+        }
+    }
+
+    QString renameError;
+    const LocalRenameResult renameResult =
+        renameLocalEntry(srcPath, dstPath, &renameError);
+    if (renameResult == LocalRenameResult::Moved) {
+        if (hadDestination)
+            (void)removeEntry(backupPath);
+        return true;
+    }
+
+    if (hadDestination &&
+        renameLocalEntry(backupPath, dstPath) != LocalRenameResult::Moved) {
+        error = QString(QCoreApplication::translate(
+                            "MainWindow",
+                            "Could not move the source or restore the previous "
+                            "destination. Recovery copy: %1"))
+                    .arg(backupPath);
+        return false;
+    }
+
+    if (renameResult != LocalRenameResult::CrossDevice) {
+        error = QString(QCoreApplication::translate(
+                            "MainWindow", "Could not move entry: %1 (%2)"))
+                    .arg(srcPath, renameError);
+        return false;
+    }
+
+    if (!copyEntryRecursively(srcPath, dstPath, error))
+        return false;
+    if (removeEntry(srcPath))
+        return true;
+    error = QString(QCoreApplication::translate("MainWindow",
+                                                "Could not delete source: %1"))
+                .arg(srcPath);
+    return false;
+}
+
 QString buildLocalFsSummaryMessage(bool deleteSource, int successCount,
                                    int failureCount, int skippedCount) {
     if (deleteSource) {
@@ -293,77 +352,65 @@ void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
                              1500);
 
     QPointer<MainWindow> self(this);
-    QThreadPool::globalInstance()->start([self, pairs, deleteSource,
-                                          skippedCount]() {
-        int successCount = 0;
-        int failureCount = 0;
-        QString lastError;
+    QThreadPool::globalInstance()->start(
+        [self, pairs, deleteSource, skippedCount]() {
+            int successCount = 0;
+            int failureCount = 0;
+            QString lastError;
 
-        for (const auto &pair : pairs) {
-            QString copyError;
-            if (copyEntryRecursively(pair.sourcePath, pair.targetPath,
-                                     copyError)) {
-                if (deleteSource) {
-                    const QFileInfo srcInfo(pair.sourcePath);
-                    const bool removed =
-                        srcInfo.isDir()
-                            ? QDir(pair.sourcePath).removeRecursively()
-                            : QFile::remove(pair.sourcePath);
-                    if (removed || !QFileInfo::exists(pair.sourcePath)) {
-                        ++successCount;
-                    } else {
-                        ++failureCount;
-                        lastError = QString(QCoreApplication::translate(
-                                                "MainWindow",
-                                                "Could not delete source: %1"))
-                                        .arg(pair.sourcePath);
-                    }
-                } else {
+            for (const auto &pair : pairs) {
+                QString operationError;
+                const bool succeeded =
+                    deleteSource
+                        ? moveEntry(pair.sourcePath, pair.targetPath,
+                                    operationError)
+                        : copyEntryRecursively(pair.sourcePath, pair.targetPath,
+                                               operationError);
+                if (succeeded) {
                     ++successCount;
+                } else {
+                    ++failureCount;
+                    lastError = operationError;
                 }
-            } else {
-                ++failureCount;
-                lastError = copyError;
             }
-        }
 
-        QObject *const app = QCoreApplication::instance();
-        if (!app)
-            return;
-        QMetaObject::invokeMethod(
-            app,
-            [self, successCount, failureCount, skippedCount, lastError,
-             deleteSource]() {
-                if (!self)
-                    return;
+            QObject *const app = QCoreApplication::instance();
+            if (!app)
+                return;
+            QMetaObject::invokeMethod(
+                app,
+                [self, successCount, failureCount, skippedCount, lastError,
+                 deleteSource]() {
+                    if (!self)
+                        return;
 
-                --self->localFsJobsInFlight_;
+                    --self->localFsJobsInFlight_;
 
-                QString statusMessage = buildLocalFsSummaryMessage(
-                    deleteSource, successCount, failureCount, skippedCount);
-                if (failureCount > 0 && !lastError.isEmpty()) {
-                    statusMessage += "\n" +
-                                     QCoreApplication::translate(
-                                         "MainWindow", "Last error: ") +
-                                     lastError;
-                }
-                self->statusBar()->showMessage(statusMessage, 6000);
+                    QString statusMessage = buildLocalFsSummaryMessage(
+                        deleteSource, successCount, failureCount, skippedCount);
+                    if (failureCount > 0 && !lastError.isEmpty()) {
+                        statusMessage += "\n" +
+                                         QCoreApplication::translate(
+                                             "MainWindow", "Last error: ") +
+                                         lastError;
+                    }
+                    self->statusBar()->showMessage(statusMessage, 6000);
 
-                self->setLeftRoot(self->leftPath_->path());
-                if (!self->rightIsRemote_) {
-                    self->setRightRoot(self->rightPath_->path());
-                }
-                self->updateDeleteShortcutEnables();
-            },
-            Qt::QueuedConnection);
-    });
+                    self->setLeftRoot(self->leftPath_->path());
+                    if (!self->rightIsRemote_) {
+                        self->setRightRoot(self->rightPath_->path());
+                    }
+                    self->updateDeleteShortcutEnables();
+                },
+                Qt::QueuedConnection);
+        });
 }
 
 void MainWindow::copyLeftToRight() {
     if (rightIsRemote_) {
         // ---- REMOTE branch: upload files (PUT) to the current remote
         // directory ----
-        if (!sessionController_->client()) {
+        if (!sessionController_->hasSession()) {
             UiAlerts::warning(this, tr("Remote"),
                               tr("No active remote session."));
             return;
@@ -453,7 +500,7 @@ void MainWindow::copyLeftToRight() {
 void MainWindow::moveLeftToRight() {
     if (rightIsRemote_) {
         if (!rightRemoteModel_ || !transferMgr_ ||
-            !sessionController_->client()) {
+            !sessionController_->hasSession()) {
             UiAlerts::warning(this, tr("Remote"),
                               tr("No active remote session."));
             return;
@@ -503,7 +550,8 @@ void MainWindow::moveLeftToRight() {
     }
     if (UiAlerts::question(
             this, tr("Confirm move"),
-            tr("This will copy and then delete the source.\nContinue?")) !=
+            tr("Move the selected items to the other panel?\n"
+               "Items on another volume will be copied and then removed.")) !=
         QMessageBox::Yes)
         return;
     runLocalFsSelection(rows, leftModel_, dstDir, true);
@@ -607,6 +655,25 @@ void MainWindow::leftItemActivated(const QModelIndex &idx) {
     }
 }
 
+bool MainWindow::renameLocalSelectedEntry(const QFileInfo &selectedFileInfo) {
+    QString newName;
+    if (!promptValidEntryName(this, tr("Rename"), tr("New name:"),
+                              selectedFileInfo.fileName(), newName) ||
+        newName == selectedFileInfo.fileName())
+        return false;
+    const QString newPath =
+        QDir(selectedFileInfo.absolutePath()).filePath(newName);
+    bool renamed = QFile::rename(selectedFileInfo.absoluteFilePath(), newPath);
+    if (!renamed)
+        renamed = QDir(selectedFileInfo.absolutePath())
+                      .rename(selectedFileInfo.absoluteFilePath(), newPath);
+    if (!renamed) {
+        UiAlerts::critical(this, tr("Local"), tr("Could not rename."));
+        return false;
+    }
+    return true;
+}
+
 void MainWindow::renameLeftSelected() {
     auto selectionModel = leftView_->selectionModel();
     if (!selectionModel)
@@ -617,26 +684,35 @@ void MainWindow::renameLeftSelected() {
                               tr("Select exactly one item."));
         return;
     }
-    const QModelIndex selectedIndex = rows.first();
-    const QFileInfo selectedFileInfo = leftModel_->fileInfo(selectedIndex);
-    bool inputAccepted = false;
-    const QString newName = QInputDialog::getText(
-        this, tr("Rename"), tr("New name:"), QLineEdit::Normal,
-        selectedFileInfo.fileName(), &inputAccepted);
-    if (!inputAccepted || newName.isEmpty() ||
-        newName == selectedFileInfo.fileName())
+    const QFileInfo selectedFileInfo = leftModel_->fileInfo(rows.first());
+    if (!renameLocalSelectedEntry(selectedFileInfo))
         return;
-    const QString newPath =
-        QDir(selectedFileInfo.absolutePath()).filePath(newName);
-    bool renamed = QFile::rename(selectedFileInfo.absoluteFilePath(), newPath);
-    if (!renamed)
-        renamed = QDir(selectedFileInfo.absolutePath())
-                      .rename(selectedFileInfo.absoluteFilePath(), newPath);
-    if (!renamed) {
-        UiAlerts::critical(this, tr("Local"), tr("Could not rename."));
-        return;
-    }
     setLeftRoot(leftPath_->path());
+}
+
+bool MainWindow::createLocalDirectory(const QDir &base, const QString &name) {
+    if (base.mkpath(base.filePath(name)))
+        return true;
+    UiAlerts::critical(this, tr("Local"), tr("Could not create folder."));
+    return false;
+}
+
+bool MainWindow::createLocalFile(const QDir &base, const QString &name) {
+    const QString path = base.filePath(name);
+    if (QFileInfo::exists(path) &&
+        UiAlerts::question(this, tr("File exists"),
+                           tr("«%1» already exists.\nOverwrite?").arg(name),
+                           QMessageBox::Yes | QMessageBox::No) !=
+            QMessageBox::Yes) {
+        return false;
+    }
+    QFile newFile(path);
+    if (!newFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        UiAlerts::critical(this, tr("Local"), tr("Could not create file."));
+        return false;
+    }
+    newFile.close();
+    return true;
 }
 
 // Create a new directory in the left (local) pane.
@@ -645,10 +721,8 @@ void MainWindow::newDirLeft() {
     if (!promptValidEntryName(this, tr("New folder"), tr("Name:"), {}, name))
         return;
     QDir base(leftPath_->path());
-    if (!base.mkpath(base.filePath(name))) {
-        UiAlerts::critical(this, tr("Local"), tr("Could not create folder."));
+    if (!createLocalDirectory(base, name))
         return;
-    }
     setLeftRoot(base.absolutePath());
 }
 
@@ -658,22 +732,10 @@ void MainWindow::newFileLeft() {
     if (!promptValidEntryName(this, tr("New file"), tr("Name:"), {}, name))
         return;
     QDir base(leftPath_->path());
-    const QString path = base.filePath(name);
-    if (QFileInfo::exists(path)) {
-        if (UiAlerts::question(this, tr("File exists"),
-                               tr("«%1» already exists.\nOverwrite?").arg(name),
-                               QMessageBox::Yes | QMessageBox::No) !=
-            QMessageBox::Yes)
-            return;
-    }
-    QFile newFile(path);
-    if (!newFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        UiAlerts::critical(this, tr("Local"), tr("Could not create file."));
+    if (!createLocalFile(base, name))
         return;
-    }
-    newFile.close();
     setLeftRoot(base.absolutePath());
-    statusBar()->showMessage(tr("File created: ") + path, 4000);
+    statusBar()->showMessage(tr("File created: ") + base.filePath(name), 4000);
 }
 
 void MainWindow::showLeftContextMenu(const QPoint &pos) {

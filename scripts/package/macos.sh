@@ -14,7 +14,7 @@ set -euo pipefail
 #   APP_NAME               Default: "OpenSCP"
 #   BUNDLE_ID              Default: "io.github.luiscuellar31.openscp"
 #   PKG_IDENTIFIER         Default: "io.github.luiscuellar31.openscp.pkg"
-#   MINIMUM_SYSTEM_VERSION Default: "12.0" (CMake deployment target + Info.plist)
+#   MINIMUM_SYSTEM_VERSION Default: "13.0" (CMake deployment target + Info.plist)
 #   CMAKE_OSX_ARCHITECTURES Default: current machine architecture
 #                            (or "arm64;x86_64" for universal naming)
 #   CMAKE_PREFIX_PATH      Path to your Qt 6 install root (if not in default search path)
@@ -67,7 +67,7 @@ DIST_DIR="${REPO_DIR}/dist"
 
 APP_NAME="${APP_NAME:-OpenSCP}"
 BUNDLE_ID="${BUNDLE_ID:-io.github.luiscuellar31.openscp}"
-MINIMUM_SYSTEM_VERSION="${MINIMUM_SYSTEM_VERSION:-12.0}"
+MINIMUM_SYSTEM_VERSION="${MINIMUM_SYSTEM_VERSION:-13.0}"
 ARCHS="${CMAKE_OSX_ARCHITECTURES:-$(uname -m)}"
 PACKAGE_FORMATS="${PACKAGE_FORMATS:-dmg}"
 ENTITLEMENTS_FILE="${ENTITLEMENTS_FILE:-${REPO_DIR}/assets/macos/entitlements.plist}"

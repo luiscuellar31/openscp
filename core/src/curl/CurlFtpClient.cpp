@@ -145,6 +145,13 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
                              : curlcommon::CurlUrlScheme::Ftp;
     if (!curlcommon::configureAllowedProtocol(curl, urlScheme, "FTP", err))
         return false;
+    // One CWD with the whole directory instead of one per path level.
+    if (curl_easy_setopt(curl, CURLOPT_FTP_FILEMETHOD,
+                         static_cast<long>(CURLFTPMETHOD_SINGLECWD)) !=
+        CURLE_OK) {
+        err = "Could not configure FTP directory changes.";
+        return false;
+    }
 
     const std::string username =
         opt.username.empty() ? std::string("anonymous") : opt.username;
@@ -273,10 +280,49 @@ std::string remoteBaseName(const std::string &rawPath) {
     return path.substr(path.find_last_of('/') + 1);
 }
 
+// Keeps the server reply to one quoted command. Header callbacks would also
+// receive login and CWD replies, so the debug stream matches the reply to the
+// command that was sent.
+struct FtpCommandReplyCapture {
+    std::string_view commandPrefix;
+    bool capturing = false;
+    bool overflow = false;
+    std::string reply;
+};
+
+int captureFtpCommandReply(CURL *, curl_infotype type, char *data, size_t size,
+                           void *userdata) {
+    constexpr std::size_t kMaxReplyBytes = 64 * 1024;
+    auto *capture = static_cast<FtpCommandReplyCapture *>(userdata);
+    if (!capture || !data)
+        return 0;
+    const std::string_view chunk(data, size);
+    if (type == CURLINFO_HEADER_OUT) {
+        capture->capturing = chunk.substr(0, capture->commandPrefix.size()) ==
+                             capture->commandPrefix;
+    } else if (type == CURLINFO_HEADER_IN && capture->capturing) {
+        if (capture->reply.size() + size > kMaxReplyBytes)
+            capture->overflow = true;
+        else
+            capture->reply.append(chunk);
+    }
+    return 0;
+}
+
+long ftpReplyCode(std::string_view reply) {
+    std::uint64_t code = 0;
+    if (reply.size() < 3 || !parseUnsignedDec(reply.substr(0, 3), code))
+        return 0;
+    return static_cast<long>(code);
+}
+
+// With replyCapture set, a command prefixed by '*' may fail without failing
+// the request, and the caller classifies the captured reply itself.
 bool runFtpCommands(CURL *curl, const SessionOptions &opt,
                     const std::vector<std::string> &commands,
                     const std::atomic<bool> *interrupted, std::string &err,
-                    CURLcode &curlCodeOut, long &responseCodeOut) {
+                    CURLcode &curlCodeOut, long &responseCodeOut,
+                    FtpCommandReplyCapture *replyCapture = nullptr) {
     curlCodeOut = CURLE_OK;
     responseCodeOut = 0;
     curl_easy_reset(curl);
@@ -307,7 +353,12 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
         curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
                          curlcommon::transferProgressCallback) == CURLE_OK &&
         curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &cancelContext) ==
-            CURLE_OK;
+            CURLE_OK &&
+        (!replyCapture ||
+         (curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION,
+                           captureFtpCommandReply) == CURLE_OK &&
+          curl_easy_setopt(curl, CURLOPT_DEBUGDATA, replyCapture) == CURLE_OK &&
+          curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L) == CURLE_OK));
     if (!configured) {
         err = "Could not configure FTP command request.";
         curl_slist_free_all(quote);
@@ -335,7 +386,7 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
             err += " (server response " + std::to_string(responseCodeOut) + ")";
         return false;
     }
-    if (responseCodeOut >= 400) {
+    if (!replyCapture && responseCodeOut >= 400) {
         err = std::string(protocolLabel(opt.protocol)) +
               " command was rejected (server response " +
               std::to_string(responseCodeOut) + ").";
@@ -344,18 +395,32 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
     return true;
 }
 
+// FTP replies meaning the server does not implement a command.
+bool isUnsupportedCommandReply(long responseCode) {
+    return responseCode == 500 || responseCode == 501 || responseCode == 502 ||
+           responseCode == 504;
+}
+
+// mlsdRejected is remembered per connection: once the server refuses MLSD,
+// listings go straight to LIST instead of paying for a failed data command.
 bool fetchFtpListing(CURL *curl, const SessionOptions &opt,
                      const std::string &remotePath,
-                     const std::atomic<bool> *interrupted,
+                     const std::atomic<bool> *interrupted, bool &mlsdRejected,
                      std::vector<FileInfo> &out, std::string &err,
                      CURLcode *lastCurlCode = nullptr,
                      long *lastResponseCode = nullptr) {
     std::string mlsdPayload;
-    std::string mlsdErr;
+    std::string mlsdErr = "not supported by the server";
     curlcommon::CurlTransferResult mlsdResult;
     const bool mlsdOk =
+        !mlsdRejected &&
         runDirectoryListingCommand(curl, opt, remotePath, "MLSD", mlsdPayload,
                                    interrupted, mlsdResult, mlsdErr);
+    if (!mlsdRejected && !mlsdOk &&
+        mlsdResult.curlCode != CURLE_ABORTED_BY_CALLBACK &&
+        isUnsupportedCommandReply(mlsdResult.responseCode)) {
+        mlsdRejected = true;
+    }
     if (mlsdOk) {
         const curlparser::ListingParseStatus parseStatus =
             curlparser::parseFtpMlsdListing(mlsdPayload, out);
@@ -426,6 +491,65 @@ bool fetchFtpListing(CURL *curl, const SessionOptions &opt,
     err = std::string(protocolLabel(opt.protocol)) +
           " directory listing parse failed for MLSD and LIST output.";
     return false;
+}
+
+enum class FtpLookupResult { Found, NotFound, Failed };
+
+// Finds one remote entry. MLST answers on the control connection; servers
+// without it fall back to searching the parent directory listing. A 550 MLST
+// reply is taken as "not found", as FTP does not tell it apart from denied
+// access.
+FtpLookupResult lookupFtpEntry(CURL *curl, const SessionOptions &opt,
+                               const std::string &commandRoot,
+                               const std::string &target,
+                               const std::atomic<bool> *interrupted,
+                               bool &mlstRejected, bool &mlsdRejected,
+                               FileInfo &info, std::string &err,
+                               CURLcode &curlCode, long &responseCode) {
+    if (!mlstRejected) {
+        FtpCommandReplyCapture capture;
+        capture.commandPrefix = "MLST ";
+        if (!runFtpCommands(
+                curl, opt,
+                {"*MLST " + curlcommon::ftpCommandPath(commandRoot, target)},
+                interrupted, err, curlCode, responseCode, &capture)) {
+            return FtpLookupResult::Failed;
+        }
+        const long replyCode = ftpReplyCode(capture.reply);
+        if (replyCode == 550)
+            return FtpLookupResult::NotFound;
+        const bool parsed =
+            replyCode >= 200 && replyCode < 300 && !capture.overflow &&
+            curlparser::parseFtpMlstReply(capture.reply, info) ==
+                curlparser::ListingParseStatus::Success;
+        if (parsed) {
+            info.name = remoteBaseName(target);
+            return FtpLookupResult::Found;
+        }
+        // Other failures, such as a busy file, retry through the listing
+        // without giving up on MLST for later paths.
+        if (replyCode == 0 || (replyCode >= 200 && replyCode < 300) ||
+            isUnsupportedCommandReply(replyCode)) {
+            mlstRejected = true;
+        }
+        info = FileInfo{};
+        err.clear();
+    }
+
+    std::vector<FileInfo> parentEntries;
+    if (!fetchFtpListing(curl, opt, remoteParentPath(target), interrupted,
+                         mlsdRejected, parentEntries, err, &curlCode,
+                         &responseCode)) {
+        return FtpLookupResult::Failed;
+    }
+    const std::string name = remoteBaseName(target);
+    const auto it = std::find_if(
+        parentEntries.begin(), parentEntries.end(),
+        [&name](const FileInfo &entry) { return entry.name == name; });
+    if (it == parentEntries.end())
+        return FtpLookupResult::NotFound;
+    info = *it;
+    return FtpLookupResult::Found;
 }
 
 } // namespace
@@ -556,6 +680,8 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
         return false;
     }
 
+    mlstRejected_ = false;
+    mlsdRejected_ = false;
     state_->commitConnection(
         std::make_shared<const SessionOptions>(std::move(normalized)),
         std::move(newEasySession), std::move(commandRoot));
@@ -589,9 +715,9 @@ bool CurlFtpClient::list(const std::string &remote_path,
 
     CURLcode rc = CURLE_OK;
     long responseCode = 0;
-    const bool ok =
-        fetchFtpListing(connection.session->get(), opt, remote_path,
-                        operation.interrupted(), out, err, &rc, &responseCode);
+    const bool ok = fetchFtpListing(connection.session->get(), opt, remote_path,
+                                    operation.interrupted(), mlsdRejected_, out,
+                                    err, &rc, &responseCode);
     if (!ok) {
         if (rc == CURLE_ABORTED_BY_CALLBACK && operation.interrupted()->load())
             err = "Interrupted";
@@ -627,8 +753,9 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
     const std::string url = buildFtpUrl(opt, remote);
     RemoteError failure;
     if (!curlcommon::downloadToLocalFile(
-            connection.session->get(), local, std::move(progress),
-            std::move(shouldCancel), operation.interrupted(),
+            connection.session->get(), local, opt.local_file_durability,
+            std::move(progress), std::move(shouldCancel),
+            operation.interrupted(),
             std::string(protocolLabel(opt.protocol)) + " download",
             [&](CURL *curl, std::FILE *file,
                 curlcommon::TransferProgressContext &progressContext,
@@ -714,7 +841,13 @@ bool CurlFtpClient::put(const std::string &local, const std::string &remote,
                        curl_easy_setopt(handle, CURLOPT_URL, url.c_str()) ==
                            CURLE_OK &&
                        curl_easy_setopt(handle, CURLOPT_FTP_CREATE_MISSING_DIRS,
-                                        CURLFTP_CREATE_DIR_RETRY) == CURLE_OK;
+                                        CURLFTP_CREATE_DIR_RETRY) == CURLE_OK &&
+                       // A single CWD would create only the last missing
+                       // directory level.
+                       curl_easy_setopt(
+                           handle, CURLOPT_FTP_FILEMETHOD,
+                           static_cast<long>(CURLFTPMETHOD_MULTICWD)) ==
+                           CURLE_OK;
             },
             [](CURLcode code, long responseCode, const std::string &message) {
                 return ftpErrorFromResult(code, responseCode, message);
@@ -778,31 +911,29 @@ bool CurlFtpClient::stat(const std::string &remote_path, FileInfo &info,
         info.mode = 0040000u;
         return true;
     }
-    std::vector<FileInfo> parentEntries;
     CURLcode rc = CURLE_OK;
     long responseCode = 0;
-    if (!fetchFtpListing(connection.session->get(), opt,
-                         remoteParentPath(target), operation.interrupted(),
-                         parentEntries, err, &rc, &responseCode)) {
-        if (rc == CURLE_ABORTED_BY_CALLBACK && operation.interrupted()->load())
-            err = "Interrupted";
-        setLastOperationError(ftpErrorFromResult(rc, responseCode, err));
-        return false;
-    }
-
-    const std::string name = remoteBaseName(target);
-    const auto it = std::find_if(
-        parentEntries.begin(), parentEntries.end(),
-        [&name](const FileInfo &entry) { return entry.name == name; });
-    if (it == parentEntries.end()) {
+    switch (lookupFtpEntry(connection.session->get(), opt,
+                           connection.commandRoot, target,
+                           operation.interrupted(), mlstRejected_,
+                           mlsdRejected_, info, err, rc, responseCode)) {
+    case FtpLookupResult::Found:
+        return true;
+    case FtpLookupResult::NotFound:
+        info = FileInfo{};
         err.clear(); // "not found" remains source-compatible and
                      // non-exceptional.
         setLastOperationError(RemoteErrorKind::NotFound,
                               "Remote path was not found.", 550);
         return false;
+    case FtpLookupResult::Failed:
+        break;
     }
-    info = *it;
-    return true;
+    info = FileInfo{};
+    if (rc == CURLE_ABORTED_BY_CALLBACK && operation.interrupted()->load())
+        err = "Interrupted";
+    setLastOperationError(ftpErrorFromResult(rc, responseCode, err));
+    return false;
 }
 
 bool CurlFtpClient::chmod(const std::string &remote_path, std::uint32_t mode,
@@ -933,27 +1064,24 @@ bool CurlFtpClient::rename(const std::string &from, const std::string &to,
     const SessionOptions &opt = *connection.options;
     const std::string &commandRoot = connection.commandRoot;
     if (!overwrite) {
-        std::vector<FileInfo> entries;
-        CURLcode listCode = CURLE_OK;
-        long listResponse = 0;
-        if (!fetchFtpListing(connection.session->get(), opt,
-                             remoteParentPath(destination),
-                             operation.interrupted(), entries, err, &listCode,
-                             &listResponse)) {
+        FileInfo existing;
+        CURLcode lookupCode = CURLE_OK;
+        long lookupResponse = 0;
+        const FtpLookupResult lookup = lookupFtpEntry(
+            connection.session->get(), opt, commandRoot, destination,
+            operation.interrupted(), mlstRejected_, mlsdRejected_, existing,
+            err, lookupCode, lookupResponse);
+        if (lookup == FtpLookupResult::Failed) {
             setLastOperationError(
-                ftpErrorFromResult(listCode, listResponse, err));
+                ftpErrorFromResult(lookupCode, lookupResponse, err));
             return false;
         }
-        const std::string destinationName = remoteBaseName(destination);
-        const bool existsAlready = std::any_of(
-            entries.begin(), entries.end(), [&](const FileInfo &entry) {
-                return entry.name == destinationName;
-            });
-        if (existsAlready) {
+        if (lookup == FtpLookupResult::Found) {
             err = "FTP rename destination already exists.";
             setLastOperationError(RemoteErrorKind::Conflict, err, 550);
             return false;
         }
+        err.clear();
     }
 
     CURLcode rc = CURLE_OK;
@@ -966,16 +1094,6 @@ bool CurlFtpClient::rename(const std::string &from, const std::string &to,
     if (!ok)
         setLastOperationError(ftpErrorFromResult(rc, responseCode, err, true));
     return ok;
-}
-
-std::unique_ptr<RemoteClient>
-CurlFtpClient::newConnectionLike(const SessionOptions &opt, std::string &err) {
-    const Protocol nextProtocol =
-        isFtpFamilyProtocol(opt.protocol) ? opt.protocol : protocol_;
-    auto ptr = std::make_unique<CurlFtpClient>(nextProtocol);
-    if (!ptr->connect(opt, err))
-        return nullptr;
-    return ptr;
 }
 
 } // namespace openscp

@@ -19,7 +19,7 @@ std::unique_ptr<RemoteClient> CreateClientForProtocol(Protocol protocol) {
     // A demo build answers every protocol from the in-memory client: the point
     // is to exercise the interface with no server and no network at all.
     (void)protocol;
-    return std::make_unique<MockSftpClient>();
+    return MockSftpClient::onDemoServer();
 #else
     if (protocol == Protocol::Sftp)
         return std::make_unique<Libssh2SftpClient>();

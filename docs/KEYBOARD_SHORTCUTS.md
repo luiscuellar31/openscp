@@ -18,6 +18,7 @@ on the keyboard configuration.
 | Show navigation history | `Ctrl+Shift+H` | `Ctrl+Shift+H` | This default can be changed in Settings → Shortcuts. |
 | Enter or leave full screen | `F11` | `Ctrl+Cmd+F` | Uses the standard shortcut for the platform. |
 | Open settings | `Ctrl+,` | `Cmd+,` | Uses the standard preferences shortcut. |
+| Show the current keyboard focus | `Shift+Esc` | `Shift+Esc` | Reveals the focus indicator without moving focus. |
 | Quit OpenSCP | `Ctrl+Q` | `Cmd+Q` | Uses the standard quit shortcut. |
 
 ## When a file panel has focus

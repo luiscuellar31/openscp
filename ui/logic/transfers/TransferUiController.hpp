@@ -23,14 +23,12 @@ class TransferUiController {
                              const QVector<quint64> &removedIds,
                              bool remotePanelActive, const QString &remoteRoot);
     void openDownloadWhenCompleted(quint64 taskId, const QString &localPath);
-    void completeScheduledRefresh();
     void reset();
 
     private:
     static bool pathIsInsideRemoteRoot(const QString &candidatePath,
                                        const QString &rootPath);
 
-    bool refreshScheduled_ = false;
     QSet<quint64> completedUploadIds_;
     QSet<quint64> notifiedTaskIds_;
     QHash<quint64, QString> downloadsToOpen_;

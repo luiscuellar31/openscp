@@ -79,7 +79,8 @@ foreach(TEST_COMPONENT IN ITEMS
         transfer_ui_controller
         terminal_command_builder
         sync_coordinator
-        local_tree_discovery)
+        local_tree_discovery
+        remote_tree_walker)
     openscp_add_test(openscp_${TEST_COMPONENT}_tests
         SOURCES ${TEST_COMPONENT}_tests.cpp
         LINK_LIBRARIES openscp_ui_logic
@@ -90,6 +91,8 @@ endforeach()
 target_include_directories(openscp_transfer_manager_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src)
 target_include_directories(openscp_sync_coordinator_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src)
+target_include_directories(openscp_remote_tree_walker_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src)
 
 openscp_add_test(openscp_platform_path_actions_tests
@@ -114,6 +117,14 @@ openscp_add_test(openscp_accessibility_widget_tests
     SOURCES accessibility_widget_tests.cpp
     LINK_LIBRARIES openscp_ui_widgets
 )
+openscp_add_test(openscp_transfer_queue_dialog_tests
+    SOURCES transfer_queue_dialog_tests.cpp
+    LINK_LIBRARIES openscp_ui_widgets
+)
+openscp_add_test(openscp_sync_dialog_tests
+    SOURCES sync_dialog_tests.cpp
+    LINK_LIBRARIES openscp_ui_widgets
+)
 openscp_add_test(openscp_main_window_navigation_tests
     SOURCES main_window_navigation_tests.cpp
     LINK_LIBRARIES openscp_main_window
@@ -123,6 +134,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         openscp_site_manager_dialog_tests
         openscp_connection_dialog_tests
         openscp_accessibility_widget_tests
+        openscp_transfer_queue_dialog_tests
+        openscp_sync_dialog_tests
         openscp_main_window_navigation_tests
         PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

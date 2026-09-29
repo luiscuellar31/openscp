@@ -21,9 +21,11 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QPushButton>
 #include <QSortFilterProxyModel>
 #include <QTableView>
+#include <QThreadPool>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QVariantList>
@@ -280,6 +282,10 @@ SyncDialog::SyncDialog(QWidget *parent) : QDialog(parent) {
     rebuildComparison();
 }
 
+SyncDialog::~SyncDialog() {
+    comparisonStopSource_.request_stop();
+}
+
 void SyncDialog::buildUi() {
     setWindowTitle(tr("Compare and synchronize directories"));
     resize(1120, 680);
@@ -454,6 +460,12 @@ void SyncDialog::setSnapshots(QVector<SyncSnapshotEntry> localSnapshot,
     rebuildComparison();
 }
 
+void SyncDialog::setScanCoverage(SyncScanCoverage coverage) {
+    coverage_ = std::move(coverage);
+    if (!localSnapshot_.isEmpty() || !remoteSnapshot_.isEmpty())
+        rebuildComparison();
+}
+
 void SyncDialog::setRootPaths(const QString &localRoot,
                               const QString &remoteRoot) {
     localRoot_ = localRoot;
@@ -472,8 +484,10 @@ void SyncDialog::setChecksumBusy(bool busy) {
     checksumButton_->setEnabled(checksumAvailable_ && !busy);
     checksumButton_->setText(busy ? tr("Calculating checksums…")
                                   : tr("Compare checksums…"));
-    if (buttonBox_ && buttonBox_->button(QDialogButtonBox::Ok))
-        buttonBox_->button(QDialogButtonBox::Ok)->setEnabled(!busy);
+    if (buttonBox_ && buttonBox_->button(QDialogButtonBox::Ok)) {
+        buttonBox_->button(QDialogButtonBox::Ok)
+            ->setEnabled(!busy && !comparisonBusy_);
+    }
 }
 
 SyncComparisonOptions SyncDialog::comparisonOptions() const {
@@ -500,21 +514,81 @@ QVector<SyncComparisonItem> SyncDialog::comparisonItems() const {
 }
 
 SyncExecutionPlan SyncDialog::executionPlan() const {
-    return SyncComparisonEngine::makeExecutionPlan(comparisonItems(),
-                                                   comparisonOptions());
+    return SyncComparisonEngine::makeExecutionPlan(
+        comparisonItems(), comparisonOptions(), coverage_);
 }
 
 void SyncDialog::rebuildComparison() {
+    rebuildTimer_->stop();
     syncOptionsFromControls();
-    comparisonModel_->setItems(SyncComparisonEngine::compare(
-        localSnapshot_, remoteSnapshot_, options_));
     updateRootLabels();
+    ++comparisonGeneration_;
+    comparisonStopSource_.request_stop();
+    if (localSnapshot_.isEmpty() && remoteSnapshot_.isEmpty()) {
+        // Nothing to compare, so the empty preview is ready right away.
+        applyComparison({});
+        return;
+    }
+
+    // Comparing tens of thousands of entries takes longer than a frame, so it
+    // runs off this thread and only the newest result reaches the preview.
+    setComparisonBusy(true);
+    comparisonStopSource_ = std::stop_source{};
+    const std::stop_token stopToken = comparisonStopSource_.get_token();
+    QPointer<SyncDialog> self(this);
+    const quint64 generation = comparisonGeneration_;
+    const QVector<SyncSnapshotEntry> local = localSnapshot_;
+    const QVector<SyncSnapshotEntry> remote = remoteSnapshot_;
+    const SyncComparisonOptions options = options_;
+    const SyncScanCoverage coverage = coverage_;
+    QThreadPool::globalInstance()->start([self, generation, local, remote,
+                                          options, coverage, stopToken] {
+        if (stopToken.stop_requested())
+            return;
+        QVector<SyncComparisonItem> items = SyncComparisonEngine::compare(
+            local, remote, options, coverage, stopToken);
+        // The token can change while compare() runs on this worker.
+        // cppcheck-suppress identicalConditionAfterEarlyExit
+        if (stopToken.stop_requested())
+            return;
+        QMetaObject::invokeMethod(
+            qApp,
+            [self, generation, stopToken, items = std::move(items)]() mutable {
+                // Stop can be requested while this callback waits in the queue.
+                // cppcheck-suppress identicalConditionAfterEarlyExit
+                if (stopToken.stop_requested() || !self ||
+                    generation != self->comparisonGeneration_)
+                    return;
+                self->applyComparison(std::move(items));
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void SyncDialog::applyComparison(QVector<SyncComparisonItem> items) {
+    comparisonModel_->setItems(std::move(items));
+    setComparisonBusy(false);
     updateSummary();
 }
 
+void SyncDialog::setComparisonBusy(bool busy) {
+    comparisonBusy_ = busy;
+    if (buttonBox_ && buttonBox_->button(QDialogButtonBox::Ok)) {
+        buttonBox_->button(QDialogButtonBox::Ok)
+            ->setEnabled(!busy && !checksumBusy_);
+    }
+    if (busy && summaryLabel_)
+        summaryLabel_->setText(tr("Comparing folders…"));
+}
+
 void SyncDialog::scheduleRebuild() {
-    if (!applyingControls_ && rebuildTimer_)
-        rebuildTimer_->start();
+    if (applyingControls_ || !rebuildTimer_)
+        return;
+    // Invalidate a result already in flight as soon as its options change.
+    ++comparisonGeneration_;
+    comparisonStopSource_.request_stop();
+    setComparisonBusy(true);
+    rebuildTimer_->start();
 }
 
 void SyncDialog::updateRootLabels() {
@@ -773,12 +847,8 @@ void SyncDialog::requestChecksums() {
 }
 
 void SyncDialog::acceptRequested() {
-    if (checksumBusy_)
+    if (checksumBusy_ || comparisonBusy_ || rebuildTimer_->isActive())
         return;
-    if (rebuildTimer_->isActive()) {
-        rebuildTimer_->stop();
-        rebuildComparison();
-    }
     const SyncExecutionPlan plan = executionPlan();
     if (plan.empty()) {
         QMessageBox::information(

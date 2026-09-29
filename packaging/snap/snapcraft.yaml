@@ -1,7 +1,7 @@
 name: openscp
 title: OpenSCP
 base: core24
-version: "1.0.0"
+version: "1.1.0"
 summary: Lightweight two-panel client for remote file transfers
 description: |
   OpenSCP is a lightweight, two-panel client for remote file transfers.

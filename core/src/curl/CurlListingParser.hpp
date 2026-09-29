@@ -37,6 +37,10 @@ struct WebDavResource {
 [[nodiscard]] ListingParseStatus
 parseFtpMlsdListing(const std::string &payload, std::vector<FileInfo> &out,
                     const ListingParserLimits &limits = {});
+// Reads the entry of a successful MLST reply. The name is the pathname the
+// server echoed, so callers that need a base name set it themselves.
+[[nodiscard]] ListingParseStatus parseFtpMlstReply(const std::string &reply,
+                                                   FileInfo &out);
 [[nodiscard]] ListingParseStatus
 parseFtpListListing(const std::string &payload, std::vector<FileInfo> &out,
                     const ListingParserLimits &limits = {});

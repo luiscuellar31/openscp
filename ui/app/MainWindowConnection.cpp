@@ -40,7 +40,9 @@
 #include <QtGlobal>
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
+#include <future>
 #include <memory>
 #include <utility>
 
@@ -224,6 +226,25 @@ void refreshOpenSiteManagerWidget(QPointer<QWidget> siteManager) {
     dlg->reloadFromSettings();
 }
 
+// Opens the session's later connections: transfer workers, listing helpers,
+// and a reopened control connection. The options carry no interactive
+// callbacks, so those connections never prompt.
+auto sessionConnectionFactory(openscp::SessionOptions options) {
+    return [options = std::move(options)](std::string &error) {
+        return openscp::CreateConnectedClient(options, error);
+    };
+}
+
+openscp::LocalFileDurability configuredLocalFileDurability() {
+    openscpui::AppSettings settings;
+    return openscp::localFileDurabilityFromStorageValue(
+        settings
+            .value(openscpui::settingskeys::kTransferLocalFileDurability,
+                   static_cast<int>(
+                       openscp::LocalFileDurability::FileAndDirectory))
+            .toInt());
+}
+
 } // namespace
 
 bool MainWindow::isLikelyRemoteTransportError(const QString &rawError) const {
@@ -393,6 +414,7 @@ void MainWindow::applyDisconnectLocalUiState() {
     rightIsRemote_ = false;
     activateScpTransferModeUi(false);
     transferUiController_.reset();
+    uploadRefreshTimer_->stop();
     restoreRightHeaderState(false);
     if (QDir(rightPath_->path()).exists()) {
         setRightRoot(rightPath_->path());
@@ -442,20 +464,31 @@ void MainWindow::scheduleDisconnectWatchdog(quint64 disconnectSeq) {
 }
 
 bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
-    // Stop transfer workers off the UI thread; clearClient() may need to join
+    // Stop transfer workers off the UI thread; clearSession() may need to join
     // active workers and can block while they unwind.
     if (!transferMgr_)
         return false;
+    if (transferCleanupFuture_.valid() &&
+        transferCleanupFuture_.wait_for(std::chrono::seconds(0)) !=
+            std::future_status::ready) {
+        return true;
+    }
+
+    auto promise = std::make_shared<std::promise<void>>();
+    transferCleanupFuture_ = promise->get_future();
+
     QPointer<MainWindow> self(this);
     TransferManager *mgr = transferMgr_;
-    QThreadPool::globalInstance()->start([self, mgr, disconnectSeq]() {
+    QThreadPool::globalInstance()->start([self, mgr, disconnectSeq, promise]() {
         try {
-            mgr->clearClient();
+            mgr->clearSession();
         } catch (...) {
             // Best effort: continue UI teardown even if queue cleanup
             // throws unexpectedly.
             qWarning() << "Transfer cleanup threw during disconnect";
         }
+        promise->set_value();
+
         QObject *app = QCoreApplication::instance();
         if (!app)
             return;
@@ -594,7 +627,7 @@ void MainWindow::completeDisconnectRemote(quint64 disconnectSeq, bool forced) {
         return;
     activeSavedSiteContext_.reset();
     pendingSavedSiteContext_.reset();
-    sessionController_->disconnectClient();
+    sessionController_->endSession();
     resetConnectionSessionIndicators();
     if (actConnect_) {
         actConnect_->setEnabled(true);
@@ -907,7 +940,7 @@ bool MainWindow::validateConnectionStart(const openscp::SessionOptions &opt) {
                                  3000);
         return false;
     }
-    if (rightIsRemote_ || sessionController_->client()) {
+    if (rightIsRemote_ || sessionController_->hasSession()) {
         statusBar()->showMessage(tr("An active remote session already exists"),
                                  3000);
         return false;
@@ -1139,7 +1172,7 @@ void MainWindow::launchConnectionWorker(
         bool canceledByUser = false;
         std::string connectionError;
         std::unique_ptr<openscp::RemoteClient> connectedOwner;
-        std::unique_ptr<openscp::RemoteClient> remoteControlOwner;
+        openscp::ProtocolCapabilities capabilities;
         try {
             if (cancelFlag && cancelFlag->load()) {
                 canceledByUser = true;
@@ -1157,21 +1190,15 @@ void MainWindow::launchConnectionWorker(
                         connectionError = "Connection canceled by user";
                 }
                 if (connectionSucceeded) {
-                    if (openscp::capabilitiesForProtocol(uiOpt.protocol)
-                            .can_list) {
-                        std::string controlError;
-                        remoteControlOwner = connectedOwner->newConnectionLike(
-                            opt, controlError);
-                        if (!remoteControlOwner) {
-                            connectionSucceeded = false;
-                            connectionError =
-                                controlError.empty()
-                                    ? "Could not create the remote control "
-                                      "connection"
-                                    : controlError;
-                            connectedOwner->disconnect();
-                            connectedOwner.reset();
-                        }
+                    capabilities = connectedOwner->capabilities();
+                    // The connection becomes the session's control connection.
+                    // A protocol without listing has no control lane: the
+                    // connection only proved the login, and transfers open
+                    // their own.
+                    if (!openscp::capabilitiesForProtocol(uiOpt.protocol)
+                             .can_list) {
+                        connectedOwner->disconnect();
+                        connectedOwner.reset();
                     }
                 }
             }
@@ -1184,41 +1211,31 @@ void MainWindow::launchConnectionWorker(
         }
 
         if (!connectionSucceeded) {
-            if (remoteControlOwner)
-                remoteControlOwner->disconnect();
-            remoteControlOwner.reset();
             if (connectedOwner)
                 connectedOwner->disconnect();
             connectedOwner.reset();
         }
         const QString connectionErrorText =
             QString::fromStdString(connectionError);
-        openscp::RemoteClient *connectedClient = connectedOwner.get();
-        openscp::RemoteClient *remoteControlClient = remoteControlOwner.get();
+        openscp::RemoteClient *controlClient = connectedOwner.get();
         const bool queued = QMetaObject::invokeMethod(
             qApp,
-            [self, connectionSucceeded, connectionErrorText, connectedClient,
-             remoteControlClient, uiOpt, saveRequest, canceledByUser]() {
+            [self, connectionSucceeded, connectionErrorText, controlClient,
+             capabilities, uiOpt, saveRequest, canceledByUser]() {
                 if (!self) {
-                    if (connectedClient) {
-                        connectedClient->disconnect();
-                        delete connectedClient;
-                    }
-                    if (remoteControlClient) {
-                        remoteControlClient->disconnect();
-                        delete remoteControlClient;
+                    if (controlClient) {
+                        controlClient->disconnect();
+                        delete controlClient;
                     }
                     return;
                 }
                 self->finalizeConnection(
-                    connectionSucceeded, connectionErrorText, connectedClient,
-                    remoteControlClient, uiOpt, saveRequest, canceledByUser);
+                    connectionSucceeded, connectionErrorText, controlClient,
+                    capabilities, uiOpt, saveRequest, canceledByUser);
             },
             Qt::QueuedConnection);
-        if (queued) {
+        if (queued)
             (void)connectedOwner.release();
-            (void)remoteControlOwner.release();
-        }
     });
 }
 
@@ -1238,6 +1255,7 @@ void MainWindow::startSavedSiteConnect(const SiteEntry &site) {
 bool MainWindow::startRemoteConnection(
     openscp::SessionOptions opt,
     std::optional<PendingSiteSaveRequest> saveRequest) {
+    opt.local_file_durability = configuredLocalFileDurability();
     if (!validateConnectionStart(opt))
         return false;
 
@@ -1252,14 +1270,28 @@ bool MainWindow::startRemoteConnection(
     return true;
 }
 
+void MainWindow::applyLocalFileDurabilityPreference() {
+    if (!transferMgr_ || !sessionController_ ||
+        !sessionController_->options()) {
+        return;
+    }
+    openscp::SessionOptions options = *sessionController_->options();
+    const openscp::LocalFileDurability configured =
+        configuredLocalFileDurability();
+    if (options.local_file_durability == configured)
+        return;
+    options.local_file_durability = configured;
+    sessionController_->setOptions(options);
+    transferMgr_->setConnectionFactory(sessionConnectionFactory(options));
+}
+
 void MainWindow::finalizeConnection(
     bool connectionOk, const QString &errorText,
-    openscp::RemoteClient *connectedClient,
-    openscp::RemoteClient *remoteControlClient,
+    openscp::RemoteClient *controlClient,
+    const openscp::ProtocolCapabilities &capabilities,
     const openscp::SessionOptions &uiOpt,
     std::optional<PendingSiteSaveRequest> saveRequest, bool canceledByUser) {
-    std::unique_ptr<openscp::RemoteClient> guard(connectedClient);
-    std::unique_ptr<openscp::RemoteClient> controlGuard(remoteControlClient);
+    std::unique_ptr<openscp::RemoteClient> controlGuard(controlClient);
     if (connectProgress_) {
         connectProgress_->close();
         connectProgress_.clear();
@@ -1305,12 +1337,14 @@ void MainWindow::finalizeConnection(
     } else {
         activeSecurityWarning_.clear();
     }
-    sessionController_->installClient(std::move(guard));
+    sessionController_->beginSession(capabilities);
     if (remoteOps_) {
-        if (controlGuard)
-            remoteOps_->installSession(std::move(controlGuard));
-        else
+        if (controlGuard) {
+            remoteOps_->installSession(std::move(controlGuard),
+                                       sessionConnectionFactory(uiOpt));
+        } else {
             remoteOps_->clearSession();
+        }
     }
     if (pendingSavedSiteContext_) {
         activeSavedSiteContext_ = std::move(pendingSavedSiteContext_);
@@ -1520,8 +1554,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         transferUiController_.reset();
         if (transferMgr_) {
             transferMgr_->setSessionIdentity(remoteNavigationScope());
-            transferMgr_->setClient(sessionController_->client());
-            transferMgr_->setSessionOptions(opt);
+            transferMgr_->setConnectionFactory(sessionConnectionFactory(opt));
         }
         requestRemoteListing(rightPath_->path(), false, true);
         applyConnectedActions(true);
@@ -1542,8 +1575,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     rightRemoteMutationsSupported_ = false;
     if (transferMgr_) {
         transferMgr_->setSessionIdentity(remoteNavigationScope());
-        transferMgr_->setClient(sessionController_->client());
-        transferMgr_->setSessionOptions(opt);
+        transferMgr_->setConnectionFactory(sessionConnectionFactory(opt));
     }
     applyConnectedActions(false);
     finishConnectedUi();

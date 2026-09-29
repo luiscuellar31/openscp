@@ -26,6 +26,11 @@ class UniqueFile {
     UniqueFile &operator=(UniqueFile &&other) noexcept {
         if (this == &other)
             return *this;
+        if (file_ == other.file_) {
+            other.file_ = nullptr;
+            closer_ = other.closer_;
+            return *this;
+        }
         reset();
         file_ = std::exchange(other.file_, nullptr);
         closer_ = other.closer_;
@@ -47,9 +52,25 @@ class UniqueFile {
     }
 
     void reset(std::FILE *file = nullptr) noexcept {
-        if (file_)
-            (void)closer_(file_);
+        if (file_ == file)
+            return;
+        std::FILE *old = file_;
         file_ = file;
+        if (old)
+            (void)closer_(old);
+    }
+
+    void reset(std::FILE *file, CloseFunction closer) noexcept {
+        if (file_ == file) {
+            closer_ = closer;
+            return;
+        }
+        std::FILE *old = file_;
+        file_ = file;
+        CloseFunction oldCloser = closer_;
+        closer_ = closer;
+        if (old)
+            (void)oldCloser(old);
     }
 
     void swap(UniqueFile &other) noexcept {

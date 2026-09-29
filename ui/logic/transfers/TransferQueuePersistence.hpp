@@ -38,6 +38,9 @@ class TransferQueuePersistence final {
 
     [[nodiscard]] static LoadResult load(const QString &path,
                                          const QString &currentSessionKey);
+    // Finished tasks are not saved, except an upload whose source cleanup is
+    // still pending.
+    [[nodiscard]] static bool isPersisted(const TransferTask &task);
     [[nodiscard]] static SaveResult save(const QString &path,
                                          const QVector<TransferTask> &tasks);
 };

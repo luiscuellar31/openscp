@@ -202,8 +202,11 @@ OPENSCP_TEST(testPathFieldPreservesAppearanceAndKeyboardNavigation, test) {
                "pointer input elsewhere should hide the path focus frame");
 
     sendKey(display, Qt::Key_Left);
+    test.check(!display->property("keyboardFocusVisible").toBool(),
+               "non-traversal keys should not reveal the path focus frame");
+    sendKey(display, Qt::Key_Escape, Qt::ShiftModifier);
     test.check(display->property("keyboardFocusVisible").toBool(),
-               "keyboard input should restore the path focus frame");
+               "Shift+Esc should reveal the current path focus frame");
 
     const int initialFontHeight = display->fontMetrics().height();
     QFont largerFont = bar.font();
@@ -491,9 +494,19 @@ OPENSCP_TEST(testFilePanelShowsKeyboardOnlyFocusOutline, test) {
                "using the mouse should hide the panel focus outline");
 
     sendKey(panel, Qt::Key_Down);
+    test.check(!panel->property("keyboardFocusVisible").toBool() &&
+                   focusIndicator && !focusIndicator->isVisible(),
+               "non-traversal keys should not reveal the panel focus outline");
+
+    sendKey(panel, Qt::Key_Escape);
+    test.check(!panel->property("keyboardFocusVisible").toBool() &&
+                   focusIndicator && !focusIndicator->isVisible(),
+               "Esc should not reveal the panel focus outline");
+
+    sendKey(panel, Qt::Key_Escape, Qt::ShiftModifier);
     test.check(panel->property("keyboardFocusVisible").toBool() &&
                    focusIndicator && focusIndicator->isVisible(),
-               "keyboard input should restore the panel focus outline");
+               "Shift+Esc should reveal the panel focus outline");
 }
 
 OPENSCP_TEST(testFilePanelScrollBarsFollowScrollActivity, test) {
@@ -561,9 +574,9 @@ OPENSCP_TEST(testPointerDialogCloseDoesNotCreateKeyboardFocus, test) {
     if (!tracker)
         return;
 
-    sendKey(beforePanel, Qt::Key_F1);
+    sendKey(beforePanel, Qt::Key_Escape, Qt::ShiftModifier);
     test.check(tracker->isKeyboardActive(),
-               "keyboard input should activate keyboard focus cues");
+               "Shift+Esc should activate keyboard focus cues");
 
     const QPointF titleBarPosition(4.0, 4.0);
     const QPointF titleBarGlobalPosition =
@@ -904,6 +917,43 @@ OPENSCP_TEST(testSettingsRestoresDefaultStagingFolderOnApply, test) {
         settings.clear();
         settings.sync();
     }
+}
+
+OPENSCP_TEST(testSettingsDownloadDurabilityFailsSafeAndPersists, test) {
+    {
+        openscpui::AppSettings settings;
+        settings.clear();
+        settings.setValue(openscpui::settingskeys::kTransferLocalFileDurability,
+                          999);
+        settings.sync();
+    }
+
+    SettingsDialog dialog;
+    auto *durability = dialog.findChild<QComboBox *>(
+        QStringLiteral("settingsLocalFileDurability"));
+    auto *apply =
+        dialog.findChild<QPushButton *>(QStringLiteral("settingsApplyButton"));
+    const int maximum =
+        static_cast<int>(openscp::LocalFileDurability::FileAndDirectory);
+    const int buffered =
+        static_cast<int>(openscp::LocalFileDurability::Buffered);
+    test.check(durability && apply &&
+                   durability->currentData().toInt() == maximum,
+               "invalid persisted durability should load as the safest mode");
+    if (durability && apply) {
+        durability->setCurrentIndex(durability->findData(buffered));
+        test.check(apply->isEnabled(),
+                   "changing download durability should enable Apply");
+        apply->click();
+    }
+
+    openscpui::AppSettings settings;
+    test.check(
+        settings.value(openscpui::settingskeys::kTransferLocalFileDurability)
+                .toInt() == buffered,
+        "Apply should persist the selected download durability");
+    settings.clear();
+    settings.sync();
 }
 
 OPENSCP_TEST(testSettingsPagesUseSharedFormStructure, test) {
@@ -1547,5 +1597,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     openscp::test::TestHarness harness("Accessible widgets");
-    return harness.run();
+    const int result = harness.run();
+    openscp::testsupport::drainThreadPool();
+    return result;
 }

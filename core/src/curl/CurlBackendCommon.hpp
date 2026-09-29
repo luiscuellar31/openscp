@@ -278,6 +278,7 @@ transferFailureError(const CurlTransferResult &result, std::string message,
 // Own the protocol-neutral local file lifecycle around a CURL transfer. The
 // backend still configures and classifies its protocol-specific request.
 bool downloadToLocalFile(CURL *curl, const std::string &destination,
+                         LocalFileDurability durability,
                          std::function<void(std::size_t, std::size_t)> progress,
                          std::function<bool()> shouldCancel,
                          const std::atomic<bool> *interrupted,

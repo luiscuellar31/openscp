@@ -272,6 +272,7 @@ int main() {
     const std::string remoteResumeUploadSeed =
         joinRemotePath(remoteSuiteDir, "resume-upload-seed.txt");
     const std::string remoteResumeUploadPart = remoteResumeUpload + ".part";
+    const std::string remoteLarge = joinRemotePath(remoteSuiteDir, "large.bin");
 
     const fs::path localTmpRoot =
         fs::temp_directory_path() / ("openscp-it-" + token);
@@ -415,6 +416,39 @@ int main() {
                             "destination: ") +
                     existsErr);
     }
+    // An upload over an existing destination replaces it.
+    if (t.failures == 0) {
+        err.clear();
+        const bool overwritten =
+            client.put(localBad.string(), remoteProtected, err, {}, {}, false);
+        t.check(overwritten,
+                std::string("upload over an existing destination should "
+                            "succeed: ") +
+                    err);
+        if (overwritten) {
+            const fs::path localOverwritten = localTmpRoot / "overwritten.txt";
+            std::string downloaded;
+            err.clear();
+            const bool downloadedOk = client.get(
+                remoteProtected, localOverwritten.string(), err, {}, {}, false);
+            t.check(downloadedOk && readFile(localOverwritten, downloaded) &&
+                        downloaded == badPayload,
+                    std::string("an overwritten destination should hold the "
+                                "new content: ") +
+                        err);
+        }
+    }
+    if (t.failures == 0) {
+        err.clear();
+        t.check(!client.get(remoteMissing,
+                            (localTmpRoot / "missing.txt").string(), err, {},
+                            {}, false) &&
+                    client.lastOperationError().kind ==
+                        openscp::RemoteErrorKind::NotFound,
+                std::string("downloading a missing remote file should report "
+                            "NotFound: ") +
+                    err);
+    }
     if (t.failures == 0) {
         bool isDir = true;
         err.clear();
@@ -448,6 +482,30 @@ int main() {
                 "downloaded file should be readable");
         t.check(downloaded == payload,
                 "downloaded content should match uploaded payload");
+    }
+    // A transfer larger than the 2 MiB SFTP buffer spans several pipelined
+    // batches and ends with a short request.
+    if (t.failures == 0) {
+        std::string largePayload(5 * 1024 * 1024 + 12345, '\0');
+        std::uint32_t state = 12345;
+        for (char &byte : largePayload) {
+            state = state * 1103515245u + 12345u;
+            byte = static_cast<char>(state >> 24);
+        }
+        const fs::path localLarge = localTmpRoot / "large.bin";
+        const fs::path localLargeDst = localTmpRoot / "large-downloaded.bin";
+        err.clear();
+        t.check(writeFile(localLarge, largePayload) &&
+                    client.put(localLarge.string(), remoteLarge, err, {}, {},
+                               false),
+                std::string("large upload should succeed: ") + err);
+        std::string downloaded;
+        err.clear();
+        t.check(client.get(remoteLarge, localLargeDst.string(), err, {}, {},
+                           false) &&
+                    readFile(localLargeDst, downloaded) &&
+                    downloaded == largePayload,
+                std::string("large download should match the upload: ") + err);
     }
     // Regression: Required integrity must fail on resume mismatch (download).
     if (t.failures == 0) {
@@ -508,6 +566,150 @@ int main() {
                 std::string("upload mismatch should report integrity error: ") +
                     err);
     }
+    // Optional integrity verifies whole-file transfers from the streamed bytes
+    // instead of reading the remote file again.
+    const std::string remoteOptional =
+        joinRemotePath(remoteSuiteDir, "optional-integrity.txt");
+    const std::string remoteOptionalChanged =
+        joinRemotePath(remoteSuiteDir, "optional-source-changed.txt");
+    const std::string remoteOptionalChanging =
+        joinRemotePath(remoteSuiteDir, "optional-remote-changing.txt");
+    const auto hourAgo = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count() -
+        3600);
+    openscp::SessionOptions optionalOpt = opt;
+    optionalOpt.transfer_integrity_policy =
+        openscp::TransferIntegrityPolicy::Optional;
+    openscp::Libssh2SftpClient optionalClient;
+    if (t.failures == 0) {
+        err.clear();
+        t.check(optionalClient.connect(optionalOpt, err),
+                std::string("optional integrity connect should succeed: ") +
+                    err);
+    }
+    if (t.failures == 0) {
+        err.clear();
+        t.check(optionalClient.put(localSrc.string(), remoteOptional, err, {},
+                                   {}, false),
+                std::string("optional integrity put should succeed: ") + err);
+        const fs::path localOptionalDst =
+            localTmpRoot / "optional-downloaded.txt";
+        // A just-uploaded file is recent, so this download keeps the full
+        // check.
+        err.clear();
+        t.check(optionalClient.get(remoteOptional, localOptionalDst.string(),
+                                   err, {}, {}, false),
+                std::string("optional recent-file get should succeed: ") + err);
+        std::string downloaded;
+        t.check(readFile(localOptionalDst, downloaded) && downloaded == payload,
+                "optional recent-file download should match the payload");
+        // An older file uses the streamed check.
+        err.clear();
+        t.check(optionalClient.setTimes(remoteOptional, hourAgo, hourAgo, err),
+                std::string("optional setTimes should succeed: ") + err);
+        err.clear();
+        t.check(optionalClient.get(remoteOptional, localOptionalDst.string(),
+                                   err, {}, {}, false),
+                std::string("optional older-file get should succeed: ") + err);
+        downloaded.clear();
+        t.check(readFile(localOptionalDst, downloaded) && downloaded == payload,
+                "optional older-file download should match the payload");
+    }
+    if (t.failures == 0) {
+        // A remote file that changes during a streamed download fails with a
+        // retryable error and discards the mixed .part. The file is changed
+        // through the local filesystem, so this case runs only when the test
+        // server shares it.
+        err.clear();
+        t.check(optionalClient.put(localSrc.string(), remoteOptionalChanging,
+                                   err, {}, {}, false),
+                std::string("optional changing-file put should succeed: ") +
+                    err);
+        err.clear();
+        t.check(
+            optionalClient.setTimes(remoteOptionalChanging, hourAgo, hourAgo,
+                                    err),
+            std::string("optional changing-file setTimes should succeed: ") +
+                err);
+        const fs::path sharedRemote(remoteOptionalChanging);
+        std::error_code sharedError;
+        const bool remoteIsShared =
+            fs::exists(sharedRemote, sharedError) &&
+            std::ofstream(sharedRemote, std::ios::binary | std::ios::app)
+                .is_open();
+        if (t.failures == 0 && remoteIsShared) {
+            const fs::path localChangingDst =
+                localTmpRoot / "optional-remote-changing.txt";
+            bool appended = false;
+            err.clear();
+            const bool ok = optionalClient.get(
+                remoteOptionalChanging, localChangingDst.string(), err,
+                [&](std::size_t, std::size_t) {
+                    if (appended)
+                        return;
+                    std::ofstream out(sharedRemote,
+                                      std::ios::binary | std::ios::app);
+                    out << "appended";
+                    appended = out.good();
+                },
+                {}, false);
+            const openscp::RemoteError changeError =
+                optionalClient.lastOperationError();
+            t.check(appended, "remote file should change during the download");
+            t.check(
+                !ok && changeError.kind == openscp::RemoteErrorKind::RemoteIo &&
+                    changeError.transient,
+                std::string("a remote change during download should be "
+                            "retryable: ") +
+                    err);
+            t.check(!fs::exists(localChangingDst) &&
+                        !fs::exists(localChangingDst.string() + ".part"),
+                    "a remote change must discard the download and its .part");
+        }
+    }
+    if (t.failures == 0) {
+        const fs::path localChanging = localTmpRoot / "optional-changing.txt";
+        t.check(writeFile(localChanging, payload),
+                "changing upload source should be writable");
+        bool changed = false;
+        err.clear();
+        const bool ok = optionalClient.put(
+            localChanging.string(), remoteOptionalChanged, err,
+            [&](std::size_t, std::size_t) {
+                if (!changed) {
+                    changed = writeFile(localChanging,
+                                        std::string(payload.size(), 'x'));
+                }
+            },
+            {}, false);
+        t.check(changed, "upload source should change during the transfer");
+        t.check(!ok && err.find("checksum mismatch") != std::string::npos,
+                std::string("optional upload should reject a source changed "
+                            "during the transfer: ") +
+                    err);
+        bool isDir = false;
+        std::string existsErr;
+        t.check(!optionalClient.exists(remoteOptionalChanged, isDir, existsErr),
+                "a rejected optional upload must not publish its destination");
+    }
+    if (t.failures == 0) {
+        // A resumed download depends on earlier data, so it keeps the full
+        // end-to-end check and rejects a stale complete .part.
+        const fs::path localStaleDst = localTmpRoot / "optional-stale.txt";
+        const fs::path localStalePart = localStaleDst.string() + ".part";
+        t.check(writeFile(localStalePart, std::string(payload.size(), 'x')),
+                "stale .part should be writable");
+        err.clear();
+        const bool ok = optionalClient.get(
+            remoteOptional, localStaleDst.string(), err, {}, {}, true);
+        t.check(!ok && err.find("integrity") != std::string::npos,
+                std::string("optional resume should reject a stale .part: ") +
+                    err);
+        t.check(!fs::exists(localStaleDst),
+                "a rejected stale download must not publish its destination");
+    }
     if (t.failures == 0) {
         err.clear();
         t.check(client.rename(remoteSrc, remoteMoved, err, false),
@@ -542,6 +744,22 @@ int main() {
                 std::string("remove remoteResumeUploadPart should succeed: ") +
                     err);
         err.clear();
+        t.check(removeRemoteFileIfExists(client, remoteOptional, err),
+                std::string("remove remoteOptional should succeed: ") + err);
+        err.clear();
+        t.check(removeRemoteFileIfExists(client, remoteOptionalChanging, err),
+                std::string("remove remoteOptionalChanging should succeed: ") +
+                    err);
+        err.clear();
+        t.check(removeRemoteFileIfExists(client,
+                                         remoteOptionalChanged + ".part", err),
+                std::string("remove remoteOptionalChanged .part should "
+                            "succeed: ") +
+                    err);
+        err.clear();
+        t.check(removeRemoteFileIfExists(client, remoteLarge, err),
+                std::string("remove remoteLarge should succeed: ") + err);
+        err.clear();
         t.check(client.removeDir(remoteSuiteDir, err),
                 std::string("removeDir should succeed: ") + err);
     }
@@ -562,7 +780,17 @@ int main() {
     cleanupErr.clear();
     (void)removeRemoteFileIfExists(client, remoteResumeUploadPart, cleanupErr);
     cleanupErr.clear();
+    (void)removeRemoteFileIfExists(client, remoteOptional, cleanupErr);
+    cleanupErr.clear();
+    (void)removeRemoteFileIfExists(client, remoteOptionalChanging, cleanupErr);
+    cleanupErr.clear();
+    (void)removeRemoteFileIfExists(client, remoteOptionalChanged + ".part",
+                                   cleanupErr);
+    cleanupErr.clear();
+    (void)removeRemoteFileIfExists(client, remoteLarge, cleanupErr);
+    cleanupErr.clear();
     (void)client.removeDir(remoteSuiteDir, cleanupErr);
+    optionalClient.disconnect();
     client.disconnect();
     fs::remove_all(localTmpRoot, ec);
 

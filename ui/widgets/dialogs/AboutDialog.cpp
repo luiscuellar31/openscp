@@ -125,6 +125,8 @@ QVector<CreditSection> splitCreditSections(const QString &markdown) {
 } // namespace
 
 AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
+    Q_INIT_RESOURCE(app_icons);
+    Q_INIT_RESOURCE(credits);
     setWindowTitle(tr("About OpenSCP"));
 
     auto *root = new QVBoxLayout(this);
@@ -174,9 +176,10 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
             {QStringLiteral("docs/credits/CREDITS.md")}, false);
         if (!creditsPath.isEmpty()) {
             creditsFile.setFileName(creditsPath);
-            creditsFile.open(QIODevice::ReadOnly | QIODevice::Text);
-            creditsBaseUrl = QUrl::fromLocalFile(
-                QFileInfo(creditsPath).absolutePath() + QDir::separator());
+            if (creditsFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                creditsBaseUrl = QUrl::fromLocalFile(
+                    QFileInfo(creditsPath).absolutePath() + QDir::separator());
+            }
         }
     }
     if (creditsFile.isOpen()) {

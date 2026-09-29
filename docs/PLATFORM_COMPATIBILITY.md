@@ -5,8 +5,8 @@ builds. Community builds may use different baselines.
 
 | Target | Supported baseline | How it is checked |
 | --- | --- | --- |
-| macOS `.app` / `.dmg` (arm64 and x86_64) | macOS 12.0+ | Qt 6.8.3 and pinned non-Qt dependencies are built for 12.0; every bundled Mach-O is checked before upload. |
-| Linux AppImage x86_64 | glibc 2.28+ | Built in a digest-pinned Rocky Linux 8 container; all bundled ELF objects are audited for `GLIBC_*` and `GLIBCXX_*`. |
+| macOS `.app` / `.dmg` (arm64 and x86_64) | macOS 13.0+ | Qt 6.11.2 and pinned non-Qt dependencies are built for 13.0; every bundled Mach-O is checked before upload. |
+| Linux AppImage x86_64 | glibc 2.34+ | Built in a digest-pinned Rocky Linux 9 container; all bundled ELF objects are audited for `GLIBC_*` and `GLIBCXX_*`. |
 | Linux AppImage aarch64 | glibc 2.39+ (Ubuntu 24.04 baseline) | Built on the Ubuntu 24.04 arm64 runner and audited before upload. |
 | Native Linux source build | Ubuntu 22.04 toolchain and newer | CMake configure, hardening, build, and unit tests run on Ubuntu 22.04 in CI. Other distributions are community-supported. |
 | Snap (built in CI, not published yet) | `core24` plus the declared content runtime | Runtime-managed; it does not inherit the host's Qt or glibc in the same way as a native build. |
@@ -32,7 +32,7 @@ Adding FTP/FTPS or WebDAV to Snap or Flatpak requires declaring and packaging
 the corresponding dependencies, removing the explicit CMake opt-outs, and
 validating the resulting artifact with the real-protocol integration suite.
 
-Official self-contained releases use Qt 6.8.3. Community builds intentionally
+Official self-contained releases use Qt 6.11.2. Community builds intentionally
 remain free to compile against another compatible Qt 6; set
 `OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=ON` only when reproducing the official
 artifact policy.
@@ -51,7 +51,7 @@ be treated as a substitute for a maintained OS.
   requirements.
 - `OPENSCP_FORTIFY_SOURCE_LEVEL=AUTO` selects level 3 when the libc and compiler
   fully support it and safely falls back to level 2 otherwise.
-- Release workflows enforce Qt 6.8.3 for the self-contained macOS and AppImage
+- Release workflows enforce Qt 6.11.2 for the self-contained macOS and AppImage
   artifacts.
 
 These baselines may be raised in a future major or minor release, but must not

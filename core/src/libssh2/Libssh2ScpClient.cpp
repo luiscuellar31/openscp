@@ -2,9 +2,9 @@
 // transfers over SSH.
 #include "libssh2/Libssh2ScpClient.hpp"
 
-#include "../common/SafeLocalFile.hpp"
 #include "common/UniqueFile.hpp"
 #include "detail/Libssh2ErrorClassifier.hpp"
+#include "openscp/SafeLocalFile.hpp"
 
 #include <libssh2.h>
 
@@ -126,6 +126,7 @@ bool Libssh2ScpClient::get(
     const std::string &remote, const std::string &local, std::string &err,
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
+    auto ioLock = delegate_.lockIo();
     auto structuredErrorScope = beginStructuredOperation(err);
     if (resume) {
         err = "SCP downloads do not support resume.";
@@ -135,6 +136,9 @@ bool Libssh2ScpClient::get(
         err = "Not connected";
         return false;
     }
+    const LocalFileDurability localFileDurability =
+        sessionOptions_ ? sessionOptions_->local_file_durability
+                        : LocalFileDurability::FileAndDirectory;
     _LIBSSH2_SESSION *session = delegate_.sessionHandle();
     if (!session) {
         err = "Not connected";
@@ -274,7 +278,7 @@ bool Libssh2ScpClient::get(
     }
 
     std::string syncError;
-    if (!localfiles::flushAndSync(localFile, syncError)) {
+    if (!localfiles::flushAndSync(localFile, syncError, localFileDurability)) {
         const int nativeError = errno;
         localFileOwner.reset();
         closeScpChannel(channel, false);
@@ -297,7 +301,8 @@ bool Libssh2ScpClient::get(
         return false;
     }
     std::string replaceError;
-    if (!localfiles::atomicReplace(partial, local, replaceError)) {
+    if (!localfiles::atomicReplace(partial, local, replaceError,
+                                   localFileDurability)) {
         const int nativeError = errno;
         err = replaceError.empty()
                   ? "Could not atomically finalize local SCP download"
@@ -314,6 +319,7 @@ bool Libssh2ScpClient::put(
     const std::string &local, const std::string &remote, std::string &err,
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
+    auto ioLock = delegate_.lockIo();
     auto structuredErrorScope = beginStructuredOperation(err, true);
     if (resume) {
         err = "SCP uploads do not support resume.";
@@ -532,16 +538,6 @@ bool Libssh2ScpClient::rename(const std::string &from, const std::string &to,
     (void)to;
     (void)overwrite;
     return unsupportedScpOperation("rename", err);
-}
-
-std::unique_ptr<RemoteClient>
-Libssh2ScpClient::newConnectionLike(const SessionOptions &opt,
-                                    std::string &err) {
-    auto structuredErrorScope = beginStructuredOperation(err);
-    auto ptr = std::make_unique<Libssh2ScpClient>();
-    if (!ptr->connect(opt, err))
-        return nullptr;
-    return ptr;
 }
 
 bool Libssh2ScpClient::transferViaSftpFallbackGet(

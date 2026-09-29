@@ -164,6 +164,8 @@ class SettingsDialog : public QDialog {
     class QSpinBox *maxConcurrentSpin_ = nullptr; // transfer worker concurrency
     class QSpinBox *globalSpeedDefaultSpin_ =
         nullptr; // default global speed limit KB/s (0 = unlimited)
+    QComboBox *localFileDurability_ =
+        nullptr; // durability used when publishing downloaded files
     QComboBox *queueAutoClearModeDefault_ =
         nullptr; // default auto-clear mode for the transfer queue
     class QSpinBox *queueAutoClearMinutesDefaultSpin_ =

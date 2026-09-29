@@ -19,6 +19,7 @@ struct SyncPreparationResult {
     QVector<SyncSnapshotEntry> remoteSnapshot;
     QString localRoot;
     QString remoteRoot;
+    SyncScanCoverage coverage;
     QStringList warnings;
     quint64 itemCount = 0;
     quint64 knownBytes = 0;

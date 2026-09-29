@@ -6,12 +6,12 @@ cmake_minimum_required(VERSION 3.22)
 # in the generated Info.plist.
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
     if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
-        set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING
             "Minimum macOS version" FORCE)
     endif()
 endif()
 
-project(OpenSCP LANGUAGES CXX VERSION 1.0.0)
+project(OpenSCP LANGUAGES CXX VERSION 1.1.0)
 
 if(APPLE)
     enable_language(OBJCXX)
@@ -204,7 +204,7 @@ endif()
 # declared below, including targets created by core and tests subdirectories.
 link_libraries(openscp_project_warnings openscp_project_hardening)
 
-set(OPENSCP_RECOMMENDED_QT_VERSION "6.8.3" CACHE STRING
+set(OPENSCP_RECOMMENDED_QT_VERSION "6.11.2" CACHE STRING
     "Qt version used for official self-contained OpenSCP artifacts")
 option(OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION
        "Reject a Qt version other than OPENSCP_RECOMMENDED_QT_VERSION" OFF)
@@ -272,7 +272,8 @@ if(OPENSCP_QT_HOST_TOOLS_DIR)
         "OpenSCP: using Qt host-tool wrappers from ${OPENSCP_QT_HOST_TOOLS_DIR}")
 endif()
 
-# Qt 6.8.x on recent macOS SDKs may expose legacy AGL through WrapOpenGL.
+# Older Qt 6 SDKs on recent macOS versions may expose legacy AGL through
+# WrapOpenGL.
 # AGL no longer ships a linkable binary, so strip it to avoid link errors.
 if (APPLE AND TARGET WrapOpenGL::WrapOpenGL)
     get_target_property(_wrapogl_libs WrapOpenGL::WrapOpenGL INTERFACE_LINK_LIBRARIES)
@@ -321,6 +322,8 @@ add_library(openscp_ui_logic STATIC
     ui/logic/common/AppSettings.cpp
     ui/logic/common/MainWindowSharedUtils.hpp
     ui/logic/common/MainWindowSharedUtils.cpp
+    ui/logic/common/RowSelection.hpp
+    ui/logic/common/RowSelection.cpp
     ui/logic/common/TimeUtils.hpp
     ui/logic/common/UiAlerts.hpp
     ui/logic/common/UiAlerts.cpp
@@ -377,6 +380,10 @@ add_library(openscp_ui_logic STATIC
     ui/logic/transfers/TransferQueue.cpp
     ui/logic/transfers/TransferQueuePersistence.hpp
     ui/logic/transfers/TransferQueuePersistence.cpp
+    ui/logic/transfers/TransferQueueWriter.hpp
+    ui/logic/transfers/TransferQueueWriter.cpp
+    ui/logic/transfers/TransferTaskControls.hpp
+    ui/logic/transfers/TransferTaskControls.cpp
     ui/logic/transfers/TransferTypes.hpp
     ui/logic/transfers/TransferUiController.hpp
     ui/logic/transfers/TransferUiController.cpp
@@ -659,12 +666,12 @@ foreach(icon ${ICON_FILES})
     set_source_files_properties(${icon} PROPERTIES QT_RESOURCE_ALIAS icons/${_name})
 endforeach()
 
-qt_add_resources(openscp app_icons
+qt_add_resources(openscp_ui_widgets app_icons
     PREFIX "/assets"
     FILES ${ICON_FILES}
 )
 
-qt_add_resources(openscp credits
+qt_add_resources(openscp_ui_widgets credits
     PREFIX "/credits"
     BASE docs/credits
     FILES

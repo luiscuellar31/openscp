@@ -4,6 +4,7 @@
 #include "openscp/KnownHostsUtils.hpp"
 #include "openscp/RemoteClient.hpp"
 
+#include <atomic>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -31,7 +32,7 @@ class Libssh2SftpClient : public RemoteClient {
     bool connectTransportOnly(const SessionOptions &opt, std::string &err);
     void disconnect() override;
     void interrupt() override;
-    bool isConnected() const override { return connected_; }
+    bool isConnected() const override { return connected_.load(); }
 
     bool list(const std::string &remote_path, std::vector<FileInfo> &out,
               std::string &err) override;
@@ -76,12 +77,12 @@ class Libssh2SftpClient : public RemoteClient {
                   std::function<void(std::size_t, std::size_t)> progress = {},
                   std::function<bool()> shouldCancel = {}) override;
 
-    std::unique_ptr<RemoteClient> newConnectionLike(const SessionOptions &opt,
-                                                    std::string &err) override;
-
     // Exposed for protocol adapters that share the authenticated SSH transport
     // (for example, SCP channel operations).
     _LIBSSH2_SESSION *sessionHandle() const { return session_; }
+    [[nodiscard]] std::unique_lock<std::recursive_mutex> lockIo() {
+        return std::unique_lock<std::recursive_mutex>(ioMutex_);
+    }
 
     private:
     class StructuredErrorScope {
@@ -96,6 +97,7 @@ class Libssh2SftpClient : public RemoteClient {
         Libssh2SftpClient &owner_;
         std::string &error_;
         bool mutation_ = false;
+        std::unique_lock<std::recursive_mutex> ioLock_;
     };
 
     StructuredErrorScope beginStructuredOperation(std::string &err,
@@ -104,13 +106,17 @@ class Libssh2SftpClient : public RemoteClient {
                                           bool mutation) const;
     bool rejectOversizedPath(const std::string &path, std::string &err);
 
-    bool connected_ = false;
+    // Atomic because interrupt() clears it from another thread.
+    std::atomic_bool connected_{false};
     int sock_ = -1;
     _LIBSSH2_SESSION *session_ = nullptr; // <- uses internal libssh2 types
     _LIBSSH2_SFTP *sftp_ = nullptr;       // <- same
     TransferIntegrityPolicy transferIntegrityPolicy_ =
         TransferIntegrityPolicy::Optional;
+    LocalFileDurability localFileDurability_ =
+        LocalFileDurability::FileAndDirectory;
     mutable std::mutex stateMutex_;
+    mutable std::recursive_mutex ioMutex_;
 #ifndef _WIN32
     int jumpProxyPid_ = -1;
     int jumpProxyStderrFd_ = -1;

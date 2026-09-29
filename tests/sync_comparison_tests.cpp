@@ -4,7 +4,9 @@
 
 #include <QCoreApplication>
 
+#include <algorithm>
 #include <optional>
+#include <stop_token>
 
 namespace {
 
@@ -35,7 +37,7 @@ const SyncComparisonItem *findItem(const QVector<SyncComparisonItem> &items,
     return nullptr;
 }
 
-OPENSCP_TEST(testPathAndGlobHelpers, test) {
+OPENSCP_TEST(testPathAndGlobFiltering, test) {
     test.check(SyncComparisonEngine::normalizeRelativePath(QStringLiteral(
                    "./src/../main.cpp")) == QStringLiteral("main.cpp"),
                "relative paths should resolve dot segments");
@@ -70,8 +72,12 @@ OPENSCP_TEST(testPathAndGlobHelpers, test) {
          "single-star should not match unrelated suffixes"},
     };
     for (const GlobCase &globCase : globCases) {
-        test.check(SyncComparisonEngine::globMatches(
-                       globCase.path, globCase.pattern) == globCase.expected,
+        SyncComparisonOptions options;
+        options.includePatterns = {globCase.pattern};
+        const auto result = SyncComparisonEngine::compare(
+            {file(globCase.path, 1, 1)}, {}, options);
+        test.check((findItem(result, globCase.path) != nullptr) ==
+                       globCase.expected,
                    globCase.message);
     }
 
@@ -163,6 +169,17 @@ OPENSCP_TEST(testComparisonRules, test) {
                "reversing direction should keep local destination extras");
 }
 
+OPENSCP_TEST(testPreCanceledComparisonReturnsNoItems, test) {
+    std::stop_source stopSource;
+    stopSource.request_stop();
+    const auto result = SyncComparisonEngine::compare(
+        {file(QStringLiteral("source.txt"), 10, 1)},
+        {file(QStringLiteral("destination.txt"), 10, 1)}, {}, {},
+        stopSource.get_token());
+    test.check(result.isEmpty(),
+               "a canceled comparison must not start building a preview");
+}
+
 OPENSCP_TEST(testIncludePatternsPreserveParents, test) {
     QVector<SyncSnapshotEntry> local{
         directory(QStringLiteral("src")),
@@ -182,6 +199,26 @@ OPENSCP_TEST(testIncludePatternsPreserveParents, test) {
     test.check(findItem(result, QStringLiteral("src/nested/readme.md")) ==
                    nullptr,
                "non-matching files should be filtered");
+}
+
+OPENSCP_TEST(testExcludedFolderStopsAtItsOwnLevel, test) {
+    QVector<SyncSnapshotEntry> local{
+        directory(QStringLiteral("keep")),
+        directory(QStringLiteral("keep/mid")),
+        file(QStringLiteral("keep/mid/file.txt"), 10, 10'000),
+        file(QStringLiteral("keep/other.txt"), 10, 10'000),
+    };
+    SyncComparisonOptions options;
+    options.excludePatterns = {QStringLiteral("keep/mid")};
+    const auto result = SyncComparisonEngine::compare(local, {}, options);
+    test.check(findItem(result, QStringLiteral("keep/mid")) == nullptr,
+               "an excluded folder should not be visible");
+    test.check(findItem(result, QStringLiteral("keep/mid/file.txt")) != nullptr,
+               "a file the filters keep should stay visible");
+    test.check(findItem(result, QStringLiteral("keep")) != nullptr &&
+                   findItem(result, QStringLiteral("keep/other.txt")) !=
+                       nullptr,
+               "another visible file should still bring its parent along");
 }
 
 OPENSCP_TEST(testExecutionPlanOrdering, test) {
@@ -230,6 +267,155 @@ OPENSCP_TEST(testExecutionPlanOrdering, test) {
         SyncComparisonEngine::makeExecutionPlan(deselected, options);
     test.check(withoutCopy.copies.isEmpty(),
                "unchecked preview rows must not enter the execution plan");
+}
+
+OPENSCP_TEST(testDisabledMirrorCannotPlanStaleDeletions, test) {
+    SyncComparisonOptions options;
+    options.mirror = true;
+    const auto mirrorItems = SyncComparisonEngine::compare(
+        {}, {file(QStringLiteral("destination-only.txt"), 8, 1)}, options);
+    test.check(mirrorItems.size() == 1 &&
+                   mirrorItems.front().action == SyncAction::DeleteFile,
+               "mirror comparison should propose deleting destination extras");
+
+    options.mirror = false;
+    const SyncExecutionPlan plan =
+        SyncComparisonEngine::makeExecutionPlan(mirrorItems, options);
+    test.check(plan.deletes.isEmpty() && !plan.requiresMirrorConfirmation,
+               "a plan with mirror disabled must discard stale deletions");
+}
+
+OPENSCP_TEST(testMirrorOnlyDeletesVerifiedPaths, test) {
+    SyncComparisonOptions options;
+    options.mirror = true;
+    const QVector<SyncSnapshotEntry> destination = {
+        directory(QStringLiteral("locked")),
+        file(QStringLiteral("locked/child.txt"), 1, 1),
+        file(QStringLiteral("locked/healthy.txt"), 1, 1),
+        file(QStringLiteral("locked-sibling.txt"), 1, 1),
+    };
+    SyncScanCoverage coverage;
+    coverage.localUnscannedPaths.insert(QStringLiteral("locked"));
+
+    const auto preview =
+        SyncComparisonEngine::compare({}, destination, options, coverage);
+    test.check(
+        findItem(preview, QStringLiteral("locked"))->action ==
+                SyncAction::Keep &&
+            findItem(preview, QStringLiteral("locked/child.txt"))->action ==
+                SyncAction::Keep &&
+            findItem(preview, QStringLiteral("locked-sibling.txt"))->action ==
+                SyncAction::DeleteFile,
+        "an unscanned subtree must not hide verified sibling deletes");
+
+    const auto stalePreview =
+        SyncComparisonEngine::compare({}, destination, options);
+    const auto plan = SyncComparisonEngine::makeExecutionPlan(
+        stalePreview, options, coverage);
+    test.check(plan.deletes.size() == 1 &&
+                   plan.deletes.front().relativePath ==
+                       QStringLiteral("locked-sibling.txt"),
+               "planning must recheck coverage before enqueuing deletions");
+
+    coverage.localUnscannedPaths.insert(QString());
+    const auto rootUnverified = SyncComparisonEngine::makeExecutionPlan(
+        stalePreview, options, coverage);
+    test.check(rootUnverified.deletes.isEmpty(),
+               "an unverified source root must block all mirror deletions");
+
+    coverage.localUnscannedPaths.clear();
+    coverage.localUnscannedPaths.insert(QStringLiteral("locked/child.txt"));
+    const auto parentPlan = SyncComparisonEngine::makeExecutionPlan(
+        stalePreview, options, coverage);
+    test.check(
+        parentPlan.deletes.size() == 2 &&
+            std::any_of(parentPlan.deletes.cbegin(), parentPlan.deletes.cend(),
+                        [](const SyncDeleteOperation &deletion) {
+                            return deletion.relativePath ==
+                                   QStringLiteral("locked/healthy.txt");
+                        }),
+        "an unverified child protects its parent without hiding verified "
+        "siblings");
+
+    options.direction = SyncDirection::RemoteToLocal;
+    coverage.localUnscannedPaths.clear();
+    coverage.remoteUnscannedPaths.insert(QStringLiteral("locked"));
+    const auto reverse =
+        SyncComparisonEngine::compare(destination, {}, options, coverage);
+    test.check(
+        findItem(reverse, QStringLiteral("locked/child.txt"))->action ==
+                SyncAction::Keep &&
+            findItem(reverse, QStringLiteral("locked-sibling.txt"))->action ==
+                SyncAction::DeleteFile,
+        "coverage must follow the selected source direction");
+}
+
+SyncComparisonItem plannedItem(const QString &path, SyncAction action,
+                               SyncEntryType type = SyncEntryType::File) {
+    SyncComparisonItem item;
+    item.relativePath = path;
+    item.action = action;
+    item.selected = true;
+    SyncSnapshotEntry entry;
+    entry.relativePath = path;
+    entry.type = type;
+    entry.size = 16;
+    entry.modifiedMs = 1;
+    if (action == SyncAction::DeleteFile ||
+        action == SyncAction::DeleteDirectory)
+        item.destination = entry;
+    else
+        item.source = entry;
+    return item;
+}
+
+OPENSCP_TEST(testMirrorKeepsFoldersThatReceiveIncomingItems, test) {
+    SyncComparisonOptions options;
+    options.mirror = true;
+
+    const SyncExecutionPlan withCopyInside =
+        SyncComparisonEngine::makeExecutionPlan(
+            {plannedItem(QStringLiteral("old"), SyncAction::DeleteDirectory,
+                         SyncEntryType::Directory),
+             plannedItem(QStringLiteral("old/deep"),
+                         SyncAction::DeleteDirectory, SyncEntryType::Directory),
+             plannedItem(QStringLiteral("old/deep/incoming.bin"),
+                         SyncAction::Copy)},
+            options);
+    test.check(withCopyInside.deletes.isEmpty() &&
+                   withCopyInside.warnings.size() == 2,
+               "a mirror must not delete a folder it is about to write into");
+
+    const SyncExecutionPlan withNewFolderInside =
+        SyncComparisonEngine::makeExecutionPlan(
+            {plannedItem(QStringLiteral("old"), SyncAction::DeleteDirectory,
+                         SyncEntryType::Directory),
+             plannedItem(QStringLiteral("old/sub"), SyncAction::CreateDirectory,
+                         SyncEntryType::Directory)},
+            options);
+    test.check(withNewFolderInside.deletes.isEmpty() &&
+                   withNewFolderInside.warnings.size() == 1,
+               "a folder that gains a new subfolder must not be deleted");
+
+    const SyncExecutionPlan recreatedFolder =
+        SyncComparisonEngine::makeExecutionPlan(
+            {plannedItem(QStringLiteral("old"), SyncAction::DeleteDirectory,
+                         SyncEntryType::Directory),
+             plannedItem(QStringLiteral("old"), SyncAction::CreateDirectory,
+                         SyncEntryType::Directory)},
+            options);
+    test.check(recreatedFolder.deletes.isEmpty() &&
+                   recreatedFolder.warnings.size() == 1,
+               "a folder the sync recreates must not be deleted");
+
+    const SyncExecutionPlan unrelated = SyncComparisonEngine::makeExecutionPlan(
+        {plannedItem(QStringLiteral("old"), SyncAction::DeleteDirectory,
+                     SyncEntryType::Directory),
+         plannedItem(QStringLiteral("old/file.bin"), SyncAction::DeleteFile),
+         plannedItem(QStringLiteral("other/incoming.bin"), SyncAction::Copy)},
+        options);
+    test.check(unrelated.deletes.size() == 2 && unrelated.warnings.isEmpty(),
+               "deletions away from the incoming items should stay");
 }
 
 OPENSCP_TEST(testChecksumComparison, test) {

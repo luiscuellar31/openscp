@@ -1,5 +1,6 @@
 #include "logic/navigation/PaneController.hpp"
 
+#include "logic/common/RowSelection.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "logic/navigation/RemotePath.hpp"
 #include "logic/remote/LocalTreeDiscovery.hpp"
@@ -230,6 +231,7 @@ int selectCurrentFolderMatches(const PaneController::SearchContext &context,
     QItemSelectionModel *selection = view->selectionModel();
     selection->clearSelection();
     QModelIndex firstMatch;
+    QVector<int> matchedRows;
     int matches = 0;
 
     const QModelIndex root = view->rootIndex();
@@ -244,13 +246,17 @@ int selectCurrentFolderMatches(const PaneController::SearchContext &context,
         if (!expression.match(name).hasMatch())
             continue;
 
-        selection->select(index, QItemSelectionModel::Select |
-                                     QItemSelectionModel::Rows);
+        matchedRows.push_back(row);
         if (!firstMatch.isValid())
             firstMatch = index;
         ++matches;
     }
 
+    if (!matchedRows.isEmpty()) {
+        selection->select(
+            openscpui::rowSelection(*model, root, std::move(matchedRows)),
+            QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    }
     if (firstMatch.isValid()) {
         selection->setCurrentIndex(firstMatch, QItemSelectionModel::NoUpdate);
         view->scrollTo(firstMatch, QAbstractItemView::PositionAtCenter);

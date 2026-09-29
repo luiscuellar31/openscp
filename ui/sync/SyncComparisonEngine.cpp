@@ -103,13 +103,16 @@ class CompiledGlobSet {
 };
 
 bool isHiddenPath(const QString &relativePath) {
-    const auto segments =
-        relativePath.split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    return std::any_of(
-        segments.cbegin(), segments.cend(), [](const QString &segment) {
-            return segment.size() > 1 ? segment.startsWith(QLatin1Char('.'))
-                                      : segment == QStringLiteral(".");
-        });
+    // A path is hidden when any of its segments starts with a dot, including a
+    // segment that is just ".". Scanning it avoids splitting a string that is
+    // checked for every path and every folder above it.
+    for (qsizetype index = 0; index < relativePath.size(); ++index) {
+        if (relativePath[index] != QLatin1Char('.'))
+            continue;
+        if (index == 0 || relativePath[index - 1] == QLatin1Char('/'))
+            return true;
+    }
+    return false;
 }
 
 QString parentRelativePath(const QString &relativePath) {
@@ -119,15 +122,41 @@ QString parentRelativePath(const QString &relativePath) {
                                  : relativePath.left(separatorPosition);
 }
 
+QSet<QString> unscannedSourceAncestors(const QSet<QString> &unscannedPaths,
+                                       std::stop_token stopToken = {}) {
+    QSet<QString> ancestors;
+    for (const QString &unscanned : unscannedPaths) {
+        if (stopToken.stop_requested())
+            return {};
+        QString parent = parentRelativePath(unscanned);
+        while (!parent.isEmpty()) {
+            if (stopToken.stop_requested())
+                return {};
+            ancestors.insert(parent);
+            parent = parentRelativePath(parent);
+        }
+    }
+    return ancestors;
+}
+
+bool sourcePathUnscanned(const QString &path,
+                         const QSet<QString> &unscannedPaths,
+                         const QSet<QString> &unscannedAncestors) {
+    if (unscannedPaths.contains(QString()) || unscannedAncestors.contains(path))
+        return true;
+    QString current = path;
+    while (!current.isEmpty()) {
+        if (unscannedPaths.contains(current))
+            return true;
+        current = parentRelativePath(current);
+    }
+    return false;
+}
+
 int pathDepth(const QString &relativePath) {
     return relativePath.isEmpty()
                ? 0
                : static_cast<int>(relativePath.count(QLatin1Char('/')) + 1);
-}
-
-bool isPathInside(const QString &path, const QString &directory) {
-    return path.size() > directory.size() && path.startsWith(directory) &&
-           path.at(directory.size()) == QLatin1Char('/');
 }
 
 bool isNewerBeyondTolerance(qint64 candidate, qint64 baseline,
@@ -141,10 +170,15 @@ bool isNewerBeyondTolerance(qint64 candidate, qint64 baseline,
 
 using EntryIndex = QHash<QString, SyncSnapshotEntry>;
 
-EntryIndex buildEntryIndex(const QVector<SyncSnapshotEntry> &snapshot) {
+EntryIndex buildEntryIndex(const QVector<SyncSnapshotEntry> &snapshot,
+                           std::stop_token stopToken) {
     EntryIndex index;
+    if (stopToken.stop_requested())
+        return index;
     index.reserve(snapshot.size());
     for (const SyncSnapshotEntry &original : snapshot) {
+        if (stopToken.stop_requested())
+            return {};
         const QString normalized =
             SyncComparisonEngine::normalizeRelativePath(original.relativePath);
         if (normalized.isEmpty())
@@ -181,7 +215,8 @@ std::optional<bool> equalComparableChecksums(const SyncSnapshotEntry &source,
 SyncComparisonItem classifyItem(const QString &relativePath,
                                 std::optional<SyncSnapshotEntry> source,
                                 std::optional<SyncSnapshotEntry> destination,
-                                const SyncComparisonOptions &options) {
+                                const SyncComparisonOptions &options,
+                                bool sourceUnscanned) {
     SyncComparisonItem item;
     item.relativePath = relativePath;
     item.source = std::move(source);
@@ -210,6 +245,12 @@ SyncComparisonItem classifyItem(const QString &relativePath,
             item.action = SyncAction::Keep;
             item.reason = QCoreApplication::translate(
                 "SyncDialog", "Only in the destination; mirror is disabled");
+        } else if (sourceUnscanned) {
+            item.action = SyncAction::Keep;
+            item.reason = QCoreApplication::translate(
+                "SyncDialog",
+                "Source scan did not verify this path; mirror deletion was "
+                "omitted");
         } else if (item.destination->type == SyncEntryType::Directory) {
             item.action = SyncAction::DeleteDirectory;
             item.reason = QCoreApplication::translate(
@@ -352,29 +393,40 @@ QStringList SyncComparisonEngine::parsePatterns(const QString &text) {
     return patterns;
 }
 
-bool SyncComparisonEngine::globMatches(const QString &relativePath,
-                                       const QString &rawPattern) {
-    const QString path = normalizeRelativePath(relativePath);
-    if (path.isEmpty())
-        return false;
-    const QRegularExpression regex = compiledGlob(rawPattern);
-    return regex.isValid() && !regex.pattern().isEmpty() &&
-           regex.match(path).hasMatch();
-}
-
 QVector<SyncComparisonItem>
 SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
                               const QVector<SyncSnapshotEntry> &remoteSnapshot,
-                              const SyncComparisonOptions &options) {
-    const EntryIndex local = buildEntryIndex(localSnapshot);
-    const EntryIndex remote = buildEntryIndex(remoteSnapshot);
+                              const SyncComparisonOptions &options,
+                              const SyncScanCoverage &coverage,
+                              std::stop_token stopToken) {
+    if (stopToken.stop_requested())
+        return {};
+    const EntryIndex local = buildEntryIndex(localSnapshot, stopToken);
+    if (stopToken.stop_requested())
+        return {};
+    const EntryIndex remote = buildEntryIndex(remoteSnapshot, stopToken);
+    if (stopToken.stop_requested())
+        return {};
+    const QSet<QString> &unscannedPaths =
+        options.direction == SyncDirection::LocalToRemote
+            ? coverage.localUnscannedPaths
+            : coverage.remoteUnscannedPaths;
+    const QSet<QString> unscannedAncestors =
+        unscannedSourceAncestors(unscannedPaths, stopToken);
+    if (stopToken.stop_requested())
+        return {};
 
     QSet<QString> allPaths;
     allPaths.reserve(local.size() + remote.size());
-    for (auto iterator = local.cbegin(); iterator != local.cend(); ++iterator)
+    for (auto iterator = local.cbegin(); iterator != local.cend(); ++iterator) {
+        if (stopToken.stop_requested())
+            return {};
         allPaths.insert(iterator.key());
+    }
     for (auto iterator = remote.cbegin(); iterator != remote.cend();
          ++iterator) {
+        if (stopToken.stop_requested())
+            return {};
         allPaths.insert(iterator.key());
     }
 
@@ -387,6 +439,8 @@ SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
     QSet<QString> visiblePaths;
     visiblePaths.reserve(allPaths.size());
     for (const QString &path : allPaths) {
+        if (stopToken.stop_requested())
+            return {};
         if ((!options.includeHidden && isHiddenPath(path)) ||
             excludeGlobs.matches(path) || !includeGlobs.matches(path)) {
             continue;
@@ -394,6 +448,10 @@ SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
         visiblePaths.insert(path);
         QString parent = parentRelativePath(path);
         while (!parent.isEmpty()) {
+            // A folder that is already visible brought its own parents with
+            // it, so there is nothing left to walk or match above it.
+            if (visiblePaths.contains(parent))
+                break;
             if ((!options.includeHidden && isHiddenPath(parent)) ||
                 excludeGlobs.matches(parent)) {
                 break;
@@ -403,15 +461,21 @@ SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
         }
     }
 
+    if (stopToken.stop_requested())
+        return {};
     QStringList sortedPaths = visiblePaths.values();
     std::sort(sortedPaths.begin(), sortedPaths.end(),
               [](const QString &left, const QString &right) {
                   return left.compare(right, Qt::CaseSensitive) < 0;
               });
+    if (stopToken.stop_requested())
+        return {};
 
     QVector<SyncComparisonItem> result;
     result.reserve(sortedPaths.size());
     for (const QString &path : sortedPaths) {
+        if (stopToken.stop_requested())
+            return {};
         const auto localEntry = local.constFind(path);
         const auto remoteEntry = remote.constFind(path);
         if (localEntry == local.cend() && remoteEntry == remote.cend())
@@ -430,18 +494,30 @@ SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
             if (localEntry != local.cend())
                 destination = *localEntry;
         }
+        const bool sourceUnscanned =
+            options.mirror && !source && destination &&
+            sourcePathUnscanned(path, unscannedPaths, unscannedAncestors);
         result.push_back(classifyItem(path, std::move(source),
-                                      std::move(destination), options));
+                                      std::move(destination), options,
+                                      sourceUnscanned));
     }
+    if (stopToken.stop_requested())
+        return {};
     return result;
 }
 
 SyncExecutionPlan SyncComparisonEngine::makeExecutionPlan(
     const QVector<SyncComparisonItem> &items,
-    const SyncComparisonOptions &options) {
+    const SyncComparisonOptions &options, const SyncScanCoverage &coverage) {
     SyncExecutionPlan plan;
     plan.direction = options.direction;
     plan.mirror = options.mirror;
+    const QSet<QString> &unscannedPaths =
+        options.direction == SyncDirection::LocalToRemote
+            ? coverage.localUnscannedPaths
+            : coverage.remoteUnscannedPaths;
+    const QSet<QString> unscannedAncestors =
+        unscannedSourceAncestors(unscannedPaths);
 
     QSet<QString> destinationDirectories;
     QSet<QString> directoriesToCreate;
@@ -493,8 +569,17 @@ SyncExecutionPlan SyncComparisonEngine::makeExecutionPlan(
             }
             continue;
         }
-        if (item.action == SyncAction::DeleteFile ||
-            item.action == SyncAction::DeleteDirectory) {
+        if (options.mirror && (item.action == SyncAction::DeleteFile ||
+                               item.action == SyncAction::DeleteDirectory)) {
+            if (sourcePathUnscanned(path, unscannedPaths, unscannedAncestors)) {
+                plan.warnings.push_back(
+                    QCoreApplication::translate(
+                        "SyncDialog",
+                        "Source scan did not verify this path; mirror deletion "
+                        "was omitted") +
+                    QStringLiteral(": ") + path);
+                continue;
+            }
             if (deletedPaths.contains(path))
                 continue;
             deletedPaths.insert(path);
@@ -506,28 +591,32 @@ SyncExecutionPlan SyncComparisonEngine::makeExecutionPlan(
         }
     }
 
+    // Folders that hold something the sync is about to write, so a mirror
+    // deletion that would take one of them with it is recognized by name
+    // instead of by comparing it against every incoming path.
+    QSet<QString> foldersWithIncomingItems;
+    const auto rememberFoldersAbove =
+        [&foldersWithIncomingItems](const QString &path) {
+            QString parent = parentRelativePath(path);
+            while (!parent.isEmpty() &&
+                   !foldersWithIncomingItems.contains(parent)) {
+                foldersWithIncomingItems.insert(parent);
+                parent = parentRelativePath(parent);
+            }
+        };
+    for (const SyncCopyOperation &copy : std::as_const(plan.copies))
+        rememberFoldersAbove(copy.relativePath);
+    for (const QString &directory : std::as_const(directoriesToCreate)) {
+        foldersWithIncomingItems.insert(directory);
+        rememberFoldersAbove(directory);
+    }
+
     QVector<SyncDeleteOperation> safeDeletes;
     safeDeletes.reserve(plan.deletes.size());
     for (const SyncDeleteOperation &deletion : std::as_const(plan.deletes)) {
-        bool conflictsWithIncoming = false;
-        if (deletion.type == SyncEntryType::Directory) {
-            for (const SyncCopyOperation &copy : std::as_const(plan.copies)) {
-                if (isPathInside(copy.relativePath, deletion.relativePath)) {
-                    conflictsWithIncoming = true;
-                    break;
-                }
-            }
-            if (!conflictsWithIncoming) {
-                for (const QString &directory :
-                     std::as_const(directoriesToCreate)) {
-                    if (directory == deletion.relativePath ||
-                        isPathInside(directory, deletion.relativePath)) {
-                        conflictsWithIncoming = true;
-                        break;
-                    }
-                }
-            }
-        }
+        const bool conflictsWithIncoming =
+            deletion.type == SyncEntryType::Directory &&
+            foldersWithIncomingItems.contains(deletion.relativePath);
         if (conflictsWithIncoming) {
             plan.warnings.push_back(
                 QCoreApplication::translate("SyncDialog",
@@ -575,6 +664,6 @@ SyncExecutionPlan SyncComparisonEngine::makeExecutionPlan(
             plan.knownCopyBytes += *copy.size;
         }
     }
-    plan.requiresMirrorConfirmation = plan.mirror && !plan.deletes.isEmpty();
+    plan.requiresMirrorConfirmation = !plan.deletes.isEmpty();
     return plan;
 }

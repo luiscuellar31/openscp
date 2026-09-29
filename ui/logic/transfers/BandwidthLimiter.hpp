@@ -19,16 +19,22 @@ class BandwidthLimiter final {
             const std::function<bool(std::uint64_t)> &shouldCancel);
     void wakeAll();
 
+    [[nodiscard]] std::size_t queuedWaiters() const;
+
     private:
     struct Waiter {
+        std::uint64_t id = 0;
         std::uint64_t taskId = 0;
         std::uint64_t bytes = 0;
     };
 
+    void removeWaiterLocked(std::uint64_t waiterId);
+
     std::atomic<int> limitKBps_{0};
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::condition_variable changed_;
-    std::deque<Waiter *> waiters_;
+    std::deque<Waiter> waiters_;
+    std::uint64_t nextWaiterId_ = 0;
     double tokens_ = 0.0;
     std::chrono::steady_clock::time_point lastRefill_{};
     int configuredLimitKBps_ = 0;

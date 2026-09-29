@@ -70,6 +70,8 @@ inline constexpr char kMacKeychainRestrictive[] =
 
 inline constexpr char kTransferMaxConcurrent[] = "Transfer/maxConcurrent";
 inline constexpr char kTransferGlobalSpeedKbps[] = "Transfer/globalSpeedKBps";
+inline constexpr char kTransferLocalFileDurability[] =
+    "Transfer/localFileDurability";
 inline constexpr char kTransferDefaultQueueAutoClearMode[] =
     "Transfer/defaultQueueAutoClearMode";
 inline constexpr char kTransferDefaultQueueAutoClearMinutes[] =
