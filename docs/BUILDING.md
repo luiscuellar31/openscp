@@ -82,6 +82,9 @@ audit the bundled ELF ABI; the check can be run directly against an AppDir:
 ./scripts/verify/linux-abi.sh dist/OpenSCP.AppDir 2.34
 ```
 
+AppImages bundle `libstdc++.so.6` and use the target system's
+`libgcc_s.so.1` to preserve the stated GLIBC compatibility floor.
+
 Snap and Flatpak intentionally build only SFTP and SCP. AppImage release builds
 include all five protocols. See each script's `--help` output for runtime,
 architecture, and dependency overrides.
