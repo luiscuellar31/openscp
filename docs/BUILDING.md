@@ -85,6 +85,12 @@ audit the bundled ELF ABI; the check can be run directly against an AppDir:
 AppImages bundle `libstdc++.so.6` and use the target system's
 `libgcc_s.so.1` to preserve the stated GLIBC compatibility floor.
 
+Linux release CI pins Python 3.14.7 for the Qt installer because older Python
+versions can misidentify the ARM `qttools` 7z archive as a ZIP. AppImage tools
+use `APPIMAGE_EXTRACT_AND_RUN=1` on headless builders; the packager removes it
+only when querying the finished image's update metadata, which needs no FUSE
+and must not launch the application.
+
 Snap and Flatpak intentionally build only SFTP and SCP. AppImage release builds
 include all five protocols. See each script's `--help` output for runtime,
 architecture, and dependency overrides.
