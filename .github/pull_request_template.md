@@ -8,14 +8,16 @@
 
 ## Verification
 
-<!-- Paste the terminal commands actually run and say whether they passed.
-For code/build changes, report the local baseline from CONTRIBUTING.md:
+<!-- Required for code and release PRs: both commands below must pass.
+The local CI script may pass with SFTP skipped. That is acceptable only when
+the GitHub Actions SFTP integration test runs and passes; a CI skip does not
+count. Add other commands run when relevant.
+For documentation-only changes, check links and the diff instead. -->
+
+```sh
 ./scripts/check_ci_local.sh --clean --full --werror
-./scripts/checks/cpp-quality.sh --format
-./scripts/checks/shell-quality.sh
-git diff --check origin/dev...HEAD  (use origin/main for PRs to main)
-Add focused tests for changed behavior. For docs-only changes, check links and
-the diff. Explain relevant checks that failed or were not run. -->
+./scripts/checks/cpp-quality.sh --format --cppcheck
+```
 
 ## Checklist
 

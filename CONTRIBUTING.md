@@ -51,10 +51,14 @@ Run the local CI baseline before opening a pull request:
 
 ```bash
 ./scripts/check_ci_local.sh --clean --full --werror
-./scripts/checks/cpp-quality.sh --format
+./scripts/checks/cpp-quality.sh --format --cppcheck
 ./scripts/checks/shell-quality.sh
 git diff --check
 ```
+
+`check_ci_local.sh` configures, builds, and runs the tests in the ignored
+`build-ci-local/` directory by default. Its `--build-dir` option changes that
+path.
 
 For documentation-only changes, check the links and run `git diff --check`;
 compiling the application is not needed to validate Markdown.
@@ -191,6 +195,14 @@ For an existing SFTP server, set `OPENSCP_IT_SFTP_HOST`,
 `OPENSCP_IT_SFTP_PORT`, `OPENSCP_IT_SFTP_USER`, the remote base, and either a
 password or private key before running CTest. See each integration test source
 for the full list of variables it accepts.
+
+For code and release pull requests, both commands in the
+[pull request template](.github/pull_request_template.md) must pass. The local
+CI script covers `openscp_sync_dialog_tests`, but SFTP may skip without a
+configured server. A passing local script with SFTP skipped is acceptable only
+if `openscp_sftp_integration_tests` runs and passes in GitHub Actions. An SFTP
+skip in both places does not satisfy the requirement. Add any other commands
+actually run to the PR's Verification block.
 
 > [!WARNING]
 > `scripts/ci/setup_protocol_services.sh` is intended only for a disposable
