@@ -33,7 +33,7 @@ set -euo pipefail
 #                       Optional update information for published AppImages
 #   SKIP_QT_PLUGIN      Set to 1 to skip the qt plugin (not recommended)
 #   OPENSCP_BUNDLE_GNU_RUNTIME
-#                       Copy libstdc++ and libgcc_s into the AppDir (default: 1)
+#                       Copy libstdc++ into the AppDir (default: 1)
 #   OPENSCP_MAX_GLIBC_VERSION
 #                       If set, reject every bundled ELF requiring a newer GLIBC
 
@@ -180,14 +180,12 @@ bundle_gnu_runtime() {
   command -v "$compiler" >/dev/null 2>&1 ||
     die "C++ compiler not found while locating the GNU runtime: $compiler"
 
-  local runtime_name runtime_path
+  local runtime_path
   mkdir -p "$APPDIR/usr/lib"
-  for runtime_name in libstdc++.so.6 libgcc_s.so.1; do
-    runtime_path="$("$compiler" -print-file-name="$runtime_name")"
-    [[ -f "$runtime_path" && "$runtime_path" != "$runtime_name" ]] ||
-      die "Could not locate $runtime_name with $compiler"
-    cp -L "$runtime_path" "$APPDIR/usr/lib/$runtime_name"
-  done
+  runtime_path="$("$compiler" -print-file-name=libstdc++.so.6)"
+  [[ -f "$runtime_path" && "$runtime_path" != "libstdc++.so.6" ]] ||
+    die "Could not locate libstdc++.so.6 with $compiler"
+  cp -L "$runtime_path" "$APPDIR/usr/lib/libstdc++.so.6"
 }
 
 verify_linux_abi_if_requested() {

@@ -232,6 +232,14 @@ change is needed, what changed, and which checks you actually ran.
 - List the relevant local checks and platform builds actually run, and explain
   any relevant checks not run.
 
+## Releases
+
+After merging to `main`, wait for the Linux and macOS build jobs in the
+**Release Artifacts** workflow to pass for that commit before creating a `v*`
+tag. The `main` run uploads workflow artifacts but skips the publication job.
+Pushing the tag runs the same builds again and uploads their assets to a draft
+release only if every build passes.
+
 ## Licensing
 
 Contributions follow the dual-licensing terms in
