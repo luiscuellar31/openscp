@@ -45,6 +45,39 @@ set(OPENSCP_REPOSITORY_URL "https://github.com/luiscuellar31/openscp" CACHE STRI
     "Project repository URL")
 set(OPENSCP_ISSUES_URL "${OPENSCP_REPOSITORY_URL}/issues" CACHE STRING
     "Project issues URL")
+set(OPENSCP_PACKAGE_KIND "manual" CACHE STRING "Installation kind: manual or appimage")
+set(OPENSCP_UPDATE_PUBLIC_KEY "" CACHE STRING "Base64 raw Ed25519 AppImage update public key")
+if(NOT OPENSCP_PACKAGE_KIND MATCHES "^(manual|appimage)$")
+    message(FATAL_ERROR "Invalid OPENSCP_PACKAGE_KIND")
+endif()
+if(OPENSCP_UPDATE_PUBLIC_KEY)
+    string(LENGTH "${OPENSCP_UPDATE_PUBLIC_KEY}" _update_key_length)
+    if(NOT _update_key_length EQUAL 44 OR NOT OPENSCP_UPDATE_PUBLIC_KEY MATCHES "^[A-Za-z0-9+/]+=$")
+        message(FATAL_ERROR "OPENSCP_UPDATE_PUBLIC_KEY must encode a raw 32-byte Ed25519 key")
+    endif()
+endif()
+option(OPENSCP_ENABLE_SPARKLE "Enable signed native macOS updates" OFF)
+set(OPENSCP_SPARKLE_FRAMEWORK "" CACHE PATH "Path to Sparkle.framework")
+set(OPENSCP_SPARKLE_FEED_URL "" CACHE STRING "HTTPS Sparkle appcast URL")
+set(OPENSCP_SPARKLE_PUBLIC_KEY "" CACHE STRING "Base64 Sparkle Ed25519 public key")
+set(OPENSCP_SPARKLE_PLIST "")
+if(OPENSCP_ENABLE_SPARKLE)
+    string(LENGTH "${OPENSCP_SPARKLE_PUBLIC_KEY}" _sparkle_key_length)
+    if(NOT APPLE OR NOT EXISTS "${OPENSCP_SPARKLE_FRAMEWORK}/Sparkle"
+       OR NOT _sparkle_key_length EQUAL 44
+       OR NOT OPENSCP_SPARKLE_PUBLIC_KEY MATCHES "^[A-Za-z0-9+/]+=$"
+       OR NOT OPENSCP_SPARKLE_FEED_URL MATCHES "^https://[A-Za-z0-9./_-]+$")
+        message(FATAL_ERROR "Sparkle requires macOS, its framework, an Ed25519 public key, and an HTTPS feed URL")
+    endif()
+    set(OPENSCP_SPARKLE_PLIST "
+  <key>SUFeedURL</key><string>${OPENSCP_SPARKLE_FEED_URL}</string>
+  <key>SUPublicEDKey</key><string>${OPENSCP_SPARKLE_PUBLIC_KEY}</string>
+  <key>SUEnableAutomaticChecks</key><false/>
+  <key>SUAutomaticallyUpdate</key><false/>
+  <key>SUAllowsAutomaticUpdates</key><false/>
+  <key>SUVerifyUpdateBeforeExtraction</key><true/>
+  <key>SURequireSignedFeed</key><true/>")
+endif()
 
 if(CMAKE_BUILD_TYPE)
     set(OPENSCP_BUILD_TYPE_STR "${CMAKE_BUILD_TYPE}")
@@ -209,7 +242,8 @@ set(OPENSCP_RECOMMENDED_QT_VERSION "6.11.2" CACHE STRING
 option(OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION
        "Reject a Qt version other than OPENSCP_RECOMMENDED_QT_VERSION" OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Svg LinguistTools)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network Svg LinguistTools)
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 if(OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION AND
    NOT Qt6_VERSION VERSION_EQUAL OPENSCP_RECOMMENDED_QT_VERSION)
     message(FATAL_ERROR
@@ -318,6 +352,13 @@ target_include_directories(openscp_sync_logic
 target_link_libraries(openscp_sync_logic PUBLIC Qt6::Core)
 
 add_library(openscp_ui_logic STATIC
+    ui/logic/updates/UpdateMetadata.hpp
+    ui/logic/updates/UpdateMetadata.cpp
+    ui/logic/updates/UpdateController.hpp
+    ui/logic/updates/UpdateController.cpp
+    ui/logic/updates/AppImageInstaller.hpp
+    ui/logic/updates/AppImageInstaller.cpp
+    ui/logic/updates/MacUpdater.hpp
     ui/logic/common/AppSettings.hpp
     ui/logic/common/AppSettings.cpp
     ui/logic/common/MainWindowSharedUtils.hpp
@@ -390,17 +431,29 @@ add_library(openscp_ui_logic STATIC
 )
 
 target_include_directories(openscp_ui_logic
+    PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
     PUBLIC
         ${CMAKE_SOURCE_DIR}/core/include
         ${CMAKE_SOURCE_DIR}/ui
 )
 
 target_link_libraries(openscp_ui_logic
+    PRIVATE OpenSSL::Crypto
     PUBLIC
         Qt6::Widgets
+        Qt6::Network
         openscp_core
         openscp_sync_logic
 )
+
+if(OPENSCP_ENABLE_SPARKLE)
+    target_sources(openscp_ui_logic PRIVATE ui/logic/updates/MacUpdater.mm)
+    set_source_files_properties(ui/logic/updates/MacUpdater.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    target_compile_options(openscp_ui_logic PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-F${OPENSCP_SPARKLE_FRAMEWORK}/..>")
+    target_link_libraries(openscp_ui_logic PRIVATE "${OPENSCP_SPARKLE_FRAMEWORK}")
+else()
+    target_sources(openscp_ui_logic PRIVATE ui/logic/updates/MacUpdater.cpp)
+endif()
 
 add_library(openscp_ui_widgets STATIC
     ui/widgets/common/FocusTraversalController.hpp
@@ -472,6 +525,7 @@ add_library(openscp_main_window STATIC
     ui/app/MainWindowRemoteOps.cpp
     ui/app/MainWindowSync.cpp
     ui/app/MainWindowTransfers.cpp
+    ui/app/MainWindowUpdates.cpp
 )
 
 target_include_directories(openscp_main_window
@@ -550,6 +604,15 @@ endif()
 ###############################################################################
 if(APPLE)
     # Bundle identifier propagated into Info.plist
+    if(OPENSCP_ENABLE_SPARKLE)
+        add_custom_command(TARGET openscp POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E rm -rf
+                "$<TARGET_BUNDLE_DIR:openscp>/Contents/Frameworks/Sparkle.framework"
+            COMMAND /usr/bin/ditto
+                "${OPENSCP_SPARKLE_FRAMEWORK}"
+                "$<TARGET_BUNDLE_DIR:openscp>/Contents/Frameworks/Sparkle.framework"
+            VERBATIM)
+    endif()
     set(BUNDLE_ID "io.github.luiscuellar31.openscp" CACHE STRING "macOS bundle identifier")
 
     # Configure Info.plist from template
@@ -678,6 +741,7 @@ qt_add_resources(openscp_ui_widgets credits
         docs/credits/CREDITS.md
         docs/credits/LGPL_COMPLIANCE.md
         docs/credits/LICENSES/OpenSSL-Apache-2.0.txt
+        docs/credits/LICENSES/Sparkle-license.txt
         docs/credits/LICENSES/Qt-LGPL-3.0.txt
         docs/credits/LICENSES/libcurl-curl-license.txt
         docs/credits/LICENSES/libssh2-BSD-3-Clause.txt

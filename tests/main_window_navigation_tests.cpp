@@ -122,6 +122,32 @@ bool hasAllFocusParts(const MainWindowFocusParts &parts) {
            parts.scpDownload;
 }
 
+OPENSCP_TEST(testUpdateMenuIsManualByDefault, test) {
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    auto *manual =
+        window.findChild<QAction *>(QStringLiteral("checkForUpdatesAction"));
+    auto *automatic =
+        window.findChild<QAction *>(QStringLiteral("automaticUpdatesAction"));
+    test.check(manual && automatic && automatic->isCheckable() &&
+                   !automatic->isChecked(),
+               "update checks expose an explicit manual action and default to "
+               "no automatic requests");
+    openscpui::AppSettings().setValue(
+        openscpui::settingskeys::kUpdateAutomaticChecks, true);
+    MainWindow restored;
+    automatic =
+        restored.findChild<QAction *>(QStringLiteral("automaticUpdatesAction"));
+    test.check(automatic && automatic->isChecked(),
+               "restore the user's update-check preference");
+    automatic->setChecked(false);
+    test.check(
+        !openscpui::AppSettings()
+             .value(openscpui::settingskeys::kUpdateAutomaticChecks)
+             .toBool(),
+        "turning off checks persists without requiring a network request");
+}
+
 OPENSCP_TEST(testMainWindowSplitterPreservesAnEvenPanelResize, test) {
     configureMainWindowSettings(settingsRootPath);
     MainWindow window;

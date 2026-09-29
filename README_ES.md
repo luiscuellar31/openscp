@@ -34,6 +34,18 @@ shasum -a 256 -c SHA256SUMS.txt --ignore-missing  # macOS
 sha256sum -c SHA256SUMS.txt --ignore-missing      # Linux
 ```
 
+### Actualizaciones
+
+Usa **OpenSCP → Buscar actualizaciones…** para consultar la última versión
+estable. **Buscar actualizaciones automáticamente** activa una consulta diaria;
+está desactivada por defecto. La instalación requiere confirmación y que hayan
+terminado las operaciones de archivos pendientes. Los builds configurados con
+firmas pueden instalar actualizaciones de AppImage y macOS; los demás abren la
+página de la versión. Flatpak y Snap usan su gestor de software. Los paquetes
+Flatpak independientes requieren descargar el nuevo paquete si no se configuró
+un repositorio de actualizaciones.
+Consulta [Cómo actualizar OpenSCP](docs/UPDATES.md) para más detalles.
+
 ### Instalación en macOS
 
 Abre el DMG, arrastra OpenSCP a la carpeta Aplicaciones y ábrelo desde ahí.

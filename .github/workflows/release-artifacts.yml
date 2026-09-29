@@ -16,6 +16,8 @@ permissions:
 
 env:
   OPENSCP_QT_VERSION: "6.11.2"
+  OPENSCP_UPDATE_PUBLIC_KEY: ${{ vars.OPENSCP_UPDATE_PUBLIC_KEY }}
+  OPENSCP_SPARKLE_PUBLIC_KEY: ${{ vars.OPENSCP_SPARKLE_PUBLIC_KEY }}
 
 jobs:
   verify-source:
@@ -32,6 +34,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+
+      - name: Verify update-manifest signing with disposable keys
+        run: python3 scripts/checks/update-signing.py
 
       - name: Validate version and tag when present
         id: meta
@@ -124,7 +129,8 @@ jobs:
 
       - name: Install macOS build tools
         run: |
-          brew install pkg-config
+          brew install pkg-config openssl@3
+          echo "OPENSSL_BIN=$(brew --prefix openssl@3)/bin/openssl" >> "$GITHUB_ENV"
 
       - name: Build pinned macOS dependencies for the deployment target
         env:
@@ -138,6 +144,17 @@ jobs:
           echo "OPENSSL_ROOT_DIR=$deps_prefix" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$deps_prefix:${CMAKE_PREFIX_PATH:-}" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$deps_prefix/lib/pkgconfig:$deps_prefix/lib64/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
+
+      - name: Configure signed macOS updates when a public key is available
+        run: |
+          set -euo pipefail
+          if [[ -n "$OPENSCP_SPARKLE_PUBLIC_KEY" ]]; then
+            sdk="$RUNNER_TEMP/sparkle"
+            bash ./scripts/ci/fetch_sparkle.sh "$sdk"
+            echo "OPENSCP_ENABLE_SPARKLE=ON" >> "$GITHUB_ENV"
+            echo "OPENSCP_SPARKLE_FRAMEWORK=$sdk/Sparkle.framework" >> "$GITHUB_ENV"
+            echo "OPENSCP_SPARKLE_FEED_URL=https://github.com/luiscuellar31/openscp/releases/latest/download/appcast-${{ matrix.arch }}.xml" >> "$GITHUB_ENV"
+          fi
 
       - name: Build macOS release artifacts
         run: |
@@ -156,8 +173,19 @@ jobs:
 
       - name: Verify macOS bundle linkage
         run: |
-          MAX_BUNDLE_SIZE_MIB=64 \
+          MAX_BUNDLE_SIZE_MIB=80 \
             bash ./scripts/verify/macos-bundle.sh build/OpenSCP.app
+
+      - name: Sign macOS update appcast
+        if: startsWith(github.ref, 'refs/tags/v') && env.OPENSCP_SPARKLE_PUBLIC_KEY != ''
+        env:
+          OPENSCP_SPARKLE_PRIVATE_KEY: ${{ secrets.OPENSCP_SPARKLE_PRIVATE_KEY }}
+        run: |
+          bash ./scripts/release/sparkle-appcast.sh \
+            "$RUNNER_TEMP/sparkle" \
+            "dist/OpenSCP-${{ needs.verify-source.outputs.version }}-${{ matrix.arch }}-UNSIGNED.zip" \
+            "${{ needs.verify-source.outputs.version }}" \
+            "dist/appcast-${{ matrix.arch }}.xml"
 
       - name: Collect macOS artifacts
         run: |
@@ -169,6 +197,7 @@ jobs:
             dist/*-${{ matrix.arch }}-UNSIGNED.zip.sha256
             dist/*-${{ matrix.arch }}-UNSIGNED.dmg
             dist/*-${{ matrix.arch }}-UNSIGNED.dmg.sha256
+            dist/appcast-${{ matrix.arch }}.xml
           )
           if [[ ${#files[@]} -eq 0 ]]; then
             echo "No macOS artifacts found for arch ${{ matrix.arch }}"
@@ -320,6 +349,7 @@ jobs:
             --workdir "$GITHUB_WORKSPACE" \
             --env APPIMAGE_EXTRACT_AND_RUN=1 \
             --env APPIMAGE_UPDATE_INFORMATION \
+            --env OPENSCP_UPDATE_PUBLIC_KEY \
             --env OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=ON \
             --env OPENSCP_MAX_GLIBC_VERSION=2.34 \
             --env "CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH:-}" \
@@ -416,6 +446,24 @@ jobs:
       - name: Show artifact tree
         run: |
           find release-assets -type f | sort
+
+      - name: Sign AppImage update manifest when configured
+        env:
+          OPENSCP_UPDATE_PRIVATE_KEY: ${{ secrets.OPENSCP_UPDATE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$OPENSCP_UPDATE_PUBLIC_KEY" && -z "$OPENSCP_UPDATE_PRIVATE_KEY" ]]; then
+            echo "AppImage update signing is not configured; updates remain manual."
+          else
+            [[ -n "$OPENSCP_UPDATE_PUBLIC_KEY" && -n "$OPENSCP_UPDATE_PRIVATE_KEY" ]] || {
+              echo "Both AppImage signing keys must be configured."
+              exit 1
+            }
+            python3 scripts/release/update-manifest.py \
+              --assets release-assets \
+              --version "${{ needs.verify-source.outputs.version }}" \
+              --output release-assets/updates
+          fi
 
       - name: Select release files and build SHA256SUMS.txt
         run: |

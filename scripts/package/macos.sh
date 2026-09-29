@@ -835,6 +835,7 @@ ensure_qt_plugin_subdir() {
 
 ensure_qt_support_plugins() {
   ensure_qt_plugin_subdir "platforms" "qcocoa" "Qt platform"
+  ensure_qt_plugin_subdir "tls" "qsecuretransportbackend" "Qt native TLS"
   ensure_qt_plugin_subdir "imageformats" "qsvg" "Qt imageformats" 0
   ensure_qt_plugin_subdir "iconengines" "qsvgicon" "Qt iconengines"
   ensure_qt_plugin_subdir "styles" "qmacstyle" "Qt macOS style" 0
@@ -865,7 +866,7 @@ prune_optional_qt_plugins() {
 is_required_qt_plugin_binary() {
   local plugin="$1"
   case "$plugin" in
-    */platforms/libqcocoa.dylib|*/platforms/qcocoa.dylib|*/iconengines/libqsvgicon.dylib|*/iconengines/qsvgicon.dylib)
+    */platforms/libqcocoa.dylib|*/platforms/qcocoa.dylib|*/iconengines/libqsvgicon.dylib|*/iconengines/qsvgicon.dylib|*/tls/libqsecuretransportbackend.dylib)
       return 0
       ;;
     *)
@@ -951,6 +952,12 @@ main() {
   # Prefer explicit Qt env vars, then auto-detect under $HOME/Qt/<version>/macos
   local qt_cfg_dir="${Qt6_DIR:-${QT6_DIR:-}}"
   local -a dependency_cmake_args=()
+  dependency_cmake_args+=(
+    "-DOPENSCP_ENABLE_SPARKLE=${OPENSCP_ENABLE_SPARKLE:-OFF}"
+    "-DOPENSCP_SPARKLE_FRAMEWORK=${OPENSCP_SPARKLE_FRAMEWORK:-}"
+    "-DOPENSCP_SPARKLE_PUBLIC_KEY=${OPENSCP_SPARKLE_PUBLIC_KEY:-}"
+    "-DOPENSCP_SPARKLE_FEED_URL=${OPENSCP_SPARKLE_FEED_URL:-}"
+  )
   if [[ -n "${OPENSCP_DEPENDENCY_PREFIX:-}" ]]; then
     local dependency_prefix="${OPENSCP_DEPENDENCY_PREFIX}"
     local libssh2_link="${dependency_prefix}/lib/libssh2.dylib"
@@ -1114,6 +1121,17 @@ main() {
   # macdeployqt owns deployed frameworks. Fill only missing direct dependencies
   # from known Qt prefixes, and copy runtime content rather than SDK headers.
   ensure_direct_qt_runtime_frameworks
+  if [[ "${OPENSCP_ENABLE_SPARKLE:-OFF}" == "ON" ]]; then
+    [[ -d "${OPENSCP_SPARKLE_FRAMEWORK:-}" ]] || die "Sparkle.framework is missing"
+    # Preserve version links and helper permissions; macdeployqt may only copy
+    # the directly linked framework binary. Replace that partial copy.
+    rm -rf "${FRAMEWORKS_DIR}/Sparkle.framework"
+    ditto "$OPENSCP_SPARKLE_FRAMEWORK" "${FRAMEWORKS_DIR}/Sparkle.framework"
+    rm -rf "${FRAMEWORKS_DIR}/Sparkle.framework/Versions/B/Headers" \
+           "${FRAMEWORKS_DIR}/Sparkle.framework/Versions/B/Modules" \
+           "${FRAMEWORKS_DIR}/Sparkle.framework/Headers" \
+           "${FRAMEWORKS_DIR}/Sparkle.framework/Modules"
+  fi
 
   # Ensure the specific plugin families we depend on are present in the bundle.
   ensure_qt_support_plugins

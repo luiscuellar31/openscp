@@ -23,6 +23,7 @@
     @CURRENT_YEAR@            e.g. 2025
 -->
 <dict>
+  @OPENSCP_SPARKLE_PLIST@
   <key>CFBundleIdentifier</key>
   <string>@BUNDLE_IDENTIFIER@</string>
 

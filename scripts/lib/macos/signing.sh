@@ -16,6 +16,7 @@ sign_item() {
 }
 
 sign_app_bundle() {
+  sign_sparkle_helpers sign_sparkle_item
   # Sign nested content first: dylibs, frameworks, plugins, then the app.
   shopt -s nullglob
   local items=()
@@ -38,6 +39,7 @@ adhoc_sign_item() {
 
 adhoc_sign_bundle() {
   log "Ad-hoc signing bundle (no Developer ID)"
+  sign_sparkle_helpers adhoc_sign_sparkle_item
   shopt -s nullglob
   local framework_binary
   local framework
@@ -65,4 +67,32 @@ adhoc_sign_bundle() {
   done
   adhoc_sign_item "$MACOS_DIR/${APP_NAME}"
   adhoc_sign_item "$APP_DIR"
+}
+
+sign_sparkle_helpers() {
+  local signer="$1"
+  local sparkle="${FRAMEWORKS_DIR}/Sparkle.framework/Versions/B"
+  [[ -d "$sparkle" ]] || return 0
+  local helper
+  for helper in \
+    "$sparkle/Autoupdate" \
+    "$sparkle/Updater.app" \
+    "$sparkle/XPCServices/Installer.xpc" \
+    "$sparkle/XPCServices/Downloader.xpc"; do
+    [[ -e "$helper" ]] || die "Missing Sparkle helper: $helper"
+    "$signer" "$helper"
+  done
+}
+
+sign_sparkle_item() {
+  [[ "${SKIP_CODESIGN:-0}" == "1" ]] && return 0
+  [[ -n "${APPLE_IDENTITY:-}" ]] || die "APPLE_IDENTITY is not set"
+  # Helper permissions belong to Sparkle, not the main application's plist.
+  codesign --force --timestamp --options runtime \
+    --preserve-metadata=identifier,entitlements --sign "$APPLE_IDENTITY" "$1"
+}
+
+adhoc_sign_sparkle_item() {
+  codesign --force -s - --timestamp=none \
+    --preserve-metadata=identifier,entitlements "$1"
 }
