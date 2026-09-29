@@ -16,4 +16,3 @@ race:libQt6Gui.so*
 race:libQt6Widgets.so*
 race:libQt6Svg.so*
 race:libQt6DBus.so*
-
