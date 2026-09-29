@@ -64,6 +64,8 @@ require_file() {
 require_file "${FRAMEWORKS_DIR}/QtCore.framework/Versions/A/QtCore"
 require_file "${FRAMEWORKS_DIR}/QtGui.framework/Versions/A/QtGui"
 require_file "${FRAMEWORKS_DIR}/QtWidgets.framework/Versions/A/QtWidgets"
+require_file "${FRAMEWORKS_DIR}/QtNetwork.framework/Versions/A/QtNetwork"
+require_file "${PLUGINS_DIR}/tls/libqsecuretransportbackend.dylib"
 
 development_content="$({
   find "$FRAMEWORKS_DIR" -type d \( -name Headers -o -name Modules \) -print
@@ -248,6 +250,19 @@ check_linkage() {
 
 targets=("$EXE_PATH")
 runtime_roots=("$EXE_PATH")
+# Sparkle starts these reviewed executables through XPC/launch services, rather
+# than dylib load commands. All their dependencies still undergo verification.
+if [[ -d "${FRAMEWORKS_DIR}/Sparkle.framework" ]]; then
+  for helper in \
+    Autoupdate \
+    Updater.app/Contents/MacOS/Updater \
+    XPCServices/Installer.xpc/Contents/MacOS/Installer \
+    XPCServices/Downloader.xpc/Contents/MacOS/Downloader; do
+    helper_path="${FRAMEWORKS_DIR}/Sparkle.framework/Versions/B/${helper}"
+    require_file "$helper_path"
+    runtime_roots+=("$helper_path")
+  done
+fi
 while IFS= read -r plugin_dylib; do
   targets+=("$plugin_dylib")
   runtime_roots+=("$plugin_dylib")

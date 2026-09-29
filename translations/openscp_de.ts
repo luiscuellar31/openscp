@@ -1498,6 +1498,7 @@ Vertrauen und in known_hosts speichern?</translation>
         <translation>Ohne Speichern verbinden</translation>
     </message>
     <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="152"/>
         <location filename="../ui/app/MainWindowConnection.cpp" line="864"/>
         <location filename="../ui/app/MainWindowConnection.cpp" line="1004"/>
         <location filename="../ui/app/MainWindowSync.cpp" line="38"/>
@@ -2986,6 +2987,101 @@ Aktualisiert: %2  |  Fehlgeschlagen: %3</translation>
         <location filename="../ui/logic/transfers/TransferUiController.cpp" line="88"/>
         <source>%1 transfers completed</source>
         <translation>%1 Übertragungen abgeschlossen</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="53"/>
+        <source>Check for updates…</source>
+        <translation>Nach Updates suchen…</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="59"/>
+        <source>Automatically check for updates</source>
+        <translation>Automatisch nach Updates suchen</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="77"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="80"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="115"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="138"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="173"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="181"/>
+        <source>Updates</source>
+        <translation>Updates</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="78"/>
+        <source>OpenSCP is up to date.</source>
+        <translation>OpenSCP ist auf dem neuesten Stand.</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="81"/>
+        <source>Could not check for updates.</source>
+        <translation>Updates konnten nicht gesucht werden.</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="99"/>
+        <source>OpenSCP %1 is available.</source>
+        <translation>OpenSCP %1 ist verfügbar.</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="102"/>
+        <source>For repository installations, use your software manager or run: flatpak update io.github.luiscuellar31.openscp. For standalone bundles, download the new bundle from the release page.</source>
+        <translation>Bei Installationen aus einem Repository verwenden Sie Ihre Softwareverwaltung oder führen Sie aus: flatpak update io.github.luiscuellar31.openscp. Bei eigenständigen Paketen laden Sie das neue Paket von der Versionsseite herunter.</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="109"/>
+        <source>For Snap Store installations, Snap manages updates automatically. To request one, run: sudo snap refresh openscp</source>
+        <translation>Bei Installationen aus dem Snap Store verwaltet Snap Updates automatisch. Um eines anzufordern, führen Sie aus: sudo snap refresh openscp</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="114"/>
+        <source>Download and install the new version from the release page.</source>
+        <translation>Laden Sie die neue Version von der Versionsseite herunter und installieren Sie sie.</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="118"/>
+        <source>Download and install…</source>
+        <translation>Herunterladen und installieren…</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="119"/>
+        <source>Open release page</source>
+        <translation>Versionsseite öffnen</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="122"/>
+        <source>Skip this version</source>
+        <translation>Diese Version überspringen</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="123"/>
+        <source>Later</source>
+        <translation>Später</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="139"/>
+        <source>Finish or cancel pending transfers and file operations before installing an update.</source>
+        <translation>Beenden oder stornieren Sie ausstehende Übertragungen und Dateivorgänge, bevor Sie ein Update installieren.</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="151"/>
+        <source>Downloading update…</source>
+        <translation>Update wird heruntergeladen…</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="164"/>
+        <source>Verifying and installing update…</source>
+        <translation>Update wird geprüft und installiert…</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="174"/>
+        <source>Update installed. Close OpenSCP and launch it again to use the new version. The previous AppImage is saved with the .previous suffix.</source>
+        <translation>Update installiert. Schließen Sie OpenSCP und starten Sie es erneut, um die neue Version zu verwenden. Die vorherige AppImage wird mit der Endung .previous gespeichert.</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="182"/>
+        <source>The update could not be installed. Your current version is still available.</source>
+        <translation>Das Update konnte nicht installiert werden. Ihre aktuelle Version ist weiterhin verfügbar.</translation>
     </message>
 </context>
 <context>

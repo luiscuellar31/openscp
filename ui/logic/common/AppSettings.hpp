@@ -7,6 +7,10 @@ namespace openscpui {
 
 namespace settingskeys {
 
+inline constexpr char kUpdateAutomaticChecks[] = "Updates/automaticChecks";
+inline constexpr char kUpdateLastCheck[] = "Updates/lastCheck";
+inline constexpr char kUpdateSkippedVersion[] = "Updates/skippedVersion";
+
 // Stable application-settings schema. Persisted record fields (saved-site
 // members, queue JSON and secret identifiers) remain owned by their respective
 // serializers; every fixed QSettings path belongs here.

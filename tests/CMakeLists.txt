@@ -80,12 +80,14 @@ foreach(TEST_COMPONENT IN ITEMS
         terminal_command_builder
         sync_coordinator
         local_tree_discovery
+        update
         remote_tree_walker)
     openscp_add_test(openscp_${TEST_COMPONENT}_tests
         SOURCES ${TEST_COMPONENT}_tests.cpp
         LINK_LIBRARIES openscp_ui_logic
     )
 endforeach()
+target_link_libraries(openscp_update_tests PRIVATE OpenSSL::Crypto)
 
 # These tests intentionally exercise the test-only mock implementation.
 target_include_directories(openscp_transfer_manager_tests PRIVATE

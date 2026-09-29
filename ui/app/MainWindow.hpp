@@ -37,6 +37,9 @@ class PlatformFilePicker;
 struct PathActionResult;
 class RemoteActionController;
 class SessionController;
+class UpdateController;
+class MacUpdater;
+struct UpdateRelease;
 } // namespace openscpui
 struct SiteEntry;  // fwd
 class QModelIndex; // fwd for slot signatures
@@ -132,6 +135,11 @@ class MainWindow : public QMainWindow {
     void initializeMenuBarActions();
     void initializePanelInteractions();
     void initializeRuntimeState();
+    void initializeUpdates();
+    bool canInstallUpdate() const;
+    void showAvailableUpdate(const openscpui::UpdateRelease &release);
+    openscpui::UpdateController *updates_ = nullptr;
+    openscpui::MacUpdater *macUpdater_ = nullptr;
     void initializeSyncCoordinator();
     QProgressDialog *makeComparisonProgress(const QString &label);
     bool isScpTransferMode() const;

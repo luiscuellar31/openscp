@@ -33,6 +33,17 @@ runtime.
 **Source and relinking information:**
 [LGPL_COMPLIANCE.md](LGPL_COMPLIANCE.md)
 
+## Sparkle (optional macOS updater)
+
+**License:** MIT, with included notices for bundled third-party code.
+
+**Project:** [https://sparkle-project.org](https://sparkle-project.org)
+
+**Notes:** Dynamically linked only when signed native updates are enabled;
+the pinned distribution is Sparkle 2.10.0.
+
+**License file:** [LICENSES/Sparkle-license.txt](LICENSES/Sparkle-license.txt)
+
 ## libssh2
 
 **License:** BSD-3-Clause

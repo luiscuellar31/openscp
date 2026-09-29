@@ -14,6 +14,8 @@
 #include "logic/remote/RemoteModel.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
 #include "logic/transfers/TransferManager.hpp"
+#include "logic/updates/MacUpdater.hpp"
+#include "logic/updates/UpdateController.hpp"
 #include "widgets/common/FocusTraversalController.hpp"
 #include "widgets/common/InputModalityTracker.hpp"
 #include "widgets/common/ToolbarKeyboardNavigation.hpp"
@@ -203,6 +205,12 @@ QString trimNavigationLabel(const QString &raw, int maxLen = 96) {
 } // namespace
 
 MainWindow::~MainWindow() {
+    // Stop updater callbacks while the window's state still exists. QObject
+    // children would otherwise be destroyed after the derived-class members.
+    delete macUpdater_;
+    macUpdater_ = nullptr;
+    delete updates_;
+    updates_ = nullptr;
     hostKeyPromptCoordinator_.cancel();
     sessionHealthMonitor_.stop();
     if (sessionController_)
@@ -247,6 +255,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     initializeMenuBarActions();
     initializePanelInteractions();
     initializeRuntimeState();
+    initializeUpdates();
 }
 
 void MainWindow::initializePanels(const QString &home) {
@@ -1408,6 +1417,12 @@ void MainWindow::showEvent(QShowEvent *e) {
 }
 
 void MainWindow::closeEvent(QCloseEvent *e) {
+    if (updates_ && updates_->installing()) {
+        e->ignore();
+        return;
+    }
+    if (updates_)
+        updates_->cancel();
     if (transferCleanupInProgress_) {
         pendingCloseAfterDisconnect_ = true;
         e->ignore();

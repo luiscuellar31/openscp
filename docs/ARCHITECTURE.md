@@ -140,6 +140,30 @@ The coordinator records paths that either scan could not verify. The comparison
 keeps destination-only entries under unscanned source paths, and plan creation
 checks that coverage again before accepting mirror deletions.
 
+## Application updates
+
+`UpdateController` owns bounded, asynchronous HTTPS checks against the latest
+stable GitHub release. Checks are manual or explicitly enabled by the user;
+automatic checks run at most once a day. Update preferences and skipped versions
+use the centralized `AppSettings` keys. No credentials or saved-site data enter
+update requests. Drafts, prereleases and downgrades are excluded.
+
+`UpdateMetadata` verifies AppImage manifests with an embedded Ed25519 public key
+before accepting a version, architecture, size, hash and minimum glibc baseline.
+`AppImageInstaller` copies and hashes the download through descriptors, locks the
+installation, preserves the previous inode, syncs staged data and atomically
+publishes the replacement. The worker belongs to `UpdateController`; destruction
+joins it before releasing its temporary download. No elevated helper is used.
+
+`MacUpdater` is the optional Objective-C++ bridge to Sparkle. Sparkle owns signed
+feeds, archive verification, replacement and relaunch. `MainWindowUpdates`
+owns prompts and the idle-work gate, persists state before installation, blocks
+new file operations during the installation flow and waits for connection
+cleanup before a native relaunch. AppImage users restart explicitly. Flatpak
+and Snap installations delegate replacement to their package manager; other
+builds open the release page. Missing signing configuration permits manual
+downloads only. See [UPDATES.md](UPDATES.md) for user-facing update instructions.
+
 ## Saved data
 
 Each kind of persisted data has one owner:
