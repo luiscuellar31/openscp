@@ -9,6 +9,7 @@
 #include <cstring>
 #include <ctime>
 #include <sstream>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -17,6 +18,90 @@ namespace {
 
 using curlcommon::parseUnsignedDec;
 using curlcommon::trimAscii;
+
+// This is a resource preflight, not an XML validator. Keep delimiters aligned
+// with tinyxml2's Identify/ParseDeep rules; tinyxml2 still validates the XML.
+// The cursor only advances, with no input-sized allocation before acceptance.
+ListingParseStatus checkXmlBudget(std::string_view xml,
+                                  const ListingParserLimits &limits) {
+    if (xml.size() > limits.maxXmlBytes)
+        return ListingParseStatus::ResourceLimitExceeded;
+    if (xml.find('\0') != std::string_view::npos)
+        return ListingParseStatus::Malformed;
+
+    std::size_t nodes = 0;
+    std::size_t depth = 0;
+    std::size_t position = 0;
+    while (position < xml.size()) {
+        if (nodes >= limits.maxXmlNodes)
+            return ListingParseStatus::ResourceLimitExceeded;
+        ++nodes;
+        if (xml[position] != '<') {
+            const std::size_t next = xml.find('<', position);
+            position = next == std::string_view::npos ? xml.size() : next;
+            continue;
+        }
+
+        const std::string_view remaining = xml.substr(position);
+        std::string_view terminator;
+        std::size_t prefixLength = 0;
+        if (remaining.starts_with("<!--")) {
+            terminator = "-->";
+            prefixLength = 4;
+        } else if (remaining.starts_with("<![CDATA[")) {
+            terminator = "]]>";
+            prefixLength = 9;
+        } else if (remaining.starts_with("<?")) {
+            terminator = "?>";
+            prefixLength = 2;
+        } else if (remaining.starts_with("<!")) {
+            terminator = ">";
+            prefixLength = 2;
+        }
+        if (!terminator.empty()) {
+            const std::size_t end =
+                xml.find(terminator, position + prefixLength);
+            if (end == std::string_view::npos)
+                return ListingParseStatus::Malformed;
+            position = end + terminator.size();
+            continue;
+        }
+
+        const bool closing = remaining.starts_with("</");
+        std::size_t attributes = 0;
+        std::size_t end = position + 1;
+        for (; end < xml.size() && xml[end] != '>'; ++end) {
+            if (xml[end] == '\'' || xml[end] == '"') {
+                end = xml.find(xml[end], end + 1);
+                if (end == std::string_view::npos)
+                    return ListingParseStatus::Malformed;
+            } else if (xml[end] == '=') {
+                if (attributes >= limits.maxXmlAttributesPerElement ||
+                    nodes >= limits.maxXmlNodes)
+                    return ListingParseStatus::ResourceLimitExceeded;
+                ++attributes;
+                ++nodes;
+            } else if (xml[end] == '<') {
+                return ListingParseStatus::Malformed;
+            }
+        }
+        if (end == xml.size())
+            return ListingParseStatus::Malformed;
+
+        if (closing) {
+            if (depth > 0)
+                --depth;
+        } else {
+            // A self-closing element still occupies the next nesting level.
+            if (depth >= limits.maxXmlNestingDepth)
+                return ListingParseStatus::ResourceLimitExceeded;
+            if (xml[end - 1] != '/')
+                ++depth;
+        }
+        position = end + 1;
+    }
+    return ListingParseStatus::Success;
+}
 
 const char *xmlLocalName(const char *name) {
     if (!name)
@@ -202,6 +287,15 @@ ListingParseStatus parseWebDavPropfindResponse(
     const ListingParserLimits &limits) {
     resources.clear();
     error.clear();
+    const ListingParseStatus budgetStatus = checkXmlBudget(xml, limits);
+    if (budgetStatus != ListingParseStatus::Success) {
+        error = budgetStatus == ListingParseStatus::ResourceLimitExceeded
+                    ? "WebDAV PROPFIND response exceeded the XML parsing "
+                      "safety limit."
+                    : "Could not parse WebDAV PROPFIND response (malformed "
+                      "XML).";
+        return budgetStatus;
+    }
     tinyxml2::XMLDocument document;
     const tinyxml2::XMLError parseError =
         document.Parse(xml.c_str(), xml.size());

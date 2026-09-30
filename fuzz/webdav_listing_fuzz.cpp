@@ -18,6 +18,9 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
     limits.maxEntries = 1'024;
     limits.maxNameBytes = 64 * 1'024;
     limits.maxXmlNestingDepth = 32;
+    limits.maxXmlBytes = 64 * 1'024;
+    limits.maxXmlNodes = 4'096;
+    limits.maxXmlAttributesPerElement = 16;
     (void)openscp::curlparser::parseWebDavPropfindResponse(
         options, payload, resources, error, limits);
     return 0;

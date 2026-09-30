@@ -242,6 +242,148 @@ OPENSCP_TEST(testWebDavRejectsExcessiveNestingAndMalformedXml, test) {
     test.check(resources.empty() && !error.empty(),
                "malformed WebDAV XML should clear output and explain failure");
 }
+
+OPENSCP_TEST(testWebDavRejectsNonResponseNodeFlood, test) {
+    std::string xml = "<multistatus>";
+    xml.reserve(2'000'100);
+    for (std::size_t index = 0; index < 500'000; ++index)
+        xml += "<x/>";
+    xml += "</multistatus>";
+    std::vector<openscp::curlparser::WebDavResource> resources{{}};
+    std::string error;
+
+    test.check(openscp::curlparser::parseWebDavPropfindResponse(
+                   webDavOptions(), xml, resources, error) ==
+                   ListingParseStatus::ResourceLimitExceeded,
+               "non-response nodes must be rejected by the XML budget");
+    test.check(resources.empty() &&
+                   error.find("safety limit") != std::string::npos,
+               "XML budget failures must clear results and explain rejection");
+}
+
+OPENSCP_TEST(testWebDavXmlBudgetExactBoundaries, test) {
+    const std::string xml = "<multistatus><response><href>/dav/file</href>"
+                            "</response></multistatus>";
+    std::vector<openscp::curlparser::WebDavResource> resources;
+    std::string error;
+    ListingParserLimits limits;
+    limits.maxXmlBytes = xml.size();
+    // Three opening tags, three closing tags, and one text segment.
+    limits.maxXmlNodes = 7;
+    limits.maxXmlNestingDepth = 3;
+    limits.maxXmlAttributesPerElement = 0;
+
+    test.check(openscp::curlparser::parseWebDavPropfindResponse(
+                   webDavOptions(), xml, resources, error, limits) ==
+                       ListingParseStatus::Success &&
+                   resources.size() == 1 && resources.front().path == "/file",
+               "XML exactly at every budget should preserve WebDAV results");
+
+    --limits.maxXmlBytes;
+    test.check(openscp::curlparser::parseWebDavPropfindResponse(
+                   webDavOptions(), xml, resources, error, limits) ==
+                   ListingParseStatus::ResourceLimitExceeded,
+               "XML bytes must be checked even for direct parser callers");
+    ++limits.maxXmlBytes;
+    --limits.maxXmlNodes;
+    test.check(openscp::curlparser::parseWebDavPropfindResponse(
+                   webDavOptions(), xml, resources, error, limits) ==
+                   ListingParseStatus::ResourceLimitExceeded,
+               "one work item above the XML budget must be rejected");
+    ++limits.maxXmlNodes;
+    --limits.maxXmlNestingDepth;
+    test.check(openscp::curlparser::parseWebDavPropfindResponse(
+                   webDavOptions(), xml, resources, error, limits) ==
+                   ListingParseStatus::ResourceLimitExceeded,
+               "XML depth must be checked before document construction");
+}
+
+OPENSCP_TEST(testWebDavXmlBudgetUnderstandsNonElementContent, test) {
+    const std::string xml =
+        "<?xml version=\"1.0\"?><!DOCTYPE multistatus>"
+        "<multistatus a=\"<x>= >\" b='<!-- > ='>\n"
+        "<!--<a><b>=--><![CDATA[<a><b>=>]]>"
+        "<response><href>/dav/file</href></response></multistatus>";
+    std::vector<openscp::curlparser::WebDavResource> resources;
+    std::string error;
+    ListingParserLimits limits;
+    limits.maxXmlNestingDepth = 3;
+    limits.maxXmlNodes = 14;
+    limits.maxXmlAttributesPerElement = 2;
+
+    test.check(openscp::curlparser::parseWebDavPropfindResponse(
+                   webDavOptions(), xml, resources, error, limits) ==
+                   ListingParseStatus::Success,
+               "quotes, comments and CDATA must not create phantom markup");
+    --limits.maxXmlNodes;
+    test.check(openscp::curlparser::parseWebDavPropfindResponse(
+                   webDavOptions(), xml, resources, error, limits) ==
+                   ListingParseStatus::ResourceLimitExceeded,
+               "all node types and attributes must consume the XML budget");
+    ++limits.maxXmlNodes;
+    --limits.maxXmlAttributesPerElement;
+    test.check(openscp::curlparser::parseWebDavPropfindResponse(
+                   webDavOptions(), xml, resources, error, limits) ==
+                   ListingParseStatus::ResourceLimitExceeded,
+               "attribute values must not hide excess attributes");
+}
+
+OPENSCP_TEST(testWebDavXmlBudgetCountsEachNonElementNode, test) {
+    std::vector<openscp::curlparser::WebDavResource> resources;
+    std::string error;
+    ListingParserLimits limits;
+    limits.maxXmlNodes = 8;
+    const std::string response = "<response><href>/dav/file</href></response>";
+    for (const std::string node :
+         {"<!-- ignored -->", "<![CDATA[text]]>", "<!extension>", "text<x/>"}) {
+        const std::string xml =
+            "<multistatus>" + node + node + response + "</multistatus>";
+        test.check(openscp::curlparser::parseWebDavPropfindResponse(
+                       webDavOptions(), xml, resources, error, limits) ==
+                       ListingParseStatus::ResourceLimitExceeded,
+                   "repeated non-element content must not bypass the budget");
+    }
+}
+
+OPENSCP_TEST(testWebDavXmlBudgetRejectsAttributeFloods, test) {
+    std::string xml = "<multistatus";
+    for (std::size_t index = 0;
+         index <= openscp::curlparser::kMaxWebDavXmlAttributesPerElement;
+         ++index)
+        xml += " a" + std::to_string(index) + "='value'";
+    xml += "><response><href>/dav/file</href></response></multistatus>";
+    std::vector<openscp::curlparser::WebDavResource> resources;
+    std::string error;
+
+    test.check(openscp::curlparser::parseWebDavPropfindResponse(
+                   webDavOptions(), xml, resources, error) ==
+                   ListingParseStatus::ResourceLimitExceeded,
+               "one element cannot cause unbounded attribute-name scans");
+}
+
+OPENSCP_TEST(testWebDavXmlPreflightLeavesValidationToTinyXml, test) {
+    std::vector<openscp::curlparser::WebDavResource> resources;
+    std::string error;
+    for (const std::string xml :
+         {"<multistatus><response></multistatus>", "<multistatus a='1' a='2'/>",
+          "<multistatus a='unfinished>", "<multistatus><!-- unfinished",
+          "<multistatus><![CDATA[text", "<?xml version='1.0'",
+          "<!DOCTYPE unfinished"}) {
+        resources.push_back({});
+        test.check(openscp::curlparser::parseWebDavPropfindResponse(
+                       webDavOptions(), xml, resources, error) ==
+                       ListingParseStatus::Malformed,
+                   "malformed XML must remain rejected without partial output");
+        test.check(resources.empty() && !error.empty(),
+                   "malformed XML must clear prior output and report an error");
+    }
+    const std::string xml = "<multistatus><response><href>/dav/file</href>"
+                            "</response></multistatus>";
+    test.check(openscp::curlparser::parseWebDavPropfindResponse(
+                   webDavOptions(), xml + std::string(1, '\0') + "<x/>",
+                   resources, error) == ListingParseStatus::Malformed,
+               "embedded null bytes must not silently truncate XML parsing");
+}
 #endif
 
 } // namespace
