@@ -202,7 +202,10 @@ bool performTextRequestOnce(CURL *curl, const SessionOptions &opt,
         headerList = curl_slist_append(headerList, h.c_str());
 
     curlcommon::TransferProgressContext cancelContext{
-        {}, {}, interrupted, false};
+        {},
+        [token = opt.connection_stop_token] { return token.stop_requested(); },
+        interrupted,
+        false};
     curlcommon::BoundedStringSink responseSink{&response.body};
     const bool configured =
         (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK) &&
@@ -428,6 +431,7 @@ bool CurlWebDavClient::connect(const SessionOptions &opt, std::string &err) {
         curl_easy_getinfo(curl, CURLINFO_HTTPAUTH_AVAIL, &authAvailable) ==
             CURLE_OK &&
         static_cast<unsigned long>(authAvailable) == CURLAUTH_BASIC;
+    normalized.connection_stop_token = {};
     state_->commitConnection(
         std::make_shared<const SessionOptions>(std::move(normalized)),
         std::move(newEasySession));

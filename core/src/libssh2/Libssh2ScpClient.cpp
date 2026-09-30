@@ -97,6 +97,7 @@ bool Libssh2ScpClient::connect(const SessionOptions &opt, std::string &err) {
     copy.protocol = Protocol::Scp;
     if (!delegate_.connectTransportOnly(copy, err))
         return false;
+    copy.connection_stop_token = {};
     sessionOptions_ = copy;
     return true;
 }

@@ -137,6 +137,32 @@ OPENSCP_TEST(testConcurrentHostKeyPromptsAreSerialized, test) {
                "the second serialized prompt should retain its decision");
 }
 
+OPENSCP_TEST(testHostKeyConnectionStopWithoutUiDispatch, test) {
+    openscpui::HostKeyPromptCoordinator coordinator;
+    std::stop_source cancellation;
+    std::promise<void> presented;
+    coordinator.setPresentPrompt(
+        [&](const HostPrompt &) { presented.set_value(); });
+    auto decision = std::async(std::launch::async, [&] {
+        return coordinator.requestDecision(prompt(QStringLiteral("closing")),
+                                           cancellation.get_token());
+    });
+    test.check(presented.get_future().wait_for(2s) == std::future_status::ready,
+               "shutdown fixture should queue a host-key presentation");
+    cancellation.request_stop();
+    const bool ready = decision.wait_for(500ms) == std::future_status::ready;
+    test.check(
+        ready,
+        "stopping a connection must wake a host-key wait without UI work");
+    if (!ready)
+        coordinator.cancel();
+    test.check(!decision.get() && !coordinator.hasPendingPrompt(),
+               "stopped host-key prompts must reject and clear pending state");
+    test.check(!coordinator.requestDecision(prompt(QStringLiteral("stale")),
+                                            cancellation.get_token()),
+               "a prompt arriving after cancellation must not wait or present");
+}
+
 OPENSCP_TEST(testSessionHealthLifecycleAndOverlappingProbes, test) {
     openscpui::SessionHealthMonitor monitor;
     quint64 nextJobId = 0;

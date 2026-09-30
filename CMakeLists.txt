@@ -466,6 +466,8 @@ add_library(openscp_ui_widgets STATIC
     ui/widgets/common/ToolbarKeyboardNavigation.cpp
     ui/widgets/dialogs/AboutDialog.hpp
     ui/widgets/dialogs/AboutDialog.cpp
+    ui/widgets/dialogs/AuthenticationInput.hpp
+    ui/widgets/dialogs/AuthenticationInput.cpp
     ui/widgets/dialogs/ConnectionDialog.hpp
     ui/widgets/dialogs/ConnectionDialog.cpp
     ui/widgets/dialogs/PermissionsDialog.hpp

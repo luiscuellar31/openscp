@@ -2,7 +2,9 @@
 #include "TestHarness.hpp"
 #include "app/MainWindow.hpp"
 #include "logic/common/AppSettings.hpp"
+#include "logic/connections/SessionController.hpp"
 #include "widgets/common/ToolbarKeyboardNavigation.hpp"
+#include "widgets/dialogs/AuthenticationInput.hpp"
 #include "widgets/dialogs/TransferQueueDialog.hpp"
 #include "widgets/files/DragAwareTreeView.hpp"
 #include "widgets/navigation/PathNavigationBar.hpp"
@@ -24,11 +26,14 @@
 #include <QSplitterHandle>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QThreadPool>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
 
+#include <future>
 #include <iostream>
+#include <memory>
 
 namespace {
 
@@ -146,6 +151,45 @@ OPENSCP_TEST(testUpdateMenuIsManualByDefault, test) {
              .value(openscpui::settingskeys::kUpdateAutomaticChecks)
              .toBool(),
         "turning off checks persists without requiring a network request");
+}
+
+OPENSCP_TEST(testCloseCancelsAuthenticationBeforeUiDispatch, test) {
+    auto window = std::make_unique<MainWindow>();
+    openscpui::SessionController *session = nullptr;
+    for (QObject *child : window->children()) {
+        if (auto *controller =
+                dynamic_cast<openscpui::SessionController *>(child))
+            session = controller;
+    }
+    test.check(session != nullptr,
+               "main window should own its session controller");
+    if (!session)
+        return;
+    auto canceled = std::make_shared<std::atomic<bool>>(false);
+    test.check(session->beginConnection(canceled),
+               "shutdown fixture should begin a connection");
+    const auto token = session->connectionStopToken();
+    std::promise<bool> result;
+    auto finished = result.get_future();
+    QThreadPool::globalInstance()->start(
+        [parent = window.get(), token, &result] {
+            QString answer;
+            result.set_value(openscpui::requestAuthenticationInput(
+                parent, token, QStringLiteral("Authentication"),
+                QStringLiteral("OTP"), QLineEdit::Password, answer));
+        });
+    test.check(finished.wait_for(std::chrono::milliseconds(100)) ==
+                   std::future_status::timeout,
+               "authentication should wait while the UI does not dispatch its "
+               "queued prompt");
+    window.reset(); // Cancels and joins the actual pool without pumping UI
+                    // events.
+    test.check(
+        finished.wait_for(std::chrono::milliseconds(500)) ==
+                std::future_status::ready &&
+            !finished.get() && canceled->load(),
+        "window destruction must cancel authentication and join its worker");
+    flushUiEvents();
 }
 
 OPENSCP_TEST(testMainWindowSplitterPreservesAnEvenPanelResize, test) {

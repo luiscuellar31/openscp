@@ -36,6 +36,9 @@ class SessionController final : public QObject {
     beginConnection(const std::shared_ptr<std::atomic<bool>> &cancelRequested);
     bool isConnecting() const { return connecting_; }
     bool requestConnectionCancellation();
+    std::stop_token connectionStopToken() const {
+        return connectionStopSource_.get_token();
+    }
     void finishConnection();
 
     quint64 beginDisconnect();
@@ -48,6 +51,7 @@ class SessionController final : public QObject {
     std::optional<openscp::ProtocolCapabilities> capabilities_;
     std::optional<openscp::SessionOptions> options_;
     std::shared_ptr<std::atomic<bool>> connectionCancelRequested_;
+    std::stop_source connectionStopSource_;
     bool connecting_ = false;
     bool disconnecting_ = false;
     quint64 disconnectSequence_ = 0;

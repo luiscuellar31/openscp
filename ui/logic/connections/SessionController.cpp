@@ -31,6 +31,7 @@ bool SessionController::beginConnection(
     if (connecting_ || disconnecting_ || !cancelRequested)
         return false;
     connectionCancelRequested_ = cancelRequested;
+    connectionStopSource_ = std::stop_source{};
     connectionCancelRequested_->store(false);
     connecting_ = true;
     return true;
@@ -40,6 +41,7 @@ bool SessionController::requestConnectionCancellation() {
     if (!connecting_ || !connectionCancelRequested_)
         return false;
     connectionCancelRequested_->store(true);
+    connectionStopSource_.request_stop();
     return true;
 }
 

@@ -8,6 +8,7 @@
 #include <functional>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 
 namespace openscpui {
 
@@ -25,7 +26,8 @@ class HostKeyPromptCoordinator final {
     using PresentPrompt = std::function<void(const Prompt &)>;
 
     void setPresentPrompt(PresentPrompt presenter);
-    [[nodiscard]] bool requestDecision(Prompt prompt);
+    [[nodiscard]] bool requestDecision(Prompt prompt,
+                                       std::stop_token stopToken = {});
     [[nodiscard]] bool resolve(bool accepted);
     void cancel();
 
@@ -34,7 +36,7 @@ class HostKeyPromptCoordinator final {
 
     private:
     mutable std::mutex mutex_;
-    std::condition_variable stateChanged_;
+    std::condition_variable_any stateChanged_;
     PresentPrompt presenter_;
     std::optional<Prompt> pending_;
     quint64 nextRequestId_ = 1;

@@ -40,13 +40,26 @@ std::unique_ptr<RemoteClient> CreateClientForProtocol(Protocol protocol) {
 std::unique_ptr<RemoteClient> CreateConnectedClient(const SessionOptions &opt,
                                                     std::string &err) {
     err.clear();
+    if (opt.connection_stop_token.stop_requested()) {
+        err = "Connection canceled by user";
+        return nullptr;
+    }
     auto client = CreateClientForProtocol(opt.protocol);
     if (!client) {
         err = std::string("Protocol not implemented: ") +
               protocolStorageName(opt.protocol);
         return nullptr;
     }
-    if (!client->connect(opt, err))
+    // Destroy the registration before the client, including failure paths.
+    std::stop_callback interruptConnection(
+        opt.connection_stop_token,
+        [pending = client.get()] { pending->interrupt(); });
+    const bool connected = client->connect(opt, err);
+    if (opt.connection_stop_token.stop_requested()) {
+        err = "Connection canceled by user";
+        return nullptr;
+    }
+    if (!connected)
         return nullptr;
     return client;
 }

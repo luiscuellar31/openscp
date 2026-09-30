@@ -33,6 +33,8 @@ set(OPENSCP_CORE_SRCS
     src/libssh2/detail/Libssh2TransferIntegrity.hpp
     src/libssh2/detail/UniqueSftpHandle.cpp
     src/libssh2/detail/UniqueSftpHandle.hpp
+    src/libssh2/detail/TcpConnect.hpp
+    src/libssh2/detail/TcpConnect.cpp
     src/libssh2/Libssh2ScpClient.cpp   # SCP backend module
     src/libssh2/Libssh2ScpClient.hpp
     src/libssh2/Libssh2SftpClient.cpp   # real implementation

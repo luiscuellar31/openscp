@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,8 @@ using KbdIntPromptsCB = std::function<KbdIntPromptResult(
     std::vector<std::string> &responses)>;
 
 struct SessionOptions {
+    // Runtime-only cancellation for this connection attempt; never persisted.
+    std::stop_token connection_stop_token;
     Protocol protocol = Protocol::Sftp;
     ScpTransferMode scp_transfer_mode = ScpTransferMode::Auto;
     std::string host;

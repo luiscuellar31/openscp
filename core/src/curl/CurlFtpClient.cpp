@@ -628,7 +628,10 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
         return false;
     }
     curlcommon::TransferProgressContext cancelContext{
-        {}, {}, operation.interrupted(), false};
+        {},
+        [token = opt.connection_stop_token] { return token.stop_requested(); },
+        operation.interrupted(),
+        false};
     if (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) != CURLE_OK ||
         curl_easy_setopt(curl, CURLOPT_NOBODY, 1L) != CURLE_OK ||
         curl_easy_setopt(curl, CURLOPT_QUOTE, probeCommands) != CURLE_OK ||
@@ -654,7 +657,8 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
     long responseCode = 0;
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
     curl_slist_free_all(probeCommands);
-    if (operation.interrupted()->load()) {
+    if (operation.interrupted()->load() ||
+        opt.connection_stop_token.stop_requested()) {
         err = "Interrupted";
         setLastOperationError(
             RemoteErrorKind::Canceled, err,
@@ -682,6 +686,7 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
 
     mlstRejected_ = false;
     mlsdRejected_ = false;
+    normalized.connection_stop_token = {};
     state_->commitConnection(
         std::make_shared<const SessionOptions>(std::move(normalized)),
         std::move(newEasySession), std::move(commandRoot));
