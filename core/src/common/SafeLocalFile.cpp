@@ -254,12 +254,14 @@ bool removeLocalFileIfUnchanged(const std::string &path,
 #ifdef _WIN32
     (void)path;
     (void)identity;
+    errno = ENOTSUP;
     error = "Safe local source removal is unavailable on Windows.";
     return false;
 #else
     const std::filesystem::path requested(path);
     const auto name = requested.filename();
     if (name.empty() || name == "." || name == "..") {
+        errno = EINVAL;
         error = "Local source path does not identify a file.";
         return false;
     }
@@ -280,17 +282,18 @@ bool removeLocalFileIfUnchanged(const std::string &path,
     }
     if (!found || current != identity) {
         ::close(parent);
-        if (found)
+        if (found) {
+            errno = ESTALE;
             error = "Local source changed after transfer; it was not removed.";
+        }
         return false;
     }
-    const int result = ::unlinkat(parent, name.c_str(), 0);
-    const int savedError = errno;
     ::close(parent);
-    if (result == 0 || savedError == ENOENT)
-        return true;
-    errno = savedError;
-    error = ioError("Could not safely remove local source");
+    // POSIX has no unlink-if-inode-matches operation. Another process can
+    // replace this name after inspection, even with the parent held open.
+    // Preserve the entry rather than risk deleting an untransferred file.
+    errno = ENOTSUP;
+    error = "Automatic local source removal requires manual review.";
     return false;
 #endif
 }

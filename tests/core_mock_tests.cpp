@@ -403,6 +403,45 @@ OPENSCP_TEST(test_safe_local_regular_write_modes, t) {
     fs::remove_all(partial.parent_path(), ec);
 }
 
+OPENSCP_TEST(test_safe_local_source_cleanup_preserves_data, t) {
+#ifndef _WIN32
+    const fs::path source = makeTempFilePath("move-source");
+    std::ofstream(source, std::ios::binary) << "uploaded-original";
+    openscp::localfiles::LocalFileIdentity identity;
+    std::string error;
+    t.check(openscp::localfiles::localFileIdentity(source.string(), identity,
+                                                   error),
+            "move cleanup should capture the uploaded source identity");
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        t.check(
+            !openscp::localfiles::removeLocalFileIfUnchanged(source.string(),
+                                                             identity, error) &&
+                errno == ENOTSUP && !error.empty(),
+            "an unchanged source must require manual removal on every retry");
+        std::string contents;
+        t.check(readTextFile(source, contents) &&
+                    contents == "uploaded-original",
+                "cleanup must not unlink or modify even an unchanged source");
+    }
+    std::error_code ec;
+    fs::rename(source, source.string() + ".original", ec);
+    t.check(!ec, "replacement fixture should preserve the original inode");
+    std::ofstream(source, std::ios::binary) << "replacement";
+    t.check(!openscp::localfiles::removeLocalFileIfUnchanged(source.string(),
+                                                             identity, error),
+            "a replacement source must not be accepted for cleanup");
+    std::string contents;
+    t.check(readTextFile(source, contents) && contents == "replacement",
+            "a replacement entry must remain intact");
+    fs::remove(source, ec);
+    t.check(openscp::localfiles::removeLocalFileIfUnchanged(source.string(),
+                                                            identity, error) &&
+                error.empty(),
+            "cleanup should finish once the source has been removed manually");
+    fs::remove_all(source.parent_path(), ec);
+#endif
+}
+
 OPENSCP_TEST(test_safe_local_parent_symlinks, t) {
 #ifndef _WIN32
     const fs::path base = makeTempFilePath("parent-symlink").parent_path();

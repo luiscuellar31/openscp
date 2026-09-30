@@ -4950,12 +4950,17 @@ Ziel: %3</translation>
         <translation>Die gespeicherte Übertragungswarteschlange wurde nicht wiederhergestellt, weil die aktuelle Warteschlange nicht leer ist.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="236"/>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="243"/>
         <source>The completed upload cannot safely remove its local source after a restart. Review the source manually.</source>
         <translation>Der Upload ist abgeschlossen, aber die lokale Quelldatei kann nach einem Neustart nicht sicher entfernt werden. Prüfen Sie die Datei manuell.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="249"/>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="252"/>
+        <source>The upload completed, but automatic local source removal cannot be done safely. Review the source and remove it manually, then retry the task to finish cleanup.</source>
+        <translation>Der Upload ist abgeschlossen, aber die lokale Quelldatei kann nicht sicher automatisch entfernt werden. Prüfen Sie die Quelldatei und entfernen Sie sie manuell. Wiederholen Sie anschließend die Aufgabe, um die Bereinigung abzuschließen.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="264"/>
         <source>The local source changed after upload and was not removed. Review it manually.</source>
         <translation>Die lokale Quelldatei wurde nach dem Upload verändert und nicht entfernt. Prüfen Sie die Datei manuell.</translation>
     </message>

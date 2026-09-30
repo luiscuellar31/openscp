@@ -144,6 +144,15 @@ Unicode también se ejecutan en serie, incluso en volúmenes que los distinguen.
 Al eliminar una tarea pendiente, se conservan los datos parciales si otra tarea
 activa está usando esa ruta.
 
+Al mover un archivo local al servidor, OpenSCP completa la subida y conserva el
+origen local con una advertencia. El borrado automático no puede excluir que
+otro proceso sustituya el origen después de comprobarlo. Revisa la subida y el
+archivo local antes de borrarlo manualmente; después, reintenta la tarea para
+completar la limpieza sin repetir la subida. Tras reiniciar, la limpieza
+requiere revisión manual porque ya no se dispone de la identidad original del
+archivo. La limpieza del origen remoto al mover archivos mediante descarga
+mantiene su comportamiento.
+
 ## Navegación por rutas
 
 Cada panel presenta la ubicación actual como un campo de ruta convencional. Haz

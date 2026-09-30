@@ -4950,12 +4950,17 @@ Destino: %3</translation>
         <translation>Ignorado porque uma tarefa prévia não foi concluída corretamente.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="236"/>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="243"/>
         <source>The completed upload cannot safely remove its local source after a restart. Review the source manually.</source>
         <translation>O envio foi concluído, mas o arquivo de origem local não pode ser removido com segurança após uma reinicialização. Verifique o arquivo manualmente.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="249"/>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="252"/>
+        <source>The upload completed, but automatic local source removal cannot be done safely. Review the source and remove it manually, then retry the task to finish cleanup.</source>
+        <translation>O envio foi concluído, mas o arquivo de origem local não pode ser removido automaticamente com segurança. Verifique a origem e remova-a manualmente; depois, tente a tarefa novamente para concluir a limpeza.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="264"/>
         <source>The local source changed after upload and was not removed. Review it manually.</source>
         <translation>O arquivo de origem local mudou após o envio e não foi removido. Verifique o arquivo manualmente.</translation>
     </message>
