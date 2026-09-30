@@ -38,6 +38,12 @@
 #include <type_traits>
 #include <vector>
 
+#ifndef _WIN32
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 namespace {
 
 namespace fs = std::filesystem;
@@ -311,6 +317,90 @@ OPENSCP_TEST(test_safe_local_partial_files, t) {
             "buffered durability should publish complete contents");
     fs::remove(target, ec);
     fs::remove_all(target.parent_path(), ec);
+}
+
+OPENSCP_TEST(test_safe_local_partial_fifos, t) {
+#ifndef _WIN32
+    const fs::path partial = makeTempFilePath("fifo").string() + ".part";
+    t.check(::mkfifo(partial.c_str(), 0600) == 0,
+            "partial FIFO fixture should be created");
+    if (!fs::is_fifo(partial))
+        return;
+
+    // A regression must fail instead of hanging the test worker indefinitely.
+    struct AlarmGuard {
+        ~AlarmGuard() { ::alarm(0); }
+    } alarmGuard;
+    ::alarm(5);
+    for (const auto mode : {openscp::localfiles::WriteMode::Truncate,
+                            openscp::localfiles::WriteMode::Append}) {
+        std::string error;
+        openscp::UniqueFile file(openscp::localfiles::openRegularFileForWrite(
+            partial.string(), mode, error));
+        t.check(!file && !error.empty(),
+                "a partial FIFO without a reader must fail without blocking");
+
+        // With a reader, open succeeds; descriptor type validation must reject
+        // the FIFO before it can be chmod'ed, truncated, or handed to stdio.
+        const int reader =
+            ::open(partial.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        t.check(reader >= 0, "a nonblocking FIFO reader should open");
+        if (reader < 0)
+            continue;
+        file.reset(openscp::localfiles::openRegularFileForWrite(
+            partial.string(), mode, error));
+        t.check(!file && errno == EINVAL && !error.empty(),
+                "a partial FIFO with a reader must fail type validation");
+        ::close(reader);
+        t.check(fs::is_fifo(partial),
+                "rejecting a partial FIFO must leave the entry intact");
+    }
+    std::error_code ec;
+    fs::remove_all(partial.parent_path(), ec);
+#endif
+}
+
+OPENSCP_TEST(test_safe_local_regular_write_modes, t) {
+    const fs::path partial = makeTempFilePath("regular-modes");
+    for (const auto mode : {openscp::localfiles::WriteMode::Truncate,
+                            openscp::localfiles::WriteMode::Append}) {
+        {
+            std::ofstream output(partial, std::ios::binary | std::ios::trunc);
+            output << "original";
+        }
+        std::string error;
+        openscp::UniqueFile file(openscp::localfiles::openRegularFileForWrite(
+            partial.string(), mode, error));
+        t.check(static_cast<bool>(file),
+                "regular partial files must open in both write modes");
+        if (!file)
+            continue;
+#ifndef _WIN32
+        const int descriptor = ::fileno(file.get());
+        const int flags = ::fcntl(descriptor, F_GETFL);
+        t.check(flags >= 0 && (flags & O_NONBLOCK) == 0,
+                "validated regular file streams must use blocking mode");
+        t.check(flags >= 0 &&
+                    ((flags & O_APPEND) != 0) ==
+                        (mode == openscp::localfiles::WriteMode::Append),
+                "blocking-mode restoration must preserve append semantics");
+        const int descriptorFlags = ::fcntl(descriptor, F_GETFD);
+        t.check(descriptorFlags >= 0 && (descriptorFlags & FD_CLOEXEC) != 0,
+                "validated regular files must remain close-on-exec");
+#endif
+        t.check(std::fwrite("new", 1, 3, file.get()) == 3 &&
+                    openscp::localfiles::flushAndSync(file.get(), error),
+                "regular partial files must remain writable and syncable");
+        file.reset();
+        std::string contents;
+        const std::string expected =
+            mode == openscp::localfiles::WriteMode::Append ? "originalnew"
+                                                           : "new";
+        t.check(readTextFile(partial, contents) && contents == expected,
+                "truncate and resume must preserve their existing behavior");
+    }
+    std::error_code ec;
+    fs::remove_all(partial.parent_path(), ec);
 }
 
 OPENSCP_TEST(test_safe_local_parent_symlinks, t) {
