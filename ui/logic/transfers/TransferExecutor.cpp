@@ -7,6 +7,7 @@
 #include <QDateTime>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <limits>
 #include <thread>
@@ -230,6 +231,14 @@ bool TransferExecutor::runPostAction(
     if (task.postAction != TransferPostAction::DeleteSource)
         return true;
     if (task.type == TransferTask::Type::Upload) {
+        // This helper never unlinks an existing entry. An absent source can
+        // finish manual cleanup even after its process-local identity is lost.
+        if (openscp::localfiles::removeLocalFileIfUnchanged(
+                task.src.toStdString(),
+                task.localSourceIdentity.value_or(
+                    openscp::localfiles::LocalFileIdentity{}),
+                error))
+            return true;
         if (!task.localSourceIdentity) {
             error = QCoreApplication::translate(
                         "TransferManager",
@@ -239,9 +248,17 @@ bool TransferExecutor::runPostAction(
                         .toStdString();
             return false;
         }
-        if (openscp::localfiles::removeLocalFileIfUnchanged(
-                task.src.toStdString(), *task.localSourceIdentity, error))
-            return true;
+        if (errno == ENOTSUP) {
+            error = QCoreApplication::translate(
+                        "TransferManager",
+                        "The upload completed, but automatic local source "
+                        "removal cannot be done safely. Review the source and "
+                        "remove it manually, then retry the task to finish "
+                        "cleanup.")
+                        .toUtf8()
+                        .toStdString();
+            return false;
+        }
         if (error ==
             "Local source changed after transfer; it was not removed.") {
             error = QCoreApplication::translate(

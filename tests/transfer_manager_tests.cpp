@@ -1464,6 +1464,7 @@ OPENSCP_TEST(testMoveDeleteSourcePhasePersistsWithoutRetransfer, test) {
 
 #ifndef _WIN32
 struct SourceUploadProbe {
+    std::atomic_int uploads{0};
     std::mutex mutex;
     std::condition_variable changed;
     bool holdMove = false;
@@ -1485,6 +1486,7 @@ class SourceUploadClient final : public openscp::MockSftpClient {
              std::string &err,
              std::function<void(std::size_t, std::size_t)> progress,
              std::function<bool()>, bool) override {
+        ++probe_->uploads;
         QFile input(QString::fromStdString(local));
         if (!input.open(QIODevice::ReadOnly)) {
             err = "Could not read local source";
@@ -1591,6 +1593,10 @@ OPENSCP_TEST(testMoveCleanupWithoutIdentityPreservesSource, test) {
                    error.find("restart") != std::string::npos &&
                    QFileInfo::exists(source),
                "cleanup without a process-local identity must fail closed");
+    test.check(QFile::remove(source) &&
+                   TransferExecutor::runPostAction(restored, nullptr, error) &&
+                   error.empty(),
+               "restored cleanup should finish only after manual removal");
 }
 
 OPENSCP_TEST(testMoveCleanupWaitsForQueuedSourceReader, test) {
@@ -1626,15 +1632,15 @@ OPENSCP_TEST(testMoveCleanupWaitsForQueuedSourceReader, test) {
     }
     probe->changed.notify_all();
     test.check(waitForStatus(manager, copy, TransferTask::Status::Done) &&
-                   waitForStatus(manager, move, TransferTask::Status::Done),
-               "copy should read the shared source before move cleanup");
+                   waitForStatus(manager, move, TransferTask::Status::Warning),
+               "copy should read the shared source before manual move cleanup");
     {
         std::lock_guard<std::mutex> lock(probe->mutex);
         test.check(probe->uploaded["/home/demo/copy"] == "original",
                    "queued copy should upload the original source bytes");
     }
-    test.check(!QFileInfo::exists(source),
-               "move should remove its source after the queued copy finishes");
+    test.check(QFileInfo::exists(source),
+               "move must preserve its source after the queued copy finishes");
 }
 
 OPENSCP_TEST(testMoveCleanupWaitsForRunningSourceReader, test) {
@@ -1675,9 +1681,11 @@ OPENSCP_TEST(testMoveCleanupWaitsForRunningSourceReader, test) {
         probe->releaseCopy = true;
     }
     probe->changed.notify_all();
-    test.check(waitForStatus(manager, copy, TransferTask::Status::Done) &&
-                   waitForStatus(manager, move, TransferTask::Status::Done),
-               "move should finish cleanup after the active copy completes");
+    test.check(
+        waitForStatus(manager, copy, TransferTask::Status::Done) &&
+            waitForStatus(manager, move, TransferTask::Status::Warning) &&
+            QFileInfo::exists(source),
+        "move should require manual cleanup after the active copy completes");
 }
 
 OPENSCP_TEST(testMoveCleanupDoesNotWaitForItsDependentTask, test) {
@@ -1703,10 +1711,51 @@ OPENSCP_TEST(testMoveCleanupDoesNotWaitForItsDependentTask, test) {
         source, QStringLiteral("/home/demo/copy"), dependent);
     configureManager(manager, baseClient, testOptions());
 
-    test.check(waitForStatus(manager, move, TransferTask::Status::Done),
+    test.check(waitForStatus(manager, move, TransferTask::Status::Warning),
                "move cleanup must not wait for a task depending on that move");
-    test.check(waitForStatus(manager, copy, TransferTask::Status::Error),
-               "dependent copy should report that its source was moved");
+    test.check(waitForStatus(manager, copy, TransferTask::Status::Skipped) &&
+                   QFileInfo::exists(source),
+               "dependent work must wait for successful cleanup without "
+               "deleting the source");
+}
+
+OPENSCP_TEST(testMoveUploadManualCleanupDoesNotRetransfer, test) {
+    QTemporaryDir root;
+    const QString source = root.filePath("source.txt");
+    QFile initial(source);
+    test.check(initial.open(QIODevice::WriteOnly) &&
+                   initial.write("original") == 8,
+               "manual cleanup fixture should create the local source");
+    initial.close();
+    auto probe = std::make_shared<SourceUploadProbe>();
+    SourceUploadClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    configureManager(manager, baseClient, testOptions());
+    auto batch = testBatchOptions();
+    batch.operation = TransferOperation::Move;
+    const quint64 move =
+        manager.enqueueUpload(source, QStringLiteral("/home/demo/move"), batch);
+    test.check(
+        waitForStatus(manager, move, TransferTask::Status::Warning) &&
+            QFileInfo::exists(source),
+        "completed move uploads must retain existing local sources for review");
+    const auto pending = manager.taskSnapshot(move);
+    test.check(
+        pending && pending->phase == TransferPhase::DeleteSource &&
+            pending->error.contains(QStringLiteral("manually")),
+        "manual cleanup must retain the copy result and explain the warning");
+    test.check(QFile::remove(source),
+               "manual cleanup fixture should remove the reviewed source");
+    manager.retryTask(move);
+    test.check(waitForStatus(manager, move, TransferTask::Status::Done),
+               "retry after manual removal should complete the existing "
+               "cleanup phase");
+    std::lock_guard lock(probe->mutex);
+    test.check(
+        probe->uploaded["/home/demo/move"] == "original" &&
+            probe->uploads.load() == 1,
+        "cleanup retry must preserve the upload without transferring again");
 }
 #endif
 

@@ -140,10 +140,13 @@ names differing only in case or Unicode normalization also run sequentially,
 even on case-sensitive volumes. Removing a queued task leaves partial data
 intact when another active task is using that path.
 
-For a local move upload, OpenSCP waits for queued tasks that need the same
-source file, then checks that the source has not changed before removing it. If
-the source changed or the app restarted before cleanup, the task shows a warning
-and leaves cleanup for manual review.
+For a local move upload, OpenSCP uploads the file and preserves the local
+source with a warning. Automatic removal cannot safely exclude another process
+replacing the source after verification. Review the completed upload and the
+local source before removing it manually, then retry the task to finish
+cleanup without uploading again. After a restart, cleanup requires manual
+review because the original file identity is no longer available. Remote
+source cleanup for move downloads is unchanged.
 
 Mirror proposes deletions only where the source scan verified that items are
 absent. Skipped links, unreadable folders, and depth limits keep destination

@@ -136,8 +136,11 @@ for a reader before type validation. They check the opened descriptor's type,
 ownership, and link count, then restore blocking mode before modifying the
 file or creating its stdio stream; append and close-on-exec flags are retained.
 Upload moves also use it to capture local file identity before transfer and
-check that identity before source cleanup. The identity is process-local; a
-restored cleanup without it requires manual review.
+inspect the source during cleanup. Existing local sources are preserved:
+POSIX provides no atomic identity-conditional unlink. The completed upload
+retains its `DeleteSource` phase with a warning for manual removal; retrying
+after removal finishes cleanup without uploading again. The identity is
+process-local; a restored cleanup without it requires manual review.
 `SyncCoordinator` resolves the selected local root before scanning and queuing
 paths, so a root reached through a system link keeps one physical location.
 
