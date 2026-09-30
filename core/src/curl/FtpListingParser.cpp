@@ -22,10 +22,11 @@ std::string trimAsciiLeft(std::string value) {
     const auto isWhitespace = [](unsigned char character) {
         return std::isspace(character) != 0;
     };
-    while (!value.empty() &&
-           isWhitespace(static_cast<unsigned char>(value.front()))) {
-        value.erase(value.begin());
-    }
+    std::size_t first = 0;
+    while (first < value.size() &&
+           isWhitespace(static_cast<unsigned char>(value[first])))
+        ++first;
+    value.erase(0, first);
     return value;
 }
 
