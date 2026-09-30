@@ -115,6 +115,11 @@ openscp_add_test(openscp_connection_dialog_tests
     SOURCES connection_dialog_tests.cpp
     LINK_LIBRARIES openscp_ui_widgets
 )
+openscp_add_test(openscp_authentication_input_tests
+    SOURCES authentication_input_tests.cpp
+    LINK_LIBRARIES openscp_ui_widgets
+)
+set_tests_properties(openscp_authentication_input_tests PROPERTIES TIMEOUT 30)
 openscp_add_test(openscp_accessibility_widget_tests
     SOURCES accessibility_widget_tests.cpp
     LINK_LIBRARIES openscp_ui_widgets
@@ -131,10 +136,12 @@ openscp_add_test(openscp_main_window_navigation_tests
     SOURCES main_window_navigation_tests.cpp
     LINK_LIBRARIES openscp_main_window
 )
+set_tests_properties(openscp_main_window_navigation_tests PROPERTIES TIMEOUT 60)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set_tests_properties(
         openscp_site_manager_dialog_tests
         openscp_connection_dialog_tests
+        openscp_authentication_input_tests
         openscp_accessibility_widget_tests
         openscp_transfer_queue_dialog_tests
         openscp_sync_dialog_tests

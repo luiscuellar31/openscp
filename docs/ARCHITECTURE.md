@@ -105,6 +105,25 @@ Models store results; they do not fetch them. Dialogs collect input; they do not
 call a remote client. Host-key prompts, health checks, and connection timing are
 kept separate from blocking network operations.
 
+Each initial connection has a runtime-only stop token owned by
+`SessionController`. `ClientFactory` interrupts the pending client when it is
+stopped and unregisters that callback before releasing the client. SSH also
+registers interruption for direct backend connections, publishes its socket
+under the state mutex before proxy negotiation, and uses nonblocking TCP
+connects with a shared 20-second deadline across resolved addresses. The
+platform's synchronous DNS resolver remains outside that TCP deadline.
+libssh2's blocking handshake/authentication timeout is set explicitly.
+
+`AuthenticationInput` opens a window-modal input dialog without a nested event loop and
+waits on shared reply state with the connection stop token. Pending and visible
+prompts can be canceled without the worker requiring UI event dispatch; a
+visible dialog closes on cancellation. Replies use `SecureString` until copied
+to the existing authentication callback. Host-key decisions use the same stop
+token, including requests arriving after cancellation. The main window cancels
+its connection before joining workers; queued connection results retain their
+client ownership until delivered or discarded and recheck cancellation before
+establishing a session.
+
 ## Transfers and synchronization
 
 `TransferManager` is the entry point for the transfer queue. It coordinates

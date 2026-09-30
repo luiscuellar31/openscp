@@ -8,6 +8,7 @@
 #include "libssh2/detail/Libssh2ErrorClassifier.hpp"
 #include "libssh2/detail/Libssh2InputSafety.hpp"
 #include "libssh2/detail/Libssh2TransferIntegrity.hpp"
+#include "libssh2/detail/TcpConnect.hpp"
 #include "libssh2/detail/UniqueSftpHandle.hpp"
 #include "mock/MockSftpClient.hpp"
 #include "openscp/ClientFactory.hpp"
@@ -30,6 +31,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <iterator>
 #include <optional>
@@ -39,7 +41,10 @@
 #include <vector>
 
 #ifndef _WIN32
+#include <arpa/inet.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -58,6 +63,118 @@ openscp::SessionOptions validOptions() {
 static_assert(std::is_same_v<decltype(openscp::SessionOptions{}.password),
                              std::optional<openscp::SecureString>>,
               "SessionOptions passwords must use SecureString storage");
+
+OPENSCP_TEST(test_connection_cancel_before_creation, t) {
+    std::stop_source cancellation;
+    cancellation.request_stop();
+    auto options = validOptions();
+    options.connection_stop_token = cancellation.get_token();
+    std::string error;
+    t.check(!openscp::CreateConnectedClient(options, error) &&
+                error == "Connection canceled by user",
+            "a stopped connection must not resolve or create a backend");
+}
+
+#ifndef _WIN32
+OPENSCP_TEST(test_tcp_wait_deadline_and_cancellation, t) {
+    int pair[2] = {-1, -1};
+    t.check(::socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0,
+            "TCP wait fixture should create socket descriptors");
+    if (pair[0] < 0)
+        return;
+    const int flags = ::fcntl(pair[0], F_GETFL, 0);
+    t.check(::fcntl(pair[0], F_SETFL, flags | O_NONBLOCK) == 0,
+            "wait fixture should use a nonblocking descriptor");
+    const std::array<char, 4096> bytes{};
+    while (::write(pair[0], bytes.data(), bytes.size()) > 0) {
+    }
+    t.check(errno == EAGAIN || errno == EWOULDBLOCK,
+            "filled send buffer should withhold write readiness");
+    std::string error;
+    const auto started = std::chrono::steady_clock::now();
+    t.check(!openscp::libssh2detail::waitForTcpConnection(
+                pair[0], started + std::chrono::milliseconds(40), {}, error) &&
+                errno == ETIMEDOUT,
+            "a non-ready socket must respect the shared TCP deadline");
+    std::stop_source cancellation;
+    auto waiting = std::async(std::launch::async, [&] {
+        return openscp::libssh2detail::waitForTcpConnection(
+            pair[0], std::chrono::steady_clock::now() + std::chrono::seconds(2),
+            cancellation.get_token(), error);
+    });
+    t.check(waiting.wait_for(std::chrono::milliseconds(20)) ==
+                std::future_status::timeout,
+            "the connection fixture should remain pending before cancellation");
+    cancellation.request_stop();
+    t.check(waiting.wait_for(std::chrono::milliseconds(500)) ==
+                    std::future_status::ready &&
+                !waiting.get() && error == "Connection canceled by user",
+            "pending TCP cancellation must finish without waiting for timeout");
+    ::close(pair[0]);
+    ::close(pair[1]);
+}
+
+OPENSCP_TEST(test_connection_cancel_while_peer_is_silent, t) {
+    std::vector<openscp::Protocol> protocols{openscp::Protocol::Sftp,
+                                             openscp::Protocol::Scp};
+#if OPENSCP_HAS_CURL_FTP
+    protocols.push_back(openscp::Protocol::Ftp);
+#endif
+#if OPENSCP_HAS_CURL_WEBDAV
+    protocols.push_back(openscp::Protocol::WebDav);
+#endif
+    for (const auto protocol : protocols) {
+        const int listener = ::socket(AF_INET, SOCK_STREAM, 0);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        const bool listening =
+            listener >= 0 &&
+            ::bind(listener, reinterpret_cast<sockaddr *>(&address),
+                   sizeof(address)) == 0 &&
+            ::listen(listener, 1) == 0;
+        t.check(listening, "connection fixture should listen on loopback");
+        if (!listening) {
+            if (listener >= 0)
+                ::close(listener);
+            continue;
+        }
+        socklen_t length = sizeof(address);
+        t.check(::getsockname(listener, reinterpret_cast<sockaddr *>(&address),
+                              &length) == 0,
+                "connection fixture should obtain its allocated port");
+        auto options = validOptions();
+        options.host = "127.0.0.1";
+        options.port = ntohs(address.sin_port);
+        options.protocol = protocol;
+        options.webdav_scheme = openscp::WebDavScheme::Http;
+        options.known_hosts_policy = openscp::KnownHostsPolicy::Off;
+        std::stop_source cancellation;
+        options.connection_stop_token = cancellation.get_token();
+        std::string error;
+        auto connecting = std::async(std::launch::async, [&] {
+            return openscp::CreateConnectedClient(options, error);
+        });
+        pollfd ready{listener, POLLIN, 0};
+        const bool accepted = ::poll(&ready, 1, 2000) > 0;
+        t.check(accepted, "the real backend should reach the silent TCP peer");
+        const int peer = accepted ? ::accept(listener, nullptr, nullptr) : -1;
+        cancellation.request_stop();
+        const bool stopped =
+            connecting.wait_for(std::chrono::milliseconds(1500)) ==
+            std::future_status::ready;
+        t.check(stopped,
+                "canceling connection creation must interrupt silent peer I/O");
+        if (peer >= 0) {
+            ::shutdown(peer, SHUT_RDWR);
+            ::close(peer);
+        }
+        ::close(listener);
+        t.check(!connecting.get() && error == "Connection canceled by user",
+                "canceled connection creation must not return a live client");
+    }
+}
+#endif
 
 fs::path makeTempFilePath(const std::string &tag) {
     const auto now =

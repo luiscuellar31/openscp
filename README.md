@@ -125,6 +125,11 @@ troubleshooting, see [Building OpenSCP](docs/BUILDING.md).
 - One-way synchronization with preview, filters, and optional checksum checks.
 - Spanish, English, Portuguese, French, and German interfaces.
 
+Canceling a connection or closing the window also cancels pending SSH
+authentication and fingerprint prompts. SSH TCP connection attempts share a
+20-second limit across resolved addresses. Name resolution uses the system
+resolver and may take longer independently of that TCP limit.
+
 Local downloads reject symbolic links in user-writable destination parent
 folders. Synchronization resolves a linked local root to its physical path and
 rejects linked folders below that root. Choose the physical destination folder

@@ -9,18 +9,20 @@ void HostKeyPromptCoordinator::setPresentPrompt(PresentPrompt presenter) {
     presenter_ = std::move(presenter);
 }
 
-bool HostKeyPromptCoordinator::requestDecision(Prompt prompt) {
+bool HostKeyPromptCoordinator::requestDecision(Prompt prompt,
+                                               std::stop_token stopToken) {
     PresentPrompt presenter;
     Prompt promptToPresent;
     std::uint64_t cancellationGeneration = 0;
     {
         std::unique_lock<std::mutex> lock(mutex_);
         cancellationGeneration = cancellationGeneration_;
-        stateChanged_.wait(lock, [&] {
+        stateChanged_.wait(lock, stopToken, [&] {
             return !active_ ||
                    cancellationGeneration_ != cancellationGeneration;
         });
-        if (cancellationGeneration_ != cancellationGeneration)
+        if (stopToken.stop_requested() ||
+            cancellationGeneration_ != cancellationGeneration)
             return false;
 
         active_ = true;
@@ -41,11 +43,11 @@ bool HostKeyPromptCoordinator::requestDecision(Prompt prompt) {
     bool accepted = false;
     {
         std::unique_lock<std::mutex> lock(mutex_);
-        stateChanged_.wait(lock, [&] {
+        stateChanged_.wait(lock, stopToken, [&] {
             return decided_ ||
                    cancellationGeneration_ != cancellationGeneration;
         });
-        accepted = decided_ && accepted_ &&
+        accepted = !stopToken.stop_requested() && decided_ && accepted_ &&
                    cancellationGeneration_ == cancellationGeneration;
         pending_.reset();
         active_ = false;

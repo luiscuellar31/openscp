@@ -8,6 +8,7 @@
 #include "detail/Libssh2ErrorClassifier.hpp"
 #include "detail/Libssh2InputSafety.hpp"
 #include "detail/Libssh2TransferIntegrity.hpp"
+#include "detail/TcpConnect.hpp"
 #include "detail/UniqueSftpHandle.hpp"
 #include "openscp/RuntimeLogging.hpp"
 #include "openscp/SafeLocalFile.hpp"
@@ -1644,8 +1645,12 @@ bool socket_recv_until(int sock, const std::string &delimiter,
 }
 
 bool connect_tcp_endpoint(const std::string &host, uint16_t port, int &sockOut,
-                          std::string &err) {
+                          std::string &err, std::stop_token stopToken) {
     sockOut = -1;
+    if (stopToken.stop_requested()) {
+        err = "Connection canceled by user";
+        return false;
+    }
     struct addrinfo hints {};
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
@@ -1662,22 +1667,54 @@ bool connect_tcp_endpoint(const std::string &host, uint16_t port, int &sockOut,
     }
 
     std::string lastConnectErr;
+    // Resolution uses the platform resolver; the TCP budget starts afterward.
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(20);
     // Try all resolved addresses (IPv4/IPv6) until one succeeds.
     for (auto rp = res; rp != nullptr; rp = rp->ai_next) {
+        if (stopToken.stop_requested() ||
+            std::chrono::steady_clock::now() >= deadline)
+            break;
         int s = ::socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (s == -1)
             continue;
         configure_tcp_keepalive(s);
         disable_nagle(s);
-        if (::connect(s, rp->ai_addr, rp->ai_addrlen) == 0) {
+        const int flags = ::fcntl(s, F_GETFL, 0);
+        if (flags < 0 || ::fcntl(s, F_SETFL, flags | O_NONBLOCK) < 0 ||
+            ::fcntl(s, F_SETFD, FD_CLOEXEC) < 0) {
+            lastConnectErr = std::strerror(errno);
+            ::close(s);
+            continue;
+        }
+        const int result = ::connect(s, rp->ai_addr, rp->ai_addrlen);
+        bool connected = result == 0;
+        if (!connected && (errno == EINPROGRESS || errno == EINTR)) {
+            connected = libssh2detail::waitForTcpConnection(
+                s, deadline, stopToken, lastConnectErr);
+        } else if (!connected) {
+            lastConnectErr = std::strerror(errno);
+        }
+        if (connected && ::fcntl(s, F_SETFL, flags) < 0) {
+            connected = false;
+            lastConnectErr = std::strerror(errno);
+        }
+        if (connected && !stopToken.stop_requested()) {
             sockOut = s;
             freeaddrinfo(res);
             return true;
         }
-        lastConnectErr = std::strerror(errno);
         ::close(s);
     }
     freeaddrinfo(res);
+    if (stopToken.stop_requested()) {
+        err = "Connection canceled by user";
+        return false;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+        err = "TCP connection timed out";
+        return false;
+    }
     err = "Could not connect to host/port";
     if (!lastConnectErr.empty())
         err += ": " + lastConnectErr;
@@ -2177,8 +2214,13 @@ bool Libssh2SftpClient::tcpConnect(const SessionOptions &opt,
             std::lock_guard<std::mutex> lk(stateMutex_);
             jumpProxyPid_ = jumpPid;
             jumpProxyStderrFd_ = jumpStderrFd;
+            sock_ = jumpSock;
         }
-        sock_ = jumpSock;
+        if (opt.connection_stop_token.stop_requested()) {
+            interrupt();
+            err = "Connection canceled by user";
+            return false;
+        }
         return true;
 #endif
     }
@@ -2195,8 +2237,18 @@ bool Libssh2SftpClient::tcpConnect(const SessionOptions &opt,
     }
 
     int socketFd = -1;
-    if (!connect_tcp_endpoint(endpointHost, endpointPort, socketFd, err))
+    if (!connect_tcp_endpoint(endpointHost, endpointPort, socketFd, err,
+                              opt.connection_stop_token))
         return false;
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        sock_ = socketFd;
+    }
+    if (opt.connection_stop_token.stop_requested()) {
+        interrupt();
+        err = "Connection canceled by user";
+        return false;
+    }
 
     if (useProxy) {
         constexpr int kProxyHandshakeTimeoutMs = 20000;
@@ -2211,12 +2263,10 @@ bool Libssh2SftpClient::tcpConnect(const SessionOptions &opt,
         }
         (void)set_socket_timeout_ms(socketFd, 0);
         if (!ok) {
-            ::close(socketFd);
             return false;
         }
     }
 
-    sock_ = socketFd;
     return true;
 }
 
@@ -2267,9 +2317,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
 
     // Ensure blocking mode and bounded waits before handshake/auth.
     libssh2_session_set_blocking(session_, 1);
-#ifdef LIBSSH2_SESSION_TIMEOUT
     libssh2_session_set_timeout(session_, 20000); // 20s
-#endif
     if (libssh2_session_handshake(session_, sock_) != 0) {
 #ifndef _WIN32
         if (opt.jump_host.has_value() && !opt.jump_host->empty() &&
@@ -2970,6 +3018,11 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
 bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
                                         std::string &err,
                                         bool initializeSftpSubsystem) {
+    if (opt.connection_stop_token.stop_requested()) {
+        err = "Connection canceled by user";
+        setLastOperationError(RemoteErrorKind::Canceled, err);
+        return false;
+    }
     if (!isValidKnownHostsPolicy(opt.known_hosts_policy) ||
         !isValidTransferIntegrityPolicy(opt.transfer_integrity_policy) ||
         !isValidLocalFileDurability(opt.local_file_durability)) {
@@ -3003,6 +3056,9 @@ bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
     // Defensive: ensure no leftover state from any previous partial attempt.
     disconnect();
 
+    std::stop_callback interruptConnection(opt.connection_stop_token,
+                                           [this] { interrupt(); });
+
     if (!libssh2detail::validateEndpointHost(opt.host, "SSH host", err)) {
         setLastOperationError(RemoteErrorKind::InvalidRequest, err);
         return false;
@@ -3019,8 +3075,12 @@ bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
         return false;
     }
 
-    if (!tcpConnect(opt, err))
+    if (!tcpConnect(opt, err)) {
+        const RemoteError failure = classifyStructuredFailure(err, false);
+        disconnect();
+        setLastOperationError(failure);
         return false;
+    }
     if (!sshHandshakeAuth(opt, err, initializeSftpSubsystem)) {
         const RemoteError structuredFailure =
             classifyStructuredFailure(err, false);
@@ -3029,6 +3089,12 @@ bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
         return false;
     }
 
+    if (opt.connection_stop_token.stop_requested()) {
+        disconnect();
+        err = "Connection canceled by user";
+        setLastOperationError(RemoteErrorKind::Canceled, err);
+        return false;
+    }
     connected_ = true;
     return true;
 }
@@ -3101,9 +3167,7 @@ void Libssh2SftpClient::disconnect() {
 
     if (session) {
         libssh2_session_set_blocking(session, 0);
-#ifdef LIBSSH2_SESSION_TIMEOUT
         libssh2_session_set_timeout(session, 2000);
-#endif
     }
 
     if (sftp) {
@@ -3167,20 +3231,18 @@ bool Libssh2SftpClient::describeJumpTunnelFailure(std::string &err) {
 #endif
 
 void Libssh2SftpClient::interrupt() {
-    int sock = -1;
-    {
-        std::lock_guard<std::mutex> lk(stateMutex_);
-        sock = sock_;
-    }
-    if (sock == -1)
+    // Keep the descriptor attached until shutdown finishes. Disconnect may
+    // otherwise close it and another thread may reuse that descriptor number.
+    std::lock_guard<std::mutex> lk(stateMutex_);
+    if (sock_ == -1)
         return;
     // libssh2 cannot abandon a blocking call, so the socket is shut down and
     // the session cannot be used again.
     connected_.store(false);
 #ifdef _WIN32
-    (void)::shutdown(sock, SD_BOTH);
+    (void)::shutdown(sock_, SD_BOTH);
 #else
-    (void)::shutdown(sock, SHUT_RDWR);
+    (void)::shutdown(sock_, SHUT_RDWR);
 #endif
 }
 
