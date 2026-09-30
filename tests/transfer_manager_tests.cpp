@@ -96,6 +96,23 @@ struct TransferManagerTestAccess {
                manager.batchWaitersById_.size();
     }
 
+    static bool hasLocalSourceUser(TransferManager &manager,
+                                   const TransferTask &move) {
+        std::lock_guard<std::mutex> lock(manager.mtx_);
+        return manager.hasOtherLocalSourceUserLocked(move);
+    }
+
+    static void setPhase(TransferManager &manager, quint64 taskId,
+                         TransferPhase phase) {
+        std::lock_guard<std::mutex> lock(manager.mtx_);
+        manager.setTaskPhaseLocked(*manager.taskForIdLocked(taskId), phase);
+    }
+
+    static std::size_t localPathUserBucketCount(TransferManager &manager) {
+        std::lock_guard<std::mutex> lock(manager.mtx_);
+        return manager.localPathUsers_.size();
+    }
+
     static std::chrono::microseconds blockedBatchScan(TransferManager &manager,
                                                       int repetitions) {
         std::lock_guard<std::mutex> lock(manager.mtx_);
@@ -1498,6 +1515,254 @@ OPENSCP_TEST(testMoveDeleteSourcePhasePersistsWithoutRetransfer, test) {
                "retrying a restored move should complete source cleanup");
     test.check(probe->downloads.load() == 1 && probe->sourceDeletes.load() == 2,
                "DeleteSource retry must not repeat the completed transfer");
+}
+
+QVector<TransferTask> localMoveCleanupTasks(int size, const QString &root,
+                                            bool sharedSource) {
+    QVector<TransferTask> tasks;
+    tasks.reserve(size);
+    for (int index = 0; index < size; ++index) {
+        TransferTask task;
+        task.taskId = quint64(index + 1);
+        task.batchId = 1;
+        task.type = TransferTask::Type::Upload;
+        task.operation = TransferOperation::Move;
+        task.postAction = TransferPostAction::DeleteSource;
+        task.phase = sharedSource && index > 0 ? TransferPhase::Transfer
+                                               : TransferPhase::DeleteSource;
+        task.dependsOnTaskId = sharedSource ? quint64(index) : 0;
+        task.src =
+            root + (sharedSource ? QStringLiteral("/shared")
+                                 : QStringLiteral("/source-%1").arg(index));
+        task.dst = QStringLiteral("/remote/move-%1").arg(index);
+        task.status = TransferTask::Status::Paused;
+        task.queuedAtMs = 1;
+        tasks.push_back(std::move(task));
+    }
+    return tasks;
+}
+
+OPENSCP_TEST(testLocalMoveCleanupScalingBenchmark, test) {
+    if (!qEnvironmentVariableIsSet("OPENSCP_BENCH_TRANSFERS"))
+        return;
+    QTemporaryDir directory;
+    for (bool sharedSource : {false, true}) {
+        for (int size : {2000, 4000, 8000}) {
+            const auto tasks =
+                localMoveCleanupTasks(size, directory.path(), sharedSource);
+            TransferManager manager;
+            TransferManagerTestAccess::appendTasks(manager, tasks);
+            int blocked = 0;
+            const int checks = sharedSource ? 1 : size;
+            const auto start = std::chrono::steady_clock::now();
+            for (int index = 0; index < checks; ++index) {
+                blocked += TransferManagerTestAccess::hasLocalSourceUser(
+                    manager, tasks[index]);
+            }
+            const auto elapsed =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - start);
+            std::cout << "BENCH move_cleanup_"
+                      << (sharedSource ? "dependent_chain_"
+                                       : "distinct_sources_")
+                      << size << "_checks=" << checks
+                      << "_us=" << elapsed.count() << '\n';
+            test.check(
+                blocked == 0,
+                "independent cleanups and move dependents must not block");
+        }
+    }
+}
+
+OPENSCP_TEST(testLocalMoveCleanupRecognizesPathsAndTaskStates, test) {
+    QTemporaryDir directory;
+    const QString source = directory.filePath(QString::fromUtf8("caf\xc3\xa9"));
+    const auto move = localMoveCleanupTasks(1, directory.path(), false).front();
+    for (const auto type :
+         {TransferTask::Type::Upload, TransferTask::Type::Download,
+          TransferTask::Type::CreateLocalDirectory,
+          TransferTask::Type::DeleteLocalFile,
+          TransferTask::Type::DeleteLocalDirectory}) {
+        TransferManager manager;
+        TransferTask cleanup = move;
+        cleanup.src = type == TransferTask::Type::Download
+                          ? source + QStringLiteral(".part")
+                          : source;
+        TransferTask user = cleanup;
+        user.taskId = 2;
+        user.type = type;
+        user.phase = TransferPhase::Transfer;
+        user.src = directory.filePath(QString::fromUtf8("CAFE\xcc\x81"));
+        user.dst = user.src;
+        TransferManagerTestAccess::appendTasks(manager, {cleanup, user});
+        const auto blocked = [&] {
+            return TransferManagerTestAccess::hasLocalSourceUser(manager,
+                                                                 cleanup);
+        };
+        test.check(blocked(),
+                   "local aliases and download partials must block cleanup");
+        TransferManagerTestAccess::setPhase(manager, 2,
+                                            TransferPhase::DeleteSource);
+        test.check(!blocked() &&
+                       TransferManagerTestAccess::localPathUserBucketCount(
+                           manager) == 0,
+                   "cleanup phases must not retain source user memberships");
+        TransferManagerTestAccess::setPhase(manager, 2,
+                                            TransferPhase::Transfer);
+        manager.cancelTask(2);
+        test.check(!blocked(),
+                   "inactive terminal users must not block cleanup");
+        manager.retryTask(2);
+        test.check(blocked(),
+                   "retry must restore the source user's protection");
+        TransferManagerTestAccess::markActive(manager, 2);
+        manager.cancelTask(2);
+        test.check(blocked(),
+                   "a canceled user still active must protect the source");
+        TransferManagerTestAccess::finishActive(manager, 2);
+        manager.removeTask(2);
+        test.check(!blocked(), "removing the final user must unblock cleanup");
+    }
+}
+
+OPENSCP_TEST(testLocalMoveCleanupPreservesDependencyExceptions, test) {
+    QTemporaryDir directory;
+    auto tasks = localMoveCleanupTasks(6, directory.path(), true);
+    // The last candidate shares ancestors with the preceding candidates.
+    tasks[5].dependsOnTaskId = 3;
+    TransferManager manager;
+    TransferManagerTestAccess::appendTasks(manager, tasks);
+    test.check(
+        !TransferManagerTestAccess::hasLocalSourceUser(manager, tasks[0]),
+        "direct and transitive move dependents must not deadlock cleanup");
+
+    auto waiter = tasks[1];
+    waiter.taskId = 7;
+    waiter.dependsOnTaskId = 0;
+    waiter.waitsForBatch = true;
+    TransferManagerTestAccess::appendTasks(manager, {waiter});
+    test.check(
+        !TransferManagerTestAccess::hasLocalSourceUser(manager, tasks[0]),
+        "a waiter in the move's own batch must not block its cleanup");
+    waiter.taskId = 8;
+    waiter.batchId = 2;
+    TransferManagerTestAccess::appendTasks(manager, {waiter});
+    test.check(TransferManagerTestAccess::hasLocalSourceUser(manager, tasks[0]),
+               "a waiter in another batch still needs protection");
+    manager.removeTask(8);
+    auto cycleA = tasks[1];
+    auto cycleB = tasks[2];
+    cycleA.taskId = 9;
+    cycleB.taskId = 10;
+    cycleA.dependsOnTaskId = 10;
+    cycleB.dependsOnTaskId = 9;
+    TransferManagerTestAccess::appendTasks(manager, {cycleA, cycleB});
+    test.check(
+        TransferManagerTestAccess::hasLocalSourceUser(manager, tasks[0]),
+        "an unrelated dependency cycle must terminate and block cleanup");
+}
+
+OPENSCP_TEST(testLocalMoveCleanupIndexTracksRenamedDestinations, test) {
+    QTemporaryDir directory;
+    TransferManager manager;
+    const QString original = directory.filePath("file.dat");
+    const quint64 id =
+        manager.enqueueDownload(QStringLiteral("/remote/file"), original);
+    auto download = *manager.taskSnapshot(id);
+    TransferTask move =
+        localMoveCleanupTasks(1, directory.path(), false).front();
+    move.taskId = 100;
+    const auto blocked = [&](const QString &source) {
+        move.src = source;
+        return TransferManagerTestAccess::hasLocalSourceUser(manager, move);
+    };
+    test.check(blocked(original) && blocked(original + QStringLiteral(".part")),
+               "a download must index both original publication paths");
+    std::string error;
+    test.check(TransferManagerTestAccess::reserve(manager, download) &&
+                   TransferManagerTestAccess::rename(manager, download, error),
+               "tracked download should reserve a renamed destination");
+    test.check(download.dst == directory.filePath("file (1).dat") &&
+                   !blocked(original) &&
+                   !blocked(original + QStringLiteral(".part")) &&
+                   blocked(download.dst) &&
+                   blocked(download.dst + QStringLiteral(".part")),
+               "renaming must move both memberships without leaving old users");
+    TransferManagerTestAccess::release(manager, id);
+    manager.removeTask(id);
+    test.check(
+        !blocked(download.dst) &&
+            TransferManagerTestAccess::localPathUserBucketCount(manager) == 0,
+        "removing a renamed download must release its index entries");
+}
+
+OPENSCP_TEST(testLocalMoveCleanupIndexRestoresAndPrunes, test) {
+    QTemporaryDir directory;
+    const QString path = directory.filePath("move-users.json");
+    auto tasks = localMoveCleanupTasks(2, directory.path(), true);
+    tasks[1].dependsOnTaskId = 0;
+    test.check(TransferQueuePersistence::save(path, tasks).succeeded,
+               "pending cleanup and source reader should save");
+    TransferManager manager;
+    test.check(
+        manager.enablePersistence(path) &&
+            TransferManagerTestAccess::hasLocalSourceUser(manager, tasks[0]),
+        "restoring must rebuild the source user index");
+    manager.removeTask(2);
+    test.check(
+        !TransferManagerTestAccess::hasLocalSourceUser(manager, tasks[0]),
+        "removing the restored reader must unblock cleanup");
+    manager.removeTask(1);
+    test.check(TransferManagerTestAccess::localPathUserBucketCount(manager) ==
+                   0,
+               "removing restored tasks must release all path buckets");
+
+    // Every canceled transfer owns a different indexed source path.
+    auto history = localMoveCleanupTasks(5502, directory.path(), false);
+    for (auto &task : history)
+        task.phase = TransferPhase::Transfer;
+    TransferManagerTestAccess::appendTasks(manager, std::move(history));
+    manager.cancelAll();
+    test.check(manager.tasksSnapshot().size() == 5000 &&
+                   TransferManagerTestAccess::localPathUserBucketCount(
+                       manager) == 5000,
+               "history pruning must remove the pruned tasks' memberships");
+    manager.clearFailedCanceled();
+    test.check(
+        manager.tasksSnapshot().isEmpty() &&
+            TransferManagerTestAccess::localPathUserBucketCount(manager) == 0,
+        "clearing terminal history must release all local path buckets");
+}
+
+OPENSCP_TEST(testLocalMoveCleanupExcludesRemotePathsAndFollowsAncestors, test) {
+    QTemporaryDir directory;
+    auto tasks = localMoveCleanupTasks(1, directory.path(), false);
+    TransferTask remote = tasks[0];
+    remote.taskId = 2;
+    remote.type = TransferTask::Type::CreateRemoteDirectory;
+    remote.phase = TransferPhase::Transfer;
+    remote.dst = tasks[0].src;
+    remote.dependsOnTaskId = 1;
+    tasks.push_back(remote);
+    TransferManager manager;
+    TransferManagerTestAccess::appendTasks(manager, tasks);
+    test.check(
+        !TransferManagerTestAccess::hasLocalSourceUser(manager, tasks[0]),
+        "remote destinations with identical text must not count locally");
+    TransferManagerTestAccess::markDone(manager, 2);
+    TransferTask reader = tasks[0];
+    reader.taskId = 3;
+    reader.phase = TransferPhase::Transfer;
+    reader.dependsOnTaskId = 2;
+    TransferManagerTestAccess::appendTasks(manager, {reader});
+    test.check(
+        !TransferManagerTestAccess::hasLocalSourceUser(manager, tasks[0]),
+        "dependency exceptions must follow terminal and remote ancestors");
+    reader.taskId = 4;
+    reader.dependsOnTaskId = 99;
+    TransferManagerTestAccess::appendTasks(manager, {reader});
+    test.check(TransferManagerTestAccess::hasLocalSourceUser(manager, tasks[0]),
+               "a missing prerequisite must not exempt an independent reader");
 }
 
 #ifndef _WIN32

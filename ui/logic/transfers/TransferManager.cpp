@@ -353,6 +353,7 @@ void TransferManager::appendTaskLocked(TransferTask task) {
     queueStore_.append(std::move(task));
     adjustBatchWorkLocked(*taskForIdLocked(taskId), true);
     adjustDependencyIndexesLocked(*taskForIdLocked(taskId), true);
+    adjustLocalPathUsersLocked(*taskForIdLocked(taskId), true);
 }
 
 quint64
@@ -389,11 +390,13 @@ void TransferManager::rebuildTaskLookupLocked() {
     batchWorkById_.clear();
     dependentsByTaskId_.clear();
     batchWaitersById_.clear();
+    localPathUsers_.clear();
     terminalTaskCount_ = 0;
     for (const auto &taskNode : queueStore_.nodes()) {
         const TransferTask &task = *taskNode;
         adjustBatchWorkLocked(task, true);
         adjustDependencyIndexesLocked(task, true);
+        adjustLocalPathUsersLocked(task, true);
         if (isTerminalTransferStatus(task.status))
             ++terminalTaskCount_;
     }
@@ -414,6 +417,7 @@ TransferQueueStore::Nodes TransferManager::removeInactiveTasksLocked(
         const TransferTask &task = *taskNode;
         adjustBatchWorkLocked(task, false);
         adjustDependencyIndexesLocked(task, false);
+        adjustLocalPathUsersLocked(task, false);
         if (isTerminalTransferStatus(task.status) && terminalTaskCount_ > 0)
             --terminalTaskCount_;
         taskControls_.forget(task.taskId);
@@ -478,40 +482,101 @@ TransferManager::localUploadSourceKey(const TransferTask &task) const {
     return localReservationKey(task.src);
 }
 
+std::vector<std::string>
+TransferManager::localPathUserKeys(const TransferTask &task) const {
+    if (task.phase != TransferPhase::Transfer)
+        return {};
+    switch (task.type) {
+    case TransferTask::Type::Upload:
+        return {localUploadSourceKey(task)};
+    case TransferTask::Type::Download:
+    case TransferTask::Type::CreateLocalDirectory:
+    case TransferTask::Type::DeleteLocalFile:
+    case TransferTask::Type::DeleteLocalDirectory:
+        return destinationKeys(task);
+    case TransferTask::Type::CreateRemoteDirectory:
+    case TransferTask::Type::DeleteRemoteFile:
+    case TransferTask::Type::DeleteRemoteDirectory:
+        return {};
+    }
+    return {};
+}
+
+void TransferManager::adjustLocalPathUsersLocked(const TransferTask &task,
+                                                 bool add) {
+    for (const auto &key : localPathUserKeys(task)) {
+        if (add) {
+            localPathUsers_[key].insert(task.taskId);
+            continue;
+        }
+        const auto found = localPathUsers_.find(key);
+        if (found == localPathUsers_.end())
+            continue;
+        found->second.erase(task.taskId);
+        if (found->second.empty())
+            localPathUsers_.erase(found);
+    }
+}
+
+void TransferManager::setTaskPhaseLocked(TransferTask &task,
+                                         TransferPhase phase) {
+    if (task.phase == phase)
+        return;
+    const bool tracked = taskForIdLocked(task.taskId) == &task;
+    if (tracked)
+        adjustLocalPathUsersLocked(task, false);
+    task.phase = phase;
+    if (tracked)
+        adjustLocalPathUsersLocked(task, true);
+}
+
 bool TransferManager::hasOtherLocalSourceUserLocked(
     const TransferTask &task) const {
-    const std::string source = localUploadSourceKey(task);
-    // ponytail: This scans the queue for each cleanup; index local paths if
-    // large queues of moves make cleanup scheduling a measured bottleneck.
-    for (const auto &node : queueStore_.nodes()) {
-        const TransferTask &other = *node;
+    const auto users = localPathUsers_.find(localUploadSourceKey(task));
+    if (users == localPathUsers_.end())
+        return false;
+
+    // Each ancestor is examined at most once per query, including shared
+    // chains. A tentative false entry detects cycles without recursion.
+    std::unordered_map<quint64, bool> waitsForMoveByTask;
+    const auto waitsForMove = [&](quint64 taskId) {
+        std::vector<quint64> path;
+        bool waits = false;
+        while (taskId != 0) {
+            if (taskId == task.taskId) {
+                waits = true;
+                break;
+            }
+            const auto [known, inserted] =
+                waitsForMoveByTask.emplace(taskId, false);
+            if (!inserted) {
+                waits = known->second;
+                break;
+            }
+            path.push_back(taskId);
+            const TransferTask *parent = taskForIdLocked(taskId);
+            taskId = parent ? parent->dependsOnTaskId : 0;
+        }
+        for (quint64 ancestor : path)
+            waitsForMoveByTask[ancestor] = waits;
+        return waits;
+    };
+
+    for (quint64 taskId : users->second) {
+        const TransferTask *candidate = taskForIdLocked(taskId);
+        if (!candidate)
+            continue;
+        const TransferTask &other = *candidate;
         if (other.taskId == task.taskId ||
             other.phase != TransferPhase::Transfer ||
             (isTerminalTransferStatus(other.status) &&
              !activeTaskIds_.count(other.taskId)))
             continue;
-        const auto destinations = destinationKeys(other);
-        if (!((other.type == TransferTask::Type::Upload &&
-               localUploadSourceKey(other) == source) ||
-              std::find(destinations.begin(), destinations.end(), source) !=
-                  destinations.end()))
-            continue;
         // A task waiting for this move cannot read the source before the move
         // finishes, so waiting for it here would deadlock the queue.
         if (other.waitsForBatch && other.batchId == task.batchId)
             continue;
-        quint64 dependency = other.dependsOnTaskId;
-        bool waitsForMove = false;
-        for (std::size_t depth = 0;
-             dependency != 0 && depth < queueStore_.nodes().size(); ++depth) {
-            if (dependency == task.taskId) {
-                waitsForMove = true;
-                break;
-            }
-            const TransferTask *parent = taskForIdLocked(dependency);
-            dependency = parent ? parent->dependsOnTaskId : 0;
-        }
-        if (waitsForMove)
+        if (waitsForMove(other.dependsOnTaskId))
             continue;
         return true;
     }
@@ -687,7 +752,7 @@ void TransferManager::skipForFailedDependencyLocked(TransferTask &task,
     taskControls_.forget(task.taskId);
     resumeRequestedTasks_.erase(task.taskId);
     setTaskStatusLocked(task, Status::Skipped, true);
-    task.phase = TransferPhase::Finished;
+    setTaskPhaseLocked(task, TransferPhase::Finished);
     task.error = QCoreApplication::translate(
         "TransferManager",
         "Skipped because a prerequisite task did not complete successfully.");
@@ -1197,7 +1262,7 @@ void TransferManager::transitionToError(TransferTask &task,
 void TransferManager::transitionToDone(TransferTask &task, qint64 nowMs) {
     const bool wasTerminal = isTerminalTransferStatus(task.status);
     setTaskStatusLocked(task, Status::Done);
-    task.phase = TransferPhase::Finished;
+    setTaskPhaseLocked(task, TransferPhase::Finished);
     task.progress = 100;
     if (task.bytesTotal > 0)
         task.bytesDone = task.bytesTotal;
@@ -1895,8 +1960,7 @@ bool TransferManager::chooseRenamedDestination(
         if (!canReserveTaskLocked(candidateTask))
             continue;
         releaseTaskPathsLocked(task.taskId);
-        task.dst = candidate;
-        if (!reserveTaskPathsLocked(task)) {
+        if (!reserveTaskPathsLocked(candidateTask)) {
             err =
                 QCoreApplication::translate(
                     "TransferManager", "Could not reserve renamed destination")
@@ -1905,8 +1969,12 @@ bool TransferManager::chooseRenamedDestination(
             return false;
         }
         TransferTask *storedTask = taskForIdLocked(task.taskId);
-        if (storedTask)
+        if (storedTask) {
+            adjustLocalPathUsersLocked(*storedTask, false);
             storedTask->dst = candidate;
+            adjustLocalPathUsersLocked(*storedTask, true);
+        }
+        task.dst = candidate;
         return true;
     }
     err = QCoreApplication::translate(
@@ -2264,7 +2332,8 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
                         if (!isTerminalTransferStatus(storedTask->status))
                             ++terminalTaskCount_;
                         setTaskStatusLocked(*storedTask, Status::Skipped);
-                        storedTask->phase = TransferPhase::Finished;
+                        setTaskPhaseLocked(*storedTask,
+                                           TransferPhase::Finished);
                         storedTask->finishedAtMs =
                             QDateTime::currentMSecsSinceEpoch();
                         storedTask->error.clear();
@@ -2306,7 +2375,7 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
                     std::lock_guard<std::mutex> lock(mtx_);
                     TransferTask *storedTask = taskForIdLocked(task.taskId);
                     if (storedTask) {
-                        storedTask->phase = task.phase;
+                        setTaskPhaseLocked(*storedTask, task.phase);
                         storedTask->localSourceIdentity =
                             task.localSourceIdentity;
                         if (task.type == TransferTask::Type::Upload &&
@@ -2358,7 +2427,8 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
                         if (!isTerminalTransferStatus(storedTask->status))
                             ++terminalTaskCount_;
                         setTaskStatusLocked(*storedTask, Status::Warning);
-                        storedTask->phase = TransferPhase::DeleteSource;
+                        setTaskPhaseLocked(*storedTask,
+                                           TransferPhase::DeleteSource);
                         storedTask->commitUncertain =
                             operationError.commit_uncertain;
                         storedTask->error =

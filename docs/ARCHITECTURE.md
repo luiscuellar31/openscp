@@ -138,11 +138,22 @@ case-sensitive volume. Remote keys retain case. Partial-file cleanup for a
 removed download acquires the same reservations and leaves the file intact if
 another task is using it. For a local upload move, it defers source
 cleanup while another queued task needs that path and reserves the source
-during cleanup. It keeps pending and failed task counts per batch so worker
-selection does not rescan a batch for each waiting task. Reverse dependency and
-batch-waiter indexes are maintained under the same mutex on insertion, removal
-and restore. Failure propagation visits only indexed dependents, expands each
-affected batch once, and marks a task skipped before visiting its dependents to
+during cleanup. A runtime local-path index shares the reservation keys and
+tracks upload sources plus local destinations and download partial paths. It
+is maintained under the queue mutex on insertion, removal, restore, conflict
+renaming and centralized phase changes. Only transfer-phase tasks are indexed;
+status and active ownership are checked when consulting it, so canceled tasks
+still in flight remain protected and status retries need no reindexing. Cleanup
+examines only users of its source path and memoizes dependency ancestry within
+each query to avoid repeatedly walking shared chains. After normalizing the
+source path, a query takes expected O(C + A) work for C indexed candidates and
+A distinct ancestors. Direct and transitive dependents of the move and waiters
+in its own batch are excluded to prevent deadlocks. It keeps
+pending and failed task counts per batch so worker selection does not rescan a
+batch for each waiting task. Reverse dependency and batch-waiter indexes are
+maintained under the same mutex on insertion, removal and restore. Failure
+propagation visits only indexed dependents, expands each affected batch once,
+and marks a task skipped before visiting its dependents to
 avoid duplicate work and cycles. Active and terminal tasks stop that branch of
 propagation. Relationships stay indexed until removal, independently of task
 status, so retries retain them. The indexes are runtime-only and do not change
