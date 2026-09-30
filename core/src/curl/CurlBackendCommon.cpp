@@ -275,10 +275,15 @@ bool rejectInterrupted(const std::atomic<bool> *interrupted, std::string &err,
 
 std::string trimAscii(std::string value) {
     auto isWs = [](unsigned char c) { return std::isspace(c) != 0; };
-    while (!value.empty() && isWs(static_cast<unsigned char>(value.front())))
-        value.erase(value.begin());
-    while (!value.empty() && isWs(static_cast<unsigned char>(value.back())))
-        value.pop_back();
+    std::size_t first = 0;
+    std::size_t last = value.size();
+    while (first < last && isWs(static_cast<unsigned char>(value[first])))
+        ++first;
+    while (last > first && isWs(static_cast<unsigned char>(value[last - 1])))
+        --last;
+    // Shift the retained content once, after scanning the bounds in O(L).
+    value.resize(last);
+    value.erase(0, first);
     return value;
 }
 

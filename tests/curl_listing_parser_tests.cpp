@@ -11,6 +11,40 @@ using openscp::curlparser::ListingParserLimits;
 using openscp::curlparser::ListingParseStatus;
 
 #if OPENSCP_HAS_CURL_FTP
+OPENSCP_TEST(testFtpListingsWithLargeWhitespacePadding, test) {
+    const std::string spaces(1024 * 1024, ' ');
+    const std::string mlsx =
+        spaces + "type=file;size=7; \t\v\f" + spaces + "a file.txt \t\r\n";
+    std::vector<openscp::FileInfo> entries;
+    test.check(
+        openscp::curlparser::parseFtpMlsdListing(
+            spaces + "\r\n" + mlsx, entries) == ListingParseStatus::Success &&
+            entries.size() == 1 && entries.front().name == "a file.txt" &&
+            entries.front().has_size && entries.front().size == 7,
+        "MLSD should trim large blank lines and entry/name padding "
+        "while preserving the name and facts");
+    openscp::FileInfo info;
+    test.check(openscp::curlparser::parseFtpMlstReply(
+                   "250-Listing\r\n" + mlsx + "250 End\r\n", info) ==
+                       ListingParseStatus::Success &&
+                   info.name == "a file.txt" && info.has_size && info.size == 7,
+               "MLST should parse the same heavily padded entry");
+    const std::string listing = spaces + "\r\n" + spaces +
+                                "-rw-r--r-- 1 user group 7 Jan 01 2024 " +
+                                spaces + "a file.txt \t\r\n";
+    test.check(openscp::curlparser::parseFtpListListing(listing, entries) ==
+                       ListingParseStatus::Success &&
+                   entries.size() == 1 &&
+                   entries.front().name == "a file.txt" &&
+                   entries.front().has_size && entries.front().size == 7,
+               "LIST should preserve records with large leading/name padding");
+    test.check(openscp::curlparser::parseFtpMlsdListing(
+                   spaces + "type=file; \t" + spaces + "\r\n", entries) ==
+                       ListingParseStatus::Malformed &&
+                   entries.empty(),
+               "large padding must not turn a missing filename into a record");
+}
+
 OPENSCP_TEST(testFtpMlsdListingLimitsAreTransactional, test) {
     const std::string payload = "type=file;size=1; first\r\n"
                                 "type=dir; second\r\n"

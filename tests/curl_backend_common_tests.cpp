@@ -50,6 +50,27 @@ OPENSCP_TEST(testRetryAfter, test) {
                "invalid Retry-After values should be ignored");
 }
 
+OPENSCP_TEST(testTrimAsciiPreservesContentAndWhitespaceRules, test) {
+    using openscp::curlcommon::trimAscii;
+    test.check(trimAscii("").empty() && trimAscii(" \t\r\n\v\f").empty(),
+               "empty and whitespace-only text should trim to empty");
+    for (const std::string &padding :
+         {std::string(), std::string(" \t\r\n\v\f"),
+          std::string(1024 * 1024, ' ')}) {
+        const std::string content("a \t b\0\xff", 7);
+        test.check(trimAscii(padding + content + padding) == content,
+                   "trimming must preserve internal whitespace, nulls and "
+                   "high-bit bytes with short or large padding");
+    }
+    test.check(trimAscii("leading \t\n") == "leading" &&
+                   trimAscii(" \ttrailing") == "trailing",
+               "one-sided whitespace should also be removed");
+    test.check(openscp::curlcommon::parseRetryAfter(
+                   std::string(1024 * 1024, ' ') + "15\t", 0) ==
+                   std::optional<std::uint32_t>(15),
+               "Retry-After should still parse heavily padded numeric text");
+}
+
 OPENSCP_TEST(testHostValidation, test) {
     using openscp::curlcommon::validateUrlHost;
 
