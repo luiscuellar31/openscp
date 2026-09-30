@@ -130,6 +130,11 @@ folders. Synchronization resolves a linked local root to its physical path and
 rejects linked folders below that root. Choose the physical destination folder
 when a download path contains a link.
 
+Transfers sharing a destination or its `.part` path run sequentially. Local
+names differing only in case or Unicode normalization also run sequentially,
+even on case-sensitive volumes. Removing a queued task leaves partial data
+intact when another active task is using that path.
+
 For a local move upload, OpenSCP waits for queued tasks that need the same
 source file, then checks that the source has not changed before removing it. If
 the source changed or the app restarted before cleanup, the task shows a warning

@@ -41,6 +41,16 @@ using Status = TransferTask::Status;
 using Policy = TransferConflictPolicy;
 using Clock = std::chrono::steady_clock;
 
+std::string localReservationKey(const QString &path) {
+    // Conservatively serialize case/Unicode aliases even on case-sensitive
+    // volumes. This also works for names that do not exist yet, without disk
+    // probes while holding the queue mutex. It does not change the actual path.
+    const QString local = QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+    return (QStringLiteral("local:") +
+            local.normalized(QString::NormalizationForm_D).toCaseFolded())
+        .toStdString();
+}
+
 bool canRetry(Status status) {
     return status == Status::Error || status == Status::Canceled ||
            status == Status::Warning;
@@ -436,22 +446,31 @@ void TransferManager::initializeConnectionStatusLocked(
 
 // Task creation and batch policy
 
-std::string TransferManager::destinationKey(const TransferTask &task) const {
+std::string TransferManager::destinationKey(const TransferTask &task,
+                                            bool partial) const {
+    const QString path =
+        partial ? task.dst + QStringLiteral(".part") : task.dst;
     if (task.type == TransferTask::Type::Upload ||
         task.type == TransferTask::Type::CreateRemoteDirectory ||
         task.type == TransferTask::Type::DeleteRemoteFile ||
         task.type == TransferTask::Type::DeleteRemoteDirectory) {
-        return ("remote:" + QDir::cleanPath(task.dst)).toStdString();
+        return ("remote:" + QDir::cleanPath(path)).toStdString();
     }
-    const QString local =
-        QDir::cleanPath(QFileInfo(task.dst).absoluteFilePath());
-    return ("local:" + local).toStdString();
+    return localReservationKey(path);
+}
+
+std::vector<std::string>
+TransferManager::destinationKeys(const TransferTask &task) const {
+    std::vector<std::string> keys{destinationKey(task)};
+    if (task.type == TransferTask::Type::Download ||
+        task.type == TransferTask::Type::Upload)
+        keys.push_back(destinationKey(task, true));
+    return keys;
 }
 
 std::string
 TransferManager::localUploadSourceKey(const TransferTask &task) const {
-    return ("local:" + QDir::cleanPath(QFileInfo(task.src).absoluteFilePath()))
-        .toStdString();
+    return localReservationKey(task.src);
 }
 
 bool TransferManager::hasOtherLocalSourceUserLocked(
@@ -466,9 +485,11 @@ bool TransferManager::hasOtherLocalSourceUserLocked(
             (isTerminalTransferStatus(other.status) &&
              !activeTaskIds_.count(other.taskId)))
             continue;
+        const auto destinations = destinationKeys(other);
         if (!((other.type == TransferTask::Type::Upload &&
                localUploadSourceKey(other) == source) ||
-              destinationKey(other) == source))
+              std::find(destinations.begin(), destinations.end(), source) !=
+                  destinations.end()))
             continue;
         // A task waiting for this move cannot read the source before the move
         // finishes, so waiting for it here would deadlock the queue.
@@ -493,8 +514,9 @@ bool TransferManager::hasOtherLocalSourceUserLocked(
 }
 
 bool TransferManager::canReserveTaskLocked(const TransferTask &task) const {
-    if (reservedPaths_.count(destinationKey(task)))
-        return false;
+    for (const auto &key : destinationKeys(task))
+        if (reservedPaths_.count(key))
+            return false;
     if (task.type != TransferTask::Type::Upload)
         return true;
     const std::string source = localUploadSourceKey(task);
@@ -508,8 +530,9 @@ bool TransferManager::reserveTaskPathsLocked(const TransferTask &task) {
     if (!canReserveTaskLocked(task))
         return false;
     auto &keys = reservationByTask_[task.taskId];
-    keys.push_back(destinationKey(task));
-    reservedPaths_.insert(keys.back());
+    keys = destinationKeys(task);
+    for (const auto &key : keys)
+        reservedPaths_.insert(key);
     if (task.type == TransferTask::Type::Upload &&
         task.phase == TransferPhase::DeleteSource)
         reserveCleanupSourceLocked(task);
@@ -1415,10 +1438,25 @@ void TransferManager::removeTasks(const QVector<quint64> &taskIds,
         removedIds.push_back(taskNode->taskId);
         if (removePartialData &&
             taskNode->type == TransferTask::Type::Download) {
-            std::string cleanupError;
-            (void)openscp::localfiles::removeLocalPath(
-                (taskNode->dst + QStringLiteral(".part")).toStdString(), false,
-                cleanupError);
+            bool reserved = false;
+            {
+                std::lock_guard<std::mutex> lock(mtx_);
+                reserved = reserveTaskPathsLocked(*taskNode);
+            }
+            // A removed task no longer owns its partial file if another task
+            // has reserved that publication path. Never unlink that task's
+            // data.
+            if (reserved) {
+                std::string cleanupError;
+                (void)openscp::localfiles::removeLocalPath(
+                    (taskNode->dst + QStringLiteral(".part")).toStdString(),
+                    false, cleanupError);
+                {
+                    std::lock_guard<std::mutex> lock(mtx_);
+                    releaseTaskPathsLocked(taskNode->taskId);
+                }
+                workCv_.notify_all();
+            }
         }
     }
     publishRemoved(removedIds);
@@ -1822,11 +1860,9 @@ bool TransferManager::chooseRenamedDestination(
         }
 
         std::lock_guard<std::mutex> lock(mtx_);
-        TransferTask candidateTask{};
-        candidateTask.type = task.type;
+        TransferTask candidateTask = task;
         candidateTask.dst = candidate;
-        const std::string key = destinationKey(candidateTask);
-        if (reservedPaths_.count(key))
+        if (!canReserveTaskLocked(candidateTask))
             continue;
         releaseTaskPathsLocked(task.taskId);
         task.dst = candidate;

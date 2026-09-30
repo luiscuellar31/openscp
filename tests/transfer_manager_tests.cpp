@@ -1,6 +1,7 @@
 // Transfer queue tests without an external test framework.
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
+#include "common/UniqueFile.hpp"
 #include "logic/transfers/BandwidthLimiter.hpp"
 #include "logic/transfers/ConflictCoordinator.hpp"
 #include "logic/transfers/TransferManager.hpp"
@@ -8,6 +9,7 @@
 #include "logic/transfers/TransferQueueWriter.hpp"
 #include "logic/transfers/TransferTaskControls.hpp"
 #include "mock/MockSftpClient.hpp"
+#include "openscp/SafeLocalFile.hpp"
 
 #include <QCoreApplication>
 #include <QFile>
@@ -30,6 +32,21 @@
 #include <vector>
 
 struct TransferManagerTestAccess {
+    static bool reserve(TransferManager &manager, const TransferTask &task) {
+        std::lock_guard<std::mutex> lock(manager.mtx_);
+        return manager.reserveTaskPathsLocked(task);
+    }
+
+    static void release(TransferManager &manager, quint64 taskId) {
+        std::lock_guard<std::mutex> lock(manager.mtx_);
+        manager.releaseTaskPathsLocked(taskId);
+    }
+
+    static bool rename(TransferManager &manager, TransferTask &task,
+                       std::string &error) {
+        return manager.chooseRenamedDestination(task, {}, error);
+    }
+
     static const TransferTask *taskAddress(TransferManager &manager,
                                            quint64 taskId) {
         std::lock_guard<std::mutex> lock(manager.mtx_);
@@ -1046,6 +1063,167 @@ OPENSCP_TEST(testDestinationReservation, test) {
                "tasks sharing a destination should both finish");
     test.check(probe->maximum.load() == 1,
                "one destination must never belong to concurrent tasks");
+}
+
+OPENSCP_TEST(testWorkersSerializeOverlappingDownloadPaths, test) {
+    auto probe = std::make_shared<ConcurrencyProbe>();
+    ConcurrentMockClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(4);
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir root;
+    manager.enqueueDownloads(
+        {{QStringLiteral("/remote/a"), root.filePath("file")},
+         {QStringLiteral("/remote/b"), root.filePath("file.part")}},
+        testBatchOptions());
+    test.check(waitUntil([&] {
+                   const auto tasks = manager.tasksSnapshot();
+                   return tasks.size() == 2 &&
+                          std::all_of(tasks.cbegin(), tasks.cend(),
+                                      [](const auto &task) {
+                                          return task.status ==
+                                                 TransferTask::Status::Done;
+                                      });
+               }),
+               "downloads with overlapping publication paths should complete");
+    test.check(probe->maximum.load() == 1,
+               "workers must serialize final-to-partial collisions");
+}
+
+OPENSCP_TEST(testDownloadReservesPublicationPaths, test) {
+    QTemporaryDir root;
+    TransferManager manager;
+    TransferTask first;
+    first.taskId = 1;
+    first.type = TransferTask::Type::Download;
+    first.dst = root.filePath("file");
+    TransferTask second = first;
+    second.taskId = 2;
+    second.dst += QStringLiteral(".part");
+    test.check(TransferManagerTestAccess::reserve(manager, first),
+               "the first download should reserve its publication paths");
+    test.check(!TransferManagerTestAccess::reserve(manager, second),
+               "a destination must not overlap an active download's partial");
+
+    TransferTask independent = first;
+    independent.taskId = 3;
+    independent.dst = root.filePath("independent");
+    test.check(TransferManagerTestAccess::reserve(manager, independent),
+               "unrelated downloads should still reserve concurrently");
+    TransferManagerTestAccess::release(manager, independent.taskId);
+
+    auto publish = [&](const TransferTask &task, const std::string &contents) {
+        const std::string destination = task.dst.toStdString();
+        const std::string partial = destination + ".part";
+        std::string error;
+        openscp::UniqueFile file(openscp::localfiles::openRegularFileForWrite(
+            partial, openscp::localfiles::WriteMode::Truncate, error));
+        if (!file)
+            return false;
+        if (std::fwrite(contents.data(), 1, contents.size(), file.get()) !=
+                contents.size() ||
+            !openscp::localfiles::flushAndSync(file.get(), error))
+            return false;
+        file.reset();
+        return openscp::localfiles::atomicReplace(partial, destination, error);
+    };
+    test.check(publish(first, "first download"),
+               "the first download should publish through the real helpers");
+    TransferManagerTestAccess::release(manager, first.taskId);
+    test.check(TransferManagerTestAccess::reserve(manager, second),
+               "the conflicting download should become runnable after release");
+    test.check(!TransferManagerTestAccess::reserve(manager, first),
+               "partial overlap must also be excluded in the opposite order");
+    test.check(publish(second, "second download"),
+               "the second download should publish its own contents");
+    TransferManagerTestAccess::release(manager, second.taskId);
+    QFile firstFile(first.dst);
+    QFile secondFile(second.dst);
+    test.check(firstFile.open(QIODevice::ReadOnly) &&
+                   firstFile.readAll() == "first download" &&
+                   secondFile.open(QIODevice::ReadOnly) &&
+                   secondFile.readAll() == "second download",
+               "successful publications must retain their respective contents");
+    test.check(TransferManagerTestAccess::reserve(manager, first),
+               "all publication reservations should be released together");
+    TransferManagerTestAccess::release(manager, first.taskId);
+}
+
+OPENSCP_TEST(testLocalReservationsExcludeCaseAndUnicodeAliases, test) {
+    QTemporaryDir root;
+    TransferManager manager;
+    TransferTask first;
+    first.taskId = 1;
+    first.type = TransferTask::Type::Download;
+    first.dst = root.filePath(QString::fromUtf8("caf\xc3\xa9"));
+    test.check(TransferManagerTestAccess::reserve(manager, first),
+               "the local destination should be reserved");
+    TransferTask alias = first;
+    alias.taskId = 2;
+    alias.dst = root.filePath(QString::fromUtf8("CAFE\xcc\x81"));
+    test.check(!TransferManagerTestAccess::reserve(manager, alias),
+               "case and normalization aliases must share a local reservation");
+    alias.dst += QStringLiteral(".PART");
+    test.check(!TransferManagerTestAccess::reserve(manager, alias),
+               "partial paths must use the same local alias normalization");
+    alias.type = TransferTask::Type::Upload;
+    alias.src = alias.dst;
+    alias.dst = QStringLiteral("/remote/other");
+    test.check(!TransferManagerTestAccess::reserve(manager, alias),
+               "uploads must not read an active download's temporary file");
+    alias.type = TransferTask::Type::DeleteLocalFile;
+    alias.dst = alias.src;
+    test.check(!TransferManagerTestAccess::reserve(manager, alias),
+               "local deletion must not remove an active download's temporary");
+    TransferManagerTestAccess::release(manager, first.taskId);
+}
+
+OPENSCP_TEST(testUploadReservationsIncludePartialAndKeepRemoteCase, test) {
+    QTemporaryDir root;
+    TransferManager manager;
+    TransferTask first;
+    first.taskId = 1;
+    first.type = TransferTask::Type::Upload;
+    first.src = root.filePath("source");
+    first.dst = QStringLiteral("/remote/file");
+    TransferTask second = first;
+    second.taskId = 2;
+    second.dst += QStringLiteral(".part");
+    test.check(TransferManagerTestAccess::reserve(manager, first) &&
+                   !TransferManagerTestAccess::reserve(manager, second),
+               "remote uploads must also reserve their partial destination");
+    second.dst = QStringLiteral("/remote/FILE");
+    test.check(TransferManagerTestAccess::reserve(manager, second),
+               "remote reservations must preserve case-sensitive semantics");
+    TransferManagerTestAccess::release(manager, first.taskId);
+    TransferManagerTestAccess::release(manager, second.taskId);
+}
+
+OPENSCP_TEST(testRenameSkipsReservedPartialDestination, test) {
+    QTemporaryDir root;
+    TransferManager manager;
+    TransferTask task;
+    task.taskId = 1;
+    task.type = TransferTask::Type::Download;
+    task.dst = root.filePath("file.dat");
+    TransferTask blocker = task;
+    blocker.taskId = 2;
+    blocker.dst = root.filePath("file (1).dat.part");
+    test.check(
+        TransferManagerTestAccess::reserve(manager, task) &&
+            TransferManagerTestAccess::reserve(manager, blocker),
+        "original destination and conflicting rename should be reserved");
+    std::string error;
+    test.check(TransferManagerTestAccess::rename(manager, task, error) &&
+                   task.dst == root.filePath("file (2).dat"),
+               "rename must skip candidates whose temporary path is reserved");
+    TransferTask probe = task;
+    probe.taskId = 3;
+    probe.dst += QStringLiteral(".part");
+    test.check(!TransferManagerTestAccess::reserve(manager, probe),
+               "rename must reserve the new temporary path");
+    TransferManagerTestAccess::release(manager, task.taskId);
+    TransferManagerTestAccess::release(manager, blocker.taskId);
 }
 
 struct RetryProbe {
@@ -2147,6 +2325,42 @@ OPENSCP_TEST(testRemovingTaskCanDeletePartialData, test) {
                "removing a task with partial data should delete both");
     test.check(removedSignals == 1,
                "removing a task should emit its granular removal");
+}
+
+OPENSCP_TEST(testRemovingTaskPreservesActivePartialData, test) {
+    auto probe = std::make_shared<LifecycleProbe>();
+    CancelLifecycleClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(2);
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir root;
+    const QString destination = root.filePath("file");
+    const auto batch = testBatchOptions();
+    const quint64 active = manager.enqueueDownload(
+        QStringLiteral("/remote/active"), destination, batch);
+    test.check(waitUntil([&] { return probe->gets.load() == 1; }),
+               "the active download should own its partial path");
+    QFile partial(destination + QStringLiteral(".part"));
+    test.check(partial.open(QIODevice::WriteOnly),
+               "the active partial fixture should be writable");
+    partial.write("active download");
+    partial.close();
+    const quint64 queued = manager.enqueueDownload(
+        QStringLiteral("/remote/queued"), destination, batch);
+    manager.removeTask(queued, true);
+    test.check(
+        partial.open(QIODevice::ReadOnly) &&
+            partial.readAll() == "active download",
+        "removing an inactive task must not unlink another task's partial");
+    partial.close();
+    manager.cancelTask(active);
+    test.check(waitForStatus(manager, active, TransferTask::Status::Canceled),
+               "the active download should remain cancellable");
+    // Canceled is observable before the worker releases its reservations.
+    manager.shutdown();
+    manager.removeTask(active, true);
+    test.check(!QFile::exists(partial.fileName()),
+               "partial cleanup should work after the active reservation ends");
 }
 
 struct RemotePartialProbe {
