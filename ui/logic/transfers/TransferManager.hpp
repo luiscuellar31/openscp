@@ -163,6 +163,11 @@ class TransferManager : public QObject {
     std::unordered_map<quint64, std::unordered_set<quint64>>
         dependentsByTaskId_;
     std::unordered_map<quint64, std::unordered_set<quint64>> batchWaitersById_;
+    // Includes upload sources and local destinations (including .part).
+    // Only transfer-phase tasks are indexed. Phase changes and renames update
+    // membership; status and active ownership are checked at lookup.
+    std::unordered_map<std::string, std::unordered_set<quint64>>
+        localPathUsers_;
     quint64 nextId_ = 1;
     quint64 nextBatchId_ = 1;
     int terminalTaskCount_ = 0;
@@ -240,6 +245,9 @@ class TransferManager : public QObject {
                                bool partial = false) const;
     std::vector<std::string> destinationKeys(const TransferTask &task) const;
     std::string localUploadSourceKey(const TransferTask &task) const;
+    std::vector<std::string> localPathUserKeys(const TransferTask &task) const;
+    void adjustLocalPathUsersLocked(const TransferTask &task, bool add);
+    void setTaskPhaseLocked(TransferTask &task, TransferPhase phase);
     bool hasOtherLocalSourceUserLocked(const TransferTask &task) const;
     bool canReserveTaskLocked(const TransferTask &task) const;
     bool reserveTaskPathsLocked(const TransferTask &task);
