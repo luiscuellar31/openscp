@@ -97,7 +97,15 @@ kept separate from blocking network operations.
 
 `TransferManager` is the entry point for the transfer queue. It coordinates
 worker connections, task state, retries, conflicts, path reservations,
-persistence, and notifications. For a local upload move, it defers source
+persistence, and notifications. Before dispatching a download or upload, it
+reserves both the final destination and its deterministic `.part` path under
+the queue mutex; both remain reserved through publication and are released
+together. Conflict renaming checks and reserves the same pair. Local reservation
+keys conservatively normalize Unicode and fold case on every volume, including
+for upload sources; this may serialize case-distinct local names on a
+case-sensitive volume. Remote keys retain case. Partial-file cleanup for a
+removed download acquires the same reservations and leaves the file intact if
+another task is using it. For a local upload move, it defers source
 cleanup while another queued task needs that path and reserves the source
 during cleanup. It keeps pending and failed task counts per batch so worker
 selection does not rescan a batch for each waiting task. The supporting classes

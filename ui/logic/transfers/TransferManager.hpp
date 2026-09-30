@@ -230,7 +230,9 @@ class TransferManager : public QObject {
     BatchWork batchWorkLocked(quint64 batchId) const;
     quint64 enqueuePathTask(TransferTask::Type type, const QString &path,
                             const TransferBatchOptions &options);
-    std::string destinationKey(const TransferTask &task) const;
+    std::string destinationKey(const TransferTask &task,
+                               bool partial = false) const;
+    std::vector<std::string> destinationKeys(const TransferTask &task) const;
     std::string localUploadSourceKey(const TransferTask &task) const;
     bool hasOtherLocalSourceUserLocked(const TransferTask &task) const;
     bool canReserveTaskLocked(const TransferTask &task) const;

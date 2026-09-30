@@ -133,6 +133,12 @@ pasos manuales, empaquetado y solución de problemas.
   comprobación opcionales.
 - Interfaces en español, inglés, portugués, francés y alemán.
 
+Las transferencias que comparten un destino o su ruta `.part` se ejecutan en
+serie. Los nombres locales que solo difieren en mayúsculas o normalización
+Unicode también se ejecutan en serie, incluso en volúmenes que los distinguen.
+Al eliminar una tarea pendiente, se conservan los datos parciales si otra tarea
+activa está usando esa ruta.
+
 ## Navegación por rutas
 
 Cada panel presenta la ubicación actual como un campo de ruta convencional. Haz
