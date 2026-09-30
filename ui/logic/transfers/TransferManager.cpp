@@ -352,6 +352,7 @@ void TransferManager::appendTaskLocked(TransferTask task) {
     const quint64 taskId = task.taskId;
     queueStore_.append(std::move(task));
     adjustBatchWorkLocked(*taskForIdLocked(taskId), true);
+    adjustDependencyIndexesLocked(*taskForIdLocked(taskId), true);
 }
 
 quint64
@@ -386,10 +387,13 @@ TransferManager::enqueuePreparedTask(TransferTask task,
 void TransferManager::rebuildTaskLookupLocked() {
     queueStore_.rebuildIndex();
     batchWorkById_.clear();
+    dependentsByTaskId_.clear();
+    batchWaitersById_.clear();
     terminalTaskCount_ = 0;
     for (const auto &taskNode : queueStore_.nodes()) {
         const TransferTask &task = *taskNode;
         adjustBatchWorkLocked(task, true);
+        adjustDependencyIndexesLocked(task, true);
         if (isTerminalTransferStatus(task.status))
             ++terminalTaskCount_;
     }
@@ -409,6 +413,7 @@ TransferQueueStore::Nodes TransferManager::removeInactiveTasksLocked(
     for (const auto &taskNode : removed) {
         const TransferTask &task = *taskNode;
         adjustBatchWorkLocked(task, false);
+        adjustDependencyIndexesLocked(task, false);
         if (isTerminalTransferStatus(task.status) && terminalTaskCount_ > 0)
             --terminalTaskCount_;
         taskControls_.forget(task.taskId);
@@ -573,6 +578,26 @@ bool failed(const TransferTask &task) {
 
 } // namespace
 
+void TransferManager::adjustDependencyIndexesLocked(const TransferTask &task,
+                                                    bool add) {
+    const auto adjust = [&](auto &index, quint64 key) {
+        if (add) {
+            index[key].insert(task.taskId);
+            return;
+        }
+        const auto found = index.find(key);
+        if (found == index.end())
+            return;
+        found->second.erase(task.taskId);
+        if (found->second.empty())
+            index.erase(found);
+    };
+    if (task.dependsOnTaskId != 0)
+        adjust(dependentsByTaskId_, task.dependsOnTaskId);
+    if (task.waitsForBatch)
+        adjust(batchWaitersById_, task.batchId);
+}
+
 void TransferManager::adjustBatchWorkLocked(const TransferTask &task,
                                             bool add) {
     if (task.waitsForBatch)
@@ -676,34 +701,39 @@ QVector<quint64>
 TransferManager::skipDependentsOfFailedLocked(quint64 failedTaskId,
                                               qint64 now) {
     QVector<quint64> skipped;
-    QSet<quint64> failedPrerequisites{failedTaskId};
-    QSet<quint64> failedBatches;
-    const auto recordFailure = [&](const TransferTask &task) {
-        failedPrerequisites.insert(task.taskId);
-        if (!task.waitsForBatch)
-            failedBatches.insert(task.batchId);
+    std::vector<quint64> failedTasks{failedTaskId};
+    std::unordered_set<quint64> visitedBatches;
+    const auto skip = [&](quint64 taskId) {
+        TransferTask *candidate = taskForIdLocked(taskId);
+        // Active membership matters even if a pause/cancel has changed status.
+        // Terminal and active tasks stop propagation through this branch.
+        if (!candidate || isTerminalTransferStatus(candidate->status) ||
+            activeTaskIds_.count(taskId)) {
+            return;
+        }
+        skipForFailedDependencyLocked(*candidate, now);
+        skipped.push_back(taskId);
+        failedTasks.push_back(taskId);
     };
-    if (const TransferTask *failedTask = taskForIdLocked(failedTaskId))
-        recordFailure(*failedTask);
-    bool foundDependent = true;
-    while (foundDependent) {
-        foundDependent = false;
-        for (auto &candidateNode : queueStore_.nodes()) {
-            auto &candidate = *candidateNode;
-            // A task that already started is left to finish.
-            if (isTerminalTransferStatus(candidate.status) ||
-                activeTaskIds_.count(candidate.taskId)) {
-                continue;
-            }
-            if (!failedPrerequisites.contains(candidate.dependsOnTaskId) &&
-                !(candidate.waitsForBatch &&
-                  failedBatches.contains(candidate.batchId))) {
-                continue;
-            }
-            skipForFailedDependencyLocked(candidate, now);
-            skipped.push_back(candidate.taskId);
-            recordFailure(candidate);
-            foundDependent = true;
+
+    // Marking a task terminal before queuing it prevents duplicate visits and
+    // cycles. Expand each batch once, even when many of its tasks fail.
+    for (std::size_t offset = 0; offset < failedTasks.size(); ++offset) {
+        const quint64 taskId = failedTasks[offset];
+        const auto dependents = dependentsByTaskId_.find(taskId);
+        if (dependents != dependentsByTaskId_.end()) {
+            for (quint64 dependentId : dependents->second)
+                skip(dependentId);
+        }
+        const TransferTask *task = taskForIdLocked(taskId);
+        if (!task || task->waitsForBatch ||
+            !visitedBatches.insert(task->batchId).second) {
+            continue;
+        }
+        const auto waiters = batchWaitersById_.find(task->batchId);
+        if (waiters != batchWaitersById_.end()) {
+            for (quint64 waiterId : waiters->second)
+                skip(waiterId);
         }
     }
     return skipped;
