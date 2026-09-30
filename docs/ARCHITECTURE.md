@@ -94,6 +94,10 @@ partial results.
 
 `SessionController` owns the active connection. `RemoteOperationController`
 runs control-connection jobs one at a time and returns completed results.
+Its bulk cancellation methods interrupt matching active I/O before marking
+the remaining registrations because both share the active job's cancel flag.
+They count newly canceled jobs once; generation-specific cancellation leaves
+other generations untouched.
 `RemoteTreeWalker` and `LocalTreeDiscovery` scan directories outside the UI
 thread and can be canceled.
 

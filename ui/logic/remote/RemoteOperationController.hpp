@@ -85,6 +85,8 @@ class RemoteOperationController final : public QObject {
     // invokes RemoteClient::interrupt() from the caller's thread.
     bool cancel(JobId jobId);
     bool setPaused(JobId jobId, bool paused);
+    // Bulk cancellation returns the number of newly canceled jobs, including
+    // the matching active job once. Repeated calls do not interrupt it again.
     int cancelGeneration(SessionGeneration generation);
     int cancelAll();
 

@@ -198,6 +198,13 @@ class RemoteOperationController::Impl {
     int cancelGeneration(SessionGeneration generation) {
         std::lock_guard lock(mutex_);
         int canceledCount = 0;
+        // The active job shares its flag with jobs_. Observe its transition
+        // first so the registration loop cannot suppress the I/O interrupt.
+        if (activeGeneration_ == generation && activeCancel_ &&
+            !activeCancel_->exchange(true, std::memory_order_relaxed)) {
+            ++canceledCount;
+            interruptActiveLocked();
+        }
         for (const auto &[id, registration] : jobs_) {
             Q_UNUSED(id);
             if (registration.generation != generation ||
@@ -207,11 +214,6 @@ class RemoteOperationController::Impl {
             }
             ++canceledCount;
         }
-        if (activeGeneration_ == generation && activeCancel_ &&
-            !activeCancel_->exchange(true, std::memory_order_relaxed)) {
-            ++canceledCount;
-            interruptActiveLocked();
-        }
         wake_.notify_one();
         return canceledCount;
     }
@@ -219,6 +221,13 @@ class RemoteOperationController::Impl {
     int cancelAll() {
         std::lock_guard lock(mutex_);
         int canceledCount = 0;
+        // Interrupt before the shared flag is marked through jobs_. The loop
+        // then skips the active registration, counting it only once.
+        if (activeCancel_ &&
+            !activeCancel_->exchange(true, std::memory_order_relaxed)) {
+            ++canceledCount;
+            interruptActiveLocked();
+        }
         for (const auto &[id, registration] : jobs_) {
             Q_UNUSED(id);
             if (registration.canceled->exchange(true,
@@ -226,11 +235,6 @@ class RemoteOperationController::Impl {
                 continue;
             }
             ++canceledCount;
-        }
-        if (activeCancel_ &&
-            !activeCancel_->exchange(true, std::memory_order_relaxed)) {
-            ++canceledCount;
-            interruptActiveLocked();
         }
         wake_.notify_one();
         return canceledCount;

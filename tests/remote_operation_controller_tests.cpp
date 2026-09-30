@@ -37,6 +37,7 @@ struct FakeState {
     std::atomic_int activeCalls{0};
     std::atomic_int maximumActiveCalls{0};
     std::atomic_bool interrupted{false};
+    std::atomic_int interruptCalls{0};
     // Makes interrupt() drop the connection, as the SFTP backend does.
     std::atomic_bool interruptDropsConnection{false};
 };
@@ -90,6 +91,7 @@ class ControllerFakeClient final : public openscp::RemoteClient {
     }
 
     void interrupt() override {
+        state_->interruptCalls.fetch_add(1);
         state_->interrupted.store(true);
         if (state_->interruptDropsConnection.load())
             connected_.store(false);
@@ -657,6 +659,85 @@ OPENSCP_TEST(testExplicitCancellationAndShutdown, test) {
                "shutdown should disconnect on the serialized lane");
     test.check(state->destructorThread == state->workerThread,
                "shutdown should destroy the client on the serialized lane");
+}
+
+OPENSCP_TEST(testCollectiveCancellationInterruptsActiveWork, test) {
+    for (const bool byGeneration : {false, true}) {
+        RemoteOperationController controller;
+        const auto state = std::make_shared<FakeState>();
+        QVector<RemoteOperationController::Completion> completions;
+        QObject::connect(
+            &controller, &RemoteOperationController::jobFinished, &controller,
+            [&](const RemoteOperationController::Completion &completion) {
+                completions.push_back(completion);
+            });
+        const auto generation =
+            controller.installSession(makeConnectedClient(state));
+        const auto active = controller.submit(
+            RemoteOperationController::ListRequest{"/slow", true});
+        const bool entered =
+            spinUntil([&] { return state->activeCalls.load() == 1; });
+        test.check(entered, "the active job must enter blocking backend I/O");
+        if (!entered)
+            continue;
+        const auto queued = controller.submit(
+            RemoteOperationController::StatRequest{"/queued"});
+        const auto alreadyCanceled = controller.submit(
+            RemoteOperationController::StatRequest{"/already-canceled"});
+        test.check(controller.cancel(alreadyCanceled),
+                   "individual cancellation should find a queued job");
+        test.check(state->interruptCalls.load() == 0,
+                   "canceling a queued job must not interrupt active I/O");
+        if (byGeneration) {
+            test.check(controller.cancelGeneration(generation + 1) == 0 &&
+                           state->interruptCalls.load() == 0,
+                       "canceling another generation must leave active work "
+                       "and queued registrations untouched");
+        }
+        const auto cancel = [&] {
+            return byGeneration ? controller.cancelGeneration(generation)
+                                : controller.cancelAll();
+        };
+        test.check(cancel() == 2,
+                   "collective cancellation must count each newly canceled "
+                   "active or queued job once");
+        test.check(state->interruptCalls.load() == 1,
+                   "collective cancellation must interrupt active backend I/O");
+        test.check(cancel() == 0 && state->interruptCalls.load() == 1,
+                   "repeated collective cancellation must not count or "
+                   "interrupt the same job again");
+        test.check(spinUntil([&] { return completions.size() == 3; }),
+                   "active and queued cancellations should all complete");
+        for (const auto id : {active, queued, alreadyCanceled}) {
+            test.check(
+                std::count_if(
+                    completions.cbegin(), completions.cend(),
+                    [id](const auto &completion) {
+                        return completion.result.job.id == id &&
+                               completion.result.outcome ==
+                                   RemoteOperationController::Outcome::Canceled;
+                    }) == 1,
+                "each canceled job must publish exactly one canceled result");
+        }
+        {
+            std::lock_guard lock(state->mutex);
+            test.check(state->calls == std::vector<std::string>{"list:/slow"},
+                       "queued canceled jobs must not call the backend");
+        }
+        const auto next =
+            controller.submit(RemoteOperationController::StatRequest{"/next"});
+        test.check(spinUntil([&] {
+                       return std::any_of(
+                           completions.cbegin(), completions.cend(),
+                           [next](const auto &completion) {
+                               return completion.result.job.id == next &&
+                                      completion.result.outcome ==
+                                          RemoteOperationController::Outcome::
+                                              Succeeded;
+                           });
+                   }),
+                   "new work should still run after collective cancellation");
+    }
 }
 
 OPENSCP_TEST(testTraversalPauseProvidesBackpressure, test) {
