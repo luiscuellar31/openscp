@@ -139,8 +139,14 @@ removed download acquires the same reservations and leaves the file intact if
 another task is using it. For a local upload move, it defers source
 cleanup while another queued task needs that path and reserves the source
 during cleanup. It keeps pending and failed task counts per batch so worker
-selection does not rescan a batch for each waiting task. The supporting classes
-have narrower jobs:
+selection does not rescan a batch for each waiting task. Reverse dependency and
+batch-waiter indexes are maintained under the same mutex on insertion, removal
+and restore. Failure propagation visits only indexed dependents, expands each
+affected batch once, and marks a task skipped before visiting its dependents to
+avoid duplicate work and cycles. Active and terminal tasks stop that branch of
+propagation. Relationships stay indexed until removal, independently of task
+status, so retries retain them. The indexes are runtime-only and do not change
+the persisted format. The supporting classes have narrower jobs:
 
 - `TransferQueue` stores tasks and selects work fairly.
 - `TransferExecutor` runs a selected transfer.

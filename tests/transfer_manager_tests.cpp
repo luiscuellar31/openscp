@@ -58,6 +58,44 @@ struct TransferManagerTestAccess {
         return manager.queueStore_.capacity();
     }
 
+    static void appendTasks(TransferManager &manager,
+                            QVector<TransferTask> tasks) {
+        std::lock_guard<std::mutex> lock(manager.mtx_);
+        for (auto &task : tasks)
+            manager.appendTaskLocked(std::move(task));
+    }
+
+    static QVector<quint64> failAndPropagate(TransferManager &manager,
+                                             quint64 taskId) {
+        std::lock_guard<std::mutex> lock(manager.mtx_);
+        manager.transitionToCanceled(*manager.taskForIdLocked(taskId), 1);
+        return manager.skipDependentsOfFailedLocked(taskId, 1);
+    }
+
+    static void markActive(TransferManager &manager, quint64 taskId) {
+        std::lock_guard<std::mutex> lock(manager.mtx_);
+        auto &task = *manager.taskForIdLocked(taskId);
+        manager.setTaskStatusLocked(task, TransferTask::Status::Running);
+        manager.activeTaskIds_.insert(taskId);
+        manager.taskControls_.startRunning(taskId, task.speedLimitKBps);
+        manager.running_.fetch_add(1);
+    }
+
+    static void markDone(TransferManager &manager, quint64 taskId) {
+        std::lock_guard<std::mutex> lock(manager.mtx_);
+        manager.transitionToDone(*manager.taskForIdLocked(taskId), 1);
+    }
+
+    static void finishActive(TransferManager &manager, quint64 taskId) {
+        manager.finishWorkerTask(taskId, 0, 0);
+    }
+
+    static std::size_t dependencyIndexBucketCount(TransferManager &manager) {
+        std::lock_guard<std::mutex> lock(manager.mtx_);
+        return manager.dependentsByTaskId_.size() +
+               manager.batchWaitersById_.size();
+    }
+
     static std::chrono::microseconds blockedBatchScan(TransferManager &manager,
                                                       int repetitions) {
         std::lock_guard<std::mutex> lock(manager.mtx_);
@@ -1924,6 +1962,221 @@ OPENSCP_TEST(testCancelingQueuedPrerequisiteSkipsDependents, test) {
     const auto other = manager.taskSnapshot(unrelated);
     test.check(other && other->status == TransferTask::Status::Queued,
                "canceling a task should leave independent work queued");
+}
+
+QVector<TransferTask> reverseDependencyChain(int size) {
+    QVector<TransferTask> tasks;
+    tasks.reserve(size);
+    for (int id = size; id > 0; --id) {
+        TransferTask task;
+        task.taskId = quint64(id);
+        task.batchId = 1;
+        task.dependsOnTaskId = quint64(id - 1);
+        task.type = TransferTask::Type::DeleteRemoteFile;
+        task.dst = QStringLiteral("/reverse-chain/%1").arg(id);
+        task.status = TransferTask::Status::Paused;
+        task.queuedAtMs = 1;
+        tasks.push_back(std::move(task));
+    }
+    return tasks;
+}
+
+OPENSCP_TEST(testRestoredReverseDependencyChainSkipsOnce, test) {
+    QTemporaryDir root;
+    const QString path = root.filePath("reverse-chain.json");
+    constexpr int chainSize = 3000;
+    test.check(
+        TransferQueuePersistence::save(path, reverseDependencyChain(chainSize))
+            .succeeded,
+        "reverse chain fixture should save in dependency-reverse order");
+    TransferManager manager;
+    test.check(
+        manager.enablePersistence(path),
+        "reverse chain should restore with its dependency relationships");
+
+    QVector<quint64> updated;
+    QObject::connect(&manager, &TransferManager::tasksUpdated, &manager,
+                     [&](const QVector<quint64> &ids) { updated += ids; });
+    manager.cancelTask(1);
+    const auto tasks = manager.tasksSnapshot();
+    test.check(tasks.size() == chainSize && updated.size() == chainSize,
+               "canceling the restored root should report every task once");
+    std::sort(updated.begin(), updated.end());
+    test.check(std::adjacent_find(updated.cbegin(), updated.cend()) ==
+                   updated.cend(),
+               "transitive skips must not duplicate update notifications");
+    for (const auto &task : tasks) {
+        test.check(task.taskId == 1
+                       ? task.status == TransferTask::Status::Canceled
+                       : task.status == TransferTask::Status::Skipped &&
+                             task.skippedByFailedDependency &&
+                             task.phase == TransferPhase::Finished &&
+                             task.finishedAtMs > 0,
+                   "failure should reach the entire reversed chain");
+    }
+}
+
+OPENSCP_TEST(testFailurePropagationPreservesActiveAndTerminalTasks, test) {
+    TransferManager manager;
+    const quint64 root =
+        manager.enqueueRemoteDelete(QStringLiteral("/root"), false);
+    TransferBatchOptions options;
+    options.dependsOnTaskId = root;
+    const quint64 active =
+        manager.enqueueRemoteDelete(QStringLiteral("/active"), false, options);
+    const quint64 completed = manager.enqueueRemoteDelete(
+        QStringLiteral("/completed"), false, options);
+    const quint64 pending =
+        manager.enqueueRemoteDelete(QStringLiteral("/pending"), false, options);
+    options.dependsOnTaskId = active;
+    const quint64 activeChild = manager.enqueueRemoteDelete(
+        QStringLiteral("/active-child"), false, options);
+    options.dependsOnTaskId = completed;
+    const quint64 completedChild = manager.enqueueRemoteDelete(
+        QStringLiteral("/completed-child"), false, options);
+    TransferManagerTestAccess::markActive(manager, active);
+    manager.pauseTask(active);
+    TransferManagerTestAccess::markDone(manager, completed);
+
+    manager.cancelTask(root);
+    test.check(manager.taskSnapshot(active)->status ==
+                       TransferTask::Status::Paused &&
+                   manager.taskSnapshot(completed)->status ==
+                       TransferTask::Status::Done &&
+                   manager.taskSnapshot(pending)->skippedByFailedDependency &&
+                   manager.taskSnapshot(activeChild)->status ==
+                       TransferTask::Status::Queued &&
+                   manager.taskSnapshot(completedChild)->status ==
+                       TransferTask::Status::Queued,
+               "active membership and terminal status should stop propagation");
+    manager.cancelTask(active);
+    test.check(manager.taskSnapshot(activeChild)->status ==
+                   TransferTask::Status::Queued,
+               "canceling active work should defer propagation until it stops");
+    TransferManagerTestAccess::finishActive(manager, active);
+    test.check(manager.taskSnapshot(activeChild)->skippedByFailedDependency,
+               "worker completion should propagate the active task's failure");
+}
+
+OPENSCP_TEST(testFailurePropagationAcrossBranchesBatchesAndCycles, test) {
+    struct Relationship {
+        quint64 parent;
+        quint64 batch;
+        bool waitsForBatch;
+        bool skipped;
+    };
+    const std::array<Relationship, 11> relationships{{
+        {8, 1, false, false}, // Root closes a cycle through three batches.
+        {1, 2, false, true},
+        {1, 2, false, true}, // Both branches fail the same batch.
+        {1, 1, true, true},  // Reachable through both indexes.
+        {0, 2, true, true},
+        {5, 3, false, true},
+        {0, 3, true, true},
+        {7, 4, false, true},
+        {0, 1, false, false}, // Independent work in the root's batch.
+        {0, 4, true, true},
+        {0, 5, true, false}, // Waiter in an unaffected batch.
+    }};
+    auto tasks = reverseDependencyChain(int(relationships.size()));
+    for (auto &task : tasks) {
+        const auto &relationship = relationships[task.taskId - 1];
+        task.dependsOnTaskId = relationship.parent;
+        task.batchId = relationship.batch;
+        task.waitsForBatch = relationship.waitsForBatch;
+    }
+    QTemporaryDir directory;
+    const QString path = directory.filePath("branched-dependencies.json");
+    test.check(TransferQueuePersistence::save(path, tasks).succeeded,
+               "mixed task and batch dependencies should save");
+    TransferManager manager;
+    test.check(manager.enablePersistence(path),
+               "restore should rebuild both dependency indexes");
+    QVector<quint64> updated;
+    QObject::connect(&manager, &TransferManager::tasksUpdated, &manager,
+                     [&](const QVector<quint64> &ids) { updated += ids; });
+    manager.cancelTask(1);
+    for (const auto &task : manager.tasksSnapshot()) {
+        const auto &relationship = relationships[task.taskId - 1];
+        test.check(task.taskId == 1
+                       ? task.status == TransferTask::Status::Canceled
+                       : task.status == (relationship.skipped
+                                             ? TransferTask::Status::Skipped
+                                             : TransferTask::Status::Paused) &&
+                             task.skippedByFailedDependency ==
+                                 relationship.skipped,
+                   "branch and batch propagation must respect reachability");
+    }
+    std::sort(updated.begin(), updated.end());
+    test.check(updated == QVector<quint64>{1, 2, 3, 4, 5, 6, 7, 8, 10},
+               "cycles and overlapping edges should notify each task once");
+}
+
+OPENSCP_TEST(testDependencyIndexesSurviveRetryRemovalAndPruning, test) {
+    TransferManager manager;
+    auto batch = testBatchOptions();
+    batch.batchId = manager.createBatch(batch);
+    const quint64 root =
+        manager.enqueueRemoteDelete(QStringLiteral("/root"), false, batch);
+    manager.cancelTask(root);
+    manager.retryTask(root);
+    batch.dependsOnTaskId = root;
+    const quint64 removed =
+        manager.enqueueRemoteDelete(QStringLiteral("/removed"), false, batch);
+    const quint64 kept =
+        manager.enqueueRemoteDelete(QStringLiteral("/kept"), false, batch);
+    batch.waitForBatch = true;
+    const quint64 waiter =
+        manager.enqueueRemoteDelete(QStringLiteral("/waiter"), false, batch);
+    manager.removeTasks({removed, waiter});
+    manager.cancelTask(kept);
+    manager.retryTask(kept);
+    manager.cancelTask(root);
+    test.check(!manager.taskSnapshot(removed) &&
+                   !manager.taskSnapshot(waiter) &&
+                   manager.taskSnapshot(kept)->skippedByFailedDependency,
+               "removal must preserve the remaining dependency after retry");
+    manager.clearCompleted();
+    manager.clearFailedCanceled();
+    test.check(
+        manager.tasksSnapshot().isEmpty() &&
+            TransferManagerTestAccess::dependencyIndexBucketCount(manager) == 0,
+        "removing all tasks must release dependency and waiter buckets");
+
+    // Exceed the history bound so propagation also exercises pruning.
+    auto history = reverseDependencyChain(5502);
+    for (auto &task : history)
+        task.waitsForBatch = task.taskId % 2 == 0;
+    TransferManagerTestAccess::appendTasks(manager, std::move(history));
+    manager.cancelTask(1);
+    test.check(manager.tasksSnapshot().size() == 5000,
+               "propagation should still prune terminal history to its bound");
+    manager.clearCompleted();
+    manager.clearFailedCanceled();
+    test.check(
+        manager.tasksSnapshot().isEmpty() &&
+            TransferManagerTestAccess::dependencyIndexBucketCount(manager) == 0,
+        "pruning and final cleanup must not retain index entries");
+}
+
+OPENSCP_TEST(testReverseDependencyPropagationBenchmark, test) {
+    if (!qEnvironmentVariableIsSet("OPENSCP_BENCH_TRANSFERS"))
+        return;
+    for (int size : {3000, 6000, 12000}) {
+        TransferManager manager;
+        TransferManagerTestAccess::appendTasks(manager,
+                                               reverseDependencyChain(size));
+        const auto start = std::chrono::steady_clock::now();
+        const auto skipped =
+            TransferManagerTestAccess::failAndPropagate(manager, 1);
+        const auto elapsed =
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - start);
+        std::cout << "BENCH reverse_dependency_" << size
+                  << "_us=" << elapsed.count() << '\n';
+        test.check(skipped.size() == size - 1,
+                   "reverse chain benchmark should reach each dependent once");
+    }
 }
 
 OPENSCP_TEST(testTasksWaitingForBatchRunAfterItSucceeds, test) {

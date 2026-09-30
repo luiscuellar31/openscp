@@ -158,6 +158,11 @@ class TransferManager : public QObject {
         std::size_t failed = 0;
     };
     std::unordered_map<quint64, BatchWorkState> batchWorkById_;
+    // Relationships are fixed at insertion and protected by mtx_. Keep
+    // terminal tasks indexed until removal so retries need no reindexing.
+    std::unordered_map<quint64, std::unordered_set<quint64>>
+        dependentsByTaskId_;
+    std::unordered_map<quint64, std::unordered_set<quint64>> batchWaitersById_;
     quint64 nextId_ = 1;
     quint64 nextBatchId_ = 1;
     int terminalTaskCount_ = 0;
@@ -222,6 +227,7 @@ class TransferManager : public QObject {
     QVector<quint64> skipDependentsOfFailedLocked(quint64 failedTaskId,
                                                   qint64 now);
     enum class BatchWork { Unfinished, Failed, Succeeded };
+    void adjustDependencyIndexesLocked(const TransferTask &task, bool add);
     void adjustBatchWorkLocked(const TransferTask &task, bool add);
     void setTaskStatusLocked(
         TransferTask &task, TransferTask::Status status,
