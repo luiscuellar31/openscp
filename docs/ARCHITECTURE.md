@@ -84,6 +84,14 @@ unblock network waits promptly. The libcurl backends share their connection,
 proxy, TLS, and transfer plumbing; each protocol file keeps only its own request
 and response rules.
 
+The WebDAV listing parser checks XML resource budgets before building a
+TinyXML2 document. An allocation-free linear scan bounds payload bytes,
+nesting, and node/attribute work, including non-DAV content; attributes per
+element are capped separately to bound duplicate-attribute checks. TinyXML2
+remains responsible for XML validation. The existing response-record and
+path-byte budgets apply independently, and rejected listings expose no
+partial results.
+
 `SessionController` owns the active connection. `RemoteOperationController`
 runs control-connection jobs one at a time and returns completed results.
 `RemoteTreeWalker` and `LocalTreeDiscovery` scan directories outside the UI

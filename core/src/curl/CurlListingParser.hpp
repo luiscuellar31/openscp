@@ -12,11 +12,19 @@
 namespace openscp::curlparser {
 
 inline constexpr std::size_t kMaxWebDavXmlNestingDepth = 64;
+inline constexpr std::size_t kMaxWebDavXmlBytes = 64 * 1024 * 1024;
+inline constexpr std::size_t kMaxWebDavXmlNodes = 100'000;
+inline constexpr std::size_t kMaxWebDavXmlAttributesPerElement = 64;
 
 struct ListingParserLimits {
     std::size_t maxEntries = kMaxRemoteListingEntries;
     std::size_t maxNameBytes = kMaxRemoteListingNameBytes;
     std::size_t maxXmlNestingDepth = kMaxWebDavXmlNestingDepth;
+    std::size_t maxXmlBytes = kMaxWebDavXmlBytes;
+    // Conservative allocation/work budget, including attributes, closing
+    // tags (temporary nodes in tinyxml2), and whitespace-only text segments.
+    std::size_t maxXmlNodes = kMaxWebDavXmlNodes;
+    std::size_t maxXmlAttributesPerElement = kMaxWebDavXmlAttributesPerElement;
 };
 
 enum class ListingParseStatus {
