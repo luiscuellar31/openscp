@@ -44,6 +44,8 @@ bool setLocalModificationTime(const std::string &path,
 
 // Opens a user-owned regular file without following a final-component symlink.
 // The descriptor is opened with close-on-exec and restricted permissions.
+// On POSIX, opening does not wait for a FIFO reader. The opened descriptor is
+// validated before modification, and returned regular-file streams block.
 std::FILE *openRegularFileForWrite(const std::string &path, WriteMode mode,
                                    std::string &error);
 

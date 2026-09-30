@@ -402,7 +402,8 @@ std::FILE *openRegularFileForWrite(const std::string &path, WriteMode mode,
     }
     return file;
 #else
-    int flags = O_WRONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW;
+    // A FIFO must not wait for a reader before fstat can reject its type.
+    int flags = O_WRONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK;
     if (mode == WriteMode::Append)
         flags |= O_APPEND;
 
@@ -438,6 +439,17 @@ std::FILE *openRegularFileForWrite(const std::string &path, WriteMode mode,
         errno = savedError;
         error = "Local partial path must be a user-owned regular file without "
                 "additional hard links.";
+        return nullptr;
+    }
+    // Keep stdio's normal blocking semantics, preserving flags such as
+    // O_APPEND. Only change the mode after verifying this exact descriptor.
+    const int statusFlags = ::fcntl(descriptor, F_GETFL);
+    if (statusFlags < 0 ||
+        ::fcntl(descriptor, F_SETFL, statusFlags & ~O_NONBLOCK) < 0) {
+        const int savedError = errno;
+        ::close(descriptor);
+        errno = savedError;
+        error = ioError("Could not restore blocking mode for local file");
         return nullptr;
     }
     if (::fchmod(descriptor, S_IRUSR | S_IWUSR) != 0) {

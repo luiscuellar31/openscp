@@ -130,6 +130,11 @@ folders. Synchronization resolves a linked local root to its physical path and
 rejects linked folders below that root. Choose the physical destination folder
 when a download path contains a link.
 
+Downloads require regular `.part` files. If an existing `.part` entry is a
+FIFO (named pipe), the download reports a local I/O error without waiting for
+a reader or replacing that entry. Choose another destination or inspect the
+conflicting entry before retrying.
+
 Transfers sharing a destination or its `.part` path run sequentially. Local
 names differing only in case or Unicode normalization also run sequentially,
 even on case-sensitive volumes. Removing a queued task leaves partial data

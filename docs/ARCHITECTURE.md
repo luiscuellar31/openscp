@@ -127,6 +127,10 @@ have narrower jobs:
 `SafeLocalFile` in the core owns local download publication and descriptor-based
 path operations for transfer tasks. The queue uses it to create or remove local
 entries without following symbolic links in user-writable parent directories.
+On POSIX, partial-file writers open with `O_NONBLOCK` so a FIFO cannot wait
+for a reader before type validation. They check the opened descriptor's type,
+ownership, and link count, then restore blocking mode before modifying the
+file or creating its stdio stream; append and close-on-exec flags are retained.
 Upload moves also use it to capture local file identity before transfer and
 check that identity before source cleanup. The identity is process-local; a
 restored cleanup without it requires manual review.

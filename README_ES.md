@@ -133,6 +133,11 @@ pasos manuales, empaquetado y solución de problemas.
   comprobación opcionales.
 - Interfaces en español, inglés, portugués, francés y alemán.
 
+Las descargas requieren archivos `.part` regulares. Si una entrada `.part`
+existente es una FIFO (tubería con nombre), la descarga informa de un error de
+E/S local sin esperar a un lector ni reemplazar esa entrada. Elige otro destino
+o revisa la entrada en conflicto antes de reintentar.
+
 Las transferencias que comparten un destino o su ruta `.part` se ejecutan en
 serie. Los nombres locales que solo difieren en mayúsculas o normalización
 Unicode también se ejecutan en serie, incluso en volúmenes que los distinguen.
