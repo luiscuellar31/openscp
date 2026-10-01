@@ -174,6 +174,17 @@ the persisted format. The supporting classes have narrower jobs:
 - `BandwidthLimiter` applies speed limits.
 - `TransferQueuePersistence` saves unfinished tasks safely.
 
+The transfer queue dialog keeps a separate table model indexed by task ID.
+Contiguous removals use Qt row-removal notifications. Discontinuous removals
+use a single layout change, compact the task vector once in survivor order,
+and rebuild the ID index and summary counts before notifying completion.
+Persistent indexes are captured after the initial layout notification and
+remapped by task ID, invalidating removed tasks while preserving surviving
+selection and current-task identity through the filter proxy. For R requested
+task IDs, N tasks and P persistent indexes, model work is expected
+O(R log R + N + P), with O(R + P) temporary storage; Qt proxy/view work is
+additional. No model reset is needed for either removal path.
+
 `SafeLocalFile` in the core owns local download publication and descriptor-based
 path operations for transfer tasks. The queue uses it to create or remove local
 entries without following symbolic links in user-writable parent directories.
