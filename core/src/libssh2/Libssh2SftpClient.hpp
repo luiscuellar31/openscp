@@ -85,6 +85,8 @@ class Libssh2SftpClient : public RemoteClient {
     }
 
     private:
+    friend struct Libssh2SftpClientTestAccess;
+
     class StructuredErrorScope {
         public:
         StructuredErrorScope(Libssh2SftpClient &owner, std::string &error,

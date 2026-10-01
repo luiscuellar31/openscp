@@ -3117,17 +3117,16 @@ void Libssh2SftpClient::disconnect() {
         std::lock_guard<std::mutex> lk(stateMutex_);
         wasConnected = connected_;
         connected_ = false;
-        sock = sock_;
-    }
-
-    // Force the transport down first so libssh2 teardown calls fail fast
-    // and any in-flight operation on another thread unblocks immediately.
-    if (sock != -1) {
+        // Keep the descriptor attached until shutdown finishes, as interrupt()
+        // does. Another disconnect must not detach, close and reuse it first.
+        // Shut down before waiting for I/O so blocking operations can finish.
+        if (sock_ != -1) {
 #ifdef _WIN32
-        (void)::shutdown(sock, SD_BOTH);
+            (void)::shutdown(sock_, SD_BOTH);
 #else
-        (void)::shutdown(sock, SHUT_RDWR);
+            (void)::shutdown(sock_, SHUT_RDWR);
 #endif
+        }
     }
 
     // Wait for any in-flight I/O operation to finish using session_ and sftp_.

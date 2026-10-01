@@ -123,6 +123,12 @@ under the state mutex before proxy negotiation, and uses nonblocking TCP
 connects with a shared 20-second deadline across resolved addresses. The
 platform's synchronous DNS resolver remains outside that TCP deadline.
 libssh2's blocking handshake/authentication timeout is set explicitly.
+SSH interruption and the initial disconnect shutdown hold the state mutex
+through the socket syscall, preventing a concurrent disconnect from closing
+and reusing the descriptor. Disconnect releases that mutex before waiting for
+the I/O mutex, so shutdown can unblock an active operation without reversing
+the I/O-to-state lock order. Session and socket ownership are then detached
+under both locks; only the caller that detaches them performs cleanup.
 
 `AuthenticationInput` opens a window-modal input dialog without a nested event loop and
 waits on shared reply state with the connection stop token. Pending and visible
