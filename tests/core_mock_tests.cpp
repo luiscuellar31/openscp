@@ -38,6 +38,7 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #ifndef _WIN32
@@ -48,6 +49,18 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
+
+namespace openscp {
+
+struct Libssh2SftpClientTestAccess {
+    static void attachSocket(Libssh2SftpClient &client, int socket) {
+        std::lock_guard lock(client.stateMutex_);
+        client.sock_ = socket;
+        client.connected_.store(true);
+    }
+};
+
+} // namespace openscp
 
 namespace {
 
@@ -76,6 +89,84 @@ OPENSCP_TEST(test_connection_cancel_before_creation, t) {
 }
 
 #ifndef _WIN32
+OPENSCP_TEST(test_concurrent_disconnect_unblocks_io_and_preserves_reused_socket,
+             t) {
+    int pair[2] = {-1, -1};
+    t.check(::socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0,
+            "disconnect fixture should create a local transport");
+    if (pair[0] < 0)
+        return;
+    openscp::Libssh2SftpClient client;
+    openscp::Libssh2SftpClientTestAccess::attachSocket(client, pair[0]);
+    auto ioLock = client.lockIo();
+    std::promise<void> start;
+    const auto go = start.get_future().share();
+    auto first = std::async(std::launch::async, [&] {
+        go.wait();
+        client.disconnect();
+    });
+    auto second = std::async(std::launch::async, [&] {
+        go.wait();
+        client.disconnect();
+    });
+    start.set_value();
+    pollfd peer{pair[1], POLLIN, 0};
+    const bool interrupted = ::poll(&peer, 1, 1000) > 0;
+    char byte = 0;
+    t.check(interrupted && ::recv(pair[1], &byte, 1, MSG_DONTWAIT) == 0 &&
+                !client.isConnected(),
+            "disconnect must shut down before waiting for active I/O");
+    t.check(first.wait_for(std::chrono::milliseconds(0)) ==
+                    std::future_status::timeout &&
+                second.wait_for(std::chrono::milliseconds(0)) ==
+                    std::future_status::timeout &&
+                ::fcntl(pair[0], F_GETFD) >= 0,
+            "both disconnects must wait for I/O before closing the descriptor");
+    // Interrupt must still be able to acquire the state mutex while teardown
+    // waits for I/O; it shares the same descriptor lifetime protection.
+    client.interrupt();
+    ioLock.unlock();
+    t.check(first.wait_for(std::chrono::seconds(1)) ==
+                    std::future_status::ready &&
+                second.wait_for(std::chrono::seconds(1)) ==
+                    std::future_status::ready,
+            "concurrent disconnects must complete once I/O is released");
+    first.get();
+    second.get();
+    t.check(::fcntl(pair[0], F_GETFD) == -1 && errno == EBADF,
+            "the detached transport must be closed");
+    ::close(pair[1]);
+
+    int reused[2] = {-1, -1};
+    t.check(::socketpair(AF_UNIX, SOCK_STREAM, 0, reused) == 0,
+            "reuse fixture should create another transport");
+    if (reused[0] < 0)
+        return;
+    if (reused[1] == pair[0])
+        std::swap(reused[0], reused[1]);
+    if (reused[0] != pair[0]) {
+        const bool duplicated = ::dup2(reused[0], pair[0]) == pair[0];
+        t.check(duplicated,
+                "reuse fixture must retain the original descriptor number");
+        if (!duplicated) {
+            ::close(reused[0]);
+            ::close(reused[1]);
+            return;
+        }
+        ::close(reused[0]);
+        reused[0] = pair[0];
+    }
+    client.disconnect();
+    client.interrupt();
+    t.check(::fcntl(reused[0], F_GETFD) >= 0 &&
+                ::recv(reused[0], &byte, 1, MSG_DONTWAIT) == -1 &&
+                (errno == EAGAIN || errno == EWOULDBLOCK),
+            "later disconnect and interrupt must leave a reused socket open "
+            "and live");
+    ::close(reused[0]);
+    ::close(reused[1]);
+}
+
 OPENSCP_TEST(test_tcp_wait_deadline_and_cancellation, t) {
     int pair[2] = {-1, -1};
     t.check(::socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0,
