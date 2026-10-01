@@ -7,6 +7,7 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
+#include <QSet>
 #include <QTemporaryDir>
 #include <QThread>
 #include <QTimer>
@@ -64,6 +65,17 @@ OPENSCP_TEST(testBatchesEmptyFoldersAndEventLoop, test) {
     test.check(eventLoopAdvanced, "discovery must not block the Qt event loop");
     test.check(maximumBatchSize <= 250,
                "default discovery batches must contain at most 250 items");
+    test.check(entries.size() == 515,
+               "all files and directories should be emitted exactly once");
+    QSet<QString> discoveredDirectories;
+    for (const auto &entry : entries) {
+        const QString parent = QFileInfo(entry.localPath).absolutePath();
+        test.check(entry.relativePath.isEmpty() ||
+                       discoveredDirectories.contains(parent),
+                   "directories must precede their children across batches");
+        if (entry.type == LocalTreeDiscoveryEntry::Type::Directory)
+            discoveredDirectories.insert(entry.localPath);
+    }
     const auto emptyDirectory = std::find_if(
         entries.cbegin(), entries.cend(),
         [&](const LocalTreeDiscoveryEntry &entry) {
@@ -72,6 +84,52 @@ OPENSCP_TEST(testBatchesEmptyFoldersAndEventLoop, test) {
         });
     test.check(emptyDirectory != entries.cend(),
                "empty directories should be explicit discovery entries");
+}
+
+OPENSCP_TEST(testIncrementalDescentAndCancellation, test) {
+    QTemporaryDir root;
+    test.check(root.isValid(), "incremental root should initialize");
+    for (int index = 0; index < 128; ++index) {
+        const QString path = root.filePath(QStringLiteral("dir-%1").arg(index));
+        test.check(QDir().mkpath(path) &&
+                       writeFile(QDir(path).filePath("leaf")),
+                   "wide directory fixture should initialize");
+    }
+
+    LocalTreeDiscovery discovery;
+    LocalTreeDiscoveryOptions options;
+    options.roots = {{root.path()}};
+    options.batchSize = 3;
+    bool canceled = false;
+    bool finished = false;
+    QVector<LocalTreeDiscoveryEntry> entries;
+    LocalTreeDiscoveryCounters finalCounters;
+    QObject::connect(&discovery, &LocalTreeDiscovery::batchReady, &discovery,
+                     [&](const LocalTreeDiscoveryBatch &batch) {
+                         entries += batch.entries;
+                         discovery.cancel();
+                     });
+    QObject::connect(&discovery, &LocalTreeDiscovery::canceled, &discovery,
+                     [&](const LocalTreeDiscoveryCounters &counters) {
+                         finalCounters = counters;
+                         canceled = true;
+                     });
+    QObject::connect(
+        &discovery, &LocalTreeDiscovery::finished, &discovery,
+        [&](const LocalTreeDiscoveryCounters &) { finished = true; });
+
+    discovery.start(options);
+    test.check(spinUntil([&] { return canceled; }),
+               "cancel during incremental descent should stop open iterators");
+    test.check(!finished && entries.size() == 3 && finalCounters.itemCount == 3,
+               "cancel at a batch boundary must prevent further enumeration");
+    if (entries.size() == 3) {
+        test.check(entries[1].type ==
+                           LocalTreeDiscoveryEntry::Type::Directory &&
+                       entries[2].localPath ==
+                           QDir(entries[1].localPath).filePath("leaf"),
+                   "descend into a directory before collecting its siblings");
+    }
 }
 
 OPENSCP_TEST(testCancellation, test) {
@@ -201,6 +259,92 @@ OPENSCP_TEST(testBackpressureHysteresis, test) {
                "dropping below the low watermark should resume discovery");
     test.check(batches > 2,
                "resumed discovery should deliver remaining batches");
+}
+
+OPENSCP_TEST(testZeroDepthAndEmptyRoots, test) {
+    QTemporaryDir root;
+    test.check(root.isValid() && QDir().mkpath(root.filePath("empty")) &&
+                   QDir().mkpath(root.filePath("nonempty")) &&
+                   writeFile(root.filePath("nonempty/.hidden")),
+               "depth-zero fixtures should initialize");
+    LocalTreeDiscovery discovery;
+    LocalTreeDiscoveryOptions options;
+    options.roots = {{root.filePath("empty")}, {root.filePath("nonempty")}};
+    options.maximumDepth = 0;
+    options.batchSize = 1;
+    bool finished = false;
+    QVector<LocalTreeDiscoveryEntry> entries;
+    LocalTreeDiscoveryCounters finalCounters;
+    QObject::connect(&discovery, &LocalTreeDiscovery::batchReady, &discovery,
+                     [&](const LocalTreeDiscoveryBatch &batch) {
+                         entries += batch.entries;
+                     });
+    QObject::connect(&discovery, &LocalTreeDiscovery::finished, &discovery,
+                     [&](const LocalTreeDiscoveryCounters &counters) {
+                         finalCounters = counters;
+                         finished = true;
+                     });
+    discovery.start(options);
+    test.check(spinUntil([&] { return finished; }),
+               "depth-zero discovery should finish");
+    test.check(entries.size() == 2 && finalCounters.itemCount == 2 &&
+                   finalCounters.depthLimits == 1 &&
+                   finalCounters.knownBytes == 0,
+               "emit both roots and count only the nonempty depth omission");
+    if (entries.size() == 2) {
+        test.check(entries[0].rootIndex == 0 && entries[1].rootIndex == 1 &&
+                       entries[0].relativePath.isEmpty() &&
+                       entries[1].relativePath.isEmpty(),
+                   "multiple roots must retain their identities");
+    }
+}
+
+OPENSCP_TEST(testHiddenEntriesSymlinkDirectoryAndByteLimit, test) {
+    QTemporaryDir root;
+    QTemporaryDir outside;
+    test.check(root.isValid() && outside.isValid() &&
+                   QDir().mkpath(root.filePath(".empty")) &&
+                   writeFile(root.filePath(".hidden"), "hello") &&
+                   writeFile(outside.filePath("excluded")),
+               "hidden-entry fixtures should initialize");
+    const bool madeSymlink =
+        QFile::link(outside.path(), root.filePath("directory-link"));
+    LocalTreeDiscovery discovery;
+    LocalTreeDiscoveryOptions options;
+    options.roots = {{root.path()}};
+    options.batchSize = 1;
+    options.confirmationKnownBytesLimit = 4;
+    bool finished = false;
+    int confirmations = 0;
+    LocalTreeDiscoveryCounters finalCounters;
+    QVector<LocalTreeDiscoveryEntry> entries;
+    QObject::connect(&discovery, &LocalTreeDiscovery::batchReady, &discovery,
+                     [&](const LocalTreeDiscoveryBatch &batch) {
+                         entries += batch.entries;
+                     });
+    QObject::connect(
+        &discovery, &LocalTreeDiscovery::largeTreeConfirmationRequired,
+        &discovery, [&](const LocalTreeDiscoveryCounters &counters) {
+            ++confirmations;
+            test.check(counters.knownBytes == 5,
+                       "byte confirmation must include hidden files");
+            discovery.continueAfterLargeTreeConfirmation();
+        });
+    QObject::connect(&discovery, &LocalTreeDiscovery::finished, &discovery,
+                     [&](const LocalTreeDiscoveryCounters &counters) {
+                         finalCounters = counters;
+                         finished = true;
+                     });
+    discovery.start(options);
+    test.check(spinUntil([&] { return finished; }),
+               "hidden-entry discovery should finish after confirmation");
+    test.check(
+        confirmations == 1 && entries.size() == 3 &&
+            finalCounters.itemCount == 3 && finalCounters.knownBytes == 5,
+        "include hidden files and empty directories without link traversal");
+    if (madeSymlink)
+        test.check(finalCounters.skippedSymlinks == 1,
+                   "directory symlinks must be skipped rather than descended");
 }
 
 } // namespace
