@@ -100,6 +100,16 @@ They count newly canceled jobs once; generation-specific cancellation leaves
 other generations untouched.
 `RemoteTreeWalker` and `LocalTreeDiscovery` scan directories outside the UI
 thread and can be canceled.
+Local discovery enumerates without sorting or materializing directory listings.
+Its depth-first traversal retains one nonrecursive Qt iterator per ancestor and
+emits each directory before its children, including empty directories, so
+upload batches can resolve parent-task dependencies. Enumeration takes O(K)
+work for K directory entries; pending traversal state is bounded by depth and
+the configured batch size rather than directory width. Batch acknowledgement,
+queue backpressure and large-tree confirmation pause enumeration. The depth
+limit checks only whether a first entry exists, using the same hidden/system
+filters; links are never followed and the existing omission counters remain.
+Sibling order follows the filesystem and is not guaranteed.
 
 Models store results; they do not fetch them. Dialogs collect input; they do not
 call a remote client. Host-key prompts, health checks, and connection timing are

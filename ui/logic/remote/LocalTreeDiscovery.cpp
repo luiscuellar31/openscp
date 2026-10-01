@@ -3,12 +3,14 @@
 #include "logic/navigation/RemotePath.hpp"
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFileInfo>
 #include <QMetaObject>
 #include <QSet>
 
 #include <algorithm>
 #include <limits>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -192,11 +194,14 @@ void LocalTreeDiscovery::start(
     worker_ = std::jthread([this, options = std::move(options),
                             generation](std::stop_token stopToken) {
         struct DirectoryNode {
-            int rootIndex = -1;
             QString absolutePath;
             QString relativePath;
             int depth = 0;
+            std::unique_ptr<QDirIterator> entries;
         };
+        const QDir::Filters entryFilters = QDir::AllEntries |
+                                           QDir::NoDotAndDotDot | QDir::Hidden |
+                                           QDir::System;
 
         LocalTreeDiscoveryCounters counters;
         LocalTreeDiscoveryBatch batch;
@@ -313,86 +318,83 @@ void LocalTreeDiscovery::start(
             if (!appendEntry(std::move(rootEntry), absolutePath))
                 break;
 
-            std::vector<DirectoryNode> stack{
-                {rootIndex, absolutePath, QString(), 0}};
+            // Retain one iterator per ancestor, not a list of pending siblings.
+            // Directory entries are emitted before descending into their
+            // children.
+            std::vector<DirectoryNode> stack;
+            stack.push_back({absolutePath, QString(), 0, nullptr});
             while (!stack.empty() && !cancellationRequested(stopToken)) {
-                DirectoryNode node = std::move(stack.back());
-                stack.pop_back();
+                DirectoryNode &node = stack.back();
                 if (node.depth >= options.maximumDepth) {
-                    QDir depthDirectory(node.absolutePath);
-                    if (!depthDirectory
-                             .entryList(QDir::AllEntries |
-                                            QDir::NoDotAndDotDot |
-                                            QDir::Hidden | QDir::System,
-                                        QDir::Name)
-                             .isEmpty()) {
+                    QDirIterator entries(node.absolutePath, entryFilters);
+                    if (entries.hasNext()) {
                         ++counters.depthLimits;
                     }
+                    stack.pop_back();
                     continue;
                 }
 
-                const QFileInfo directoryInfo(node.absolutePath);
-                if (!directoryInfo.isReadable()) {
+                if (!node.entries) {
+                    const QFileInfo directoryInfo(node.absolutePath);
+                    if (!directoryInfo.isReadable()) {
+                        ++counters.inaccessibleEntries;
+                        stack.pop_back();
+                        continue;
+                    }
+                    node.entries = std::make_unique<QDirIterator>(
+                        node.absolutePath, entryFilters);
+                }
+                if (!node.entries->hasNext()) {
+                    stack.pop_back();
+                    continue;
+                }
+                node.entries->next();
+                const QFileInfo child = node.entries->fileInfo();
+                if (cancellationRequested(stopToken))
+                    break;
+                if (child.isSymLink()) {
+                    ++counters.skippedSymlinks;
+                    continue;
+                }
+                if (!isSafeRemoteEntryName(child.fileName())) {
+                    ++counters.invalidNames;
+                    continue;
+                }
+                if (!child.isReadable()) {
                     ++counters.inaccessibleEntries;
                     continue;
                 }
-                QDir directory(node.absolutePath);
-                const QFileInfoList entries = directory.entryInfoList(
-                    QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden |
-                        QDir::System,
-                    QDir::DirsFirst | QDir::Name);
-                QVector<DirectoryNode> childDirectories;
-                childDirectories.reserve(entries.size());
-                for (const QFileInfo &child : entries) {
-                    if (cancellationRequested(stopToken))
-                        break;
-                    if (child.isSymLink()) {
-                        ++counters.skippedSymlinks;
-                        continue;
-                    }
-                    if (!isSafeRemoteEntryName(child.fileName())) {
-                        ++counters.invalidNames;
-                        continue;
-                    }
-                    if (!child.isReadable()) {
-                        ++counters.inaccessibleEntries;
-                        continue;
-                    }
-                    const QString relative = node.relativePath.isEmpty()
-                                                 ? child.fileName()
-                                                 : node.relativePath +
-                                                       QStringLiteral("/") +
-                                                       child.fileName();
-                    LocalTreeDiscoveryEntry entry;
-                    entry.rootIndex = rootIndex;
-                    entry.localPath = child.absoluteFilePath();
-                    entry.relativePath = relative;
-                    if (child.isDir()) {
-                        entry.type = LocalTreeDiscoveryEntry::Type::Directory;
-                        childDirectories.push_back({rootIndex,
-                                                    child.absoluteFilePath(),
-                                                    relative, node.depth + 1});
-                    } else if (child.isFile()) {
-                        entry.type = LocalTreeDiscoveryEntry::Type::File;
-                        const qint64 fileSize = child.size();
-                        if (fileSize >= 0) {
-                            entry.size = quint64(fileSize);
-                            addKnownBytes(counters, entry.size);
-                        } else {
-                            ++counters.unknownSizes;
-                        }
+                const QString relative = node.relativePath.isEmpty()
+                                             ? child.fileName()
+                                             : node.relativePath +
+                                                   QStringLiteral("/") +
+                                                   child.fileName();
+                LocalTreeDiscoveryEntry entry;
+                entry.rootIndex = rootIndex;
+                entry.localPath = child.absoluteFilePath();
+                entry.relativePath = relative;
+                if (child.isDir()) {
+                    entry.type = LocalTreeDiscoveryEntry::Type::Directory;
+                } else if (child.isFile()) {
+                    entry.type = LocalTreeDiscoveryEntry::Type::File;
+                    const qint64 fileSize = child.size();
+                    if (fileSize >= 0) {
+                        entry.size = quint64(fileSize);
+                        addKnownBytes(counters, entry.size);
                     } else {
-                        ++counters.inaccessibleEntries;
-                        continue;
+                        ++counters.unknownSizes;
                     }
-                    if (!appendEntry(std::move(entry),
-                                     child.absoluteFilePath())) {
-                        break;
-                    }
+                } else {
+                    ++counters.inaccessibleEntries;
+                    continue;
                 }
-                for (auto it = childDirectories.crbegin();
-                     it != childDirectories.crend(); ++it) {
-                    stack.push_back(*it);
+                if (!appendEntry(std::move(entry), child.absoluteFilePath())) {
+                    break;
+                }
+                if (child.isDir()) {
+                    const int childDepth = node.depth + 1;
+                    stack.push_back({child.absoluteFilePath(), relative,
+                                     childDepth, nullptr});
                 }
             }
         }
