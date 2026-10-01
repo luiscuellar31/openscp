@@ -158,6 +158,87 @@ struct TransferManagerTestAccess {
         manager.openConnection_ = {};
         return duration;
     }
+
+    struct SchedulerMeasurement {
+        std::vector<qint64> samplesNs;
+        int selected = 0;
+    };
+
+    static SchedulerMeasurement measureScheduler(TransferManager &manager,
+                                                 int repetitions) {
+        std::lock_guard<std::mutex> lock(manager.mtx_);
+        manager.openConnection_ = [](std::string &) {
+            return std::unique_ptr<openscp::RemoteClient>{};
+        };
+        SchedulerMeasurement result;
+        result.samplesNs.reserve(static_cast<std::size_t>(repetitions));
+        for (int repetition = -3; repetition < repetitions; ++repetition) {
+            const auto start = std::chrono::steady_clock::now();
+            const auto selected = manager.pickRunnableTaskLocked(0);
+            const auto elapsed = std::chrono::steady_clock::now() - start;
+            if (repetition >= 0) {
+                result.samplesNs.push_back(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        elapsed)
+                        .count());
+                result.selected += selected.has_value();
+            }
+            // Requeue outside the timed region so availability remains stable.
+            if (selected) {
+                manager.releaseTaskPathsLocked(selected->taskId);
+                manager.activeTaskIds_.erase(selected->taskId);
+                manager.taskControls_.finishRunning(selected->taskId);
+                manager.running_.fetch_sub(1);
+                manager.setTaskStatusLocked(
+                    *manager.taskForIdLocked(selected->taskId),
+                    TransferTask::Status::Queued);
+            }
+        }
+        manager.openConnection_ = {};
+        return result;
+    }
+
+    struct WakeMeasurement {
+        qint64 serviceNs = 0;
+        qint64 wallNs = 0;
+        qint64 maximumWakeNs = 0;
+        int unexpectedSelections = 0;
+    };
+
+    static WakeMeasurement measureBlockedWakeCadence(TransferManager &manager,
+                                                     int workers, int hz) {
+        WakeMeasurement result;
+        const auto start = std::chrono::steady_clock::now();
+        const auto period = std::chrono::nanoseconds(1'000'000'000 / hz);
+        for (int wake = 0; wake < hz; ++wake) {
+            std::this_thread::sleep_until(start + wake * period);
+            // Replay the serialized checks that notify_all can cause. This
+            // measures scheduler service, not OS condition-variable latency.
+            std::lock_guard<std::mutex> lock(manager.mtx_);
+            manager.maxConcurrent_.store(workers);
+            manager.openConnection_ = [](std::string &) {
+                return std::unique_ptr<openscp::RemoteClient>{};
+            };
+            const auto serviceStart = std::chrono::steady_clock::now();
+            for (int slot = 0; slot < workers; ++slot)
+                result.unexpectedSelections +=
+                    manager
+                        .pickRunnableTaskLocked(static_cast<std::size_t>(slot))
+                        .has_value();
+            const qint64 elapsed =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - serviceStart)
+                    .count();
+            result.serviceNs += elapsed;
+            result.maximumWakeNs = std::max(result.maximumWakeNs, elapsed);
+            manager.openConnection_ = {};
+        }
+        std::this_thread::sleep_until(start + std::chrono::seconds(1));
+        result.wallNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - start)
+                            .count();
+        return result;
+    }
 };
 
 namespace {
@@ -484,6 +565,82 @@ OPENSCP_TEST(testRunnableTailSchedulerBenchmark, test) {
               << '\n';
     test.check(elapsed.count() > 0,
                "runnable-tail benchmark should select queued work");
+}
+
+OPENSCP_TEST(benchmarkSchedulerScalingAndWakeCadence, test) {
+    if (!qEnvironmentVariableIsSet("OPENSCP_BENCH_SCHEDULER"))
+        return;
+
+    for (int size : {2000, 5000, 20000, 100000}) {
+        for (const QString &scenario :
+             {QStringLiteral("paused"), QStringLiteral("batch_blocked"),
+              QStringLiteral("dependency_blocked"), QStringLiteral("tail"),
+              QStringLiteral("sparse_1pct"), QStringLiteral("ready")}) {
+            TransferManager manager;
+            QVector<TransferTask> tasks;
+            tasks.reserve(size);
+            const bool batchBlocked =
+                scenario == QStringLiteral("batch_blocked");
+            const bool dependencyBlocked =
+                scenario == QStringLiteral("dependency_blocked");
+            for (int index = 0; index < size; ++index) {
+                TransferTask task;
+                task.taskId = quint64(index + 1);
+                task.batchId = 1;
+                task.src = QStringLiteral("/remote/scheduler-%1").arg(index);
+                task.dst = QStringLiteral("/local/scheduler-%1").arg(index);
+                if (scenario == QStringLiteral("paused") ||
+                    (scenario == QStringLiteral("tail") && index + 1 != size) ||
+                    (scenario == QStringLiteral("sparse_1pct") &&
+                     index % 100 != 0) ||
+                    ((batchBlocked || dependencyBlocked) && index == 0)) {
+                    task.status = TransferTask::Status::Paused;
+                }
+                task.waitsForBatch = batchBlocked && index != 0;
+                task.dependsOnTaskId = dependencyBlocked && index != 0 ? 1 : 0;
+                tasks.push_back(std::move(task));
+            }
+            TransferManagerTestAccess::appendTasks(manager, std::move(tasks));
+            auto result =
+                TransferManagerTestAccess::measureScheduler(manager, 61);
+            const bool runnable = scenario == QStringLiteral("tail") ||
+                                  scenario == QStringLiteral("sparse_1pct") ||
+                                  scenario == QStringLiteral("ready");
+            test.check(
+                result.selected == (runnable ? 61 : 0),
+                "scheduler benchmark must preserve fixture availability");
+            std::sort(result.samplesNs.begin(), result.samplesNs.end());
+            std::cout << "BENCH scheduler size=" << size
+                      << " scenario=" << scenario.toStdString()
+                      << " samples=" << result.samplesNs.size() << " median_us="
+                      << static_cast<double>(result.samplesNs[30]) / 1000.0
+                      << " p95_us="
+                      << static_cast<double>(result.samplesNs[57]) / 1000.0
+                      << " selected=" << result.selected << std::endl;
+
+            if (batchBlocked && (size == 5000 || size == 100000)) {
+                for (int workers : {2, 8}) {
+                    for (int hz : {1, 10, 100}) {
+                        const auto wake = TransferManagerTestAccess::
+                            measureBlockedWakeCadence(manager, workers, hz);
+                        test.check(
+                            wake.unexpectedSelections == 0,
+                            "blocked wake replay must never dispatch work");
+                        std::cout
+                            << "BENCH wakes size=" << size
+                            << " workers=" << workers << " hz=" << hz
+                            << " checks=" << workers * hz << " service_ms="
+                            << static_cast<double>(wake.serviceNs) / 1'000'000.0
+                            << " wall_ms="
+                            << static_cast<double>(wake.wallNs) / 1'000'000.0
+                            << " max_wake_us="
+                            << static_cast<double>(wake.maximumWakeNs) / 1000.0
+                            << std::endl;
+                    }
+                }
+            }
+        }
+    }
 }
 
 OPENSCP_TEST(testConcurrencyUpdates, test) {
