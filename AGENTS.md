@@ -10,3 +10,7 @@
   important flows, persistence, or navigation paths change.
 - Keep user-facing documentation aligned with behavior changes, and update
   translations when user-visible strings change.
+- Add repository documentation only when it provides lasting value to users,
+  contributors, or maintainers; prefer existing documents. Keep investigation
+  reports and one-off benchmark results outside the repository unless explicitly
+  asked to include them.
