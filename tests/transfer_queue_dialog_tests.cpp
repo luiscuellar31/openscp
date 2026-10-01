@@ -7,11 +7,16 @@
 #include <QAbstractItemModel>
 #include <QApplication>
 #include <QClipboard>
+#include <QElapsedTimer>
 #include <QGuiApplication>
+#include <QHeaderView>
 #include <QItemSelectionModel>
 #include <QLabel>
+#include <QPersistentModelIndex>
+#include <QSortFilterProxyModel>
 #include <QTableView>
 
+#include <algorithm>
 #include <iostream>
 
 namespace {
@@ -190,6 +195,223 @@ OPENSCP_TEST(testSelectedActionsUseTaskSnapshots, test) {
                    canceledLast->status == TransferTask::Status::Canceled &&
                    stillUntouched->status != TransferTask::Status::Canceled,
                "cancel should affect only selected tasks");
+}
+
+OPENSCP_TEST(testDiscontinuousRemovalPreservesIndexesAndSelection, test) {
+    TransferManager manager;
+    TransferBatchOptions batch;
+    QVector<quint64> ids;
+    for (int row = 0; row < 48; ++row)
+        ids.push_back(manager.enqueueRemoteDelete(
+            QStringLiteral("/bulk-%1").arg(row), false, batch));
+
+    TransferQueueDialog dialog(&manager);
+    auto *table =
+        dialog.findChild<QTableView *>(QStringLiteral("transferQueueTable"));
+    auto *proxy =
+        table ? qobject_cast<QSortFilterProxyModel *>(table->model()) : nullptr;
+    test.check(proxy && proxy->rowCount() == 48,
+               "bulk-removal table should expose all tasks");
+    if (!proxy || proxy->rowCount() != 48)
+        return;
+    auto *source = proxy->sourceModel();
+    auto *selection = table->selectionModel();
+    selection->select(QItemSelection(proxy->index(10, 0), proxy->index(20, 10)),
+                      QItemSelectionModel::Select);
+    selection->setCurrentIndex(proxy->index(19, kDestinationColumn),
+                               QItemSelectionModel::NoUpdate);
+    QPersistentModelIndex sourceSurvivor(source->index(19, kDestinationColumn));
+    QPersistentModelIndex proxySurvivor(proxy->index(19, kDestinationColumn));
+    QPersistentModelIndex sourceRemoved(source->index(10, kDestinationColumn));
+    QPersistentModelIndex proxyRemoved(proxy->index(10, kDestinationColumn));
+    QPersistentModelIndex createdDuringNotification;
+    int layouts = 0;
+    int resets = 0;
+    int removals = 0;
+    QObject::connect(
+        source, &QAbstractItemModel::layoutAboutToBeChanged, &dialog, [&] {
+            test.check(source->rowCount() == 48,
+                       "layout notification must precede compaction");
+            createdDuringNotification = source->index(45, kDestinationColumn);
+        });
+    QObject::connect(source, &QAbstractItemModel::layoutChanged, &dialog,
+                     [&] { ++layouts; });
+    QObject::connect(source, &QAbstractItemModel::modelReset, &dialog,
+                     [&] { ++resets; });
+    QObject::connect(source, &QAbstractItemModel::rowsRemoved, &dialog,
+                     [&] { ++removals; });
+
+    QVector<quint64> removed{ids[0], ids[47]};
+    QStringList expected;
+    for (int row = 1; row < 47; ++row) {
+        if (row % 2 == 0)
+            removed.push_back(ids[row]);
+        else
+            expected.push_back(QStringLiteral("/bulk-%1").arg(row));
+    }
+    manager.removeTasks(removed);
+    flushUiEvents();
+    test.check(
+        layouts == 1 && resets == 0 && removals == 0,
+        "discontinuous removal should use one layout change without reset");
+    test.check(destinations(source) == expected &&
+                   destinations(proxy) == expected,
+               "source and proxy must retain surviving tasks in order");
+    test.check(sourceSurvivor.isValid() && proxySurvivor.isValid() &&
+                   sourceSurvivor.row() == 9 && proxySurvivor.row() == 9 &&
+                   sourceSurvivor.data().toString() ==
+                       QStringLiteral("/bulk-19") &&
+                   proxySurvivor.data() == sourceSurvivor.data(),
+               "persistent source and proxy indexes must retain task identity");
+    test.check(!sourceRemoved.isValid() && !proxyRemoved.isValid(),
+               "removed tasks must invalidate persistent indexes");
+    test.check(createdDuringNotification.isValid() &&
+                   createdDuringNotification.data().toString() ==
+                       QStringLiteral("/bulk-45"),
+               "indexes created by layout observers must also be remapped");
+    QStringList selected;
+    for (const auto &index : selection->selectedRows(kDestinationColumn))
+        selected.push_back(index.data().toString());
+    std::sort(selected.begin(), selected.end());
+    test.check(selected == QStringList{"/bulk-11", "/bulk-13", "/bulk-15",
+                                       "/bulk-17", "/bulk-19"},
+               "selection ranges must retain only their surviving tasks");
+    test.check(selection->currentIndex().data().toString() ==
+                   QStringLiteral("/bulk-19"),
+               "current surviving task must remain current");
+
+    test.check(QMetaObject::invokeMethod(&dialog, "onTasksRemoved",
+                                         Q_ARG(QVector<quint64>, removed)),
+               "stale removal notification should be accepted");
+    test.check(layouts == 1 && destinations(source) == expected,
+               "already absent ids must produce no structural notification");
+    manager.pauseTask(ids[19]);
+    flushUiEvents();
+    test.check(source->index(9, 4).data().toString() ==
+                   TransferQueueDialog::tr("Paused"),
+               "later updates must find the compacted row by task id");
+    test.check(waitUntil([&] {
+                   return badgeText(&dialog, "transferBadgeTotal") ==
+                          TransferQueueDialog::tr("Total: %1").arg(23);
+               }),
+               "summary counts must match the compacted table");
+}
+
+OPENSCP_TEST(benchmarkDiscontinuousRemoval, test) {
+    if (!qEnvironmentVariableIsSet("OPENSCP_BENCH_QUEUE_MODEL"))
+        return;
+    for (int size : {2000, 4000, 8000}) {
+        TransferManager manager;
+        TransferBatchOptions batch;
+        QVector<quint64> removed;
+        for (int row = 0; row < size; ++row) {
+            const auto id = manager.enqueueRemoteDelete(
+                QStringLiteral("/benchmark-%1").arg(row), false, batch);
+            if (row % 2 == 0)
+                removed.push_back(id);
+        }
+        TransferQueueDialog dialog(&manager);
+        QElapsedTimer timer;
+        timer.start();
+        // Isolate model/proxy work from TransferManager's queue compaction.
+        test.check(QMetaObject::invokeMethod(&dialog, "onTasksRemoved",
+                                             Q_ARG(QVector<quint64>, removed)),
+                   "benchmark removal should invoke the dialog update");
+        std::cout << "BENCH discontinuous_model_" << size
+                  << "_us=" << timer.nsecsElapsed() / 1000 << '\n';
+    }
+}
+
+OPENSCP_TEST(testBulkRemovalThroughSortedFilterAndFullClear, test) {
+    TransferManager manager;
+    TransferBatchOptions batch;
+    QVector<quint64> ids;
+    for (int row = 0; row < 24; ++row) {
+        ids.push_back(manager.enqueueRemoteDelete(
+            QStringLiteral("/filtered-%1").arg(row, 2, 10, QChar('0')), false,
+            batch));
+        if (row % 2 != 0)
+            manager.cancelTask(ids.back());
+    }
+    TransferQueueDialog dialog(&manager);
+    auto *table =
+        dialog.findChild<QTableView *>(QStringLiteral("transferQueueTable"));
+    auto *proxy =
+        table ? qobject_cast<QSortFilterProxyModel *>(table->model()) : nullptr;
+    test.check(proxy != nullptr, "filtered queue should expose its proxy");
+    if (!proxy)
+        return;
+    test.check(
+        QMetaObject::invokeMethod(&dialog, "onFilterChanged", Q_ARG(int, 4)),
+        "canceled filter should be callable");
+    proxy->sort(kDestinationColumn, Qt::DescendingOrder);
+    test.check(proxy->rowCount() == 12 &&
+                   proxy->index(0, kDestinationColumn).data().toString() ==
+                       QStringLiteral("/filtered-23"),
+               "proxy should filter statuses and reverse task order");
+    if (proxy->rowCount() != 12)
+        return;
+    auto *source = proxy->sourceModel();
+    auto *selection = table->selectionModel();
+    selection->select(QItemSelection(proxy->index(0, 0), proxy->index(2, 10)),
+                      QItemSelectionModel::Select);
+    selection->setCurrentIndex(proxy->index(0, kDestinationColumn),
+                               QItemSelectionModel::NoUpdate);
+    QPersistentModelIndex survivor(proxy->index(1, kDestinationColumn));
+    QPersistentModelIndex removedIndex(proxy->index(0, kDestinationColumn));
+    int layouts = 0;
+    int rowRemovals = 0;
+    QObject::connect(source, &QAbstractItemModel::layoutChanged, &dialog,
+                     [&] { ++layouts; });
+    QObject::connect(source, &QAbstractItemModel::rowsRemoved, &dialog,
+                     [&](const QModelIndex &, int first, int last) {
+                         ++rowRemovals;
+                         test.check(
+                             first == 0 && last == 9 && source->rowCount() == 0,
+                             "full clear should announce one valid range");
+                     });
+    QVector<quint64> removed{ids[19], ids[23]};
+    for (int row = 0; row < 24; row += 2)
+        removed.push_back(ids[row]);
+    QVector<quint64> notification = removed;
+    notification += QVector<quint64>{ids[19], ids[0], 0};
+    // Exercise duplicate/unknown IDs in a notification, then bring the manager
+    // into the same state; its subsequent notification must be a no-op.
+    test.check(QMetaObject::invokeMethod(&dialog, "onTasksRemoved",
+                                         Q_ARG(QVector<quint64>, notification)),
+               "duplicate removal ids should be accepted");
+    manager.removeTasks(removed);
+    flushUiEvents();
+    QStringList expected;
+    QVector<quint64> remaining;
+    for (int row = 21; row >= 1; row -= 2) {
+        if (row == 19)
+            continue;
+        expected.push_back(
+            QStringLiteral("/filtered-%1").arg(row, 2, 10, QChar('0')));
+        remaining.push_back(ids[row]);
+    }
+    test.check(layouts == 1 && rowRemovals == 0 &&
+                   destinations(proxy) == expected,
+               "bulk removal must update a sorted filter with one layout");
+    test.check(
+        survivor.isValid() && survivor.row() == 0 &&
+            survivor.data().toString() == QStringLiteral("/filtered-21") &&
+            !removedIndex.isValid() && !selection->currentIndex().isValid(),
+        "surviving identity must persist and removed current task must clear");
+    const auto selected = selection->selectedRows(kDestinationColumn);
+    test.check(selected.size() == 1 && selected[0].data().toString() ==
+                                           QStringLiteral("/filtered-21"),
+               "filtered selection must drop removed tasks without selecting "
+               "neighbors");
+
+    manager.removeTasks(remaining);
+    flushUiEvents();
+    test.check(source->rowCount() == 0 && proxy->rowCount() == 0 &&
+                   table->verticalHeader()->count() == 0 &&
+                   !survivor.isValid() && selection->selectedRows().isEmpty() &&
+                   layouts == 1 && rowRemovals == 1,
+               "full contiguous clear must empty view, selection and indexes");
 }
 
 } // namespace

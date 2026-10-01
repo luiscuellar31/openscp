@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <utility>
 
 namespace {
 
@@ -460,21 +461,59 @@ class TransferTaskTableModel final : public QAbstractTableModel {
             if (found != rowById_.cend())
                 rows.push_back(found.value());
         }
-        std::sort(rows.begin(), rows.end(), std::greater<int>());
+        std::sort(rows.begin(), rows.end());
         rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
-        // Adjacent rows go out as one range, so removing a contiguous
-        // selection shifts the rows below it only once.
-        for (qsizetype index = 0; index < rows.size();) {
-            const int last = rows[index];
-            int first = last;
-            while (++index < rows.size() && rows[index] == first - 1)
-                first = rows[index];
+        if (rows.isEmpty())
+            return;
+
+        const int first = rows.constFirst();
+        const int last = rows.constLast();
+        if (last - first + 1 == rows.size()) {
+            // A single range already shifts survivors only once. Qt handles
+            // its persistent indexes and selection through the row signals.
             beginRemoveRows({}, first, last);
-            tasks_.remove(first, last - first + 1);
-            endRemoveRows();
-        }
-        if (!rows.isEmpty())
+            tasks_.remove(first, rows.size());
             rebuildIndex();
+            endRemoveRows();
+            return;
+        }
+
+        // Qt supports discontinuous bulk removal as one layout change. Capture
+        // persistent indexes after notifying observers: proxies and selection
+        // models may create more indexes in response to this signal.
+        emit layoutAboutToBeChanged();
+        const QModelIndexList oldIndexes = persistentIndexList();
+        QVector<quint64> persistentTaskIds;
+        persistentTaskIds.reserve(oldIndexes.size());
+        for (const auto &oldIndex : oldIndexes)
+            persistentTaskIds.push_back(tasks_.at(oldIndex.row()).taskId);
+
+        int writeRow = 0;
+        qsizetype removedIndex = 0;
+        for (int readRow = 0; readRow < tasks_.size(); ++readRow) {
+            if (removedIndex < rows.size() && rows[removedIndex] == readRow) {
+                ++removedIndex;
+                continue;
+            }
+            if (writeRow != readRow)
+                tasks_[writeRow] = std::move(tasks_[readRow]);
+            ++writeRow;
+        }
+        tasks_.resize(writeRow);
+        rebuildIndex();
+
+        QModelIndexList newIndexes;
+        newIndexes.reserve(oldIndexes.size());
+        for (qsizetype indexNumber = 0; indexNumber < oldIndexes.size();
+             ++indexNumber) {
+            const auto row = rowById_.constFind(persistentTaskIds[indexNumber]);
+            newIndexes.push_back(
+                row == rowById_.cend()
+                    ? QModelIndex()
+                    : index(row.value(), oldIndexes[indexNumber].column()));
+        }
+        changePersistentIndexList(oldIndexes, newIndexes);
+        emit layoutChanged();
     }
 
     const QVector<TransferTask> &tasks() const { return tasks_; }
