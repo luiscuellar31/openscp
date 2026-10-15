@@ -1012,7 +1012,7 @@ Usa la ruta remota de arriba como carpeta de destino para subidas.
 Para descargas, elige una ruta remota de archivo explícitamente.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1644"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1646"/>
         <source>This protocol works in transfer-only mode.
 Uploads use the remote folder path above.
 Downloads require entering a remote file path.</source>
@@ -1216,76 +1216,76 @@ Continue?</source>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="727"/>
         <location filename="../ui/app/MainWindow.cpp" line="743"/>
-        <location filename="../ui/app/MainWindow.cpp" line="2159"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2163"/>
         <source>History</source>
         <translation>Historial</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1994"/>
-        <location filename="../ui/app/MainWindow.cpp" line="2176"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1998"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2180"/>
         <source>Open selected</source>
         <translation>Abrir seleccionado</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="2170"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2174"/>
         <source>Recent local paths</source>
         <translation>Rutas locales recientes</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="2171"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2175"/>
         <source>Recent remote paths</source>
         <translation>Rutas remotas recientes</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="2172"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2176"/>
         <source>Recent servers</source>
         <translation>Servidores recientes</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="2344"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2348"/>
         <source>Connect to a remote server to open remote path history.</source>
         <translation>Conéctate a un servidor remoto para abrir el historial de rutas remotas.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="2355"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2359"/>
         <source>Disconnect the current remote session before opening another server.</source>
         <translation>Desconecta la sesión remota actual antes de abrir otro servidor.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="2283"/>
-        <location filename="../ui/app/MainWindow.cpp" line="2297"/>
-        <location filename="../ui/app/MainWindow.cpp" line="2313"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2287"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2301"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2317"/>
         <source>No recent history</source>
         <translation>No hay historial reciente</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="2180"/>
-        <location filename="../ui/app/MainWindow.cpp" line="2395"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2184"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2399"/>
         <source>Clear history</source>
         <translation>Borrar historial</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1861"/>
-        <location filename="../ui/app/MainWindow.cpp" line="1902"/>
-        <location filename="../ui/app/MainWindow.cpp" line="2119"/>
-        <location filename="../ui/app/MainWindow.cpp" line="2390"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1865"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1906"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2123"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2394"/>
         <source>Favorite removed</source>
         <translation>Favorito eliminado</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1842"/>
-        <location filename="../ui/app/MainWindow.cpp" line="1902"/>
-        <location filename="../ui/app/MainWindow.cpp" line="2390"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1846"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1906"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2394"/>
         <source>Favorite added</source>
         <translation>Favorito añadido</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="2396"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2400"/>
         <source>Remove all recent paths and servers from history?</source>
         <translation>¿Eliminar del historial todas las rutas y servidores recientes?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="2401"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2405"/>
         <source>History cleared</source>
         <translation>Historial borrado</translation>
     </message>
@@ -1353,48 +1353,53 @@ Continue?</source>
         <translation>Listo</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1285"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1136"/>
+        <source>Transfers are waiting: no connection to the server could be opened (%1). Resume them once it is reachable.</source>
+        <translation>Las transferencias están en espera: no se pudo abrir ninguna conexión con el servidor (%1). Reanúdalas cuando vuelva a estar disponible.</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindow.cpp" line="1288"/>
         <source>Type: HttpConnect</source>
         <translation>Tipo: HttpConnect</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1288"/>
-        <location filename="../ui/app/MainWindow.cpp" line="1321"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1291"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1324"/>
         <source>Active connection method for this session</source>
         <translation>Método de conexión activo para esta sesión</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1298"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1301"/>
         <source>Session: 000:00:00</source>
         <translation>Sesión: 000:00:00</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1301"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1304"/>
         <source>Elapsed time for the current connection session</source>
         <translation>Tiempo transcurrido de la sesión de conexión actual</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1344"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1347"/>
         <source>Unknown</source>
         <translation>Desconocido</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1310"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1313"/>
         <source>None</source>
         <translation>Ninguno</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1315"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1318"/>
         <source>Type: %1</source>
         <translation>Tipo: %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1331"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1334"/>
         <source>Session: --:--:--</source>
         <translation>Sesión: --:--:--</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1328"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1331"/>
         <source>Session: %1</source>
         <translation>Sesión: %1</translation>
     </message>
@@ -1404,12 +1409,12 @@ Continue?</source>
         <translation>OpenSCP — local/local (clic en Conectar para remoto)</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1216"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1219"/>
         <source>Warning: unencrypted secrets storage active (fallback)</source>
         <translation>Advertencia: almacenamiento de secretos sin cifrar activo (modo alternativo)</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1222"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1225"/>
         <source>You are using unencrypted credentials storage enabled via environment variable. Disable OPENSCP_ENABLE_INSECURE_FALLBACK to hide this warning.</source>
         <translation>Estás usando un almacenamiento de credenciales sin cifrar activado por variable de entorno. Desactiva OPENSCP_ENABLE_INSECURE_FALLBACK para ocultar este aviso.</translation>
     </message>
@@ -1645,7 +1650,7 @@ Continue?</source>
         <translation>Descarga ya encolada</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1618"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1620"/>
         <source>Downloaded: </source>
         <translation>Descargado: </translation>
     </message>
@@ -1732,7 +1737,7 @@ Continue?</source>
 %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1987"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1991"/>
         <location filename="../ui/app/MainWindowLocalOps.cpp" line="462"/>
         <location filename="../ui/app/MainWindowLocalOps.cpp" line="487"/>
         <location filename="../ui/app/MainWindowLocalOps.cpp" line="502"/>
@@ -2166,7 +2171,7 @@ No se podrá guardar la huella. Conexión solo por esta vez.</translation>
         <translation>Carpetas no listadas: %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1488"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1490"/>
         <source>Window layout restored to defaults</source>
         <translation>Diseño de ventana restaurado a valores predeterminados</translation>
     </message>
@@ -2313,6 +2318,7 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
     </message>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="997"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1139"/>
         <source>Transport error.</source>
         <translation>Error de transporte.</translation>
     </message>
@@ -2354,7 +2360,7 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
         <translation>Error desconocido.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1988"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1992"/>
         <location filename="../ui/app/MainWindowLocalOps.cpp" line="209"/>
         <location filename="../ui/app/MainWindowLocalOps.cpp" line="215"/>
         <location filename="../ui/app/MainWindowLocalOps.cpp" line="299"/>
@@ -2458,68 +2464,68 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
         <translation>Cola de transferencias</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1314"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1317"/>
         <source>Type: %1 • UNSAFE</source>
         <translation>Tipo: %1 • INSEGURO</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="733"/>
         <location filename="../ui/app/MainWindow.cpp" line="744"/>
-        <location filename="../ui/app/MainWindow.cpp" line="1975"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1979"/>
         <source>Favorites</source>
         <translation>Favoritos</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1883"/>
-        <location filename="../ui/app/MainWindow.cpp" line="1920"/>
-        <location filename="../ui/app/MainWindow.cpp" line="1922"/>
-        <location filename="../ui/app/MainWindow.cpp" line="2048"/>
-        <location filename="../ui/app/MainWindow.cpp" line="2080"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1887"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1924"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1926"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2052"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2084"/>
         <source>Connect to a remote server to use remote favorites</source>
         <translation>Conéctate a un servidor remoto para usar los favoritos remotos</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1942"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1946"/>
         <source>Remove current path from favorites</source>
         <translation>Quitar la ruta actual de favoritos</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="379"/>
         <location filename="../ui/app/MainWindow.cpp" line="464"/>
-        <location filename="../ui/app/MainWindow.cpp" line="1934"/>
-        <location filename="../ui/app/MainWindow.cpp" line="1935"/>
-        <location filename="../ui/app/MainWindow.cpp" line="1943"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1938"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1939"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1947"/>
         <source>Add current path to favorites</source>
         <translation>Añadir la ruta actual a favoritos</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="2042"/>
-        <location filename="../ui/app/MainWindow.cpp" line="2063"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2046"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2067"/>
         <source>No favorites</source>
         <translation>Sin favoritos</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1998"/>
-        <location filename="../ui/app/MainWindow.cpp" line="2127"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2002"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2131"/>
         <source>Clear favorites</source>
         <translation>Borrar favoritos</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="2128"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2132"/>
         <source>Remove all favorites in this section?</source>
         <translation>¿Quitar todos los favoritos de esta sección?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="2177"/>
-        <location filename="../ui/app/MainWindow.cpp" line="2234"/>
-        <location filename="../ui/app/MainWindow.cpp" line="2247"/>
-        <location filename="../ui/app/MainWindow.cpp" line="2255"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2181"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2238"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2251"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2259"/>
         <source>Add to favorites</source>
         <translation>Añadir a favoritos</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindow.cpp" line="1995"/>
-        <location filename="../ui/app/MainWindow.cpp" line="2254"/>
+        <location filename="../ui/app/MainWindow.cpp" line="1999"/>
+        <location filename="../ui/app/MainWindow.cpp" line="2258"/>
         <source>Remove from favorites</source>
         <translation>Quitar de favoritos</translation>
     </message>
@@ -4852,57 +4858,62 @@ Copy its saved credentials to the duplicate?</source>
 <context>
     <name>TransferManager</name>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="92"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="94"/>
         <source>A local transfer path contains a symbolic link. Choose the physical folder and retry.</source>
         <translation>Una ruta local de transferencia contiene un enlace simbólico. Elige la carpeta física y vuelve a intentarlo.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1833"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1925"/>
         <source>Conflict</source>
         <translation>Conflicto</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1844"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1936"/>
         <source>Resume</source>
         <translation>Reanudar</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1840"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1932"/>
         <source>Overwrite</source>
         <translation>Sobrescribir</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1860"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1952"/>
         <source>Skip</source>
         <translation>Omitir</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="98"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="100"/>
         <source>Integrity mismatch detected: local and remote checksums differ. Transfer was stopped to prevent corrupted data.</source>
         <translation>Se detectó un desajuste de integridad: los checksums local y remoto difieren. La transferencia se detuvo para evitar datos corruptos.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="104"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="106"/>
         <source>Resume integrity mismatch detected between local and remote partial data. Transfer was stopped.</source>
         <translation>Se detectó un desajuste de integridad al reanudar entre los datos parciales local y remoto. La transferencia se detuvo.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="111"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="113"/>
         <source>Integrity verification is required but could not be completed. Transfer failed.</source>
         <translation>La verificación de integridad es obligatoria, pero no pudo completarse. La transferencia falló.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1114"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1131"/>
         <source>Transfer queue paused or disconnected</source>
         <translation>La cola de transferencias está pausada o desconectada</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1131"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1147"/>
+        <source>Waiting for a connection to the server</source>
+        <translation>Esperando una conexión con el servidor</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1157"/>
         <source>No transfer connection is available</source>
         <translation>No hay ninguna conexión de transferencia disponible</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1835"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1927"/>
         <source>«%1» already exists.
 Source: %2
 Destination: %3</source>
@@ -4911,77 +4922,77 @@ Origen: %2
 Destino: %3</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1849"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1941"/>
         <source>Rename</source>
         <translation>Renombrar</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1855"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1947"/>
         <source>Copy if newer</source>
         <translation>Copiar si es más reciente</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1863"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1955"/>
         <source>Apply this decision to remaining conflicts</source>
         <translation>Aplicar esta decisión a los conflictos restantes</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1965"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2057"/>
         <source>Could not reserve renamed destination</source>
         <translation>No se pudo reservar el destino renombrado</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1980"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2072"/>
         <source>Could not find an available destination name</source>
         <translation>No se pudo encontrar un nombre de destino disponible</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2078"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2170"/>
         <source>Remote path component is not a directory: %1</source>
         <translation>Un componente de la ruta remota no es un directorio: %1</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2134"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2226"/>
         <source>Could not create local destination directory</source>
         <translation>No se pudo crear el directorio de destino local</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2436"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2538"/>
         <source>The source cleanup result is uncertain. Refresh both locations and reconcile the item manually before retrying.</source>
         <translation>El resultado de la limpieza del origen es incierto. Actualiza ambas ubicaciones y concilia el elemento manualmente antes de reintentarlo.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2503"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2605"/>
         <source>The server may have committed this operation, but its final result could not be confirmed. Refresh the destination and reconcile it manually; OpenSCP will not retry automatically.</source>
         <translation>Es posible que el servidor haya confirmado esta operación, pero no se pudo comprobar el resultado final. Actualiza el destino y concílialo manualmente; OpenSCP no reintentará automáticamente.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2528"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2630"/>
         <source>Transfer failed</source>
         <translation>La transferencia falló</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2554"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2656"/>
         <source>Temporary failure. Retrying automatically…</source>
         <translation>Fallo temporal. Reintentando automáticamente…</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2578"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2680"/>
         <source>Transfer failed after all retry attempts</source>
         <translation>La transferencia falló después de agotar todos los reintentos</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2763"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2914"/>
         <source>The transfer queue storage directory is unavailable.</source>
         <translation>El directorio de almacenamiento de la cola de transferencias no está disponible.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2803"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2954"/>
         <source>The saved transfer queue was not restored because the current queue is not empty.</source>
         <translation>La cola de transferencias guardada no se restauró porque la cola actual no está vacía.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="756"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="769"/>
         <source>Skipped because a prerequisite task did not complete successfully.</source>
         <translation>Se omitió porque una tarea previa no terminó correctamente.</translation>
     </message>

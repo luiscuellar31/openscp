@@ -159,6 +159,9 @@ struct TransferManager::WorkerSlot {
     std::atomic<quint64> activeTaskId{0};
     // Signals of the task this slot runs; only its worker thread uses them.
     std::shared_ptr<const TransferTaskControls::Signals> taskSignals;
+    // Session generation in which this slot could not connect while other
+    // workers could; the slot stays idle for it. Guarded by mtx_.
+    quint64 parkedGeneration = 0;
 };
 
 TransferManager::TransferManager(QObject *parent) : QObject(parent) {
@@ -239,6 +242,7 @@ void TransferManager::setSessionIdentity(const QString &sessionKey) {
             return;
         currentSessionKey_ = sessionKey;
         ++sessionGeneration_;
+        resetConnectionFailuresLocked();
         for (auto &taskNode : queueStore_.nodes()) {
             auto &task = *taskNode;
             if (isTerminalTransferStatus(task.status) ||
@@ -273,8 +277,14 @@ void TransferManager::setConnectionFactory(ConnectionFactory openConnection) {
         std::lock_guard<std::mutex> lock(mtx_);
         openConnection_ = std::move(openConnection);
         ++sessionGeneration_;
+        resetConnectionFailuresLocked();
     }
     workCv_.notify_all();
+}
+
+void TransferManager::resetConnectionFailuresLocked() {
+    consecutiveConnectionFailures_ = 0;
+    connectionSuspended_ = false;
 }
 
 void TransferManager::clearSession() {
@@ -285,6 +295,7 @@ void TransferManager::clearSession() {
         std::lock_guard<std::mutex> lock(mtx_);
         openConnection_ = {};
         ++sessionGeneration_;
+        resetConnectionFailuresLocked();
         for (auto &taskNode : queueStore_.nodes()) {
             auto &task = *taskNode;
             if (task.status == Status::Running ||
@@ -1043,7 +1054,9 @@ std::optional<TransferTask>
 TransferManager::pickRunnableTaskLocked(std::size_t slotIndex) {
     if (shuttingDown_.load() || paused_.load() ||
         slotIndex >= static_cast<std::size_t>(maxConcurrent_.load()) ||
-        !openConnection_ || queueStore_.nodes().empty())
+        !openConnection_ || connectionSuspended_ ||
+        workerSlots_[slotIndex]->parkedGeneration == sessionGeneration_ ||
+        queueStore_.nodes().empty())
         return std::nullopt;
     const auto taskIndex = scheduler_.nextRunnable(
         queueStore_.nodes(), [this](TransferTask &task) {
@@ -1101,7 +1114,9 @@ void TransferManager::workerLoop(std::size_t slotIndex,
 
 std::shared_ptr<openscp::RemoteClient>
 TransferManager::workerClient(WorkerSlot &slot, quint64 taskId,
-                              quint64 generation, std::string &err) {
+                              quint64 generation, std::string &err,
+                              bool &connectionFailed) {
+    connectionFailed = false;
     {
         std::lock_guard<std::mutex> lock(slot.clientMutex);
         if (slot.client && slot.clientGeneration == generation &&
@@ -1127,6 +1142,15 @@ TransferManager::workerClient(WorkerSlot &slot, quint64 taskId,
             err = stoppedError();
             return {};
         }
+        if (connectionSuspended_) {
+            err =
+                QCoreApplication::translate(
+                    "TransferManager", "Waiting for a connection to the server")
+                    .toUtf8()
+                    .toStdString();
+            connectionFailed = true;
+            return {};
+        }
         openConnection = openConnection_;
     }
     if (!openConnection) {
@@ -1138,12 +1162,16 @@ TransferManager::workerClient(WorkerSlot &slot, quint64 taskId,
     }
     // No lock is held during the handshake, so workers connect in parallel.
     std::unique_ptr<openscp::RemoteClient> created = openConnection(err);
-    if (!created)
+    if (!created) {
+        connectionFailed = true;
         return {};
+    }
     bool sessionChanged = false;
     {
         std::lock_guard<std::mutex> lock(mtx_);
         sessionChanged = generation != sessionGeneration_;
+        if (!sessionChanged)
+            consecutiveConnectionFailures_ = 0;
     }
     if (sessionChanged) {
         // The session was cleared or replaced during the handshake.
@@ -1159,6 +1187,66 @@ TransferManager::workerClient(WorkerSlot &slot, quint64 taskId,
         slot.clientGeneration = generation;
     }
     return shared;
+}
+
+void TransferManager::handleWorkerConnectionFailure(WorkerSlot &slot,
+                                                    quint64 taskId,
+                                                    quint64 generation,
+                                                    const std::string &error) {
+    const bool otherWorkerConnected = std::any_of(
+        workerSlots_.cbegin(), workerSlots_.cend(), [&](const auto &other) {
+            if (other.get() == &slot)
+                return false;
+            std::lock_guard<std::mutex> lock(other->clientMutex);
+            return other->client && other->clientGeneration == generation &&
+                   other->client->isConnected();
+        });
+    QVector<quint64> changed;
+    bool suspended = false;
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        TransferTask *storedTask = taskForIdLocked(taskId);
+        if (!storedTask)
+            return;
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        changed.push_back(taskId);
+        if (generation != sessionGeneration_) {
+            // A session change while connecting already decided the state
+            // of the task unless it left it running.
+            if (storedTask->status == Status::Running)
+                transitionToQueued(*storedTask, now, storedTask->resumeHint);
+        } else if (otherWorkerConnected && !connectionSuspended_) {
+            // The server takes fewer connections than there are workers. Keep
+            // this slot idle for the session; a connected one takes the task.
+            slot.parkedGeneration = generation;
+            transitionToQueued(*storedTask, now, storedTask->resumeHint);
+        } else if (!connectionSuspended_ &&
+                   ++consecutiveConnectionFailures_ < kConnectionFailureLimit) {
+            transitionToQueued(*storedTask, now, storedTask->resumeHint);
+        } else {
+            suspended = !connectionSuspended_;
+            connectionSuspended_ = true;
+            for (auto &taskNode : queueStore_.nodes()) {
+                TransferTask &pending = *taskNode;
+                if (pending.taskId != taskId &&
+                    pending.status != Status::Queued)
+                    continue;
+                if (!pending.sessionKey.isEmpty() &&
+                    pending.sessionKey != currentSessionKey_)
+                    continue;
+                setTaskStatusLocked(pending, Status::WaitingForConnection);
+                if (pending.taskId != taskId)
+                    changed.push_back(pending.taskId);
+            }
+            storedTask->error = errorForUi(error);
+            storedTask->currentSpeedKBps = 0;
+            storedTask->etaSeconds = -1;
+        }
+    }
+    publishUpdated(changed);
+    if (suspended)
+        emit transfersWaitingForConnection(errorForUi(error));
+    workCv_.notify_all();
 }
 
 void TransferManager::invalidateWorkerClient(WorkerSlot &slot) {
@@ -1319,6 +1407,7 @@ void TransferManager::resumeAll() {
     QVector<quint64> changed;
     {
         std::lock_guard<std::mutex> lock(mtx_);
+        resetConnectionFailuresLocked();
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         for (auto &taskNode : queueStore_.nodes()) {
             auto &task = *taskNode;
@@ -1386,6 +1475,7 @@ void TransferManager::resumeTask(quint64 taskId) {
             setTaskStatusLocked(task, Status::WaitingForConnection);
             return;
         }
+        resetConnectionFailuresLocked();
         if (activeTaskIds_.count(taskId)) {
             resumeRequestedTasks_.insert(taskId);
         } else {
@@ -2312,7 +2402,16 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
 
         std::string error;
         openscp::RemoteError operationError{};
-        client = workerClient(slot, task.taskId, generation, error);
+        bool connectionFailed = false;
+        client = workerClient(slot, task.taskId, generation, error,
+                              connectionFailed);
+        if (!client && connectionFailed && !shouldCancel(task.taskId)) {
+            // A connection failure is not the task's: it keeps its attempts,
+            // and an outage stops the queue instead of failing every task.
+            handleWorkerConnectionFailure(slot, task.taskId, generation, error);
+            finish();
+            return;
+        }
         bool failed = !client;
         if (client)
             caps = client->capabilities();

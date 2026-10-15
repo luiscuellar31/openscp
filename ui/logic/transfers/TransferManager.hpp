@@ -128,6 +128,9 @@ class TransferManager : public QObject {
     void tasksRemoved(const QVector<quint64> &taskIds);
     void queueSettingsChanged();
     void persistenceWarning(const QString &message);
+    // No worker could open a connection, so dispatch stopped and pending work
+    // waits until it is resumed or the session changes.
+    void transfersWaitingForConnection(const QString &error);
 
     public slots:
     void schedule();
@@ -135,6 +138,9 @@ class TransferManager : public QObject {
 
     private:
     static constexpr int kWorkerSlots = 8;
+    // Consecutive failed connections, with no worker connected, after which
+    // the queue stops dispatching instead of failing every task in turn.
+    static constexpr int kConnectionFailureLimit = 3;
     // Completed, failed and canceled tasks each keep their newest
     // kMaxTerminalHistory entries; pending cleanups and uncertain commits are
     // never pruned. Pruning runs once kTerminalHistoryPruneBatch more tasks
@@ -172,6 +178,8 @@ class TransferManager : public QObject {
     quint64 nextId_ = 1;
     quint64 nextBatchId_ = 1;
     int terminalTaskCount_ = 0;
+    int consecutiveConnectionFailures_ = 0;
+    bool connectionSuspended_ = false;
     int terminalHistoryPruneAt_ =
         kMaxTerminalHistory + kTerminalHistoryPruneBatch;
     TransferScheduler scheduler_;
@@ -259,11 +267,16 @@ class TransferManager : public QObject {
     bool dependencySatisfiedLocked(const TransferTask &task) const;
     std::optional<TransferTask> pickRunnableTaskLocked(std::size_t slotIndex);
     void workerLoop(std::size_t slotIndex, std::stop_token stopToken);
-    std::shared_ptr<openscp::RemoteClient> workerClient(WorkerSlot &slot,
-                                                        quint64 taskId,
-                                                        quint64 generation,
-                                                        std::string &err);
+    // connectionFailed is set when no connection could be opened, as opposed
+    // to the task or session stopping.
+    std::shared_ptr<openscp::RemoteClient>
+    workerClient(WorkerSlot &slot, quint64 taskId, quint64 generation,
+                 std::string &err, bool &connectionFailed);
     void invalidateWorkerClient(WorkerSlot &slot);
+    void handleWorkerConnectionFailure(WorkerSlot &slot, quint64 taskId,
+                                       quint64 generation,
+                                       const std::string &error);
+    void resetConnectionFailuresLocked();
     void interruptTask(quint64 taskId);
     void interruptAllActive();
     bool shouldCancel(quint64 taskId) const;

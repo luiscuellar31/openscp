@@ -1130,6 +1130,15 @@ void MainWindow::initializeRuntimeState() {
                 statusBar()->showMessage(warning, 8000);
                 UiAlerts::warning(this, tr("Transfer queue"), warning);
             });
+    connect(transferMgr_, &TransferManager::transfersWaitingForConnection, this,
+            [this](const QString &error) {
+                statusBar()->showMessage(
+                    tr("Transfers are waiting: no connection to the server "
+                       "could be opened (%1). Resume them once it is "
+                       "reachable.")
+                        .arg(shortRemoteError(error, tr("Transport error."))),
+                    0);
+            });
     (void)transferMgr_->enablePersistence();
     // A single cold snapshot seeds the delta-based UI observer at startup.
     transferUiController_.initialize(transferMgr_->tasksSnapshot());

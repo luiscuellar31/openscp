@@ -182,7 +182,15 @@ and marks a task skipped before visiting its dependents to
 avoid duplicate work and cycles. Active and terminal tasks stop that branch of
 propagation. Relationships stay indexed until removal, independently of task
 status, so retries retain them. The indexes are runtime-only and do not change
-the persisted format. The supporting classes have narrower jobs:
+the persisted format.
+
+A worker that cannot open a connection returns its task to the queue without
+spending its attempts. If other workers are connected, the server is taken to
+accept fewer connections, and that worker stays idle until the session
+changes. If none is, three failures in a row stop dispatching: pending tasks
+of the session wait for a connection until they are resumed or the session
+changes, and the main window reports it. The supporting classes have narrower
+jobs:
 
 - `TransferQueue` stores tasks and selects work fairly.
 - `TransferExecutor` runs a selected transfer.

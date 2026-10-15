@@ -854,6 +854,129 @@ OPENSCP_TEST(testSuccessfulWorkerConnectionReuse, test) {
                "a successful worker should reuse its protocol connection");
 }
 
+// Accepts as many worker connections as `allowed` still permits.
+struct ConnectionLimitProbe {
+    std::atomic<int> allowed{0};
+    std::atomic<int> opened{0};
+    std::atomic<int> refused{0};
+};
+
+class ConnectionLimitClient final : public DownloadMockClient {
+    public:
+    explicit ConnectionLimitClient(std::shared_ptr<ConnectionLimitProbe> probe)
+        : probe_(std::move(probe)) {}
+
+    bool get(const std::string &, const std::string &, std::string &err,
+             std::function<void(std::size_t, std::size_t)> progress,
+             std::function<bool()>, bool) override {
+        clearLastOperationError();
+        if (progress)
+            progress(1, 1);
+        err.clear();
+        return true;
+    }
+
+    std::unique_ptr<openscp::RemoteClient>
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
+        if (probe_->allowed.fetch_sub(1) <= 0) {
+            probe_->allowed.fetch_add(1);
+            probe_->refused.fetch_add(1);
+            err = "Connection refused";
+            return nullptr;
+        }
+        probe_->opened.fetch_add(1);
+        return makeConnectedWorker<ConnectionLimitClient>(options, err, probe_);
+    }
+
+    private:
+    std::shared_ptr<ConnectionLimitProbe> probe_;
+};
+
+bool allTasksHaveStatus(const TransferManager &manager, int count,
+                        TransferTask::Status status) {
+    const auto tasks = manager.tasksSnapshot();
+    return tasks.size() == count &&
+           std::all_of(tasks.cbegin(), tasks.cend(),
+                       [status](const TransferTask &task) {
+                           return task.status == status;
+                       });
+}
+
+OPENSCP_TEST(testUnreachableServerStopsTheQueue, test) {
+    auto probe = std::make_shared<ConnectionLimitProbe>();
+    ConnectionLimitClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(2);
+    std::atomic<int> notices{0};
+    QObject::connect(&manager, &TransferManager::transfersWaitingForConnection,
+                     [&notices](const QString &) { ++notices; });
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+    QVector<QPair<QString, QString>> downloads;
+    for (int index = 0; index < 20; ++index) {
+        downloads.push_back(
+            {QStringLiteral("/remote/outage-%1").arg(index),
+             destination.filePath(QStringLiteral("outage-%1").arg(index))});
+    }
+    manager.enqueueDownloads(downloads, testBatchOptions());
+
+    test.check(waitUntil([&] {
+                   return allTasksHaveStatus(
+                       manager, 20, TransferTask::Status::WaitingForConnection);
+               }),
+               "an unreachable server should leave the queue waiting, with no "
+               "task failed");
+    test.check(probe->refused.load() <= 4 && notices.load() == 1,
+               "the queue should stop connecting and report it once");
+
+    probe->allowed.store(1000);
+    manager.resumeAll();
+    test.check(waitUntil([&] {
+                   return allTasksHaveStatus(manager, 20,
+                                             TransferTask::Status::Done);
+               }),
+               "resuming once the server is back should transfer every task");
+}
+
+OPENSCP_TEST(testWorkerOverTheConnectionLimitStaysIdle, test) {
+    auto probe = std::make_shared<ConnectionLimitProbe>();
+    probe->allowed.store(1);
+    ConnectionLimitClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    std::atomic<int> notices{0};
+    QObject::connect(&manager, &TransferManager::transfersWaitingForConnection,
+                     [&notices](const QString &) { ++notices; });
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+    manager.enqueueDownload(QStringLiteral("/remote/limit-first"),
+                            destination.filePath("limit-first"),
+                            testBatchOptions());
+    test.check(waitUntil([&] {
+                   return allTasksHaveStatus(manager, 1,
+                                             TransferTask::Status::Done);
+               }),
+               "the first worker should connect and transfer");
+
+    manager.setMaxConcurrent(2);
+    QVector<QPair<QString, QString>> downloads;
+    for (int index = 0; index < 6; ++index) {
+        downloads.push_back(
+            {QStringLiteral("/remote/limit-%1").arg(index),
+             destination.filePath(QStringLiteral("limit-%1").arg(index))});
+    }
+    manager.enqueueDownloads(downloads, testBatchOptions());
+    test.check(waitUntil([&] {
+                   return allTasksHaveStatus(manager, 7,
+                                             TransferTask::Status::Done);
+               }),
+               "a worker over the server's connection limit should leave its "
+               "tasks to the connected one");
+    test.check(probe->opened.load() == 1 && probe->refused.load() == 1 &&
+                   notices.load() == 0,
+               "the refused worker should stop connecting for the session");
+}
+
 struct LifecycleProbe {
     std::atomic<int> connections{0};
     std::atomic<int> disconnects{0};
