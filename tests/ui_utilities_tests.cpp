@@ -117,6 +117,44 @@ OPENSCP_TEST(testLocalRenameUsesTheFilesystemMove, test) {
                "report an error");
 }
 
+OPENSCP_TEST(testLocalRemoveKeepsLinkTargets, test) {
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(),
+               "the local remove test should have a temporary directory");
+    if (!temporary.isValid())
+        return;
+
+    const QDir root(temporary.path());
+    const QString target = root.filePath(QStringLiteral("target"));
+    const QString targetFile = root.filePath(QStringLiteral("target/data.txt"));
+    test.check(root.mkpath(QStringLiteral("target/sub")),
+               "the local remove fixture should create a folder tree");
+    QFile data(targetFile);
+    test.check(data.open(QIODevice::WriteOnly) && data.write("payload") == 7,
+               "the local remove fixture should be writable");
+    data.close();
+
+    const QString link = root.filePath(QStringLiteral("link"));
+    test.check(QFile::link(target, link),
+               "the local remove fixture should link to the folder");
+    test.check(removeLocalEntry(link) && !QFileInfo(link).isSymLink(),
+               "removing a folder link should remove the link itself");
+    test.check(QFile::exists(targetFile) &&
+                   QDir(root.filePath(QStringLiteral("target/sub"))).exists(),
+               "removing a folder link should keep the linked folder intact");
+
+    const QString dangling = root.filePath(QStringLiteral("dangling"));
+    test.check(QFile::link(root.filePath(QStringLiteral("missing")), dangling),
+               "the local remove fixture should create a dangling link");
+    test.check(removeLocalEntry(dangling) && !QFileInfo(dangling).isSymLink(),
+               "removing a dangling link should remove the link");
+
+    test.check(removeLocalEntry(target) && !QFileInfo::exists(target),
+               "removing a folder should remove its whole tree");
+    test.check(removeLocalEntry(target),
+               "removing a missing entry should count as removed");
+}
+
 OPENSCP_TEST(testTerminalTransferStatuses, test) {
     using Status = TransferTask::Status;
     for (const Status status : {Status::Done, Status::Error, Status::Canceled,

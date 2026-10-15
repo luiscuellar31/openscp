@@ -38,6 +38,17 @@ LocalRenameResult renameLocalEntry(const QString &sourcePath,
     return LocalRenameResult::Failed;
 }
 
+bool removeLocalEntry(const QString &path) {
+    const QFileInfo info(path);
+    if (!info.exists() && !info.isSymLink())
+        return true;
+    // isDir() follows links, and removeRecursively() on a link to a folder
+    // would empty the target.
+    if (info.isDir() && !info.isSymLink())
+        return QDir(path).removeRecursively();
+    return QFile::remove(path);
+}
+
 bool PathDepthComparator::operator()(const QString &left,
                                      const QString &right) const {
     const qsizetype leftDepth =

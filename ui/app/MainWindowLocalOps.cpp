@@ -33,15 +33,6 @@ bool entryExists(const QString &path) {
     return info.exists() || info.isSymLink();
 }
 
-bool removeEntry(const QString &path) {
-    const QFileInfo info(path);
-    if (!info.exists() && !info.isSymLink())
-        return true;
-    if (info.isDir() && !info.isSymLink())
-        return QDir(path).removeRecursively();
-    return QFile::remove(path);
-}
-
 bool renameEntry(const QString &from, const QString &to) {
     const QFileInfo info(from);
     if (info.isDir() && !info.isSymLink())
@@ -132,13 +123,13 @@ bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
             .filePath(QStringLiteral(".openscp-backup-") + token);
 
     if (!copyEntryToEmptyDestination(srcPath, stagedPath, error)) {
-        (void)removeEntry(stagedPath);
+        (void)removeLocalEntry(stagedPath);
         return false;
     }
 
     const bool hadDestination = entryExists(dstPath);
     if (hadDestination && !renameEntry(dstPath, backupPath)) {
-        (void)removeEntry(stagedPath);
+        (void)removeLocalEntry(stagedPath);
         error = QString(QCoreApplication::translate(
                             "MainWindow",
                             "Could not preserve existing destination: %1"))
@@ -147,7 +138,7 @@ bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
     }
 
     if (!renameEntry(stagedPath, dstPath)) {
-        (void)removeEntry(stagedPath);
+        (void)removeLocalEntry(stagedPath);
         const bool restored =
             !hadDestination || renameEntry(backupPath, dstPath);
         error =
@@ -165,7 +156,7 @@ bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
     }
 
     if (hadDestination)
-        (void)removeEntry(backupPath);
+        (void)removeLocalEntry(backupPath);
     return true;
 }
 
@@ -199,7 +190,7 @@ bool moveEntry(const QString &srcPath, const QString &dstPath, QString &error) {
         renameLocalEntry(srcPath, dstPath, &renameError);
     if (renameResult == LocalRenameResult::Moved) {
         if (hadDestination)
-            (void)removeEntry(backupPath);
+            (void)removeLocalEntry(backupPath);
         return true;
     }
 
@@ -222,7 +213,7 @@ bool moveEntry(const QString &srcPath, const QString &dstPath, QString &error) {
 
     if (!copyEntryRecursively(srcPath, dstPath, error))
         return false;
-    if (removeEntry(srcPath))
+    if (removeLocalEntry(srcPath))
         return true;
     error = QString(QCoreApplication::translate("MainWindow",
                                                 "Could not delete source: %1"))
@@ -574,11 +565,7 @@ void MainWindow::deleteFromLeft() {
     int failedCount = 0;
     for (const QModelIndex &idx : rows) {
         const QFileInfo selectedFileInfo = leftModel_->fileInfo(idx);
-        bool removed =
-            selectedFileInfo.isDir()
-                ? QDir(selectedFileInfo.absoluteFilePath()).removeRecursively()
-                : QFile::remove(selectedFileInfo.absoluteFilePath());
-        if (removed)
+        if (removeLocalEntry(selectedFileInfo.absoluteFilePath()))
             ++deletedCount;
         else
             ++failedCount;

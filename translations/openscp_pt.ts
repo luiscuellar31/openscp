@@ -722,98 +722,98 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
         <translation>A abertura no terminal não está disponível com proxies autenticados, pois os argumentos do comando poderiam expor a senha do proxy.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="142"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="133"/>
         <source>Could not preserve existing destination: %1</source>
         <translation>Não foi possível preservar o destino existente: %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="156"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="147"/>
         <source>Could not publish completed copy: %1</source>
         <translation>Não foi possível publicar a cópia concluída: %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="159"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="150"/>
         <source>Could not publish completed copy or restore the previous destination. Recovery copy: %1</source>
         <translation>Não foi possível publicar a cópia concluída nem restaurar o destino anterior. Cópia de recuperação: %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="59"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="50"/>
         <source>Could not copy file: %1</source>
         <translation>Não foi possível copiar arquivo: %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="70"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="119"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="61"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="110"/>
         <source>Could not create destination folder: %1</source>
         <translation>Não foi possível criar pasta de destino: %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="91"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="82"/>
         <source>Could not create destination subfolder: %1</source>
         <translation>Não foi possível criar subpasta de destino: %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="100"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="91"/>
         <source>Failed to copy: %1</source>
         <translation>Falha ao copiar: %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="110"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="101"/>
         <source>Source entry is neither file nor folder.</source>
         <translation>A entrada de origem não é arquivo nem pasta.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="55"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="66"/>
         <source>Invalid name: cannot be &apos;.&apos; or &apos;..&apos;.</source>
         <translation>Nome inválido: não pode ser &apos;.&apos; nem &apos;..&apos;.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="62"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="73"/>
         <source>Invalid name: cannot contain separators (&apos;/&apos; or &apos;\\&apos;).</source>
         <translation>Nome inválido: não pode conter separadores (&apos;/&apos; ou &apos;\\&apos;).</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="72"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="83"/>
         <source>Invalid name: cannot contain control characters.</source>
         <translation>Nome inválido: não pode conter caracteres de controle.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="111"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="122"/>
         <source>Permission denied.</source>
         <translation>Permissão negada.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="114"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="125"/>
         <source>Location is read-only.</source>
         <translation>Local em modo somente leitura.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="118"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="129"/>
         <source>File or folder does not exist.</source>
         <translation>O arquivo ou pasta não existe.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="122"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="133"/>
         <source>Connection timed out.</source>
         <translation>Tempo limite de conexão atingido.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="128"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="139"/>
         <source>Could not resolve the server hostname.</source>
         <translation>Não foi possível resolver o nome do servidor.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="132"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="143"/>
         <source>Connection refused by the server.</source>
         <translation>Conexão recusada pelo servidor.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="137"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="148"/>
         <source>Network unavailable or host unreachable.</source>
         <translation>Rede indisponível ou host inacessível.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="142"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="153"/>
         <source>Authentication failed.</source>
         <translation>Falha na autenticação.</translation>
     </message>
@@ -867,29 +867,29 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="393"/>
         <location filename="../ui/app/MainWindow.cpp" line="533"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="428"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="433"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="487"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="492"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="386"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="391"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="419"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="424"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="478"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="483"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="385"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="390"/>
         <source>Copy</source>
         <translation>Copiar</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="398"/>
         <location filename="../ui/app/MainWindow.cpp" line="536"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="512"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="547"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="432"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="503"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="538"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="431"/>
         <source>Move</source>
         <translation>Mover</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="402"/>
         <location filename="../ui/app/MainWindow.cpp" line="511"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="563"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="623"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="554"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="622"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="227"/>
         <source>Delete</source>
         <translation>Excluir</translation>
@@ -907,26 +907,26 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="421"/>
         <location filename="../ui/app/MainWindow.cpp" line="505"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="721"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="544"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="708"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="543"/>
         <source>New folder</source>
         <translation>Nova pasta</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="423"/>
         <location filename="../ui/app/MainWindow.cpp" line="508"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="660"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="683"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="586"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="597"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="647"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="670"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="585"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="596"/>
         <source>Rename</source>
         <translation>Renomear</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="426"/>
         <location filename="../ui/app/MainWindow.cpp" line="514"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="732"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="562"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="719"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="561"/>
         <source>New file</source>
         <translation>Novo arquivo</translation>
     </message>
@@ -937,41 +937,41 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     </message>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="499"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="81"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="107"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="117"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="80"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="106"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="116"/>
         <source>Open in terminal</source>
         <translation>Abrir no terminal</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="82"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="81"/>
         <source>The right panel must be connected as remote.</source>
         <translation>O painel direito deve estar conectado como remoto.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="108"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="107"/>
         <source>Could not prepare the terminal command.
 %1</source>
         <translation>Não foi possível preparar o comando de terminal.
 %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="129"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="128"/>
         <source>Opening remote terminal at %1</source>
         <translation>Abrindo terminal remoto em %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="134"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="133"/>
         <source> (password may be requested by OpenSSH for security)</source>
         <translation> (o OpenSSH pode solicitar senha por segurança)</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="131"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="130"/>
         <source> (interactive login required)</source>
         <translation> (login interativo obrigatório)</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="137"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="136"/>
         <source> (auto-fallback to SFTP CLI enabled)</source>
         <translation> (uso automático da CLI do SFTP como alternativa ativado)</translation>
     </message>
@@ -981,7 +981,7 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
         <translation>OpenSCP: o shell SSH não estava disponível. A CLI do SFTP será usada como alternativa.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="118"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="117"/>
         <source>Could not open a remote terminal.
 %1</source>
         <translation>Não foi possível abrir um terminal remoto.
@@ -1006,12 +1006,12 @@ Os uploads usam o caminho da pasta remota acima.
 Os downloads exigem informar um caminho de arquivo remoto.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="464"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="455"/>
         <source>Transfer-only mode currently supports uploading files only.</source>
         <translation>O modo somente transferência atualmente suporta apenas envio de arquivos.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="162"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="161"/>
         <source>Refresh is not available in transfer-only mode.</source>
         <translation>A atualização não está disponível no modo somente transferência.</translation>
     </message>
@@ -1156,10 +1156,10 @@ Continuar?</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="480"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="280"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="305"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="320"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="348"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="279"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="304"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="319"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="347"/>
         <source>Download</source>
         <translation>Download</translation>
     </message>
@@ -1399,117 +1399,117 @@ Continuar?</translation>
         <translation>Você está usando armazenamento de credenciais sem criptografia ativado por variável de ambiente. Desative OPENSCP_ENABLE_INSECURE_FALLBACK para ocultar este aviso.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="295"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="286"/>
         <source>Select left folder</source>
         <translation>Selecione a pasta esquerda</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="303"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="294"/>
         <source>Select right folder</source>
         <translation>Selecione a pasta direita</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="316"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="307"/>
         <source>Left: </source>
         <translation>Esquerda: </translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="319"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="336"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="310"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="327"/>
         <source>Invalid path</source>
         <translation>Caminho inválido</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="320"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="337"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="311"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="328"/>
         <source>Folder does not exist.</source>
         <translation>A pasta não existe.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="333"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="324"/>
         <source>Right: </source>
         <translation>Direita: </translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="428"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="487"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="419"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="478"/>
         <source>No selection available.</source>
         <translation>Nenhuma seleção disponível.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="434"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="493"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="513"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="548"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="564"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="425"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="484"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="504"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="539"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="555"/>
         <source>No entries selected in the left panel.</source>
         <translation>Não há entradas selecionadas no painel esquerdo.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="504"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="503"/>
         <source>Queued: %1 uploads</source>
         <translation>Enfileirados: %1 uploads</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="480"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="541"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="296"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="380"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="438"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="471"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="532"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="295"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="379"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="437"/>
         <source>Invalid destination</source>
         <translation>Destino inválido</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="481"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="542"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="297"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="472"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="533"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="296"/>
         <source>Destination folder does not exist.</source>
         <translation>A pasta de destino não existe.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="174"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="185"/>
         <source>Conflict</source>
         <translation>Conflito</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="175"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="186"/>
         <source>“%1” already exists at destination.
 Overwrite?</source>
         <translation>«%1» já existe no destino.
 Sobrescrever?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="244"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="235"/>
         <source>Copied: %1  |  Failed: %2  |  Skipped: %3</source>
         <translation>Copiados: %1  |  Falhas: %2  |  Ignorados: %3</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="393"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="384"/>
         <location filename="../ui/app/MainWindowTransfers.cpp" line="254"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="278"/>
         <source>Last error: </source>
         <translation>Último erro: </translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="516"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="552"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="507"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="543"/>
         <source>Confirm move</source>
         <translation>Confirmar movimentação</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="517"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="508"/>
         <source>This will upload to the server and delete the local source.
 Continue?</source>
         <translation>Isto enviará para o servidor e excluirá a origem local.
 Deseja continuar?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="236"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="227"/>
         <source>Moved OK: %1  |  Failed: %2  |  Skipped: %3</source>
         <translation>Movidos OK: %1  |  Falhas: %2  |  Ignorados: %3</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="468"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="459"/>
         <source>Preparing uploads; folders skipped in transfer-only mode: %1</source>
         <translation>Preparando uploads; pastas ignoradas no modo somente transferência: %1</translation>
     </message>
@@ -1520,22 +1520,22 @@ Continue?</source>
 Deseja continuar?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="567"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="640"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="558"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="639"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="199"/>
         <source>Confirm delete</source>
         <translation>Confirmar exclusão</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="568"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="559"/>
         <source>This will permanently delete the selected items in the left panel.
 Continue?</source>
         <translation>Isto excluirá permanentemente os itens selecionados no painel esquerdo.
 Deseja continuar?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="586"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="656"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="573"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="652"/>
         <source>Deleted: %1  |  Failed: %2</source>
         <translation>Excluídos: %1  |  Falhas: %2</translation>
     </message>
@@ -1576,22 +1576,22 @@ Deseja continuar?</translation>
         <translation>A confirmação de risco não foi concluída corretamente.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="631"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="618"/>
         <source>Opening preference</source>
         <translation>Preferência de abertura</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="632"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="619"/>
         <source>How do you want to open this file?</source>
         <translation>Como deseja abrir este arquivo?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="633"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="620"/>
         <source>Open file</source>
         <translation>Abrir arquivo</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="635"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="622"/>
         <source>Show folder</source>
         <translation>Mostrar pasta</translation>
     </message>
@@ -1610,22 +1610,22 @@ Deseja continuar?</translation>
 %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="245"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="603"/>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="95"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="244"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="602"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="106"/>
         <source>Invalid name</source>
         <translation>Nome inválido</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="262"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="325"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="261"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="324"/>
         <location filename="../ui/app/MainWindowTransfers.cpp" line="125"/>
         <location filename="../ui/app/MainWindowTransfers.cpp" line="217"/>
         <source>Queued: %1 downloads</source>
         <translation>Enfileirados: %1 downloads</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="268"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="267"/>
         <source>Download already queued</source>
         <translation>Download já enfileirado</translation>
     </message>
@@ -1635,17 +1635,17 @@ Deseja continuar?</translation>
         <translation>Baixado: </translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="281"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="280"/>
         <source>The right panel is not remote.</source>
         <translation>O painel direito não está em modo remoto.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="289"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="288"/>
         <source>Select destination folder (local)</source>
         <translation>Selecione a pasta de destino (local)</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="349"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="348"/>
         <source>Nothing to download.</source>
         <translation>Nada para baixar.</translation>
     </message>
@@ -1656,20 +1656,20 @@ Deseja continuar?</translation>
         <translation>Ignorados inválidos: %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="381"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="439"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="380"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="438"/>
         <source>The destination folder (left panel) does not exist.</source>
         <translation>A pasta de destino (painel esquerdo) não existe.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="386"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="385"/>
         <source>No selection.</source>
         <translation>Sem seleção.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="391"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="432"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="623"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="390"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="431"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="622"/>
         <source>Nothing selected.</source>
         <translation>Nada selecionado.</translation>
     </message>
@@ -1679,33 +1679,33 @@ Deseja continuar?</translation>
         <translation>Enfileirados: %1 downloads (mover)</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="463"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="473"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="513"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="454"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="472"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="512"/>
         <source>Upload</source>
         <translation>Upload</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="474"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="473"/>
         <source>The right panel is not remote or there is no active session.</source>
         <translation>O painel direito não está em modo remoto ou não há sessão ativa.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="511"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="510"/>
         <source>Select files or folders to upload</source>
         <translation>Selecione arquivos ou pastas para enviar</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="536"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="535"/>
         <location filename="../ui/app/MainWindowTransfers.cpp" line="586"/>
         <source>Nothing to upload.</source>
         <translation>Nada para enviar.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="721"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="732"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="544"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="562"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="708"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="719"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="543"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="561"/>
         <source>Name:</source>
         <translation>Nome:</translation>
     </message>
@@ -1718,25 +1718,25 @@ Deseja continuar?</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="1987"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="671"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="696"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="711"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="658"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="683"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="698"/>
         <source>Local</source>
         <translation>Local</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="696"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="683"/>
         <source>Could not create folder.</source>
         <translation>Não foi possível criar a pasta.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="703"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="690"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="159"/>
         <source>File exists</source>
         <translation>Arquivo já existe</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="704"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="691"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="160"/>
         <source>«%1» already exists.
 Overwrite?</source>
@@ -1751,53 +1751,53 @@ Sobrescrever?</translation>
 %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="738"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="574"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="725"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="573"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="116"/>
         <source>File created: </source>
         <translation>Arquivo criado: </translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="711"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="698"/>
         <source>Could not create file.</source>
         <translation>Não foi possível criar arquivo.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="188"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="179"/>
         <source>Could not preserve existing destination: %1 (%2)</source>
         <translation>Não foi possível preservar o destino existente: %1 (%2)</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="208"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="199"/>
         <source>Could not move the source or restore the previous destination. Recovery copy: %1</source>
         <translation>Não foi possível mover a origem nem restaurar o destino anterior. Cópia de recuperação: %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="217"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="208"/>
         <source>Could not move entry: %1 (%2)</source>
         <translation>Não foi possível mover o item: %1 (%2)</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="553"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="544"/>
         <source>Move the selected items to the other panel?
 Items on another volume will be copied and then removed.</source>
         <translation>Mover os itens selecionados para o outro painel?
 Os itens em outro volume serão copiados e depois removidos.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="609"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="596"/>
         <source>Open location</source>
         <translation>Abrir localização</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="684"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="587"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="671"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="586"/>
         <source>Select exactly one item.</source>
         <translation>Selecione exatamente um item.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="660"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="597"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="647"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="596"/>
         <source>New name:</source>
         <translation>Novo nome:</translation>
     </message>
@@ -1809,7 +1809,7 @@ Os itens em outro volume serão copiados e depois removidos.</translation>
 %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="671"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="658"/>
         <source>Could not rename.</source>
         <translation>Não foi possível renomear.</translation>
     </message>
@@ -1826,30 +1826,30 @@ Continuar?</translation>
         <translation>Excluídos OK: %1  |  Falhas: %2</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="641"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="640"/>
         <source>This will permanently delete on local disk.
 Continue?</source>
         <translation>Isto excluirá permanentemente no disco local.
 Continuar?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="728"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="724"/>
         <source>Change permissions…</source>
         <translation>Alterar permissões…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="755"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="742"/>
         <source>Copy to right panel</source>
         <translation>Copiar para o painel direito</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="758"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="745"/>
         <source>Move to right panel</source>
         <translation>Mover para o painel direito</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="771"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="780"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="767"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="776"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="359"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="386"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="439"/>
@@ -1857,7 +1857,7 @@ Continuar?</translation>
         <translation>Permissões</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="781"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="777"/>
         <source>Select only one item.</source>
         <translation>Selecione apenas um item.</translation>
     </message>
@@ -1957,7 +1957,7 @@ Não foi possível salvar a impressão digital. Conexão permitida somente desta
         <translation>Diretório remoto somente leitura; não é possível enviar aqui</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="251"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="242"/>
         <source>Copied: %1  |  Failed: %2</source>
         <translation>Copiados: %1  |  Falhas: %2</translation>
     </message>
@@ -2101,17 +2101,17 @@ Não foi possível salvar a impressão digital. Conexão permitida somente desta
         <translation>Indisponível no modo remoto</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="350"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="341"/>
         <source>Moving selected items...</source>
         <translation>Movendo itens selecionados...</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="351"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="342"/>
         <source>Copying selected items...</source>
         <translation>Copiando itens selecionados...</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="227"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="218"/>
         <source>Could not delete source: %1</source>
         <translation>Não foi possível excluir a origem: %1</translation>
     </message>
@@ -2333,21 +2333,21 @@ O OpenSCP vai desconectar para evitar operações inconsistentes.
         <translation>O cliente sftp do OpenSSH não foi encontrado no PATH.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="110"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="119"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="109"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="118"/>
         <source>Unknown error.</source>
         <translation>Erro desconhecido.</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="1988"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="414"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="420"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="504"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="285"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="335"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="402"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="449"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="479"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="405"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="411"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="495"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="284"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="334"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="401"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="448"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="478"/>
         <location filename="../ui/app/MainWindowTransfers.cpp" line="88"/>
         <location filename="../ui/app/MainWindowTransfers.cpp" line="582"/>
         <location filename="../ui/logic/navigation/PaneController.cpp" line="346"/>
@@ -2358,14 +2358,14 @@ O OpenSCP vai desconectar para evitar operações inconsistentes.
         <translation>Remoto</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="415"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="421"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="505"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="285"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="335"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="402"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="449"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="479"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="406"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="412"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="496"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="284"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="334"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="401"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="448"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="478"/>
         <location filename="../ui/app/MainWindowTransfers.cpp" line="88"/>
         <location filename="../ui/app/MainWindowTransfers.cpp" line="582"/>
         <location filename="../ui/logic/navigation/PaneController.cpp" line="347"/>
@@ -2413,22 +2413,22 @@ O OpenSCP vai desconectar para evitar operações inconsistentes.
         <translation>Baixar arquivo remoto…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="151"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="150"/>
         <source>Remote path: %1</source>
         <translation>Caminho remoto: %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="306"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="305"/>
         <source>Remote file path (absolute or relative to %1):</source>
         <translation>Caminho do arquivo remoto (absoluto ou relativo a %1):</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="321"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="320"/>
         <source>Enter a valid remote file path.</source>
         <translation>Insira um caminho de arquivo remoto válido.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="486"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="485"/>
         <source>Select files to upload</source>
         <translation>Selecione arquivos para enviar</translation>
     </message>
@@ -2626,17 +2626,17 @@ Continuar por sua conta e risco?</translation>
         <translation>O site não foi salvo.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="174"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="173"/>
         <source>Remote control connection is not available</source>
         <translation>A conexão de controle remoto não está disponível</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="208"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="207"/>
         <source>Refreshing remote folder…</source>
         <translation>Atualizando pasta remota…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="209"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="208"/>
         <source>Opening remote folder…</source>
         <translation>Abrindo pasta remota…</translation>
     </message>
@@ -2701,7 +2701,7 @@ Excluídos: %2  |  Falhas: %3</translation>
         <translation>Não foi possível iniciar a exclusão remota.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="772"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="768"/>
         <source>Permissions are not supported for the active protocol.</source>
         <translation>O protocolo ativo não oferece suporte a permissões.</translation>
     </message>

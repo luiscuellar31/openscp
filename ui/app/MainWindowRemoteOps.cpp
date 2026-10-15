@@ -14,7 +14,6 @@
 #include "widgets/platform/PlatformFilePicker.hpp"
 
 #include <QDir>
-#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QInputDialog>
@@ -646,11 +645,8 @@ void MainWindow::deleteRightSelected() {
     int failedCount = 0;
     for (const QModelIndex &index : rows) {
         const QFileInfo selectedFileInfo = rightLocalModel_->fileInfo(index);
-        const bool removed =
-            selectedFileInfo.isDir()
-                ? QDir(selectedFileInfo.absoluteFilePath()).removeRecursively()
-                : QFile::remove(selectedFileInfo.absoluteFilePath());
-        removed ? ++deletedCount : ++failedCount;
+        removeLocalEntry(selectedFileInfo.absoluteFilePath()) ? ++deletedCount
+                                                              : ++failedCount;
     }
     statusBar()->showMessage(
         tr("Deleted: %1  |  Failed: %2").arg(deletedCount).arg(failedCount),

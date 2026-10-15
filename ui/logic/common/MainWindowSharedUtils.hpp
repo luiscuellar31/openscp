@@ -27,6 +27,10 @@ LocalRenameResult renameLocalEntry(const QString &sourcePath,
                                    const QString &targetPath,
                                    QString *error = nullptr);
 
+// Removes a file, a directory tree, or a symbolic link. A link is removed
+// itself, never through its target. A missing entry counts as removed.
+bool removeLocalEntry(const QString &path);
+
 bool isValidEntryName(const QString &name, QString *why = nullptr);
 bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
                           const QString &labelText, const QString &initialValue,
