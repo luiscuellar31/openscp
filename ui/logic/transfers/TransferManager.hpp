@@ -13,6 +13,7 @@
 
 #include <QObject>
 #include <QPair>
+#include <QSet>
 #include <QString>
 #include <QVector>
 
@@ -50,7 +51,10 @@ class TransferManager : public QObject {
     using ConnectionFactory =
         std::function<std::unique_ptr<openscp::RemoteClient>(std::string &)>;
 
-    void setConnectionFactory(ConnectionFactory openConnection);
+    // `uploadsUsePartialFiles` says whether the session's uploads go through
+    // "<destination>.part", which removing tasks with partial data cleans up.
+    void setConnectionFactory(ConnectionFactory openConnection,
+                              bool uploadsUsePartialFiles = true);
     // Pauses the session's active work until another session is set, waiting
     // for workers to stop, and closes their connections.
     void clearSession();
@@ -157,6 +161,9 @@ class TransferManager : public QObject {
 
     ConnectionFactory openConnection_;
     QString currentSessionKey_;
+    // Sessions of this run whose uploads write the destination directly, so
+    // a "<destination>.part" on their server is not an upload's.
+    QSet<QString> sessionsWithoutUploadPartials_;
     quint64 sessionGeneration_ = 1;
 
     TransferQueueStore queueStore_;
@@ -260,6 +267,8 @@ class TransferManager : public QObject {
     void adjustLocalPathUsersLocked(const TransferTask &task, bool add);
     void setTaskPhaseLocked(TransferTask &task, TransferPhase phase);
     bool hasOtherLocalSourceUserLocked(const TransferTask &task) const;
+    bool hasOtherLocalPathUserLocked(const std::string &key,
+                                     quint64 taskId) const;
     bool canReserveTaskLocked(const TransferTask &task) const;
     bool reserveTaskPathsLocked(const TransferTask &task);
     void reserveCleanupSourceLocked(const TransferTask &task);

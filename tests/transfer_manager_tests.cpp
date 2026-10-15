@@ -3439,6 +3439,79 @@ OPENSCP_TEST(testRemovingUploadCanQueueRemotePartialCleanup, test) {
                "remote cleanup should target the deterministic .part path");
 }
 
+OPENSCP_TEST(testRemovingDownloadKeepsAnotherDownloadsPartial, test) {
+    QTemporaryDir root;
+    const QString destination = root.filePath("shared.dat");
+    QFile partial(destination + QStringLiteral(".part"));
+    test.check(partial.open(QIODevice::WriteOnly),
+               "partial-data fixture should be writable");
+    partial.write("queued download");
+    partial.close();
+
+    TransferManager manager;
+    const quint64 kept =
+        manager.enqueueDownload(QStringLiteral("/remote/kept"), destination);
+    const quint64 removed =
+        manager.enqueueDownload(QStringLiteral("/remote/removed"), destination);
+    manager.removeTask(removed, true);
+    test.check(QFile::exists(partial.fileName()),
+               "removing a download must keep the partial file that another "
+               "queued download resumes from");
+    manager.removeTask(kept, true);
+    test.check(!QFile::exists(partial.fileName()),
+               "the last download to a destination should delete its partial");
+}
+
+OPENSCP_TEST(testRemovingFinishedTasksLeavesPartialFilesAlone, test) {
+    QTemporaryDir root;
+    const QString destination = root.filePath("done.dat");
+    QFile partial(destination + QStringLiteral(".part"));
+    test.check(partial.open(QIODevice::WriteOnly),
+               "partial-data fixture should be writable");
+    partial.close();
+
+    TransferManager manager;
+    TransferBatchOptions batch;
+    batch.sessionKey = QStringLiteral("test-session");
+    const quint64 download = manager.enqueueDownload(
+        QStringLiteral("/remote/done"), destination, batch);
+    const quint64 upload = manager.enqueueUpload(
+        QStringLiteral("/local/done"), QStringLiteral("/remote/done"), batch);
+    TransferManagerTestAccess::markDone(manager, download);
+    TransferManagerTestAccess::markDone(manager, upload);
+    manager.removeTasks({download, upload}, true);
+    test.check(manager.tasksSnapshot().isEmpty(),
+               "finished tasks should not queue a remote partial cleanup");
+    test.check(QFile::exists(partial.fileName()),
+               "a finished download has no partial file of its own to delete");
+}
+
+OPENSCP_TEST(testRemovingUploadKeepsPartialFilesItDoesNotOwn, test) {
+    TransferManager manager;
+    TransferBatchOptions batch;
+    batch.sessionKey = QStringLiteral("test-session");
+    const quint64 kept = manager.enqueueUpload(
+        QStringLiteral("/local/a"), QStringLiteral("/remote/shared"), batch);
+    const quint64 removed = manager.enqueueUpload(
+        QStringLiteral("/local/b"), QStringLiteral("/remote/shared"), batch);
+    manager.removeTask(removed, true);
+    const auto remaining = manager.tasksSnapshot();
+    test.check(remaining.size() == 1 && remaining.front().taskId == kept,
+               "another queued upload to the destination may resume from "
+               "its partial file");
+
+    // Classic SCP writes the destination itself.
+    manager.setSessionIdentity(QStringLiteral("scp-session"));
+    manager.setConnectionFactory({}, false);
+    batch.sessionKey = QStringLiteral("scp-session");
+    const quint64 scpUpload = manager.enqueueUpload(
+        QStringLiteral("/local/scp"), QStringLiteral("/remote/scp"), batch);
+    manager.removeTask(scpUpload, true);
+    test.check(manager.tasksSnapshot().size() == 1,
+               "an upload that never writes a partial file should not queue "
+               "its cleanup");
+}
+
 struct RemoteLookupProbe {
     std::mutex mutex;
     std::vector<std::string> exists;

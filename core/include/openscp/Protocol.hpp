@@ -272,6 +272,13 @@ inline ScpTransferMode scpTransferModeFromStorageName(const std::string &raw) {
                                     : ScpTransferMode::Auto;
 }
 
+// SFTP, FTP, WebDAV and SCP in Auto mode upload to "<destination>.part" and
+// rename it into place; classic SCP writes the destination itself.
+inline constexpr bool uploadsUsePartialFile(Protocol protocol,
+                                            ScpTransferMode scpMode) {
+    return protocol != Protocol::Scp || scpMode == ScpTransferMode::Auto;
+}
+
 inline ProtocolCapabilities capabilitiesForProtocol(Protocol protocol) {
     ProtocolCapabilities capabilities;
     bool managedFilesSupported = protocol == Protocol::Sftp;

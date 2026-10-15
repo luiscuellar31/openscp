@@ -168,9 +168,13 @@ the queue mutex; both remain reserved through publication and are released
 together. Conflict renaming checks and reserves the same pair. Local reservation
 keys conservatively normalize Unicode and fold case on every volume, including
 for upload sources; this may serialize case-distinct local names on a
-case-sensitive volume. Remote keys retain case. Partial-file cleanup for a
-removed download acquires the same reservations and leaves the file intact if
-another task is using it. For a local upload move, it defers source
+case-sensitive volume. Remote keys retain case. Partial-file cleanup applies
+only to uploads and downloads that have not finished their transfer. For a
+removed download it acquires the same reservations and leaves the file intact
+while another task, queued or running, can still use it. A removed upload
+queues its remote cleanup unless another upload of the session targets the
+same destination or the session uses classic SCP, which writes the
+destination directly. For a local upload move, it defers source
 cleanup while another queued task needs that path and reserves the source
 during cleanup. A runtime local-path index shares the reservation keys and
 tracks upload sources plus local destinations and download partial paths. It

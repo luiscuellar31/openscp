@@ -1281,7 +1281,10 @@ void MainWindow::applyLocalFileDurabilityPreference() {
         return;
     options.local_file_durability = configured;
     sessionController_->setOptions(options);
-    transferMgr_->setConnectionFactory(sessionConnectionFactory(options));
+    transferMgr_->setConnectionFactory(
+        sessionConnectionFactory(options),
+        openscp::uploadsUsePartialFile(options.protocol,
+                                       options.scp_transfer_mode));
 }
 
 void MainWindow::finalizeConnection(
@@ -1553,7 +1556,10 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         transferUiController_.reset();
         if (transferMgr_) {
             transferMgr_->setSessionIdentity(remoteNavigationScope());
-            transferMgr_->setConnectionFactory(sessionConnectionFactory(opt));
+            transferMgr_->setConnectionFactory(
+                sessionConnectionFactory(opt),
+                openscp::uploadsUsePartialFile(opt.protocol,
+                                               opt.scp_transfer_mode));
         }
         requestRemoteListing(rightPath_->path(), false, true);
         applyConnectedActions(true);
@@ -1574,7 +1580,10 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     rightRemoteMutationsSupported_ = false;
     if (transferMgr_) {
         transferMgr_->setSessionIdentity(remoteNavigationScope());
-        transferMgr_->setConnectionFactory(sessionConnectionFactory(opt));
+        transferMgr_->setConnectionFactory(
+            sessionConnectionFactory(opt),
+            openscp::uploadsUsePartialFile(opt.protocol,
+                                           opt.scp_transfer_mode));
     }
     applyConnectedActions(false);
     finishConnectedUi();

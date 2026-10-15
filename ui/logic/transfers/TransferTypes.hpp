@@ -89,3 +89,13 @@ isTerminalTransferStatus(TransferTask::Status status) {
            status == Status::Canceled || status == Status::Skipped ||
            status == Status::Warning;
 }
+
+// Only an upload or download that has not finished its transfer can have left
+// "<destination>.part" behind.
+[[nodiscard]] inline bool mayHavePartialData(const TransferTask &task) {
+    using Status = TransferTask::Status;
+    return (task.type == TransferTask::Type::Upload ||
+            task.type == TransferTask::Type::Download) &&
+           task.phase == TransferPhase::Transfer &&
+           task.status != Status::Done && task.status != Status::Skipped;
+}

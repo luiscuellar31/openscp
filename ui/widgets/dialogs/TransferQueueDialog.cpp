@@ -150,6 +150,7 @@ struct SelectedActionsState {
     bool canCancel = false;
     bool canRetry = false;
     bool canShowDestination = false;
+    bool canRemovePartialData = false;
 };
 
 using TaskIndexById = QHash<quint64, const TransferTask *>;
@@ -202,6 +203,8 @@ SelectedActionsState buildSelectedActionsState(const QVector<quint64> &ids,
             out.canShowDestination ||
             task.type == TransferTask::Type::Download ||
             task.type == TransferTask::Type::CreateLocalDirectory;
+        out.canRemovePartialData =
+            out.canRemovePartialData || mayHavePartialData(task);
     });
     return out;
 }
@@ -1521,7 +1524,7 @@ void TransferQueueDialog::showContextMenu(const QPoint &pos) {
     actCopyDst->setEnabled(selectedState.hasSelection);
     actClearFinished->setEnabled(true);
     actRemove->setEnabled(selectedState.hasSelection);
-    actRemoveWithPartial->setEnabled(selectedState.hasSelection);
+    actRemoveWithPartial->setEnabled(selectedState.canRemovePartialData);
 
     QAction *chosen = menu.exec(table_->viewport()->mapToGlobal(menuPosition));
     if (!chosen)

@@ -142,8 +142,10 @@ conflicting entry before retrying.
 
 Transfers sharing a destination or its `.part` path run sequentially. Local
 names differing only in case or Unicode normalization also run sequentially,
-even on case-sensitive volumes. Removing a queued task leaves partial data
-intact when another active task is using that path.
+even on case-sensitive volumes. Removing a task with its partial data keeps the
+`.part` file while another task in the queue can still resume from it, and
+removes nothing for finished tasks or for classic SCP uploads, which write the
+destination directly.
 
 For a local move upload, OpenSCP uploads the file and preserves the local
 source with a warning. Automatic removal cannot safely exclude another process

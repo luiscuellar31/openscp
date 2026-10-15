@@ -272,10 +272,15 @@ QString TransferManager::sessionIdentity() const {
     return currentSessionKey_;
 }
 
-void TransferManager::setConnectionFactory(ConnectionFactory openConnection) {
+void TransferManager::setConnectionFactory(ConnectionFactory openConnection,
+                                           bool uploadsUsePartialFiles) {
     {
         std::lock_guard<std::mutex> lock(mtx_);
         openConnection_ = std::move(openConnection);
+        if (uploadsUsePartialFiles)
+            sessionsWithoutUploadPartials_.remove(currentSessionKey_);
+        else
+            sessionsWithoutUploadPartials_.insert(currentSessionKey_);
         ++sessionGeneration_;
         resetConnectionFailuresLocked();
     }
@@ -594,6 +599,18 @@ bool TransferManager::hasOtherLocalSourceUserLocked(
         return true;
     }
     return false;
+}
+
+bool TransferManager::hasOtherLocalPathUserLocked(const std::string &key,
+                                                  quint64 taskId) const {
+    const auto users = localPathUsers_.find(key);
+    if (users == localPathUsers_.end())
+        return false;
+    return std::any_of(
+        users->second.cbegin(), users->second.cend(), [&](quint64 userId) {
+            const TransferTask *user = taskForIdLocked(userId);
+            return userId != taskId && user && user->status != Status::Done;
+        });
 }
 
 bool TransferManager::canReserveTaskLocked(const TransferTask &task) const {
@@ -1609,12 +1626,26 @@ void TransferManager::removeTasks(const QVector<quint64> &taskIds,
         return;
     const QSet<quint64> selected(taskIds.cbegin(), taskIds.cend());
     TransferQueueStore::Nodes removed;
+    // Remote partial files that remaining uploads can still resume from.
+    QSet<QString> remotePartialsInUse;
+    QSet<QString> sessionsWithoutUploadPartials;
     {
         std::lock_guard<std::mutex> lock(mtx_);
         removed =
             removeInactiveTasksLocked([&selected](const TransferTask &task) {
                 return selected.contains(task.taskId);
             });
+        if (removePartialData && !removed.empty()) {
+            for (const auto &taskNode : queueStore_.nodes()) {
+                if (taskNode->type == TransferTask::Type::Upload &&
+                    mayHavePartialData(*taskNode)) {
+                    remotePartialsInUse.insert(taskNode->sessionKey +
+                                               QLatin1Char('\n') +
+                                               taskNode->dst);
+                }
+            }
+            sessionsWithoutUploadPartials = sessionsWithoutUploadPartials_;
+        }
     }
     if (removed.empty())
         return;
@@ -1624,11 +1655,17 @@ void TransferManager::removeTasks(const QVector<quint64> &taskIds,
     for (const auto &taskNode : removed) {
         removedIds.push_back(taskNode->taskId);
         if (removePartialData &&
-            taskNode->type == TransferTask::Type::Download) {
+            taskNode->type == TransferTask::Type::Download &&
+            mayHavePartialData(*taskNode)) {
             bool reserved = false;
             {
                 std::lock_guard<std::mutex> lock(mtx_);
-                reserved = reserveTaskPathsLocked(*taskNode);
+                // Another download to the same destination, running or not,
+                // may resume from this partial file.
+                reserved =
+                    !hasOtherLocalPathUserLocked(
+                        destinationKey(*taskNode, true), taskNode->taskId) &&
+                    reserveTaskPathsLocked(*taskNode);
             }
             // A removed task no longer owns its partial file if another task
             // has reserved that publication path. Never unlink that task's
@@ -1651,8 +1688,13 @@ void TransferManager::removeTasks(const QVector<quint64> &taskIds,
         return;
     for (const auto &taskNode : removed) {
         const TransferTask &task = *taskNode;
-        if (task.type != TransferTask::Type::Upload)
+        if (task.type != TransferTask::Type::Upload ||
+            !mayHavePartialData(task) ||
+            sessionsWithoutUploadPartials.contains(task.sessionKey) ||
+            remotePartialsInUse.contains(task.sessionKey + QLatin1Char('\n') +
+                                         task.dst)) {
             continue;
+        }
         // Remote cleanup must stay off the UI thread. Represent it as a normal
         // persistent queue operation so it can wait for the matching session.
         TransferBatchOptions cleanup;

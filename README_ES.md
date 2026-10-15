@@ -147,8 +147,10 @@ o revisa la entrada en conflicto antes de reintentar.
 Las transferencias que comparten un destino o su ruta `.part` se ejecutan en
 serie. Los nombres locales que solo difieren en mayúsculas o normalización
 Unicode también se ejecutan en serie, incluso en volúmenes que los distinguen.
-Al eliminar una tarea pendiente, se conservan los datos parciales si otra tarea
-activa está usando esa ruta.
+Al eliminar una tarea con sus datos parciales, se conserva el `.part` mientras
+otra tarea de la cola pueda reanudarse desde él, y no se borra nada de las
+tareas terminadas ni de las subidas por SCP clásico, que escriben directamente
+en el destino.
 
 Al mover un archivo local al servidor, OpenSCP completa la subida y conserva el
 origen local con una advertencia. El borrado automático no puede excluir que
