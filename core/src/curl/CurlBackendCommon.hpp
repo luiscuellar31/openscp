@@ -150,6 +150,10 @@ std::string webDavServerPath(std::string_view basePath,
                              std::string_view logicalPath);
 bool webDavLogicalPath(std::string_view basePath, std::string_view serverPath,
                        std::string &logicalPath);
+// True when `redirectUrl` names `serverPath` with a trailing slash added, the
+// collection URL that servers such as Apache's mod_dir redirect to.
+bool isWebDavCollectionRedirect(std::string_view redirectUrl,
+                                std::string_view serverPath);
 bool isCompletedWebDavGetStatus(long statusCode);
 bool isCompletedWebDavWriteStatus(long statusCode);
 std::optional<std::uint32_t>

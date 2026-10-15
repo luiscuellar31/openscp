@@ -37,6 +37,8 @@ struct WebDavTextRequest {
     std::string remotePath;
     const std::string *body = nullptr;
     std::vector<std::string> headers;
+    // The target is a collection, so its URL ends in a slash.
+    bool collection = false;
 };
 
 SessionOptions defaultWebDavOptions() {
@@ -78,10 +80,14 @@ std::string normalizeRemoteDirPath(std::string path) {
 }
 
 std::string buildWebDavUrl(const SessionOptions &opt,
-                           const std::string &remotePath) {
+                           const std::string &remotePath,
+                           bool collection = false) {
     const std::string host = curlcommon::normalizeHostAuthorityForUrl(opt.host);
-    const std::string path = curlcommon::encodeUrlPath(
-        curlcommon::webDavServerPath(opt.webdav_base_path, remotePath));
+    std::string serverPath =
+        curlcommon::webDavServerPath(opt.webdav_base_path, remotePath);
+    if (collection && serverPath.back() != '/')
+        serverPath.push_back('/');
+    const std::string path = curlcommon::encodeUrlPath(serverPath);
     return std::string(webDavSchemeStorageName(
                normalizeWebDavScheme(opt.webdav_scheme))) +
            "://" + host + ":" + std::to_string(opt.port) + path;
@@ -196,7 +202,8 @@ bool performTextRequestOnce(CURL *curl, const SessionOptions &opt,
         return false;
     }
 
-    const std::string url = buildWebDavUrl(opt, request.remotePath);
+    const std::string url =
+        buildWebDavUrl(opt, request.remotePath, request.collection);
     struct curl_slist *headerList = nullptr;
     for (const std::string &h : request.headers)
         headerList = curl_slist_append(headerList, h.c_str());
@@ -273,20 +280,45 @@ bool performTextRequestOnce(CURL *curl, const SessionOptions &opt,
     return true;
 }
 
+// Apache's mod_dir, with its default DirectorySlash On, redirects a request
+// for a collection without the trailing slash to the same URL with it.
+bool redirectsToCollectionUrl(CURL *curl, const SessionOptions &opt,
+                              const WebDavTextRequest &request,
+                              long statusCode) {
+    if (request.collection || (statusCode != 301 && statusCode != 302 &&
+                               statusCode != 307 && statusCode != 308)) {
+        return false;
+    }
+    char *redirectUrl = nullptr;
+    return curl_easy_getinfo(curl, CURLINFO_REDIRECT_URL, &redirectUrl) ==
+               CURLE_OK &&
+           redirectUrl &&
+           curlcommon::isWebDavCollectionRedirect(
+               redirectUrl, curlcommon::webDavServerPath(opt.webdav_base_path,
+                                                         request.remotePath));
+}
+
 bool performTextRequest(CURL *curl, const SessionOptions &opt,
                         bool &basicAuthPinned, const WebDavTextRequest &request,
                         const std::atomic<bool> *interrupted,
                         WebDavResponse &response, std::string &err,
                         CURLcode *curlCodeOut = nullptr) {
-    const bool ok =
-        performTextRequestOnce(curl, opt, basicAuthPinned, request, interrupted,
-                               response, err, curlCodeOut);
-    if (!ok || !unpinBasicAuthAfterRejection(curl, basicAuthPinned,
-                                             response.statusCode)) {
-        return ok;
+    bool ok = performTextRequestOnce(curl, opt, basicAuthPinned, request,
+                                     interrupted, response, err, curlCodeOut);
+    if (ok && unpinBasicAuthAfterRejection(curl, basicAuthPinned,
+                                           response.statusCode)) {
+        ok = performTextRequestOnce(curl, opt, basicAuthPinned, request,
+                                    interrupted, response, err, curlCodeOut);
     }
-    return performTextRequestOnce(curl, opt, basicAuthPinned, request,
-                                  interrupted, response, err, curlCodeOut);
+    // Redirects are never followed; this one is repeated, once, with the
+    // collection URL on the same server.
+    if (!ok ||
+        !redirectsToCollectionUrl(curl, opt, request, response.statusCode))
+        return ok;
+    WebDavTextRequest collectionRequest = request;
+    collectionRequest.collection = true;
+    return performTextRequest(curl, opt, basicAuthPinned, collectionRequest,
+                              interrupted, response, err, curlCodeOut);
 }
 
 bool isDirectChildPath(const std::string &parentPath, const std::string &path,
@@ -330,17 +362,17 @@ bool performPropfind(CURL *curl, const SessionOptions &opt,
                      bool &basicAuthPinned, const std::string &remotePath,
                      int depth, const std::atomic<bool> *interrupted,
                      WebDavResponse &response, std::string &err,
-                     CURLcode *curlCodeOut = nullptr) {
+                     CURLcode *curlCodeOut = nullptr, bool collection = false) {
     // PROPFIND drives both stat(depth=0) and list(depth=1).
     const std::string &body = propfindBody();
     std::vector<std::string> headers = {
         "Depth: " + std::to_string(depth),
         "Content-Type: application/xml; charset=utf-8",
     };
-    return performTextRequest(
-        curl, opt, basicAuthPinned,
-        WebDavTextRequest{"PROPFIND", remotePath, &body, std::move(headers)},
-        interrupted, response, err, curlCodeOut);
+    return performTextRequest(curl, opt, basicAuthPinned,
+                              WebDavTextRequest{"PROPFIND", remotePath, &body,
+                                                std::move(headers), collection},
+                              interrupted, response, err, curlCodeOut);
 }
 
 bool unsupportedWebDavOperation(const char *what, std::string &err) {
@@ -478,7 +510,8 @@ bool CurlWebDavClient::connect(const SessionOptions &opt, std::string &err) {
     CURLcode probeCode = CURLE_OK;
     bool probeBasicAuthPinned = false;
     if (!performPropfind(curl, normalized, probeBasicAuthPinned, "/", 0,
-                         operation.interrupted(), probe, err, &probeCode)) {
+                         operation.interrupted(), probe, err, &probeCode,
+                         true)) {
         setLastOperationError(
             curlcommon::errorFromCurl(probeCode, err, probe.statusCode));
         return false;
@@ -535,7 +568,7 @@ bool CurlWebDavClient::list(const std::string &remote_path,
     CURLcode rc = CURLE_OK;
     if (!performPropfind(connection.session->get(), opt, basicAuthPinned_,
                          basePath, 1, operation.interrupted(), response, err,
-                         &rc)) {
+                         &rc, true)) {
         if (rc == CURLE_ABORTED_BY_CALLBACK && operation.interrupted()->load())
             err = "Interrupted";
         setLastOperationError(
@@ -1060,7 +1093,7 @@ bool CurlWebDavClient::removeResource(const std::string &remote_path,
     CURLcode rc = CURLE_OK;
     if (!performTextRequest(
             connection.session->get(), opt, basicAuthPinned_,
-            WebDavTextRequest{"DELETE", remote_path, nullptr, {}},
+            WebDavTextRequest{"DELETE", remote_path, nullptr, {}, collection},
             operation.interrupted(), response, err, &rc)) {
         setLastOperationError(
             curlcommon::errorFromCurl(rc, err, response.statusCode, true));

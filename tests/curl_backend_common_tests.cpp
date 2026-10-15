@@ -192,6 +192,27 @@ OPENSCP_TEST(testWebDavPaths, test) {
                "WebDAV paths outside the configured base should be rejected");
 }
 
+OPENSCP_TEST(testWebDavCollectionRedirects, test) {
+    using openscp::curlcommon::isWebDavCollectionRedirect;
+
+    test.check(
+        isWebDavCollectionRedirect("https://dav.example/files/team/",
+                                   "/files/team") &&
+            isWebDavCollectionRedirect("http://127.0.0.1:8080/files/my%20team/",
+                                       "/files/my team"),
+        "a redirect to the same path plus a slash names the "
+        "collection URL, whatever the origin and encoding");
+    test.check(!isWebDavCollectionRedirect("https://dav.example/files/team",
+                                           "/files/team") &&
+                   !isWebDavCollectionRedirect(
+                       "https://dav.example/files/team/sub/", "/files/team") &&
+                   !isWebDavCollectionRedirect("https://dav.example/login/",
+                                               "/files/team") &&
+                   !isWebDavCollectionRedirect("https://dav.example/", "/") &&
+                   !isWebDavCollectionRedirect("not a url", "/files/team"),
+               "other redirects must not be repeated with a slash");
+}
+
 OPENSCP_TEST(testWebDavCompletionStatuses, test) {
     using openscp::curlcommon::isCompletedWebDavGetStatus;
     using openscp::curlcommon::isCompletedWebDavWriteStatus;

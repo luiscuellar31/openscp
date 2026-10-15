@@ -101,6 +101,12 @@ first: `removeDir` deletes only empty collections, `removeFile` refuses
 collections, and uploads and overwriting renames replace only files, sending
 `Overwrite: F` when nothing is at the destination.
 
+Requests on a collection the client knows, such as the connection probe of the
+base, a listing, or the DELETE of an empty collection, use its URL with the
+trailing slash. Redirects are never followed, but a request that the server
+redirects to the same path plus a slash, as Apache's mod_dir does by default,
+is repeated once with that collection URL.
+
 `SessionController` owns the active connection. `RemoteOperationController`
 runs control-connection jobs one at a time and returns completed results.
 Its bulk cancellation methods interrupt matching active I/O before marking

@@ -429,6 +429,26 @@ bool webDavLogicalPath(std::string_view basePath, std::string_view serverPath,
     return true;
 }
 
+bool isWebDavCollectionRedirect(std::string_view redirectUrl,
+                                std::string_view serverPath) {
+    const std::string path = normalizeRemotePath(serverPath);
+    if (path == "/")
+        return false;
+    CURLU *url = curl_url();
+    if (!url)
+        return false;
+    const std::string redirect(redirectUrl);
+    char *redirectPath = nullptr;
+    const bool matches =
+        curl_url_set(url, CURLUPART_URL, redirect.c_str(), 0) == CURLUE_OK &&
+        curl_url_get(url, CURLUPART_PATH, &redirectPath, CURLU_URLDECODE) ==
+            CURLUE_OK &&
+        redirectPath && path + "/" == redirectPath;
+    curl_free(redirectPath);
+    curl_url_cleanup(url);
+    return matches;
+}
+
 bool isCompletedWebDavGetStatus(long statusCode) {
     return statusCode == 200;
 }
