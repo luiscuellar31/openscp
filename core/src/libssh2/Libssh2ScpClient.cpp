@@ -60,6 +60,61 @@ void appendSessionErrorDetail(_LIBSSH2_SESSION *session, std::string &msg) {
     }
 }
 
+// After the file data, an SCP source sends one status byte (0, or 1 or 2 and
+// a message line) and waits for an acknowledgement before it exits. Reading
+// until EOF instead takes that byte as data and then blocks until the session
+// timeout. remoteFailure tells a reported error from a broken channel.
+bool finishScpDownload(_LIBSSH2_SESSION *session, LIBSSH2_CHANNEL *channel,
+                       std::string &err, bool &remoteFailure) {
+    remoteFailure = false;
+    const auto readByte = [channel](char &byte) {
+        while (true) {
+            const ssize_t n = libssh2_channel_read(channel, &byte, 1);
+            if (n == 1)
+                return true;
+            if (n < 0 && n != LIBSSH2_ERROR_EAGAIN)
+                return false;
+            if (n == 0 && libssh2_channel_eof(channel))
+                return false;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    };
+
+    char status = 0;
+    if (!readByte(status)) {
+        err = "SCP download ended without a final status";
+        appendSessionErrorDetail(session, err);
+        return false;
+    }
+    if (status != 0) {
+        constexpr std::size_t kMaxMessage = 1024;
+        std::string message;
+        char byte = 0;
+        while (message.size() < kMaxMessage && readByte(byte) && byte != '\n') {
+            if (static_cast<unsigned char>(byte) >= 0x20)
+                message.push_back(byte);
+        }
+        err = "Remote SCP reported an error";
+        if (!message.empty())
+            err += ": " + message;
+        remoteFailure = true;
+        return false;
+    }
+
+    const char ack = 0;
+    while (true) {
+        const ssize_t n = libssh2_channel_write(channel, &ack, 1);
+        if (n == 1)
+            return true;
+        if (n != LIBSSH2_ERROR_EAGAIN) {
+            err = "Could not acknowledge the SCP download";
+            appendSessionErrorDetail(session, err);
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
 } // namespace
 
 Libssh2ScpClient::StructuredErrorScope::StructuredErrorScope(
@@ -200,9 +255,9 @@ bool Libssh2ScpClient::get(
     std::vector<char> buffer(kScpChunkSize);
     std::size_t done = 0;
 
-    // Pull from remote channel until EOF; libssh2 is polled in non-blocking
-    // mode.
-    while (true) {
+    // Read exactly the advertised size: the source follows the data with a
+    // status byte, handled by finishScpDownload().
+    while (done < total) {
         if (shouldCancel && shouldCancel()) {
             err = "Canceled by user";
             localFileOwner.reset();
@@ -210,17 +265,18 @@ bool Libssh2ScpClient::get(
             return false;
         }
 
-        const ssize_t n = libssh2_channel_read(
-            channel, buffer.data(), static_cast<size_t>(buffer.size()));
+        const std::size_t wanted = std::min(buffer.size(), total - done);
+        const ssize_t n = libssh2_channel_read(channel, buffer.data(), wanted);
         if (n == LIBSSH2_ERROR_EAGAIN) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
         if (n < 0) {
-            localFileOwner.reset();
-            closeScpChannel(channel, false);
+            // Capture the session error before freeing the channel resets it.
             std::string scpErr = "SCP read failed";
             appendSessionErrorDetail(session, scpErr);
+            localFileOwner.reset();
+            closeScpChannel(channel, false);
             // Retry through SFTP only when SCP mode is "Auto".
             if (!sftpFallbackEnabled()) {
                 scpErr +=
@@ -257,15 +313,7 @@ bool Libssh2ScpClient::get(
             return false;
         }
 
-        const std::size_t received = static_cast<std::size_t>(n);
-        if (received > std::numeric_limits<std::size_t>::max() - done) {
-            err = "Remote SCP download exceeded the local size limit";
-            localFileOwner.reset();
-            closeScpChannel(channel, false);
-            setLastOperationError(RemoteErrorKind::Integrity, err);
-            return false;
-        }
-        done += received;
+        done += static_cast<std::size_t>(n);
         if (progress && total)
             progress(done, total);
     }
@@ -275,6 +323,17 @@ bool Libssh2ScpClient::get(
         localFileOwner.reset();
         closeScpChannel(channel, false);
         setLastOperationError(RemoteErrorKind::Integrity, err);
+        return false;
+    }
+    bool remoteFailure = false;
+    if (!finishScpDownload(session, channel, err, remoteFailure)) {
+        // Classify while the session still holds the channel's error.
+        if (remoteFailure)
+            setLastOperationError(RemoteErrorKind::RemoteIo, err);
+        else
+            setLastOperationError(classifyStructuredFailure(err, false));
+        localFileOwner.reset();
+        closeScpChannel(channel, false);
         return false;
     }
 

@@ -5,6 +5,7 @@
 #include "TestHarness.hpp"
 #include "libssh2/Libssh2ScpClient.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -119,14 +120,20 @@ int main() {
             std::string("SCP upload should succeed: ") + err);
     t.check(uploadProgressCalled, "upload progress callback should be called");
 
+    // Waiting for the channel to close instead of acknowledging SCP's final
+    // status byte stalls each download until the session timeout.
+    constexpr auto kTimeoutStall = std::chrono::seconds(10);
     bool downloadProgressCalled = false;
     err.clear();
+    auto started = std::chrono::steady_clock::now();
     t.check(
         client.get(
             remotePath, localDownload.string(), err,
             [&](std::size_t, std::size_t) { downloadProgressCalled = true; },
             {}, false),
         std::string("SCP download should succeed: ") + err);
+    t.check(std::chrono::steady_clock::now() - started < kTimeoutStall,
+            "SCP download should not wait for the session timeout");
     t.check(downloadProgressCalled,
             "download progress callback should be called");
 
@@ -134,6 +141,32 @@ int main() {
     t.check(readFile(localDownload, downloaded),
             "downloaded file should be readable");
     t.check(downloaded == payload, "downloaded content should match uploaded");
+
+    // SCP-only mode has no SFTP fallback to hide a broken download.
+    openscp::SessionOptions scpOnlyOptions = opt;
+    scpOnlyOptions.scp_transfer_mode = openscp::ScpTransferMode::ScpOnly;
+    openscp::Libssh2ScpClient scpOnlyClient;
+    err.clear();
+    t.check(scpOnlyClient.connect(scpOnlyOptions, err),
+            std::string("SCP-only connect should succeed: ") + err);
+    const fs::path scpOnlyDownload = tempDir / "scp_only_download.txt";
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        err.clear();
+        downloaded.clear();
+        started = std::chrono::steady_clock::now();
+        t.check(scpOnlyClient.get(remotePath, scpOnlyDownload.string(), err, {},
+                                  {}, false),
+                std::string("SCP-only download should succeed on a reused "
+                            "session: ") +
+                    err);
+        t.check(std::chrono::steady_clock::now() - started < kTimeoutStall,
+                "SCP-only download should not wait for the session timeout");
+        t.check(readFile(scpOnlyDownload, downloaded) && downloaded == payload,
+                "SCP-only download should match the upload");
+        t.check(!fs::exists(scpOnlyDownload.string() + ".part"),
+                "SCP-only download should not leave a partial file");
+    }
+    scpOnlyClient.disconnect();
 
     const std::string preservedDestination = "preserve existing destination";
     t.check(writeFile(localDownload, preservedDestination),
