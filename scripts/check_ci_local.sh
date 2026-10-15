@@ -15,6 +15,7 @@ warn() { printf "\033[1;33m[warn]\033[0m %s\n" "$*"; }
 die() { printf "\033[1;31m[err ]\033[0m %s\n" "$*"; exit 1; }
 
 source "${REPO_DIR}/scripts/lib/macos/qt-host-tools.sh"
+source "${REPO_DIR}/scripts/lib/version.sh"
 
 usage() {
   cat <<'EOF'
@@ -85,11 +86,20 @@ normalize_paths() {
 
 latest_qt6_dir() {
   local best=""
+  local best_version=""
   local cand=""
+  local version=""
   shopt -s nullglob
   for cand in "${HOME}"/Qt/*/macos/lib/cmake/Qt6; do
     [[ -f "${cand}/Qt6Config.cmake" ]] || continue
-    best="$cand"
+    # The glob sorts as text, where 6.8 follows 6.11, so compare versions.
+    version="${cand#"${HOME}/Qt/"}"
+    version="${version%%/*}"
+    [[ "$version" =~ ^[0-9]+(\.[0-9]+)*$ ]] || continue
+    if [[ -z "$best" ]] || version_is_greater "$version" "$best_version"; then
+      best="$cand"
+      best_version="$version"
+    fi
   done
   shopt -u nullglob
   [[ -n "$best" ]] && printf "%s\n" "$best"
