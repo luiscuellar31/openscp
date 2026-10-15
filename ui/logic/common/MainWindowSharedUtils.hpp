@@ -31,6 +31,19 @@ LocalRenameResult renameLocalEntry(const QString &sourcePath,
 // itself, never through its target. A missing entry counts as removed.
 bool removeLocalEntry(const QString &path);
 
+// Copies a file, folder tree, or link through a staged sibling and replaces an
+// existing destination only once the copy is complete. Hidden entries are
+// included and links are recreated, not followed. Special files and copying a
+// folder into itself fail.
+bool copyLocalEntry(const QString &srcPath, const QString &dstPath,
+                    QString &error);
+
+// Renames the entry, replacing an existing destination. Across volumes it
+// falls back to copyLocalEntry() and removes the source only after the copy
+// succeeds.
+bool moveLocalEntry(const QString &srcPath, const QString &dstPath,
+                    QString &error);
+
 bool isValidEntryName(const QString &name, QString *why = nullptr);
 bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
                           const QString &labelText, const QString &initialValue,

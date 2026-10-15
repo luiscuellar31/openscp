@@ -11,9 +11,16 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <filesystem>
 #include <initializer_list>
 #include <string>
+#include <system_error>
 #include <vector>
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -153,6 +160,134 @@ OPENSCP_TEST(testLocalRemoveKeepsLinkTargets, test) {
                "removing a folder should remove its whole tree");
     test.check(removeLocalEntry(target),
                "removing a missing entry should count as removed");
+}
+
+std::filesystem::path nativePath(const QString &path) {
+    return std::filesystem::path(QFile::encodeName(path).constData());
+}
+
+bool writeLocalFile(const QString &path, const QByteArray &contents) {
+    QFile file(path);
+    return file.open(QIODevice::WriteOnly) &&
+           file.write(contents) == contents.size();
+}
+
+QByteArray readLocalFile(const QString &path) {
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
+
+bool createRelativeLink(const QString &linkPath, const char *target) {
+    std::error_code error;
+    std::filesystem::create_symlink(target, nativePath(linkPath), error);
+    return !error;
+}
+
+QString linkText(const QString &linkPath) {
+    std::error_code error;
+    const std::filesystem::path target =
+        std::filesystem::read_symlink(nativePath(linkPath), error);
+    return error ? QString() : QString::fromStdString(target.string());
+}
+
+OPENSCP_TEST(testLocalCopyKeepsHiddenEntriesAndLinks, test) {
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(),
+               "the local copy test should have a temporary directory");
+    if (!temporary.isValid())
+        return;
+
+    const QDir root(temporary.path());
+    const QString source = root.filePath(QStringLiteral("source"));
+    const QString copy = root.filePath(QStringLiteral("copy"));
+    test.check(root.mkpath(QStringLiteral("source/.git")) &&
+                   root.mkpath(QStringLiteral("source/sub")),
+               "the local copy fixture should create its folders");
+    test.check(
+        writeLocalFile(source + QStringLiteral("/.env"), "hidden") &&
+            writeLocalFile(source + QStringLiteral("/.git/config"), "git") &&
+            writeLocalFile(source + QStringLiteral("/sub/inner.txt"), "inner"),
+        "the local copy fixture should write its files");
+    test.check(
+        createRelativeLink(source + QStringLiteral("/folder-link"), "sub") &&
+            createRelativeLink(source + QStringLiteral("/sub/file-link"),
+                               "inner.txt") &&
+            createRelativeLink(source + QStringLiteral("/dangling"), "missing"),
+        "the local copy fixture should create relative links");
+
+    QString error;
+    test.check(copyLocalEntry(source, copy, error) && error.isEmpty(),
+               "copying a folder with hidden entries and links should work");
+    test.check(readLocalFile(copy + QStringLiteral("/.env")) == "hidden" &&
+                   readLocalFile(copy + QStringLiteral("/.git/config")) ==
+                       "git",
+               "a folder copy should include hidden files and folders");
+    test.check(QFileInfo(copy + QStringLiteral("/folder-link")).isSymLink() &&
+                   linkText(copy + QStringLiteral("/folder-link")) ==
+                       QStringLiteral("sub"),
+               "a folder link should be copied as the same relative link");
+    test.check(QFileInfo(copy + QStringLiteral("/sub/file-link")).isSymLink() &&
+                   linkText(copy + QStringLiteral("/sub/file-link")) ==
+                       QStringLiteral("inner.txt"),
+               "a file link should be copied as a link, not as a file");
+    test.check(QFileInfo(copy + QStringLiteral("/dangling")).isSymLink(),
+               "a dangling link should be copied too");
+    test.check(readLocalFile(copy + QStringLiteral("/sub/inner.txt")) ==
+                   "inner",
+               "regular files should be copied with their contents");
+
+    const QString linkCopy = root.filePath(QStringLiteral("link-copy"));
+    error.clear();
+    test.check(copyLocalEntry(source + QStringLiteral("/folder-link"), linkCopy,
+                              error) &&
+                   QFileInfo(linkCopy).isSymLink(),
+               "copying a selected link should copy the link itself");
+}
+
+OPENSCP_TEST(testLocalCopyRejectsUnsafeSources, test) {
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(),
+               "the unsafe copy test should have a temporary directory");
+    if (!temporary.isValid())
+        return;
+
+    const QDir root(temporary.path());
+    const QString source = root.filePath(QStringLiteral("source"));
+    test.check(root.mkpath(QStringLiteral("source/sub")) &&
+                   writeLocalFile(source + QStringLiteral("/data.txt"), "data"),
+               "the unsafe copy fixture should create a folder tree");
+
+    QString error;
+    const QString nested = source + QStringLiteral("/sub/copy");
+    test.check(!copyLocalEntry(source, nested, error) && !error.isEmpty(),
+               "copying a folder into itself should fail");
+    test.check(!QFileInfo::exists(nested) &&
+                   QDir(source + QStringLiteral("/sub"))
+                       .entryList(QDir::AllEntries | QDir::Hidden |
+                                  QDir::System | QDir::NoDotAndDotDot)
+                       .isEmpty(),
+               "a rejected copy into itself should leave nothing behind");
+
+#ifndef _WIN32
+    const QString fifoSource = root.filePath(QStringLiteral("fifo-source"));
+    const QString fifoCopy = root.filePath(QStringLiteral("fifo-copy"));
+    const QString fifo = fifoSource + QStringLiteral("/pipe");
+    test.check(root.mkpath(QStringLiteral("fifo-source")) &&
+                   ::mkfifo(QFile::encodeName(fifo).constData(), 0600) == 0,
+               "the unsafe copy fixture should create a FIFO");
+
+    // A regression must fail instead of hanging the test worker.
+    struct AlarmGuard {
+        ~AlarmGuard() { ::alarm(0); }
+    } alarmGuard;
+    ::alarm(5);
+    error.clear();
+    test.check(!copyLocalEntry(fifoSource, fifoCopy, error) &&
+                   !error.isEmpty() && !QFileInfo::exists(fifoCopy),
+               "copying a folder with a FIFO should fail without blocking");
+    test.check(QFileInfo(fifo).exists(),
+               "a failed copy should keep the source FIFO");
+#endif
 }
 
 OPENSCP_TEST(testTerminalTransferStatuses, test) {
