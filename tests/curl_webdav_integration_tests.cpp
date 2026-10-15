@@ -13,9 +13,12 @@
 namespace {
 
 using openscp::testsupport::envValue;
+using openscp::testsupport::IntegrationTempDir;
+using openscp::testsupport::joinRemotePath;
 using openscp::testsupport::kSkipExitCode;
 using openscp::testsupport::parseBool;
 using openscp::testsupport::parsePort;
+using openscp::testsupport::writeFile;
 
 openscp::WebDavScheme parseWebDavScheme(const std::optional<std::string> &raw,
                                         std::uint16_t port) {
@@ -26,6 +29,64 @@ openscp::WebDavScheme parseWebDavScheme(const std::optional<std::string> &raw,
                    : openscp::WebDavScheme::Https;
     }
     return openscp::webDavSchemeFromStorageName(*raw);
+}
+
+// DELETE and MOVE with Overwrite: T act on a whole collection, so removing,
+// uploading over or renaming onto a folder must fail and keep its contents.
+void checkCollectionsSurviveMutations(openscp::RemoteClient &client,
+                                      const std::string &remoteDirectory,
+                                      TestContext &test) {
+    IntegrationTempDir localDirectory;
+    const auto localPayload = localDirectory.path() / "payload.txt";
+    test.check(localDirectory.isValid() && writeFile(localPayload, "payload"),
+               "WebDAV: should write the collection test payload");
+    const std::string folder = joinRemotePath(remoteDirectory, "protected");
+    const std::string child = joinRemotePath(folder, "child.txt");
+    const std::string sibling = joinRemotePath(remoteDirectory, "sibling.txt");
+
+    std::string error;
+    test.check(
+        client.mkdir(folder, error) &&
+            client.put(localPayload.string(), child, error, {}, {}, false) &&
+            client.put(localPayload.string(), sibling, error, {}, {}, false),
+        "WebDAV: should create a folder with a child: " + error);
+    const auto failsWith = [&client](bool succeeded,
+                                     openscp::RemoteErrorKind kind) {
+        return !succeeded && client.lastOperationError().kind == kind;
+    };
+
+    error.clear();
+    test.check(failsWith(client.removeDir(folder, error),
+                         openscp::RemoteErrorKind::Conflict),
+               "WebDAV: removeDir should refuse a collection with children");
+    error.clear();
+    test.check(failsWith(client.removeFile(folder, error),
+                         openscp::RemoteErrorKind::InvalidRequest),
+               "WebDAV: removeFile should refuse a collection");
+    error.clear();
+    test.check(failsWith(client.put(localPayload.string(), folder, error, {},
+                                    {}, false),
+                         openscp::RemoteErrorKind::Conflict),
+               "WebDAV: an upload should not replace a collection");
+    error.clear();
+    (void)client.removeFile(folder + ".part", error);
+    error.clear();
+    test.check(failsWith(client.rename(sibling, folder, error, true),
+                         openscp::RemoteErrorKind::Conflict),
+               "WebDAV: an overwriting rename should not replace a "
+               "collection");
+    bool childIsDirectory = true;
+    error.clear();
+    test.check(client.exists(child, childIsDirectory, error) &&
+                   !childIsDirectory,
+               "WebDAV: the refused requests should keep the folder's "
+               "contents");
+
+    error.clear();
+    test.check(client.removeFile(child, error) &&
+                   client.removeDir(folder, error) &&
+                   client.removeFile(sibling, error),
+               "WebDAV: an emptied collection should be removable: " + error);
 }
 
 } // namespace
@@ -94,6 +155,8 @@ int main() {
         test.check(created,
                    "WebDAV: mkdir should verify an existing collection: " +
                        error);
+        checkCollectionsSurviveMutations(connectedClient, remoteDirectory,
+                                         test);
     };
     hooks.afterUpload = [](openscp::RemoteClient &connectedClient,
                            const std::string &remotePath, TestContext &test) {

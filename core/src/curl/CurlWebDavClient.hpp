@@ -63,6 +63,12 @@ class CurlWebDavClient : public RemoteClient {
                 std::string &err, bool overwrite = false) override;
 
     private:
+    // DELETE removes a collection with everything in it, so the target is
+    // checked first: removeFile accepts only a file, removeDir only an empty
+    // collection.
+    bool removeResource(const std::string &remote_path, bool collection,
+                        std::string &err);
+
     std::unique_ptr<curlcommon::CurlClientState> state_;
     // Set on connect when the server offered only Basic authentication, so
     // requests carry credentials without a 401 round trip. Accessed only

@@ -92,6 +92,12 @@ remains responsible for XML validation. The existing response-record and
 path-byte budgets apply independently, and rejected listings expose no
 partial results.
 
+WebDAV servers apply DELETE, and MOVE with `Overwrite: T`, to whole
+collections. The WebDAV backend therefore checks the target with PROPFIND
+first: `removeDir` deletes only empty collections, `removeFile` refuses
+collections, and uploads and overwriting renames replace only files, sending
+`Overwrite: F` when nothing is at the destination.
+
 `SessionController` owns the active connection. `RemoteOperationController`
 runs control-connection jobs one at a time and returns completed results.
 Its bulk cancellation methods interrupt matching active I/O before marking
