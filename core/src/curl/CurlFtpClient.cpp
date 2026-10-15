@@ -118,7 +118,9 @@ RemoteError ftpErrorFromResult(CURLcode code, long responseCode,
     if (responseCode == 530) {
         error.kind = RemoteErrorKind::Authentication;
         error.transient = false;
-    } else if (responseCode == 550 || responseCode == 553) {
+    } else if ((responseCode == 550 || responseCode == 553) &&
+               code != CURLE_REMOTE_FILE_NOT_FOUND) {
+        // libcurl already reads a RETR 550 as a missing file.
         error.kind = RemoteErrorKind::PermissionDenied;
         error.transient = false;
     } else if (responseCode == 452 || responseCode == 552) {
@@ -550,6 +552,33 @@ FtpLookupResult lookupFtpEntry(CURL *curl, const SessionOptions &opt,
         return FtpLookupResult::NotFound;
     info = *it;
     return FtpLookupResult::Found;
+}
+
+// FTP answers 550 both for a missing path and for refused access. After a
+// failed DELE, RMD or RNFR, a lookup tells a missing path apart, so deleting
+// it again counts as done.
+RemoteError ftpPathErrorFromResult(CURL *curl, const SessionOptions &opt,
+                                   const std::string &commandRoot,
+                                   const std::string &target,
+                                   const std::atomic<bool> *interrupted,
+                                   bool &mlstRejected, bool &mlsdRejected,
+                                   CURLcode code, long responseCode,
+                                   const std::string &message) {
+    RemoteError error = ftpErrorFromResult(code, responseCode, message, true);
+    if (responseCode != 550)
+        return error;
+    FileInfo info;
+    std::string lookupError;
+    CURLcode lookupCode = CURLE_OK;
+    long lookupResponse = 0;
+    if (lookupFtpEntry(curl, opt, commandRoot, target, interrupted,
+                       mlstRejected, mlsdRejected, info, lookupError,
+                       lookupCode,
+                       lookupResponse) == FtpLookupResult::NotFound) {
+        error.kind = RemoteErrorKind::NotFound;
+        error.commit_uncertain = false;
+    }
+    return error;
 }
 
 } // namespace
@@ -1022,8 +1051,12 @@ bool CurlFtpClient::removeFile(const std::string &remote_path,
         connection.session->get(), opt,
         {"DELE " + curlcommon::ftpCommandPath(commandRoot, target)},
         operation.interrupted(), err, rc, responseCode);
-    if (!ok)
-        setLastOperationError(ftpErrorFromResult(rc, responseCode, err, true));
+    if (!ok) {
+        setLastOperationError(ftpPathErrorFromResult(
+            connection.session->get(), opt, commandRoot, target,
+            operation.interrupted(), mlstRejected_, mlsdRejected_, rc,
+            responseCode, err));
+    }
     return ok;
 }
 
@@ -1046,8 +1079,12 @@ bool CurlFtpClient::removeDir(const std::string &remote_dir, std::string &err) {
         connection.session->get(), opt,
         {"RMD " + curlcommon::ftpCommandPath(commandRoot, target)},
         operation.interrupted(), err, rc, responseCode);
-    if (!ok)
-        setLastOperationError(ftpErrorFromResult(rc, responseCode, err, true));
+    if (!ok) {
+        setLastOperationError(ftpPathErrorFromResult(
+            connection.session->get(), opt, commandRoot, target,
+            operation.interrupted(), mlstRejected_, mlsdRejected_, rc,
+            responseCode, err));
+    }
     return ok;
 }
 
@@ -1096,8 +1133,12 @@ bool CurlFtpClient::rename(const std::string &from, const std::string &to,
         {"RNFR " + curlcommon::ftpCommandPath(commandRoot, source),
          "RNTO " + curlcommon::ftpCommandPath(commandRoot, destination)},
         operation.interrupted(), err, rc, responseCode);
-    if (!ok)
-        setLastOperationError(ftpErrorFromResult(rc, responseCode, err, true));
+    if (!ok) {
+        setLastOperationError(ftpPathErrorFromResult(
+            connection.session->get(), opt, commandRoot, source,
+            operation.interrupted(), mlstRejected_, mlsdRejected_, rc,
+            responseCode, err));
+    }
     return ok;
 }
 

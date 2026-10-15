@@ -365,7 +365,8 @@ inline void runManagedFilesContract(
 }
 
 // FTP answers stat, exists and rename conflicts through MLST when the server
-// offers it and through the parent listing otherwise; both must agree.
+// offers it and through the parent listing otherwise; both must agree. The
+// same lookup tells a missing path from refused access after a 550.
 inline void checkFtpEntryLookups(openscp::RemoteClient &client,
                                  const std::string &remotePath,
                                  TestContext &test) {
@@ -388,6 +389,27 @@ inline void checkFtpEntryLookups(openscp::RemoteClient &client,
                        openscp::RemoteErrorKind::Conflict,
                "FTP: rename without overwrite onto an existing file should "
                "report a conflict: " +
+                   error);
+
+    const std::string missing = remotePath + ".missing";
+    const auto reportsNotFound = [&client](bool succeeded) {
+        return !succeeded && client.lastOperationError().kind ==
+                                 openscp::RemoteErrorKind::NotFound;
+    };
+    error.clear();
+    test.check(reportsNotFound(client.removeFile(missing, error)),
+               "FTP: deleting a missing file should report NotFound: " + error);
+    error.clear();
+    test.check(reportsNotFound(client.removeDir(missing, error)),
+               "FTP: removing a missing directory should report NotFound: " +
+                   error);
+    IntegrationTempDir localDirectory;
+    error.clear();
+    test.check(localDirectory.isValid() &&
+                   reportsNotFound(client.get(
+                       missing, (localDirectory.path() / "missing").string(),
+                       error, {}, {}, false)),
+               "FTP: downloading a missing file should report NotFound: " +
                    error);
 }
 
