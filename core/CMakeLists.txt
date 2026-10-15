@@ -31,6 +31,7 @@ set(OPENSCP_CORE_SRCS
     src/libssh2/detail/Libssh2ErrorClassifier.hpp
     src/libssh2/detail/Libssh2InputSafety.hpp
     src/libssh2/detail/Libssh2TransferIntegrity.hpp
+    src/libssh2/detail/Libssh2WritePacing.hpp
     src/libssh2/detail/UniqueSftpHandle.cpp
     src/libssh2/detail/UniqueSftpHandle.hpp
     src/libssh2/detail/TcpConnect.hpp

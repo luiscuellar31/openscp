@@ -8,6 +8,7 @@
 #include "libssh2/detail/Libssh2ErrorClassifier.hpp"
 #include "libssh2/detail/Libssh2InputSafety.hpp"
 #include "libssh2/detail/Libssh2TransferIntegrity.hpp"
+#include "libssh2/detail/Libssh2WritePacing.hpp"
 #include "libssh2/detail/TcpConnect.hpp"
 #include "libssh2/detail/UniqueSftpHandle.hpp"
 #include "mock/MockSftpClient.hpp"
@@ -285,6 +286,24 @@ bool readTextFile(const fs::path &path, std::string &out) {
     out.assign(std::istreambuf_iterator<char>(in),
                std::istreambuf_iterator<char>());
     return in.good() || in.eof();
+}
+
+OPENSCP_TEST(test_sftp_write_size_follows_the_upload_rate, t) {
+    using openscp::libssh2detail::nextSftpWriteSize;
+    constexpr std::size_t kKiB = 1024;
+    constexpr std::size_t kBuffer = 2 * 1024 * kKiB;
+    t.check(nextSftpWriteSize(64 * kKiB, 40 * kKiB, 1.0, kBuffer) == 80 * kKiB,
+            "a write should carry two seconds of data at the measured rate");
+    t.check(nextSftpWriteSize(32 * kKiB, 100 * 1024 * kKiB, 0.1, kBuffer) ==
+                64 * kKiB,
+            "a fast link should grow the write size at most twofold");
+    t.check(nextSftpWriteSize(1536 * kKiB, 100 * 1024 * kKiB, 0.1, kBuffer) ==
+                kBuffer,
+            "the write size should stop at the transfer buffer");
+    t.check(nextSftpWriteSize(32 * kKiB, kKiB, 10.0, kBuffer) == 32 * kKiB,
+            "a very slow link should still send whole libssh2 packets");
+    t.check(nextSftpWriteSize(32 * kKiB, 0, 0.0, 16 * kKiB) == 16 * kKiB,
+            "a small file's buffer should bound the write size");
 }
 
 OPENSCP_TEST(test_session_defaults, t) {

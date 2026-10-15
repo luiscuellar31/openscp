@@ -8,6 +8,7 @@
 #include "detail/Libssh2ErrorClassifier.hpp"
 #include "detail/Libssh2InputSafety.hpp"
 #include "detail/Libssh2TransferIntegrity.hpp"
+#include "detail/Libssh2WritePacing.hpp"
 #include "detail/TcpConnect.hpp"
 #include "detail/UniqueSftpHandle.hpp"
 #include "openscp/RuntimeLogging.hpp"
@@ -3733,6 +3734,10 @@ bool Libssh2SftpClient::put(
         policy == TransferIntegrityPolicy::Optional && done == 0;
     DigestContext streamDigest = start_stream_digest(streamIntegrity);
 
+    std::size_t writeSize =
+        std::min(libssh2detail::kMinSftpWriteSize, buf.size());
+    const auto writeStart = std::chrono::steady_clock::now();
+    std::uint64_t writtenNow = 0;
     while (true) {
         size_t n = std::fread(buf.data(), 1, buf.size(), localFile.get());
         if (n > 0) {
@@ -3744,7 +3749,8 @@ bool Libssh2SftpClient::put(
                     localFile.reset();
                     return false;
                 }
-                ssize_t w = libssh2_sftp_write(wh.get(), p, remain);
+                ssize_t w = libssh2_sftp_write(wh.get(), p,
+                                               std::min(remain, writeSize));
                 if (w < 0) {
                     const bool canceledNow = (shouldCancel && shouldCancel());
                     err = canceledNow ? "Canceled by user"
@@ -3758,6 +3764,13 @@ bool Libssh2SftpClient::put(
                 remain = remain - static_cast<size_t>(w);
                 p = p + w;
                 done = done + static_cast<size_t>(w);
+                writtenNow += static_cast<std::uint64_t>(w);
+                writeSize = libssh2detail::nextSftpWriteSize(
+                    writeSize, writtenNow,
+                    std::chrono::duration<double>(
+                        std::chrono::steady_clock::now() - writeStart)
+                        .count(),
+                    buf.size());
                 if (progress && total)
                     progress(done, total);
             }

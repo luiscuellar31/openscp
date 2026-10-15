@@ -145,7 +145,10 @@ registers interruption for direct backend connections, publishes its socket
 under the state mutex before proxy negotiation, and uses nonblocking TCP
 connects with a shared 20-second deadline across resolved addresses. The
 platform's synchronous DNS resolver remains outside that TCP deadline.
-libssh2's blocking handshake/authentication timeout is set explicitly.
+libssh2's blocking handshake/authentication timeout is set explicitly. That
+20-second timeout also covers each blocking SFTP write, so an upload passes
+about two seconds of data per write at the rate it has reached, from 32 KiB up
+to its 2 MiB buffer.
 SSH interruption and the initial disconnect shutdown hold the state mutex
 through the socket syscall, preventing a concurrent disconnect from closing
 and reusing the descriptor. Disconnect releases that mutex before waiting for
