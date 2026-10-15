@@ -106,11 +106,14 @@ SyncCoordinator::SyncCoordinator(RemoteOperationController *remoteOperations,
 
                 SyncSnapshotEntry snapshot;
                 snapshot.relativePath = relative;
-                snapshot.type =
-                    entry.isSymlink
-                        ? SyncEntryType::SymbolicLink
-                        : (entry.info.is_dir ? SyncEntryType::Directory
-                                             : SyncEntryType::File);
+                if (entry.isSymlink)
+                    snapshot.type = SyncEntryType::SymbolicLink;
+                else if (entry.info.is_dir)
+                    snapshot.type = SyncEntryType::Directory;
+                else if (isRemoteSpecialFile(entry.info.mode))
+                    snapshot.type = SyncEntryType::Other;
+                else
+                    snapshot.type = SyncEntryType::File;
                 if (!entry.info.is_dir) {
                     if (entry.info.has_size) {
                         snapshot.size = entry.info.size;
@@ -688,11 +691,23 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
                     unscannedPaths.insert(normalized);
                     continue;
                 }
+                // Uploads refuse these names, and the remote scan drops them.
+                if (!isSafeRemoteEntryName(info.fileName())) {
+                    ++invalidNames;
+                    unscannedPaths.insert(node.relativePath);
+                    continue;
+                }
 
                 SyncSnapshotEntry entry;
                 entry.relativePath = normalized;
-                entry.type = info.isDir() ? SyncEntryType::Directory
-                                          : SyncEntryType::File;
+                // FIFOs, sockets and devices are neither, and are never
+                // copied: reading a FIFO would block the transfer.
+                if (info.isDir())
+                    entry.type = SyncEntryType::Directory;
+                else if (info.isFile())
+                    entry.type = SyncEntryType::File;
+                else
+                    entry.type = SyncEntryType::Other;
                 if (info.isFile()) {
                     const qint64 size = info.size();
                     if (size >= 0) {

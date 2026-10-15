@@ -265,7 +265,9 @@ dialog applies only the newest completed result.
 
 The coordinator records paths that either scan could not verify. The comparison
 keeps destination-only entries under unscanned source paths, and plan creation
-checks that coverage again before accepting mirror deletions.
+checks that coverage again before accepting mirror deletions. Both scans mark
+FIFOs, sockets and devices as entries that are never copied or deleted, and the
+local scan leaves out the names that uploads refuse, as the remote scan does.
 
 ## Application updates
 

@@ -17,8 +17,13 @@
 #include <algorithm>
 #include <chrono>
 #include <functional>
+#include <optional>
 #include <thread>
 #include <utility>
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 
 namespace {
 
@@ -91,6 +96,90 @@ class IncompleteListingMockClient final : public openscp::MockSftpClient {
         return MockSftpClient::list(remotePath, entries, error);
     }
 };
+
+class SpecialEntryMockClient final : public openscp::MockSftpClient {
+    public:
+    bool list(const std::string &remotePath,
+              std::vector<openscp::FileInfo> &entries,
+              std::string &error) override {
+        if (!MockSftpClient::list(remotePath, entries, error))
+            return false;
+        if (remotePath == "/") {
+            openscp::FileInfo pipe;
+            pipe.name = "remote-pipe";
+            pipe.mode = 0010644;
+            entries.push_back(pipe);
+        }
+        return true;
+    }
+};
+
+OPENSCP_TEST(testScanMarksSpecialEntriesAndRefusesUnsafeNames, test) {
+#ifndef _WIN32
+    QTemporaryDir localRoot;
+    test.check(
+        localRoot.isValid() &&
+            ::mkfifo(
+                QFile::encodeName(localRoot.filePath("local-pipe")).constData(),
+                0600) == 0,
+        "a local FIFO should be created");
+    for (const QString &name : {QStringLiteral("back\\slash.txt"),
+                                QStringLiteral("line\nbreak.txt")}) {
+        QFile file(localRoot.filePath(name));
+        test.check(file.open(QIODevice::WriteOnly),
+                   "a file with an unsafe name should be created");
+    }
+
+    RemoteOperationController remote;
+    test.check(remote.installSession(
+                   connectedClient<SpecialEntryMockClient>("sync.test")) > 0,
+               "remote controller should accept a connected session");
+    TransferManager transfers;
+    SyncCoordinator coordinator(&remote, &transfers);
+    bool ready = false;
+    SyncPreparationResult prepared;
+    QObject::connect(&coordinator, &SyncCoordinator::preparationReady,
+                     &coordinator, [&](const SyncPreparationResult &result) {
+                         prepared = result;
+                         ready = true;
+                     });
+    coordinator.start(localRoot.path(), QStringLiteral("/"));
+    test.check(waitUntil([&] { return ready; }),
+               "a scan with special entries should complete");
+
+    const auto typeOf =
+        [](const QVector<SyncSnapshotEntry> &entries,
+           const QString &path) -> std::optional<SyncEntryType> {
+        for (const SyncSnapshotEntry &entry : entries) {
+            if (entry.relativePath == path)
+                return entry.type;
+        }
+        return std::nullopt;
+    };
+    test.check(
+        typeOf(prepared.localSnapshot, QStringLiteral("local-pipe")) ==
+                SyncEntryType::Other &&
+            typeOf(prepared.remoteSnapshot, QStringLiteral("remote-pipe")) ==
+                SyncEntryType::Other,
+        "FIFOs should be scanned as entries that cannot be copied");
+    test.check(
+        !typeOf(prepared.localSnapshot, QStringLiteral("back\\slash.txt")) &&
+            !typeOf(prepared.localSnapshot,
+                    QStringLiteral("line\nbreak.txt")) &&
+            prepared.invalidNames >= 2,
+        "names that uploads refuse should stay out of the scan");
+
+    const auto items = SyncComparisonEngine::compare(
+        prepared.localSnapshot, prepared.remoteSnapshot, {}, prepared.coverage);
+    test.check(std::none_of(items.cbegin(), items.cend(),
+                            [](const SyncComparisonItem &item) {
+                                return item.selected &&
+                                       item.relativePath.endsWith(
+                                           QStringLiteral("-pipe"));
+                            }),
+               "special entries should never be selected for copying");
+#endif
+}
 
 OPENSCP_TEST(testAsynchronousSnapshots, test) {
     QTemporaryDir localRoot;

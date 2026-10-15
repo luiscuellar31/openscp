@@ -139,6 +139,10 @@ conexión TCP de SSH comparten un límite de 20 segundos entre las direcciones
 resueltas. La resolución de nombres usa el sistema y puede tardar más,
 independientemente de ese límite TCP.
 
+La sincronización nunca copia FIFOs, sockets ni dispositivos, y deja fuera los
+nombres con barra invertida o caracteres de control, que las subidas también
+rechazan.
+
 Las descargas requieren archivos `.part` regulares. Si una entrada `.part`
 existente es una FIFO (tubería con nombre), la descarga informa de un error de
 E/S local sin esperar a un lector ni reemplazar esa entrada. Elige otro destino

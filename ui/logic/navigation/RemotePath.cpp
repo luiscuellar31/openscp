@@ -62,3 +62,9 @@ std::optional<QString> decodeRemoteEntryName(const std::string &rawName) {
 bool isRemoteSymlink(std::uint32_t mode) {
     return (mode & 0170000u) == 0120000u;
 }
+
+bool isRemoteSpecialFile(std::uint32_t mode) {
+    const std::uint32_t type = mode & 0170000u;
+    return type != 0 && type != 0100000u && type != 0040000u &&
+           type != 0120000u;
+}
