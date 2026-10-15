@@ -75,6 +75,10 @@ class RemoteModel : public QAbstractTableModel {
 
     const Item *itemForIndex(const QModelIndex &index) const;
     QIcon iconForRemoteEntry(const Item &item) const;
+    // Item rows in display order. Equal keys fall back to the name, so every
+    // sort gives the same order.
+    std::vector<std::size_t> sortedRows(const std::vector<Item> &items,
+                                        int column, Qt::SortOrder order) const;
     void sortItemsVector(std::vector<Item> &items, int column,
                          Qt::SortOrder order) const;
 };

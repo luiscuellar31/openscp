@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <numeric>
 
 namespace {
 
@@ -259,34 +260,54 @@ void RemoteModel::setEntries(const QString &path,
     emit rootPathLoaded(currentPath_, true, QString());
 }
 
+std::vector<std::size_t> RemoteModel::sortedRows(const std::vector<Item> &items,
+                                                 int column,
+                                                 Qt::SortOrder order) const {
+    auto ascendingLess = [column](const Item &leftItem, const Item &rightItem) {
+        switch (column) {
+        case 1:
+            if (leftItem.size != rightItem.size)
+                return leftItem.size < rightItem.size;
+            break;
+        case 2:
+            if (leftItem.mtime != rightItem.mtime)
+                return leftItem.mtime < rightItem.mtime;
+            break;
+        case 3:
+            if (leftItem.mode != rightItem.mode)
+                return leftItem.mode < rightItem.mode;
+            break;
+        default:
+            break;
+        }
+        const int byName = QString::compare(leftItem.name, rightItem.name,
+                                            Qt::CaseInsensitive);
+        if (byName != 0)
+            return byName < 0;
+        return leftItem.name < rightItem.name;
+    };
+    const bool asc = (order == Qt::AscendingOrder);
+    std::vector<std::size_t> rows(items.size());
+    std::iota(rows.begin(), rows.end(), std::size_t{0});
+    std::stable_sort(rows.begin(), rows.end(),
+                     [&](std::size_t leftRow, std::size_t rightRow) {
+                         const Item &leftItem = items[leftRow];
+                         const Item &rightItem = items[rightRow];
+                         if (leftItem.isDir != rightItem.isDir)
+                             return leftItem.isDir;
+                         return asc ? ascendingLess(leftItem, rightItem)
+                                    : ascendingLess(rightItem, leftItem);
+                     });
+    return rows;
+}
+
 void RemoteModel::sortItemsVector(std::vector<Item> &items, int column,
                                   Qt::SortOrder order) const {
-    const bool asc = (order == Qt::AscendingOrder);
-    auto lessCaseInsensitive = [&](const QString &leftName,
-                                   const QString &rightName) {
-        int cmp = QString::compare(leftName, rightName, Qt::CaseInsensitive);
-        return asc ? (cmp < 0) : (cmp > 0);
-    };
-    auto compareItems = [&](const Item &leftItem, const Item &rightItem) {
-        if (leftItem.isDir != rightItem.isDir)
-            return leftItem.isDir && !rightItem.isDir;
-        switch (column) {
-        case 0:
-            return lessCaseInsensitive(leftItem.name, rightItem.name);
-        case 1:
-            return asc ? (leftItem.size < rightItem.size)
-                       : (leftItem.size > rightItem.size);
-        case 2:
-            return asc ? (leftItem.mtime < rightItem.mtime)
-                       : (leftItem.mtime > rightItem.mtime);
-        case 3:
-            return asc ? (leftItem.mode < rightItem.mode)
-                       : (leftItem.mode > rightItem.mode);
-        default:
-            return lessCaseInsensitive(leftItem.name, rightItem.name);
-        }
-    };
-    std::sort(items.begin(), items.end(), compareItems);
+    std::vector<Item> sorted;
+    sorted.reserve(items.size());
+    for (const std::size_t row : sortedRows(items, column, order))
+        sorted.push_back(std::move(items[row]));
+    items = std::move(sorted);
 }
 
 const RemoteModel::Item *
@@ -357,7 +378,28 @@ void RemoteModel::sort(int column, Qt::SortOrder order) {
     sortOrder_ = order;
     if (items_.empty())
         return;
-    emit layoutAboutToBeChanged();
-    sortItemsVector(items_, sortColumn_, sortOrder_);
-    emit layoutChanged();
+    emit layoutAboutToBeChanged({}, QAbstractItemModel::VerticalSortHint);
+    const std::vector<std::size_t> rows =
+        sortedRows(items_, sortColumn_, sortOrder_);
+    std::vector<Item> sorted;
+    sorted.reserve(items_.size());
+    std::vector<int> newRowByOldRow(items_.size());
+    for (std::size_t newRow = 0; newRow < rows.size(); ++newRow) {
+        sorted.push_back(std::move(items_[rows[newRow]]));
+        newRowByOldRow[rows[newRow]] = static_cast<int>(newRow);
+    }
+    items_ = std::move(sorted);
+
+    // The view keeps its selection and current index as persistent indexes.
+    // Move them with their entries, or they would point at other files.
+    const QModelIndexList from = persistentIndexList();
+    QModelIndexList to;
+    to.reserve(from.size());
+    for (const QModelIndex &index : from) {
+        to.push_back(
+            createIndex(newRowByOldRow[static_cast<std::size_t>(index.row())],
+                        index.column()));
+    }
+    changePersistentIndexList(from, to);
+    emit layoutChanged({}, QAbstractItemModel::VerticalSortHint);
 }
