@@ -1683,12 +1683,8 @@ void MainWindow::applyPreferences() {
     prefShowQueueOnEnqueue_ =
         settings.value(openscpui::settingskeys::kUiShowQueueOnEnqueue, true)
             .toBool();
-    prefNoHostVerificationTtlMin_ = qBound(
-        1,
-        settings
-            .value(openscpui::settingskeys::kNoHostVerificationTtlMinutes, 15)
-            .toInt(),
-        120);
+    prefNoHostVerificationTtlMin_ =
+        openscpui::effectiveNoHostVerificationTtlMinutes(settings);
     const int sessionHealthIntervalMs =
         qBound(
             60,

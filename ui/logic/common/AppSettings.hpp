@@ -68,6 +68,7 @@ inline constexpr char kKnownHostsHashed[] = "Security/knownHostsHashed";
 inline constexpr char kFingerprintHex[] = "Security/fpHex";
 inline constexpr char kNoHostVerificationTtlMinutes[] =
     "Security/noHostVerificationTtlMin";
+inline constexpr int kDefaultNoHostVerificationTtlMinutes = 15;
 inline constexpr char kEnableInsecureSecretFallback[] =
     "Security/enableInsecureSecretFallback";
 inline constexpr char kMacKeychainRestrictive[] =
@@ -90,7 +91,9 @@ inline constexpr char kStagingPreparationTimeoutMs[] =
     "Advanced/stagingPrepTimeoutMs";
 inline constexpr char kStagingConfirmationItems[] =
     "Advanced/stagingConfirmItems";
+inline constexpr int kDefaultStagingConfirmationItems = 100000;
 inline constexpr char kStagingConfirmationMiB[] = "Advanced/stagingConfirmMiB";
+inline constexpr int kDefaultStagingConfirmationMiB = 100 * 1024;
 inline constexpr char kAutoCleanStaging[] = "Advanced/autoCleanStaging";
 inline constexpr char kMaximumFolderDepth[] = "Advanced/maxFolderDepth";
 inline constexpr char kStagingRetentionDays[] = "Advanced/stagingRetentionDays";
@@ -116,6 +119,8 @@ inline constexpr char kRemoteScopeFavoritesPattern[] =
 
 QString defaultStagingRootPath();
 QString effectiveStagingRootPath(const QSettings &settings);
+// Minutes that a "no host verification" exception lasts, between 1 and 120.
+int effectiveNoHostVerificationTtlMinutes(const QSettings &settings);
 
 struct SettingsSyncResult {
     bool ok = false;

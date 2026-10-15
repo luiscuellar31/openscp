@@ -70,19 +70,19 @@ QPair<QString, QString> splitNameMultiExt(const QString &fileName) {
 }
 
 QPair<int, quint64> loadStagingConfirmThresholds() {
+    using namespace openscpui::settingskeys;
     openscpui::AppSettings settings;
     int itemThreshold =
         settings
-            .value(openscpui::settingskeys::kStagingConfirmationItems, 100000)
+            .value(kStagingConfirmationItems, kDefaultStagingConfirmationItems)
             .toInt();
     if (itemThreshold < 1)
-        itemThreshold = 100000;
+        itemThreshold = kDefaultStagingConfirmationItems;
     int mibThreshold =
-        settings
-            .value(openscpui::settingskeys::kStagingConfirmationMiB, 100 * 1024)
+        settings.value(kStagingConfirmationMiB, kDefaultStagingConfirmationMiB)
             .toInt();
     if (mibThreshold < 1)
-        mibThreshold = 100 * 1024;
+        mibThreshold = kDefaultStagingConfirmationMiB;
     return qMakePair(itemThreshold,
                      static_cast<quint64>(mibThreshold) * 1024ull * 1024ull);
 }

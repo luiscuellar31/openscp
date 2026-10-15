@@ -307,7 +307,7 @@ Each kind of persisted data has one owner:
 
 | Owner | Data |
 | --- | --- |
-| `AppSettings` | Application identity and settings keys. |
+| `AppSettings` | Application identity, settings keys, and defaults that several readers share. |
 | `SavedSitesPersistence` | Current saved-site format and validation. |
 | `SiteCredentialRepository` | Stable credential keys and secure storage. |
 | `SecretStore` | Keychain, Secret Service/libsecret, and platform encryption. |
@@ -315,6 +315,8 @@ Each kind of persisted data has one owner:
 | `TransferQueuePersistence` | Versioned, atomic storage for unfinished transfers. |
 
 Use these classes instead of reading or writing their settings directly.
+`SettingsDialog` writes only the values the user changed, so every other
+setting keeps following its default.
 Changes to persisted formats require explicit decisions about schema and
 versioning, and corrupt or unsupported data must not be silently overwritten.
 

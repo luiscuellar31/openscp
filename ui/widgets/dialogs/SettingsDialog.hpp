@@ -57,7 +57,9 @@ class SettingsDialog : public QDialog {
     readCurrentSnapshot(const QVector<SettingBinding> &bindings) const;
     void applySnapshotToControls(const QVariantMap &snapshot,
                                  const QVector<SettingBinding> &bindings);
-    void writeSnapshot(QSettings &settings, const QVariantMap &snapshot,
+    void writeSnapshot(QSettings &settings,
+                       const QVariantMap &persistedSnapshot,
+                       const QVariantMap &snapshot,
                        const QVector<SettingBinding> &bindings) const;
 
     void setupSectionList(class QListWidget *sectionList) const;
