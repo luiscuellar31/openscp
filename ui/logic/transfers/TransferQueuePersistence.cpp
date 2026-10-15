@@ -20,8 +20,12 @@ namespace {
 using Policy = TransferConflictPolicy;
 using Status = TransferTask::Status;
 
-constexpr qint64 kMaxPersistenceBytes = 16 * 1024 * 1024;
+// Room for kMaxPersistedTasks tasks with paths of about 170 characters.
+constexpr qint64 kMaxPersistenceBytes = 64 * 1024 * 1024;
 constexpr qsizetype kMaxPersistedTasks = 100'000;
+// Fewer bytes than a task takes besides its paths and session key, so a
+// queue that cannot fit is rejected without serializing it.
+constexpr qint64 kMinSerializedTaskBytes = 200;
 constexpr int kSchemaVersion = 1;
 // Written only when a task waits for its batch, so builds that predate batch
 // waiting preserve the file instead of running those tasks without waiting.
@@ -395,16 +399,42 @@ TransferQueuePersistence::SaveResult
 TransferQueuePersistence::save(const QString &path,
                                const QVector<TransferTask> &tasks) {
     SaveResult result;
+    // An older file left in place would be restored on the next start and
+    // repeat work that has finished since, so a queue too large to save
+    // removes it.
+    const auto rejectTooLarge = [&path, &result] {
+        QFile previous(path);
+        if (previous.exists() && !previous.remove()) {
+            result.warning =
+                translate("The transfer queue is too large to be saved, and "
+                          "its previous copy could not be removed: %1")
+                    .arg(previous.errorString());
+        } else {
+            result.warning =
+                translate("The transfer queue is too large to be saved, so it "
+                          "will not be restored after a restart.");
+        }
+        return result;
+    };
+
+    qsizetype persistedCount = 0;
+    qint64 minimumBytes = 0;
+    for (const TransferTask &task : tasks) {
+        if (!isPersisted(task))
+            continue;
+        ++persistedCount;
+        minimumBytes += kMinSerializedTaskBytes + task.src.size() +
+                        task.dst.size() + task.sessionKey.size();
+    }
+    if (persistedCount > kMaxPersistedTasks ||
+        minimumBytes > kMaxPersistenceBytes)
+        return rejectTooLarge();
+
     QJsonArray serialized;
     bool waitsForBatch = false;
     for (const TransferTask &task : tasks) {
         if (!isPersisted(task))
             continue;
-        if (serialized.size() >= kMaxPersistedTasks) {
-            result.warning = translate(
-                "The transfer queue exceeds the persistence safety limit.");
-            return result;
-        }
         serialized.append(serializeTask(task));
         waitsForBatch = waitsForBatch || task.waitsForBatch;
     }
@@ -414,11 +444,8 @@ TransferQueuePersistence::save(const QString &path,
                 waitsForBatch ? kBatchWaitSchemaVersion : kSchemaVersion);
     root.insert(QStringLiteral("tasks"), serialized);
     const QByteArray data = QJsonDocument(root).toJson(QJsonDocument::Compact);
-    if (data.size() > kMaxPersistenceBytes) {
-        result.warning = translate(
-            "The transfer queue exceeds the persistence safety limit.");
-        return result;
-    }
+    if (data.size() > kMaxPersistenceBytes)
+        return rejectTooLarge();
 
     const QFileInfo fileInfo(path);
     if (!QDir().mkpath(fileInfo.dir().absolutePath())) {

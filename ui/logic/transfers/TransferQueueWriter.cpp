@@ -57,6 +57,9 @@ void TransferQueueWriter::shutdown() {
 }
 
 void TransferQueueWriter::run(std::stop_token stopToken) {
+    // A failure is reported once, not again until a save succeeds, so a queue
+    // that keeps failing does not raise a warning on every change.
+    bool failureReported = false;
     while (true) {
         QVector<TransferTask> tasks;
         QString path;
@@ -88,7 +91,11 @@ void TransferQueueWriter::run(std::stop_token stopToken) {
             writing_ = false;
         }
         idle_.notify_all();
-        if (!result.succeeded && !result.warning.isEmpty() && onWarning)
+        if (result.succeeded) {
+            failureReported = false;
+        } else if (!failureReported && !result.warning.isEmpty() && onWarning) {
+            failureReported = true;
             onWarning(result.warning);
+        }
     }
 }

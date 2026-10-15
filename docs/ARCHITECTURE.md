@@ -195,7 +195,9 @@ jobs:
 - `TransferQueue` stores tasks and selects work fairly.
 - `TransferExecutor` runs a selected transfer.
 - `BandwidthLimiter` applies speed limits.
-- `TransferQueuePersistence` saves unfinished tasks safely.
+- `TransferQueuePersistence` saves unfinished tasks safely. A queue too large
+  to save removes the previous file, so a stale queue is never restored, and
+  `TransferQueueWriter` reports a failed save once until a save succeeds.
 
 The transfer queue dialog keeps a separate table model indexed by task ID.
 Contiguous removals use Qt row-removal notifications. Discontinuous removals

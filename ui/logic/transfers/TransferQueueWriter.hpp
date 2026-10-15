@@ -27,7 +27,8 @@ class TransferQueueWriter final {
     TransferQueueWriter(const TransferQueueWriter &) = delete;
     TransferQueueWriter &operator=(const TransferQueueWriter &) = delete;
 
-    // Called from the writer thread when a snapshot could not be saved.
+    // Called from the writer thread when a snapshot could not be saved; later
+    // failures are not reported again until a snapshot is saved.
     void setWarningHandler(WarningHandler onWarning);
     // Snapshots are dropped until a path is set.
     void setPath(QString path);

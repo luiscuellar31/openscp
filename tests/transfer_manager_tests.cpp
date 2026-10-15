@@ -3700,6 +3700,63 @@ OPENSCP_TEST(testQueueWriterReportsFailures, test) {
                "a snapshot that cannot be written should report a warning");
 }
 
+QVector<TransferTask> queueOverTheTaskLimit() {
+    QVector<TransferTask> tasks;
+    tasks.reserve(100'001);
+    for (quint64 taskId = 1; taskId <= 100'001; ++taskId)
+        tasks.push_back(persistableTask(taskId, QStringLiteral("/too-many")));
+    return tasks;
+}
+
+OPENSCP_TEST(testOversizedQueueRemovesItsStaleFile, test) {
+    QTemporaryDir root;
+    const QString path = root.filePath("oversized.json");
+    test.check(TransferQueuePersistence::save(
+                   path, {persistableTask(1, QStringLiteral("/older"))})
+                   .succeeded,
+               "a small queue should be saved");
+    // The size estimate assumes a task takes at least 200 bytes besides its
+    // strings; one task with empty strings must still be larger.
+    TransferTask empty = persistableTask(1, QString());
+    empty.src.clear();
+    empty.sessionKey.clear();
+    const QString emptyPath = root.filePath("empty-task.json");
+    test.check(TransferQueuePersistence::save(emptyPath, {empty}).succeeded &&
+                   QFileInfo(emptyPath).size() > 200,
+               "a saved task should take more than the estimated minimum");
+
+    const auto result =
+        TransferQueuePersistence::save(path, queueOverTheTaskLimit());
+    test.check(!result.succeeded && !result.warning.isEmpty(),
+               "a queue over the limit should not be saved");
+    test.check(
+        !QFileInfo::exists(path) &&
+            TransferQueuePersistence::load(path, QStringLiteral("session"))
+                    .status == TransferQueuePersistence::LoadStatus::NotFound,
+        "an unsaved queue should not leave its older copy to be "
+        "restored");
+}
+
+OPENSCP_TEST(testQueueWriterReportsAFailureOnce, test) {
+    QTemporaryDir root;
+    const QString path = root.filePath("failing.json");
+    std::atomic<int> warnings{0};
+    TransferQueueWriter writer;
+    writer.setWarningHandler([&warnings](const QString &) { ++warnings; });
+    writer.setPath(path);
+
+    writer.saveAndWait(queueOverTheTaskLimit());
+    writer.saveAndWait(queueOverTheTaskLimit());
+    test.check(warnings.load() == 1,
+               "a failure that repeats should be reported once");
+    writer.saveAndWait({persistableTask(1, QStringLiteral("/saved"))});
+    test.check(savedDestinations(path) == QStringList{QStringLiteral("/saved")},
+               "a queue that fits should be saved again");
+    writer.saveAndWait(queueOverTheTaskLimit());
+    test.check(warnings.load() == 2,
+               "a failure after a successful save should be reported again");
+}
+
 OPENSCP_TEST(testPausedQueuePersistence, test) {
     QTemporaryDir root;
     const QString queuePath = root.filePath("transfer-queue-v1.json");
