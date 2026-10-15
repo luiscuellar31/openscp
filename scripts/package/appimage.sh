@@ -138,23 +138,17 @@ StartupWMClass=OpenSCP
 EOF
 }
 
-prepare_icon() {
-  local src_png_256="${REPO_DIR}/assets/linux/icon-openscp-256.png"
-  local src_png_large="${REPO_DIR}/assets/icons/app-openscp.png"
-  local dst_png="$1"
-  mkdir -p "$(dirname "$dst_png")"
-  if [[ -f "$src_png_256" ]]; then
-    cp "$src_png_256" "$dst_png"
-    return
-  fi
-  if [[ -f "$src_png_large" ]] && command -v convert >/dev/null 2>&1; then
-    convert "$src_png_large" -resize 256x256 "$dst_png"
-    return
-  fi
-  if [[ -f "$src_png_large" ]]; then
-    die "Missing 256x256 icon asset and ImageMagick 'convert' is unavailable to resize ${src_png_large}"
-  fi
-  die "No source icon found for AppImage packaging"
+# Stages the standard icon at every size scripts/icons generates, as the
+# hicolor theme lays it out; CMakeLists.txt installs the same sizes.
+prepare_icons() {
+  local size src dst_dir
+  for size in 16 24 32 48 64 128 256 512; do
+    src="${REPO_DIR}/assets/icons/app/standard/openscp-${size}.png"
+    [[ -f "$src" ]] || die "Missing icon asset: $src"
+    dst_dir="$APPDIR/usr/share/icons/hicolor/${size}x${size}/apps"
+    mkdir -p "$dst_dir"
+    cp "$src" "$dst_dir/openscp.png"
+  done
 }
 
 copy_licenses() {
@@ -288,11 +282,11 @@ main() {
 
   # Prepare AppDir skeleton
   rm -rf "$APPDIR"
-  mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+  mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications"
 
-  # Desktop and icon
+  # Desktop and icons
   prepare_desktop "$APPDIR/usr/share/applications/openscp.desktop"
-  prepare_icon "$APPDIR/usr/share/icons/hicolor/256x256/apps/openscp.png"
+  prepare_icons
   copy_licenses
 
   # Ensure tools

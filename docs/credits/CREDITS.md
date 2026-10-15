@@ -16,7 +16,10 @@ by Addicted04, derived from `Emblem-star.svg`
 **Notes:** OpenSCP includes public-domain Tango artwork and adapted variants.
 `action-open-favorites.svg` is derived from the Tango `bookmark-new.svg` icon,
 with the new-bookmark highlight removed. The favorite state icons retain the
-source artwork under descriptive OpenSCP resource names.
+source artwork under descriptive OpenSCP resource names. The application icon
+is drawn from Rocket000's Tango-style padlock and the Tango `edit-redo.svg`
+arrow by Jakub Steiner, whose paths, gradients and opacities
+`scripts/icons/generate-icon.swift` reproduces.
 
 ## Qt 6
 

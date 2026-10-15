@@ -176,6 +176,28 @@ otool -L build/OpenSCP.app/Contents/MacOS/OpenSCP | \
 
 Bundled references should resolve through `@executable_path/../Frameworks`.
 
+## Application icon
+
+The icon is drawn by
+[`scripts/icons/generate-icon.swift`](../scripts/icons/generate-icon.swift)
+from two public-domain Tango drawings, in three styles: `standard`, the
+free-standing drawing, and `macos-light` and `macos-dark`, the drawing on
+Apple's icon shape. It writes each style's 1024-pixel image to
+`assets/icons/app/<style>/openscp-1024.png`, in sRGB.
+
+The sizes derived from those images, from 16 to 512 pixels, are committed with
+them, as are the macOS bundle icon `assets/macos/OpenSCP.icns`, made from
+`macos-light`, and the snap icon `packaging/snap/icon.png`. Ordinary builds
+therefore need no image tools. After changing the artwork, regenerate them on
+macOS with Swift, Python 3, and the system `sips` and `iconutil` tools:
+
+```bash
+swift scripts/icons/generate-icon.swift
+python3 scripts/icons/generate-icon-sizes.py
+```
+
+Linux packages install the `standard` sizes in the hicolor theme.
+
 ## Tests and quality checks
 
 The standard local CI command configures all available test targets, builds

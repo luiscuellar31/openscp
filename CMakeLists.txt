@@ -722,7 +722,6 @@ set(ICON_FILES
     assets/icons/action-search-item.svg
     assets/icons/action-rename.svg
     assets/icons/action-upload.svg
-    assets/icons/app-openscp.png
 )
 
 # Aliases for stable paths: /assets/icons/<name>
@@ -734,6 +733,22 @@ endforeach()
 qt_add_resources(openscp_ui_widgets app_icons
     PREFIX "/assets"
     FILES ${ICON_FILES}
+)
+
+# The standard application icon, at the sizes scripts/icons generates, under
+# its repository path: /assets/icons/app/<style>/openscp-<size>.png
+set(OPENSCP_APP_ICON_SIZES 16 24 32 48 64 128 256 512)
+set(APP_ICON_STYLE_FILES)
+foreach(_style IN ITEMS standard)
+    foreach(_size IN LISTS OPENSCP_APP_ICON_SIZES)
+        list(APPEND APP_ICON_STYLE_FILES
+            assets/icons/app/${_style}/openscp-${_size}.png)
+    endforeach()
+endforeach()
+
+qt_add_resources(openscp_ui_widgets app_icon_styles
+    PREFIX "/"
+    FILES ${APP_ICON_STYLE_FILES}
 )
 
 qt_add_resources(openscp_ui_widgets credits
@@ -754,7 +769,6 @@ qt_add_resources(openscp_ui_widgets credits
 if(UNIX AND NOT APPLE)
     # Desktop entry and app icon installation for Linux (XDG paths)
     set(APP_DESKTOP_FILE assets/linux/openscp.desktop)
-    set(APP_ICON_PNG     assets/linux/icon-openscp-256.png)
     set(APP_ICON_NAME    openscp) # must match Icon= in the .desktop
 
     # Install binary
@@ -764,13 +778,15 @@ if(UNIX AND NOT APPLE)
     install(FILES ${APP_DESKTOP_FILE}
                     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
 
-    # Install app icon where desktops expect it
-    # Prefer hicolor 256x256; fall back to pixmaps for broad compatibility
-    install(FILES ${APP_ICON_PNG}
-                    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps
-                    RENAME ${APP_ICON_NAME}.png)
+    # Install the standard app icon where desktops expect it: the hicolor
+    # theme at every size, and pixmaps at 256 for broad compatibility
+    foreach(_size IN LISTS OPENSCP_APP_ICON_SIZES)
+        install(FILES assets/icons/app/standard/openscp-${_size}.png
+                        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/${_size}x${_size}/apps
+                        RENAME ${APP_ICON_NAME}.png)
+    endforeach()
 
-    install(FILES ${APP_ICON_PNG}
+    install(FILES assets/icons/app/standard/openscp-256.png
                     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pixmaps
                     RENAME ${APP_ICON_NAME}.png)
 endif()

@@ -1058,9 +1058,9 @@ main() {
   if [[ ! -f "$ICON_ICNS_PATH" ]]; then
     if [[ -f "${REPO_DIR}/assets/macos/${ICON_BASENAME}.icns" ]]; then
       cp "${REPO_DIR}/assets/macos/${ICON_BASENAME}.icns" "$ICON_ICNS_PATH"
-    elif [[ -f "${REPO_DIR}/assets/icons/app-openscp.png" ]]; then
+    elif [[ -f "${REPO_DIR}/assets/icons/app/macos-light/openscp-1024.png" ]]; then
       log "Generating ${ICON_BASENAME}.icns from PNG"
-      generate_icns_from_png "${REPO_DIR}/assets/icons/app-openscp.png" "$ICON_ICNS_PATH"
+      generate_icns_from_png "${REPO_DIR}/assets/icons/app/macos-light/openscp-1024.png" "$ICON_ICNS_PATH"
     fi
   fi
 

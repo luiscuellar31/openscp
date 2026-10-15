@@ -158,7 +158,8 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     topRow->addLayout(leftCol, 1);
 
     auto *iconLabel = new QLabel(this);
-    QPixmap iconPix(QStringLiteral(":/assets/icons/app-openscp.png"));
+    QPixmap iconPix(
+        QStringLiteral(":/assets/icons/app/standard/openscp-256.png"));
     if (!iconPix.isNull()) {
         iconLabel->setPixmap(iconPix.scaled(96, 96, Qt::KeepAspectRatio,
                                             Qt::SmoothTransformation));
