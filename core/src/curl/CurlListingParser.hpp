@@ -23,6 +23,9 @@ struct ListingParserLimits {
     std::size_t maxXmlBytes = kMaxWebDavXmlBytes;
     // Conservative allocation/work budget, including attributes, closing
     // tags (temporary nodes in tinyxml2), and whitespace-only text segments.
+    // WebDAV parses each response record on its own, so the budget applies
+    // to each record and, separately, to the content around them, whose
+    // whitespace-only text is not counted.
     std::size_t maxXmlNodes = kMaxWebDavXmlNodes;
     std::size_t maxXmlAttributesPerElement = kMaxWebDavXmlAttributesPerElement;
 };

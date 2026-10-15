@@ -84,13 +84,16 @@ unblock network waits promptly. The libcurl backends share their connection,
 proxy, TLS, and transfer plumbing; each protocol file keeps only its own request
 and response rules.
 
-The WebDAV listing parser checks XML resource budgets before building a
-TinyXML2 document. An allocation-free linear scan bounds payload bytes,
+The WebDAV listing parser checks XML resource budgets before building
+TinyXML2 documents. An allocation-free linear scan bounds payload bytes,
 nesting, and node/attribute work, including non-DAV content; attributes per
-element are capped separately to bound duplicate-attribute checks. TinyXML2
-remains responsible for XML validation. The existing response-record and
-path-byte budgets apply independently, and rejected listings expose no
-partial results.
+element are capped separately to bound duplicate-attribute checks. The scan
+hands each `response` record to TinyXML2 on its own as soon as it closes, so
+the node budget bounds each record, and separately the content around the
+records, instead of the whole listing, and memory stays proportional to one
+record. TinyXML2 validates each record; the scan checks that the elements
+around them nest and close. The existing response-record and path-byte budgets
+apply independently, and rejected listings expose no partial results.
 
 WebDAV servers apply DELETE, and MOVE with `Overwrite: T`, to whole
 collections. The WebDAV backend therefore checks the target with PROPFIND
