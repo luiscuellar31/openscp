@@ -13,10 +13,12 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
 #include <QListWidget>
 #include <QPixmap>
 #include <QPushButton>
+#include <QSize>
 #include <QSplitter>
 #include <QStringConverter>
 #include <QStringList>
@@ -157,13 +159,11 @@ AboutDialog::AboutDialog(QWidget *parent) : QDialog(parent) {
     leftCol->addStretch(1);
     topRow->addLayout(leftCol, 1);
 
+    // The application's icon, in the style chosen in Settings.
     auto *iconLabel = new QLabel(this);
-    QPixmap iconPix(
-        QStringLiteral(":/assets/icons/app/standard/openscp-256.png"));
-    if (!iconPix.isNull()) {
-        iconLabel->setPixmap(iconPix.scaled(96, 96, Qt::KeepAspectRatio,
-                                            Qt::SmoothTransformation));
-    }
+    const QIcon icon = windowIcon();
+    if (!icon.isNull())
+        iconLabel->setPixmap(icon.pixmap(QSize(96, 96), devicePixelRatioF()));
     iconLabel->setAlignment(Qt::AlignRight | Qt::AlignTop);
     topRow->addWidget(iconLabel, 0);
     root->addLayout(topRow);

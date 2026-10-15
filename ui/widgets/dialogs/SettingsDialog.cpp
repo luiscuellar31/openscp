@@ -4,6 +4,7 @@
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "openscp/Protocol.hpp"
+#include "widgets/common/AppIcon.hpp"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -143,7 +144,7 @@ QVector<SettingsDialog::SettingBinding>
 SettingsDialog::buildSettingBindings() const {
     // Build a single source of truth for settings I/O and control sync.
     QVector<SettingBinding> bindings;
-    bindings.reserve(41);
+    bindings.reserve(42);
 
     using StringNormalizer = std::function<QString(const QString &)>;
     using IntNormalizer = std::function<int(int)>;
@@ -367,6 +368,9 @@ SettingsDialog::buildSettingBindings() const {
 
     addStringCombo(openscpui::settingskeys::kUiLanguage, QStringLiteral("en"),
                    langCombo_);
+    addStringCombo(openscpui::settingskeys::kUiAppIconStyle,
+                   openscpui::appIconStyleKey(openscpui::defaultAppIconStyle()),
+                   appIconStyle_);
     for (const BoolBindingSpec &spec : generalBoolBindings)
         addBool(spec.key, spec.defaultValue, spec.check);
 
@@ -1160,6 +1164,21 @@ void SettingsDialog::buildGeneralPage(const PageBuildContext &ctx) {
                        : tr("Default layout will be used the next time the app "
                             "starts."));
     });
+
+    QFormLayout *appearanceForm = addSection(generalPage, tr("Appearance"));
+    addFormNote(appearanceForm, generalPage,
+                tr("The icon changes while OpenSCP runs; file managers and app "
+                   "launchers keep the installed one."));
+    appIconStyle_ =
+        addComboRow(appearanceForm, generalPage, tr("Application icon:"));
+    using openscpui::AppIconStyle;
+    addComboItems(
+        appIconStyle_,
+        {{tr("Standard"), openscpui::appIconStyleKey(AppIconStyle::Standard)},
+         {tr("macOS, light"),
+          openscpui::appIconStyleKey(AppIconStyle::MacosLight)},
+         {tr("macOS, dark"),
+          openscpui::appIconStyleKey(AppIconStyle::MacosDark)}});
 }
 
 void SettingsDialog::buildShortcutsPage(const PageBuildContext &ctx) {
@@ -1469,9 +1488,10 @@ void SettingsDialog::connectDirtyTracking() {
     };
 
     for (QComboBox *combo :
-         {langCombo_, clickMode_, openBehaviorMode_, defaultProtocol_,
-          scpModeDefault_, defaultKnownHostsPolicy_, defaultIntegrityPolicy_,
-          localFileDurability_, queueAutoClearModeDefault_}) {
+         {langCombo_, appIconStyle_, clickMode_, openBehaviorMode_,
+          defaultProtocol_, scpModeDefault_, defaultKnownHostsPolicy_,
+          defaultIntegrityPolicy_, localFileDurability_,
+          queueAutoClearModeDefault_}) {
         bindDirtyFlag(combo, qOverload<int>(&QComboBox::currentIndexChanged));
     }
     for (QCheckBox *check :

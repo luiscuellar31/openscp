@@ -196,7 +196,12 @@ swift scripts/icons/generate-icon.swift
 python3 scripts/icons/generate-icon-sizes.py
 ```
 
-Linux packages install the `standard` sizes in the hicolor theme.
+The application embeds every style and shows the one chosen under
+**Settings → General → Application icon**: `macos-light` by default on macOS
+and `standard` elsewhere. Installed icons cannot change while the application
+runs, so Finder, the Dock while OpenSCP is closed, and Linux launchers keep the
+platform default; Linux packages install the `standard` sizes in the hicolor
+theme.
 
 ## Tests and quality checks
 

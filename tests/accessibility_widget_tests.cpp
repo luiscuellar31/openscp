@@ -965,7 +965,7 @@ OPENSCP_TEST(testSettingsPagesUseSharedFormStructure, test) {
     SettingsDialog &dialog = fixture.dialog;
     auto *sections = fixture.sections;
     auto *pages = fixture.pages;
-    const QList<int> expectedSectionCounts = {2, 1, 2, 1, 3, 1, 2};
+    const QList<int> expectedSectionCounts = {3, 1, 2, 1, 3, 1, 2};
     int sectionCount = 0;
     bool pageStructureMatches = true;
     bool sectionStructureMatches = true;
@@ -1121,10 +1121,10 @@ OPENSCP_TEST(testSettingsPagesUseSharedFormStructure, test) {
 
     test.check(pages && pages->count() == 7 && pageStructureMatches,
                "every settings page should use the same responsive form base");
-    test.check(sectionCount == 12 && sectionStructureMatches &&
+    test.check(sectionCount == 13 && sectionStructureMatches &&
                    contentIsIndented,
                "every section should lead one consistently indented form");
-    test.check(noteCount == 1 && notesShareTheHeadingAxis,
+    test.check(noteCount == 2 && notesShareTheHeadingAxis,
                "settings guidance should align with its section heading");
     test.check(checkCount > 0 && checksRideIndentedSpanningRows,
                "settings checks should span their forms from the field axis");

@@ -16,6 +16,7 @@
 #include "logic/transfers/TransferManager.hpp"
 #include "logic/updates/MacUpdater.hpp"
 #include "logic/updates/UpdateController.hpp"
+#include "widgets/common/AppIcon.hpp"
 #include "widgets/common/FocusTraversalController.hpp"
 #include "widgets/common/InputModalityTracker.hpp"
 #include "widgets/common/ToolbarKeyboardNavigation.hpp"
@@ -1718,6 +1719,9 @@ void MainWindow::applyPreferences() {
             .value(openscpui::settingskeys::kUiOpenSiteManagerOnDisconnect,
                    true)
             .toBool();
+    // Windows, and the Dock on macOS, show the chosen icon while running.
+    QApplication::setWindowIcon(
+        openscpui::appIcon(openscpui::savedAppIconStyle(settings)));
     applyTransferPreferences();
 
     // Local: model filters (hidden on/off)

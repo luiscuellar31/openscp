@@ -19,6 +19,7 @@ inline constexpr char kSitesDeleteSecretsOnRemove[] =
     "Sites/deleteSecretsOnRemove";
 
 inline constexpr char kUiLanguage[] = "UI/language";
+inline constexpr char kUiAppIconStyle[] = "UI/appIconStyle";
 inline constexpr char kUiShowHidden[] = "UI/showHidden";
 inline constexpr char kUiShowConnectionOnStart[] = "UI/showConnOnStart";
 inline constexpr char kUiOpenSiteManagerOnDisconnect[] =

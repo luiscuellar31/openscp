@@ -456,6 +456,8 @@ else()
 endif()
 
 add_library(openscp_ui_widgets STATIC
+    ui/widgets/common/AppIcon.hpp
+    ui/widgets/common/AppIcon.cpp
     ui/widgets/common/FocusTraversalController.hpp
     ui/widgets/common/FocusTraversalController.cpp
     ui/widgets/common/InputModalityTracker.hpp
@@ -735,11 +737,11 @@ qt_add_resources(openscp_ui_widgets app_icons
     FILES ${ICON_FILES}
 )
 
-# The standard application icon, at the sizes scripts/icons generates, under
-# its repository path: /assets/icons/app/<style>/openscp-<size>.png
+# The application icon in each style, at the sizes scripts/icons generates,
+# under its repository path: /assets/icons/app/<style>/openscp-<size>.png
 set(OPENSCP_APP_ICON_SIZES 16 24 32 48 64 128 256 512)
 set(APP_ICON_STYLE_FILES)
-foreach(_style IN ITEMS standard)
+foreach(_style IN ITEMS standard macos-light macos-dark)
     foreach(_size IN LISTS OPENSCP_APP_ICON_SIZES)
         list(APPEND APP_ICON_STYLE_FILES
             assets/icons/app/${_style}/openscp-${_size}.png)
