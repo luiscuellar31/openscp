@@ -4,8 +4,11 @@ on:
   push:
     branches:
       - dev
+  # Pull requests target dev, and CONTRIBUTING accepts a local run without SFTP
+  # only when these tests pass here.
   pull_request:
     branches:
+      - dev
       - main
     types:
       - opened
