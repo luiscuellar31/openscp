@@ -139,7 +139,8 @@ bool canRetryTask(const TransferTask &task) {
     return !task.commitUncertain &&
            (task.status == TransferTask::Status::Error ||
             task.status == TransferTask::Status::Canceled ||
-            task.status == TransferTask::Status::Warning);
+            task.status == TransferTask::Status::Warning ||
+            skippedAfterFailure(task));
 }
 
 struct SelectedActionsState {
@@ -219,7 +220,8 @@ class TransferTaskTableModel final : public QAbstractTableModel {
         ProgressRole,
         TypeRole,
         SourceRole,
-        DestinationRole
+        DestinationRole,
+        SkippedAfterFailureRole
     };
 
     enum Column {
@@ -308,6 +310,8 @@ class TransferTaskTableModel final : public QAbstractTableModel {
             return task.src;
         if (role == DestinationRole)
             return task.dst;
+        if (role == SkippedAfterFailureRole)
+            return skippedAfterFailure(task);
 
         if (role == Qt::TextAlignmentRole) {
             if (index.column() == ColStatus || index.column() == ColProgress ||
@@ -393,6 +397,7 @@ class TransferTaskTableModel final : public QAbstractTableModel {
         int retrying = 0;
         int done = 0;
         int skipped = 0;
+        int failedSkips = 0;
         int error = 0;
         int warning = 0;
         int canceled = 0;
@@ -532,7 +537,8 @@ class TransferTaskTableModel final : public QAbstractTableModel {
                prev.etaSeconds != next.etaSeconds ||
                prev.attempts != next.attempts ||
                prev.maxAttempts != next.maxAttempts ||
-               prev.error != next.error || prev.phase != next.phase;
+               prev.error != next.error || prev.phase != next.phase ||
+               prev.skippedByFailedDependency != next.skippedByFailedDependency;
     }
 
     void countTask(const TransferTask &task, int delta) {
@@ -559,7 +565,10 @@ class TransferTaskTableModel final : public QAbstractTableModel {
             counts_.done += delta;
             break;
         case TransferTask::Status::Skipped:
-            counts_.skipped += delta;
+            if (skippedAfterFailure(task))
+                counts_.failedSkips += delta;
+            else
+                counts_.skipped += delta;
             break;
         case TransferTask::Status::Error:
             counts_.error += delta;
@@ -585,7 +594,7 @@ class TransferTaskTableModel final : public QAbstractTableModel {
                              {Qt::DisplayRole, Qt::TextAlignmentRole,
                               Qt::ToolTipRole, StatusRole, TaskIdRole,
                               ProgressRole, TypeRole, SourceRole,
-                              DestinationRole});
+                              DestinationRole, SkippedAfterFailureRole});
         }
     }
 
@@ -631,6 +640,12 @@ class TransferTaskFilterProxyModel final : public QSortFilterProxyModel {
         if (!raw.isValid())
             return true;
         const auto status = static_cast<TransferTask::Status>(raw.toInt());
+        // A task skipped after a failed prerequisite is a failure.
+        const bool failedSkip =
+            sourceModel()
+                ->data(statusIdx,
+                       TransferTaskTableModel::SkippedAfterFailureRole)
+                .toBool();
 
         switch (mode_) {
         case 1: // Active
@@ -641,10 +656,10 @@ class TransferTaskFilterProxyModel final : public QSortFilterProxyModel {
                    status == TransferTask::Status::RetryWaiting;
         case 2: // Errors
             return status == TransferTask::Status::Error ||
-                   status == TransferTask::Status::Warning;
+                   status == TransferTask::Status::Warning || failedSkip;
         case 3: // Completed
             return status == TransferTask::Status::Done ||
-                   status == TransferTask::Status::Skipped;
+                   (status == TransferTask::Status::Skipped && !failedSkip);
         case 4: // Canceled
             return status == TransferTask::Status::Canceled;
         default:
@@ -1384,6 +1399,7 @@ void TransferQueueDialog::updateSummary() {
     const int retrying = counts.retrying;
     const int done = counts.done;
     const int skipped = counts.skipped;
+    const int failedSkips = counts.failedSkips;
     const int error = counts.error;
     const int warning = counts.warning;
     const int canceled = counts.canceled;
@@ -1399,7 +1415,8 @@ void TransferQueueDialog::updateSummary() {
     if (badgePaused_)
         badgePaused_->setText(tr("Paused: %1").arg(paused));
     if (badgeErrors_)
-        badgeErrors_->setText(tr("Errors: %1").arg(error + warning));
+        badgeErrors_->setText(
+            tr("Errors: %1").arg(error + warning + failedSkips));
     if (badgeCompleted_)
         badgeCompleted_->setText(tr("Completed: %1").arg(done + skipped));
     if (badgeCanceled_)
@@ -1669,10 +1686,12 @@ void TransferQueueDialog::maybeAutoClear(
     // Quick pre-scan avoids manager calls when nothing is eligible yet.
     for (const auto &task : snapshot) {
         const bool isDone = task.status == TransferTask::Status::Done ||
-                            task.status == TransferTask::Status::Skipped;
+                            (task.status == TransferTask::Status::Skipped &&
+                             !skippedAfterFailure(task));
         const bool isFailed = (task.status == TransferTask::Status::Error ||
                                task.status == TransferTask::Status::Canceled ||
-                               task.status == TransferTask::Status::Warning);
+                               task.status == TransferTask::Status::Warning ||
+                               skippedAfterFailure(task));
         bool candidate = false;
         if (mode == AutoClearCompleted)
             candidate = isDone;

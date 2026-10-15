@@ -90,6 +90,13 @@ isTerminalTransferStatus(TransferTask::Status status) {
            status == Status::Warning;
 }
 
+// A task skipped because a prerequisite failed never ran, so it is a failure
+// that can be retried rather than completed work.
+[[nodiscard]] inline bool skippedAfterFailure(const TransferTask &task) {
+    return task.status == TransferTask::Status::Skipped &&
+           task.skippedByFailedDependency;
+}
+
 // Only an upload or download that has not finished its transfer can have left
 // "<destination>.part" behind.
 [[nodiscard]] inline bool mayHavePartialData(const TransferTask &task) {

@@ -333,6 +333,8 @@ class TransferManager : public QObject {
                            qint64 nowMs);
     void transitionToDone(TransferTask &task, qint64 nowMs);
     void resetForRetry(TransferTask &task, qint64 nowMs);
+    bool retryLocked(TransferTask &task, qint64 nowMs);
+    void retryDependentsLocked(QVector<quint64> &retried, qint64 nowMs);
     void removeInactiveTasks(
         const std::function<bool(const TransferTask &)> &shouldRemove);
     // Tasks in justCanceled count toward their limit but stay this time, so a

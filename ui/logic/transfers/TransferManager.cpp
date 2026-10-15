@@ -53,9 +53,9 @@ std::string localReservationKey(const QString &path) {
         .toStdString();
 }
 
-bool canRetry(Status status) {
-    return status == Status::Error || status == Status::Canceled ||
-           status == Status::Warning;
+bool canRetry(const TransferTask &task) {
+    return task.status == Status::Error || task.status == Status::Canceled ||
+           task.status == Status::Warning || skippedAfterFailure(task);
 }
 
 const char *statusName(Status status) {
@@ -1384,6 +1384,11 @@ void TransferManager::transitionToDone(TransferTask &task, qint64 nowMs) {
 void TransferManager::resetForRetry(TransferTask &task, qint64 nowMs) {
     if (isTerminalTransferStatus(task.status) && terminalTaskCount_ > 0)
         --terminalTaskCount_;
+    if (task.skippedByFailedDependency) {
+        // Skipping moved the task, which never ran, out of its transfer.
+        setTaskStatusLocked(task, task.status, false);
+        setTaskPhaseLocked(task, TransferPhase::Transfer);
+    }
     task.attempts = 0;
     task.error.clear();
     task.finishedAtMs = 0;
@@ -1578,20 +1583,58 @@ void TransferManager::setTaskSpeedLimit(quint64 taskId, int kbps) {
         publishUpdated({taskId});
 }
 
+bool TransferManager::retryLocked(TransferTask &task, qint64 nowMs) {
+    // A skipped task waits for its prerequisites to be retried first.
+    if (!canRetry(task) || task.commitUncertain ||
+        activeTaskIds_.count(task.taskId) ||
+        (task.skippedByFailedDependency && dependencyFailedLocked(task)))
+        return false;
+    taskControls_.forget(task.taskId);
+    resetForRetry(task, nowMs);
+    return true;
+}
+
+void TransferManager::retryDependentsLocked(QVector<quint64> &retried,
+                                            qint64 nowMs) {
+    // The reverse of skipDependentsOfFailedLocked: a retried task brings back
+    // the tasks skipped for it whose other prerequisites have not failed.
+    std::unordered_set<quint64> visitedBatches;
+    for (qsizetype offset = 0; offset < retried.size(); ++offset) {
+        const TransferTask *task = taskForIdLocked(retried[offset]);
+        if (!task)
+            continue;
+        std::vector<quint64> candidates;
+        const auto dependents = dependentsByTaskId_.find(task->taskId);
+        if (dependents != dependentsByTaskId_.end())
+            candidates.assign(dependents->second.cbegin(),
+                              dependents->second.cend());
+        if (!task->waitsForBatch &&
+            visitedBatches.insert(task->batchId).second) {
+            const auto waiters = batchWaitersById_.find(task->batchId);
+            if (waiters != batchWaitersById_.end())
+                candidates.insert(candidates.end(), waiters->second.cbegin(),
+                                  waiters->second.cend());
+        }
+        for (quint64 candidateId : candidates) {
+            TransferTask *candidate = taskForIdLocked(candidateId);
+            if (candidate && skippedAfterFailure(*candidate) &&
+                retryLocked(*candidate, nowMs)) {
+                retried.push_back(candidateId);
+            }
+        }
+    }
+}
+
 void TransferManager::retryFailed() {
     QVector<quint64> changed;
     {
         std::lock_guard<std::mutex> lock(mtx_);
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         for (auto &taskNode : queueStore_.nodes()) {
-            auto &task = *taskNode;
-            if (!canRetry(task.status) || task.commitUncertain ||
-                activeTaskIds_.count(task.taskId))
-                continue;
-            taskControls_.forget(task.taskId);
-            resetForRetry(task, now);
-            changed.push_back(task.taskId);
+            if (retryLocked(*taskNode, now))
+                changed.push_back(taskNode->taskId);
         }
+        retryDependentsLocked(changed, now);
     }
     if (!changed.isEmpty())
         publishUpdated(changed);
@@ -1599,19 +1642,18 @@ void TransferManager::retryFailed() {
 }
 
 void TransferManager::retryTask(quint64 taskId) {
-    bool changed = false;
+    QVector<quint64> changed;
     {
         std::lock_guard<std::mutex> lock(mtx_);
         TransferTask *task = taskForIdLocked(taskId);
-        if (task && canRetry(task->status) && !task->commitUncertain &&
-            !activeTaskIds_.count(taskId)) {
-            taskControls_.forget(taskId);
-            resetForRetry(*task, QDateTime::currentMSecsSinceEpoch());
-            changed = true;
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (task && retryLocked(*task, now)) {
+            changed.push_back(taskId);
+            retryDependentsLocked(changed, now);
         }
     }
-    if (changed) {
-        publishUpdated({taskId});
+    if (!changed.isEmpty()) {
+        publishUpdated(changed);
         workCv_.notify_all();
     }
 }
@@ -1719,7 +1761,8 @@ void TransferManager::removeInactiveTasks(
 
 void TransferManager::clearCompleted() {
     removeInactiveTasks([](const TransferTask &task) {
-        return task.status == Status::Done || task.status == Status::Skipped;
+        return task.status == Status::Done ||
+               (task.status == Status::Skipped && !skippedAfterFailure(task));
     });
 }
 

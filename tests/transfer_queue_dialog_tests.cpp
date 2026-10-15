@@ -87,6 +87,31 @@ OPENSCP_TEST(testQueueSummaryFollowsTaskStates, test) {
                "removed tasks should leave the summary");
 }
 
+OPENSCP_TEST(testSkippedDependentsCountAsErrors, test) {
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    TransferBatchOptions batch;
+    batch.sessionKey = QStringLiteral("test-session");
+    TransferQueueDialog dialog(&manager);
+    dialog.show();
+    flushUiEvents();
+
+    const quint64 prerequisite = manager.enqueueRemoteDelete(
+        QStringLiteral("/prerequisite"), false, batch);
+    batch.dependsOnTaskId = prerequisite;
+    manager.enqueueRemoteDelete(QStringLiteral("/dependent"), false, batch);
+    manager.cancelTask(prerequisite);
+    test.check(
+        waitUntil([&] {
+            return badgeText(&dialog, QStringLiteral("transferBadgeErrors")) ==
+                       TransferQueueDialog::tr("Errors: %1").arg(1) &&
+                   badgeText(&dialog,
+                             QStringLiteral("transferBadgeCompleted")) ==
+                       TransferQueueDialog::tr("Completed: %1").arg(0);
+        }),
+        "a task skipped after a failed prerequisite should count as an error");
+}
+
 OPENSCP_TEST(testQueueTableFollowsRemovedTasks, test) {
     TransferManager manager;
     manager.setSessionIdentity(QStringLiteral("test-session"));

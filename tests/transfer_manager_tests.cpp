@@ -2588,6 +2588,63 @@ OPENSCP_TEST(testCancelingQueuedPrerequisiteSkipsDependents, test) {
                "canceling a task should leave independent work queued");
 }
 
+OPENSCP_TEST(testRetryingPrerequisiteBringsBackSkippedDependents, test) {
+    // Without a connection factory nothing runs, so every task stays queued.
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    TransferBatchOptions batch;
+    batch.sessionKey = QStringLiteral("test-session");
+    batch.batchId = manager.createBatch(batch);
+    const quint64 first =
+        manager.enqueueRemoteDelete(QStringLiteral("/first"), false, batch);
+    const quint64 sibling =
+        manager.enqueueRemoteDelete(QStringLiteral("/sibling"), false, batch);
+    batch.dependsOnTaskId = first;
+    const quint64 second =
+        manager.enqueueRemoteDelete(QStringLiteral("/second"), false, batch);
+    batch.dependsOnTaskId = second;
+    const quint64 third =
+        manager.enqueueRemoteDelete(QStringLiteral("/third"), false, batch);
+    batch.dependsOnTaskId = 0;
+    batch.waitForBatch = true;
+    const quint64 waiter =
+        manager.enqueueRemoteDelete(QStringLiteral("/waiter"), false, batch);
+    manager.cancelTask(first);
+    manager.cancelTask(sibling);
+
+    const auto skipped = [&](quint64 taskId) {
+        const auto task = manager.taskSnapshot(taskId);
+        return task && skippedAfterFailure(*task);
+    };
+    const auto queued = [&](quint64 taskId) {
+        const auto task = manager.taskSnapshot(taskId);
+        return task && task->status == TransferTask::Status::Queued &&
+               !task->skippedByFailedDependency &&
+               task->phase == TransferPhase::Transfer;
+    };
+    test.check(skipped(second) && skipped(third) && skipped(waiter),
+               "the dependents of failed tasks should be skipped");
+
+    manager.clearCompleted();
+    test.check(manager.taskSnapshot(second) && manager.taskSnapshot(waiter),
+               "clearing completed tasks should keep skipped failures");
+
+    manager.retryTask(third);
+    test.check(skipped(third),
+               "a skipped task should wait for its prerequisite's retry");
+    manager.retryTask(first);
+    test.check(queued(first) && queued(second) && queued(third),
+               "retrying a prerequisite should bring back its dependents");
+    test.check(skipped(waiter),
+               "a batch waiter should stay skipped while its batch fails");
+
+    manager.cancelTask(first);
+    manager.retryFailed();
+    test.check(queued(first) && queued(sibling) && queued(second) &&
+                   queued(third) && queued(waiter),
+               "retrying every failure should bring back all skipped work");
+}
+
 QVector<TransferTask> reverseDependencyChain(int size) {
     QVector<TransferTask> tasks;
     tasks.reserve(size);

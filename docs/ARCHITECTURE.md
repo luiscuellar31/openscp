@@ -202,7 +202,10 @@ propagation visits only indexed dependents, expands each affected batch once,
 and marks a task skipped before visiting its dependents to
 avoid duplicate work and cycles. Active and terminal tasks stop that branch of
 propagation. Relationships stay indexed until removal, independently of task
-status, so retries retain them. The indexes are runtime-only and do not change
+status, so retries retain them. Retrying a task walks the same indexes the
+other way: each task skipped for it comes back once none of its other
+prerequisites or batch tasks still fails, and a skipped task counts as a
+failure, not as completed work. The indexes are runtime-only and do not change
 the persisted format.
 
 A worker that cannot open a connection returns its task to the queue without
