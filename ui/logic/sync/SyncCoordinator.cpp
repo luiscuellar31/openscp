@@ -140,7 +140,9 @@ SyncCoordinator::SyncCoordinator(RemoteOperationController *remoteOperations,
                                               state->result.knownBytes)) {
                     state->limitExceeded = true;
                     state->canceled->store(true);
-                    remoteOperations_->cancel(state->remoteJobId);
+                    remoteOperations_->cancel(
+                        state->remoteJobId,
+                        RemoteOperationController::Interrupt::No);
                     break;
                 }
             }
@@ -766,8 +768,11 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
                     std::move(unscannedPaths);
                 state->limitExceeded = state->limitExceeded || limitExceeded;
                 state->localDone = true;
-                if (state->limitExceeded && safeThis->remoteOperations_)
-                    safeThis->remoteOperations_->cancel(state->remoteJobId);
+                if (state->limitExceeded && safeThis->remoteOperations_) {
+                    safeThis->remoteOperations_->cancel(
+                        state->remoteJobId,
+                        RemoteOperationController::Interrupt::No);
+                }
                 safeThis->maybeFinish(state);
             },
             Qt::QueuedConnection);

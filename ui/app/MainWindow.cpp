@@ -1141,12 +1141,6 @@ void MainWindow::initializeRuntimeState() {
     connect(uploadRefreshTimer_, &QTimer::timeout, this, [this] {
         if (!rightIsRemote_ || !rightRemoteModel_)
             return;
-        // Canceling a listing in flight interrupts the control connection,
-        // so wait for it to finish instead.
-        if (activeRemoteListJob_ != 0) {
-            uploadRefreshTimer_->start();
-            return;
-        }
         requestRemoteListing(rightRemoteModel_->rootPath(), true);
     });
     connect(transferMgr_, &TransferManager::tasksAdded, this,
@@ -1362,11 +1356,10 @@ void MainWindow::showAboutDialog() {
 void MainWindow::showSettingsDialog() {
     const QPointer<QWidget> previousFocus = QApplication::focusWidget();
     SettingsDialog dlg(this);
+    // Settings change only through Apply, which emits settingsApplied.
     connect(&dlg, &SettingsDialog::settingsApplied, this,
             &MainWindow::applyPreferences);
     dlg.exec();
-    // Reflect any applied changes in the running UI
-    applyPreferences();
     restoreFocusAfterDialog(previousFocus);
 }
 
@@ -1737,11 +1730,13 @@ void MainWindow::applyPreferences() {
     applyLocalFilters(leftModel_);
     applyLocalFilters(rightLocalModel_);
 
-    // Remote: re-list with hidden filter
+    // Remote: re-list only when the hidden filter changed
+    const bool showHiddenChanged = prefShowHidden_ != showHidden;
     prefShowHidden_ = showHidden;
     if (rightRemoteModel_) {
         rightRemoteModel_->setShowHidden(showHidden);
-        requestRemoteListing(rightRemoteModel_->rootPath(), true);
+        if (showHiddenChanged)
+            requestRemoteListing(rightRemoteModel_->rootPath(), true);
     }
 
     // Single-click activation (connect/disconnect to clicked())

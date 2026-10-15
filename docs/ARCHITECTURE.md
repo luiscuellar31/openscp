@@ -103,7 +103,10 @@ runs control-connection jobs one at a time and returns completed results.
 Its bulk cancellation methods interrupt matching active I/O before marking
 the remaining registrations because both share the active job's cancel flag.
 They count newly canceled jobs once; generation-specific cancellation leaves
-other generations untouched.
+other generations untouched. Interrupting can drop the control connection, as
+SFTP does, so work that is only replaced (a newer listing, a search at its
+match limit, a sync scan over its size limit) cancels without interrupting
+and lets the active call finish.
 `RemoteTreeWalker` and `LocalTreeDiscovery` scan directories outside the UI
 thread and can be canceled.
 Local discovery enumerates without sorting or materializing directory listings.

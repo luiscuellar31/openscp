@@ -175,8 +175,11 @@ void MainWindow::requestRemoteListing(const QString &path, bool refresh,
     }
 
     const QString normalized = normalizeRemotePath(path);
+    // The new listing replaces the old one; interrupting it would drop the
+    // control connection and make the next listing log in again.
     if (activeRemoteListJob_ != 0)
-        remoteOps_->cancel(activeRemoteListJob_);
+        remoteOps_->cancel(activeRemoteListJob_,
+                           RemoteOperationController::Interrupt::No);
 
     remoteRefreshSelectionNames_.clear();
     remoteRefreshScrollValue_ = 0;

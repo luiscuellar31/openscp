@@ -40,6 +40,8 @@ struct FakeState {
     std::atomic_int interruptCalls{0};
     // Makes interrupt() drop the connection, as the SFTP backend does.
     std::atomic_bool interruptDropsConnection{false};
+    // Lets a /slow listing finish without an interrupt.
+    std::atomic_bool releaseSlow{false};
 };
 
 class ActiveCall {
@@ -106,7 +108,7 @@ class ControllerFakeClient final : public openscp::RemoteClient {
         if (remotePath == "/slow") {
             std::unique_lock lock(state_->mutex);
             state_->wake.wait_for(lock, std::chrono::seconds(2), [this] {
-                return state_->interrupted.load();
+                return state_->interrupted.load() || state_->releaseSlow.load();
             });
             if (state_->interrupted.load()) {
                 err = "Canceled";
@@ -1058,6 +1060,67 @@ OPENSCP_TEST(testCanceledJobDroppingConnectionIsReopened, test) {
                "the dropped client should be disconnected on the lane");
     test.check(listRoot() && opened.load() == 1,
                "a healthy control connection must not be reopened");
+}
+
+OPENSCP_TEST(testReplacedListingKeepsTheConnection, test) {
+    RemoteOperationController controller;
+    const auto state = std::make_shared<FakeState>();
+    state->interruptDropsConnection.store(true);
+    std::atomic_int opened{0};
+    RemoteOperationController::JobId slowJob = 0;
+    RemoteOperationController::JobId nextJob = 0;
+    bool slowStarted = false;
+    std::optional<RemoteOperationController::ListResult> slowResult;
+    std::optional<RemoteOperationController::ListResult> nextResult;
+
+    QObject::connect(&controller, &RemoteOperationController::jobStarted,
+                     &controller,
+                     [&](const RemoteOperationController::JobKey &job) {
+                         if (job.id == slowJob)
+                             slowStarted = true;
+                     });
+    QObject::connect(&controller, &RemoteOperationController::listCompleted,
+                     &controller,
+                     [&](const RemoteOperationController::ListResult &result) {
+                         if (result.result.job.id == slowJob)
+                             slowResult = result;
+                         if (result.result.job.id == nextJob)
+                             nextResult = result;
+                     });
+    controller.installSession(
+        makeConnectedClient(state),
+        [&](std::string &) -> std::unique_ptr<openscp::RemoteClient> {
+            ++opened;
+            return makeConnectedClient(state);
+        });
+
+    slowJob = controller.submit(
+        RemoteOperationController::ListRequest{"/slow", true});
+    test.check(spinUntil([&] { return slowStarted; }),
+               "the listing to replace should start");
+    test.check(
+        controller.cancel(slowJob, RemoteOperationController::Interrupt::No),
+        "a cooperative cancel should find the listing");
+    nextJob =
+        controller.submit(RemoteOperationController::ListRequest{"/", true});
+    test.check(state->interruptCalls.load() == 0,
+               "replacing a listing must not interrupt the call in progress");
+    {
+        std::lock_guard lock(state->mutex);
+        state->releaseSlow.store(true);
+    }
+    state->wake.notify_all();
+
+    test.check(spinUntil([&] { return nextResult.has_value(); }) &&
+                   nextResult->result.outcome ==
+                       RemoteOperationController::Outcome::Succeeded,
+               "the replacing listing should run after the replaced one");
+    test.check(slowResult.has_value() &&
+                   slowResult->result.outcome ==
+                       RemoteOperationController::Outcome::Canceled,
+               "the replaced listing should report cancellation");
+    test.check(opened.load() == 0 && state->interruptCalls.load() == 0,
+               "a replaced listing should keep the control connection");
 }
 
 OPENSCP_TEST(testRefusedReopenIsNotRetried, test) {

@@ -166,7 +166,7 @@ class RemoteOperationController::Impl {
         return id;
     }
 
-    bool cancel(JobId jobId) {
+    bool cancel(JobId jobId, bool interruptActive) {
         if (jobId == 0)
             return false;
 
@@ -177,7 +177,8 @@ class RemoteOperationController::Impl {
         registration->second.canceled->store(true, std::memory_order_relaxed);
         if (activeJobId_ == jobId && activeCancel_) {
             activeCancel_->store(true, std::memory_order_relaxed);
-            interruptActiveLocked();
+            if (interruptActive)
+                interruptActiveLocked();
         }
         wake_.notify_one();
         return true;
@@ -1579,8 +1580,8 @@ RemoteOperationController::submit(const ChecksumRequest &request) {
     return impl_->enqueue(request, JobKind::Checksum);
 }
 
-bool RemoteOperationController::cancel(JobId jobId) {
-    return impl_->cancel(jobId);
+bool RemoteOperationController::cancel(JobId jobId, Interrupt interrupt) {
+    return impl_->cancel(jobId, interrupt == Interrupt::Yes);
 }
 
 bool RemoteOperationController::setPaused(JobId jobId, bool paused) {

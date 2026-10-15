@@ -82,8 +82,12 @@ class RemoteOperationController final : public QObject {
     JobId submit(const ChecksumRequest &request);
 
     // Cancellation is cooperative. For active network calls it additionally
-    // invokes RemoteClient::interrupt() from the caller's thread.
-    bool cancel(JobId jobId);
+    // invokes RemoteClient::interrupt() from the caller's thread, which may
+    // drop the control connection (SFTP does) so the next job reconnects.
+    // Interrupt::No only marks the job: an active call finishes and reports
+    // the job as canceled. Use it when work is replaced, not abandoned.
+    enum class Interrupt { Yes, No };
+    bool cancel(JobId jobId, Interrupt interrupt = Interrupt::Yes);
     bool setPaused(JobId jobId, bool paused);
     // Bulk cancellation returns the number of newly canceled jobs, including
     // the matching active job once. Repeated calls do not interrupt it again.
