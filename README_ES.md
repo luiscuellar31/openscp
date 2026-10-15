@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/icons/app/standard/openscp-256.png" alt="Icono de OpenSCP" width="128">
+  <img src="assets/icons/app/macos-light/openscp-256.png" alt="Icono de OpenSCP" width="128">
   <h1>OpenSCP</h1>
 
   <p><strong>Un cliente ligero y multiplataforma para transferir archivos, con flujo de trabajo de doble panel, configuración segura por defecto y compatibilidad con SFTP, SCP, FTP, FTPS y WebDAV.</strong></p>
