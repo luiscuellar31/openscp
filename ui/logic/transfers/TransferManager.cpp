@@ -2276,8 +2276,9 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
 
     constexpr int maxAutomaticAttempts = 3;
     task.maxAttempts = maxAutomaticAttempts;
-    for (int attempt = std::max(1, task.attempts + 1);
-         attempt <= maxAutomaticAttempts; ++attempt) {
+    // Each run gets its own automatic retries. Pausing, reconnecting or
+    // restarting must not spend the attempts of the next run.
+    for (int attempt = 1; attempt <= maxAutomaticAttempts; ++attempt) {
         if (stopToken.stop_requested() || shouldCancel(task.taskId)) {
             markStopped();
             publishUpdated({task.taskId});

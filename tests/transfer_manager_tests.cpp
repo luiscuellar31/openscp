@@ -962,6 +962,67 @@ OPENSCP_TEST(testPausingRunningTaskStopsItsTransfer, test) {
                "a resumed task should finish");
 }
 
+// Stops the first runs until they are paused, then lets the next one finish.
+class PauseCycleClient final : public DownloadMockClient {
+    public:
+    PauseCycleClient(std::shared_ptr<LifecycleProbe> probe, int stoppedRuns)
+        : probe_(std::move(probe)), stoppedRuns_(stoppedRuns) {}
+
+    bool get(const std::string &, const std::string &, std::string &err,
+             std::function<void(std::size_t, std::size_t)> progress,
+             std::function<bool()> shouldCancel, bool) override {
+        if (probe_->gets.fetch_add(1) + 1 <= stoppedRuns_) {
+            while (!shouldCancel())
+                std::this_thread::sleep_for(2ms);
+            err = "Canceled";
+            setLastOperationError(openscp::RemoteErrorKind::Canceled, err);
+            return false;
+        }
+        clearLastOperationError();
+        if (progress)
+            progress(1, 1);
+        err.clear();
+        return true;
+    }
+
+    std::unique_ptr<openscp::RemoteClient>
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
+        return makeConnectedWorker<PauseCycleClient>(options, err, probe_,
+                                                     stoppedRuns_);
+    }
+
+    private:
+    std::shared_ptr<LifecycleProbe> probe_;
+    int stoppedRuns_ = 0;
+};
+
+OPENSCP_TEST(testPausingDoesNotSpendRetryAttempts, test) {
+    constexpr int kPauses = 3;
+    auto probe = std::make_shared<LifecycleProbe>();
+    PauseCycleClient baseClient(probe, kPauses);
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+
+    const quint64 taskId = manager.enqueueDownload(
+        QStringLiteral("/remote/pause-cycle"), destination.filePath("cycle"),
+        testBatchOptions());
+    for (int pause = 1; pause <= kPauses; ++pause) {
+        test.check(waitUntil([&] { return probe->gets.load() == pause; }),
+                   "each resumed run should start its transfer");
+        manager.pauseTask(taskId);
+        test.check(waitForStatus(manager, taskId, TransferTask::Status::Paused),
+                   "pausing should stop the running transfer");
+        manager.resumeTask(taskId);
+    }
+    test.check(waitForStatus(manager, taskId, TransferTask::Status::Done),
+               "a task paused three times should still transfer when resumed");
+    const auto task = manager.taskSnapshot(taskId);
+    test.check(probe->gets.load() == kPauses + 1 && task && task->attempts == 1,
+               "a resumed run should start counting its attempts again");
+}
+
 struct SpeedLimitProbe {
     std::atomic_bool firstChunkReported{false};
     std::atomic_bool limitSet{false};
