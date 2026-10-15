@@ -309,6 +309,11 @@ Use these classes instead of reading or writing their settings directly.
 Changes to persisted formats require explicit decisions about schema and
 versioning, and corrupt or unsupported data must not be silently overwritten.
 
+Saving rewrites the whole saved-site list, so the Site Manager applies each
+change to the list as stored at that moment rather than to the copy it loaded.
+The main window keeps one Site Manager open at a time and reloads it after
+saving a site.
+
 ## Path navigation
 
 Path navigation is split by responsibility:

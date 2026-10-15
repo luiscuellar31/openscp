@@ -619,7 +619,9 @@ void MainWindow::persistActiveSitePaths() {
         const auto saveResult = SavedSitesPersistence::saveSites(sites);
         if (!saveResult.ok) {
             UiAlerts::warning(this, tr("Paths not saved"), saveResult.error);
+            return;
         }
+        refreshOpenSiteManagerWidget(siteManager_);
     }
 }
 

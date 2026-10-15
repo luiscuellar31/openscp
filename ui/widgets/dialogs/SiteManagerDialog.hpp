@@ -32,8 +32,12 @@ class SiteManagerDialog : public QDialog {
     private:
     void loadSites();
     bool saveSites();
+    // Saves and shows `sites`; when saving fails, warns and shows what is
+    // stored.
+    bool storeSites(const QVector<SiteEntry> &sites);
     void refresh();
     int selectedSiteIndex() const;
+    void selectSite(const QString &siteId);
     void selectSiteIndex(int siteIndex);
 
     QVector<SiteEntry> sites_;

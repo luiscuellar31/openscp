@@ -159,6 +159,39 @@ OPENSCP_TEST(testReloadSwitchesBetweenEmptyStateAndTable, test) {
                "search should hide again after the final site is removed");
 }
 
+OPENSCP_TEST(testChangesKeepSitesSavedElsewhere, test) {
+    clearSavedSites();
+    const SiteEntry kept = savedSiteFixture();
+    SiteEntry removed = savedSiteFixture();
+    removed.siteId = QStringLiteral("site-manager-removed-id");
+    removed.name = QStringLiteral("Old server");
+    test.check(SavedSitesPersistence::saveSites({removed}).ok,
+               "the first saved site should persist");
+    SiteManagerDialog dialog;
+    // Saved while the dialog is open, as a quick connection does.
+    test.check(SavedSitesPersistence::saveSites({removed, kept}).ok,
+               "a site saved elsewhere should persist");
+
+    auto *table =
+        dialog.findChild<QTableView *>(QStringLiteral("savedSitesTable"));
+    auto *deleteButton = dialog.findChild<QPushButton *>(
+        QStringLiteral("siteManagerDeleteButton"));
+    test.check(table && table->model() && deleteButton &&
+                   table->model()->rowCount() == 1,
+               "the dialog should list the site it loaded");
+    if (!table || !table->model() || !deleteButton)
+        return;
+    table->selectRow(0);
+    deleteButton->click();
+
+    const auto stored = SavedSitesPersistence::loadSites().sites;
+    test.check(stored.size() == 1 && stored.front().siteId == kept.siteId,
+               "removing a site must keep the sites saved after the dialog "
+               "loaded them");
+    test.check(table->model()->rowCount() == 1,
+               "the dialog should list the stored sites after a change");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {

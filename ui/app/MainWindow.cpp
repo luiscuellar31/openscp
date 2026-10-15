@@ -696,8 +696,16 @@ void MainWindow::initializeMainToolbar() {
     setTextBesideIcon(actDisconnect_, tr("Disconnect"));
     mainToolbar->addSeparator();
     actSites_ = mainToolbar->addAction(tr("Saved sites"), [this] {
+        // Raise the open Site Manager: the main window refreshes only that one.
+        if (siteManager_) {
+            siteManager_->show();
+            siteManager_->raise();
+            siteManager_->activateWindow();
+            return;
+        }
         const QPointer<QWidget> previousFocus = QApplication::focusWidget();
         SiteManagerDialog dlg(this);
+        siteManager_ = &dlg;
         bool connectionStarted = false;
         if (dlg.exec() == QDialog::Accepted) {
             SiteEntry site;
