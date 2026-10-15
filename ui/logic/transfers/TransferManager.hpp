@@ -135,9 +135,10 @@ class TransferManager : public QObject {
 
     private:
     static constexpr int kWorkerSlots = 8;
-    // The queue keeps at least the newest kMaxTerminalHistory finished tasks
-    // and prunes the older ones once kTerminalHistoryPruneBatch more have
-    // finished, so pruning walks the queue once per batch, not per task.
+    // Completed, failed and canceled tasks each keep their newest
+    // kMaxTerminalHistory entries; pending cleanups and uncertain commits are
+    // never pruned. Pruning runs once kTerminalHistoryPruneBatch more tasks
+    // have finished, so it walks the queue once per batch, not per task.
     static constexpr int kMaxTerminalHistory = 5000;
     static constexpr int kTerminalHistoryPruneBatch = kMaxTerminalHistory / 10;
     // A save waits for a pause in queue changes, but never longer than the
@@ -171,6 +172,8 @@ class TransferManager : public QObject {
     quint64 nextId_ = 1;
     quint64 nextBatchId_ = 1;
     int terminalTaskCount_ = 0;
+    int terminalHistoryPruneAt_ =
+        kMaxTerminalHistory + kTerminalHistoryPruneBatch;
     TransferScheduler scheduler_;
 
     std::atomic<bool> paused_{false};
@@ -310,7 +313,10 @@ class TransferManager : public QObject {
     void resetForRetry(TransferTask &task, qint64 nowMs);
     void removeInactiveTasks(
         const std::function<bool(const TransferTask &)> &shouldRemove);
-    QVector<quint64> pruneTerminalHistoryLocked();
+    // Tasks in justCanceled count toward their limit but stay this time, so a
+    // cancel does not remove what it just canceled.
+    QVector<quint64>
+    pruneTerminalHistoryLocked(const QVector<quint64> &justCanceled = {});
     void recordCompletionMetrics(quint64 taskId, TransferTask::Status status,
                                  quint64 bytesDone, qint64 queueLatencyMs,
                                  qint64 precheckMs, qint64 transferMs);

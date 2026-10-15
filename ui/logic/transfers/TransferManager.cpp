@@ -28,9 +28,11 @@
 #include <QTimer>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <tuple>
 #include <utility>
 
 Q_LOGGING_CATEGORY(ocXfer, "openscp.transfer")
@@ -910,7 +912,7 @@ void TransferManager::cancelBatch(quint64 batchId) {
             transitionToCanceled(task, now);
             changed.push_back(task.taskId);
         }
-        removed = pruneTerminalHistoryLocked();
+        removed = pruneTerminalHistoryLocked(changed);
     }
     if (!changed.isEmpty())
         publishUpdated(changed);
@@ -1416,7 +1418,7 @@ void TransferManager::cancelTask(quint64 taskId) {
             if (!active)
                 dependencySkipped = skipDependentsOfFailedLocked(taskId, now);
             changed = true;
-            removed = pruneTerminalHistoryLocked();
+            removed = pruneTerminalHistoryLocked({taskId});
         }
     }
     if (changed)
@@ -1444,7 +1446,7 @@ void TransferManager::cancelAll() {
             transitionToCanceled(task, now);
             changed.push_back(task.taskId);
         }
-        removed = pruneTerminalHistoryLocked();
+        removed = pruneTerminalHistoryLocked(changed);
     }
     if (!changed.isEmpty())
         publishUpdated(changed);
@@ -2584,23 +2586,72 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
     finish();
 }
 
-QVector<quint64> TransferManager::pruneTerminalHistoryLocked() {
-    if (terminalTaskCount_ <= kMaxTerminalHistory + kTerminalHistoryPruneBatch)
+QVector<quint64> TransferManager::pruneTerminalHistoryLocked(
+    const QVector<quint64> &justCanceled) {
+    if (terminalTaskCount_ <= terminalHistoryPruneAt_)
         return {};
 
-    // Tasks are appended as they are queued, so the first terminal tasks in
-    // queue order are the oldest.
-    int toRemove = terminalTaskCount_ - kMaxTerminalHistory;
-    QVector<quint64> removed;
-    for (const auto &taskNode :
-         removeInactiveTasksLocked([&toRemove](const TransferTask &task) {
-             if (toRemove == 0 || !isTerminalTransferStatus(task.status))
-                 return false;
-             --toRemove;
-             return true;
-         })) {
-        removed.push_back(taskNode->taskId);
+    // Each kind keeps its own newest entries, so a burst of successes or
+    // cancellations does not evict the errors the user has not seen yet.
+    enum History : std::size_t { Completed, Failed, Canceled, KindCount };
+    struct Finished {
+        qint64 finishedAtMs = 0;
+        quint64 taskId = 0;
+    };
+    const QSet<quint64> keep(justCanceled.cbegin(), justCanceled.cend());
+    std::array<std::size_t, KindCount> counts{};
+    std::array<std::vector<Finished>, KindCount> candidates;
+    for (const auto &taskNode : queueStore_.nodes()) {
+        const TransferTask &task = *taskNode;
+        if (!isTerminalTransferStatus(task.status))
+            continue;
+        // A failed source cleanup or an uncertain commit needs the user.
+        if (task.commitUncertain || (task.status == Status::Warning &&
+                                     task.phase == TransferPhase::DeleteSource))
+            continue;
+        const History history =
+            task.status == Status::Done || (task.status == Status::Skipped &&
+                                            !task.skippedByFailedDependency)
+                ? Completed
+                : (task.status == Status::Canceled ? Canceled : Failed);
+        ++counts[history];
+        if (!activeTaskIds_.count(task.taskId) && !keep.contains(task.taskId))
+            candidates[history].push_back({task.finishedAtMs, task.taskId});
     }
+
+    QSet<quint64> expired;
+    for (std::size_t history = 0; history < KindCount; ++history) {
+        const std::size_t limit = kMaxTerminalHistory;
+        if (counts[history] <= limit)
+            continue;
+        auto &entries = candidates[history];
+        const std::size_t excess =
+            std::min(counts[history] - limit, entries.size());
+        const auto oldestEnd =
+            entries.begin() + static_cast<std::ptrdiff_t>(excess);
+        std::nth_element(entries.begin(), oldestEnd, entries.end(),
+                         [](const Finished &left, const Finished &right) {
+                             return std::tie(left.finishedAtMs, left.taskId) <
+                                    std::tie(right.finishedAtMs, right.taskId);
+                         });
+        for (auto entry = entries.begin(); entry != oldestEnd; ++entry)
+            expired.insert(entry->taskId);
+    }
+
+    QVector<quint64> removed;
+    if (!expired.isEmpty()) {
+        for (const auto &taskNode :
+             removeInactiveTasksLocked([&expired](const TransferTask &task) {
+                 return expired.contains(task.taskId);
+             })) {
+            removed.push_back(taskNode->taskId);
+        }
+    }
+    // Walk the queue again only after another batch has finished, even when
+    // kept entries leave the history above its bound.
+    terminalHistoryPruneAt_ =
+        std::max(kMaxTerminalHistory, terminalTaskCount_) +
+        kTerminalHistoryPruneBatch;
     return removed;
 }
 

@@ -65,6 +65,22 @@ struct TransferManagerTestAccess {
             manager.appendTaskLocked(std::move(task));
     }
 
+    // Appends tasks the way a restored queue does, counting terminal ones.
+    static void restoreTasks(TransferManager &manager,
+                             QVector<TransferTask> tasks) {
+        std::lock_guard<std::mutex> lock(manager.mtx_);
+        for (auto &task : tasks)
+            manager.appendTaskLocked(std::move(task));
+        manager.rebuildTaskLookupLocked();
+    }
+
+    // Prunes the history now, as if another batch of tasks had finished.
+    static void pruneHistory(TransferManager &manager) {
+        std::lock_guard<std::mutex> lock(manager.mtx_);
+        manager.terminalHistoryPruneAt_ = 0;
+        (void)manager.pruneTerminalHistoryLocked();
+    }
+
     static QVector<quint64> failAndPropagate(TransferManager &manager,
                                              quint64 taskId) {
         std::lock_guard<std::mutex> lock(manager.mtx_);
@@ -1941,6 +1957,8 @@ OPENSCP_TEST(testLocalMoveCleanupIndexRestoresAndPrunes, test) {
         task.phase = TransferPhase::Transfer;
     TransferManagerTestAccess::appendTasks(manager, std::move(history));
     manager.cancelAll();
+    // A cancel keeps what it just canceled until the next prune.
+    TransferManagerTestAccess::pruneHistory(manager);
     test.check(manager.tasksSnapshot().size() == 5000 &&
                    TransferManagerTestAccess::localPathUserBucketCount(
                        manager) == 5000,
@@ -2632,7 +2650,10 @@ OPENSCP_TEST(testDependencyIndexesSurviveRetryRemovalAndPruning, test) {
         task.waitsForBatch = task.taskId % 2 == 0;
     TransferManagerTestAccess::appendTasks(manager, std::move(history));
     manager.cancelTask(1);
-    test.check(manager.tasksSnapshot().size() == 5000,
+    // The skipped dependents are pruned to their bound; the canceled root is
+    // kept in its own history.
+    test.check(manager.tasksSnapshot().size() == 5001 &&
+                   manager.taskSnapshot(1),
                "propagation should still prune terminal history to its bound");
     manager.clearCompleted();
     manager.clearFailedCanceled();
@@ -3028,6 +3049,91 @@ OPENSCP_TEST(testTerminalHistoryIsBounded, test) {
     enqueueFinished(5501, 1);
     test.check(manager.tasksSnapshot().size() == 5001,
                "a pruned history should grow again before the next prune");
+}
+
+TransferTask finishedHistoryTask(quint64 taskId, TransferTask::Status status,
+                                 qint64 finishedAtMs) {
+    TransferTask task;
+    task.taskId = taskId;
+    task.batchId = 1;
+    task.type = TransferTask::Type::Download;
+    task.src = QStringLiteral("/remote/finished-%1").arg(taskId);
+    task.dst = QStringLiteral("/local/finished-%1").arg(taskId);
+    task.status = status;
+    task.phase = TransferPhase::Finished;
+    task.finishedAtMs = finishedAtMs;
+    return task;
+}
+
+int countStatus(const QVector<TransferTask> &tasks,
+                TransferTask::Status status) {
+    return static_cast<int>(std::count_if(
+        tasks.cbegin(), tasks.cend(),
+        [status](const TransferTask &task) { return task.status == status; }));
+}
+
+OPENSCP_TEST(testHistoryPruningKeepsErrorsAndPendingCleanups, test) {
+    using Status = TransferTask::Status;
+    TransferManager manager;
+    QVector<TransferTask> tasks;
+    TransferTask cleanup = finishedHistoryTask(1'000'000, Status::Warning, 1);
+    cleanup.operation = TransferOperation::Move;
+    cleanup.postAction = TransferPostAction::DeleteSource;
+    cleanup.phase = TransferPhase::DeleteSource;
+    TransferTask uncertain = finishedHistoryTask(1'000'001, Status::Warning, 2);
+    uncertain.commitUncertain = true;
+    tasks << cleanup << uncertain;
+    for (int index = 0; index < 10; ++index)
+        tasks << finishedHistoryTask(1'000'100 + quint64(index), Status::Error,
+                                     10 + index);
+    for (int index = 0; index < 5600; ++index)
+        tasks << finishedHistoryTask(1'010'000 + quint64(index), Status::Done,
+                                     100 + index);
+    TransferManagerTestAccess::restoreTasks(manager, std::move(tasks));
+
+    manager.cancelAll(); // Nothing to cancel; it still prunes the history.
+    const auto remaining = manager.tasksSnapshot();
+    test.check(countStatus(remaining, Status::Done) == 5000 &&
+                   !manager.taskSnapshot(1'010'599) &&
+                   manager.taskSnapshot(1'010'600),
+               "pruning should drop only the oldest completed tasks");
+    test.check(countStatus(remaining, Status::Error) == 10,
+               "completed tasks should not evict older errors");
+    test.check(manager.taskSnapshot(1'000'000) &&
+                   manager.taskSnapshot(1'000'001),
+               "pending cleanups and uncertain commits should never be "
+               "pruned");
+}
+
+OPENSCP_TEST(testCancelingKeepsWhatItCanceledAndOlderErrors, test) {
+    using Status = TransferTask::Status;
+    TransferManager manager;
+    QVector<TransferTask> errors;
+    for (int index = 0; index < 10; ++index)
+        errors << finishedHistoryTask(1'000'000 + quint64(index), Status::Error,
+                                      1 + index);
+    TransferManagerTestAccess::restoreTasks(manager, std::move(errors));
+    const auto enqueueAndCancel = [&manager](int first, int count) {
+        QVector<QPair<QString, QString>> downloads;
+        for (int index = first; index < first + count; ++index) {
+            downloads.push_back(
+                {QStringLiteral("/remote/cancel-%1").arg(index),
+                 QStringLiteral("/local/cancel-%1").arg(index)});
+        }
+        manager.enqueueDownloads(downloads);
+        manager.cancelAll();
+    };
+
+    enqueueAndCancel(0, 5600);
+    test.check(manager.tasksSnapshot().size() == 5610,
+               "a cancel should not prune the tasks it just canceled");
+    enqueueAndCancel(5600, 600);
+    const auto remaining = manager.tasksSnapshot();
+    test.check(countStatus(remaining, Status::Canceled) == 5000 &&
+                   !manager.taskSnapshot(1) && manager.taskSnapshot(6200),
+               "later pruning should keep the newest canceled tasks");
+    test.check(countStatus(remaining, Status::Error) == 10,
+               "canceled tasks should not evict older errors");
 }
 
 OPENSCP_TEST(testRemovingSelectedTasksReportsThemOnce, test) {
