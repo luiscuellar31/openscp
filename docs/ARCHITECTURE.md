@@ -213,8 +213,11 @@ spending its attempts. If other workers are connected, the server is taken to
 accept fewer connections, and that worker stays idle until the session
 changes. If none is, three failures in a row stop dispatching: pending tasks
 of the session wait for a connection until they are resumed or the session
-changes, and the main window reports it. The supporting classes have narrower
-jobs:
+connects again, and the main window reports it. Disconnecting also leaves the
+session's queued and running work waiting; a new connection factory for the
+current session, which reconnecting to the same site sets without changing the
+session key, queues that work again. Switching sessions leaves paused tasks
+paused. The supporting classes have narrower jobs:
 
 - `TransferQueue` stores tasks and selects work fairly.
 - `TransferExecutor` runs a selected transfer.

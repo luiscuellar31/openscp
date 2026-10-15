@@ -245,26 +245,39 @@ void TransferManager::setSessionIdentity(const QString &sessionKey) {
         resetConnectionFailuresLocked();
         for (auto &taskNode : queueStore_.nodes()) {
             auto &task = *taskNode;
-            if (isTerminalTransferStatus(task.status) ||
-                task.sessionKey.isEmpty())
-                continue;
-            if (task.sessionKey != currentSessionKey_) {
-                if (task.status == Status::Queued ||
-                    task.status == Status::Paused) {
-                    setTaskStatusLocked(task, Status::WaitingForConnection);
-                    changed.push_back(task.taskId);
-                }
-            } else if (task.status == Status::WaitingForConnection) {
-                // Restored work never starts merely because a site connected.
-                setTaskStatusLocked(task, task.restored ? Status::Paused
-                                                        : Status::Queued);
+            // Another session's queued work waits for its connection; paused
+            // work stays paused, so the user's pause survives the switch.
+            if (task.status == Status::Queued && !task.sessionKey.isEmpty() &&
+                task.sessionKey != currentSessionKey_) {
+                setTaskStatusLocked(task, Status::WaitingForConnection);
                 changed.push_back(task.taskId);
             }
         }
+        wakeCurrentSessionLocked(changed);
     }
     if (!changed.isEmpty())
         publishUpdated(changed);
     workCv_.notify_all();
+}
+
+void TransferManager::wakeCurrentSessionLocked(QVector<quint64> &changed) {
+    for (auto &taskNode : queueStore_.nodes()) {
+        auto &task = *taskNode;
+        if (task.status != Status::WaitingForConnection ||
+            (!task.sessionKey.isEmpty() &&
+             task.sessionKey != currentSessionKey_)) {
+            continue;
+        }
+        // Restored work never starts merely because a site connected. The
+        // rest drops the pause that clearSession used to stop it.
+        if (task.restored) {
+            setTaskStatusLocked(task, Status::Paused);
+        } else {
+            taskControls_.resume(task.taskId);
+            setTaskStatusLocked(task, Status::Queued);
+        }
+        changed.push_back(task.taskId);
+    }
 }
 
 QString TransferManager::sessionIdentity() const {
@@ -274,6 +287,7 @@ QString TransferManager::sessionIdentity() const {
 
 void TransferManager::setConnectionFactory(ConnectionFactory openConnection,
                                            bool uploadsUsePartialFiles) {
+    QVector<quint64> changed;
     {
         std::lock_guard<std::mutex> lock(mtx_);
         openConnection_ = std::move(openConnection);
@@ -283,7 +297,13 @@ void TransferManager::setConnectionFactory(ConnectionFactory openConnection,
             sessionsWithoutUploadPartials_.insert(currentSessionKey_);
         ++sessionGeneration_;
         resetConnectionFailuresLocked();
+        // Reconnecting to the same site keeps its session key, so its waiting
+        // work resumes here rather than in setSessionIdentity.
+        if (openConnection_)
+            wakeCurrentSessionLocked(changed);
     }
+    if (!changed.isEmpty())
+        publishUpdated(changed);
     workCv_.notify_all();
 }
 
@@ -1439,7 +1459,10 @@ void TransferManager::resumeAll() {
             }
             if (!task.sessionKey.isEmpty() &&
                 task.sessionKey != currentSessionKey_) {
-                setTaskStatusLocked(task, Status::WaitingForConnection);
+                if (task.status != Status::WaitingForConnection) {
+                    setTaskStatusLocked(task, Status::WaitingForConnection);
+                    changed.push_back(task.taskId);
+                }
                 continue;
             }
             if (activeTaskIds_.count(task.taskId)) {
@@ -1494,16 +1517,18 @@ void TransferManager::resumeTask(quint64 taskId) {
         }
         if (!task.sessionKey.isEmpty() &&
             task.sessionKey != currentSessionKey_) {
+            changed = task.status != Status::WaitingForConnection;
             setTaskStatusLocked(task, Status::WaitingForConnection);
-            return;
-        }
-        resetConnectionFailuresLocked();
-        if (activeTaskIds_.count(taskId)) {
-            resumeRequestedTasks_.insert(taskId);
         } else {
-            taskControls_.resume(taskId);
-            transitionToQueued(task, QDateTime::currentMSecsSinceEpoch(), true);
-            changed = true;
+            resetConnectionFailuresLocked();
+            if (activeTaskIds_.count(taskId)) {
+                resumeRequestedTasks_.insert(taskId);
+            } else {
+                taskControls_.resume(taskId);
+                transitionToQueued(task, QDateTime::currentMSecsSinceEpoch(),
+                                   true);
+                changed = true;
+            }
         }
     }
     if (changed)

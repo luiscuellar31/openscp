@@ -1135,6 +1135,72 @@ class PauseCycleClient final : public DownloadMockClient {
     int stoppedRuns_ = 0;
 };
 
+OPENSCP_TEST(testReconnectingResumesWorkThatWaitedForTheConnection, test) {
+    auto probe = std::make_shared<LifecycleProbe>();
+    // The first download runs until it is stopped; later ones complete.
+    PauseCycleClient baseClient(probe, 1);
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+    const quint64 running = manager.enqueueDownload(
+        QStringLiteral("/remote/running"), destination.filePath("running"),
+        testBatchOptions());
+    test.check(waitUntil([&] { return probe->gets.load() == 1; }),
+               "the first download should start");
+    const quint64 queued = manager.enqueueDownload(
+        QStringLiteral("/remote/queued"), destination.filePath("queued"),
+        testBatchOptions());
+
+    manager.clearSession();
+    test.check(waitForStatus(manager, running,
+                             TransferTask::Status::WaitingForConnection) &&
+                   waitForStatus(manager, queued,
+                                 TransferTask::Status::WaitingForConnection),
+               "disconnecting should leave the session's work waiting");
+
+    // Reconnecting to the same site keeps its session key.
+    configureManager(manager, baseClient, testOptions());
+    test.check(waitForStatus(manager, running, TransferTask::Status::Done) &&
+                   waitForStatus(manager, queued, TransferTask::Status::Done),
+               "reconnecting should finish the work that waited, including "
+               "the download the disconnect stopped");
+}
+
+OPENSCP_TEST(testSessionChangesKeepPausesAndShowWaiting, test) {
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("first-session"));
+    TransferBatchOptions batch;
+    batch.sessionKey = QStringLiteral("first-session");
+    const quint64 paused =
+        manager.enqueueRemoteDelete(QStringLiteral("/paused"), false, batch);
+    manager.pauseTask(paused);
+    manager.setSessionIdentity(QStringLiteral("second-session"));
+    manager.setSessionIdentity(QStringLiteral("first-session"));
+    const auto status = [&](quint64 taskId) {
+        const auto task = manager.taskSnapshot(taskId);
+        return task ? task->status : TransferTask::Status::Error;
+    };
+    test.check(status(paused) == TransferTask::Status::Paused,
+               "a paused task should stay paused across a session switch");
+
+    manager.setSessionIdentity(QStringLiteral("second-session"));
+    QVector<quint64> updated;
+    QObject::connect(&manager, &TransferManager::tasksUpdated, &manager,
+                     [&](const QVector<quint64> &ids) { updated += ids; });
+    manager.resumeTask(paused);
+    test.check(status(paused) == TransferTask::Status::WaitingForConnection &&
+                   updated.contains(paused),
+               "resuming another session's task should show it waiting for "
+               "its connection");
+    manager.pauseTask(paused);
+    updated.clear();
+    manager.resumeAll();
+    test.check(status(paused) == TransferTask::Status::WaitingForConnection &&
+                   updated.contains(paused),
+               "resuming the queue should publish the same change");
+}
+
 OPENSCP_TEST(testPausingDoesNotSpendRetryAttempts, test) {
     constexpr int kPauses = 3;
     auto probe = std::make_shared<LifecycleProbe>();

@@ -286,6 +286,8 @@ class TransferManager : public QObject {
                                        quint64 generation,
                                        const std::string &error);
     void resetConnectionFailuresLocked();
+    // Requeues the current session's work that waited for a connection.
+    void wakeCurrentSessionLocked(QVector<quint64> &changed);
     void interruptTask(quint64 taskId);
     void interruptAllActive();
     bool shouldCancel(quint64 taskId) const;
