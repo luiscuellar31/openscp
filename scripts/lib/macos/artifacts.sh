@@ -7,7 +7,7 @@ create_dmg() {
   local volume_name="$2"
   local source_app="$3"
   local staging
-  staging="$(mktemp -d)"
+  staging="$(mktemp -d "${WORK_DIR:?package work directory is not set}/dmg.XXXXXX")"
   rm -f "$dmg_path"
   mkdir -p "$staging"
   cp -R "$source_app" "$staging/"
@@ -60,7 +60,7 @@ create_pkg() {
   local component_pkg
   local component_plist
   local package_identifier
-  staging="$(mktemp -d)"
+  staging="$(mktemp -d "${WORK_DIR:?package work directory is not set}/pkg.XXXXXX")"
   component_pkg="${staging}/component.pkg"
   component_plist="${staging}/components.plist"
   package_identifier="${PKG_IDENTIFIER:-io.github.luiscuellar31.openscp.pkg}"
@@ -101,10 +101,10 @@ notarize_and_staple() {
   done
   ensure_cmd xcrun
 
-  local key_file
-  key_file="$(mktemp -t AuthKey).p8"
-  chmod 600 "$key_file"
-  printf "%s" "${APPLE_API_KEY_P8}" > "$key_file"
+  # The work directory is removed on exit, so the key does not outlive a
+  # failed submission.
+  local key_file="${WORK_DIR:?package work directory is not set}/notary-key.p8"
+  (umask 077 && printf "%s" "${APPLE_API_KEY_P8}" > "$key_file")
   log "Submitting for notarization (this may take a few minutes)"
   xcrun notarytool submit "$dmg_path" \
     --key "$key_file" \

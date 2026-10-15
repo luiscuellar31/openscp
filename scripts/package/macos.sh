@@ -88,6 +88,8 @@ INFO_PLIST_OUT="${CONTENTS_DIR}/Info.plist"
 QTPREFIX=""
 MACDEPLOYQT_PATH=""
 QT_HOST_WRAP_DIR=""
+# Temporary files: the notarization key and the icon, PKG and DMG staging.
+WORK_DIR=""
 
 source "${REPO_DIR}/scripts/lib/macos/signing.sh"
 source "${REPO_DIR}/scripts/lib/macos/artifacts.sh"
@@ -266,7 +268,7 @@ generate_icns_from_png() {
   local src_png="$1"; local dst_icns="$2"
   ensure_cmd sips; ensure_cmd iconutil
   local tmp_iconset
-  tmp_iconset="$(mktemp -d)"/icon.iconset
+  tmp_iconset="$(mktemp -d "${WORK_DIR:?package work directory is not set}/iconset.XXXXXX")"/icon.iconset
   mkdir -p "$tmp_iconset"
   # Required sizes for macOS iconset
   local sizes=(16 32 64 128 256 512)
@@ -910,6 +912,8 @@ main() {
   [[ $# -eq 0 ]] || die "Unexpected argument: $1"
 
   mkdir -p "$BUILD_DIR" "$DIST_DIR"
+  WORK_DIR="$(mktemp -d -t openscp-package)"
+  trap 'rm -rf "$WORK_DIR"' EXIT
 
   # Auto-local defaults: if no Apple signing/notarization creds are present and
   # the caller didn't set SKIP_* explicitly, default to skipping them (local unsigned build).
