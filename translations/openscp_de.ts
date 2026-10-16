@@ -3257,54 +3257,54 @@ Aktualisiert: %2  |  Fehlgeschlagen: %3</translation>
         <translation>Neue Verbindung</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="82"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="81"/>
         <source>Name</source>
         <translation>Name</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="84"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="83"/>
         <source>Protocol</source>
         <translation>Protokoll</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="86"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="85"/>
         <source>Host</source>
         <translation>Host</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="88"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="87"/>
         <source>User</source>
         <translation>Benutzer</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="108"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="107"/>
         <source>Credentials not saved</source>
         <translation>Anmeldedaten nicht gespeichert</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="109"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="108"/>
         <source>Could not save one or more credentials in the secure backend:
 %1</source>
         <translation>Mindestens ein Anmeldedatensatz konnte nicht im sicheren Backend gespeichert werden:
 %1</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="136"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="135"/>
         <source>Duplicate name</source>
         <translation>Doppelter Name</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="137"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="136"/>
         <source>A site named &quot;%1&quot; already exists. Use a different name.</source>
         <translation>Eine Verbindung namens „%1“ ist bereits vorhanden. Verwenden Sie einen anderen Namen.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="143"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="142"/>
         <source>Name required</source>
         <translation>Name erforderlich</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="144"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="143"/>
         <source>Enter a site name to save this connection.</source>
         <translation>Geben Sie einen Namen ein, um diese Verbindung zu speichern.</translation>
     </message>
@@ -4235,115 +4235,137 @@ Möchten Sie den unsicheren Rückgriff trotzdem aktivieren?</translation>
 <context>
     <name>SiteManagerDialog</name>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="164"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="163"/>
         <source>Site Manager</source>
         <translation>Verbindungsverwaltung</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="170"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="169"/>
         <source>Search by name, protocol, host, or user…</source>
         <translation>Nach Name, Protokoll, Host oder Benutzer suchen…</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="171"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="170"/>
         <source>Search saved sites</source>
         <translation>Gespeicherte Verbindungen durchsuchen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="220"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="219"/>
         <source>No saved sites</source>
         <translation>Keine gespeicherten Verbindungen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="232"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="231"/>
         <source>Add a site to save its connection details and access it later.</source>
         <translation>Fügen Sie eine Verbindung hinzu, um ihre Verbindungsdaten zu speichern und später darauf zuzugreifen.</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="245"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="244"/>
         <source>Add Site</source>
         <translation>Verbindung hinzufügen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="254"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="253"/>
         <source>Add</source>
         <translation>Hinzufügen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="257"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="256"/>
         <source>Edit</source>
         <translation>Bearbeiten</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="260"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="259"/>
         <source>Duplicate</source>
         <translation>Duplizieren</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="263"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="262"/>
         <source>Delete</source>
         <translation>Löschen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="266"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="265"/>
         <source>Connect</source>
         <translation>Verbinden</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="271"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="270"/>
         <source>Close</source>
         <translation>Schließen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="318"/>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="327"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="317"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="326"/>
         <source>Sites not saved</source>
         <translation>Verbindungen nicht gespeichert</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="390"/>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="392"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="389"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="391"/>
         <source>Add site</source>
         <translation>Verbindung hinzufügen</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="437"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="436"/>
         <source>Edit site</source>
         <translation>Verbindung bearbeiten</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="439"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="438"/>
         <source>Save</source>
         <translation>Speichern</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="501"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="500"/>
         <source>Unnamed site</source>
         <translation>Unbenannte Verbindung</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="503"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="502"/>
         <source>%1 copy</source>
         <translation>%1 – Kopie</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="508"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="507"/>
         <source>%1 copy %2</source>
         <translation>%1 – Kopie %2</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="523"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="522"/>
         <source>Copy credentials?</source>
         <translation>Anmeldedaten kopieren?</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="524"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="523"/>
         <source>The site was duplicated with a new identity.
 
 Copy its saved credentials to the duplicate?</source>
         <translation>Die Verbindung wurde mit einer neuen Identität dupliziert.
 
 Gespeicherte Anmeldedaten in das Duplikat kopieren?</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="596"/>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="606"/>
+        <source>Remove host key</source>
+        <translation>Hostschlüssel entfernen</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="597"/>
+        <source>Also remove the saved host key of %1 from %2?
+
+Other programs that use this file, such as ssh, will not recognize the server until its key is accepted again.</source>
+        <translation>Auch den gespeicherten Hostschlüssel von %1 aus %2 entfernen?
+
+Andere Programme, die diese Datei verwenden, etwa ssh, erkennen den Server erst wieder, wenn sein Schlüssel erneut akzeptiert wurde.</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/dialogs/SiteManagerDialog.cpp" line="607"/>
+        <source>The host key could not be removed from %1:
+%2</source>
+        <translation>Der Hostschlüssel konnte nicht aus %1 entfernt werden:
+%2</translation>
     </message>
 </context>
 <context>

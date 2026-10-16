@@ -11,7 +11,6 @@
 #include <QAbstractTableModel>
 #include <QDialogButtonBox>
 #include <QDir>
-#include <QFileInfo>
 #include <QFont>
 #include <QFrame>
 #include <QHeaderView>
@@ -541,19 +540,13 @@ void SiteManagerDialog::onRemove() {
     // Capture fields before removing for optional cleanup
     const SiteEntry removed =
         storedIndex >= 0 ? sites[storedIndex] : sites_[modelIndex];
-    const QString removedHost = QString::fromStdString(removed.opt.host);
-    const std::uint16_t removedPort = removed.opt.port;
-    const QString removedKh =
-        removed.opt.known_hosts_path
-            ? QString::fromStdString(*removed.opt.known_hosts_path)
-            : QString();
     if (storedIndex >= 0)
         sites.remove(storedIndex);
     if (!storeSites(sites)) {
         selectSite(removed.siteId);
         return;
     }
-    // Optionally delete stored credentials and known_hosts entry for this site
+    // Optionally delete stored credentials for this site
     openscpui::AppSettings settings;
     const bool deleteSecrets =
         settings
@@ -563,22 +556,57 @@ void SiteManagerDialog::onRemove() {
         showPersistIssues(
             this,
             SiteCredentialRepository().removeAll(removed).issueMessages());
-        // Also remove known_hosts entry if we know the file and host
-        // Derive effective known_hosts path from the entry we just removed (if
-        // available), falling back to ~/.ssh/known_hosts.
-        QString khPath = removedKh;
-        if (khPath.isEmpty()) {
-            khPath = QDir::homePath() + "/.ssh/known_hosts";
-        }
-        QFileInfo khInfo(khPath);
-        if (khInfo.exists() && khInfo.isFile()) {
-            std::string rmerr;
-            (void)openscp::RemoveKnownHostEntry(khPath.toStdString(),
-                                                removedHost.toStdString(),
-                                                removedPort, rmerr);
+    }
+    offerHostKeyRemoval(removed, sites);
+    refresh();
+}
+
+void SiteManagerDialog::offerHostKeyRemoval(
+    const SiteEntry &removed, const QVector<SiteEntry> &remainingSites) {
+    // The key guards every connection to that server, including those of ssh
+    // and other programs that read the same file, so it is never removed
+    // without asking, nor while another saved site still uses it.
+    const auto usesKnownHosts = [](const SiteEntry &site) {
+        return openscp::capabilitiesForProtocol(site.opt.protocol)
+            .supports_known_hosts;
+    };
+    if (!usesKnownHosts(removed))
+        return;
+    const QString host = QString::fromStdString(removed.opt.host);
+    const std::uint16_t port = removed.opt.port;
+    for (const SiteEntry &site : remainingSites) {
+        if (usesKnownHosts(site) && site.opt.port == port &&
+            QString::fromStdString(site.opt.host)
+                    .compare(host, Qt::CaseInsensitive) == 0) {
+            return;
         }
     }
-    refresh();
+    const QString khPath =
+        removed.opt.known_hosts_path
+            ? QString::fromStdString(*removed.opt.known_hosts_path)
+            : QDir::homePath() + QStringLiteral("/.ssh/known_hosts");
+    if (!openscp::HasKnownHostEntry(khPath.toStdString(), host.toStdString(),
+                                    port)) {
+        return;
+    }
+
+    const QString server =
+        port == 22 ? host : QStringLiteral("%1:%2").arg(host).arg(port);
+    if (UiAlerts::question(
+            this, tr("Remove host key"),
+            tr("Also remove the saved host key of %1 from %2?\n\nOther "
+               "programs that use this file, such as ssh, will not recognize "
+               "the server until its key is accepted again.")
+                .arg(server, khPath)) != QMessageBox::Yes) {
+        return;
+    }
+    std::string error;
+    if (!openscp::RemoveKnownHostEntry(khPath.toStdString(), host.toStdString(),
+                                       port, error)) {
+        UiAlerts::warning(this, tr("Remove host key"),
+                          tr("The host key could not be removed from %1:\n%2")
+                              .arg(khPath, QString::fromStdString(error)));
+    }
 }
 
 void SiteManagerDialog::onConnect() {

@@ -3910,6 +3910,22 @@ bool Libssh2SftpClient::rename(const std::string &from, const std::string &to,
     return true;
 }
 
+bool HasKnownHostEntry(const std::string &khPath, const std::string &host,
+                       std::uint16_t port) {
+    if (khPath.empty() || host.empty())
+        return false;
+    std::vector<std::string> lines;
+    if (libssh2detail::readKnownHosts(khPath, lines) !=
+        libssh2detail::KnownHostsReadStatus::Read) {
+        return false;
+    }
+    const std::vector<std::string> hostTokens = known_hosts_tokens(host, port);
+    return std::any_of(lines.begin(), lines.end(),
+                       [&hostTokens](const std::string &line) {
+                           return line_matches_site_host(line, hostTokens);
+                       });
+}
+
 bool RemoveKnownHostEntry(const std::string &khPath, const std::string &host,
                           std::uint16_t port, std::string &err) {
     err.clear();
