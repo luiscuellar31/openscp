@@ -460,7 +460,7 @@ OPENSCP_TEST(test_libssh2_input_safety, t) {
             "SSH hosts must keep ports in the dedicated field");
 }
 
-OPENSCP_TEST(test_known_hosts_file_reads_past_refused_lines, t) {
+OPENSCP_TEST(test_known_hosts_file_reads_every_line, t) {
     namespace detail = openscp::libssh2detail;
     const fs::path path = makeTempFilePath("known-hosts-read");
     {
@@ -469,33 +469,46 @@ OPENSCP_TEST(test_known_hosts_file_reads_past_refused_lines, t) {
                "[gamma]:2222 k AQID";
     }
     std::vector<std::string> lines;
-    const auto read =
-        detail::readKnownHosts(path.string(), [&lines](const std::string &l) {
-            lines.push_back(l);
-            return l != "broken";
-        });
-    t.check(read.status == detail::KnownHostsReadStatus::Read &&
-                read.skippedLines == 1,
-            "a known_hosts file with one refused line should be read");
-    t.check(lines == std::vector<std::string>{"# comment", "", "alpha k AQID",
-                                              "broken", "beta k AQID",
-                                              "[gamma]:2222 k AQID"},
-            "every line should be handed over, the ones after a refused line "
-            "too, without its line ending");
+    t.check(detail::readKnownHosts(path.string(), lines) ==
+                    detail::KnownHostsReadStatus::Read &&
+                lines == std::vector<std::string>{"# comment", "",
+                                                  "alpha k AQID", "broken",
+                                                  "beta k AQID",
+                                                  "[gamma]:2222 k AQID"},
+            "every line should be read without its line ending");
 
-    const auto accept = [](const std::string &) { return true; };
-    t.check(detail::readKnownHosts(path.string() + ".missing", accept).status ==
-                detail::KnownHostsReadStatus::Missing,
+    t.check(detail::readKnownHosts(path.string() + ".missing", lines) ==
+                    detail::KnownHostsReadStatus::Missing &&
+                lines.empty(),
             "a missing known_hosts file should be reported as missing");
 #ifndef _WIN32
     if (::geteuid() != 0) {
         fs::permissions(path, fs::perms::none);
-        t.check(detail::readKnownHosts(path.string(), accept).status ==
+        t.check(detail::readKnownHosts(path.string(), lines) ==
                     detail::KnownHostsReadStatus::Unreadable,
                 "a known_hosts file that cannot be read should be reported");
         fs::permissions(path, fs::perms::owner_read | fs::perms::owner_write);
     }
 #endif
+}
+
+OPENSCP_TEST(test_host_key_preference_starts_with_recorded_types, t) {
+    namespace detail = openscp::libssh2detail;
+    const std::string usual = "ssh-ed25519,ecdsa-sha2-nistp256,rsa-sha2-512,"
+                              "rsa-sha2-256,ecdsa-sha2-nistp384,"
+                              "ecdsa-sha2-nistp521";
+    t.check(detail::hostKeyAlgorithmPreference({}) == usual,
+            "an unknown host should get the usual order");
+    t.check(detail::hostKeyAlgorithmPreference({"ssh-rsa"}) ==
+                "rsa-sha2-512,rsa-sha2-256,ssh-ed25519,ecdsa-sha2-nistp256,"
+                "ecdsa-sha2-nistp384,ecdsa-sha2-nistp521",
+            "a host known by its RSA key should be asked for RSA first");
+    t.check(detail::hostKeyAlgorithmPreference({"ecdsa-sha2-nistp384",
+                                                "sk-ssh-ed25519@openssh.com",
+                                                "ecdsa-sha2-nistp256"}) ==
+                "ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ssh-ed25519,"
+                "rsa-sha2-512,rsa-sha2-256,ecdsa-sha2-nistp521",
+            "recorded types should keep the usual order among themselves");
 }
 
 OPENSCP_TEST(test_known_hosts_lines_name_their_host, t) {

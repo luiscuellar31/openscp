@@ -4,6 +4,7 @@
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -34,21 +35,18 @@ std::string systemError(const char *where) {
 
 } // namespace
 
-KnownHostsReadResult
-readKnownHosts(const std::string &path,
-               const std::function<bool(const std::string &line)> &addLine) {
-    KnownHostsReadResult result;
+KnownHostsReadStatus readKnownHosts(const std::string &path,
+                                    std::vector<std::string> &lines) {
+    lines.clear();
     std::error_code statusError;
     if (std::filesystem::status(path, statusError).type() ==
         std::filesystem::file_type::not_found) {
-        result.status = KnownHostsReadStatus::Missing;
-        return result;
+        return KnownHostsReadStatus::Missing;
     }
 
-    result.status = KnownHostsReadStatus::Unreadable;
     std::FILE *file = std::fopen(path.c_str(), "rb");
     if (!file)
-        return result;
+        return KnownHostsReadStatus::Unreadable;
     std::string content;
     char buffer[8192];
     std::size_t count = 0;
@@ -57,9 +55,8 @@ readKnownHosts(const std::string &path,
     const bool readFailed = std::ferror(file) != 0;
     std::fclose(file);
     if (readFailed)
-        return result;
+        return KnownHostsReadStatus::Unreadable;
 
-    result.status = KnownHostsReadStatus::Read;
     std::size_t start = 0;
     while (start < content.size()) {
         std::size_t end = content.find('\n', start);
@@ -68,11 +65,10 @@ readKnownHosts(const std::string &path,
         std::string line = content.substr(start, end - start);
         if (!line.empty() && line.back() == '\r')
             line.pop_back();
-        if (!addLine(line))
-            ++result.skippedLines;
+        lines.push_back(std::move(line));
         start = end + 1;
     }
-    return result;
+    return KnownHostsReadStatus::Read;
 }
 
 std::string knownHostsLine(const std::string &hostToken,
@@ -95,6 +91,38 @@ std::string knownHostsLine(const std::string &hostToken,
             "|1|" + base64(salt, sizeof(salt)) + "|" + base64(mac, macLength);
     }
     return name + " " + keyType + " " + base64(key, keyLength);
+}
+
+std::string
+hostKeyAlgorithmPreference(const std::vector<std::string> &recordedKeyTypes) {
+    struct Algorithm {
+        const char *name;
+        // The key type known_hosts records for keys of this algorithm.
+        const char *keyType;
+    };
+    static constexpr Algorithm kAlgorithms[] = {
+        {"ssh-ed25519", "ssh-ed25519"},
+        {"ecdsa-sha2-nistp256", "ecdsa-sha2-nistp256"},
+        {"rsa-sha2-512", "ssh-rsa"},
+        {"rsa-sha2-256", "ssh-rsa"},
+        {"ecdsa-sha2-nistp384", "ecdsa-sha2-nistp384"},
+        {"ecdsa-sha2-nistp521", "ecdsa-sha2-nistp521"},
+    };
+    const auto recorded = [&recordedKeyTypes](const Algorithm &algorithm) {
+        return std::find(recordedKeyTypes.begin(), recordedKeyTypes.end(),
+                         algorithm.keyType) != recordedKeyTypes.end();
+    };
+    std::string preference;
+    for (const bool recordedPass : {true, false}) {
+        for (const Algorithm &algorithm : kAlgorithms) {
+            if (recorded(algorithm) != recordedPass)
+                continue;
+            if (!preference.empty())
+                preference.push_back(',');
+            preference += algorithm.name;
+        }
+    }
+    return preference;
 }
 
 bool appendKnownHostsLine(const std::string &path, const std::string &line,

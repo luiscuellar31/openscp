@@ -1,33 +1,34 @@
 #pragma once
 
 #include <cstddef>
-#include <functional>
 #include <string>
+#include <vector>
 
 namespace openscp::libssh2detail {
 
 enum class KnownHostsReadStatus { Missing, Read, Unreadable };
 
-struct KnownHostsReadResult {
-    KnownHostsReadStatus status = KnownHostsReadStatus::Missing;
-    // Lines `addLine` refused. As OpenSSH does, each is skipped on its own.
-    int skippedLines = 0;
-};
+/// Reads the known_hosts file at `path` into `lines`, without their line
+/// endings. Loading them into libssh2 one at a time lets a line it cannot
+/// parse be skipped on its own, as OpenSSH does:
+/// libssh2_knownhost_readfile() stops at such a line and keeps only the lines
+/// before it, so a host listed after one would look new instead of changed.
+KnownHostsReadStatus readKnownHosts(const std::string &path,
+                                    std::vector<std::string> &lines);
 
-/// Reads the known_hosts file at `path` and hands each line, without its line
-/// ending, to `addLine`, which returns false for a line it cannot parse.
-/// libssh2_knownhost_readfile() instead stops at the first such line and keeps
-/// only the lines before it, so a host listed after one would look new
-/// instead of changed.
-KnownHostsReadResult
-readKnownHosts(const std::string &path,
-               const std::function<bool(const std::string &line)> &addLine);
 /// An OpenSSH known_hosts line for `hostToken` ("host" or "[host]:port") and
 /// the raw host key `key`, with the name hashed as `ssh-keygen -H` does when
 /// `hashName` is set. Empty when no random salt could be drawn.
 std::string knownHostsLine(const std::string &hostToken,
                            const std::string &keyType, const unsigned char *key,
                            std::size_t keyLength, bool hashName);
+
+/// The host key algorithms to ask the server for, most preferred first: the
+/// usual order, with the ones whose key type known_hosts already records for
+/// the host moved to the front. OpenSSH does the same, so a host known by one
+/// key type does not look new because it also offers another.
+std::string
+hostKeyAlgorithmPreference(const std::vector<std::string> &recordedKeyTypes);
 
 /// Appends `line` to the known_hosts file at `path`, which is created with
 /// mode 0600, and its folder with 0700, when missing. The rest of the file,

@@ -1118,6 +1118,45 @@ bool line_matches_site_host(const std::string &line,
     return false;
 }
 
+// The names known_hosts gives `host` and `port`: "host" or "[host]:port".
+std::vector<std::string> known_hosts_tokens(const std::string &host,
+                                            std::uint16_t port) {
+    if (port == 22) {
+        // Support this uncommon notation if present in existing files.
+        return {host, "[" + host + "]:22"};
+    }
+    return {"[" + host + "]:" + std::to_string(port)};
+}
+
+// The key types known_hosts records for `host` and `port`, under plain or
+// hashed names. Lines with a marker, @cert-authority or @revoked, hold no key
+// of the host's own.
+std::vector<std::string>
+recorded_host_key_types(const std::vector<std::string> &lines,
+                        const std::string &host, std::uint16_t port) {
+    const std::vector<std::string> tokens = known_hosts_tokens(host, port);
+    std::vector<std::string> types;
+    for (const std::string &line : lines) {
+        const std::size_t first = line.find_first_not_of(" \t");
+        if (first == std::string::npos || line[first] == '@' ||
+            !line_matches_site_host(line, tokens)) {
+            continue;
+        }
+        std::size_t hostStart = 0;
+        std::size_t hostEnd = 0;
+        if (!parse_known_hosts_host_field(line, hostStart, hostEnd))
+            continue;
+        const std::size_t typeStart = line.find_first_not_of(" \t", hostEnd);
+        if (typeStart == std::string::npos)
+            continue;
+        const std::size_t typeEnd = line.find_first_of(" \t", typeStart);
+        types.push_back(line.substr(typeStart, typeEnd == std::string::npos
+                                                   ? std::string::npos
+                                                   : typeEnd - typeStart));
+    }
+    return types;
+}
+
 // Global libssh2 initialization (once per process).
 std::once_flag g_libssh2_init_once;
 int g_libssh2_init_result = LIBSSH2_ERROR_NONE;
@@ -2132,15 +2171,36 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
         return false;
     }
 
+    // known_hosts is read before the handshake so that the host key types it
+    // already records for this host are asked for first.
+    std::string khPath;
+    std::vector<std::string> khLines;
+    auto khRead = libssh2detail::KnownHostsReadStatus::Missing;
+    if (opt.known_hosts_policy != openscp::KnownHostsPolicy::Off) {
+        if (opt.known_hosts_path.has_value()) {
+            khPath = *opt.known_hosts_path;
+        } else {
+#ifndef _WIN32
+            std::string home = resolve_posix_home();
+            if (!home.empty())
+                khPath = home + "/.ssh/known_hosts";
+#endif
+        }
+        if (!khPath.empty()) {
+            khRead = libssh2detail::readKnownHosts(khPath, khLines);
+        }
+    }
+
     // Prefer modern algorithms (host keys, ciphers, MACs) and avoid DSA where
     // possible
 #ifdef LIBSSH2_METHOD_HOSTKEY
     // Host keys: ensure no ssh-dss, avoid ssh-rsa(SHA-1); prefer modern with
-    // safe fallbacks
-    (void)libssh2_session_method_pref(
-        session_, LIBSSH2_METHOD_HOSTKEY,
-        "ssh-ed25519,ecdsa-sha2-nistp256,rsa-sha2-512,rsa-sha2-256,ecdsa-sha2-"
-        "nistp384,ecdsa-sha2-nistp521");
+    // safe fallbacks, after the types known_hosts records for this host.
+    const std::string hostKeyPreference =
+        libssh2detail::hostKeyAlgorithmPreference(
+            recorded_host_key_types(khLines, opt.host, opt.port));
+    (void)libssh2_session_method_pref(session_, LIBSSH2_METHOD_HOSTKEY,
+                                      hostKeyPreference.c_str());
 #endif
 #ifdef LIBSSH2_METHOD_KEX
     (void)libssh2_session_method_pref(
@@ -2197,35 +2257,21 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             return false;
         }
 
-        // Effective path
-        std::string khPath;
-        if (opt.known_hosts_path.has_value()) {
-            khPath = *opt.known_hosts_path;
-        } else {
-#ifndef _WIN32
-            std::string home = resolve_posix_home();
-            if (!home.empty())
-                khPath = home + "/.ssh/known_hosts";
-#endif
+        // Each line is loaded on its own: a line libssh2 cannot parse is
+        // skipped, as OpenSSH does, instead of ending the load.
+        int skippedLines = 0;
+        for (const std::string &line : khLines) {
+            // libssh2_knownhost_readfile() passes the newline too.
+            const std::string withNewline = line + "\n";
+            if (libssh2_knownhost_readline(nh, withNewline.data(),
+                                           withNewline.size(),
+                                           LIBSSH2_KNOWNHOST_FILE_OPENSSH) < 0)
+                ++skippedLines;
         }
-
-        auto khRead = libssh2detail::KnownHostsReadStatus::Missing;
-        if (!khPath.empty()) {
-            const auto read = libssh2detail::readKnownHosts(
-                khPath, [nh](const std::string &line) {
-                    // libssh2_knownhost_readfile() passes the newline too.
-                    const std::string withNewline = line + "\n";
-                    return libssh2_knownhost_readline(
-                               nh, withNewline.data(), withNewline.size(),
-                               LIBSSH2_KNOWNHOST_FILE_OPENSSH) >= 0;
-                });
-            khRead = read.status;
-            if (read.skippedLines > 0) {
-                core_logf(CoreLogLevel::Info,
-                          "known_hosts: skipped %d line(s) libssh2 cannot "
-                          "parse",
-                          read.skippedLines);
-            }
+        if (skippedLines > 0) {
+            core_logf(CoreLogLevel::Info,
+                      "known_hosts: skipped %d line(s) libssh2 cannot parse",
+                      skippedLines);
         }
         if (khRead != libssh2detail::KnownHostsReadStatus::Read &&
             opt.known_hosts_policy == openscp::KnownHostsPolicy::Strict) {
@@ -2298,21 +2344,18 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
 
         int typemask_plain =
             LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW | alg;
-        int typemask_hash =
-            LIBSSH2_KNOWNHOST_TYPE_SHA1 | LIBSSH2_KNOWNHOST_KEYENC_RAW | alg;
         core_logf(CoreLogLevel::Debug,
                   "HostKey map: keytype=%d algMask=%d display=%s", keytype, alg,
                   algDisplay.c_str());
 
+        // TYPE_PLAIN names the host being checked; libssh2 compares it with
+        // plain and hashed (|1|...) entries alike. A second check with
+        // TYPE_SHA1 would always report a mismatch, since libssh2 cannot take
+        // a SHA1 name as input, and hide the real "not found".
         struct libssh2_knownhost *host = nullptr;
         int check =
             libssh2_knownhost_checkp(nh, opt.host.c_str(), opt.port, hostkey,
                                      keylen, typemask_plain, &host);
-        if (check != LIBSSH2_KNOWNHOST_CHECK_MATCH) {
-            check =
-                libssh2_knownhost_checkp(nh, opt.host.c_str(), opt.port,
-                                         hostkey, keylen, typemask_hash, &host);
-        }
 
         if (check == LIBSSH2_KNOWNHOST_CHECK_MATCH) {
             libssh2_knownhost_free(nh);
@@ -3869,14 +3912,7 @@ bool RemoveKnownHostEntry(const std::string &khPath, const std::string &host,
         return false;
     }
 
-    std::vector<std::string> hostTokens;
-    if (port == 22) {
-        hostTokens.push_back(host);
-        // Support this uncommon notation if present in existing files.
-        hostTokens.push_back("[" + host + "]:22");
-    } else {
-        hostTokens.push_back("[" + host + "]:" + std::to_string(port));
-    }
+    const std::vector<std::string> hostTokens = known_hosts_tokens(host, port);
 
     const bool hadTrailingLf = !content.empty() && content.back() == '\n';
     std::istringstream inLines(content);
