@@ -200,6 +200,23 @@ EntryIndex buildEntryIndex(const QVector<SyncSnapshotEntry> &snapshot,
     return index;
 }
 
+// Names that differ only in letter case or Unicode form can be one entry on
+// the destination, as on APFS, NTFS or SMB shares.
+QString aliasKey(const QString &relativePath) {
+    return relativePath.normalized(QString::NormalizationForm_D).toCaseFolded();
+}
+
+QSet<QString> aliasKeys(const EntryIndex &index, std::stop_token stopToken) {
+    QSet<QString> keys;
+    keys.reserve(index.size());
+    for (auto iterator = index.cbegin(); iterator != index.cend(); ++iterator) {
+        if (stopToken.stop_requested())
+            return {};
+        keys.insert(aliasKey(iterator.key()));
+    }
+    return keys;
+}
+
 std::optional<bool> equalComparableChecksums(const SyncSnapshotEntry &source,
                                              const SyncSnapshotEntry &dest) {
     if (source.checksumAlgorithm.isEmpty() ||
@@ -216,11 +233,21 @@ SyncComparisonItem classifyItem(const QString &relativePath,
                                 std::optional<SyncSnapshotEntry> source,
                                 std::optional<SyncSnapshotEntry> destination,
                                 const SyncComparisonOptions &options,
-                                bool sourceUnscanned) {
+                                bool sourceUnscanned, bool aliasOnOtherSide) {
     SyncComparisonItem item;
     item.relativePath = relativePath;
     item.source = std::move(source);
     item.destination = std::move(destination);
+
+    // Copying one spelling and deleting the other could delete what was just
+    // copied.
+    if (aliasOnOtherSide) {
+        item.action = SyncAction::Conflict;
+        item.reason = QCoreApplication::translate(
+            "SyncDialog", "The other side has this name with different letter "
+                          "case or Unicode form");
+        return item;
+    }
 
     if (item.source && !item.destination) {
         if (item.source->type == SyncEntryType::Directory) {
@@ -407,6 +434,10 @@ SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
     const EntryIndex remote = buildEntryIndex(remoteSnapshot, stopToken);
     if (stopToken.stop_requested())
         return {};
+    const QSet<QString> localAliases = aliasKeys(local, stopToken);
+    const QSet<QString> remoteAliases = aliasKeys(remote, stopToken);
+    if (stopToken.stop_requested())
+        return {};
     const QSet<QString> &unscannedPaths =
         options.direction == SyncDirection::LocalToRemote
             ? coverage.localUnscannedPaths
@@ -497,9 +528,14 @@ SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
         const bool sourceUnscanned =
             options.mirror && !source && destination &&
             sourcePathUnscanned(path, unscannedPaths, unscannedAncestors);
+        const bool onlyRemote = localEntry == local.cend();
+        const bool onlyLocal = remoteEntry == remote.cend();
+        const bool aliasOnOtherSide =
+            (onlyRemote && localAliases.contains(aliasKey(path))) ||
+            (onlyLocal && remoteAliases.contains(aliasKey(path)));
         result.push_back(classifyItem(path, std::move(source),
                                       std::move(destination), options,
-                                      sourceUnscanned));
+                                      sourceUnscanned, aliasOnOtherSide));
     }
     if (stopToken.stop_requested())
         return {};

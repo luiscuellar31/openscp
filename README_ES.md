@@ -141,7 +141,9 @@ independientemente de ese límite TCP.
 
 La sincronización nunca copia FIFOs, sockets ni dispositivos, y deja fuera los
 nombres con barra invertida o caracteres de control, que las subidas también
-rechazan.
+rechazan. Un nombre que solo se diferencia de otro del lado contrario en
+mayúsculas o normalización Unicode aparece como conflicto y no se copia ni se
+borra.
 
 Las descargas requieren archivos `.part` regulares. Si una entrada `.part`
 existente es una FIFO (tubería con nombre), la descarga informa de un error de

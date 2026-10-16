@@ -136,7 +136,9 @@ rejects linked folders below that root. Choose the physical destination folder
 when a download path contains a link.
 
 Synchronization never copies FIFOs, sockets, or devices, and leaves out names
-with a backslash or control characters, which uploads also refuse.
+with a backslash or control characters, which uploads also refuse. A name that
+differs from one on the other side only in letter case or Unicode normalization
+appears as a conflict and is neither copied nor deleted.
 
 Downloads require regular `.part` files. If an existing `.part` entry is a
 FIFO (named pipe), the download reports a local I/O error without waiting for
