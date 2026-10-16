@@ -10,6 +10,10 @@
 #include "curl/CurlWebDavClient.hpp"
 #endif
 
+#ifndef _WIN32
+#include <sys/socket.h>
+#endif
+
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -19,6 +23,21 @@
 #include <string>
 
 namespace {
+
+// Records whether curl enabled SO_KEEPALIVE, then stops before connecting.
+int recordKeepalive(void *userdata, curl_socket_t socket, curlsocktype) {
+    int enabled = 0;
+#ifdef _WIN32
+    int length = sizeof(enabled);
+#else
+    socklen_t length = sizeof(enabled);
+#endif
+    if (getsockopt(socket, SOL_SOCKET, SO_KEEPALIVE,
+                   reinterpret_cast<char *>(&enabled), &length) == 0) {
+        *static_cast<int *>(userdata) = enabled;
+    }
+    return CURL_SOCKOPT_ERROR;
+}
 
 curl_socket_t rejectSocketOpen(void *userdata, curlsocktype,
                                struct curl_sockaddr *) {
@@ -389,6 +408,33 @@ OPENSCP_TEST(testCurlFailuresNameTheirCause, test) {
     test.check(result.curlCode != CURLE_OK && error.rfind(generic, 0) == 0 &&
                    error.size() > generic.size(),
                "a curl failure should add libcurl's detail: " + error);
+}
+
+OPENSCP_TEST(testCurlConnectionsUseTcpKeepalive, test) {
+    openscp::curlcommon::CurlEasySession session;
+    std::string error;
+    test.check(session.initialize(error),
+               std::string("curl session should initialize: ") + error);
+    if (!session.get())
+        return;
+
+    int keepalive = -1;
+    const bool configured =
+        openscp::curlcommon::configureBaseCurlHandle(session.get(), "test",
+                                                     false, 30L, error) &&
+        curl_easy_setopt(session.get(), CURLOPT_PROXY, "") == CURLE_OK &&
+        curl_easy_setopt(session.get(), CURLOPT_URL, "http://127.0.0.1:1/") ==
+            CURLE_OK &&
+        curl_easy_setopt(session.get(), CURLOPT_SOCKOPTFUNCTION,
+                         recordKeepalive) == CURLE_OK &&
+        curl_easy_setopt(session.get(), CURLOPT_SOCKOPTDATA, &keepalive) ==
+            CURLE_OK;
+    test.check(configured, "the keepalive test request should configure");
+    if (configured)
+        (void)curl_easy_perform(session.get());
+    test.check(keepalive > 0,
+               "curl connections should enable TCP keepalive, so an idle FTP "
+               "control connection survives NAT timeouts");
 }
 
 OPENSCP_TEST(testCurlTransportPolicy, test) {

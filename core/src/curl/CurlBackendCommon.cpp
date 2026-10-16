@@ -668,6 +668,15 @@ bool configureBaseCurlHandle(CURL *curl, const char *backendLabel,
               " client timeouts.";
         return false;
     }
+    // The FTP control connection stays silent during a long transfer, and a
+    // NAT or load balancer drops it after a few idle minutes.
+    if (curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_TCP_KEEPIDLE, 60L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_TCP_KEEPINTVL, 30L) != CURLE_OK) {
+        err = std::string("Could not configure ") + backendLabel +
+              " TCP keepalive.";
+        return false;
+    }
     if (responseTimeoutSeconds &&
         curl_easy_setopt(curl, CURLOPT_FTP_RESPONSE_TIMEOUT,
                          *responseTimeoutSeconds) != CURLE_OK) {
