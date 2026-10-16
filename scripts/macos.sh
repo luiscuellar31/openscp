@@ -150,9 +150,9 @@ configure_release() {
     -B "$BUILD_DIR"
     -DCMAKE_BUILD_TYPE=Release
     "-DBUNDLE_ID=${BUNDLE_ID}"
-    # Packaging and development share build/. Release packaging can cache an
-    # ephemeral OPENSCP_DEPENDENCY_PREFIX there, so force local dependency
-    # discovery instead of reusing paths that may have been deleted.
+    # Packaging used to share build/ and could cache an ephemeral
+    # OPENSCP_DEPENDENCY_PREFIX there, so force local dependency discovery
+    # instead of reusing paths that may have been deleted.
     -U "LIBSSH2_*"
     -U "OPENSSL_CRYPTO_LIBRARY"
     -U "OPENSSL_INCLUDE_DIR"

@@ -329,8 +329,9 @@ option(OPENSCP_BUILD_SECURE_ONLY "Disable insecure fallback for secrets storage"
 
 if (OPENSCP_BUILD_TESTS OR OPENSCP_ENABLE_DEMO_MODE)
     # Tests and demo builds answer from MockSftpClient, so openscp_core needs
-    # the mock sources.
-    set(OPENSCP_ENABLE_MOCK ON CACHE BOOL "Build mock SFTP client" FORCE)
+    # the mock sources. A normal variable, unlike a forced cache entry, lets a
+    # later configure without tests or demo leave the mock out again.
+    set(OPENSCP_ENABLE_MOCK ON)
 endif()
 
 add_subdirectory(core)

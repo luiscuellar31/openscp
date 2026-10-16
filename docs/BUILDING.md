@@ -147,7 +147,9 @@ Local unsigned artifacts are generated with:
 
 Outputs and their `.sha256` files are written under `dist/`. The packaging
 flow runs `macdeployqt`, bundles non-Qt dependencies, rewrites linkage, and
-verifies the completed bundle.
+verifies the completed bundle. It builds in `build-macos-package/`, without
+tests or demo mode, so the development cache in `build/` cannot change a
+package; set `BUILD_DIR` to use another isolated directory.
 
 Plugin scanning is disabled by default because the required macOS platform,
 SVG icon, and style plugins are staged explicitly. Set
@@ -170,7 +172,7 @@ variables, and the skip controls used for local unsigned packages.
 To inspect linkage manually:
 
 ```bash
-otool -L build/OpenSCP.app/Contents/MacOS/OpenSCP | \
+otool -L build-macos-package/OpenSCP.app/Contents/MacOS/OpenSCP | \
   grep -E 'libssh2|libcrypto|libssl|tinyxml2|@executable_path'
 ```
 

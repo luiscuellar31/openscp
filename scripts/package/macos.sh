@@ -11,6 +11,8 @@ set -euo pipefail
 # - Notarizes with notarytool and staples the ticket
 #
 # Configuration via environment variables (local-only usage):
+#   BUILD_DIR              CMake build directory (default: build-macos-package/,
+#                          apart from the development build/)
 #   APP_NAME               Default: "OpenSCP"
 #   BUNDLE_ID              Default: "io.github.luiscuellar31.openscp"
 #   PKG_IDENTIFIER         Default: "io.github.luiscuellar31.openscp.pkg"
@@ -62,7 +64,7 @@ set -euo pipefail
 #     where <ARCH> is arm64, x86_64, or arm64+x86_64
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BUILD_DIR="${REPO_DIR}/build"
+BUILD_DIR="${BUILD_DIR:-${REPO_DIR}/build-macos-package}"
 DIST_DIR="${REPO_DIR}/dist"
 
 APP_NAME="${APP_NAME:-OpenSCP}"
@@ -1004,6 +1006,8 @@ main() {
       "-DCMAKE_OSX_ARCHITECTURES=${ARCHS}"
       "-DCMAKE_OSX_DEPLOYMENT_TARGET=${MINIMUM_SYSTEM_VERSION}"
       "-DOPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=${OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION:-OFF}"
+      -DOPENSCP_BUILD_TESTS=OFF
+      -DOPENSCP_ENABLE_DEMO_MODE=OFF
     )
     if [[ -n "$QT_HOST_WRAP_DIR" ]]; then
       cmake_args+=("-DCMAKE_AUTOUIC_EXECUTABLE=${QT_HOST_WRAP_DIR}/uic")
@@ -1029,6 +1033,8 @@ main() {
       "-DCMAKE_OSX_ARCHITECTURES=${ARCHS}"
       "-DCMAKE_OSX_DEPLOYMENT_TARGET=${MINIMUM_SYSTEM_VERSION}"
       "-DOPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=${OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION:-OFF}"
+      -DOPENSCP_BUILD_TESTS=OFF
+      -DOPENSCP_ENABLE_DEMO_MODE=OFF
     )
     if ((${#dependency_cmake_args[@]:-0})); then
       fallback_cmake_args+=("${dependency_cmake_args[@]}")
@@ -1037,8 +1043,8 @@ main() {
   fi
   cmake --build "$BUILD_DIR" -j
 
-  # Expect CMake to have produced build/OpenSCP.app already
-  [[ -d "$APP_DIR" ]] || die "App bundle not found at $APP_DIR. Build it first: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j"
+  # Expect CMake to have produced the app bundle already
+  [[ -d "$APP_DIR" ]] || die "App bundle not found at $APP_DIR after building $BUILD_DIR."
 
   # Use bundle version when available; fallback to CMake project version.
   version="$(detect_bundle_version "$INFO_PLIST_OUT")"
