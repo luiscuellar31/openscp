@@ -5,6 +5,7 @@
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
 #include "logic/common/RowSelection.hpp"
+#include "logic/common/StagingStore.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "logic/connections/SessionController.hpp"
 #include "logic/navigation/NavigationScope.hpp"
@@ -1193,29 +1194,17 @@ void MainWindow::initializeRuntimeState() {
         if (!autoClean)
             return;
         const QString root = openscpui::effectiveStagingRootPath(settings);
-        QDir stagingRootDir(root);
-        if (!stagingRootDir.exists())
-            return;
-        const QDateTime now = QDateTime::currentDateTimeUtc();
         const int retentionDays = qBound(
             1,
             settings.value(openscpui::settingskeys::kStagingRetentionDays, 7)
                 .toInt(),
             365);
-        const qint64 maxAgeMs = qint64(retentionDays) * 24 * 60 * 60 * 1000;
-        const auto entries = stagingRootDir.entryInfoList(
-            QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks);
-        for (const QFileInfo &entryInfo : entries) {
-            if (entryInfo.isSymLink())
-                continue; // do not follow symlinks
-            if (!openscpui::isStagingBatchName(entryInfo.fileName()))
-                continue; // only batches
-            const QDateTime lastModifiedUtc = entryInfo.lastModified().toUTC();
-            if (lastModifiedUtc.isValid() &&
-                lastModifiedUtc.msecsTo(now) > maxAgeMs) {
-                QDir(entryInfo.absoluteFilePath()).removeRecursively();
-            }
-        }
+        const QDateTime cutoff =
+            QDateTime::currentDateTimeUtc().addDays(-retentionDays);
+        // Batches can hold whole downloads, so they go away off the UI thread.
+        QThreadPool::globalInstance()->start([root, cutoff] {
+            (void)openscpui::removeStagingBatchesOlderThan(root, cutoff);
+        });
     });
 
     // Warn if insecure storage is active (non‑Apple only when explicitly

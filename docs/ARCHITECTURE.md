@@ -273,13 +273,14 @@ applies the rule from `TransferAutoClear` every minute; the transfer queue
 window only edits that rule, so the cleanup also runs while it stays closed.
 
 Dragging remote items out of the window first downloads them into a batch
-folder under the staging root, named as `newStagingBatchName()` in
-`AppSettings` describes. Only a drop of that drag on the local panel deletes
-its batch, once its copy finishes without errors and only if
+folder under the staging root. `StagingStore` names the batches, checks one
+before it is deleted, and deletes them. Only a drop of that drag on the local
+panel deletes its batch, once its copy finishes without errors and only if
 `stagingBatchPathForCleanup()` confirms it is a batch folder in the staging
 root. Any other target, such as another application, may read the files long
 after the drop, so its batch stays; the startup cleanup removes batches older
-than the retention setting.
+than the retention setting. Both deletions, and the removal of a staging root
+left empty, run outside the UI thread.
 
 Synchronization has three steps:
 

@@ -2,6 +2,7 @@
 #include "TestHarness.hpp"
 #include "app/MainWindow.hpp"
 #include "logic/common/AppSettings.hpp"
+#include "logic/common/StagingStore.hpp"
 #include "logic/connections/SessionController.hpp"
 #include "widgets/common/ToolbarKeyboardNavigation.hpp"
 #include "widgets/dialogs/AuthenticationInput.hpp"

@@ -2,17 +2,20 @@
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
 #include "logic/common/RowSelection.hpp"
+#include "logic/common/StagingStore.hpp"
 #include "logic/common/UiFormatters.hpp"
 #include "logic/navigation/RemotePath.hpp"
 #include "logic/remote/RemoteModel.hpp"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QSettings>
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <initializer_list>
 #include <string>
@@ -303,6 +306,70 @@ OPENSCP_TEST(testStagingBatchNames, test) {
                    !openscpui::isStagingBatchName(
                        QStringLiteral("20260101-120000-123")),
                "other folders in the staging root should be left alone");
+}
+
+OPENSCP_TEST(testStagingBatchRemovalTakesAnEmptyRoot, test) {
+    QTemporaryDir directory;
+    test.check(directory.isValid(), "the staging test needs a folder");
+    if (!directory.isValid())
+        return;
+    const QString root =
+        QDir(directory.path()).filePath(QStringLiteral("staging"));
+    const QString first = QDir(root).filePath(openscpui::newStagingBatchName());
+    const QString second =
+        QDir(root).filePath(QStringLiteral("20260101-120000"));
+    QFile payload(QDir(first).filePath(QStringLiteral("payload.txt")));
+    test.check(QDir().mkpath(first) && QDir().mkpath(second) &&
+                   payload.open(QIODevice::WriteOnly),
+               "the staging batches should be created");
+    payload.close();
+
+    openscpui::removeStagingBatch(first);
+    test.check(!QFileInfo::exists(first) && QFileInfo::exists(root),
+               "a root with another batch should stay");
+    openscpui::removeStagingBatch(second);
+    test.check(!QFileInfo::exists(root),
+               "a root left empty should be removed with its last batch");
+}
+
+OPENSCP_TEST(testExpiredStagingBatchesAreRemoved, test) {
+    QTemporaryDir directory;
+    test.check(directory.isValid(), "the staging test needs a folder");
+    if (!directory.isValid())
+        return;
+    const QDir base(directory.path());
+    const QString root = base.filePath(QStringLiteral("staging"));
+    const QString oldBatch =
+        QDir(root).filePath(QStringLiteral("20200101-120000"));
+    const QString newBatch =
+        QDir(root).filePath(openscpui::newStagingBatchName());
+    const QString other = QDir(root).filePath(QStringLiteral("Documents"));
+    const QString outside = base.filePath(QStringLiteral("outside"));
+    test.check(QDir().mkpath(oldBatch) && QDir().mkpath(newBatch) &&
+                   QDir().mkpath(other) && QDir().mkpath(outside),
+               "the staging folders should be created");
+    const auto age = [](const QString &path) {
+        std::error_code error;
+        std::filesystem::last_write_time(
+            QFile::encodeName(path).toStdString(),
+            std::filesystem::file_time_type::clock::now() -
+                std::chrono::hours(24 * 30),
+            error);
+        return !error;
+    };
+    test.check(age(oldBatch) && age(other) && age(outside),
+               "the old folders should be dated back");
+#ifndef _WIN32
+    const QString link = QDir(root).filePath(QStringLiteral("20200101-130000"));
+    test.check(QFile::link(outside, link), "a batch-named link should exist");
+#endif
+
+    const int removed = openscpui::removeStagingBatchesOlderThan(
+        root, QDateTime::currentDateTimeUtc().addDays(-7));
+    test.check(removed == 1 && !QFileInfo::exists(oldBatch) &&
+                   QFileInfo::exists(newBatch) && QFileInfo::exists(other) &&
+                   QFileInfo::exists(outside),
+               "only batches older than the retention should be removed");
 }
 
 OPENSCP_TEST(testOnlyStagingBatchesAreCleanedAfterADrop, test) {

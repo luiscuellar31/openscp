@@ -3,6 +3,7 @@
 
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
+#include "logic/common/StagingStore.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "logic/remote/RemoteModel.hpp"
 #include "logic/remote/RemoteOperationController.hpp"

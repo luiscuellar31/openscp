@@ -2,6 +2,7 @@
 #include "app/MainWindow.hpp"
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
+#include "logic/common/StagingStore.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "logic/connections/SessionController.hpp"
 #include "logic/remote/LocalTreeDiscovery.hpp"
@@ -1140,14 +1141,9 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                                 dragView->showKeepMessage(stagingBatchDir);
                             return;
                         }
-                        (void)QDir(stagingBatchDir).removeRecursively();
-                        // If the staging root is now empty, remove it too.
-                        QDir root(QFileInfo(stagingBatchDir).absolutePath());
-                        if (root.entryList(QDir::NoDotAndDotDot |
-                                           QDir::AllEntries)
-                                .isEmpty()) {
-                            (void)root.rmdir(QStringLiteral("."));
-                        }
+                        QThreadPool::globalInstance()->start([stagingBatchDir] {
+                            openscpui::removeStagingBatch(stagingBatchDir);
+                        });
                     };
                 }
                 runLocalFsOperation(pairs, false, 0, removeBatch);

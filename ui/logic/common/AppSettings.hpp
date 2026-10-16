@@ -120,16 +120,6 @@ inline constexpr char kRemoteScopeFavoritesPattern[] =
 
 QString defaultStagingRootPath();
 QString effectiveStagingRootPath(const QSettings &settings);
-// A drag-out staging batch is a folder in the staging root named after the
-// UTC time it was created plus a random suffix. The startup cleanup removes
-// only folders with such a name.
-QString newStagingBatchName();
-bool isStagingBatchName(const QString &name);
-// The canonical path of `path` when it is a staging batch folder directly in
-// the staging root, and not a symbolic link; empty otherwise. A drop names
-// the batch it copies from, and only such a folder may be deleted after it.
-QString stagingBatchPathForCleanup(const QSettings &settings,
-                                   const QString &path);
 // Minutes that a "no host verification" exception lasts, between 1 and 120.
 int effectiveNoHostVerificationTtlMinutes(const QSettings &settings);
 
