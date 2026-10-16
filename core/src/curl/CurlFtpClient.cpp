@@ -502,10 +502,112 @@ bool fetchFtpListing(CURL *curl, const SessionOptions &opt,
 
 enum class FtpLookupResult { Found, NotFound, Failed };
 
+// A NOBODY request with FILETIME, which libcurl answers from the control
+// connection: MDTM, TYPE and SIZE for a file URL, only CWD for a folder URL.
+// Neither opens a data connection.
+CURLcode probeFtpUrl(CURL *curl, const SessionOptions &opt,
+                     const std::string &url,
+                     const std::atomic<bool> *interrupted, curl_off_t &fileTime,
+                     curl_off_t &length, long &responseCode) {
+    fileTime = -1;
+    length = -1;
+    responseCode = 0;
+    curl_easy_reset(curl);
+    std::string err;
+    if (!configureCommonCurlHandle(curl, opt, err))
+        return CURLE_FAILED_INIT;
+    std::string sink;
+    curlcommon::BoundedStringSink responseSink{&sink};
+    curlcommon::TransferProgressContext cancelContext{
+        {}, {}, interrupted, false};
+    if (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_NOBODY, 1L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_FILETIME, 1L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
+                         curlcommon::appendStringCallback) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseSink) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
+                         curlcommon::transferProgressCallback) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &cancelContext) !=
+            CURLE_OK) {
+        return CURLE_FAILED_INIT;
+    }
+    CURLcode code = CURLE_OK;
+    if (curlcommon::rejectInterrupted(interrupted, err, &code))
+        return code;
+    std::string detail;
+    code = curlcommon::performWithErrorDetail(curl, detail);
+    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
+    if (code == CURLE_OK) {
+        (void)curl_easy_getinfo(curl, CURLINFO_FILETIME_T, &fileTime);
+        (void)curl_easy_getinfo(curl, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T,
+                                &length);
+    }
+    return code;
+}
+
+// Without MLST, asks for the path as a file and then as a folder. Missing
+// tells "not found" like a 550 to MLST does; Unknown, from a server that
+// gives neither size nor time or from another failure, leaves the parent
+// listing to decide.
+enum class FtpProbeResult { Found, NotFound, Unknown, Interrupted };
+
+FtpProbeResult probeFtpEntry(CURL *curl, const SessionOptions &opt,
+                             const std::string &target,
+                             const std::atomic<bool> *interrupted,
+                             FileInfo &info) {
+    curl_off_t fileTime = -1;
+    curl_off_t length = -1;
+    long responseCode = 0;
+    const CURLcode asFile =
+        probeFtpUrl(curl, opt, buildFtpUrl(opt, target), interrupted, fileTime,
+                    length, responseCode);
+    if (asFile == CURLE_ABORTED_BY_CALLBACK)
+        return FtpProbeResult::Interrupted;
+    if (asFile == CURLE_OK) {
+        if (fileTime < 0 && length < 0)
+            return FtpProbeResult::Unknown;
+        info = FileInfo{};
+        info.name = remoteBaseName(target);
+        info.is_dir = false;
+        info.mode = 0100000u;
+        if (length >= 0) {
+            info.size = static_cast<std::uint64_t>(length);
+            info.has_size = true;
+        }
+        if (fileTime >= 0)
+            info.mtime = static_cast<std::uint64_t>(fileTime);
+        return FtpProbeResult::Found;
+    }
+    // A missing parent folder fails its CWD before MDTM is sent.
+    if (asFile == CURLE_REMOTE_ACCESS_DENIED)
+        return FtpProbeResult::NotFound;
+    if (asFile != CURLE_REMOTE_FILE_NOT_FOUND)
+        return FtpProbeResult::Unknown;
+
+    const CURLcode asFolder =
+        probeFtpUrl(curl, opt, buildFtpUrl(opt, target, true), interrupted,
+                    fileTime, length, responseCode);
+    if (asFolder == CURLE_ABORTED_BY_CALLBACK)
+        return FtpProbeResult::Interrupted;
+    if (asFolder == CURLE_OK) {
+        info = FileInfo{};
+        info.name = remoteBaseName(target);
+        info.is_dir = true;
+        info.mode = 0040000u;
+        return FtpProbeResult::Found;
+    }
+    if (asFolder == CURLE_REMOTE_ACCESS_DENIED)
+        return FtpProbeResult::NotFound;
+    return FtpProbeResult::Unknown;
+}
+
 // Finds one remote entry. MLST answers on the control connection; servers
-// without it fall back to searching the parent directory listing. A 550 MLST
-// reply is taken as "not found", as FTP does not tell it apart from denied
-// access.
+// without it, such as vsftpd, are asked with MDTM, SIZE and CWD, also on the
+// control connection, and the parent directory listing is searched only when
+// those cannot tell. A 550 reply is taken as "not found", as FTP does not
+// tell it apart from denied access.
 FtpLookupResult lookupFtpEntry(CURL *curl, const SessionOptions &opt,
                                const std::string &commandRoot,
                                const std::string &target,
@@ -541,6 +643,22 @@ FtpLookupResult lookupFtpEntry(CURL *curl, const SessionOptions &opt,
         }
         info = FileInfo{};
         err.clear();
+    }
+
+    switch (probeFtpEntry(curl, opt, target, interrupted, info)) {
+    case FtpProbeResult::Found:
+        return FtpLookupResult::Found;
+    case FtpProbeResult::NotFound:
+        info = FileInfo{};
+        return FtpLookupResult::NotFound;
+    case FtpProbeResult::Interrupted:
+        info = FileInfo{};
+        curlCode = CURLE_ABORTED_BY_CALLBACK;
+        err = "Interrupted";
+        return FtpLookupResult::Failed;
+    case FtpProbeResult::Unknown:
+        info = FileInfo{};
+        break;
     }
 
     std::vector<FileInfo> parentEntries;

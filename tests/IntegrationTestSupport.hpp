@@ -376,12 +376,26 @@ inline void checkFtpEntryLookups(openscp::RemoteClient &client,
     test.check(client.stat(parent, info, error) && info.is_dir,
                "FTP: stat should report the parent as a directory: " + error);
 
+    // vsftpd has no MLST: the time comes from MDTM, which LIST lacked.
+    error.clear();
+    test.check(
+        client.stat(remotePath, info, error) && !info.is_dir && info.mtime > 0,
+        "FTP: stat should report the file's modification time: " + error);
+
     error.clear();
     test.check(!client.stat(remotePath + ".missing", info, error) &&
                    error.empty() &&
                    client.lastOperationError().kind ==
                        openscp::RemoteErrorKind::NotFound,
                "FTP: stat of a missing file should report NotFound: " + error);
+
+    error.clear();
+    test.check(!client.stat(parent + "/missing-folder/file", info, error) &&
+                   error.empty() &&
+                   client.lastOperationError().kind ==
+                       openscp::RemoteErrorKind::NotFound,
+               "FTP: stat under a missing folder should report NotFound: " +
+                   error);
 
     error.clear();
     test.check(!client.rename(remotePath, remotePath, error, false) &&
