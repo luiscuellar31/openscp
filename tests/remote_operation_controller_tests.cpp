@@ -152,6 +152,16 @@ class ControllerFakeClient final : public openscp::RemoteClient {
             out = {
                 {"must-not-be-listed.txt", false, 1, true, 0, 0100644u, 1, 1},
             };
+        } else if (remotePath == "/links") {
+            out = {
+                {"current", true, 0, false, 0, 0120777u, 1, 1},
+                {"file-link", false, 0, false, 0, 0120777u, 1, 1},
+                {"data.txt", false, 4, true, 0, 0100644u, 1, 1},
+            };
+        } else if (remotePath == "/links/current") {
+            out = {
+                {"link-target.txt", false, 1, true, 0, 0100644u, 1, 1},
+            };
         } else if (remotePath == "/unsafe") {
             out = {
                 {"safe.txt", false, 4, true, 0, 0100644u, 1, 1},
@@ -488,6 +498,49 @@ OPENSCP_TEST(testListRejectsUnsafeNames, test) {
                "normal listings must filter unsafe and invalid UTF-8 names");
     test.check(completion && completion->invalidNames == 4,
                "normal listings should report every rejected name");
+}
+
+OPENSCP_TEST(testRecursiveDeleteRemovesLinksWithoutFollowingThem, test) {
+    RemoteOperationController controller;
+    const auto state = std::make_shared<FakeState>();
+    RemoteOperationController::JobId deleteJob = 0;
+    std::optional<RemoteOperationController::Completion> completion;
+    QObject::connect(
+        &controller, &RemoteOperationController::jobFinished, &controller,
+        [&](const RemoteOperationController::Completion &finished) {
+            if (finished.result.job.id == deleteJob)
+                completion = finished;
+        });
+
+    controller.installSession(makeConnectedClient(state));
+    RemoteOperationController::DeleteRequest deletion;
+    deletion.path = QStringLiteral("/links");
+    deletion.kind = RemoteOperationController::DeleteKind::Directory;
+    deletion.recursive = true;
+    deletion.traversal.skipSymlinks = false;
+    deleteJob = controller.submit(deletion);
+
+    test.check(spinUntil([&] { return completion.has_value(); }),
+               "recursive delete with links should complete");
+    test.check(completion &&
+                   completion->result.outcome ==
+                       RemoteOperationController::Outcome::Succeeded &&
+                   completion->skippedSymlinks == 0,
+               "a folder with links should be deleted completely");
+
+    std::lock_guard lock(state->mutex);
+    const auto called = [&](const std::string &name) {
+        return std::find(state->calls.cbegin(), state->calls.cend(), name) !=
+               state->calls.cend();
+    };
+    test.check(called("removeFile:/links/current") &&
+                   called("removeFile:/links/file-link") &&
+                   called("removeFile:/links/data.txt") &&
+                   called("removeDir:/links"),
+               "links should be removed as entries before their folder");
+    test.check(!called("list:/links/current") &&
+                   !called("removeFile:/links/current/link-target.txt"),
+               "a recursive delete must never follow a link");
 }
 
 OPENSCP_TEST(testRecursiveMutationsRejectUnsafeNames, test) {

@@ -307,17 +307,8 @@ void RemoteActionController::remove(const QString &basePath,
     });
 
     for (const Entry &entry : entries) {
-        RemoteOperationController::DeleteRequest request;
-        request.path = joinRemotePath(basePath, entry.name);
-        request.kind = entry.isDirectory
-                           ? RemoteOperationController::DeleteKind::Directory
-                           : RemoteOperationController::DeleteKind::File;
-        request.recursive = entry.isDirectory;
-        request.traversal.includeHidden = true;
-        request.traversal.skipSymlinks = true;
-        request.traversal.maxDepth = 32;
-        request.traversal.batchSize = 250;
-        const quint64 jobId = context_.operations->submit(request);
+        const quint64 jobId =
+            context_.operations->submit(deleteRequest(basePath, entry));
         if (jobId != 0)
             state->pending.insert(jobId);
     }
@@ -500,6 +491,24 @@ RemoteActionController::Availability RemoteActionController::availability(
     result.canMutate = result.canUpload || result.canCreateDirectory ||
                        result.canDelete || result.canRename;
     return result;
+}
+
+openscp::remote_operation::DeleteRequest
+RemoteActionController::deleteRequest(const QString &basePath,
+                                      const Entry &entry) {
+    RemoteOperationController::DeleteRequest request;
+    request.path = joinRemotePath(basePath, entry.name);
+    request.kind = entry.isDirectory
+                       ? RemoteOperationController::DeleteKind::Directory
+                       : RemoteOperationController::DeleteKind::File;
+    request.recursive = entry.isDirectory;
+    request.traversal.includeHidden = true;
+    // Links inside the folder are deleted themselves and never followed, as
+    // rm -r does; skipping them would leave the folder impossible to remove.
+    request.traversal.skipSymlinks = false;
+    request.traversal.maxDepth = 32;
+    request.traversal.batchSize = 250;
+    return request;
 }
 
 } // namespace openscpui

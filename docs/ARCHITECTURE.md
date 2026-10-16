@@ -122,7 +122,8 @@ SFTP does, so work that is only replaced (a newer listing, a search at its
 match limit, a sync scan over its size limit) cancels without interrupting
 and lets the active call finish.
 `RemoteTreeWalker` and `LocalTreeDiscovery` scan directories outside the UI
-thread and can be canceled.
+thread and can be canceled. Deleting a remote folder removes the links inside
+it as entries and never follows them.
 Local discovery enumerates without sorting or materializing directory listings.
 Its depth-first traversal retains one nonrecursive Qt iterator per ancestor and
 emits each directory before its children, including empty directories, so

@@ -43,6 +43,20 @@ OPENSCP_TEST(testMoveRequiresDownloadAndDelete, test) {
                "remote move should require both download and delete");
 }
 
+OPENSCP_TEST(testFolderDeletionRemovesLinks, test) {
+    using openscpui::RemoteActionController;
+    const auto folder = RemoteActionController::deleteRequest(
+        QStringLiteral("/srv"), {QStringLiteral("app"), true});
+    test.check(folder.path == QStringLiteral("/srv/app") && folder.recursive &&
+                   !folder.traversal.skipSymlinks,
+               "deleting a folder should delete the links inside it");
+
+    const auto file = RemoteActionController::deleteRequest(
+        QStringLiteral("/srv"), {QStringLiteral("current"), false});
+    test.check(file.path == QStringLiteral("/srv/current") && !file.recursive,
+               "deleting a file or link should not walk a tree");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
