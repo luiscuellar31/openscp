@@ -2962,16 +2962,10 @@ void Libssh2SftpClient::disconnect() {
 #endif
     }
 
-    if (sock != -1) {
-        ::close(sock);
-    }
-#ifndef _WIN32
-    if (jumpStderrFd != -1)
-        ::close(jumpStderrFd);
-    if (jumpPid > 0)
-        stop_ssh_jump_tunnel(jumpPid);
-#endif
-
+    // libssh2 keeps the socket's number and still reads, writes and changes
+    // its flags while shutting down, so the session goes before the socket:
+    // once closed, that number may already belong to another connection. The
+    // socket is shut down, so these calls fail at once.
     if (session) {
         libssh2_session_set_blocking(session, 0);
         libssh2_session_set_timeout(session, 2000);
@@ -2987,6 +2981,16 @@ void Libssh2SftpClient::disconnect() {
         }
         libssh2_session_free(session);
     }
+
+    if (sock != -1) {
+        ::close(sock);
+    }
+#ifndef _WIN32
+    if (jumpStderrFd != -1)
+        ::close(jumpStderrFd);
+    if (jumpPid > 0)
+        stop_ssh_jump_tunnel(jumpPid);
+#endif
 }
 
 #ifndef _WIN32
