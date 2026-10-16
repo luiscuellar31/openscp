@@ -182,6 +182,13 @@ bundle_gnu_runtime() {
   cp -L "$runtime_path" "$APPDIR/usr/lib/libstdc++.so.6"
 }
 
+# The executable as shipped, after linuxdeploy patched it.
+verify_elf_hardening() {
+  local checker="${REPO_DIR}/scripts/verify/linux-hardening.sh"
+  [[ -x "$checker" ]] || die "ELF hardening checker not found or not executable: $checker"
+  "$checker" "$APPDIR/usr/bin/$EXEC_NAME"
+}
+
 verify_linux_abi_if_requested() {
   [[ -n "${OPENSCP_MAX_GLIBC_VERSION:-}" ]] || return 0
   local checker="${REPO_DIR}/scripts/verify/linux-abi.sh"
@@ -319,6 +326,7 @@ main() {
   ensure_optional_qt_desktop_theme_plugins
   bundle_gnu_runtime
   verify_qt_runtime_plugins
+  verify_elf_hardening
   verify_linux_abi_if_requested
 
   log "Creating AppImage: $out_name"

@@ -75,8 +75,12 @@ AppImage uses `build-appimage/` by default so its release-oriented Qt and
 CMake configuration cannot alter the development cache in `build/`. Set
 `BUILD_DIR=/path/to/build` only when a different isolated directory is needed.
 
-The packagers validate the required Qt SVG plugins. Official AppImages also
-audit the bundled ELF ABI; the check can be run directly against an AppDir:
+The AppImage packager checks that the bundled Qt SVG and platform plugins and
+their libraries resolve, and that the packaged executable keeps its ELF
+hardening (PIE, RELRO, immediate binding, non-executable stack). Snap and
+Flatpak take Qt from their runtime, so they have no Qt plugins of their own to
+check. Official AppImages also audit the bundled ELF ABI; the check can be run
+directly against an AppDir:
 
 ```bash
 ./scripts/verify/linux-abi.sh dist/OpenSCP.AppDir 2.34

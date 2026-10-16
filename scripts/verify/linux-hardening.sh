@@ -25,23 +25,26 @@ elf_header="$(readelf -hW "$binary")"
 program_headers="$(readelf -lW "$binary")"
 dynamic_section="$(readelf -dW "$binary")"
 
-if ! rg -q 'Type:[[:space:]]+DYN' <<<"$elf_header"; then
+# grep, not rg: the AppImage builds in a Rocky Linux image without ripgrep.
+if ! grep -Eq 'Type:[[:space:]]+DYN' <<<"$elf_header"; then
     echo "hardening check failed: executable is not PIE" >&2
     exit 1
 fi
 
-if ! rg -q 'GNU_RELRO' <<<"$program_headers"; then
+if ! grep -Eq 'GNU_RELRO' <<<"$program_headers"; then
     echo "hardening check failed: GNU_RELRO is missing" >&2
     exit 1
 fi
 
-if ! rg -q 'BIND_NOW|FLAGS.*NOW' <<<"$dynamic_section"; then
+if ! grep -Eq 'BIND_NOW|FLAGS.*NOW' <<<"$dynamic_section"; then
     echo "hardening check failed: immediate symbol binding is missing" >&2
     exit 1
 fi
 
-stack_header="$(rg 'GNU_STACK' <<<"$program_headers")"
-if [[ -z "$stack_header" ]] || rg -q 'GNU_STACK.*RWE' <<<"$stack_header"; then
+# A missing GNU_STACK makes grep fail, which must reach the message below
+# instead of ending the script through set -e.
+stack_header="$(grep -E 'GNU_STACK' <<<"$program_headers" || true)"
+if [[ -z "$stack_header" ]] || grep -Eq 'GNU_STACK.*RWE' <<<"$stack_header"; then
     echo "hardening check failed: stack is executable or unspecified" >&2
     exit 1
 fi

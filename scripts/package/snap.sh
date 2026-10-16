@@ -69,7 +69,6 @@ main() {
   [[ -x "$CHECKER" ]] || die "Qt runtime checker not found/executable: $CHECKER"
 
   ensure_cmd "$SNAPCRAFT"
-  ensure_cmd unsquashfs
   ensure_cmd file
   validate_snap_icon
 
@@ -83,16 +82,17 @@ main() {
   log "Produced snap: $snap_file"
   popd >/dev/null
 
-  local tmp_dir
-  tmp_dir="$(mktemp -d)"
-  trap '[[ -n "${tmp_dir:-}" ]] && rm -rf "${tmp_dir}"' EXIT
-
-  log "Extracting snap for Qt runtime validation"
-  unsquashfs -f -d "${tmp_dir}/root" "${PROJECT_DIR}/$(basename "$snap_file")" >/dev/null
   if uses_kde_neon_extension; then
-    log "Detected kde-neon-6 extension; allowing runtime-provided Qt plugins."
-    "$CHECKER" --allow-runtime-provided --context snap "${tmp_dir}/root"
+    # The snap carries no Qt of its own, so there is nothing to validate.
+    log "Qt comes from the kde-neon-6 extension; skipping the Qt plugin check."
   else
+    ensure_cmd unsquashfs
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    # Expanded now: tmp_dir is local and gone by the time the script exits.
+    trap "rm -rf '${tmp_dir}'" EXIT
+    log "Extracting snap for Qt runtime validation"
+    unsquashfs -f -d "${tmp_dir}/root" "${PROJECT_DIR}/$(basename "$snap_file")" >/dev/null
     "$CHECKER" --context snap "${tmp_dir}/root"
   fi
 

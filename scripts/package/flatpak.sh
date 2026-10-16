@@ -120,8 +120,8 @@ main() {
     "$build_manifest"
 
   if uses_external_qt_runtime "$build_manifest"; then
-    log "Detected external Flatpak runtime; allowing runtime-provided Qt plugins."
-    "$CHECKER" --allow-runtime-provided --context flatpak "${BUILD_DIR}/files"
+    # The app carries no Qt of its own, so there is nothing to validate.
+    log "Qt comes from the Flatpak runtime; skipping the Qt plugin check."
   else
     "$CHECKER" --context flatpak "${BUILD_DIR}/files"
   fi
