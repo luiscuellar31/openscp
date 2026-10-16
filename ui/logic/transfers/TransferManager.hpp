@@ -238,6 +238,8 @@ class TransferManager : public QObject {
     TransferQueueWriter persistenceWriter_;
     QString persistencePath_;
     qint64 persistencePendingSinceMs_ = 0;
+    // Fingerprint of the last snapshot handed to the writer; guarded by mtx_.
+    std::optional<std::size_t> lastPersistedFingerprint_;
     bool persistenceEnabled_ = false;
     bool persistenceBlocked_ = false;
     mutable std::mutex persistenceMutex_;
@@ -377,7 +379,11 @@ class TransferManager : public QObject {
     void writeQueueSnapshot();
     bool restorePersistenceFile(QString &warning);
     // The tasks the queue would save, or nullopt when it saves nothing.
-    std::optional<QVector<TransferTask>> persistedSnapshot() const;
+    // The tasks to save. With `onlyIfChanged`, nothing when what would be
+    // saved matches the last snapshot taken this way: most updates only
+    // change a task's status or progress, which the file does not keep.
+    std::optional<QVector<TransferTask>>
+    persistedSnapshot(bool onlyIfChanged = false);
 
     friend struct TransferManagerTestAccess;
 };

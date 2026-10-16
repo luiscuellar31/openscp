@@ -23,6 +23,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <memory>
@@ -1120,6 +1121,44 @@ OPENSCP_TEST(testLeavingASessionStopsWorkersStillConnecting, test) {
                                           "session") +
                        " should not wait for a hanging connection");
     }
+}
+
+OPENSCP_TEST(testStatusChangesAloneDoNotRewriteTheQueue, test) {
+    QTemporaryDir directory;
+    const QString path = directory.filePath(QStringLiteral("queue.json"));
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    test.check(manager.enablePersistence(path),
+               "persistence should be enabled");
+    QVector<quint64> ids;
+    for (int index = 0; index < 3; ++index) {
+        ids.push_back(manager.enqueueDownload(
+            QStringLiteral("/remote/file-%1").arg(index),
+            directory.filePath(QStringLiteral("file-%1").arg(index))));
+    }
+    const auto savedTasks = [&path] {
+        return TransferQueuePersistence::load(path,
+                                              QStringLiteral("test-session"))
+            .tasks.size();
+    };
+    test.check(waitUntil([&] { return savedTasks() == 3; }),
+               "the queue should be saved");
+    const auto writtenAt = [&path] {
+        std::error_code error;
+        return std::filesystem::last_write_time(
+            QFile::encodeName(path).toStdString(), error);
+    };
+    const auto firstWrite = writtenAt();
+
+    // Pausing changes only the task's status, which the file does not keep.
+    manager.pauseTask(ids[0]);
+    test.check(!waitUntil([&] { return writtenAt() != firstWrite; },
+                          std::chrono::milliseconds(3000)),
+               "a status change alone should not rewrite the queue");
+
+    manager.removeTasks({ids[1]});
+    test.check(waitUntil([&] { return savedTasks() == 2; }),
+               "removing a task should still be saved");
 }
 
 OPENSCP_TEST(testResumeDuringAFailedConnectionRequeuesTheTask, test) {

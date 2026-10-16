@@ -3090,7 +3090,7 @@ void TransferManager::restartPersistenceTimer() {
 
 void TransferManager::writeQueueSnapshot() {
     // The writer thread serializes and writes, so this only copies.
-    if (auto snapshot = persistedSnapshot())
+    if (auto snapshot = persistedSnapshot(true))
         persistenceWriter_.save(std::move(*snapshot));
 }
 
@@ -3113,6 +3113,11 @@ bool TransferManager::enablePersistence(const QString &path) {
         persistenceEnabled_ = true;
         persistenceBlocked_ = false;
         persistenceWriter_.setPath(persistencePath_);
+    }
+    {
+        // A new file has seen no snapshot yet.
+        std::lock_guard<std::mutex> lock(mtx_);
+        lastPersistedFingerprint_.reset();
     }
 
     QString warning;
@@ -3166,14 +3171,33 @@ bool TransferManager::restorePersistenceFile(QString &warning) {
 }
 
 std::optional<QVector<TransferTask>>
-TransferManager::persistedSnapshot() const {
+TransferManager::persistedSnapshot(bool onlyIfChanged) {
     {
         std::lock_guard<std::mutex> lock(persistenceMutex_);
         if (!persistenceEnabled_ || persistenceBlocked_)
             return std::nullopt;
     }
-    QVector<TransferTask> snapshot;
     std::lock_guard<std::mutex> lock(mtx_);
+    // Hashing the saved fields is far cheaper than copying, serializing and
+    // writing the queue. attempts is left out: a retry alone is not worth a
+    // rewrite, and the next save carries it.
+    std::size_t fingerprint = 0;
+    for (const auto &taskNode : queueStore_.nodes()) {
+        const TransferTask &task = *taskNode;
+        if (!TransferQueuePersistence::isPersisted(task))
+            continue;
+        fingerprint = qHashMulti(
+            fingerprint, task.taskId, task.batchId, task.dependsOnTaskId,
+            task.waitsForBatch, static_cast<int>(task.type), task.sessionKey,
+            task.src, task.dst, task.resumeHint, task.speedLimitKBps,
+            task.maxAttempts, static_cast<int>(task.operation),
+            static_cast<int>(task.conflictPolicy), static_cast<int>(task.phase),
+            task.commitUncertain, task.queuedAtMs);
+    }
+    if (onlyIfChanged && lastPersistedFingerprint_ == fingerprint)
+        return std::nullopt;
+    lastPersistedFingerprint_ = fingerprint;
+    QVector<TransferTask> snapshot;
     for (const auto &taskNode : queueStore_.nodes()) {
         if (TransferQueuePersistence::isPersisted(*taskNode))
             snapshot.push_back(*taskNode);
