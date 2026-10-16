@@ -18,6 +18,7 @@ struct FakeSecretBackend {
     SecretStore::PersistStatus saveStatus = SecretStore::PersistStatus::Stored;
     SecretStore::LoadStatus missingLoadStatus =
         SecretStore::LoadStatus::Missing;
+    SecretStore::LoadStatus loadStatus = SecretStore::LoadStatus::Loaded;
     SecretStore::DeleteStatus deleteStatus = SecretStore::DeleteStatus::Removed;
 
     SiteCredentialRepository::Backend interface() {
@@ -28,6 +29,11 @@ struct FakeSecretBackend {
                 return SecretStore::PersistResult{saveStatus, {}};
             },
             [this](const QString &key) -> SecretStore::LoadResult {
+                if (loadStatus != SecretStore::LoadStatus::Loaded) {
+                    return {loadStatus,
+                            {},
+                            QStringLiteral("simulated load failure")};
+                }
                 const auto iterator = values.constFind(key);
                 if (iterator == values.cend()) {
                     return {missingLoadStatus,
@@ -89,6 +95,39 @@ OPENSCP_TEST(testSaveLoadAndRemoval, test) {
     Q_UNUSED(removed);
     test.check(backend.values.isEmpty(),
                "saving absent credentials should remove stale values");
+}
+
+OPENSCP_TEST(testSaveKeepsCredentialsThatCouldNotBeRead, test) {
+    FakeSecretBackend backend;
+    SiteCredentialRepository repository(backend.interface());
+    const SiteEntry entry = site();
+
+    openscp::SessionOptions options = entry.opt;
+    options.password = "password";
+    options.private_key_passphrase = "passphrase";
+    options.proxy_password = "proxy";
+    const auto saved = repository.save(entry, options);
+    test.check(saved.issues.isEmpty(), "credentials should be stored first");
+
+    backend.loadStatus = SecretStore::LoadStatus::PermissionDenied;
+    openscp::SessionOptions edited = entry.opt;
+    const auto loaded = repository.load(entry, edited);
+    test.check(loaded.issueKinds().size() == 3 && !edited.password,
+               "unreadable credentials should be reported and left empty");
+
+    backend.loadStatus = SecretStore::LoadStatus::Loaded;
+    edited.private_key_passphrase = "new passphrase";
+    const auto resaved = repository.save(entry, edited, loaded.issueKinds());
+    const auto stored = [&](SiteCredentialKind kind) {
+        return backend.values.value(
+            SiteCredentialRepository::stableKey(entry, kind));
+    };
+    test.check(resaved.issues.isEmpty() &&
+                   stored(SiteCredentialKind::Password) == "password" &&
+                   stored(SiteCredentialKind::ProxyPassword) == "proxy",
+               "saving should keep credentials that could not be read");
+    test.check(stored(SiteCredentialKind::KeyPassphrase) == "new passphrase",
+               "a value typed for an unreadable credential should replace it");
 }
 
 OPENSCP_TEST(testStableCredentialCopy, test) {

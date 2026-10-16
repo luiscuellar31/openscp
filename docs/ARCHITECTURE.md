@@ -327,7 +327,9 @@ Each kind of persisted data has one owner:
 
 Use these classes instead of reading or writing their settings directly.
 `SettingsDialog` writes only the values the user changed, so every other
-setting keeps following its default.
+setting keeps following its default. Saving an edited site removes the
+credentials whose fields are empty, except those that could not be read when
+the editor opened.
 Changes to persisted formats require explicit decisions about schema and
 versioning, and corrupt or unsupported data must not be silently overwritten.
 

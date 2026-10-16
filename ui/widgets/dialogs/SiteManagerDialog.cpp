@@ -443,8 +443,9 @@ void SiteManagerDialog::onEdit() {
     dlg.setRememberLastPaths(editedEntry.rememberLastPaths);
     SiteCredentialRepository credentials;
     openscp::SessionOptions sessionOptions = editedEntry.opt;
-    showPersistIssues(
-        this, credentials.load(editedEntry, sessionOptions).issueMessages());
+    const SiteCredentialOperationResult loaded =
+        credentials.load(editedEntry, sessionOptions);
+    showPersistIssues(this, loaded.issueMessages());
     dlg.setOptions(sessionOptions);
     if (dlg.exec() != QDialog::Accepted)
         return;
@@ -474,8 +475,11 @@ void SiteManagerDialog::onEdit() {
     selectSite(siteId);
     if (!saved)
         return;
+    // An empty field for a credential that could not be read means unknown,
+    // not cleared, so saving keeps the stored value.
     showPersistIssues(
-        this, credentials.save(editedEntry, editedOptions).issueMessages());
+        this, credentials.save(editedEntry, editedOptions, loaded.issueKinds())
+                  .issueMessages());
 }
 
 void SiteManagerDialog::onDuplicate() {

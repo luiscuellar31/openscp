@@ -106,6 +106,14 @@ QStringList SiteCredentialOperationResult::issueMessages() const {
     return messages;
 }
 
+QVector<SiteCredentialKind> SiteCredentialOperationResult::issueKinds() const {
+    QVector<SiteCredentialKind> kinds;
+    kinds.reserve(issues.size());
+    for (const SiteCredentialIssue &issue : issues)
+        kinds.push_back(issue.kind);
+    return kinds;
+}
+
 SiteCredentialRepository::SiteCredentialRepository(Backend backend)
     : backend_(std::move(backend)) {
 }
@@ -184,15 +192,14 @@ SiteCredentialRepository::storeValue(const SiteEntry &site,
     return backend_.store(stableKey(site, kind), value);
 }
 
-SiteCredentialOperationResult
-SiteCredentialRepository::save(const SiteEntry &site,
-                               const openscp::SessionOptions &options,
-                               bool removeMissing) {
+SiteCredentialOperationResult SiteCredentialRepository::save(
+    const SiteEntry &site, const openscp::SessionOptions &options,
+    const QVector<SiteCredentialKind> &keepWhenEmpty) {
     SiteCredentialOperationResult result;
     for (SiteCredentialKind kind : kCredentialKinds) {
         const openscp::SecureString *value = credentialValue(options, kind);
         if (!value || value->empty()) {
-            if (removeMissing) {
+            if (!keepWhenEmpty.contains(kind)) {
                 const SecretStore::DeleteResult deleteResult =
                     backend_.remove(stableKey(site, kind));
                 if (!deleteResult.isRemovedOrMissing()) {
@@ -252,8 +259,7 @@ SiteCredentialRepository::copy(const SiteEntry &source,
                                const SiteEntry &target) {
     openscp::SessionOptions options = source.opt;
     SiteCredentialOperationResult result = load(source, options);
-    const SiteCredentialOperationResult saveResult =
-        save(target, options, true);
+    const SiteCredentialOperationResult saveResult = save(target, options);
     result.anyCredentialHandled =
         result.anyCredentialHandled || saveResult.anyCredentialHandled;
     result.issues += saveResult.issues;

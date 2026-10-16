@@ -26,6 +26,7 @@ struct SiteCredentialOperationResult {
     QVector<SiteCredentialIssue> issues;
 
     [[nodiscard]] QStringList issueMessages() const;
+    [[nodiscard]] QVector<SiteCredentialKind> issueKinds() const;
 };
 
 class SiteCredentialRepository {
@@ -40,9 +41,11 @@ class SiteCredentialRepository {
 
     explicit SiteCredentialRepository(Backend backend = systemBackend());
 
+    // Empty credentials remove the stored value, except the kinds in
+    // `keepWhenEmpty`, such as those whose stored value could not be read.
     [[nodiscard]] SiteCredentialOperationResult
     save(const SiteEntry &site, const openscp::SessionOptions &options,
-         bool removeMissing = true);
+         const QVector<SiteCredentialKind> &keepWhenEmpty = {});
     [[nodiscard]] SiteCredentialOperationResult
     load(const SiteEntry &site, openscp::SessionOptions &options);
     [[nodiscard]] SiteCredentialOperationResult copy(const SiteEntry &source,
