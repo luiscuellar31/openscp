@@ -3797,10 +3797,12 @@ struct RemoteLookupProbe {
     std::mutex mutex;
     std::vector<std::string> exists;
     std::vector<std::string> stats;
+    // Directories stat() reports; other paths are missing.
+    std::vector<std::string> directories;
 };
 
-// Records remote lookups. Every directory exists and no upload destination
-// does.
+// Records remote lookups. exists() finds every path as a directory, while
+// stat() finds only the probe's directories, so no upload destination exists.
 class RemoteLookupClient final : public openscp::MockSftpClient {
     public:
     explicit RemoteLookupClient(std::shared_ptr<RemoteLookupProbe> probe)
@@ -3821,7 +3823,11 @@ class RemoteLookupClient final : public openscp::MockSftpClient {
         info = openscp::FileInfo{};
         clearLastOperationError();
         err.clear();
-        return false;
+        std::lock_guard<std::mutex> lock(probe_->mutex);
+        info.is_dir =
+            std::find(probe_->directories.begin(), probe_->directories.end(),
+                      remote) != probe_->directories.end();
+        return info.is_dir;
     }
 
     bool put(const std::string &, const std::string &, std::string &err,
@@ -3885,6 +3891,34 @@ OPENSCP_TEST(testUploadPrecheckReusesCompletedParentDirectory, test) {
     test.check(calls(probe->exists, "/remote") == 1 &&
                    calls(probe->exists, "/remote/dir") == 2,
                "a completed parent directory task should skip the path walk");
+}
+
+OPENSCP_TEST(testUploadPrecheckStatsAnExistingParentOnce, test) {
+    auto probe = std::make_shared<RemoteLookupProbe>();
+    probe->directories = {"/var/www/html/assets/img"};
+    RemoteLookupClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    configureManager(manager, baseClient, testOptions());
+
+    QVector<quint64> uploads;
+    for (int index = 0; index < 3; ++index) {
+        uploads.push_back(manager.enqueueUpload(
+            QStringLiteral("/local/image-%1.png").arg(index),
+            QStringLiteral("/var/www/html/assets/img/image-%1.png").arg(index),
+            testBatchOptions()));
+    }
+    bool done = true;
+    for (const quint64 id : uploads)
+        done = waitForStatus(manager, id, TransferTask::Status::Done) && done;
+    test.check(done, "the uploads should complete");
+
+    std::lock_guard<std::mutex> lock(probe->mutex);
+    test.check(probe->exists.empty() &&
+                   std::count(probe->stats.begin(), probe->stats.end(),
+                              "/var/www/html/assets/img") == 3,
+               "an existing parent should cost one stat per upload, not a "
+               "lookup per path level");
 }
 
 TransferTask persistableTask(quint64 taskId, const QString &destination) {

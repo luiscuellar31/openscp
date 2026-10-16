@@ -2292,8 +2292,33 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
                        normalizeRemotePath(dependency->dst) ==
                            normalizeRemotePath(parent);
             }();
+            // One stat of the parent usually settles it; the path is walked
+            // from the root, creating what is missing, only when it is not
+            // there.
+            bool parentExists = false;
             if (caps.can_mkdir && !parent.isEmpty() &&
                 parent != QStringLiteral(".") && !parentCreatedByDependency) {
+                openscp::FileInfo parentInfo{};
+                std::string parentError;
+                parentExists = workerClient->stat(parent.toStdString(),
+                                                  parentInfo, parentError);
+                if (!parentError.empty()) {
+                    err = parentError;
+                    return PrecheckOutcome::Error;
+                }
+                if (parentExists && !parentInfo.is_dir) {
+                    err = QCoreApplication::translate(
+                              "TransferManager",
+                              "Remote path component is not a directory: %1")
+                              .arg(parent)
+                              .toUtf8()
+                              .toStdString();
+                    return PrecheckOutcome::Error;
+                }
+            }
+            if (caps.can_mkdir && !parent.isEmpty() &&
+                parent != QStringLiteral(".") && !parentCreatedByDependency &&
+                !parentExists) {
                 QString current = QStringLiteral("/");
                 const QStringList pieces =
                     parent.split('/', Qt::SkipEmptyParts);
