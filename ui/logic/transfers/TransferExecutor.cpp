@@ -120,18 +120,22 @@ bool isFilesystemOperation(TransferTask::Type type) {
 void preserveDownloadModificationTime(
     const TransferTask &task,
     const std::shared_ptr<openscp::RemoteClient> &remoteClient) {
-    openscp::FileInfo remoteInfo{};
-    std::string statError;
-    (void)remoteClient->stat(task.src.toStdString(), remoteInfo, statError);
-    if (remoteInfo.mtime == 0)
-        return;
-
-    if (remoteInfo.mtime >
-        static_cast<quint64>(std::numeric_limits<std::int64_t>::max()))
+    // Backends that learned the time while downloading spare a round trip.
+    std::uint64_t modified =
+        remoteClient->lastDownloadModifiedTime().value_or(0);
+    if (modified == 0) {
+        openscp::FileInfo remoteInfo{};
+        std::string statError;
+        (void)remoteClient->stat(task.src.toStdString(), remoteInfo, statError);
+        modified = remoteInfo.mtime;
+    }
+    if (modified == 0 ||
+        modified >
+            static_cast<quint64>(std::numeric_limits<std::int64_t>::max()))
         return;
     std::string ignoredError;
     (void)openscp::localfiles::setLocalModificationTime(
-        task.dst.toStdString(), static_cast<std::int64_t>(remoteInfo.mtime),
+        task.dst.toStdString(), static_cast<std::int64_t>(modified),
         ignoredError);
 }
 

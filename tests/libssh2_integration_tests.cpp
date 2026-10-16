@@ -624,6 +624,11 @@ int main() {
         err.clear();
         t.check(client.get(remoteSrc, localDst.string(), err, {}, {}, false),
                 std::string("get should succeed: ") + err);
+        openscp::FileInfo remoteInfo{};
+        t.check(client.stat(remoteSrc, remoteInfo, err) &&
+                    remoteInfo.mtime > 0 &&
+                    client.lastDownloadModifiedTime() == remoteInfo.mtime,
+                "get should report the file's modification time");
         std::string downloaded;
         t.check(readFile(localDst, downloaded),
                 "downloaded file should be readable");

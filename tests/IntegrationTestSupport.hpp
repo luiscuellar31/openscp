@@ -252,6 +252,10 @@ inline void runManagedFilesContract(
         "download should succeed", error);
     test.check(downloadProgressCalled,
                message("download progress callback should be called"));
+    // The download learns the file's time, so keeping it needs no stat.
+    test.check(statInfo.mtime > 0 &&
+                   client.lastDownloadModifiedTime() == statInfo.mtime,
+               message("download should report the file's modification time"));
     std::string downloaded;
     test.check(readFile(localDownload, downloaded),
                message("downloaded file should be readable"));

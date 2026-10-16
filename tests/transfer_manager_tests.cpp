@@ -23,6 +23,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -935,6 +936,56 @@ class IdleConnectionClient final : public DownloadMockClient {
     private:
     std::shared_ptr<IdleConnectionProbe> probe_;
 };
+
+// Downloads a file and reports its time as a backend that learns it during
+// the download does, counting any stat that follows.
+class TimedDownloadClient final : public DownloadMockClient {
+    public:
+    explicit TimedDownloadClient(std::shared_ptr<std::atomic<int>> stats)
+        : stats_(std::move(stats)) {}
+
+    bool get(const std::string &, const std::string &local, std::string &err,
+             std::function<void(std::size_t, std::size_t)>,
+             std::function<bool()>, bool) override {
+        clearLastOperationError();
+        std::ofstream(local, std::ios::binary) << "data";
+        setLastDownloadModifiedTime(1600000000);
+        err.clear();
+        return true;
+    }
+
+    bool stat(const std::string &path, openscp::FileInfo &info,
+              std::string &err) override {
+        stats_->fetch_add(1);
+        return DownloadMockClient::stat(path, info, err);
+    }
+
+    std::unique_ptr<openscp::RemoteClient>
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
+        return makeConnectedWorker<TimedDownloadClient>(options, err, stats_);
+    }
+
+    private:
+    std::shared_ptr<std::atomic<int>> stats_;
+};
+
+OPENSCP_TEST(testDownloadTimeComesFromTheTransfer, test) {
+    auto stats = std::make_shared<std::atomic<int>>(0);
+    TimedDownloadClient baseClient(stats);
+    TransferManager manager;
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+    const QString local = destination.filePath(QStringLiteral("timed.txt"));
+    const quint64 id =
+        manager.enqueueDownload(QStringLiteral("/remote/timed.txt"), local);
+    test.check(waitForStatus(manager, id, TransferTask::Status::Done),
+               "the download should complete");
+    test.check(QFileInfo(local).lastModified().toSecsSinceEpoch() ==
+                       1600000000 &&
+                   stats->load() == 0,
+               "the download's own time should be kept without a stat");
+    manager.shutdown();
+}
 
 OPENSCP_TEST(testIdleWorkersCloseTheirConnections, test) {
     auto probe = std::make_shared<IdleConnectionProbe>();

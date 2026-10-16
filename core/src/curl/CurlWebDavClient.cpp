@@ -639,6 +639,7 @@ bool CurlWebDavClient::get(
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
     clearLastOperationError();
+    setLastDownloadModifiedTime(std::nullopt);
     if (resume) {
         err = "WebDAV backend does not support resume.";
         setLastOperationError(RemoteErrorKind::Unsupported, err);
@@ -677,6 +678,9 @@ bool CurlWebDavClient::get(
                            CURLE_OK &&
                        curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L) ==
                            CURLE_OK &&
+                       // The time comes from Last-Modified.
+                       curl_easy_setopt(curl, CURLOPT_FILETIME, 1L) ==
+                           CURLE_OK &&
                        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION,
                                         captureWebDavHeader) == CURLE_OK &&
                        curl_easy_setopt(curl, CURLOPT_HEADERDATA,
@@ -704,6 +708,12 @@ bool CurlWebDavClient::get(
     if (!downloaded) {
         setLastOperationError(failure);
         return false;
+    }
+    curl_off_t fileTime = -1;
+    if (curl_easy_getinfo(connection.session->get(), CURLINFO_FILETIME_T,
+                          &fileTime) == CURLE_OK &&
+        fileTime > 0) {
+        setLastDownloadModifiedTime(static_cast<std::uint64_t>(fileTime));
     }
     return true;
 }

@@ -906,6 +906,7 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
                         std::function<void(std::size_t, std::size_t)> progress,
                         std::function<bool()> shouldCancel, bool resume) {
     clearLastOperationError();
+    setLastDownloadModifiedTime(std::nullopt);
     if (resume) {
         err = std::string(protocolLabel(protocol_)) +
               " backend does not support resume.";
@@ -935,12 +936,15 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
             [&](CURL *curl, std::FILE *file,
                 curlcommon::TransferProgressContext &progressContext,
                 std::string &configurationError) {
+                // FILETIME sends MDTM on the control connection, so the
+                // file's time comes without a later stat.
                 return configureCommonCurlHandle(curl, opt,
                                                  configurationError) &&
                        curlcommon::configureFileDownload(
                            curl, file, progressContext, configurationError) &&
                        curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) ==
-                           CURLE_OK;
+                           CURLE_OK &&
+                       curl_easy_setopt(curl, CURLOPT_FILETIME, 1L) == CURLE_OK;
             },
             [](CURLcode code, long responseCode, const std::string &message) {
                 return ftpErrorFromResult(code, responseCode, message);
@@ -958,6 +962,12 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
             failure, err)) {
         setLastOperationError(failure);
         return false;
+    }
+    curl_off_t fileTime = -1;
+    if (curl_easy_getinfo(connection.session->get(), CURLINFO_FILETIME_T,
+                          &fileTime) == CURLE_OK &&
+        fileTime > 0) {
+        setLastDownloadModifiedTime(static_cast<std::uint64_t>(fileTime));
     }
     return true;
 }

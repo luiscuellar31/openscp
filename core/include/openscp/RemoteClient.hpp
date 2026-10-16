@@ -32,6 +32,14 @@ class RemoteClient {
         return lastError_;
     }
 
+    // The remote file's modification time, in seconds, as the last get()
+    // learned it while downloading. Empty when that get() failed or the
+    // backend does not track it, so a caller that needs it asks stat().
+    std::optional<std::uint64_t> lastDownloadModifiedTime() const {
+        std::lock_guard<std::mutex> lk(lastErrorMutex_);
+        return lastDownloadModifiedTime_;
+    }
+
     virtual bool connect(const SessionOptions &opt, std::string &err) = 0;
     virtual void disconnect() = 0;
     // Aborts the operation in progress; may be called from another thread. A
@@ -109,6 +117,13 @@ class RemoteClient {
     }
 
     protected:
+    // A time of 0 means unknown.
+    void setLastDownloadModifiedTime(std::optional<std::uint64_t> seconds) {
+        std::lock_guard<std::mutex> lk(lastErrorMutex_);
+        lastDownloadModifiedTime_ =
+            seconds && *seconds > 0 ? seconds : std::nullopt;
+    }
+
     void clearLastOperationError() {
         std::lock_guard<std::mutex> lk(lastErrorMutex_);
         lastError_ = RemoteError{};
@@ -138,6 +153,7 @@ class RemoteClient {
     private:
     mutable std::mutex lastErrorMutex_;
     RemoteError lastError_{};
+    std::optional<std::uint64_t> lastDownloadModifiedTime_;
 };
 
 } // namespace openscp

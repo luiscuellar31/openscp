@@ -209,6 +209,7 @@ bool Libssh2ScpClient::get(
     std::function<bool()> shouldCancel, bool resume) {
     auto ioLock = delegate_.lockIo();
     auto structuredErrorScope = beginStructuredOperation(err);
+    setLastDownloadModifiedTime(std::nullopt);
     if (resume) {
         err = "SCP downloads do not support resume.";
         return false;
@@ -395,6 +396,9 @@ bool Libssh2ScpClient::get(
     }
     if (progress && total)
         progress(done, total);
+    if (fileInfo.st_mtime > 0)
+        setLastDownloadModifiedTime(
+            static_cast<std::uint64_t>(fileInfo.st_mtime));
     return true;
 }
 
@@ -650,6 +654,7 @@ bool Libssh2ScpClient::transferViaSftpFallbackGet(
                                   std::move(shouldCancel), false);
     if (!ok)
         setLastOperationError(delegate_.lastOperationError());
+    setLastDownloadModifiedTime(delegate_.lastDownloadModifiedTime());
     return ok;
 }
 

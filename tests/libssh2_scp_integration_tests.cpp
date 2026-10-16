@@ -181,6 +181,8 @@ int main() {
                               {}, {}, false) &&
                 readFile(scpOnlyDownload, downloaded) && downloaded == payload,
             std::string("SCP-only upload should round-trip: ") + err);
+    t.check(scpOnlyClient.lastDownloadModifiedTime().value_or(0) > 0,
+            "an SCP download should report the file's modification time");
 #ifndef _WIN32
     // SCP creates the file with the local permissions too; SFTP reads them.
     {

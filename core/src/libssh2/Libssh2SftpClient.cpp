@@ -3180,6 +3180,7 @@ bool Libssh2SftpClient::get(
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
     auto structuredErrorScope = beginStructuredOperation(err);
+    setLastDownloadModifiedTime(std::nullopt);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
 
@@ -3383,6 +3384,8 @@ bool Libssh2SftpClient::get(
         err = std::string("Could not finalize atomic download: ") + replaceErr;
         return false;
     }
+    if ((st.flags & LIBSSH2_SFTP_ATTR_ACMODTIME) != 0)
+        setLastDownloadModifiedTime(st.mtime);
     return true;
 }
 
