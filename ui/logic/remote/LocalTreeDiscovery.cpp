@@ -277,14 +277,16 @@ void LocalTreeDiscovery::start(
             const QString canonical = info.canonicalFilePath().isEmpty()
                                           ? absolutePath
                                           : info.canonicalFilePath();
+            // A root inside an accepted one is already covered. Looking up
+            // its ancestors costs its depth, where comparing it with every
+            // accepted root cost their number. Qt paths use '/' on every
+            // platform.
             bool duplicateOrNested = acceptedRoots.contains(canonical);
-            if (!duplicateOrNested) {
-                for (const QString &accepted : acceptedRoots) {
-                    if (canonical.startsWith(accepted + QDir::separator())) {
-                        duplicateOrNested = true;
-                        break;
-                    }
-                }
+            for (qsizetype slash = canonical.lastIndexOf(QLatin1Char('/'));
+                 !duplicateOrNested && slash > 0;
+                 slash = canonical.lastIndexOf(QLatin1Char('/'), slash - 1)) {
+                duplicateOrNested =
+                    acceptedRoots.contains(canonical.left(slash));
             }
             if (duplicateOrNested)
                 continue;

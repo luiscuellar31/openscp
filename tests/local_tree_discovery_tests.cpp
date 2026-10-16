@@ -86,6 +86,49 @@ OPENSCP_TEST(testBatchesEmptyFoldersAndEventLoop, test) {
                "empty directories should be explicit discovery entries");
 }
 
+OPENSCP_TEST(testRootsInsideAcceptedRootsAreSkipped, test) {
+    QTemporaryDir root;
+    const QString folder = root.filePath(QStringLiteral("dir"));
+    const QString sibling = root.filePath(QStringLiteral("dir2"));
+    test.check(QDir().mkpath(folder + QStringLiteral("/sub")) &&
+                   QDir().mkpath(sibling) &&
+                   writeFile(folder + QStringLiteral("/sub/inner.txt")) &&
+                   writeFile(sibling + QStringLiteral("/other.txt")),
+               "the root fixtures should be created");
+
+    LocalTreeDiscovery discovery;
+    LocalTreeDiscoveryOptions options;
+    // The nested root and the duplicate add nothing; dir2 only shares a
+    // prefix with dir.
+    options.roots = {{folder},
+                     {folder + QStringLiteral("/sub/inner.txt")},
+                     {folder},
+                     {sibling}};
+    bool finished = false;
+    QVector<LocalTreeDiscoveryEntry> entries;
+    QObject::connect(&discovery, &LocalTreeDiscovery::batchReady, &discovery,
+                     [&](const LocalTreeDiscoveryBatch &batch) {
+                         entries += batch.entries;
+                     });
+    QObject::connect(
+        &discovery, &LocalTreeDiscovery::finished, &discovery,
+        [&](const LocalTreeDiscoveryCounters &) { finished = true; });
+    discovery.start(options);
+    test.check(spinUntil([&] { return finished; }), "discovery should finish");
+
+    QStringList paths;
+    for (const auto &entry : entries)
+        paths.push_back(QDir(root.path()).relativeFilePath(entry.localPath));
+    paths.sort();
+    test.check(paths == QStringList{QStringLiteral("dir"),
+                                    QStringLiteral("dir/sub"),
+                                    QStringLiteral("dir/sub/inner.txt"),
+                                    QStringLiteral("dir2"),
+                                    QStringLiteral("dir2/other.txt")},
+               "each entry should be discovered once: " +
+                   paths.join(QLatin1Char(',')).toStdString());
+}
+
 OPENSCP_TEST(testIncrementalDescentAndCancellation, test) {
     QTemporaryDir root;
     test.check(root.isValid(), "incremental root should initialize");
