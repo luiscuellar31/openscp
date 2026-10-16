@@ -13,6 +13,8 @@ cmake-build-*/
 *.AppImage
 *.dmg
 *.sha256
+# Manifest copies flatpak.sh edits for RUNTIME_VERSION_OVERRIDE
+/packaging/flatpak/.runtime-override-*.yml
 
 # Secrets / env files
 AuthKey_*.p8

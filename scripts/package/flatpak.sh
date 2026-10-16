@@ -22,7 +22,20 @@ usage() {
 Usage: ./scripts/package/flatpak.sh [flatpak-builder options]
 
 Builds dist/OpenSCP.flatpak. Additional arguments are forwarded to
-flatpak-builder; environment overrides are documented in docs/BUILDING.md.
+flatpak-builder; prerequisites are documented in docs/BUILDING.md.
+
+Environment overrides:
+  MANIFEST                  Flatpak manifest
+                            (default: packaging/flatpak/io.github.luiscuellar31.openscp.yml)
+  RUNTIME_VERSION_OVERRIDE  Runtime version to build against instead of the
+                            manifest's runtime-version
+  BUILD_DIR                 flatpak-builder build folder
+                            (default: dist/flatpak/build-dir)
+  REPO_OUT                  OSTree repository (default: dist/flatpak/repo)
+  BUNDLE_OUT                Bundle path (default: dist/OpenSCP.flatpak)
+  APP_ID                    Application ID (default: io.github.luiscuellar31.openscp)
+  BRANCH                    Repository branch (default: stable)
+  APP_ICON                  256x256 PNG icon checked before building
 EOF
 }
 
@@ -85,7 +98,10 @@ main() {
   local build_manifest="$MANIFEST"
   local tmp_manifest=""
   if [[ -n "$RUNTIME_VERSION_OVERRIDE" ]]; then
-    tmp_manifest="$(mktemp)"
+    # flatpak-builder resolves the manifest's relative source paths, such as
+    # "path: ../..", from the manifest's own folder, and reads its format from
+    # the extension, so the edited copy sits beside the original.
+    tmp_manifest="$(mktemp "${MANIFEST%/*}/.runtime-override-XXXXXX.yml")"
     sed -E \
       "s|^runtime-version:[[:space:]]*\"?[^\"]+\"?[[:space:]]*$|runtime-version: \"${RUNTIME_VERSION_OVERRIDE}\"|" \
       "$MANIFEST" > "$tmp_manifest"
