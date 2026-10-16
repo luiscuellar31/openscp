@@ -12,6 +12,7 @@
 #include "openscp/SafeLocalFile.hpp"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QFile>
 #include <QFileDevice>
 #include <QFileInfo>
@@ -2773,6 +2774,49 @@ QVector<TransferTask> reverseDependencyChain(int size) {
         tasks.push_back(std::move(task));
     }
     return tasks;
+}
+
+OPENSCP_TEST(testAutoClearRunsWithoutTheQueueWindow, test) {
+    TransferManager manager;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const auto finished = [now](quint64 id, TransferTask::Status status,
+                                int minutesAgo, bool afterFailure = false) {
+        TransferTask task;
+        task.taskId = id;
+        task.type = TransferTask::Type::DeleteRemoteFile;
+        task.dst = QStringLiteral("/auto-clear/%1").arg(id);
+        task.status = status;
+        task.skippedByFailedDependency = afterFailure;
+        task.queuedAtMs = 1;
+        task.finishedAtMs = now - qint64(minutesAgo) * 60 * 1000;
+        return task;
+    };
+    using Status = TransferTask::Status;
+    TransferManagerTestAccess::appendTasks(
+        manager,
+        {finished(1, Status::Done, 30), finished(2, Status::Skipped, 30),
+         finished(3, Status::Error, 30), finished(4, Status::Skipped, 30, true),
+         finished(5, Status::Done, 1)});
+    const auto remaining = [&manager] {
+        QVector<quint64> ids;
+        for (const TransferTask &task : manager.tasksSnapshot())
+            ids.push_back(task.taskId);
+        std::sort(ids.begin(), ids.end());
+        return ids;
+    };
+
+    manager.setAutoClear({TransferAutoClearMode::Completed, 15});
+    test.check(remaining() == QVector<quint64>{3, 4, 5},
+               "the completed cleanup should apply as soon as it is set, "
+               "including skipped tasks that did not fail");
+    manager.setAutoClear({TransferAutoClearMode::FailedCanceled, 15});
+    test.check(remaining() == QVector<quint64>{5},
+               "the failed cleanup should take errors and tasks skipped "
+               "after a failure");
+    manager.setAutoClear({TransferAutoClearMode::Off, 15});
+    manager.setAutoClear({TransferAutoClearMode::Finished, 15});
+    test.check(remaining() == QVector<quint64>{5},
+               "tasks finished more recently than the delay should stay");
 }
 
 OPENSCP_TEST(testRestoredReverseDependencyChainSkipsOnce, test) {

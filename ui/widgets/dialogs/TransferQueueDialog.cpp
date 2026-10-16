@@ -4,6 +4,7 @@
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "logic/common/UiFormatters.hpp"
+#include "logic/transfers/TransferAutoClear.hpp"
 #include "widgets/platform/PlatformPathActions.hpp"
 
 #include <QAbstractItemView>
@@ -1016,11 +1017,15 @@ void TransferQueueDialog::buildQueueOptionsDialog() {
     autoClearModeCombo_ = new QComboBox(queueOptionsDialog_);
     autoClearModeCombo_->setObjectName(
         QStringLiteral("transferQueueAutoClearMode"));
-    autoClearModeCombo_->addItem(tr("Off"), AutoClearOff);
-    autoClearModeCombo_->addItem(tr("Completed"), AutoClearCompleted);
-    autoClearModeCombo_->addItem(tr("Failed/Canceled"),
-                                 AutoClearFailedCanceled);
-    autoClearModeCombo_->addItem(tr("All finished"), AutoClearFinished);
+    autoClearModeCombo_->addItem(tr("Off"),
+                                 static_cast<int>(TransferAutoClearMode::Off));
+    autoClearModeCombo_->addItem(
+        tr("Completed"), static_cast<int>(TransferAutoClearMode::Completed));
+    autoClearModeCombo_->addItem(
+        tr("Failed/Canceled"),
+        static_cast<int>(TransferAutoClearMode::FailedCanceled));
+    autoClearModeCombo_->addItem(
+        tr("All finished"), static_cast<int>(TransferAutoClearMode::Finished));
     autoClearModeCombo_->setAccessibleName(tr("Automatic queue cleanup"));
     optionsForm->addRow(tr("Automatic cleanup:"), autoClearModeCombo_);
 
@@ -1155,7 +1160,6 @@ void TransferQueueDialog::refresh() {
     // Refresh always works from manager snapshot to avoid stale view state.
     const auto snapshot = mgr_->tasksSnapshot();
     model_->sync(snapshot);
-    maybeAutoClear(snapshot);
     updateSummary();
 }
 
@@ -1169,17 +1173,7 @@ void TransferQueueDialog::onTasksAdded(const QVector<quint64> &taskIds) {
 void TransferQueueDialog::onTasksUpdated(const QVector<quint64> &taskIds) {
     if (!model_)
         return;
-    const auto updated = mgr_->tasksSnapshot(taskIds);
-    model_->upsert(updated);
-    const bool hasTerminalUpdate = std::any_of(
-        updated.cbegin(), updated.cend(), [](const TransferTask &task) {
-            return task.status == TransferTask::Status::Done ||
-                   task.status == TransferTask::Status::Error ||
-                   task.status == TransferTask::Status::Canceled ||
-                   task.status == TransferTask::Status::Skipped ||
-                   task.status == TransferTask::Status::Warning;
-        });
-    autoClearPending_ = autoClearPending_ || hasTerminalUpdate;
+    model_->upsert(mgr_->tasksSnapshot(taskIds));
     scheduleSummaryUpdate();
 }
 
@@ -1348,6 +1342,8 @@ void TransferQueueDialog::onAutoClearChanged() {
     if (suppressAutoClearSignal_)
         return;
     saveUiState();
+    openscpui::AppSettings settings;
+    mgr_->setAutoClear(storedTransferAutoClearRule(settings));
     updateSummary();
 }
 
@@ -1384,10 +1380,6 @@ void TransferQueueDialog::scheduleSummaryUpdate() {
 void TransferQueueDialog::updateSummary() {
     if (!model_)
         return;
-    if (autoClearPending_) {
-        autoClearPending_ = false;
-        maybeAutoClear(model_->tasks());
-    }
 
     // The model counts rows as they change, so the badges and the action
     // enablement never walk the queue.
@@ -1471,9 +1463,10 @@ void TransferQueueDialog::updateSummary() {
 
     const int autoMode = autoClearModeCombo_
                              ? autoClearModeCombo_->currentData().toInt()
-                             : AutoClearOff;
+                             : static_cast<int>(TransferAutoClearMode::Off);
     if (autoClearMinutesSpin_)
-        autoClearMinutesSpin_->setEnabled(autoMode != AutoClearOff);
+        autoClearMinutesSpin_->setEnabled(
+            autoMode != static_cast<int>(TransferAutoClearMode::Off));
 }
 
 QVector<quint64> TransferQueueDialog::selectedTaskIds() const {
@@ -1602,39 +1595,14 @@ void TransferQueueDialog::loadUiState() {
     }
 
     suppressAutoClearSignal_ = true;
-    const int defaultAutoMode = qBound(
-        static_cast<int>(AutoClearOff),
-        settings
-            .value(openscpui::settingskeys::kTransferDefaultQueueAutoClearMode,
-                   static_cast<int>(AutoClearOff))
-            .toInt(),
-        static_cast<int>(AutoClearFinished));
-    const int defaultAutoMin = qBound(
-        1,
-        settings
-            .value(
-                openscpui::settingskeys::kTransferDefaultQueueAutoClearMinutes,
-                15)
-            .toInt(),
-        1440);
-    const int autoMode =
-        settings
-            .value(openscpui::settingskeys::kTransferQueueAutoClearMode,
-                   defaultAutoMode)
-            .toInt();
-    const int autoMin =
-        settings
-            .value(openscpui::settingskeys::kTransferQueueAutoClearMinutes,
-                   defaultAutoMin)
-            .toInt();
+    const TransferAutoClearRule autoClear =
+        storedTransferAutoClearRule(settings);
     if (autoClearModeCombo_) {
-        int modeIndex = autoClearModeCombo_->findData(autoMode);
-        if (modeIndex < 0)
-            modeIndex = autoClearModeCombo_->findData(AutoClearOff);
-        autoClearModeCombo_->setCurrentIndex(modeIndex);
+        autoClearModeCombo_->setCurrentIndex(
+            autoClearModeCombo_->findData(static_cast<int>(autoClear.mode)));
     }
     if (autoClearMinutesSpin_)
-        autoClearMinutesSpin_->setValue(qBound(1, autoMin, 1440));
+        autoClearMinutesSpin_->setValue(autoClear.minutes);
     suppressAutoClearSignal_ = false;
 }
 
@@ -1657,7 +1625,7 @@ void TransferQueueDialog::saveUiState() const {
 
     const int autoMode = autoClearModeCombo_
                              ? autoClearModeCombo_->currentData().toInt()
-                             : AutoClearOff;
+                             : static_cast<int>(TransferAutoClearMode::Off);
     const int autoMin =
         autoClearMinutesSpin_ ? autoClearMinutesSpin_->value() : 15;
     settings.setValue(openscpui::settingskeys::kTransferQueueAutoClearMode,
@@ -1665,53 +1633,4 @@ void TransferQueueDialog::saveUiState() const {
     settings.setValue(openscpui::settingskeys::kTransferQueueAutoClearMinutes,
                       autoMin);
     settings.sync();
-}
-
-void TransferQueueDialog::maybeAutoClear(
-    const QVector<TransferTask> &snapshot) {
-    if (!autoClearModeCombo_ || !autoClearMinutesSpin_)
-        return;
-
-    const int mode = autoClearModeCombo_->currentData().toInt();
-    if (mode == AutoClearOff)
-        return;
-
-    const int minutes = autoClearMinutesSpin_->value();
-    if (minutes <= 0)
-        return;
-
-    const qint64 cutoff =
-        QDateTime::currentMSecsSinceEpoch() - qint64(minutes) * 60 * 1000;
-    bool needsCleanup = false;
-    // Quick pre-scan avoids manager calls when nothing is eligible yet.
-    for (const auto &task : snapshot) {
-        const bool isDone = task.status == TransferTask::Status::Done ||
-                            (task.status == TransferTask::Status::Skipped &&
-                             !skippedAfterFailure(task));
-        const bool isFailed = (task.status == TransferTask::Status::Error ||
-                               task.status == TransferTask::Status::Canceled ||
-                               task.status == TransferTask::Status::Warning ||
-                               skippedAfterFailure(task));
-        bool candidate = false;
-        if (mode == AutoClearCompleted)
-            candidate = isDone;
-        else if (mode == AutoClearFailedCanceled)
-            candidate = isFailed;
-        else if (mode == AutoClearFinished)
-            candidate = (isDone || isFailed);
-
-        if (candidate && task.finishedAtMs > 0 && task.finishedAtMs <= cutoff) {
-            needsCleanup = true;
-            break;
-        }
-    }
-    if (!needsCleanup)
-        return;
-
-    if (mode == AutoClearCompleted)
-        mgr_->clearFinishedOlderThan(minutes, true, false);
-    else if (mode == AutoClearFailedCanceled)
-        mgr_->clearFinishedOlderThan(minutes, false, true);
-    else if (mode == AutoClearFinished)
-        mgr_->clearFinishedOlderThan(minutes, true, true);
 }

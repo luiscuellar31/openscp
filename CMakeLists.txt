@@ -424,6 +424,8 @@ add_library(openscp_ui_logic STATIC
     ui/logic/transfers/TransferQueuePersistence.cpp
     ui/logic/transfers/TransferQueueWriter.hpp
     ui/logic/transfers/TransferQueueWriter.cpp
+    ui/logic/transfers/TransferAutoClear.hpp
+    ui/logic/transfers/TransferAutoClear.cpp
     ui/logic/transfers/TransferTaskControls.hpp
     ui/logic/transfers/TransferTaskControls.cpp
     ui/logic/transfers/TransferTypes.hpp

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "logic/transfers/BandwidthLimiter.hpp"
+#include "logic/transfers/TransferAutoClear.hpp"
 #include "logic/transfers/TransferExecutor.hpp"
 #include "logic/transfers/TransferQueue.hpp"
 #include "logic/transfers/TransferQueuePersistence.hpp"
@@ -120,6 +121,9 @@ class TransferManager : public QObject {
     void clearFailedCanceled();
     void clearFinishedOlderThan(int minutes, bool clearDone,
                                 bool clearFailedCanceled);
+    // Applies `rule` now and then every minute, so finished tasks leave the
+    // queue whether or not its window is open.
+    void setAutoClear(const TransferAutoClearRule &rule);
 
     // Queue persistence is explicit so tests and embedders do not unexpectedly
     // touch user data. The application should call this once during startup.
@@ -216,6 +220,9 @@ class TransferManager : public QObject {
     ConflictCoordinator conflictCoordinator_;
 
     BandwidthLimiter bandwidthLimiter_;
+
+    QTimer *autoClearTimer_ = nullptr;
+    TransferAutoClearRule autoClearRule_;
 
     QTimer *persistenceTimer_ = nullptr;
     TransferQueueWriter persistenceWriter_;
@@ -337,6 +344,7 @@ class TransferManager : public QObject {
     void resetForRetry(TransferTask &task, qint64 nowMs);
     bool retryLocked(TransferTask &task, qint64 nowMs);
     void retryDependentsLocked(QVector<quint64> &retried, qint64 nowMs);
+    void applyAutoClear();
     void removeInactiveTasks(
         const std::function<bool(const TransferTask &)> &shouldRemove);
     // Tasks in justCanceled count toward their limit but stay this time, so a

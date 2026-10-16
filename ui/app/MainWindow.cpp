@@ -13,6 +13,7 @@
 #include "logic/remote/RemoteActionController.hpp"
 #include "logic/remote/RemoteModel.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
+#include "logic/transfers/TransferAutoClear.hpp"
 #include "logic/transfers/TransferManager.hpp"
 #include "logic/updates/MacUpdater.hpp"
 #include "logic/updates/UpdateController.hpp"
@@ -1694,6 +1695,9 @@ void MainWindow::applyPreferences() {
     sessionHealthMonitor_.setInterval(sessionHealthIntervalMs);
     downloadDir_ = defaultDownloadDirFromSettings(settings);
     QDir().mkpath(downloadDir_);
+    // The queue applies its cleanup even if its window never opens.
+    if (transferMgr_)
+        transferMgr_->setAutoClear(storedTransferAutoClearRule(settings));
     if (actShowQueue_) {
         const QString queueShortcutText =
             settings

@@ -263,6 +263,10 @@ connFactoryMutex_ -> mtx_
 Release manager locks before calling a remote client, invoking a callback, or
 emitting a Qt signal.
 
+The automatic cleanup of finished tasks belongs to `TransferManager`, which
+applies the rule from `TransferAutoClear` every minute; the transfer queue
+window only edits that rule, so the cleanup also runs while it stays closed.
+
 Dragging remote items out of the window first downloads them into a batch
 folder under the staging root, named as `newStagingBatchName()` in
 `AppSettings` describes. A drop outside the window keeps its batch, because

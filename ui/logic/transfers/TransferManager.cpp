@@ -1807,14 +1807,43 @@ void TransferManager::clearFinishedOlderThan(int minutes, bool clearDone,
     const qint64 cutoff = QDateTime::currentMSecsSinceEpoch() -
                           static_cast<qint64>(minutes) * 60 * 1000;
     removeInactiveTasks([=](const TransferTask &task) {
+        // A task skipped because its prerequisite failed counts as a
+        // failure, as in the queue's counters and clear actions.
+        const bool done =
+            task.status == Status::Done ||
+            (task.status == Status::Skipped && !skippedAfterFailure(task));
+        const bool failed =
+            task.status == Status::Error || task.status == Status::Canceled ||
+            task.status == Status::Warning || skippedAfterFailure(task);
         const bool selected =
-            (clearDone && task.status == Status::Done) ||
-            (clearFailedCanceled &&
-             (task.status == Status::Error || task.status == Status::Canceled ||
-              task.status == Status::Skipped ||
-              task.status == Status::Warning));
+            (clearDone && done) || (clearFailedCanceled && failed);
         return selected && task.finishedAtMs > 0 && task.finishedAtMs <= cutoff;
     });
+}
+
+void TransferManager::setAutoClear(const TransferAutoClearRule &rule) {
+    autoClearRule_ = rule;
+    if (!autoClearTimer_) {
+        autoClearTimer_ = new QTimer(this);
+        autoClearTimer_->setInterval(60 * 1000);
+        connect(autoClearTimer_, &QTimer::timeout, this,
+                &TransferManager::applyAutoClear);
+    }
+    if (rule.mode == TransferAutoClearMode::Off) {
+        autoClearTimer_->stop();
+        return;
+    }
+    autoClearTimer_->start();
+    applyAutoClear();
+}
+
+void TransferManager::applyAutoClear() {
+    const TransferAutoClearMode mode = autoClearRule_.mode;
+    clearFinishedOlderThan(autoClearRule_.minutes,
+                           mode == TransferAutoClearMode::Completed ||
+                               mode == TransferAutoClearMode::Finished,
+                           mode == TransferAutoClearMode::FailedCanceled ||
+                               mode == TransferAutoClearMode::Finished);
 }
 
 void TransferManager::schedule() {
