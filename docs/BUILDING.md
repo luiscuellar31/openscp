@@ -74,6 +74,9 @@ Install each format's own host tools before running its command:
 AppImage uses `build-appimage/` by default so its release-oriented Qt and
 CMake configuration cannot alter the development cache in `build/`. Set
 `BUILD_DIR=/path/to/build` only when a different isolated directory is needed.
+The build scripts configure a new build directory with Ninja when it is
+installed, and run as many compile jobs as there are CPUs; set `JOBS` to
+change that number.
 
 The AppImage packager checks that the bundled Qt SVG and platform plugins and
 their libraries resolve, and that the packaged executable keeps its ELF

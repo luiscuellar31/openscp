@@ -12,7 +12,9 @@ set -euo pipefail
 #
 # Configuration via environment variables (local-only usage):
 #   BUILD_DIR              CMake build directory (default: build-macos-package/,
-#                          apart from the development build/)
+#                          apart from the development build/), configured with
+#                          Ninja when it is new and ninja is installed
+#   JOBS                   Parallel compile jobs (default: the CPU count)
 #   APP_NAME               Default: "OpenSCP"
 #   BUNDLE_ID              Default: "io.github.luiscuellar31.openscp"
 #   PKG_IDENTIFIER         Default: "io.github.luiscuellar31.openscp.pkg"
@@ -114,6 +116,7 @@ EOF
 }
 
 source "${REPO_DIR}/scripts/lib/macos/qt-host-tools.sh"
+source "${REPO_DIR}/scripts/lib/cmake-build.sh"
 
 ensure_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required tool: $1"
@@ -1018,6 +1021,9 @@ main() {
     if ((${#dependency_cmake_args[@]:-0})); then
       cmake_args+=("${dependency_cmake_args[@]}")
     fi
+    if use_ninja_generator "$BUILD_DIR"; then
+      cmake_args+=(-G Ninja)
+    fi
     cmake "${cmake_args[@]}"
   else
     if [[ -n "$qt_cfg_dir" ]]; then
@@ -1039,9 +1045,12 @@ main() {
     if ((${#dependency_cmake_args[@]:-0})); then
       fallback_cmake_args+=("${dependency_cmake_args[@]}")
     fi
+    if use_ninja_generator "$BUILD_DIR"; then
+      fallback_cmake_args+=(-G Ninja)
+    fi
     cmake "${fallback_cmake_args[@]}"
   fi
-  cmake --build "$BUILD_DIR" -j
+  cmake --build "$BUILD_DIR" --parallel "$(build_jobs)"
 
   # Expect CMake to have produced the app bundle already
   [[ -d "$APP_DIR" ]] || die "App bundle not found at $APP_DIR after building $BUILD_DIR."

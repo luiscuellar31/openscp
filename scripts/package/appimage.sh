@@ -20,7 +20,9 @@ set -euo pipefail
 # Optional env vars:
 #   APP_NAME            Default: "OpenSCP"
 #   EXEC_NAME           Default: "openscp" (the built binary name)
-#   BUILD_DIR           CMake build directory (default: build-appimage/)
+#   BUILD_DIR           CMake build directory (default: build-appimage/),
+#                       configured with Ninja when it is new and ninja exists
+#   JOBS                Parallel compile jobs (default: the CPU count)
 #   CMAKE_PREFIX_PATH   Point to your Qt root if not in system paths
 #   Qt6_DIR             Qt6 CMake config dir (…/lib/cmake/Qt6), optional
 #   OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION
@@ -40,6 +42,8 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-${REPO_DIR}/build-appimage}"
 DIST_DIR="${REPO_DIR}/dist"
+
+source "${REPO_DIR}/scripts/lib/cmake-build.sh"
 
 APP_NAME="${APP_NAME:-OpenSCP}"
 EXEC_NAME="${EXEC_NAME:-openscp}"
@@ -280,8 +284,11 @@ main() {
   if [[ -n "${CMAKE_PREFIX_PATH:-}" ]]; then
     cmake_args+=("-DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}")
   fi
+  if use_ninja_generator "$BUILD_DIR"; then
+    cmake_args+=(-G Ninja)
+  fi
   cmake "${cmake_args[@]}"
-  cmake --build "$BUILD_DIR" -j
+  cmake --build "$BUILD_DIR" --parallel "$(build_jobs)"
 
   local exe
   exe="$BUILD_DIR/$EXEC_NAME"
