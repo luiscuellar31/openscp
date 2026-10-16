@@ -86,7 +86,11 @@ ctest --test-dir build-no-backends --output-on-failure \
 ```
 
 Clang/libFuzzer harnesses cover the untrusted FTP and WebDAV listing parsers.
-They are opt-in and never enter normal application or release builds:
+They are opt-in and never enter normal application or release builds. Build
+them on Linux with Clang and its libFuzzer runtime (`clang` and
+`libclang-rt-<version>-dev` on Ubuntu), as the nightly CI does. Apple Clang
+ships no libFuzzer, and Homebrew's LLVM 17 cannot link the project against
+current macOS SDKs, so on macOS use a Linux container or the nightly run:
 
 ```bash
 CC=clang CXX=clang++ cmake -S . -B build-fuzz -G Ninja \

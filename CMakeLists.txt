@@ -139,7 +139,9 @@ if(OPENSCP_BUILD_FUZZERS)
     if(NOT OPENSCP_HAS_LIBFUZZER)
         message(FATAL_ERROR
             "OPENSCP_BUILD_FUZZERS requires a usable Clang libFuzzer, "
-            "AddressSanitizer, and UndefinedBehaviorSanitizer runtime")
+            "AddressSanitizer, and UndefinedBehaviorSanitizer runtime. "
+            "Apple Clang ships no libFuzzer; build the fuzzers on Linux, as "
+            "CONTRIBUTING.md describes.")
     endif()
 endif()
 
