@@ -94,6 +94,31 @@ OPENSCP_TEST(testFtpListListingLimitsAndMalformedInput, test) {
                "fully malformed LIST output should be rejected");
 }
 
+OPENSCP_TEST(testFtpMlsdReportsSymbolicLinks, test) {
+    // ProFTPD's default form, and the RFC 3659 example form that ProFTPD
+    // with UseSlink and Pure-FTPd send.
+    std::vector<openscp::FileInfo> entries;
+    test.check(openscp::curlparser::parseFtpMlsdListing(
+                   "type=OS.unix=symlink;UNIX.mode=0777; current\r\n"
+                   "type=OS.unix=slink:/srv/releases/42; previous\r\n"
+                   "type=file;size=3; notes.txt\r\n",
+                   entries) == ListingParseStatus::Success &&
+                   entries.size() == 3,
+               "MLSD with links should parse");
+    if (entries.size() != 3)
+        return;
+    for (std::size_t index = 0; index < 2; ++index) {
+        test.check(!entries[index].is_dir &&
+                       (entries[index].mode & 0170000u) == 0120000u,
+                   "MLSD should report " + entries[index].name +
+                       " as a symbolic link");
+    }
+    test.check(entries[0].mode == 0120777u,
+               "a link should keep its permission bits");
+    test.check((entries[2].mode & 0170000u) == 0100000u,
+               "a file next to the links should stay a regular file");
+}
+
 OPENSCP_TEST(testFtpMlstReplyReadsTheEntryLine, test) {
     openscp::FileInfo info;
     test.check(openscp::curlparser::parseFtpMlstReply(
@@ -118,6 +143,14 @@ OPENSCP_TEST(testFtpMlstReplyReadsTheEntryLine, test) {
                    std::string("MLST should report type=") + type +
                        " as a directory");
     }
+
+    info = {};
+    test.check(openscp::curlparser::parseFtpMlstReply(
+                   "250-Listing /current\r\n type=OS.unix=symlink;"
+                   "UNIX.mode=0777; /current\r\n250 End\r\n",
+                   info) == ListingParseStatus::Success &&
+                   !info.is_dir && info.mode == 0120777u,
+               "MLST should report a symbolic link as a link");
 
     test.check(openscp::curlparser::parseFtpMlstReply(
                    "250-Listing /x\r\n size=1; /x\r\n250 End\r\n", info) ==
