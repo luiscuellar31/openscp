@@ -416,18 +416,16 @@ OPENSCP_TEST(testCurlFailuresNameTheirCause, test) {
     if (!session.get())
         return;
 
-    int socketAttempts = 0;
+    // A refused connection: every libcurl version describes it in the error
+    // buffer, unlike a socket an open-socket callback rejects (7.81 leaves the
+    // buffer empty then).
     openscp::curlcommon::TransferProgressContext progressContext;
     const auto result = openscp::curlcommon::performCurlTransfer(
         session.get(), progressContext, "test transfer",
         [&](CURL *curl, std::string &) {
             return curl_easy_setopt(curl, CURLOPT_PROXY, "") == CURLE_OK &&
                    curl_easy_setopt(curl, CURLOPT_URL, "http://127.0.0.1:1/") ==
-                       CURLE_OK &&
-                   curl_easy_setopt(curl, CURLOPT_OPENSOCKETFUNCTION,
-                                    rejectSocketOpen) == CURLE_OK &&
-                   curl_easy_setopt(curl, CURLOPT_OPENSOCKETDATA,
-                                    &socketAttempts) == CURLE_OK;
+                       CURLE_OK;
         },
         error);
     const std::string generic = std::string("test transfer failed: ") +
