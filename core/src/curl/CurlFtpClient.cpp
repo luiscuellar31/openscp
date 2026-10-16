@@ -304,10 +304,16 @@ int captureFtpCommandReply(CURL *, curl_infotype type, char *data, size_t size,
         capture->capturing = chunk.substr(0, capture->commandPrefix.size()) ==
                              capture->commandPrefix;
     } else if (type == CURLINFO_HEADER_IN && capture->capturing) {
-        if (capture->reply.size() + size > kMaxReplyBytes)
+        if (capture->reply.size() + size > kMaxReplyBytes) {
             capture->overflow = true;
-        else
-            capture->reply.append(chunk);
+        } else {
+            // An exception must not cross libcurl's C frames.
+            try {
+                capture->reply.append(chunk);
+            } catch (...) {
+                capture->overflow = true;
+            }
+        }
     }
     return 0;
 }

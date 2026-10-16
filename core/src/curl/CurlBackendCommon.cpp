@@ -1169,38 +1169,44 @@ int transferProgressCallback(void *userdata, curl_off_t dltotal,
     if (!ctx)
         return 0;
 
-    const bool preferUpload = ctx->preferUploadCounters;
-    // Some protocols only report one side reliably; pick preferred counters
-    // and fallback to the opposite side when needed.
-    const curl_off_t totalRaw = preferUpload
-                                    ? ((ultotal > 0) ? ultotal : dltotal)
-                                    : ((dltotal > 0) ? dltotal : ultotal);
-    const curl_off_t doneRaw = preferUpload ? ((ulnow > 0) ? ulnow : dlnow)
-                                            : ((dlnow > 0) ? dlnow : ulnow);
-    if (totalRaw > 0 && doneRaw >= totalRaw)
-        ctx->payloadComplete = true;
+    // An exception from the UI's callbacks must not cross libcurl's C frames,
+    // so it stops the transfer.
+    try {
+        const bool preferUpload = ctx->preferUploadCounters;
+        // Some protocols only report one side reliably; pick preferred counters
+        // and fallback to the opposite side when needed.
+        const curl_off_t totalRaw = preferUpload
+                                        ? ((ultotal > 0) ? ultotal : dltotal)
+                                        : ((dltotal > 0) ? dltotal : ultotal);
+        const curl_off_t doneRaw = preferUpload ? ((ulnow > 0) ? ulnow : dlnow)
+                                                : ((dlnow > 0) ? dlnow : ulnow);
+        if (totalRaw > 0 && doneRaw >= totalRaw)
+            ctx->payloadComplete = true;
 
-    if (ctx->interrupted && ctx->interrupted->load())
-        return 1;
-    if (!ctx->payloadComplete && ctx->shouldCancel && ctx->shouldCancel())
-        return 1;
-    if (!ctx->progressCb)
+        if (ctx->interrupted && ctx->interrupted->load())
+            return 1;
+        if (!ctx->payloadComplete && ctx->shouldCancel && ctx->shouldCancel())
+            return 1;
+        if (!ctx->progressCb)
+            return 0;
+
+        const std::size_t total =
+            totalRaw > 0 ? static_cast<std::size_t>(totalRaw) : 0u;
+        const std::size_t done =
+            doneRaw > 0 ? static_cast<std::size_t>(doneRaw) : 0u;
+        ctx->progressCb(done, total);
+        // A progress callback can itself publish the state that makes
+        // shouldCancel() true. Abort incomplete payloads immediately; completed
+        // payloads finish their response so callers can retain the remote/local
+        // partial while still refusing the final publish step.
+        if (ctx->interrupted && ctx->interrupted->load())
+            return 1;
+        if (!ctx->payloadComplete && ctx->shouldCancel && ctx->shouldCancel())
+            return 1;
         return 0;
-
-    const std::size_t total =
-        totalRaw > 0 ? static_cast<std::size_t>(totalRaw) : 0u;
-    const std::size_t done =
-        doneRaw > 0 ? static_cast<std::size_t>(doneRaw) : 0u;
-    ctx->progressCb(done, total);
-    // A progress callback can itself publish the state that makes
-    // shouldCancel() true. Abort incomplete payloads immediately; completed
-    // payloads finish their response so callers can retain the remote/local
-    // partial while still refusing the final publish step.
-    if (ctx->interrupted && ctx->interrupted->load())
+    } catch (...) {
         return 1;
-    if (!ctx->payloadComplete && ctx->shouldCancel && ctx->shouldCancel())
-        return 1;
-    return 0;
+    }
 }
 
 } // namespace openscp::curlcommon

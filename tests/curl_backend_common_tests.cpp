@@ -19,7 +19,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <new>
 #include <optional>
+#include <stdexcept>
 #include <string>
 
 namespace {
@@ -379,6 +381,31 @@ OPENSCP_TEST(testCurlResponseAndWriteFailures, test) {
     readOnly.reset();
     std::error_code removeError;
     std::filesystem::remove(readOnlyPath, removeError);
+}
+
+OPENSCP_TEST(testProgressCallbackContainsExceptions, test) {
+    // An exception crossing libcurl's C frames ends the process; the callback
+    // has to stop the transfer instead.
+    openscp::curlcommon::TransferProgressContext throwingProgress{
+        [](std::size_t, std::size_t) { throw std::runtime_error("progress"); },
+        {},
+        nullptr,
+        false};
+    openscp::curlcommon::TransferProgressContext throwingCancel{
+        {}, []() -> bool { throw std::bad_alloc(); }, nullptr, false};
+    for (auto *context : {&throwingProgress, &throwingCancel}) {
+        int result = 0;
+        bool escaped = false;
+        try {
+            result = openscp::curlcommon::transferProgressCallback(context, 10,
+                                                                   5, 0, 0);
+        } catch (...) {
+            escaped = true;
+        }
+        test.check(!escaped && result == 1,
+                   "an exception from a transfer callback should stop the "
+                   "transfer without leaving the callback");
+    }
 }
 
 OPENSCP_TEST(testCurlFailuresNameTheirCause, test) {

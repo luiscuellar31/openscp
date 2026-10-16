@@ -60,14 +60,20 @@ size_t captureWebDavHeader(char *ptr, size_t size, size_t nmemb,
     if (!userdata)
         return 0;
     const size_t total = size * nmemb;
-    std::string line(ptr, total);
-    const std::string lowered = toLowerAscii(line);
-    static constexpr std::string_view prefix = "retry-after:";
-    if (lowered.rfind(prefix, 0) == 0) {
-        const std::string value = trimAscii(line.substr(prefix.size()));
-        auto *retryAfter =
-            static_cast<std::optional<std::uint32_t> *>(userdata);
-        *retryAfter = curlcommon::parseRetryAfter(value);
+    // An exception must not cross libcurl's C frames; returning a short
+    // count aborts the transfer instead.
+    try {
+        std::string line(ptr, total);
+        const std::string lowered = toLowerAscii(line);
+        static constexpr std::string_view prefix = "retry-after:";
+        if (lowered.rfind(prefix, 0) == 0) {
+            const std::string value = trimAscii(line.substr(prefix.size()));
+            auto *retryAfter =
+                static_cast<std::optional<std::uint32_t> *>(userdata);
+            *retryAfter = curlcommon::parseRetryAfter(value);
+        }
+    } catch (...) {
+        return 0;
     }
     return total;
 }
