@@ -54,6 +54,77 @@ OPENSCP_TEST(testIncompletePreReleaseSitesAreDiscarded, test) {
     settings.endArray();
 }
 
+OPENSCP_TEST(testMissingFieldsTakeDefaults, test) {
+    SiteEntry site;
+    site.siteId = QStringLiteral("partial-site");
+    site.name = QStringLiteral("Partial site");
+    site.opt.protocol = openscp::Protocol::Ftps;
+    site.opt.host = "ftp.example";
+    site.opt.ftps_mode = openscp::FtpsMode::ImplicitTls;
+    test.check(SavedSitesPersistence::saveSites({site}).ok,
+               "partial-site fixture should use the current format");
+    QSettings settings;
+    settings.beginWriteArray(QStringLiteral("sites"));
+    settings.setArrayIndex(0);
+    settings.remove(QStringLiteral("ftpsMode"));
+    settings.remove(QStringLiteral("webdavBasePath"));
+    settings.endArray();
+    settings.sync();
+
+    const auto loaded = SavedSitesPersistence::loadSites();
+    test.check(loaded.sites.size() == 1 &&
+                   loaded.sites.front().siteId == site.siteId &&
+                   loaded.sites.front().opt.host == "ftp.example" &&
+                   loaded.sites.front().opt.ftps_mode ==
+                       openscp::FtpsMode::Auto,
+               "a saved site that lacks fields should load with defaults");
+    test.check(!loaded.needsSave,
+               "missing fields alone should not rewrite the saved sites");
+}
+
+OPENSCP_TEST(testUnknownProtocolSitesAreKeptUnchanged, test) {
+    SiteEntry known;
+    known.siteId = QStringLiteral("known-site");
+    known.name = QStringLiteral("Known");
+    SiteEntry future = known;
+    future.siteId = QStringLiteral("future-site");
+    future.name = QStringLiteral("Future");
+    test.check(SavedSitesPersistence::saveSites({known, future}).ok,
+               "unknown-protocol fixture should use the current format");
+    QSettings settings;
+    settings.beginWriteArray(QStringLiteral("sites"));
+    settings.setArrayIndex(1);
+    settings.setValue(QStringLiteral("protocol"), QStringLiteral("s3"));
+    settings.setValue(QStringLiteral("bucket"), QStringLiteral("archive"));
+    settings.endArray();
+    settings.sync();
+
+    const auto loaded = SavedSitesPersistence::loadSites();
+    test.check(!loaded.needsSave && loaded.sites.size() == 1 &&
+                   loaded.sites.front().siteId == known.siteId,
+               "a site with an unknown protocol should not load as SFTP");
+
+    SiteEntry renamed = loaded.sites.value(0, known);
+    renamed.name = QStringLiteral("Renamed");
+    test.check(SavedSitesPersistence::saveSites({renamed}).ok,
+               "saving the known site should succeed");
+    QSettings raw;
+    const int storedCount = raw.beginReadArray(QStringLiteral("sites"));
+    bool futureKept = false;
+    for (int siteIndex = 0; siteIndex < storedCount; ++siteIndex) {
+        raw.setArrayIndex(siteIndex);
+        if (raw.value(QStringLiteral("id")).toString() != future.siteId)
+            continue;
+        futureKept =
+            raw.value(QStringLiteral("protocol")).toString() == "s3" &&
+            raw.value(QStringLiteral("bucket")).toString() == "archive" &&
+            raw.value(QStringLiteral("name")).toString() == future.name;
+    }
+    raw.endArray();
+    test.check(storedCount == 2 && futureKept,
+               "saving should keep a site with an unknown protocol unchanged");
+}
+
 OPENSCP_TEST(testRoundTrip, test) {
     SiteEntry site;
     site.siteId = QStringLiteral("stable-site-id");

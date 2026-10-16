@@ -6,6 +6,7 @@
 
 #include <QSet>
 #include <QUuid>
+#include <QVariantHash>
 
 #include <algorithm>
 #include <array>
@@ -60,6 +61,50 @@ bool hasCurrentSiteFormat(const QSettings &settings) {
         [&settings](const char *field) { return settings.contains(field); });
 }
 
+// Version 1 is the 1.0 format. Stores saved before the version was recorded
+// hold complete 1.0 records or records from releases before 1.0.
+constexpr int kSitesFormatVersion = 1;
+
+enum class StoredSite { Current, PreRelease, Unsupported };
+
+StoredSite classifyStoredSite(const QSettings &settings, bool versioned) {
+    // Records from before 1.0 are no longer migrated. A versioned record that
+    // lacks fields takes their defaults instead.
+    if (!versioned && !hasCurrentSiteFormat(settings))
+        return StoredSite::PreRelease;
+    // A protocol this version does not know, such as one a newer version
+    // added, must not be read as SFTP.
+    const QString protocolName =
+        settings.value("protocol", QStringLiteral("sftp"))
+            .toString()
+            .trimmed()
+            .toLower();
+    const QString knownName = QString::fromLatin1(openscp::protocolStorageName(
+        openscp::protocolFromStorageName(protocolName.toStdString())));
+    return protocolName == knownName ? StoredSite::Current
+                                     : StoredSite::Unsupported;
+}
+
+// Saving keeps unsupported records exactly as stored.
+QVector<QVariantHash> unsupportedStoredSites(QSettings &settings) {
+    const bool versioned =
+        settings.contains(openscpui::settingskeys::kSitesFormatVersion);
+    QVector<QVariantHash> records;
+    const int siteCount =
+        settings.beginReadArray(openscpui::settingskeys::kSites);
+    for (int siteIndex = 0; siteIndex < siteCount; ++siteIndex) {
+        settings.setArrayIndex(siteIndex);
+        if (classifyStoredSite(settings, versioned) != StoredSite::Unsupported)
+            continue;
+        QVariantHash record;
+        for (const QString &key : settings.allKeys())
+            record.insert(key, settings.value(key));
+        records.push_back(record);
+    }
+    settings.endArray();
+    return records;
+}
+
 std::uint16_t loadPort(QSettings &settings, const char *key,
                        std::uint16_t fallback, bool allowZero,
                        bool &needsSave) {
@@ -111,13 +156,21 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
     LoadResult result;
 
     openscpui::AppSettings settings;
+    const bool versioned =
+        settings.contains(openscpui::settingskeys::kSitesFormatVersion);
     const int siteCount =
         settings.beginReadArray(openscpui::settingskeys::kSites);
     QSet<QString> usedIds;
     for (int siteIndex = 0; siteIndex < siteCount; ++siteIndex) {
         settings.setArrayIndex(siteIndex);
-        if (!hasCurrentSiteFormat(settings)) {
+        const StoredSite stored = classifyStoredSite(settings, versioned);
+        if (stored == StoredSite::PreRelease) {
             result.needsSave = true;
+            continue;
+        }
+        if (stored == StoredSite::Unsupported) {
+            // Hidden but kept; no loaded site may take its ID.
+            usedIds.insert(settings.value("id").toString().trimmed());
             continue;
         }
         SiteEntry site;
@@ -311,6 +364,7 @@ SavedSitesPersistence::loadSites(const LoadOptions &options) {
 SavedSitesPersistence::SaveResult
 SavedSitesPersistence::saveSites(const QVector<SiteEntry> &sites) {
     openscpui::AppSettings settings;
+    const QVector<QVariantHash> unsupported = unsupportedStoredSites(settings);
     settings.remove(openscpui::settingskeys::kSites);
     settings.beginWriteArray(openscpui::settingskeys::kSites);
     for (int siteIndex = 0; siteIndex < sites.size(); ++siteIndex) {
@@ -408,7 +462,15 @@ SavedSitesPersistence::saveSites(const QVector<SiteEntry> &sites) {
                 ? QString::fromStdString(*site.opt.webdav_ca_cert_path)
                 : QString());
     }
+    for (int recordIndex = 0; recordIndex < unsupported.size(); ++recordIndex) {
+        settings.setArrayIndex(static_cast<int>(sites.size()) + recordIndex);
+        const QVariantHash &record = unsupported[recordIndex];
+        for (auto field = record.cbegin(); field != record.cend(); ++field)
+            settings.setValue(field.key(), field.value());
+    }
     settings.endArray();
+    settings.setValue(openscpui::settingskeys::kSitesFormatVersion,
+                      kSitesFormatVersion);
     // A SaveResult can only be trustworthy after QSettings has flushed its
     // backend.
     const auto result = settings.syncSecure();

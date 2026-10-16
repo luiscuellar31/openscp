@@ -333,6 +333,12 @@ the editor opened.
 Changes to persisted formats require explicit decisions about schema and
 versioning, and corrupt or unsupported data must not be silently overwritten.
 
+Saved sites record their format version under `Sites/formatVersion`. A
+versioned record that lacks fields takes their defaults, while incomplete
+records in a store without the version come from releases before 1.0 and are
+discarded. Records with a protocol this version does not know stay hidden, and
+saving keeps them unchanged.
+
 Saving rewrites the whole saved-site list, so the Site Manager applies each
 change to the list as stored at that moment rather than to the copy it loaded.
 The main window keeps one Site Manager open at a time and reloads it after

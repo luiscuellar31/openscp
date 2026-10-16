@@ -15,6 +15,7 @@ inline constexpr char kUpdateSkippedVersion[] = "Updates/skippedVersion";
 // members, queue JSON and secret identifiers) remain owned by their respective
 // serializers; every fixed QSettings path belongs here.
 inline constexpr char kSites[] = "sites";
+inline constexpr char kSitesFormatVersion[] = "Sites/formatVersion";
 inline constexpr char kSitesDeleteSecretsOnRemove[] =
     "Sites/deleteSecretsOnRemove";
 
