@@ -1615,6 +1615,9 @@ bool socket_recv_exact(int sock, unsigned char *buf, std::size_t len,
     return true;
 }
 
+// Reads up to the delimiter one byte at a time: what follows it belongs to the
+// tunneled protocol, such as the SSH server's banner, and must stay in the
+// socket.
 bool socket_recv_until(int sock, const std::string &delimiter,
                        std::size_t maxBytes, const char *stage,
                        std::string &out, std::string &err) {
@@ -1623,9 +1626,9 @@ bool socket_recv_until(int sock, const std::string &delimiter,
         err = std::string(stage) + " invalid delimiter";
         return false;
     }
-    std::array<char, 512> chunk{};
-    while (out.find(delimiter) == std::string::npos) {
-        const ssize_t r = ::recv(sock, chunk.data(), chunk.size(), 0);
+    while (!out.ends_with(delimiter)) {
+        char byte = 0;
+        const ssize_t r = ::recv(sock, &byte, 1, 0);
         if (r < 0) {
             if (errno == EINTR)
                 continue;
@@ -1636,7 +1639,7 @@ bool socket_recv_until(int sock, const std::string &delimiter,
             err = std::string(stage) + " recv failed: connection closed";
             return false;
         }
-        out.append(chunk.data(), static_cast<std::size_t>(r));
+        out.push_back(byte);
         if (out.size() > maxBytes) {
             err = std::string(stage) + " too large";
             return false;
