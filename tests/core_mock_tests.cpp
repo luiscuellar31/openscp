@@ -1661,6 +1661,25 @@ OPENSCP_TEST(test_shared_libssh2_error_classification, t) {
     t.check(local.kind == openscp::RemoteErrorKind::LocalIo ||
                 local.kind == openscp::RemoteErrorKind::InsufficientSpace,
             "shared libssh2 errors should classify local file failures");
+
+    for (const char *path :
+         {"/srv/backups/checksums", "/home/ana/orders-canceled",
+          "/etc/password-policies", "/data/fingerprints", "/srv/connections"}) {
+        const openscp::RemoteError listing =
+            openscp::libssh2detail::classifyFailure(
+                std::string("sftp_opendir failed for: ") + path, nullptr);
+        t.check(listing.kind == openscp::RemoteErrorKind::RemoteIo,
+                std::string("a word in a path should not classify the "
+                            "failure: ") +
+                    path);
+    }
+    const openscp::RemoteError serverReason =
+        openscp::libssh2detail::classifyFailure(
+            "Could not open remote file for SCP download: scp: "
+            "/etc/password-policies/list: Permission denied",
+            nullptr);
+    t.check(serverReason.kind == openscp::RemoteErrorKind::PermissionDenied,
+            "the server's reason should still classify the failure");
 }
 
 OPENSCP_TEST(test_libssh2_recent_remote_modification, t) {
