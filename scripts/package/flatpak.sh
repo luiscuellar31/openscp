@@ -4,8 +4,10 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MANIFEST="${MANIFEST:-${REPO_DIR}/packaging/flatpak/io.github.luiscuellar31.openscp.yml}"
-BUILD_DIR="${BUILD_DIR:-${REPO_DIR}/dist/flatpak/build-dir}"
-REPO_OUT="${REPO_OUT:-${REPO_DIR}/dist/flatpak/repo}"
+# Not BUILD_DIR: the other build scripts name their CMake build that, and
+# flatpak-builder --force-clean empties this folder.
+FLATPAK_BUILD_DIR="${FLATPAK_BUILD_DIR:-${REPO_DIR}/dist/flatpak/build-dir}"
+FLATPAK_REPO_OUT="${FLATPAK_REPO_OUT:-${REPO_DIR}/dist/flatpak/repo}"
 BUNDLE_OUT="${BUNDLE_OUT:-${REPO_DIR}/dist/OpenSCP.flatpak}"
 APP_ID="${APP_ID:-io.github.luiscuellar31.openscp}"
 BRANCH="${BRANCH:-stable}"
@@ -29,9 +31,9 @@ Environment overrides:
                             (default: packaging/flatpak/io.github.luiscuellar31.openscp.yml)
   RUNTIME_VERSION_OVERRIDE  Runtime version to build against instead of the
                             manifest's runtime-version
-  BUILD_DIR                 flatpak-builder build folder
-                            (default: dist/flatpak/build-dir)
-  REPO_OUT                  OSTree repository (default: dist/flatpak/repo)
+  FLATPAK_BUILD_DIR         flatpak-builder build folder, emptied on each
+                            build (default: dist/flatpak/build-dir)
+  FLATPAK_REPO_OUT          OSTree repository (default: dist/flatpak/repo)
   BUNDLE_OUT                Bundle path (default: dist/OpenSCP.flatpak)
   APP_ID                    Application ID (default: io.github.luiscuellar31.openscp)
   BRANCH                    Repository branch (default: stable)
@@ -93,7 +95,9 @@ main() {
   ensure_cmd file
   validate_png_256 "$APP_ICON"
 
-  mkdir -p "$(dirname "$BUILD_DIR")" "$(dirname "$BUNDLE_OUT")" "$REPO_OUT"
+  [[ ! -f "${FLATPAK_BUILD_DIR}/CMakeCache.txt" ]] ||
+    die "FLATPAK_BUILD_DIR is a CMake build, which --force-clean would empty: ${FLATPAK_BUILD_DIR}"
+  mkdir -p "$(dirname "$FLATPAK_BUILD_DIR")" "$(dirname "$BUNDLE_OUT")" "$FLATPAK_REPO_OUT"
 
   local build_manifest="$MANIFEST"
   local tmp_manifest=""
@@ -114,20 +118,20 @@ main() {
   flatpak-builder \
     --force-clean \
     --default-branch="$BRANCH" \
-    --repo="$REPO_OUT" \
+    --repo="$FLATPAK_REPO_OUT" \
     "$@" \
-    "$BUILD_DIR" \
+    "$FLATPAK_BUILD_DIR" \
     "$build_manifest"
 
   if uses_external_qt_runtime "$build_manifest"; then
     # The app carries no Qt of its own, so there is nothing to validate.
     log "Qt comes from the Flatpak runtime; skipping the Qt plugin check."
   else
-    "$CHECKER" --context flatpak "${BUILD_DIR}/files"
+    "$CHECKER" --context flatpak "${FLATPAK_BUILD_DIR}/files"
   fi
 
   log "Bundling Flatpak: $BUNDLE_OUT"
-  flatpak build-bundle "$REPO_OUT" "$BUNDLE_OUT" "$APP_ID" "$BRANCH"
+  flatpak build-bundle "$FLATPAK_REPO_OUT" "$BUNDLE_OUT" "$APP_ID" "$BRANCH"
   log "Done: $BUNDLE_OUT"
 }
 
