@@ -224,12 +224,15 @@ MainWindow::~MainWindow() {
         transferMgr_->shutdown();
     if (transferCleanupFuture_.valid())
         transferCleanupFuture_.wait();
+    localFsCanceled_->store(true);
+    localFsPool_.waitForDone();
     QThreadPool::globalInstance()->waitForDone();
 }
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     Q_INIT_RESOURCE(app_icons);
     Q_INIT_RESOURCE(credits);
+    localFsPool_.setMaxThreadCount(2);
     focusTraversalController_ = new openscpui::FocusTraversalController(this);
     uploadSourcePicker_ = openscpui::createPlatformFilePicker();
     QPointer<MainWindow> self(this);
@@ -1421,6 +1424,19 @@ void MainWindow::closeEvent(QCloseEvent *e) {
     }
     if (updates_)
         updates_->cancel();
+    if (localFsJobsInFlight_.load() > 0) {
+        if (UiAlerts::question(
+                this, tr("Local copies running"),
+                tr("Local copies or moves are still running. Stop them and "
+                   "quit?\n\nWhat they did not finish stays as it was.")) !=
+            QMessageBox::Yes) {
+            e->ignore();
+            return;
+        }
+        // Each stops at its next entry; one large file still finishes.
+        localFsCanceled_->store(true);
+        localFsPool_.waitForDone();
+    }
     if (transferCleanupInProgress_) {
         pendingCloseAfterDisconnect_ = true;
         e->ignore();

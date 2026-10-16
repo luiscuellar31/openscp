@@ -15,6 +15,7 @@
 #include <QPointer>
 #include <QSet>
 #include <QStringList>
+#include <QThreadPool>
 #include <QTreeView>
 #include <QVector>
 
@@ -390,6 +391,13 @@ class MainWindow : public QMainWindow {
     QPointer<class QProgressDialog> connectProgress_;
     bool connectProgressDimmed_ = false;
     std::atomic<int> localFsJobsInFlight_{0};
+    // Local copies and moves stop at their next entry once this is set, as
+    // closing the window asks.
+    std::shared_ptr<std::atomic_bool> localFsCanceled_ =
+        std::make_shared<std::atomic_bool>(false);
+    // Their own threads, so long copies never hold the global pool the
+    // connection and the disconnect cleanup run on.
+    QThreadPool localFsPool_;
     std::optional<SavedSiteContext> pendingSavedSiteContext_;
     std::optional<SavedSiteContext> activeSavedSiteContext_;
     QPointer<class QProgressDialog> remoteScanProgress_;

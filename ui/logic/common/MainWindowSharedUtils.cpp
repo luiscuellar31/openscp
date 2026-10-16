@@ -61,8 +61,16 @@ bool isSameOrInside(const QString &path, const QString &folder) {
     return (canonicalPath + QLatin1Char('/')).startsWith(canonicalFolder);
 }
 
+bool copyCanceled(const std::function<bool()> &shouldCancel, QString &error) {
+    if (!shouldCancel || !shouldCancel())
+        return false;
+    error = QCoreApplication::translate("MainWindow", "Canceled");
+    return true;
+}
+
 bool copyEntryToEmptyDestination(const QString &srcPath, const QString &dstPath,
-                                 QString &error) {
+                                 QString &error,
+                                 const std::function<bool()> &shouldCancel) {
     QFileInfo srcInfo(srcPath);
 
     // isFile() and isDir() follow links, so check for a link first.
@@ -96,6 +104,8 @@ bool copyEntryToEmptyDestination(const QString &srcPath, const QString &dstPath,
                                      QDir::Hidden | QDir::System,
                                  QDirIterator::Subdirectories);
         while (dirIterator.hasNext()) {
+            if (copyCanceled(shouldCancel, error))
+                return false;
             dirIterator.next();
             const QFileInfo entryFileInfo = dirIterator.fileInfo();
             const QString relativePath = QDir(srcPath).relativeFilePath(
@@ -169,7 +179,9 @@ bool removeLocalEntry(const QString &path) {
 }
 
 bool copyLocalEntry(const QString &srcPath, const QString &dstPath,
-                    QString &error) {
+                    QString &error, const std::function<bool()> &shouldCancel) {
+    if (copyCanceled(shouldCancel, error))
+        return false;
     const QString destinationParent = QFileInfo(dstPath).dir().absolutePath();
     if (!QDir().mkpath(destinationParent)) {
         error = QString(QCoreApplication::translate(
@@ -199,7 +211,9 @@ bool copyLocalEntry(const QString &srcPath, const QString &dstPath,
         QDir(destinationParent)
             .filePath(QStringLiteral(".openscp-backup-") + token);
 
-    if (!copyEntryToEmptyDestination(srcPath, stagedPath, error)) {
+    if (!copyEntryToEmptyDestination(srcPath, stagedPath, error,
+                                     shouldCancel) ||
+        copyCanceled(shouldCancel, error)) {
         (void)removeLocalEntry(stagedPath);
         return false;
     }
@@ -238,7 +252,9 @@ bool copyLocalEntry(const QString &srcPath, const QString &dstPath,
 }
 
 bool moveLocalEntry(const QString &srcPath, const QString &dstPath,
-                    QString &error) {
+                    QString &error, const std::function<bool()> &shouldCancel) {
+    if (copyCanceled(shouldCancel, error))
+        return false;
     if (QDir::cleanPath(QFileInfo(srcPath).absoluteFilePath()) ==
         QDir::cleanPath(QFileInfo(dstPath).absoluteFilePath())) {
         return true;
@@ -289,7 +305,7 @@ bool moveLocalEntry(const QString &srcPath, const QString &dstPath,
         return false;
     }
 
-    if (!copyLocalEntry(srcPath, dstPath, error))
+    if (!copyLocalEntry(srcPath, dstPath, error, shouldCancel))
         return false;
     if (removeLocalEntry(srcPath))
         return true;

@@ -249,6 +249,41 @@ OPENSCP_TEST(testLocalCopyKeepsHiddenEntriesAndLinks, test) {
                "copying a selected link should copy the link itself");
 }
 
+OPENSCP_TEST(testLocalCopyStopsWhenCanceled, test) {
+    QTemporaryDir root;
+    const QString source = root.filePath(QStringLiteral("source"));
+    const QString destination = root.filePath(QStringLiteral("destination"));
+    test.check(QDir().mkpath(source + QStringLiteral("/nested")),
+               "the copy source should be created");
+    for (int index = 0; index < 5; ++index) {
+        QFile file(QDir(source).filePath(QStringLiteral("file-%1").arg(index)));
+        test.check(file.open(QIODevice::WriteOnly) && file.write("x") == 1,
+                   "a source file should be written");
+    }
+    QFile existing(destination);
+    test.check(existing.open(QIODevice::WriteOnly) &&
+                   existing.write("keep") == 4,
+               "the existing destination should be written");
+    existing.close();
+
+    int asked = 0;
+    QString error;
+    test.check(!copyLocalEntry(source, destination, error,
+                               [&asked] { return ++asked > 3; }) &&
+                   !error.isEmpty(),
+               "a canceled copy should fail");
+    QFile kept(destination);
+    test.check(kept.open(QIODevice::ReadOnly) && kept.readAll() == "keep",
+               "a canceled copy should leave the destination as it was");
+    const QStringList leftovers =
+        QDir(root.path())
+            .entryList({QStringLiteral(".openscp-*")},
+                       QDir::AllEntries | QDir::Hidden);
+    test.check(leftovers.isEmpty(),
+               "a canceled copy should remove what it staged: " +
+                   leftovers.join(QLatin1Char(',')).toStdString());
+}
+
 OPENSCP_TEST(testLocalCopyRejectsUnsafeSources, test) {
     QTemporaryDir temporary;
     test.check(temporary.isValid(),

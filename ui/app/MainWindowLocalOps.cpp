@@ -151,19 +151,22 @@ void MainWindow::runLocalFsOperation(
                              1500);
 
     QPointer<MainWindow> self(this);
-    QThreadPool::globalInstance()->start([self, pairs, deleteSource,
-                                          skippedCount, onFinished]() {
+    localFsPool_.start([self, pairs, deleteSource, skippedCount, onFinished,
+                        canceled = localFsCanceled_]() {
         int successCount = 0;
         int failureCount = 0;
         QString lastError;
+        const auto shouldCancel = [canceled] { return canceled->load(); };
 
         for (const auto &pair : pairs) {
+            if (shouldCancel())
+                break;
             QString operationError;
             const bool succeeded =
                 deleteSource ? moveLocalEntry(pair.sourcePath, pair.targetPath,
-                                              operationError)
+                                              operationError, shouldCancel)
                              : copyLocalEntry(pair.sourcePath, pair.targetPath,
-                                              operationError);
+                                              operationError, shouldCancel);
             if (succeeded) {
                 ++successCount;
             } else {
