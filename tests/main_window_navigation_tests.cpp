@@ -14,12 +14,14 @@
 #include <QApplication>
 #include <QDialog>
 #include <QDir>
+#include <QDropEvent>
 #include <QFile>
 #include <QFileSystemModel>
 #include <QInputDialog>
 #include <QItemSelectionModel>
 #include <QKeyEvent>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QSplitter>
@@ -332,6 +334,62 @@ OPENSCP_TEST(testMainWindowTraversesItsCompleteVisibleFocusOrder, test) {
     sendTab(receiver);
     test.check(QApplication::focusWidget() == expected.first(),
                "the complete MainWindow focus order should wrap once");
+}
+
+OPENSCP_TEST(testForeignStagingDropCopiesWithoutDeleting, test) {
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(), "the staging drop needs a folder");
+    if (!temporary.isValid())
+        return;
+    configureMainWindowSettings(settingsRootPath);
+    // Another application can start a drag with OpenSCP's staging type; its
+    // folder is copied like any other, never deleted afterwards.
+    const QString batch =
+        QDir(QDir(settingsRootPath).filePath(QStringLiteral("staging")))
+            .filePath(openscpui::newStagingBatchName());
+    const QString payload = QDir(batch).filePath(QStringLiteral("payload.txt"));
+    const QString destination =
+        QDir(temporary.path()).filePath(QStringLiteral("destination"));
+    QFile payloadFile(payload);
+    test.check(QDir().mkpath(batch) && QDir().mkpath(destination) &&
+                   payloadFile.open(QIODevice::WriteOnly) &&
+                   payloadFile.write("data") == 4,
+               "the staging drop fixture should be created");
+    payloadFile.close();
+
+    MainWindow window;
+    window.show();
+    flushUiEvents();
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftPath && parts.leftView,
+               "the staging drop needs the local panel");
+    if (!parts.leftPath || !parts.leftView)
+        return;
+    parts.leftPath->pathRequested(destination);
+    flushUiEvents();
+
+    QMimeData mime;
+    mime.setUrls({QUrl::fromLocalFile(payload)});
+    mime.setData(QByteArrayLiteral("application/x-openscp-staging-batch"),
+                 batch.toUtf8());
+    QDropEvent drop(QPointF(10, 10), Qt::CopyAction, &mime, Qt::LeftButton,
+                    Qt::NoModifier);
+    // QApplication delivers a drop only to the target of a drag in progress,
+    // so the panel's filter gets it directly, as a real drop would reach it.
+    static_cast<QObject &>(window).eventFilter(parts.leftView->viewport(),
+                                               &drop);
+
+    const QString copied =
+        QDir(destination).filePath(QStringLiteral("payload.txt"));
+    test.check(openscp::testsupport::waitUntil(
+                   [&] { return QFileInfo::exists(copied); },
+                   std::chrono::milliseconds(5000)),
+               "the dropped file should be copied");
+    QThreadPool::globalInstance()->waitForDone(5000);
+    test.check(!openscp::testsupport::waitUntil(
+                   [&] { return !QFileInfo::exists(batch); },
+                   std::chrono::milliseconds(1500)),
+               "a staging folder from a foreign drag should not be deleted");
 }
 
 OPENSCP_TEST(testLocalRenameValidatesNamesInBothPanes, test) {

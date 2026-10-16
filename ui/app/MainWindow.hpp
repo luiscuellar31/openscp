@@ -315,8 +315,12 @@ class MainWindow : public QMainWindow {
     void runLocalFsSelection(const QModelIndexList &rows,
                              QFileSystemModel *sourceModel,
                              const QDir &destination, bool deleteSource);
-    void runLocalFsOperation(const QVector<LocalFsPair> &pairs,
-                             bool deleteSource, int skippedCount = 0);
+    // `onFinished` runs on the UI thread once the job ends, told whether
+    // every pair succeeded.
+    void
+    runLocalFsOperation(const QVector<LocalFsPair> &pairs, bool deleteSource,
+                        int skippedCount = 0,
+                        std::function<void(bool allSucceeded)> onFinished = {});
     struct RemoteDownloadSeed {
         QString remotePath;
         QString localPath;

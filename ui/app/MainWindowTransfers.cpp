@@ -1,5 +1,6 @@
 // MainWindow transfer queue UI, remote prescan, and drag-and-drop handling.
 #include "app/MainWindow.hpp"
+#include "logic/common/AppSettings.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "logic/connections/SessionController.hpp"
@@ -7,6 +8,7 @@
 #include "logic/remote/RemoteModel.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
 #include "widgets/dialogs/TransferQueueDialog.hpp"
+#include "widgets/files/DragAwareTreeView.hpp"
 #include "widgets/navigation/PathNavigationBar.hpp"
 
 #include <QCoreApplication>
@@ -18,6 +20,7 @@
 #include <QGuiApplication>
 #include <QLocale>
 #include <QMimeData>
+#include <QPointer>
 #include <QProgressDialog>
 #include <QScreen>
 #include <QStatusBar>
@@ -27,6 +30,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <functional>
 #include <limits>
 #include <memory>
 
@@ -978,39 +982,6 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
         return QString::fromUtf8(raw).trimmed();
     };
 
-    auto scheduleStagingCleanupAfterLocalJobs = [this](
-                                                    const QString &batchDir) {
-        if (batchDir.isEmpty())
-            return;
-        auto *timer = new QTimer(this);
-        timer->setInterval(350);
-        timer->setSingleShot(false);
-        auto attempts = std::make_shared<int>(0);
-        connect(timer, &QTimer::timeout, this,
-                [this, timer, attempts, batchDir] {
-                    ++(*attempts);
-                    const bool giveUp = (*attempts >= 300); // ~105s max wait
-                    if (!giveUp && localFsJobsInFlight_.load() > 0)
-                        return;
-
-                    timer->stop();
-                    timer->deleteLater();
-                    QDir batch(batchDir);
-                    if (batch.exists())
-                        (void)batch.removeRecursively();
-
-                    // If the staging root is now empty, remove it as well.
-                    const QString rootPath = QFileInfo(batchDir).absolutePath();
-                    QDir root(rootPath);
-                    if (root.exists() &&
-                        root.entryList(QDir::NoDotAndDotDot | QDir::AllEntries)
-                            .isEmpty()) {
-                        (void)root.rmdir(".");
-                    }
-                });
-        timer->start();
-    };
-
     // Drag-and-drop over the right panel (local or remote)
     if (eventSource == rightViewport) {
         if (event->type() == QEvent::DragEnter) {
@@ -1122,8 +1093,17 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
             return true;
         } else if (event->type() == QEvent::Drop) {
             auto *dropEvent = static_cast<QDropEvent *>(event);
-            const QString stagingBatchDir =
-                extractStagingBatchDir(dropEvent->mimeData());
+            // Only the remote panel's own drag carries a staging batch to
+            // delete once copied, and only a batch folder in the staging
+            // root; any other drop is a plain copy.
+            openscpui::AppSettings settings;
+            QString stagingBatchDir;
+            if (dropEvent->source() == rightView_ &&
+                settings.value(openscpui::settingskeys::kAutoCleanStaging, true)
+                    .toBool()) {
+                stagingBatchDir = openscpui::stagingBatchPathForCleanup(
+                    settings, extractStagingBatchDir(dropEvent->mimeData()));
+            }
             const auto urls = dropEvent->mimeData()
                                   ? dropEvent->mimeData()->urls()
                                   : QList<QUrl>{};
@@ -1148,9 +1128,29 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                     }
                     pairs.push_back({localFileInfo.absoluteFilePath(), target});
                 }
-                runLocalFsOperation(pairs, false, 0);
-                if (!stagingBatchDir.isEmpty())
-                    scheduleStagingCleanupAfterLocalJobs(stagingBatchDir);
+                std::function<void(bool)> removeBatch;
+                if (!stagingBatchDir.isEmpty()) {
+                    // The batch goes once this copy ends; if part of it
+                    // failed, its files stay where the user can find them.
+                    QPointer<QTreeView> view(rightView_);
+                    removeBatch = [stagingBatchDir, view](bool allSucceeded) {
+                        if (!allSucceeded) {
+                            if (auto *dragView =
+                                    qobject_cast<DragAwareTreeView *>(view))
+                                dragView->showKeepMessage(stagingBatchDir);
+                            return;
+                        }
+                        (void)QDir(stagingBatchDir).removeRecursively();
+                        // If the staging root is now empty, remove it too.
+                        QDir root(QFileInfo(stagingBatchDir).absolutePath());
+                        if (root.entryList(QDir::NoDotAndDotDot |
+                                           QDir::AllEntries)
+                                .isEmpty()) {
+                            (void)root.rmdir(QStringLiteral("."));
+                        }
+                    };
+                }
+                runLocalFsOperation(pairs, false, 0, removeBatch);
                 dropEvent->acceptProposedAction();
                 updateDeleteShortcutEnables();
                 return true;

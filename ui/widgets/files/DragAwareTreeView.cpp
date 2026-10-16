@@ -218,36 +218,7 @@ void DragAwareTreeView::startDrag(Qt::DropActions supportedActions) {
     }
     auto drag = new QDrag(this);
     drag->setMimeData(mimeData);
-    const auto dragResult = drag->exec(Qt::CopyAction);
-
-    // Custom payload from RemoteModel when dragging out from remote
-    const QByteArray stagingBatchMimeType =
-        QByteArrayLiteral("application/x-openscp-staging-batch");
-    if (!mimeData->hasFormat(stagingBatchMimeType))
-        return; // nothing to do
-    const QString batchDir =
-        QString::fromUtf8(mimeData->data(stagingBatchMimeType));
-    if (batchDir.isEmpty())
-        return;
-
-    openscpui::AppSettings settings;
-    const bool autoClean =
-        settings.value(openscpui::settingskeys::kAutoCleanStaging, true)
-            .toBool();
-
-    if (dragResult == Qt::IgnoreAction) {
-        // Drag canceled: keep staging and notify with clickable link
-        showKeepMessage(batchDir);
-        return;
-    }
-
-    if (!autoClean) {
-        showKeepMessage(batchDir);
-        return;
-    }
-
-    // Success path: schedule retries to delete batch dir and maybe root
-    scheduleAutoCleanup(batchDir);
+    drag->exec(Qt::CopyAction);
 }
 
 void DragAwareTreeView::showKeepMessage(const QString &batchDir) {
@@ -285,46 +256,6 @@ void DragAwareTreeView::showKeepMessageWithPrefix(const QString &prefix,
     QTimer::singleShot(12000, statusLabel, [mainWindow, statusLabel] {
         mainWindow->statusBar()->removeWidget(statusLabel);
         statusLabel->deleteLater();
-    });
-}
-
-void DragAwareTreeView::scheduleAutoCleanup(const QString &batchDir,
-                                            int initialDelayMs) {
-    auto tryDelete = [](const QString &dir) -> bool {
-        QDir targetDir(dir);
-        if (!targetDir.exists())
-            return true;
-        bool removed = targetDir.removeRecursively();
-        if (!removed)
-            return false;
-        // If root empty, remove it
-        QString root = stagingRootFromSettings();
-        QDir rootDir(root);
-        if (rootDir.exists() &&
-            rootDir.entryList(QDir::NoDotAndDotDot | QDir::AllEntries)
-                .isEmpty()) {
-            rootDir.rmdir(".");
-        }
-        return true;
-    };
-
-    const int firstDelayMs = qBound(0, initialDelayMs, 60000);
-    // First attempt with a brief delay to allow OS to finish copying
-    QTimer::singleShot(firstDelayMs, this, [this, batchDir, tryDelete]() {
-        if (tryDelete(batchDir))
-            return;
-        // Retry up to 3 times at 1s intervals
-        auto retries = std::make_shared<int>(3);
-        auto timer = new QTimer(this);
-        timer->setInterval(1000);
-        connect(timer, &QTimer::timeout, this,
-                [timer, retries, batchDir, tryDelete]() {
-                    if (tryDelete(batchDir) || --(*retries) <= 0) {
-                        timer->stop();
-                        timer->deleteLater();
-                    }
-                });
-        timer->start();
     });
 }
 
@@ -1043,14 +974,6 @@ void DragAwareTreeView::finishRemoteDragStaging(
     drag->setMimeData(mimeData);
     const Qt::DropAction result = drag->exec(Qt::CopyAction);
 
-    bool droppedInsideThisWindow = false;
-    if (const QObject *dropTarget = drag->target()) {
-        const QWidget *targetWidget = qobject_cast<const QWidget *>(dropTarget);
-        QWidget *const sourceWindow = window();
-        droppedInsideThisWindow = targetWidget && sourceWindow &&
-                                  targetWidget->window() == sourceWindow;
-    }
-
     openscpui::AppSettings settings;
     const bool autoClean =
         settings.value(openscpui::settingskeys::kAutoCleanStaging, true)
@@ -1066,11 +989,10 @@ void DragAwareTreeView::finishRemoteDragStaging(
         return;
     }
 
-    // A target outside this window, such as Finder, a browser or a mail
+    // The drop target owns the batch: the local panel deletes it once its
+    // copy ends. Any other target, such as Finder, a browser or a mail
     // client, may read the files long after the drop, so its batch waits for
-    // the startup cleanup instead.
-    if (droppedInsideThisWindow)
-        scheduleAutoCleanup(currentBatchDir_, 10000);
+    // the startup cleanup.
     finishBatch(QStringLiteral("accepted"), 0);
 }
 

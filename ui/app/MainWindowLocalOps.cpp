@@ -134,11 +134,14 @@ void MainWindow::setRightRoot(const QString &path) {
     }
 }
 
-void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
-                                     bool deleteSource, int skippedCount) {
+void MainWindow::runLocalFsOperation(
+    const QVector<LocalFsPair> &pairs, bool deleteSource, int skippedCount,
+    std::function<void(bool allSucceeded)> onFinished) {
     if (pairs.isEmpty()) {
         statusBar()->showMessage(
             buildLocalFsSummaryMessage(deleteSource, 0, 0, skippedCount), 5000);
+        if (onFinished)
+            onFinished(true);
         return;
     }
 
@@ -149,7 +152,7 @@ void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
 
     QPointer<MainWindow> self(this);
     QThreadPool::globalInstance()->start([self, pairs, deleteSource,
-                                          skippedCount]() {
+                                          skippedCount, onFinished]() {
         int successCount = 0;
         int failureCount = 0;
         QString lastError;
@@ -175,11 +178,13 @@ void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
         QMetaObject::invokeMethod(
             app,
             [self, successCount, failureCount, skippedCount, lastError,
-             deleteSource]() {
+             deleteSource, onFinished]() {
                 if (!self)
                     return;
 
                 --self->localFsJobsInFlight_;
+                if (onFinished)
+                    onFinished(failureCount == 0);
 
                 QString statusMessage = buildLocalFsSummaryMessage(
                     deleteSource, successCount, failureCount, skippedCount);

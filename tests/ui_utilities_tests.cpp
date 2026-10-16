@@ -9,6 +9,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QSettings>
 #include <QTemporaryDir>
 
 #include <algorithm>
@@ -302,6 +303,51 @@ OPENSCP_TEST(testStagingBatchNames, test) {
                    !openscpui::isStagingBatchName(
                        QStringLiteral("20260101-120000-123")),
                "other folders in the staging root should be left alone");
+}
+
+OPENSCP_TEST(testOnlyStagingBatchesAreCleanedAfterADrop, test) {
+    QTemporaryDir directory;
+    test.check(directory.isValid(), "the staging test needs a folder");
+    if (!directory.isValid())
+        return;
+    const QDir base(directory.path());
+    const QString root = base.filePath(QStringLiteral("staging"));
+    const QString batch = QDir(root).filePath(openscpui::newStagingBatchName());
+    const QString outside = base.filePath(QStringLiteral("20260101-120000"));
+    test.check(
+        QDir().mkpath(batch) && QDir().mkpath(outside) &&
+            QDir().mkpath(QDir(root).filePath(QStringLiteral("Documents"))) &&
+            QDir().mkpath(QDir(batch).filePath(QStringLiteral("nested"))),
+        "the staging fixture should be created");
+    QSettings settings(base.filePath(QStringLiteral("settings.ini")),
+                       QSettings::IniFormat);
+    settings.setValue(openscpui::settingskeys::kStagingRoot, root);
+
+    test.check(openscpui::stagingBatchPathForCleanup(settings, batch) ==
+                   QFileInfo(batch).canonicalFilePath(),
+               "a batch in the staging root should be cleaned");
+    const QStringList refused = {
+        QString(),
+        root,
+        outside,
+        QDir(root).filePath(QStringLiteral("Documents")),
+        QDir(batch).filePath(QStringLiteral("nested")),
+        QDir(root).filePath(QStringLiteral("../20260101-120000")),
+        QDir(root).filePath(QStringLiteral("20991231-235959")),
+    };
+    for (const QString &path : refused) {
+        test.check(
+            openscpui::stagingBatchPathForCleanup(settings, path).isEmpty(),
+            "only a batch directly in the staging root may be cleaned: " +
+                path.toStdString());
+    }
+#ifndef _WIN32
+    const QString link = QDir(root).filePath(QStringLiteral("20260101-130000"));
+    test.check(
+        QFile::link(outside, link) &&
+            openscpui::stagingBatchPathForCleanup(settings, link).isEmpty(),
+        "a link named like a batch should not be followed");
+#endif
 }
 
 OPENSCP_TEST(testTerminalTransferStatuses, test) {

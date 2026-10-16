@@ -65,6 +65,23 @@ bool isStagingBatchName(const QString &name) {
     return pattern.match(name).hasMatch();
 }
 
+QString stagingBatchPathForCleanup(const QSettings &settings,
+                                   const QString &path) {
+    if (path.isEmpty())
+        return {};
+    const QFileInfo batch(path);
+    const QString canonical = batch.canonicalFilePath();
+    const QString root =
+        QFileInfo(effectiveStagingRootPath(settings)).canonicalFilePath();
+    if (batch.isSymLink() || canonical.isEmpty() || root.isEmpty() ||
+        !QFileInfo(canonical).isDir() ||
+        QFileInfo(canonical).absolutePath() != root ||
+        !isStagingBatchName(QFileInfo(canonical).fileName())) {
+        return {};
+    }
+    return canonical;
+}
+
 int effectiveNoHostVerificationTtlMinutes(const QSettings &settings) {
     return qBound(1,
                   settings

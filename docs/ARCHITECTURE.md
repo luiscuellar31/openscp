@@ -269,9 +269,12 @@ window only edits that rule, so the cleanup also runs while it stays closed.
 
 Dragging remote items out of the window first downloads them into a batch
 folder under the staging root, named as `newStagingBatchName()` in
-`AppSettings` describes. A drop outside the window keeps its batch, because
-the target may read the files long after the drop; the startup cleanup removes
-batches older than the retention setting.
+`AppSettings` describes. Only a drop of that drag on the local panel deletes
+its batch, once its copy finishes without errors and only if
+`stagingBatchPathForCleanup()` confirms it is a batch folder in the staging
+root. Any other target, such as another application, may read the files long
+after the drop, so its batch stays; the startup cleanup removes batches older
+than the retention setting.
 
 Synchronization has three steps:
 
