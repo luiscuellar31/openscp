@@ -1,6 +1,7 @@
 // Connection, authentication, and transport settings for a remote session.
 #pragma once
 
+#include "KeyboardInteractive.hpp"
 #include "Protocol.hpp"
 #include "SecureString.hpp"
 
@@ -12,13 +13,6 @@
 #include <vector>
 
 namespace openscp {
-
-enum class KbdIntPromptResult { Handled, Unhandled, Cancelled };
-
-using KbdIntPromptsCB = std::function<KbdIntPromptResult(
-    const std::string &name, const std::string &instruction,
-    const std::vector<std::string> &prompts,
-    std::vector<std::string> &responses)>;
 
 struct SessionOptions {
     // Runtime-only cancellation for this connection attempt; never persisted.

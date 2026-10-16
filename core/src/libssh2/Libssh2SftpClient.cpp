@@ -1120,8 +1120,8 @@ int ensure_libssh2_initialized() {
     return g_libssh2_init_result;
 }
 
-// Context for keyboard-interactive: respond with username/password based on the
-// prompt
+// Context for keyboard-interactive: the saved credentials and the optional
+// UI callback that answers the rest.
 struct KbdIntCtx {
     const char *user;
     const char *pass;
@@ -1129,10 +1129,11 @@ struct KbdIntCtx {
     bool *cancelled;           // explicit user cancellation in UI callback
     bool *rejected;            // malformed, excessive or unallocatable input
     std::string *rejectionError;
+    int *rounds; // requests with prompts answered so far
 };
 
-// Keyboard-interactive callback: respond to prompts with username/password
-// based on the text
+// Keyboard-interactive callback: the saved username and password answer the
+// prompts that clearly ask for them, and the UI callback the others.
 void kbint_password_callback(const char *name, int name_len,
                              const char *instruction, int instruction_len,
                              int num_prompts,
@@ -1207,9 +1208,56 @@ void kbint_password_callback(const char *name, int name_len,
         return;
     }
 
-    // If a UI callback is provided, give it a chance to answer the prompts.
-    if (ctx->cb && *(ctx->cb) && num_prompts > 0) {
-        std::vector<std::string> answers;
+    if (num_prompts > 0 && ctx->rounds)
+        ++*ctx->rounds;
+    const int round = ctx->rounds ? *ctx->rounds : 1;
+
+    auto scrubAnswers = [](std::vector<std::string> &values) {
+        for (std::string &value : values) {
+            if (value.capacity() > 0) {
+                OPENSSL_cleanse(value.data(), value.capacity());
+                value.clear();
+            }
+        }
+    };
+
+    // The saved credentials answer what they clearly match; the user answers
+    // the rest, so a one-time code never receives the account password.
+    std::vector<std::string> answers;
+    std::vector<KbdIntPrompt> userPrompts;
+    std::vector<int> userPromptIndexes;
+    try {
+        answers.resize(static_cast<std::size_t>(num_prompts));
+        for (int i = 0; i < num_prompts; ++i) {
+            KbdIntPrompt prompt{std::move(promptTexts[static_cast<size_t>(i)]),
+                                prompts && prompts[i].echo != 0};
+            const auto saved = libssh2detail::savedKbdIntAnswer(prompt, round);
+            std::string &answer = answers[static_cast<size_t>(i)];
+            if (saved == libssh2detail::KbdIntSavedAnswer::Username &&
+                ulen > 0) {
+                answer.assign(user, ulen);
+            } else if (saved == libssh2detail::KbdIntSavedAnswer::Password &&
+                       plen > 0) {
+                answer.assign(pass, plen);
+            } else {
+                userPrompts.push_back(std::move(prompt));
+                userPromptIndexes.push_back(i);
+            }
+        }
+    } catch (...) {
+        scrubAnswers(answers);
+        rejectPrompts("Could not allocate keyboard-interactive answer data.");
+        return;
+    }
+
+    if (!userPrompts.empty()) {
+        if (!ctx->cb || !*(ctx->cb)) {
+            scrubAnswers(answers);
+            rejectPrompts("The server asked for a one-time code or other "
+                          "input that only the main connection can answer.");
+            return;
+        }
+        std::vector<std::string> userAnswers;
         KbdIntPromptResult result = KbdIntPromptResult::Unhandled;
         try {
             const std::size_t safeNameLength =
@@ -1221,68 +1269,17 @@ void kbint_password_callback(const char *name, int name_len,
             const std::string nm(name ? name : "", safeNameLength);
             const std::string ins(instruction ? instruction : "",
                                   safeInstructionLength);
-            result = (*(ctx->cb))(nm, ins, promptTexts, answers);
+            result = (*(ctx->cb))(nm, ins, userPrompts, userAnswers);
         } catch (...) {
+            scrubAnswers(answers);
+            scrubAnswers(userAnswers);
             rejectPrompts(
                 "Keyboard-interactive prompt handler failed unexpectedly.");
             return;
         }
-        auto scrubAnswers = [&answers]() {
-            for (std::string &answer : answers) {
-                if (answer.capacity() > 0) {
-                    OPENSSL_cleanse(answer.data(), answer.capacity());
-                    answer.clear();
-                }
-            }
-        };
-        if (result == KbdIntPromptResult::Handled &&
-            static_cast<int>(answers.size()) >= num_prompts) {
-            std::size_t totalAnswerBytes = 0;
-            for (int i = 0; i < num_prompts; ++i) {
-                const std::size_t answerSize =
-                    answers[static_cast<size_t>(i)].size();
-                if (answerSize >
-                        libssh2detail::kMaxKeyboardInteractiveAnswerBytes ||
-                    totalAnswerBytes >
-                        libssh2detail::kMaxKeyboardInteractiveAnswerBytes -
-                            answerSize) {
-                    rejectPrompts("Keyboard-interactive answer exceeds the "
-                                  "safety limit.");
-                    scrubAnswers();
-                    return;
-                }
-                totalAnswerBytes += answerSize;
-            }
-            for (int i = 0; i < num_prompts; ++i) {
-                const std::string &a = answers[static_cast<size_t>(i)];
-                if (a.empty()) {
-                    responses[i].text = nullptr;
-                    responses[i].length = 0;
-                    continue;
-                }
-                char *buf = static_cast<char *>(std::malloc(a.size() + 1));
-                if (!buf) {
-                    for (int j = 0; j < i; ++j) {
-                        std::free(responses[j].text);
-                        responses[j].text = nullptr;
-                        responses[j].length = 0;
-                    }
-                    rejectPrompts(
-                        "Could not allocate keyboard-interactive answer data.");
-                    scrubAnswers();
-                    return;
-                }
-                std::memcpy(buf, a.data(), a.size());
-                buf[a.size()] = '\0';
-                responses[i].text = buf;
-                responses[i].length = static_cast<unsigned int>(a.size());
-            }
-            // Best-effort: scrub answers after copying into libssh2 buffers
-            scrubAnswers();
-            return;
-        }
         if (result == KbdIntPromptResult::Cancelled) {
-            scrubAnswers();
+            scrubAnswers(answers);
+            scrubAnswers(userAnswers);
             if (ctx->cancelled)
                 *ctx->cancelled = true;
             for (int i = 0; i < num_prompts; ++i) {
@@ -1291,32 +1288,59 @@ void kbint_password_callback(const char *name, int name_len,
             }
             return;
         }
-        scrubAnswers();
-        // If the callback could not answer, fall back to the simple heuristic
+        if (result != KbdIntPromptResult::Handled ||
+            userAnswers.size() < userPrompts.size()) {
+            scrubAnswers(answers);
+            scrubAnswers(userAnswers);
+            rejectPrompts("Keyboard-interactive prompts were left unanswered.");
+            return;
+        }
+        for (std::size_t k = 0; k < userPrompts.size(); ++k) {
+            answers[static_cast<size_t>(userPromptIndexes[k])].swap(
+                userAnswers[k]);
+        }
+        scrubAnswers(userAnswers);
+    }
+
+    std::size_t totalAnswerBytes = 0;
+    for (const std::string &answer : answers) {
+        if (answer.size() > libssh2detail::kMaxKeyboardInteractiveAnswerBytes ||
+            totalAnswerBytes >
+                libssh2detail::kMaxKeyboardInteractiveAnswerBytes -
+                    answer.size()) {
+            scrubAnswers(answers);
+            rejectPrompts("Keyboard-interactive answer exceeds the safety "
+                          "limit.");
+            return;
+        }
+        totalAnswerBytes += answer.size();
     }
     for (int i = 0; i < num_prompts; ++i) {
-        // Simple heuristic: if the prompt mentions "user" or "name", send
-        // username; otherwise send password
-        const bool wantUser = libssh2detail::promptRequestsUsername(
-            promptTexts[static_cast<size_t>(i)]);
-        const char *ans = wantUser ? user : pass;
-        const size_t alen = wantUser ? ulen : plen;
-        if (!ans || alen == 0) {
+        const std::string &a = answers[static_cast<size_t>(i)];
+        if (a.empty()) {
             responses[i].text = nullptr;
             responses[i].length = 0;
             continue;
         }
-        char *buf = static_cast<char *>(std::malloc(alen + 1));
+        char *buf = static_cast<char *>(std::malloc(a.size() + 1));
         if (!buf) {
-            responses[i].text = nullptr;
-            responses[i].length = 0;
-            continue;
+            for (int j = 0; j < i; ++j) {
+                std::free(responses[j].text);
+                responses[j].text = nullptr;
+                responses[j].length = 0;
+            }
+            scrubAnswers(answers);
+            rejectPrompts(
+                "Could not allocate keyboard-interactive answer data.");
+            return;
         }
-        std::memcpy(buf, ans, alen);
-        buf[alen] = '\0';
+        std::memcpy(buf, a.data(), a.size());
+        buf[a.size()] = '\0';
         responses[i].text = buf;
-        responses[i].length = static_cast<unsigned int>(alen);
+        responses[i].length = static_cast<unsigned int>(a.size());
     }
+    // Best-effort: scrub answers after copying into libssh2 buffers
+    scrubAnswers(answers);
 }
 
 } // namespace
@@ -2635,12 +2659,14 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                 bool kbdCancelled = false;
                 bool kbdRejected = false;
                 std::string kbdRejectionError;
+                int kbdRounds = 0;
                 KbdIntCtx ctx{opt.username.c_str(),
                               opt.password->c_str(),
                               &opt.keyboard_interactive_cb,
                               &kbdCancelled,
                               &kbdRejected,
-                              &kbdRejectionError};
+                              &kbdRejectionError,
+                              &kbdRounds};
                 void **abs = libssh2_session_abstract(session_);
                 if (abs)
                     *abs = &ctx;

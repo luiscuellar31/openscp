@@ -1097,95 +1097,54 @@ void MainWindow::configureConnectionCallbacks(openscp::SessionOptions &opt) {
             Qt::QueuedConnection);
     };
 
-    // Keyboard-interactive callback (OTP/2FA). Prefer auto-filling
-    // password/username; request OTP if needed.
-    const std::string savedUser = opt.username;
-    const openscp::SecureString savedPass =
-        opt.password ? *opt.password : openscp::SecureString();
-    opt.keyboard_interactive_cb = [self, stopToken, savedUser, savedPass](
-                                      const std::string &name,
-                                      const std::string &instruction,
-                                      const std::vector<std::string> &prompts,
-                                      std::vector<std::string> &responses)
+    // Keyboard-interactive: the core answers the account name and password
+    // itself, so every prompt here needs the user.
+    opt.keyboard_interactive_cb =
+        [self, stopToken](const std::string &name,
+                          const std::string &instruction,
+                          const std::vector<openscp::KbdIntPrompt> &prompts,
+                          std::vector<std::string> &responses)
         -> openscp::KbdIntPromptResult {
         (void)name;
         if (!self || stopToken.stop_requested())
             return openscp::KbdIntPromptResult::Cancelled;
         responses.clear();
         responses.reserve(prompts.size());
-        auto promptForInput =
-            [self, stopToken](const QString &title, const QString &promptText,
-                              QLineEdit::EchoMode echoMode, QString &answer) {
-                return openscpui::requestAuthenticationInput(
-                    self, stopToken, title, promptText, echoMode, answer);
-            };
-        auto appendUtf8Response = [&responses](QString &answer) {
-            QByteArray bytes = answer.toUtf8();
-            responses.emplace_back(bytes.constData(),
-                                   static_cast<size_t>(bytes.size()));
-            secureClear(bytes);
-            secureClear(answer);
-        };
         const QString instructionSuffix =
             instruction.empty()
                 ? QString()
                 : QStringLiteral(" — ") + QString::fromStdString(instruction);
 
-        // Resolve each prompt: auto-fill user/pass and ask for OTP/codes if
-        // present
-        for (const std::string &promptTextUtf8 : prompts) {
+        for (const openscp::KbdIntPrompt &prompt : prompts) {
             if (stopToken.stop_requested())
                 return openscp::KbdIntPromptResult::Cancelled;
-            QString promptText = QString::fromStdString(promptTextUtf8);
-            QString promptTextLower = promptText.toLower();
-            // Username
-            if (promptTextLower.contains("user") ||
-                promptTextLower.contains("name:")) {
-                responses.emplace_back(savedUser);
-                continue;
+            QString title = tr("Information required") + instructionSuffix;
+            switch (openscp::classifyKbdIntPrompt(prompt)) {
+            case openscp::KbdIntPromptKind::OneTimeCode:
+                title = tr("Verification code required") + instructionSuffix;
+                break;
+            case openscp::KbdIntPromptKind::Password:
+                title = tr("Password required");
+                break;
+            case openscp::KbdIntPromptKind::Username:
+            case openscp::KbdIntPromptKind::Other:
+                break;
             }
-            // Password
-            if (promptTextLower.contains("password") ||
-                promptTextLower.contains("passphrase") ||
-                promptTextLower.contains("passcode")) {
-                if (!savedPass.empty()) {
-                    responses.emplace_back(savedPass.data(), savedPass.size());
-                    continue;
-                }
-                QString answer;
-                if (!promptForInput(tr("Password required"), promptText,
-                                    QLineEdit::Password, answer)) {
-                    return openscp::KbdIntPromptResult::Cancelled;
-                }
-                appendUtf8Response(answer);
-                continue;
-            }
-            // OTP / Verification code / Token
+            // A prompt the server hides is a secret, whatever it says.
             QString answer;
-            if (promptTextLower.contains("verification") ||
-                promptTextLower.contains("verify") ||
-                promptTextLower.contains("otp") ||
-                promptTextLower.contains("code") ||
-                promptTextLower.contains("token")) {
-                const QString title =
-                    tr("Verification code required") + instructionSuffix;
-                if (!promptForInput(title, promptText, QLineEdit::Password,
-                                    answer)) {
-                    return openscp::KbdIntPromptResult::Cancelled;
-                }
-                appendUtf8Response(answer);
-                continue;
-            }
-            // Generic case: ask for text (not hidden)
-            const QString title =
-                tr("Information required") + instructionSuffix;
-            if (!promptForInput(title, promptText, QLineEdit::Normal, answer))
+            if (!openscpui::requestAuthenticationInput(
+                    self, stopToken, title, QString::fromStdString(prompt.text),
+                    prompt.echo ? QLineEdit::Normal : QLineEdit::Password,
+                    answer)) {
                 return openscp::KbdIntPromptResult::Cancelled;
-            appendUtf8Response(answer);
+            }
+            QByteArray bytes = answer.toUtf8();
+            responses.emplace_back(bytes.constData(),
+                                   static_cast<size_t>(bytes.size()));
+            secureClear(bytes);
+            secureClear(answer);
         }
-        return (responses.size() == prompts.size())
-                   ? openscp::KbdIntPromptResult::Handled
-                   : openscp::KbdIntPromptResult::Unhandled;
+        return openscp::KbdIntPromptResult::Handled;
     };
 }
 

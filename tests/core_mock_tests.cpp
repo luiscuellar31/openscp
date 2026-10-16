@@ -419,6 +419,55 @@ OPENSCP_TEST(test_secure_string_value_semantics, t) {
     t.check(moved.empty(), "SecureString clear should release the value");
 }
 
+OPENSCP_TEST(test_keyboard_interactive_prompts, t) {
+    using openscp::KbdIntPrompt;
+    using openscp::KbdIntPromptKind;
+    struct Case {
+        KbdIntPrompt prompt;
+        KbdIntPromptKind kind;
+    };
+    // Prompts as servers send them: OpenSSH with PAM, RSA SecurID, Duo,
+    // pam_oath, Google Authenticator and FreeIPA.
+    const std::vector<Case> cases = {
+        {{"Password: ", false}, KbdIntPromptKind::Password},
+        {{"Password for deploy_user@host: ", false},
+         KbdIntPromptKind::Password},
+        {{"Enter passphrase for key: ", false}, KbdIntPromptKind::Password},
+        {{"Enter PASSCODE:", false}, KbdIntPromptKind::OneTimeCode},
+        {{"Passcode or option (1-3): ", true}, KbdIntPromptKind::OneTimeCode},
+        {{"One-time password (OATH) for `alice': ", false},
+         KbdIntPromptKind::OneTimeCode},
+        {{"Verification code: ", false}, KbdIntPromptKind::OneTimeCode},
+        {{"Verification code for user alice: ", false},
+         KbdIntPromptKind::OneTimeCode},
+        {{"Hostname verification code:", false}, KbdIntPromptKind::OneTimeCode},
+        {{"First Factor: ", false}, KbdIntPromptKind::Other},
+        {{"Username: ", true}, KbdIntPromptKind::Username},
+        {{"login: ", true}, KbdIntPromptKind::Username},
+        {{"Username: ", false}, KbdIntPromptKind::Other},
+        {{"Your account name: ", true}, KbdIntPromptKind::Other},
+    };
+    for (const Case &entry : cases) {
+        t.check(openscp::classifyKbdIntPrompt(entry.prompt) == entry.kind,
+                "unexpected kind for the prompt \"" + entry.prompt.text + "\"");
+    }
+
+    using openscp::libssh2detail::KbdIntSavedAnswer;
+    using openscp::libssh2detail::savedKbdIntAnswer;
+    t.check(savedKbdIntAnswer({"Password: ", false}, 1) ==
+                    KbdIntSavedAnswer::Password &&
+                savedKbdIntAnswer({"Password: ", false}, 2) ==
+                    KbdIntSavedAnswer::None,
+            "the saved password should answer only the first round");
+    t.check(savedKbdIntAnswer({"Username: ", true}, 2) ==
+                    KbdIntSavedAnswer::Username &&
+                savedKbdIntAnswer({"Enter PASSCODE:", false}, 1) ==
+                    KbdIntSavedAnswer::None &&
+                savedKbdIntAnswer({"First Factor: ", false}, 1) ==
+                    KbdIntSavedAnswer::None,
+            "codes and unclear secrets should be left to the user");
+}
+
 OPENSCP_TEST(test_libssh2_input_safety, t) {
     using namespace openscp::libssh2detail;
 
@@ -433,8 +482,6 @@ OPENSCP_TEST(test_libssh2_input_safety, t) {
             "bounded keyboard-interactive prompts should be accepted");
     t.check(copied.size() == 1 && copied.front() == "User",
             "keyboard-interactive prompt copies must honor explicit lengths");
-    t.check(promptRequestsUsername(copied.front()),
-            "bounded prompt matching should detect username prompts");
 
     prompt.length = kMaxKeyboardInteractivePromptBytes + 1;
     copied.clear();

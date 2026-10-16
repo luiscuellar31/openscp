@@ -171,6 +171,13 @@ once trusted, the session's options carry the pin, so libcurl refuses any other
 key on the control, worker and reopened connections. The pin is remembered
 after the connection succeeds.
 
+Keyboard-interactive prompts have one classifier, `classifyKbdIntPrompt`, which
+uses whole words and the prompt's echo flag. The SSH backend answers the account
+name and, in the first round only, the account password; every other prompt,
+one-time codes included, goes to the connection's prompt callback, which asks
+the user with the server's echo setting. Connections without that callback,
+such as transfer workers, fail on those prompts instead of guessing.
+
 `AuthenticationInput` opens a window-modal input dialog without a nested event loop and
 waits on shared reply state with the connection stop token. Pending and visible
 prompts can be canceled without the worker requiring UI event dispatch; a
