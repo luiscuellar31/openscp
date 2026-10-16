@@ -38,6 +38,19 @@ Common types include `feat`, `fix`, `refactor`, `docs`, `test`, `ci`, and `chore
 For a breaking change, add `!` after the type or scope and explain the impact
 and migration in the commit body with a `BREAKING CHANGE:` footer.
 
+The release notes list each subject line unchanged, grouped by type, so choose
+the type by who notices the change:
+
+- `feat`, `fix`, and `perf` are for changes that users notice: a new
+  capability, corrected behavior, or faster work.
+- Changes to CI, builds, packaging, scripts, and tests use `ci`, `build`,
+  `test`, or `chore`, even when they fix something.
+
+Write the subject as the effect, not the mechanism: `fix(webdav): stop DELETE
+from removing whole collections` rather than `fix(webdav): check the resource
+type before DELETE`. The body, which the release notes do not show, can
+explain how.
+
 ## Build and test
 
 The normal development entrypoints are:
