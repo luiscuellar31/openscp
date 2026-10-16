@@ -181,6 +181,7 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
         }
         if (!curlcommon::configureTlsPolicy(
                 curl, opt.ftps_verify_peer, opt.ftps_ca_cert_path,
+                opt.tls_pinned_public_key,
                 "Could not enforce the FTPS TLS 1.2 minimum.",
                 "Could not configure FTPS certificate verification.",
                 "Could not configure FTPS CA certificate path.", err)) {
@@ -721,6 +722,36 @@ RemoteError ftpPathErrorFromResult(CURL *curl, const SessionOptions &opt,
 }
 
 } // namespace
+
+bool fetchFtpsServerPublicKeyPin(const SessionOptions &opt, std::string &pin,
+                                 std::string &err) {
+    pin.clear();
+    err.clear();
+    if (opt.protocol != Protocol::Ftps) {
+        err = "Only FTPS connections present a TLS certificate.";
+        return false;
+    }
+    if (!curlcommon::validateUrlHost(opt.host, "FTP host", err) ||
+        !ensureCurlInitialized(err))
+        return false;
+    // Without credentials the handle logs in anonymously, and the probe stops
+    // before that login completes.
+    SessionOptions probeOptions = opt;
+    probeOptions.username.clear();
+    probeOptions.password.reset();
+    probeOptions.ftps_mode = normalizeFtpsMode(probeOptions.ftps_mode);
+    probeOptions.ftps_verify_peer = false;
+    probeOptions.tls_pinned_public_key.reset();
+    if (probeOptions.port == 0)
+        probeOptions.port = defaultPortForProtocol(Protocol::Ftps);
+    curlcommon::CurlEasySession session;
+    if (!session.initialize(err) ||
+        !configureCommonCurlHandle(session.get(), probeOptions, err))
+        return false;
+    return curlcommon::readServerPublicKeyPin(
+        session.get(), buildFtpUrl(probeOptions, "/"),
+        opt.connection_stop_token, pin, err);
+}
 
 CurlFtpClient::CurlFtpClient(Protocol protocol)
     : protocol_(isFtpFamilyProtocol(protocol) ? protocol : Protocol::Ftp),

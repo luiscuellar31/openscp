@@ -129,6 +129,8 @@ troubleshooting, see [Building OpenSCP](docs/BUILDING.md).
   conflict policies, bandwidth limits, and resumable `.part` files.
 - Saved sites with Keychain on macOS and Secret Service/libsecret on Linux.
 - Strict, accept-new, or explicitly disabled SSH host-key verification.
+- FTPS and HTTPS WebDAV without certificate verification still check the
+  server's public key, which you trust on the first connection.
 - SOCKS5, HTTP CONNECT, and SSH jump-host support where the protocol allows it.
 - One-way synchronization with preview, filters, and optional checksum checks.
 - Spanish, English, Portuguese, French, and German interfaces.

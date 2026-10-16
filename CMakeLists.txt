@@ -385,6 +385,8 @@ add_library(openscp_ui_logic STATIC
     ui/logic/connections/SessionHealthMonitor.cpp
     ui/logic/connections/TerminalCommandBuilder.hpp
     ui/logic/connections/TerminalCommandBuilder.cpp
+    ui/logic/connections/TlsKeyTrust.hpp
+    ui/logic/connections/TlsKeyTrust.cpp
     ui/logic/navigation/NavigationScope.hpp
     ui/logic/navigation/NavigationScope.cpp
     ui/logic/navigation/NavigationStore.hpp

@@ -4,6 +4,7 @@
 #include "logic/common/MainWindowSharedUtils.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "logic/connections/SessionController.hpp"
+#include "logic/connections/TlsKeyTrust.hpp"
 #include "logic/persistence/SavedSitesPersistence.hpp"
 #include "logic/persistence/SiteCredentialRepository.hpp"
 #include "logic/remote/RemoteModel.hpp"
@@ -871,7 +872,24 @@ void MainWindow::showHostKeyPrompt(
     box->setIcon(QMessageBox::Question);
     box->setWindowTitle(tr("Confirm SSH fingerprint"));
     QString text;
-    if (!prompt.canSave) {
+    if (prompt.kind ==
+        openscpui::HostKeyPromptCoordinator::KeyKind::TlsPublicKey) {
+        box->setWindowTitle(tr("Confirm TLS public key"));
+        if (prompt.keyChanged) {
+            box->setIcon(QMessageBox::Warning);
+            text = tr("The TLS public key of %1 has changed.\nNew "
+                      "fingerprint: %2\n\nSomeone may be intercepting the "
+                      "connection, or the server may have a new key. Trust "
+                      "the new key only if you expected this change.")
+                       .arg(prompt.host, prompt.fingerprint);
+        } else {
+            text = tr("Connect to %1\nThe server certificate is not "
+                      "verified for this connection.\nPublic key "
+                      "fingerprint: %2\n\nTrust this key? Later "
+                      "connections will refuse any other key.")
+                       .arg(prompt.host, prompt.fingerprint);
+        }
+    } else if (!prompt.canSave) {
         text = (tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
                    "%3\n\nFingerprint cannot be saved. Connection "
                    "allowed only this time."))
@@ -888,7 +906,10 @@ void MainWindow::showHostKeyPrompt(
     box->setText(text);
     box->addButton(prompt.canSave ? tr("Trust") : tr("Connect without saving"),
                    QMessageBox::YesRole);
-    box->addButton(tr("Cancel"), QMessageBox::RejectRole);
+    QPushButton *cancelButton =
+        box->addButton(tr("Cancel"), QMessageBox::RejectRole);
+    if (prompt.keyChanged)
+        box->setDefaultButton(cancelButton);
     connect(box, &QMessageBox::finished, this, &MainWindow::onTofuFinished);
     QTimer::singleShot(0, box, [box] {
         box->open();
@@ -1173,8 +1194,27 @@ void MainWindow::launchConnectionWorker(
     std::optional<PendingSiteSaveRequest> saveRequest,
     const std::shared_ptr<std::atomic<bool>> &cancelFlag) {
     QPointer<MainWindow> self(this);
-    QThreadPool::globalInstance()->start([self, opt = std::move(opt), uiOpt,
-                                          saveRequest, cancelFlag]() mutable {
+    // Called on the worker; the user answers on the UI thread.
+    auto confirmTlsKey = [self, stopToken = opt.connection_stop_token,
+                          host = QString::fromStdString(opt.host),
+                          port = opt.port](const std::string &pin,
+                                           bool changed) {
+        if (!self || stopToken.stop_requested())
+            return false;
+        openscpui::HostKeyPromptCoordinator::Prompt prompt;
+        prompt.host = host;
+        prompt.port = static_cast<quint16>(port);
+        prompt.fingerprint = openscpui::tlsKeyFingerprint(pin);
+        prompt.canSave = true;
+        prompt.kind =
+            openscpui::HostKeyPromptCoordinator::KeyKind::TlsPublicKey;
+        prompt.keyChanged = changed;
+        return self->hostKeyPromptCoordinator_.requestDecision(
+            std::move(prompt), stopToken);
+    };
+    QThreadPool::globalInstance()->start([self, opt = std::move(opt),
+                                          uiOpt = uiOpt, saveRequest,
+                                          cancelFlag, confirmTlsKey]() mutable {
         bool connectionSucceeded = false;
         bool canceledByUser = false;
         std::string connectionError;
@@ -1184,7 +1224,14 @@ void MainWindow::launchConnectionWorker(
             if (cancelFlag && cancelFlag->load()) {
                 canceledByUser = true;
                 connectionError = "Connection canceled by user";
+            } else if (openscp::skipsTlsCertificateVerification(opt) &&
+                       !openscpui::pinServerTlsKey(
+                           opt, openscp::FetchServerPublicKeyPin, confirmTlsKey,
+                           connectionError)) {
+                // Without a trusted key no credentials are sent.
             } else {
+                // Later connections of the session require the same key.
+                uiOpt.tls_pinned_public_key = opt.tls_pinned_public_key;
                 connectedOwner =
                     openscp::CreateConnectedClient(opt, connectionError);
                 connectionSucceeded = static_cast<bool>(connectedOwner);
@@ -1267,6 +1314,8 @@ bool MainWindow::startRemoteConnection(
     opt.local_file_durability = configuredLocalFileDurability();
     if (!validateConnectionStart(opt))
         return false;
+    if (openscp::skipsTlsCertificateVerification(opt))
+        opt.tls_pinned_public_key = openscpui::trustedTlsKeyPin(opt);
 
     const openscp::SessionOptions uiOpt = opt;
     auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
@@ -1332,6 +1381,11 @@ void MainWindow::finalizeConnection(
         }
         return;
     }
+
+    // A trusted TLS key is remembered once it led to a session.
+    if (openscp::skipsTlsCertificateVerification(uiOpt) &&
+        uiOpt.tls_pinned_public_key)
+        openscpui::rememberTlsKeyPin(uiOpt, *uiOpt.tls_pinned_public_key);
 
     sessionNoHostVerification_ =
         openscp::capabilitiesForProtocol(uiOpt.protocol).supports_known_hosts &&

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "TestHarness.hpp"
+#include "openscp/ClientFactory.hpp"
 #include "openscp/RemoteClient.hpp"
 
 #include <algorithm>
@@ -429,6 +430,35 @@ inline void checkFtpEntryLookups(openscp::RemoteClient &client,
                        error, {}, {}, false)),
                "FTP: downloading a missing file should report NotFound: " +
                    error);
+}
+
+// With certificate verification off, a connection accepts the public key the
+// probe read and refuses any other one.
+inline void checkTlsKeyPinning(openscp::SessionOptions options,
+                               std::string_view label, TestContext &test) {
+    const std::string prefix = std::string(label) + ": ";
+    std::string pin;
+    std::string error;
+    test.check(openscp::FetchServerPublicKeyPin(options, pin, error) &&
+                   pin.starts_with("sha256//"),
+               prefix + "the TLS key probe should return a pin: " + error);
+    options.ftps_verify_peer = false;
+    options.webdav_verify_peer = false;
+    options.tls_pinned_public_key = pin;
+    auto pinned = openscp::CreateConnectedClient(options, error);
+    test.check(pinned != nullptr,
+               prefix + "the pinned key should be accepted: " + error);
+    if (pinned)
+        pinned->disconnect();
+
+    options.tls_pinned_public_key =
+        "sha256//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    auto client = openscp::CreateClientForProtocol(options.protocol);
+    error.clear();
+    test.check(client && !client->connect(options, error) &&
+                   client->lastOperationError().kind ==
+                       openscp::RemoteErrorKind::Certificate,
+               prefix + "another key should be refused: " + error);
 }
 
 inline int finishIntegration(std::string_view suiteName,

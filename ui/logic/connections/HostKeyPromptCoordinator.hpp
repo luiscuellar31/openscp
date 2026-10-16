@@ -14,6 +14,10 @@ namespace openscpui {
 
 class HostKeyPromptCoordinator final {
     public:
+    // An SSH host key, or the TLS public key of a server whose certificate
+    // is not verified.
+    enum class KeyKind { SshHostKey, TlsPublicKey };
+
     struct Prompt {
         QString host;
         quint16 port = 0;
@@ -21,6 +25,9 @@ class HostKeyPromptCoordinator final {
         QString fingerprint;
         bool canSave = false;
         quint64 requestId = 0;
+        KeyKind kind = KeyKind::SshHostKey;
+        // Another key was trusted for this server before.
+        bool keyChanged = false;
     };
 
     using PresentPrompt = std::function<void(const Prompt &)>;

@@ -14,14 +14,25 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 #endif
 
+#include <openssl/ec.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/ssl.h>
+#include <openssl/x509.h>
+
+#include <algorithm>
+#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <memory>
 #include <new>
 #include <optional>
 #include <stdexcept>
@@ -562,6 +573,342 @@ OPENSCP_TEST(testHttpProxyAuthenticationIsNegotiated, test) {
 }
 #endif
 
+// Made for this test with openssl req. The pin below came from `openssl
+// x509 -pubkey | openssl pkey -pubin -outform der | openssl dgst -sha256
+// -binary | base64`.
+constexpr char kTestCertificatePem[] = R"(-----BEGIN CERTIFICATE-----
+MIIBmDCCAT+gAwIBAgIUD6mJzHJ4UN+OvMSu6RA2Xf/0gTYwCgYIKoZIzj0EAwIw
+FDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI2MTAxNjA4MTEzMFoXDTI2MTExNTA4
+MTEzMFowFDESMBAGA1UEAwwJbG9jYWxob3N0MFkwEwYHKoZIzj0CAQYIKoZIzj0D
+AQcDQgAE2prEIsr6LUO6d2pcv//LBQZAqNsW3tB2RVIDd4hPlPoTgr5eVaOey5DD
+Fy9VZiuHvxyKb925otFbgm7npAaIR6NvMG0wHQYDVR0OBBYEFMLzn75ucgUVqzO5
+esEeBgZDpsfTMB8GA1UdIwQYMBaAFMLzn75ucgUVqzO5esEeBgZDpsfTMA8GA1Ud
+EwEB/wQFMAMBAf8wGgYDVR0RBBMwEYIJbG9jYWxob3N0hwR/AAABMAoGCCqGSM49
+BAMCA0cAMEQCIC/4sURVyIq6VEkYhVu0L/PdpF5VoUO0LWhtO6GMtfVOAiBkUXkr
+UErBZnu3mBabH5JWnZBPTJjCHWWvq+xN3ukCCg==
+-----END CERTIFICATE-----
+)";
+
+OPENSCP_TEST(testPublicKeyPinFromPem, test) {
+    std::string pin;
+    test.check(
+        openscp::curlcommon::publicKeyPinFromPem(kTestCertificatePem, pin) &&
+            pin == "sha256//2YrJaarPxRSYFIDRKwT33vyJAbXl2/gvXAORgj1y8To=",
+        "the pin should be the SHA-256 of the certificate's public key: " +
+            pin);
+    test.check(
+        !openscp::curlcommon::publicKeyPinFromPem("not a certificate", pin) &&
+            pin.empty(),
+        "text without a certificate should give no pin");
+}
+
+#if !defined(_WIN32) && (OPENSCP_HAS_CURL_FTP || OPENSCP_HAS_CURL_WEBDAV)
+// A server context with a new P-256 key and a self-signed certificate.
+struct TlsTestServerIdentity {
+    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> context{nullptr,
+                                                              &SSL_CTX_free};
+    std::string certificatePem;
+};
+
+TlsTestServerIdentity makeTlsTestServerIdentity() {
+    TlsTestServerIdentity identity;
+    std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)> keyContext(
+        EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr), &EVP_PKEY_CTX_free);
+    EVP_PKEY *generatedKey = nullptr;
+    if (!keyContext || EVP_PKEY_keygen_init(keyContext.get()) != 1 ||
+        EVP_PKEY_CTX_set_ec_paramgen_curve_nid(keyContext.get(),
+                                               NID_X9_62_prime256v1) != 1 ||
+        EVP_PKEY_keygen(keyContext.get(), &generatedKey) != 1)
+        return identity;
+    std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key(generatedKey,
+                                                            &EVP_PKEY_free);
+    std::unique_ptr<X509, decltype(&X509_free)> certificate(X509_new(),
+                                                            &X509_free);
+    if (!certificate)
+        return identity;
+    X509_NAME *name = X509_get_subject_name(certificate.get());
+    const auto *commonName = reinterpret_cast<const unsigned char *>("test");
+    std::unique_ptr<BIO, decltype(&BIO_free)> pem(BIO_new(BIO_s_mem()),
+                                                  &BIO_free);
+    if (X509_set_version(certificate.get(), 2) != 1 ||
+        ASN1_INTEGER_set(X509_get_serialNumber(certificate.get()), 1) != 1 ||
+        !X509_gmtime_adj(X509_getm_notBefore(certificate.get()), 0) ||
+        !X509_gmtime_adj(X509_getm_notAfter(certificate.get()), 3600) ||
+        X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, commonName, -1, -1,
+                                   0) != 1 ||
+        X509_set_issuer_name(certificate.get(), name) != 1 ||
+        X509_set_pubkey(certificate.get(), key.get()) != 1 ||
+        X509_sign(certificate.get(), key.get(), EVP_sha256()) <= 0 || !pem ||
+        PEM_write_bio_X509(pem.get(), certificate.get()) != 1)
+        return identity;
+    char *pemData = nullptr;
+    const long pemLength = BIO_get_mem_data(pem.get(), &pemData);
+    identity.context.reset(SSL_CTX_new(TLS_server_method()));
+    if (!identity.context ||
+        SSL_CTX_use_certificate(identity.context.get(), certificate.get()) !=
+            1 ||
+        SSL_CTX_use_PrivateKey(identity.context.get(), key.get()) != 1) {
+        identity.context.reset();
+        return identity;
+    }
+    identity.certificatePem.assign(pemData,
+                                   static_cast<std::size_t>(pemLength));
+    return identity;
+}
+
+// Serves the first connection on a loopback port with `serve`. Reads on that
+// socket give up after two seconds, so a quiet client cannot hang the test.
+class LoopbackServer final {
+    public:
+    explicit LoopbackServer(std::function<void(int socket)> serve) {
+        // A client that hangs up early, as a refused key makes curl do, must
+        // fail the server's next write instead of ending the test process.
+        std::signal(SIGPIPE, SIG_IGN);
+        listener_ = ::socket(AF_INET, SOCK_STREAM, 0);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        socklen_t addressLength = sizeof(address);
+        listening_ =
+            listener_ >= 0 &&
+            ::bind(listener_, reinterpret_cast<sockaddr *>(&address),
+                   sizeof(address)) == 0 &&
+            ::listen(listener_, 1) == 0 &&
+            ::getsockname(listener_, reinterpret_cast<sockaddr *>(&address),
+                          &addressLength) == 0;
+        port_ = ntohs(address.sin_port);
+        if (!listening_)
+            return;
+        thread_ = std::thread([this, serve = std::move(serve)] {
+            const int client = ::accept(listener_, nullptr, nullptr);
+            if (client < 0)
+                return;
+            timeval timeout{2, 0};
+            (void)::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+                               sizeof(timeout));
+            serve(client);
+            ::close(client);
+        });
+    }
+    ~LoopbackServer() {
+        if (listener_ >= 0)
+            ::shutdown(listener_, SHUT_RDWR);
+        if (thread_.joinable())
+            thread_.join();
+        if (listener_ >= 0)
+            ::close(listener_);
+    }
+    LoopbackServer(const LoopbackServer &) = delete;
+    LoopbackServer &operator=(const LoopbackServer &) = delete;
+
+    [[nodiscard]] bool listening() const { return listening_; }
+    [[nodiscard]] std::uint16_t port() const { return port_; }
+
+    private:
+    int listener_ = -1;
+    bool listening_ = false;
+    std::uint16_t port_ = 0;
+    std::thread thread_;
+};
+
+// What a client sent after the handshake, until it closed or went quiet.
+struct TlsSessionRecord {
+    bool handshake = false;
+    std::string received;
+};
+
+// Completes the server side of the handshake on `socket`, then hands the
+// session to `exchange`.
+void serveTls(SSL_CTX *context, int socket, TlsSessionRecord &record,
+              const std::function<void(SSL *)> &exchange) {
+    std::unique_ptr<SSL, decltype(&SSL_free)> ssl(SSL_new(context), &SSL_free);
+    if (!ssl || SSL_set_fd(ssl.get(), socket) != 1)
+        return;
+    record.handshake = SSL_accept(ssl.get()) == 1;
+    if (record.handshake)
+        exchange(ssl.get());
+}
+
+std::string readTlsUntilClosed(SSL *ssl) {
+    std::string data;
+    char buffer[1024];
+    int count = 0;
+    while ((count = SSL_read(ssl, buffer, sizeof(buffer))) > 0)
+        data.append(buffer, static_cast<std::size_t>(count));
+    return data;
+}
+#endif
+
+#if !defined(_WIN32) && OPENSCP_HAS_CURL_WEBDAV
+openscp::SessionOptions unverifiedWebDavOptions(std::uint16_t port) {
+    openscp::SessionOptions options;
+    options.protocol = openscp::Protocol::WebDav;
+    options.webdav_scheme = openscp::WebDavScheme::Https;
+    options.webdav_verify_peer = false;
+    options.host = "127.0.0.1";
+    options.port = port;
+    options.username = "user";
+    options.password = "secret";
+    return options;
+}
+
+OPENSCP_TEST(testWebDavKeyProbeSendsNoRequest, test) {
+    TlsTestServerIdentity identity = makeTlsTestServerIdentity();
+    std::string expectedPin;
+    test.check(identity.context && openscp::curlcommon::publicKeyPinFromPem(
+                                       identity.certificatePem, expectedPin),
+               "the test server identity should be created");
+    if (!identity.context)
+        return;
+
+    TlsSessionRecord probe;
+    std::string pin;
+    std::string error;
+    {
+        LoopbackServer server([&](int socket) {
+            serveTls(identity.context.get(), socket, probe, [&](SSL *ssl) {
+                probe.received = readTlsUntilClosed(ssl);
+            });
+        });
+        test.check(server.listening(), "the TLS server should listen");
+        (void)openscp::fetchWebDavServerPublicKeyPin(
+            unverifiedWebDavOptions(server.port()), pin, error);
+    }
+    test.check(pin == expectedPin,
+               "the probe should return the server's key pin: " + error);
+    test.check(probe.handshake && probe.received.empty(),
+               "the probe should send no request after the handshake");
+
+    TlsSessionRecord mismatch;
+    openscp::RemoteError mismatchError;
+    {
+        LoopbackServer server([&](int socket) {
+            serveTls(identity.context.get(), socket, mismatch, [&](SSL *ssl) {
+                mismatch.received = readTlsUntilClosed(ssl);
+            });
+        });
+        openscp::SessionOptions options =
+            unverifiedWebDavOptions(server.port());
+        options.tls_pinned_public_key =
+            "sha256//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        openscp::CurlWebDavClient client;
+        test.check(!client.connect(options, error),
+                   "a key other than the pinned one should be refused");
+        mismatchError = client.lastOperationError();
+    }
+    test.check(mismatchError.kind == openscp::RemoteErrorKind::Certificate,
+               "a key mismatch should be a certificate error: " +
+                   mismatchError.message);
+    test.check(mismatch.received.empty(),
+               "a key mismatch should stop before the request is sent");
+
+    TlsSessionRecord pinned;
+    {
+        LoopbackServer server([&](int socket) {
+            serveTls(identity.context.get(), socket, pinned, [&](SSL *ssl) {
+                char buffer[1024];
+                while (pinned.received.find("\r\n\r\n") == std::string::npos) {
+                    const int count = SSL_read(ssl, buffer, sizeof(buffer));
+                    if (count <= 0)
+                        return;
+                    pinned.received.append(buffer,
+                                           static_cast<std::size_t>(count));
+                }
+                constexpr char kReply[] = "HTTP/1.1 403 Forbidden\r\n"
+                                          "Content-Length: 0\r\n"
+                                          "Connection: close\r\n\r\n";
+                (void)SSL_write(ssl, kReply, sizeof(kReply) - 1);
+            });
+        });
+        openscp::SessionOptions options =
+            unverifiedWebDavOptions(server.port());
+        options.tls_pinned_public_key = expectedPin;
+        openscp::CurlWebDavClient client;
+        (void)client.connect(options, error);
+    }
+    test.check(pinned.received.starts_with("PROPFIND "),
+               "the pinned key should let the request through");
+}
+#endif
+
+#if !defined(_WIN32) && OPENSCP_HAS_CURL_FTP
+std::string readPlainLine(int socket) {
+    std::string line;
+    char character = 0;
+    while (::recv(socket, &character, 1, 0) == 1 && character != '\n')
+        line.push_back(character);
+    if (!line.empty() && line.back() == '\r')
+        line.pop_back();
+    return line;
+}
+
+std::string readTlsLine(SSL *ssl) {
+    std::string line;
+    char character = 0;
+    while (SSL_read(ssl, &character, 1) == 1 && character != '\n')
+        line.push_back(character);
+    if (!line.empty() && line.back() == '\r')
+        line.pop_back();
+    return line;
+}
+
+OPENSCP_TEST(testFtpsKeyProbeNeverSendsAPassword, test) {
+    TlsTestServerIdentity identity = makeTlsTestServerIdentity();
+    std::string expectedPin;
+    test.check(identity.context && openscp::curlcommon::publicKeyPinFromPem(
+                                       identity.certificatePem, expectedPin),
+               "the test server identity should be created");
+    if (!identity.context)
+        return;
+
+    TlsSessionRecord session;
+    std::vector<std::string> commands;
+    std::string pin;
+    std::string error;
+    {
+        LoopbackServer server([&](int socket) {
+            constexpr char kGreeting[] = "220 test\r\n";
+            (void)::send(socket, kGreeting, sizeof(kGreeting) - 1, 0);
+            if (readPlainLine(socket) != "AUTH TLS")
+                return;
+            constexpr char kAuthReply[] = "234 go ahead\r\n";
+            (void)::send(socket, kAuthReply, sizeof(kAuthReply) - 1, 0);
+            serveTls(identity.context.get(), socket, session, [&](SSL *ssl) {
+                for (std::string line = readTlsLine(ssl); !line.empty();
+                     line = readTlsLine(ssl)) {
+                    commands.push_back(line);
+                    const std::string reply = line.starts_with("USER ")
+                                                  ? "331 password\r\n"
+                                                  : "530 no\r\n";
+                    (void)SSL_write(ssl, reply.data(),
+                                    static_cast<int>(reply.size()));
+                }
+            });
+        });
+        test.check(server.listening(), "the FTPS server should listen");
+        openscp::SessionOptions options;
+        options.protocol = openscp::Protocol::Ftps;
+        options.ftps_mode = openscp::FtpsMode::ExplicitTls;
+        options.ftps_verify_peer = false;
+        options.host = "127.0.0.1";
+        options.port = server.port();
+        options.username = "user";
+        options.password = "secret";
+        (void)openscp::fetchFtpsServerPublicKeyPin(options, pin, error);
+    }
+    test.check(pin == expectedPin,
+               "the probe should return the server's key pin: " + error);
+    test.check(session.handshake && !commands.empty() &&
+                   commands.front() == "USER anonymous",
+               "the probe should log in anonymously, not as the user");
+    test.check(std::none_of(commands.begin(), commands.end(),
+                            [](const std::string &command) {
+                                return command.starts_with("PASS");
+                            }),
+               "the probe should stop before sending a password");
+}
+#endif
+
 OPENSCP_TEST(testCurlTransportPolicy, test) {
     using openscp::curlcommon::configureAllowedProtocol;
     using openscp::curlcommon::configureTlsPolicy;
@@ -595,8 +942,10 @@ OPENSCP_TEST(testCurlTransportPolicy, test) {
                    std::string("allowed protocol should configure: ") + error);
         if (allowed.tls) {
             const std::optional<std::string> caPath = "openscp-test-ca.pem";
+            const std::optional<std::string> pin =
+                "sha256//2YrJaarPxRSYFIDRKwT33vyJAbXl2/gvXAORgj1y8To=";
             const bool tlsConfigured =
-                configureTlsPolicy(session.get(), true, caPath,
+                configureTlsPolicy(session.get(), true, caPath, pin,
                                    "Could not enforce test TLS minimum.",
                                    "Could not configure test TLS verification.",
                                    "Could not configure test CA path.", error);

@@ -1207,7 +1207,7 @@ Continue?</source>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="702"/>
         <location filename="../ui/app/MainWindow.cpp" line="752"/>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1449"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1503"/>
         <source>Saved sites</source>
         <translation>Sitios guardados</translation>
     </message>
@@ -1577,38 +1577,38 @@ Continue?</source>
         <translation>Borrados: %1  |  Fallidos: %2</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="659"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="660"/>
         <source>Disconnected</source>
         <translation>Desconectado</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="461"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="462"/>
         <source>OpenSCP — local/local</source>
         <translation>OpenSCP — local/local</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="771"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="772"/>
         <source>Critical security risk</source>
         <translation>Riesgo crítico de seguridad</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="781"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="782"/>
         <source>Additional confirmation required</source>
         <translation>Confirmación adicional requerida</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="782"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="783"/>
         <source>To confirm, type exactly %1</source>
         <translation>Para confirmar, escribe exactamente %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="787"/>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1325"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="788"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1374"/>
         <source>Connection canceled</source>
         <translation>Conexión cancelada</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="788"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="789"/>
         <source>Risk confirmation was not completed correctly.</source>
         <translation>No se confirmó el riesgo de forma válida.</translation>
     </message>
@@ -1923,12 +1923,12 @@ Continue?</source>
         <translation>Error al aplicar cambios.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="872"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="873"/>
         <source>Confirm SSH fingerprint</source>
         <translation>Confirmar huella SSH</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="882"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="900"/>
         <source>Connect to %1
 Algorithm: %2
 Fingerprint: %3
@@ -1941,7 +1941,7 @@ Huella: %3
 ¿Confiar y guardar en known_hosts?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="875"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="893"/>
         <source>Connect to %1
 Algorithm: %2
 Fingerprint: %3
@@ -1954,18 +1954,18 @@ Huella: %3
 No se podrá guardar la huella. Conexión solo por esta vez.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="889"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="907"/>
         <source>Trust</source>
         <translation>Confiar</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="889"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="907"/>
         <source>Connect without saving</source>
         <translation>Conectar sin guardar</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="891"/>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1031"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="910"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1052"/>
         <location filename="../ui/app/MainWindowSync.cpp" line="38"/>
         <location filename="../ui/app/MainWindowSync.cpp" line="140"/>
         <location filename="../ui/app/MainWindowTransfers.cpp" line="187"/>
@@ -1979,12 +1979,12 @@ No se podrá guardar la huella. Conexión solo por esta vez.</translation>
         <translation>Cancelar</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="922"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="943"/>
         <source>Could not save fingerprint; allowing one-time connection</source>
         <translation>No se pudo guardar la huella, conexión permitida solo esta vez</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="926"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="947"/>
         <source>Connection cancelled: fingerprint not accepted</source>
         <translation>Conexión cancelada: huella no aceptada</translation>
     </message>
@@ -2005,135 +2005,135 @@ No se podrá guardar la huella. Conexión solo por esta vez.</translation>
         <translation>Encolados: %1 descargas (DND)</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="953"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="974"/>
         <source>A connection is already in progress</source>
         <translation>Ya hay una conexión en progreso</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1031"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1052"/>
         <source>Connecting…</source>
         <translation>Conectando…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1038"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1059"/>
         <source>Canceling connection…</source>
         <translation>Cancelando conexión…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1135"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1156"/>
         <source>Password required</source>
         <translation>Contraseña requerida</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1150"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1171"/>
         <source>Verification code required</source>
         <translation>Código de verificación requerido</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1160"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1181"/>
         <source>Information required</source>
         <translation>Información requerida</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1328"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1377"/>
         <source>Connection error</source>
         <translation>Error de conexión</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1329"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1378"/>
         <source>Could not connect to the server.
 %1</source>
         <translation>No fue posible conectar con el servidor.
 %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1331"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1380"/>
         <source>Check host, port, and credentials.</source>
         <translation>Revisa host, puerto y credenciales.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1434"/>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1459"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1488"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1513"/>
         <source>Connected. Site saved.</source>
         <translation>Conectado. Sitio guardado.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1435"/>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1462"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1489"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1516"/>
         <source>Connected. Site already exists.</source>
         <translation>Conectado. Sitio ya existente.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1436"/>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1465"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1490"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1519"/>
         <source>Site saved.</source>
         <translation>Sitio guardado.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1436"/>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1467"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1490"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1521"/>
         <source>Site already exists.</source>
         <translation>Sitio ya existente.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1450"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1504"/>
         <source>The site was saved, but some credentials could not be saved:
 %1</source>
         <translation>El sitio se guardó, pero no fue posible guardar algunas credenciales:
 %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="378"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="379"/>
         <source>Please wait while active transfers are canceled</source>
         <translation>Espera mientras se cancelan las transferencias activas</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="391"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="392"/>
         <source>Disconnecting… waiting for active transfers to stop</source>
         <translation>Desconectando… esperando a que se detengan las transferencias activas</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="471"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="472"/>
         <source>Disconnect timeout reached; forcing local mode while cleanup continues</source>
         <translation>Se alcanzó el tiempo límite de desconexión; forzando modo local mientras la limpieza continúa</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="523"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="524"/>
         <source>Background transfer cleanup finished</source>
         <translation>Limpieza de transferencias en segundo plano finalizada</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="656"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="657"/>
         <source>Disconnected (transfer cleanup still finishing in background)</source>
         <translation>Desconectado (la limpieza de transferencias sigue finalizando en segundo plano)</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="947"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="968"/>
         <source>Please wait: previous transfer cleanup is still running (%1s)</source>
         <translation>Espera: la limpieza de transferencias anterior sigue en ejecución (%1s)</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1458"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1512"/>
         <source>Connected. Site and credentials saved.</source>
         <translation>Conectado. Sitio y credenciales guardados.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1461"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1515"/>
         <source>Connected. Credentials updated.</source>
         <translation>Conectado. Credenciales actualizadas.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1464"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1518"/>
         <source>Site and credentials saved.</source>
         <translation>Sitio y credenciales guardados.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1466"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1520"/>
         <source>Credentials updated.</source>
         <translation>Credenciales actualizadas.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1509"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1563"/>
         <source>Not available in remote mode</source>
         <translation>No disponible en modo remoto</translation>
     </message>
@@ -2235,65 +2235,65 @@ No se podrá guardar la huella. Conexión solo por esta vez.</translation>
         <translation>%1 transferencias completadas</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="333"/>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="994"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="334"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1015"/>
         <source>Invalid transport configuration</source>
         <translation>Configuración de transporte inválida</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="334"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="335"/>
         <source>Proxy and SSH jump host cannot be used together in the same connection.
 Choose only one transport method.</source>
         <translation>El proxy y el host de salto SSH no pueden usarse juntos en la misma conexión.
 Elige solo un método de transporte.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="337"/>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="998"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="338"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1019"/>
         <source>Connection canceled: invalid transport configuration</source>
         <translation>Conexión cancelada: configuración de transporte inválida</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="343"/>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="967"/>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1004"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="344"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="988"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1025"/>
         <source>Unsupported transport</source>
         <translation>Transporte no compatible</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="982"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1003"/>
         <source>SSH jump host is not available for %1.</source>
         <translation>El host de salto SSH no está disponible para %1.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="983"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1004"/>
         <source>Connection canceled: SSH jump host is not supported for %1</source>
         <translation>Conexión cancelada: el host de salto SSH no es compatible para %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="988"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1009"/>
         <source>Proxy settings are not available for %1.</source>
         <translation>La configuración de proxy no está disponible para %1.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="989"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1010"/>
         <source>Connection canceled: proxy is not supported for %1</source>
         <translation>Conexión cancelada: el proxy no es compatible para %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="344"/>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1005"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="345"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1026"/>
         <source>SSH jump host is currently unavailable on Windows.</source>
         <translation>El host de salto SSH no está disponible actualmente en Windows.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="346"/>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1007"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="347"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1028"/>
         <source>Connection canceled: SSH jump host is unsupported on Windows</source>
         <translation>Conexión cancelada: el host de salto SSH no es compatible en Windows</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="995"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1016"/>
         <source>Proxy and SSH jump host cannot be used together in the same connection.
 Edit the site and keep only one transport.</source>
         <translation>El proxy y el host de salto SSH no pueden usarse juntos en la misma conexión.
@@ -2411,32 +2411,32 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
         <translation>No hay sesión remota activa.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="958"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="979"/>
         <source>An active remote session already exists</source>
         <translation>Ya existe una sesión remota activa</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="973"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="994"/>
         <source>Protocol not available</source>
         <translation>Protocolo no disponible</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="974"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="995"/>
         <source>%1 support is not implemented yet.</source>
         <translation>El soporte para %1 aún no está implementado.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="976"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="997"/>
         <source>Connection canceled: unsupported protocol %1</source>
         <translation>Conexión cancelada: protocolo no compatible %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1516"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1570"/>
         <source>Connected (%1) to %2</source>
         <translation>Conectado (%1) a %2</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1520"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1574"/>
         <source>OpenSCP — local/remote (%1)</source>
         <translation>OpenSCP — local/remoto (%1)</translation>
     </message>
@@ -2547,42 +2547,42 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
         <translation>Quitar de favoritos</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="554"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="555"/>
         <source>Transfers are still active</source>
         <translation>Aún hay transferencias activas</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="556"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="557"/>
         <source>%1 transfer(s) are still active for this session.</source>
         <translation>%1 transferencia(s) siguen activas para esta sesión.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="559"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="560"/>
         <source>Choose whether to keep their progress for the next connection, cancel them, or stay connected.</source>
         <translation>Elige si deseas conservar su progreso para la siguiente conexión, cancelarlas o mantener la conexión.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="561"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="562"/>
         <source>Pause and disconnect</source>
         <translation>Pausar y desconectar</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="563"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="564"/>
         <source>Cancel and disconnect</source>
         <translation>Cancelar y desconectar</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="566"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="567"/>
         <source>Stay connected</source>
         <translation>Mantener la conexión</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="632"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="633"/>
         <source>Paths not saved</source>
         <translation>Rutas no guardadas</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="757"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="758"/>
         <source>This connection does not encrypt credentials, file names, or file contents. Anyone able to observe the network may read or modify them.
 
 Continue only for a trusted network or legacy server?</source>
@@ -2591,7 +2591,7 @@ Continue only for a trusted network or legacy server?</source>
 ¿Continuar sólo en una red de confianza o con un servidor antiguo?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="762"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="763"/>
         <source>TLS encryption is enabled, but the server certificate will not be verified. This allows server impersonation and man-in-the-middle attacks.
 
 Continue at your own risk?</source>
@@ -2600,7 +2600,7 @@ Continue at your own risk?</source>
 ¿Continuar bajo tu responsabilidad?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="766"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="767"/>
         <source>The SSH host key will not be verified. This allows server impersonation and man-in-the-middle attacks.
 
 Continue at your own risk?</source>
@@ -2609,57 +2609,86 @@ Continue at your own risk?</source>
 ¿Continuar bajo tu responsabilidad?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="771"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="772"/>
         <source>Insecure connection</source>
         <translation>Conexión insegura</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="801"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="802"/>
         <source>Temporary security exception active until %1</source>
         <translation>Excepción temporal de seguridad activa hasta %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="824"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="825"/>
         <source>This security exception applies only to the current session.</source>
         <translation>Esta excepción de seguridad sólo se aplica a la sesión actual.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1014"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="877"/>
+        <source>Confirm TLS public key</source>
+        <translation>Confirmar clave pública TLS</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="880"/>
+        <source>The TLS public key of %1 has changed.
+New fingerprint: %2
+
+Someone may be intercepting the connection, or the server may have a new key. Trust the new key only if you expected this change.</source>
+        <translation>La clave pública TLS de %1 ha cambiado.
+Huella nueva: %2
+
+Alguien podría estar interceptando la conexión, o el servidor podría tener una clave nueva. Confía en la clave nueva solo si esperabas este cambio.</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="886"/>
+        <source>Connect to %1
+The server certificate is not verified for this connection.
+Public key fingerprint: %2
+
+Trust this key? Later connections will refuse any other key.</source>
+        <translation>Conectar a %1
+El certificado del servidor no se verifica en esta conexión.
+Huella de la clave pública: %2
+
+¿Confiar en esta clave? Las conexiones posteriores rechazarán cualquier otra clave.</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1035"/>
         <source>Connection canceled: security exception not confirmed</source>
         <translation>Conexión cancelada: no se confirmó la excepción de seguridad</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1340"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1394"/>
         <source>Insecure: FTP traffic is not encrypted</source>
         <translation>Inseguro: el tráfico FTP no está cifrado</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1344"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1398"/>
         <source>Insecure: WebDAV HTTP traffic is not encrypted</source>
         <translation>Inseguro: el tráfico HTTP de WebDAV no está cifrado</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1350"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1404"/>
         <source>Risk: TLS certificate is not verified</source>
         <translation>Riesgo: no se verifica el certificado TLS</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1352"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1406"/>
         <source>Risk: SSH host key is not verified</source>
         <translation>Riesgo: no se verifica la clave de host SSH</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1421"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1475"/>
         <source>Site not saved</source>
         <translation>Sitio no guardado</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1423"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1477"/>
         <source>Connected. Site was not saved.</source>
         <translation>Conectado. El sitio no se guardó.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="1424"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="1478"/>
         <source>Site was not saved.</source>
         <translation>El sitio no se guardó.</translation>
     </message>
@@ -3265,8 +3294,8 @@ Scan them again without this limit?</source>
 <context>
     <name>QObject</name>
     <message>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="187"/>
-        <location filename="../ui/app/MainWindowConnection.cpp" line="200"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="188"/>
+        <location filename="../ui/app/MainWindowConnection.cpp" line="201"/>
         <source>New site</source>
         <translation>Nuevo sitio</translation>
     </message>
@@ -5038,7 +5067,7 @@ Destino: %3</translation>
         <translation>El directorio de almacenamiento de la cola de transferencias no está disponible.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="3144"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="3149"/>
         <source>The saved transfer queue was not restored because the current queue is not empty.</source>
         <translation>La cola de transferencias guardada no se restauró porque la cola actual no está vacía.</translation>
     </message>

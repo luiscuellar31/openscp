@@ -51,6 +51,11 @@ struct SessionOptions {
     bool webdav_verify_peer = true;
     std::optional<std::string> webdav_ca_cert_path;
 
+    // Pin of the server's TLS public key: "sha256//" and the Base64 SHA-256
+    // of its SubjectPublicKeyInfo. FTPS and HTTPS WebDAV refuse any other
+    // key, also when certificate verification is off.
+    std::optional<std::string> tls_pinned_public_key;
+
     ProxyType proxy_type = ProxyType::None;
     std::string proxy_host;
     std::uint16_t proxy_port = 0;
@@ -69,5 +74,14 @@ struct SessionOptions {
     std::function<void(const std::string &message)> hostkey_status_cb;
     KbdIntPromptsCB keyboard_interactive_cb;
 };
+
+// Whether the connection uses TLS without verifying the server certificate.
+inline bool skipsTlsCertificateVerification(const SessionOptions &opt) {
+    if (opt.protocol == Protocol::Ftps)
+        return !opt.ftps_verify_peer;
+    return opt.protocol == Protocol::WebDav &&
+           normalizeWebDavScheme(opt.webdav_scheme) == WebDavScheme::Https &&
+           !opt.webdav_verify_peer;
+}
 
 } // namespace openscp

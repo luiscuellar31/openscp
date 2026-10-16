@@ -229,6 +229,10 @@ if(OPENSCP_CORE_HAS_CURL_FTP OR OPENSCP_CORE_HAS_CURL_WEBDAV)
         INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/src
         LINK_LIBRARIES openscp_core
     )
+    # The TLS key probe tests run a loopback TLS server.
+    find_package(OpenSSL REQUIRED COMPONENTS SSL Crypto)
+    target_link_libraries(openscp_curl_backend_common_tests
+        PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     openscp_add_test(openscp_curl_listing_parser_tests
         SOURCES curl_listing_parser_tests.cpp
         INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/src

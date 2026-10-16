@@ -67,6 +67,9 @@ inline constexpr char kWebDavCaCertPathDefault[] =
     "Security/webdavCaCertPathDefault";
 inline constexpr char kKnownHostsHashed[] = "Security/knownHostsHashed";
 inline constexpr char kFingerprintHex[] = "Security/fpHex";
+// Group of TLS public key pins trusted for connections without certificate
+// verification, keyed by protocol, host and port.
+inline constexpr char kTlsKeyPins[] = "Security/tlsKeyPins";
 inline constexpr char kNoHostVerificationTtlMinutes[] =
     "Security/noHostVerificationTtlMin";
 inline constexpr int kDefaultNoHostVerificationTtlMinutes = 15;

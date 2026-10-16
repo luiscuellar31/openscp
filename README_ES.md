@@ -135,6 +135,8 @@ pasos manuales, empaquetado y solución de problemas.
 - Sitios guardados con Keychain en macOS y Secret Service/libsecret en Linux.
 - Verificación estricta de claves SSH, con aceptación de claves nuevas o
   deshabilitada explícitamente.
+- FTPS y WebDAV por HTTPS sin verificación del certificado siguen comprobando
+  la clave pública del servidor, en la que confías en la primera conexión.
 - Proxies SOCKS5 y HTTP CONNECT, además de servidores de salto SSH cuando el
   protocolo lo permite.
 - Sincronización unidireccional con vista previa, filtros y sumas de

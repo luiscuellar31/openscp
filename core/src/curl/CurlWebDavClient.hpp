@@ -9,6 +9,11 @@ namespace curlcommon {
 class CurlClientState;
 }
 
+// Reads the server's TLS public key without credentials; see
+// FetchServerPublicKeyPin.
+bool fetchWebDavServerPublicKeyPin(const SessionOptions &opt, std::string &pin,
+                                   std::string &err);
+
 class CurlWebDavClient : public RemoteClient {
     public:
     CurlWebDavClient();

@@ -165,6 +165,7 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
     if (webDavScheme == WebDavScheme::Https) {
         if (!curlcommon::configureTlsPolicy(
                 curl, opt.webdav_verify_peer, opt.webdav_ca_cert_path,
+                opt.tls_pinned_public_key,
                 "Could not enforce the WebDAV TLS 1.2 minimum.",
                 "Could not configure WebDAV TLS verification policy.",
                 "Could not configure WebDAV TLS CA bundle.", err)) {
@@ -450,6 +451,37 @@ bool probeWebDavResource(CURL *curl, const SessionOptions &opt,
 }
 
 } // namespace
+
+bool fetchWebDavServerPublicKeyPin(const SessionOptions &opt, std::string &pin,
+                                   std::string &err) {
+    pin.clear();
+    err.clear();
+    if (opt.protocol != Protocol::WebDav ||
+        normalizeWebDavScheme(opt.webdav_scheme) != WebDavScheme::Https) {
+        err = "Only HTTPS WebDAV connections present a TLS certificate.";
+        return false;
+    }
+    if (!curlcommon::validateUrlHost(opt.host, "WebDAV host", err) ||
+        !ensureCurlInitialized(err))
+        return false;
+    SessionOptions probeOptions = opt;
+    probeOptions.username.clear();
+    probeOptions.password.reset();
+    probeOptions.webdav_scheme = WebDavScheme::Https;
+    probeOptions.webdav_base_path =
+        normalizeWebDavBasePath(probeOptions.webdav_base_path);
+    probeOptions.webdav_verify_peer = false;
+    probeOptions.tls_pinned_public_key.reset();
+    if (probeOptions.port == 0)
+        probeOptions.port = defaultPortForWebDavScheme(WebDavScheme::Https);
+    curlcommon::CurlEasySession session;
+    if (!session.initialize(err) ||
+        !configureCommonCurlHandle(session.get(), probeOptions, false, err))
+        return false;
+    return curlcommon::readServerPublicKeyPin(
+        session.get(), buildWebDavUrl(probeOptions, "/"),
+        opt.connection_stop_token, pin, err);
+}
 
 CurlWebDavClient::CurlWebDavClient()
     : state_(std::make_unique<curlcommon::CurlClientState>(

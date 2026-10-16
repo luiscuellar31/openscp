@@ -170,6 +170,8 @@ int main() {
     };
     openscp::testsupport::runManagedFilesContract(
         *client, openscp::Protocol::WebDav, "WebDAV", *remoteBase, t, hooks);
+    if (opt.webdav_scheme == openscp::WebDavScheme::Https)
+        openscp::testsupport::checkTlsKeyPinning(opt, "WebDAV", t);
     return openscp::testsupport::finishIntegration(
         "openscp_webdav_integration_tests", t);
 }

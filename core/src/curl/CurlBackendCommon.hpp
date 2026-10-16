@@ -16,6 +16,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 
@@ -209,9 +210,20 @@ bool configureProxy(CURL *curl, const SessionOptions &opt,
 
 bool configureTlsPolicy(CURL *curl, bool verifyPeer,
                         const std::optional<std::string> &caCertPath,
+                        const std::optional<std::string> &pinnedPublicKey,
                         const char *minimumVersionError,
                         const char *verificationError, const char *caPathError,
                         std::string &err);
+
+// The CURLOPT_PINNEDPUBLICKEY form of a PEM certificate's public key.
+bool publicKeyPinFromPem(std::string_view pem, std::string &pin);
+
+// Performs a request to `url` that ends once the TLS handshake shows the
+// server certificate, and returns the pin of its public key. The handle must
+// not carry credentials: an FTP server still receives USER, but never PASS.
+bool readServerPublicKeyPin(CURL *curl, const std::string &url,
+                            const std::stop_token &stop, std::string &pin,
+                            std::string &err);
 
 inline constexpr std::size_t kMaxMetadataResponseBytes = 64 * 1024 * 1024;
 

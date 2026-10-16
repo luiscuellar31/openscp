@@ -5,6 +5,12 @@
 #include "openscp/RemotePath.hpp"
 #include "openscp/SafeLocalFile.hpp"
 
+#include <openssl/bio.h>
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
@@ -808,6 +814,7 @@ bool configureProxy(CURL *curl, const SessionOptions &opt,
 
 bool configureTlsPolicy(CURL *curl, bool verifyPeer,
                         const std::optional<std::string> &caCertPath,
+                        const std::optional<std::string> &pinnedPublicKey,
                         const char *minimumVersionError,
                         const char *verificationError, const char *caPathError,
                         std::string &err) {
@@ -837,7 +844,115 @@ bool configureTlsPolicy(CURL *curl, bool verifyPeer,
             return false;
         }
     }
+    if (pinnedPublicKey && !pinnedPublicKey->empty()) {
+        if (curl_easy_setopt(curl, CURLOPT_PINNEDPUBLICKEY,
+                             pinnedPublicKey->c_str()) != CURLE_OK) {
+            err = "This libcurl build cannot pin the server's TLS public key.";
+            return false;
+        }
+    }
     return true;
+}
+
+bool publicKeyPinFromPem(std::string_view pem, std::string &pin) {
+    pin.clear();
+    if (pem.empty() ||
+        pem.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+        return false;
+    std::unique_ptr<BIO, decltype(&BIO_free)> bio(
+        BIO_new_mem_buf(pem.data(), static_cast<int>(pem.size())), &BIO_free);
+    if (!bio)
+        return false;
+    std::unique_ptr<X509, decltype(&X509_free)> certificate(
+        PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr), &X509_free);
+    if (!certificate)
+        return false;
+    unsigned char *der = nullptr;
+    const int derLength =
+        i2d_X509_PUBKEY(X509_get_X509_PUBKEY(certificate.get()), &der);
+    if (derLength <= 0)
+        return false;
+    const auto freeDer = [](unsigned char *bytes) { OPENSSL_free(bytes); };
+    std::unique_ptr<unsigned char, decltype(freeDer)> ownedDer(der, freeDer);
+    unsigned char digest[EVP_MAX_MD_SIZE] = {};
+    unsigned int digestLength = 0;
+    if (EVP_Digest(der, static_cast<std::size_t>(derLength), digest,
+                   &digestLength, EVP_sha256(), nullptr) != 1)
+        return false;
+    unsigned char encoded[4 * ((EVP_MAX_MD_SIZE + 2) / 3) + 1] = {};
+    const int encodedLength =
+        EVP_EncodeBlock(encoded, digest, static_cast<int>(digestLength));
+    if (encodedLength <= 0)
+        return false;
+    pin = "sha256//" + std::string(reinterpret_cast<const char *>(encoded),
+                                   static_cast<std::size_t>(encodedLength));
+    return true;
+}
+
+namespace {
+
+bool hasServerCertificate(CURL *curl) {
+    struct curl_certinfo *info = nullptr;
+    return curl_easy_getinfo(curl, CURLINFO_CERTINFO, &info) == CURLE_OK &&
+           info && info->num_of_certs > 0;
+}
+
+// FTP logs in while it connects. The first reply after the handshake stops
+// the probe, so the server sees USER but never PASS.
+size_t stopAfterServerCertificate(char *, size_t size, size_t nmemb,
+                                  void *userdata) {
+    if (hasServerCertificate(static_cast<CURL *>(userdata)))
+        return 0;
+    return size * nmemb;
+}
+
+} // namespace
+
+bool readServerPublicKeyPin(CURL *curl, const std::string &url,
+                            const std::stop_token &stop, std::string &pin,
+                            std::string &err) {
+    pin.clear();
+    TransferProgressContext cancelContext;
+    cancelContext.shouldCancel = [&stop] { return stop.stop_requested(); };
+    if (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_CERTINFO, 1L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 1L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION,
+                         stopAfterServerCertificate) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_HEADERDATA, curl) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
+                         transferProgressCallback) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &cancelContext) !=
+            CURLE_OK) {
+        err = "Could not configure the TLS public key check.";
+        return false;
+    }
+    std::string detail;
+    const CURLcode code = performWithErrorDetail(curl, detail);
+    if (stop.stop_requested()) {
+        err = "Connection canceled by user";
+        return false;
+    }
+    struct curl_certinfo *info = nullptr;
+    if (curl_easy_getinfo(curl, CURLINFO_CERTINFO, &info) != CURLE_OK ||
+        !info || info->num_of_certs <= 0) {
+        err = code == CURLE_OK
+                  ? std::string("The server did not present a certificate.")
+                  : curlFailureText(code, detail);
+        return false;
+    }
+    // The server's own certificate comes first in the chain.
+    constexpr std::string_view kCertificateField = "Cert:";
+    for (const curl_slist *field = info->certinfo[0]; field;
+         field = field->next) {
+        const std::string_view text = field->data ? field->data : "";
+        if (text.starts_with(kCertificateField) &&
+            publicKeyPinFromPem(text.substr(kCertificateField.size()), pin))
+            return true;
+    }
+    err = "Could not read the public key of the server certificate.";
+    return false;
 }
 
 size_t appendStringCallback(char *ptr, size_t size, size_t nmemb,

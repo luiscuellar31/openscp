@@ -162,6 +162,15 @@ the I/O mutex, so shutdown can unblock an active operation without reversing
 the I/O-to-state lock order. Session and socket ownership are then detached
 under both locks; only the caller that detaches them performs cleanup.
 
+FTPS and HTTPS WebDAV connections that skip certificate verification pin the
+server's TLS public key. Before the control connection, the connection worker
+reads the key through `FetchServerPublicKeyPin`, a handshake without
+credentials, and `TlsKeyTrust` compares it with the pin remembered for that
+protocol, host and port. A new or changed key goes through the host-key prompt;
+once trusted, the session's options carry the pin, so libcurl refuses any other
+key on the control, worker and reopened connections. The pin is remembered
+after the connection succeeds.
+
 `AuthenticationInput` opens a window-modal input dialog without a nested event loop and
 waits on shared reply state with the connection stop token. Pending and visible
 prompts can be canceled without the worker requiring UI event dispatch; a

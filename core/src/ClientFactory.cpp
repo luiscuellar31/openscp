@@ -64,4 +64,30 @@ std::unique_ptr<RemoteClient> CreateConnectedClient(const SessionOptions &opt,
     return client;
 }
 
+bool FetchServerPublicKeyPin(const SessionOptions &opt, std::string &pin,
+                             std::string &err) {
+    pin.clear();
+    err.clear();
+    if (opt.connection_stop_token.stop_requested()) {
+        err = "Connection canceled by user";
+        return false;
+    }
+#if defined(OPENSCP_DEMO_MODE) && OPENSCP_DEMO_MODE
+    err = "The demo has no TLS servers.";
+    return false;
+#else
+#if defined(OPENSCP_HAS_CURL_FTP) && OPENSCP_HAS_CURL_FTP
+    if (opt.protocol == Protocol::Ftps)
+        return fetchFtpsServerPublicKeyPin(opt, pin, err);
+#endif
+#if defined(OPENSCP_HAS_CURL_WEBDAV) && OPENSCP_HAS_CURL_WEBDAV
+    if (opt.protocol == Protocol::WebDav)
+        return fetchWebDavServerPublicKeyPin(opt, pin, err);
+#endif
+    err = std::string("No TLS certificate check for protocol: ") +
+          protocolStorageName(opt.protocol);
+    return false;
+#endif
+}
+
 } // namespace openscp

@@ -1,7 +1,9 @@
+#include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "logic/connections/ConnectionStatusCoordinator.hpp"
 #include "logic/connections/HostKeyPromptCoordinator.hpp"
 #include "logic/connections/SessionHealthMonitor.hpp"
+#include "logic/connections/TlsKeyTrust.hpp"
 
 #include <QCoreApplication>
 #include <QVector>
@@ -292,6 +294,89 @@ OPENSCP_TEST(testConnectionStatusLifecycle, test) {
                    snapshots.back().connectionType.isEmpty() &&
                    snapshots.back().elapsedSeconds == 0,
                "reset should stop and clear connection session state");
+}
+
+openscp::SessionOptions unverifiedFtpsOptions() {
+    openscp::SessionOptions options;
+    options.protocol = openscp::Protocol::Ftps;
+    options.host = "Files.Example";
+    options.port = 990;
+    options.ftps_verify_peer = false;
+    return options;
+}
+
+OPENSCP_TEST(testTlsKeyIsTrustedOnFirstUseAndWhenChanged, test) {
+    const std::string serverPin = "sha256//c2VydmVyLWtleQ==";
+    const openscpui::FetchTlsKeyPin fetch =
+        [&](const openscp::SessionOptions &, std::string &pin, std::string &) {
+            pin = serverPin;
+            return true;
+        };
+    std::vector<bool> askedAsChange;
+    bool answer = true;
+    const openscpui::ConfirmTlsKey confirm = [&](const std::string &pin,
+                                                 bool changed) {
+        askedAsChange.push_back(changed && pin == serverPin);
+        return answer;
+    };
+    openscp::SessionOptions options = unverifiedFtpsOptions();
+    std::string error;
+
+    test.check(openscpui::pinServerTlsKey(options, fetch, confirm, error) &&
+                   options.tls_pinned_public_key == serverPin &&
+                   askedAsChange == std::vector<bool>{false},
+               "a first key should be pinned once the user trusts it");
+
+    askedAsChange.clear();
+    test.check(openscpui::pinServerTlsKey(options, fetch, confirm, error) &&
+                   askedAsChange.empty(),
+               "the trusted key should not be asked about again");
+
+    const std::string previousPin = "sha256//cHJldmlvdXMta2V5";
+    options.tls_pinned_public_key = previousPin;
+    answer = false;
+    test.check(!openscpui::pinServerTlsKey(options, fetch, confirm, error) &&
+                   askedAsChange == std::vector<bool>{true} &&
+                   options.tls_pinned_public_key == previousPin &&
+                   !error.empty(),
+               "a changed key should be asked about as a change and refused "
+               "when the user declines");
+
+    askedAsChange.clear();
+    const openscpui::FetchTlsKeyPin unreachable =
+        [](const openscp::SessionOptions &, std::string &, std::string &e) {
+            e = "unreachable";
+            return false;
+        };
+    test.check(
+        !openscpui::pinServerTlsKey(options, unreachable, confirm, error) &&
+            error == "unreachable" && askedAsChange.empty(),
+        "a failed key probe should ask nothing");
+}
+
+OPENSCP_TEST(testTlsKeyPinsAreRememberedPerServer, test) {
+    openscp::testsupport::IsolatedSettings settings;
+    test.check(settings.isValid(), "test settings should be isolated");
+    const std::string pin = "sha256//c2VydmVyLWtleQ==";
+    openscp::SessionOptions options = unverifiedFtpsOptions();
+    test.check(!openscpui::trustedTlsKeyPin(options).has_value(),
+               "no key should be trusted before the first connection");
+    openscpui::rememberTlsKeyPin(options, pin);
+
+    openscp::SessionOptions sameServer = options;
+    sameServer.host = " files.example ";
+    test.check(openscpui::trustedTlsKeyPin(sameServer) == pin,
+               "the pin should be found again for the same server");
+    openscp::SessionOptions otherPort = options;
+    otherPort.port = 21;
+    openscp::SessionOptions webDav = options;
+    webDav.protocol = openscp::Protocol::WebDav;
+    test.check(!openscpui::trustedTlsKeyPin(otherPort).has_value() &&
+                   !openscpui::trustedTlsKeyPin(webDav).has_value(),
+               "pins should not cross ports or protocols");
+    test.check(openscpui::tlsKeyFingerprint(pin) ==
+                   QStringLiteral("SHA256:c2VydmVyLWtleQ=="),
+               "a pin should be shown as a SHA256 fingerprint");
 }
 
 } // namespace
