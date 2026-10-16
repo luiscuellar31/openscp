@@ -199,6 +199,10 @@ class TransferManager : public QObject {
     std::atomic<bool> shuttingDown_{false};
     std::atomic<int> running_{0};
     std::atomic<int> maxConcurrent_{2};
+    // A worker without a task for this long closes its connection, so idle
+    // slots, and slots above a lowered limit, do not hold server connections.
+    // Read and written under mtx_.
+    std::chrono::milliseconds idleConnectionTimeout_{std::chrono::seconds(60)};
 
     // Worker-slot client mutexes and retry, persistence, and performance
     // mutexes are independent of mtx_ and must be released before acquiring

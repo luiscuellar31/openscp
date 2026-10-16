@@ -33,6 +33,12 @@
 #include <vector>
 
 struct TransferManagerTestAccess {
+    static void setIdleConnectionTimeout(TransferManager &manager,
+                                         std::chrono::milliseconds timeout) {
+        std::lock_guard<std::mutex> lock(manager.mtx_);
+        manager.idleConnectionTimeout_ = timeout;
+    }
+
     static bool reserve(TransferManager &manager, const TransferTask &task) {
         std::lock_guard<std::mutex> lock(manager.mtx_);
         return manager.reserveTaskPathsLocked(task);
@@ -893,6 +899,67 @@ class ConnectionLimitClient final : public DownloadMockClient {
     private:
     std::shared_ptr<ConnectionLimitProbe> probe_;
 };
+
+struct IdleConnectionProbe {
+    std::atomic<int> opened{0};
+    std::atomic<int> closed{0};
+};
+
+class IdleConnectionClient final : public DownloadMockClient {
+    public:
+    explicit IdleConnectionClient(std::shared_ptr<IdleConnectionProbe> probe)
+        : probe_(std::move(probe)) {}
+
+    bool get(const std::string &, const std::string &, std::string &err,
+             std::function<void(std::size_t, std::size_t)> progress,
+             std::function<bool()>, bool) override {
+        clearLastOperationError();
+        if (progress)
+            progress(1, 1);
+        err.clear();
+        return true;
+    }
+
+    void disconnect() override {
+        if (isConnected())
+            probe_->closed.fetch_add(1);
+        DownloadMockClient::disconnect();
+    }
+
+    std::unique_ptr<openscp::RemoteClient>
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
+        probe_->opened.fetch_add(1);
+        return makeConnectedWorker<IdleConnectionClient>(options, err, probe_);
+    }
+
+    private:
+    std::shared_ptr<IdleConnectionProbe> probe_;
+};
+
+OPENSCP_TEST(testIdleWorkersCloseTheirConnections, test) {
+    auto probe = std::make_shared<IdleConnectionProbe>();
+    IdleConnectionClient baseClient(probe);
+    TransferManager manager;
+    TransferManagerTestAccess::setIdleConnectionTimeout(manager, 100ms);
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+    const auto download = [&](const char *name) {
+        const quint64 id = manager.enqueueDownload(
+            QStringLiteral("/remote/") + QLatin1String(name),
+            destination.filePath(QLatin1String(name)));
+        return waitForStatus(manager, id, TransferTask::Status::Done);
+    };
+
+    test.check(download("first") && probe->opened.load() >= 1,
+               "the first download should open a worker connection");
+    test.check(
+        waitUntil([&] { return probe->closed.load() == probe->opened.load(); }),
+        "an idle worker should close its connection");
+    const int openedBefore = probe->opened.load();
+    test.check(download("second") && probe->opened.load() > openedBefore,
+               "the next task should connect again");
+    manager.shutdown();
+}
 
 bool allTasksHaveStatus(const TransferManager &manager, int count,
                         TransferTask::Status status) {

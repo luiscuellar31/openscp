@@ -1131,17 +1131,26 @@ void TransferManager::workerLoop(std::size_t slotIndex,
     WorkerSlot &slot = *workerSlots_[slotIndex];
     while (!stopToken.stop_requested() && !shuttingDown_.load()) {
         std::optional<TransferTask> task;
+        bool idle = false;
         {
             std::unique_lock<std::mutex> lock(mtx_);
-            workCv_.wait(lock, [this, slotIndex, &stopToken, &task] {
-                if (stopToken.stop_requested() || shuttingDown_.load())
-                    return true;
-                task = pickRunnableTaskLocked(slotIndex);
-                return task.has_value();
-            });
-            if (!task)
+            idle = !workCv_.wait_for(
+                lock, idleConnectionTimeout_,
+                [this, slotIndex, &stopToken, &task] {
+                    if (stopToken.stop_requested() || shuttingDown_.load())
+                        return true;
+                    task = pickRunnableTaskLocked(slotIndex);
+                    return task.has_value();
+                });
+            if (!idle && !task)
                 break;
-            slot.taskSignals = taskControls_.runningSignals(task->taskId);
+            if (task)
+                slot.taskSignals = taskControls_.runningSignals(task->taskId);
+        }
+        if (idle) {
+            // The next task, if any, connects again.
+            invalidateWorkerClient(slot);
+            continue;
         }
         slot.activeTaskId.store(task->taskId);
         publishUpdated({task->taskId});
