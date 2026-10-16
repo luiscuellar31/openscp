@@ -2951,19 +2951,33 @@ Visitados: %2  |  Coincidencias: %3</translation>
         <translation>Comparación muy grande</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowSync.cpp" line="85"/>
         <source>The two trees contain more than the safe review threshold:
 
 %1 items
 %2 of known data
 
 Scan them again without this limit?</source>
-        <translation>Los dos árboles superan el umbral seguro de revisión:
+        <translation type="vanished">Los dos árboles superan el umbral seguro de revisión:
 
 %1 elementos
 %2 de datos de tamaño conocido
 
 ¿Volver a escanearlos sin este límite?</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowSync.cpp" line="85"/>
+        <source>The two trees contain more than the safe review threshold:
+
+%1 items
+%2 of known data
+
+Continue scanning without this limit?</source>
+        <translation>Los dos árboles superan el umbral seguro de revisión:
+
+%1 elementos
+%2 de datos de tamaño conocido
+
+¿Seguir escaneándolos sin este límite?</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindowSync.cpp" line="99"/>
@@ -4414,99 +4428,99 @@ Copy its saved credentials to the duplicate?</source>
 <context>
     <name>SyncCoordinator</name>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="199"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="218"/>
         <source>Some remote folders could not be read; the comparison is partial.</source>
         <translation>No se pudieron leer algunas carpetas remotas; la comparación es parcial.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="207"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="226"/>
         <source>Could not scan the remote folder.</source>
         <translation>No se pudo escanear la carpeta remota.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="555"/>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="560"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="574"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="579"/>
         <source>The current local folder is unavailable.</source>
         <translation>La carpeta local actual no está disponible.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="332"/>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="564"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="351"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="583"/>
         <source>No remote session is available.</source>
         <translation>No hay ninguna sesión remota disponible.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="237"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="256"/>
         <source>Could not calculate the remote checksum.</source>
         <translation>No se pudo calcular la suma de comprobación remota.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="240"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="259"/>
         <source>%1: %2</source>
         <translation>%1: %2</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="328"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="347"/>
         <source>The local folder is no longer available.</source>
         <translation>La carpeta local ya no está disponible.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="347"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="366"/>
         <source>Select at least one file that exists on both sides.</source>
         <translation>Selecciona al menos un archivo que exista en ambos lados.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="405"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="424"/>
         <source>%1: the local file is unavailable or outside the selected root.</source>
         <translation>%1: el archivo local no está disponible o se encuentra fuera de la raíz seleccionada.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="418"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="437"/>
         <source>%1: the local file could not be opened.</source>
         <translation>%1: no se pudo abrir el archivo local.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="454"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="473"/>
         <source>%1: the local file could not be read.</source>
         <translation>%1: no se pudo leer el archivo local.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="503"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="522"/>
         <source>%1: the remote checksum could not be started.</source>
         <translation>%1: no se pudo iniciar el cálculo de la suma de comprobación remota.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="542"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="561"/>
         <source>No checksums could be calculated.</source>
         <translation>No se pudo calcular ninguna suma de comprobación.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="589"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="607"/>
         <source>Could not start the remote scan.</source>
         <translation>No se pudo iniciar el escaneo remoto.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="830"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="870"/>
         <source>%1 symbolic links were skipped.</source>
         <translation>Se omitieron %1 enlaces simbólicos.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="835"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="875"/>
         <source>%1 folders reached the maximum depth of %2.</source>
         <translation>%1 carpetas alcanzaron la profundidad máxima de %2.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="841"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="881"/>
         <source>%1 folders could not be read.</source>
         <translation>No se pudieron leer %1 carpetas.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="846"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="886"/>
         <source>%1 entries with unsafe names were skipped.</source>
         <translation>Se omitieron %1 entradas con nombres no seguros.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="850"/>
+        <location filename="../ui/logic/sync/SyncCoordinator.cpp" line="890"/>
         <source>%1 files have an unknown size.</source>
         <translation>%1 archivos tienen un tamaño desconocido.</translation>
     </message>

@@ -25,6 +25,14 @@
 #include <sys/stat.h>
 #endif
 
+struct SyncCoordinatorTestAccess {
+    static void setLargeTreeLimits(SyncCoordinator &coordinator, quint64 items,
+                                   quint64 bytes) {
+        coordinator.largeTreeItems_ = items;
+        coordinator.largeTreeBytes_ = bytes;
+    }
+};
+
 namespace {
 
 using namespace std::chrono_literals;
@@ -446,6 +454,128 @@ OPENSCP_TEST(testMirrorDoesNotDeleteUnreadableLocalSubtree, test) {
                    SyncAction::DeleteFile,
                "unrelated verified destination extras can still be deleted");
 #endif
+}
+
+// Local files, and the mock server's tree with extra remote folders.
+struct LargeTreeFixture {
+    QTemporaryDir localRoot;
+    RemoteOperationController remote;
+    TransferManager transfers;
+
+    bool prepare(int localFiles, int remoteFolders) {
+        for (int index = 0; index < localFiles; ++index) {
+            QFile file(QDir(localRoot.path())
+                           .filePath(QStringLiteral("file-%1.txt").arg(index)));
+            if (!file.open(QIODevice::WriteOnly) || file.write("x") != 1)
+                return false;
+        }
+        auto client = connectedClient<openscp::MockSftpClient>("sync.test");
+        std::string error;
+        if (!client || (remoteFolders > 0 && !client->mkdir("/bulk", error)))
+            return false;
+        for (int index = 0; index < remoteFolders; ++index) {
+            if (!client->mkdir("/bulk/folder-" + std::to_string(index), error))
+                return false;
+        }
+        return localRoot.isValid() &&
+               remote.installSession(std::move(client)) > 0;
+    }
+};
+
+OPENSCP_TEST(testLargeTreeScansPauseUntilConfirmed, test) {
+    struct Case {
+        int localFiles;
+        int remoteFolders;
+        quint64 itemLimit;
+        const char *label;
+    };
+    for (const Case &scenario :
+         {Case{6, 0, 3, "local"}, Case{0, 600, 300, "remote"}}) {
+        const std::string label = std::string(" (") + scenario.label + ")";
+        LargeTreeFixture fixture;
+        test.check(fixture.prepare(scenario.localFiles, scenario.remoteFolders),
+                   "the comparison fixture should be ready" + label);
+
+        std::optional<SyncPreparationResult> unlimited;
+        {
+            SyncCoordinator coordinator(&fixture.remote, &fixture.transfers);
+            QObject::connect(&coordinator, &SyncCoordinator::preparationReady,
+                             &coordinator,
+                             [&](const SyncPreparationResult &result) {
+                                 unlimited = result;
+                             });
+            coordinator.start(fixture.localRoot.path(), QStringLiteral("/"));
+            test.check(waitUntil([&] { return unlimited.has_value(); }),
+                       "a comparison under the threshold should not ask" +
+                           label);
+        }
+        if (!unlimited)
+            continue;
+
+        SyncCoordinator coordinator(&fixture.remote, &fixture.transfers);
+        SyncCoordinatorTestAccess::setLargeTreeLimits(
+            coordinator, scenario.itemLimit, quint64(1) << 40);
+        int remoteScans = 0;
+        int questions = 0;
+        std::optional<SyncPreparationResult> prepared;
+        QObject::connect(
+            &fixture.remote, &RemoteOperationController::jobStarted,
+            &coordinator,
+            [&](const RemoteOperationController::JobKey &) { ++remoteScans; });
+        QObject::connect(&coordinator,
+                         &SyncCoordinator::largeTreeConfirmationRequired,
+                         &coordinator, [&](quint64, quint64) { ++questions; });
+        QObject::connect(
+            &coordinator, &SyncCoordinator::preparationReady, &coordinator,
+            [&](const SyncPreparationResult &result) { prepared = result; });
+        coordinator.start(fixture.localRoot.path(), QStringLiteral("/"));
+        test.check(waitUntil([&] { return questions == 1; }),
+                   "crossing the threshold should ask once" + label);
+        test.check(!waitUntil([&] { return prepared.has_value(); },
+                              std::chrono::milliseconds(300)),
+                   "the comparison should wait for the answer" + label);
+
+        coordinator.continueLargeTree();
+        test.check(waitUntil([&] { return prepared.has_value(); }),
+                   "accepting should finish the comparison" + label);
+        if (!prepared)
+            continue;
+        test.check(questions == 1 && remoteScans == 1,
+                   "accepting should resume the scans instead of repeating "
+                   "them" +
+                       label);
+        test.check(
+            prepared->localSnapshot.size() == unlimited->localSnapshot.size() &&
+                prepared->remoteSnapshot.size() ==
+                    unlimited->remoteSnapshot.size() &&
+                prepared->coverage.remoteUnscannedPaths.isEmpty(),
+            "a resumed comparison should cover both trees completely" + label);
+    }
+}
+
+OPENSCP_TEST(testDecliningALargeTreeStopsTheComparison, test) {
+    LargeTreeFixture fixture;
+    test.check(fixture.prepare(6, 0), "the comparison fixture should be ready");
+    SyncCoordinator coordinator(&fixture.remote, &fixture.transfers);
+    SyncCoordinatorTestAccess::setLargeTreeLimits(coordinator, 3,
+                                                  quint64(1) << 40);
+    bool canceled = false;
+    bool ready = false;
+    QObject::connect(
+        &coordinator, &SyncCoordinator::largeTreeConfirmationRequired,
+        &coordinator, [&](quint64, quint64) { coordinator.cancel(); });
+    QObject::connect(&coordinator, &SyncCoordinator::preparationCanceled,
+                     &coordinator, [&] { canceled = true; });
+    QObject::connect(&coordinator, &SyncCoordinator::preparationReady,
+                     &coordinator,
+                     [&](const SyncPreparationResult &) { ready = true; });
+    coordinator.start(fixture.localRoot.path(), QStringLiteral("/"));
+    test.check(waitUntil([&] { return canceled; }),
+               "declining should cancel the comparison");
+    test.check(
+        !waitUntil([&] { return ready; }, std::chrono::milliseconds(300)) &&
+            !coordinator.isPreparing(),
+        "a declined comparison should not finish");
 }
 
 OPENSCP_TEST(testPersistentExecutionPlan, test) {

@@ -309,6 +309,11 @@ Synchronization has three steps:
 3. The accepted actions enter `TransferManager` as one ordered batch, in one
    `enqueueTasks` call.
 
+When the scans pass 100,000 items or 100 GiB of known data, the coordinator
+pauses both, the remote traversal through `RemoteOperationController::setPaused`
+and the local scan on a condition variable, and asks before going on.
+Accepting resumes them with what they already found; declining cancels them.
+
 `SyncDialog` cancels superseded comparisons when options or snapshots change.
 The engine checks cancellation while building and classifying the preview; the
 dialog applies only the newest completed result.
