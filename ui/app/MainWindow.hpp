@@ -316,6 +316,9 @@ class MainWindow : public QMainWindow {
     void runLocalFsSelection(const QModelIndexList &rows,
                              QFileSystemModel *sourceModel,
                              const QDir &destination, bool deleteSource);
+    // Deletes local entries on the local pool, never through a link, and
+    // reports the result; closing the window waits for it as for copies.
+    void runLocalDelete(const QStringList &paths);
     // `onFinished` runs on the UI thread once the job ends, told whether
     // every pair succeeded.
     void

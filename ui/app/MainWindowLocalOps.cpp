@@ -373,19 +373,47 @@ void MainWindow::deleteFromLeft() {
                           QMessageBox::Yes | QMessageBox::No) !=
         QMessageBox::Yes)
         return;
-    int deletedCount = 0;
-    int failedCount = 0;
-    for (const QModelIndex &idx : rows) {
-        const QFileInfo selectedFileInfo = leftModel_->fileInfo(idx);
-        if (removeLocalEntry(selectedFileInfo.absoluteFilePath()))
-            ++deletedCount;
-        else
-            ++failedCount;
-    }
-    statusBar()->showMessage(QString(tr("Deleted: %1  |  Failed: %2"))
-                                 .arg(deletedCount)
-                                 .arg(failedCount),
-                             5000);
+    QStringList paths;
+    for (const QModelIndex &idx : rows)
+        paths.push_back(leftModel_->fileInfo(idx).absoluteFilePath());
+    runLocalDelete(paths);
+}
+
+void MainWindow::runLocalDelete(const QStringList &paths) {
+    if (paths.isEmpty())
+        return;
+    // A large tree, or a network volume, can take long to delete, so it runs
+    // on the local pool rather than on the UI thread.
+    ++localFsJobsInFlight_;
+    QPointer<MainWindow> self(this);
+    localFsPool_.start([self, paths, canceled = localFsCanceled_]() {
+        int deletedCount = 0;
+        int failedCount = 0;
+        for (const QString &path : paths) {
+            if (canceled->load())
+                break;
+            removeLocalEntry(path) ? ++deletedCount : ++failedCount;
+        }
+        QObject *const app = QCoreApplication::instance();
+        if (!app)
+            return;
+        QMetaObject::invokeMethod(
+            app,
+            [self, deletedCount, failedCount]() {
+                if (!self)
+                    return;
+                --self->localFsJobsInFlight_;
+                self->statusBar()->showMessage(tr("Deleted: %1  |  Failed: %2")
+                                                   .arg(deletedCount)
+                                                   .arg(failedCount),
+                                               5000);
+                self->setLeftRoot(self->leftPath_->path());
+                if (!self->rightIsRemote_)
+                    self->setRightRoot(self->rightPath_->path());
+                self->updateDeleteShortcutEnables();
+            },
+            Qt::QueuedConnection);
+    });
 }
 
 void MainWindow::goUpLeft() {

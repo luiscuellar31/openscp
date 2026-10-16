@@ -834,7 +834,7 @@ Geben Sie für Downloads ausdrücklich einen Remote-Dateipfad an.</translation>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="425"/>
         <location filename="../ui/app/MainWindow.cpp" line="509"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="520"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="548"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="543"/>
         <source>New folder</source>
         <translation>Neuer Ordner</translation>
@@ -842,8 +842,8 @@ Geben Sie für Downloads ausdrücklich einen Remote-Dateipfad an.</translation>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="427"/>
         <location filename="../ui/app/MainWindow.cpp" line="512"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="459"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="482"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="487"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="510"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="585"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="596"/>
         <source>Rename</source>
@@ -852,7 +852,7 @@ Geben Sie für Downloads ausdrücklich einen Remote-Dateipfad an.</translation>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="430"/>
         <location filename="../ui/app/MainWindow.cpp" line="518"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="531"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="559"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="561"/>
         <source>New file</source>
         <translation>Neue Datei</translation>
@@ -1190,9 +1190,9 @@ Für Downloads muss ein Remote-Dateipfad eingegeben werden.</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="2001"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="470"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="495"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="510"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="498"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="523"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="538"/>
         <source>Local</source>
         <translation>Lokal</translation>
     </message>
@@ -1976,74 +1976,73 @@ Continue?</source>
 Fortfahren?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="385"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="652"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="406"/>
         <source>Deleted: %1  |  Failed: %2</source>
         <translation>Gelöscht: %1  |  Fehlgeschlagen: %2</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="408"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="436"/>
         <source>Open location</source>
         <translation>Speicherort öffnen</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="430"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="458"/>
         <source>Opening preference</source>
         <translation>Öffnungsoption</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="431"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="459"/>
         <source>How do you want to open this file?</source>
         <translation>Wie möchten Sie diese Datei öffnen?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="432"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="460"/>
         <source>Open file</source>
         <translation>Datei öffnen</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="434"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="462"/>
         <source>Show folder</source>
         <translation>Ordner anzeigen</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="483"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="511"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="586"/>
         <source>Select exactly one item.</source>
         <translation>Wählen Sie genau ein Element aus.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="459"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="487"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="596"/>
         <source>New name:</source>
         <translation>Neuer Name:</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="470"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="498"/>
         <source>Could not rename.</source>
         <translation>Umbenennen fehlgeschlagen.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="520"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="531"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="548"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="559"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="543"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="561"/>
         <source>Name:</source>
         <translation>Name:</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="495"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="523"/>
         <source>Could not create folder.</source>
         <translation>Ordner konnte nicht erstellt werden.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="502"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="530"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="159"/>
         <source>File exists</source>
         <translation>Datei ist bereits vorhanden</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="503"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="531"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="160"/>
         <source>«%1» already exists.
 Overwrite?</source>
@@ -2051,24 +2050,24 @@ Overwrite?</source>
 Überschreiben?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="510"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="538"/>
         <source>Could not create file.</source>
         <translation>Datei konnte nicht erstellt werden.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="537"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="565"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="573"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="116"/>
         <source>File created: </source>
         <translation>Datei erstellt: </translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="554"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="582"/>
         <source>Copy to right panel</source>
         <translation>In den rechten Bereich kopieren</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="557"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="585"/>
         <source>Move to right panel</source>
         <translation>In den rechten Bereich verschieben</translation>
     </message>
@@ -2239,13 +2238,13 @@ Continue?</source>
 Fortfahren?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="724"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="717"/>
         <source>Change permissions…</source>
         <translation>Berechtigungen ändern…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="767"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="776"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="760"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="769"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="350"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="377"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="430"/>
@@ -2253,12 +2252,12 @@ Fortfahren?</translation>
         <translation>Berechtigungen</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="768"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="761"/>
         <source>Permissions are not supported for the active protocol.</source>
         <translation>Berechtigungen werden vom aktiven Protokoll nicht unterstützt.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="777"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="770"/>
         <source>Select only one item.</source>
         <translation>Wählen Sie nur ein Element aus.</translation>
     </message>

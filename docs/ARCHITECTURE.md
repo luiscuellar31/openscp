@@ -285,10 +285,10 @@ after the drop, so its batch stays; the startup cleanup removes batches older
 than the retention setting. Both deletions, and the removal of a staging root
 left empty, run outside the UI thread.
 
-Copies and moves between local folders run on a pool of two threads that
-`MainWindow` owns, apart from the global pool the connection and the
-disconnect cleanup use. They stop at the next entry when canceled, removing
-what they staged; closing the window while one runs asks first.
+Copies, moves and deletions between local folders run on a pool of two
+threads that `MainWindow` owns, apart from the global pool the connection and
+the disconnect cleanup use. They stop at the next entry when canceled,
+removing what they staged; closing the window while one runs asks first.
 
 Synchronization has three steps:
 

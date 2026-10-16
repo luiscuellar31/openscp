@@ -393,6 +393,71 @@ OPENSCP_TEST(testForeignStagingDropCopiesWithoutDeleting, test) {
                "a staging folder from a foreign drag should not be deleted");
 }
 
+OPENSCP_TEST(testLocalDeleteRunsOffTheUiThread, test) {
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(), "the delete test needs a folder");
+    if (!temporary.isValid())
+        return;
+    configureMainWindowSettings(settingsRootPath);
+    const QDir base(temporary.path());
+    const QString panel = base.filePath(QStringLiteral("panel"));
+    const QString victim = QDir(panel).filePath(QStringLiteral("victim"));
+    const QString outside = base.filePath(QStringLiteral("outside"));
+    const QString link = QDir(panel).filePath(QStringLiteral("link"));
+    QFile inner(QDir(victim).filePath(QStringLiteral("inner.txt")));
+    QFile kept(QDir(outside).filePath(QStringLiteral("kept.txt")));
+    test.check(QDir().mkpath(victim) && QDir().mkpath(outside) &&
+                   inner.open(QIODevice::WriteOnly) &&
+                   kept.open(QIODevice::WriteOnly) &&
+                   QFile::link(outside, link),
+               "the delete fixture should be created");
+    inner.close();
+    kept.close();
+
+    MainWindow window;
+    window.show();
+    flushUiEvents();
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftPath && parts.leftView,
+               "the delete test needs the local panel");
+    if (!parts.leftPath || !parts.leftView)
+        return;
+    parts.leftPath->pathRequested(panel);
+    auto *model = qobject_cast<QFileSystemModel *>(parts.leftView->model());
+    const bool listed =
+        model && openscp::testsupport::waitUntil(
+                     [&] {
+                         return model->index(victim).isValid() &&
+                                model->index(link).isValid();
+                     },
+                     std::chrono::milliseconds(3000));
+    test.check(listed, "the entries to delete should be listed");
+    if (!listed)
+        return;
+    parts.leftView->selectionModel()->select(
+        model->index(victim),
+        QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    parts.leftView->selectionModel()->select(model->index(link),
+                                             QItemSelectionModel::Select |
+                                                 QItemSelectionModel::Rows);
+
+    QTimer::singleShot(0, &window, [] {
+        if (auto *box =
+                qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+            box->done(QMessageBox::Yes);
+    });
+    QMetaObject::invokeMethod(&window, "deleteFromLeft");
+    test.check(openscp::testsupport::waitUntil(
+                   [&] {
+                       return !QFileInfo::exists(victim) &&
+                              !QFileInfo(link).isSymLink();
+                   },
+                   std::chrono::milliseconds(5000)),
+               "the selected folder and link should be deleted");
+    test.check(QFileInfo::exists(QDir(outside).filePath("kept.txt")),
+               "deleting a link should keep its target's contents");
+}
+
 OPENSCP_TEST(testLocalRenameValidatesNamesInBothPanes, test) {
     QTemporaryDir temporary;
     test.check(temporary.isValid(), "local rename needs a temporary directory");

@@ -641,17 +641,10 @@ void MainWindow::deleteRightSelected() {
             QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
         return;
     }
-    int deletedCount = 0;
-    int failedCount = 0;
-    for (const QModelIndex &index : rows) {
-        const QFileInfo selectedFileInfo = rightLocalModel_->fileInfo(index);
-        removeLocalEntry(selectedFileInfo.absoluteFilePath()) ? ++deletedCount
-                                                              : ++failedCount;
-    }
-    statusBar()->showMessage(
-        tr("Deleted: %1  |  Failed: %2").arg(deletedCount).arg(failedCount),
-        5000);
-    setRightRoot(rightPath_->path());
+    QStringList paths;
+    for (const QModelIndex &index : rows)
+        paths.push_back(rightLocalModel_->fileInfo(index).absoluteFilePath());
+    runLocalDelete(paths);
 }
 
 // Show context menu for the right pane based on current state.

@@ -926,7 +926,7 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="425"/>
         <location filename="../ui/app/MainWindow.cpp" line="509"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="520"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="548"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="543"/>
         <source>New folder</source>
         <translation>Nova pasta</translation>
@@ -934,8 +934,8 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="427"/>
         <location filename="../ui/app/MainWindow.cpp" line="512"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="459"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="482"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="487"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="510"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="585"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="596"/>
         <source>Rename</source>
@@ -944,7 +944,7 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="430"/>
         <location filename="../ui/app/MainWindow.cpp" line="518"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="531"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="559"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="561"/>
         <source>New file</source>
         <translation>Novo arquivo</translation>
@@ -1572,8 +1572,7 @@ Continue?</source>
 Deseja continuar?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="385"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="652"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="406"/>
         <source>Deleted: %1  |  Failed: %2</source>
         <translation>Excluídos: %1  |  Falhas: %2</translation>
     </message>
@@ -1614,22 +1613,22 @@ Deseja continuar?</translation>
         <translation>A confirmação de risco não foi concluída corretamente.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="430"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="458"/>
         <source>Opening preference</source>
         <translation>Preferência de abertura</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="431"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="459"/>
         <source>How do you want to open this file?</source>
         <translation>Como deseja abrir este arquivo?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="432"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="460"/>
         <source>Open file</source>
         <translation>Abrir arquivo</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="434"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="462"/>
         <source>Show folder</source>
         <translation>Mostrar pasta</translation>
     </message>
@@ -1740,8 +1739,8 @@ Deseja continuar?</translation>
         <translation>Nada para enviar.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="520"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="531"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="548"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="559"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="543"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="561"/>
         <source>Name:</source>
@@ -1756,25 +1755,25 @@ Deseja continuar?</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindow.cpp" line="2001"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="470"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="495"/>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="510"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="498"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="523"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="538"/>
         <source>Local</source>
         <translation>Local</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="495"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="523"/>
         <source>Could not create folder.</source>
         <translation>Não foi possível criar a pasta.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="502"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="530"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="159"/>
         <source>File exists</source>
         <translation>Arquivo já existe</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="503"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="531"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="160"/>
         <source>«%1» already exists.
 Overwrite?</source>
@@ -1789,14 +1788,14 @@ Sobrescrever?</translation>
 %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="537"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="565"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="573"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="116"/>
         <source>File created: </source>
         <translation>Arquivo criado: </translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="510"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="538"/>
         <source>Could not create file.</source>
         <translation>Não foi possível criar arquivo.</translation>
     </message>
@@ -1823,18 +1822,18 @@ Items on another volume will be copied and then removed.</source>
 Os itens em outro volume serão copiados e depois removidos.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="408"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="436"/>
         <source>Open location</source>
         <translation>Abrir localização</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="483"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="511"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="586"/>
         <source>Select exactly one item.</source>
         <translation>Selecione exatamente um item.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="459"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="487"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="596"/>
         <source>New name:</source>
         <translation>Novo nome:</translation>
@@ -1847,7 +1846,7 @@ Os itens em outro volume serão copiados e depois removidos.</translation>
 %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="470"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="498"/>
         <source>Could not rename.</source>
         <translation>Não foi possível renomear.</translation>
     </message>
@@ -1871,23 +1870,23 @@ Continue?</source>
 Continuar?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="724"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="717"/>
         <source>Change permissions…</source>
         <translation>Alterar permissões…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="554"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="582"/>
         <source>Copy to right panel</source>
         <translation>Copiar para o painel direito</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowLocalOps.cpp" line="557"/>
+        <location filename="../ui/app/MainWindowLocalOps.cpp" line="585"/>
         <source>Move to right panel</source>
         <translation>Mover para o painel direito</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="767"/>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="776"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="760"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="769"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="350"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="377"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="430"/>
@@ -1895,7 +1894,7 @@ Continuar?</translation>
         <translation>Permissões</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="777"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="770"/>
         <source>Select only one item.</source>
         <translation>Selecione apenas um item.</translation>
     </message>
@@ -2741,7 +2740,7 @@ Excluídos: %2  |  Falhas: %3</translation>
         <translation>Não foi possível iniciar a exclusão remota.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="768"/>
+        <location filename="../ui/app/MainWindowRemoteOps.cpp" line="761"/>
         <source>Permissions are not supported for the active protocol.</source>
         <translation>O protocolo ativo não oferece suporte a permissões.</translation>
     </message>
