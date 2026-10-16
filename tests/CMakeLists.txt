@@ -31,6 +31,9 @@ function(openscp_add_test TARGET_NAME)
     endif()
 
     add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
+    # A hung test fails after ten minutes instead of CTest's default 25,
+    # which sanitizer runs still stay well within. Tests may set their own.
+    set_tests_properties(${TARGET_NAME} PROPERTIES TIMEOUT 600)
     if(TEST_LABELS)
         set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "${TEST_LABELS}")
     else()

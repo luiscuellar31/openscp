@@ -23,6 +23,7 @@ jobs:
   verify-source:
     name: Verify release source
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       tag_name: ${{ steps.meta.outputs.tag_name }}
       tag_commit: ${{ steps.meta.outputs.tag_commit }}
@@ -92,6 +93,7 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -221,6 +223,7 @@ jobs:
     env:
       APPIMAGE_UPDATE_INFORMATION: gh-releases-zsync|luiscuellar31|openscp|latest|OpenSCP-*-${{ matrix.arch_name }}.AppImage.zsync
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -427,6 +430,7 @@ jobs:
       - build-macos
       - build-linux
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
 
