@@ -42,14 +42,6 @@ std::string localDestinationKey(const std::string &path) {
     return std::string("local:") + absolutePath.lexically_normal().string();
 }
 
-size_t writeFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
-    if (!userdata)
-        return 0;
-    std::FILE *file = static_cast<std::FILE *>(userdata);
-    const size_t total = size * nmemb;
-    return std::fwrite(ptr, 1, total, file);
-}
-
 size_t readFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
     if (!userdata)
         return 0;
@@ -541,6 +533,9 @@ RemoteError errorFromCurl(CURLcode code, std::string message, long responseCode,
     case CURLE_RECV_ERROR:
     case CURLE_SEND_ERROR:
     case CURLE_GOT_NOTHING:
+    // A handshake that broke off, such as on a reset, not a certificate that
+    // failed verification.
+    case CURLE_SSL_CONNECT_ERROR:
         error.kind = RemoteErrorKind::Connection;
         error.transient = true;
         break;
@@ -560,7 +555,6 @@ RemoteError errorFromCurl(CURLcode code, std::string message, long responseCode,
     case CURLE_REMOTE_DISK_FULL:
         error.kind = RemoteErrorKind::InsufficientSpace;
         break;
-    case CURLE_SSL_CONNECT_ERROR:
     case CURLE_SSL_CERTPROBLEM:
     case CURLE_SSL_CIPHER:
     case CURLE_PEER_FAILED_VERIFICATION:
@@ -575,18 +569,12 @@ RemoteError errorFromCurl(CURLcode code, std::string message, long responseCode,
         error.kind = RemoteErrorKind::Certificate;
         break;
     case CURLE_WRITE_ERROR:
-        if (errno == ENOSPC) {
-            error.kind = RemoteErrorKind::InsufficientSpace;
-            error.native_code = ENOSPC;
-            break;
-        }
-        error.kind = RemoteErrorKind::LocalIo;
-        break;
     case CURLE_READ_ERROR:
         error.kind = RemoteErrorKind::LocalIo;
         break;
     case CURLE_QUOTE_ERROR:
     case CURLE_WEIRD_SERVER_REPLY:
+    case CURLE_FILESIZE_EXCEEDED:
         error.kind = RemoteErrorKind::Protocol;
         break;
     default:
@@ -598,6 +586,23 @@ RemoteError errorFromCurl(CURLcode code, std::string message, long responseCode,
                             error.kind == RemoteErrorKind::Timeout ||
                             error.kind == RemoteErrorKind::RemoteIo);
     return error;
+}
+
+CURLcode performWithErrorDetail(CURL *curl, std::string &detail) {
+    char buffer[CURL_ERROR_SIZE] = {};
+    (void)curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, buffer);
+    const CURLcode code = curl_easy_perform(curl);
+    // The handle outlives this buffer.
+    (void)curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, nullptr);
+    detail = buffer;
+    return code;
+}
+
+std::string curlFailureText(CURLcode code, const std::string &detail) {
+    std::string text = curl_easy_strerror(code);
+    if (!detail.empty() && detail != text)
+        text += ": " + detail;
+    return text;
 }
 
 RemoteError errorFromHttpStatus(long statusCode, std::string message,
@@ -840,6 +845,34 @@ size_t appendStringCallback(char *ptr, size_t size, size_t nmemb,
     return total;
 }
 
+bool refusedResponse(const BoundedStringSink &sink, const std::string &response,
+                     CURLcode &code, std::string &err) {
+    if (sink.limitExceeded) {
+        code = CURLE_FILESIZE_EXCEEDED;
+        err = response + " exceeded the " +
+              std::to_string(sink.maxBytes / (1024 * 1024)) +
+              " MiB safety limit.";
+        return true;
+    }
+    if (sink.allocationFailed) {
+        code = CURLE_WRITE_ERROR;
+        err = response + " could not be stored in memory.";
+        return true;
+    }
+    return false;
+}
+
+size_t writeFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
+    auto *context = static_cast<TransferProgressContext *>(userdata);
+    if (!context || !context->downloadFile)
+        return 0;
+    const size_t total = size * nmemb;
+    const size_t written = std::fwrite(ptr, 1, total, context->downloadFile);
+    if (written != total)
+        context->writeError = errno;
+    return written;
+}
+
 int seekFileCallback(void *userdata, curl_off_t offset, int origin) {
     if (!userdata)
         return CURL_SEEKFUNC_FAIL;
@@ -863,11 +896,14 @@ int seekFileCallback(void *userdata, curl_off_t offset, int origin) {
 bool configureFileDownload(CURL *curl, std::FILE *file,
                            TransferProgressContext &progressContext,
                            std::string &err) {
+    progressContext.downloadFile = file;
+    progressContext.writeError = 0;
     const bool configured =
         curl && file &&
         (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeFileCallback) ==
          CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_WRITEDATA, file) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_WRITEDATA, &progressContext) ==
+         CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
                           transferProgressCallback) == CURLE_OK) &&
@@ -942,7 +978,8 @@ performCurlTransfer(CURL *curl, TransferProgressContext &progressContext,
         return result;
     }
 
-    result.curlCode = curl_easy_perform(curl);
+    std::string detail;
+    result.curlCode = performWithErrorDetail(curl, detail);
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result.responseCode);
     if (detectTransferCancellation(progressContext, err)) {
         result.failure = CurlTransferFailure::Canceled;
@@ -952,7 +989,7 @@ performCurlTransfer(CURL *curl, TransferProgressContext &progressContext,
     if (result.curlCode != CURLE_OK) {
         result.failure = CurlTransferFailure::Transport;
         err = std::string(operationLabel) +
-              " failed: " + curl_easy_strerror(result.curlCode);
+              " failed: " + curlFailureText(result.curlCode, detail);
     }
     return result;
 }
@@ -1026,6 +1063,13 @@ bool downloadToLocalFile(CURL *curl, const std::string &destination,
     if (!result.succeeded()) {
         localFileOwner.reset();
         failure = transferFailureError(result, err, transportErrorMapper);
+        if (result.curlCode == CURLE_WRITE_ERROR &&
+            progressContext.writeError != 0) {
+            failure.kind = progressContext.writeError == ENOSPC
+                               ? RemoteErrorKind::InsufficientSpace
+                               : RemoteErrorKind::LocalIo;
+            failure.native_code = progressContext.writeError;
+        }
         return false;
     }
     if (responseErrorMapper) {

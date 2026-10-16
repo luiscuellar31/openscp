@@ -99,9 +99,11 @@ std::string ftpDestinationKey(const SessionOptions &opt,
 }
 
 std::string formatCurlProbeFailure(Protocol protocol, CURLcode code,
+                                   const std::string &detail,
                                    long responseCode) {
-    std::string msg = std::string(protocolLabel(protocol)) +
-                      " connect probe failed: " + curl_easy_strerror(code);
+    std::string msg =
+        std::string(protocolLabel(protocol)) +
+        " connect probe failed: " + curlcommon::curlFailureText(code, detail);
     if (responseCode > 0) {
         msg += " (server response ";
         msg += std::to_string(responseCode);
@@ -233,25 +235,24 @@ bool runDirectoryListingCommand(CURL *curl, const SessionOptions &opt,
     if (curlcommon::rejectInterrupted(interrupted, err, &result.curlCode))
         return false;
 
-    result.curlCode = curl_easy_perform(curl);
+    std::string detail;
+    result.curlCode = curlcommon::performWithErrorDetail(curl, detail);
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result.responseCode);
     if (interrupted && interrupted->load()) {
         result.curlCode = CURLE_ABORTED_BY_CALLBACK;
         err = "Interrupted";
         return false;
     }
-    if (payloadSink.limitExceeded || payloadSink.allocationFailed) {
-        result.curlCode = CURLE_WRITE_ERROR;
-        err = payloadSink.limitExceeded
-                  ? std::string(protocolLabel(opt.protocol)) +
-                        " directory listing exceeded the 64 MiB safety limit."
-                  : std::string(protocolLabel(opt.protocol)) +
-                        " directory listing could not be stored in memory.";
+    if (curlcommon::refusedResponse(payloadSink,
+                                    std::string(protocolLabel(opt.protocol)) +
+                                        " directory listing",
+                                    result.curlCode, err)) {
         return false;
     }
     if (result.curlCode != CURLE_OK) {
         err = std::string(protocolLabel(opt.protocol)) + " listing command " +
-              command + " failed: " + curl_easy_strerror(result.curlCode);
+              command + " failed: " +
+              curlcommon::curlFailureText(result.curlCode, detail);
         return false;
     }
     if (result.responseCode >= 400) {
@@ -371,19 +372,17 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
         return false;
     }
 
-    curlCodeOut = curl_easy_perform(curl);
+    std::string detail;
+    curlCodeOut = curlcommon::performWithErrorDetail(curl, detail);
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCodeOut);
     curl_slist_free_all(quote);
-    if (responseSink.limitExceeded || responseSink.allocationFailed) {
-        curlCodeOut = CURLE_WRITE_ERROR;
-        err = responseSink.limitExceeded
-                  ? "FTP command response exceeded the 64 MiB safety limit."
-                  : "FTP command response could not be stored in memory.";
+    if (curlcommon::refusedResponse(responseSink, "FTP command response",
+                                    curlCodeOut, err)) {
         return false;
     }
     if (curlCodeOut != CURLE_OK) {
-        err = std::string(protocolLabel(opt.protocol)) +
-              " command failed: " + curl_easy_strerror(curlCodeOut);
+        err = std::string(protocolLabel(opt.protocol)) + " command failed: " +
+              curlcommon::curlFailureText(curlCodeOut, detail);
         if (responseCodeOut > 0)
             err += " (server response " + std::to_string(responseCodeOut) + ")";
         return false;
@@ -682,7 +681,8 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
                               static_cast<std::int64_t>(rc));
         return false;
     }
-    rc = curl_easy_perform(curl);
+    std::string detail;
+    rc = curlcommon::performWithErrorDetail(curl, detail);
     long responseCode = 0;
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
     curl_slist_free_all(probeCommands);
@@ -695,7 +695,8 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
         return false;
     }
     if (rc != CURLE_OK) {
-        err = formatCurlProbeFailure(normalized.protocol, rc, responseCode);
+        err = formatCurlProbeFailure(normalized.protocol, rc, detail,
+                                     responseCode);
         setLastOperationError(ftpErrorFromResult(rc, responseCode, err));
         return false;
     }

@@ -256,25 +256,21 @@ bool performTextRequestOnce(CURL *curl, const SessionOptions &opt,
         curl_slist_free_all(headerList);
         return false;
     }
-    const CURLcode rc = curl_easy_perform(curl);
-    if (curlCodeOut)
-        *curlCodeOut = rc;
+    std::string detail;
+    CURLcode rc = curlcommon::performWithErrorDetail(curl, detail);
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.statusCode);
     curl_slist_free_all(headerList);
 
-    if (responseSink.limitExceeded || responseSink.allocationFailed) {
-        if (curlCodeOut)
-            *curlCodeOut = CURLE_WRITE_ERROR;
-        err = responseSink.limitExceeded
-                  ? std::string("WebDAV ") + request.method +
-                        " response exceeded the 64 MiB safety limit."
-                  : std::string("WebDAV ") + request.method +
-                        " response could not be stored in memory.";
+    const bool refused = curlcommon::refusedResponse(
+        responseSink, std::string("WebDAV ") + request.method + " response", rc,
+        err);
+    if (curlCodeOut)
+        *curlCodeOut = rc;
+    if (refused)
         return false;
-    }
     if (rc != CURLE_OK) {
         err = std::string("WebDAV ") + request.method +
-              " failed: " + curl_easy_strerror(rc);
+              " failed: " + curlcommon::curlFailureText(rc, detail);
         return false;
     }
     return true;

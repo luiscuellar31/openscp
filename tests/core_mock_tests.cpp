@@ -1139,20 +1139,28 @@ OPENSCP_TEST(test_curl_structured_error_mappings, t) {
                 !httpFull.transient && !httpFull.commit_uncertain,
             "HTTP 507 should be a permanent, commit-certain space error");
 
-    const openscp::RemoteError tlsFailure = openscp::curlcommon::errorFromCurl(
-        CURLE_SSL_CONNECT_ERROR, "TLS handshake failed");
-    t.check(tlsFailure.kind == openscp::RemoteErrorKind::Certificate &&
-                !tlsFailure.transient,
-            "TLS verification/handshake failures should not be retried");
+    const openscp::RemoteError handshakeFailure =
+        openscp::curlcommon::errorFromCurl(CURLE_SSL_CONNECT_ERROR,
+                                           "TLS handshake failed");
+    t.check(handshakeFailure.kind == openscp::RemoteErrorKind::Connection &&
+                handshakeFailure.transient,
+            "a broken TLS handshake should be a transient connection error");
+    const openscp::RemoteError verificationFailure =
+        openscp::curlcommon::errorFromCurl(CURLE_PEER_FAILED_VERIFICATION,
+                                           "certificate rejected");
+    t.check(verificationFailure.kind == openscp::RemoteErrorKind::Certificate &&
+                !verificationFailure.transient,
+            "TLS verification failures should not be retried");
 
+    // Downloads keep the errno of the write that failed; libcurl makes more
+    // calls before it returns, so a later errno says nothing.
     const int previousErrno = errno;
     errno = ENOSPC;
-    const openscp::RemoteError localFull = openscp::curlcommon::errorFromCurl(
+    const openscp::RemoteError localWrite = openscp::curlcommon::errorFromCurl(
         CURLE_WRITE_ERROR, "local write failed");
     errno = previousErrno;
-    t.check(localFull.kind == openscp::RemoteErrorKind::InsufficientSpace &&
-                localFull.native_code == ENOSPC,
-            "local ENOSPC during a CURL write should retain its native code");
+    t.check(localWrite.kind == openscp::RemoteErrorKind::LocalIo,
+            "a CURL write error should not read an unrelated errno");
 }
 #endif
 

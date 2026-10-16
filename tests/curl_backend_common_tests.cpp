@@ -13,6 +13,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 
@@ -322,6 +324,71 @@ OPENSCP_TEST(testBoundedStringSink, test) {
                "bounded response sinks should stop oversized responses");
     test.check(sink.limitExceeded && output == "abc",
                "oversized response chunks must not be partially appended");
+}
+
+OPENSCP_TEST(testCurlResponseAndWriteFailures, test) {
+    using openscp::RemoteErrorKind;
+    using openscp::curlcommon::errorFromCurl;
+
+    std::string output;
+    openscp::curlcommon::BoundedStringSink sink{&output, 4};
+    char oversized[] = {'a', 'b', 'c', 'd', 'e'};
+    (void)openscp::curlcommon::appendStringCallback(oversized, 1,
+                                                    sizeof(oversized), &sink);
+    CURLcode code = CURLE_OK;
+    std::string error;
+    test.check(
+        openscp::curlcommon::refusedResponse(sink, "Listing", code, error) &&
+            errorFromCurl(code, error).kind == RemoteErrorKind::Protocol,
+        "an oversized response should be a protocol error");
+
+    // A stream opened for reading refuses writes, as a full disk would.
+    const std::filesystem::path readOnlyPath =
+        std::filesystem::temp_directory_path() /
+        "openscp_curl_write_error_test";
+    { std::ofstream(readOnlyPath) << "x"; }
+    openscp::UniqueFile readOnly(
+        std::fopen(readOnlyPath.string().c_str(), "rb"));
+    openscp::curlcommon::TransferProgressContext context;
+    context.downloadFile = readOnly.get();
+    char data[] = {'x'};
+    test.check(
+        readOnly &&
+            openscp::curlcommon::writeFileCallback(data, 1, 1, &context) == 0 &&
+            context.writeError != 0,
+        "a failed download write should keep its errno");
+    readOnly.reset();
+    std::error_code removeError;
+    std::filesystem::remove(readOnlyPath, removeError);
+}
+
+OPENSCP_TEST(testCurlFailuresNameTheirCause, test) {
+    openscp::curlcommon::CurlEasySession session;
+    std::string error;
+    test.check(session.initialize(error),
+               std::string("curl session should initialize: ") + error);
+    if (!session.get())
+        return;
+
+    int socketAttempts = 0;
+    openscp::curlcommon::TransferProgressContext progressContext;
+    const auto result = openscp::curlcommon::performCurlTransfer(
+        session.get(), progressContext, "test transfer",
+        [&](CURL *curl, std::string &) {
+            return curl_easy_setopt(curl, CURLOPT_PROXY, "") == CURLE_OK &&
+                   curl_easy_setopt(curl, CURLOPT_URL, "http://127.0.0.1:1/") ==
+                       CURLE_OK &&
+                   curl_easy_setopt(curl, CURLOPT_OPENSOCKETFUNCTION,
+                                    rejectSocketOpen) == CURLE_OK &&
+                   curl_easy_setopt(curl, CURLOPT_OPENSOCKETDATA,
+                                    &socketAttempts) == CURLE_OK;
+        },
+        error);
+    const std::string generic = std::string("test transfer failed: ") +
+                                curl_easy_strerror(result.curlCode);
+    test.check(result.curlCode != CURLE_OK && error.rfind(generic, 0) == 0 &&
+                   error.size() > generic.size(),
+               "a curl failure should add libcurl's detail: " + error);
 }
 
 OPENSCP_TEST(testCurlTransportPolicy, test) {
