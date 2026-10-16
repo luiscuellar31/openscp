@@ -106,7 +106,7 @@ QVector<QVariantHash> unsupportedStoredSites(QSettings &settings) {
 }
 
 // Removes the stored array entries but no other key in their group: Windows
-// ignores case in setting keys, so the "Sites/..." settings share it.
+// ignores case in setting keys, so the settings under Sites share it.
 void removeStoredSites(QSettings &settings) {
     settings.beginGroup(openscpui::settingskeys::kSites);
     const QStringList groups = settings.childGroups();
