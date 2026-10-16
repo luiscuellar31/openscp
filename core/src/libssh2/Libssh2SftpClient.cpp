@@ -786,23 +786,6 @@ bool verify_final_transfer_integrity(
     return true;
 }
 
-using DigestContext = std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)>;
-
-// Returns an initialized SHA-256 context, or null when streaming is disabled
-// or OpenSSL cannot provide one.
-DigestContext start_stream_digest(bool enabled) {
-    DigestContext ctx(enabled ? EVP_MD_CTX_new() : nullptr, &EVP_MD_CTX_free);
-    if (ctx && EVP_DigestInit_ex(ctx.get(), EVP_sha256(), nullptr) != 1)
-        ctx.reset();
-    return ctx;
-}
-
-void update_stream_digest(DigestContext &ctx, const char *data,
-                          std::size_t size) {
-    if (ctx && EVP_DigestUpdate(ctx.get(), data, size) != 1)
-        ctx.reset();
-}
-
 bool remote_file_changed(const LIBSSH2_SFTP_ATTRIBUTES &before,
                          const LIBSSH2_SFTP_ATTRIBUTES &after) {
     const auto reportedByBoth = [&](unsigned long flag) {
@@ -812,36 +795,6 @@ bool remote_file_changed(const LIBSSH2_SFTP_ATTRIBUTES &before,
             before.filesize != after.filesize) ||
            (reportedByBoth(LIBSSH2_SFTP_ATTR_ACMODTIME) &&
             before.mtime != after.mtime);
-}
-
-// Optional policy for a transfer that streamed the whole file: compares the
-// streamed bytes with the local file instead of reading the remote file again,
-// because SSH already protects the bytes in transit. As with the full check,
-// a digest that cannot be computed does not fail an Optional transfer.
-bool verify_streamed_transfer_integrity(
-    DigestContext &streamDigest, const std::string &localPath,
-    std::uint64_t size, const char *transferKind, std::string &err,
-    const std::function<bool()> *shouldCancel) {
-    Sha256Digest streamed{};
-    unsigned int streamedLength = 0;
-    if (!streamDigest ||
-        EVP_DigestFinal_ex(streamDigest.get(), streamed.data(),
-                           &streamedLength) != 1 ||
-        streamedLength != SHA256_DIGEST_LENGTH) {
-        return true;
-    }
-    Sha256Digest localDigest{};
-    std::string hashErr;
-    const bool localOk = hash_local_range(localPath, 0, size, localDigest,
-                                          &hashErr, shouldCancel);
-    if (fail_if_transfer_canceled(shouldCancel, err))
-        return false;
-    if (localOk && localDigest != streamed) {
-        err = std::string("Final integrity check failed (") + transferKind +
-              "): transferred data and local file checksum mismatch";
-        return false;
-    }
-    return true;
 }
 
 #ifndef _WIN32
@@ -3330,9 +3283,11 @@ bool Libssh2SftpClient::get(
         hasTotal ? total - offset : std::numeric_limits<std::uint64_t>::max()));
     std::size_t done = offset;
 
-    // Optional integrity hashes a whole-file transfer while it streams. A
-    // resumed transfer also depends on earlier data, and a recently modified
-    // file may change without new metadata, so both keep the full check.
+    // Under Optional, SSH already protects the bytes in transit, so a
+    // whole-file download only checks that the remote file kept its size and
+    // time; reading back what was just written would add little. A resumed
+    // download also depends on earlier data, and a recently modified file may
+    // change without new metadata, so both keep the full check.
     const std::optional<std::uint64_t> remoteModified =
         (st.flags & LIBSSH2_SFTP_ATTR_ACMODTIME) != 0
             ? std::optional<std::uint64_t>(st.mtime)
@@ -3341,10 +3296,9 @@ bool Libssh2SftpClient::get(
         std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch())
             .count();
-    const bool streamIntegrity =
+    const bool metadataCheckSuffices =
         policy == TransferIntegrityPolicy::Optional && offset == 0 &&
         !libssh2detail::remoteFileMayBeChanging(remoteModified, nowSeconds);
-    DigestContext streamDigest = start_stream_digest(streamIntegrity);
 
     while (true) {
         if (shouldCancel && shouldCancel()) {
@@ -3364,8 +3318,6 @@ bool Libssh2SftpClient::get(
                                       nativeError);
                 return false;
             }
-            update_stream_digest(streamDigest, buf.data(),
-                                 static_cast<std::size_t>(n));
             done = done + static_cast<std::size_t>(n);
             if (progress && total)
                 progress(done, total);
@@ -3382,7 +3334,7 @@ bool Libssh2SftpClient::get(
         }
     }
 
-    if (streamIntegrity) {
+    if (metadataCheckSuffices) {
         LIBSSH2_SFTP_ATTRIBUTES after{};
         const bool remoteChanged =
             (hasTotal && done != total) ||
@@ -3416,14 +3368,11 @@ bool Libssh2SftpClient::get(
     if (fail_if_transfer_canceled(&shouldCancel, err))
         return false;
 
-    const bool integrityOk =
-        streamIntegrity
-            ? verify_streamed_transfer_integrity(streamDigest, localPart, done,
-                                                 "download", err, &shouldCancel)
-            : verify_final_transfer_integrity(sftp_, localPart, remote, policy,
-                                              "download", err, &shouldCancel);
-    if (!integrityOk)
+    if (!metadataCheckSuffices &&
+        !verify_final_transfer_integrity(sftp_, localPart, remote, policy,
+                                         "download", err, &shouldCancel)) {
         return false;
+    }
 
     if (fail_if_transfer_canceled(&shouldCancel, err))
         return false;
@@ -3561,12 +3510,17 @@ bool Libssh2SftpClient::put(
     }
     std::vector<char> buf(sftp_transfer_buffer_size(total - done));
 
-    // Optional integrity hashes a whole-file transfer while it streams. A
-    // resumed transfer also depends on earlier data, so it keeps the full
-    // check.
-    const bool streamIntegrity =
+    // Under Optional, SSH already protects the bytes in transit, so a
+    // whole-file upload only checks that the source did not change while it
+    // was read, by its identity rather than by reading it again. A resumed
+    // upload also depends on earlier data, so it keeps the full check.
+    const bool identityCheckSuffices =
         policy == TransferIntegrityPolicy::Optional && done == 0;
-    DigestContext streamDigest = start_stream_digest(streamIntegrity);
+    localfiles::LocalFileIdentity sourceBefore{};
+    std::string identityError;
+    const bool sourceIdentified =
+        identityCheckSuffices &&
+        localfiles::localFileIdentity(local, sourceBefore, identityError);
 
     std::size_t writeSize =
         std::min(libssh2detail::kMinSftpWriteSize, buf.size());
@@ -3608,7 +3562,6 @@ bool Libssh2SftpClient::put(
                 if (progress && total)
                     progress(done, total);
             }
-            update_stream_digest(streamDigest, buf.data(), n);
         } else {
             if (std::ferror(localFile.get())) {
                 const int nativeError = errno;
@@ -3622,7 +3575,7 @@ bool Libssh2SftpClient::put(
         }
     }
 
-    if (streamIntegrity) {
+    if (identityCheckSuffices) {
         LIBSSH2_SFTP_ATTRIBUTES written{};
         const bool sizeChanged =
             done != total ||
@@ -3654,14 +3607,22 @@ bool Libssh2SftpClient::put(
     if (fail_if_transfer_canceled(&shouldCancel, err))
         return false;
 
-    const bool integrityOk =
-        streamIntegrity
-            ? verify_streamed_transfer_integrity(streamDigest, local, done,
-                                                 "upload", err, &shouldCancel)
-            : verify_final_transfer_integrity(sftp_, local, remotePart, policy,
-                                              "upload", err, &shouldCancel);
-    if (!integrityOk)
+    if (identityCheckSuffices) {
+        // A source that cannot be identified is not checked, as Optional
+        // does with a checksum it cannot compute.
+        localfiles::LocalFileIdentity sourceAfter{};
+        if (sourceIdentified &&
+            localfiles::localFileIdentity(local, sourceAfter, identityError) &&
+            sourceAfter != sourceBefore) {
+            err = "Final integrity check failed (upload): the local file "
+                  "changed during transfer";
+            return false;
+        }
+    } else if (!verify_final_transfer_integrity(sftp_, local, remotePart,
+                                                policy, "upload", err,
+                                                &shouldCancel)) {
         return false;
+    }
 
     if (fail_if_transfer_canceled(&shouldCancel, err))
         return false;

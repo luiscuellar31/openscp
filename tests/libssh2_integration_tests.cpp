@@ -832,7 +832,7 @@ int main() {
             },
             {}, false);
         t.check(changed, "upload source should change during the transfer");
-        t.check(!ok && err.find("checksum mismatch") != std::string::npos,
+        t.check(!ok && err.find("changed during transfer") != std::string::npos,
                 std::string("optional upload should reject a source changed "
                             "during the transfer: ") +
                     err);
