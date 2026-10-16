@@ -230,9 +230,20 @@ void refreshOpenSiteManagerWidget(QPointer<QWidget> siteManager) {
 // Opens the session's later connections: transfer workers, listing helpers,
 // and a reopened control connection. The options carry no interactive
 // callbacks, so those connections never prompt.
-auto sessionConnectionFactory(openscp::SessionOptions options) {
+// Reopens the control connection for RemoteOperationController.
+auto controlConnectionFactory(openscp::SessionOptions options) {
     return [options = std::move(options)](std::string &error) {
         return openscp::CreateConnectedClient(options, error);
+    };
+}
+
+auto sessionConnectionFactory(openscp::SessionOptions options) {
+    return [options = std::move(options)](std::stop_token stop,
+                                          std::string &error) {
+        // The manager stops a worker's handshake when the session goes away.
+        openscp::SessionOptions workerOptions = options;
+        workerOptions.connection_stop_token = std::move(stop);
+        return openscp::CreateConnectedClient(workerOptions, error);
     };
 }
 
@@ -1346,7 +1357,7 @@ void MainWindow::finalizeConnection(
     if (remoteOps_) {
         if (controlGuard) {
             remoteOps_->installSession(std::move(controlGuard),
-                                       sessionConnectionFactory(uiOpt));
+                                       controlConnectionFactory(uiOpt));
         } else {
             remoteOps_->clearSession();
         }

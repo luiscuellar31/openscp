@@ -48,9 +48,12 @@ class TransferManager : public QObject {
 
     // Opens a connection to the current session, or returns null with an
     // error. Worker slots call it concurrently and without locks held, and
-    // retain the connections they open.
+    // retain the connections they open. The token is requested when the
+    // session is cleared or replaced, or the manager shuts down, so a
+    // connection still being opened gives up instead of making them wait.
     using ConnectionFactory =
-        std::function<std::unique_ptr<openscp::RemoteClient>(std::string &)>;
+        std::function<std::unique_ptr<openscp::RemoteClient>(std::stop_token,
+                                                             std::string &)>;
 
     // `uploadsUsePartialFiles` says whether the session's uploads go through
     // "<destination>.part", which removing tasks with partial data cleans up.
@@ -164,6 +167,9 @@ class TransferManager : public QObject {
     enum class PrecheckOutcome { Continue, Skipped, Canceled, Error };
 
     ConnectionFactory openConnection_;
+    // Stops the connections being opened for the current session; replaced
+    // with each new one. Read and written under mtx_.
+    std::stop_source connectionStop_;
     QString currentSessionKey_;
     // Sessions of this run whose uploads write the destination directly, so
     // a "<destination>.part" on their server is not an upload's.

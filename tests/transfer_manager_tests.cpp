@@ -156,7 +156,7 @@ struct TransferManagerTestAccess {
     static std::chrono::microseconds blockedBatchScan(TransferManager &manager,
                                                       int repetitions) {
         std::lock_guard<std::mutex> lock(manager.mtx_);
-        manager.openConnection_ = [](std::string &) {
+        manager.openConnection_ = [](std::stop_token, std::string &) {
             return std::unique_ptr<openscp::RemoteClient>{};
         };
         const auto start = std::chrono::steady_clock::now();
@@ -177,7 +177,7 @@ struct TransferManagerTestAccess {
             manager.setTaskStatusLocked(*manager.queueStore_.nodes()[index],
                                         TransferTask::Status::Paused);
         }
-        manager.openConnection_ = [](std::string &) {
+        manager.openConnection_ = [](std::stop_token, std::string &) {
             return std::unique_ptr<openscp::RemoteClient>{};
         };
         const auto start = std::chrono::steady_clock::now();
@@ -207,7 +207,7 @@ struct TransferManagerTestAccess {
     static SchedulerMeasurement measureScheduler(TransferManager &manager,
                                                  int repetitions) {
         std::lock_guard<std::mutex> lock(manager.mtx_);
-        manager.openConnection_ = [](std::string &) {
+        manager.openConnection_ = [](std::stop_token, std::string &) {
             return std::unique_ptr<openscp::RemoteClient>{};
         };
         SchedulerMeasurement result;
@@ -256,7 +256,7 @@ struct TransferManagerTestAccess {
             // measures scheduler service, not OS condition-variable latency.
             std::lock_guard<std::mutex> lock(manager.mtx_);
             manager.maxConcurrent_.store(workers);
-            manager.openConnection_ = [](std::string &) {
+            manager.openConnection_ = [](std::stop_token, std::string &) {
                 return std::unique_ptr<openscp::RemoteClient>{};
             };
             const auto serviceStart = std::chrono::steady_clock::now();
@@ -810,9 +810,10 @@ void configureManager(TransferManager &manager, Client &baseClient,
     std::string connectError;
     (void)baseClient.connect(options, connectError);
     manager.setSessionIdentity(QStringLiteral("test-session"));
-    manager.setConnectionFactory([&baseClient, options](std::string &error) {
-        return baseClient.openConnection(options, error);
-    });
+    manager.setConnectionFactory(
+        [&baseClient, options](std::stop_token, std::string &error) {
+            return baseClient.openConnection(options, error);
+        });
 }
 
 OPENSCP_TEST(testPersistentWorkersRunConcurrently, test) {
@@ -1075,6 +1076,50 @@ OPENSCP_TEST(testUnreachableServerStopsTheQueue, test) {
                    },
                    std::chrono::seconds(30)),
                "resuming once the server is back should transfer every task");
+}
+
+// A server that never answers: the connection only gives up when it is told
+// to stop, or after ten seconds.
+TransferManager::ConnectionFactory
+hangingConnection(std::shared_ptr<std::atomic<bool>> connecting) {
+    return [connecting](
+               std::stop_token stop,
+               std::string &error) -> std::unique_ptr<openscp::RemoteClient> {
+        connecting->store(true);
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!stop.stop_requested() &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        error = "Connection canceled";
+        return nullptr;
+    };
+}
+
+OPENSCP_TEST(testLeavingASessionStopsWorkersStillConnecting, test) {
+    for (const bool shutDown : {false, true}) {
+        auto connecting = std::make_shared<std::atomic<bool>>(false);
+        TransferManager manager;
+        manager.setSessionIdentity(QStringLiteral("test-session"));
+        manager.setConnectionFactory(hangingConnection(connecting));
+        QTemporaryDir destination;
+        manager.enqueueDownload(QStringLiteral("/remote/hanging"),
+                                destination.filePath("hanging"));
+        test.check(waitUntil([&] { return connecting->load(); }),
+                   "a worker should start connecting");
+        const auto started = std::chrono::steady_clock::now();
+        if (shutDown)
+            manager.shutdown();
+        else
+            manager.clearSession();
+        test.check(std::chrono::steady_clock::now() - started <
+                       std::chrono::seconds(2),
+                   std::string(shutDown ? "shutting down"
+                                        : "clearing the "
+                                          "session") +
+                       " should not wait for a hanging connection");
+    }
 }
 
 OPENSCP_TEST(testResumeDuringAFailedConnectionRequeuesTheTask, test) {
@@ -1489,7 +1534,7 @@ OPENSCP_TEST(testWorkersConnectInParallel, test) {
     TransferManager manager;
     manager.setMaxConcurrent(2);
     manager.setSessionIdentity(QStringLiteral("test-session"));
-    manager.setConnectionFactory([&](std::string &error) {
+    manager.setConnectionFactory([&](std::stop_token, std::string &error) {
         {
             // Each handshake waits for a second one to overlap it, which can
             // only happen when workers do not connect one at a time.
@@ -1536,7 +1581,7 @@ OPENSCP_TEST(testConnectionOpenedAfterClearSessionIsDiscarded, test) {
     TransferManager manager;
     manager.setMaxConcurrent(1);
     manager.setSessionIdentity(QStringLiteral("test-session"));
-    manager.setConnectionFactory([&](std::string &error) {
+    manager.setConnectionFactory([&](std::stop_token, std::string &error) {
         {
             std::unique_lock lock(gateMutex);
             handshakeStarted = true;
@@ -4316,9 +4361,10 @@ OPENSCP_TEST(testBatchWaitingPersistence, test) {
     restored.setSessionIdentity(QStringLiteral("saved-site-id"));
     ConcurrentMockClient baseClient(std::make_shared<ConcurrencyProbe>());
     const auto options = testOptions();
-    restored.setConnectionFactory([&baseClient, options](std::string &error) {
-        return baseClient.openConnection(options, error);
-    });
+    restored.setConnectionFactory(
+        [&baseClient, options](std::stop_token, std::string &error) {
+            return baseClient.openConnection(options, error);
+        });
     restored.resumeTask(tasks[1].taskId);
     restored.resumeTask(tasks[0].taskId);
     test.check(

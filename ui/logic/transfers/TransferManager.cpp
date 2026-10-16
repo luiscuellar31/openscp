@@ -195,6 +195,10 @@ void TransferManager::shutdown() {
     if (!shuttingDown_.compare_exchange_strong(expected, true))
         return;
     paused_.store(true);
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        connectionStop_.request_stop();
+    }
 
     // Persist a recoverable paused representation before stopping workers.
     persistNow();
@@ -292,6 +296,8 @@ void TransferManager::setConnectionFactory(ConnectionFactory openConnection,
     {
         std::lock_guard<std::mutex> lock(mtx_);
         openConnection_ = std::move(openConnection);
+        connectionStop_.request_stop();
+        connectionStop_ = std::stop_source();
         if (uploadsUsePartialFiles)
             sessionsWithoutUploadPartials_.remove(currentSessionKey_);
         else
@@ -320,6 +326,8 @@ void TransferManager::clearSession() {
     {
         std::lock_guard<std::mutex> lock(mtx_);
         openConnection_ = {};
+        connectionStop_.request_stop();
+        connectionStop_ = std::stop_source();
         ++sessionGeneration_;
         resetConnectionFailuresLocked();
         for (auto &taskNode : queueStore_.nodes()) {
@@ -1181,6 +1189,7 @@ TransferManager::workerClient(WorkerSlot &slot, quint64 taskId,
             .toStdString();
     };
     ConnectionFactory openConnection;
+    std::stop_token connectionStop;
     {
         std::lock_guard<std::mutex> lock(mtx_);
         if (generation != sessionGeneration_ || paused_.load() ||
@@ -1199,6 +1208,7 @@ TransferManager::workerClient(WorkerSlot &slot, quint64 taskId,
             return {};
         }
         openConnection = openConnection_;
+        connectionStop = connectionStop_.get_token();
     }
     if (!openConnection) {
         err = QCoreApplication::translate("TransferManager",
@@ -1208,7 +1218,8 @@ TransferManager::workerClient(WorkerSlot &slot, quint64 taskId,
         return {};
     }
     // No lock is held during the handshake, so workers connect in parallel.
-    std::unique_ptr<openscp::RemoteClient> created = openConnection(err);
+    std::unique_ptr<openscp::RemoteClient> created =
+        openConnection(connectionStop, err);
     if (!created) {
         connectionFailed = true;
         return {};

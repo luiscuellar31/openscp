@@ -223,7 +223,10 @@ connects again, and the main window reports it. Disconnecting also leaves the
 session's queued and running work waiting; a new connection factory for the
 current session, which reconnecting to the same site sets without changing the
 session key, queues that work again. Switching sessions leaves paused tasks
-paused. The supporting classes have narrower jobs:
+paused. The connection factory gets a stop token of the manager's that
+clearing or replacing the session, or shutting down, requests, so a worker
+still connecting gives up instead of making them wait. The supporting classes
+have narrower jobs:
 
 - `TransferQueue` stores tasks and selects work fairly.
 - `TransferExecutor` runs a selected transfer.
