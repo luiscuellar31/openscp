@@ -453,6 +453,22 @@ bool fetchFtpListing(CURL *curl, const SessionOptions &opt,
         err = "Interrupted";
         return false;
     }
+    // LIST can only help when the server refused MLSD with a reply or sent
+    // output that does not parse. A timeout, a blocked data connection (425
+    // and 426 included), a TLS failure or the size limit would fail LIST the
+    // same way, only later.
+    const long mlsdReply = mlsdResult.responseCode;
+    const bool mlsdRefusedByReply =
+        mlsdReply >= 400 && mlsdReply != 425 && mlsdReply != 426;
+    if (!mlsdRejected && !mlsdOk && !mlsdRefusedByReply) {
+        if (lastCurlCode)
+            *lastCurlCode = mlsdResult.curlCode;
+        if (lastResponseCode)
+            *lastResponseCode = mlsdReply;
+        err = std::string(protocolLabel(opt.protocol)) +
+              " directory listing failed: " + mlsdErr;
+        return false;
+    }
 
     std::string listPayload;
     std::string listErr;

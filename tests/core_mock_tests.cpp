@@ -1258,6 +1258,129 @@ OPENSCP_TEST(test_curlftp_rejects_unsupported_proxy_type, t) {
             "FTP validation failure should expose a structured error");
 }
 
+#ifndef _WIN32
+// A local port with nothing listening, as behind a firewall that blocks FTP
+// data connections.
+std::uint16_t closedLocalPort() {
+    const int probe = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t length = sizeof(address);
+    const bool bound =
+        probe >= 0 &&
+        ::bind(probe, reinterpret_cast<sockaddr *>(&address),
+               sizeof(address)) == 0 &&
+        ::getsockname(probe, reinterpret_cast<sockaddr *>(&address), &length) ==
+            0;
+    if (probe >= 0)
+        ::close(probe);
+    return bound ? ntohs(address.sin_port) : 0;
+}
+
+OPENSCP_TEST(test_curlftp_listing_skips_list_after_a_data_failure, t) {
+    // An FTP control server whose passive data port refuses connections.
+    const int listener = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t length = sizeof(address);
+    const std::uint16_t dataPort = closedLocalPort();
+    const bool listening =
+        listener >= 0 && dataPort != 0 &&
+        ::bind(listener, reinterpret_cast<sockaddr *>(&address),
+               sizeof(address)) == 0 &&
+        ::listen(listener, 4) == 0 &&
+        ::getsockname(listener, reinterpret_cast<sockaddr *>(&address),
+                      &length) == 0;
+    t.check(listening, "the fake FTP server should listen");
+    if (!listening) {
+        if (listener >= 0)
+            ::close(listener);
+        return;
+    }
+    std::atomic<int> dataCommands{0};
+    std::thread server([listener, dataPort, &dataCommands] {
+        for (;;) {
+            const int client = ::accept(listener, nullptr, nullptr);
+            if (client < 0)
+                return;
+            const auto reply = [client](const std::string &line) {
+                const std::string text = line + "\r\n";
+                (void)::send(client, text.data(), text.size(), 0);
+            };
+            reply("220 fake");
+            std::string pending;
+            char buffer[512];
+            for (;;) {
+                const std::size_t end = pending.find("\r\n");
+                if (end == std::string::npos) {
+                    const ssize_t n = ::recv(client, buffer, sizeof(buffer), 0);
+                    if (n <= 0)
+                        break;
+                    pending.append(buffer, static_cast<std::size_t>(n));
+                    continue;
+                }
+                const std::string command = pending.substr(0, end);
+                pending.erase(0, end + 2);
+                const std::string verb = command.substr(0, command.find(' '));
+                if (verb == "USER")
+                    reply("331 password");
+                else if (verb == "PASS")
+                    reply("230 logged in");
+                else if (verb == "PWD")
+                    reply("257 \"/\" is the current directory");
+                else if (verb == "CWD")
+                    reply("250 ok");
+                else if (verb == "TYPE")
+                    reply("200 ok");
+                else if (verb == "EPSV") {
+                    ++dataCommands;
+                    reply("229 Entering Extended Passive Mode (|||" +
+                          std::to_string(dataPort) + "|)");
+                } else if (verb == "PASV") {
+                    ++dataCommands;
+                    reply("227 Entering Passive Mode (127,0,0,1," +
+                          std::to_string(dataPort / 256) + "," +
+                          std::to_string(dataPort % 256) + ")");
+                } else if (verb == "QUIT") {
+                    reply("221 bye");
+                    break;
+                } else {
+                    reply("502 not implemented");
+                }
+            }
+            ::close(client);
+        }
+    });
+
+    openscp::CurlFtpClient client(openscp::Protocol::Ftp);
+    openscp::SessionOptions opt;
+    opt.protocol = openscp::Protocol::Ftp;
+    opt.host = "127.0.0.1";
+    opt.port = ntohs(address.sin_port);
+    opt.username = "alice";
+    opt.password = openscp::SecureString("secret");
+    std::string err;
+    std::vector<openscp::FileInfo> entries;
+    const bool connected = client.connect(opt, err);
+    t.check(connected, "the fake FTP server should accept the login: " + err);
+    const int before = dataCommands.load();
+    const bool listed = connected && client.list("/", entries, err);
+    // libcurl tries PASV itself after EPSV fails, so one listing command
+    // takes two; retrying with LIST took two more.
+    t.check(!listed && dataCommands.load() - before == 2,
+            "a listing whose data connection fails should not retry with "
+            "LIST: " +
+                std::to_string(dataCommands.load() - before) +
+                " data command(s), " + err);
+    client.disconnect();
+    ::shutdown(listener, SHUT_RDWR);
+    ::close(listener);
+    server.join();
+}
+#endif
+
 OPENSCP_TEST(test_curlftp_rejects_command_injection_paths, t) {
     openscp::CurlFtpClient client(openscp::Protocol::Ftp);
     std::vector<openscp::FileInfo> entries;
