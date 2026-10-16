@@ -34,7 +34,8 @@ sign_app_bundle() {
 
 adhoc_sign_item() {
   local path="$1"
-  codesign --force -s - --timestamp=none "$path" 2>/dev/null || true
+  codesign --force -s - --timestamp=none "$path" ||
+    die "Ad-hoc signing failed: $path"
 }
 
 adhoc_sign_bundle() {

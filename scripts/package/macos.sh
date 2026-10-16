@@ -1168,6 +1168,9 @@ main() {
     # Ad‑hoc sign by default to avoid Code Signature Invalid on modified frameworks
     if [[ "${DO_ADHOC_SIGN:-1}" == "1" ]]; then
       adhoc_sign_bundle
+      # Without a valid ad-hoc signature the modified bundle does not start
+      # on Apple silicon.
+      codesign --verify --deep --strict --verbose=2 "$APP_DIR"
     else
       warn "SKIP_CODESIGN=1 and DO_ADHOC_SIGN=0: skipping all signing"
     fi
