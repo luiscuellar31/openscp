@@ -449,6 +449,64 @@ OPENSCP_TEST(testConcurrentConflictsUseOneBatchResolution, test) {
                "apply-to-remaining should persist the selected batch policy");
 }
 
+OPENSCP_TEST(testMixedTaskBatchEnqueue, test) {
+    TransferManager manager;
+    int addedNotifications = 0;
+    QObject::connect(&manager, &TransferManager::tasksAdded, &manager,
+                     [&](const QVector<quint64> &) { ++addedNotifications; });
+
+    TransferBatchOptions options = testBatchOptions();
+    options.operation = TransferOperation::Move;
+    TransferBatchOptions deleteOptions = options;
+    deleteOptions.waitForBatch = true;
+    const QVector<TransferRequest> requests = {
+        {TransferTask::Type::CreateRemoteDirectory,
+         {},
+         QStringLiteral("/remote/folder"),
+         options,
+         -1},
+        {TransferTask::Type::Upload, QStringLiteral("/local/folder/a.txt"),
+         QStringLiteral("/remote/folder/a.txt"), options, 0},
+        {TransferTask::Type::DeleteRemoteFile,
+         {},
+         QStringLiteral("/remote/old.txt"),
+         deleteOptions,
+         1},
+    };
+    const QVector<quint64> ids = manager.enqueueTasks(requests);
+    test.check(ids.size() == 3 && addedNotifications == 1,
+               "a mixed batch should be published as one addition");
+    const QVector<TransferTask> tasks = manager.tasksSnapshot(ids);
+    if (tasks.size() != 3)
+        return;
+
+    test.check(tasks[0].dst == QStringLiteral("/remote/folder") &&
+                   tasks[0].conflictPolicy == TransferConflictPolicy::Skip &&
+                   tasks[0].postAction == TransferPostAction::None,
+               "a directory request should create its destination");
+    test.check(tasks[1].src == QStringLiteral("/local/folder/a.txt") &&
+                   tasks[1].dst == QStringLiteral("/remote/folder/a.txt") &&
+                   tasks[1].postAction == TransferPostAction::DeleteSource &&
+                   tasks[1].conflictPolicy == TransferConflictPolicy::Overwrite,
+               "an upload request should keep its paths, move and policy");
+    test.check(tasks[2].src == QStringLiteral("/remote/old.txt") &&
+                   tasks[2].dst == QStringLiteral("/remote/old.txt") &&
+                   tasks[2].waitsForBatch,
+               "a delete request should act on its destination");
+    test.check(tasks[1].dependsOnTaskId == ids[0] &&
+                   tasks[2].dependsOnTaskId == ids[1] &&
+                   tasks[0].dependsOnTaskId == 0,
+               "requests should depend on the tasks of earlier requests");
+    test.check(tasks[0].batchId != 0 && tasks[0].batchId == tasks[1].batchId &&
+                   tasks[1].batchId == tasks[2].batchId,
+               "requests without a batch should share one new batch");
+    test.check(manager.enqueueUpload(QStringLiteral("/local/b.txt"),
+                                     QStringLiteral("/remote/b.txt"),
+                                     options) != 0 &&
+                   addedNotifications == 2,
+               "single enqueues should still publish their task");
+}
+
 OPENSCP_TEST(testBatchDownloadEnqueueAndGranularSignals, test) {
     TransferManager manager;
     int addedNotifications = 0;

@@ -102,6 +102,10 @@ class TransferManager : public QObject {
     int
     enqueueDownloads(const QVector<QPair<QString, QString>> &remoteLocalPairs,
                      const TransferBatchOptions &options = {});
+    // Adds the requests under one lock, with one tasksAdded and one wake-up
+    // of the workers, and returns their task IDs in order. Requests with a
+    // zero batchId share one new batch.
+    QVector<quint64> enqueueTasks(const QVector<TransferRequest> &requests);
     quint64 createBatch(const TransferBatchOptions &options = {});
     void cancelBatch(quint64 batchId);
 
@@ -251,9 +255,7 @@ class TransferManager : public QObject {
     TransferTask *taskForIdLocked(quint64 taskId);
     const TransferTask *taskForIdLocked(quint64 taskId) const;
     void appendTaskLocked(TransferTask task);
-    quint64 enqueuePreparedTask(TransferTask task,
-                                const TransferBatchOptions &options,
-                                bool inheritBatchConflictPolicy);
+    quint64 enqueueRequest(TransferRequest request);
     void rebuildTaskLookupLocked();
     // Removes the inactive tasks shouldRemove selects in one pass, releases
     // what the queue kept for them, and returns them.
@@ -276,8 +278,6 @@ class TransferManager : public QObject {
         std::optional<bool> skippedByFailedDependency = std::nullopt);
     // State of the batch's tasks that do not wait for the batch.
     BatchWork batchWorkLocked(quint64 batchId) const;
-    quint64 enqueuePathTask(TransferTask::Type type, const QString &path,
-                            const TransferBatchOptions &options);
     std::string destinationKey(const TransferTask &task,
                                bool partial = false) const;
     std::vector<std::string> destinationKeys(const TransferTask &task) const;

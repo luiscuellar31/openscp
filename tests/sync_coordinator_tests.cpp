@@ -463,6 +463,9 @@ OPENSCP_TEST(testPersistentExecutionPlan, test) {
         {QStringLiteral("old"), SyncEntryType::Directory},
     };
 
+    int addedNotifications = 0;
+    QObject::connect(&transfers, &TransferManager::tasksAdded, &transfers,
+                     [&](const QVector<quint64> &) { ++addedNotifications; });
     qsizetype taskCount = 0;
     const quint64 batchId = coordinator.enqueuePlan(
         plan, QStringLiteral("/local/root"), QStringLiteral("/remote/root"),
@@ -470,6 +473,8 @@ OPENSCP_TEST(testPersistentExecutionPlan, test) {
     const auto tasks = transfers.tasksSnapshot();
     test.check(batchId != 0 && taskCount == 4 && tasks.size() == 4,
                "the whole sync plan should become one persistent batch");
+    test.check(addedNotifications == 1,
+               "the sync plan should be queued in one addition");
     if (tasks.size() != 4)
         return;
 

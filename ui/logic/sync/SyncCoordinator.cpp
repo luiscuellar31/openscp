@@ -869,20 +869,18 @@ quint64 SyncCoordinator::enqueuePlan(const SyncExecutionPlan &plan,
     options.operation = TransferOperation::Copy;
     options.batchId = transfers_->createBatch(options);
 
-    qsizetype taskCount = 0;
-    const auto record = [&](quint64 taskId) {
-        if (taskId != 0)
-            ++taskCount;
-        return taskId;
-    };
+    // The whole plan is queued in one call, so dependencies name requests.
+    QVector<TransferRequest> requests;
+    requests.reserve(plan.directoriesToCreate.size() + plan.copies.size() +
+                     plan.deletes.size());
+    const bool toRemote = plan.direction == SyncDirection::LocalToRemote;
 
     // Directories and copies wait only for the directory task that creates
     // their parent, so a sync runs as many of them at once as the queue
     // allows. SyncComparisonEngine orders directories parents-first.
-    QHash<QString, quint64> directoryTasks;
-    const auto dependOnParentDirectory = [&](const QString &relative) {
-        options.dependsOnTaskId =
-            directoryTasks.value(parentRelativePath(relative), 0);
+    QHash<QString, qsizetype> directoryRequests;
+    const auto parentDirectoryRequest = [&](const QString &relative) {
+        return directoryRequests.value(parentRelativePath(relative), -1);
     };
 
     for (const QString &rawRelative : plan.directoriesToCreate) {
@@ -890,15 +888,15 @@ quint64 SyncCoordinator::enqueuePlan(const SyncExecutionPlan &plan,
             SyncComparisonEngine::normalizeRelativePath(rawRelative);
         if (relative.isEmpty())
             continue;
-        dependOnParentDirectory(relative);
-        const quint64 taskId =
-            plan.direction == SyncDirection::LocalToRemote
-                ? record(transfers_->enqueueRemoteDirectory(
-                      joinRemotePath(remoteRoot, relative), options))
-                : record(transfers_->enqueueLocalDirectory(
-                      joinedLocalPath(localRoot, relative), options));
-        if (taskId != 0)
-            directoryTasks.insert(relative, taskId);
+        const qsizetype parent = parentDirectoryRequest(relative);
+        directoryRequests.insert(relative, requests.size());
+        requests.push_back({toRemote ? TransferTask::Type::CreateRemoteDirectory
+                                     : TransferTask::Type::CreateLocalDirectory,
+                            {},
+                            toRemote ? joinRemotePath(remoteRoot, relative)
+                                     : joinedLocalPath(localRoot, relative),
+                            options,
+                            parent});
     }
 
     for (const SyncCopyOperation &copy : plan.copies) {
@@ -906,15 +904,16 @@ quint64 SyncCoordinator::enqueuePlan(const SyncExecutionPlan &plan,
             SyncComparisonEngine::normalizeRelativePath(copy.relativePath);
         if (relative.isEmpty())
             continue;
-        dependOnParentDirectory(relative);
-        if (plan.direction == SyncDirection::LocalToRemote) {
-            record(transfers_->enqueueUpload(
-                joinedLocalPath(localRoot, relative),
-                joinRemotePath(remoteRoot, relative), options));
+        const QString localPath = joinedLocalPath(localRoot, relative);
+        const QString remotePath = joinRemotePath(remoteRoot, relative);
+        if (toRemote) {
+            requests.push_back({TransferTask::Type::Upload, localPath,
+                                remotePath, options,
+                                parentDirectoryRequest(relative)});
         } else {
-            record(transfers_->enqueueDownload(
-                joinRemotePath(remoteRoot, relative),
-                joinedLocalPath(localRoot, relative), options));
+            requests.push_back({TransferTask::Type::Download, remotePath,
+                                localPath, options,
+                                parentDirectoryRequest(relative)});
         }
     }
 
@@ -922,25 +921,31 @@ quint64 SyncCoordinator::enqueuePlan(const SyncExecutionPlan &plan,
     // leaves every destination extra in place. SyncComparisonEngine orders
     // them deepest-first, and chaining them keeps that order.
     options.waitForBatch = true;
-    quint64 previousDelete = 0;
+    qsizetype previousDelete = -1;
     for (const SyncDeleteOperation &deletion : plan.deletes) {
         const QString relative =
             SyncComparisonEngine::normalizeRelativePath(deletion.relativePath);
         if (relative.isEmpty())
             continue;
         const bool directory = deletion.type == SyncEntryType::Directory;
-        options.dependsOnTaskId = previousDelete;
-        const quint64 taskId =
-            plan.direction == SyncDirection::LocalToRemote
-                ? record(transfers_->enqueueRemoteDelete(
-                      joinRemotePath(remoteRoot, relative), directory, options))
-                : record(transfers_->enqueueLocalDelete(
-                      joinedLocalPath(localRoot, relative), directory,
-                      options));
-        if (taskId != 0)
-            previousDelete = taskId;
+        TransferTask::Type type = TransferTask::Type::DeleteLocalFile;
+        if (toRemote) {
+            type = directory ? TransferTask::Type::DeleteRemoteDirectory
+                             : TransferTask::Type::DeleteRemoteFile;
+        } else if (directory) {
+            type = TransferTask::Type::DeleteLocalDirectory;
+        }
+        const qsizetype request = requests.size();
+        requests.push_back({type,
+                            {},
+                            toRemote ? joinRemotePath(remoteRoot, relative)
+                                     : joinedLocalPath(localRoot, relative),
+                            options,
+                            previousDelete});
+        previousDelete = request;
     }
 
+    const qsizetype taskCount = transfers_->enqueueTasks(requests).size();
     if (taskCountOut)
         *taskCountOut = taskCount;
     return taskCount > 0 ? options.batchId : 0;

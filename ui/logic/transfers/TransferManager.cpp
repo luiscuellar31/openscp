@@ -403,33 +403,85 @@ void TransferManager::appendTaskLocked(TransferTask task) {
     adjustLocalPathUsersLocked(*taskForIdLocked(taskId), true);
 }
 
-quint64
-TransferManager::enqueuePreparedTask(TransferTask task,
-                                     const TransferBatchOptions &options,
-                                     bool inheritBatchConflictPolicy) {
-    quint64 taskId = 0;
+quint64 TransferManager::enqueueRequest(TransferRequest request) {
+    return enqueueTasks({std::move(request)}).front();
+}
+
+QVector<quint64>
+TransferManager::enqueueTasks(const QVector<TransferRequest> &requests) {
+    QVector<quint64> ids;
+    if (requests.isEmpty())
+        return ids;
+    ids.reserve(requests.size());
     {
         std::lock_guard<std::mutex> lock(mtx_);
-        task.taskId = nextId_++;
-        task.batchId = normalizedBatchIdLocked(options.batchId);
-        task.dependsOnTaskId = options.dependsOnTaskId;
-        task.waitsForBatch = options.waitForBatch;
-        task.sessionKey = options.sessionKey.isEmpty() ? currentSessionKey_
-                                                       : options.sessionKey;
-        initializeConnectionStatusLocked(task);
-        task.queuedAtMs = QDateTime::currentMSecsSinceEpoch();
-        conflictCoordinator_.ensureBatchPolicy(task.batchId,
-                                               options.conflictPolicy);
-        if (inheritBatchConflictPolicy) {
-            task.conflictPolicy = conflictCoordinator_.batchPolicy(
-                task.batchId, options.conflictPolicy);
+        const qint64 queuedAt = QDateTime::currentMSecsSinceEpoch();
+        quint64 sharedBatchId = 0;
+        queueStore_.nodes().reserve(queueStore_.nodes().size() +
+                                    static_cast<std::size_t>(requests.size()));
+        for (const TransferRequest &request : requests) {
+            const TransferBatchOptions &options = request.options;
+            TransferTask task{};
+            task.type = request.type;
+            task.operation = TransferOperation::Copy;
+            task.conflictPolicy = Policy::Skip;
+            switch (request.type) {
+            case TransferTask::Type::Upload:
+            case TransferTask::Type::Download:
+                task.src = request.source;
+                task.dst = request.destination;
+                task.operation = options.operation;
+                task.conflictPolicy = options.conflictPolicy;
+                task.postAction = options.operation == TransferOperation::Move
+                                      ? TransferPostAction::DeleteSource
+                                      : TransferPostAction::None;
+                break;
+            case TransferTask::Type::CreateLocalDirectory:
+            case TransferTask::Type::CreateRemoteDirectory:
+                task.dst = request.destination;
+                break;
+            case TransferTask::Type::DeleteLocalFile:
+            case TransferTask::Type::DeleteLocalDirectory:
+            case TransferTask::Type::DeleteRemoteFile:
+            case TransferTask::Type::DeleteRemoteDirectory:
+                task.src = request.destination;
+                task.dst = request.destination;
+                break;
+            }
+
+            task.taskId = nextId_++;
+            if (options.batchId != 0) {
+                task.batchId = normalizedBatchIdLocked(options.batchId);
+            } else {
+                if (sharedBatchId == 0)
+                    sharedBatchId = normalizedBatchIdLocked(0);
+                task.batchId = sharedBatchId;
+            }
+            task.dependsOnTaskId = options.dependsOnTaskId;
+            if (request.dependsOnRequest >= 0 &&
+                request.dependsOnRequest < ids.size())
+                task.dependsOnTaskId = ids[request.dependsOnRequest];
+            task.waitsForBatch = options.waitForBatch;
+            task.sessionKey = options.sessionKey.isEmpty() ? currentSessionKey_
+                                                           : options.sessionKey;
+            initializeConnectionStatusLocked(task);
+            task.queuedAtMs = queuedAt;
+            conflictCoordinator_.ensureBatchPolicy(task.batchId,
+                                                   options.conflictPolicy);
+            // Copies follow their batch's conflict choice; directory and
+            // delete tasks always skip.
+            if (task.type == TransferTask::Type::Upload ||
+                task.type == TransferTask::Type::Download) {
+                task.conflictPolicy = conflictCoordinator_.batchPolicy(
+                    task.batchId, options.conflictPolicy);
+            }
+            ids.push_back(task.taskId);
+            appendTaskLocked(std::move(task));
         }
-        taskId = task.taskId;
-        appendTaskLocked(std::move(task));
     }
-    publishAdded({taskId});
+    publishAdded(ids);
     schedule();
-    return taskId;
+    return ids;
 }
 
 void TransferManager::rebuildTaskLookupLocked() {
@@ -866,81 +918,57 @@ TransferManager::skipDependentsOfFailedLocked(quint64 failedTaskId,
 quint64 TransferManager::enqueueUpload(const QString &local,
                                        const QString &remote,
                                        const TransferBatchOptions &options) {
-    TransferTask task{};
-    task.type = TransferTask::Type::Upload;
-    task.src = local;
-    task.dst = remote;
-    task.operation = options.operation;
-    task.conflictPolicy = options.conflictPolicy;
-    task.postAction = options.operation == TransferOperation::Move
-                          ? TransferPostAction::DeleteSource
-                          : TransferPostAction::None;
-    return enqueuePreparedTask(std::move(task), options, true);
+    return enqueueRequest(
+        {TransferTask::Type::Upload, local, remote, options, -1});
 }
 
 quint64 TransferManager::enqueueDownload(const QString &remote,
                                          const QString &local,
                                          const TransferBatchOptions &options) {
-    TransferTask task{};
-    task.type = TransferTask::Type::Download;
-    task.src = remote;
-    task.dst = local;
-    task.operation = options.operation;
-    task.conflictPolicy = options.conflictPolicy;
-    task.postAction = options.operation == TransferOperation::Move
-                          ? TransferPostAction::DeleteSource
-                          : TransferPostAction::None;
-    return enqueuePreparedTask(std::move(task), options, true);
+    return enqueueRequest(
+        {TransferTask::Type::Download, remote, local, options, -1});
 }
 
 quint64
 TransferManager::enqueueLocalDirectory(const QString &localDirectory,
                                        const TransferBatchOptions &options) {
-    TransferTask task{};
-    task.type = TransferTask::Type::CreateLocalDirectory;
-    task.dst = localDirectory;
-    task.operation = TransferOperation::Copy;
-    task.conflictPolicy = Policy::Skip;
-    return enqueuePreparedTask(std::move(task), options, false);
+    return enqueueRequest({TransferTask::Type::CreateLocalDirectory,
+                           {},
+                           localDirectory,
+                           options,
+                           -1});
 }
 
 quint64
 TransferManager::enqueueRemoteDirectory(const QString &remoteDirectory,
                                         const TransferBatchOptions &options) {
-    TransferTask task{};
-    task.type = TransferTask::Type::CreateRemoteDirectory;
-    task.dst = remoteDirectory;
-    task.operation = TransferOperation::Copy;
-    task.conflictPolicy = Policy::Skip;
-    return enqueuePreparedTask(std::move(task), options, false);
-}
-
-quint64 TransferManager::enqueuePathTask(TransferTask::Type type,
-                                         const QString &path,
-                                         const TransferBatchOptions &options) {
-    TransferTask task{};
-    task.type = type;
-    task.src = path;
-    task.dst = path;
-    task.operation = TransferOperation::Copy;
-    task.conflictPolicy = Policy::Skip;
-    return enqueuePreparedTask(std::move(task), options, false);
+    return enqueueRequest({TransferTask::Type::CreateRemoteDirectory,
+                           {},
+                           remoteDirectory,
+                           options,
+                           -1});
 }
 
 quint64
 TransferManager::enqueueLocalDelete(const QString &localPath, bool directory,
                                     const TransferBatchOptions &options) {
-    return enqueuePathTask(directory ? TransferTask::Type::DeleteLocalDirectory
+    return enqueueRequest({directory ? TransferTask::Type::DeleteLocalDirectory
                                      : TransferTask::Type::DeleteLocalFile,
-                           localPath, options);
+                           {},
+                           localPath,
+                           options,
+                           -1});
 }
 
 quint64
 TransferManager::enqueueRemoteDelete(const QString &remotePath, bool directory,
                                      const TransferBatchOptions &options) {
-    return enqueuePathTask(directory ? TransferTask::Type::DeleteRemoteDirectory
+    return enqueueRequest({directory ? TransferTask::Type::DeleteRemoteDirectory
                                      : TransferTask::Type::DeleteRemoteFile,
-                           remotePath, options);
+                           {},
+                           remotePath,
+                           options,
+                           -1});
 }
 
 quint64 TransferManager::createBatch(const TransferBatchOptions &options) {
@@ -982,48 +1010,13 @@ void TransferManager::cancelBatch(quint64 batchId) {
 int TransferManager::enqueueDownloads(
     const QVector<QPair<QString, QString>> &remoteLocalPairs,
     const TransferBatchOptions &options) {
-    if (remoteLocalPairs.isEmpty())
-        return 0;
-
-    QVector<quint64> ids;
-    ids.reserve(remoteLocalPairs.size());
-    {
-        std::lock_guard<std::mutex> lock(mtx_);
-        const quint64 batchId = normalizedBatchIdLocked(options.batchId);
-        const QString sessionKey = options.sessionKey.isEmpty()
-                                       ? currentSessionKey_
-                                       : options.sessionKey;
-        const qint64 queuedAt = QDateTime::currentMSecsSinceEpoch();
-        conflictCoordinator_.ensureBatchPolicy(batchId, options.conflictPolicy);
-        const Policy batchPolicy =
-            conflictCoordinator_.batchPolicy(batchId, options.conflictPolicy);
-        queueStore_.nodes().reserve(
-            queueStore_.nodes().size() +
-            static_cast<std::size_t>(remoteLocalPairs.size()));
-        for (const auto &pair : remoteLocalPairs) {
-            TransferTask task{};
-            task.type = TransferTask::Type::Download;
-            task.taskId = nextId_++;
-            task.batchId = batchId;
-            task.dependsOnTaskId = options.dependsOnTaskId;
-            task.waitsForBatch = options.waitForBatch;
-            task.sessionKey = sessionKey;
-            initializeConnectionStatusLocked(task);
-            task.src = pair.first;
-            task.dst = pair.second;
-            task.operation = options.operation;
-            task.conflictPolicy = batchPolicy;
-            task.postAction = options.operation == TransferOperation::Move
-                                  ? TransferPostAction::DeleteSource
-                                  : TransferPostAction::None;
-            task.queuedAtMs = queuedAt;
-            ids.push_back(task.taskId);
-            appendTaskLocked(std::move(task));
-        }
+    QVector<TransferRequest> requests;
+    requests.reserve(remoteLocalPairs.size());
+    for (const auto &pair : remoteLocalPairs) {
+        requests.push_back({TransferTask::Type::Download, pair.first,
+                            pair.second, options, -1});
     }
-    publishAdded(ids);
-    schedule();
-    return static_cast<int>(ids.size());
+    return static_cast<int>(enqueueTasks(requests).size());
 }
 
 QVector<TransferTask> TransferManager::tasksSnapshot() const {

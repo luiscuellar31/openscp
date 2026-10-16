@@ -185,7 +185,10 @@ establishing a session.
 
 `TransferManager` is the entry point for the transfer queue. It coordinates
 worker connections, task state, retries, conflicts, path reservations,
-persistence, and notifications. Before dispatching a download or upload, it
+persistence, and notifications. `enqueueTasks` adds many tasks under one lock
+with one `tasksAdded` signal and one worker wake-up; a request can depend on an
+earlier request of the same call. Synchronization plans, local discovery
+batches and remote prescan batches enter the queue through it. Before dispatching a download or upload, it
 reserves both the final destination and its deterministic `.part` path under
 the queue mutex; both remain reserved through publication and are released
 together. Conflict renaming checks and reserves the same pair. Local reservation
@@ -303,7 +306,8 @@ Synchronization has three steps:
 
 1. `SyncCoordinator` collects bounded local and remote snapshots.
 2. `SyncComparisonEngine` creates a data-only plan.
-3. The accepted actions enter `TransferManager` as one ordered batch.
+3. The accepted actions enter `TransferManager` as one ordered batch, in one
+   `enqueueTasks` call.
 
 `SyncDialog` cancels superseded comparisons when options or snapshots change.
 The engine checks cancellation while building and classifying the preview; the

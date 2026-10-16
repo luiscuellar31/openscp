@@ -473,11 +473,17 @@ void MainWindow::runRemoteDownloadPrescan(
                     remoteOps_->setPaused(jobId, false);
             }
 
+            QVector<TransferRequest> requests;
+            requests.reserve(directories.size());
             for (const QString &directory : directories) {
-                transferMgr_->enqueueLocalDirectory(directory,
-                                                    state->batchOptions);
-                ++state->enqueuedDirectories;
+                requests.push_back({TransferTask::Type::CreateLocalDirectory,
+                                    {},
+                                    directory,
+                                    state->batchOptions,
+                                    -1});
             }
+            state->enqueuedDirectories +=
+                static_cast<int>(transferMgr_->enqueueTasks(requests).size());
             state->enqueuedDownloads +=
                 transferMgr_->enqueueDownloads(files, state->batchOptions);
 
@@ -773,8 +779,14 @@ void MainWindow::startLocalUploadDiscovery(
                 return;
             }
             state->counters = batch.counters;
-            QVector<quint64> newTaskIds;
-            newTaskIds.reserve(batch.entries.size());
+            // The batch is queued in one call. A directory created by an
+            // earlier batch is a task; one created by this batch is a
+            // request.
+            QVector<TransferRequest> requests;
+            requests.reserve(batch.entries.size());
+            QHash<QString, qsizetype> directoryRequests;
+            QVector<QString> requestDirectoryKeys;
+            requestDirectoryKeys.reserve(batch.entries.size());
             for (const auto &entry : batch.entries) {
                 if (entry.rootIndex < 0 ||
                     entry.rootIndex >= state->destinationRoots.size()) {
@@ -798,38 +810,51 @@ void MainWindow::startLocalUploadDiscovery(
 
                 const QString parentKey = QString::number(entry.rootIndex) +
                                           QStringLiteral(":") + parentRelative;
+                qsizetype parentRequest = -1;
                 if (entry.type == LocalTreeDiscoveryEntry::Type::File &&
                     entry.relativePath.isEmpty()) {
                     entryOptions.dependsOnTaskId = 0;
                 } else {
+                    parentRequest = directoryRequests.value(parentKey, -1);
                     entryOptions.dependsOnTaskId =
                         state->directoryTasks.value(parentKey, 0);
                 }
 
-                quint64 taskId = 0;
                 if (entry.type == LocalTreeDiscoveryEntry::Type::Directory) {
-                    taskId = transferMgr_->enqueueRemoteDirectory(destination,
-                                                                  entryOptions);
                     const QString directoryKey =
                         QString::number(entry.rootIndex) + QStringLiteral(":") +
                         entry.relativePath;
-                    state->directoryTasks.insert(directoryKey, taskId);
-                    if (taskId != 0)
-                        state->directoryTaskIds.insert(taskId);
+                    directoryRequests.insert(directoryKey, requests.size());
+                    requestDirectoryKeys.push_back(directoryKey);
+                    requests.push_back(
+                        {TransferTask::Type::CreateRemoteDirectory,
+                         {},
+                         destination,
+                         entryOptions,
+                         parentRequest});
                     ++state->directoryCount;
                     if (!state->sourceDirectorySet.contains(entry.localPath)) {
                         state->sourceDirectorySet.insert(entry.localPath);
                         state->sourceDirectories.push_back(entry.localPath);
                     }
                 } else {
-                    taskId = transferMgr_->enqueueUpload(
-                        entry.localPath, destination, entryOptions);
+                    requestDirectoryKeys.push_back({});
+                    requests.push_back({TransferTask::Type::Upload,
+                                        entry.localPath, destination,
+                                        entryOptions, parentRequest});
                     ++state->uploadCount;
                 }
-                if (taskId != 0) {
-                    state->pendingTasks.insert(taskId);
-                    newTaskIds.push_back(taskId);
+            }
+            const QVector<quint64> newTaskIds =
+                transferMgr_->enqueueTasks(requests);
+            for (qsizetype i = 0; i < newTaskIds.size(); ++i) {
+                const quint64 taskId = newTaskIds[i];
+                if (!requestDirectoryKeys[i].isEmpty()) {
+                    state->directoryTasks.insert(requestDirectoryKeys[i],
+                                                 taskId);
+                    state->directoryTaskIds.insert(taskId);
                 }
+                state->pendingTasks.insert(taskId);
             }
             // A fast directory task can finish between enqueue() and the
             // insertion above. Reconcile immediately so discovery

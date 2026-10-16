@@ -1207,7 +1207,7 @@ Für Downloads muss ein Remote-Dateipfad eingegeben werden.</translation>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="448"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="478"/>
         <location filename="../ui/app/MainWindowTransfers.cpp" line="93"/>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="587"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="593"/>
         <location filename="../ui/logic/navigation/PaneController.cpp" line="346"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="74"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="144"/>
@@ -1552,7 +1552,7 @@ Vertrauen und in known_hosts speichern?</translation>
         <location filename="../ui/app/MainWindowSync.cpp" line="38"/>
         <location filename="../ui/app/MainWindowSync.cpp" line="140"/>
         <location filename="../ui/app/MainWindowTransfers.cpp" line="187"/>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="643"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="649"/>
         <location filename="../ui/app/MainWindowUpdates.cpp" line="152"/>
         <location filename="../ui/logic/navigation/PaneController.cpp" line="362"/>
         <location filename="../ui/logic/navigation/PaneController.cpp" line="480"/>
@@ -1918,7 +1918,7 @@ Elemente auf einem anderen Datenträger werden kopiert und anschließend entfern
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="448"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="478"/>
         <location filename="../ui/app/MainWindowTransfers.cpp" line="93"/>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="587"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="593"/>
         <location filename="../ui/logic/navigation/PaneController.cpp" line="347"/>
         <source>No active remote session.</source>
         <translation>Keine aktive Remote-Sitzung.</translation>
@@ -2255,7 +2255,7 @@ Overwrite?</source>
     </message>
     <message>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="535"/>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="591"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="597"/>
         <source>Nothing to upload.</source>
         <translation>Keine Dateien zum Hochladen.</translation>
     </message>
@@ -2510,69 +2510,69 @@ Bekannte Datenmenge: %2
 Mit der Vorbereitung dieses Stapels fortfahren?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="496"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="502"/>
         <source>Queue backpressure: waiting for pending tasks to drop below 1,000…</source>
         <translation>Warteschlange ausgelastet: Warten, bis weniger als 1.000 Aufgaben ausstehen…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="509"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="515"/>
         <source>Scanning remote folders... %1 folders, %2 files found</source>
         <translation>Remote-Ordner werden gescannt... %1 Ordner, %2 Dateien gefunden</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="642"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="648"/>
         <source>Preparing local upload queue…</source>
         <translation>Lokale Uploadwarteschlange wird vorbereitet…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="644"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="650"/>
         <source>Preparing move</source>
         <translation>Verschieben wird vorbereitet</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="645"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="651"/>
         <source>Preparing upload</source>
         <translation>Upload wird vorbereitet</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="668"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="674"/>
         <source>symlinks skipped: %1</source>
         <translation>übersprungene symbolische Links: %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="671"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="677"/>
         <source>depth limits: %1</source>
         <translation>Tiefenlimits: %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="675"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="681"/>
         <source>inaccessible: %1</source>
         <translation>nicht zugänglich: %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="678"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="684"/>
         <source>invalid names: %1</source>
         <translation>ungültige Namen: %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="681"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="687"/>
         <source>unknown sizes: %1</source>
         <translation>unbekannte Größen: %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="852"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="877"/>
         <source>Scanning local items: %1
 %2</source>
         <translation>Lokale Elemente werden gescannt: %1
 %2</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="867"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="892"/>
         <source>Large upload</source>
         <translation>Großer Upload</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="868"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="893"/>
         <source>This upload contains more than 100,000 items or 100 GiB of known data.
 
 Discovered so far: %1 items, %2.
@@ -2583,32 +2583,32 @@ Bisher gefunden: %1 Elemente, %2.
 Mit der Vorbereitung fortfahren?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="903"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="928"/>
         <source>Queued: %1 uploads, %2 folders (DND)</source>
         <translation>Eingereiht: %1 Uploads, %2 Ordner (DND)</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="907"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="932"/>
         <source>Queued: %1 uploads, %2 folders (move)</source>
         <translation>Eingereiht: %1 Uploads, %2 Ordner (Verschieben)</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="910"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="935"/>
         <source>Queued: %1 uploads, %2 folders</source>
         <translation>Eingereiht: %1 Uploads, %2 Ordner</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="936"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="961"/>
         <source>Upload preparation canceled.</source>
         <translation>Uploadvorbereitung abgebrochen.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="1018"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="1043"/>
         <source>Drop ignored: remote-origin drag cannot be dropped back into the same remote panel</source>
         <translation>Ablegen ignoriert: Ein vom Remote-Bereich gezogenes Element kann nicht wieder im selben Remote-Bereich abgelegt werden</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="1027"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="1052"/>
         <source>Remote directory is read-only; cannot upload here</source>
         <translation>Das Remote-Verzeichnis ist schreibgeschützt; hier kann nichts hochgeladen werden</translation>
     </message>
@@ -4957,32 +4957,32 @@ Andere Programme, die diese Datei verwenden, etwa ssh, erkennen den Server erst 
         <translation>Die Integritätsprüfung ist erforderlich, konnte aber nicht abgeschlossen werden. Die Übertragung ist fehlgeschlagen.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="815"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="867"/>
         <source>Skipped because a prerequisite task did not complete successfully.</source>
         <translation>Übersprungen, weil eine erforderliche vorherige Aufgabe nicht erfolgreich abgeschlossen wurde.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1186"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1179"/>
         <source>Transfer queue paused or disconnected</source>
         <translation>Übertragungswarteschlange pausiert oder getrennt</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1203"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1196"/>
         <source>Waiting for a connection to the server</source>
         <translation>Warten auf eine Verbindung zum Server</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1214"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="1207"/>
         <source>No transfer connection is available</source>
         <translation>Es ist keine Übertragungsverbindung verfügbar</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2085"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2078"/>
         <source>Conflict</source>
         <translation>Konflikt</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2087"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2080"/>
         <source>«%1» already exists.
 Source: %2
 Destination: %3</source>
@@ -4991,88 +4991,88 @@ Quelle: %2
 Ziel: %3</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2092"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2085"/>
         <source>Overwrite</source>
         <translation>Überschreiben</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2096"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2089"/>
         <source>Resume</source>
         <translation>Fortsetzen</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2101"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2094"/>
         <source>Rename</source>
         <translation>Umbenennen</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2107"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2100"/>
         <source>Copy if newer</source>
         <translation>Kopieren, wenn neuer</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2112"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2105"/>
         <source>Skip</source>
         <translation>Überspringen</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2115"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2108"/>
         <source>Apply this decision to remaining conflicts</source>
         <translation>Diese Entscheidung auf verbleibende Konflikte anwenden</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2217"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2210"/>
         <source>Could not reserve renamed destination</source>
         <translation>Umbenanntes Ziel konnte nicht reserviert werden</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2232"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2225"/>
         <source>Could not find an available destination name</source>
         <translation>Es wurde kein verfügbarer Zielname gefunden</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2321"/>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2355"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2314"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2348"/>
         <source>Remote path component is not a directory: %1</source>
         <translation>Remote-Pfadkomponente ist kein Verzeichnis: %1</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2411"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2404"/>
         <source>Could not create local destination directory</source>
         <translation>Lokales Zielverzeichnis konnte nicht erstellt werden</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2723"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2716"/>
         <source>The source cleanup result is uncertain. Refresh both locations and reconcile the item manually before retrying.</source>
         <translation>Das Ergebnis der Quellenbereinigung ist ungewiss. Aktualisieren Sie beide Speicherorte und gleichen Sie das Element manuell ab, bevor Sie es erneut versuchen.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2790"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2783"/>
         <source>The server may have committed this operation, but its final result could not be confirmed. Refresh the destination and reconcile it manually; OpenSCP will not retry automatically.</source>
         <translation>Der Server hat diesen Vorgang möglicherweise ausgeführt, das Endergebnis konnte jedoch nicht bestätigt werden. Aktualisieren Sie das Ziel und gleichen Sie es manuell ab; OpenSCP versucht den Vorgang nicht automatisch erneut.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2815"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2808"/>
         <source>Transfer failed</source>
         <translation>Übertragung fehlgeschlagen</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2841"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2834"/>
         <source>Temporary failure. Retrying automatically…</source>
         <translation>Temporärer Fehler. Automatischer neuer Versuch…</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2865"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="2858"/>
         <source>Transfer failed after all retry attempts</source>
         <translation>Übertragung nach allen Versuchen fehlgeschlagen</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="3104"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="3097"/>
         <source>The transfer queue storage directory is unavailable.</source>
         <translation>Das Speicherverzeichnis der Übertragungswarteschlange ist nicht verfügbar.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferManager.cpp" line="3149"/>
+        <location filename="../ui/logic/transfers/TransferManager.cpp" line="3142"/>
         <source>The saved transfer queue was not restored because the current queue is not empty.</source>
         <translation>Die gespeicherte Übertragungswarteschlange wurde nicht wiederhergestellt, weil die aktuelle Warteschlange nicht leer ist.</translation>
     </message>

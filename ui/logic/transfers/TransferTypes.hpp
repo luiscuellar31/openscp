@@ -82,6 +82,18 @@ struct TransferTask {
     QString error;
 };
 
+// One task for TransferManager::enqueueTasks. Directory creation and deletes
+// act on destination; uploads and downloads copy source to destination.
+struct TransferRequest {
+    TransferTask::Type type = TransferTask::Type::Download;
+    QString source;
+    QString destination;
+    TransferBatchOptions options;
+    // An earlier request of the same call whose task this one depends on,
+    // in place of options.dependsOnTaskId.
+    qsizetype dependsOnRequest = -1;
+};
+
 [[nodiscard]] constexpr bool
 isTerminalTransferStatus(TransferTask::Status status) {
     using Status = TransferTask::Status;
