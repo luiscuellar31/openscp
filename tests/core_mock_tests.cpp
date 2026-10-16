@@ -4,6 +4,7 @@
 #include "common/UniqueFile.hpp"
 #include "libssh2/Libssh2ScpClient.hpp"
 #include "libssh2/Libssh2SftpClient.hpp"
+#include "libssh2/detail/KnownHostsFile.hpp"
 #include "libssh2/detail/Libssh2CipherPreference.hpp"
 #include "libssh2/detail/Libssh2ErrorClassifier.hpp"
 #include "libssh2/detail/Libssh2InputSafety.hpp"
@@ -458,6 +459,140 @@ OPENSCP_TEST(test_libssh2_input_safety, t) {
     t.check(!validateEndpointHost("example.test:2222", "SSH host", error),
             "SSH hosts must keep ports in the dedicated field");
 }
+
+OPENSCP_TEST(test_known_hosts_file_reads_past_refused_lines, t) {
+    namespace detail = openscp::libssh2detail;
+    const fs::path path = makeTempFilePath("known-hosts-read");
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << "# comment\n\nalpha k AQID\nbroken\r\nbeta k AQID\r\n"
+               "[gamma]:2222 k AQID";
+    }
+    std::vector<std::string> lines;
+    const auto read =
+        detail::readKnownHosts(path.string(), [&lines](const std::string &l) {
+            lines.push_back(l);
+            return l != "broken";
+        });
+    t.check(read.status == detail::KnownHostsReadStatus::Read &&
+                read.skippedLines == 1,
+            "a known_hosts file with one refused line should be read");
+    t.check(lines == std::vector<std::string>{"# comment", "", "alpha k AQID",
+                                              "broken", "beta k AQID",
+                                              "[gamma]:2222 k AQID"},
+            "every line should be handed over, the ones after a refused line "
+            "too, without its line ending");
+
+    const auto accept = [](const std::string &) { return true; };
+    t.check(detail::readKnownHosts(path.string() + ".missing", accept).status ==
+                detail::KnownHostsReadStatus::Missing,
+            "a missing known_hosts file should be reported as missing");
+#ifndef _WIN32
+    if (::geteuid() != 0) {
+        fs::permissions(path, fs::perms::none);
+        t.check(detail::readKnownHosts(path.string(), accept).status ==
+                    detail::KnownHostsReadStatus::Unreadable,
+                "a known_hosts file that cannot be read should be reported");
+        fs::permissions(path, fs::perms::owner_read | fs::perms::owner_write);
+    }
+#endif
+}
+
+OPENSCP_TEST(test_known_hosts_lines_name_their_host, t) {
+    namespace detail = openscp::libssh2detail;
+    const unsigned char raw[] = {1, 2, 3};
+    t.check(detail::knownHostsLine("[h.example]:2222", "ssh-ed25519", raw,
+                                   sizeof(raw), false) ==
+                "[h.example]:2222 ssh-ed25519 AQID",
+            "a plain known_hosts line should name the host and the key");
+
+    const std::string hashed = detail::knownHostsLine(
+        "[h.example]:2222", "ssh-ed25519", raw, sizeof(raw), true);
+    t.check(hashed.size() == 3 + 28 + 1 + 28 + 17 &&
+                hashed.rfind("|1|", 0) == 0 && hashed[31] == '|' &&
+                hashed.compare(60, std::string::npos, " ssh-ed25519 AQID") == 0,
+            "a hashed known_hosts line should look like ssh-keygen -H's: " +
+                hashed);
+    t.check(hashed != detail::knownHostsLine("[h.example]:2222", "ssh-ed25519",
+                                             raw, sizeof(raw), true),
+            "each hashed line should use its own salt");
+
+    // RemoveKnownHostEntry recognizes OpenSSH's hashed names, so it finds the
+    // host behind the hash.
+    const fs::path path = makeTempFilePath("known-hosts-hashed");
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << hashed << "\nkept k AQID\n";
+    }
+    std::string error;
+    std::string content;
+    t.check(openscp::RemoveKnownHostEntry(path.string(), "h.example", 2222,
+                                          error) &&
+                readTextFile(path, content) && content == "kept k AQID\n",
+            "the hashed name should match its host: " + error);
+}
+
+#ifndef _WIN32
+OPENSCP_TEST(test_known_hosts_append_keeps_the_rest_of_the_file, t) {
+    namespace detail = openscp::libssh2detail;
+    const fs::path folder =
+        makeTempFilePath("known-hosts-append").parent_path() / "append-folder";
+    std::error_code ec;
+    fs::create_directories(folder, ec);
+    fs::permissions(folder,
+                    fs::perms::owner_all | fs::perms::group_read |
+                        fs::perms::group_exec | fs::perms::others_read |
+                        fs::perms::others_exec,
+                    ec);
+    const fs::path path = folder / "known_hosts";
+    const std::string original =
+        "# keep me\n\nmulti.example,10.0.0.9 ssh-ed25519 AQID";
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << original;
+    }
+    fs::permissions(path,
+                    fs::perms::owner_read | fs::perms::owner_write |
+                        fs::perms::group_read | fs::perms::others_read,
+                    ec);
+    std::string error;
+    t.check(detail::appendKnownHostsLine(path.string(), "new.example k AQID",
+                                         error),
+            "a line should be appended: " + error);
+    std::string content;
+    t.check(readTextFile(path, content) &&
+                content == original + "\nnew.example k AQID\n",
+            "the file should keep its lines and gain the new one: " + content);
+    struct ::stat fileStat {};
+    struct ::stat folderStat {};
+    t.check(::stat(path.c_str(), &fileStat) == 0 &&
+                (fileStat.st_mode & 0777) == 0644 &&
+                ::stat(folder.c_str(), &folderStat) == 0 &&
+                (folderStat.st_mode & 0777) == 0755,
+            "appending should keep the file's and the folder's permissions");
+
+    const fs::path link = folder / "linked_known_hosts";
+    fs::create_symlink(path, link, ec);
+    t.check(!ec &&
+                detail::appendKnownHostsLine(link.string(), "via.link k AQID",
+                                             error) &&
+                fs::is_symlink(link) && readTextFile(path, content) &&
+                content.size() >= 16 &&
+                content.compare(content.size() - 16, 16, "via.link k AQID\n") ==
+                    0,
+            "a symbolic link should stay a link and its target gain the line");
+
+    const fs::path created = folder / "new-ssh" / "known_hosts";
+    t.check(
+        detail::appendKnownHostsLine(created.string(), "first k AQID", error) &&
+            readTextFile(created, content) && content == "first k AQID\n" &&
+            ::stat(created.c_str(), &fileStat) == 0 &&
+            (fileStat.st_mode & 0777) == 0600 &&
+            ::stat(created.parent_path().c_str(), &folderStat) == 0 &&
+            (folderStat.st_mode & 0777) == 0700,
+        "a missing file and folder should be created private: " + error);
+}
+#endif
 
 OPENSCP_TEST(test_safe_local_partial_files, t) {
     const fs::path target = makeTempFilePath("safe-target");

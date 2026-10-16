@@ -4,6 +4,7 @@
 
 #include "../common/RemoteListingLimits.hpp"
 #include "common/UniqueFile.hpp"
+#include "detail/KnownHostsFile.hpp"
 #include "detail/Libssh2CipherPreference.hpp"
 #include "detail/Libssh2ErrorClassifier.hpp"
 #include "detail/Libssh2InputSafety.hpp"
@@ -140,11 +141,6 @@ CoreLogLevel core_log_level() {
     return level;
 }
 
-bool core_sensitive_debug_enabled() {
-    static const bool enabled = openscp::sensitiveLoggingEnabled();
-    return enabled;
-}
-
 bool core_log_enabled(CoreLogLevel level) {
     return static_cast<int>(core_log_level()) >= static_cast<int>(level);
 }
@@ -237,7 +233,9 @@ std::string posix_err(const char *where) {
     return std::string(where) + ": " + std::strerror(errno);
 }
 
-bool ensure_parent_dir_0700(const std::string &path, std::string *why) {
+// Creates the parent folder with mode 0700 when missing. An existing folder
+// keeps its permissions: it may be one the user chose and shares.
+bool ensure_parent_dir(const std::string &path, std::string *why) {
     std::string dir = path;
     std::size_t p = dir.find_last_of('/');
     if (p == std::string::npos)
@@ -245,15 +243,9 @@ bool ensure_parent_dir_0700(const std::string &path, std::string *why) {
     else
         dir.resize(p);
     struct ::stat st {};
-    if (::stat(dir.c_str(), &st) != 0) {
-        if (::mkdir(dir.c_str(), 0700) != 0) {
-            if (why)
-                *why = posix_err("mkdir");
-            return false;
-        }
-    } else if (::chmod(dir.c_str(), 0700) != 0) {
+    if (::stat(dir.c_str(), &st) != 0 && ::mkdir(dir.c_str(), 0700) != 0) {
         if (why)
-            *why = posix_err("chmod(dir)");
+            *why = posix_err("mkdir");
         return false;
     }
     return true;
@@ -852,136 +844,6 @@ bool verify_streamed_transfer_integrity(
     return true;
 }
 
-bool persist_known_hosts_atomic(LIBSSH2_KNOWNHOSTS *nh,
-                                const std::string &khPath, std::string *why) {
-    if (!nh) {
-        if (why)
-            *why = "known_hosts not initialized";
-        return false;
-    }
-    if (khPath.empty()) {
-        if (why)
-            *why = "empty known_hosts path";
-        return false;
-    }
-
-#ifndef _WIN32
-    if (!ensure_parent_dir_0700(khPath, why))
-        return false;
-    std::string tmp = khPath + ".tmpXXXXXX";
-    std::vector<char> tmpl(tmp.begin(), tmp.end());
-    tmpl.push_back('\0');
-    int fd = ::mkstemp(tmpl.data());
-    if (fd < 0) {
-        if (why)
-            *why = posix_err("mkstemp");
-        return false;
-    }
-    const std::string tmpPath(tmpl.data());
-    if (::close(fd) != 0) {
-        if (why)
-            *why = posix_err("close(tmp)");
-        (void)::unlink(tmpPath.c_str());
-        return false;
-    }
-
-    if (libssh2_knownhost_writefile(nh, tmpPath.c_str(),
-                                    LIBSSH2_KNOWNHOST_FILE_OPENSSH) != 0) {
-        if (why)
-            *why = "libssh2_knownhost_writefile failed";
-        (void)::unlink(tmpPath.c_str());
-        return false;
-    }
-
-    if (::chmod(tmpPath.c_str(), 0600) != 0) {
-        if (why)
-            *why = posix_err("chmod(tmp)");
-        (void)::unlink(tmpPath.c_str());
-        return false;
-    }
-
-    int fdw = ::open(tmpPath.c_str(), O_WRONLY);
-    if (fdw < 0) {
-        if (why)
-            *why = posix_err("open(tmp)");
-        (void)::unlink(tmpPath.c_str());
-        return false;
-    }
-    if (::fchmod(fdw, 0600) != 0) {
-        if (why)
-            *why = posix_err("fchmod(tmp)");
-        ::close(fdw);
-        (void)::unlink(tmpPath.c_str());
-        return false;
-    }
-    if (::fsync(fdw) != 0) {
-        if (why)
-            *why = posix_err("fsync(tmp)");
-        ::close(fdw);
-        (void)::unlink(tmpPath.c_str());
-        return false;
-    }
-    if (::close(fdw) != 0) {
-        if (why)
-            *why = posix_err("close(tmp)");
-        (void)::unlink(tmpPath.c_str());
-        return false;
-    }
-
-    if (::rename(tmpPath.c_str(), khPath.c_str()) != 0) {
-        if (why)
-            *why = posix_err("rename(tmp->known_hosts)");
-        (void)::unlink(tmpPath.c_str());
-        return false;
-    }
-    if (!fsync_parent_dir(khPath, why))
-        return false;
-    return true;
-#else
-    std::string tmpPath = khPath + ".tmp";
-    if (libssh2_knownhost_writefile(nh, tmpPath.c_str(),
-                                    LIBSSH2_KNOWNHOST_FILE_OPENSSH) != 0) {
-        if (why)
-            *why = "libssh2_knownhost_writefile failed";
-        return false;
-    }
-    HANDLE h = CreateFileA(tmpPath.c_str(), GENERIC_READ | GENERIC_WRITE,
-                           FILE_SHARE_READ, NULL, OPEN_EXISTING,
-                           FILE_ATTRIBUTE_NORMAL, NULL);
-    if (h == INVALID_HANDLE_VALUE) {
-        DWORD ec = GetLastError();
-        (void)DeleteFileA(tmpPath.c_str());
-        if (why)
-            *why = win_err("CreateFile(tmp)", ec);
-        return false;
-    }
-    if (!FlushFileBuffers(h)) {
-        DWORD ec = GetLastError();
-        CloseHandle(h);
-        (void)DeleteFileA(tmpPath.c_str());
-        if (why)
-            *why = win_err("FlushFileBuffers(tmp)", ec);
-        return false;
-    }
-    if (!CloseHandle(h)) {
-        DWORD ec = GetLastError();
-        (void)DeleteFileA(tmpPath.c_str());
-        if (why)
-            *why = win_err("CloseHandle(tmp)", ec);
-        return false;
-    }
-    if (!MoveFileExA(tmpPath.c_str(), khPath.c_str(),
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) {
-        DWORD ec = GetLastError();
-        (void)DeleteFileA(tmpPath.c_str());
-        if (why)
-            *why = win_err("MoveFileEx(tmp->known_hosts)", ec);
-        return false;
-    }
-    return true;
-#endif
-}
-
 #ifndef _WIN32
 bool persist_text_atomic(const std::string &path, const std::string &content,
                          std::string *why) {
@@ -990,7 +852,7 @@ bool persist_text_atomic(const std::string &path, const std::string &content,
             *why = "empty destination path";
         return false;
     }
-    if (!ensure_parent_dir_0700(path, why))
+    if (!ensure_parent_dir(path, why))
         return false;
 
     std::string tmp = path + ".tmpXXXXXX";
@@ -1265,27 +1127,6 @@ int ensure_libssh2_initialized() {
                    []() { g_libssh2_init_result = libssh2_init(0); });
     return g_libssh2_init_result;
 }
-
-#ifndef _WIN32
-// Compute OpenSSH hashed hostname token: |1|base64(salt)|base64(HMAC_SHA1(salt,
-// host))
-std::string openssh_hash_hostname(const std::string &host) {
-    unsigned char salt[20];
-    if (RAND_bytes(salt, sizeof(salt)) != 1) {
-        // fallback: pseudo-random
-        for (size_t i = 0; i < sizeof(salt); ++i)
-            salt[i] = static_cast<unsigned char>(rand() & 0xFF);
-    }
-    unsigned char mac[EVP_MAX_MD_SIZE];
-    unsigned int maclen = 0;
-    HMAC(EVP_sha1(), salt, static_cast<int>(sizeof(salt)),
-         reinterpret_cast<const unsigned char *>(host.data()), host.size(), mac,
-         &maclen);
-    std::string s_salt = b64encode(salt, sizeof(salt));
-    std::string s_mac = b64encode(mac, maclen);
-    return std::string("|1|") + s_salt + "|" + s_mac;
-}
-#endif
 
 // Context for keyboard-interactive: respond with username/password based on the
 // prompt
@@ -2368,16 +2209,39 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
 #endif
         }
 
-        bool khLoaded = false;
+        auto khRead = libssh2detail::KnownHostsReadStatus::Missing;
         if (!khPath.empty()) {
-            khLoaded =
-                (libssh2_knownhost_readfile(
-                     nh, khPath.c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH) >= 0);
+            const auto read = libssh2detail::readKnownHosts(
+                khPath, [nh](const std::string &line) {
+                    // libssh2_knownhost_readfile() passes the newline too.
+                    const std::string withNewline = line + "\n";
+                    return libssh2_knownhost_readline(
+                               nh, withNewline.data(), withNewline.size(),
+                               LIBSSH2_KNOWNHOST_FILE_OPENSSH) >= 0;
+                });
+            khRead = read.status;
+            if (read.skippedLines > 0) {
+                core_logf(CoreLogLevel::Info,
+                          "known_hosts: skipped %d line(s) libssh2 cannot "
+                          "parse",
+                          read.skippedLines);
+            }
         }
-        if (!khLoaded &&
+        if (khRead != libssh2detail::KnownHostsReadStatus::Read &&
             opt.known_hosts_policy == openscp::KnownHostsPolicy::Strict) {
             libssh2_knownhost_free(nh);
             err = "known_hosts unavailable or unreadable (strict policy)";
+            return false;
+        }
+        // Without the whole file a changed key would look like a new host.
+        if (khRead == libssh2detail::KnownHostsReadStatus::Unreadable &&
+            opt.known_hosts_policy == openscp::KnownHostsPolicy::AcceptNew) {
+            libssh2_knownhost_free(nh);
+            err = "known_hosts exists but could not be read, so the host key "
+                  "cannot be verified";
+            if (opt.hostkey_status_cb) {
+                opt.hostkey_status_cb(err);
+            }
             return false;
         }
 
@@ -2404,41 +2268,29 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             err = "Host key DSA no permitido";
             return false;
         case LIBSSH2_HOSTKEY_TYPE_ECDSA_256:
+            algDisplay = "ecdsa-sha2-nistp256";
 #ifdef LIBSSH2_KNOWNHOST_KEY_ECDSA_256
             alg = LIBSSH2_KNOWNHOST_KEY_ECDSA_256;
-            algDisplay = "ecdsa-sha2-nistp256";
-            break;
-#else
-            alg = 0;
-            break;
 #endif
+            break;
         case LIBSSH2_HOSTKEY_TYPE_ECDSA_384:
+            algDisplay = "ecdsa-sha2-nistp384";
 #ifdef LIBSSH2_KNOWNHOST_KEY_ECDSA_384
             alg = LIBSSH2_KNOWNHOST_KEY_ECDSA_384;
-            algDisplay = "ecdsa-sha2-nistp384";
-            break;
-#else
-            alg = 0;
-            break;
 #endif
+            break;
         case LIBSSH2_HOSTKEY_TYPE_ECDSA_521:
+            algDisplay = "ecdsa-sha2-nistp521";
 #ifdef LIBSSH2_KNOWNHOST_KEY_ECDSA_521
             alg = LIBSSH2_KNOWNHOST_KEY_ECDSA_521;
-            algDisplay = "ecdsa-sha2-nistp521";
-            break;
-#else
-            alg = 0;
-            break;
 #endif
+            break;
         case LIBSSH2_HOSTKEY_TYPE_ED25519:
+            algDisplay = "ssh-ed25519";
 #ifdef LIBSSH2_KNOWNHOST_KEY_ED25519
             alg = LIBSSH2_KNOWNHOST_KEY_ED25519;
-            algDisplay = "ssh-ed25519";
-            break;
-#else
-            alg = 0;
-            break;
 #endif
+            break;
         default:
             alg = 0;
             break;
@@ -2610,8 +2462,6 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                                 "skipped");
                 // Continue without persisting
             } else {
-                bool saved = false;
-                // Prepare add/typemask
                 bool preferHashed = opt.known_hosts_hash_names;
                 if (const char *ev = std::getenv("OPENSCP_KNOWNHOSTS_PLAIN")) {
                     if (*ev == '1')
@@ -2619,124 +2469,27 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                     else if (*ev == '0')
                         preferHashed = true;
                 }
-                int nameMask = preferHashed ? LIBSSH2_KNOWNHOST_TYPE_SHA1
-                                            : LIBSSH2_KNOWNHOST_TYPE_PLAIN;
-                int addMask = nameMask | LIBSSH2_KNOWNHOST_KEYENC_RAW | alg;
                 // host string with port when non-default
                 std::string hostForKnown = opt.host;
                 if (opt.port != 22)
                     hostForKnown = std::string("[") + opt.host +
                                    "]:" + std::to_string(opt.port);
 
-                // Add entry
-                if (alg != 0 &&
-                    libssh2_knownhost_addc(nh, hostForKnown.c_str(), nullptr,
-                                           hostkey, keylen, nullptr, 0, addMask,
-                                           nullptr) == 0) {
-                    std::string persistErr;
-                    saved = persist_known_hosts_atomic(nh, khPath, &persistErr);
-                    if (!saved && opt.hostkey_status_cb) {
-                        opt.hostkey_status_cb(
-                            std::string("Could not save known_hosts: ") +
-                            persistErr);
-                    }
+                // Only the new line is appended: the rest of the file keeps
+                // its comments, its lines and its permissions.
+                const std::string line = libssh2detail::knownHostsLine(
+                    hostForKnown, algDisplay,
+                    reinterpret_cast<const unsigned char *>(hostkey), keylen,
+                    preferHashed);
+                std::string persistErr = "could not hash the host name";
+                const bool saved =
+                    !line.empty() && libssh2detail::appendKnownHostsLine(
+                                         khPath, line, persistErr);
+                if (!saved && opt.hostkey_status_cb) {
+                    opt.hostkey_status_cb(
+                        std::string("Could not save known_hosts: ") +
+                        persistErr);
                 }
-                // Manual ED25519 fallback when libssh2 lacks knownhosts alg
-                // mask
-#ifdef LIBSSH2_HOSTKEY_TYPE_ED25519
-                if (!saved && keytype == LIBSSH2_HOSTKEY_TYPE_ED25519) {
-                    const auto *hostkeyBytes =
-                        reinterpret_cast<const unsigned char *>(hostkey);
-                    if (core_sensitive_debug_enabled()) {
-                        std::ostringstream preview;
-                        const std::size_t n = std::min<std::size_t>(
-                            static_cast<std::size_t>(keylen),
-                            static_cast<std::size_t>(8));
-                        for (std::size_t i = 0; i < n; ++i) {
-                            if (i)
-                                preview << ' ';
-                            char b[4];
-                            std::snprintf(
-                                b, sizeof(b), "%02X",
-                                static_cast<unsigned>(hostkeyBytes[i]));
-                            preview << b;
-                        }
-                        core_logf(CoreLogLevel::Debug,
-                                  "Manual known_hosts write for ssh-ed25519 "
-                                  "fallback; keylen=%zu key_head=%s",
-                                  keylen, preview.str().c_str());
-                    } else {
-                        core_logf(CoreLogLevel::Debug,
-                                  "Manual known_hosts write for ssh-ed25519 "
-                                  "fallback; key material redacted (set "
-                                  "OPENSCP_ENV=dev and "
-                                  "OPENSCP_LOG_SENSITIVE=1 to include)");
-                    }
-                    // Fallback: write OpenSSH line atomically (hashed or plain)
-#ifndef _WIN32
-                    // Read existing
-                    std::string existing;
-                    int rfd = ::open(khPath.c_str(), O_RDONLY);
-                    if (rfd >= 0) {
-                        char buf[4096];
-                        ssize_t n;
-                        while ((n = ::read(rfd, buf, sizeof(buf))) > 0)
-                            existing.append(buf, buf + n);
-                        ::close(rfd);
-                    }
-                    // Build lines
-                    std::vector<std::string> lines;
-                    {
-                        std::string tmp;
-                        for (char c : existing) {
-                            if (c == '\r')
-                                continue;
-                            if (c == '\n') {
-                                lines.push_back(tmp);
-                                tmp.clear();
-                            } else
-                                tmp.push_back(c);
-                        }
-                        if (!existing.empty() && existing.back() != '\n')
-                            lines.push_back(tmp);
-                    }
-                    std::string b64 = b64encode(hostkeyBytes, keylen);
-                    std::string hostToken;
-                    if (preferHashed) {
-                        hostToken = openssh_hash_hostname(hostForKnown);
-                        // note: hashed entries won't be deduplicated (new salt)
-                        lines.push_back(hostToken + " ssh-ed25519 " + b64);
-                    } else {
-                        hostToken = hostForKnown;
-                        std::string prefix = hostToken + " ssh-ed25519 ";
-                        auto it =
-                            std::find_if(lines.begin(), lines.end(),
-                                         [&prefix](const std::string &ln) {
-                                             return ln.rfind(prefix, 0) == 0;
-                                         });
-                        if (it != lines.end()) {
-                            *it = prefix + b64;
-                        } else {
-                            lines.push_back(prefix + b64);
-                        }
-                    }
-                    std::string content;
-                    content.reserve(lines.size() * 64);
-                    for (const std::string &ln : lines) {
-                        if (!ln.empty())
-                            content.append(ln);
-                        content.push_back('\n');
-                    }
-                    std::string persistErr;
-                    saved = persist_text_atomic(khPath, content, &persistErr);
-                    if (!saved && opt.hostkey_status_cb) {
-                        opt.hostkey_status_cb(
-                            std::string("Could not save known_hosts: ") +
-                            persistErr);
-                    }
-#endif
-                }
-#endif
 
                 libssh2_knownhost_free(nh);
                 if (saved) {
