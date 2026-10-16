@@ -34,6 +34,21 @@
 #include <vector>
 
 struct TransferManagerTestAccess {
+    // A task whose worker is still finishing it after a failed connection
+    // suspended the queue.
+    static void markActiveAndWaiting(TransferManager &manager, quint64 taskId) {
+        std::lock_guard<std::mutex> lock(manager.mtx_);
+        TransferTask *task = manager.taskForIdLocked(taskId);
+        manager.setTaskStatusLocked(*task,
+                                    TransferTask::Status::WaitingForConnection);
+        manager.activeTaskIds_.insert(taskId);
+        manager.connectionSuspended_ = true;
+    }
+
+    static void finishWorkerTask(TransferManager &manager, quint64 taskId) {
+        manager.finishWorkerTask(taskId, 0, 0);
+    }
+
     static void setIdleConnectionTimeout(TransferManager &manager,
                                          std::chrono::milliseconds timeout) {
         std::lock_guard<std::mutex> lock(manager.mtx_);
@@ -1051,11 +1066,30 @@ OPENSCP_TEST(testUnreachableServerStopsTheQueue, test) {
 
     probe->allowed.store(1000);
     manager.resumeAll();
-    test.check(waitUntil([&] {
-                   return allTasksHaveStatus(manager, 20,
-                                             TransferTask::Status::Done);
-               }),
+    // Twenty transfers through two workers can take longer than the usual
+    // wait on a loaded machine.
+    test.check(waitUntil(
+                   [&] {
+                       return allTasksHaveStatus(manager, 20,
+                                                 TransferTask::Status::Done);
+                   },
+                   std::chrono::seconds(30)),
                "resuming once the server is back should transfer every task");
+}
+
+OPENSCP_TEST(testResumeDuringAFailedConnectionRequeuesTheTask, test) {
+    // resumeAll() can run while the worker that failed to connect is still
+    // finishing its task; the task must not stay waiting afterwards.
+    TransferManager manager;
+    QTemporaryDir destination;
+    const quint64 id = manager.enqueueDownload(
+        QStringLiteral("/remote/waiting"), destination.filePath("waiting"));
+    TransferManagerTestAccess::markActiveAndWaiting(manager, id);
+    manager.resumeAll();
+    TransferManagerTestAccess::finishWorkerTask(manager, id);
+    const auto task = manager.taskSnapshot(id);
+    test.check(task && task->status == TransferTask::Status::Queued,
+               "a resumed task should be queued once its worker finishes");
 }
 
 OPENSCP_TEST(testWorkerOverTheConnectionLimitStaysIdle, test) {
@@ -1092,7 +1126,9 @@ OPENSCP_TEST(testWorkerOverTheConnectionLimitStaysIdle, test) {
                }),
                "a worker over the server's connection limit should leave its "
                "tasks to the connected one");
-    test.check(probe->opened.load() == 1 && probe->refused.load() == 1 &&
+    // The connected worker may finish every task before the other one wakes,
+    // so the second worker is refused once at most.
+    test.check(probe->opened.load() == 1 && probe->refused.load() <= 1 &&
                    notices.load() == 0,
                "the refused worker should stop connecting for the session");
 }

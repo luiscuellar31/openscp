@@ -2946,8 +2946,13 @@ void TransferManager::finishWorkerTask(quint64 taskId, qint64 precheckMs,
             if (task.queuedAtMs > 0 && task.startedAtMs >= task.queuedAtMs) {
                 queueLatency = task.startedAtMs - task.queuedAtMs;
             }
+            // A resume can arrive while the task is still active, after its
+            // pause or after a failed connection left it waiting; unless the
+            // connection failed again since, it runs once more.
             if (resumeRequestedTasks_.erase(taskId) &&
-                task.status == Status::Paused) {
+                (task.status == Status::Paused ||
+                 (task.status == Status::WaitingForConnection &&
+                  !connectionSuspended_))) {
                 taskControls_.resume(taskId);
                 transitionToQueued(task, QDateTime::currentMSecsSinceEpoch(),
                                    true);
