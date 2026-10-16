@@ -253,8 +253,11 @@ bool MockSftpClient::chown(const std::string &remote_path, std::uint32_t uid,
     if (entry == state_->entries.end())
         return fail(RemoteErrorKind::NotFound,
                     "Mock remote path not found: " + path, err);
-    entry->second.uid = uid;
-    entry->second.gid = gid;
+    // (uint32_t)-1 leaves that id unchanged, as in POSIX chown.
+    if (uid != static_cast<std::uint32_t>(-1))
+        entry->second.uid = uid;
+    if (gid != static_cast<std::uint32_t>(-1))
+        entry->second.gid = gid;
     succeed(err);
     return true;
 }

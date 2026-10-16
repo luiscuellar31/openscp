@@ -64,6 +64,7 @@ class RemoteClient {
     virtual bool chmod(const std::string &remote_path, std::uint32_t mode,
                        std::string &err) = 0;
 
+    // A uid or gid of (uint32_t)-1 leaves that id unchanged.
     virtual bool chown(const std::string &remote_path, std::uint32_t uid,
                        std::uint32_t gid, std::string &err) = 0;
 

@@ -1376,6 +1376,12 @@ OPENSCP_TEST(test_mock_filesystem_crud_and_metadata, t) {
     t.check(c.stat("/workspace/report.txt", info, err) && info.mode == 0600 &&
                 info.uid == 1000 && info.gid == 1001 && info.mtime == 300,
             "metadata mutations should persist in the mock filesystem");
+    constexpr auto kUnchanged = static_cast<std::uint32_t>(-1);
+    t.check(c.chown("/workspace/report.txt", 1002, kUnchanged, err) &&
+                c.chown("/workspace/report.txt", kUnchanged, 1003, err) &&
+                c.stat("/workspace/report.txt", info, err) &&
+                info.uid == 1002 && info.gid == 1003,
+            "chown with an unchanged id should keep that id");
 
     t.check(c.mkdir("/workspace/archive", err, 0700),
             "mkdir should create a directory in the mock filesystem");

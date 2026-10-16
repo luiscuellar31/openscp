@@ -3984,21 +3984,32 @@ bool Libssh2SftpClient::chown(const std::string &remote_path, std::uint32_t uid,
     auto structuredErrorScope = beginStructuredOperation(err, true);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
-    LIBSSH2_SFTP_ATTRIBUTES a{};
-    a.flags = 0;
-    if (uid != static_cast<std::uint32_t>(-1)) {
-        a.flags |= LIBSSH2_SFTP_ATTR_UIDGID;
-        a.uid = uid;
-    }
-    if (gid != static_cast<std::uint32_t>(-1)) {
-        a.flags |= LIBSSH2_SFTP_ATTR_UIDGID;
-        a.gid = gid;
-    }
-    if (a.flags == 0) {
+    constexpr auto kUnchanged = static_cast<std::uint32_t>(-1);
+    if (uid == kUnchanged && gid == kUnchanged) {
         // Nothing requested to change.
         err.clear();
         return true;
     }
+    // SFTP v3 sets the owner and the group together, so the one that must
+    // not change is read first; sending 0 for it would give it to root.
+    if (uid == kUnchanged || gid == kUnchanged) {
+        LIBSSH2_SFTP_ATTRIBUTES current{};
+        if (libssh2_sftp_stat_ex(sftp_, remote_path.c_str(),
+                                 static_cast<unsigned>(remote_path.size()),
+                                 LIBSSH2_SFTP_STAT, &current) != 0 ||
+            (current.flags & LIBSSH2_SFTP_ATTR_UIDGID) == 0) {
+            err = "Could not read the current owner and group for remote chown";
+            return false;
+        }
+        if (uid == kUnchanged)
+            uid = static_cast<std::uint32_t>(current.uid);
+        if (gid == kUnchanged)
+            gid = static_cast<std::uint32_t>(current.gid);
+    }
+    LIBSSH2_SFTP_ATTRIBUTES a{};
+    a.flags = LIBSSH2_SFTP_ATTR_UIDGID;
+    a.uid = uid;
+    a.gid = gid;
     int rc = libssh2_sftp_stat_ex(sftp_, remote_path.c_str(),
                                   static_cast<unsigned>(remote_path.size()),
                                   LIBSSH2_SFTP_SETSTAT, &a);

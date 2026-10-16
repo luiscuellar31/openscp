@@ -464,6 +464,18 @@ int main() {
         t.check(st.has_size, "stat(remoteSrc) should report size");
         t.check(st.size == payload.size(),
                 "remote file size should match payload size");
+
+        // Changing only the owner, to the one it already has, must not send
+        // group 0, which the server would refuse or apply.
+        constexpr auto kUnchanged = static_cast<std::uint32_t>(-1);
+        openscp::FileInfo owned{};
+        err.clear();
+        t.check(client.chown(remoteSrc, st.uid, kUnchanged, err) &&
+                    client.chown(remoteSrc, kUnchanged, st.gid, err) &&
+                    client.stat(remoteSrc, owned, err) && owned.uid == st.uid &&
+                    owned.gid == st.gid,
+                std::string("chown with an unchanged id should keep it: ") +
+                    err);
     }
     if (t.failures == 0) {
         std::vector<openscp::FileInfo> entries;
