@@ -214,6 +214,37 @@ int main() {
     t.check(err.find("resume") != std::string::npos,
             "SCP download resume error should mention resume");
 
+    // Auto mode uploads through SFTP on the session SCP opened, so
+    // interrupting the client stops the upload; a separate fallback
+    // connection used to carry on until the file was complete.
+    {
+        const fs::path largeUpload = tempDir / "large.bin";
+        openscp::Libssh2ScpClient interrupted;
+        std::string interruptErr;
+        const bool ready =
+            writeFile(largeUpload, std::string(16 * 1024 * 1024, 'x')) &&
+            interrupted.connect(opt, interruptErr);
+        t.check(ready, "the interrupted upload should start: " + interruptErr);
+        bool interruptRequested = false;
+        const bool uploaded =
+            ready &&
+            interrupted.put(
+                largeUpload.string(),
+                joinRemotePath(remoteBase,
+                               "openscp_scp_it_interrupted_" + token + ".bin"),
+                interruptErr,
+                [&](std::size_t done, std::size_t) {
+                    if (done > 0 && !interruptRequested) {
+                        interruptRequested = true;
+                        interrupted.interrupt();
+                    }
+                },
+                {}, false);
+        t.check(ready && interruptRequested && !uploaded,
+                "interrupting an Auto-mode upload should stop it");
+        interrupted.disconnect();
+    }
+
     client.disconnect();
     std::error_code ec;
     fs::remove_all(tempDir, ec);

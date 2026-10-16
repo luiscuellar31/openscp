@@ -2918,6 +2918,25 @@ bool Libssh2SftpClient::connectTransportOnly(const SessionOptions &opt,
     return connectInternal(opt, err, false);
 }
 
+bool Libssh2SftpClient::ensureSftpSubsystem(std::string &err) {
+    auto ioLock = lockIo();
+    err.clear();
+    if (!connected_ || !session_) {
+        err = "Not connected";
+        return false;
+    }
+    if (sftp_)
+        return true;
+    _LIBSSH2_SFTP *sftp = libssh2_sftp_init(session_);
+    if (!sftp) {
+        err = "Could not initialize SFTP";
+        return false;
+    }
+    std::lock_guard<std::mutex> lk(stateMutex_);
+    sftp_ = sftp;
+    return true;
+}
+
 void Libssh2SftpClient::disconnect() {
     bool wasConnected = false;
     int sock = -1;
