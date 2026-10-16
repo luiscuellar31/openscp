@@ -1573,11 +1573,19 @@ bool set_socket_timeout_ms(int sock, int timeoutMs) {
 
 bool socket_send_all(int sock, const unsigned char *data, std::size_t len,
                      const char *stage, std::string &err) {
+    // interrupt() shuts the socket down from another thread, and a send after
+    // that raises SIGPIPE, which ends the process unless it is suppressed.
+#ifdef MSG_NOSIGNAL
+    constexpr int kSendFlags = MSG_NOSIGNAL;
+#else
+    constexpr int kSendFlags = 0;
+#endif
     // send(2) may write partially; loop until the full buffer is sent.
     std::size_t off = 0;
     while (off < len) {
-        const ssize_t w = ::send(
-            sock, reinterpret_cast<const char *>(data + off), len - off, 0);
+        const ssize_t w =
+            ::send(sock, reinterpret_cast<const char *>(data + off), len - off,
+                   kSendFlags);
         if (w < 0) {
             if (errno == EINTR)
                 continue;
