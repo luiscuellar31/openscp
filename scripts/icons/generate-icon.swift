@@ -72,7 +72,7 @@ struct Style {
 
 let styles = [
     Style(name: "standard", tile: nil, composition: freeStanding),
-    Style(name: "macos-light", tile: (top: 0xEEEEEC, bottom: 0xC8CCC4), composition: onTile),
+    Style(name: "macos-light", tile: (top: 0xFFFFFF, bottom: 0xEEEEEC), composition: onTile),
     Style(name: "macos-dark", tile: (top: 0x555753, bottom: 0x2E3436), composition: onTile),
 ]
 
