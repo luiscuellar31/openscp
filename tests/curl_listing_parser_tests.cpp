@@ -3,6 +3,7 @@
 #include "curl/CurlListingParser.hpp"
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -395,11 +396,18 @@ OPENSCP_TEST(testWebDavXmlBudgetCountsEachNonElementNode, test) {
     limits.maxXmlNodes = 3;
     for (const std::string node :
          {"<!-- ignored -->", "<![CDATA[text]]>", "<!extension>", "text<x/>"}) {
+        // The node twice, between `before` and `after`.
+        const auto twice = [&node](std::string_view before,
+                                   std::string_view after) {
+            std::string xml(before);
+            xml += node;
+            xml += node;
+            xml += after;
+            return xml;
+        };
         for (const std::string &xml :
-             {"<multistatus>" + node + node +
-                  "<response></response></multistatus>",
-              "<multistatus><response>" + node + node +
-                  "</response></multistatus>"}) {
+             {twice("<multistatus>", "<response></response></multistatus>"),
+              twice("<multistatus><response>", "</response></multistatus>")}) {
             test.check(
                 openscp::curlparser::parseWebDavPropfindResponse(
                     webDavOptions(), xml, resources, error, limits) ==

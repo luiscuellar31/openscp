@@ -134,7 +134,7 @@ QString numberedFileName(const QString &filename, int suffix) {
 QString numberedPath(const QString &path, int suffix) {
     const QFileInfo info(path);
     const QString directory = info.path();
-    const QString name = numberedFileName(info.fileName(), suffix);
+    QString name = numberedFileName(info.fileName(), suffix);
     if (directory.isEmpty() || directory == QStringLiteral("."))
         return name;
     return QDir(directory).filePath(name);

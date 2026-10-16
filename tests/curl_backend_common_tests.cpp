@@ -97,7 +97,10 @@ OPENSCP_TEST(testTrimAsciiPreservesContentAndWhitespaceRules, test) {
          {std::string(), std::string(" \t\r\n\v\f"),
           std::string(1024 * 1024, ' ')}) {
         const std::string content("a \t b\0\xff", 7);
-        test.check(trimAscii(padding + content + padding) == content,
+        std::string padded = padding;
+        padded += content;
+        padded += padding;
+        test.check(trimAscii(padded) == content,
                    "trimming must preserve internal whitespace, nulls and "
                    "high-bit bytes with short or large padding");
     }

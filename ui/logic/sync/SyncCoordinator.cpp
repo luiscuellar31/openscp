@@ -766,12 +766,13 @@ void SyncCoordinator::start(const QString &localRoot,
                                          node.depth + 1});
                     }
                 }
-                if (state->exceedsLargeTreeLimit(itemCount, knownBytes) &&
-                    !state->largeTreePending.exchange(true)) {
+                // The first entry past the threshold reports at once, so
+                // the question comes up; the others report in batches.
+                const bool reachedLimit =
+                    state->exceedsLargeTreeLimit(itemCount, knownBytes) &&
+                    !state->largeTreePending.exchange(true);
+                if (reachedLimit || (itemCount % kBatchSize) == 0)
                     postProgress(info.absoluteFilePath());
-                } else if ((itemCount % kBatchSize) == 0) {
-                    postProgress(info.absoluteFilePath());
-                }
                 if (state->largeTreePending.load() &&
                     !state->allowLargeTree.load())
                     waitForLargeTreeAnswer();

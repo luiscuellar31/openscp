@@ -28,7 +28,7 @@ QString stagingBatchPathForCleanup(const QSettings &settings,
     if (path.isEmpty())
         return {};
     const QFileInfo batch(path);
-    const QString canonical = batch.canonicalFilePath();
+    QString canonical = batch.canonicalFilePath();
     const QString root =
         QFileInfo(effectiveStagingRootPath(settings)).canonicalFilePath();
     if (batch.isSymLink() || canonical.isEmpty() || root.isEmpty() ||

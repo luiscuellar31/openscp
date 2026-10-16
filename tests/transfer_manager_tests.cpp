@@ -684,7 +684,7 @@ OPENSCP_TEST(benchmarkSchedulerScalingAndWakeCadence, test) {
                 scenario == QStringLiteral("dependency_blocked");
             for (int index = 0; index < size; ++index) {
                 TransferTask task;
-                task.taskId = quint64(index + 1);
+                task.taskId = quint64(index) + 1;
                 task.batchId = 1;
                 task.src = QStringLiteral("/remote/scheduler-%1").arg(index);
                 task.dst = QStringLiteral("/local/scheduler-%1").arg(index);
@@ -715,7 +715,7 @@ OPENSCP_TEST(benchmarkSchedulerScalingAndWakeCadence, test) {
                       << static_cast<double>(result.samplesNs[30]) / 1000.0
                       << " p95_us="
                       << static_cast<double>(result.samplesNs[57]) / 1000.0
-                      << " selected=" << result.selected << std::endl;
+                      << " selected=" << result.selected << '\n';
 
             if (batchBlocked && (size == 5000 || size == 100000)) {
                 for (int workers : {2, 8}) {
@@ -734,7 +734,7 @@ OPENSCP_TEST(benchmarkSchedulerScalingAndWakeCadence, test) {
                             << static_cast<double>(wake.wallNs) / 1'000'000.0
                             << " max_wake_us="
                             << static_cast<double>(wake.maximumWakeNs) / 1000.0
-                            << std::endl;
+                            << '\n';
                     }
                 }
             }
@@ -2244,7 +2244,7 @@ QVector<TransferTask> localMoveCleanupTasks(int size, const QString &root,
     tasks.reserve(size);
     for (int index = 0; index < size; ++index) {
         TransferTask task;
-        task.taskId = quint64(index + 1);
+        task.taskId = quint64(index) + 1;
         task.batchId = 1;
         task.type = TransferTask::Type::Upload;
         task.operation = TransferOperation::Move;
