@@ -29,6 +29,10 @@ class TerminalCommandBuilder {
 
     bool launch(const QString &shellCommand, QString *error = nullptr) const;
 
+    // The command a terminal types into the user's login shell, which on
+    // macOS may be fish, csh or tcsh: POSIX sh runs `shellCommand` instead.
+    static QString posixShellCommand(const QString &shellCommand);
+
     private:
     ExecutableLookup executableLookup_;
 };

@@ -269,9 +269,13 @@ bool buildSshCommand(const openscp::SessionOptions &session,
         return false;
 
     arguments << QStringLiteral("%1@%2").arg(user, host);
-    arguments << QStringLiteral("cd -- %1 2>/dev/null || cd /; "
-                                "exec ${SHELL:-/bin/sh} -l")
-                     .arg(shellSingleQuote(normalizeRemotePath(remotePath)));
+    // The server's login shell, which may be fish or tcsh, only has to read
+    // single quotes; POSIX sh changes directory and starts that shell.
+    arguments << QStringLiteral("exec /bin/sh -c %1 sh %2")
+                     .arg(shellSingleQuote(QStringLiteral(
+                              "cd -- \"$1\" 2>/dev/null || cd /; "
+                              "exec \"${SHELL:-/bin/sh}\" -l")),
+                          shellSingleQuote(normalizeRemotePath(remotePath)));
     *command = shellJoinQuoted(arguments);
     return true;
 }
@@ -361,6 +365,10 @@ TerminalCommandResult TerminalCommandBuilder::prepare(
     return result;
 }
 
+QString TerminalCommandBuilder::posixShellCommand(const QString &shellCommand) {
+    return QStringLiteral("/bin/sh -c %1").arg(shellSingleQuote(shellCommand));
+}
+
 bool TerminalCommandBuilder::launch(const QString &shellCommand,
                                     QString *error) const {
     if (error)
@@ -378,7 +386,7 @@ bool TerminalCommandBuilder::launch(const QString &shellCommand,
         QStringLiteral("tell application \"Terminal\" to activate");
     const QString run =
         QStringLiteral("tell application \"Terminal\" to do script %1")
-            .arg(appleScriptStringLiteral(shellCommand));
+            .arg(appleScriptStringLiteral(posixShellCommand(shellCommand)));
     if (!QProcess::startDetached(osascript, {QStringLiteral("-e"), activate,
                                              QStringLiteral("-e"), run})) {
         if (error)
