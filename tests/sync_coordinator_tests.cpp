@@ -114,6 +114,31 @@ class SpecialEntryMockClient final : public openscp::MockSftpClient {
     }
 };
 
+OPENSCP_TEST(testCoordinatorIsDestroyedAfterItsControllers, test) {
+    // MainWindow creates the remote controller first, and Qt destroys
+    // children in creation order, so the coordinator outlives it.
+    QTemporaryDir localRoot;
+    auto owner = std::make_unique<QObject>();
+    auto *remote = new RemoteOperationController(owner.get());
+    auto *transfers = new TransferManager(owner.get());
+    auto *coordinator = new SyncCoordinator(remote, transfers, owner.get());
+    test.check(localRoot.isValid() &&
+                   remote->installSession(
+                       connectedClient<openscp::MockSftpClient>("sync.test")) >
+                       0,
+               "the remote controller should accept a connected session");
+    bool ready = false;
+    QObject::connect(coordinator, &SyncCoordinator::preparationReady,
+                     coordinator,
+                     [&ready](const SyncPreparationResult &) { ready = true; });
+    coordinator->start(localRoot.path(), QStringLiteral("/"));
+    test.check(waitUntil([&] { return ready; }),
+               "the comparison should complete");
+    // Under AddressSanitizer a coordinator that still reaches the destroyed
+    // controller fails here.
+    owner.reset();
+}
+
 OPENSCP_TEST(testScanMarksSpecialEntriesAndRefusesUnsafeNames, test) {
 #ifndef _WIN32
     QTemporaryDir localRoot;

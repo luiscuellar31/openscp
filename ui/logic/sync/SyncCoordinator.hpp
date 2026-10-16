@@ -5,6 +5,7 @@
 
 #include <QHash>
 #include <QObject>
+#include <QPointer>
 #include <QStringList>
 
 #include <atomic>
@@ -91,8 +92,10 @@ class SyncCoordinator final : public QObject {
     void maybeFinishChecksums(const std::shared_ptr<ChecksumState> &state);
     void stopChecksumState(bool emitCanceled);
 
-    RemoteOperationController *remoteOperations_ = nullptr;
-    TransferManager *transfers_ = nullptr;
+    // Guarded: MainWindow destroys both before this coordinator, whose
+    // destructor still cancels its jobs.
+    QPointer<RemoteOperationController> remoteOperations_;
+    QPointer<TransferManager> transfers_;
     std::shared_ptr<PreparationState> state_;
     std::jthread localWorker_;
     quint64 generation_ = 0;
