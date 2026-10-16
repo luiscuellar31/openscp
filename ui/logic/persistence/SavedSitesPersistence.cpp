@@ -105,6 +105,21 @@ QVector<QVariantHash> unsupportedStoredSites(QSettings &settings) {
     return records;
 }
 
+// Removes the stored array entries but no other key in their group: Windows
+// ignores case in setting keys, so the "Sites/..." settings share it.
+void removeStoredSites(QSettings &settings) {
+    settings.beginGroup(openscpui::settingskeys::kSites);
+    const QStringList groups = settings.childGroups();
+    for (const QString &group : groups) {
+        bool isIndex = false;
+        (void)group.toInt(&isIndex);
+        if (isIndex)
+            settings.remove(group);
+    }
+    settings.remove(QStringLiteral("size"));
+    settings.endGroup();
+}
+
 std::uint16_t loadPort(QSettings &settings, const char *key,
                        std::uint16_t fallback, bool allowZero,
                        bool &needsSave) {
@@ -365,7 +380,7 @@ SavedSitesPersistence::SaveResult
 SavedSitesPersistence::saveSites(const QVector<SiteEntry> &sites) {
     openscpui::AppSettings settings;
     const QVector<QVariantHash> unsupported = unsupportedStoredSites(settings);
-    settings.remove(openscpui::settingskeys::kSites);
+    removeStoredSites(settings);
     settings.beginWriteArray(openscpui::settingskeys::kSites);
     for (int siteIndex = 0; siteIndex < sites.size(); ++siteIndex) {
         settings.setArrayIndex(siteIndex);

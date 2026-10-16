@@ -125,6 +125,38 @@ OPENSCP_TEST(testUnknownProtocolSitesAreKeptUnchanged, test) {
                "saving should keep a site with an unknown protocol unchanged");
 }
 
+OPENSCP_TEST(testSavingSitesKeepsOtherKeysInTheirGroup, test) {
+    // Windows ignores case in setting keys, so "Sites/deleteSecretsOnRemove"
+    // lives in the same group as the "sites" array there.
+    QSettings().clear();
+    SiteEntry first;
+    first.siteId = QStringLiteral("group-first");
+    first.name = QStringLiteral("First");
+    SiteEntry second = first;
+    second.siteId = QStringLiteral("group-second");
+    second.name = QStringLiteral("Second");
+    test.check(SavedSitesPersistence::saveSites({first, second}).ok,
+               "two sites should be saved first");
+    {
+        QSettings settings;
+        settings.setValue(QStringLiteral("sites/deleteSecretsOnRemove"), true);
+        settings.sync();
+    }
+
+    test.check(SavedSitesPersistence::saveSites({first}).ok,
+               "saving fewer sites should succeed");
+    QSettings raw;
+    test.check(
+        raw.value(QStringLiteral("sites/deleteSecretsOnRemove")).toBool(),
+        "saving sites should keep the other settings in their group");
+    raw.beginGroup(QStringLiteral("sites"));
+    test.check(raw.childGroups() == QStringList{QStringLiteral("1")},
+               "saving sites should remove the entries it no longer has");
+    raw.endGroup();
+    test.check(SavedSitesPersistence::loadSites().sites.size() == 1,
+               "the remaining site should load");
+}
+
 OPENSCP_TEST(testRoundTrip, test) {
     SiteEntry site;
     site.siteId = QStringLiteral("stable-site-id");
