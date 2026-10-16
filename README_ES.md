@@ -34,6 +34,14 @@ shasum -a 256 -c SHA256SUMS.txt --ignore-missing  # macOS
 sha256sum -c SHA256SUMS.txt --ignore-missing      # Linux
 ```
 
+Las sumas de comprobación detectan una descarga dañada, no un archivo
+sustituido. Para confirmar que un archivo lo generó el workflow de publicación
+de este repositorio, usa la [CLI de GitHub](https://cli.github.com/):
+
+```bash
+gh attestation verify OpenSCP-<versión>-x86_64.AppImage --repo luiscuellar31/openscp
+```
+
 ### Actualizaciones
 
 Usa **OpenSCP → Buscar actualizaciones…** para consultar la última versión

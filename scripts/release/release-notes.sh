@@ -238,6 +238,12 @@ shasum -a 256 -c SHA256SUMS.txt --ignore-missing  # macOS
 sha256sum -c SHA256SUMS.txt --ignore-missing      # Linux
 \`\`\`
 
+Checksums catch a damaged download, not a replaced one. To confirm that a file was built by this repository's release workflow, use the [GitHub CLI](https://cli.github.com/):
+
+\`\`\`bash
+gh attestation verify OpenSCP-${VERSION}-x86_64.AppImage --repo luiscuellar31/openscp
+\`\`\`
+
 ### macOS
 
 Download \`OpenSCP-${VERSION}-arm64-UNSIGNED.dmg\` on Apple Silicon or \`OpenSCP-${VERSION}-x86_64-UNSIGNED.dmg\` on Intel, open it, and drag OpenSCP onto Applications.
