@@ -443,9 +443,10 @@ bool Libssh2ScpClient::put(
     }
     UniqueFile localFileOwner(localFile);
 
-    LIBSSH2_CHANNEL *channel =
-        libssh2_scp_send64(session, remote.c_str(), 0644,
-                           static_cast<libssh2_int64_t>(total), 0, 0);
+    LIBSSH2_CHANNEL *channel = libssh2_scp_send64(
+        session, remote.c_str(),
+        static_cast<int>(localfiles::uploadPermissions(localFile)),
+        static_cast<libssh2_int64_t>(total), 0, 0);
     if (!channel) {
         std::string scpErr = "Could not open remote file for SCP upload";
         appendSessionErrorDetail(session, scpErr);

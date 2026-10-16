@@ -50,6 +50,11 @@ bool setLocalModificationTime(const std::string &path,
 std::FILE *openRegularFileForWrite(const std::string &path, WriteMode mode,
                                    std::string &error);
 
+// The permission bits (mode & 0777) of an open local file, which uploads give
+// the remote copy as OpenSSH's sftp and scp do. Windows has no such bits, so
+// it, and a file that cannot be inspected, get 0644.
+std::uint32_t uploadPermissions(std::FILE *file);
+
 // Buffered always flushes userspace buffers. File also syncs file data and
 // metadata; FileAndDirectory additionally makes the published directory entry
 // durable in atomicReplace().

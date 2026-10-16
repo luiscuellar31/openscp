@@ -584,6 +584,34 @@ int main() {
                 std::string("chown with an unchanged id should keep it: ") +
                     err);
     }
+#ifndef _WIN32
+    // Uploads keep the local file's permissions, so a private file is not
+    // left readable by other users of the server.
+    for (const fs::perms permissions :
+         {fs::perms::owner_read | fs::perms::owner_write,
+          fs::perms::owner_read | fs::perms::owner_write |
+              fs::perms::group_read}) {
+        if (t.failures != 0)
+            break;
+        const fs::path localPrivate = localTmpRoot / "permissions.txt";
+        const std::string remotePrivate =
+            joinRemotePath(remoteSuiteDir, "permissions.txt");
+        std::error_code permissionsError;
+        openscp::FileInfo uploaded{};
+        err.clear();
+        const bool written = writeFile(localPrivate, "private");
+        fs::permissions(localPrivate, permissions, permissionsError);
+        t.check(written && !permissionsError &&
+                    client.put(localPrivate.string(), remotePrivate, err, {},
+                               {}, false) &&
+                    client.stat(remotePrivate, uploaded, err) &&
+                    (uploaded.mode & 0777u) ==
+                        static_cast<std::uint32_t>(permissions),
+                std::string("an upload should keep the local permissions: ") +
+                    err);
+        (void)client.removeFile(remotePrivate, err);
+    }
+#endif
     if (t.failures == 0) {
         std::vector<openscp::FileInfo> entries;
         err.clear();

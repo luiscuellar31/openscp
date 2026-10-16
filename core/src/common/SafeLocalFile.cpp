@@ -484,6 +484,19 @@ std::FILE *openRegularFileForWrite(const std::string &path, WriteMode mode,
 #endif
 }
 
+std::uint32_t uploadPermissions(std::FILE *file) {
+    constexpr std::uint32_t kDefault = 0644;
+#ifdef _WIN32
+    (void)file;
+    return kDefault;
+#else
+    struct ::stat st {};
+    if (!file || ::fstat(::fileno(file), &st) != 0)
+        return kDefault;
+    return static_cast<std::uint32_t>(st.st_mode) & 0777u;
+#endif
+}
+
 bool flushAndSync(std::FILE *file, std::string &error,
                   LocalFileDurability durability) {
     if (!file) {

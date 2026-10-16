@@ -112,6 +112,11 @@ report a missing path as NotFound. FTP answers 550 both for a missing path and
 for refused access, so after a failed DELE, RMD or RNFR the FTP backend looks
 the path up before reporting PermissionDenied.
 
+SFTP and SCP uploads give the remote file the local file's permission bits,
+as OpenSSH's sftp and scp do. SFTP writes the `.part` with mode 0600 and
+applies those bits just before the rename; FTP and WebDAV leave permissions to
+the server.
+
 `SessionController` owns the active connection. `RemoteOperationController`
 runs control-connection jobs one at a time and returns completed results.
 Its bulk cancellation methods interrupt matching active I/O before marking

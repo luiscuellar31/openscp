@@ -181,6 +181,35 @@ int main() {
                               {}, {}, false) &&
                 readFile(scpOnlyDownload, downloaded) && downloaded == payload,
             std::string("SCP-only upload should round-trip: ") + err);
+#ifndef _WIN32
+    // SCP creates the file with the local permissions too; SFTP reads them.
+    {
+        const fs::path localPrivate = tempDir / "private.txt";
+        const std::string remotePrivate =
+            joinRemotePath(remoteBase, "openscp_scp_private_" + token + ".txt");
+        std::error_code permissionsError;
+        const bool written = writeFile(localPrivate, "private");
+        fs::permissions(localPrivate,
+                        fs::perms::owner_read | fs::perms::owner_write,
+                        permissionsError);
+        openscp::Libssh2SftpClient inspector;
+        openscp::SessionOptions inspectorOptions = opt;
+        inspectorOptions.protocol = openscp::Protocol::Sftp;
+        openscp::FileInfo uploaded{};
+        err.clear();
+        t.check(written && !permissionsError &&
+                    scpOnlyClient.put(localPrivate.string(), remotePrivate, err,
+                                      {}, {}, false) &&
+                    inspector.connect(inspectorOptions, err) &&
+                    inspector.stat(remotePrivate, uploaded, err) &&
+                    (uploaded.mode & 0777u) == 0600u,
+                std::string("an SCP upload should keep the local "
+                            "permissions: ") +
+                    err);
+        (void)inspector.removeFile(remotePrivate, err);
+        inspector.disconnect();
+    }
+#endif
     scpOnlyClient.disconnect();
 
     const std::string preservedDestination = "preserve existing destination";

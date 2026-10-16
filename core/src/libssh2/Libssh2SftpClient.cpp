@@ -3528,11 +3528,15 @@ bool Libssh2SftpClient::put(
         }
     }
 
+    // The .part stays private while it is written; the local file's own
+    // permissions are applied just before it replaces the destination.
+    const std::uint32_t permissions =
+        localfiles::uploadPermissions(localFile.get());
     unsigned long flags = LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT |
                           ((startOffset > 0) ? 0 : LIBSSH2_FXF_TRUNC);
     libssh2detail::UniqueSftpHandle wh(libssh2_sftp_open_ex(
         sftp_, remotePart.c_str(), static_cast<unsigned>(remotePart.size()),
-        flags, 0644, LIBSSH2_SFTP_OPENFILE));
+        flags, 0600, LIBSSH2_SFTP_OPENFILE));
     if (!wh) {
         localFile.reset();
         err = "Could not open remote (.part) for writing";
@@ -3661,6 +3665,15 @@ bool Libssh2SftpClient::put(
 
     if (fail_if_transfer_canceled(&shouldCancel, err))
         return false;
+
+    // A server that refuses this leaves the file private, which is safer
+    // than failing an upload that otherwise succeeded.
+    LIBSSH2_SFTP_ATTRIBUTES mode{};
+    mode.flags = LIBSSH2_SFTP_ATTR_PERMISSIONS;
+    mode.permissions = permissions;
+    (void)libssh2_sftp_stat_ex(sftp_, remotePart.c_str(),
+                               static_cast<unsigned>(remotePart.size()),
+                               LIBSSH2_SFTP_SETSTAT, &mode);
 
     std::string rnErr;
     if (!rename_remote(sftp_, remotePart, remote, true, &rnErr)) {
