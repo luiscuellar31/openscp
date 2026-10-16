@@ -101,7 +101,9 @@ bool parseMlsxEntry(const std::string &raw, FileInfo &parsed,
     std::string line = raw;
     if (!line.empty() && line.back() == '\r')
         line.pop_back();
-    line = trimAscii(line);
+    // RFC 3659 puts one space between the facts and the pathname, which can
+    // itself start or end with spaces, so only padding before the facts goes.
+    line = trimAsciiLeft(line);
 
     const std::size_t separator = line.find_first_of(" \t");
     if (separator == std::string::npos)
@@ -109,8 +111,8 @@ bool parseMlsxEntry(const std::string &raw, FileInfo &parsed,
 
     const std::string factsPart = line.substr(0, separator);
     parsed = FileInfo{};
-    parsed.name = trimAsciiLeft(line.substr(separator + 1));
-    if (parsed.name.empty())
+    parsed.name = line.substr(separator + 1);
+    if (trimAscii(parsed.name).empty())
         return false;
     type.clear();
 

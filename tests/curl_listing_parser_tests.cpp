@@ -13,15 +13,14 @@ using openscp::curlparser::ListingParseStatus;
 #if OPENSCP_HAS_CURL_FTP
 OPENSCP_TEST(testFtpListingsWithLargeWhitespacePadding, test) {
     const std::string spaces(1024 * 1024, ' ');
-    const std::string mlsx =
-        spaces + "type=file;size=7; \t\v\f" + spaces + "a file.txt \t\r\n";
+    const std::string mlsx = spaces + "type=file;size=7; a file.txt\r\n";
     std::vector<openscp::FileInfo> entries;
     test.check(
         openscp::curlparser::parseFtpMlsdListing(
             spaces + "\r\n" + mlsx, entries) == ListingParseStatus::Success &&
             entries.size() == 1 && entries.front().name == "a file.txt" &&
             entries.front().has_size && entries.front().size == 7,
-        "MLSD should trim large blank lines and entry/name padding "
+        "MLSD should skip large blank lines and padding before the facts "
         "while preserving the name and facts");
     openscp::FileInfo info;
     test.check(openscp::curlparser::parseFtpMlstReply(
@@ -43,6 +42,28 @@ OPENSCP_TEST(testFtpListingsWithLargeWhitespacePadding, test) {
                        ListingParseStatus::Malformed &&
                    entries.empty(),
                "large padding must not turn a missing filename into a record");
+}
+
+OPENSCP_TEST(testFtpMlsxNamesKeepTheirSpaces, test) {
+    // One space separates the facts from the name; any other space belongs to
+    // the name, so these are three different files.
+    std::vector<openscp::FileInfo> entries;
+    test.check(openscp::curlparser::parseFtpMlsdListing(
+                   "type=file;size=1;  foo\r\n"
+                   "type=file;size=2; foo\r\n"
+                   "type=file;size=3; foo \r\n",
+                   entries) == ListingParseStatus::Success &&
+                   entries.size() == 3 && entries[0].name == " foo" &&
+                   entries[1].name == "foo" && entries[2].name == "foo ",
+               "MLSD should keep spaces at the start and end of names");
+
+    openscp::FileInfo info;
+    test.check(openscp::curlparser::parseFtpMlstReply(
+                   "250-Listing\r\n type=file;size=1; /dir/ spaced \r\n"
+                   "250 End\r\n",
+                   info) == ListingParseStatus::Success &&
+                   info.name == "/dir/ spaced ",
+               "MLST should keep spaces in the echoed pathname");
 }
 
 OPENSCP_TEST(testFtpMlsdListingLimitsAreTransactional, test) {
