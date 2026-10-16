@@ -21,18 +21,15 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QScrollBar>
-#include <QStandardPaths>
 #include <QStatusBar>
 
 namespace {
 
-QString tempDownloadPathFor(const QString &remoteName) {
-    QString base =
-        QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
-    if (base.isEmpty())
-        base = QDir::homePath() + "/Downloads";
-    QDir().mkpath(base);
-    return QDir(base).filePath(remoteName);
+// Double-clicking a remote file downloads it into the folder chosen for
+// downloads, set in Settings or by the last "Download to" choice.
+QString downloadPathFor(const QString &downloadDir, const QString &remoteName) {
+    QDir().mkpath(downloadDir);
+    return QDir(downloadDir).filePath(remoteName);
 }
 
 } // namespace
@@ -250,7 +247,7 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
     }
     const QString remotePath =
         joinRemotePath(rightRemoteModel_->rootPath(), name);
-    const QString localPath = tempDownloadPathFor(name);
+    const QString localPath = downloadPathFor(downloadDir_, name);
     // Reuse the exact active transfer for this session so repeated activation
     // opens the result once without creating process-global listener state.
     const std::optional<quint64> activeTaskId =
