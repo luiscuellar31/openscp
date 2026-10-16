@@ -71,6 +71,11 @@ database:
   --build-dir build-ci-local
 ```
 
+`--tidy` uses clang-tidy 17. On macOS it reads the SDK's libc++, which a newer
+Xcode may write with builtins that clang-tidy 17 does not know; the script then
+stops instead of reporting parse noise, and the analysis belongs on Linux, as
+the nightly CI runs it.
+
 FTP and WebDAV are optional backends selected at configure time. Changes to
 their `#if` branches must also build and pass tests with both disabled:
 

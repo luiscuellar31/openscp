@@ -191,6 +191,27 @@ if [[ "$RUN_TIDY" -eq 1 ]]; then
             "-extra-arg=-isysroot"
             "-extra-arg=${sdk_path}"
         )
+        # A newer SDK's libc++ uses builtins that clang-tidy 17 does not know,
+        # and then every file fails to parse and the report is noise. One
+        # small file tells whether this clang-tidy can read these headers.
+        tidy_probe_dir="$(mktemp -d)"
+        printf '%s\n' '#include <bit>' '#include <thread>' \
+            'int main() { return std::popcount(1u) == 1 ? 0 : 1; }' \
+            > "${tidy_probe_dir}/probe.cpp"
+        # clang-tidy refuses to run with no check; this one cannot fire on
+        # the probe, so any failure comes from parsing.
+        if ! "$tidy_bin" -checks='-*,bugprone-use-after-move' \
+            "${tidy_extra_args[@]}" \
+            "${tidy_probe_dir}/probe.cpp" -- -std=c++20 >/dev/null 2>&1; then
+            rm -rf "$tidy_probe_dir"
+            printf '%s\n' \
+                "clang-tidy 17 cannot parse this macOS SDK's C++ headers" \
+                "($(xcrun clang --version | sed -n '1p'))," \
+                "so its findings here would be unreliable. Run --tidy on Linux," \
+                "as the nightly CI does." >&2
+            exit 1
+        fi
+        rm -rf "$tidy_probe_dir"
     fi
     source_root_regex="$(printf '%s\n' "$REPO_DIR" | sed 's#[.[\*^$()+?{|\\/]#\\&#g')"
     "$run_tidy_bin" \
