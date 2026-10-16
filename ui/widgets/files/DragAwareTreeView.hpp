@@ -79,6 +79,7 @@ class DragAwareTreeView : public QTreeView {
     void hidePrepOverlay();
     void updateOverlayGeometry();
     void cancelCurrentBatch(const QString &reason);
+    void stopWaitPrompt();
     void logBatchResult(const QString &batchId, int totalItems, int failedItems,
                         const QString &result);
 
@@ -97,6 +98,7 @@ class DragAwareTreeView : public QTreeView {
     class QShortcut *overlayEsc_ =
         nullptr;                  // ESC shortcut while overlay visible
     QTimer *waitTimer_ = nullptr; // Wait/Cancel timer
+    QPointer<class QMessageBox> waitPrompt_;
     QTimer *scrollBarHideTimer_ = nullptr;
     bool updatingScrollBarVisibility_ = false;
     bool scrollBarInteractionActive_ = false;

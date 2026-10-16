@@ -1,4 +1,5 @@
 #include "TestHarness.hpp"
+#include "logic/common/AppSettings.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
 #include "logic/common/RowSelection.hpp"
 #include "logic/common/UiFormatters.hpp"
@@ -288,6 +289,19 @@ OPENSCP_TEST(testLocalCopyRejectsUnsafeSources, test) {
     test.check(QFileInfo(fifo).exists(),
                "a failed copy should keep the source FIFO");
 #endif
+}
+
+OPENSCP_TEST(testStagingBatchNames, test) {
+    const QString name = openscpui::newStagingBatchName();
+    test.check(openscpui::isStagingBatchName(name),
+               "the startup cleanup should recognize new staging batches: " +
+                   name.toStdString());
+    test.check(openscpui::isStagingBatchName(QStringLiteral("20260101-120000")),
+               "batches named by older releases should still be recognized");
+    test.check(!openscpui::isStagingBatchName(QStringLiteral("Documents")) &&
+                   !openscpui::isStagingBatchName(
+                       QStringLiteral("20260101-120000-123")),
+               "other folders in the staging root should be left alone");
 }
 
 OPENSCP_TEST(testTerminalTransferStatuses, test) {

@@ -1,9 +1,12 @@
 #include "logic/common/AppSettings.hpp"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QRegularExpression>
+#include <QUuid>
 
 namespace openscpui {
 namespace {
@@ -46,6 +49,20 @@ QString effectiveStagingRootPath(const QSettings &settings) {
     const QString configuredRoot =
         settings.value(settingskeys::kStagingRoot).toString();
     return configuredRoot.isEmpty() ? defaultStagingRootPath() : configuredRoot;
+}
+
+QString newStagingBatchName() {
+    return QDateTime::currentDateTimeUtc().toString(
+               QStringLiteral("yyyyMMdd-HHmmss-zzz")) +
+           QLatin1Char('-') +
+           QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+}
+
+bool isStagingBatchName(const QString &name) {
+    // Releases before the random suffix named batches yyyyMMdd-HHmmss.
+    static const QRegularExpression pattern(
+        QStringLiteral("^\\d{8}-\\d{6}(?:-\\d{3}-[0-9a-f]{8})?$"));
+    return pattern.match(name).hasMatch();
 }
 
 int effectiveNoHostVerificationTtlMinutes(const QSettings &settings) {

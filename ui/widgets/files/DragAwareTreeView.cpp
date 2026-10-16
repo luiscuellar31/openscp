@@ -12,7 +12,6 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QCoreApplication>
-#include <QDateTime>
 #include <QDir>
 #include <QDrag>
 #include <QFileInfo>
@@ -33,7 +32,6 @@
 #include <QStatusBar>
 #include <QTimer>
 #include <QUrl>
-#include <QUuid>
 #include <QVector>
 #include <QWheelEvent>
 
@@ -681,17 +679,24 @@ void DragAwareTreeView::startRemoteDragStaging(
         auto *mainWindow = qobject_cast<QMainWindow *>(window());
         if (!mainWindow || !dragInProgress_)
             return;
-        QMessageBox box(mainWindow);
-        UiAlerts::configure(box);
-        box.setIcon(QMessageBox::Information);
-        box.setWindowTitle(tr("Preparing files…"));
-        box.setText(tr("Still preparing files for drag-out. Wait or cancel?"));
-        box.addButton(tr("Wait"), QMessageBox::AcceptRole);
+        // Not exec(): the drag starts as soon as preparation ends, and a
+        // nested loop would leave this prompt open on top of it.
+        auto *box = new QMessageBox(mainWindow);
+        UiAlerts::configure(*box);
+        box->setIcon(QMessageBox::Information);
+        box->setWindowTitle(tr("Preparing files…"));
+        box->setText(tr("Still preparing files for drag-out. Wait or cancel?"));
+        box->addButton(tr("Wait"), QMessageBox::AcceptRole);
         auto *cancelButton =
-            box.addButton(tr("Cancel"), QMessageBox::RejectRole);
-        box.exec();
-        if (box.clickedButton() == cancelButton)
-            cancelCurrentBatch(QStringLiteral("dialog"));
+            box->addButton(tr("Cancel"), QMessageBox::RejectRole);
+        QObject::connect(box, &QDialog::finished, box, &QObject::deleteLater);
+        QObject::connect(box, &QMessageBox::buttonClicked, this,
+                         [this, cancelButton](QAbstractButton *button) {
+                             if (button == cancelButton)
+                                 cancelCurrentBatch(QStringLiteral("dialog"));
+                         });
+        waitPrompt_ = box;
+        box->open();
     });
     waitTimer_->start();
 
@@ -923,9 +928,18 @@ DragAwareTreeView::formatRemoteDragMetrics(const QString &result,
         .arg(QLocale().toString(static_cast<qulonglong>(enumInaccessible_)));
 }
 
-void DragAwareTreeView::resetRemoteDragState() {
+void DragAwareTreeView::stopWaitPrompt() {
     if (waitTimer_)
         waitTimer_->stop();
+    if (waitPrompt_) {
+        QObject::disconnect(waitPrompt_, nullptr, this, nullptr);
+        waitPrompt_->hide();
+        waitPrompt_->deleteLater();
+    }
+}
+
+void DragAwareTreeView::resetRemoteDragState() {
+    stopWaitPrompt();
     if (stagingState_) {
         stagingState_->finished = true;
         QObject::disconnect(stagingState_->addedConnection);
@@ -976,6 +990,7 @@ void DragAwareTreeView::finishRemoteDragStaging(
     QObject::disconnect(state->updatedConnection);
     QObject::disconnect(state->removedConnection);
     hidePrepOverlay();
+    stopWaitPrompt();
 
     const int total = static_cast<int>(state->orderedDirectories.size() +
                                        state->targets.size());
@@ -1051,8 +1066,11 @@ void DragAwareTreeView::finishRemoteDragStaging(
         return;
     }
 
-    const int cleanupDelayMs = droppedInsideThisWindow ? 10000 : 500;
-    scheduleAutoCleanup(currentBatchDir_, cleanupDelayMs);
+    // A target outside this window, such as Finder, a browser or a mail
+    // client, may read the files long after the drop, so its batch waits for
+    // the startup cleanup instead.
+    if (droppedInsideThisWindow)
+        scheduleAutoCleanup(currentBatchDir_, 10000);
     finishBatch(QStringLiteral("accepted"), 0);
 }
 
@@ -1086,12 +1104,8 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *remoteModel) {
     prepTimer_.restart();
 
     const QString root = buildStagingRoot();
-    const QString stamp =
-        QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz");
-    const QString uniqueSuffix =
-        QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
     const QString stagingDir =
-        QDir(root).filePath(stamp + QLatin1Char('-') + uniqueSuffix);
+        QDir(root).filePath(openscpui::newStagingBatchName());
     currentBatchDir_ = stagingDir;
     currentBatchId_ = QFileInfo(stagingDir).fileName();
     batchLogged_ = false;
@@ -1279,8 +1293,7 @@ void DragAwareTreeView::cancelCurrentBatch(const QString &reason) {
         QObject::disconnect(stagingState_->updatedConnection);
         QObject::disconnect(stagingState_->removedConnection);
     }
-    if (waitTimer_)
-        waitTimer_->stop();
+    stopWaitPrompt();
     if (remoteOps_) {
         const auto pending = enumPendingJobs_;
         for (const auto jobId : pending)

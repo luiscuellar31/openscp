@@ -52,7 +52,6 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QRegularExpression>
 #include <QScreen>
 #include <QScrollBar>
 #include <QShortcut>
@@ -1203,14 +1202,12 @@ void MainWindow::initializeRuntimeState() {
                 .toInt(),
             365);
         const qint64 maxAgeMs = qint64(retentionDays) * 24 * 60 * 60 * 1000;
-        // Match timestamp batches: yyyyMMdd-HHmmss
-        QRegularExpression re("^\\d{8}-\\d{6}$");
         const auto entries = stagingRootDir.entryInfoList(
             QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks);
         for (const QFileInfo &entryInfo : entries) {
             if (entryInfo.isSymLink())
                 continue; // do not follow symlinks
-            if (!re.match(entryInfo.fileName()).hasMatch())
+            if (!openscpui::isStagingBatchName(entryInfo.fileName()))
                 continue; // only batches
             const QDateTime lastModifiedUtc = entryInfo.lastModified().toUTC();
             if (lastModifiedUtc.isValid() &&

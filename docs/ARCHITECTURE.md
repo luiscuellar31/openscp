@@ -263,6 +263,12 @@ connFactoryMutex_ -> mtx_
 Release manager locks before calling a remote client, invoking a callback, or
 emitting a Qt signal.
 
+Dragging remote items out of the window first downloads them into a batch
+folder under the staging root, named as `newStagingBatchName()` in
+`AppSettings` describes. A drop outside the window keeps its batch, because
+the target may read the files long after the drop; the startup cleanup removes
+batches older than the retention setting.
+
 Synchronization has three steps:
 
 1. `SyncCoordinator` collects bounded local and remote snapshots.
