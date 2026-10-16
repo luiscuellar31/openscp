@@ -119,16 +119,22 @@ QString errorForUi(const std::string &rawError) {
     return message;
 }
 
+// "name (N).ext", split at the last dot for uploads and downloads alike. A
+// name whose only dot starts it, such as ".bashrc", has no extension. The
+// single arg() call keeps a "%1" in the name from being replaced.
+QString numberedFileName(const QString &filename, int suffix) {
+    const qsizetype dot = filename.lastIndexOf(QLatin1Char('.'));
+    const bool hasExtension = dot > 0;
+    const QString base = hasExtension ? filename.left(dot) : filename;
+    const QString extension = hasExtension ? filename.mid(dot) : QString();
+    return QStringLiteral("%1 (%2)%3")
+        .arg(base, QString::number(suffix), extension);
+}
+
 QString numberedPath(const QString &path, int suffix) {
     const QFileInfo info(path);
     const QString directory = info.path();
-    QString base = info.completeBaseName();
-    QString extension = info.completeSuffix();
-    if (base.isEmpty())
-        base = info.fileName();
-    QString name = QStringLiteral("%1 (%2)").arg(base).arg(suffix);
-    if (!extension.isEmpty())
-        name += QStringLiteral(".") + extension;
+    const QString name = numberedFileName(info.fileName(), suffix);
     if (directory.isEmpty() || directory == QStringLiteral("."))
         return name;
     return QDir(directory).filePath(name);
@@ -138,12 +144,7 @@ QString numberedRemotePath(const QString &path, int suffix) {
     const qsizetype slash = path.lastIndexOf('/');
     const QString directory = slash >= 0 ? path.left(slash + 1) : QString();
     const QString filename = slash >= 0 ? path.mid(slash + 1) : path;
-    const qsizetype dot = filename.lastIndexOf('.');
-    const bool hasExtension = dot > 0;
-    const QString base = hasExtension ? filename.left(dot) : filename;
-    const QString extension = hasExtension ? filename.mid(dot) : QString();
-    return directory +
-           QStringLiteral("%1 (%2)%3").arg(base).arg(suffix).arg(extension);
+    return directory + numberedFileName(filename, suffix);
 }
 
 } // namespace

@@ -43,8 +43,9 @@ struct TransferManagerTestAccess {
     }
 
     static bool rename(TransferManager &manager, TransferTask &task,
-                       std::string &error) {
-        return manager.chooseRenamedDestination(task, {}, error);
+                       std::string &error,
+                       std::shared_ptr<openscp::RemoteClient> client = {}) {
+        return manager.chooseRenamedDestination(task, client, error);
     }
 
     static const TransferTask *taskAddress(TransferManager &manager,
@@ -2083,6 +2084,52 @@ OPENSCP_TEST(testLocalMoveCleanupPreservesDependencyExceptions, test) {
     test.check(
         TransferManagerTestAccess::hasLocalSourceUser(manager, tasks[0]),
         "an unrelated dependency cycle must terminate and block cleanup");
+}
+
+OPENSCP_TEST(testRenamedNamesKeepTheirExtensionAndText, test) {
+    struct Case {
+        const char *name;
+        const char *renamed;
+    };
+    const Case cases[] = {
+        {"a.tar.gz", "a.tar (1).gz"},
+        {".bashrc", ".bashrc (1)"},
+        {"a%1b.txt", "a%1b (1).txt"},
+    };
+    QTemporaryDir directory;
+    TransferManager manager;
+    auto remote = std::make_shared<openscp::MockSftpClient>();
+    std::string connectError;
+    test.check(remote->connect(testOptions(), connectError),
+               "the rename test should connect its mock client");
+    for (const Case &entry : cases) {
+        const QString name = QString::fromUtf8(entry.name);
+        const QString renamed = QString::fromUtf8(entry.renamed);
+        const quint64 downloadId = manager.enqueueDownload(
+            QStringLiteral("/remote/") + name, directory.filePath(name));
+        auto download = *manager.taskSnapshot(downloadId);
+        std::string error;
+        test.check(
+            TransferManagerTestAccess::reserve(manager, download) &&
+                TransferManagerTestAccess::rename(manager, download, error) &&
+                download.dst == directory.filePath(renamed),
+            "a renamed download should be " + renamed.toStdString() + ", not " +
+                download.dst.toStdString());
+        TransferManagerTestAccess::release(manager, downloadId);
+        manager.removeTask(downloadId);
+
+        const quint64 uploadId = manager.enqueueUpload(
+            directory.filePath(name), QStringLiteral("/remote/") + name);
+        auto upload = *manager.taskSnapshot(uploadId);
+        test.check(TransferManagerTestAccess::reserve(manager, upload) &&
+                       TransferManagerTestAccess::rename(manager, upload, error,
+                                                         remote) &&
+                       upload.dst == QStringLiteral("/remote/") + renamed,
+                   "a renamed upload should be " + renamed.toStdString() +
+                       ", not " + upload.dst.toStdString());
+        TransferManagerTestAccess::release(manager, uploadId);
+        manager.removeTask(uploadId);
+    }
 }
 
 OPENSCP_TEST(testLocalMoveCleanupIndexTracksRenamedDestinations, test) {
