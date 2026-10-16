@@ -1295,7 +1295,10 @@ void MainWindow::finalizeConnection(
     std::optional<PendingSiteSaveRequest> saveRequest, bool canceledByUser) {
     std::unique_ptr<openscp::RemoteClient> controlGuard(controlClient);
     if (connectProgress_) {
-        connectProgress_->close();
+        // close() would emit canceled() and cancel a connection that has
+        // already finished.
+        connectProgress_->hide();
+        connectProgress_->deleteLater();
         connectProgress_.clear();
     }
     connectProgressDimmed_ = false;
