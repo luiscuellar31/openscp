@@ -60,59 +60,89 @@ void appendSessionErrorDetail(_LIBSSH2_SESSION *session, std::string &msg) {
     }
 }
 
-// After the file data, an SCP source sends one status byte (0, or 1 or 2 and
-// a message line) and waits for an acknowledgement before it exits. Reading
-// until EOF instead takes that byte as data and then blocks until the session
-// timeout. remoteFailure tells a reported error from a broken channel.
-bool finishScpDownload(_LIBSSH2_SESSION *session, LIBSSH2_CHANNEL *channel,
-                       std::string &err, bool &remoteFailure) {
-    remoteFailure = false;
-    const auto readByte = [channel](char &byte) {
-        while (true) {
-            const ssize_t n = libssh2_channel_read(channel, &byte, 1);
-            if (n == 1)
-                return true;
-            if (n < 0 && n != LIBSSH2_ERROR_EAGAIN)
-                return false;
-            if (n == 0 && libssh2_channel_eof(channel))
-                return false;
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-    };
+bool readScpByte(LIBSSH2_CHANNEL *channel, char &byte) {
+    while (true) {
+        const ssize_t n = libssh2_channel_read(channel, &byte, 1);
+        if (n == 1)
+            return true;
+        if (n < 0 && n != LIBSSH2_ERROR_EAGAIN)
+            return false;
+        if (n == 0 && libssh2_channel_eof(channel))
+            return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
 
+// Reads an SCP status: 0, or 1 or 2 and a message line. remoteFailure tells
+// a reported error from a broken channel.
+bool readScpStatus(_LIBSSH2_SESSION *session, LIBSSH2_CHANNEL *channel,
+                   const char *missingStatus, std::string &err,
+                   bool &remoteFailure) {
+    remoteFailure = false;
     char status = 0;
-    if (!readByte(status)) {
-        err = "SCP download ended without a final status";
+    if (!readScpByte(channel, status)) {
+        err = missingStatus;
         appendSessionErrorDetail(session, err);
         return false;
     }
-    if (status != 0) {
-        constexpr std::size_t kMaxMessage = 1024;
-        std::string message;
-        char byte = 0;
-        while (message.size() < kMaxMessage && readByte(byte) && byte != '\n') {
-            if (static_cast<unsigned char>(byte) >= 0x20)
-                message.push_back(byte);
-        }
-        err = "Remote SCP reported an error";
-        if (!message.empty())
-            err += ": " + message;
-        remoteFailure = true;
-        return false;
-    }
+    if (status == 0)
+        return true;
 
-    const char ack = 0;
+    constexpr std::size_t kMaxMessage = 1024;
+    std::string message;
+    char byte = 0;
+    while (message.size() < kMaxMessage && readScpByte(channel, byte) &&
+           byte != '\n') {
+        if (static_cast<unsigned char>(byte) >= 0x20)
+            message.push_back(byte);
+    }
+    err = "Remote SCP reported an error";
+    if (!message.empty())
+        err += ": " + message;
+    remoteFailure = true;
+    return false;
+}
+
+bool writeScpOk(_LIBSSH2_SESSION *session, LIBSSH2_CHANNEL *channel,
+                const char *failure, std::string &err) {
+    const char ok = 0;
     while (true) {
-        const ssize_t n = libssh2_channel_write(channel, &ack, 1);
+        const ssize_t n = libssh2_channel_write(channel, &ok, 1);
         if (n == 1)
             return true;
         if (n != LIBSSH2_ERROR_EAGAIN) {
-            err = "Could not acknowledge the SCP download";
+            err = failure;
             appendSessionErrorDetail(session, err);
             return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
+}
+
+// After the file data, an SCP source sends one status byte and waits for an
+// acknowledgement before it exits. Reading until EOF instead takes that byte
+// as data and then blocks until the session timeout.
+bool finishScpDownload(_LIBSSH2_SESSION *session, LIBSSH2_CHANNEL *channel,
+                       std::string &err, bool &remoteFailure) {
+    return readScpStatus(session, channel,
+                         "SCP download ended without a final status", err,
+                         remoteFailure) &&
+           writeScpOk(session, channel,
+                      "Could not acknowledge the SCP download", err);
+}
+
+// The upload is the source: after the data it sends the status byte and
+// waits for the remote scp to answer, which is where a failed write on the
+// remote disk shows up. Without that byte the remote scp exits with an error
+// even after a good copy.
+bool finishScpUpload(_LIBSSH2_SESSION *session, LIBSSH2_CHANNEL *channel,
+                     std::string &err, bool &remoteFailure) {
+    remoteFailure = false;
+    return writeScpOk(session, channel, "Could not finish the SCP upload",
+                      err) &&
+           readScpStatus(session, channel,
+                         "SCP upload ended without a final status", err,
+                         remoteFailure);
 }
 
 } // namespace
@@ -518,6 +548,16 @@ bool Libssh2ScpClient::put(
         err = "Could not close local file";
         closeScpChannel(channel, false);
         setLastOperationError(RemoteErrorKind::LocalIo, err, nativeError);
+        return false;
+    }
+    bool remoteFailure = false;
+    if (!finishScpUpload(session, channel, err, remoteFailure)) {
+        // Classify while the session still holds the channel's error.
+        if (remoteFailure)
+            setLastOperationError(RemoteErrorKind::RemoteIo, err);
+        else
+            setLastOperationError(classifyStructuredFailure(err, false));
+        closeScpChannel(channel, false);
         return false;
     }
     closeScpChannel(channel, true);

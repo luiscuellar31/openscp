@@ -166,6 +166,21 @@ int main() {
         t.check(!fs::exists(scpOnlyDownload.string() + ".part"),
                 "SCP-only download should not leave a partial file");
     }
+
+    // The upload waits for the remote scp to confirm the write, which is
+    // where it reports a full disk.
+    const std::string scpOnlyRemotePath =
+        joinRemotePath(remoteBase, "openscp_scp_only_it_" + token + ".txt");
+    err.clear();
+    t.check(scpOnlyClient.put(localUpload.string(), scpOnlyRemotePath, err, {},
+                              {}, false),
+            std::string("SCP-only upload should succeed: ") + err);
+    err.clear();
+    downloaded.clear();
+    t.check(scpOnlyClient.get(scpOnlyRemotePath, scpOnlyDownload.string(), err,
+                              {}, {}, false) &&
+                readFile(scpOnlyDownload, downloaded) && downloaded == payload,
+            std::string("SCP-only upload should round-trip: ") + err);
     scpOnlyClient.disconnect();
 
     const std::string preservedDestination = "preserve existing destination";
