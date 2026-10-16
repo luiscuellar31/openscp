@@ -783,6 +783,16 @@ bool configureProxy(CURL *curl, const SessionOptions &opt,
                   " proxy username.";
             return false;
         }
+        // libcurl would send the password in Basic, in clear, to any HTTP
+        // proxy. ANY asks the proxy first and picks the safest method it
+        // offers, so NTLM, Negotiate and Digest proxies work too.
+        if (normalizedProxyType == ProxyType::HttpConnect &&
+            curl_easy_setopt(curl, CURLOPT_PROXYAUTH, CURLAUTH_ANY) !=
+                CURLE_OK) {
+            err = std::string("Could not configure ") + backendLabel +
+                  " proxy authentication.";
+            return false;
+        }
     }
     if (opt.proxy_password && !opt.proxy_password->empty()) {
         if (curl_easy_setopt(curl, CURLOPT_PROXYPASSWORD,

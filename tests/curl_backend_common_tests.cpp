@@ -11,7 +11,10 @@
 #endif
 
 #ifndef _WIN32
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
+#include <unistd.h>
 #endif
 
 #include <cstdint>
@@ -23,6 +26,8 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace {
 
@@ -461,6 +466,101 @@ OPENSCP_TEST(testCurlConnectionsUseTcpKeepalive, test) {
                "curl connections should enable TCP keepalive, so an idle FTP "
                "control connection survives NAT timeouts");
 }
+
+#ifndef _WIN32
+// Runs one request through a fake HTTP proxy that answers each CONNECT with
+// 407 and a `scheme` challenge, and returns the scheme of the credentials it
+// received on each connection ("" for none).
+std::vector<std::string> proxyAuthorizations(openscp::test::TestContext &test,
+                                             const std::string &scheme) {
+    const int listener = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t addressLength = sizeof(address);
+    const bool listening =
+        listener >= 0 &&
+        ::bind(listener, reinterpret_cast<sockaddr *>(&address),
+               sizeof(address)) == 0 &&
+        ::listen(listener, 4) == 0 &&
+        ::getsockname(listener, reinterpret_cast<sockaddr *>(&address),
+                      &addressLength) == 0;
+    test.check(listening, "the fake proxy should listen");
+    if (!listening) {
+        if (listener >= 0)
+            ::close(listener);
+        return {};
+    }
+    std::vector<std::string> authorizations;
+    std::thread proxy([listener, &authorizations, &scheme] {
+        for (int request = 0; request < 2; ++request) {
+            const int client = ::accept(listener, nullptr, nullptr);
+            if (client < 0)
+                return;
+            std::string headers;
+            char buffer[1024];
+            while (headers.find("\r\n\r\n") == std::string::npos) {
+                const ssize_t n = ::recv(client, buffer, sizeof(buffer), 0);
+                if (n <= 0)
+                    break;
+                headers.append(buffer, static_cast<std::size_t>(n));
+            }
+            const std::size_t start = headers.find("Proxy-Authorization: ");
+            authorizations.push_back(
+                start == std::string::npos
+                    ? std::string()
+                    : headers.substr(start + 21, headers.find(' ', start + 21) -
+                                                     start - 21));
+            const std::string challenge =
+                scheme == "Digest"
+                    ? "Digest realm=\"test\", nonce=\"abc\", qop=\"auth\""
+                    : "Basic realm=\"test\"";
+            const std::string reply =
+                "HTTP/1.1 407 Proxy Authentication Required\r\n"
+                "Proxy-Authenticate: " +
+                challenge +
+                "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            (void)::send(client, reply.data(), reply.size(), 0);
+            ::close(client);
+        }
+    });
+
+    openscp::curlcommon::CurlEasySession session;
+    std::string error;
+    openscp::SessionOptions options;
+    options.proxy_type = openscp::ProxyType::HttpConnect;
+    options.proxy_host = "127.0.0.1";
+    options.proxy_port = ntohs(address.sin_port);
+    options.proxy_username = "proxy-user";
+    options.proxy_password = "proxy-secret";
+    const bool configured =
+        session.initialize(error) &&
+        openscp::curlcommon::configureProxy(session.get(), options, "test",
+                                            "test", error) &&
+        curl_easy_setopt(session.get(), CURLOPT_URL,
+                         "http://example.invalid:80/") == CURLE_OK &&
+        curl_easy_setopt(session.get(), CURLOPT_TIMEOUT, 10L) == CURLE_OK;
+    test.check(configured, "the proxied request should configure: " + error);
+    if (configured)
+        (void)curl_easy_perform(session.get());
+    ::shutdown(listener, SHUT_RDWR);
+    ::close(listener);
+    proxy.join();
+    return authorizations;
+}
+
+OPENSCP_TEST(testHttpProxyAuthenticationIsNegotiated, test) {
+    for (const std::string scheme : {"Digest", "Basic"}) {
+        const auto authorizations = proxyAuthorizations(test, scheme);
+        test.check(!authorizations.empty() && authorizations.front().empty(),
+                   "the proxy password must not be sent before the proxy "
+                   "asks for it (" +
+                       scheme + ")");
+        test.check(authorizations.size() == 2 && authorizations[1] == scheme,
+                   "curl should answer the proxy's " + scheme + " challenge");
+    }
+}
+#endif
 
 OPENSCP_TEST(testCurlTransportPolicy, test) {
     using openscp::curlcommon::configureAllowedProtocol;
