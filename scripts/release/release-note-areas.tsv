@@ -1,0 +1,14 @@
+# Areas of the release notes, in the order they appear: the area name, a tab,
+# then the commit scopes it collects. A user-visible commit whose scope is not
+# listed here appears under Other. Add an area only for a new part of the app.
+SSH, SFTP and SCP	ssh sftp scp libssh2 jump auth
+FTP, FTPS and WebDAV	ftp webdav curl tls
+Connections and remote files	connection connections remote remote-model terminal
+Transfers	transfers transfer queue transfer-queue staging dnd discovery storage
+Synchronization	sync
+Local files	local
+Sites, settings and credentials	sites settings security secrets secret-store
+Updates	updates
+Interface	ui navigation accessibility i18n icons about
+# Work that users do not see. Its commits go to Maintenance whatever their type.
+internal	ci build release tests test checks scripts demo quality integration nightly packaging macos linux snap flatpak appimage

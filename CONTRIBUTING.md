@@ -38,13 +38,19 @@ Common types include `feat`, `fix`, `refactor`, `docs`, `test`, `ci`, and `chore
 For a breaking change, add `!` after the type or scope and explain the impact
 and migration in the commit body with a `BREAKING CHANGE:` footer.
 
-The release notes list each subject line unchanged, grouped by type, so choose
-the type by who notices the change:
+The release notes list each subject line, grouped by type and by the area of
+its scope, so choose the type by who notices the change:
 
 - `feat`, `fix`, and `perf` are for changes that users notice: a new
   capability, corrected behavior, or faster work.
 - Changes to CI, builds, packaging, scripts, and tests use `ci`, `build`,
   `test`, or `chore`, even when they fix something.
+
+Take the scope from
+[`scripts/release/release-note-areas.tsv`](scripts/release/release-note-areas.tsv),
+which groups scopes into the areas of the release notes. A user-visible change
+whose scope is not listed there appears under Other; add an area there only for
+a new part of the application.
 
 Write the subject as the effect, not the mechanism: `fix(webdav): stop DELETE
 from removing whole collections` rather than `fix(webdav): check the resource
@@ -260,7 +266,9 @@ After merging to `main`, wait for the Linux and macOS build jobs in the
 **Release Artifacts** workflow to pass for that commit before creating a `v*`
 tag. The `main` run uploads workflow artifacts but skips the publication job.
 Pushing the tag runs the same builds again and uploads their assets to a draft
-release only if every build passes.
+release only if every build passes. The draft's notes come from
+`scripts/release/release-notes.sh`; write the release name and a short
+introduction at the top before publishing it.
 
 ## Licensing
 
