@@ -3803,7 +3803,18 @@ bool Libssh2SftpClient::put(
         }
     }
 
-    wh.close();
+    // Some servers report a failed write only when the handle closes, as NFS
+    // or a quota can; the .part must not replace the destination then.
+    if (wh.close() != 0) {
+        const bool canceledNow = (shouldCancel && shouldCancel());
+        err = canceledNow ? "Canceled by user"
+                          : "Could not close remote (.part) after writing";
+        const RemoteError structuredFailure =
+            classifyStructuredFailure(err, false);
+        localFile.reset();
+        setLastOperationError(structuredFailure);
+        return false;
+    }
     localFile.reset();
 
     if (fail_if_transfer_canceled(&shouldCancel, err))
