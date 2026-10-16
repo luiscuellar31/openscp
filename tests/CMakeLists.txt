@@ -107,6 +107,12 @@ openscp_add_test(openscp_ui_utilities_tests
     LINK_LIBRARIES openscp_ui_logic
 )
 
+# Only demo builds compile the sample data into the application.
+openscp_add_test(openscp_demo_data_tests
+    SOURCES demo_data_tests.cpp ${CMAKE_SOURCE_DIR}/ui/logic/demo/DemoData.cpp
+    LINK_LIBRARIES openscp_ui_logic
+)
+
 openscp_add_test(openscp_app_icon_tests
     SOURCES app_icon_tests.cpp
     LINK_LIBRARIES openscp_ui_widgets
