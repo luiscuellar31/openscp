@@ -4,6 +4,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFileInfo>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QStringList>
@@ -11,6 +12,10 @@
 #include <algorithm>
 #include <optional>
 #include <string>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 namespace openscpui {
 
@@ -76,10 +81,15 @@ void appendHostKeyArguments(QStringList &arguments,
     const openscp::KnownHostsPolicy policy =
         openscp::normalizeKnownHostsPolicy(session.known_hosts_policy);
     if (policy == openscp::KnownHostsPolicy::Off) {
+#ifdef Q_OS_WIN
+        const QString nullDevice = QStringLiteral("NUL");
+#else
+        const QString nullDevice = QStringLiteral("/dev/null");
+#endif
         arguments << QStringLiteral("-o")
                   << QStringLiteral("StrictHostKeyChecking=no")
                   << QStringLiteral("-o")
-                  << QStringLiteral("UserKnownHostsFile=/dev/null");
+                  << QStringLiteral("UserKnownHostsFile=%1").arg(nullDevice);
         return;
     }
 
@@ -207,6 +217,16 @@ bool appendJumpOrProxyArguments(
     const QString jumpHost = trimOptionalString(session.jump_host);
     const bool usesJumpHost = !jumpHost.isEmpty();
     const bool usesProxy = session.proxy_type != openscp::ProxyType::None;
+#ifdef Q_OS_WIN
+    // OpenSCP does not connect through jump hosts on Windows yet, and Windows
+    // has no nc or ncat to run as a proxy command.
+    if (usesJumpHost || usesProxy) {
+        *error = QCoreApplication::translate(
+            "MainWindow", "On Windows, Open in terminal cannot use an SSH "
+                          "jump host or a proxy yet.");
+        return false;
+    }
+#endif
     if (usesJumpHost && usesProxy) {
         *error = QCoreApplication::translate(
             "MainWindow",
@@ -297,14 +317,22 @@ bool validateSession(const openscp::SessionOptions &session, QString *host,
     return true;
 }
 
-bool buildSshCommand(const openscp::SessionOptions &session,
-                     const QString &remotePath, bool forceInteractiveLogin,
-                     const TerminalCommandBuilder::ExecutableLookup &lookup,
-                     QString *command, QString *error) {
+// The ssh program and its arguments, to be quoted for the platform's shell.
+bool buildSshArguments(const openscp::SessionOptions &session,
+                       const QString &remotePath, bool forceInteractiveLogin,
+                       const TerminalCommandBuilder::ExecutableLookup &lookup,
+                       QStringList *command, QString *error) {
     const QString executable = lookup(QStringLiteral("ssh"));
     if (executable.isEmpty()) {
+#ifdef Q_OS_WIN
+        *error = QCoreApplication::translate(
+            "MainWindow",
+            "The OpenSSH client was not found. Add the \"OpenSSH Client\" "
+            "optional feature in Windows Settings.");
+#else
         *error = QCoreApplication::translate(
             "MainWindow", "OpenSSH client was not found in PATH.");
+#endif
         return false;
     }
 
@@ -331,14 +359,14 @@ bool buildSshCommand(const openscp::SessionOptions &session,
                               "cd -- \"$1\" 2>/dev/null || cd /; "
                               "exec \"${SHELL:-/bin/sh}\" -l")),
                           shellSingleQuote(normalizeRemotePath(remotePath)));
-    *command = shellJoinQuoted(arguments);
+    *command = arguments;
     return true;
 }
 
-bool buildSftpCommand(const openscp::SessionOptions &session,
-                      const QString &remotePath, bool forceInteractiveLogin,
-                      const TerminalCommandBuilder::ExecutableLookup &lookup,
-                      QString *command, QString *error) {
+bool buildSftpArguments(const openscp::SessionOptions &session,
+                        const QString &remotePath, bool forceInteractiveLogin,
+                        const TerminalCommandBuilder::ExecutableLookup &lookup,
+                        QStringList *command, QString *error) {
     const QString executable = lookup(QStringLiteral("sftp"));
     if (executable.isEmpty()) {
         *error = QCoreApplication::translate(
@@ -361,22 +389,120 @@ bool buildSftpCommand(const openscp::SessionOptions &session,
     arguments << QStringLiteral("--")
               << QStringLiteral("%1@%2:%3")
                      .arg(user, host, normalizeRemotePath(remotePath));
-    *command = shellJoinQuoted(arguments);
+    *command = arguments;
     return true;
 }
 
+QString sftpFallbackMessage() {
+    return QCoreApplication::translate(
+        "MainWindow",
+        "OpenSCP: SSH shell was not available. Falling back to SFTP CLI.");
+}
+
+#ifdef Q_OS_WIN
+// Windows itself names its system folder, normally C:\Windows\System32; PATH
+// and %SystemRoot% could point elsewhere.
+QString windowsSystemDirectory() {
+    wchar_t buffer[MAX_PATH];
+    const UINT length = GetSystemDirectoryW(buffer, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH)
+        return {};
+    return QDir::fromNativeSeparators(
+        QString::fromWCharArray(buffer, static_cast<qsizetype>(length)));
+}
+
+// Quotes an argument for a Windows command line, which every program splits
+// itself; this follows the Microsoft C runtime, which the OpenSSH for Windows
+// programs use. Characters that Cygwin and MSYS programs would treat as
+// quotes or wildcards are quoted too.
+QString windowsCommandLineArgument(const QString &argument) {
+    const auto isPlain = [](QChar ch) {
+        return (ch >= u'a' && ch <= u'z') || (ch >= u'A' && ch <= u'Z') ||
+               (ch >= u'0' && ch <= u'9') ||
+               QStringView(u"-_./:=@,+%").contains(ch);
+    };
+    if (!argument.isEmpty() &&
+        std::all_of(argument.cbegin(), argument.cend(), isPlain)) {
+        return argument;
+    }
+
+    QString quoted = QStringLiteral("\"");
+    qsizetype backslashes = 0;
+    for (const QChar ch : argument) {
+        if (ch == u'\\') {
+            ++backslashes;
+            continue;
+        }
+        // Backslashes are literal unless a quote follows them.
+        quoted += QString(ch == u'"' ? backslashes * 2 + 1 : backslashes,
+                          QLatin1Char('\\'));
+        quoted += ch;
+        backslashes = 0;
+    }
+    quoted += QString(backslashes * 2, QLatin1Char('\\'));
+    quoted += QLatin1Char('"');
+    return quoted;
+}
+
+// A single-quoted Windows PowerShell string. PowerShell also ends one at the
+// typographic single quotes, and reads any of them doubled as one.
+QString powerShellSingleQuote(const QString &value) {
+    QString quoted = QStringLiteral("'");
+    for (const QChar ch : value) {
+        quoted += ch;
+        if (QStringView(u"'\u2018\u2019\u201A\u201B").contains(ch))
+            quoted += ch;
+    }
+    quoted += QLatin1Char('\'');
+    return quoted;
+}
+
+// A PowerShell expression that runs a program in its console, waits for it
+// and gives its exit code. Start-Process takes the command line as written;
+// Windows PowerShell 5.1 would lose the quotes inside arguments passed
+// directly.
+QString powerShellExitCodeOf(const QStringList &command) {
+    QStringList arguments;
+    for (qsizetype i = 1; i < command.size(); ++i)
+        arguments << windowsCommandLineArgument(command.at(i));
+    return QStringLiteral("(Start-Process -FilePath ") +
+           powerShellSingleQuote(QDir::toNativeSeparators(command.front())) +
+           QStringLiteral(" -ArgumentList ") +
+           powerShellSingleQuote(arguments.join(QLatin1Char(' '))) +
+           QStringLiteral(" -NoNewWindow -Wait -PassThru).ExitCode");
+}
+
+// The script the new console runs: ssh, then sftp if ssh could not connect,
+// as on other systems. The window closes with the session, unless it ended
+// with an error that the user should be able to read first.
+QString powerShellScript(const QStringList &ssh, const QStringList &sftp) {
+    QString script = QStringLiteral("$status = ") + powerShellExitCodeOf(ssh);
+    if (!sftp.isEmpty()) {
+        script += QStringLiteral("; if ($status -eq 255) { Write-Host ") +
+                  powerShellSingleQuote(sftpFallbackMessage()) +
+                  QStringLiteral("; $status = ") + powerShellExitCodeOf(sftp) +
+                  QStringLiteral(" }");
+    }
+    // Not QString::arg(), which would replace the %1 that PowerShell fills.
+    script +=
+        QStringLiteral("; if ($status -ne 0) { Write-Host ''; Write-Host (") +
+        powerShellSingleQuote(QCoreApplication::translate(
+            "MainWindow", "OpenSCP: the session ended with exit code %1.")) +
+        QStringLiteral(" -replace '%1', $status); Read-Host ") +
+        powerShellSingleQuote(QCoreApplication::translate(
+            "MainWindow", "Press Enter to close this window")) +
+        QStringLiteral(" | Out-Null }");
+    return script;
+}
+#else
 QString withSftpFallback(const QString &sshCommand,
                          const QString &sftpCommand) {
     return QStringLiteral("%1; _openscp_ssh_status=$?; "
                           "if [ \"$_openscp_ssh_status\" -eq 255 ]; then "
                           "printf '%s\\n' %2; %3; fi")
-        .arg(sshCommand,
-             shellSingleQuote(QCoreApplication::translate(
-                 "MainWindow",
-                 "OpenSCP: SSH shell was not available. Falling back to SFTP "
-                 "CLI.")),
-             sftpCommand);
+        .arg(sshCommand, shellSingleQuote(sftpFallbackMessage()), sftpCommand);
 }
+#endif
 
 #ifdef Q_OS_MAC
 QString appleScriptStringLiteral(const QString &raw) {
@@ -394,7 +520,24 @@ TerminalCommandBuilder::TerminalCommandBuilder(
     : executableLookup_(std::move(executableLookup)) {
     if (!executableLookup_) {
         executableLookup_ = [](const QString &name) {
+#ifdef Q_OS_WIN
+            // Only an .exe: Windows would run ssh.cmd or ssh.bat through
+            // cmd.exe, which reads the arguments with other quoting rules.
+            const QString executable =
+                QStandardPaths::findExecutable(name + QStringLiteral(".exe"));
+            if (!executable.isEmpty())
+                return executable;
+            // The OpenSSH client that Windows installs, if PATH misses it.
+            const QString systemDirectory = windowsSystemDirectory();
+            const QString bundled = systemDirectory +
+                                    QStringLiteral("/OpenSSH/") + name +
+                                    QStringLiteral(".exe");
+            return !systemDirectory.isEmpty() && QFileInfo(bundled).isFile()
+                       ? bundled
+                       : QString();
+#else
             return QStandardPaths::findExecutable(name);
+#endif
         };
     }
 }
@@ -403,21 +546,33 @@ TerminalCommandResult TerminalCommandBuilder::prepare(
     const openscp::SessionOptions &session, const QString &remotePath,
     bool forceInteractiveLogin, bool enableSftpCliFallback) const {
     TerminalCommandResult result;
-    if (!buildSshCommand(session, remotePath, forceInteractiveLogin,
-                         executableLookup_, &result.command, &result.error)) {
+    QStringList sshCommand;
+    if (!buildSshArguments(session, remotePath, forceInteractiveLogin,
+                           executableLookup_, &sshCommand, &result.error)) {
         return result;
     }
+    result.title = QStringLiteral("%1@%2 - OpenSCP")
+                       .arg(QString::fromStdString(session.username).trimmed(),
+                            QString::fromStdString(session.host).trimmed());
 
-    if (!enableSftpCliFallback)
-        return result;
-
-    QString sftpCommand;
+    QStringList sftpCommand;
     QString ignoredError;
-    if (buildSftpCommand(session, remotePath, forceInteractiveLogin,
-                         executableLookup_, &sftpCommand, &ignoredError)) {
-        result.command = withSftpFallback(result.command, sftpCommand);
-        result.hasSftpFallback = true;
+    if (enableSftpCliFallback &&
+        !buildSftpArguments(session, remotePath, forceInteractiveLogin,
+                            executableLookup_, &sftpCommand, &ignoredError)) {
+        sftpCommand.clear();
     }
+    result.hasSftpFallback = !sftpCommand.isEmpty();
+
+#ifdef Q_OS_WIN
+    result.command = powerShellScript(sshCommand, sftpCommand);
+#else
+    result.command = shellJoinQuoted(sshCommand);
+    if (result.hasSftpFallback) {
+        result.command =
+            withSftpFallback(result.command, shellJoinQuoted(sftpCommand));
+    }
+#endif
     return result;
 }
 
@@ -425,10 +580,17 @@ QString TerminalCommandBuilder::posixShellCommand(const QString &shellCommand) {
     return QStringLiteral("/bin/sh -c %1").arg(shellSingleQuote(shellCommand));
 }
 
-bool TerminalCommandBuilder::launch(const QString &shellCommand,
+#ifdef Q_OS_WIN
+QStringList TerminalCommandBuilder::powerShellArguments(const QString &script) {
+    return {QStringLiteral("-NoProfile"), QStringLiteral("-Command"), script};
+}
+#endif
+
+bool TerminalCommandBuilder::launch(const TerminalCommandResult &command,
                                     QString *error) const {
     if (error)
         error->clear();
+    const QString &shellCommand = command.command;
 
 #ifdef Q_OS_MAC
     const QString osascript = executableLookup_(QStringLiteral("osascript"));
@@ -486,6 +648,47 @@ bool TerminalCommandBuilder::launch(const QString &shellCommand,
         *error = QCoreApplication::translate(
             "MainWindow", "No compatible terminal emulator was found.");
     return false;
+#elif defined(Q_OS_WIN)
+    const QString systemDirectory = windowsSystemDirectory();
+    const QString powerShell =
+        systemDirectory +
+        QStringLiteral("/WindowsPowerShell/v1.0/powershell.exe");
+    if (systemDirectory.isEmpty() || !QFileInfo(powerShell).isFile()) {
+        if (error)
+            *error = QCoreApplication::translate(
+                "MainWindow", "Could not locate Windows PowerShell.");
+        return false;
+    }
+
+    std::wstring title = command.title.toStdWString();
+    QProcess process;
+    process.setProgram(QDir::toNativeSeparators(powerShell));
+    process.setArguments(powerShellArguments(shellCommand));
+    // A process keeps its working folder from being deleted on Windows.
+    process.setWorkingDirectory(QDir::homePath());
+    process.setCreateProcessArgumentsModifier(
+        [&title](QProcess::CreateProcessArguments *arguments) {
+            // Qt starts a GUI app's detached processes without a console;
+            // ssh needs a console window of its own, with its own input and
+            // output, to ask for passwords and draw the remote shell.
+            arguments->flags &= ~static_cast<DWORD>(CREATE_NO_WINDOW);
+            arguments->flags |= CREATE_NEW_CONSOLE;
+            arguments->inheritHandles = false;
+            arguments->startupInfo->dwFlags &=
+                ~static_cast<DWORD>(STARTF_USESTDHANDLES);
+            arguments->startupInfo->hStdInput = nullptr;
+            arguments->startupInfo->hStdOutput = nullptr;
+            arguments->startupInfo->hStdError = nullptr;
+            if (!title.empty())
+                arguments->startupInfo->lpTitle = title.data();
+        });
+    if (!process.startDetached()) {
+        if (error)
+            *error = QCoreApplication::translate(
+                "MainWindow", "Could not open a Windows PowerShell window.");
+        return false;
+    }
+    return true;
 #else
     Q_UNUSED(shellCommand)
     if (error) {

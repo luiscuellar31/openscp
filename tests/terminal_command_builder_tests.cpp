@@ -4,11 +4,15 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QList>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QStandardPaths>
+#include <QStringList>
 #include <QTemporaryDir>
 
 #include <functional>
+#include <utility>
 
 namespace {
 
@@ -39,11 +43,14 @@ OPENSCP_TEST(testBuildsSshAndFallbackWithoutSecrets, test) {
     test.check(result.isValid(), "valid sessions should produce a command");
     test.check(result.hasSftpFallback,
                "the optional SFTP fallback should be included when available");
+#ifndef Q_OS_WIN
+    // testWindowsScriptPassesExactArguments checks the Windows quoting.
     test.check(result.command.contains(QStringLiteral("'2222'")),
                "the selected port should be passed to OpenSSH");
     test.check(result.command.contains(
                    QStringLiteral("UserKnownHostsFile=\"/tmp/known hosts\"")),
                "the known-hosts file should be preserved");
+#endif
     test.check(result.command.contains(QStringLiteral("Quarter")),
                "the remote working directory should be preserved");
     test.check(
@@ -51,6 +58,9 @@ OPENSCP_TEST(testBuildsSshAndFallbackWithoutSecrets, test) {
         "stored passwords must never be copied to terminal arguments");
 }
 
+#ifndef Q_OS_WIN
+// The POSIX shell quoting; on Windows, testWindowsScriptPassesExactArguments
+// runs the command and checks every argument that ssh and sftp receive.
 OPENSCP_TEST(testKnownHostsFileReachesSshAsOneName, test) {
     // ssh reads the value of -o like a config line: unquoted spaces would
     // split it into several files, and % starts a token in OpenSSH 8.4+.
@@ -80,6 +90,7 @@ OPENSCP_TEST(testSeparatesDestinationsFromOptions, test) {
                    "'--' '-oProxyCommand=touch pwned@files.example:/'")),
                "sftp should get its destination after --");
 }
+#endif
 
 OPENSCP_TEST(testRejectsNamesThatOpenSshWouldMisread, test) {
     const auto prepareWith =
@@ -117,6 +128,7 @@ OPENSCP_TEST(testRejectsNamesThatOpenSshWouldMisread, test) {
                 }).isValid(),
                "ssh splits a jump specification at commas");
 
+#ifndef Q_OS_WIN
     const auto plainJump = prepareWith([](auto &options) {
         options.jump_host = "jump.example";
         options.jump_username = "ops";
@@ -124,8 +136,10 @@ OPENSCP_TEST(testRejectsNamesThatOpenSshWouldMisread, test) {
     test.check(plainJump.isValid() && plainJump.command.contains(QStringLiteral(
                                           "'-J' 'ops@jump.example'")),
                "ordinary jump hosts should still be accepted");
+#endif
 }
 
+#ifndef Q_OS_WIN
 OPENSCP_TEST(testProxyCommandsKeepPercentSignsLiteral, test) {
     // ssh expands %-tokens in a ProxyCommand, which then sits inside one
     // more pair of single quotes in the terminal command.
@@ -157,6 +171,7 @@ OPENSCP_TEST(testProxyCommandsKeepPercentSignsLiteral, test) {
                        nested(QStringLiteral("'fe80::1%%eth0:1080'"))),
                "a proxy address with a zone index should keep its %");
 }
+#endif
 
 OPENSCP_TEST(testRejectsCredentialedProxy, test) {
     auto options = session();
@@ -202,6 +217,214 @@ OPENSCP_TEST(testInteractiveModeDisablesPublicKeys, test) {
     test.check(!result.command.contains(QStringLiteral("private key")),
                "interactive mode should not pass the saved private key");
 }
+
+#ifdef Q_OS_WIN
+struct ScriptRun {
+    bool finished = false;
+    int exitCode = -1;
+    QString output;
+    // Each program the script started: its name in capitals, then the
+    // arguments it received.
+    QList<QStringList> programs;
+};
+
+QList<QStringList> readProbeLog(const QString &path) {
+    QFile log(path);
+    if (!log.open(QIODevice::ReadOnly))
+        return {};
+    QList<QStringList> programs;
+    const QString records = QString::fromUtf8(log.readAll());
+    for (const QString &record :
+         records.split(QChar(0x1e), Qt::SkipEmptyParts)) {
+        programs << record.split(QChar(0x1f));
+    }
+    return programs;
+}
+
+QString describe(const QList<QStringList> &programs) {
+    QStringList lines;
+    for (const QStringList &program : programs) {
+        lines << QStringLiteral("[") + program.join(QStringLiteral("|")) +
+                     QStringLiteral("]");
+    }
+    return lines.join(QLatin1Char(' '));
+}
+
+// Copies of the argument probe as ssh.exe and sftp.exe, in a folder whose
+// name needs quoting both in PowerShell and on a command line.
+struct ProbeTools {
+    QTemporaryDir root;
+    QString ssh;
+    QString sftp;
+    QString log;
+
+    bool create() {
+        if (!root.isValid())
+            return false;
+        const QString tools =
+            QDir(root.path()).filePath(QStringLiteral("O'Brien\u2019s tools"));
+        ssh = QDir(tools).filePath(QStringLiteral("ssh.exe"));
+        sftp = QDir(tools).filePath(QStringLiteral("sftp.exe"));
+        log = QDir(root.path()).filePath(QStringLiteral("programs.log"));
+        const QString probe = QStringLiteral(OPENSCP_TERMINAL_ARGV_PROBE);
+        return QDir().mkpath(tools) && QFile::copy(probe, ssh) &&
+               QFile::copy(probe, sftp);
+    }
+
+    openscpui::TerminalCommandBuilder builder() const {
+        return openscpui::TerminalCommandBuilder([this](const QString &name) {
+            if (name == QStringLiteral("ssh"))
+                return ssh;
+            return name == QStringLiteral("sftp") ? sftp : QString();
+        });
+    }
+
+    // Runs a prepared script with the arguments that launch() gives
+    // powershell.exe, here without a console of its own.
+    ScriptRun run(const QString &script,
+                  const QList<std::pair<QString, QString>> &environment) const {
+        QProcessEnvironment variables =
+            QProcessEnvironment::systemEnvironment();
+        variables.insert(QStringLiteral("OPENSCP_ARGV_PROBE_LOG"),
+                         QDir::toNativeSeparators(log));
+        for (const auto &[name, value] : environment)
+            variables.insert(name, value);
+
+        QProcess powerShell;
+        powerShell.setProcessEnvironment(variables);
+        powerShell.setProcessChannelMode(QProcess::MergedChannels);
+        powerShell.start(
+            qEnvironmentVariable("SystemRoot") +
+                QStringLiteral(
+                    "/System32/WindowsPowerShell/v1.0/powershell.exe"),
+            openscpui::TerminalCommandBuilder::powerShellArguments(script));
+        // With no more input, Read-Host returns at once.
+        powerShell.closeWriteChannel();
+
+        ScriptRun result;
+        result.finished = powerShell.waitForFinished(60000);
+        result.exitCode = powerShell.exitCode();
+        result.output = QString::fromLocal8Bit(powerShell.readAll());
+        result.programs = readProbeLog(log);
+        return result;
+    }
+};
+
+OPENSCP_TEST(testWindowsScriptPassesExactArguments, test) {
+    ProbeTools tools;
+    test.check(tools.create(), "the probe tools should be created");
+
+    auto options = session();
+    // A backslash before a quote is what the C runtime rules treat specially.
+    options.username = "CORP\\al\"i\\\"ce";
+    options.known_hosts_path = "C:\\Users\\Jane Doe\\100%\\known_hosts";
+    options.private_key_path = "C:\\Users\\Jane Doe\\.ssh\\id_ed25519";
+    const QString remotePath =
+        QStringLiteral("/srv/it's \"quoted\" $HOME \u2018x\u2019 100%");
+    const auto result =
+        tools.builder().prepare(options, remotePath, false, true);
+    test.check(result.isValid() && result.hasSftpFallback,
+               "the script with its SFTP fallback should be built");
+    test.check(
+        !result.command.contains(QStringLiteral("never-place-this-in-command")),
+        "stored passwords must never be copied to the script");
+
+    // ssh exits as it does when it cannot connect, so sftp runs as well.
+    const ScriptRun run = tools.run(
+        result.command, {{QStringLiteral("OPENSCP_ARGV_PROBE_EXIT_SSH"),
+                          QStringLiteral("255")}});
+    test.check(run.finished && run.exitCode == 0,
+               "the script should finish: " + run.output.toStdString());
+
+    const QStringList sharedOptions{
+        QStringLiteral("-o"),
+        QStringLiteral("StrictHostKeyChecking=yes"),
+        QStringLiteral("-o"),
+        QStringLiteral(
+            "UserKnownHostsFile=\"C:/Users/Jane Doe/100%%/known_hosts\""),
+        QStringLiteral("-i"),
+        QStringLiteral("C:/Users/Jane Doe/.ssh/id_ed25519"),
+        QStringLiteral("-o"),
+        QStringLiteral("IdentitiesOnly=yes"),
+        QStringLiteral("--"),
+    };
+    const QString destination =
+        QStringLiteral("CORP\\al\"i\\\"ce@files.example");
+    const QList<QStringList> expected{
+        QStringList{QStringLiteral("SSH"), QStringLiteral("-tt"),
+                    QStringLiteral("-p"), QStringLiteral("2222")} +
+            sharedOptions +
+            QStringList{
+                destination,
+                QStringLiteral(
+                    "exec /bin/sh -c 'cd -- \"$1\" 2>/dev/null || cd /; "
+                    "exec \"${SHELL:-/bin/sh}\" -l' sh "
+                    "'/srv/it'\"'\"'s \"quoted\" $HOME \u2018x\u2019 100%'")},
+        QStringList{QStringLiteral("SFTP"), QStringLiteral("-P"),
+                    QStringLiteral("2222")} +
+            sharedOptions +
+            QStringList{destination + QStringLiteral(":") + remotePath},
+    };
+    test.check(run.programs == expected,
+               "ssh and then sftp should receive exactly these arguments: " +
+                   describe(run.programs).toStdString());
+    test.check(run.output.contains(QStringLiteral("Falling back to SFTP CLI")),
+               "the script should say that it falls back to SFTP");
+    test.check(!run.output.contains(QStringLiteral("exit code")),
+               "a session that ends well should not hold the window open");
+}
+
+OPENSCP_TEST(testWindowsScriptHoldsTheWindowAfterAnError, test) {
+    ProbeTools tools;
+    test.check(tools.create(), "the probe tools should be created");
+    const auto result =
+        tools.builder().prepare(session(), QStringLiteral("/"), false, true);
+    test.check(result.isValid(), "the script should be built");
+
+    // Only exit code 255, ssh's own failure, falls back to sftp.
+    const ScriptRun run = tools.run(
+        result.command,
+        {{QStringLiteral("OPENSCP_ARGV_PROBE_EXIT_SSH"), QStringLiteral("3")}});
+    test.check(run.finished, "Read-Host should return at the end of input");
+    test.check(run.programs.size() == 1 &&
+                   run.programs.front().value(0) == QStringLiteral("SSH"),
+               "only ssh should run: " + describe(run.programs).toStdString());
+    test.check(run.output.contains(QStringLiteral("exit code 3")),
+               "the window should show the exit code: " +
+                   run.output.toStdString());
+    // Read-Host shows its prompt only in a console.
+    test.check(result.command.contains(QStringLiteral(
+                   "Read-Host 'Press Enter to close this window'")),
+               "the window should wait for Enter");
+}
+
+OPENSCP_TEST(testWindowsUsesTheNulDeviceAndNoNetworkHelpers, test) {
+    auto unchecked = session();
+    unchecked.known_hosts_policy = openscp::KnownHostsPolicy::Off;
+    const auto withoutHostKeys =
+        builder().prepare(unchecked, QStringLiteral("/"), false, false);
+    test.check(withoutHostKeys.isValid() &&
+                   withoutHostKeys.command.contains(
+                       QStringLiteral("UserKnownHostsFile=NUL")),
+               "Windows has no /dev/null for ssh to write host keys to");
+
+    auto jump = session();
+    jump.jump_host = "jump.example";
+    const auto jumpResult =
+        builder().prepare(jump, QStringLiteral("/"), false, false);
+    test.check(!jumpResult.isValid() && !jumpResult.error.isEmpty(),
+               "jump hosts should be refused with a reason on Windows");
+
+    auto proxy = session();
+    proxy.proxy_type = openscp::ProxyType::Socks5;
+    proxy.proxy_host = "proxy.example";
+    proxy.proxy_port = 1080;
+    const auto proxyResult =
+        builder().prepare(proxy, QStringLiteral("/"), false, false);
+    test.check(!proxyResult.isValid() && !proxyResult.error.isEmpty(),
+               "proxies should be refused with a reason on Windows");
+}
+#endif
 
 bool writeScript(const QString &path, const QByteArray &body) {
     QFile file(path);
