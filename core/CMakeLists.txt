@@ -177,9 +177,14 @@ set_property(TARGET openscp_core PROPERTY OPENSCP_HAS_CURL_WEBDAV
              ${OPENSCP_HAS_CURL_WEBDAV})
 
 # libssh2 (Homebrew/pkg-config) with robust link flags on macOS/Homebrew.
+# Windows uses libssh2's own CMake package, which vcpkg installs: its
+# pkg-config file would leave out the libraries a static libssh2 needs.
 find_package(PkgConfig QUIET)
-if (PkgConfig_FOUND)
+if (PkgConfig_FOUND AND NOT WIN32)
     pkg_check_modules(LIBSSH2 QUIET IMPORTED_TARGET libssh2)
+endif()
+if (WIN32)
+    find_package(libssh2 CONFIG REQUIRED)
 endif()
 
 # OpenSSL (for HMAC/RAND used in hashed known_hosts fallback)
@@ -205,7 +210,9 @@ if (OPENSCP_HAS_CURL_WEBDAV)
                                                ${OPENSCP_TINYXML2_TARGET})
 endif()
 
-if (TARGET PkgConfig::LIBSSH2)
+if (TARGET libssh2::libssh2)
+    target_link_libraries(openscp_core PRIVATE libssh2::libssh2)
+elseif (TARGET PkgConfig::LIBSSH2)
     # Preferred path: preserve all pkg-config link/search flags (e.g. Homebrew -L paths).
     target_link_libraries(openscp_core PRIVATE PkgConfig::LIBSSH2)
 elseif (LIBSSH2_FOUND)
