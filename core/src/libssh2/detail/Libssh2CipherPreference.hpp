@@ -2,6 +2,8 @@
 
 #if defined(__x86_64__) || defined(__i386__)
 #include <cpuid.h>
+#elif defined(_M_X64) || defined(_M_IX86)
+#include <intrin.h>
 #elif defined(__linux__) && defined(__aarch64__)
 #include <sys/auxv.h>
 #endif
@@ -14,13 +16,26 @@ namespace openscp::libssh2detail {
 // is the cheaper cipher; without them software AES-GCM costs about twice the
 // CPU of chacha20-poly1305. Unknown CPUs are treated as lacking them.
 inline bool cpuHasAesGcmInstructions() {
+#if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) ||             \
+    defined(_M_IX86)
+    // CPUID leaf 1 reports AES-NI and PCLMULQDQ in ECX.
+    unsigned int ecx = 0;
 #if defined(__x86_64__) || defined(__i386__)
     unsigned int eax = 0;
     unsigned int ebx = 0;
-    unsigned int ecx = 0;
     unsigned int edx = 0;
     if (__get_cpuid(1, &eax, &ebx, &ecx, &edx) == 0)
         return false;
+#else
+    // MSVC: leaf 0 gives the highest leaf, and the registers come as EAX,
+    // EBX, ECX, EDX.
+    int registers[4] = {};
+    __cpuid(registers, 0);
+    if (registers[0] < 1)
+        return false;
+    __cpuid(registers, 1);
+    ecx = static_cast<unsigned int>(registers[2]);
+#endif
     constexpr unsigned int kPclmulqdq = 1U << 1;
     constexpr unsigned int kAesNi = 1U << 25;
     return (ecx & kAesNi) != 0 && (ecx & kPclmulqdq) != 0;
