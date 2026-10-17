@@ -1,3 +1,4 @@
+#include "PlatformTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
@@ -147,19 +148,24 @@ OPENSCP_TEST(testLocalRemoveKeepsLinkTargets, test) {
     data.close();
 
     const QString link = root.filePath(QStringLiteral("link"));
-    test.check(QFile::link(target, link),
+    test.check(openscp::testsupport::createLocalLink(target, link),
                "the local remove fixture should link to the folder");
-    test.check(removeLocalEntry(link) && !QFileInfo(link).isSymLink(),
+    test.check(removeLocalEntry(link) && !QFileInfo::exists(link) &&
+                   !QFileInfo(link).isSymLink(),
                "removing a folder link should remove the link itself");
     test.check(QFile::exists(targetFile) &&
                    QDir(root.filePath(QStringLiteral("target/sub"))).exists(),
                "removing a folder link should keep the linked folder intact");
 
     const QString dangling = root.filePath(QStringLiteral("dangling"));
-    test.check(QFile::link(root.filePath(QStringLiteral("missing")), dangling),
-               "the local remove fixture should create a dangling link");
-    test.check(removeLocalEntry(dangling) && !QFileInfo(dangling).isSymLink(),
-               "removing a dangling link should remove the link");
+    if (openscp::testsupport::createLocalLink(
+            root.filePath(QStringLiteral("missing")), dangling)) {
+        test.check(removeLocalEntry(dangling) &&
+                       !QFileInfo(dangling).isSymLink(),
+                   "removing a dangling link should remove the link");
+    } else {
+        test.skip("removing a dangling link needs symbolic links");
+    }
 
     test.check(removeLocalEntry(target) && !QFileInfo::exists(target),
                "removing a folder should remove its whole tree");
@@ -168,7 +174,7 @@ OPENSCP_TEST(testLocalRemoveKeepsLinkTargets, test) {
 }
 
 std::filesystem::path nativePath(const QString &path) {
-    return std::filesystem::path(QFile::encodeName(path).constData());
+    return openscp::testsupport::nativeTestPath(path);
 }
 
 bool writeLocalFile(const QString &path, const QByteArray &contents) {
@@ -213,12 +219,19 @@ OPENSCP_TEST(testLocalCopyKeepsHiddenEntriesAndLinks, test) {
             writeLocalFile(source + QStringLiteral("/.git/config"), "git") &&
             writeLocalFile(source + QStringLiteral("/sub/inner.txt"), "inner"),
         "the local copy fixture should write its files");
-    test.check(
+    const bool linked =
         createRelativeLink(source + QStringLiteral("/folder-link"), "sub") &&
-            createRelativeLink(source + QStringLiteral("/sub/file-link"),
-                               "inner.txt") &&
-            createRelativeLink(source + QStringLiteral("/dangling"), "missing"),
-        "the local copy fixture should create relative links");
+        createRelativeLink(source + QStringLiteral("/sub/file-link"),
+                           "inner.txt") &&
+        createRelativeLink(source + QStringLiteral("/dangling"), "missing");
+#ifdef Q_OS_WIN
+    // Only administrators, or Developer Mode, may make symbolic links.
+    if (!linked) {
+        test.skip("copying links needs symbolic links");
+        return;
+    }
+#endif
+    test.check(linked, "the local copy fixture should create relative links");
 
     QString error;
     test.check(copyLocalEntry(source, copy, error) && error.isEmpty(),
@@ -394,10 +407,9 @@ OPENSCP_TEST(testExpiredStagingBatchesAreRemoved, test) {
     };
     test.check(age(oldBatch) && age(other) && age(outside),
                "the old folders should be dated back");
-#ifndef _WIN32
     const QString link = QDir(root).filePath(QStringLiteral("20200101-130000"));
-    test.check(QFile::link(outside, link), "a batch-named link should exist");
-#endif
+    test.check(openscp::testsupport::createLocalLink(outside, link),
+               "a batch-named link should exist");
 
     const int removed = openscpui::removeStagingBatchesOlderThan(
         root, QDateTime::currentDateTimeUtc().addDays(-7));
@@ -443,13 +455,11 @@ OPENSCP_TEST(testOnlyStagingBatchesAreCleanedAfterADrop, test) {
             "only a batch directly in the staging root may be cleaned: " +
                 path.toStdString());
     }
-#ifndef _WIN32
     const QString link = QDir(root).filePath(QStringLiteral("20260101-130000"));
     test.check(
-        QFile::link(outside, link) &&
+        openscp::testsupport::createLocalLink(outside, link) &&
             openscpui::stagingBatchPathForCleanup(settings, link).isEmpty(),
         "a link named like a batch should not be followed");
-#endif
 }
 
 OPENSCP_TEST(testTerminalTransferStatuses, test) {

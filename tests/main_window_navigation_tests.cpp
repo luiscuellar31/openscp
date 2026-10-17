@@ -1,3 +1,4 @@
+#include "PlatformTestSupport.hpp"
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "app/MainWindow.hpp"
@@ -409,7 +410,7 @@ OPENSCP_TEST(testLocalDeleteRunsOffTheUiThread, test) {
     test.check(QDir().mkpath(victim) && QDir().mkpath(outside) &&
                    inner.open(QIODevice::WriteOnly) &&
                    kept.open(QIODevice::WriteOnly) &&
-                   QFile::link(outside, link),
+                   openscp::testsupport::createLocalLink(outside, link),
                "the delete fixture should be created");
     inner.close();
     kept.close();
@@ -450,6 +451,7 @@ OPENSCP_TEST(testLocalDeleteRunsOffTheUiThread, test) {
     test.check(openscp::testsupport::waitUntil(
                    [&] {
                        return !QFileInfo::exists(victim) &&
+                              !QFileInfo::exists(link) &&
                               !QFileInfo(link).isSymLink();
                    },
                    std::chrono::milliseconds(5000)),

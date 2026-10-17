@@ -1,3 +1,4 @@
+#include "PlatformTestSupport.hpp"
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "logic/remote/LocalTreeDiscovery.hpp"
@@ -216,8 +217,8 @@ OPENSCP_TEST(testLargeTreeConfirmationAndDepthCounters, test) {
                    writeFile(root.filePath("two")) &&
                    writeFile(root.filePath("three")),
                "limit fixture files should initialize");
-    const bool madeSymlink =
-        QFile::link(root.filePath("one"), root.filePath("one-link"));
+    const bool madeSymlink = openscp::testsupport::createLocalLink(
+        root.filePath("one"), root.filePath("one-link"));
     const bool madeInvalidName =
         writeFile(root.filePath(QStringLiteral("invalid\nname")));
 
@@ -350,8 +351,8 @@ OPENSCP_TEST(testHiddenEntriesSymlinkDirectoryAndByteLimit, test) {
                    writeFile(root.filePath(".hidden"), "hello") &&
                    writeFile(outside.filePath("excluded")),
                "hidden-entry fixtures should initialize");
-    const bool madeSymlink =
-        QFile::link(outside.path(), root.filePath("directory-link"));
+    const bool madeSymlink = openscp::testsupport::createLocalLink(
+        outside.path(), root.filePath("directory-link"));
     LocalTreeDiscovery discovery;
     LocalTreeDiscoveryOptions options;
     options.roots = {{root.path()}};

@@ -50,6 +50,12 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#else
+// clang-format off
+#include <windows.h>
+#include <winioctl.h>
+// clang-format on
+#include <io.h>
 #endif
 
 namespace openscp {
@@ -537,6 +543,8 @@ OPENSCP_TEST(test_known_hosts_file_reads_every_line, t) {
         fs::permissions(path, fs::perms::owner_read | fs::perms::owner_write);
     }
 #endif
+    std::error_code ec;
+    fs::remove_all(path.parent_path(), ec);
 }
 
 OPENSCP_TEST(test_host_key_preference_starts_with_recorded_types, t) {
@@ -590,6 +598,8 @@ OPENSCP_TEST(test_known_hosts_lines_name_their_host, t) {
                                           error) &&
                 readTextFile(path, content) && content == "kept k AQID\n",
             "the hashed name should match its host: " + error);
+    std::error_code ec;
+    fs::remove_all(path.parent_path(), ec);
 }
 
 #ifndef _WIN32
@@ -2131,6 +2141,13 @@ OPENSCP_TEST(test_local_file_64bit_seek_and_size_large_offsets, t) {
     t.check(f != nullptr, "temporary file should open for write");
     if (!f)
         return;
+#ifdef _WIN32
+    // NTFS writes zeros up to the offset unless the file is sparse.
+    DWORD returned = 0;
+    (void)DeviceIoControl(reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(f))),
+                          FSCTL_SET_SPARSE, nullptr, 0, nullptr, 0, &returned,
+                          nullptr);
+#endif
 
     // Offset greater than 2 GiB (3 GiB = 3 * 1024 * 1024 * 1024)
     constexpr std::uint64_t largeOffset = 3ULL * 1024 * 1024 * 1024;
