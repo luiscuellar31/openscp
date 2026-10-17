@@ -12,8 +12,10 @@
 #include <QSaveFile>
 #include <QSet>
 
+#include <chrono>
 #include <limits>
 #include <optional>
+#include <thread>
 
 namespace {
 
@@ -458,22 +460,34 @@ TransferQueuePersistence::save(const QString &path,
             "The transfer queue storage directory could not be created.");
         return result;
     }
-    QSaveFile saveFile(path);
-    saveFile.setDirectWriteFallback(false);
-    if (!saveFile.open(QIODevice::WriteOnly)) {
-        result.warning =
-            QCoreApplication::translate(
-                "TransferManager", "The transfer queue could not be saved: %1")
-                .arg(saveFile.errorString());
-        return result;
-    }
-    saveFile.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    if (saveFile.write(data) != data.size() || !saveFile.commit()) {
-        result.warning =
-            QCoreApplication::translate(
-                "TransferManager", "The transfer queue could not be saved: %1")
-                .arg(saveFile.errorString());
-        return result;
+    // On Windows, any program that has the queue open, as QFile and many
+    // antivirus scanners open files, makes the final rename fail until it
+    // closes it, so a failed rename is tried again for a moment.
+    const auto renameDeadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    for (;;) {
+        QSaveFile saveFile(path);
+        saveFile.setDirectWriteFallback(false);
+        if (!saveFile.open(QIODevice::WriteOnly)) {
+            result.warning = QCoreApplication::translate(
+                                 "TransferManager",
+                                 "The transfer queue could not be saved: %1")
+                                 .arg(saveFile.errorString());
+            return result;
+        }
+        saveFile.setPermissions(QFileDevice::ReadOwner |
+                                QFileDevice::WriteOwner);
+        if (saveFile.write(data) == data.size() && saveFile.commit())
+            break;
+        if (saveFile.error() != QFileDevice::RenameError ||
+            std::chrono::steady_clock::now() >= renameDeadline) {
+            result.warning = QCoreApplication::translate(
+                                 "TransferManager",
+                                 "The transfer queue could not be saved: %1")
+                                 .arg(saveFile.errorString());
+            return result;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     QFile::setPermissions(path,
                           QFileDevice::ReadOwner | QFileDevice::WriteOwner);
