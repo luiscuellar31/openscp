@@ -111,13 +111,16 @@ endforeach()
 target_link_libraries(openscp_update_tests PRIVATE OpenSSL::Crypto)
 
 if(WIN32)
-    # Stands in for ssh.exe and sftp.exe when the terminal command tests run
-    # the PowerShell script that "Open in terminal" prepares.
-    add_executable(openscp_terminal_argv_probe terminal_argv_probe.cpp)
-    add_dependencies(openscp_terminal_command_builder_tests
-        openscp_terminal_argv_probe)
-    target_compile_definitions(openscp_terminal_command_builder_tests PRIVATE
-        "OPENSCP_TERMINAL_ARGV_PROBE=\"$<TARGET_FILE:openscp_terminal_argv_probe>\"")
+    # Stands in for ssh.exe, sftp.exe and the update setup in the tests that
+    # check how OpenSCP starts them.
+    add_executable(openscp_argv_probe argv_probe.cpp)
+    foreach(PROBE_USER IN ITEMS
+            openscp_terminal_command_builder_tests
+            openscp_update_tests)
+        add_dependencies(${PROBE_USER} openscp_argv_probe)
+        target_compile_definitions(${PROBE_USER} PRIVATE
+            "OPENSCP_ARGV_PROBE=\"$<TARGET_FILE:openscp_argv_probe>\"")
+    endforeach()
 endif()
 
 # These tests intentionally exercise the test-only mock implementation.

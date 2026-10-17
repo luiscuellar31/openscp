@@ -8,7 +8,17 @@
 
 namespace openscpui {
 
-enum class UpdateInstallation { Manual, MacBundle, AppImage, Flatpak, Snap };
+enum class UpdateInstallation {
+    Manual,
+    MacBundle,
+    AppImage,
+    Flatpak,
+    Snap,
+    WindowsSetup
+};
+
+// Whom the Windows setup installed OpenSCP for.
+enum class WindowsSetupScope { CurrentUser, AllUsers };
 
 struct UpdateArtifact {
     QString name;
@@ -38,6 +48,20 @@ verifyUpdateManifest(const QByteArray &json, const QByteArray &signature,
                      const QByteArray &publicKey, const QString &version,
                      const QString &architecture, const QString &glibcVersion,
                      QString &error);
+// The Windows setup for this architecture, for Windows builds from
+// `windowsBuild` on.
+std::optional<UpdateArtifact>
+verifyWindowsUpdateManifest(const QByteArray &json, const QByteArray &signature,
+                            const QByteArray &publicKey, const QString &version,
+                            const QString &architecture, int windowsBuild,
+                            QString &error);
 UpdateInstallation detectUpdateInstallation();
+// Whom the OpenSCP setup installed this executable for, or nothing when it
+// did not install it: a copy, an MSI or a build runs elsewhere.
+std::optional<WindowsSetupScope> windowsSetupScope();
+// The same for a setup with that Inno Setup AppId and an executable in that
+// folder; for tests.
+std::optional<WindowsSetupScope>
+windowsSetupScope(const QString &appId, const QString &applicationDirectory);
 
 } // namespace openscpui

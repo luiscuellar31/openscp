@@ -31,6 +31,7 @@ def main() -> None:
         assets.mkdir()
         for arch in ("x86_64", "aarch64"):
             (assets / f"OpenSCP-1.2.0-{arch}.AppImage").write_bytes(b"test artifact " + arch.encode())
+        (assets / "OpenSCP-1.2.0-x64-setup.exe").write_bytes(b"test windows setup")
         output = working / "signed"
         env = dict(os.environ, OPENSCP_UPDATE_PRIVATE_KEY=key.read_text(),
                    OPENSCP_UPDATE_PUBLIC_KEY=public)
@@ -40,7 +41,10 @@ def main() -> None:
         signature = output / "update-manifest.sig"
         contents = json.loads(manifest.read_bytes())
         assert contents["version"] == "1.2.0"
-        assert len(contents["artifacts"]) == 2
+        assert len(contents["artifacts"]) == 3
+        setup = next(entry for entry in contents["artifacts"]
+                     if entry["name"] == "OpenSCP-1.2.0-x64-setup.exe")
+        assert setup["minimum_windows_build"] == 17763
         assert signature.stat().st_size == 64
         pubfile = working / "public.der"
         pubfile.write_bytes(public_der)
@@ -55,6 +59,14 @@ def main() -> None:
             pass
         else:
             raise AssertionError("mismatched signing key must fail")
+        (assets / "OpenSCP-1.2.0-x64-setup.exe").unlink()
+        try:
+            module.build_manifest(assets, "1.2.0")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("missing Windows setup must fail")
+        (assets / "OpenSCP-1.2.0-x64-setup.exe").write_bytes(b"test windows setup")
         (assets / "OpenSCP-1.2.0-aarch64.AppImage").unlink()
         try:
             module.build_manifest(assets, "1.2.0")

@@ -3,6 +3,7 @@
 #include "AppVersion.hpp"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -14,11 +15,22 @@
 #include <openssl/evp.h>
 
 #include <memory>
+#include <string>
+#include <utility>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 namespace openscpui {
 namespace {
 const QString kReleaseRoot =
     QStringLiteral("https://github.com/luiscuellar31/openscp/releases/");
+
+// The AppId of the Inno Setup installer, which names its uninstall key. It
+// must match AppId in packaging/windows/OpenSCP.iss and never change.
+const QString kWindowsSetupAppId =
+    QStringLiteral("{2C03B5C3-87DD-4DAB-B609-F89E831909E6}");
 
 bool validVersion(const QString &text) {
     static const QRegularExpression pattern(QStringLiteral(
@@ -29,6 +41,60 @@ bool validVersion(const QString &text) {
 QUrl assetUrl(const QString &version, const QString &name) {
     return QUrl(kReleaseRoot + QStringLiteral("download/v") + version +
                 QLatin1Char('/') + name);
+}
+
+// The artifact list of a manifest that `publicKey` signed for `version`.
+std::optional<QJsonArray> signedArtifacts(const QByteArray &json,
+                                          const QByteArray &signature,
+                                          const QByteArray &publicKey,
+                                          const QString &version) {
+    if (json.isEmpty() || json.size() > kMaximumManifestSize ||
+        signature.size() != 64 || publicKey.size() != 32 ||
+        !validVersion(version))
+        return std::nullopt;
+    using Key = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>;
+    using Context = std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)>;
+    Key key(EVP_PKEY_new_raw_public_key(
+                EVP_PKEY_ED25519, nullptr,
+                reinterpret_cast<const unsigned char *>(publicKey.constData()),
+                32),
+            EVP_PKEY_free);
+    Context context(EVP_MD_CTX_new(), EVP_MD_CTX_free);
+    if (!key || !context ||
+        EVP_DigestVerifyInit(context.get(), nullptr, nullptr, nullptr,
+                             key.get()) != 1 ||
+        EVP_DigestVerify(
+            context.get(),
+            reinterpret_cast<const unsigned char *>(signature.constData()), 64,
+            reinterpret_cast<const unsigned char *>(json.constData()),
+            static_cast<std::size_t>(json.size())) != 1)
+        return std::nullopt;
+    const auto document = QJsonDocument::fromJson(json);
+    const auto root = document.object();
+    if (!document.isObject() || root.value("schema").toInt() != 1 ||
+        root.value("version").toString() != version ||
+        !root.value("artifacts").isArray())
+        return std::nullopt;
+    return root.value("artifacts").toArray();
+}
+
+// The artifact that a manifest entry describes, if its size and digest are
+// well formed.
+std::optional<UpdateArtifact> artifactFromEntry(const QJsonObject &entry,
+                                                const QString &name,
+                                                const QString &version) {
+    const auto sizeValue = entry.value("size");
+    const qint64 size = sizeValue.toInteger(-1);
+    const QByteArray hash = entry.value("sha256").toString().toLatin1();
+    static const QRegularExpression hashPattern(
+        QStringLiteral("^[0-9a-f]{64}$"));
+    if (!sizeValue.isDouble() ||
+        sizeValue.toDouble() != static_cast<double>(size) || size <= 0 ||
+        size > kMaximumUpdateSize ||
+        !hashPattern.match(QString::fromLatin1(hash)).hasMatch())
+        return std::nullopt;
+    return UpdateArtifact{name, assetUrl(version, name), size,
+                          QByteArray::fromHex(hash)};
 }
 } // namespace
 
@@ -99,32 +165,8 @@ verifyUpdateManifest(const QByteArray &json, const QByteArray &signature,
                      const QString &architecture, const QString &glibcVersion,
                      QString &error) {
     error = QStringLiteral("The update signature or manifest is invalid.");
-    if (json.isEmpty() || json.size() > kMaximumManifestSize ||
-        signature.size() != 64 || publicKey.size() != 32 ||
-        !validVersion(version))
-        return std::nullopt;
-    using Key = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>;
-    using Context = std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)>;
-    Key key(EVP_PKEY_new_raw_public_key(
-                EVP_PKEY_ED25519, nullptr,
-                reinterpret_cast<const unsigned char *>(publicKey.constData()),
-                32),
-            EVP_PKEY_free);
-    Context context(EVP_MD_CTX_new(), EVP_MD_CTX_free);
-    if (!key || !context ||
-        EVP_DigestVerifyInit(context.get(), nullptr, nullptr, nullptr,
-                             key.get()) != 1 ||
-        EVP_DigestVerify(
-            context.get(),
-            reinterpret_cast<const unsigned char *>(signature.constData()), 64,
-            reinterpret_cast<const unsigned char *>(json.constData()),
-            static_cast<std::size_t>(json.size())) != 1)
-        return std::nullopt;
-    const auto document = QJsonDocument::fromJson(json);
-    const auto root = document.object();
-    if (!document.isObject() || root.value("schema").toInt() != 1 ||
-        root.value("version").toString() != version ||
-        !root.value("artifacts").isArray())
+    const auto artifacts = signedArtifacts(json, signature, publicKey, version);
+    if (!artifacts)
         return std::nullopt;
     if (architecture != QStringLiteral("x86_64") &&
         architecture != QStringLiteral("aarch64"))
@@ -132,7 +174,7 @@ verifyUpdateManifest(const QByteArray &json, const QByteArray &signature,
     const QString expected =
         QStringLiteral("OpenSCP-%1-%2.AppImage").arg(version, architecture);
     std::optional<UpdateArtifact> result;
-    for (const auto &value : root.value("artifacts").toArray()) {
+    for (const auto &value : *artifacts) {
         const auto object = value.toObject();
         if (object.value("name").toString() != expected)
             continue;
@@ -147,18 +189,47 @@ verifyUpdateManifest(const QByteArray &json, const QByteArray &signature,
                 QStringLiteral("This update requires a newer Linux system.");
             return std::nullopt;
         }
-        const auto sizeValue = object.value("size");
-        const qint64 size = sizeValue.toInteger(-1);
-        const QByteArray hash = object.value("sha256").toString().toLatin1();
-        static const QRegularExpression hashPattern(
-            QStringLiteral("^[0-9a-f]{64}$"));
-        if (result || !sizeValue.isDouble() ||
-            sizeValue.toDouble() != static_cast<double>(size) || size <= 0 ||
-            size > kMaximumUpdateSize ||
-            !hashPattern.match(QString::fromLatin1(hash)).hasMatch())
+        const auto artifact = artifactFromEntry(object, expected, version);
+        if (result || !artifact)
             return std::nullopt;
-        result = UpdateArtifact{expected, assetUrl(version, expected), size,
-                                QByteArray::fromHex(hash)};
+        result = artifact;
+    }
+    if (result)
+        error.clear();
+    return result;
+}
+
+std::optional<UpdateArtifact>
+verifyWindowsUpdateManifest(const QByteArray &json, const QByteArray &signature,
+                            const QByteArray &publicKey, const QString &version,
+                            const QString &architecture, int windowsBuild,
+                            QString &error) {
+    error = QStringLiteral("The update signature or manifest is invalid.");
+    const auto artifacts = signedArtifacts(json, signature, publicKey, version);
+    if (!artifacts || architecture != QStringLiteral("x86_64"))
+        return std::nullopt;
+    const QString expected =
+        QStringLiteral("OpenSCP-%1-x64-setup.exe").arg(version);
+    std::optional<UpdateArtifact> result;
+    for (const auto &value : *artifacts) {
+        const auto object = value.toObject();
+        if (object.value("name").toString() != expected)
+            continue;
+        const auto minimumValue = object.value("minimum_windows_build");
+        const qint64 minimum = minimumValue.toInteger(-1);
+        if (!minimumValue.isDouble() ||
+            minimumValue.toDouble() != static_cast<double>(minimum) ||
+            minimum <= 0 || minimum > 1000000)
+            return std::nullopt;
+        if (windowsBuild < minimum) {
+            error = QStringLiteral(
+                "This update requires a newer version of Windows.");
+            return std::nullopt;
+        }
+        const auto artifact = artifactFromEntry(object, expected, version);
+        if (result || !artifact)
+            return std::nullopt;
+        result = artifact;
     }
     if (result)
         error.clear();
@@ -188,6 +259,53 @@ UpdateInstallation detectUpdateInstallation() {
             QStringLiteral(".app/Contents/MacOS")))
         return UpdateInstallation::MacBundle;
 #endif
+    if (windowsSetupScope())
+        return UpdateInstallation::WindowsSetup;
     return UpdateInstallation::Manual;
+}
+
+std::optional<WindowsSetupScope> windowsSetupScope() {
+    return windowsSetupScope(kWindowsSetupAppId,
+                             QCoreApplication::applicationDirPath());
+}
+
+std::optional<WindowsSetupScope>
+windowsSetupScope(const QString &appId, const QString &applicationDirectory) {
+#ifdef Q_OS_WIN
+    // Inno Setup records where it installed in its uninstall key: in the
+    // user's hive for that user, in the machine's for all users.
+    const std::wstring key =
+        (QStringLiteral("Software\\Microsoft\\Windows\\CurrentVersion"
+                        "\\Uninstall\\") +
+         appId + QStringLiteral("_is1"))
+            .toStdWString();
+    const QString directory =
+        QDir::cleanPath(QDir::fromNativeSeparators(applicationDirectory));
+    const std::pair<HKEY, WindowsSetupScope> hives[] = {
+        {HKEY_CURRENT_USER, WindowsSetupScope::CurrentUser},
+        {HKEY_LOCAL_MACHINE, WindowsSetupScope::AllUsers},
+    };
+    for (const auto &[hive, scope] : hives) {
+        // Read only: QSettings would create the key it opens.
+        DWORD size = 0;
+        if (RegGetValueW(hive, key.c_str(), L"InstallLocation", RRF_RT_REG_SZ,
+                         nullptr, nullptr, &size) != ERROR_SUCCESS)
+            continue;
+        std::wstring buffer(size / sizeof(wchar_t) + 1, L'\0');
+        size = static_cast<DWORD>(buffer.size() * sizeof(wchar_t));
+        if (RegGetValueW(hive, key.c_str(), L"InstallLocation", RRF_RT_REG_SZ,
+                         nullptr, buffer.data(), &size) != ERROR_SUCCESS)
+            continue;
+        const QString location = QString::fromWCharArray(buffer.c_str());
+        if (!location.isEmpty() &&
+            QDir::cleanPath(QDir::fromNativeSeparators(location))
+                    .compare(directory, Qt::CaseInsensitive) == 0)
+            return scope;
+    }
+#else
+    Q_UNUSED(appId)
+    Q_UNUSED(applicationDirectory)
+#endif
+    return std::nullopt;
 }
 } // namespace openscpui

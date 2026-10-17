@@ -349,6 +349,17 @@ installation, preserves the previous inode, syncs staged data and atomically
 publishes the replacement. The worker belongs to `UpdateController`; destruction
 joins it before releasing its temporary download. No elevated helper is used.
 
+The same signed manifest lists the Windows setup with its minimum Windows
+build. `UpdateMetadata` treats an installation as the setup's only when the
+setup's uninstall key, in the user's or the machine's hive, names the
+executable's folder; copies and MSI installations stay manual.
+`WindowsSetupInstaller` checks the downloaded setup's size and SHA-256 through
+a handle that refuses writers, renames and deletion, and starts it before
+closing that handle: directly for a per-user installation, elevated through
+UAC for one for all users. The silent setup waits for OpenSCP's process to end,
+which `MainWindowUpdates` then closes, and starts OpenSCP again when it is
+done. The next start deletes the downloaded setup.
+
 `MacUpdater` is the optional Objective-C++ bridge to Sparkle. Sparkle owns signed
 feeds, archive verification, replacement and relaunch. `MainWindowUpdates`
 owns prompts and the idle-work gate, persists state before installation, blocks

@@ -402,6 +402,8 @@ add_library(openscp_ui_logic STATIC
     ui/logic/updates/AppImageInstaller.hpp
     ui/logic/updates/AppImageInstaller.cpp
     ui/logic/updates/MacUpdater.hpp
+    ui/logic/updates/WindowsSetupInstaller.hpp
+    ui/logic/updates/WindowsSetupInstaller.cpp
     ui/logic/common/AppSettings.hpp
     ui/logic/common/AppSettings.cpp
     ui/logic/common/LocalLinks.hpp
@@ -497,6 +499,12 @@ target_link_libraries(openscp_ui_logic
         openscp_core
         openscp_sync_logic
 )
+
+if(WIN32)
+    # ShellExecuteExW starts the update setup elevated for all-users
+    # installations.
+    target_link_libraries(openscp_ui_logic PRIVATE Shell32 Ole32)
+endif()
 
 if(OPENSCP_ENABLE_SPARKLE)
     target_sources(openscp_ui_logic PRIVATE ui/logic/updates/MacUpdater.mm)

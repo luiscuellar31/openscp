@@ -42,12 +42,18 @@ class UpdateController : public QObject {
         const QUrl &url, qint64 limit,
         std::function<void(const QByteArray &, const QString &)> completion);
     void finishCheck(bool manual, const UpdateRelease &release);
+    std::optional<UpdateArtifact> verifyManifest(const QByteArray &manifest,
+                                                 const QByteArray &signature,
+                                                 const QString &version,
+                                                 QString &error) const;
     void publishDownloaded(const UpdateArtifact &artifact);
+    void finishInstall(bool success, const QString &error);
 
     QNetworkAccessManager *network_;
     QThreadPool worker_;
     QPointer<QNetworkReply> reply_;
     std::unique_ptr<QTemporaryFile> download_;
+    std::optional<WindowsSetupScope> windowsSetupScope_;
     UpdateInstallation installation_;
     QByteArray publicKey_;
     std::optional<UpdateArtifact> verifiedArtifact_;

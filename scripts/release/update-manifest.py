@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Create the bounded, Ed25519-signed AppImage update manifest.
+"""Create the bounded, Ed25519-signed update manifest.
 
-The private key is a PEM secret supplied only to the release job. No production
-keys are generated here. Keep minimum glibc versions aligned with the verified
-release-build baselines.
+It describes the AppImages and the Windows setup, which update themselves in
+the app. The private key is a PEM secret supplied only to the release job. No
+production keys are generated here. Keep the minimum glibc versions and
+Windows build aligned with the verified release-build baselines.
 """
 
 import argparse
@@ -17,25 +18,32 @@ import subprocess
 import tempfile
 
 
+def describe_artifact(assets: Path, name: str) -> dict:
+    matches = list(assets.rglob(name))
+    if len(matches) != 1 or matches[0].is_symlink():
+        raise ValueError(f"Expected exactly one regular artifact: {name}")
+    artifact = matches[0]
+    size = artifact.stat().st_size
+    if not artifact.is_file() or not 0 < size <= 256 * 1024 * 1024:
+        raise ValueError(f"Invalid artifact size: {name}")
+    with artifact.open("rb") as stream:
+        hasher = hashlib.sha256()
+        for chunk in iter(lambda: stream.read(256 * 1024), b""):
+            hasher.update(chunk)
+        digest = hasher.hexdigest()
+    return dict(name=name, size=size, sha256=digest)
+
+
 def build_manifest(assets: Path, version: str) -> bytes:
     if not re.fullmatch(r"(?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2}", version):
         raise ValueError("Invalid stable release version")
     artifacts = []
     for architecture, baseline in (("x86_64", "2.34"), ("aarch64", "2.39")):
-        name = f"OpenSCP-{version}-{architecture}.AppImage"
-        matches = list(assets.rglob(name))
-        if len(matches) != 1 or matches[0].is_symlink():
-            raise ValueError(f"Expected exactly one regular artifact: {name}")
-        artifact = matches[0]
-        size = artifact.stat().st_size
-        if not artifact.is_file() or not 0 < size <= 256 * 1024 * 1024:
-            raise ValueError(f"Invalid artifact size: {name}")
-        with artifact.open("rb") as stream:
-            hasher = hashlib.sha256()
-            for chunk in iter(lambda: stream.read(256 * 1024), b""):
-                hasher.update(chunk)
-            digest = hasher.hexdigest()
-        artifacts.append(dict(name=name, size=size, sha256=digest, minimum_glibc=baseline))
+        artifact = describe_artifact(assets, f"OpenSCP-{version}-{architecture}.AppImage")
+        artifacts.append(dict(artifact, minimum_glibc=baseline))
+    # Windows 10 1809, the oldest Windows that Qt 6 supports.
+    artifact = describe_artifact(assets, f"OpenSCP-{version}-x64-setup.exe")
+    artifacts.append(dict(artifact, minimum_windows_build=17763))
     return (json.dumps(dict(schema=1, version=version, artifacts=artifacts),
                        sort_keys=True, separators=(",", ":")) + "\n").encode()
 

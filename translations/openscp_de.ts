@@ -1553,7 +1553,7 @@ Vertrauen und in known_hosts speichern?</translation>
         <location filename="../ui/app/MainWindowSync.cpp" line="140"/>
         <location filename="../ui/app/MainWindowTransfers.cpp" line="201"/>
         <location filename="../ui/app/MainWindowTransfers.cpp" line="663"/>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="152"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="156"/>
         <location filename="../ui/logic/navigation/PaneController.cpp" line="362"/>
         <location filename="../ui/logic/navigation/PaneController.cpp" line="480"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="224"/>
@@ -3118,10 +3118,10 @@ Aktualisiert: %2  |  Fehlgeschlagen: %3</translation>
     <message>
         <location filename="../ui/app/MainWindowUpdates.cpp" line="77"/>
         <location filename="../ui/app/MainWindowUpdates.cpp" line="80"/>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="115"/>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="138"/>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="173"/>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="181"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="119"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="142"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="185"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="193"/>
         <source>Updates</source>
         <translation>Updates</translation>
     </message>
@@ -3156,47 +3156,52 @@ Aktualisiert: %2  |  Fehlgeschlagen: %3</translation>
         <translation>Laden Sie die neue Version von der Versionsseite herunter und installieren Sie sie.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="118"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="117"/>
+        <source>OpenSCP closes while the update installs and opens again when it is done.</source>
+        <translation>OpenSCP wird während der Installation des Updates geschlossen und danach wieder geöffnet.</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="122"/>
         <source>Download and install…</source>
         <translation>Herunterladen und installieren…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="119"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="123"/>
         <source>Open release page</source>
         <translation>Versionsseite öffnen</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="122"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="126"/>
         <source>Skip this version</source>
         <translation>Diese Version überspringen</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="123"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="127"/>
         <source>Later</source>
         <translation>Später</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="139"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="143"/>
         <source>Finish or cancel pending transfers and file operations before installing an update.</source>
         <translation>Beenden oder stornieren Sie ausstehende Übertragungen und Dateivorgänge, bevor Sie ein Update installieren.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="151"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="155"/>
         <source>Downloading update…</source>
         <translation>Update wird heruntergeladen…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="164"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="168"/>
         <source>Verifying and installing update…</source>
         <translation>Update wird geprüft und installiert…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="174"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="186"/>
         <source>Update installed. Close OpenSCP and launch it again to use the new version. The previous AppImage is saved with the .previous suffix.</source>
         <translation>Update installiert. Schließen Sie OpenSCP und starten Sie es erneut, um die neue Version zu verwenden. Die vorherige AppImage wird mit der Endung .previous gespeichert.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="182"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="194"/>
         <source>The update could not be installed. Your current version is still available.</source>
         <translation>Das Update konnte nicht installiert werden. Ihre aktuelle Version ist weiterhin verfügbar.</translation>
     </message>
