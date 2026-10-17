@@ -198,7 +198,10 @@ Windows 10 version 1809 or later, or Windows 11, on x64, with:
 - a clone of [vcpkg](https://github.com/microsoft/vcpkg). On the first
   configure, `vcpkg.json` makes it build libssh2, OpenSSL, libcurl, and
   tinyxml2 as static libraries for the `x64-windows-static-md` triplet, at the
-  versions of its `builtin-baseline`.
+  versions of its `builtin-baseline`. OpenSSL comes instead from the overlay
+  port in `vcpkg-ports/openssl`, which keeps it on the 3.5 long-term support
+  release that the macOS release builds use; its README explains how to move
+  it to a newer one.
 
 The scripts enter the Visual Studio developer environment themselves. They
 take Qt from `QT_PREFIX` or `Qt6_DIR`, otherwise from the newest
