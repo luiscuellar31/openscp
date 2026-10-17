@@ -1790,6 +1790,8 @@ bool spawn_ssh_jump_tunnel(const SessionOptions &opt, int &sockOut, int &pidOut,
     args.emplace_back(std::to_string(opt.jump_port));
     args.emplace_back("-W");
     args.emplace_back(format_host_port_authority(opt.host, opt.port));
+    // Whatever the destination looks like, it is not an option.
+    args.emplace_back("--");
     args.emplace_back(*opt.jump_host);
 
     std::vector<char *> argv;

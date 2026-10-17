@@ -31,6 +31,12 @@ inline bool validateEndpointHost(std::string_view host, const char *fieldLabel,
         error = label + " is required.";
         return false;
     }
+    // No host name or address starts with '-', and the ssh program that a
+    // jump host is given to would read one as an option.
+    if (host.front() == '-') {
+        error = label + " must not start with '-'.";
+        return false;
+    }
     const auto forbiddenHostCharacter = [](const unsigned char ch) {
         return ch < 0x20 || ch == 0x7f || std::isspace(ch) != 0 || ch == '/' ||
                ch == '\\' || ch == '@' || ch == '?' || ch == '#';
