@@ -3090,8 +3090,10 @@ void TransferManager::writeQueueSnapshot() {
 bool TransferManager::enablePersistence(const QString &path) {
     QString resolved = path;
     if (resolved.isEmpty()) {
-        const QString dataDir =
-            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        // The queue names this computer's paths, so on Windows it stays out
+        // of the roaming profile; elsewhere both locations are the same.
+        const QString dataDir = QStandardPaths::writableLocation(
+            QStandardPaths::AppLocalDataLocation);
         if (dataDir.isEmpty()) {
             emit persistenceWarning(
                 tr("The transfer queue storage directory is unavailable."));
