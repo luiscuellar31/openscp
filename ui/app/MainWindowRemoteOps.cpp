@@ -115,7 +115,7 @@ void MainWindow::openRightRemoteTerminal() {
     }
 
     QString launchError;
-    if (!terminalCommands.launch(command.command, &launchError)) {
+    if (!terminalCommands.launch(command, &launchError)) {
         UiAlerts::warning(this, tr("Open in terminal"),
                           tr("Could not open a remote terminal.\n%1")
                               .arg(launchError.isEmpty() ? tr("Unknown error.")
