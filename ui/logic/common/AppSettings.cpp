@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QStandardPaths>
 
 namespace openscpui {
 namespace {
@@ -38,6 +39,13 @@ QString statusError(QSettings::Status status) {
 } // namespace
 
 QString defaultStagingRootPath() {
+#ifdef Q_OS_WIN
+    // Windows can move the Downloads folder, often onto another drive.
+    const QString downloads =
+        QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    if (!downloads.isEmpty())
+        return QDir(downloads).filePath(QStringLiteral("OpenSCP-Dragged"));
+#endif
     return QDir(QDir::homePath())
         .filePath(QStringLiteral("Downloads/OpenSCP-Dragged"));
 }
@@ -68,7 +76,10 @@ AppSettings::AppSettings(Store store)
 
 AppSettings::AppSettings(const QString &organization,
                          const QString &application)
-    : QSettings(organization, application) {
+    // As above: the plain organization/application constructor would always
+    // use NativeFormat, the registry on Windows.
+    : QSettings(QSettings::defaultFormat(), QSettings::UserScope, organization,
+                application) {
 }
 
 AppSettings::AppSettings(const QString &fileName, Format format)
