@@ -389,6 +389,14 @@ the editor opened.
 Changes to persisted formats require explicit decisions about schema and
 versioning, and corrupt or unsupported data must not be silently overwritten.
 
+Only one OpenSCP process uses a data folder at a time, so two processes never
+restore, run or save the same transfer queue. At startup, `SingleInstance`
+locks `instance.lock` in the application's local data folder, where the queue
+lives, and listens on a local socket that only the user can open; a later
+launch asks that process to bring its window forward and quits. A lock whose
+process has ended is taken over, and a folder that cannot hold a lock leaves
+OpenSCP unguarded.
+
 Saved sites record their format version under `Sites/formatVersion`. A
 versioned record that lacks fields takes their defaults, while incomplete
 records in a store without the version come from releases before 1.0 and are

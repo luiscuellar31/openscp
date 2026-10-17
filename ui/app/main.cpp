@@ -2,6 +2,8 @@
 #include "AppVersion.hpp"
 #include "app/MainWindow.hpp"
 #include "logic/common/AppSettings.hpp"
+#include "logic/common/SingleInstance.hpp"
+#include "logic/common/UiAlerts.hpp"
 #if defined(OPENSCP_DEMO_MODE) && OPENSCP_DEMO_MODE
 #include "logic/demo/DemoData.hpp"
 #endif
@@ -12,6 +14,7 @@
 #include <QLibraryInfo>
 #include <QLocale>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QTranslator>
 
 int main(int argc, char *argv[]) {
@@ -67,11 +70,40 @@ int main(int argc, char *argv[]) {
                           QStringLiteral("_"), qtTransPath)) {
         app.installTranslator(&qtTranslator);
     }
+
+    // One OpenSCP per data folder, which holds the transfer queue: a second
+    // launch brings the running window forward instead of opening another
+    // one over the same queue.
+    openscpui::SingleInstance instance(
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation));
+    switch (instance.start()) {
+    case openscpui::SingleInstance::Role::Primary:
+        break;
+    case openscpui::SingleInstance::Role::Forwarded:
+        return 0;
+    case openscpui::SingleInstance::Role::Unreachable:
+        UiAlerts::information(
+            nullptr, QCoreApplication::applicationName(),
+            QCoreApplication::translate(
+                "MainWindow",
+                "OpenSCP is already running, but it did not respond. Wait "
+                "for it to finish starting or closing, then try again."));
+        return 0;
+    }
+
 #if defined(OPENSCP_DEMO_MODE) && OPENSCP_DEMO_MODE
     openscpui::demo::seedSampleDataIfEmpty();
 #endif
 
     MainWindow w;
+    QObject::connect(
+        &instance, &openscpui::SingleInstance::activationRequested, &w, [&w] {
+            w.setWindowState((w.windowState() & ~Qt::WindowMinimized) |
+                             Qt::WindowActive);
+            w.show();
+            w.raise();
+            w.activateWindow();
+        });
     w.show();
     return app.exec();
 }

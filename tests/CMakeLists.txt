@@ -101,7 +101,8 @@ foreach(TEST_COMPONENT IN ITEMS
         sync_coordinator
         local_tree_discovery
         update
-        remote_tree_walker)
+        remote_tree_walker
+        single_instance)
     openscp_add_test(openscp_${TEST_COMPONENT}_tests
         SOURCES ${TEST_COMPONENT}_tests.cpp
         LINK_LIBRARIES openscp_ui_logic
