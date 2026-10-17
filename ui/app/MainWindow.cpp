@@ -846,14 +846,26 @@ void MainWindow::initializeMenuBarActions() {
     actPrefs_ = appMenu_->addAction(tr("Settings…"), this,
                                     &MainWindow::showSettingsDialog);
     actPrefs_->setMenuRole(QAction::PreferencesRole);
-    // Standard cross‑platform shortcut (Cmd+, on macOS; Ctrl+, on
-    // Linux/Windows)
-    actPrefs_->setShortcut(QKeySequence::Preferences);
+    // The platform's standard shortcuts, such as Cmd+, and Cmd+Q on macOS.
+    // Qt has none for these on Windows, nor for settings under GNOME; there
+    // they get Ctrl+, and Ctrl+Q.
+    const auto standardShortcutsOr = [](QKeySequence::StandardKey key,
+                                        const QString &fallback) {
+        const QList<QKeySequence> standard = QKeySequence::keyBindings(key);
+        return standard.isEmpty()
+                   ? QList<QKeySequence>{QKeySequence::fromString(
+                         fallback, QKeySequence::PortableText)}
+                   : standard;
+    };
+    actPrefs_->setObjectName(QStringLiteral("settingsAction"));
+    actPrefs_->setShortcuts(standardShortcutsOr(QKeySequence::Preferences,
+                                                QStringLiteral("Ctrl+,")));
     appMenu_->addSeparator();
     actQuit_ = appMenu_->addAction(tr("Quit"), this, &QWidget::close);
+    actQuit_->setObjectName(QStringLiteral("quitAction"));
     actQuit_->setMenuRole(QAction::QuitRole);
-    // Standard quit shortcut (Cmd+Q / Ctrl+Q)
-    actQuit_->setShortcut(QKeySequence::Quit);
+    actQuit_->setShortcuts(
+        standardShortcutsOr(QKeySequence::Quit, QStringLiteral("Ctrl+Q")));
 
     fileMenu_ = menuBar()->addMenu(tr("File"));
     fileMenu_->addAction(actChooseLeft_);
