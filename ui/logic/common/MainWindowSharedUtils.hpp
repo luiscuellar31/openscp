@@ -50,9 +50,17 @@ bool moveLocalEntry(const QString &srcPath, const QString &dstPath,
                     const std::function<bool()> &shouldCancel = {});
 
 bool isValidEntryName(const QString &name, QString *why = nullptr);
+// isValidEntryName(), and also a valid name for a local file or folder on this
+// computer: Windows refuses some names that servers accept, such as "a:b",
+// "CON" or one ending in a dot. Use it wherever a name becomes local.
+bool isValidLocalEntryName(const QString &name, QString *why = nullptr);
+
+// Where a name typed in promptValidEntryName() will be used.
+enum class EntryNameTarget { Remote, Local };
 bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
                           const QString &labelText, const QString &initialValue,
-                          QString &nameOut);
+                          QString &nameOut,
+                          EntryNameTarget target = EntryNameTarget::Remote);
 QString shortRemoteError(const QString &raw, const QString &fallback);
 
 QVector<QPair<QString, QString>> buildLocalDestinationPairsWithOverwritePrompt(

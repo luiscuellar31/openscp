@@ -240,7 +240,7 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
     const QString name = rightRemoteModel_->nameAt(idx);
     {
         QString why;
-        if (!isValidEntryName(name, &why)) {
+        if (!isValidLocalEntryName(name, &why)) {
             UiAlerts::warning(this, tr("Invalid name"), why);
             return;
         }
@@ -357,7 +357,7 @@ void MainWindow::downloadRightToLeft() {
         const QString name = rightRemoteModel_->nameAt(idx);
         {
             QString why;
-            if (!isValidEntryName(name, &why)) {
+            if (!isValidLocalEntryName(name, &why)) {
                 ++skippedInvalidCount;
                 continue;
             }
@@ -409,7 +409,7 @@ void MainWindow::copyRightToLeft() {
         const QString name = rightRemoteModel_->nameAt(idx);
         {
             QString why;
-            if (!isValidEntryName(name, &why)) {
+            if (!isValidLocalEntryName(name, &why)) {
                 ++skippedInvalidCount;
                 continue;
             }
@@ -456,7 +456,7 @@ void MainWindow::moveRightToLeft() {
     for (const QModelIndex &index : rows) {
         const QString name = rightRemoteModel_->nameAt(index);
         QString why;
-        if (!isValidEntryName(name, &why)) {
+        if (!isValidLocalEntryName(name, &why)) {
             ++skippedInvalidCount;
             continue;
         }
@@ -540,7 +540,9 @@ void MainWindow::uploadViaDialog() {
 
 void MainWindow::newDirRight() {
     QString name;
-    if (!promptValidEntryName(this, tr("New folder"), tr("Name:"), {}, name))
+    if (!promptValidEntryName(this, tr("New folder"), tr("Name:"), {}, name,
+                              rightIsRemote_ ? EntryNameTarget::Remote
+                                             : EntryNameTarget::Local))
         return;
     if (rightIsRemote_) {
         if (!remoteActionController_ || !rightRemoteModel_)
@@ -558,7 +560,9 @@ void MainWindow::newDirRight() {
 // Create a new empty file in the right pane (local only).
 void MainWindow::newFileRight() {
     QString name;
-    if (!promptValidEntryName(this, tr("New file"), tr("Name:"), {}, name))
+    if (!promptValidEntryName(this, tr("New file"), tr("Name:"), {}, name,
+                              rightIsRemote_ ? EntryNameTarget::Remote
+                                             : EntryNameTarget::Local))
         return;
     if (rightIsRemote_) {
         if (!remoteActionController_ || !rightRemoteModel_)

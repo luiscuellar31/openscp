@@ -488,7 +488,8 @@ void MainWindow::leftItemActivated(const QModelIndex &idx) {
 bool MainWindow::renameLocalSelectedEntry(const QFileInfo &selectedFileInfo) {
     QString newName;
     if (!promptValidEntryName(this, tr("Rename"), tr("New name:"),
-                              selectedFileInfo.fileName(), newName) ||
+                              selectedFileInfo.fileName(), newName,
+                              EntryNameTarget::Local) ||
         newName == selectedFileInfo.fileName())
         return false;
     const QString newPath =
@@ -548,7 +549,8 @@ bool MainWindow::createLocalFile(const QDir &base, const QString &name) {
 // Create a new directory in the left (local) pane.
 void MainWindow::newDirLeft() {
     QString name;
-    if (!promptValidEntryName(this, tr("New folder"), tr("Name:"), {}, name))
+    if (!promptValidEntryName(this, tr("New folder"), tr("Name:"), {}, name,
+                              EntryNameTarget::Local))
         return;
     QDir base(leftPath_->path());
     if (!createLocalDirectory(base, name))
@@ -559,7 +561,8 @@ void MainWindow::newDirLeft() {
 // Create a new empty file in the left (local) pane.
 void MainWindow::newFileLeft() {
     QString name;
-    if (!promptValidEntryName(this, tr("New file"), tr("Name:"), {}, name))
+    if (!promptValidEntryName(this, tr("New file"), tr("Name:"), {}, name,
+                              EntryNameTarget::Local))
         return;
     QDir base(leftPath_->path());
     if (!createLocalFile(base, name))

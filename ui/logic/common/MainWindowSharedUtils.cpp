@@ -3,6 +3,7 @@
 
 #include "logic/common/LocalLinks.hpp"
 #include "logic/common/UiAlerts.hpp"
+#include "openscp/SafeLocalFile.hpp"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -391,9 +392,28 @@ bool isValidEntryName(const QString &name, QString *why) {
     return true;
 }
 
+bool isValidLocalEntryName(const QString &name, QString *why) {
+    if (!isValidEntryName(name, why))
+        return false;
+    // A name a server accepts can still be impossible here. On Windows ':'
+    // opens an alternate data stream, CON or NUL a device, and a final dot or
+    // space is dropped, so the file would land elsewhere.
+    if (!openscp::localfiles::localNameProblem(name.toStdString()).empty()) {
+        if (why) {
+            *why = QCoreApplication::translate(
+                "MainWindow",
+                "Invalid name for this computer: Windows does not allow the "
+                "characters < > : \" | ? *, a final dot or space, or device "
+                "names such as CON, NUL or COM1.");
+        }
+        return false;
+    }
+    return true;
+}
+
 bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
                           const QString &labelText, const QString &initialValue,
-                          QString &nameOut) {
+                          QString &nameOut, EntryNameTarget target) {
     bool inputAccepted = false;
     const QString candidateName =
         QInputDialog::getText(parent, dialogTitle, labelText, QLineEdit::Normal,
@@ -402,7 +422,11 @@ bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,
         return false;
 
     QString invalidReason;
-    if (!isValidEntryName(candidateName, &invalidReason)) {
+    const bool valid =
+        target == EntryNameTarget::Local
+            ? isValidLocalEntryName(candidateName, &invalidReason)
+            : isValidEntryName(candidateName, &invalidReason);
+    if (!valid) {
         UiAlerts::warning(
             parent, QCoreApplication::translate("MainWindow", "Invalid name"),
             invalidReason);
