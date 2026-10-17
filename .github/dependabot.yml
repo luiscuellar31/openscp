@@ -16,3 +16,20 @@ updates:
     commit-message:
       prefix: "ci"
       include: "scope"
+
+  # Moves vcpkg.json's builtin-baseline, which pins the Windows libraries;
+  # the Windows CI jobs fetch vcpkg at that commit.
+  - package-ecosystem: "vcpkg"
+    directory: "/"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Mexico_City"
+    open-pull-requests-limit: 2
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "build"
+      include: "scope"
