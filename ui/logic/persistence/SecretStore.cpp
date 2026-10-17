@@ -18,8 +18,11 @@
 #include <string>
 
 #ifdef Q_OS_WIN
-#include <wincrypt.h>
+// wincrypt.h needs the types windows.h declares.
+// clang-format off
 #include <windows.h>
+#include <wincrypt.h>
+// clang-format on
 #endif
 
 #ifdef __APPLE__
