@@ -25,6 +25,8 @@ Los binarios precompilados de cada versión etiquetada están en la
 | Linux, x86_64 | `OpenSCP-<versión>-x86_64.AppImage` |
 | Linux, ARM64 | `OpenSCP-<versión>-aarch64.AppImage` |
 | Linux, paquete Flatpak | `OpenSCP-x86_64.flatpak`, `OpenSCP-aarch64.flatpak` |
+| Windows 10 y 11, x64 | `OpenSCP-<versión>-x64-setup.exe` |
+| Windows, x64, MSI para todos los usuarios | `OpenSCP-<versión>-x64.msi` |
 
 Cada versión incluye un `SHA256SUMS.txt` que cubre todos esos archivos.
 Descárgalo junto al que hayas elegido y compruébalos juntos:
@@ -32,6 +34,13 @@ Descárgalo junto al que hayas elegido y compruébalos juntos:
 ```bash
 shasum -a 256 -c SHA256SUMS.txt --ignore-missing  # macOS
 sha256sum -c SHA256SUMS.txt --ignore-missing      # Linux
+```
+
+En Windows, PowerShell muestra `True` cuando el archivo coincide:
+
+```powershell
+$file = 'OpenSCP-<versión>-x64-setup.exe'
+(Get-FileHash $file).Hash -eq (-split (Select-String -Path SHA256SUMS.txt -SimpleMatch "  $file").Line)[0]
 ```
 
 Las sumas de comprobación detectan una descarga dañada, no un archivo
@@ -48,8 +57,8 @@ Usa **OpenSCP → Buscar actualizaciones…** para consultar la última versión
 estable. **Buscar actualizaciones automáticamente** activa una consulta diaria;
 está desactivada por defecto. La instalación requiere confirmación y que hayan
 terminado las operaciones de archivos pendientes. Los builds configurados con
-firmas pueden instalar actualizaciones de AppImage y macOS; los demás abren la
-página de la versión. Flatpak y Snap usan su gestor de software. Los paquetes
+firmas pueden instalar actualizaciones de AppImage, macOS y el instalador de
+Windows; los demás abren la página de la versión. Flatpak y Snap usan su gestor de software. Los paquetes
 Flatpak independientes requieren descargar el nuevo paquete si no se configuró
 un repositorio de actualizaciones.
 Consulta [Cómo actualizar OpenSCP](docs/UPDATES.md) para más detalles.
@@ -102,11 +111,33 @@ flatpak run io.github.luiscuellar31.openscp
 El remoto de Flathub es necesario porque el paquete depende del entorno de
 ejecución de KDE.
 
+### Instalación en Windows
+
+OpenSCP necesita Windows 10 versión 1809 o posterior, o Windows 11, en x64.
+Ejecuta `OpenSCP-<versión>-x64-setup.exe`: instala OpenSCP para tu usuario, sin
+permisos de administrador, salvo que elijas instalarlo para todos los usuarios.
+Para herramientas de despliegue, el MSI lo instala para todos los usuarios,
+también en silencio:
+
+```powershell
+msiexec /i OpenSCP-<versión>-x64.msi /qn
+```
+
+Los instaladores no tienen firma de código, así que SmartScreen muestra
+**Windows protegió su PC** la primera vez. Pulsa **Más información** y luego
+**Ejecutar de todas formas**. Igual que en macOS, la suma de verificación
+publicada es lo que te permite validar la descarga.
+
+**Abrir en terminal** usa el cliente OpenSSH de Windows; si falta, agrega
+**Cliente OpenSSH** en **Características opcionales** de la Configuración de
+Windows. Los servidores de salto SSH todavía no están disponibles en Windows.
+
 ## Compilar desde el código fuente
 
-OpenSCP es compatible actualmente con Linux y macOS. Requiere Qt 6, CMake
-3.22+, libssh2 y OpenSSL. libcurl habilita FTP y FTPS; WebDAV requiere libcurl
-y tinyxml2.
+OpenSCP se compila en Linux, macOS y Windows. Requiere Qt 6, CMake 3.22+,
+libssh2 y OpenSSL. libcurl habilita FTP y FTPS; WebDAV requiere libcurl y
+tinyxml2. En Windows lo compila Visual Studio 2022 con Qt para MSVC, y vcpkg
+compila las demás bibliotecas.
 
 ```bash
 git clone https://github.com/luiscuellar31/openscp.git
@@ -117,6 +148,12 @@ cd openscp
 
 # macOS
 ./scripts/macos.sh dev
+```
+
+```powershell
+# Windows (PowerShell)
+$env:VCPKG_ROOT = 'C:\ruta\a\vcpkg'
+.\scripts\windows.ps1 dev
 ```
 
 Consulta [Compilar OpenSCP](docs/BUILDING.md) para dependencias por plataforma,
@@ -131,13 +168,15 @@ pasos manuales, empaquetado y solución de problemas.
 - Cola persistente con transferencias en paralelo, pausa, reanudación,
   reintentos, políticas de conflicto, límites de ancho de banda y archivos
   `.part`.
-- Sitios guardados con Keychain en macOS y Secret Service/libsecret en Linux.
+- Sitios guardados con Keychain en macOS, Secret Service/libsecret en Linux y
+  cifrado DPAPI en Windows.
 - Verificación estricta de claves SSH, con aceptación de claves nuevas o
   deshabilitada explícitamente.
 - FTPS y WebDAV por HTTPS sin verificación del certificado siguen comprobando
   la clave pública del servidor, en la que confías en la primera conexión.
 - Proxies SOCKS5 y HTTP CONNECT, además de servidores de salto SSH cuando el
-  protocolo lo permite.
+  protocolo lo permite; los servidores de salto todavía no están disponibles en
+  Windows.
 - Sincronización unidireccional con vista previa, filtros y sumas de
   comprobación opcionales.
 - Interfaces en español, inglés, portugués, francés y alemán.
@@ -167,13 +206,15 @@ otra tarea de la cola pueda reanudarse desde él, y no se borra nada de las
 tareas terminadas ni de las subidas por SCP clásico, que escriben directamente
 en el destino.
 
-Al mover un archivo local al servidor, OpenSCP completa la subida y conserva el
-origen local con una advertencia. El borrado automático no puede excluir que
+Al mover un archivo local al servidor en macOS y Linux, OpenSCP completa la
+subida y conserva el origen local con una advertencia. El borrado automático no puede excluir que
 otro proceso sustituya el origen después de comprobarlo. Revisa la subida y el
 archivo local antes de borrarlo manualmente; después, reintenta la tarea para
 completar la limpieza sin repetir la subida. Tras reiniciar, la limpieza
 requiere revisión manual porque ya no se dispone de la identidad original del
-archivo. La limpieza del origen remoto al mover archivos mediante descarga
+archivo. En Windows, OpenSCP borra el origen local después de la subida si no
+cambió: mantiene el archivo abierto contra cambios mientras lo comprueba y lo
+borra. La limpieza del origen remoto al mover archivos mediante descarga
 mantiene su comportamiento.
 
 ## Navegación por rutas
@@ -182,7 +223,7 @@ Cada panel presenta la ubicación actual como un campo de ruta convencional. Haz
 clic en cualquier directorio superior dentro de la ruta para abrirlo, o en el
 directorio actual para mostrar el diálogo **Abrir directorio**. También puedes
 usar `Ctrl+L` (`Cmd+L` también está disponible en macOS) o el atajo Abrir de
-la plataforma: `Ctrl+O` en Linux y `Cmd+O` en macOS.
+la plataforma: `Ctrl+O` en Linux y Windows y `Cmd+O` en macOS.
 
 El diálogo permite escribir una ruta directamente y consultar las rutas
 recientes y los favoritos del panel local o de la sesión remota seleccionada.
@@ -216,6 +257,14 @@ Estas variables opcionales ayudan a diagnosticar problemas:
   junto con `OPENSCP_ENV=dev`
 - `OPENSCP_ENABLE_INSECURE_FALLBACK=1` solo cuando la compilación lo permite
 
+Los mensajes van a la salida de error estándar. En Windows, donde OpenSCP no
+muestra consola, ábrelo desde PowerShell guardando esa salida en un archivo:
+
+```powershell
+$env:OPENSCP_LOG_LEVEL = 'debug'
+Start-Process OpenSCP.exe -RedirectStandardError openscp.log
+```
+
 Los registros sensibles están deshabilitados por defecto y solo deberían
 activarse temporalmente en un entorno de desarrollo controlado.
 
@@ -242,8 +291,7 @@ activarse temporalmente en un entorno de desarrollo controlado.
 
 ## Roadmap
 
-- Completar y validar la compatibilidad con Windows; el código actual todavía
-  es experimental.
+- Admitir servidores de salto SSH en Windows y firmar los paquetes de Windows.
 - Probar WebDAV con una mayor variedad de servidores.
 - Ampliar la autenticación interactiva y las configuraciones empresariales de
   proxies y servidores de salto SSH.

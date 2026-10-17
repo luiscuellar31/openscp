@@ -66,6 +66,12 @@ The normal development entrypoints are:
 ./scripts/macos.sh dev
 ```
 
+On Windows, from PowerShell:
+
+```powershell
+.\scripts\windows.ps1 dev
+```
+
 Run the local CI baseline before opening a pull request:
 
 ```bash
@@ -77,7 +83,8 @@ git diff --check
 
 `check_ci_local.sh` configures, builds, and runs the tests in the ignored
 `build-ci-local/` directory by default. Its `--build-dir` option changes that
-path.
+path. On Windows, where these scripts need a POSIX shell, the counterpart of the
+first one is `.\scripts\windows.ps1 test` with `OPENSCP_WERROR=ON`.
 
 For documentation-only changes, check the links and run `git diff --check`;
 compiling the application is not needed to validate Markdown.
@@ -262,9 +269,9 @@ change is needed, what changed, and which checks you actually ran.
 
 ## Releases
 
-After merging to `main`, wait for the Linux and macOS build jobs in the
-**Release Artifacts** workflow to pass for that commit before creating a `v*`
-tag. The `main` run uploads workflow artifacts but skips the publication job.
+After merging to `main`, wait for the Linux, macOS and Windows build jobs in
+the **Release Artifacts** workflow to pass for that commit before creating a
+`v*` tag. The `main` run uploads workflow artifacts but skips the publication job.
 Pushing the tag runs the same builds again and uploads their assets to a draft
 release only if every build passes. The draft's notes come from
 `scripts/release/release-notes.sh`; write the release name and a short

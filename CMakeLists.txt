@@ -19,22 +19,6 @@ if(APPLE)
     set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
 endif()
 
-if(WIN32)
-    option(OPENSCP_ENABLE_EXPERIMENTAL_WINDOWS_PORT
-        "Allow configuration of the unsupported Windows port scaffold"
-        OFF)
-    if(NOT OPENSCP_ENABLE_EXPERIMENTAL_WINDOWS_PORT)
-        message(FATAL_ERROR
-            "OpenSCP does not currently support Windows. The modular port "
-            "is intentionally gated to prevent accidental release builds. "
-            "Port developers may opt in with "
-            "-DOPENSCP_ENABLE_EXPERIMENTAL_WINDOWS_PORT=ON.")
-    endif()
-    message(WARNING
-        "Experimental Windows scaffold enabled: this configuration is not "
-        "a supported OpenSCP release target.")
-endif()
-
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

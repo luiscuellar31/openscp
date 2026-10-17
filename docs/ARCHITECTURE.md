@@ -161,6 +161,16 @@ and reusing the descriptor. Disconnect releases that mutex before waiting for
 the I/O mutex, so shutdown can unblock an active operation without reversing
 the I/O-to-state lock order. Session and socket ownership are then detached
 under both locks; only the caller that detaches them performs cleanup.
+On Windows the socket calls go through `PlatformSocket`, over Winsock. Shutting
+a Windows socket down does not wake a thread blocked in `select()` or `recv()`
+on it, so interruption also cancels the socket's pending I/O with `CancelIoEx`,
+and disconnect repeats that until the I/O mutex is free.
+
+"Open in terminal" belongs to `TerminalCommandBuilder`, which builds the ssh
+and sftp arguments once and then quotes them for the platform: as a POSIX
+shell command for Terminal.app or a Linux terminal, and on Windows as a
+PowerShell script that a new console runs, starting each program through
+`Start-Process` with a command line quoted for the Microsoft C runtime.
 
 FTPS and HTTPS WebDAV connections that skip certificate verification pin the
 server's TLS public key. Before the control connection, the connection worker
@@ -273,11 +283,21 @@ for a reader before type validation. They check the opened descriptor's type,
 ownership, and link count, then restore blocking mode before modifying the
 file or creating its stdio stream; append and close-on-exec flags are retained.
 Upload moves also use it to capture local file identity before transfer and
-inspect the source during cleanup. Existing local sources are preserved:
-POSIX provides no atomic identity-conditional unlink. The completed upload
+inspect the source during cleanup. On POSIX, existing local sources are
+preserved: POSIX provides no atomic identity-conditional unlink. The completed upload
 retains its `DeleteSource` phase with a warning for manual removal; retrying
 after removal finishes cleanup without uploading again. The identity is
 process-local; a restored cleanup without it requires manual review.
+On Windows, `SafeLocalFile_win.cpp` opens each path component relative to its
+parent's handle with `NtCreateFile`, so a junction, symbolic link or mount
+point below a user-writable folder is refused as a POSIX symbolic link is;
+only system folders that the user cannot write may be links. It renames
+through the parent handle, deletes with POSIX semantics, and refuses names that
+Windows cannot store. Its move cleanup removes an unchanged source: it holds
+the file open, sharing only reads, while it compares the identity and deletes
+it, so no other program can change the file in between. The UI takes
+junctions, like symbolic links, as links through `isLocalLink()`, and shortcut
+files as plain files.
 `SyncCoordinator` resolves the selected local root before scanning and queuing
 paths, so a root reached through a system link keeps one physical location.
 
@@ -391,6 +411,11 @@ Each kind of persisted data has one owner:
 | `SecretStore` | Keychain, Secret Service/libsecret, and platform encryption. |
 | `NavigationStore` | Local history and session-scoped remote history and favorites. |
 | `TransferQueuePersistence` | Versioned, atomic storage for unfinished transfers. |
+
+On Windows, `main.cpp` makes INI the default settings format, so settings,
+with the secrets that DPAPI encrypts for the user, are files under
+`%APPDATA%\OpenSCP` rather than registry keys. The transfer queue lives in
+`%LOCALAPPDATA%`, which roaming profiles do not copy to other computers.
 
 Use these classes instead of reading or writing their settings directly.
 `SettingsDialog` writes only the values the user changed, so every other

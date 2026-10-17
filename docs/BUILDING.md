@@ -185,6 +185,72 @@ otool -L build-macos-package/OpenSCP.app/Contents/MacOS/OpenSCP | \
 
 Bundled references should resolve through `@executable_path/../Frameworks`.
 
+## Windows
+
+### Dependencies
+
+Windows 10 version 1809 or later, or Windows 11, on x64, with:
+
+- Visual Studio 2022 or its Build Tools with the **Desktop development with
+  C++** workload, which brings MSVC, the Windows SDK, CMake, and Ninja;
+- Qt 6 for MSVC 2022 64-bit from the Qt installer, with Qt SVG and the Qt
+  Linguist tools; official artifacts use Qt 6.11.2; and
+- a clone of [vcpkg](https://github.com/microsoft/vcpkg). On the first
+  configure, `vcpkg.json` makes it build libssh2, OpenSSL, libcurl, and
+  tinyxml2 as static libraries for the `x64-windows-static-md` triplet, at the
+  versions of its `builtin-baseline`.
+
+The scripts enter the Visual Studio developer environment themselves. They
+take Qt from `QT_PREFIX` or `Qt6_DIR`, otherwise from the newest
+`C:\Qt\<version>\msvc2022_64`, and need `VCPKG_ROOT`:
+
+```powershell
+$env:VCPKG_ROOT = 'C:\path\to\vcpkg'
+$env:QT_PREFIX = 'C:\Qt\6.11.2\msvc2022_64'
+```
+
+### Development build
+
+```powershell
+.\scripts\windows.ps1 dev
+```
+
+Or run the steps independently:
+
+```powershell
+.\scripts\windows.ps1 configure
+.\scripts\windows.ps1 build
+.\scripts\windows.ps1 run
+```
+
+The executable is written to `build\OpenSCP.exe`. The build tree has no
+deployed Qt, so `run` and the tests take Qt's DLLs from the Qt installation.
+Settings go to INI files under `%APPDATA%\OpenSCP`, not to the registry.
+
+### Windows packages
+
+Packaging also needs Inno Setup 6 and WiX v5, which installs as a .NET tool:
+
+```powershell
+dotnet tool install --global wix --version 5.0.2
+.\scripts\package\windows.ps1
+```
+
+It builds in `build-windows-package\`, stages the application in
+`build-windows-package\stage\OpenSCP` with `windeployqt`, the Qt translations,
+the Visual C++ runtime DLLs it imports, and the licenses, and checks that
+folder with `scripts\verify\windows-package.ps1`: every binary must be x64
+with ASLR, high-entropy ASLR, and DEP, `OpenSCP.exe` also with Control Flow
+Guard and CET, and every imported DLL must be staged or part of Windows. It
+then writes `dist\OpenSCP-<version>-x64-setup.exe` and
+`dist\OpenSCP-<version>-x64.msi` with their `.sha256` files. Set
+`PACKAGE_FORMATS=setup` or `msi` to build one; `.\scripts\package\windows.ps1
+help` lists the other variables.
+
+The setup installs for the current user by default and can install for all
+users; it is the one that updates itself from the signed update manifest. The
+MSI installs for all users, for deployment tools. Neither is code-signed.
+
 ## Application icon
 
 The icon is drawn by
@@ -196,7 +262,8 @@ Apple's icon shape. It writes each style's 1024-pixel image to
 
 The sizes derived from those images, from 16 to 512 pixels, are committed with
 them, as are the macOS bundle icon `assets/macos/OpenSCP.icns`, made from
-`macos-light`, and the snap icon `packaging/snap/icon.png`. Ordinary builds
+`macos-light`, the Windows icon `assets/windows/OpenSCP.ico`, made from
+`standard`, and the snap icon `packaging/snap/icon.png`. Ordinary builds
 therefore need no image tools. After changing the artwork, regenerate them on
 macOS with Swift, Python 3, and the system `sips` and `iconutil` tools:
 
@@ -208,9 +275,9 @@ python3 scripts/icons/generate-icon-sizes.py
 The application embeds every style and shows the one chosen under
 **Settings → General → Application icon**: `macos-light` by default on macOS
 and `standard` elsewhere. Installed icons cannot change while the application
-runs, so Finder, the Dock while OpenSCP is closed, and Linux launchers keep the
-platform default; Linux packages install the `standard` sizes in the hicolor
-theme.
+runs, so Finder, the Dock while OpenSCP is closed, Linux launchers, and Windows
+Explorer keep the platform default; Linux packages install the `standard`
+sizes in the hicolor theme.
 
 ## Tests and quality checks
 
@@ -220,6 +287,10 @@ them, and runs CTest:
 ```bash
 ./scripts/check_ci_local.sh --clean --full --werror
 ```
+
+On Windows, `.\scripts\windows.ps1 test` configures the tests, builds them,
+and runs CTest; with `OPENSCP_WERROR=ON` it treats warnings as errors, as the
+Windows CI job does.
 
 Individual checks remain available when diagnosing a failure:
 
