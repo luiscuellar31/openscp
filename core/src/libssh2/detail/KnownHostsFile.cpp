@@ -1,5 +1,7 @@
 #include "libssh2/detail/KnownHostsFile.hpp"
 
+#include "common/UniqueFile.hpp"
+
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
@@ -8,13 +10,16 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
-#include <filesystem>
 
 #ifndef _WIN32
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#else
+#include "common/Win32Text.hpp"
+
+#include <windows.h>
 #endif
 
 namespace openscp::libssh2detail {
@@ -29,31 +34,29 @@ std::string base64(const unsigned char *data, std::size_t length) {
     return out;
 }
 
+#ifndef _WIN32
 std::string systemError(const char *where) {
     return std::string(where) + ": " + std::strerror(errno);
 }
+#endif
 
 } // namespace
 
 KnownHostsReadStatus readKnownHosts(const std::string &path,
                                     std::vector<std::string> &lines) {
     lines.clear();
-    std::error_code statusError;
-    if (std::filesystem::status(path, statusError).type() ==
-        std::filesystem::file_type::not_found) {
-        return KnownHostsReadStatus::Missing;
+    UniqueFile file(openLocalFile(path, "rb"));
+    if (!file) {
+        return errno == ENOENT ? KnownHostsReadStatus::Missing
+                               : KnownHostsReadStatus::Unreadable;
     }
-
-    std::FILE *file = std::fopen(path.c_str(), "rb");
-    if (!file)
-        return KnownHostsReadStatus::Unreadable;
     std::string content;
     char buffer[8192];
     std::size_t count = 0;
-    while ((count = std::fread(buffer, 1, sizeof(buffer), file)) > 0)
+    while ((count = std::fread(buffer, 1, sizeof(buffer), file.get())) > 0)
         content.append(buffer, count);
-    const bool readFailed = std::ferror(file) != 0;
-    std::fclose(file);
+    const bool readFailed = std::ferror(file.get()) != 0;
+    file.reset();
     if (readFailed)
         return KnownHostsReadStatus::Unreadable;
 
@@ -181,26 +184,53 @@ bool appendKnownHostsLine(const std::string &path, const std::string &line,
     }
     return true;
 #else
-    std::FILE *file = std::fopen(path.c_str(), "a+b");
-    if (!file) {
-        error = systemError("fopen(known_hosts)");
+    std::wstring widePath;
+    if (!win32::toWidePath(path, widePath)) {
+        error = "known_hosts path is not valid UTF-8";
         return false;
     }
+    const std::size_t separator = widePath.find_last_of(L"/\\");
+    if (separator != std::wstring::npos && separator > 0) {
+        const std::wstring folder = widePath.substr(0, separator);
+        if (!::CreateDirectoryW(folder.c_str(), nullptr) &&
+            ::GetLastError() != ERROR_ALREADY_EXISTS) {
+            error = "CreateDirectory: " + win32::errorMessage(::GetLastError());
+            return false;
+        }
+    }
+    // With append access only, every write lands at the end of the file,
+    // even while another program appends to it.
+    HANDLE handle = ::CreateFileW(
+        widePath.c_str(), FILE_READ_DATA | FILE_APPEND_DATA | SYNCHRONIZE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        error = "open(known_hosts): " + win32::errorMessage(::GetLastError());
+        return false;
+    }
+    // A last line without its newline would run into the new one.
     std::string text;
-    if (std::fseek(file, -1, SEEK_END) == 0 && std::fgetc(file) != '\n')
-        text.push_back('\n');
+    LARGE_INTEGER size{};
+    if (::GetFileSizeEx(handle, &size) && size.QuadPart > 0) {
+        OVERLAPPED lastByte{};
+        lastByte.Offset = static_cast<DWORD>(size.QuadPart - 1);
+        lastByte.OffsetHigh = static_cast<DWORD>((size.QuadPart - 1) >> 32);
+        char last = '\n';
+        DWORD read = 0;
+        if (::ReadFile(handle, &last, 1, &read, &lastByte) && read == 1 &&
+            last != '\n')
+            text.push_back('\n');
+    }
     text += line;
     text.push_back('\n');
+    DWORD written = 0;
     const bool ok =
-        std::fseek(file, 0, SEEK_END) == 0 &&
-        std::fwrite(text.data(), 1, text.size(), file) == text.size() &&
-        std::fflush(file) == 0;
+        ::WriteFile(handle, text.data(), static_cast<DWORD>(text.size()),
+                    &written, nullptr) &&
+        written == text.size() && ::FlushFileBuffers(handle);
     if (!ok)
-        error = systemError("write(known_hosts)");
-    if (std::fclose(file) != 0 && ok) {
-        error = systemError("close(known_hosts)");
-        return false;
-    }
+        error = "write(known_hosts): " + win32::errorMessage(::GetLastError());
+    ::CloseHandle(handle);
     return ok;
 #endif
 }

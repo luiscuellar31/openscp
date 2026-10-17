@@ -11,6 +11,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 #else
+#include "common/Win32Text.hpp"
+
 #include <windows.h>
 #endif
 
@@ -46,8 +48,18 @@ inline bool getLocalFileSize(const std::string &path, std::uint64_t &out,
     out = static_cast<std::uint64_t>(st.st_size);
     return true;
 #else
-    HANDLE h = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL,
-                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    std::wstring widePath;
+    if (!win32::toWidePath(path, widePath)) {
+        if (why)
+            *why = "local path is not valid UTF-8";
+        return false;
+    }
+    // Attribute access, all a size needs, never conflicts with the sharing
+    // mode of a program that has the file open, as read access would.
+    HANDLE h =
+        CreateFileW(widePath.c_str(), FILE_READ_ATTRIBUTES,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) {
         if (why)
             *why = "CreateFile(local-size) failed";

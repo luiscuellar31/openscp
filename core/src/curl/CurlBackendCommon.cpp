@@ -24,7 +24,9 @@
 #include <utility>
 
 #ifdef _WIN32
-#include <io.h>
+#include "common/Win32Text.hpp"
+
+#include <windows.h>
 #else
 #include <unistd.h>
 #endif
@@ -40,12 +42,35 @@ std::string localPartialPath(const std::string &destination) {
 }
 
 std::string localDestinationKey(const std::string &path) {
+#ifdef _WIN32
+    // The full path, with the letter case NTFS ignores folded, from UTF-16:
+    // std::filesystem would read the UTF-8 bytes in the system code page and
+    // throw on a sequence that page does not have.
+    std::wstring wide;
+    if (!win32::toWidePath(path, wide))
+        return std::string("local:") + path;
+    const DWORD length = ::GetFullPathNameW(wide.c_str(), 0, nullptr, nullptr);
+    if (length == 0)
+        return std::string("local:") + path;
+    std::wstring full(length, L'\0');
+    const DWORD written =
+        ::GetFullPathNameW(wide.c_str(), length, full.data(), nullptr);
+    full.resize(written < length ? written : 0);
+    if (full.empty() ||
+        ::LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_UPPERCASE, full.data(),
+                        static_cast<int>(full.size()), full.data(),
+                        static_cast<int>(full.size()), nullptr, nullptr,
+                        0) == 0)
+        return std::string("local:") + path;
+    return std::string("local:") + win32::toUtf8(full);
+#else
     std::error_code pathError;
     const std::filesystem::path absolutePath =
         std::filesystem::absolute(std::filesystem::path(path), pathError);
     if (pathError)
         return std::string("local:") + path;
     return std::string("local:") + absolutePath.lexically_normal().string();
+#endif
 }
 
 size_t readFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
@@ -504,16 +529,16 @@ std::string encodeFtpUrlPath(std::string_view logicalPath, bool directory) {
 std::FILE *openFileForUpload(const std::string &path, std::uint64_t &fileSize,
                              std::string &err) {
     fileSize = 0;
-    try {
-        fileSize = std::filesystem::file_size(path);
-    } catch (...) {
+    UniqueFile file(openLocalFile(path, "rb"));
+    if (!file) {
+        err = "Could not open local file for reading.";
+        return nullptr;
+    }
+    if (!localFileSize(file.get(), fileSize)) {
         err = "Could not determine local file size.";
         return nullptr;
     }
-    std::FILE *file = std::fopen(path.c_str(), "rb");
-    if (!file)
-        err = "Could not open local file for reading.";
-    return file;
+    return file.release();
 }
 
 RemoteError errorFromCurl(CURLcode code, std::string message, long responseCode,
