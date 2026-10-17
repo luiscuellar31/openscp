@@ -106,7 +106,10 @@ void MainWindow::setLeftRoot(const QString &path) {
     if (QDir(path).exists()) {
         const QString normalized = QDir(path).absolutePath();
         leftPath_->setPath(normalized);
-        leftView_->setRootIndex(leftModel_->index(normalized));
+        // index() alone finds no folder inside a hidden one, such as AppData
+        // or ~/.config, once the model has listed it while hidden entries
+        // are filtered out; setRootPath() makes the path visible.
+        leftView_->setRootIndex(leftModel_->setRootPath(normalized));
         addRecentLocalPath(normalized);
         refreshLeftPathNavigation();
         statusBar()->showMessage(tr("Left: ") + normalized, 3000);
@@ -122,8 +125,8 @@ void MainWindow::setRightRoot(const QString &path) {
     if (QDir(path).exists()) {
         const QString normalized = QDir(path).absolutePath();
         rightPath_->setPath(normalized);
-        rightView_->setRootIndex(
-            rightLocalModel_->index(normalized)); // <-- here
+        // See setLeftRoot().
+        rightView_->setRootIndex(rightLocalModel_->setRootPath(normalized));
         addRecentLocalPath(normalized);
         refreshRightPathNavigation();
         statusBar()->showMessage(tr("Right: ") + normalized, 3000);
