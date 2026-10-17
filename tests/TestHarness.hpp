@@ -24,7 +24,15 @@ class TestContext {
         check(haystack.find(needle) != std::string_view::npos, message);
     }
 
+    // Notes a case this system cannot run, such as one that needs symbolic
+    // links where only administrators may make them. It is not a failure.
+    void skip(std::string_view message) {
+        ++skipped;
+        std::cerr << "[SKIP] " << message << '\n';
+    }
+
     int failures = 0;
+    int skipped = 0;
 };
 
 using TestCase = std::function<void(TestContext &)>;
@@ -55,8 +63,12 @@ class TestHarness {
         TestContext context;
         for (const RegisteredCase &testCase : registeredTestCases())
             runCase(testCase, context);
-        if (context.failures == 0)
-            std::cout << "All " << suiteName_ << " tests passed\n";
+        if (context.failures == 0) {
+            std::cout << "All " << suiteName_ << " tests passed";
+            if (context.skipped > 0)
+                std::cout << " (" << context.skipped << " cases skipped)";
+            std::cout << '\n';
+        }
         return context.failures == 0 ? 0 : 1;
     }
 

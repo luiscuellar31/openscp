@@ -1215,7 +1215,12 @@ OPENSCP_TEST(testStatusChangesAloneDoNotRewriteTheQueue, test) {
                "a status change alone should not rewrite the queue");
 
     manager.removeTasks({ids[1]});
-    test.check(waitUntil([&] { return savedTasks() == 2; }),
+    // On Windows, reading the queue while the manager replaces it makes the
+    // replacement fail and retry, so the file is read only now and then.
+    test.check(waitUntil([&] {
+                   std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                   return savedTasks() == 2;
+               }),
                "removing a task should still be saved");
 }
 
@@ -4398,12 +4403,16 @@ OPENSCP_TEST(testPausedQueuePersistence, test) {
                "queue persistence should be schema-versioned");
     test.check(!stored.contains("password") && !stored.contains("passphrase"),
                "queue persistence must not contain credentials");
+#ifdef Q_OS_UNIX
+    // Windows has no permission bits: the profile folder's ACL keeps the
+    // queue private there.
     const auto permissions = QFile::permissions(queuePath);
     test.check(permissions.testFlag(QFileDevice::ReadOwner) &&
                    permissions.testFlag(QFileDevice::WriteOwner) &&
                    !permissions.testFlag(QFileDevice::ReadGroup) &&
                    !permissions.testFlag(QFileDevice::ReadOther),
                "queue persistence should use owner-only permissions");
+#endif
 
     TransferManager restored;
     test.check(restored.enablePersistence(queuePath),
