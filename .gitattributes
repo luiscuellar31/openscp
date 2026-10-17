@@ -1,0 +1,8 @@
+# Text files use LF in the repository and in every checkout, whatever
+# core.autocrlf says, so Windows checkouts match macOS and Linux ones. Bash
+# fails on scripts with CRLF line endings.
+* text=auto eol=lf
+
+# cmd.exe can misread batch files that use LF line endings.
+*.bat text eol=crlf
+*.cmd text eol=crlf
