@@ -22,6 +22,7 @@
 #include <QMessageBox>
 #include <QScrollBar>
 #include <QStatusBar>
+#include <QToolBar>
 
 namespace {
 
@@ -52,8 +53,13 @@ void MainWindow::goUpRight() {
     } else {
         QString cur = rightPath_->path();
         QDir currentDir(cur);
-        if (!currentDir.cdUp())
+        if (!currentDir.cdUp()) {
+            const QString drive = chooseLocalDrive(
+                rightPaneBar_->widgetForAction(actUpRight_), cur);
+            if (!drive.isEmpty())
+                setRightRoot(drive);
             return;
+        }
         setRightRoot(currentDir.absolutePath());
         updateDeleteShortcutEnables();
     }
@@ -669,8 +675,7 @@ void MainWindow::showRightContextMenu(const QPoint &pos) {
                               : (rightPath_ ? rightPath_->path() : QString()));
         canGoUp = (!cur.isEmpty() && cur != "/");
     } else {
-        QDir currentDir(rightPath_ ? rightPath_->path() : QString());
-        canGoUp = currentDir.cdUp();
+        canGoUp = canGoUpLocally(rightPath_ ? rightPath_->path() : QString());
     }
 
     if (isScpTransferMode()) {

@@ -6,12 +6,15 @@
 #include "openscp/SafeLocalFile.hpp"
 
 #include <QCoreApplication>
+#include <QCursor>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
 #include <QInputDialog>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMessageBox>
+#include <QStorageInfo>
 #include <QUuid>
 
 #include <filesystem>
@@ -360,6 +363,46 @@ bool PathDepthComparator::operator()(const QString &left,
     if (leftDepth != rightDepth)
         return deepestFirst ? leftDepth > rightDepth : leftDepth < rightDepth;
     return deepestFirst ? left > right : left < right;
+}
+
+bool canGoUpLocally(const QString &path) {
+#ifdef Q_OS_WIN
+    (void)path;
+    return true;
+#else
+    QDir directory(path);
+    return directory.cdUp();
+#endif
+}
+
+QString chooseLocalDrive(QWidget *anchor, const QString &currentPath) {
+#ifdef Q_OS_WIN
+    QMenu menu(anchor);
+    const QString currentRoot = QStorageInfo(currentPath).rootPath();
+    for (const QStorageInfo &volume : QStorageInfo::mountedVolumes()) {
+        if (!volume.isValid() || !volume.isReady())
+            continue;
+        const QString root = volume.rootPath();
+        const QString drive = QDir::toNativeSeparators(root);
+        const QString name = volume.displayName();
+        QAction *action =
+            menu.addAction(name.isEmpty() || name == root
+                               ? drive
+                               : QStringLiteral("%1  %2").arg(drive, name));
+        action->setData(root);
+        action->setCheckable(true);
+        action->setChecked(root.compare(currentRoot, Qt::CaseInsensitive) == 0);
+    }
+    const QPoint position =
+        anchor ? anchor->mapToGlobal(QPoint(0, anchor->height()))
+               : QCursor::pos();
+    const QAction *chosen = menu.exec(position);
+    return chosen ? chosen->data().toString() : QString();
+#else
+    (void)anchor;
+    (void)currentPath;
+    return QString();
+#endif
 }
 
 bool isValidEntryName(const QString &name, QString *why) {

@@ -2455,11 +2455,9 @@ void MainWindow::updateDeleteShortcutEnables() {
         actNewDirLeft_->setEnabled(true); // always enabled on local
     if (actNewFileLeft_)
         actNewFileLeft_->setEnabled(true); // always enabled on local
-    if (actUpLeft_) {
-        QDir leftDir(leftPath_ ? leftPath_->path() : QString());
-        bool canUp = leftDir.cdUp();
-        actUpLeft_->setEnabled(canUp);
-    }
+    if (actUpLeft_)
+        actUpLeft_->setEnabled(
+            canGoUpLocally(leftPath_ ? leftPath_->path() : QString()));
 
     // Right: enable according to selection + permissions (exceptions: Up,
     // Upload, Download)
@@ -2532,8 +2530,7 @@ void MainWindow::updateDeleteShortcutEnables() {
             cur = normalizeRemotePath(cur);
             actUpRight_->setEnabled(!cur.isEmpty() && cur != "/");
         } else {
-            QDir currentDir(cur);
-            actUpRight_->setEnabled(currentDir.cdUp());
+            actUpRight_->setEnabled(canGoUpLocally(cur));
         }
     }
 }
