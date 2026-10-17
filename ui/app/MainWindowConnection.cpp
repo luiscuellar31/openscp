@@ -4,6 +4,7 @@
 #include "logic/common/MainWindowSharedUtils.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "logic/connections/SessionController.hpp"
+#include "logic/connections/TlsKeyTrust.hpp"
 #include "logic/persistence/SavedSitesPersistence.hpp"
 #include "logic/persistence/SiteCredentialRepository.hpp"
 #include "logic/remote/RemoteModel.hpp"
@@ -12,6 +13,7 @@
 #include "logic/transfers/TransferManager.hpp"
 #include "openscp/ClientFactory.hpp"
 #include "openscp/RuntimeLogging.hpp"
+#include "widgets/dialogs/AuthenticationInput.hpp"
 #include "widgets/dialogs/ConnectionDialog.hpp"
 #include "widgets/dialogs/SiteManagerDialog.hpp"
 #include "widgets/navigation/PathNavigationBar.hpp"
@@ -229,9 +231,20 @@ void refreshOpenSiteManagerWidget(QPointer<QWidget> siteManager) {
 // Opens the session's later connections: transfer workers, listing helpers,
 // and a reopened control connection. The options carry no interactive
 // callbacks, so those connections never prompt.
-auto sessionConnectionFactory(openscp::SessionOptions options) {
+// Reopens the control connection for RemoteOperationController.
+auto controlConnectionFactory(openscp::SessionOptions options) {
     return [options = std::move(options)](std::string &error) {
         return openscp::CreateConnectedClient(options, error);
+    };
+}
+
+auto sessionConnectionFactory(openscp::SessionOptions options) {
+    return [options = std::move(options)](std::stop_token stop,
+                                          std::string &error) {
+        // The manager stops a worker's handshake when the session goes away.
+        openscp::SessionOptions workerOptions = options;
+        workerOptions.connection_stop_token = std::move(stop);
+        return openscp::CreateConnectedClient(workerOptions, error);
     };
 }
 
@@ -618,7 +631,9 @@ void MainWindow::persistActiveSitePaths() {
         const auto saveResult = SavedSitesPersistence::saveSites(sites);
         if (!saveResult.ok) {
             UiAlerts::warning(this, tr("Paths not saved"), saveResult.error);
+            return;
         }
+        refreshOpenSiteManagerWidget(siteManager_);
     }
 }
 
@@ -857,7 +872,24 @@ void MainWindow::showHostKeyPrompt(
     box->setIcon(QMessageBox::Question);
     box->setWindowTitle(tr("Confirm SSH fingerprint"));
     QString text;
-    if (!prompt.canSave) {
+    if (prompt.kind ==
+        openscpui::HostKeyPromptCoordinator::KeyKind::TlsPublicKey) {
+        box->setWindowTitle(tr("Confirm TLS public key"));
+        if (prompt.keyChanged) {
+            box->setIcon(QMessageBox::Warning);
+            text = tr("The TLS public key of %1 has changed.\nNew "
+                      "fingerprint: %2\n\nSomeone may be intercepting the "
+                      "connection, or the server may have a new key. Trust "
+                      "the new key only if you expected this change.")
+                       .arg(prompt.host, prompt.fingerprint);
+        } else {
+            text = tr("Connect to %1\nThe server certificate is not "
+                      "verified for this connection.\nPublic key "
+                      "fingerprint: %2\n\nTrust this key? Later "
+                      "connections will refuse any other key.")
+                       .arg(prompt.host, prompt.fingerprint);
+        }
+    } else if (!prompt.canSave) {
         text = (tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
                    "%3\n\nFingerprint cannot be saved. Connection "
                    "allowed only this time."))
@@ -874,7 +906,10 @@ void MainWindow::showHostKeyPrompt(
     box->setText(text);
     box->addButton(prompt.canSave ? tr("Trust") : tr("Connect without saving"),
                    QMessageBox::YesRole);
-    box->addButton(tr("Cancel"), QMessageBox::RejectRole);
+    QPushButton *cancelButton =
+        box->addButton(tr("Cancel"), QMessageBox::RejectRole);
+    if (prompt.keyChanged)
+        box->setDefaultButton(cancelButton);
     connect(box, &QMessageBox::finished, this, &MainWindow::onTofuFinished);
     QTimer::singleShot(0, box, [box] {
         box->open();
@@ -1032,22 +1067,23 @@ void MainWindow::initializeConnectionUiState(
 
 void MainWindow::configureConnectionCallbacks(openscp::SessionOptions &opt) {
     QPointer<MainWindow> self(this);
+    const auto stopToken = opt.connection_stop_token;
     // Inject host key confirmation (TOFU) via UI
-    opt.hostkey_confirm_cb = [self](const std::string &host, std::uint16_t port,
-                                    const std::string &algorithm,
-                                    const std::string &fingerprint,
-                                    bool canSave) {
-        if (!self)
-            return false;
-        openscpui::HostKeyPromptCoordinator::Prompt prompt;
-        prompt.host = QString::fromStdString(host);
-        prompt.port = static_cast<quint16>(port);
-        prompt.algorithm = QString::fromStdString(algorithm);
-        prompt.fingerprint = QString::fromStdString(fingerprint);
-        prompt.canSave = canSave;
-        return self->hostKeyPromptCoordinator_.requestDecision(
-            std::move(prompt));
-    };
+    opt.hostkey_confirm_cb =
+        [self, stopToken](const std::string &host, std::uint16_t port,
+                          const std::string &algorithm,
+                          const std::string &fingerprint, bool canSave) {
+            if (!self || stopToken.stop_requested())
+                return false;
+            openscpui::HostKeyPromptCoordinator::Prompt prompt;
+            prompt.host = QString::fromStdString(host);
+            prompt.port = static_cast<quint16>(port);
+            prompt.algorithm = QString::fromStdString(algorithm);
+            prompt.fingerprint = QString::fromStdString(fingerprint);
+            prompt.canSave = canSave;
+            return self->hostKeyPromptCoordinator_.requestDecision(
+                std::move(prompt), stopToken);
+        };
     opt.hostkey_status_cb = [self](const std::string &msg) {
         if (!self)
             return;
@@ -1061,103 +1097,54 @@ void MainWindow::configureConnectionCallbacks(openscp::SessionOptions &opt) {
             Qt::QueuedConnection);
     };
 
-    // Keyboard-interactive callback (OTP/2FA). Prefer auto-filling
-    // password/username; request OTP if needed.
-    const std::string savedUser = opt.username;
-    const openscp::SecureString savedPass =
-        opt.password ? *opt.password : openscp::SecureString();
+    // Keyboard-interactive: the core answers the account name and password
+    // itself, so every prompt here needs the user.
     opt.keyboard_interactive_cb =
-        [self, savedUser, savedPass](const std::string &name,
-                                     const std::string &instruction,
-                                     const std::vector<std::string> &prompts,
-                                     std::vector<std::string> &responses)
+        [self, stopToken](const std::string &name,
+                          const std::string &instruction,
+                          const std::vector<openscp::KbdIntPrompt> &prompts,
+                          std::vector<std::string> &responses)
         -> openscp::KbdIntPromptResult {
         (void)name;
-        if (!self)
+        if (!self || stopToken.stop_requested())
             return openscp::KbdIntPromptResult::Cancelled;
         responses.clear();
         responses.reserve(prompts.size());
-        auto promptForInput =
-            [self](const QString &title, const QString &promptText,
-                   QLineEdit::EchoMode echoMode, QString &answer) {
-                bool accepted = false;
-                QMetaObject::invokeMethod(
-                    self,
-                    [&] {
-                        if (!self)
-                            return;
-                        answer = QInputDialog::getText(self, title, promptText,
-                                                       echoMode, QString(),
-                                                       &accepted);
-                    },
-                    Qt::BlockingQueuedConnection);
-                return accepted;
-            };
-        auto appendUtf8Response = [&responses](QString &answer) {
-            QByteArray bytes = answer.toUtf8();
-            responses.emplace_back(bytes.constData(),
-                                   static_cast<size_t>(bytes.size()));
-            secureClear(bytes);
-            secureClear(answer);
-        };
         const QString instructionSuffix =
             instruction.empty()
                 ? QString()
                 : QStringLiteral(" — ") + QString::fromStdString(instruction);
 
-        // Resolve each prompt: auto-fill user/pass and ask for OTP/codes if
-        // present
-        for (const std::string &promptTextUtf8 : prompts) {
-            QString promptText = QString::fromStdString(promptTextUtf8);
-            QString promptTextLower = promptText.toLower();
-            // Username
-            if (promptTextLower.contains("user") ||
-                promptTextLower.contains("name:")) {
-                responses.emplace_back(savedUser);
-                continue;
-            }
-            // Password
-            if (promptTextLower.contains("password") ||
-                promptTextLower.contains("passphrase") ||
-                promptTextLower.contains("passcode")) {
-                if (!savedPass.empty()) {
-                    responses.emplace_back(savedPass.data(), savedPass.size());
-                    continue;
-                }
-                QString answer;
-                if (!promptForInput(tr("Password required"), promptText,
-                                    QLineEdit::Password, answer)) {
-                    return openscp::KbdIntPromptResult::Cancelled;
-                }
-                appendUtf8Response(answer);
-                continue;
-            }
-            // OTP / Verification code / Token
-            QString answer;
-            if (promptTextLower.contains("verification") ||
-                promptTextLower.contains("verify") ||
-                promptTextLower.contains("otp") ||
-                promptTextLower.contains("code") ||
-                promptTextLower.contains("token")) {
-                const QString title =
-                    tr("Verification code required") + instructionSuffix;
-                if (!promptForInput(title, promptText, QLineEdit::Password,
-                                    answer)) {
-                    return openscp::KbdIntPromptResult::Cancelled;
-                }
-                appendUtf8Response(answer);
-                continue;
-            }
-            // Generic case: ask for text (not hidden)
-            const QString title =
-                tr("Information required") + instructionSuffix;
-            if (!promptForInput(title, promptText, QLineEdit::Normal, answer))
+        for (const openscp::KbdIntPrompt &prompt : prompts) {
+            if (stopToken.stop_requested())
                 return openscp::KbdIntPromptResult::Cancelled;
-            appendUtf8Response(answer);
+            QString title = tr("Information required") + instructionSuffix;
+            switch (openscp::classifyKbdIntPrompt(prompt)) {
+            case openscp::KbdIntPromptKind::OneTimeCode:
+                title = tr("Verification code required") + instructionSuffix;
+                break;
+            case openscp::KbdIntPromptKind::Password:
+                title = tr("Password required");
+                break;
+            case openscp::KbdIntPromptKind::Username:
+            case openscp::KbdIntPromptKind::Other:
+                break;
+            }
+            // A prompt the server hides is a secret, whatever it says.
+            QString answer;
+            if (!openscpui::requestAuthenticationInput(
+                    self, stopToken, title, QString::fromStdString(prompt.text),
+                    prompt.echo ? QLineEdit::Normal : QLineEdit::Password,
+                    answer)) {
+                return openscp::KbdIntPromptResult::Cancelled;
+            }
+            QByteArray bytes = answer.toUtf8();
+            responses.emplace_back(bytes.constData(),
+                                   static_cast<size_t>(bytes.size()));
+            secureClear(bytes);
+            secureClear(answer);
         }
-        return (responses.size() == prompts.size())
-                   ? openscp::KbdIntPromptResult::Handled
-                   : openscp::KbdIntPromptResult::Unhandled;
+        return openscp::KbdIntPromptResult::Handled;
     };
 }
 
@@ -1166,8 +1153,27 @@ void MainWindow::launchConnectionWorker(
     std::optional<PendingSiteSaveRequest> saveRequest,
     const std::shared_ptr<std::atomic<bool>> &cancelFlag) {
     QPointer<MainWindow> self(this);
-    QThreadPool::globalInstance()->start([self, opt = std::move(opt), uiOpt,
-                                          saveRequest, cancelFlag]() mutable {
+    // Called on the worker; the user answers on the UI thread.
+    auto confirmTlsKey = [self, stopToken = opt.connection_stop_token,
+                          host = QString::fromStdString(opt.host),
+                          port = opt.port](const std::string &pin,
+                                           bool changed) {
+        if (!self || stopToken.stop_requested())
+            return false;
+        openscpui::HostKeyPromptCoordinator::Prompt prompt;
+        prompt.host = host;
+        prompt.port = static_cast<quint16>(port);
+        prompt.fingerprint = openscpui::tlsKeyFingerprint(pin);
+        prompt.canSave = true;
+        prompt.kind =
+            openscpui::HostKeyPromptCoordinator::KeyKind::TlsPublicKey;
+        prompt.keyChanged = changed;
+        return self->hostKeyPromptCoordinator_.requestDecision(
+            std::move(prompt), stopToken);
+    };
+    QThreadPool::globalInstance()->start([self, opt = std::move(opt),
+                                          uiOpt = uiOpt, saveRequest,
+                                          cancelFlag, confirmTlsKey]() mutable {
         bool connectionSucceeded = false;
         bool canceledByUser = false;
         std::string connectionError;
@@ -1177,7 +1183,14 @@ void MainWindow::launchConnectionWorker(
             if (cancelFlag && cancelFlag->load()) {
                 canceledByUser = true;
                 connectionError = "Connection canceled by user";
+            } else if (openscp::skipsTlsCertificateVerification(opt) &&
+                       !openscpui::pinServerTlsKey(
+                           opt, openscp::FetchServerPublicKeyPin, confirmTlsKey,
+                           connectionError)) {
+                // Without a trusted key no credentials are sent.
             } else {
+                // Later connections of the session require the same key.
+                uiOpt.tls_pinned_public_key = opt.tls_pinned_public_key;
                 connectedOwner =
                     openscp::CreateConnectedClient(opt, connectionError);
                 connectionSucceeded = static_cast<bool>(connectedOwner);
@@ -1217,25 +1230,27 @@ void MainWindow::launchConnectionWorker(
         }
         const QString connectionErrorText =
             QString::fromStdString(connectionError);
-        openscp::RemoteClient *controlClient = connectedOwner.get();
-        const bool queued = QMetaObject::invokeMethod(
+        auto owner = std::make_shared<std::unique_ptr<openscp::RemoteClient>>(
+            std::move(connectedOwner));
+        QMetaObject::invokeMethod(
             qApp,
-            [self, connectionSucceeded, connectionErrorText, controlClient,
-             capabilities, uiOpt, saveRequest, canceledByUser]() {
-                if (!self) {
-                    if (controlClient) {
-                        controlClient->disconnect();
-                        delete controlClient;
-                    }
+            [self, connectionSucceeded, connectionErrorText, owner,
+             capabilities, uiOpt, saveRequest, canceledByUser,
+             stopToken = opt.connection_stop_token]() {
+                if (!self)
                     return;
-                }
+                const bool canceled =
+                    canceledByUser || stopToken.stop_requested();
+                if (canceled)
+                    owner->reset();
                 self->finalizeConnection(
-                    connectionSucceeded, connectionErrorText, controlClient,
-                    capabilities, uiOpt, saveRequest, canceledByUser);
+                    connectionSucceeded && !canceled,
+                    canceled ? QStringLiteral("Connection canceled by user")
+                             : connectionErrorText,
+                    owner->release(), capabilities, uiOpt, saveRequest,
+                    canceled);
             },
             Qt::QueuedConnection);
-        if (queued)
-            (void)connectedOwner.release();
     });
 }
 
@@ -1258,10 +1273,13 @@ bool MainWindow::startRemoteConnection(
     opt.local_file_durability = configuredLocalFileDurability();
     if (!validateConnectionStart(opt))
         return false;
+    if (openscp::skipsTlsCertificateVerification(opt))
+        opt.tls_pinned_public_key = openscpui::trustedTlsKeyPin(opt);
 
     const openscp::SessionOptions uiOpt = opt;
     auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
     initializeConnectionUiState(cancelFlag);
+    opt.connection_stop_token = sessionController_->connectionStopToken();
 
     if (openscp::capabilitiesForProtocol(opt.protocol).supports_known_hosts)
         configureConnectionCallbacks(opt);
@@ -1282,7 +1300,10 @@ void MainWindow::applyLocalFileDurabilityPreference() {
         return;
     options.local_file_durability = configured;
     sessionController_->setOptions(options);
-    transferMgr_->setConnectionFactory(sessionConnectionFactory(options));
+    transferMgr_->setConnectionFactory(
+        sessionConnectionFactory(options),
+        openscp::uploadsUsePartialFile(options.protocol,
+                                       options.scp_transfer_mode));
 }
 
 void MainWindow::finalizeConnection(
@@ -1293,7 +1314,10 @@ void MainWindow::finalizeConnection(
     std::optional<PendingSiteSaveRequest> saveRequest, bool canceledByUser) {
     std::unique_ptr<openscp::RemoteClient> controlGuard(controlClient);
     if (connectProgress_) {
-        connectProgress_->close();
+        // close() would emit canceled() and cancel a connection that has
+        // already finished.
+        connectProgress_->hide();
+        connectProgress_->deleteLater();
         connectProgress_.clear();
     }
     connectProgressDimmed_ = false;
@@ -1316,6 +1340,11 @@ void MainWindow::finalizeConnection(
         }
         return;
     }
+
+    // A trusted TLS key is remembered once it led to a session.
+    if (openscp::skipsTlsCertificateVerification(uiOpt) &&
+        uiOpt.tls_pinned_public_key)
+        openscpui::rememberTlsKeyPin(uiOpt, *uiOpt.tls_pinned_public_key);
 
     sessionNoHostVerification_ =
         openscp::capabilitiesForProtocol(uiOpt.protocol).supports_known_hosts &&
@@ -1341,7 +1370,7 @@ void MainWindow::finalizeConnection(
     if (remoteOps_) {
         if (controlGuard) {
             remoteOps_->installSession(std::move(controlGuard),
-                                       sessionConnectionFactory(uiOpt));
+                                       controlConnectionFactory(uiOpt));
         } else {
             remoteOps_->clearSession();
         }
@@ -1554,7 +1583,10 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         transferUiController_.reset();
         if (transferMgr_) {
             transferMgr_->setSessionIdentity(remoteNavigationScope());
-            transferMgr_->setConnectionFactory(sessionConnectionFactory(opt));
+            transferMgr_->setConnectionFactory(
+                sessionConnectionFactory(opt),
+                openscp::uploadsUsePartialFile(opt.protocol,
+                                               opt.scp_transfer_mode));
         }
         requestRemoteListing(rightPath_->path(), false, true);
         applyConnectedActions(true);
@@ -1575,7 +1607,10 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     rightRemoteMutationsSupported_ = false;
     if (transferMgr_) {
         transferMgr_->setSessionIdentity(remoteNavigationScope());
-        transferMgr_->setConnectionFactory(sessionConnectionFactory(opt));
+        transferMgr_->setConnectionFactory(
+            sessionConnectionFactory(opt),
+            openscp::uploadsUsePartialFile(opt.protocol,
+                                           opt.scp_transfer_mode));
     }
     applyConnectedActions(false);
     finishConnectedUi();

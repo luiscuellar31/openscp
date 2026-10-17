@@ -32,8 +32,16 @@ class SiteManagerDialog : public QDialog {
     private:
     void loadSites();
     bool saveSites();
+    // Saves and shows `sites`; when saving fails, warns and shows what is
+    // stored.
+    bool storeSites(const QVector<SiteEntry> &sites);
+    // Asks whether to remove the host key of a removed site from known_hosts,
+    // unless another of `remainingSites` still connects to that server.
+    void offerHostKeyRemoval(const SiteEntry &removed,
+                             const QVector<SiteEntry> &remainingSites);
     void refresh();
     int selectedSiteIndex() const;
+    void selectSite(const QString &siteId);
     void selectSiteIndex(int siteIndex);
 
     QVector<SiteEntry> sites_;

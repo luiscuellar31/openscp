@@ -32,6 +32,13 @@ Adding FTP/FTPS or WebDAV to Snap or Flatpak requires declaring and packaging
 the corresponding dependencies, removing the explicit CMake opt-outs, and
 validating the resulting artifact with the real-protocol integration suite.
 
+WebDAV responses are subject to safety limits on XML size (64 MiB), nesting,
+and node/attribute work per entry before each entry is parsed, and to the
+100,000-entry limit that applies to every protocol. A listing that exceeds
+these limits fails without returning partial entries, even when its XML is
+otherwise valid. This can affect unusually large or complex directory
+listings.
+
 Official self-contained releases use Qt 6.11.2. Community builds intentionally
 remain free to compile against another compatible Qt 6; set
 `OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=ON` only when reproducing the official

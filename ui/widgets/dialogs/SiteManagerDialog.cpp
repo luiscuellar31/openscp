@@ -11,7 +11,6 @@
 #include <QAbstractTableModel>
 #include <QDialogButtonBox>
 #include <QDir>
-#include <QFileInfo>
 #include <QFont>
 #include <QFrame>
 #include <QHeaderView>
@@ -142,6 +141,20 @@ void showMissingNameIssue(QWidget *parent) {
     UiAlerts::warning(
         parent, QObject::tr("Name required"),
         QObject::tr("Enter a site name to save this connection."));
+}
+
+// Each change starts from the sites as stored now, so it keeps what the main
+// window saved, such as a site's last paths, after this dialog loaded them.
+QVector<SiteEntry> storedSites() {
+    return SavedSitesPersistence::loadSites().sites;
+}
+
+int siteIndexById(const QVector<SiteEntry> &sites, const QString &siteId) {
+    for (int siteIndex = 0; siteIndex < sites.size(); ++siteIndex) {
+        if (sites[siteIndex].siteId == siteId)
+            return siteIndex;
+    }
+    return -1;
 }
 
 } // namespace
@@ -307,6 +320,19 @@ bool SiteManagerDialog::saveSites() {
     return true;
 }
 
+bool SiteManagerDialog::storeSites(const QVector<SiteEntry> &sites) {
+    const auto result = SavedSitesPersistence::saveSites(sites);
+    if (!result.ok) {
+        UiAlerts::warning(this, tr("Sites not saved"), result.error);
+        sites_ = storedSites();
+        refresh();
+        return false;
+    }
+    sites_ = sites;
+    refresh();
+    return true;
+}
+
 void SiteManagerDialog::refresh() {
     if (model_)
         model_->reload();
@@ -337,6 +363,10 @@ int SiteManagerDialog::selectedSiteIndex() const {
         return -1;
     const QModelIndex source = proxy_->mapToSource(rows.constFirst());
     return source.isValid() ? source.row() : -1;
+}
+
+void SiteManagerDialog::selectSite(const QString &siteId) {
+    selectSiteIndex(siteIndexById(sites_, siteId));
 }
 
 void SiteManagerDialog::selectSiteIndex(int siteIndex) {
@@ -372,7 +402,8 @@ void SiteManagerDialog::onAdd() {
         showMissingNameIssue(this);
         return;
     }
-    if (hasDuplicateSiteName(sites_, name)) {
+    QVector<SiteEntry> sites = storedSites();
+    if (hasDuplicateSiteName(sites, name)) {
         showDuplicateNameIssue(this, name);
         return;
     }
@@ -384,13 +415,9 @@ void SiteManagerDialog::onAdd() {
     newEntry.initialLocalPath = dlg.initialLocalPath();
     newEntry.initialRemotePath = dlg.initialRemotePath();
     newEntry.rememberLastPaths = dlg.rememberLastPaths();
-    sites_.push_back(newEntry);
-    if (!saveSites()) {
-        sites_.removeLast();
-        refresh();
+    sites.push_back(newEntry);
+    if (!storeSites(sites))
         return;
-    }
-    refresh();
     SiteCredentialRepository credentials;
     showPersistIssues(
         this, credentials.save(newEntry, sessionOptions).issueMessages());
@@ -400,7 +427,11 @@ void SiteManagerDialog::onEdit() {
     const int modelIndex = selectedSiteIndex();
     if (modelIndex < 0 || modelIndex >= sites_.size())
         return;
-    SiteEntry editedEntry = sites_[modelIndex];
+    const QString siteId = sites_[modelIndex].siteId;
+    const QVector<SiteEntry> current = storedSites();
+    const int currentIndex = siteIndexById(current, siteId);
+    SiteEntry editedEntry =
+        currentIndex >= 0 ? current[currentIndex] : sites_[modelIndex];
     ConnectionDialog dlg(this);
     dlg.setWindowTitle(tr("Edit site"));
     dlg.setSiteNameVisible(true);
@@ -411,8 +442,9 @@ void SiteManagerDialog::onEdit() {
     dlg.setRememberLastPaths(editedEntry.rememberLastPaths);
     SiteCredentialRepository credentials;
     openscp::SessionOptions sessionOptions = editedEntry.opt;
-    showPersistIssues(
-        this, credentials.load(editedEntry, sessionOptions).issueMessages());
+    const SiteCredentialOperationResult loaded =
+        credentials.load(editedEntry, sessionOptions);
+    showPersistIssues(this, loaded.issueMessages());
     dlg.setOptions(sessionOptions);
     if (dlg.exec() != QDialog::Accepted)
         return;
@@ -427,23 +459,26 @@ void SiteManagerDialog::onEdit() {
         showMissingNameIssue(this);
         return;
     }
-    if (hasDuplicateSiteName(sites_, name, modelIndex)) {
+    QVector<SiteEntry> sites = storedSites();
+    const int storedIndex = siteIndexById(sites, siteId);
+    if (hasDuplicateSiteName(sites, name, storedIndex)) {
         showDuplicateNameIssue(this, name);
         return;
     }
-    const SiteEntry previousEntry = sites_[modelIndex];
     editedEntry.name = name;
-    sites_[modelIndex] = editedEntry;
-    if (!saveSites()) {
-        sites_[modelIndex] = previousEntry;
-        refresh();
-        selectSiteIndex(modelIndex);
+    if (storedIndex >= 0)
+        sites[storedIndex] = editedEntry;
+    else
+        sites.push_back(editedEntry);
+    const bool saved = storeSites(sites);
+    selectSite(siteId);
+    if (!saved)
         return;
-    }
-    refresh();
-    selectSiteIndex(modelIndex);
+    // An empty field for a credential that could not be read means unknown,
+    // not cleared, so saving keeps the stored value.
     showPersistIssues(
-        this, credentials.save(editedEntry, editedOptions).issueMessages());
+        this, credentials.save(editedEntry, editedOptions, loaded.issueKinds())
+                  .issueMessages());
 }
 
 void SiteManagerDialog::onDuplicate() {
@@ -451,7 +486,10 @@ void SiteManagerDialog::onDuplicate() {
     if (modelIndex < 0 || modelIndex >= sites_.size())
         return;
 
-    const SiteEntry source = sites_.at(modelIndex);
+    QVector<SiteEntry> sites = storedSites();
+    const int storedIndex = siteIndexById(sites, sites_[modelIndex].siteId);
+    const SiteEntry source =
+        storedIndex >= 0 ? sites.at(storedIndex) : sites_.at(modelIndex);
     SiteEntry duplicate = source;
     duplicate.siteId = SavedSitesPersistence::createSiteId();
     duplicate.opt.password.reset();
@@ -464,24 +502,21 @@ void SiteManagerDialog::onDuplicate() {
     const QString baseName = tr("%1 copy").arg(sourceName);
     duplicate.name = baseName;
     for (int suffix = 2;
-         hasDuplicateSiteName(sites_, duplicate.name) && suffix < 10000;
+         hasDuplicateSiteName(sites, duplicate.name) && suffix < 10000;
          ++suffix) {
         duplicate.name = tr("%1 copy %2").arg(sourceName).arg(suffix);
     }
-    if (hasDuplicateSiteName(sites_, duplicate.name)) {
+    if (hasDuplicateSiteName(sites, duplicate.name)) {
         duplicate.name =
             QString("%1 %2").arg(baseName, duplicate.siteId.left(6));
     }
 
-    sites_.push_back(duplicate);
-    if (!saveSites()) {
-        sites_.removeLast();
-        refresh();
-        selectSiteIndex(modelIndex);
+    sites.push_back(duplicate);
+    if (!storeSites(sites)) {
+        selectSite(source.siteId);
         return;
     }
-    refresh();
-    selectSiteIndex(static_cast<int>(sites_.size() - 1));
+    selectSite(duplicate.siteId);
 
     const auto copyChoice =
         UiAlerts::question(this, tr("Copy credentials?"),
@@ -500,22 +535,18 @@ void SiteManagerDialog::onRemove() {
     const int modelIndex = selectedSiteIndex();
     if (modelIndex < 0 || modelIndex >= sites_.size())
         return;
+    QVector<SiteEntry> sites = storedSites();
+    const int storedIndex = siteIndexById(sites, sites_[modelIndex].siteId);
     // Capture fields before removing for optional cleanup
-    const SiteEntry removed = sites_[modelIndex];
-    const QString removedHost = QString::fromStdString(removed.opt.host);
-    const std::uint16_t removedPort = removed.opt.port;
-    const QString removedKh =
-        removed.opt.known_hosts_path
-            ? QString::fromStdString(*removed.opt.known_hosts_path)
-            : QString();
-    sites_.remove(modelIndex);
-    if (!saveSites()) {
-        sites_.insert(modelIndex, removed);
-        refresh();
-        selectSiteIndex(modelIndex);
+    const SiteEntry removed =
+        storedIndex >= 0 ? sites[storedIndex] : sites_[modelIndex];
+    if (storedIndex >= 0)
+        sites.remove(storedIndex);
+    if (!storeSites(sites)) {
+        selectSite(removed.siteId);
         return;
     }
-    // Optionally delete stored credentials and known_hosts entry for this site
+    // Optionally delete stored credentials for this site
     openscpui::AppSettings settings;
     const bool deleteSecrets =
         settings
@@ -525,22 +556,57 @@ void SiteManagerDialog::onRemove() {
         showPersistIssues(
             this,
             SiteCredentialRepository().removeAll(removed).issueMessages());
-        // Also remove known_hosts entry if we know the file and host
-        // Derive effective known_hosts path from the entry we just removed (if
-        // available), falling back to ~/.ssh/known_hosts.
-        QString khPath = removedKh;
-        if (khPath.isEmpty()) {
-            khPath = QDir::homePath() + "/.ssh/known_hosts";
-        }
-        QFileInfo khInfo(khPath);
-        if (khInfo.exists() && khInfo.isFile()) {
-            std::string rmerr;
-            (void)openscp::RemoveKnownHostEntry(khPath.toStdString(),
-                                                removedHost.toStdString(),
-                                                removedPort, rmerr);
+    }
+    offerHostKeyRemoval(removed, sites);
+    refresh();
+}
+
+void SiteManagerDialog::offerHostKeyRemoval(
+    const SiteEntry &removed, const QVector<SiteEntry> &remainingSites) {
+    // The key guards every connection to that server, including those of ssh
+    // and other programs that read the same file, so it is never removed
+    // without asking, nor while another saved site still uses it.
+    const auto usesKnownHosts = [](const SiteEntry &site) {
+        return openscp::capabilitiesForProtocol(site.opt.protocol)
+            .supports_known_hosts;
+    };
+    if (!usesKnownHosts(removed))
+        return;
+    const QString host = QString::fromStdString(removed.opt.host);
+    const std::uint16_t port = removed.opt.port;
+    for (const SiteEntry &site : remainingSites) {
+        if (usesKnownHosts(site) && site.opt.port == port &&
+            QString::fromStdString(site.opt.host)
+                    .compare(host, Qt::CaseInsensitive) == 0) {
+            return;
         }
     }
-    refresh();
+    const QString khPath =
+        removed.opt.known_hosts_path
+            ? QString::fromStdString(*removed.opt.known_hosts_path)
+            : QDir::homePath() + QStringLiteral("/.ssh/known_hosts");
+    if (!openscp::HasKnownHostEntry(khPath.toStdString(), host.toStdString(),
+                                    port)) {
+        return;
+    }
+
+    const QString server =
+        port == 22 ? host : QStringLiteral("%1:%2").arg(host).arg(port);
+    if (UiAlerts::question(
+            this, tr("Remove host key"),
+            tr("Also remove the saved host key of %1 from %2?\n\nOther "
+               "programs that use this file, such as ssh, will not recognize "
+               "the server until its key is accepted again.")
+                .arg(server, khPath)) != QMessageBox::Yes) {
+        return;
+    }
+    std::string error;
+    if (!openscp::RemoveKnownHostEntry(khPath.toStdString(), host.toStdString(),
+                                       port, error)) {
+        UiAlerts::warning(this, tr("Remove host key"),
+                          tr("The host key could not be removed from %1:\n%2")
+                              .arg(khPath, QString::fromStdString(error)));
+    }
 }
 
 void SiteManagerDialog::onConnect() {

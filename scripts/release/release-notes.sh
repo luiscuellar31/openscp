@@ -21,17 +21,39 @@ die() {
   exit 1
 }
 
-append_item() {
-  local var_name="$1"
-  local text="$2"
-  printf -v "$var_name" '%s- %s\n' "${!var_name}" "$text"
+# Turns a commit description into a sentence: single spaces and a capital
+# first letter.
+sentence() {
+  local -a words
+  read -r -a words <<<"$1"
+  local text="${words[*]}"
+  local first
+  first="$(printf '%s' "${text:0:1}" | tr '[:lower:]' '[:upper:]')"
+  printf '%s' "${first}${text:1}"
 }
 
-print_section() {
-  local title="$1"
-  local items="$2"
-  [[ -n "$items" ]] || return 0
-  printf '## %s\n\n%s\n' "$title" "$items"
+# Prints "1 fix" or "3 fixes".
+count_phrase() {
+  if (($1 == 1)); then
+    printf '1 %s' "$2"
+  else
+    printf '%s %s' "$1" "$3"
+  fi
+}
+
+# Joins words as "A", "A and B" or "A, B and C".
+join_phrases() {
+  local result="" index
+  for ((index = 1; index <= $#; index++)); do
+    if ((index == 1)); then
+      result="${!index}"
+    elif ((index == $#)); then
+      result+=" and ${!index}"
+    else
+      result+=", ${!index}"
+    fi
+  done
+  printf '%s' "$result"
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -103,20 +125,81 @@ if [[ -z "$RANGE" ]]; then
   fi
 fi
 
+AREAS_FILE="${SCRIPT_DIR}/release-note-areas.tsv"
+AREA_NAMES=()
+AREA_SCOPES=()
+INTERNAL_SCOPES=" "
+
+# Sets found_area to an area index, to "internal", or to "" for a scope that
+# release-note-areas.tsv does not list.
+find_area() {
+  local scope="$1" index
+  found_area=""
+  [[ -n "$scope" ]] || return 0
+  if [[ "$INTERNAL_SCOPES" == *" ${scope} "* ]]; then
+    found_area="internal"
+    return 0
+  fi
+  for index in "${!AREA_SCOPES[@]}"; do
+    if [[ "${AREA_SCOPES[$index]}" == *" ${scope} "* ]]; then
+      found_area="$index"
+      return 0
+    fi
+  done
+}
+
+[[ -r "$AREAS_FILE" ]] || die "Cannot read ${AREAS_FILE}"
+line_number=0
+while IFS= read -r line || [[ -n "$line" ]]; do
+  line_number=$((line_number + 1))
+  [[ -z "$line" || "$line" == \#* ]] && continue
+  [[ "$line" == *$'\t'* ]] ||
+    die "${AREAS_FILE}:${line_number}: expected an area, a tab and its scopes"
+  area_name="${line%%$'\t'*}"
+  read -r -a area_scope_list <<<"${line#*$'\t'}"
+  [[ -n "$area_name" && ${#area_scope_list[@]} -gt 0 ]] ||
+    die "${AREAS_FILE}:${line_number}: an area needs a name and scopes"
+  for scope in "${area_scope_list[@]}"; do
+    find_area "$scope"
+    [[ -z "$found_area" ]] ||
+      die "${AREAS_FILE}:${line_number}: scope '${scope}' is listed twice"
+  done
+  if [[ "$area_name" == "internal" ]]; then
+    INTERNAL_SCOPES+="${area_scope_list[*]} "
+  else
+    AREA_NAMES+=("$area_name")
+    AREA_SCOPES+=(" ${area_scope_list[*]} ")
+  fi
+done <"$AREAS_FILE"
+((${#AREA_NAMES[@]} > 0)) || die "${AREAS_FILE} lists no areas"
+
+# User-visible changes are kept per area; the last slot is Other.
+OTHER_AREA=${#AREA_NAMES[@]}
+AREA_NAMES+=("Other")
+FEAT_ITEMS=()
+FIX_ITEMS=()
+PERF_ITEMS=()
+AREA_TOTALS=()
+for index in "${!AREA_NAMES[@]}"; do
+  FEAT_ITEMS[index]=""
+  FIX_ITEMS[index]=""
+  PERF_ITEMS[index]=""
+  AREA_TOTALS[index]=0
+done
+feat_count=0
+fix_count=0
+perf_count=0
+breaking_items=""
+maintenance_items=""
+maintenance_count=0
+unlisted_scopes=" "
+VERSION_BUMP_PATTERN='^[[:space:]]*[Bb]ump version'
+
 commits_raw="$(
   git log --no-merges --reverse \
     --pretty=tformat:'%H%x1f%s%x1f%b%x1e' \
     "$RANGE"
 )"
-
-breaking_items=""
-feat_items=""
-fix_items=""
-perf_items=""
-refactor_items=""
-docs_items=""
-maintenance_items=""
-other_items=""
 
 if [[ -n "$commits_raw" ]]; then
   while IFS= read -r -d $'\x1e' record; do
@@ -144,77 +227,125 @@ if [[ -n "$commits_raw" ]]; then
     if [[ "$subject" == *:* ]]; then
       prefix="${subject%%:*}"
       raw_desc="${subject#*:}"
-      raw_desc="${raw_desc#"${raw_desc%%[![:space:]]*}"}"
-      if [[ "$prefix" =~ ^([A-Za-z]+)(\(.*\))?(!)?$ ]]; then
+      if [[ "$prefix" =~ ^([A-Za-z]+)(\((.*)\))?(!)?$ ]]; then
         type="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
-        scope="${BASH_REMATCH[2]}"
-        bang="${BASH_REMATCH[3]}"
+        # A commit with several scopes is filed under the first.
+        scope="${BASH_REMATCH[3]%%,*}"
+        scope="${scope// /}"
+        bang="${BASH_REMATCH[4]}"
         desc="$raw_desc"
       fi
     fi
+    item="$(sentence "$desc") (${short_sha})"
 
-    if [[ -n "$scope" ]]; then
-      scope_name="${scope#(}"
-      scope_name="${scope_name%)}"
-      desc="${scope_name}: ${desc}"
-    fi
-
-    entry="${desc} (${short_sha})"
-
-    is_breaking=0
-    breaking_note=""
-    if [[ -n "$bang" ]]; then
-      is_breaking=1
-    fi
-    if [[ "$body" == *"BREAKING CHANGE:"* || "$body" == *"BREAKING-CHANGE:"* ]]; then
-      is_breaking=1
+    if [[ -n "$bang" || "$body" == *"BREAKING CHANGE:"* ||
+      "$body" == *"BREAKING-CHANGE:"* ]]; then
+      breaking_note=""
       while IFS= read -r line; do
+        # git puts a space before the body in this log format.
+        line="${line#"${line%%[![:space:]]*}"}"
         if [[ "$line" =~ ^BREAKING[[:space:]-]CHANGE:[[:space:]]*(.+)$ ]]; then
           breaking_note="${BASH_REMATCH[1]}"
           break
         fi
       done <<<"$body"
-    fi
-    if ((is_breaking)); then
       if [[ -n "$breaking_note" ]]; then
-        append_item breaking_items "${breaking_note} (${short_sha})"
+        breaking_items+="- $(sentence "$breaking_note") (${short_sha})"$'\n'
       else
-        append_item breaking_items "$entry"
+        breaking_items+="- ${item}"$'\n'
       fi
     fi
 
     case "$type" in
-    feat)
-      append_item feat_items "$entry"
-      ;;
-    fix)
-      append_item fix_items "$entry"
-      ;;
-    perf)
-      append_item perf_items "$entry"
-      ;;
-    refactor)
-      append_item refactor_items "$entry"
-      ;;
-    docs)
-      append_item docs_items "$entry"
-      ;;
-    build | ci | chore | style | test | revert)
-      append_item maintenance_items "$entry"
+    feat | fix | perf)
+      find_area "$scope"
+      if [[ "$found_area" != "internal" ]]; then
+        if [[ -z "$found_area" ]]; then
+          found_area=$OTHER_AREA
+          if [[ "$unlisted_scopes" != *" ${scope:-(none)} "* ]]; then
+            unlisted_scopes+="${scope:-(none)} "
+          fi
+        fi
+        case "$type" in
+        feat)
+          FEAT_ITEMS[found_area]+="- **${AREA_NAMES[$found_area]}:** ${item}"$'\n'
+          feat_count=$((feat_count + 1))
+          ;;
+        fix)
+          FIX_ITEMS[found_area]+="- ${item}"$'\n'
+          fix_count=$((fix_count + 1))
+          ;;
+        perf)
+          PERF_ITEMS[found_area]+="- ${item}"$'\n'
+          perf_count=$((perf_count + 1))
+          ;;
+        esac
+        AREA_TOTALS[found_area]=$((AREA_TOTALS[found_area] + 1))
+        continue
+      fi
       ;;
     "")
-      append_item other_items "${subject} (${short_sha})"
-      ;;
-    *)
-      append_item other_items "$entry"
+      echo "[release-notes] ${short_sha} has no Conventional Commits type; listed under Maintenance" >&2
       ;;
     esac
+    # The version bump is the release itself, not a change in it.
+    if [[ "$desc" =~ $VERSION_BUMP_PATTERN ]]; then
+      continue
+    fi
+    maintenance_items+="- ${item}"$'\n'
+    maintenance_count=$((maintenance_count + 1))
   done < <(printf '%s' "$commits_raw")
 fi
 
+for scope in $unlisted_scopes; do
+  echo "[release-notes] scope '${scope}' is not in release-note-areas.tsv; its changes are listed under Other" >&2
+done
+
+# Prints the fixes or performance changes with one heading per area.
+print_by_area() {
+  local title="$1" index items
+  printf '## %s\n\n' "$title"
+  for index in "${!AREA_NAMES[@]}"; do
+    if [[ "$title" == "Fixes" ]]; then
+      items="${FIX_ITEMS[$index]}"
+    else
+      items="${PERF_ITEMS[$index]}"
+    fi
+    [[ -n "$items" ]] || continue
+    printf '### %s\n\n%s\n' "${AREA_NAMES[$index]}" "$items"
+  done
+}
+
+summary=()
+if ((feat_count > 0)); then
+  summary+=("$(count_phrase "$feat_count" "new feature" "new features")")
+fi
+if ((fix_count > 0)); then
+  summary+=("$(count_phrase "$fix_count" "fix" "fixes")")
+fi
+if ((perf_count > 0)); then
+  summary+=("$(count_phrase "$perf_count" "performance improvement" "performance improvements")")
+fi
+# Up to three areas with the most changes, Other aside.
+busiest=()
+chosen=" "
+for _ in 1 2 3; do
+  best=""
+  for ((index = 0; index < OTHER_AREA; index++)); do
+    [[ "$chosen" != *" ${index} "* ]] || continue
+    ((AREA_TOTALS[index] > 0)) || continue
+    if [[ -z "$best" ]] || ((AREA_TOTALS[index] > AREA_TOTALS[best])); then
+      best=$index
+    fi
+  done
+  [[ -n "$best" ]] || break
+  chosen+="${best} "
+  busiest+=("**${AREA_NAMES[$best]}**")
+done
+
 {
   cat <<EOF
-<!-- RELEASE OVERVIEW: edit this block before publishing. Highlights come from feat commits. -->
+<!-- RELEASE OVERVIEW: write the release name and a short introduction before publishing. Everything below is generated from the commits. -->
 # Release name (${TAG})
 
 _Add a short introduction for this release._
@@ -223,7 +354,41 @@ _Add a short introduction for this release._
 
 EOF
 
-  print_section "Highlights" "$feat_items"
+  if ((${#summary[@]} > 0)); then
+    line="$(join_phrases "${summary[@]}")"
+    if ((${#busiest[@]} > 0)); then
+      line+=", mostly in $(join_phrases "${busiest[@]}")"
+    fi
+    printf '%s.\n\n' "$line"
+  fi
+
+  if [[ -n "$breaking_items" ]]; then
+    printf '## Breaking changes\n\n%s\n' "$breaking_items"
+  fi
+  if ((feat_count > 0)); then
+    printf "## What's new\n\n"
+    for index in "${!AREA_NAMES[@]}"; do
+      printf '%s' "${FEAT_ITEMS[$index]}"
+    done
+    printf '\n'
+  fi
+  if ((fix_count > 0)); then
+    print_by_area "Fixes"
+  fi
+  if ((perf_count > 0)); then
+    print_by_area "Performance"
+  fi
+
+  if ((maintenance_count > 0)); then
+    cat <<EOF
+<details>
+<summary><strong>Maintenance</strong>: $(count_phrase "$maintenance_count" "behind-the-scenes change" "behind-the-scenes changes") to code, tests, builds, releases and documentation</summary>
+
+${maintenance_items}
+</details>
+
+EOF
+  fi
 
   cat <<EOF
 <details>
@@ -236,6 +401,12 @@ Verify the download first. \`SHA256SUMS.txt\` is attached to this release:
 \`\`\`bash
 shasum -a 256 -c SHA256SUMS.txt --ignore-missing  # macOS
 sha256sum -c SHA256SUMS.txt --ignore-missing      # Linux
+\`\`\`
+
+Checksums catch a damaged download, not a replaced one. To confirm that a file was built by this repository's release workflow, use the [GitHub CLI](https://cli.github.com/):
+
+\`\`\`bash
+gh attestation verify OpenSCP-${VERSION}-x86_64.AppImage --repo luiscuellar31/openscp
 \`\`\`
 
 ### macOS
@@ -265,21 +436,8 @@ Replace \`x86_64\` with \`aarch64\` on ARM64 machines.
 
 </details>
 
-<details>
-<summary><strong>Full changelog</strong></summary>
-
 EOF
 
-  print_section "Breaking changes" "$breaking_items"
-  print_section "Fixes" "$fix_items"
-  print_section "Performance" "$perf_items"
-  print_section "Refactors" "$refactor_items"
-  print_section "Documentation" "$docs_items"
-  print_section "Maintenance" "$maintenance_items"
-  print_section "Other changes" "$other_items"
-
-  echo "</details>"
-  echo
   if [[ -n "$PREV_TAG" && -n "$REPO" ]]; then
     echo "**Full comparison:** [\`${PREV_TAG}...${TAG}\`](https://github.com/${REPO}/compare/${PREV_TAG}...${TAG})"
   elif [[ -n "$PREV_TAG" ]]; then

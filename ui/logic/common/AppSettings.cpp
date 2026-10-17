@@ -48,6 +48,15 @@ QString effectiveStagingRootPath(const QSettings &settings) {
     return configuredRoot.isEmpty() ? defaultStagingRootPath() : configuredRoot;
 }
 
+int effectiveNoHostVerificationTtlMinutes(const QSettings &settings) {
+    return qBound(1,
+                  settings
+                      .value(settingskeys::kNoHostVerificationTtlMinutes,
+                             settingskeys::kDefaultNoHostVerificationTtlMinutes)
+                      .toInt(),
+                  120);
+}
+
 AppSettings::AppSettings(Store store)
     // Passing the format explicitly matters: the organization/application
     // constructor always uses NativeFormat, so a caller that redirects

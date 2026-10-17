@@ -34,8 +34,9 @@ bool removeLocalPath(const std::string &path, bool directory,
                      std::string &error);
 bool localFileIdentity(const std::string &path, LocalFileIdentity &identity,
                        std::string &error);
-// Compares the entry immediately before unlinking it. Other processes can
-// still replace the entry between those two filesystem calls.
+// Checks a move source without unlinking an existing entry. POSIX cannot
+// atomically compare identity and unlink, so unchanged sources fail with
+// ENOTSUP for manual cleanup; already absent sources succeed.
 bool removeLocalFileIfUnchanged(const std::string &path,
                                 const LocalFileIdentity &identity,
                                 std::string &error);
@@ -44,8 +45,15 @@ bool setLocalModificationTime(const std::string &path,
 
 // Opens a user-owned regular file without following a final-component symlink.
 // The descriptor is opened with close-on-exec and restricted permissions.
+// On POSIX, opening does not wait for a FIFO reader. The opened descriptor is
+// validated before modification, and returned regular-file streams block.
 std::FILE *openRegularFileForWrite(const std::string &path, WriteMode mode,
                                    std::string &error);
+
+// The permission bits (mode & 0777) of an open local file, which uploads give
+// the remote copy as OpenSSH's sftp and scp do. Windows has no such bits, so
+// it, and a file that cannot be inspected, get 0644.
+std::uint32_t uploadPermissions(std::FILE *file);
 
 // Buffered always flushes userspace buffers. File also syncs file data and
 // metadata; FileAndDirectory additionally makes the published directory entry

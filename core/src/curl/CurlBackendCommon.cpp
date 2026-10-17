@@ -5,6 +5,12 @@
 #include "openscp/RemotePath.hpp"
 #include "openscp/SafeLocalFile.hpp"
 
+#include <openssl/bio.h>
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
@@ -40,14 +46,6 @@ std::string localDestinationKey(const std::string &path) {
     if (pathError)
         return std::string("local:") + path;
     return std::string("local:") + absolutePath.lexically_normal().string();
-}
-
-size_t writeFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
-    if (!userdata)
-        return 0;
-    std::FILE *file = static_cast<std::FILE *>(userdata);
-    const size_t total = size * nmemb;
-    return std::fwrite(ptr, 1, total, file);
 }
 
 size_t readFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
@@ -275,10 +273,15 @@ bool rejectInterrupted(const std::atomic<bool> *interrupted, std::string &err,
 
 std::string trimAscii(std::string value) {
     auto isWs = [](unsigned char c) { return std::isspace(c) != 0; };
-    while (!value.empty() && isWs(static_cast<unsigned char>(value.front())))
-        value.erase(value.begin());
-    while (!value.empty() && isWs(static_cast<unsigned char>(value.back())))
-        value.pop_back();
+    std::size_t first = 0;
+    std::size_t last = value.size();
+    while (first < last && isWs(static_cast<unsigned char>(value[first])))
+        ++first;
+    while (last > first && isWs(static_cast<unsigned char>(value[last - 1])))
+        --last;
+    // Shift the retained content once, after scanning the bounds in O(L).
+    value.resize(last);
+    value.erase(0, first);
     return value;
 }
 
@@ -424,6 +427,26 @@ bool webDavLogicalPath(std::string_view basePath, std::string_view serverPath,
     return true;
 }
 
+bool isWebDavCollectionRedirect(std::string_view redirectUrl,
+                                std::string_view serverPath) {
+    const std::string path = normalizeRemotePath(serverPath);
+    if (path == "/")
+        return false;
+    CURLU *url = curl_url();
+    if (!url)
+        return false;
+    const std::string redirect(redirectUrl);
+    char *redirectPath = nullptr;
+    const bool matches =
+        curl_url_set(url, CURLUPART_URL, redirect.c_str(), 0) == CURLUE_OK &&
+        curl_url_get(url, CURLUPART_PATH, &redirectPath, CURLU_URLDECODE) ==
+            CURLUE_OK &&
+        redirectPath && path + "/" == redirectPath;
+    curl_free(redirectPath);
+    curl_url_cleanup(url);
+    return matches;
+}
+
 bool isCompletedWebDavGetStatus(long statusCode) {
     return statusCode == 200;
 }
@@ -516,6 +539,9 @@ RemoteError errorFromCurl(CURLcode code, std::string message, long responseCode,
     case CURLE_RECV_ERROR:
     case CURLE_SEND_ERROR:
     case CURLE_GOT_NOTHING:
+    // A handshake that broke off, such as on a reset, not a certificate that
+    // failed verification.
+    case CURLE_SSL_CONNECT_ERROR:
         error.kind = RemoteErrorKind::Connection;
         error.transient = true;
         break;
@@ -535,7 +561,6 @@ RemoteError errorFromCurl(CURLcode code, std::string message, long responseCode,
     case CURLE_REMOTE_DISK_FULL:
         error.kind = RemoteErrorKind::InsufficientSpace;
         break;
-    case CURLE_SSL_CONNECT_ERROR:
     case CURLE_SSL_CERTPROBLEM:
     case CURLE_SSL_CIPHER:
     case CURLE_PEER_FAILED_VERIFICATION:
@@ -550,18 +575,12 @@ RemoteError errorFromCurl(CURLcode code, std::string message, long responseCode,
         error.kind = RemoteErrorKind::Certificate;
         break;
     case CURLE_WRITE_ERROR:
-        if (errno == ENOSPC) {
-            error.kind = RemoteErrorKind::InsufficientSpace;
-            error.native_code = ENOSPC;
-            break;
-        }
-        error.kind = RemoteErrorKind::LocalIo;
-        break;
     case CURLE_READ_ERROR:
         error.kind = RemoteErrorKind::LocalIo;
         break;
     case CURLE_QUOTE_ERROR:
     case CURLE_WEIRD_SERVER_REPLY:
+    case CURLE_FILESIZE_EXCEEDED:
         error.kind = RemoteErrorKind::Protocol;
         break;
     default:
@@ -573,6 +592,23 @@ RemoteError errorFromCurl(CURLcode code, std::string message, long responseCode,
                             error.kind == RemoteErrorKind::Timeout ||
                             error.kind == RemoteErrorKind::RemoteIo);
     return error;
+}
+
+CURLcode performWithErrorDetail(CURL *curl, std::string &detail) {
+    char buffer[CURL_ERROR_SIZE] = {};
+    (void)curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, buffer);
+    const CURLcode code = curl_easy_perform(curl);
+    // The handle outlives this buffer.
+    (void)curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, nullptr);
+    detail = buffer;
+    return code;
+}
+
+std::string curlFailureText(CURLcode code, const std::string &detail) {
+    std::string text = curl_easy_strerror(code);
+    if (!detail.empty() && detail != text)
+        text += ": " + detail;
+    return text;
 }
 
 RemoteError errorFromHttpStatus(long statusCode, std::string message,
@@ -636,6 +672,15 @@ bool configureBaseCurlHandle(CURL *curl, const char *backendLabel,
         curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 60L) != CURLE_OK) {
         err = std::string("Could not configure ") + backendLabel +
               " client timeouts.";
+        return false;
+    }
+    // The FTP control connection stays silent during a long transfer, and a
+    // NAT or load balancer drops it after a few idle minutes.
+    if (curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_TCP_KEEPIDLE, 60L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_TCP_KEEPINTVL, 30L) != CURLE_OK) {
+        err = std::string("Could not configure ") + backendLabel +
+              " TCP keepalive.";
         return false;
     }
     if (responseTimeoutSeconds &&
@@ -744,6 +789,16 @@ bool configureProxy(CURL *curl, const SessionOptions &opt,
                   " proxy username.";
             return false;
         }
+        // libcurl would send the password in Basic, in clear, to any HTTP
+        // proxy. ANY asks the proxy first and picks the safest method it
+        // offers, so NTLM, Negotiate and Digest proxies work too.
+        if (normalizedProxyType == ProxyType::HttpConnect &&
+            curl_easy_setopt(curl, CURLOPT_PROXYAUTH, CURLAUTH_ANY) !=
+                CURLE_OK) {
+            err = std::string("Could not configure ") + backendLabel +
+                  " proxy authentication.";
+            return false;
+        }
     }
     if (opt.proxy_password && !opt.proxy_password->empty()) {
         if (curl_easy_setopt(curl, CURLOPT_PROXYPASSWORD,
@@ -759,6 +814,7 @@ bool configureProxy(CURL *curl, const SessionOptions &opt,
 
 bool configureTlsPolicy(CURL *curl, bool verifyPeer,
                         const std::optional<std::string> &caCertPath,
+                        const std::optional<std::string> &pinnedPublicKey,
                         const char *minimumVersionError,
                         const char *verificationError, const char *caPathError,
                         std::string &err) {
@@ -788,7 +844,115 @@ bool configureTlsPolicy(CURL *curl, bool verifyPeer,
             return false;
         }
     }
+    if (pinnedPublicKey && !pinnedPublicKey->empty()) {
+        if (curl_easy_setopt(curl, CURLOPT_PINNEDPUBLICKEY,
+                             pinnedPublicKey->c_str()) != CURLE_OK) {
+            err = "This libcurl build cannot pin the server's TLS public key.";
+            return false;
+        }
+    }
     return true;
+}
+
+bool publicKeyPinFromPem(std::string_view pem, std::string &pin) {
+    pin.clear();
+    if (pem.empty() ||
+        pem.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+        return false;
+    std::unique_ptr<BIO, decltype(&BIO_free)> bio(
+        BIO_new_mem_buf(pem.data(), static_cast<int>(pem.size())), &BIO_free);
+    if (!bio)
+        return false;
+    std::unique_ptr<X509, decltype(&X509_free)> certificate(
+        PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr), &X509_free);
+    if (!certificate)
+        return false;
+    unsigned char *der = nullptr;
+    const int derLength =
+        i2d_X509_PUBKEY(X509_get_X509_PUBKEY(certificate.get()), &der);
+    if (derLength <= 0)
+        return false;
+    const auto freeDer = [](unsigned char *bytes) { OPENSSL_free(bytes); };
+    std::unique_ptr<unsigned char, decltype(freeDer)> ownedDer(der, freeDer);
+    unsigned char digest[EVP_MAX_MD_SIZE] = {};
+    unsigned int digestLength = 0;
+    if (EVP_Digest(der, static_cast<std::size_t>(derLength), digest,
+                   &digestLength, EVP_sha256(), nullptr) != 1)
+        return false;
+    unsigned char encoded[4 * ((EVP_MAX_MD_SIZE + 2) / 3) + 1] = {};
+    const int encodedLength =
+        EVP_EncodeBlock(encoded, digest, static_cast<int>(digestLength));
+    if (encodedLength <= 0)
+        return false;
+    pin = "sha256//" + std::string(reinterpret_cast<const char *>(encoded),
+                                   static_cast<std::size_t>(encodedLength));
+    return true;
+}
+
+namespace {
+
+bool hasServerCertificate(CURL *curl) {
+    struct curl_certinfo *info = nullptr;
+    return curl_easy_getinfo(curl, CURLINFO_CERTINFO, &info) == CURLE_OK &&
+           info && info->num_of_certs > 0;
+}
+
+// FTP logs in while it connects. The first reply after the handshake stops
+// the probe, so the server sees USER but never PASS.
+size_t stopAfterServerCertificate(char *, size_t size, size_t nmemb,
+                                  void *userdata) {
+    if (hasServerCertificate(static_cast<CURL *>(userdata)))
+        return 0;
+    return size * nmemb;
+}
+
+} // namespace
+
+bool readServerPublicKeyPin(CURL *curl, const std::string &url,
+                            const std::stop_token &stop, std::string &pin,
+                            std::string &err) {
+    pin.clear();
+    TransferProgressContext cancelContext;
+    cancelContext.shouldCancel = [&stop] { return stop.stop_requested(); };
+    if (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_CERTINFO, 1L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 1L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION,
+                         stopAfterServerCertificate) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_HEADERDATA, curl) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
+                         transferProgressCallback) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &cancelContext) !=
+            CURLE_OK) {
+        err = "Could not configure the TLS public key check.";
+        return false;
+    }
+    std::string detail;
+    const CURLcode code = performWithErrorDetail(curl, detail);
+    if (stop.stop_requested()) {
+        err = "Connection canceled by user";
+        return false;
+    }
+    struct curl_certinfo *info = nullptr;
+    if (curl_easy_getinfo(curl, CURLINFO_CERTINFO, &info) != CURLE_OK ||
+        !info || info->num_of_certs <= 0) {
+        err = code == CURLE_OK
+                  ? std::string("The server did not present a certificate.")
+                  : curlFailureText(code, detail);
+        return false;
+    }
+    // The server's own certificate comes first in the chain.
+    constexpr std::string_view kCertificateField = "Cert:";
+    for (const curl_slist *field = info->certinfo[0]; field;
+         field = field->next) {
+        const std::string_view text = field->data ? field->data : "";
+        if (text.starts_with(kCertificateField) &&
+            publicKeyPinFromPem(text.substr(kCertificateField.size()), pin))
+            return true;
+    }
+    err = "Could not read the public key of the server certificate.";
+    return false;
 }
 
 size_t appendStringCallback(char *ptr, size_t size, size_t nmemb,
@@ -815,6 +979,34 @@ size_t appendStringCallback(char *ptr, size_t size, size_t nmemb,
     return total;
 }
 
+bool refusedResponse(const BoundedStringSink &sink, const std::string &response,
+                     CURLcode &code, std::string &err) {
+    if (sink.limitExceeded) {
+        code = CURLE_FILESIZE_EXCEEDED;
+        err = response + " exceeded the " +
+              std::to_string(sink.maxBytes / (1024 * 1024)) +
+              " MiB safety limit.";
+        return true;
+    }
+    if (sink.allocationFailed) {
+        code = CURLE_WRITE_ERROR;
+        err = response + " could not be stored in memory.";
+        return true;
+    }
+    return false;
+}
+
+size_t writeFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata) {
+    auto *context = static_cast<TransferProgressContext *>(userdata);
+    if (!context || !context->downloadFile)
+        return 0;
+    const size_t total = size * nmemb;
+    const size_t written = std::fwrite(ptr, 1, total, context->downloadFile);
+    if (written != total)
+        context->writeError = errno;
+    return written;
+}
+
 int seekFileCallback(void *userdata, curl_off_t offset, int origin) {
     if (!userdata)
         return CURL_SEEKFUNC_FAIL;
@@ -838,11 +1030,14 @@ int seekFileCallback(void *userdata, curl_off_t offset, int origin) {
 bool configureFileDownload(CURL *curl, std::FILE *file,
                            TransferProgressContext &progressContext,
                            std::string &err) {
+    progressContext.downloadFile = file;
+    progressContext.writeError = 0;
     const bool configured =
         curl && file &&
         (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeFileCallback) ==
          CURLE_OK) &&
-        (curl_easy_setopt(curl, CURLOPT_WRITEDATA, file) == CURLE_OK) &&
+        (curl_easy_setopt(curl, CURLOPT_WRITEDATA, &progressContext) ==
+         CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) == CURLE_OK) &&
         (curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
                           transferProgressCallback) == CURLE_OK) &&
@@ -917,7 +1112,8 @@ performCurlTransfer(CURL *curl, TransferProgressContext &progressContext,
         return result;
     }
 
-    result.curlCode = curl_easy_perform(curl);
+    std::string detail;
+    result.curlCode = performWithErrorDetail(curl, detail);
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result.responseCode);
     if (detectTransferCancellation(progressContext, err)) {
         result.failure = CurlTransferFailure::Canceled;
@@ -927,7 +1123,7 @@ performCurlTransfer(CURL *curl, TransferProgressContext &progressContext,
     if (result.curlCode != CURLE_OK) {
         result.failure = CurlTransferFailure::Transport;
         err = std::string(operationLabel) +
-              " failed: " + curl_easy_strerror(result.curlCode);
+              " failed: " + curlFailureText(result.curlCode, detail);
     }
     return result;
 }
@@ -1001,6 +1197,13 @@ bool downloadToLocalFile(CURL *curl, const std::string &destination,
     if (!result.succeeded()) {
         localFileOwner.reset();
         failure = transferFailureError(result, err, transportErrorMapper);
+        if (result.curlCode == CURLE_WRITE_ERROR &&
+            progressContext.writeError != 0) {
+            failure.kind = progressContext.writeError == ENOSPC
+                               ? RemoteErrorKind::InsufficientSpace
+                               : RemoteErrorKind::LocalIo;
+            failure.native_code = progressContext.writeError;
+        }
         return false;
     }
     if (responseErrorMapper) {
@@ -1091,38 +1294,44 @@ int transferProgressCallback(void *userdata, curl_off_t dltotal,
     if (!ctx)
         return 0;
 
-    const bool preferUpload = ctx->preferUploadCounters;
-    // Some protocols only report one side reliably; pick preferred counters
-    // and fallback to the opposite side when needed.
-    const curl_off_t totalRaw = preferUpload
-                                    ? ((ultotal > 0) ? ultotal : dltotal)
-                                    : ((dltotal > 0) ? dltotal : ultotal);
-    const curl_off_t doneRaw = preferUpload ? ((ulnow > 0) ? ulnow : dlnow)
-                                            : ((dlnow > 0) ? dlnow : ulnow);
-    if (totalRaw > 0 && doneRaw >= totalRaw)
-        ctx->payloadComplete = true;
+    // An exception from the UI's callbacks must not cross libcurl's C frames,
+    // so it stops the transfer.
+    try {
+        const bool preferUpload = ctx->preferUploadCounters;
+        // Some protocols only report one side reliably; pick preferred counters
+        // and fallback to the opposite side when needed.
+        const curl_off_t totalRaw = preferUpload
+                                        ? ((ultotal > 0) ? ultotal : dltotal)
+                                        : ((dltotal > 0) ? dltotal : ultotal);
+        const curl_off_t doneRaw = preferUpload ? ((ulnow > 0) ? ulnow : dlnow)
+                                                : ((dlnow > 0) ? dlnow : ulnow);
+        if (totalRaw > 0 && doneRaw >= totalRaw)
+            ctx->payloadComplete = true;
 
-    if (ctx->interrupted && ctx->interrupted->load())
-        return 1;
-    if (!ctx->payloadComplete && ctx->shouldCancel && ctx->shouldCancel())
-        return 1;
-    if (!ctx->progressCb)
+        if (ctx->interrupted && ctx->interrupted->load())
+            return 1;
+        if (!ctx->payloadComplete && ctx->shouldCancel && ctx->shouldCancel())
+            return 1;
+        if (!ctx->progressCb)
+            return 0;
+
+        const std::size_t total =
+            totalRaw > 0 ? static_cast<std::size_t>(totalRaw) : 0u;
+        const std::size_t done =
+            doneRaw > 0 ? static_cast<std::size_t>(doneRaw) : 0u;
+        ctx->progressCb(done, total);
+        // A progress callback can itself publish the state that makes
+        // shouldCancel() true. Abort incomplete payloads immediately; completed
+        // payloads finish their response so callers can retain the remote/local
+        // partial while still refusing the final publish step.
+        if (ctx->interrupted && ctx->interrupted->load())
+            return 1;
+        if (!ctx->payloadComplete && ctx->shouldCancel && ctx->shouldCancel())
+            return 1;
         return 0;
-
-    const std::size_t total =
-        totalRaw > 0 ? static_cast<std::size_t>(totalRaw) : 0u;
-    const std::size_t done =
-        doneRaw > 0 ? static_cast<std::size_t>(doneRaw) : 0u;
-    ctx->progressCb(done, total);
-    // A progress callback can itself publish the state that makes
-    // shouldCancel() true. Abort incomplete payloads immediately; completed
-    // payloads finish their response so callers can retain the remote/local
-    // partial while still refusing the final publish step.
-    if (ctx->interrupted && ctx->interrupted->load())
+    } catch (...) {
         return 1;
-    if (!ctx->payloadComplete && ctx->shouldCancel && ctx->shouldCancel())
-        return 1;
-    return 0;
+    }
 }
 
 } // namespace openscp::curlcommon

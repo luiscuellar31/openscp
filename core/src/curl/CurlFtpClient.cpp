@@ -99,9 +99,11 @@ std::string ftpDestinationKey(const SessionOptions &opt,
 }
 
 std::string formatCurlProbeFailure(Protocol protocol, CURLcode code,
+                                   const std::string &detail,
                                    long responseCode) {
-    std::string msg = std::string(protocolLabel(protocol)) +
-                      " connect probe failed: " + curl_easy_strerror(code);
+    std::string msg =
+        std::string(protocolLabel(protocol)) +
+        " connect probe failed: " + curlcommon::curlFailureText(code, detail);
     if (responseCode > 0) {
         msg += " (server response ";
         msg += std::to_string(responseCode);
@@ -118,7 +120,9 @@ RemoteError ftpErrorFromResult(CURLcode code, long responseCode,
     if (responseCode == 530) {
         error.kind = RemoteErrorKind::Authentication;
         error.transient = false;
-    } else if (responseCode == 550 || responseCode == 553) {
+    } else if ((responseCode == 550 || responseCode == 553) &&
+               code != CURLE_REMOTE_FILE_NOT_FOUND) {
+        // libcurl already reads a RETR 550 as a missing file.
         error.kind = RemoteErrorKind::PermissionDenied;
         error.transient = false;
     } else if (responseCode == 452 || responseCode == 552) {
@@ -177,6 +181,7 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
         }
         if (!curlcommon::configureTlsPolicy(
                 curl, opt.ftps_verify_peer, opt.ftps_ca_cert_path,
+                opt.tls_pinned_public_key,
                 "Could not enforce the FTPS TLS 1.2 minimum.",
                 "Could not configure FTPS certificate verification.",
                 "Could not configure FTPS CA certificate path.", err)) {
@@ -231,25 +236,24 @@ bool runDirectoryListingCommand(CURL *curl, const SessionOptions &opt,
     if (curlcommon::rejectInterrupted(interrupted, err, &result.curlCode))
         return false;
 
-    result.curlCode = curl_easy_perform(curl);
+    std::string detail;
+    result.curlCode = curlcommon::performWithErrorDetail(curl, detail);
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result.responseCode);
     if (interrupted && interrupted->load()) {
         result.curlCode = CURLE_ABORTED_BY_CALLBACK;
         err = "Interrupted";
         return false;
     }
-    if (payloadSink.limitExceeded || payloadSink.allocationFailed) {
-        result.curlCode = CURLE_WRITE_ERROR;
-        err = payloadSink.limitExceeded
-                  ? std::string(protocolLabel(opt.protocol)) +
-                        " directory listing exceeded the 64 MiB safety limit."
-                  : std::string(protocolLabel(opt.protocol)) +
-                        " directory listing could not be stored in memory.";
+    if (curlcommon::refusedResponse(payloadSink,
+                                    std::string(protocolLabel(opt.protocol)) +
+                                        " directory listing",
+                                    result.curlCode, err)) {
         return false;
     }
     if (result.curlCode != CURLE_OK) {
         err = std::string(protocolLabel(opt.protocol)) + " listing command " +
-              command + " failed: " + curl_easy_strerror(result.curlCode);
+              command + " failed: " +
+              curlcommon::curlFailureText(result.curlCode, detail);
         return false;
     }
     if (result.responseCode >= 400) {
@@ -301,10 +305,16 @@ int captureFtpCommandReply(CURL *, curl_infotype type, char *data, size_t size,
         capture->capturing = chunk.substr(0, capture->commandPrefix.size()) ==
                              capture->commandPrefix;
     } else if (type == CURLINFO_HEADER_IN && capture->capturing) {
-        if (capture->reply.size() + size > kMaxReplyBytes)
+        if (capture->reply.size() + size > kMaxReplyBytes) {
             capture->overflow = true;
-        else
-            capture->reply.append(chunk);
+        } else {
+            // An exception must not cross libcurl's C frames.
+            try {
+                capture->reply.append(chunk);
+            } catch (...) {
+                capture->overflow = true;
+            }
+        }
     }
     return 0;
 }
@@ -369,19 +379,17 @@ bool runFtpCommands(CURL *curl, const SessionOptions &opt,
         return false;
     }
 
-    curlCodeOut = curl_easy_perform(curl);
+    std::string detail;
+    curlCodeOut = curlcommon::performWithErrorDetail(curl, detail);
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCodeOut);
     curl_slist_free_all(quote);
-    if (responseSink.limitExceeded || responseSink.allocationFailed) {
-        curlCodeOut = CURLE_WRITE_ERROR;
-        err = responseSink.limitExceeded
-                  ? "FTP command response exceeded the 64 MiB safety limit."
-                  : "FTP command response could not be stored in memory.";
+    if (curlcommon::refusedResponse(responseSink, "FTP command response",
+                                    curlCodeOut, err)) {
         return false;
     }
     if (curlCodeOut != CURLE_OK) {
-        err = std::string(protocolLabel(opt.protocol)) +
-              " command failed: " + curl_easy_strerror(curlCodeOut);
+        err = std::string(protocolLabel(opt.protocol)) + " command failed: " +
+              curlcommon::curlFailureText(curlCodeOut, detail);
         if (responseCodeOut > 0)
             err += " (server response " + std::to_string(responseCodeOut) + ")";
         return false;
@@ -446,6 +454,22 @@ bool fetchFtpListing(CURL *curl, const SessionOptions &opt,
         err = "Interrupted";
         return false;
     }
+    // LIST can only help when the server refused MLSD with a reply or sent
+    // output that does not parse. A timeout, a blocked data connection (425
+    // and 426 included), a TLS failure or the size limit would fail LIST the
+    // same way, only later.
+    const long mlsdReply = mlsdResult.responseCode;
+    const bool mlsdRefusedByReply =
+        mlsdReply >= 400 && mlsdReply != 425 && mlsdReply != 426;
+    if (!mlsdRejected && !mlsdOk && !mlsdRefusedByReply) {
+        if (lastCurlCode)
+            *lastCurlCode = mlsdResult.curlCode;
+        if (lastResponseCode)
+            *lastResponseCode = mlsdReply;
+        err = std::string(protocolLabel(opt.protocol)) +
+              " directory listing failed: " + mlsdErr;
+        return false;
+    }
 
     std::string listPayload;
     std::string listErr;
@@ -495,10 +519,112 @@ bool fetchFtpListing(CURL *curl, const SessionOptions &opt,
 
 enum class FtpLookupResult { Found, NotFound, Failed };
 
+// A NOBODY request with FILETIME, which libcurl answers from the control
+// connection: MDTM, TYPE and SIZE for a file URL, only CWD for a folder URL.
+// Neither opens a data connection.
+CURLcode probeFtpUrl(CURL *curl, const SessionOptions &opt,
+                     const std::string &url,
+                     const std::atomic<bool> *interrupted, curl_off_t &fileTime,
+                     curl_off_t &length, long &responseCode) {
+    fileTime = -1;
+    length = -1;
+    responseCode = 0;
+    curl_easy_reset(curl);
+    std::string err;
+    if (!configureCommonCurlHandle(curl, opt, err))
+        return CURLE_FAILED_INIT;
+    std::string sink;
+    curlcommon::BoundedStringSink responseSink{&sink};
+    curlcommon::TransferProgressContext cancelContext{
+        {}, {}, interrupted, false};
+    if (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_NOBODY, 1L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_FILETIME, 1L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
+                         curlcommon::appendStringCallback) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseSink) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
+                         curlcommon::transferProgressCallback) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &cancelContext) !=
+            CURLE_OK) {
+        return CURLE_FAILED_INIT;
+    }
+    CURLcode code = CURLE_OK;
+    if (curlcommon::rejectInterrupted(interrupted, err, &code))
+        return code;
+    std::string detail;
+    code = curlcommon::performWithErrorDetail(curl, detail);
+    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
+    if (code == CURLE_OK) {
+        (void)curl_easy_getinfo(curl, CURLINFO_FILETIME_T, &fileTime);
+        (void)curl_easy_getinfo(curl, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T,
+                                &length);
+    }
+    return code;
+}
+
+// Without MLST, asks for the path as a file and then as a folder. Missing
+// tells "not found" like a 550 to MLST does; Unknown, from a server that
+// gives neither size nor time or from another failure, leaves the parent
+// listing to decide.
+enum class FtpProbeResult { Found, NotFound, Unknown, Interrupted };
+
+FtpProbeResult probeFtpEntry(CURL *curl, const SessionOptions &opt,
+                             const std::string &target,
+                             const std::atomic<bool> *interrupted,
+                             FileInfo &info) {
+    curl_off_t fileTime = -1;
+    curl_off_t length = -1;
+    long responseCode = 0;
+    const CURLcode asFile =
+        probeFtpUrl(curl, opt, buildFtpUrl(opt, target), interrupted, fileTime,
+                    length, responseCode);
+    if (asFile == CURLE_ABORTED_BY_CALLBACK)
+        return FtpProbeResult::Interrupted;
+    if (asFile == CURLE_OK) {
+        if (fileTime < 0 && length < 0)
+            return FtpProbeResult::Unknown;
+        info = FileInfo{};
+        info.name = remoteBaseName(target);
+        info.is_dir = false;
+        info.mode = 0100000u;
+        if (length >= 0) {
+            info.size = static_cast<std::uint64_t>(length);
+            info.has_size = true;
+        }
+        if (fileTime >= 0)
+            info.mtime = static_cast<std::uint64_t>(fileTime);
+        return FtpProbeResult::Found;
+    }
+    // A missing parent folder fails its CWD before MDTM is sent.
+    if (asFile == CURLE_REMOTE_ACCESS_DENIED)
+        return FtpProbeResult::NotFound;
+    if (asFile != CURLE_REMOTE_FILE_NOT_FOUND)
+        return FtpProbeResult::Unknown;
+
+    const CURLcode asFolder =
+        probeFtpUrl(curl, opt, buildFtpUrl(opt, target, true), interrupted,
+                    fileTime, length, responseCode);
+    if (asFolder == CURLE_ABORTED_BY_CALLBACK)
+        return FtpProbeResult::Interrupted;
+    if (asFolder == CURLE_OK) {
+        info = FileInfo{};
+        info.name = remoteBaseName(target);
+        info.is_dir = true;
+        info.mode = 0040000u;
+        return FtpProbeResult::Found;
+    }
+    if (asFolder == CURLE_REMOTE_ACCESS_DENIED)
+        return FtpProbeResult::NotFound;
+    return FtpProbeResult::Unknown;
+}
+
 // Finds one remote entry. MLST answers on the control connection; servers
-// without it fall back to searching the parent directory listing. A 550 MLST
-// reply is taken as "not found", as FTP does not tell it apart from denied
-// access.
+// without it, such as vsftpd, are asked with MDTM, SIZE and CWD, also on the
+// control connection, and the parent directory listing is searched only when
+// those cannot tell. A 550 reply is taken as "not found", as FTP does not
+// tell it apart from denied access.
 FtpLookupResult lookupFtpEntry(CURL *curl, const SessionOptions &opt,
                                const std::string &commandRoot,
                                const std::string &target,
@@ -536,6 +662,22 @@ FtpLookupResult lookupFtpEntry(CURL *curl, const SessionOptions &opt,
         err.clear();
     }
 
+    switch (probeFtpEntry(curl, opt, target, interrupted, info)) {
+    case FtpProbeResult::Found:
+        return FtpLookupResult::Found;
+    case FtpProbeResult::NotFound:
+        info = FileInfo{};
+        return FtpLookupResult::NotFound;
+    case FtpProbeResult::Interrupted:
+        info = FileInfo{};
+        curlCode = CURLE_ABORTED_BY_CALLBACK;
+        err = "Interrupted";
+        return FtpLookupResult::Failed;
+    case FtpProbeResult::Unknown:
+        info = FileInfo{};
+        break;
+    }
+
     std::vector<FileInfo> parentEntries;
     if (!fetchFtpListing(curl, opt, remoteParentPath(target), interrupted,
                          mlsdRejected, parentEntries, err, &curlCode,
@@ -552,7 +694,64 @@ FtpLookupResult lookupFtpEntry(CURL *curl, const SessionOptions &opt,
     return FtpLookupResult::Found;
 }
 
+// FTP answers 550 both for a missing path and for refused access. After a
+// failed DELE, RMD or RNFR, a lookup tells a missing path apart, so deleting
+// it again counts as done.
+RemoteError ftpPathErrorFromResult(CURL *curl, const SessionOptions &opt,
+                                   const std::string &commandRoot,
+                                   const std::string &target,
+                                   const std::atomic<bool> *interrupted,
+                                   bool &mlstRejected, bool &mlsdRejected,
+                                   CURLcode code, long responseCode,
+                                   const std::string &message) {
+    RemoteError error = ftpErrorFromResult(code, responseCode, message, true);
+    if (responseCode != 550)
+        return error;
+    FileInfo info;
+    std::string lookupError;
+    CURLcode lookupCode = CURLE_OK;
+    long lookupResponse = 0;
+    if (lookupFtpEntry(curl, opt, commandRoot, target, interrupted,
+                       mlstRejected, mlsdRejected, info, lookupError,
+                       lookupCode,
+                       lookupResponse) == FtpLookupResult::NotFound) {
+        error.kind = RemoteErrorKind::NotFound;
+        error.commit_uncertain = false;
+    }
+    return error;
+}
+
 } // namespace
+
+bool fetchFtpsServerPublicKeyPin(const SessionOptions &opt, std::string &pin,
+                                 std::string &err) {
+    pin.clear();
+    err.clear();
+    if (opt.protocol != Protocol::Ftps) {
+        err = "Only FTPS connections present a TLS certificate.";
+        return false;
+    }
+    if (!curlcommon::validateUrlHost(opt.host, "FTP host", err) ||
+        !ensureCurlInitialized(err))
+        return false;
+    // Without credentials the handle logs in anonymously, and the probe stops
+    // before that login completes.
+    SessionOptions probeOptions = opt;
+    probeOptions.username.clear();
+    probeOptions.password.reset();
+    probeOptions.ftps_mode = normalizeFtpsMode(probeOptions.ftps_mode);
+    probeOptions.ftps_verify_peer = false;
+    probeOptions.tls_pinned_public_key.reset();
+    if (probeOptions.port == 0)
+        probeOptions.port = defaultPortForProtocol(Protocol::Ftps);
+    curlcommon::CurlEasySession session;
+    if (!session.initialize(err) ||
+        !configureCommonCurlHandle(session.get(), probeOptions, err))
+        return false;
+    return curlcommon::readServerPublicKeyPin(
+        session.get(), buildFtpUrl(probeOptions, "/"),
+        opt.connection_stop_token, pin, err);
+}
 
 CurlFtpClient::CurlFtpClient(Protocol protocol)
     : protocol_(isFtpFamilyProtocol(protocol) ? protocol : Protocol::Ftp),
@@ -628,7 +827,10 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
         return false;
     }
     curlcommon::TransferProgressContext cancelContext{
-        {}, {}, operation.interrupted(), false};
+        {},
+        [token = opt.connection_stop_token] { return token.stop_requested(); },
+        operation.interrupted(),
+        false};
     if (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) != CURLE_OK ||
         curl_easy_setopt(curl, CURLOPT_NOBODY, 1L) != CURLE_OK ||
         curl_easy_setopt(curl, CURLOPT_QUOTE, probeCommands) != CURLE_OK ||
@@ -650,11 +852,13 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
                               static_cast<std::int64_t>(rc));
         return false;
     }
-    rc = curl_easy_perform(curl);
+    std::string detail;
+    rc = curlcommon::performWithErrorDetail(curl, detail);
     long responseCode = 0;
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
     curl_slist_free_all(probeCommands);
-    if (operation.interrupted()->load()) {
+    if (operation.interrupted()->load() ||
+        opt.connection_stop_token.stop_requested()) {
         err = "Interrupted";
         setLastOperationError(
             RemoteErrorKind::Canceled, err,
@@ -662,7 +866,8 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
         return false;
     }
     if (rc != CURLE_OK) {
-        err = formatCurlProbeFailure(normalized.protocol, rc, responseCode);
+        err = formatCurlProbeFailure(normalized.protocol, rc, detail,
+                                     responseCode);
         setLastOperationError(ftpErrorFromResult(rc, responseCode, err));
         return false;
     }
@@ -682,6 +887,7 @@ bool CurlFtpClient::connect(const SessionOptions &opt, std::string &err) {
 
     mlstRejected_ = false;
     mlsdRejected_ = false;
+    normalized.connection_stop_token = {};
     state_->commitConnection(
         std::make_shared<const SessionOptions>(std::move(normalized)),
         std::move(newEasySession), std::move(commandRoot));
@@ -731,6 +937,7 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
                         std::function<void(std::size_t, std::size_t)> progress,
                         std::function<bool()> shouldCancel, bool resume) {
     clearLastOperationError();
+    setLastDownloadModifiedTime(std::nullopt);
     if (resume) {
         err = std::string(protocolLabel(protocol_)) +
               " backend does not support resume.";
@@ -760,12 +967,15 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
             [&](CURL *curl, std::FILE *file,
                 curlcommon::TransferProgressContext &progressContext,
                 std::string &configurationError) {
+                // FILETIME sends MDTM on the control connection, so the
+                // file's time comes without a later stat.
                 return configureCommonCurlHandle(curl, opt,
                                                  configurationError) &&
                        curlcommon::configureFileDownload(
                            curl, file, progressContext, configurationError) &&
                        curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) ==
-                           CURLE_OK;
+                           CURLE_OK &&
+                       curl_easy_setopt(curl, CURLOPT_FILETIME, 1L) == CURLE_OK;
             },
             [](CURLcode code, long responseCode, const std::string &message) {
                 return ftpErrorFromResult(code, responseCode, message);
@@ -783,6 +993,12 @@ bool CurlFtpClient::get(const std::string &remote, const std::string &local,
             failure, err)) {
         setLastOperationError(failure);
         return false;
+    }
+    curl_off_t fileTime = -1;
+    if (curl_easy_getinfo(connection.session->get(), CURLINFO_FILETIME_T,
+                          &fileTime) == CURLE_OK &&
+        fileTime > 0) {
+        setLastDownloadModifiedTime(static_cast<std::uint64_t>(fileTime));
     }
     return true;
 }
@@ -1017,8 +1233,12 @@ bool CurlFtpClient::removeFile(const std::string &remote_path,
         connection.session->get(), opt,
         {"DELE " + curlcommon::ftpCommandPath(commandRoot, target)},
         operation.interrupted(), err, rc, responseCode);
-    if (!ok)
-        setLastOperationError(ftpErrorFromResult(rc, responseCode, err, true));
+    if (!ok) {
+        setLastOperationError(ftpPathErrorFromResult(
+            connection.session->get(), opt, commandRoot, target,
+            operation.interrupted(), mlstRejected_, mlsdRejected_, rc,
+            responseCode, err));
+    }
     return ok;
 }
 
@@ -1041,8 +1261,12 @@ bool CurlFtpClient::removeDir(const std::string &remote_dir, std::string &err) {
         connection.session->get(), opt,
         {"RMD " + curlcommon::ftpCommandPath(commandRoot, target)},
         operation.interrupted(), err, rc, responseCode);
-    if (!ok)
-        setLastOperationError(ftpErrorFromResult(rc, responseCode, err, true));
+    if (!ok) {
+        setLastOperationError(ftpPathErrorFromResult(
+            connection.session->get(), opt, commandRoot, target,
+            operation.interrupted(), mlstRejected_, mlsdRejected_, rc,
+            responseCode, err));
+    }
     return ok;
 }
 
@@ -1091,8 +1315,12 @@ bool CurlFtpClient::rename(const std::string &from, const std::string &to,
         {"RNFR " + curlcommon::ftpCommandPath(commandRoot, source),
          "RNTO " + curlcommon::ftpCommandPath(commandRoot, destination)},
         operation.interrupted(), err, rc, responseCode);
-    if (!ok)
-        setLastOperationError(ftpErrorFromResult(rc, responseCode, err, true));
+    if (!ok) {
+        setLastOperationError(ftpPathErrorFromResult(
+            connection.session->get(), opt, commandRoot, source,
+            operation.interrupted(), mlstRejected_, mlsdRejected_, rc,
+            responseCode, err));
+    }
     return ok;
 }
 

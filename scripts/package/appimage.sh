@@ -20,7 +20,9 @@ set -euo pipefail
 # Optional env vars:
 #   APP_NAME            Default: "OpenSCP"
 #   EXEC_NAME           Default: "openscp" (the built binary name)
-#   BUILD_DIR           CMake build directory (default: build-appimage/)
+#   BUILD_DIR           CMake build directory (default: build-appimage/),
+#                       configured with Ninja when it is new and ninja exists
+#   JOBS                Parallel compile jobs (default: the CPU count)
 #   CMAKE_PREFIX_PATH   Point to your Qt root if not in system paths
 #   Qt6_DIR             Qt6 CMake config dir (…/lib/cmake/Qt6), optional
 #   OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION
@@ -40,6 +42,8 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-${REPO_DIR}/build-appimage}"
 DIST_DIR="${REPO_DIR}/dist"
+
+source "${REPO_DIR}/scripts/lib/cmake-build.sh"
 
 APP_NAME="${APP_NAME:-OpenSCP}"
 EXEC_NAME="${EXEC_NAME:-openscp}"
@@ -138,23 +142,17 @@ StartupWMClass=OpenSCP
 EOF
 }
 
-prepare_icon() {
-  local src_png_256="${REPO_DIR}/assets/linux/icon-openscp-256.png"
-  local src_png_large="${REPO_DIR}/assets/icons/app-openscp.png"
-  local dst_png="$1"
-  mkdir -p "$(dirname "$dst_png")"
-  if [[ -f "$src_png_256" ]]; then
-    cp "$src_png_256" "$dst_png"
-    return
-  fi
-  if [[ -f "$src_png_large" ]] && command -v convert >/dev/null 2>&1; then
-    convert "$src_png_large" -resize 256x256 "$dst_png"
-    return
-  fi
-  if [[ -f "$src_png_large" ]]; then
-    die "Missing 256x256 icon asset and ImageMagick 'convert' is unavailable to resize ${src_png_large}"
-  fi
-  die "No source icon found for AppImage packaging"
+# Stages the standard icon at every size scripts/icons generates, as the
+# hicolor theme lays it out; CMakeLists.txt installs the same sizes.
+prepare_icons() {
+  local size src dst_dir
+  for size in 16 24 32 48 64 128 256 512; do
+    src="${REPO_DIR}/assets/icons/app/standard/openscp-${size}.png"
+    [[ -f "$src" ]] || die "Missing icon asset: $src"
+    dst_dir="$APPDIR/usr/share/icons/hicolor/${size}x${size}/apps"
+    mkdir -p "$dst_dir"
+    cp "$src" "$dst_dir/openscp.png"
+  done
 }
 
 copy_licenses() {
@@ -186,6 +184,13 @@ bundle_gnu_runtime() {
   [[ -f "$runtime_path" && "$runtime_path" != "libstdc++.so.6" ]] ||
     die "Could not locate libstdc++.so.6 with $compiler"
   cp -L "$runtime_path" "$APPDIR/usr/lib/libstdc++.so.6"
+}
+
+# The executable as shipped, after linuxdeploy patched it.
+verify_elf_hardening() {
+  local checker="${REPO_DIR}/scripts/verify/linux-hardening.sh"
+  [[ -x "$checker" ]] || die "ELF hardening checker not found or not executable: $checker"
+  "$checker" "$APPDIR/usr/bin/$EXEC_NAME"
 }
 
 verify_linux_abi_if_requested() {
@@ -269,6 +274,8 @@ main() {
     -S "$REPO_DIR"
     -B "$BUILD_DIR"
     -DCMAKE_BUILD_TYPE=Release
+    -DOPENSCP_PACKAGE_KIND=appimage
+    "-DOPENSCP_UPDATE_PUBLIC_KEY=${OPENSCP_UPDATE_PUBLIC_KEY:-}"
     "-DOPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=${OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION:-OFF}"
   )
   if [[ -n "${Qt6_DIR:-}" ]]; then
@@ -277,8 +284,11 @@ main() {
   if [[ -n "${CMAKE_PREFIX_PATH:-}" ]]; then
     cmake_args+=("-DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}")
   fi
+  if use_ninja_generator "$BUILD_DIR"; then
+    cmake_args+=(-G Ninja)
+  fi
   cmake "${cmake_args[@]}"
-  cmake --build "$BUILD_DIR" -j
+  cmake --build "$BUILD_DIR" --parallel "$(build_jobs)"
 
   local exe
   exe="$BUILD_DIR/$EXEC_NAME"
@@ -286,11 +296,11 @@ main() {
 
   # Prepare AppDir skeleton
   rm -rf "$APPDIR"
-  mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+  mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications"
 
-  # Desktop and icon
+  # Desktop and icons
   prepare_desktop "$APPDIR/usr/share/applications/openscp.desktop"
-  prepare_icon "$APPDIR/usr/share/icons/hicolor/256x256/apps/openscp.png"
+  prepare_icons
   copy_licenses
 
   # Ensure tools
@@ -323,6 +333,7 @@ main() {
   ensure_optional_qt_desktop_theme_plugins
   bundle_gnu_runtime
   verify_qt_runtime_plugins
+  verify_elf_hardening
   verify_linux_abi_if_requested
 
   log "Creating AppImage: $out_name"

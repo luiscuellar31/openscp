@@ -321,7 +321,10 @@ int main() {
             fs::remove_all(localTmpRoot, ec);
             return EXIT_FAILURE;
         }
-        khOut << knownHostsHostToken(*host, port) << " ssh-ed25519 "
+        // libssh2_knownhost_readfile() stopped at a line it could not
+        // parse, so the changed key after it looked like a new host.
+        khOut << "broken line here\n"
+              << knownHostsHostToken(*host, port) << " ssh-ed25519 "
               << kFakeEd25519Key << "\n";
     }
     if (t.failures == 0) {
@@ -350,6 +353,110 @@ int main() {
             "TOFU mismatch should fail before invoking confirmation callback");
         mismatchClient.disconnect();
     }
+
+    // TOFU with a host that known_hosts does not list: the user is asked, the
+    // key is appended under a hashed name, and the rest of the file stays.
+    const fs::path tofuNewKnownHosts = localTmpRoot / "known_hosts_tofu_new";
+    const std::string tofuNewOriginal =
+        "# keep this comment\n\nother.example ssh-ed25519 "
+        "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/"
+        "qwU9iIfMHkUqPnwGwGZRuQQ3v1d\n";
+    t.check(writeFile(tofuNewKnownHosts, tofuNewOriginal),
+            "TOFU new-host known_hosts should be written");
+    if (t.failures == 0) {
+        openscp::SessionOptions newHostOpt = opt;
+        newHostOpt.known_hosts_policy = openscp::KnownHostsPolicy::AcceptNew;
+        newHostOpt.known_hosts_path = tofuNewKnownHosts.string();
+        newHostOpt.known_hosts_hash_names = true;
+        bool askedToSave = false;
+        newHostOpt.hostkey_confirm_cb =
+            [&askedToSave](const std::string &, std::uint16_t,
+                           const std::string &, const std::string &,
+                           bool canSave) {
+                askedToSave = canSave;
+                return true;
+            };
+        openscp::Libssh2SftpClient newHostClient;
+        std::string newHostErr;
+        t.check(newHostClient.connect(newHostOpt, newHostErr) && askedToSave,
+                std::string("TOFU should ask about a new host and connect: ") +
+                    newHostErr);
+        newHostClient.disconnect();
+        std::string saved;
+        t.check(readFile(tofuNewKnownHosts, saved) &&
+                    saved.rfind(tofuNewOriginal, 0) == 0 &&
+                    saved.compare(tofuNewOriginal.size(), 3, "|1|") == 0 &&
+                    std::count(saved.begin(), saved.end(), '\n') == 4,
+                "the accepted key should be appended as one hashed line: " +
+                    saved);
+
+        openscp::SessionOptions strictOpt = opt;
+        strictOpt.known_hosts_policy = openscp::KnownHostsPolicy::Strict;
+        strictOpt.known_hosts_path = tofuNewKnownHosts.string();
+        openscp::Libssh2SftpClient strictClient;
+        std::string strictErr;
+        t.check(strictClient.connect(strictOpt, strictErr),
+                std::string("the saved hashed entry should match the host: ") +
+                    strictErr);
+        strictClient.disconnect();
+    }
+
+    // Strict with a host known_hosts does not list reports an unknown host,
+    // not a changed key.
+    const fs::path strictUnknownKnownHosts =
+        localTmpRoot / "known_hosts_strict_unknown";
+    if (t.failures == 0 &&
+        writeFile(strictUnknownKnownHosts, tofuNewOriginal)) {
+        openscp::SessionOptions strictOpt = opt;
+        strictOpt.known_hosts_policy = openscp::KnownHostsPolicy::Strict;
+        strictOpt.known_hosts_path = strictUnknownKnownHosts.string();
+        openscp::Libssh2SftpClient strictClient;
+        std::string strictErr;
+        t.check(!strictClient.connect(strictOpt, strictErr) &&
+                    strictErr == "Unknown host in known_hosts",
+                "Strict should report an unknown host: " + strictErr);
+        strictClient.disconnect();
+    }
+
+#ifndef _WIN32
+    // A host known_hosts records only by its RSA key is asked for that key
+    // first, so it matches instead of looking new because it also offers
+    // ED25519. ssh-keyscan reads the RSA key, when the server has one.
+    std::string rsaLine;
+    {
+        const std::string command = "ssh-keyscan -T 5 -t rsa -p " +
+                                    std::to_string(port) + " " + *host +
+                                    " 2>/dev/null";
+        if (std::FILE *scan = ::popen(command.c_str(), "r")) {
+            char buffer[4096];
+            while (std::fgets(buffer, sizeof(buffer), scan)) {
+                const std::string line(buffer);
+                if (line.find(" ssh-rsa ") != std::string::npos &&
+                    line[0] != '#') {
+                    rsaLine = line;
+                }
+            }
+            ::pclose(scan);
+        }
+    }
+    const fs::path rsaOnlyKnownHosts = localTmpRoot / "known_hosts_rsa_only";
+    if (t.failures == 0 && !rsaLine.empty() &&
+        writeFile(rsaOnlyKnownHosts,
+                  knownHostsHostToken(*host, port) +
+                      rsaLine.substr(rsaLine.find(" ssh-rsa ")))) {
+        openscp::SessionOptions strictOpt = opt;
+        strictOpt.known_hosts_policy = openscp::KnownHostsPolicy::Strict;
+        strictOpt.known_hosts_path = rsaOnlyKnownHosts.string();
+        openscp::Libssh2SftpClient strictClient;
+        std::string strictErr;
+        t.check(strictClient.connect(strictOpt, strictErr),
+                std::string("a host known by its RSA key should match: ") +
+                    strictErr);
+        strictClient.disconnect();
+    } else if (rsaLine.empty()) {
+        std::cout << "[SKIP] no RSA host key from ssh-keyscan\n";
+    }
+#endif
 
     openscp::Libssh2SftpClient client;
     std::string err;
@@ -464,7 +571,47 @@ int main() {
         t.check(st.has_size, "stat(remoteSrc) should report size");
         t.check(st.size == payload.size(),
                 "remote file size should match payload size");
+
+        // Changing only the owner, to the one it already has, must not send
+        // group 0, which the server would refuse or apply.
+        constexpr auto kUnchanged = static_cast<std::uint32_t>(-1);
+        openscp::FileInfo owned{};
+        err.clear();
+        t.check(client.chown(remoteSrc, st.uid, kUnchanged, err) &&
+                    client.chown(remoteSrc, kUnchanged, st.gid, err) &&
+                    client.stat(remoteSrc, owned, err) && owned.uid == st.uid &&
+                    owned.gid == st.gid,
+                std::string("chown with an unchanged id should keep it: ") +
+                    err);
     }
+#ifndef _WIN32
+    // Uploads keep the local file's permissions, so a private file is not
+    // left readable by other users of the server.
+    for (const fs::perms permissions :
+         {fs::perms::owner_read | fs::perms::owner_write,
+          fs::perms::owner_read | fs::perms::owner_write |
+              fs::perms::group_read}) {
+        if (t.failures != 0)
+            break;
+        const fs::path localPrivate = localTmpRoot / "permissions.txt";
+        const std::string remotePrivate =
+            joinRemotePath(remoteSuiteDir, "permissions.txt");
+        std::error_code permissionsError;
+        openscp::FileInfo uploaded{};
+        err.clear();
+        const bool written = writeFile(localPrivate, "private");
+        fs::permissions(localPrivate, permissions, permissionsError);
+        t.check(written && !permissionsError &&
+                    client.put(localPrivate.string(), remotePrivate, err, {},
+                               {}, false) &&
+                    client.stat(remotePrivate, uploaded, err) &&
+                    (uploaded.mode & 0777u) ==
+                        static_cast<std::uint32_t>(permissions),
+                std::string("an upload should keep the local permissions: ") +
+                    err);
+        (void)client.removeFile(remotePrivate, err);
+    }
+#endif
     if (t.failures == 0) {
         std::vector<openscp::FileInfo> entries;
         err.clear();
@@ -477,6 +624,11 @@ int main() {
         err.clear();
         t.check(client.get(remoteSrc, localDst.string(), err, {}, {}, false),
                 std::string("get should succeed: ") + err);
+        openscp::FileInfo remoteInfo{};
+        t.check(client.stat(remoteSrc, remoteInfo, err) &&
+                    remoteInfo.mtime > 0 &&
+                    client.lastDownloadModifiedTime() == remoteInfo.mtime,
+                "get should report the file's modification time");
         std::string downloaded;
         t.check(readFile(localDst, downloaded),
                 "downloaded file should be readable");
@@ -685,7 +837,7 @@ int main() {
             },
             {}, false);
         t.check(changed, "upload source should change during the transfer");
-        t.check(!ok && err.find("checksum mismatch") != std::string::npos,
+        t.check(!ok && err.find("changed during transfer") != std::string::npos,
                 std::string("optional upload should reject a source changed "
                             "during the transfer: ") +
                     err);

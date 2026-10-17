@@ -418,6 +418,45 @@ OPENSCP_TEST(testMirrorKeepsFoldersThatReceiveIncomingItems, test) {
                "deletions away from the incoming items should stay");
 }
 
+OPENSCP_TEST(testCaseAndUnicodeAliasesAreConflicts, test) {
+    SyncComparisonOptions options;
+    options.mirror = true;
+    const QString composed = QStringLiteral("caf\u00e9.txt");
+    const QString decomposed = QStringLiteral("cafe\u0301.txt");
+    const auto items = SyncComparisonEngine::compare(
+        {file(QStringLiteral("README.md"), 2, 2000),
+         directory(QStringLiteral("Docs")),
+         file(QStringLiteral("Docs/a.txt"), 2, 2000), file(composed, 2, 2000),
+         file(QStringLiteral("new.txt"), 2, 2000)},
+        {file(QStringLiteral("Readme.md"), 1, 1000),
+         directory(QStringLiteral("docs")),
+         file(QStringLiteral("docs/a.txt"), 1, 1000), file(decomposed, 1, 1000),
+         file(QStringLiteral("old.txt"), 1, 1000)},
+        options);
+
+    for (const QString &path :
+         {QStringLiteral("README.md"), QStringLiteral("Readme.md"),
+          QStringLiteral("Docs"), QStringLiteral("docs"),
+          QStringLiteral("Docs/a.txt"), QStringLiteral("docs/a.txt"), composed,
+          decomposed}) {
+        const SyncComparisonItem *item = findItem(items, path);
+        test.check(item && item->action == SyncAction::Conflict &&
+                       !item->selected,
+                   "names that differ only in case or Unicode form should be "
+                   "a conflict: " +
+                       path.toStdString());
+    }
+
+    const SyncExecutionPlan plan =
+        SyncComparisonEngine::makeExecutionPlan(items, options);
+    test.check(plan.copies.size() == 1 && plan.copies.front().relativePath ==
+                                              QStringLiteral("new.txt"),
+               "only the unrelated new file should be copied");
+    test.check(plan.deletes.size() == 1 && plan.deletes.front().relativePath ==
+                                               QStringLiteral("old.txt"),
+               "the mirror should delete only the unrelated stale file");
+}
+
 OPENSCP_TEST(testChecksumComparison, test) {
     SyncSnapshotEntry local = file(QStringLiteral("verified.bin"), 10, 20'000);
     local.checksumAlgorithm = QStringLiteral("SHA-256");

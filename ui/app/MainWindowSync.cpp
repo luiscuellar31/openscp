@@ -84,7 +84,7 @@ void MainWindow::initializeSyncCoordinator() {
                 this, tr("Very large comparison"),
                 tr("The two trees contain more than the safe review "
                    "threshold:\n\n%1 items\n%2 of known data\n\n"
-                   "Scan them again without this limit?")
+                   "Continue scanning without this limit?")
                     .arg(
                         QLocale().toString(items),
                         QLocale().formattedDataSize(

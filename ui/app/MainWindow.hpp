@@ -15,6 +15,7 @@
 #include <QPointer>
 #include <QSet>
 #include <QStringList>
+#include <QThreadPool>
 #include <QTreeView>
 #include <QVector>
 
@@ -37,6 +38,9 @@ class PlatformFilePicker;
 struct PathActionResult;
 class RemoteActionController;
 class SessionController;
+class UpdateController;
+class MacUpdater;
+struct UpdateRelease;
 } // namespace openscpui
 struct SiteEntry;  // fwd
 class QModelIndex; // fwd for slot signatures
@@ -132,6 +136,11 @@ class MainWindow : public QMainWindow {
     void initializeMenuBarActions();
     void initializePanelInteractions();
     void initializeRuntimeState();
+    void initializeUpdates();
+    bool canInstallUpdate() const;
+    void showAvailableUpdate(const openscpui::UpdateRelease &release);
+    openscpui::UpdateController *updates_ = nullptr;
+    openscpui::MacUpdater *macUpdater_ = nullptr;
     void initializeSyncCoordinator();
     QProgressDialog *makeComparisonProgress(const QString &label);
     bool isScpTransferMode() const;
@@ -307,8 +316,15 @@ class MainWindow : public QMainWindow {
     void runLocalFsSelection(const QModelIndexList &rows,
                              QFileSystemModel *sourceModel,
                              const QDir &destination, bool deleteSource);
-    void runLocalFsOperation(const QVector<LocalFsPair> &pairs,
-                             bool deleteSource, int skippedCount = 0);
+    // Deletes local entries on the local pool, never through a link, and
+    // reports the result; closing the window waits for it as for copies.
+    void runLocalDelete(const QStringList &paths);
+    // `onFinished` runs on the UI thread once the job ends, told whether
+    // every pair succeeded.
+    void
+    runLocalFsOperation(const QVector<LocalFsPair> &pairs, bool deleteSource,
+                        int skippedCount = 0,
+                        std::function<void(bool allSucceeded)> onFinished = {});
     struct RemoteDownloadSeed {
         QString remotePath;
         QString localPath;
@@ -378,6 +394,13 @@ class MainWindow : public QMainWindow {
     QPointer<class QProgressDialog> connectProgress_;
     bool connectProgressDimmed_ = false;
     std::atomic<int> localFsJobsInFlight_{0};
+    // Local copies and moves stop at their next entry once this is set, as
+    // closing the window asks.
+    std::shared_ptr<std::atomic_bool> localFsCanceled_ =
+        std::make_shared<std::atomic_bool>(false);
+    // Their own threads, so long copies never hold the global pool the
+    // connection and the disconnect cleanup run on.
+    QThreadPool localFsPool_;
     std::optional<SavedSiteContext> pendingSavedSiteContext_;
     std::optional<SavedSiteContext> activeSavedSiteContext_;
     QPointer<class QProgressDialog> remoteScanProgress_;

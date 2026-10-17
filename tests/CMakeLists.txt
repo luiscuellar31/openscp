@@ -31,6 +31,9 @@ function(openscp_add_test TARGET_NAME)
     endif()
 
     add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
+    # A hung test fails after ten minutes instead of CTest's default 25,
+    # which sanitizer runs still stay well within. Tests may set their own.
+    set_tests_properties(${TARGET_NAME} PROPERTIES TIMEOUT 600)
     if(TEST_LABELS)
         set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "${TEST_LABELS}")
     else()
@@ -80,12 +83,14 @@ foreach(TEST_COMPONENT IN ITEMS
         terminal_command_builder
         sync_coordinator
         local_tree_discovery
+        update
         remote_tree_walker)
     openscp_add_test(openscp_${TEST_COMPONENT}_tests
         SOURCES ${TEST_COMPONENT}_tests.cpp
         LINK_LIBRARIES openscp_ui_logic
     )
 endforeach()
+target_link_libraries(openscp_update_tests PRIVATE OpenSSL::Crypto)
 
 # These tests intentionally exercise the test-only mock implementation.
 target_include_directories(openscp_transfer_manager_tests PRIVATE
@@ -105,6 +110,17 @@ openscp_add_test(openscp_ui_utilities_tests
     LINK_LIBRARIES openscp_ui_logic
 )
 
+# Only demo builds compile the sample data into the application.
+openscp_add_test(openscp_demo_data_tests
+    SOURCES demo_data_tests.cpp ${CMAKE_SOURCE_DIR}/ui/logic/demo/DemoData.cpp
+    LINK_LIBRARIES openscp_ui_logic
+)
+
+openscp_add_test(openscp_app_icon_tests
+    SOURCES app_icon_tests.cpp
+    LINK_LIBRARIES openscp_ui_widgets
+)
+
 openscp_add_test(openscp_site_manager_dialog_tests
     SOURCES site_manager_dialog_tests.cpp
     LINK_LIBRARIES openscp_ui_widgets
@@ -113,6 +129,11 @@ openscp_add_test(openscp_connection_dialog_tests
     SOURCES connection_dialog_tests.cpp
     LINK_LIBRARIES openscp_ui_widgets
 )
+openscp_add_test(openscp_authentication_input_tests
+    SOURCES authentication_input_tests.cpp
+    LINK_LIBRARIES openscp_ui_widgets
+)
+set_tests_properties(openscp_authentication_input_tests PROPERTIES TIMEOUT 30)
 openscp_add_test(openscp_accessibility_widget_tests
     SOURCES accessibility_widget_tests.cpp
     LINK_LIBRARIES openscp_ui_widgets
@@ -129,10 +150,13 @@ openscp_add_test(openscp_main_window_navigation_tests
     SOURCES main_window_navigation_tests.cpp
     LINK_LIBRARIES openscp_main_window
 )
+set_tests_properties(openscp_main_window_navigation_tests PROPERTIES TIMEOUT 60)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set_tests_properties(
+        openscp_app_icon_tests
         openscp_site_manager_dialog_tests
         openscp_connection_dialog_tests
+        openscp_authentication_input_tests
         openscp_accessibility_widget_tests
         openscp_transfer_queue_dialog_tests
         openscp_sync_dialog_tests
@@ -205,6 +229,10 @@ if(OPENSCP_CORE_HAS_CURL_FTP OR OPENSCP_CORE_HAS_CURL_WEBDAV)
         INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/src
         LINK_LIBRARIES openscp_core
     )
+    # The TLS key probe tests run a loopback TLS server.
+    find_package(OpenSSL REQUIRED COMPONENTS SSL Crypto)
+    target_link_libraries(openscp_curl_backend_common_tests
+        PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     openscp_add_test(openscp_curl_listing_parser_tests
         SOURCES curl_listing_parser_tests.cpp
         INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/src

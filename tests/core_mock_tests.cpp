@@ -4,10 +4,13 @@
 #include "common/UniqueFile.hpp"
 #include "libssh2/Libssh2ScpClient.hpp"
 #include "libssh2/Libssh2SftpClient.hpp"
+#include "libssh2/detail/KnownHostsFile.hpp"
 #include "libssh2/detail/Libssh2CipherPreference.hpp"
 #include "libssh2/detail/Libssh2ErrorClassifier.hpp"
 #include "libssh2/detail/Libssh2InputSafety.hpp"
 #include "libssh2/detail/Libssh2TransferIntegrity.hpp"
+#include "libssh2/detail/Libssh2WritePacing.hpp"
+#include "libssh2/detail/TcpConnect.hpp"
 #include "libssh2/detail/UniqueSftpHandle.hpp"
 #include "mock/MockSftpClient.hpp"
 #include "openscp/ClientFactory.hpp"
@@ -30,13 +33,36 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <iterator>
 #include <optional>
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <utility>
 #include <vector>
+
+#ifndef _WIN32
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
+namespace openscp {
+
+struct Libssh2SftpClientTestAccess {
+    static void attachSocket(Libssh2SftpClient &client, int socket) {
+        std::lock_guard lock(client.stateMutex_);
+        client.sock_ = socket;
+        client.connected_.store(true);
+    }
+};
+
+} // namespace openscp
 
 namespace {
 
@@ -52,6 +78,196 @@ openscp::SessionOptions validOptions() {
 static_assert(std::is_same_v<decltype(openscp::SessionOptions{}.password),
                              std::optional<openscp::SecureString>>,
               "SessionOptions passwords must use SecureString storage");
+
+OPENSCP_TEST(test_connection_cancel_before_creation, t) {
+    std::stop_source cancellation;
+    cancellation.request_stop();
+    auto options = validOptions();
+    options.connection_stop_token = cancellation.get_token();
+    std::string error;
+    t.check(!openscp::CreateConnectedClient(options, error) &&
+                error == "Connection canceled by user",
+            "a stopped connection must not resolve or create a backend");
+}
+
+#ifndef _WIN32
+OPENSCP_TEST(test_concurrent_disconnect_unblocks_io_and_preserves_reused_socket,
+             t) {
+    int pair[2] = {-1, -1};
+    t.check(::socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0,
+            "disconnect fixture should create a local transport");
+    if (pair[0] < 0)
+        return;
+    openscp::Libssh2SftpClient client;
+    openscp::Libssh2SftpClientTestAccess::attachSocket(client, pair[0]);
+    auto ioLock = client.lockIo();
+    std::promise<void> start;
+    const auto go = start.get_future().share();
+    auto first = std::async(std::launch::async, [&] {
+        go.wait();
+        client.disconnect();
+    });
+    auto second = std::async(std::launch::async, [&] {
+        go.wait();
+        client.disconnect();
+    });
+    start.set_value();
+    pollfd peer{pair[1], POLLIN, 0};
+    const bool interrupted = ::poll(&peer, 1, 1000) > 0;
+    char byte = 0;
+    t.check(interrupted && ::recv(pair[1], &byte, 1, MSG_DONTWAIT) == 0 &&
+                !client.isConnected(),
+            "disconnect must shut down before waiting for active I/O");
+    t.check(first.wait_for(std::chrono::milliseconds(0)) ==
+                    std::future_status::timeout &&
+                second.wait_for(std::chrono::milliseconds(0)) ==
+                    std::future_status::timeout &&
+                ::fcntl(pair[0], F_GETFD) >= 0,
+            "both disconnects must wait for I/O before closing the descriptor");
+    // Interrupt must still be able to acquire the state mutex while teardown
+    // waits for I/O; it shares the same descriptor lifetime protection.
+    client.interrupt();
+    ioLock.unlock();
+    t.check(first.wait_for(std::chrono::seconds(1)) ==
+                    std::future_status::ready &&
+                second.wait_for(std::chrono::seconds(1)) ==
+                    std::future_status::ready,
+            "concurrent disconnects must complete once I/O is released");
+    first.get();
+    second.get();
+    t.check(::fcntl(pair[0], F_GETFD) == -1 && errno == EBADF,
+            "the detached transport must be closed");
+    ::close(pair[1]);
+
+    int reused[2] = {-1, -1};
+    t.check(::socketpair(AF_UNIX, SOCK_STREAM, 0, reused) == 0,
+            "reuse fixture should create another transport");
+    if (reused[0] < 0)
+        return;
+    if (reused[1] == pair[0])
+        std::swap(reused[0], reused[1]);
+    if (reused[0] != pair[0]) {
+        const bool duplicated = ::dup2(reused[0], pair[0]) == pair[0];
+        t.check(duplicated,
+                "reuse fixture must retain the original descriptor number");
+        if (!duplicated) {
+            ::close(reused[0]);
+            ::close(reused[1]);
+            return;
+        }
+        ::close(reused[0]);
+        reused[0] = pair[0];
+    }
+    client.disconnect();
+    client.interrupt();
+    t.check(::fcntl(reused[0], F_GETFD) >= 0 &&
+                ::recv(reused[0], &byte, 1, MSG_DONTWAIT) == -1 &&
+                (errno == EAGAIN || errno == EWOULDBLOCK),
+            "later disconnect and interrupt must leave a reused socket open "
+            "and live");
+    ::close(reused[0]);
+    ::close(reused[1]);
+}
+
+OPENSCP_TEST(test_tcp_wait_deadline_and_cancellation, t) {
+    int pair[2] = {-1, -1};
+    t.check(::socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0,
+            "TCP wait fixture should create socket descriptors");
+    if (pair[0] < 0)
+        return;
+    const int flags = ::fcntl(pair[0], F_GETFL, 0);
+    t.check(::fcntl(pair[0], F_SETFL, flags | O_NONBLOCK) == 0,
+            "wait fixture should use a nonblocking descriptor");
+    const std::array<char, 4096> bytes{};
+    while (::write(pair[0], bytes.data(), bytes.size()) > 0) {
+    }
+    t.check(errno == EAGAIN || errno == EWOULDBLOCK,
+            "filled send buffer should withhold write readiness");
+    std::string error;
+    const auto started = std::chrono::steady_clock::now();
+    t.check(!openscp::libssh2detail::waitForTcpConnection(
+                pair[0], started + std::chrono::milliseconds(40), {}, error) &&
+                errno == ETIMEDOUT,
+            "a non-ready socket must respect the shared TCP deadline");
+    std::stop_source cancellation;
+    auto waiting = std::async(std::launch::async, [&] {
+        return openscp::libssh2detail::waitForTcpConnection(
+            pair[0], std::chrono::steady_clock::now() + std::chrono::seconds(2),
+            cancellation.get_token(), error);
+    });
+    t.check(waiting.wait_for(std::chrono::milliseconds(20)) ==
+                std::future_status::timeout,
+            "the connection fixture should remain pending before cancellation");
+    cancellation.request_stop();
+    t.check(waiting.wait_for(std::chrono::milliseconds(500)) ==
+                    std::future_status::ready &&
+                !waiting.get() && error == "Connection canceled by user",
+            "pending TCP cancellation must finish without waiting for timeout");
+    ::close(pair[0]);
+    ::close(pair[1]);
+}
+
+OPENSCP_TEST(test_connection_cancel_while_peer_is_silent, t) {
+    std::vector<openscp::Protocol> protocols{openscp::Protocol::Sftp,
+                                             openscp::Protocol::Scp};
+#if OPENSCP_HAS_CURL_FTP
+    protocols.push_back(openscp::Protocol::Ftp);
+#endif
+#if OPENSCP_HAS_CURL_WEBDAV
+    protocols.push_back(openscp::Protocol::WebDav);
+#endif
+    for (const auto protocol : protocols) {
+        const int listener = ::socket(AF_INET, SOCK_STREAM, 0);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        const bool listening =
+            listener >= 0 &&
+            ::bind(listener, reinterpret_cast<sockaddr *>(&address),
+                   sizeof(address)) == 0 &&
+            ::listen(listener, 1) == 0;
+        t.check(listening, "connection fixture should listen on loopback");
+        if (!listening) {
+            if (listener >= 0)
+                ::close(listener);
+            continue;
+        }
+        socklen_t length = sizeof(address);
+        t.check(::getsockname(listener, reinterpret_cast<sockaddr *>(&address),
+                              &length) == 0,
+                "connection fixture should obtain its allocated port");
+        auto options = validOptions();
+        options.host = "127.0.0.1";
+        options.port = ntohs(address.sin_port);
+        options.protocol = protocol;
+        options.webdav_scheme = openscp::WebDavScheme::Http;
+        options.known_hosts_policy = openscp::KnownHostsPolicy::Off;
+        std::stop_source cancellation;
+        options.connection_stop_token = cancellation.get_token();
+        std::string error;
+        auto connecting = std::async(std::launch::async, [&] {
+            return openscp::CreateConnectedClient(options, error);
+        });
+        pollfd ready{listener, POLLIN, 0};
+        const bool accepted = ::poll(&ready, 1, 2000) > 0;
+        t.check(accepted, "the real backend should reach the silent TCP peer");
+        const int peer = accepted ? ::accept(listener, nullptr, nullptr) : -1;
+        cancellation.request_stop();
+        const bool stopped =
+            connecting.wait_for(std::chrono::milliseconds(1500)) ==
+            std::future_status::ready;
+        t.check(stopped,
+                "canceling connection creation must interrupt silent peer I/O");
+        if (peer >= 0) {
+            ::shutdown(peer, SHUT_RDWR);
+            ::close(peer);
+        }
+        ::close(listener);
+        t.check(!connecting.get() && error == "Connection canceled by user",
+                "canceled connection creation must not return a live client");
+    }
+}
+#endif
 
 fs::path makeTempFilePath(const std::string &tag) {
     const auto now =
@@ -71,6 +287,24 @@ bool readTextFile(const fs::path &path, std::string &out) {
     out.assign(std::istreambuf_iterator<char>(in),
                std::istreambuf_iterator<char>());
     return in.good() || in.eof();
+}
+
+OPENSCP_TEST(test_sftp_write_size_follows_the_upload_rate, t) {
+    using openscp::libssh2detail::nextSftpWriteSize;
+    constexpr std::size_t kKiB = 1024;
+    constexpr std::size_t kBuffer = 2 * 1024 * kKiB;
+    t.check(nextSftpWriteSize(64 * kKiB, 40 * kKiB, 1.0, kBuffer) == 80 * kKiB,
+            "a write should carry two seconds of data at the measured rate");
+    t.check(nextSftpWriteSize(32 * kKiB, 100 * 1024 * kKiB, 0.1, kBuffer) ==
+                64 * kKiB,
+            "a fast link should grow the write size at most twofold");
+    t.check(nextSftpWriteSize(1536 * kKiB, 100 * 1024 * kKiB, 0.1, kBuffer) ==
+                kBuffer,
+            "the write size should stop at the transfer buffer");
+    t.check(nextSftpWriteSize(32 * kKiB, kKiB, 10.0, kBuffer) == 32 * kKiB,
+            "a very slow link should still send whole libssh2 packets");
+    t.check(nextSftpWriteSize(32 * kKiB, 0, 0.0, 16 * kKiB) == 16 * kKiB,
+            "a small file's buffer should bound the write size");
 }
 
 OPENSCP_TEST(test_session_defaults, t) {
@@ -185,6 +419,55 @@ OPENSCP_TEST(test_secure_string_value_semantics, t) {
     t.check(moved.empty(), "SecureString clear should release the value");
 }
 
+OPENSCP_TEST(test_keyboard_interactive_prompts, t) {
+    using openscp::KbdIntPrompt;
+    using openscp::KbdIntPromptKind;
+    struct Case {
+        KbdIntPrompt prompt;
+        KbdIntPromptKind kind;
+    };
+    // Prompts as servers send them: OpenSSH with PAM, RSA SecurID, Duo,
+    // pam_oath, Google Authenticator and FreeIPA.
+    const std::vector<Case> cases = {
+        {{"Password: ", false}, KbdIntPromptKind::Password},
+        {{"Password for deploy_user@host: ", false},
+         KbdIntPromptKind::Password},
+        {{"Enter passphrase for key: ", false}, KbdIntPromptKind::Password},
+        {{"Enter PASSCODE:", false}, KbdIntPromptKind::OneTimeCode},
+        {{"Passcode or option (1-3): ", true}, KbdIntPromptKind::OneTimeCode},
+        {{"One-time password (OATH) for `alice': ", false},
+         KbdIntPromptKind::OneTimeCode},
+        {{"Verification code: ", false}, KbdIntPromptKind::OneTimeCode},
+        {{"Verification code for user alice: ", false},
+         KbdIntPromptKind::OneTimeCode},
+        {{"Hostname verification code:", false}, KbdIntPromptKind::OneTimeCode},
+        {{"First Factor: ", false}, KbdIntPromptKind::Other},
+        {{"Username: ", true}, KbdIntPromptKind::Username},
+        {{"login: ", true}, KbdIntPromptKind::Username},
+        {{"Username: ", false}, KbdIntPromptKind::Other},
+        {{"Your account name: ", true}, KbdIntPromptKind::Other},
+    };
+    for (const Case &entry : cases) {
+        t.check(openscp::classifyKbdIntPrompt(entry.prompt) == entry.kind,
+                "unexpected kind for the prompt \"" + entry.prompt.text + "\"");
+    }
+
+    using openscp::libssh2detail::KbdIntSavedAnswer;
+    using openscp::libssh2detail::savedKbdIntAnswer;
+    t.check(savedKbdIntAnswer({"Password: ", false}, 1) ==
+                    KbdIntSavedAnswer::Password &&
+                savedKbdIntAnswer({"Password: ", false}, 2) ==
+                    KbdIntSavedAnswer::None,
+            "the saved password should answer only the first round");
+    t.check(savedKbdIntAnswer({"Username: ", true}, 2) ==
+                    KbdIntSavedAnswer::Username &&
+                savedKbdIntAnswer({"Enter PASSCODE:", false}, 1) ==
+                    KbdIntSavedAnswer::None &&
+                savedKbdIntAnswer({"First Factor: ", false}, 1) ==
+                    KbdIntSavedAnswer::None,
+            "codes and unclear secrets should be left to the user");
+}
+
 OPENSCP_TEST(test_libssh2_input_safety, t) {
     using namespace openscp::libssh2detail;
 
@@ -199,8 +482,6 @@ OPENSCP_TEST(test_libssh2_input_safety, t) {
             "bounded keyboard-interactive prompts should be accepted");
     t.check(copied.size() == 1 && copied.front() == "User",
             "keyboard-interactive prompt copies must honor explicit lengths");
-    t.check(promptRequestsUsername(copied.front()),
-            "bounded prompt matching should detect username prompts");
 
     prompt.length = kMaxKeyboardInteractivePromptBytes + 1;
     copied.clear();
@@ -225,6 +506,153 @@ OPENSCP_TEST(test_libssh2_input_safety, t) {
     t.check(!validateEndpointHost("example.test:2222", "SSH host", error),
             "SSH hosts must keep ports in the dedicated field");
 }
+
+OPENSCP_TEST(test_known_hosts_file_reads_every_line, t) {
+    namespace detail = openscp::libssh2detail;
+    const fs::path path = makeTempFilePath("known-hosts-read");
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << "# comment\n\nalpha k AQID\nbroken\r\nbeta k AQID\r\n"
+               "[gamma]:2222 k AQID";
+    }
+    std::vector<std::string> lines;
+    t.check(detail::readKnownHosts(path.string(), lines) ==
+                    detail::KnownHostsReadStatus::Read &&
+                lines == std::vector<std::string>{"# comment", "",
+                                                  "alpha k AQID", "broken",
+                                                  "beta k AQID",
+                                                  "[gamma]:2222 k AQID"},
+            "every line should be read without its line ending");
+
+    t.check(detail::readKnownHosts(path.string() + ".missing", lines) ==
+                    detail::KnownHostsReadStatus::Missing &&
+                lines.empty(),
+            "a missing known_hosts file should be reported as missing");
+#ifndef _WIN32
+    if (::geteuid() != 0) {
+        fs::permissions(path, fs::perms::none);
+        t.check(detail::readKnownHosts(path.string(), lines) ==
+                    detail::KnownHostsReadStatus::Unreadable,
+                "a known_hosts file that cannot be read should be reported");
+        fs::permissions(path, fs::perms::owner_read | fs::perms::owner_write);
+    }
+#endif
+}
+
+OPENSCP_TEST(test_host_key_preference_starts_with_recorded_types, t) {
+    namespace detail = openscp::libssh2detail;
+    const std::string usual = "ssh-ed25519,ecdsa-sha2-nistp256,rsa-sha2-512,"
+                              "rsa-sha2-256,ecdsa-sha2-nistp384,"
+                              "ecdsa-sha2-nistp521";
+    t.check(detail::hostKeyAlgorithmPreference({}) == usual,
+            "an unknown host should get the usual order");
+    t.check(detail::hostKeyAlgorithmPreference({"ssh-rsa"}) ==
+                "rsa-sha2-512,rsa-sha2-256,ssh-ed25519,ecdsa-sha2-nistp256,"
+                "ecdsa-sha2-nistp384,ecdsa-sha2-nistp521",
+            "a host known by its RSA key should be asked for RSA first");
+    t.check(detail::hostKeyAlgorithmPreference({"ecdsa-sha2-nistp384",
+                                                "sk-ssh-ed25519@openssh.com",
+                                                "ecdsa-sha2-nistp256"}) ==
+                "ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ssh-ed25519,"
+                "rsa-sha2-512,rsa-sha2-256,ecdsa-sha2-nistp521",
+            "recorded types should keep the usual order among themselves");
+}
+
+OPENSCP_TEST(test_known_hosts_lines_name_their_host, t) {
+    namespace detail = openscp::libssh2detail;
+    const unsigned char raw[] = {1, 2, 3};
+    t.check(detail::knownHostsLine("[h.example]:2222", "ssh-ed25519", raw,
+                                   sizeof(raw), false) ==
+                "[h.example]:2222 ssh-ed25519 AQID",
+            "a plain known_hosts line should name the host and the key");
+
+    const std::string hashed = detail::knownHostsLine(
+        "[h.example]:2222", "ssh-ed25519", raw, sizeof(raw), true);
+    t.check(hashed.size() == 3 + 28 + 1 + 28 + 17 &&
+                hashed.rfind("|1|", 0) == 0 && hashed[31] == '|' &&
+                hashed.compare(60, std::string::npos, " ssh-ed25519 AQID") == 0,
+            "a hashed known_hosts line should look like ssh-keygen -H's: " +
+                hashed);
+    t.check(hashed != detail::knownHostsLine("[h.example]:2222", "ssh-ed25519",
+                                             raw, sizeof(raw), true),
+            "each hashed line should use its own salt");
+
+    // RemoveKnownHostEntry recognizes OpenSSH's hashed names, so it finds the
+    // host behind the hash.
+    const fs::path path = makeTempFilePath("known-hosts-hashed");
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << hashed << "\nkept k AQID\n";
+    }
+    std::string error;
+    std::string content;
+    t.check(openscp::RemoveKnownHostEntry(path.string(), "h.example", 2222,
+                                          error) &&
+                readTextFile(path, content) && content == "kept k AQID\n",
+            "the hashed name should match its host: " + error);
+}
+
+#ifndef _WIN32
+OPENSCP_TEST(test_known_hosts_append_keeps_the_rest_of_the_file, t) {
+    namespace detail = openscp::libssh2detail;
+    const fs::path folder =
+        makeTempFilePath("known-hosts-append").parent_path() / "append-folder";
+    std::error_code ec;
+    fs::create_directories(folder, ec);
+    fs::permissions(folder,
+                    fs::perms::owner_all | fs::perms::group_read |
+                        fs::perms::group_exec | fs::perms::others_read |
+                        fs::perms::others_exec,
+                    ec);
+    const fs::path path = folder / "known_hosts";
+    const std::string original =
+        "# keep me\n\nmulti.example,10.0.0.9 ssh-ed25519 AQID";
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << original;
+    }
+    fs::permissions(path,
+                    fs::perms::owner_read | fs::perms::owner_write |
+                        fs::perms::group_read | fs::perms::others_read,
+                    ec);
+    std::string error;
+    t.check(detail::appendKnownHostsLine(path.string(), "new.example k AQID",
+                                         error),
+            "a line should be appended: " + error);
+    std::string content;
+    t.check(readTextFile(path, content) &&
+                content == original + "\nnew.example k AQID\n",
+            "the file should keep its lines and gain the new one: " + content);
+    struct ::stat fileStat {};
+    struct ::stat folderStat {};
+    t.check(::stat(path.c_str(), &fileStat) == 0 &&
+                (fileStat.st_mode & 0777) == 0644 &&
+                ::stat(folder.c_str(), &folderStat) == 0 &&
+                (folderStat.st_mode & 0777) == 0755,
+            "appending should keep the file's and the folder's permissions");
+
+    const fs::path link = folder / "linked_known_hosts";
+    fs::create_symlink(path, link, ec);
+    t.check(!ec &&
+                detail::appendKnownHostsLine(link.string(), "via.link k AQID",
+                                             error) &&
+                fs::is_symlink(link) && readTextFile(path, content) &&
+                content.size() >= 16 &&
+                content.compare(content.size() - 16, 16, "via.link k AQID\n") ==
+                    0,
+            "a symbolic link should stay a link and its target gain the line");
+
+    const fs::path created = folder / "new-ssh" / "known_hosts";
+    t.check(
+        detail::appendKnownHostsLine(created.string(), "first k AQID", error) &&
+            readTextFile(created, content) && content == "first k AQID\n" &&
+            ::stat(created.c_str(), &fileStat) == 0 &&
+            (fileStat.st_mode & 0777) == 0600 &&
+            ::stat(created.parent_path().c_str(), &folderStat) == 0 &&
+            (folderStat.st_mode & 0777) == 0700,
+        "a missing file and folder should be created private: " + error);
+}
+#endif
 
 OPENSCP_TEST(test_safe_local_partial_files, t) {
     const fs::path target = makeTempFilePath("safe-target");
@@ -311,6 +739,129 @@ OPENSCP_TEST(test_safe_local_partial_files, t) {
             "buffered durability should publish complete contents");
     fs::remove(target, ec);
     fs::remove_all(target.parent_path(), ec);
+}
+
+OPENSCP_TEST(test_safe_local_partial_fifos, t) {
+#ifndef _WIN32
+    const fs::path partial = makeTempFilePath("fifo").string() + ".part";
+    t.check(::mkfifo(partial.c_str(), 0600) == 0,
+            "partial FIFO fixture should be created");
+    if (!fs::is_fifo(partial))
+        return;
+
+    // A regression must fail instead of hanging the test worker indefinitely.
+    struct AlarmGuard {
+        ~AlarmGuard() { ::alarm(0); }
+    } alarmGuard;
+    ::alarm(5);
+    for (const auto mode : {openscp::localfiles::WriteMode::Truncate,
+                            openscp::localfiles::WriteMode::Append}) {
+        std::string error;
+        openscp::UniqueFile file(openscp::localfiles::openRegularFileForWrite(
+            partial.string(), mode, error));
+        t.check(!file && !error.empty(),
+                "a partial FIFO without a reader must fail without blocking");
+
+        // With a reader, open succeeds; descriptor type validation must reject
+        // the FIFO before it can be chmod'ed, truncated, or handed to stdio.
+        const int reader =
+            ::open(partial.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        t.check(reader >= 0, "a nonblocking FIFO reader should open");
+        if (reader < 0)
+            continue;
+        file.reset(openscp::localfiles::openRegularFileForWrite(
+            partial.string(), mode, error));
+        t.check(!file && errno == EINVAL && !error.empty(),
+                "a partial FIFO with a reader must fail type validation");
+        ::close(reader);
+        t.check(fs::is_fifo(partial),
+                "rejecting a partial FIFO must leave the entry intact");
+    }
+    std::error_code ec;
+    fs::remove_all(partial.parent_path(), ec);
+#endif
+}
+
+OPENSCP_TEST(test_safe_local_regular_write_modes, t) {
+    const fs::path partial = makeTempFilePath("regular-modes");
+    for (const auto mode : {openscp::localfiles::WriteMode::Truncate,
+                            openscp::localfiles::WriteMode::Append}) {
+        {
+            std::ofstream output(partial, std::ios::binary | std::ios::trunc);
+            output << "original";
+        }
+        std::string error;
+        openscp::UniqueFile file(openscp::localfiles::openRegularFileForWrite(
+            partial.string(), mode, error));
+        t.check(static_cast<bool>(file),
+                "regular partial files must open in both write modes");
+        if (!file)
+            continue;
+#ifndef _WIN32
+        const int descriptor = ::fileno(file.get());
+        const int flags = ::fcntl(descriptor, F_GETFL);
+        t.check(flags >= 0 && (flags & O_NONBLOCK) == 0,
+                "validated regular file streams must use blocking mode");
+        t.check(flags >= 0 &&
+                    ((flags & O_APPEND) != 0) ==
+                        (mode == openscp::localfiles::WriteMode::Append),
+                "blocking-mode restoration must preserve append semantics");
+        const int descriptorFlags = ::fcntl(descriptor, F_GETFD);
+        t.check(descriptorFlags >= 0 && (descriptorFlags & FD_CLOEXEC) != 0,
+                "validated regular files must remain close-on-exec");
+#endif
+        t.check(std::fwrite("new", 1, 3, file.get()) == 3 &&
+                    openscp::localfiles::flushAndSync(file.get(), error),
+                "regular partial files must remain writable and syncable");
+        file.reset();
+        std::string contents;
+        const std::string expected =
+            mode == openscp::localfiles::WriteMode::Append ? "originalnew"
+                                                           : "new";
+        t.check(readTextFile(partial, contents) && contents == expected,
+                "truncate and resume must preserve their existing behavior");
+    }
+    std::error_code ec;
+    fs::remove_all(partial.parent_path(), ec);
+}
+
+OPENSCP_TEST(test_safe_local_source_cleanup_preserves_data, t) {
+#ifndef _WIN32
+    const fs::path source = makeTempFilePath("move-source");
+    std::ofstream(source, std::ios::binary) << "uploaded-original";
+    openscp::localfiles::LocalFileIdentity identity;
+    std::string error;
+    t.check(openscp::localfiles::localFileIdentity(source.string(), identity,
+                                                   error),
+            "move cleanup should capture the uploaded source identity");
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        t.check(
+            !openscp::localfiles::removeLocalFileIfUnchanged(source.string(),
+                                                             identity, error) &&
+                errno == ENOTSUP && !error.empty(),
+            "an unchanged source must require manual removal on every retry");
+        std::string contents;
+        t.check(readTextFile(source, contents) &&
+                    contents == "uploaded-original",
+                "cleanup must not unlink or modify even an unchanged source");
+    }
+    std::error_code ec;
+    fs::rename(source, source.string() + ".original", ec);
+    t.check(!ec, "replacement fixture should preserve the original inode");
+    std::ofstream(source, std::ios::binary) << "replacement";
+    t.check(!openscp::localfiles::removeLocalFileIfUnchanged(source.string(),
+                                                             identity, error),
+            "a replacement source must not be accepted for cleanup");
+    std::string contents;
+    t.check(readTextFile(source, contents) && contents == "replacement",
+            "a replacement entry must remain intact");
+    fs::remove(source, ec);
+    t.check(openscp::localfiles::removeLocalFileIfUnchanged(source.string(),
+                                                            identity, error) &&
+                error.empty(),
+            "cleanup should finish once the source has been removed manually");
+    fs::remove_all(source.parent_path(), ec);
+#endif
 }
 
 OPENSCP_TEST(test_safe_local_parent_symlinks, t) {
@@ -754,6 +1305,129 @@ OPENSCP_TEST(test_curlftp_rejects_unsupported_proxy_type, t) {
             "FTP validation failure should expose a structured error");
 }
 
+#ifndef _WIN32
+// A local port with nothing listening, as behind a firewall that blocks FTP
+// data connections.
+std::uint16_t closedLocalPort() {
+    const int probe = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t length = sizeof(address);
+    const bool bound =
+        probe >= 0 &&
+        ::bind(probe, reinterpret_cast<sockaddr *>(&address),
+               sizeof(address)) == 0 &&
+        ::getsockname(probe, reinterpret_cast<sockaddr *>(&address), &length) ==
+            0;
+    if (probe >= 0)
+        ::close(probe);
+    return bound ? ntohs(address.sin_port) : 0;
+}
+
+OPENSCP_TEST(test_curlftp_listing_skips_list_after_a_data_failure, t) {
+    // An FTP control server whose passive data port refuses connections.
+    const int listener = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t length = sizeof(address);
+    const std::uint16_t dataPort = closedLocalPort();
+    const bool listening =
+        listener >= 0 && dataPort != 0 &&
+        ::bind(listener, reinterpret_cast<sockaddr *>(&address),
+               sizeof(address)) == 0 &&
+        ::listen(listener, 4) == 0 &&
+        ::getsockname(listener, reinterpret_cast<sockaddr *>(&address),
+                      &length) == 0;
+    t.check(listening, "the fake FTP server should listen");
+    if (!listening) {
+        if (listener >= 0)
+            ::close(listener);
+        return;
+    }
+    std::atomic<int> dataCommands{0};
+    std::thread server([listener, dataPort, &dataCommands] {
+        for (;;) {
+            const int client = ::accept(listener, nullptr, nullptr);
+            if (client < 0)
+                return;
+            const auto reply = [client](const std::string &line) {
+                const std::string text = line + "\r\n";
+                (void)::send(client, text.data(), text.size(), 0);
+            };
+            reply("220 fake");
+            std::string pending;
+            char buffer[512];
+            for (;;) {
+                const std::size_t end = pending.find("\r\n");
+                if (end == std::string::npos) {
+                    const ssize_t n = ::recv(client, buffer, sizeof(buffer), 0);
+                    if (n <= 0)
+                        break;
+                    pending.append(buffer, static_cast<std::size_t>(n));
+                    continue;
+                }
+                const std::string command = pending.substr(0, end);
+                pending.erase(0, end + 2);
+                const std::string verb = command.substr(0, command.find(' '));
+                if (verb == "USER")
+                    reply("331 password");
+                else if (verb == "PASS")
+                    reply("230 logged in");
+                else if (verb == "PWD")
+                    reply("257 \"/\" is the current directory");
+                else if (verb == "CWD")
+                    reply("250 ok");
+                else if (verb == "TYPE")
+                    reply("200 ok");
+                else if (verb == "EPSV") {
+                    ++dataCommands;
+                    reply("229 Entering Extended Passive Mode (|||" +
+                          std::to_string(dataPort) + "|)");
+                } else if (verb == "PASV") {
+                    ++dataCommands;
+                    reply("227 Entering Passive Mode (127,0,0,1," +
+                          std::to_string(dataPort / 256) + "," +
+                          std::to_string(dataPort % 256) + ")");
+                } else if (verb == "QUIT") {
+                    reply("221 bye");
+                    break;
+                } else {
+                    reply("502 not implemented");
+                }
+            }
+            ::close(client);
+        }
+    });
+
+    openscp::CurlFtpClient client(openscp::Protocol::Ftp);
+    openscp::SessionOptions opt;
+    opt.protocol = openscp::Protocol::Ftp;
+    opt.host = "127.0.0.1";
+    opt.port = ntohs(address.sin_port);
+    opt.username = "alice";
+    opt.password = openscp::SecureString("secret");
+    std::string err;
+    std::vector<openscp::FileInfo> entries;
+    const bool connected = client.connect(opt, err);
+    t.check(connected, "the fake FTP server should accept the login: " + err);
+    const int before = dataCommands.load();
+    const bool listed = connected && client.list("/", entries, err);
+    // libcurl tries PASV itself after EPSV fails, so one listing command
+    // takes two; retrying with LIST took two more.
+    t.check(!listed && dataCommands.load() - before == 2,
+            "a listing whose data connection fails should not retry with "
+            "LIST: " +
+                std::to_string(dataCommands.load() - before) +
+                " data command(s), " + err);
+    client.disconnect();
+    ::shutdown(listener, SHUT_RDWR);
+    ::close(listener);
+    server.join();
+}
+#endif
+
 OPENSCP_TEST(test_curlftp_rejects_command_injection_paths, t) {
     openscp::CurlFtpClient client(openscp::Protocol::Ftp);
     std::vector<openscp::FileInfo> entries;
@@ -783,20 +1457,28 @@ OPENSCP_TEST(test_curl_structured_error_mappings, t) {
                 !httpFull.transient && !httpFull.commit_uncertain,
             "HTTP 507 should be a permanent, commit-certain space error");
 
-    const openscp::RemoteError tlsFailure = openscp::curlcommon::errorFromCurl(
-        CURLE_SSL_CONNECT_ERROR, "TLS handshake failed");
-    t.check(tlsFailure.kind == openscp::RemoteErrorKind::Certificate &&
-                !tlsFailure.transient,
-            "TLS verification/handshake failures should not be retried");
+    const openscp::RemoteError handshakeFailure =
+        openscp::curlcommon::errorFromCurl(CURLE_SSL_CONNECT_ERROR,
+                                           "TLS handshake failed");
+    t.check(handshakeFailure.kind == openscp::RemoteErrorKind::Connection &&
+                handshakeFailure.transient,
+            "a broken TLS handshake should be a transient connection error");
+    const openscp::RemoteError verificationFailure =
+        openscp::curlcommon::errorFromCurl(CURLE_PEER_FAILED_VERIFICATION,
+                                           "certificate rejected");
+    t.check(verificationFailure.kind == openscp::RemoteErrorKind::Certificate &&
+                !verificationFailure.transient,
+            "TLS verification failures should not be retried");
 
+    // Downloads keep the errno of the write that failed; libcurl makes more
+    // calls before it returns, so a later errno says nothing.
     const int previousErrno = errno;
     errno = ENOSPC;
-    const openscp::RemoteError localFull = openscp::curlcommon::errorFromCurl(
+    const openscp::RemoteError localWrite = openscp::curlcommon::errorFromCurl(
         CURLE_WRITE_ERROR, "local write failed");
     errno = previousErrno;
-    t.check(localFull.kind == openscp::RemoteErrorKind::InsufficientSpace &&
-                localFull.native_code == ENOSPC,
-            "local ENOSPC during a CURL write should retain its native code");
+    t.check(localWrite.kind == openscp::RemoteErrorKind::LocalIo,
+            "a CURL write error should not read an unrelated errno");
 }
 #endif
 
@@ -1012,6 +1694,12 @@ OPENSCP_TEST(test_mock_filesystem_crud_and_metadata, t) {
     t.check(c.stat("/workspace/report.txt", info, err) && info.mode == 0600 &&
                 info.uid == 1000 && info.gid == 1001 && info.mtime == 300,
             "metadata mutations should persist in the mock filesystem");
+    constexpr auto kUnchanged = static_cast<std::uint32_t>(-1);
+    t.check(c.chown("/workspace/report.txt", 1002, kUnchanged, err) &&
+                c.chown("/workspace/report.txt", kUnchanged, 1003, err) &&
+                c.stat("/workspace/report.txt", info, err) &&
+                info.uid == 1002 && info.gid == 1003,
+            "chown with an unchanged id should keep that id");
 
     t.check(c.mkdir("/workspace/archive", err, 0700),
             "mkdir should create a directory in the mock filesystem");
@@ -1297,6 +1985,25 @@ OPENSCP_TEST(test_shared_libssh2_error_classification, t) {
     t.check(local.kind == openscp::RemoteErrorKind::LocalIo ||
                 local.kind == openscp::RemoteErrorKind::InsufficientSpace,
             "shared libssh2 errors should classify local file failures");
+
+    for (const char *path :
+         {"/srv/backups/checksums", "/home/ana/orders-canceled",
+          "/etc/password-policies", "/data/fingerprints", "/srv/connections"}) {
+        const openscp::RemoteError listing =
+            openscp::libssh2detail::classifyFailure(
+                std::string("sftp_opendir failed for: ") + path, nullptr);
+        t.check(listing.kind == openscp::RemoteErrorKind::RemoteIo,
+                std::string("a word in a path should not classify the "
+                            "failure: ") +
+                    path);
+    }
+    const openscp::RemoteError serverReason =
+        openscp::libssh2detail::classifyFailure(
+            "Could not open remote file for SCP download: scp: "
+            "/etc/password-policies/list: Permission denied",
+            nullptr);
+    t.check(serverReason.kind == openscp::RemoteErrorKind::PermissionDenied,
+            "the server's reason should still classify the failure");
 }
 
 OPENSCP_TEST(test_libssh2_recent_remote_modification, t) {

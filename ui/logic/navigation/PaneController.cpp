@@ -383,7 +383,8 @@ void PaneController::search(const SearchContext &context) {
                         state->truncated = true;
                         if (state->context.remoteOperations) {
                             state->context.remoteOperations->cancel(
-                                state->jobId);
+                                state->jobId,
+                                RemoteOperationController::Interrupt::No);
                         }
                         break;
                     }

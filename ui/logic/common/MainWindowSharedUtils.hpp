@@ -11,6 +11,8 @@
 #include <QVector>
 #include <QWidget>
 
+#include <functional>
+
 inline constexpr int kNameColumn = 0;
 
 struct PathDepthComparator {
@@ -26,6 +28,26 @@ enum class LocalRenameResult { Moved, CrossDevice, Failed };
 LocalRenameResult renameLocalEntry(const QString &sourcePath,
                                    const QString &targetPath,
                                    QString *error = nullptr);
+
+// Removes a file, a directory tree, or a symbolic link. A link is removed
+// itself, never through its target. A missing entry counts as removed.
+bool removeLocalEntry(const QString &path);
+
+// Copies a file, folder tree, or link through a staged sibling and replaces an
+// existing destination only once the copy is complete. Hidden entries are
+// included and links are recreated, not followed. Special files and copying a
+// folder into itself fail. `shouldCancel` is asked before each entry; a
+// canceled copy removes what it staged and leaves the destination as it was.
+bool copyLocalEntry(const QString &srcPath, const QString &dstPath,
+                    QString &error,
+                    const std::function<bool()> &shouldCancel = {});
+
+// Renames the entry, replacing an existing destination. Across volumes it
+// falls back to copyLocalEntry() and removes the source only after the copy
+// succeeds.
+bool moveLocalEntry(const QString &srcPath, const QString &dstPath,
+                    QString &error,
+                    const std::function<bool()> &shouldCancel = {});
 
 bool isValidEntryName(const QString &name, QString *why = nullptr);
 bool promptValidEntryName(QWidget *parent, const QString &dialogTitle,

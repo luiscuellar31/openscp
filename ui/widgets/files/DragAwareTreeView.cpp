@@ -3,6 +3,7 @@
 
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
+#include "logic/common/StagingStore.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "logic/remote/RemoteModel.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
@@ -12,7 +13,6 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QCoreApplication>
-#include <QDateTime>
 #include <QDir>
 #include <QDrag>
 #include <QFileInfo>
@@ -33,7 +33,6 @@
 #include <QStatusBar>
 #include <QTimer>
 #include <QUrl>
-#include <QUuid>
 #include <QVector>
 #include <QWheelEvent>
 
@@ -70,19 +69,19 @@ QPair<QString, QString> splitNameMultiExt(const QString &fileName) {
 }
 
 QPair<int, quint64> loadStagingConfirmThresholds() {
+    using namespace openscpui::settingskeys;
     openscpui::AppSettings settings;
     int itemThreshold =
         settings
-            .value(openscpui::settingskeys::kStagingConfirmationItems, 100000)
+            .value(kStagingConfirmationItems, kDefaultStagingConfirmationItems)
             .toInt();
     if (itemThreshold < 1)
-        itemThreshold = 100000;
+        itemThreshold = kDefaultStagingConfirmationItems;
     int mibThreshold =
-        settings
-            .value(openscpui::settingskeys::kStagingConfirmationMiB, 100 * 1024)
+        settings.value(kStagingConfirmationMiB, kDefaultStagingConfirmationMiB)
             .toInt();
     if (mibThreshold < 1)
-        mibThreshold = 100 * 1024;
+        mibThreshold = kDefaultStagingConfirmationMiB;
     return qMakePair(itemThreshold,
                      static_cast<quint64>(mibThreshold) * 1024ull * 1024ull);
 }
@@ -220,36 +219,7 @@ void DragAwareTreeView::startDrag(Qt::DropActions supportedActions) {
     }
     auto drag = new QDrag(this);
     drag->setMimeData(mimeData);
-    const auto dragResult = drag->exec(Qt::CopyAction);
-
-    // Custom payload from RemoteModel when dragging out from remote
-    const QByteArray stagingBatchMimeType =
-        QByteArrayLiteral("application/x-openscp-staging-batch");
-    if (!mimeData->hasFormat(stagingBatchMimeType))
-        return; // nothing to do
-    const QString batchDir =
-        QString::fromUtf8(mimeData->data(stagingBatchMimeType));
-    if (batchDir.isEmpty())
-        return;
-
-    openscpui::AppSettings settings;
-    const bool autoClean =
-        settings.value(openscpui::settingskeys::kAutoCleanStaging, true)
-            .toBool();
-
-    if (dragResult == Qt::IgnoreAction) {
-        // Drag canceled: keep staging and notify with clickable link
-        showKeepMessage(batchDir);
-        return;
-    }
-
-    if (!autoClean) {
-        showKeepMessage(batchDir);
-        return;
-    }
-
-    // Success path: schedule retries to delete batch dir and maybe root
-    scheduleAutoCleanup(batchDir);
+    drag->exec(Qt::CopyAction);
 }
 
 void DragAwareTreeView::showKeepMessage(const QString &batchDir) {
@@ -287,46 +257,6 @@ void DragAwareTreeView::showKeepMessageWithPrefix(const QString &prefix,
     QTimer::singleShot(12000, statusLabel, [mainWindow, statusLabel] {
         mainWindow->statusBar()->removeWidget(statusLabel);
         statusLabel->deleteLater();
-    });
-}
-
-void DragAwareTreeView::scheduleAutoCleanup(const QString &batchDir,
-                                            int initialDelayMs) {
-    auto tryDelete = [](const QString &dir) -> bool {
-        QDir targetDir(dir);
-        if (!targetDir.exists())
-            return true;
-        bool removed = targetDir.removeRecursively();
-        if (!removed)
-            return false;
-        // If root empty, remove it
-        QString root = stagingRootFromSettings();
-        QDir rootDir(root);
-        if (rootDir.exists() &&
-            rootDir.entryList(QDir::NoDotAndDotDot | QDir::AllEntries)
-                .isEmpty()) {
-            rootDir.rmdir(".");
-        }
-        return true;
-    };
-
-    const int firstDelayMs = qBound(0, initialDelayMs, 60000);
-    // First attempt with a brief delay to allow OS to finish copying
-    QTimer::singleShot(firstDelayMs, this, [this, batchDir, tryDelete]() {
-        if (tryDelete(batchDir))
-            return;
-        // Retry up to 3 times at 1s intervals
-        auto retries = std::make_shared<int>(3);
-        auto timer = new QTimer(this);
-        timer->setInterval(1000);
-        connect(timer, &QTimer::timeout, this,
-                [timer, retries, batchDir, tryDelete]() {
-                    if (tryDelete(batchDir) || --(*retries) <= 0) {
-                        timer->stop();
-                        timer->deleteLater();
-                    }
-                });
-        timer->start();
     });
 }
 
@@ -681,17 +611,24 @@ void DragAwareTreeView::startRemoteDragStaging(
         auto *mainWindow = qobject_cast<QMainWindow *>(window());
         if (!mainWindow || !dragInProgress_)
             return;
-        QMessageBox box(mainWindow);
-        UiAlerts::configure(box);
-        box.setIcon(QMessageBox::Information);
-        box.setWindowTitle(tr("Preparing files…"));
-        box.setText(tr("Still preparing files for drag-out. Wait or cancel?"));
-        box.addButton(tr("Wait"), QMessageBox::AcceptRole);
+        // Not exec(): the drag starts as soon as preparation ends, and a
+        // nested loop would leave this prompt open on top of it.
+        auto *box = new QMessageBox(mainWindow);
+        UiAlerts::configure(*box);
+        box->setIcon(QMessageBox::Information);
+        box->setWindowTitle(tr("Preparing files…"));
+        box->setText(tr("Still preparing files for drag-out. Wait or cancel?"));
+        box->addButton(tr("Wait"), QMessageBox::AcceptRole);
         auto *cancelButton =
-            box.addButton(tr("Cancel"), QMessageBox::RejectRole);
-        box.exec();
-        if (box.clickedButton() == cancelButton)
-            cancelCurrentBatch(QStringLiteral("dialog"));
+            box->addButton(tr("Cancel"), QMessageBox::RejectRole);
+        QObject::connect(box, &QDialog::finished, box, &QObject::deleteLater);
+        QObject::connect(box, &QMessageBox::buttonClicked, this,
+                         [this, cancelButton](QAbstractButton *button) {
+                             if (button == cancelButton)
+                                 cancelCurrentBatch(QStringLiteral("dialog"));
+                         });
+        waitPrompt_ = box;
+        box->open();
     });
     waitTimer_->start();
 
@@ -923,9 +860,18 @@ DragAwareTreeView::formatRemoteDragMetrics(const QString &result,
         .arg(QLocale().toString(static_cast<qulonglong>(enumInaccessible_)));
 }
 
-void DragAwareTreeView::resetRemoteDragState() {
+void DragAwareTreeView::stopWaitPrompt() {
     if (waitTimer_)
         waitTimer_->stop();
+    if (waitPrompt_) {
+        QObject::disconnect(waitPrompt_, nullptr, this, nullptr);
+        waitPrompt_->hide();
+        waitPrompt_->deleteLater();
+    }
+}
+
+void DragAwareTreeView::resetRemoteDragState() {
+    stopWaitPrompt();
     if (stagingState_) {
         stagingState_->finished = true;
         QObject::disconnect(stagingState_->addedConnection);
@@ -976,6 +922,7 @@ void DragAwareTreeView::finishRemoteDragStaging(
     QObject::disconnect(state->updatedConnection);
     QObject::disconnect(state->removedConnection);
     hidePrepOverlay();
+    stopWaitPrompt();
 
     const int total = static_cast<int>(state->orderedDirectories.size() +
                                        state->targets.size());
@@ -1028,14 +975,6 @@ void DragAwareTreeView::finishRemoteDragStaging(
     drag->setMimeData(mimeData);
     const Qt::DropAction result = drag->exec(Qt::CopyAction);
 
-    bool droppedInsideThisWindow = false;
-    if (const QObject *dropTarget = drag->target()) {
-        const QWidget *targetWidget = qobject_cast<const QWidget *>(dropTarget);
-        QWidget *const sourceWindow = window();
-        droppedInsideThisWindow = targetWidget && sourceWindow &&
-                                  targetWidget->window() == sourceWindow;
-    }
-
     openscpui::AppSettings settings;
     const bool autoClean =
         settings.value(openscpui::settingskeys::kAutoCleanStaging, true)
@@ -1051,8 +990,10 @@ void DragAwareTreeView::finishRemoteDragStaging(
         return;
     }
 
-    const int cleanupDelayMs = droppedInsideThisWindow ? 10000 : 500;
-    scheduleAutoCleanup(currentBatchDir_, cleanupDelayMs);
+    // The drop target owns the batch: the local panel deletes it once its
+    // copy ends. Any other target, such as Finder, a browser or a mail
+    // client, may read the files long after the drop, so its batch waits for
+    // the startup cleanup.
     finishBatch(QStringLiteral("accepted"), 0);
 }
 
@@ -1086,12 +1027,8 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *remoteModel) {
     prepTimer_.restart();
 
     const QString root = buildStagingRoot();
-    const QString stamp =
-        QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz");
-    const QString uniqueSuffix =
-        QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
     const QString stagingDir =
-        QDir(root).filePath(stamp + QLatin1Char('-') + uniqueSuffix);
+        QDir(root).filePath(openscpui::newStagingBatchName());
     currentBatchDir_ = stagingDir;
     currentBatchId_ = QFileInfo(stagingDir).fileName();
     batchLogged_ = false;
@@ -1279,8 +1216,7 @@ void DragAwareTreeView::cancelCurrentBatch(const QString &reason) {
         QObject::disconnect(stagingState_->updatedConnection);
         QObject::disconnect(stagingState_->removedConnection);
     }
-    if (waitTimer_)
-        waitTimer_->stop();
+    stopWaitPrompt();
     if (remoteOps_) {
         const auto pending = enumPendingJobs_;
         for (const auto jobId : pending)

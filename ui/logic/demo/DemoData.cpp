@@ -45,8 +45,11 @@ QVector<SiteEntry> sampleSites() {
 
 void seedSampleDataIfEmpty() {
     const QVector<SiteEntry> sites = sampleSites();
-    if (SavedSitesPersistence::loadSites().sites.isEmpty())
-        SavedSitesPersistence::saveSites(sites);
+    // Each call makes the sample sites with new ids, so only the ones saved
+    // now may get history: any other start would seed scopes nothing reads.
+    const bool savedSampleSites =
+        SavedSitesPersistence::loadSites().sites.isEmpty() &&
+        SavedSitesPersistence::saveSites(sites).ok;
 
     NavigationStore navigation;
     if (navigation.recentServers().isEmpty()) {
@@ -65,6 +68,8 @@ void seedSampleDataIfEmpty() {
         }
     }
 
+    if (!savedSampleSites)
+        return;
     // Connecting through a saved site scopes its history by site id, so seed
     // the same scope the application will read back.
     for (const SiteEntry &site : sites) {

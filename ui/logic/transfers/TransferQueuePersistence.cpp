@@ -20,16 +20,16 @@ namespace {
 using Policy = TransferConflictPolicy;
 using Status = TransferTask::Status;
 
-constexpr qint64 kMaxPersistenceBytes = 16 * 1024 * 1024;
+// Room for kMaxPersistedTasks tasks with paths of about 170 characters.
+constexpr qint64 kMaxPersistenceBytes = 64 * 1024 * 1024;
 constexpr qsizetype kMaxPersistedTasks = 100'000;
+// Fewer bytes than a task takes besides its paths and session key, so a
+// queue that cannot fit is rejected without serializing it.
+constexpr qint64 kMinSerializedTaskBytes = 200;
 constexpr int kSchemaVersion = 1;
 // Written only when a task waits for its batch, so builds that predate batch
 // waiting preserve the file instead of running those tasks without waiting.
 constexpr int kBatchWaitSchemaVersion = 2;
-
-QString translate(const char *text) {
-    return QCoreApplication::translate("TransferManager", text);
-}
 
 QString policyName(Policy policy) {
     switch (policy) {
@@ -251,7 +251,8 @@ std::optional<TransferTask> deserializeTask(const QJsonObject &object,
 void markCorrupt(TransferQueuePersistence::LoadResult &result) {
     result.status = TransferQueuePersistence::LoadStatus::Corrupt;
     result.tasks.clear();
-    result.warning = translate(
+    result.warning = QCoreApplication::translate(
+        "TransferManager",
         "The saved transfer queue is corrupt and was preserved without "
         "changes.");
 }
@@ -295,9 +296,10 @@ TransferQueuePersistence::load(const QString &path,
         return result;
     if (!file.open(QIODevice::ReadOnly)) {
         result.status = LoadStatus::IoError;
-        result.warning =
-            translate("The saved transfer queue could not be read: %1")
-                .arg(file.errorString());
+        result.warning = QCoreApplication::translate(
+                             "TransferManager",
+                             "The saved transfer queue could not be read: %1")
+                             .arg(file.errorString());
         return result;
     }
 
@@ -312,9 +314,10 @@ TransferQueuePersistence::load(const QString &path,
     }
     if (file.error() != QFileDevice::NoError) {
         result.status = LoadStatus::IoError;
-        result.warning =
-            translate("The saved transfer queue could not be read: %1")
-                .arg(file.errorString());
+        result.warning = QCoreApplication::translate(
+                             "TransferManager",
+                             "The saved transfer queue could not be read: %1")
+                             .arg(file.errorString());
         return result;
     }
 
@@ -323,7 +326,8 @@ TransferQueuePersistence::load(const QString &path,
         QJsonDocument::fromJson(serialized, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
         result.status = LoadStatus::Corrupt;
-        result.warning = translate(
+        result.warning = QCoreApplication::translate(
+            "TransferManager",
             "The saved transfer queue is corrupt and was preserved without "
             "changes.");
         return result;
@@ -334,7 +338,8 @@ TransferQueuePersistence::load(const QString &path,
     if (schemaVersion != kSchemaVersion &&
         schemaVersion != kBatchWaitSchemaVersion) {
         result.status = LoadStatus::UnsupportedSchema;
-        result.warning = translate(
+        result.warning = QCoreApplication::translate(
+            "TransferManager",
             "The saved transfer queue uses a newer format and was preserved "
             "without changes.");
         return result;
@@ -395,16 +400,45 @@ TransferQueuePersistence::SaveResult
 TransferQueuePersistence::save(const QString &path,
                                const QVector<TransferTask> &tasks) {
     SaveResult result;
+    // An older file left in place would be restored on the next start and
+    // repeat work that has finished since, so a queue too large to save
+    // removes it.
+    const auto rejectTooLarge = [&path, &result] {
+        QFile previous(path);
+        if (previous.exists() && !previous.remove()) {
+            result.warning =
+                QCoreApplication::translate(
+                    "TransferManager",
+                    "The transfer queue is too large to be saved, and "
+                    "its previous copy could not be removed: %1")
+                    .arg(previous.errorString());
+        } else {
+            result.warning = QCoreApplication::translate(
+                "TransferManager",
+                "The transfer queue is too large to be saved, so it "
+                "will not be restored after a restart.");
+        }
+        return result;
+    };
+
+    qsizetype persistedCount = 0;
+    qint64 minimumBytes = 0;
+    for (const TransferTask &task : tasks) {
+        if (!isPersisted(task))
+            continue;
+        ++persistedCount;
+        minimumBytes += kMinSerializedTaskBytes + task.src.size() +
+                        task.dst.size() + task.sessionKey.size();
+    }
+    if (persistedCount > kMaxPersistedTasks ||
+        minimumBytes > kMaxPersistenceBytes)
+        return rejectTooLarge();
+
     QJsonArray serialized;
     bool waitsForBatch = false;
     for (const TransferTask &task : tasks) {
         if (!isPersisted(task))
             continue;
-        if (serialized.size() >= kMaxPersistedTasks) {
-            result.warning = translate(
-                "The transfer queue exceeds the persistence safety limit.");
-            return result;
-        }
         serialized.append(serializeTask(task));
         waitsForBatch = waitsForBatch || task.waitsForBatch;
     }
@@ -414,29 +448,31 @@ TransferQueuePersistence::save(const QString &path,
                 waitsForBatch ? kBatchWaitSchemaVersion : kSchemaVersion);
     root.insert(QStringLiteral("tasks"), serialized);
     const QByteArray data = QJsonDocument(root).toJson(QJsonDocument::Compact);
-    if (data.size() > kMaxPersistenceBytes) {
-        result.warning = translate(
-            "The transfer queue exceeds the persistence safety limit.");
-        return result;
-    }
+    if (data.size() > kMaxPersistenceBytes)
+        return rejectTooLarge();
 
     const QFileInfo fileInfo(path);
     if (!QDir().mkpath(fileInfo.dir().absolutePath())) {
-        result.warning = translate(
+        result.warning = QCoreApplication::translate(
+            "TransferManager",
             "The transfer queue storage directory could not be created.");
         return result;
     }
     QSaveFile saveFile(path);
     saveFile.setDirectWriteFallback(false);
     if (!saveFile.open(QIODevice::WriteOnly)) {
-        result.warning = translate("The transfer queue could not be saved: %1")
-                             .arg(saveFile.errorString());
+        result.warning =
+            QCoreApplication::translate(
+                "TransferManager", "The transfer queue could not be saved: %1")
+                .arg(saveFile.errorString());
         return result;
     }
     saveFile.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     if (saveFile.write(data) != data.size() || !saveFile.commit()) {
-        result.warning = translate("The transfer queue could not be saved: %1")
-                             .arg(saveFile.errorString());
+        result.warning =
+            QCoreApplication::translate(
+                "TransferManager", "The transfer queue could not be saved: %1")
+                .arg(saveFile.errorString());
         return result;
     }
     QFile::setPermissions(path,

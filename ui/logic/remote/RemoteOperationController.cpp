@@ -166,7 +166,7 @@ class RemoteOperationController::Impl {
         return id;
     }
 
-    bool cancel(JobId jobId) {
+    bool cancel(JobId jobId, bool interruptActive) {
         if (jobId == 0)
             return false;
 
@@ -177,7 +177,8 @@ class RemoteOperationController::Impl {
         registration->second.canceled->store(true, std::memory_order_relaxed);
         if (activeJobId_ == jobId && activeCancel_) {
             activeCancel_->store(true, std::memory_order_relaxed);
-            interruptActiveLocked();
+            if (interruptActive)
+                interruptActiveLocked();
         }
         wake_.notify_one();
         return true;
@@ -198,6 +199,13 @@ class RemoteOperationController::Impl {
     int cancelGeneration(SessionGeneration generation) {
         std::lock_guard lock(mutex_);
         int canceledCount = 0;
+        // The active job shares its flag with jobs_. Observe its transition
+        // first so the registration loop cannot suppress the I/O interrupt.
+        if (activeGeneration_ == generation && activeCancel_ &&
+            !activeCancel_->exchange(true, std::memory_order_relaxed)) {
+            ++canceledCount;
+            interruptActiveLocked();
+        }
         for (const auto &[id, registration] : jobs_) {
             Q_UNUSED(id);
             if (registration.generation != generation ||
@@ -207,11 +215,6 @@ class RemoteOperationController::Impl {
             }
             ++canceledCount;
         }
-        if (activeGeneration_ == generation && activeCancel_ &&
-            !activeCancel_->exchange(true, std::memory_order_relaxed)) {
-            ++canceledCount;
-            interruptActiveLocked();
-        }
         wake_.notify_one();
         return canceledCount;
     }
@@ -219,6 +222,13 @@ class RemoteOperationController::Impl {
     int cancelAll() {
         std::lock_guard lock(mutex_);
         int canceledCount = 0;
+        // Interrupt before the shared flag is marked through jobs_. The loop
+        // then skips the active registration, counting it only once.
+        if (activeCancel_ &&
+            !activeCancel_->exchange(true, std::memory_order_relaxed)) {
+            ++canceledCount;
+            interruptActiveLocked();
+        }
         for (const auto &[id, registration] : jobs_) {
             Q_UNUSED(id);
             if (registration.canceled->exchange(true,
@@ -226,11 +236,6 @@ class RemoteOperationController::Impl {
                 continue;
             }
             ++canceledCount;
-        }
-        if (activeCancel_ &&
-            !activeCancel_->exchange(true, std::memory_order_relaxed)) {
-            ++canceledCount;
-            interruptActiveLocked();
         }
         wake_.notify_one();
         return canceledCount;
@@ -1575,8 +1580,8 @@ RemoteOperationController::submit(const ChecksumRequest &request) {
     return impl_->enqueue(request, JobKind::Checksum);
 }
 
-bool RemoteOperationController::cancel(JobId jobId) {
-    return impl_->cancel(jobId);
+bool RemoteOperationController::cancel(JobId jobId, Interrupt interrupt) {
+    return impl_->cancel(jobId, interrupt == Interrupt::Yes);
 }
 
 bool RemoteOperationController::setPaused(JobId jobId, bool paused) {

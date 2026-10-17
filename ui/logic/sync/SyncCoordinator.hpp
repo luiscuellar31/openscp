@@ -5,6 +5,7 @@
 
 #include <QHash>
 #include <QObject>
+#include <QPointer>
 #include <QStringList>
 
 #include <atomic>
@@ -41,6 +42,8 @@ struct SyncChecksumResult {
 
 Q_DECLARE_METATYPE(SyncChecksumResult)
 
+struct SyncCoordinatorTestAccess;
+
 class SyncCoordinator final : public QObject {
     Q_OBJECT
 
@@ -50,8 +53,9 @@ class SyncCoordinator final : public QObject {
                              QObject *parent = nullptr);
     ~SyncCoordinator() override;
 
-    void start(const QString &localRoot, const QString &remoteRoot,
-               bool allowLargeTree = false);
+    void start(const QString &localRoot, const QString &remoteRoot);
+    // Both scans wait after largeTreeConfirmationRequired: this resumes them,
+    // and cancel() stops them.
     void continueLargeTree();
     void cancel();
     bool isPreparing() const;
@@ -87,18 +91,25 @@ class SyncCoordinator final : public QObject {
     struct ChecksumState;
 
     void maybeFinish(const std::shared_ptr<PreparationState> &state);
+    void
+    askLargeTreeConfirmation(const std::shared_ptr<PreparationState> &state);
     void stopState(bool emitCanceled);
     void maybeFinishChecksums(const std::shared_ptr<ChecksumState> &state);
     void stopChecksumState(bool emitCanceled);
 
-    RemoteOperationController *remoteOperations_ = nullptr;
-    TransferManager *transfers_ = nullptr;
+    // Guarded: MainWindow destroys both before this coordinator, whose
+    // destructor still cancels its jobs.
+    QPointer<RemoteOperationController> remoteOperations_;
+    QPointer<TransferManager> transfers_;
     std::shared_ptr<PreparationState> state_;
     std::jthread localWorker_;
     quint64 generation_ = 0;
     std::shared_ptr<ChecksumState> checksumState_;
     std::jthread checksumWorker_;
     quint64 checksumGeneration_ = 0;
-    QString retryLocalRoot_;
-    QString retryRemoteRoot_;
+    // Past these, a comparison asks before it goes on scanning.
+    quint64 largeTreeItems_ = 0;
+    quint64 largeTreeBytes_ = 0;
+
+    friend struct SyncCoordinatorTestAccess;
 };

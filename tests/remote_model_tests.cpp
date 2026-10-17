@@ -5,7 +5,9 @@
 #include "logic/remote/RemoteModel.hpp"
 
 #include <QCoreApplication>
+#include <QItemSelectionModel>
 #include <QMimeData>
+#include <QPersistentModelIndex>
 #include <QUrl>
 
 #include <cstdint>
@@ -105,6 +107,63 @@ OPENSCP_TEST(testFilteringSortingAndMimeData, test) {
     test.check(model.mimeTypes() ==
                    QStringList{QStringLiteral("text/uri-list")},
                "remote drags should advertise native file URLs");
+}
+
+QStringList namesInRowOrder(const RemoteModel &model) {
+    QStringList names;
+    for (int row = 0; row < model.rowCount(); ++row)
+        names.push_back(model.nameAt(model.index(row, 0)));
+    return names;
+}
+
+OPENSCP_TEST(testSortingKeepsSelectionOnItsEntries, test) {
+    RemoteModel model;
+    model.setEntries(QStringLiteral("/"),
+                     {entry("alpha", false, 30, true, 3, 0100644),
+                      entry("beta", false, 10, true, 1, 0100644),
+                      entry("gamma", false, 20, true, 2, 0100644),
+                      entry("tie-b", false, 5, true, 0, 0100644),
+                      entry("tie-a", false, 5, true, 0, 0100644),
+                      entry("dir", true, 0, false, 0, 0040755)});
+    test.check(
+        namesInRowOrder(model) ==
+            QStringList({"dir", "alpha", "beta", "gamma", "tie-a", "tie-b"}),
+        "entries should load sorted by name with folders first");
+
+    QItemSelectionModel selection(&model);
+    const QModelIndex beta = model.index(2, 0);
+    selection.select(beta,
+                     QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    selection.setCurrentIndex(beta, QItemSelectionModel::NoUpdate);
+    const QPersistentModelIndex betaSize(model.index(2, 1));
+
+    for (const auto &[column, order] :
+         {std::pair{1, Qt::AscendingOrder}, std::pair{2, Qt::DescendingOrder},
+          std::pair{0, Qt::DescendingOrder}}) {
+        model.sort(column, order);
+        const QModelIndexList selectedRows = selection.selectedRows();
+        test.check(selectedRows.size() == 1 &&
+                       model.nameAt(selectedRows.first()) ==
+                           QStringLiteral("beta"),
+                   "sorting should keep the selection on the same entry");
+        test.check(model.nameAt(selection.currentIndex()) ==
+                       QStringLiteral("beta"),
+                   "sorting should keep the current index on the same entry");
+        test.check(betaSize.row() == selection.currentIndex().row() &&
+                       betaSize.column() == 1,
+                   "sorting should keep persistent indexes in their column");
+    }
+
+    model.sort(1, Qt::AscendingOrder);
+    test.check(
+        namesInRowOrder(model) ==
+            QStringList({"dir", "tie-a", "tie-b", "beta", "gamma", "alpha"}),
+        "equal sizes should fall back to the name");
+    model.sort(1, Qt::DescendingOrder);
+    test.check(
+        namesInRowOrder(model) ==
+            QStringList({"dir", "alpha", "gamma", "beta", "tie-b", "tie-a"}),
+        "a descending sort should reverse ties too");
 }
 
 OPENSCP_TEST(testLargeListingsReusePrecomputedDisplayData, test) {

@@ -1,25 +1,22 @@
 // Connection, authentication, and transport settings for a remote session.
 #pragma once
 
+#include "KeyboardInteractive.hpp"
 #include "Protocol.hpp"
 #include "SecureString.hpp"
 
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <vector>
 
 namespace openscp {
 
-enum class KbdIntPromptResult { Handled, Unhandled, Cancelled };
-
-using KbdIntPromptsCB = std::function<KbdIntPromptResult(
-    const std::string &name, const std::string &instruction,
-    const std::vector<std::string> &prompts,
-    std::vector<std::string> &responses)>;
-
 struct SessionOptions {
+    // Runtime-only cancellation for this connection attempt; never persisted.
+    std::stop_token connection_stop_token;
     Protocol protocol = Protocol::Sftp;
     ScpTransferMode scp_transfer_mode = ScpTransferMode::Auto;
     std::string host;
@@ -48,6 +45,11 @@ struct SessionOptions {
     bool webdav_verify_peer = true;
     std::optional<std::string> webdav_ca_cert_path;
 
+    // Pin of the server's TLS public key: "sha256//" and the Base64 SHA-256
+    // of its SubjectPublicKeyInfo. FTPS and HTTPS WebDAV refuse any other
+    // key, also when certificate verification is off.
+    std::optional<std::string> tls_pinned_public_key;
+
     ProxyType proxy_type = ProxyType::None;
     std::string proxy_host;
     std::uint16_t proxy_port = 0;
@@ -66,5 +68,14 @@ struct SessionOptions {
     std::function<void(const std::string &message)> hostkey_status_cb;
     KbdIntPromptsCB keyboard_interactive_cb;
 };
+
+// Whether the connection uses TLS without verifying the server certificate.
+inline bool skipsTlsCertificateVerification(const SessionOptions &opt) {
+    if (opt.protocol == Protocol::Ftps)
+        return !opt.ftps_verify_peer;
+    return opt.protocol == Protocol::WebDav &&
+           normalizeWebDavScheme(opt.webdav_scheme) == WebDavScheme::Https &&
+           !opt.webdav_verify_peer;
+}
 
 } // namespace openscp

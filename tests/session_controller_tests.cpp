@@ -11,14 +11,23 @@ OPENSCP_TEST(testConnectionCancellation, test) {
     test.check(session.beginConnection(canceled),
                "an idle controller should begin a connection");
     test.check(session.isConnecting(), "connection state should be observable");
+    const auto stopToken = session.connectionStopToken();
+    bool interrupted = false;
+    std::stop_callback interrupt(stopToken, [&] { interrupted = true; });
     test.check(!session.beginConnection(canceled),
                "a second concurrent connection should be rejected");
-    test.check(session.requestConnectionCancellation() && canceled->load(),
-               "cancellation should reach the worker's shared flag");
+    test.check(session.requestConnectionCancellation() && canceled->load() &&
+                   stopToken.stop_requested() && interrupted,
+               "cancellation should reach both the worker flag and active I/O");
     session.finishConnection();
     test.check(!session.isConnecting() &&
                    !session.requestConnectionCancellation(),
                "finishing should clear connection and cancellation state");
+    test.check(session.beginConnection(canceled) &&
+                   !session.connectionStopToken().stop_requested() &&
+                   stopToken.stop_requested(),
+               "new attempts should get an independent cancellation lifetime");
+    session.finishConnection();
 }
 
 OPENSCP_TEST(testDisconnectGenerations, test) {

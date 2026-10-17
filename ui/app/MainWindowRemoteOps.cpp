@@ -14,7 +14,6 @@
 #include "widgets/platform/PlatformFilePicker.hpp"
 
 #include <QDir>
-#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QInputDialog>
@@ -22,18 +21,15 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QScrollBar>
-#include <QStandardPaths>
 #include <QStatusBar>
 
 namespace {
 
-QString tempDownloadPathFor(const QString &remoteName) {
-    QString base =
-        QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
-    if (base.isEmpty())
-        base = QDir::homePath() + "/Downloads";
-    QDir().mkpath(base);
-    return QDir(base).filePath(remoteName);
+// Double-clicking a remote file downloads it into the folder chosen for
+// downloads, set in Settings or by the last "Download to" choice.
+QString downloadPathFor(const QString &downloadDir, const QString &remoteName) {
+    QDir().mkpath(downloadDir);
+    return QDir(downloadDir).filePath(remoteName);
 }
 
 } // namespace
@@ -176,8 +172,11 @@ void MainWindow::requestRemoteListing(const QString &path, bool refresh,
     }
 
     const QString normalized = normalizeRemotePath(path);
+    // The new listing replaces the old one; interrupting it would drop the
+    // control connection and make the next listing log in again.
     if (activeRemoteListJob_ != 0)
-        remoteOps_->cancel(activeRemoteListJob_);
+        remoteOps_->cancel(activeRemoteListJob_,
+                           RemoteOperationController::Interrupt::No);
 
     remoteRefreshSelectionNames_.clear();
     remoteRefreshScrollValue_ = 0;
@@ -248,7 +247,7 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
     }
     const QString remotePath =
         joinRemotePath(rightRemoteModel_->rootPath(), name);
-    const QString localPath = tempDownloadPathFor(name);
+    const QString localPath = downloadPathFor(downloadDir_, name);
     // Reuse the exact active transfer for this session so repeated activation
     // opens the result once without creating process-global listener state.
     const std::optional<quint64> activeTaskId =
@@ -642,20 +641,10 @@ void MainWindow::deleteRightSelected() {
             QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
         return;
     }
-    int deletedCount = 0;
-    int failedCount = 0;
-    for (const QModelIndex &index : rows) {
-        const QFileInfo selectedFileInfo = rightLocalModel_->fileInfo(index);
-        const bool removed =
-            selectedFileInfo.isDir()
-                ? QDir(selectedFileInfo.absoluteFilePath()).removeRecursively()
-                : QFile::remove(selectedFileInfo.absoluteFilePath());
-        removed ? ++deletedCount : ++failedCount;
-    }
-    statusBar()->showMessage(
-        tr("Deleted: %1  |  Failed: %2").arg(deletedCount).arg(failedCount),
-        5000);
-    setRightRoot(rightPath_->path());
+    QStringList paths;
+    for (const QModelIndex &index : rows)
+        paths.push_back(rightLocalModel_->fileInfo(index).absoluteFilePath());
+    runLocalDelete(paths);
 }
 
 // Show context menu for the right pane based on current state.

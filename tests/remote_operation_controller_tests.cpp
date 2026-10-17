@@ -37,8 +37,11 @@ struct FakeState {
     std::atomic_int activeCalls{0};
     std::atomic_int maximumActiveCalls{0};
     std::atomic_bool interrupted{false};
+    std::atomic_int interruptCalls{0};
     // Makes interrupt() drop the connection, as the SFTP backend does.
     std::atomic_bool interruptDropsConnection{false};
+    // Lets a /slow listing finish without an interrupt.
+    std::atomic_bool releaseSlow{false};
 };
 
 class ActiveCall {
@@ -90,6 +93,7 @@ class ControllerFakeClient final : public openscp::RemoteClient {
     }
 
     void interrupt() override {
+        state_->interruptCalls.fetch_add(1);
         state_->interrupted.store(true);
         if (state_->interruptDropsConnection.load())
             connected_.store(false);
@@ -104,7 +108,7 @@ class ControllerFakeClient final : public openscp::RemoteClient {
         if (remotePath == "/slow") {
             std::unique_lock lock(state_->mutex);
             state_->wake.wait_for(lock, std::chrono::seconds(2), [this] {
-                return state_->interrupted.load();
+                return state_->interrupted.load() || state_->releaseSlow.load();
             });
             if (state_->interrupted.load()) {
                 err = "Canceled";
@@ -147,6 +151,16 @@ class ControllerFakeClient final : public openscp::RemoteClient {
         } else if (remotePath == "/summary/deep") {
             out = {
                 {"must-not-be-listed.txt", false, 1, true, 0, 0100644u, 1, 1},
+            };
+        } else if (remotePath == "/links") {
+            out = {
+                {"current", true, 0, false, 0, 0120777u, 1, 1},
+                {"file-link", false, 0, false, 0, 0120777u, 1, 1},
+                {"data.txt", false, 4, true, 0, 0100644u, 1, 1},
+            };
+        } else if (remotePath == "/links/current") {
+            out = {
+                {"link-target.txt", false, 1, true, 0, 0100644u, 1, 1},
             };
         } else if (remotePath == "/unsafe") {
             out = {
@@ -486,6 +500,49 @@ OPENSCP_TEST(testListRejectsUnsafeNames, test) {
                "normal listings should report every rejected name");
 }
 
+OPENSCP_TEST(testRecursiveDeleteRemovesLinksWithoutFollowingThem, test) {
+    RemoteOperationController controller;
+    const auto state = std::make_shared<FakeState>();
+    RemoteOperationController::JobId deleteJob = 0;
+    std::optional<RemoteOperationController::Completion> completion;
+    QObject::connect(
+        &controller, &RemoteOperationController::jobFinished, &controller,
+        [&](const RemoteOperationController::Completion &finished) {
+            if (finished.result.job.id == deleteJob)
+                completion = finished;
+        });
+
+    controller.installSession(makeConnectedClient(state));
+    RemoteOperationController::DeleteRequest deletion;
+    deletion.path = QStringLiteral("/links");
+    deletion.kind = RemoteOperationController::DeleteKind::Directory;
+    deletion.recursive = true;
+    deletion.traversal.skipSymlinks = false;
+    deleteJob = controller.submit(deletion);
+
+    test.check(spinUntil([&] { return completion.has_value(); }),
+               "recursive delete with links should complete");
+    test.check(completion &&
+                   completion->result.outcome ==
+                       RemoteOperationController::Outcome::Succeeded &&
+                   completion->skippedSymlinks == 0,
+               "a folder with links should be deleted completely");
+
+    std::lock_guard lock(state->mutex);
+    const auto called = [&](const std::string &name) {
+        return std::find(state->calls.cbegin(), state->calls.cend(), name) !=
+               state->calls.cend();
+    };
+    test.check(called("removeFile:/links/current") &&
+                   called("removeFile:/links/file-link") &&
+                   called("removeFile:/links/data.txt") &&
+                   called("removeDir:/links"),
+               "links should be removed as entries before their folder");
+    test.check(!called("list:/links/current") &&
+                   !called("removeFile:/links/current/link-target.txt"),
+               "a recursive delete must never follow a link");
+}
+
 OPENSCP_TEST(testRecursiveMutationsRejectUnsafeNames, test) {
     RemoteOperationController controller;
     const auto state = std::make_shared<FakeState>();
@@ -657,6 +714,85 @@ OPENSCP_TEST(testExplicitCancellationAndShutdown, test) {
                "shutdown should disconnect on the serialized lane");
     test.check(state->destructorThread == state->workerThread,
                "shutdown should destroy the client on the serialized lane");
+}
+
+OPENSCP_TEST(testCollectiveCancellationInterruptsActiveWork, test) {
+    for (const bool byGeneration : {false, true}) {
+        RemoteOperationController controller;
+        const auto state = std::make_shared<FakeState>();
+        QVector<RemoteOperationController::Completion> completions;
+        QObject::connect(
+            &controller, &RemoteOperationController::jobFinished, &controller,
+            [&](const RemoteOperationController::Completion &completion) {
+                completions.push_back(completion);
+            });
+        const auto generation =
+            controller.installSession(makeConnectedClient(state));
+        const auto active = controller.submit(
+            RemoteOperationController::ListRequest{"/slow", true});
+        const bool entered =
+            spinUntil([&] { return state->activeCalls.load() == 1; });
+        test.check(entered, "the active job must enter blocking backend I/O");
+        if (!entered)
+            continue;
+        const auto queued = controller.submit(
+            RemoteOperationController::StatRequest{"/queued"});
+        const auto alreadyCanceled = controller.submit(
+            RemoteOperationController::StatRequest{"/already-canceled"});
+        test.check(controller.cancel(alreadyCanceled),
+                   "individual cancellation should find a queued job");
+        test.check(state->interruptCalls.load() == 0,
+                   "canceling a queued job must not interrupt active I/O");
+        if (byGeneration) {
+            test.check(controller.cancelGeneration(generation + 1) == 0 &&
+                           state->interruptCalls.load() == 0,
+                       "canceling another generation must leave active work "
+                       "and queued registrations untouched");
+        }
+        const auto cancel = [&] {
+            return byGeneration ? controller.cancelGeneration(generation)
+                                : controller.cancelAll();
+        };
+        test.check(cancel() == 2,
+                   "collective cancellation must count each newly canceled "
+                   "active or queued job once");
+        test.check(state->interruptCalls.load() == 1,
+                   "collective cancellation must interrupt active backend I/O");
+        test.check(cancel() == 0 && state->interruptCalls.load() == 1,
+                   "repeated collective cancellation must not count or "
+                   "interrupt the same job again");
+        test.check(spinUntil([&] { return completions.size() == 3; }),
+                   "active and queued cancellations should all complete");
+        for (const auto id : {active, queued, alreadyCanceled}) {
+            test.check(
+                std::count_if(
+                    completions.cbegin(), completions.cend(),
+                    [id](const auto &completion) {
+                        return completion.result.job.id == id &&
+                               completion.result.outcome ==
+                                   RemoteOperationController::Outcome::Canceled;
+                    }) == 1,
+                "each canceled job must publish exactly one canceled result");
+        }
+        {
+            std::lock_guard lock(state->mutex);
+            test.check(state->calls == std::vector<std::string>{"list:/slow"},
+                       "queued canceled jobs must not call the backend");
+        }
+        const auto next =
+            controller.submit(RemoteOperationController::StatRequest{"/next"});
+        test.check(spinUntil([&] {
+                       return std::any_of(
+                           completions.cbegin(), completions.cend(),
+                           [next](const auto &completion) {
+                               return completion.result.job.id == next &&
+                                      completion.result.outcome ==
+                                          RemoteOperationController::Outcome::
+                                              Succeeded;
+                           });
+                   }),
+                   "new work should still run after collective cancellation");
+    }
 }
 
 OPENSCP_TEST(testTraversalPauseProvidesBackpressure, test) {
@@ -977,6 +1113,67 @@ OPENSCP_TEST(testCanceledJobDroppingConnectionIsReopened, test) {
                "the dropped client should be disconnected on the lane");
     test.check(listRoot() && opened.load() == 1,
                "a healthy control connection must not be reopened");
+}
+
+OPENSCP_TEST(testReplacedListingKeepsTheConnection, test) {
+    RemoteOperationController controller;
+    const auto state = std::make_shared<FakeState>();
+    state->interruptDropsConnection.store(true);
+    std::atomic_int opened{0};
+    RemoteOperationController::JobId slowJob = 0;
+    RemoteOperationController::JobId nextJob = 0;
+    bool slowStarted = false;
+    std::optional<RemoteOperationController::ListResult> slowResult;
+    std::optional<RemoteOperationController::ListResult> nextResult;
+
+    QObject::connect(&controller, &RemoteOperationController::jobStarted,
+                     &controller,
+                     [&](const RemoteOperationController::JobKey &job) {
+                         if (job.id == slowJob)
+                             slowStarted = true;
+                     });
+    QObject::connect(&controller, &RemoteOperationController::listCompleted,
+                     &controller,
+                     [&](const RemoteOperationController::ListResult &result) {
+                         if (result.result.job.id == slowJob)
+                             slowResult = result;
+                         if (result.result.job.id == nextJob)
+                             nextResult = result;
+                     });
+    controller.installSession(
+        makeConnectedClient(state),
+        [&](std::string &) -> std::unique_ptr<openscp::RemoteClient> {
+            ++opened;
+            return makeConnectedClient(state);
+        });
+
+    slowJob = controller.submit(
+        RemoteOperationController::ListRequest{"/slow", true});
+    test.check(spinUntil([&] { return slowStarted; }),
+               "the listing to replace should start");
+    test.check(
+        controller.cancel(slowJob, RemoteOperationController::Interrupt::No),
+        "a cooperative cancel should find the listing");
+    nextJob =
+        controller.submit(RemoteOperationController::ListRequest{"/", true});
+    test.check(state->interruptCalls.load() == 0,
+               "replacing a listing must not interrupt the call in progress");
+    {
+        std::lock_guard lock(state->mutex);
+        state->releaseSlow.store(true);
+    }
+    state->wake.notify_all();
+
+    test.check(spinUntil([&] { return nextResult.has_value(); }) &&
+                   nextResult->result.outcome ==
+                       RemoteOperationController::Outcome::Succeeded,
+               "the replacing listing should run after the replaced one");
+    test.check(slowResult.has_value() &&
+                   slowResult->result.outcome ==
+                       RemoteOperationController::Outcome::Canceled,
+               "the replaced listing should report cancellation");
+    test.check(opened.load() == 0 && state->interruptCalls.load() == 0,
+               "a replaced listing should keep the control connection");
 }
 
 OPENSCP_TEST(testRefusedReopenIsNotRetried, test) {

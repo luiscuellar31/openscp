@@ -11,4 +11,9 @@ namespace openscp {
 bool RemoveKnownHostEntry(const std::string &khPath, const std::string &host,
                           std::uint16_t port, std::string &err);
 
+// Whether the known_hosts file at khPath lists host:port, under a plain or a
+// hashed name. A file that cannot be read lists nothing.
+bool HasKnownHostEntry(const std::string &khPath, const std::string &host,
+                       std::uint16_t port);
+
 } // namespace openscp

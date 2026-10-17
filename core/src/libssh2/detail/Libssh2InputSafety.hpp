@@ -1,5 +1,7 @@
 #pragma once
 
+#include "openscp/KeyboardInteractive.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
@@ -102,31 +104,24 @@ copyKeyboardInteractivePrompts(const KeyboardInteractivePromptView *prompts,
     return true;
 }
 
-inline bool promptRequestsUsername(std::string_view prompt) {
-    auto containsAsciiCaseInsensitive =
-        [prompt](std::string_view needle) -> bool {
-        if (needle.empty() || needle.size() > prompt.size())
-            return false;
-        for (std::size_t offset = 0; offset <= prompt.size() - needle.size();
-             ++offset) {
-            bool matches = true;
-            for (std::size_t i = 0; i < needle.size(); ++i) {
-                unsigned char ch =
-                    static_cast<unsigned char>(prompt[offset + i]);
-                if (ch >= 'A' && ch <= 'Z')
-                    ch = static_cast<unsigned char>(ch - 'A' + 'a');
-                if (ch != static_cast<unsigned char>(needle[i])) {
-                    matches = false;
-                    break;
-                }
-            }
-            if (matches)
-                return true;
-        }
-        return false;
-    };
-    return containsAsciiCaseInsensitive("user") ||
-           containsAsciiCaseInsensitive("name");
+enum class KbdIntSavedAnswer { None, Username, Password };
+
+// Which saved credential answers a prompt: the account name, or the account
+// password in the first round only. A password prompt in a later round
+// usually means the saved one was refused.
+inline KbdIntSavedAnswer savedKbdIntAnswer(const KbdIntPrompt &prompt,
+                                           int round) {
+    switch (classifyKbdIntPrompt(prompt)) {
+    case KbdIntPromptKind::Username:
+        return KbdIntSavedAnswer::Username;
+    case KbdIntPromptKind::Password:
+        return round == 1 ? KbdIntSavedAnswer::Password
+                          : KbdIntSavedAnswer::None;
+    case KbdIntPromptKind::OneTimeCode:
+    case KbdIntPromptKind::Other:
+        break;
+    }
+    return KbdIntSavedAnswer::None;
 }
 
 } // namespace openscp::libssh2detail

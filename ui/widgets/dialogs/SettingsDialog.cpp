@@ -4,6 +4,7 @@
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "openscp/Protocol.hpp"
+#include "widgets/common/AppIcon.hpp"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -137,13 +138,19 @@ void removeSettingsKeys(QSettings *settings,
         settings->remove(QString::fromLatin1(key));
 }
 
+QString noVerificationPolicyText(int minutes) {
+    return SettingsDialog::tr(
+               "No verification (double confirmation, expires in %1 min)")
+        .arg(minutes);
+}
+
 } // namespace
 
 QVector<SettingsDialog::SettingBinding>
 SettingsDialog::buildSettingBindings() const {
     // Build a single source of truth for settings I/O and control sync.
     QVector<SettingBinding> bindings;
-    bindings.reserve(41);
+    bindings.reserve(42);
 
     using StringNormalizer = std::function<QString(const QString &)>;
     using IntNormalizer = std::function<int(int)>;
@@ -367,6 +374,9 @@ SettingsDialog::buildSettingBindings() const {
 
     addStringCombo(openscpui::settingskeys::kUiLanguage, QStringLiteral("en"),
                    langCombo_);
+    addStringCombo(openscpui::settingskeys::kUiAppIconStyle,
+                   openscpui::appIconStyleKey(openscpui::defaultAppIconStyle()),
+                   appIconStyle_);
     for (const BoolBindingSpec &spec : generalBoolBindings)
         addBool(spec.key, spec.defaultValue, spec.check);
 
@@ -539,7 +549,8 @@ SettingsDialog::buildSettingBindings() const {
     addLineEdit(openscpui::settingskeys::kFtpsCaCertPathDefault, QString(),
                 ftpsCaCertPathDefaultEdit_,
                 [](const QString &raw) { return raw.trimmed(); });
-    addSpin(openscpui::settingskeys::kNoHostVerificationTtlMinutes, 15,
+    addSpin(openscpui::settingskeys::kNoHostVerificationTtlMinutes,
+            openscpui::settingskeys::kDefaultNoHostVerificationTtlMinutes,
             noHostVerifyTtlMinSpin_);
 
 #if defined(Q_OS_MAC) || defined(Q_OS_MACOS) || defined(__APPLE__)
@@ -566,9 +577,11 @@ SettingsDialog::buildSettingBindings() const {
          globalSpeedDefaultSpin_},
         {openscpui::settingskeys::kStagingPreparationTimeoutMs, 2000,
          stagingPrepTimeoutMsSpin_},
-        {openscpui::settingskeys::kStagingConfirmationItems, 500,
+        {openscpui::settingskeys::kStagingConfirmationItems,
+         openscpui::settingskeys::kDefaultStagingConfirmationItems,
          stagingConfirmItemsSpin_},
-        {openscpui::settingskeys::kStagingConfirmationMiB, 1024,
+        {openscpui::settingskeys::kStagingConfirmationMiB,
+         openscpui::settingskeys::kDefaultStagingConfirmationMiB,
          stagingConfirmMiBSpin_},
         {openscpui::settingskeys::kMaximumFolderDepth, 32, maxDepthSpin_},
     };
@@ -650,10 +663,15 @@ void SettingsDialog::applySnapshotToControls(
 }
 
 void SettingsDialog::writeSnapshot(
-    QSettings &settings, const QVariantMap &snapshot,
+    QSettings &settings, const QVariantMap &persistedSnapshot,
+    const QVariantMap &snapshot,
     const QVector<SettingBinding> &bindings) const {
     for (const auto &binding : bindings) {
-        if (!binding.writePersisted)
+        // An unchanged value is not written, so a setting the user never
+        // chose keeps following the application's default.
+        if (!binding.writePersisted ||
+            snapshot.value(binding.bindingKey) ==
+                persistedSnapshot.value(binding.bindingKey))
             continue;
         binding.writePersisted(settings, snapshot.value(binding.bindingKey));
     }
@@ -1160,6 +1178,21 @@ void SettingsDialog::buildGeneralPage(const PageBuildContext &ctx) {
                        : tr("Default layout will be used the next time the app "
                             "starts."));
     });
+
+    QFormLayout *appearanceForm = addSection(generalPage, tr("Appearance"));
+    addFormNote(appearanceForm, generalPage,
+                tr("The icon changes while OpenSCP runs; file managers and app "
+                   "launchers keep the installed one."));
+    appIconStyle_ =
+        addComboRow(appearanceForm, generalPage, tr("Application icon:"));
+    using openscpui::AppIconStyle;
+    addComboItems(
+        appIconStyle_,
+        {{tr("Standard"), openscpui::appIconStyleKey(AppIconStyle::Standard)},
+         {tr("macOS, light"),
+          openscpui::appIconStyleKey(AppIconStyle::MacosLight)},
+         {tr("macOS, dark"),
+          openscpui::appIconStyleKey(AppIconStyle::MacosDark)}});
 }
 
 void SettingsDialog::buildShortcutsPage(const PageBuildContext &ctx) {
@@ -1288,7 +1321,8 @@ void SettingsDialog::buildSecurityPage(const PageBuildContext &ctx) {
         {{tr("Strict"), static_cast<int>(openscp::KnownHostsPolicy::Strict)},
          {tr("Accept new (TOFU)"),
           static_cast<int>(openscp::KnownHostsPolicy::AcceptNew)},
-         {tr("No verification (double confirmation, expires in 15 min)"),
+         {noVerificationPolicyText(
+              openscpui::settingskeys::kDefaultNoHostVerificationTtlMinutes),
           static_cast<int>(openscp::KnownHostsPolicy::Off)}});
     addLabeledRow(policiesForm, securityPage, tr("Default known_hosts policy:"),
                   defaultKnownHostsPolicy_);
@@ -1305,10 +1339,21 @@ void SettingsDialog::buildSecurityPage(const PageBuildContext &ctx) {
     addLabeledRow(policiesForm, securityPage, tr("Default integrity policy:"),
                   defaultIntegrityPolicy_);
     noHostVerifyTtlMinSpin_ = addSpinRow(
-        policiesForm, securityPage, tr("No-verification TTL:"), 1, 120, 15,
+        policiesForm, securityPage, tr("No-verification TTL:"), 1, 120,
+        openscpui::settingskeys::kDefaultNoHostVerificationTtlMinutes,
         tr(" min"), 100, 1,
         tr("Duration of the temporary exception for no host-key verification "
            "policy."));
+    const auto showNoVerificationTtl = [this](int minutes) {
+        const int index = defaultKnownHostsPolicy_->findData(
+            static_cast<int>(openscp::KnownHostsPolicy::Off));
+        if (index >= 0) {
+            defaultKnownHostsPolicy_->setItemText(
+                index, noVerificationPolicyText(minutes));
+        }
+    };
+    connect(noHostVerifyTtlMinSpin_, qOverload<int>(&QSpinBox::valueChanged),
+            this, showNoVerificationTtl);
     QFormLayout *ftpsForm = addSection(securityPage, tr("FTPS"));
     addBrowsePathRow(ftpsForm, securityPage, tr("Default FTPS CA bundle:"),
                      tr("Select FTPS CA bundle"), true,
@@ -1381,12 +1426,14 @@ void SettingsDialog::buildStagingPage(const PageBuildContext &ctx) {
         limitsForm, stagingPage, tr("Preparation timeout:"), 250, 60000, 2000,
         tr(" ms"), 110, 250, tr("Time before showing the Wait/Cancel dialog."));
     stagingConfirmItemsSpin_ = addSpinRow(
-        limitsForm, stagingPage, tr("Confirm from items:"), 50, 100000, 500,
-        QString(), 110, 1,
+        limitsForm, stagingPage, tr("Confirm from items:"), 50, 100000,
+        openscpui::settingskeys::kDefaultStagingConfirmationItems, QString(),
+        110, 1,
         tr("Item count threshold to request confirmation for large batches."));
     stagingConfirmMiBSpin_ = addSpinRow(
-        limitsForm, stagingPage, tr("Confirm from size:"), 128, 65536, 1024,
-        tr(" MiB"), 120, 1,
+        limitsForm, stagingPage, tr("Confirm from size:"), 128, 1024 * 1024,
+        openscpui::settingskeys::kDefaultStagingConfirmationMiB, tr(" MiB"),
+        120, 1,
         tr("Estimated size threshold to request confirmation for large "
            "batches."));
     auto *rowWidget = new QWidget(stagingPage);
@@ -1469,9 +1516,10 @@ void SettingsDialog::connectDirtyTracking() {
     };
 
     for (QComboBox *combo :
-         {langCombo_, clickMode_, openBehaviorMode_, defaultProtocol_,
-          scpModeDefault_, defaultKnownHostsPolicy_, defaultIntegrityPolicy_,
-          localFileDurability_, queueAutoClearModeDefault_}) {
+         {langCombo_, appIconStyle_, clickMode_, openBehaviorMode_,
+          defaultProtocol_, scpModeDefault_, defaultKnownHostsPolicy_,
+          defaultIntegrityPolicy_, localFileDurability_,
+          queueAutoClearModeDefault_}) {
         bindDirtyFlag(combo, qOverload<int>(&QComboBox::currentIndexChanged));
     }
     for (QCheckBox *check :
@@ -1602,7 +1650,7 @@ void SettingsDialog::onApply() {
             .value(QString::fromLatin1(openscpui::settingskeys::kUiLanguage))
             .toString();
 
-    writeSnapshot(settings, currentSnapshot, bindings);
+    writeSnapshot(settings, persistedSnapshot, currentSnapshot, bindings);
     settings.sync();
 
     // Only notify if language actually changed

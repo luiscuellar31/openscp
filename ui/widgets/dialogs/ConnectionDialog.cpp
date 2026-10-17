@@ -431,7 +431,9 @@ ConnectionDialog::ConnectionDialog(QWidget *parent) : QDialog(parent) {
     khPolicy_->addItem(tr("Accept new (TOFU)"),
                        static_cast<int>(openscp::KnownHostsPolicy::AcceptNew));
     khPolicy_->addItem(
-        tr("No verification (double confirmation, expires in 15 min)"),
+        tr("No verification (double confirmation, expires in %1 min)")
+            .arg(openscpui::effectiveNoHostVerificationTtlMinutes(
+                openscpui::AppSettings())),
         static_cast<int>(openscp::KnownHostsPolicy::Off));
     khPathRow_ = new QWidget(this);
     auto *khPathRowLayout = new QHBoxLayout(khPathRow_);

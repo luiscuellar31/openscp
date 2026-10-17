@@ -82,10 +82,39 @@ struct TransferTask {
     QString error;
 };
 
+// One task for TransferManager::enqueueTasks. Directory creation and deletes
+// act on destination; uploads and downloads copy source to destination.
+struct TransferRequest {
+    TransferTask::Type type = TransferTask::Type::Download;
+    QString source;
+    QString destination;
+    TransferBatchOptions options;
+    // An earlier request of the same call whose task this one depends on,
+    // in place of options.dependsOnTaskId.
+    qsizetype dependsOnRequest = -1;
+};
+
 [[nodiscard]] constexpr bool
 isTerminalTransferStatus(TransferTask::Status status) {
     using Status = TransferTask::Status;
     return status == Status::Done || status == Status::Error ||
            status == Status::Canceled || status == Status::Skipped ||
            status == Status::Warning;
+}
+
+// A task skipped because a prerequisite failed never ran, so it is a failure
+// that can be retried rather than completed work.
+[[nodiscard]] inline bool skippedAfterFailure(const TransferTask &task) {
+    return task.status == TransferTask::Status::Skipped &&
+           task.skippedByFailedDependency;
+}
+
+// Only an upload or download that has not finished its transfer can have left
+// "<destination>.part" behind.
+[[nodiscard]] inline bool mayHavePartialData(const TransferTask &task) {
+    using Status = TransferTask::Status;
+    return (task.type == TransferTask::Type::Upload ||
+            task.type == TransferTask::Type::Download) &&
+           task.phase == TransferPhase::Transfer &&
+           task.status != Status::Done && task.status != Status::Skipped;
 }

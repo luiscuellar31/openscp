@@ -1,19 +1,31 @@
 #include "TestHarness.hpp"
+#include "logic/common/AppSettings.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
 #include "logic/common/RowSelection.hpp"
+#include "logic/common/StagingStore.hpp"
 #include "logic/common/UiFormatters.hpp"
 #include "logic/navigation/RemotePath.hpp"
 #include "logic/remote/RemoteModel.hpp"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QSettings>
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <chrono>
+#include <filesystem>
 #include <initializer_list>
 #include <string>
+#include <system_error>
 #include <vector>
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -115,6 +127,329 @@ OPENSCP_TEST(testLocalRenameUsesTheFilesystemMove, test) {
                    QFile::exists(destination) && !error.isEmpty(),
                "non-volume rename failures should preserve the source and "
                "report an error");
+}
+
+OPENSCP_TEST(testLocalRemoveKeepsLinkTargets, test) {
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(),
+               "the local remove test should have a temporary directory");
+    if (!temporary.isValid())
+        return;
+
+    const QDir root(temporary.path());
+    const QString target = root.filePath(QStringLiteral("target"));
+    const QString targetFile = root.filePath(QStringLiteral("target/data.txt"));
+    test.check(root.mkpath(QStringLiteral("target/sub")),
+               "the local remove fixture should create a folder tree");
+    QFile data(targetFile);
+    test.check(data.open(QIODevice::WriteOnly) && data.write("payload") == 7,
+               "the local remove fixture should be writable");
+    data.close();
+
+    const QString link = root.filePath(QStringLiteral("link"));
+    test.check(QFile::link(target, link),
+               "the local remove fixture should link to the folder");
+    test.check(removeLocalEntry(link) && !QFileInfo(link).isSymLink(),
+               "removing a folder link should remove the link itself");
+    test.check(QFile::exists(targetFile) &&
+                   QDir(root.filePath(QStringLiteral("target/sub"))).exists(),
+               "removing a folder link should keep the linked folder intact");
+
+    const QString dangling = root.filePath(QStringLiteral("dangling"));
+    test.check(QFile::link(root.filePath(QStringLiteral("missing")), dangling),
+               "the local remove fixture should create a dangling link");
+    test.check(removeLocalEntry(dangling) && !QFileInfo(dangling).isSymLink(),
+               "removing a dangling link should remove the link");
+
+    test.check(removeLocalEntry(target) && !QFileInfo::exists(target),
+               "removing a folder should remove its whole tree");
+    test.check(removeLocalEntry(target),
+               "removing a missing entry should count as removed");
+}
+
+std::filesystem::path nativePath(const QString &path) {
+    return std::filesystem::path(QFile::encodeName(path).constData());
+}
+
+bool writeLocalFile(const QString &path, const QByteArray &contents) {
+    QFile file(path);
+    return file.open(QIODevice::WriteOnly) &&
+           file.write(contents) == contents.size();
+}
+
+QByteArray readLocalFile(const QString &path) {
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
+
+bool createRelativeLink(const QString &linkPath, const char *target) {
+    std::error_code error;
+    std::filesystem::create_symlink(target, nativePath(linkPath), error);
+    return !error;
+}
+
+QString linkText(const QString &linkPath) {
+    std::error_code error;
+    const std::filesystem::path target =
+        std::filesystem::read_symlink(nativePath(linkPath), error);
+    return error ? QString() : QString::fromStdString(target.string());
+}
+
+OPENSCP_TEST(testLocalCopyKeepsHiddenEntriesAndLinks, test) {
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(),
+               "the local copy test should have a temporary directory");
+    if (!temporary.isValid())
+        return;
+
+    const QDir root(temporary.path());
+    const QString source = root.filePath(QStringLiteral("source"));
+    const QString copy = root.filePath(QStringLiteral("copy"));
+    test.check(root.mkpath(QStringLiteral("source/.git")) &&
+                   root.mkpath(QStringLiteral("source/sub")),
+               "the local copy fixture should create its folders");
+    test.check(
+        writeLocalFile(source + QStringLiteral("/.env"), "hidden") &&
+            writeLocalFile(source + QStringLiteral("/.git/config"), "git") &&
+            writeLocalFile(source + QStringLiteral("/sub/inner.txt"), "inner"),
+        "the local copy fixture should write its files");
+    test.check(
+        createRelativeLink(source + QStringLiteral("/folder-link"), "sub") &&
+            createRelativeLink(source + QStringLiteral("/sub/file-link"),
+                               "inner.txt") &&
+            createRelativeLink(source + QStringLiteral("/dangling"), "missing"),
+        "the local copy fixture should create relative links");
+
+    QString error;
+    test.check(copyLocalEntry(source, copy, error) && error.isEmpty(),
+               "copying a folder with hidden entries and links should work");
+    test.check(readLocalFile(copy + QStringLiteral("/.env")) == "hidden" &&
+                   readLocalFile(copy + QStringLiteral("/.git/config")) ==
+                       "git",
+               "a folder copy should include hidden files and folders");
+    test.check(QFileInfo(copy + QStringLiteral("/folder-link")).isSymLink() &&
+                   linkText(copy + QStringLiteral("/folder-link")) ==
+                       QStringLiteral("sub"),
+               "a folder link should be copied as the same relative link");
+    test.check(QFileInfo(copy + QStringLiteral("/sub/file-link")).isSymLink() &&
+                   linkText(copy + QStringLiteral("/sub/file-link")) ==
+                       QStringLiteral("inner.txt"),
+               "a file link should be copied as a link, not as a file");
+    test.check(QFileInfo(copy + QStringLiteral("/dangling")).isSymLink(),
+               "a dangling link should be copied too");
+    test.check(readLocalFile(copy + QStringLiteral("/sub/inner.txt")) ==
+                   "inner",
+               "regular files should be copied with their contents");
+
+    const QString linkCopy = root.filePath(QStringLiteral("link-copy"));
+    error.clear();
+    test.check(copyLocalEntry(source + QStringLiteral("/folder-link"), linkCopy,
+                              error) &&
+                   QFileInfo(linkCopy).isSymLink(),
+               "copying a selected link should copy the link itself");
+}
+
+OPENSCP_TEST(testLocalCopyStopsWhenCanceled, test) {
+    QTemporaryDir root;
+    const QString source = root.filePath(QStringLiteral("source"));
+    const QString destination = root.filePath(QStringLiteral("destination"));
+    test.check(QDir().mkpath(source + QStringLiteral("/nested")),
+               "the copy source should be created");
+    for (int index = 0; index < 5; ++index) {
+        QFile file(QDir(source).filePath(QStringLiteral("file-%1").arg(index)));
+        test.check(file.open(QIODevice::WriteOnly) && file.write("x") == 1,
+                   "a source file should be written");
+    }
+    QFile existing(destination);
+    test.check(existing.open(QIODevice::WriteOnly) &&
+                   existing.write("keep") == 4,
+               "the existing destination should be written");
+    existing.close();
+
+    int asked = 0;
+    QString error;
+    test.check(!copyLocalEntry(source, destination, error,
+                               [&asked] { return ++asked > 3; }) &&
+                   !error.isEmpty(),
+               "a canceled copy should fail");
+    QFile kept(destination);
+    test.check(kept.open(QIODevice::ReadOnly) && kept.readAll() == "keep",
+               "a canceled copy should leave the destination as it was");
+    const QStringList leftovers =
+        QDir(root.path())
+            .entryList({QStringLiteral(".openscp-*")},
+                       QDir::AllEntries | QDir::Hidden);
+    test.check(leftovers.isEmpty(),
+               "a canceled copy should remove what it staged: " +
+                   leftovers.join(QLatin1Char(',')).toStdString());
+}
+
+OPENSCP_TEST(testLocalCopyRejectsUnsafeSources, test) {
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(),
+               "the unsafe copy test should have a temporary directory");
+    if (!temporary.isValid())
+        return;
+
+    const QDir root(temporary.path());
+    const QString source = root.filePath(QStringLiteral("source"));
+    test.check(root.mkpath(QStringLiteral("source/sub")) &&
+                   writeLocalFile(source + QStringLiteral("/data.txt"), "data"),
+               "the unsafe copy fixture should create a folder tree");
+
+    QString error;
+    const QString nested = source + QStringLiteral("/sub/copy");
+    test.check(!copyLocalEntry(source, nested, error) && !error.isEmpty(),
+               "copying a folder into itself should fail");
+    test.check(!QFileInfo::exists(nested) &&
+                   QDir(source + QStringLiteral("/sub"))
+                       .entryList(QDir::AllEntries | QDir::Hidden |
+                                  QDir::System | QDir::NoDotAndDotDot)
+                       .isEmpty(),
+               "a rejected copy into itself should leave nothing behind");
+
+#ifndef _WIN32
+    const QString fifoSource = root.filePath(QStringLiteral("fifo-source"));
+    const QString fifoCopy = root.filePath(QStringLiteral("fifo-copy"));
+    const QString fifo = fifoSource + QStringLiteral("/pipe");
+    test.check(root.mkpath(QStringLiteral("fifo-source")) &&
+                   ::mkfifo(QFile::encodeName(fifo).constData(), 0600) == 0,
+               "the unsafe copy fixture should create a FIFO");
+
+    // A regression must fail instead of hanging the test worker.
+    struct AlarmGuard {
+        ~AlarmGuard() { ::alarm(0); }
+    } alarmGuard;
+    ::alarm(5);
+    error.clear();
+    test.check(!copyLocalEntry(fifoSource, fifoCopy, error) &&
+                   !error.isEmpty() && !QFileInfo::exists(fifoCopy),
+               "copying a folder with a FIFO should fail without blocking");
+    test.check(QFileInfo(fifo).exists(),
+               "a failed copy should keep the source FIFO");
+#endif
+}
+
+OPENSCP_TEST(testStagingBatchNames, test) {
+    const QString name = openscpui::newStagingBatchName();
+    test.check(openscpui::isStagingBatchName(name),
+               "the startup cleanup should recognize new staging batches: " +
+                   name.toStdString());
+    test.check(openscpui::isStagingBatchName(QStringLiteral("20260101-120000")),
+               "batches named by older releases should still be recognized");
+    test.check(!openscpui::isStagingBatchName(QStringLiteral("Documents")) &&
+                   !openscpui::isStagingBatchName(
+                       QStringLiteral("20260101-120000-123")),
+               "other folders in the staging root should be left alone");
+}
+
+OPENSCP_TEST(testStagingBatchRemovalTakesAnEmptyRoot, test) {
+    QTemporaryDir directory;
+    test.check(directory.isValid(), "the staging test needs a folder");
+    if (!directory.isValid())
+        return;
+    const QString root =
+        QDir(directory.path()).filePath(QStringLiteral("staging"));
+    const QString first = QDir(root).filePath(openscpui::newStagingBatchName());
+    const QString second =
+        QDir(root).filePath(QStringLiteral("20260101-120000"));
+    QFile payload(QDir(first).filePath(QStringLiteral("payload.txt")));
+    test.check(QDir().mkpath(first) && QDir().mkpath(second) &&
+                   payload.open(QIODevice::WriteOnly),
+               "the staging batches should be created");
+    payload.close();
+
+    openscpui::removeStagingBatch(first);
+    test.check(!QFileInfo::exists(first) && QFileInfo::exists(root),
+               "a root with another batch should stay");
+    openscpui::removeStagingBatch(second);
+    test.check(!QFileInfo::exists(root),
+               "a root left empty should be removed with its last batch");
+}
+
+OPENSCP_TEST(testExpiredStagingBatchesAreRemoved, test) {
+    QTemporaryDir directory;
+    test.check(directory.isValid(), "the staging test needs a folder");
+    if (!directory.isValid())
+        return;
+    const QDir base(directory.path());
+    const QString root = base.filePath(QStringLiteral("staging"));
+    const QString oldBatch =
+        QDir(root).filePath(QStringLiteral("20200101-120000"));
+    const QString newBatch =
+        QDir(root).filePath(openscpui::newStagingBatchName());
+    const QString other = QDir(root).filePath(QStringLiteral("Documents"));
+    const QString outside = base.filePath(QStringLiteral("outside"));
+    test.check(QDir().mkpath(oldBatch) && QDir().mkpath(newBatch) &&
+                   QDir().mkpath(other) && QDir().mkpath(outside),
+               "the staging folders should be created");
+    const auto age = [](const QString &path) {
+        std::error_code error;
+        std::filesystem::last_write_time(
+            QFile::encodeName(path).toStdString(),
+            std::filesystem::file_time_type::clock::now() -
+                std::chrono::hours(24 * 30),
+            error);
+        return !error;
+    };
+    test.check(age(oldBatch) && age(other) && age(outside),
+               "the old folders should be dated back");
+#ifndef _WIN32
+    const QString link = QDir(root).filePath(QStringLiteral("20200101-130000"));
+    test.check(QFile::link(outside, link), "a batch-named link should exist");
+#endif
+
+    const int removed = openscpui::removeStagingBatchesOlderThan(
+        root, QDateTime::currentDateTimeUtc().addDays(-7));
+    test.check(removed == 1 && !QFileInfo::exists(oldBatch) &&
+                   QFileInfo::exists(newBatch) && QFileInfo::exists(other) &&
+                   QFileInfo::exists(outside),
+               "only batches older than the retention should be removed");
+}
+
+OPENSCP_TEST(testOnlyStagingBatchesAreCleanedAfterADrop, test) {
+    QTemporaryDir directory;
+    test.check(directory.isValid(), "the staging test needs a folder");
+    if (!directory.isValid())
+        return;
+    const QDir base(directory.path());
+    const QString root = base.filePath(QStringLiteral("staging"));
+    const QString batch = QDir(root).filePath(openscpui::newStagingBatchName());
+    const QString outside = base.filePath(QStringLiteral("20260101-120000"));
+    test.check(
+        QDir().mkpath(batch) && QDir().mkpath(outside) &&
+            QDir().mkpath(QDir(root).filePath(QStringLiteral("Documents"))) &&
+            QDir().mkpath(QDir(batch).filePath(QStringLiteral("nested"))),
+        "the staging fixture should be created");
+    QSettings settings(base.filePath(QStringLiteral("settings.ini")),
+                       QSettings::IniFormat);
+    settings.setValue(openscpui::settingskeys::kStagingRoot, root);
+
+    test.check(openscpui::stagingBatchPathForCleanup(settings, batch) ==
+                   QFileInfo(batch).canonicalFilePath(),
+               "a batch in the staging root should be cleaned");
+    const QStringList refused = {
+        QString(),
+        root,
+        outside,
+        QDir(root).filePath(QStringLiteral("Documents")),
+        QDir(batch).filePath(QStringLiteral("nested")),
+        QDir(root).filePath(QStringLiteral("../20260101-120000")),
+        QDir(root).filePath(QStringLiteral("20991231-235959")),
+    };
+    for (const QString &path : refused) {
+        test.check(
+            openscpui::stagingBatchPathForCleanup(settings, path).isEmpty(),
+            "only a batch directly in the staging root may be cleaned: " +
+                path.toStdString());
+    }
+#ifndef _WIN32
+    const QString link = QDir(root).filePath(QStringLiteral("20260101-130000"));
+    test.check(
+        QFile::link(outside, link) &&
+            openscpui::stagingBatchPathForCleanup(settings, link).isEmpty(),
+        "a link named like a batch should not be followed");
+#endif
 }
 
 OPENSCP_TEST(testTerminalTransferStatuses, test) {

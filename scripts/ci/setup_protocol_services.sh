@@ -268,6 +268,8 @@ printf '%s\n' "$IT_PASSWORD" |
 sudo chown root:www-data "$WEBDAV_PASSWORD_FILE"
 sudo chmod 0640 "$WEBDAV_PASSWORD_FILE"
 
+# Keep DirectorySlash On, Apache's default and what most servers run: it
+# redirects a collection URL that lacks the trailing slash.
 APACHE_CONFIG="${CONFIG_DIR}/apache2-webdav.conf"
 {
   printf '%s\n' \
@@ -300,7 +302,7 @@ APACHE_CONFIG="${CONFIG_DIR}/apache2-webdav.conf"
     "    Alias \"${WEBDAV_BASE_PATH}\" \"${DATA_DIR}/webdav\"" \
     "    <Directory \"${DATA_DIR}/webdav\">" \
     '        DAV On' \
-    '        DirectorySlash Off' \
+    '        DirectorySlash On' \
     '        Options None' \
     '        AllowOverride None' \
     '        AuthType Basic' \

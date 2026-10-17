@@ -16,11 +16,14 @@ permissions:
 
 env:
   OPENSCP_QT_VERSION: "6.11.2"
+  OPENSCP_UPDATE_PUBLIC_KEY: ${{ vars.OPENSCP_UPDATE_PUBLIC_KEY }}
+  OPENSCP_SPARKLE_PUBLIC_KEY: ${{ vars.OPENSCP_SPARKLE_PUBLIC_KEY }}
 
 jobs:
   verify-source:
     name: Verify release source
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       tag_name: ${{ steps.meta.outputs.tag_name }}
       tag_commit: ${{ steps.meta.outputs.tag_commit }}
@@ -32,6 +35,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+
+      - name: Verify update-manifest signing with disposable keys
+        run: python3 scripts/checks/update-signing.py
 
       - name: Validate version and tag when present
         id: meta
@@ -87,6 +93,7 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -124,7 +131,8 @@ jobs:
 
       - name: Install macOS build tools
         run: |
-          brew install pkg-config
+          brew install pkg-config openssl@3
+          echo "OPENSSL_BIN=$(brew --prefix openssl@3)/bin/openssl" >> "$GITHUB_ENV"
 
       - name: Build pinned macOS dependencies for the deployment target
         env:
@@ -139,9 +147,20 @@ jobs:
           echo "CMAKE_PREFIX_PATH=$deps_prefix:${CMAKE_PREFIX_PATH:-}" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$deps_prefix/lib/pkgconfig:$deps_prefix/lib64/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
 
+      - name: Configure signed macOS updates when a public key is available
+        run: |
+          set -euo pipefail
+          if [[ -n "$OPENSCP_SPARKLE_PUBLIC_KEY" ]]; then
+            sdk="$RUNNER_TEMP/sparkle"
+            bash ./scripts/ci/fetch_sparkle.sh "$sdk"
+            echo "OPENSCP_ENABLE_SPARKLE=ON" >> "$GITHUB_ENV"
+            echo "OPENSCP_SPARKLE_FRAMEWORK=$sdk/Sparkle.framework" >> "$GITHUB_ENV"
+            echo "OPENSCP_SPARKLE_FEED_URL=https://github.com/luiscuellar31/openscp/releases/latest/download/appcast-${{ matrix.arch }}.xml" >> "$GITHUB_ENV"
+          fi
+
       - name: Build macOS release artifacts
         run: |
-          rm -rf dist build
+          rm -rf dist build-macos-package
           SKIP_CODESIGN=1 \
           SKIP_NOTARIZATION=1 \
           DO_ADHOC_SIGN=1 \
@@ -156,8 +175,8 @@ jobs:
 
       - name: Verify macOS bundle linkage
         run: |
-          MAX_BUNDLE_SIZE_MIB=64 \
-            bash ./scripts/verify/macos-bundle.sh build/OpenSCP.app
+          MAX_BUNDLE_SIZE_MIB=80 \
+            bash ./scripts/verify/macos-bundle.sh build-macos-package/OpenSCP.app
 
       - name: Collect macOS artifacts
         run: |
@@ -185,6 +204,55 @@ jobs:
           path: out/*
           if-no-files-found: error
 
+  # The Sparkle key signs on a fresh VM that only fetches the pinned Sparkle
+  # tools, never on one that installed Homebrew and PyPI packages or ran the
+  # build.
+  sign-macos-updates:
+    name: Sign macOS update appcasts
+    if: startsWith(github.ref, 'refs/tags/v') && vars.OPENSCP_SPARKLE_PUBLIC_KEY != ''
+    needs:
+      - verify-source
+      - build-macos
+    runs-on: macos-15
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch pinned Sparkle tools
+        run: bash ./scripts/ci/fetch_sparkle.sh "$RUNNER_TEMP/sparkle"
+
+      - name: Download macOS archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: macos-*
+          path: macos-assets
+
+      - name: Sign update appcasts
+        env:
+          OPENSCP_SPARKLE_PRIVATE_KEY: ${{ secrets.OPENSCP_SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          version="${{ needs.verify-source.outputs.version }}"
+          mkdir -p out
+          for arch in arm64 x86_64; do
+            bash ./scripts/release/sparkle-appcast.sh \
+              "$RUNNER_TEMP/sparkle" \
+              "macos-assets/macos-${arch}/OpenSCP-${version}-${arch}-UNSIGNED.zip" \
+              "$version" \
+              "out/appcast-${arch}.xml"
+          done
+
+      - name: Upload appcasts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-appcasts
+          path: out/*
+          if-no-files-found: error
+
   build-linux:
     name: Build Linux (${{ matrix.arch_name }})
     needs:
@@ -192,6 +260,7 @@ jobs:
     env:
       APPIMAGE_UPDATE_INFORMATION: gh-releases-zsync|luiscuellar31|openscp|latest|OpenSCP-*-${{ matrix.arch_name }}.AppImage.zsync
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -320,6 +389,7 @@ jobs:
             --workdir "$GITHUB_WORKSPACE" \
             --env APPIMAGE_EXTRACT_AND_RUN=1 \
             --env APPIMAGE_UPDATE_INFORMATION \
+            --env OPENSCP_UPDATE_PUBLIC_KEY \
             --env OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=ON \
             --env OPENSCP_MAX_GLIBC_VERSION=2.34 \
             --env "CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH:-}" \
@@ -391,14 +461,25 @@ jobs:
 
   publish-assets:
     name: Upload assets to release
-    if: startsWith(github.ref, 'refs/tags/v')
+    # sign-macos-updates is skipped when Sparkle signing is not configured.
+    if: >-
+      !cancelled() &&
+      startsWith(github.ref, 'refs/tags/v') &&
+      needs.verify-source.result == 'success' &&
+      needs.build-macos.result == 'success' &&
+      needs.build-linux.result == 'success' &&
+      contains(fromJSON('["success", "skipped"]'), needs.sign-macos-updates.result)
     needs:
       - verify-source
       - build-macos
+      - sign-macos-updates
       - build-linux
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
+      id-token: write
+      attestations: write
 
     steps:
       - name: Checkout tag
@@ -416,6 +497,24 @@ jobs:
       - name: Show artifact tree
         run: |
           find release-assets -type f | sort
+
+      - name: Sign AppImage update manifest when configured
+        env:
+          OPENSCP_UPDATE_PRIVATE_KEY: ${{ secrets.OPENSCP_UPDATE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$OPENSCP_UPDATE_PUBLIC_KEY" && -z "$OPENSCP_UPDATE_PRIVATE_KEY" ]]; then
+            echo "AppImage update signing is not configured; updates remain manual."
+          else
+            [[ -n "$OPENSCP_UPDATE_PUBLIC_KEY" && -n "$OPENSCP_UPDATE_PRIVATE_KEY" ]] || {
+              echo "Both AppImage signing keys must be configured."
+              exit 1
+            }
+            python3 scripts/release/update-manifest.py \
+              --assets release-assets \
+              --version "${{ needs.verify-source.outputs.version }}" \
+              --output release-assets/updates
+          fi
 
       - name: Select release files and build SHA256SUMS.txt
         run: |
@@ -449,6 +548,13 @@ jobs:
           echo SHA256SUMS.txt >> publish-files.txt
           cat SHA256SUMS.txt
 
+      # Each listed file gets a signed provenance record that
+      # `gh attestation verify` checks without trusting this release page.
+      - name: Attest release files
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: SHA256SUMS.txt
+
       - name: Generate draft release notes
         run: |
           set -euo pipefail
@@ -476,19 +582,25 @@ jobs:
             exit 1
           fi
 
+          # Builds are not bit-for-bit reproducible, so assets already
+          # uploaded are never replaced: their checksums may have been
+          # verified, and SHA256SUMS.txt must describe the files beside it.
           if gh release view "$tag" --repo "${{ github.repository }}" \
               >/dev/null 2>&1; then
-            is_draft="$(gh release view "$tag" \
+            release_state="$(gh release view "$tag" \
               --repo "${{ github.repository }}" \
-              --json isDraft --jq '.isDraft')"
-            if [[ "$is_draft" == "true" ]]; then
-              gh release edit "$tag" \
-                --repo "${{ github.repository }}" \
-                --title "$title" \
-                --notes-file "$notes_file"
-            else
-              echo "Release for ${tag} already exists and is not a draft."
+              --json isDraft,assets \
+              --jq '"\(.isDraft) \(.assets | length)"')"
+            read -r is_draft asset_count <<<"$release_state"
+            if [[ "$is_draft" != "true" ]]; then
+              echo "::error::Release ${tag} is already published; its assets are not replaced."
+              exit 1
             fi
+            if [[ "$asset_count" -gt 0 ]]; then
+              echo "::error::Draft release ${tag} already has ${asset_count} asset(s). Delete them, or the draft, and re-run this job."
+              exit 1
+            fi
+            # The draft's notes may have been edited by hand, so they stay.
           else
             gh release create "$tag" \
               --repo "${{ github.repository }}" \
@@ -498,4 +610,4 @@ jobs:
               --notes-file "$notes_file"
           fi
 
-          gh release upload "$tag" "${files[@]}" --clobber --repo "${{ github.repository }}"
+          gh release upload "$tag" "${files[@]}" --repo "${{ github.repository }}"

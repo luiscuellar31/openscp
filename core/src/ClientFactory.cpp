@@ -40,15 +40,54 @@ std::unique_ptr<RemoteClient> CreateClientForProtocol(Protocol protocol) {
 std::unique_ptr<RemoteClient> CreateConnectedClient(const SessionOptions &opt,
                                                     std::string &err) {
     err.clear();
+    if (opt.connection_stop_token.stop_requested()) {
+        err = "Connection canceled by user";
+        return nullptr;
+    }
     auto client = CreateClientForProtocol(opt.protocol);
     if (!client) {
         err = std::string("Protocol not implemented: ") +
               protocolStorageName(opt.protocol);
         return nullptr;
     }
-    if (!client->connect(opt, err))
+    // Destroy the registration before the client, including failure paths.
+    std::stop_callback interruptConnection(
+        opt.connection_stop_token,
+        [pending = client.get()] { pending->interrupt(); });
+    const bool connected = client->connect(opt, err);
+    if (opt.connection_stop_token.stop_requested()) {
+        err = "Connection canceled by user";
+        return nullptr;
+    }
+    if (!connected)
         return nullptr;
     return client;
+}
+
+bool FetchServerPublicKeyPin(const SessionOptions &opt, std::string &pin,
+                             std::string &err) {
+    pin.clear();
+    err.clear();
+    if (opt.connection_stop_token.stop_requested()) {
+        err = "Connection canceled by user";
+        return false;
+    }
+#if defined(OPENSCP_DEMO_MODE) && OPENSCP_DEMO_MODE
+    err = "The demo has no TLS servers.";
+    return false;
+#else
+#if defined(OPENSCP_HAS_CURL_FTP) && OPENSCP_HAS_CURL_FTP
+    if (opt.protocol == Protocol::Ftps)
+        return fetchFtpsServerPublicKeyPin(opt, pin, err);
+#endif
+#if defined(OPENSCP_HAS_CURL_WEBDAV) && OPENSCP_HAS_CURL_WEBDAV
+    if (opt.protocol == Protocol::WebDav)
+        return fetchWebDavServerPublicKeyPin(opt, pin, err);
+#endif
+    err = std::string("No TLS certificate check for protocol: ") +
+          protocolStorageName(opt.protocol);
+    return false;
+#endif
 }
 
 } // namespace openscp

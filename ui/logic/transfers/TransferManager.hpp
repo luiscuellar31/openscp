@@ -2,6 +2,7 @@
 #pragma once
 
 #include "logic/transfers/BandwidthLimiter.hpp"
+#include "logic/transfers/TransferAutoClear.hpp"
 #include "logic/transfers/TransferExecutor.hpp"
 #include "logic/transfers/TransferQueue.hpp"
 #include "logic/transfers/TransferQueuePersistence.hpp"
@@ -13,6 +14,7 @@
 
 #include <QObject>
 #include <QPair>
+#include <QSet>
 #include <QString>
 #include <QVector>
 
@@ -46,11 +48,17 @@ class TransferManager : public QObject {
 
     // Opens a connection to the current session, or returns null with an
     // error. Worker slots call it concurrently and without locks held, and
-    // retain the connections they open.
+    // retain the connections they open. The token is requested when the
+    // session is cleared or replaced, or the manager shuts down, so a
+    // connection still being opened gives up instead of making them wait.
     using ConnectionFactory =
-        std::function<std::unique_ptr<openscp::RemoteClient>(std::string &)>;
+        std::function<std::unique_ptr<openscp::RemoteClient>(std::stop_token,
+                                                             std::string &)>;
 
-    void setConnectionFactory(ConnectionFactory openConnection);
+    // `uploadsUsePartialFiles` says whether the session's uploads go through
+    // "<destination>.part", which removing tasks with partial data cleans up.
+    void setConnectionFactory(ConnectionFactory openConnection,
+                              bool uploadsUsePartialFiles = true);
     // Pauses the session's active work until another session is set, waiting
     // for workers to stop, and closes their connections.
     void clearSession();
@@ -94,6 +102,10 @@ class TransferManager : public QObject {
     int
     enqueueDownloads(const QVector<QPair<QString, QString>> &remoteLocalPairs,
                      const TransferBatchOptions &options = {});
+    // Adds the requests under one lock, with one tasksAdded and one wake-up
+    // of the workers, and returns their task IDs in order. Requests with a
+    // zero batchId share one new batch.
+    QVector<quint64> enqueueTasks(const QVector<TransferRequest> &requests);
     quint64 createBatch(const TransferBatchOptions &options = {});
     void cancelBatch(quint64 batchId);
 
@@ -116,6 +128,9 @@ class TransferManager : public QObject {
     void clearFailedCanceled();
     void clearFinishedOlderThan(int minutes, bool clearDone,
                                 bool clearFailedCanceled);
+    // Applies `rule` now and then every minute, so finished tasks leave the
+    // queue whether or not its window is open.
+    void setAutoClear(const TransferAutoClearRule &rule);
 
     // Queue persistence is explicit so tests and embedders do not unexpectedly
     // touch user data. The application should call this once during startup.
@@ -128,6 +143,9 @@ class TransferManager : public QObject {
     void tasksRemoved(const QVector<quint64> &taskIds);
     void queueSettingsChanged();
     void persistenceWarning(const QString &message);
+    // No worker could open a connection, so dispatch stopped and pending work
+    // waits until it is resumed or the session changes.
+    void transfersWaitingForConnection(const QString &error);
 
     public slots:
     void schedule();
@@ -135,9 +153,13 @@ class TransferManager : public QObject {
 
     private:
     static constexpr int kWorkerSlots = 8;
-    // The queue keeps at least the newest kMaxTerminalHistory finished tasks
-    // and prunes the older ones once kTerminalHistoryPruneBatch more have
-    // finished, so pruning walks the queue once per batch, not per task.
+    // Consecutive failed connections, with no worker connected, after which
+    // the queue stops dispatching instead of failing every task in turn.
+    static constexpr int kConnectionFailureLimit = 3;
+    // Completed, failed and canceled tasks each keep their newest
+    // kMaxTerminalHistory entries; pending cleanups and uncertain commits are
+    // never pruned. Pruning runs once kTerminalHistoryPruneBatch more tasks
+    // have finished, so it walks the queue once per batch, not per task.
     static constexpr int kMaxTerminalHistory = 5000;
     static constexpr int kTerminalHistoryPruneBatch = kMaxTerminalHistory / 10;
     // A save waits for a pause in queue changes, but never longer than the
@@ -149,7 +171,13 @@ class TransferManager : public QObject {
     enum class PrecheckOutcome { Continue, Skipped, Canceled, Error };
 
     ConnectionFactory openConnection_;
+    // Stops the connections being opened for the current session; replaced
+    // with each new one. Read and written under mtx_.
+    std::stop_source connectionStop_;
     QString currentSessionKey_;
+    // Sessions of this run whose uploads write the destination directly, so
+    // a "<destination>.part" on their server is not an upload's.
+    QSet<QString> sessionsWithoutUploadPartials_;
     quint64 sessionGeneration_ = 1;
 
     TransferQueueStore queueStore_;
@@ -158,15 +186,33 @@ class TransferManager : public QObject {
         std::size_t failed = 0;
     };
     std::unordered_map<quint64, BatchWorkState> batchWorkById_;
+    // Relationships are fixed at insertion and protected by mtx_. Keep
+    // terminal tasks indexed until removal so retries need no reindexing.
+    std::unordered_map<quint64, std::unordered_set<quint64>>
+        dependentsByTaskId_;
+    std::unordered_map<quint64, std::unordered_set<quint64>> batchWaitersById_;
+    // Includes upload sources and local destinations (including .part).
+    // Only transfer-phase tasks are indexed. Phase changes and renames update
+    // membership; status and active ownership are checked at lookup.
+    std::unordered_map<std::string, std::unordered_set<quint64>>
+        localPathUsers_;
     quint64 nextId_ = 1;
     quint64 nextBatchId_ = 1;
     int terminalTaskCount_ = 0;
+    int consecutiveConnectionFailures_ = 0;
+    bool connectionSuspended_ = false;
+    int terminalHistoryPruneAt_ =
+        kMaxTerminalHistory + kTerminalHistoryPruneBatch;
     TransferScheduler scheduler_;
 
     std::atomic<bool> paused_{false};
     std::atomic<bool> shuttingDown_{false};
     std::atomic<int> running_{0};
     std::atomic<int> maxConcurrent_{2};
+    // A worker without a task for this long closes its connection, so idle
+    // slots, and slots above a lowered limit, do not hold server connections.
+    // Read and written under mtx_.
+    std::chrono::milliseconds idleConnectionTimeout_{std::chrono::seconds(60)};
 
     // Worker-slot client mutexes and retry, persistence, and performance
     // mutexes are independent of mtx_ and must be released before acquiring
@@ -189,10 +235,15 @@ class TransferManager : public QObject {
 
     BandwidthLimiter bandwidthLimiter_;
 
+    QTimer *autoClearTimer_ = nullptr;
+    TransferAutoClearRule autoClearRule_;
+
     QTimer *persistenceTimer_ = nullptr;
     TransferQueueWriter persistenceWriter_;
     QString persistencePath_;
     qint64 persistencePendingSinceMs_ = 0;
+    // Fingerprint of the last snapshot handed to the writer; guarded by mtx_.
+    std::optional<std::size_t> lastPersistedFingerprint_;
     bool persistenceEnabled_ = false;
     bool persistenceBlocked_ = false;
     mutable std::mutex persistenceMutex_;
@@ -204,9 +255,7 @@ class TransferManager : public QObject {
     TransferTask *taskForIdLocked(quint64 taskId);
     const TransferTask *taskForIdLocked(quint64 taskId) const;
     void appendTaskLocked(TransferTask task);
-    quint64 enqueuePreparedTask(TransferTask task,
-                                const TransferBatchOptions &options,
-                                bool inheritBatchConflictPolicy);
+    quint64 enqueueRequest(TransferRequest request);
     void rebuildTaskLookupLocked();
     // Removes the inactive tasks shouldRemove selects in one pass, releases
     // what the queue kept for them, and returns them.
@@ -222,17 +271,23 @@ class TransferManager : public QObject {
     QVector<quint64> skipDependentsOfFailedLocked(quint64 failedTaskId,
                                                   qint64 now);
     enum class BatchWork { Unfinished, Failed, Succeeded };
+    void adjustDependencyIndexesLocked(const TransferTask &task, bool add);
     void adjustBatchWorkLocked(const TransferTask &task, bool add);
     void setTaskStatusLocked(
         TransferTask &task, TransferTask::Status status,
         std::optional<bool> skippedByFailedDependency = std::nullopt);
     // State of the batch's tasks that do not wait for the batch.
     BatchWork batchWorkLocked(quint64 batchId) const;
-    quint64 enqueuePathTask(TransferTask::Type type, const QString &path,
-                            const TransferBatchOptions &options);
-    std::string destinationKey(const TransferTask &task) const;
+    std::string destinationKey(const TransferTask &task,
+                               bool partial = false) const;
+    std::vector<std::string> destinationKeys(const TransferTask &task) const;
     std::string localUploadSourceKey(const TransferTask &task) const;
+    std::vector<std::string> localPathUserKeys(const TransferTask &task) const;
+    void adjustLocalPathUsersLocked(const TransferTask &task, bool add);
+    void setTaskPhaseLocked(TransferTask &task, TransferPhase phase);
     bool hasOtherLocalSourceUserLocked(const TransferTask &task) const;
+    bool hasOtherLocalPathUserLocked(const std::string &key,
+                                     quint64 taskId) const;
     bool canReserveTaskLocked(const TransferTask &task) const;
     bool reserveTaskPathsLocked(const TransferTask &task);
     void reserveCleanupSourceLocked(const TransferTask &task);
@@ -240,11 +295,18 @@ class TransferManager : public QObject {
     bool dependencySatisfiedLocked(const TransferTask &task) const;
     std::optional<TransferTask> pickRunnableTaskLocked(std::size_t slotIndex);
     void workerLoop(std::size_t slotIndex, std::stop_token stopToken);
-    std::shared_ptr<openscp::RemoteClient> workerClient(WorkerSlot &slot,
-                                                        quint64 taskId,
-                                                        quint64 generation,
-                                                        std::string &err);
+    // connectionFailed is set when no connection could be opened, as opposed
+    // to the task or session stopping.
+    std::shared_ptr<openscp::RemoteClient>
+    workerClient(WorkerSlot &slot, quint64 taskId, quint64 generation,
+                 std::string &err, bool &connectionFailed);
     void invalidateWorkerClient(WorkerSlot &slot);
+    void handleWorkerConnectionFailure(WorkerSlot &slot, quint64 taskId,
+                                       quint64 generation,
+                                       const std::string &error);
+    void resetConnectionFailuresLocked();
+    // Requeues the current session's work that waited for a connection.
+    void wakeCurrentSessionLocked(QVector<quint64> &changed);
     void interruptTask(quint64 taskId);
     void interruptAllActive();
     bool shouldCancel(quint64 taskId) const;
@@ -292,9 +354,15 @@ class TransferManager : public QObject {
                            qint64 nowMs);
     void transitionToDone(TransferTask &task, qint64 nowMs);
     void resetForRetry(TransferTask &task, qint64 nowMs);
+    bool retryLocked(TransferTask &task, qint64 nowMs);
+    void retryDependentsLocked(QVector<quint64> &retried, qint64 nowMs);
+    void applyAutoClear();
     void removeInactiveTasks(
         const std::function<bool(const TransferTask &)> &shouldRemove);
-    QVector<quint64> pruneTerminalHistoryLocked();
+    // Tasks in justCanceled count toward their limit but stay this time, so a
+    // cancel does not remove what it just canceled.
+    QVector<quint64>
+    pruneTerminalHistoryLocked(const QVector<quint64> &justCanceled = {});
     void recordCompletionMetrics(quint64 taskId, TransferTask::Status status,
                                  quint64 bytesDone, qint64 queueLatencyMs,
                                  qint64 precheckMs, qint64 transferMs);
@@ -311,7 +379,11 @@ class TransferManager : public QObject {
     void writeQueueSnapshot();
     bool restorePersistenceFile(QString &warning);
     // The tasks the queue would save, or nullopt when it saves nothing.
-    std::optional<QVector<TransferTask>> persistedSnapshot() const;
+    // The tasks to save. With `onlyIfChanged`, nothing when what would be
+    // saved matches the last snapshot taken this way: most updates only
+    // change a task's status or progress, which the file does not keep.
+    std::optional<QVector<TransferTask>>
+    persistedSnapshot(bool onlyIfChanged = false);
 
     friend struct TransferManagerTestAccess;
 };

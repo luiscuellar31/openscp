@@ -15,6 +15,7 @@ warn() { printf "\033[1;33m[warn]\033[0m %s\n" "$*"; }
 die() { printf "\033[1;31m[err ]\033[0m %s\n" "$*"; exit 1; }
 
 source "${REPO_DIR}/scripts/lib/macos/qt-host-tools.sh"
+source "${REPO_DIR}/scripts/lib/version.sh"
 
 usage() {
   cat <<'EOF'
@@ -56,7 +57,7 @@ parse_args() {
         shift
         ;;
       --build-dir)
-        [[ $# -ge 2 ]] || die "--build-dir requires a value"
+        [[ $# -ge 2 && -n "$2" ]] || die "--build-dir requires a value"
         BUILD_DIR="$2"
         shift 2
         ;;
@@ -83,13 +84,40 @@ normalize_paths() {
   esac
 }
 
+# --clean deletes the build directory, so it has to be one: not the root,
+# the repository or a folder holding it, and a CMake build or empty.
+clean_build_dir() {
+  [[ -d "$BUILD_DIR" ]] || return 0
+  local resolved repo
+  resolved="$(cd "$BUILD_DIR" && pwd -P)"
+  repo="$(cd "$REPO_DIR" && pwd -P)"
+  [[ "$resolved" != "/" ]] || die "Refusing to clean the root directory."
+  case "${repo}/" in
+    "${resolved}"/*) die "Refusing to clean ${resolved}: it holds the repository." ;;
+  esac
+  if [[ ! -f "${resolved}/CMakeCache.txt" && -n "$(ls -A "$resolved")" ]]; then
+    die "Refusing to clean ${resolved}: it is not a CMake build directory."
+  fi
+  log "Cleaning build directory: ${resolved}"
+  rm -rf "$resolved"
+}
+
 latest_qt6_dir() {
   local best=""
+  local best_version=""
   local cand=""
+  local version=""
   shopt -s nullglob
   for cand in "${HOME}"/Qt/*/macos/lib/cmake/Qt6; do
     [[ -f "${cand}/Qt6Config.cmake" ]] || continue
-    best="$cand"
+    # The glob sorts as text, where 6.8 follows 6.11, so compare versions.
+    version="${cand#"${HOME}/Qt/"}"
+    version="${version%%/*}"
+    [[ "$version" =~ ^[0-9]+(\.[0-9]+)*$ ]] || continue
+    if [[ -z "$best" ]] || version_is_greater "$version" "$best_version"; then
+      best="$cand"
+      best_version="$version"
+    fi
   done
   shopt -u nullglob
   [[ -n "$best" ]] && printf "%s\n" "$best"
@@ -164,8 +192,7 @@ main() {
   normalize_paths
 
   if [[ "$CLEAN" -eq 1 ]]; then
-    log "Cleaning build directory: ${BUILD_DIR}"
-    rm -rf "$BUILD_DIR"
+    clean_build_dir
   fi
 
   configure_project

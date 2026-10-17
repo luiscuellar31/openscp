@@ -11,7 +11,6 @@
 
 #include <QCoreApplication>
 #include <QDir>
-#include <QDirIterator>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -20,215 +19,12 @@
 #include <QPushButton>
 #include <QStatusBar>
 #include <QThreadPool>
-#include <QUuid>
 
 #include <algorithm>
 #include <functional>
 #include <memory>
 
 namespace {
-
-bool entryExists(const QString &path) {
-    const QFileInfo info(path);
-    return info.exists() || info.isSymLink();
-}
-
-bool removeEntry(const QString &path) {
-    const QFileInfo info(path);
-    if (!info.exists() && !info.isSymLink())
-        return true;
-    if (info.isDir() && !info.isSymLink())
-        return QDir(path).removeRecursively();
-    return QFile::remove(path);
-}
-
-bool renameEntry(const QString &from, const QString &to) {
-    const QFileInfo info(from);
-    if (info.isDir() && !info.isSymLink())
-        return QDir().rename(from, to);
-    return QFile::rename(from, to);
-}
-
-bool copyEntryToEmptyDestination(const QString &srcPath, const QString &dstPath,
-                                 QString &error) {
-    QFileInfo srcInfo(srcPath);
-
-    if (srcInfo.isFile()) {
-        QDir().mkpath(QFileInfo(dstPath).dir().absolutePath());
-        if (!QFile::copy(srcPath, dstPath)) {
-            error = QString(QCoreApplication::translate(
-                                "MainWindow", "Could not copy file: %1"))
-                        .arg(srcPath);
-            return false;
-        }
-        return true;
-    }
-
-    if (srcInfo.isDir()) {
-        // Create destination directory
-        if (!QDir().mkpath(dstPath)) {
-            error = QString(QCoreApplication::translate(
-                                "MainWindow",
-                                "Could not create destination folder: %1"))
-                        .arg(dstPath);
-            return false;
-        }
-        // Iterate recursively
-        QDirIterator dirIterator(srcPath,
-                                 QDir::NoDotAndDotDot | QDir::AllEntries,
-                                 QDirIterator::Subdirectories);
-        while (dirIterator.hasNext()) {
-            dirIterator.next();
-            const QFileInfo entryFileInfo = dirIterator.fileInfo();
-            const QString relativePath = QDir(srcPath).relativeFilePath(
-                entryFileInfo.absoluteFilePath());
-            const QString target = QDir(dstPath).filePath(relativePath);
-
-            if (entryFileInfo.isDir()) {
-                if (!QDir().mkpath(target)) {
-                    error =
-                        QString(
-                            QCoreApplication::translate(
-                                "MainWindow",
-                                "Could not create destination subfolder: %1"))
-                            .arg(target);
-                    return false;
-                }
-            } else {
-                QDir().mkpath(QFileInfo(target).dir().absolutePath());
-                if (!QFile::copy(entryFileInfo.absoluteFilePath(), target)) {
-                    error = QString(QCoreApplication::translate(
-                                        "MainWindow", "Failed to copy: %1"))
-                                .arg(entryFileInfo.absoluteFilePath());
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    error = QCoreApplication::translate(
-        "MainWindow", "Source entry is neither file nor folder.");
-    return false;
-}
-
-bool copyEntryRecursively(const QString &srcPath, const QString &dstPath,
-                          QString &error) {
-    const QString destinationParent = QFileInfo(dstPath).dir().absolutePath();
-    if (!QDir().mkpath(destinationParent)) {
-        error = QString(QCoreApplication::translate(
-                            "MainWindow",
-                            "Could not create destination folder: %1"))
-                    .arg(destinationParent);
-        return false;
-    }
-
-    const QString token = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    const QString stagedPath =
-        QDir(destinationParent)
-            .filePath(QStringLiteral(".openscp-stage-") + token);
-    const QString backupPath =
-        QDir(destinationParent)
-            .filePath(QStringLiteral(".openscp-backup-") + token);
-
-    if (!copyEntryToEmptyDestination(srcPath, stagedPath, error)) {
-        (void)removeEntry(stagedPath);
-        return false;
-    }
-
-    const bool hadDestination = entryExists(dstPath);
-    if (hadDestination && !renameEntry(dstPath, backupPath)) {
-        (void)removeEntry(stagedPath);
-        error = QString(QCoreApplication::translate(
-                            "MainWindow",
-                            "Could not preserve existing destination: %1"))
-                    .arg(dstPath);
-        return false;
-    }
-
-    if (!renameEntry(stagedPath, dstPath)) {
-        (void)removeEntry(stagedPath);
-        const bool restored =
-            !hadDestination || renameEntry(backupPath, dstPath);
-        error =
-            restored
-                ? QString(
-                      QCoreApplication::translate(
-                          "MainWindow", "Could not publish completed copy: %1"))
-                      .arg(dstPath)
-                : QString(QCoreApplication::translate(
-                              "MainWindow",
-                              "Could not publish completed copy or restore the "
-                              "previous destination. Recovery copy: %1"))
-                      .arg(backupPath);
-        return false;
-    }
-
-    if (hadDestination)
-        (void)removeEntry(backupPath);
-    return true;
-}
-
-bool moveEntry(const QString &srcPath, const QString &dstPath, QString &error) {
-    if (QDir::cleanPath(QFileInfo(srcPath).absoluteFilePath()) ==
-        QDir::cleanPath(QFileInfo(dstPath).absoluteFilePath())) {
-        return true;
-    }
-
-    const bool hadDestination = entryExists(dstPath);
-    QString backupPath;
-    if (hadDestination) {
-        const QString token =
-            QUuid::createUuid().toString(QUuid::WithoutBraces);
-        backupPath = QDir(QFileInfo(dstPath).dir())
-                         .filePath(QStringLiteral(".openscp-backup-") + token);
-        QString backupError;
-        if (renameLocalEntry(dstPath, backupPath, &backupError) !=
-            LocalRenameResult::Moved) {
-            error = QString(QCoreApplication::translate(
-                                "MainWindow",
-                                "Could not preserve existing destination: %1 "
-                                "(%2)"))
-                        .arg(dstPath, backupError);
-            return false;
-        }
-    }
-
-    QString renameError;
-    const LocalRenameResult renameResult =
-        renameLocalEntry(srcPath, dstPath, &renameError);
-    if (renameResult == LocalRenameResult::Moved) {
-        if (hadDestination)
-            (void)removeEntry(backupPath);
-        return true;
-    }
-
-    if (hadDestination &&
-        renameLocalEntry(backupPath, dstPath) != LocalRenameResult::Moved) {
-        error = QString(QCoreApplication::translate(
-                            "MainWindow",
-                            "Could not move the source or restore the previous "
-                            "destination. Recovery copy: %1"))
-                    .arg(backupPath);
-        return false;
-    }
-
-    if (renameResult != LocalRenameResult::CrossDevice) {
-        error = QString(QCoreApplication::translate(
-                            "MainWindow", "Could not move entry: %1 (%2)"))
-                    .arg(srcPath, renameError);
-        return false;
-    }
-
-    if (!copyEntryRecursively(srcPath, dstPath, error))
-        return false;
-    if (removeEntry(srcPath))
-        return true;
-    error = QString(QCoreApplication::translate("MainWindow",
-                                                "Could not delete source: %1"))
-                .arg(srcPath);
-    return false;
-}
 
 QString buildLocalFsSummaryMessage(bool deleteSource, int successCount,
                                    int failureCount, int skippedCount) {
@@ -338,11 +134,14 @@ void MainWindow::setRightRoot(const QString &path) {
     }
 }
 
-void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
-                                     bool deleteSource, int skippedCount) {
+void MainWindow::runLocalFsOperation(
+    const QVector<LocalFsPair> &pairs, bool deleteSource, int skippedCount,
+    std::function<void(bool allSucceeded)> onFinished) {
     if (pairs.isEmpty()) {
         statusBar()->showMessage(
             buildLocalFsSummaryMessage(deleteSource, 0, 0, skippedCount), 5000);
+        if (onFinished)
+            onFinished(true);
         return;
     }
 
@@ -352,58 +151,62 @@ void MainWindow::runLocalFsOperation(const QVector<LocalFsPair> &pairs,
                              1500);
 
     QPointer<MainWindow> self(this);
-    QThreadPool::globalInstance()->start(
-        [self, pairs, deleteSource, skippedCount]() {
-            int successCount = 0;
-            int failureCount = 0;
-            QString lastError;
+    localFsPool_.start([self, pairs, deleteSource, skippedCount, onFinished,
+                        canceled = localFsCanceled_]() {
+        int successCount = 0;
+        int failureCount = 0;
+        QString lastError;
+        const auto shouldCancel = [canceled] { return canceled->load(); };
 
-            for (const auto &pair : pairs) {
-                QString operationError;
-                const bool succeeded =
-                    deleteSource
-                        ? moveEntry(pair.sourcePath, pair.targetPath,
-                                    operationError)
-                        : copyEntryRecursively(pair.sourcePath, pair.targetPath,
-                                               operationError);
-                if (succeeded) {
-                    ++successCount;
-                } else {
-                    ++failureCount;
-                    lastError = operationError;
-                }
+        for (const auto &pair : pairs) {
+            if (shouldCancel())
+                break;
+            QString operationError;
+            const bool succeeded =
+                deleteSource ? moveLocalEntry(pair.sourcePath, pair.targetPath,
+                                              operationError, shouldCancel)
+                             : copyLocalEntry(pair.sourcePath, pair.targetPath,
+                                              operationError, shouldCancel);
+            if (succeeded) {
+                ++successCount;
+            } else {
+                ++failureCount;
+                lastError = operationError;
             }
+        }
 
-            QObject *const app = QCoreApplication::instance();
-            if (!app)
-                return;
-            QMetaObject::invokeMethod(
-                app,
-                [self, successCount, failureCount, skippedCount, lastError,
-                 deleteSource]() {
-                    if (!self)
-                        return;
+        QObject *const app = QCoreApplication::instance();
+        if (!app)
+            return;
+        QMetaObject::invokeMethod(
+            app,
+            [self, successCount, failureCount, skippedCount, lastError,
+             deleteSource, onFinished]() {
+                if (!self)
+                    return;
 
-                    --self->localFsJobsInFlight_;
+                --self->localFsJobsInFlight_;
+                if (onFinished)
+                    onFinished(failureCount == 0);
 
-                    QString statusMessage = buildLocalFsSummaryMessage(
-                        deleteSource, successCount, failureCount, skippedCount);
-                    if (failureCount > 0 && !lastError.isEmpty()) {
-                        statusMessage += "\n" +
-                                         QCoreApplication::translate(
-                                             "MainWindow", "Last error: ") +
-                                         lastError;
-                    }
-                    self->statusBar()->showMessage(statusMessage, 6000);
+                QString statusMessage = buildLocalFsSummaryMessage(
+                    deleteSource, successCount, failureCount, skippedCount);
+                if (failureCount > 0 && !lastError.isEmpty()) {
+                    statusMessage += "\n" +
+                                     QCoreApplication::translate(
+                                         "MainWindow", "Last error: ") +
+                                     lastError;
+                }
+                self->statusBar()->showMessage(statusMessage, 6000);
 
-                    self->setLeftRoot(self->leftPath_->path());
-                    if (!self->rightIsRemote_) {
-                        self->setRightRoot(self->rightPath_->path());
-                    }
-                    self->updateDeleteShortcutEnables();
-                },
-                Qt::QueuedConnection);
-        });
+                self->setLeftRoot(self->leftPath_->path());
+                if (!self->rightIsRemote_) {
+                    self->setRightRoot(self->rightPath_->path());
+                }
+                self->updateDeleteShortcutEnables();
+            },
+            Qt::QueuedConnection);
+    });
 }
 
 void MainWindow::copyLeftToRight() {
@@ -570,23 +373,47 @@ void MainWindow::deleteFromLeft() {
                           QMessageBox::Yes | QMessageBox::No) !=
         QMessageBox::Yes)
         return;
-    int deletedCount = 0;
-    int failedCount = 0;
-    for (const QModelIndex &idx : rows) {
-        const QFileInfo selectedFileInfo = leftModel_->fileInfo(idx);
-        bool removed =
-            selectedFileInfo.isDir()
-                ? QDir(selectedFileInfo.absoluteFilePath()).removeRecursively()
-                : QFile::remove(selectedFileInfo.absoluteFilePath());
-        if (removed)
-            ++deletedCount;
-        else
-            ++failedCount;
-    }
-    statusBar()->showMessage(QString(tr("Deleted: %1  |  Failed: %2"))
-                                 .arg(deletedCount)
-                                 .arg(failedCount),
-                             5000);
+    QStringList paths;
+    for (const QModelIndex &idx : rows)
+        paths.push_back(leftModel_->fileInfo(idx).absoluteFilePath());
+    runLocalDelete(paths);
+}
+
+void MainWindow::runLocalDelete(const QStringList &paths) {
+    if (paths.isEmpty())
+        return;
+    // A large tree, or a network volume, can take long to delete, so it runs
+    // on the local pool rather than on the UI thread.
+    ++localFsJobsInFlight_;
+    QPointer<MainWindow> self(this);
+    localFsPool_.start([self, paths, canceled = localFsCanceled_]() {
+        int deletedCount = 0;
+        int failedCount = 0;
+        for (const QString &path : paths) {
+            if (canceled->load())
+                break;
+            removeLocalEntry(path) ? ++deletedCount : ++failedCount;
+        }
+        QObject *const app = QCoreApplication::instance();
+        if (!app)
+            return;
+        QMetaObject::invokeMethod(
+            app,
+            [self, deletedCount, failedCount]() {
+                if (!self)
+                    return;
+                --self->localFsJobsInFlight_;
+                self->statusBar()->showMessage(tr("Deleted: %1  |  Failed: %2")
+                                                   .arg(deletedCount)
+                                                   .arg(failedCount),
+                                               5000);
+                self->setLeftRoot(self->leftPath_->path());
+                if (!self->rightIsRemote_)
+                    self->setRightRoot(self->rightPath_->path());
+                self->updateDeleteShortcutEnables();
+            },
+            Qt::QueuedConnection);
+    });
 }
 
 void MainWindow::goUpLeft() {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "TestHarness.hpp"
+#include "openscp/ClientFactory.hpp"
 #include "openscp/RemoteClient.hpp"
 
 #include <algorithm>
@@ -252,6 +253,10 @@ inline void runManagedFilesContract(
         "download should succeed", error);
     test.check(downloadProgressCalled,
                message("download progress callback should be called"));
+    // The download learns the file's time, so keeping it needs no stat.
+    test.check(statInfo.mtime > 0 &&
+                   client.lastDownloadModifiedTime() == statInfo.mtime,
+               message("download should report the file's modification time"));
     std::string downloaded;
     test.check(readFile(localDownload, downloaded),
                message("downloaded file should be readable"));
@@ -365,7 +370,8 @@ inline void runManagedFilesContract(
 }
 
 // FTP answers stat, exists and rename conflicts through MLST when the server
-// offers it and through the parent listing otherwise; both must agree.
+// offers it and through the parent listing otherwise; both must agree. The
+// same lookup tells a missing path from refused access after a 550.
 inline void checkFtpEntryLookups(openscp::RemoteClient &client,
                                  const std::string &remotePath,
                                  TestContext &test) {
@@ -375,6 +381,12 @@ inline void checkFtpEntryLookups(openscp::RemoteClient &client,
     test.check(client.stat(parent, info, error) && info.is_dir,
                "FTP: stat should report the parent as a directory: " + error);
 
+    // vsftpd has no MLST: the time comes from MDTM, which LIST lacked.
+    error.clear();
+    test.check(
+        client.stat(remotePath, info, error) && !info.is_dir && info.mtime > 0,
+        "FTP: stat should report the file's modification time: " + error);
+
     error.clear();
     test.check(!client.stat(remotePath + ".missing", info, error) &&
                    error.empty() &&
@@ -383,12 +395,70 @@ inline void checkFtpEntryLookups(openscp::RemoteClient &client,
                "FTP: stat of a missing file should report NotFound: " + error);
 
     error.clear();
+    test.check(!client.stat(parent + "/missing-folder/file", info, error) &&
+                   error.empty() &&
+                   client.lastOperationError().kind ==
+                       openscp::RemoteErrorKind::NotFound,
+               "FTP: stat under a missing folder should report NotFound: " +
+                   error);
+
+    error.clear();
     test.check(!client.rename(remotePath, remotePath, error, false) &&
                    client.lastOperationError().kind ==
                        openscp::RemoteErrorKind::Conflict,
                "FTP: rename without overwrite onto an existing file should "
                "report a conflict: " +
                    error);
+
+    const std::string missing = remotePath + ".missing";
+    const auto reportsNotFound = [&client](bool succeeded) {
+        return !succeeded && client.lastOperationError().kind ==
+                                 openscp::RemoteErrorKind::NotFound;
+    };
+    error.clear();
+    test.check(reportsNotFound(client.removeFile(missing, error)),
+               "FTP: deleting a missing file should report NotFound: " + error);
+    error.clear();
+    test.check(reportsNotFound(client.removeDir(missing, error)),
+               "FTP: removing a missing directory should report NotFound: " +
+                   error);
+    IntegrationTempDir localDirectory;
+    error.clear();
+    test.check(localDirectory.isValid() &&
+                   reportsNotFound(client.get(
+                       missing, (localDirectory.path() / "missing").string(),
+                       error, {}, {}, false)),
+               "FTP: downloading a missing file should report NotFound: " +
+                   error);
+}
+
+// With certificate verification off, a connection accepts the public key the
+// probe read and refuses any other one.
+inline void checkTlsKeyPinning(openscp::SessionOptions options,
+                               std::string_view label, TestContext &test) {
+    const std::string prefix = std::string(label) + ": ";
+    std::string pin;
+    std::string error;
+    test.check(openscp::FetchServerPublicKeyPin(options, pin, error) &&
+                   pin.starts_with("sha256//"),
+               prefix + "the TLS key probe should return a pin: " + error);
+    options.ftps_verify_peer = false;
+    options.webdav_verify_peer = false;
+    options.tls_pinned_public_key = pin;
+    auto pinned = openscp::CreateConnectedClient(options, error);
+    test.check(pinned != nullptr,
+               prefix + "the pinned key should be accepted: " + error);
+    if (pinned)
+        pinned->disconnect();
+
+    options.tls_pinned_public_key =
+        "sha256//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    auto client = openscp::CreateClientForProtocol(options.protocol);
+    error.clear();
+    test.check(client && !client->connect(options, error) &&
+                   client->lastOperationError().kind ==
+                       openscp::RemoteErrorKind::Certificate,
+               prefix + "another key should be refused: " + error);
 }
 
 inline int finishIntegration(std::string_view suiteName,

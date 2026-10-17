@@ -956,6 +956,65 @@ OPENSCP_TEST(testSettingsDownloadDurabilityFailsSafeAndPersists, test) {
     settings.sync();
 }
 
+OPENSCP_TEST(testSettingsShowAndKeepApplicationDefaults, test) {
+    using namespace openscpui::settingskeys;
+    {
+        openscpui::AppSettings settings;
+        settings.clear();
+        settings.setValue(kNoHostVerificationTtlMinutes, 30);
+        settings.sync();
+    }
+
+    const auto noVerificationText = [](QWidget &parent) {
+        for (auto *combo : parent.findChildren<QComboBox *>()) {
+            for (int index = 0; index < combo->count(); ++index) {
+                if (combo->itemText(index).startsWith(
+                        QStringLiteral("No verification")))
+                    return combo->itemText(index);
+            }
+        }
+        return QString();
+    };
+    {
+        ConnectionDialog connection;
+        test.check(noVerificationText(connection)
+                       .contains(QStringLiteral("expires in 30 min")),
+                   "the connection policy should state the configured "
+                   "exception lifetime");
+    }
+
+    SettingsDialog dialog;
+    test.check(noVerificationText(dialog).contains(
+                   QStringLiteral("expires in 30 min")),
+               "the default policy should state the configured exception "
+               "lifetime");
+    QList<int> spinValues;
+    for (const auto *spin : dialog.findChildren<QSpinBox *>())
+        spinValues << spin->value();
+    test.check(spinValues.contains(kDefaultStagingConfirmationItems) &&
+                   spinValues.contains(kDefaultStagingConfirmationMiB),
+               "staging thresholds should show the defaults dragging uses");
+
+    auto *durability = dialog.findChild<QComboBox *>(
+        QStringLiteral("settingsLocalFileDurability"));
+    auto *apply =
+        dialog.findChild<QPushButton *>(QStringLiteral("settingsApplyButton"));
+    test.check(durability && apply, "the durability setting should exist");
+    if (durability && apply) {
+        durability->setCurrentIndex(durability->findData(
+            static_cast<int>(openscp::LocalFileDurability::Buffered)));
+        apply->click();
+    }
+    openscpui::AppSettings settings;
+    test.check(settings.contains(kTransferLocalFileDurability) &&
+                   !settings.contains(kStagingConfirmationItems) &&
+                   !settings.contains(kStagingConfirmationMiB),
+               "Apply should save only what changed, so other settings keep "
+               "following their defaults");
+    settings.clear();
+    settings.sync();
+}
+
 OPENSCP_TEST(testSettingsPagesUseSharedFormStructure, test) {
     SettingsDialogFixture fixture;
     test.check(fixture.valid(),
@@ -965,7 +1024,7 @@ OPENSCP_TEST(testSettingsPagesUseSharedFormStructure, test) {
     SettingsDialog &dialog = fixture.dialog;
     auto *sections = fixture.sections;
     auto *pages = fixture.pages;
-    const QList<int> expectedSectionCounts = {2, 1, 2, 1, 3, 1, 2};
+    const QList<int> expectedSectionCounts = {3, 1, 2, 1, 3, 1, 2};
     int sectionCount = 0;
     bool pageStructureMatches = true;
     bool sectionStructureMatches = true;
@@ -1121,10 +1180,10 @@ OPENSCP_TEST(testSettingsPagesUseSharedFormStructure, test) {
 
     test.check(pages && pages->count() == 7 && pageStructureMatches,
                "every settings page should use the same responsive form base");
-    test.check(sectionCount == 12 && sectionStructureMatches &&
+    test.check(sectionCount == 13 && sectionStructureMatches &&
                    contentIsIndented,
                "every section should lead one consistently indented form");
-    test.check(noteCount == 1 && notesShareTheHeadingAxis,
+    test.check(noteCount == 2 && notesShareTheHeadingAxis,
                "settings guidance should align with its section heading");
     test.check(checkCount > 0 && checksRideIndentedSpanningRows,
                "settings checks should span their forms from the field axis");

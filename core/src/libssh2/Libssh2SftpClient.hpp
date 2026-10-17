@@ -30,6 +30,10 @@ class Libssh2SftpClient : public RemoteClient {
     // Internal entry point used by protocol adapters (e.g. SCP) that need a
     // raw authenticated SSH transport without opening the SFTP subsystem.
     bool connectTransportOnly(const SessionOptions &opt, std::string &err);
+    // Opens the SFTP subsystem on a transport connected with
+    // connectTransportOnly(), so SCP can fall back to SFTP without a second
+    // SSH login. Does nothing when the subsystem is already open.
+    bool ensureSftpSubsystem(std::string &err);
     void disconnect() override;
     void interrupt() override;
     bool isConnected() const override { return connected_.load(); }
@@ -85,6 +89,8 @@ class Libssh2SftpClient : public RemoteClient {
     }
 
     private:
+    friend struct Libssh2SftpClientTestAccess;
+
     class StructuredErrorScope {
         public:
         StructuredErrorScope(Libssh2SftpClient &owner, std::string &error,

@@ -8,11 +8,16 @@
 #include <functional>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 
 namespace openscpui {
 
 class HostKeyPromptCoordinator final {
     public:
+    // An SSH host key, or the TLS public key of a server whose certificate
+    // is not verified.
+    enum class KeyKind { SshHostKey, TlsPublicKey };
+
     struct Prompt {
         QString host;
         quint16 port = 0;
@@ -20,12 +25,16 @@ class HostKeyPromptCoordinator final {
         QString fingerprint;
         bool canSave = false;
         quint64 requestId = 0;
+        KeyKind kind = KeyKind::SshHostKey;
+        // Another key was trusted for this server before.
+        bool keyChanged = false;
     };
 
     using PresentPrompt = std::function<void(const Prompt &)>;
 
     void setPresentPrompt(PresentPrompt presenter);
-    [[nodiscard]] bool requestDecision(Prompt prompt);
+    [[nodiscard]] bool requestDecision(Prompt prompt,
+                                       std::stop_token stopToken = {});
     [[nodiscard]] bool resolve(bool accepted);
     void cancel();
 
@@ -34,7 +43,7 @@ class HostKeyPromptCoordinator final {
 
     private:
     mutable std::mutex mutex_;
-    std::condition_variable stateChanged_;
+    std::condition_variable_any stateChanged_;
     PresentPrompt presenter_;
     std::optional<Prompt> pending_;
     quint64 nextRequestId_ = 1;

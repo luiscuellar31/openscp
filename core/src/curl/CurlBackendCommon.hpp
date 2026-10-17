@@ -16,6 +16,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 
@@ -150,6 +151,10 @@ std::string webDavServerPath(std::string_view basePath,
                              std::string_view logicalPath);
 bool webDavLogicalPath(std::string_view basePath, std::string_view serverPath,
                        std::string &logicalPath);
+// True when `redirectUrl` names `serverPath` with a trailing slash added, the
+// collection URL that servers such as Apache's mod_dir redirect to.
+bool isWebDavCollectionRedirect(std::string_view redirectUrl,
+                                std::string_view serverPath);
 bool isCompletedWebDavGetStatus(long statusCode);
 bool isCompletedWebDavWriteStatus(long statusCode);
 std::optional<std::uint32_t>
@@ -162,6 +167,12 @@ std::FILE *openFileForUpload(const std::string &path, std::uint64_t &fileSize,
 
 RemoteError errorFromCurl(CURLcode code, std::string message,
                           long responseCode = 0, bool commitUncertain = false);
+// Runs curl_easy_perform with an error buffer, so a failure can name its cause,
+// such as the TLS alert or the refused address.
+CURLcode performWithErrorDetail(CURL *curl, std::string &detail);
+// The curl_easy_strerror text, followed by the error-buffer detail when it adds
+// something.
+std::string curlFailureText(CURLcode code, const std::string &detail);
 RemoteError
 errorFromHttpStatus(long statusCode, std::string message,
                     bool commitUncertain = false,
@@ -199,9 +210,20 @@ bool configureProxy(CURL *curl, const SessionOptions &opt,
 
 bool configureTlsPolicy(CURL *curl, bool verifyPeer,
                         const std::optional<std::string> &caCertPath,
+                        const std::optional<std::string> &pinnedPublicKey,
                         const char *minimumVersionError,
                         const char *verificationError, const char *caPathError,
                         std::string &err);
+
+// The CURLOPT_PINNEDPUBLICKEY form of a PEM certificate's public key.
+bool publicKeyPinFromPem(std::string_view pem, std::string &pin);
+
+// Performs a request to `url` that ends once the TLS handshake shows the
+// server certificate, and returns the pin of its public key. The handle must
+// not carry credentials: an FTP server still receives USER, but never PASS.
+bool readServerPublicKeyPin(CURL *curl, const std::string &url,
+                            const std::stop_token &stop, std::string &pin,
+                            std::string &err);
 
 inline constexpr std::size_t kMaxMetadataResponseBytes = 64 * 1024 * 1024;
 
@@ -214,6 +236,10 @@ struct BoundedStringSink {
 
 size_t appendStringCallback(char *ptr, size_t size, size_t nmemb,
                             void *userdata);
+// When the sink did not store the whole `response`, sets the failure: a
+// response over the limit is a protocol error, not a local write error.
+bool refusedResponse(const BoundedStringSink &sink, const std::string &response,
+                     CURLcode &code, std::string &err);
 int seekFileCallback(void *userdata, curl_off_t offset, int origin);
 
 struct TransferProgressContext {
@@ -222,7 +248,14 @@ struct TransferProgressContext {
     const std::atomic<bool> *interrupted = nullptr;
     bool preferUploadCounters = false;
     bool payloadComplete = false;
+    // A download writes to downloadFile. writeError keeps the errno of a
+    // failed write, since libcurl makes more calls before it returns.
+    std::FILE *downloadFile = nullptr;
+    int writeError = 0;
 };
+
+// Writes a download to downloadFile; userdata is the TransferProgressContext.
+size_t writeFileCallback(char *ptr, size_t size, size_t nmemb, void *userdata);
 
 enum class CurlTransferFailure {
     None,

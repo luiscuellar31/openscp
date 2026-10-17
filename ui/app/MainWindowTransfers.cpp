@@ -1,12 +1,15 @@
 // MainWindow transfer queue UI, remote prescan, and drag-and-drop handling.
 #include "app/MainWindow.hpp"
+#include "logic/common/AppSettings.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
+#include "logic/common/StagingStore.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "logic/connections/SessionController.hpp"
 #include "logic/remote/LocalTreeDiscovery.hpp"
 #include "logic/remote/RemoteModel.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
 #include "widgets/dialogs/TransferQueueDialog.hpp"
+#include "widgets/files/DragAwareTreeView.hpp"
 #include "widgets/navigation/PathNavigationBar.hpp"
 
 #include <QCoreApplication>
@@ -18,6 +21,7 @@
 #include <QGuiApplication>
 #include <QLocale>
 #include <QMimeData>
+#include <QPointer>
 #include <QProgressDialog>
 #include <QScreen>
 #include <QStatusBar>
@@ -27,6 +31,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <functional>
 #include <limits>
 #include <memory>
 
@@ -468,11 +473,17 @@ void MainWindow::runRemoteDownloadPrescan(
                     remoteOps_->setPaused(jobId, false);
             }
 
+            QVector<TransferRequest> requests;
+            requests.reserve(directories.size());
             for (const QString &directory : directories) {
-                transferMgr_->enqueueLocalDirectory(directory,
-                                                    state->batchOptions);
-                ++state->enqueuedDirectories;
+                requests.push_back({TransferTask::Type::CreateLocalDirectory,
+                                    {},
+                                    directory,
+                                    state->batchOptions,
+                                    -1});
             }
+            state->enqueuedDirectories +=
+                static_cast<int>(transferMgr_->enqueueTasks(requests).size());
             state->enqueuedDownloads +=
                 transferMgr_->enqueueDownloads(files, state->batchOptions);
 
@@ -768,8 +779,14 @@ void MainWindow::startLocalUploadDiscovery(
                 return;
             }
             state->counters = batch.counters;
-            QVector<quint64> newTaskIds;
-            newTaskIds.reserve(batch.entries.size());
+            // The batch is queued in one call. A directory created by an
+            // earlier batch is a task; one created by this batch is a
+            // request.
+            QVector<TransferRequest> requests;
+            requests.reserve(batch.entries.size());
+            QHash<QString, qsizetype> directoryRequests;
+            QVector<QString> requestDirectoryKeys;
+            requestDirectoryKeys.reserve(batch.entries.size());
             for (const auto &entry : batch.entries) {
                 if (entry.rootIndex < 0 ||
                     entry.rootIndex >= state->destinationRoots.size()) {
@@ -793,38 +810,51 @@ void MainWindow::startLocalUploadDiscovery(
 
                 const QString parentKey = QString::number(entry.rootIndex) +
                                           QStringLiteral(":") + parentRelative;
+                qsizetype parentRequest = -1;
                 if (entry.type == LocalTreeDiscoveryEntry::Type::File &&
                     entry.relativePath.isEmpty()) {
                     entryOptions.dependsOnTaskId = 0;
                 } else {
+                    parentRequest = directoryRequests.value(parentKey, -1);
                     entryOptions.dependsOnTaskId =
                         state->directoryTasks.value(parentKey, 0);
                 }
 
-                quint64 taskId = 0;
                 if (entry.type == LocalTreeDiscoveryEntry::Type::Directory) {
-                    taskId = transferMgr_->enqueueRemoteDirectory(destination,
-                                                                  entryOptions);
                     const QString directoryKey =
                         QString::number(entry.rootIndex) + QStringLiteral(":") +
                         entry.relativePath;
-                    state->directoryTasks.insert(directoryKey, taskId);
-                    if (taskId != 0)
-                        state->directoryTaskIds.insert(taskId);
+                    directoryRequests.insert(directoryKey, requests.size());
+                    requestDirectoryKeys.push_back(directoryKey);
+                    requests.push_back(
+                        {TransferTask::Type::CreateRemoteDirectory,
+                         {},
+                         destination,
+                         entryOptions,
+                         parentRequest});
                     ++state->directoryCount;
                     if (!state->sourceDirectorySet.contains(entry.localPath)) {
                         state->sourceDirectorySet.insert(entry.localPath);
                         state->sourceDirectories.push_back(entry.localPath);
                     }
                 } else {
-                    taskId = transferMgr_->enqueueUpload(
-                        entry.localPath, destination, entryOptions);
+                    requestDirectoryKeys.push_back({});
+                    requests.push_back({TransferTask::Type::Upload,
+                                        entry.localPath, destination,
+                                        entryOptions, parentRequest});
                     ++state->uploadCount;
                 }
-                if (taskId != 0) {
-                    state->pendingTasks.insert(taskId);
-                    newTaskIds.push_back(taskId);
+            }
+            const QVector<quint64> newTaskIds =
+                transferMgr_->enqueueTasks(requests);
+            for (qsizetype i = 0; i < newTaskIds.size(); ++i) {
+                const quint64 taskId = newTaskIds[i];
+                if (!requestDirectoryKeys[i].isEmpty()) {
+                    state->directoryTasks.insert(requestDirectoryKeys[i],
+                                                 taskId);
+                    state->directoryTaskIds.insert(taskId);
                 }
+                state->pendingTasks.insert(taskId);
             }
             // A fast directory task can finish between enqueue() and the
             // insertion above. Reconcile immediately so discovery
@@ -978,39 +1008,6 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
         return QString::fromUtf8(raw).trimmed();
     };
 
-    auto scheduleStagingCleanupAfterLocalJobs = [this](
-                                                    const QString &batchDir) {
-        if (batchDir.isEmpty())
-            return;
-        auto *timer = new QTimer(this);
-        timer->setInterval(350);
-        timer->setSingleShot(false);
-        auto attempts = std::make_shared<int>(0);
-        connect(timer, &QTimer::timeout, this,
-                [this, timer, attempts, batchDir] {
-                    ++(*attempts);
-                    const bool giveUp = (*attempts >= 300); // ~105s max wait
-                    if (!giveUp && localFsJobsInFlight_.load() > 0)
-                        return;
-
-                    timer->stop();
-                    timer->deleteLater();
-                    QDir batch(batchDir);
-                    if (batch.exists())
-                        (void)batch.removeRecursively();
-
-                    // If the staging root is now empty, remove it as well.
-                    const QString rootPath = QFileInfo(batchDir).absolutePath();
-                    QDir root(rootPath);
-                    if (root.exists() &&
-                        root.entryList(QDir::NoDotAndDotDot | QDir::AllEntries)
-                            .isEmpty()) {
-                        (void)root.rmdir(".");
-                    }
-                });
-        timer->start();
-    };
-
     // Drag-and-drop over the right panel (local or remote)
     if (eventSource == rightViewport) {
         if (event->type() == QEvent::DragEnter) {
@@ -1122,8 +1119,17 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
             return true;
         } else if (event->type() == QEvent::Drop) {
             auto *dropEvent = static_cast<QDropEvent *>(event);
-            const QString stagingBatchDir =
-                extractStagingBatchDir(dropEvent->mimeData());
+            // Only the remote panel's own drag carries a staging batch to
+            // delete once copied, and only a batch folder in the staging
+            // root; any other drop is a plain copy.
+            openscpui::AppSettings settings;
+            QString stagingBatchDir;
+            if (dropEvent->source() == rightView_ &&
+                settings.value(openscpui::settingskeys::kAutoCleanStaging, true)
+                    .toBool()) {
+                stagingBatchDir = openscpui::stagingBatchPathForCleanup(
+                    settings, extractStagingBatchDir(dropEvent->mimeData()));
+            }
             const auto urls = dropEvent->mimeData()
                                   ? dropEvent->mimeData()->urls()
                                   : QList<QUrl>{};
@@ -1148,9 +1154,24 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                     }
                     pairs.push_back({localFileInfo.absoluteFilePath(), target});
                 }
-                runLocalFsOperation(pairs, false, 0);
-                if (!stagingBatchDir.isEmpty())
-                    scheduleStagingCleanupAfterLocalJobs(stagingBatchDir);
+                std::function<void(bool)> removeBatch;
+                if (!stagingBatchDir.isEmpty()) {
+                    // The batch goes once this copy ends; if part of it
+                    // failed, its files stay where the user can find them.
+                    QPointer<QTreeView> view(rightView_);
+                    removeBatch = [stagingBatchDir, view](bool allSucceeded) {
+                        if (!allSucceeded) {
+                            if (auto *dragView =
+                                    qobject_cast<DragAwareTreeView *>(view))
+                                dragView->showKeepMessage(stagingBatchDir);
+                            return;
+                        }
+                        QThreadPool::globalInstance()->start([stagingBatchDir] {
+                            openscpui::removeStagingBatch(stagingBatchDir);
+                        });
+                    };
+                }
+                runLocalFsOperation(pairs, false, 0, removeBatch);
                 dropEvent->acceptProposedAction();
                 updateDeleteShortcutEnables();
                 return true;

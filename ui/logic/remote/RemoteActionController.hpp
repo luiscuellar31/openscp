@@ -1,5 +1,6 @@
 #pragma once
 
+#include "logic/remote/RemoteOperationTypes.hpp"
 #include "openscp/RemoteClient.hpp"
 
 #include <QObject>
@@ -66,6 +67,8 @@ class RemoteActionController final : public QObject {
     static Availability
     availability(const openscp::ProtocolCapabilities &capabilities,
                  bool sessionActive = true);
+    static openscp::remote_operation::DeleteRequest
+    deleteRequest(const QString &basePath, const Entry &entry);
 
     private:
     bool isReady() const;

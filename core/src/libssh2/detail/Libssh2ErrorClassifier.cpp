@@ -24,6 +24,26 @@ std::string lowercase(std::string value) {
     return value;
 }
 
+// Drops the words that hold a path, as in "sftp_opendir failed for:
+// /srv/backups/checksums" or a server's "scp: /etc/password-policies:
+// Permission denied": a word inside a path says nothing about the failure.
+std::string withoutPathWords(const std::string &message) {
+    std::string kept;
+    std::size_t start = 0;
+    while (start < message.size()) {
+        std::size_t end = message.find_first_of(" \t", start);
+        if (end == std::string::npos)
+            end = message.size();
+        const std::string word = message.substr(start, end - start);
+        if (word.find_first_of("/\\") == std::string::npos) {
+            kept += word;
+            kept += ' ';
+        }
+        start = end + 1;
+    }
+    return kept;
+}
+
 bool containsAny(const std::string &value,
                  std::initializer_list<const char *> needles) {
     return std::any_of(needles.begin(), needles.end(),
@@ -134,7 +154,7 @@ std::optional<RemoteError> classifySftpCode(const std::string &message,
 RemoteError classifyFailure(const std::string &message,
                             _LIBSSH2_SESSION *session, _LIBSSH2_SFTP *sftp,
                             bool mutation, const RemoteError *fallback) {
-    const std::string lower = lowercase(message);
+    const std::string lower = lowercase(withoutPathWords(message));
     if (auto messageError = classifyMessage(message, lower))
         return *messageError;
 

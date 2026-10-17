@@ -57,7 +57,9 @@ class SettingsDialog : public QDialog {
     readCurrentSnapshot(const QVector<SettingBinding> &bindings) const;
     void applySnapshotToControls(const QVariantMap &snapshot,
                                  const QVector<SettingBinding> &bindings);
-    void writeSnapshot(QSettings &settings, const QVariantMap &snapshot,
+    void writeSnapshot(QSettings &settings,
+                       const QVariantMap &persistedSnapshot,
+                       const QVariantMap &snapshot,
                        const QVector<SettingBinding> &bindings) const;
 
     void setupSectionList(class QListWidget *sectionList) const;
@@ -114,6 +116,7 @@ class SettingsDialog : public QDialog {
     void trackWrappedCheck(QCheckBox *checkBox);
 
     QComboBox *langCombo_ = nullptr;        // es/en/fr/pt
+    QComboBox *appIconStyle_ = nullptr;     // application icon style
     QCheckBox *showHidden_ = nullptr;       // show hidden files
     QComboBox *clickMode_ = nullptr;        // single click vs double click
     QComboBox *openBehaviorMode_ = nullptr; // ask/reveal/open downloaded files

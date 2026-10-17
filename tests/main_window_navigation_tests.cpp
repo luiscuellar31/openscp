@@ -2,7 +2,10 @@
 #include "TestHarness.hpp"
 #include "app/MainWindow.hpp"
 #include "logic/common/AppSettings.hpp"
+#include "logic/common/StagingStore.hpp"
+#include "logic/connections/SessionController.hpp"
 #include "widgets/common/ToolbarKeyboardNavigation.hpp"
+#include "widgets/dialogs/AuthenticationInput.hpp"
 #include "widgets/dialogs/TransferQueueDialog.hpp"
 #include "widgets/files/DragAwareTreeView.hpp"
 #include "widgets/navigation/PathNavigationBar.hpp"
@@ -12,23 +15,28 @@
 #include <QApplication>
 #include <QDialog>
 #include <QDir>
+#include <QDropEvent>
 #include <QFile>
 #include <QFileSystemModel>
 #include <QInputDialog>
 #include <QItemSelectionModel>
 #include <QKeyEvent>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QSplitter>
 #include <QSplitterHandle>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QThreadPool>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
 
+#include <future>
 #include <iostream>
+#include <memory>
 
 namespace {
 
@@ -120,6 +128,71 @@ bool hasAllFocusParts(const MainWindowFocusParts &parts) {
            parts.connectAction && parts.leftPath && parts.rightPath &&
            parts.leftView && parts.rightView && parts.scpUpload &&
            parts.scpDownload;
+}
+
+OPENSCP_TEST(testUpdateMenuIsManualByDefault, test) {
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    auto *manual =
+        window.findChild<QAction *>(QStringLiteral("checkForUpdatesAction"));
+    auto *automatic =
+        window.findChild<QAction *>(QStringLiteral("automaticUpdatesAction"));
+    test.check(manual && automatic && automatic->isCheckable() &&
+                   !automatic->isChecked(),
+               "update checks expose an explicit manual action and default to "
+               "no automatic requests");
+    openscpui::AppSettings().setValue(
+        openscpui::settingskeys::kUpdateAutomaticChecks, true);
+    MainWindow restored;
+    automatic =
+        restored.findChild<QAction *>(QStringLiteral("automaticUpdatesAction"));
+    test.check(automatic && automatic->isChecked(),
+               "restore the user's update-check preference");
+    automatic->setChecked(false);
+    test.check(
+        !openscpui::AppSettings()
+             .value(openscpui::settingskeys::kUpdateAutomaticChecks)
+             .toBool(),
+        "turning off checks persists without requiring a network request");
+}
+
+OPENSCP_TEST(testCloseCancelsAuthenticationBeforeUiDispatch, test) {
+    auto window = std::make_unique<MainWindow>();
+    openscpui::SessionController *session = nullptr;
+    for (QObject *child : window->children()) {
+        if (auto *controller =
+                dynamic_cast<openscpui::SessionController *>(child))
+            session = controller;
+    }
+    test.check(session != nullptr,
+               "main window should own its session controller");
+    if (!session)
+        return;
+    auto canceled = std::make_shared<std::atomic<bool>>(false);
+    test.check(session->beginConnection(canceled),
+               "shutdown fixture should begin a connection");
+    const auto token = session->connectionStopToken();
+    std::promise<bool> result;
+    auto finished = result.get_future();
+    QThreadPool::globalInstance()->start(
+        [parent = window.get(), token, &result] {
+            QString answer;
+            result.set_value(openscpui::requestAuthenticationInput(
+                parent, token, QStringLiteral("Authentication"),
+                QStringLiteral("OTP"), QLineEdit::Password, answer));
+        });
+    test.check(finished.wait_for(std::chrono::milliseconds(100)) ==
+                   std::future_status::timeout,
+               "authentication should wait while the UI does not dispatch its "
+               "queued prompt");
+    window.reset(); // Cancels and joins the actual pool without pumping UI
+                    // events.
+    test.check(
+        finished.wait_for(std::chrono::milliseconds(500)) ==
+                std::future_status::ready &&
+            !finished.get() && canceled->load(),
+        "window destruction must cancel authentication and join its worker");
+    flushUiEvents();
 }
 
 OPENSCP_TEST(testMainWindowSplitterPreservesAnEvenPanelResize, test) {
@@ -262,6 +335,127 @@ OPENSCP_TEST(testMainWindowTraversesItsCompleteVisibleFocusOrder, test) {
     sendTab(receiver);
     test.check(QApplication::focusWidget() == expected.first(),
                "the complete MainWindow focus order should wrap once");
+}
+
+OPENSCP_TEST(testForeignStagingDropCopiesWithoutDeleting, test) {
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(), "the staging drop needs a folder");
+    if (!temporary.isValid())
+        return;
+    configureMainWindowSettings(settingsRootPath);
+    // Another application can start a drag with OpenSCP's staging type; its
+    // folder is copied like any other, never deleted afterwards.
+    const QString batch =
+        QDir(QDir(settingsRootPath).filePath(QStringLiteral("staging")))
+            .filePath(openscpui::newStagingBatchName());
+    const QString payload = QDir(batch).filePath(QStringLiteral("payload.txt"));
+    const QString destination =
+        QDir(temporary.path()).filePath(QStringLiteral("destination"));
+    QFile payloadFile(payload);
+    test.check(QDir().mkpath(batch) && QDir().mkpath(destination) &&
+                   payloadFile.open(QIODevice::WriteOnly) &&
+                   payloadFile.write("data") == 4,
+               "the staging drop fixture should be created");
+    payloadFile.close();
+
+    MainWindow window;
+    window.show();
+    flushUiEvents();
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftPath && parts.leftView,
+               "the staging drop needs the local panel");
+    if (!parts.leftPath || !parts.leftView)
+        return;
+    parts.leftPath->pathRequested(destination);
+    flushUiEvents();
+
+    QMimeData mime;
+    mime.setUrls({QUrl::fromLocalFile(payload)});
+    mime.setData(QByteArrayLiteral("application/x-openscp-staging-batch"),
+                 batch.toUtf8());
+    QDropEvent drop(QPointF(10, 10), Qt::CopyAction, &mime, Qt::LeftButton,
+                    Qt::NoModifier);
+    // QApplication delivers a drop only to the target of a drag in progress,
+    // so the panel's filter gets it directly, as a real drop would reach it.
+    static_cast<QObject &>(window).eventFilter(parts.leftView->viewport(),
+                                               &drop);
+
+    const QString copied =
+        QDir(destination).filePath(QStringLiteral("payload.txt"));
+    test.check(openscp::testsupport::waitUntil(
+                   [&] { return QFileInfo::exists(copied); },
+                   std::chrono::milliseconds(5000)),
+               "the dropped file should be copied");
+    QThreadPool::globalInstance()->waitForDone(5000);
+    test.check(!openscp::testsupport::waitUntil(
+                   [&] { return !QFileInfo::exists(batch); },
+                   std::chrono::milliseconds(1500)),
+               "a staging folder from a foreign drag should not be deleted");
+}
+
+OPENSCP_TEST(testLocalDeleteRunsOffTheUiThread, test) {
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(), "the delete test needs a folder");
+    if (!temporary.isValid())
+        return;
+    configureMainWindowSettings(settingsRootPath);
+    const QDir base(temporary.path());
+    const QString panel = base.filePath(QStringLiteral("panel"));
+    const QString victim = QDir(panel).filePath(QStringLiteral("victim"));
+    const QString outside = base.filePath(QStringLiteral("outside"));
+    const QString link = QDir(panel).filePath(QStringLiteral("link"));
+    QFile inner(QDir(victim).filePath(QStringLiteral("inner.txt")));
+    QFile kept(QDir(outside).filePath(QStringLiteral("kept.txt")));
+    test.check(QDir().mkpath(victim) && QDir().mkpath(outside) &&
+                   inner.open(QIODevice::WriteOnly) &&
+                   kept.open(QIODevice::WriteOnly) &&
+                   QFile::link(outside, link),
+               "the delete fixture should be created");
+    inner.close();
+    kept.close();
+
+    MainWindow window;
+    window.show();
+    flushUiEvents();
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftPath && parts.leftView,
+               "the delete test needs the local panel");
+    if (!parts.leftPath || !parts.leftView)
+        return;
+    parts.leftPath->pathRequested(panel);
+    auto *model = qobject_cast<QFileSystemModel *>(parts.leftView->model());
+    const bool listed =
+        model && openscp::testsupport::waitUntil(
+                     [&] {
+                         return model->index(victim).isValid() &&
+                                model->index(link).isValid();
+                     },
+                     std::chrono::milliseconds(3000));
+    test.check(listed, "the entries to delete should be listed");
+    if (!listed)
+        return;
+    parts.leftView->selectionModel()->select(
+        model->index(victim),
+        QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    parts.leftView->selectionModel()->select(model->index(link),
+                                             QItemSelectionModel::Select |
+                                                 QItemSelectionModel::Rows);
+
+    QTimer::singleShot(0, &window, [] {
+        if (auto *box =
+                qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+            box->done(QMessageBox::Yes);
+    });
+    QMetaObject::invokeMethod(&window, "deleteFromLeft");
+    test.check(openscp::testsupport::waitUntil(
+                   [&] {
+                       return !QFileInfo::exists(victim) &&
+                              !QFileInfo(link).isSymLink();
+                   },
+                   std::chrono::milliseconds(5000)),
+               "the selected folder and link should be deleted");
+    test.check(QFileInfo::exists(QDir(outside).filePath("kept.txt")),
+               "deleting a link should keep its target's contents");
 }
 
 OPENSCP_TEST(testLocalRenameValidatesNamesInBothPanes, test) {

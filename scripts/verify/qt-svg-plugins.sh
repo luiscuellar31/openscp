@@ -10,24 +10,21 @@ die() { err "$*"; exit 1; }
 usage() {
   cat << 'EOF'
 Usage:
-  ./scripts/verify/qt-svg-plugins.sh [--allow-runtime-provided] [--context <name>] <package-root>
+  ./scripts/verify/qt-svg-plugins.sh [--context <name>] <package-root>
+
+Checks that a package bundling Qt carries the qsvg, qsvgicon and qxcb plugins
+and that ldd resolves their libraries and the executable's. A package that
+takes Qt from a runtime, as Snap and Flatpak do, has nothing to check here.
 
 Options:
-  --allow-runtime-provided  Do not fail if qsvg/qsvgicon/qxcb are missing from package payload.
-                            Use only when Qt plugins are expected from an external runtime.
-  --context <name>          Optional label for diagnostics (e.g. appimage, snap, flatpak).
+  --context <name>          Optional label for diagnostics (e.g. appimage).
 EOF
 }
 
-ALLOW_RUNTIME_PROVIDED=0
 CONTEXT="package"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --allow-runtime-provided)
-      ALLOW_RUNTIME_PROVIDED=1
-      shift
-      ;;
     --context)
       [[ $# -ge 2 ]] || die "Missing value for --context"
       CONTEXT="$2"
@@ -108,17 +105,7 @@ fi
 if [[ ${#missing[@]} -eq 0 ]]; then
   log "Qt plugin presence validation passed (${CONTEXT})."
 else
-  if [[ $ALLOW_RUNTIME_PROVIDED -eq 1 ]]; then
-    warn "Missing Qt plugin(s) in payload (${CONTEXT}): ${missing[*]}"
-    warn "Continuing because --allow-runtime-provided is enabled."
-  else
-    die "Missing Qt plugin(s) in payload (${CONTEXT}): ${missing[*]}"
-  fi
-fi
-
-if [[ $ALLOW_RUNTIME_PROVIDED -eq 1 ]]; then
-  warn "Skipping ldd dependency validation because runtime-provided plugins are allowed (${CONTEXT})."
-  exit 0
+  die "Missing Qt plugin(s) in payload (${CONTEXT}): ${missing[*]}"
 fi
 
 command -v ldd >/dev/null 2>&1 || die "ldd is required for dependency validation (${CONTEXT})."

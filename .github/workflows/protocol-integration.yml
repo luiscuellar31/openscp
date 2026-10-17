@@ -4,8 +4,11 @@ on:
   push:
     branches:
       - dev
+  # Pull requests target dev, and CONTRIBUTING accepts a local run without SFTP
+  # only when these tests pass here.
   pull_request:
     branches:
+      - dev
       - main
     types:
       - opened
@@ -106,6 +109,7 @@ jobs:
 
       - name: Build SFTP and SCP integration binaries
         run: |
+          set -o pipefail
           cmake --build build --parallel --target \
             openscp_sftp_integration_tests \
             openscp_scp_integration_tests 2>&1 | \
@@ -129,6 +133,7 @@ jobs:
           OPENSCP_IT_SFTP_KEY: /tmp/openscp_it_linux_ed25519
           OPENSCP_IT_REMOTE_BASE: /home/openscp_it/upload
         run: |
+          set -o pipefail
           ./build/tests/openscp_sftp_integration_tests 2>&1 | \
             tee /tmp/openscp-ssh-tests.log
           ./build/tests/openscp_scp_integration_tests 2>&1 | \
@@ -282,6 +287,7 @@ jobs:
 
       - name: Run protocol integration binaries directly
         run: |
+          set -o pipefail
           ./scripts/ci/run_protocol_integration.sh build 2>&1 | \
             tee /tmp/openscp-protocol-tests.log
 
@@ -355,6 +361,7 @@ jobs:
 
       - name: Build instrumented app and tests
         run: |
+          set -o pipefail
           cmake --build build --parallel 2>&1 | \
             tee /tmp/openscp-sanitizer-build.log
 
@@ -375,6 +382,7 @@ jobs:
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
           QT_QPA_PLATFORM: offscreen
         run: |
+          set -o pipefail
           ctest --test-dir build --output-on-failure \
             -LE integration --timeout 180 2>&1 | \
             tee /tmp/openscp-sanitizer-tests.log
@@ -390,6 +398,7 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           TSAN_OPTIONS: suppressions=${{ github.workspace }}/.github/tsan-suppressions.txt:halt_on_error=1:second_deadlock_stack=1:history_size=7
         run: |
+          set -o pipefail
           ctest --test-dir build --output-on-failure \
             -LE integration --timeout 180 2>&1 | \
             tee /tmp/openscp-sanitizer-tests.log

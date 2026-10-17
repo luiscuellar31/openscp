@@ -22,10 +22,11 @@ std::string trimAsciiLeft(std::string value) {
     const auto isWhitespace = [](unsigned char character) {
         return std::isspace(character) != 0;
     };
-    while (!value.empty() &&
-           isWhitespace(static_cast<unsigned char>(value.front()))) {
-        value.erase(value.begin());
-    }
+    std::size_t first = 0;
+    while (first < value.size() &&
+           isWhitespace(static_cast<unsigned char>(value[first])))
+        ++first;
+    value.erase(0, first);
     return value;
 }
 
@@ -100,7 +101,9 @@ bool parseMlsxEntry(const std::string &raw, FileInfo &parsed,
     std::string line = raw;
     if (!line.empty() && line.back() == '\r')
         line.pop_back();
-    line = trimAscii(line);
+    // RFC 3659 puts one space between the facts and the pathname, which can
+    // itself start or end with spaces, so only padding before the facts goes.
+    line = trimAsciiLeft(line);
 
     const std::size_t separator = line.find_first_of(" \t");
     if (separator == std::string::npos)
@@ -108,8 +111,8 @@ bool parseMlsxEntry(const std::string &raw, FileInfo &parsed,
 
     const std::string factsPart = line.substr(0, separator);
     parsed = FileInfo{};
-    parsed.name = trimAsciiLeft(line.substr(separator + 1));
-    if (parsed.name.empty())
+    parsed.name = line.substr(separator + 1);
+    if (trimAscii(parsed.name).empty())
         return false;
     type.clear();
 
@@ -164,9 +167,19 @@ bool parseMlsxEntry(const std::string &raw, FileInfo &parsed,
     return true;
 }
 
-void finishMlsxEntry(FileInfo &parsed, bool isDir) {
+// ProFTPD reports a link as "OS.unix=symlink"; with its UseSlink option, as
+// Pure-FTPd does, as "OS.unix=slink:<target>". Either way the type of the
+// target is unknown.
+bool isMlsxLinkType(const std::string &type) {
+    return type == "os.unix=symlink" || type == "os.unix=slink" ||
+           type.rfind("os.unix=slink:", 0) == 0;
+}
+
+void finishMlsxEntry(FileInfo &parsed, bool isDir, bool isLink) {
     parsed.is_dir = isDir;
-    if (parsed.is_dir) {
+    if (isLink) {
+        parsed.mode = (parsed.mode & 07777u) | 0120000u;
+    } else if (parsed.is_dir) {
         parsed.has_size = false;
         parsed.size = 0;
         if ((parsed.mode & 0170000u) == 0)
@@ -192,7 +205,7 @@ bool parseMlsdLine(const std::string &raw, FileInfo &info, bool &emit) {
     if (type == "cdir" || type == "pdir")
         return true;
 
-    finishMlsxEntry(parsed, type == "dir");
+    finishMlsxEntry(parsed, type == "dir", isMlsxLinkType(type));
     info = std::move(parsed);
     emit = true;
     return true;
@@ -321,7 +334,8 @@ ListingParseStatus parseFtpMlstReply(const std::string &reply, FileInfo &out) {
         if (!parseMlsxEntry(line, parsed, type) || type.empty())
             return ListingParseStatus::Malformed;
         finishMlsxEntry(parsed,
-                        type == "dir" || type == "cdir" || type == "pdir");
+                        type == "dir" || type == "cdir" || type == "pdir",
+                        isMlsxLinkType(type));
         out = std::move(parsed);
         return ListingParseStatus::Success;
     }

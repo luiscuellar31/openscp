@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/icons/app-openscp.png" alt="Icono de OpenSCP" width="128">
+  <img src="assets/icons/app/macos-light/openscp-256.png" alt="Icono de OpenSCP" width="128">
   <h1>OpenSCP</h1>
 
   <p><strong>Un cliente ligero y multiplataforma para transferir archivos, con flujo de trabajo de doble panel, configuración segura por defecto y compatibilidad con SFTP, SCP, FTP, FTPS y WebDAV.</strong></p>
@@ -33,6 +33,26 @@ Descárgalo junto al que hayas elegido y compruébalos juntos:
 shasum -a 256 -c SHA256SUMS.txt --ignore-missing  # macOS
 sha256sum -c SHA256SUMS.txt --ignore-missing      # Linux
 ```
+
+Las sumas de comprobación detectan una descarga dañada, no un archivo
+sustituido. Para confirmar que un archivo lo generó el workflow de publicación
+de este repositorio, usa la [CLI de GitHub](https://cli.github.com/):
+
+```bash
+gh attestation verify OpenSCP-<versión>-x86_64.AppImage --repo luiscuellar31/openscp
+```
+
+### Actualizaciones
+
+Usa **OpenSCP → Buscar actualizaciones…** para consultar la última versión
+estable. **Buscar actualizaciones automáticamente** activa una consulta diaria;
+está desactivada por defecto. La instalación requiere confirmación y que hayan
+terminado las operaciones de archivos pendientes. Los builds configurados con
+firmas pueden instalar actualizaciones de AppImage y macOS; los demás abren la
+página de la versión. Flatpak y Snap usan su gestor de software. Los paquetes
+Flatpak independientes requieren descargar el nuevo paquete si no se configuró
+un repositorio de actualizaciones.
+Consulta [Cómo actualizar OpenSCP](docs/UPDATES.md) para más detalles.
 
 ### Instalación en macOS
 
@@ -115,11 +135,47 @@ pasos manuales, empaquetado y solución de problemas.
 - Sitios guardados con Keychain en macOS y Secret Service/libsecret en Linux.
 - Verificación estricta de claves SSH, con aceptación de claves nuevas o
   deshabilitada explícitamente.
+- FTPS y WebDAV por HTTPS sin verificación del certificado siguen comprobando
+  la clave pública del servidor, en la que confías en la primera conexión.
 - Proxies SOCKS5 y HTTP CONNECT, además de servidores de salto SSH cuando el
   protocolo lo permite.
 - Sincronización unidireccional con vista previa, filtros y sumas de
   comprobación opcionales.
 - Interfaces en español, inglés, portugués, francés y alemán.
+
+Cancelar una conexión o cerrar la ventana también cancela las solicitudes
+pendientes de autenticación SSH y confirmación de huella. Los intentos de
+conexión TCP de SSH comparten un límite de 20 segundos entre las direcciones
+resueltas. La resolución de nombres usa el sistema y puede tardar más,
+independientemente de ese límite TCP.
+
+La sincronización nunca copia FIFOs, sockets ni dispositivos, y deja fuera los
+nombres con barra invertida o caracteres de control, que las subidas también
+rechazan. Un nombre que solo se diferencia de otro del lado contrario en
+mayúsculas o normalización Unicode aparece como conflicto y no se copia ni se
+borra.
+
+Las descargas requieren archivos `.part` regulares. Si una entrada `.part`
+existente es una FIFO (tubería con nombre), la descarga informa de un error de
+E/S local sin esperar a un lector ni reemplazar esa entrada. Elige otro destino
+o revisa la entrada en conflicto antes de reintentar.
+
+Las transferencias que comparten un destino o su ruta `.part` se ejecutan en
+serie. Los nombres locales que solo difieren en mayúsculas o normalización
+Unicode también se ejecutan en serie, incluso en volúmenes que los distinguen.
+Al eliminar una tarea con sus datos parciales, se conserva el `.part` mientras
+otra tarea de la cola pueda reanudarse desde él, y no se borra nada de las
+tareas terminadas ni de las subidas por SCP clásico, que escriben directamente
+en el destino.
+
+Al mover un archivo local al servidor, OpenSCP completa la subida y conserva el
+origen local con una advertencia. El borrado automático no puede excluir que
+otro proceso sustituya el origen después de comprobarlo. Revisa la subida y el
+archivo local antes de borrarlo manualmente; después, reintenta la tarea para
+completar la limpieza sin repetir la subida. Tras reiniciar, la limpieza
+requiere revisión manual porque ya no se dispone de la identidad original del
+archivo. La limpieza del origen remoto al mover archivos mediante descarga
+mantiene su comportamiento.
 
 ## Navegación por rutas
 

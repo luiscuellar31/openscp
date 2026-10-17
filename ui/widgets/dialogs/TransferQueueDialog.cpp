@@ -4,6 +4,7 @@
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "logic/common/UiFormatters.hpp"
+#include "logic/transfers/TransferAutoClear.hpp"
 #include "widgets/platform/PlatformPathActions.hpp"
 
 #include <QAbstractItemView>
@@ -35,6 +36,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <utility>
 
 namespace {
 
@@ -138,7 +140,8 @@ bool canRetryTask(const TransferTask &task) {
     return !task.commitUncertain &&
            (task.status == TransferTask::Status::Error ||
             task.status == TransferTask::Status::Canceled ||
-            task.status == TransferTask::Status::Warning);
+            task.status == TransferTask::Status::Warning ||
+            skippedAfterFailure(task));
 }
 
 struct SelectedActionsState {
@@ -149,6 +152,7 @@ struct SelectedActionsState {
     bool canCancel = false;
     bool canRetry = false;
     bool canShowDestination = false;
+    bool canRemovePartialData = false;
 };
 
 using TaskIndexById = QHash<quint64, const TransferTask *>;
@@ -201,6 +205,8 @@ SelectedActionsState buildSelectedActionsState(const QVector<quint64> &ids,
             out.canShowDestination ||
             task.type == TransferTask::Type::Download ||
             task.type == TransferTask::Type::CreateLocalDirectory;
+        out.canRemovePartialData =
+            out.canRemovePartialData || mayHavePartialData(task);
     });
     return out;
 }
@@ -215,7 +221,8 @@ class TransferTaskTableModel final : public QAbstractTableModel {
         ProgressRole,
         TypeRole,
         SourceRole,
-        DestinationRole
+        DestinationRole,
+        SkippedAfterFailureRole
     };
 
     enum Column {
@@ -304,6 +311,8 @@ class TransferTaskTableModel final : public QAbstractTableModel {
             return task.src;
         if (role == DestinationRole)
             return task.dst;
+        if (role == SkippedAfterFailureRole)
+            return skippedAfterFailure(task);
 
         if (role == Qt::TextAlignmentRole) {
             if (index.column() == ColStatus || index.column() == ColProgress ||
@@ -389,6 +398,7 @@ class TransferTaskTableModel final : public QAbstractTableModel {
         int retrying = 0;
         int done = 0;
         int skipped = 0;
+        int failedSkips = 0;
         int error = 0;
         int warning = 0;
         int canceled = 0;
@@ -460,21 +470,59 @@ class TransferTaskTableModel final : public QAbstractTableModel {
             if (found != rowById_.cend())
                 rows.push_back(found.value());
         }
-        std::sort(rows.begin(), rows.end(), std::greater<int>());
+        std::sort(rows.begin(), rows.end());
         rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
-        // Adjacent rows go out as one range, so removing a contiguous
-        // selection shifts the rows below it only once.
-        for (qsizetype index = 0; index < rows.size();) {
-            const int last = rows[index];
-            int first = last;
-            while (++index < rows.size() && rows[index] == first - 1)
-                first = rows[index];
+        if (rows.isEmpty())
+            return;
+
+        const int first = rows.constFirst();
+        const int last = rows.constLast();
+        if (last - first + 1 == rows.size()) {
+            // A single range already shifts survivors only once. Qt handles
+            // its persistent indexes and selection through the row signals.
             beginRemoveRows({}, first, last);
-            tasks_.remove(first, last - first + 1);
-            endRemoveRows();
-        }
-        if (!rows.isEmpty())
+            tasks_.remove(first, rows.size());
             rebuildIndex();
+            endRemoveRows();
+            return;
+        }
+
+        // Qt supports discontinuous bulk removal as one layout change. Capture
+        // persistent indexes after notifying observers: proxies and selection
+        // models may create more indexes in response to this signal.
+        emit layoutAboutToBeChanged();
+        const QModelIndexList oldIndexes = persistentIndexList();
+        QVector<quint64> persistentTaskIds;
+        persistentTaskIds.reserve(oldIndexes.size());
+        for (const auto &oldIndex : oldIndexes)
+            persistentTaskIds.push_back(tasks_.at(oldIndex.row()).taskId);
+
+        int writeRow = 0;
+        qsizetype removedIndex = 0;
+        for (int readRow = 0; readRow < tasks_.size(); ++readRow) {
+            if (removedIndex < rows.size() && rows[removedIndex] == readRow) {
+                ++removedIndex;
+                continue;
+            }
+            if (writeRow != readRow)
+                tasks_[writeRow] = std::move(tasks_[readRow]);
+            ++writeRow;
+        }
+        tasks_.resize(writeRow);
+        rebuildIndex();
+
+        QModelIndexList newIndexes;
+        newIndexes.reserve(oldIndexes.size());
+        for (qsizetype indexNumber = 0; indexNumber < oldIndexes.size();
+             ++indexNumber) {
+            const auto row = rowById_.constFind(persistentTaskIds[indexNumber]);
+            newIndexes.push_back(
+                row == rowById_.cend()
+                    ? QModelIndex()
+                    : index(row.value(), oldIndexes[indexNumber].column()));
+        }
+        changePersistentIndexList(oldIndexes, newIndexes);
+        emit layoutChanged();
     }
 
     const QVector<TransferTask> &tasks() const { return tasks_; }
@@ -490,7 +538,8 @@ class TransferTaskTableModel final : public QAbstractTableModel {
                prev.etaSeconds != next.etaSeconds ||
                prev.attempts != next.attempts ||
                prev.maxAttempts != next.maxAttempts ||
-               prev.error != next.error || prev.phase != next.phase;
+               prev.error != next.error || prev.phase != next.phase ||
+               prev.skippedByFailedDependency != next.skippedByFailedDependency;
     }
 
     void countTask(const TransferTask &task, int delta) {
@@ -517,7 +566,10 @@ class TransferTaskTableModel final : public QAbstractTableModel {
             counts_.done += delta;
             break;
         case TransferTask::Status::Skipped:
-            counts_.skipped += delta;
+            if (skippedAfterFailure(task))
+                counts_.failedSkips += delta;
+            else
+                counts_.skipped += delta;
             break;
         case TransferTask::Status::Error:
             counts_.error += delta;
@@ -543,7 +595,7 @@ class TransferTaskTableModel final : public QAbstractTableModel {
                              {Qt::DisplayRole, Qt::TextAlignmentRole,
                               Qt::ToolTipRole, StatusRole, TaskIdRole,
                               ProgressRole, TypeRole, SourceRole,
-                              DestinationRole});
+                              DestinationRole, SkippedAfterFailureRole});
         }
     }
 
@@ -589,6 +641,12 @@ class TransferTaskFilterProxyModel final : public QSortFilterProxyModel {
         if (!raw.isValid())
             return true;
         const auto status = static_cast<TransferTask::Status>(raw.toInt());
+        // A task skipped after a failed prerequisite is a failure.
+        const bool failedSkip =
+            sourceModel()
+                ->data(statusIdx,
+                       TransferTaskTableModel::SkippedAfterFailureRole)
+                .toBool();
 
         switch (mode_) {
         case 1: // Active
@@ -599,10 +657,10 @@ class TransferTaskFilterProxyModel final : public QSortFilterProxyModel {
                    status == TransferTask::Status::RetryWaiting;
         case 2: // Errors
             return status == TransferTask::Status::Error ||
-                   status == TransferTask::Status::Warning;
+                   status == TransferTask::Status::Warning || failedSkip;
         case 3: // Completed
             return status == TransferTask::Status::Done ||
-                   status == TransferTask::Status::Skipped;
+                   (status == TransferTask::Status::Skipped && !failedSkip);
         case 4: // Canceled
             return status == TransferTask::Status::Canceled;
         default:
@@ -959,11 +1017,15 @@ void TransferQueueDialog::buildQueueOptionsDialog() {
     autoClearModeCombo_ = new QComboBox(queueOptionsDialog_);
     autoClearModeCombo_->setObjectName(
         QStringLiteral("transferQueueAutoClearMode"));
-    autoClearModeCombo_->addItem(tr("Off"), AutoClearOff);
-    autoClearModeCombo_->addItem(tr("Completed"), AutoClearCompleted);
-    autoClearModeCombo_->addItem(tr("Failed/Canceled"),
-                                 AutoClearFailedCanceled);
-    autoClearModeCombo_->addItem(tr("All finished"), AutoClearFinished);
+    autoClearModeCombo_->addItem(tr("Off"),
+                                 static_cast<int>(TransferAutoClearMode::Off));
+    autoClearModeCombo_->addItem(
+        tr("Completed"), static_cast<int>(TransferAutoClearMode::Completed));
+    autoClearModeCombo_->addItem(
+        tr("Failed/Canceled"),
+        static_cast<int>(TransferAutoClearMode::FailedCanceled));
+    autoClearModeCombo_->addItem(
+        tr("All finished"), static_cast<int>(TransferAutoClearMode::Finished));
     autoClearModeCombo_->setAccessibleName(tr("Automatic queue cleanup"));
     optionsForm->addRow(tr("Automatic cleanup:"), autoClearModeCombo_);
 
@@ -1098,7 +1160,6 @@ void TransferQueueDialog::refresh() {
     // Refresh always works from manager snapshot to avoid stale view state.
     const auto snapshot = mgr_->tasksSnapshot();
     model_->sync(snapshot);
-    maybeAutoClear(snapshot);
     updateSummary();
 }
 
@@ -1112,17 +1173,7 @@ void TransferQueueDialog::onTasksAdded(const QVector<quint64> &taskIds) {
 void TransferQueueDialog::onTasksUpdated(const QVector<quint64> &taskIds) {
     if (!model_)
         return;
-    const auto updated = mgr_->tasksSnapshot(taskIds);
-    model_->upsert(updated);
-    const bool hasTerminalUpdate = std::any_of(
-        updated.cbegin(), updated.cend(), [](const TransferTask &task) {
-            return task.status == TransferTask::Status::Done ||
-                   task.status == TransferTask::Status::Error ||
-                   task.status == TransferTask::Status::Canceled ||
-                   task.status == TransferTask::Status::Skipped ||
-                   task.status == TransferTask::Status::Warning;
-        });
-    autoClearPending_ = autoClearPending_ || hasTerminalUpdate;
+    model_->upsert(mgr_->tasksSnapshot(taskIds));
     scheduleSummaryUpdate();
 }
 
@@ -1291,6 +1342,8 @@ void TransferQueueDialog::onAutoClearChanged() {
     if (suppressAutoClearSignal_)
         return;
     saveUiState();
+    openscpui::AppSettings settings;
+    mgr_->setAutoClear(storedTransferAutoClearRule(settings));
     updateSummary();
 }
 
@@ -1327,10 +1380,6 @@ void TransferQueueDialog::scheduleSummaryUpdate() {
 void TransferQueueDialog::updateSummary() {
     if (!model_)
         return;
-    if (autoClearPending_) {
-        autoClearPending_ = false;
-        maybeAutoClear(model_->tasks());
-    }
 
     // The model counts rows as they change, so the badges and the action
     // enablement never walk the queue.
@@ -1342,6 +1391,7 @@ void TransferQueueDialog::updateSummary() {
     const int retrying = counts.retrying;
     const int done = counts.done;
     const int skipped = counts.skipped;
+    const int failedSkips = counts.failedSkips;
     const int error = counts.error;
     const int warning = counts.warning;
     const int canceled = counts.canceled;
@@ -1357,7 +1407,8 @@ void TransferQueueDialog::updateSummary() {
     if (badgePaused_)
         badgePaused_->setText(tr("Paused: %1").arg(paused));
     if (badgeErrors_)
-        badgeErrors_->setText(tr("Errors: %1").arg(error + warning));
+        badgeErrors_->setText(
+            tr("Errors: %1").arg(error + warning + failedSkips));
     if (badgeCompleted_)
         badgeCompleted_->setText(tr("Completed: %1").arg(done + skipped));
     if (badgeCanceled_)
@@ -1412,9 +1463,10 @@ void TransferQueueDialog::updateSummary() {
 
     const int autoMode = autoClearModeCombo_
                              ? autoClearModeCombo_->currentData().toInt()
-                             : AutoClearOff;
+                             : static_cast<int>(TransferAutoClearMode::Off);
     if (autoClearMinutesSpin_)
-        autoClearMinutesSpin_->setEnabled(autoMode != AutoClearOff);
+        autoClearMinutesSpin_->setEnabled(
+            autoMode != static_cast<int>(TransferAutoClearMode::Off));
 }
 
 QVector<quint64> TransferQueueDialog::selectedTaskIds() const {
@@ -1482,7 +1534,7 @@ void TransferQueueDialog::showContextMenu(const QPoint &pos) {
     actCopyDst->setEnabled(selectedState.hasSelection);
     actClearFinished->setEnabled(true);
     actRemove->setEnabled(selectedState.hasSelection);
-    actRemoveWithPartial->setEnabled(selectedState.hasSelection);
+    actRemoveWithPartial->setEnabled(selectedState.canRemovePartialData);
 
     QAction *chosen = menu.exec(table_->viewport()->mapToGlobal(menuPosition));
     if (!chosen)
@@ -1543,39 +1595,14 @@ void TransferQueueDialog::loadUiState() {
     }
 
     suppressAutoClearSignal_ = true;
-    const int defaultAutoMode = qBound(
-        static_cast<int>(AutoClearOff),
-        settings
-            .value(openscpui::settingskeys::kTransferDefaultQueueAutoClearMode,
-                   static_cast<int>(AutoClearOff))
-            .toInt(),
-        static_cast<int>(AutoClearFinished));
-    const int defaultAutoMin = qBound(
-        1,
-        settings
-            .value(
-                openscpui::settingskeys::kTransferDefaultQueueAutoClearMinutes,
-                15)
-            .toInt(),
-        1440);
-    const int autoMode =
-        settings
-            .value(openscpui::settingskeys::kTransferQueueAutoClearMode,
-                   defaultAutoMode)
-            .toInt();
-    const int autoMin =
-        settings
-            .value(openscpui::settingskeys::kTransferQueueAutoClearMinutes,
-                   defaultAutoMin)
-            .toInt();
+    const TransferAutoClearRule autoClear =
+        storedTransferAutoClearRule(settings);
     if (autoClearModeCombo_) {
-        int modeIndex = autoClearModeCombo_->findData(autoMode);
-        if (modeIndex < 0)
-            modeIndex = autoClearModeCombo_->findData(AutoClearOff);
-        autoClearModeCombo_->setCurrentIndex(modeIndex);
+        autoClearModeCombo_->setCurrentIndex(
+            autoClearModeCombo_->findData(static_cast<int>(autoClear.mode)));
     }
     if (autoClearMinutesSpin_)
-        autoClearMinutesSpin_->setValue(qBound(1, autoMin, 1440));
+        autoClearMinutesSpin_->setValue(autoClear.minutes);
     suppressAutoClearSignal_ = false;
 }
 
@@ -1598,7 +1625,7 @@ void TransferQueueDialog::saveUiState() const {
 
     const int autoMode = autoClearModeCombo_
                              ? autoClearModeCombo_->currentData().toInt()
-                             : AutoClearOff;
+                             : static_cast<int>(TransferAutoClearMode::Off);
     const int autoMin =
         autoClearMinutesSpin_ ? autoClearMinutesSpin_->value() : 15;
     settings.setValue(openscpui::settingskeys::kTransferQueueAutoClearMode,
@@ -1606,51 +1633,4 @@ void TransferQueueDialog::saveUiState() const {
     settings.setValue(openscpui::settingskeys::kTransferQueueAutoClearMinutes,
                       autoMin);
     settings.sync();
-}
-
-void TransferQueueDialog::maybeAutoClear(
-    const QVector<TransferTask> &snapshot) {
-    if (!autoClearModeCombo_ || !autoClearMinutesSpin_)
-        return;
-
-    const int mode = autoClearModeCombo_->currentData().toInt();
-    if (mode == AutoClearOff)
-        return;
-
-    const int minutes = autoClearMinutesSpin_->value();
-    if (minutes <= 0)
-        return;
-
-    const qint64 cutoff =
-        QDateTime::currentMSecsSinceEpoch() - qint64(minutes) * 60 * 1000;
-    bool needsCleanup = false;
-    // Quick pre-scan avoids manager calls when nothing is eligible yet.
-    for (const auto &task : snapshot) {
-        const bool isDone = task.status == TransferTask::Status::Done ||
-                            task.status == TransferTask::Status::Skipped;
-        const bool isFailed = (task.status == TransferTask::Status::Error ||
-                               task.status == TransferTask::Status::Canceled ||
-                               task.status == TransferTask::Status::Warning);
-        bool candidate = false;
-        if (mode == AutoClearCompleted)
-            candidate = isDone;
-        else if (mode == AutoClearFailedCanceled)
-            candidate = isFailed;
-        else if (mode == AutoClearFinished)
-            candidate = (isDone || isFailed);
-
-        if (candidate && task.finishedAtMs > 0 && task.finishedAtMs <= cutoff) {
-            needsCleanup = true;
-            break;
-        }
-    }
-    if (!needsCleanup)
-        return;
-
-    if (mode == AutoClearCompleted)
-        mgr_->clearFinishedOlderThan(minutes, true, false);
-    else if (mode == AutoClearFailedCanceled)
-        mgr_->clearFinishedOlderThan(minutes, false, true);
-    else if (mode == AutoClearFinished)
-        mgr_->clearFinishedOlderThan(minutes, true, true);
 }

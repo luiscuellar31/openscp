@@ -38,6 +38,25 @@ Common types include `feat`, `fix`, `refactor`, `docs`, `test`, `ci`, and `chore
 For a breaking change, add `!` after the type or scope and explain the impact
 and migration in the commit body with a `BREAKING CHANGE:` footer.
 
+The release notes list each subject line, grouped by type and by the area of
+its scope, so choose the type by who notices the change:
+
+- `feat`, `fix`, and `perf` are for changes that users notice: a new
+  capability, corrected behavior, or faster work.
+- Changes to CI, builds, packaging, scripts, and tests use `ci`, `build`,
+  `test`, or `chore`, even when they fix something.
+
+Take the scope from
+[`scripts/release/release-note-areas.tsv`](scripts/release/release-note-areas.tsv),
+which groups scopes into the areas of the release notes. A user-visible change
+whose scope is not listed there appears under Other; add an area there only for
+a new part of the application.
+
+Write the subject as the effect, not the mechanism: `fix(webdav): stop DELETE
+from removing whole collections` rather than `fix(webdav): check the resource
+type before DELETE`. The body, which the release notes do not show, can
+explain how.
+
 ## Build and test
 
 The normal development entrypoints are:
@@ -71,6 +90,11 @@ database:
   --build-dir build-ci-local
 ```
 
+`--tidy` uses clang-tidy 17. On macOS it reads the SDK's libc++, which a newer
+Xcode may write with builtins that clang-tidy 17 does not know; the script then
+stops instead of reporting parse noise, and the analysis belongs on Linux, as
+the nightly CI runs it.
+
 FTP and WebDAV are optional backends selected at configure time. Changes to
 their `#if` branches must also build and pass tests with both disabled:
 
@@ -86,7 +110,11 @@ ctest --test-dir build-no-backends --output-on-failure \
 ```
 
 Clang/libFuzzer harnesses cover the untrusted FTP and WebDAV listing parsers.
-They are opt-in and never enter normal application or release builds:
+They are opt-in and never enter normal application or release builds. Build
+them on Linux with Clang and its libFuzzer runtime (`clang` and
+`libclang-rt-<version>-dev` on Ubuntu), as the nightly CI does. Apple Clang
+ships no libFuzzer, and Homebrew's LLVM 17 cannot link the project against
+current macOS SDKs, so on macOS use a Linux container or the nightly run:
 
 ```bash
 CC=clang CXX=clang++ cmake -S . -B build-fuzz -G Ninja \
@@ -238,7 +266,9 @@ After merging to `main`, wait for the Linux and macOS build jobs in the
 **Release Artifacts** workflow to pass for that commit before creating a `v*`
 tag. The `main` run uploads workflow artifacts but skips the publication job.
 Pushing the tag runs the same builds again and uploads their assets to a draft
-release only if every build passes.
+release only if every build passes. The draft's notes come from
+`scripts/release/release-notes.sh`; write the release name and a short
+introduction at the top before publishing it.
 
 ## Licensing
 

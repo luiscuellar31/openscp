@@ -11,7 +11,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
     endif()
 endif()
 
-project(OpenSCP LANGUAGES CXX VERSION 1.1.0)
+project(OpenSCP LANGUAGES CXX VERSION 1.2.0)
 
 if(APPLE)
     enable_language(OBJCXX)
@@ -45,6 +45,39 @@ set(OPENSCP_REPOSITORY_URL "https://github.com/luiscuellar31/openscp" CACHE STRI
     "Project repository URL")
 set(OPENSCP_ISSUES_URL "${OPENSCP_REPOSITORY_URL}/issues" CACHE STRING
     "Project issues URL")
+set(OPENSCP_PACKAGE_KIND "manual" CACHE STRING "Installation kind: manual or appimage")
+set(OPENSCP_UPDATE_PUBLIC_KEY "" CACHE STRING "Base64 raw Ed25519 AppImage update public key")
+if(NOT OPENSCP_PACKAGE_KIND MATCHES "^(manual|appimage)$")
+    message(FATAL_ERROR "Invalid OPENSCP_PACKAGE_KIND")
+endif()
+if(OPENSCP_UPDATE_PUBLIC_KEY)
+    string(LENGTH "${OPENSCP_UPDATE_PUBLIC_KEY}" _update_key_length)
+    if(NOT _update_key_length EQUAL 44 OR NOT OPENSCP_UPDATE_PUBLIC_KEY MATCHES "^[A-Za-z0-9+/]+=$")
+        message(FATAL_ERROR "OPENSCP_UPDATE_PUBLIC_KEY must encode a raw 32-byte Ed25519 key")
+    endif()
+endif()
+option(OPENSCP_ENABLE_SPARKLE "Enable signed native macOS updates" OFF)
+set(OPENSCP_SPARKLE_FRAMEWORK "" CACHE PATH "Path to Sparkle.framework")
+set(OPENSCP_SPARKLE_FEED_URL "" CACHE STRING "HTTPS Sparkle appcast URL")
+set(OPENSCP_SPARKLE_PUBLIC_KEY "" CACHE STRING "Base64 Sparkle Ed25519 public key")
+set(OPENSCP_SPARKLE_PLIST "")
+if(OPENSCP_ENABLE_SPARKLE)
+    string(LENGTH "${OPENSCP_SPARKLE_PUBLIC_KEY}" _sparkle_key_length)
+    if(NOT APPLE OR NOT EXISTS "${OPENSCP_SPARKLE_FRAMEWORK}/Sparkle"
+       OR NOT _sparkle_key_length EQUAL 44
+       OR NOT OPENSCP_SPARKLE_PUBLIC_KEY MATCHES "^[A-Za-z0-9+/]+=$"
+       OR NOT OPENSCP_SPARKLE_FEED_URL MATCHES "^https://[A-Za-z0-9./_-]+$")
+        message(FATAL_ERROR "Sparkle requires macOS, its framework, an Ed25519 public key, and an HTTPS feed URL")
+    endif()
+    set(OPENSCP_SPARKLE_PLIST "
+  <key>SUFeedURL</key><string>${OPENSCP_SPARKLE_FEED_URL}</string>
+  <key>SUPublicEDKey</key><string>${OPENSCP_SPARKLE_PUBLIC_KEY}</string>
+  <key>SUEnableAutomaticChecks</key><false/>
+  <key>SUAutomaticallyUpdate</key><false/>
+  <key>SUAllowsAutomaticUpdates</key><false/>
+  <key>SUVerifyUpdateBeforeExtraction</key><true/>
+  <key>SURequireSignedFeed</key><true/>")
+endif()
 
 if(CMAKE_BUILD_TYPE)
     set(OPENSCP_BUILD_TYPE_STR "${CMAKE_BUILD_TYPE}")
@@ -106,7 +139,9 @@ if(OPENSCP_BUILD_FUZZERS)
     if(NOT OPENSCP_HAS_LIBFUZZER)
         message(FATAL_ERROR
             "OPENSCP_BUILD_FUZZERS requires a usable Clang libFuzzer, "
-            "AddressSanitizer, and UndefinedBehaviorSanitizer runtime")
+            "AddressSanitizer, and UndefinedBehaviorSanitizer runtime. "
+            "Apple Clang ships no libFuzzer; build the fuzzers on Linux, as "
+            "CONTRIBUTING.md describes.")
     endif()
 endif()
 
@@ -209,7 +244,8 @@ set(OPENSCP_RECOMMENDED_QT_VERSION "6.11.2" CACHE STRING
 option(OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION
        "Reject a Qt version other than OPENSCP_RECOMMENDED_QT_VERSION" OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Svg LinguistTools)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network Svg LinguistTools)
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 if(OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION AND
    NOT Qt6_VERSION VERSION_EQUAL OPENSCP_RECOMMENDED_QT_VERSION)
     message(FATAL_ERROR
@@ -295,8 +331,9 @@ option(OPENSCP_BUILD_SECURE_ONLY "Disable insecure fallback for secrets storage"
 
 if (OPENSCP_BUILD_TESTS OR OPENSCP_ENABLE_DEMO_MODE)
     # Tests and demo builds answer from MockSftpClient, so openscp_core needs
-    # the mock sources.
-    set(OPENSCP_ENABLE_MOCK ON CACHE BOOL "Build mock SFTP client" FORCE)
+    # the mock sources. A normal variable, unlike a forced cache entry, lets a
+    # later configure without tests or demo leave the mock out again.
+    set(OPENSCP_ENABLE_MOCK ON)
 endif()
 
 add_subdirectory(core)
@@ -318,8 +355,17 @@ target_include_directories(openscp_sync_logic
 target_link_libraries(openscp_sync_logic PUBLIC Qt6::Core)
 
 add_library(openscp_ui_logic STATIC
+    ui/logic/updates/UpdateMetadata.hpp
+    ui/logic/updates/UpdateMetadata.cpp
+    ui/logic/updates/UpdateController.hpp
+    ui/logic/updates/UpdateController.cpp
+    ui/logic/updates/AppImageInstaller.hpp
+    ui/logic/updates/AppImageInstaller.cpp
+    ui/logic/updates/MacUpdater.hpp
     ui/logic/common/AppSettings.hpp
     ui/logic/common/AppSettings.cpp
+    ui/logic/common/StagingStore.hpp
+    ui/logic/common/StagingStore.cpp
     ui/logic/common/MainWindowSharedUtils.hpp
     ui/logic/common/MainWindowSharedUtils.cpp
     ui/logic/common/RowSelection.hpp
@@ -339,6 +385,8 @@ add_library(openscp_ui_logic STATIC
     ui/logic/connections/SessionHealthMonitor.cpp
     ui/logic/connections/TerminalCommandBuilder.hpp
     ui/logic/connections/TerminalCommandBuilder.cpp
+    ui/logic/connections/TlsKeyTrust.hpp
+    ui/logic/connections/TlsKeyTrust.cpp
     ui/logic/navigation/NavigationScope.hpp
     ui/logic/navigation/NavigationScope.cpp
     ui/logic/navigation/NavigationStore.hpp
@@ -382,6 +430,8 @@ add_library(openscp_ui_logic STATIC
     ui/logic/transfers/TransferQueuePersistence.cpp
     ui/logic/transfers/TransferQueueWriter.hpp
     ui/logic/transfers/TransferQueueWriter.cpp
+    ui/logic/transfers/TransferAutoClear.hpp
+    ui/logic/transfers/TransferAutoClear.cpp
     ui/logic/transfers/TransferTaskControls.hpp
     ui/logic/transfers/TransferTaskControls.cpp
     ui/logic/transfers/TransferTypes.hpp
@@ -390,19 +440,33 @@ add_library(openscp_ui_logic STATIC
 )
 
 target_include_directories(openscp_ui_logic
+    PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
     PUBLIC
         ${CMAKE_SOURCE_DIR}/core/include
         ${CMAKE_SOURCE_DIR}/ui
 )
 
 target_link_libraries(openscp_ui_logic
+    PRIVATE OpenSSL::Crypto
     PUBLIC
         Qt6::Widgets
+        Qt6::Network
         openscp_core
         openscp_sync_logic
 )
 
+if(OPENSCP_ENABLE_SPARKLE)
+    target_sources(openscp_ui_logic PRIVATE ui/logic/updates/MacUpdater.mm)
+    set_source_files_properties(ui/logic/updates/MacUpdater.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    target_compile_options(openscp_ui_logic PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-F${OPENSCP_SPARKLE_FRAMEWORK}/..>")
+    target_link_libraries(openscp_ui_logic PRIVATE "${OPENSCP_SPARKLE_FRAMEWORK}")
+else()
+    target_sources(openscp_ui_logic PRIVATE ui/logic/updates/MacUpdater.cpp)
+endif()
+
 add_library(openscp_ui_widgets STATIC
+    ui/widgets/common/AppIcon.hpp
+    ui/widgets/common/AppIcon.cpp
     ui/widgets/common/FocusTraversalController.hpp
     ui/widgets/common/FocusTraversalController.cpp
     ui/widgets/common/InputModalityTracker.hpp
@@ -413,6 +477,8 @@ add_library(openscp_ui_widgets STATIC
     ui/widgets/common/ToolbarKeyboardNavigation.cpp
     ui/widgets/dialogs/AboutDialog.hpp
     ui/widgets/dialogs/AboutDialog.cpp
+    ui/widgets/dialogs/AuthenticationInput.hpp
+    ui/widgets/dialogs/AuthenticationInput.cpp
     ui/widgets/dialogs/ConnectionDialog.hpp
     ui/widgets/dialogs/ConnectionDialog.cpp
     ui/widgets/dialogs/PermissionsDialog.hpp
@@ -472,6 +538,7 @@ add_library(openscp_main_window STATIC
     ui/app/MainWindowRemoteOps.cpp
     ui/app/MainWindowSync.cpp
     ui/app/MainWindowTransfers.cpp
+    ui/app/MainWindowUpdates.cpp
 )
 
 target_include_directories(openscp_main_window
@@ -550,6 +617,15 @@ endif()
 ###############################################################################
 if(APPLE)
     # Bundle identifier propagated into Info.plist
+    if(OPENSCP_ENABLE_SPARKLE)
+        add_custom_command(TARGET openscp POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E rm -rf
+                "$<TARGET_BUNDLE_DIR:openscp>/Contents/Frameworks/Sparkle.framework"
+            COMMAND /usr/bin/ditto
+                "${OPENSCP_SPARKLE_FRAMEWORK}"
+                "$<TARGET_BUNDLE_DIR:openscp>/Contents/Frameworks/Sparkle.framework"
+            VERBATIM)
+    endif()
     set(BUNDLE_ID "io.github.luiscuellar31.openscp" CACHE STRING "macOS bundle identifier")
 
     # Configure Info.plist from template
@@ -657,7 +733,6 @@ set(ICON_FILES
     assets/icons/action-search-item.svg
     assets/icons/action-rename.svg
     assets/icons/action-upload.svg
-    assets/icons/app-openscp.png
 )
 
 # Aliases for stable paths: /assets/icons/<name>
@@ -671,6 +746,22 @@ qt_add_resources(openscp_ui_widgets app_icons
     FILES ${ICON_FILES}
 )
 
+# The application icon in each style, at the sizes scripts/icons generates,
+# under its repository path: /assets/icons/app/<style>/openscp-<size>.png
+set(OPENSCP_APP_ICON_SIZES 16 24 32 48 64 128 256 512)
+set(APP_ICON_STYLE_FILES)
+foreach(_style IN ITEMS standard macos-light macos-dark)
+    foreach(_size IN LISTS OPENSCP_APP_ICON_SIZES)
+        list(APPEND APP_ICON_STYLE_FILES
+            assets/icons/app/${_style}/openscp-${_size}.png)
+    endforeach()
+endforeach()
+
+qt_add_resources(openscp_ui_widgets app_icon_styles
+    PREFIX "/"
+    FILES ${APP_ICON_STYLE_FILES}
+)
+
 qt_add_resources(openscp_ui_widgets credits
     PREFIX "/credits"
     BASE docs/credits
@@ -678,6 +769,7 @@ qt_add_resources(openscp_ui_widgets credits
         docs/credits/CREDITS.md
         docs/credits/LGPL_COMPLIANCE.md
         docs/credits/LICENSES/OpenSSL-Apache-2.0.txt
+        docs/credits/LICENSES/Sparkle-license.txt
         docs/credits/LICENSES/Qt-LGPL-3.0.txt
         docs/credits/LICENSES/libcurl-curl-license.txt
         docs/credits/LICENSES/libssh2-BSD-3-Clause.txt
@@ -688,7 +780,6 @@ qt_add_resources(openscp_ui_widgets credits
 if(UNIX AND NOT APPLE)
     # Desktop entry and app icon installation for Linux (XDG paths)
     set(APP_DESKTOP_FILE assets/linux/openscp.desktop)
-    set(APP_ICON_PNG     assets/linux/icon-openscp-256.png)
     set(APP_ICON_NAME    openscp) # must match Icon= in the .desktop
 
     # Install binary
@@ -698,13 +789,15 @@ if(UNIX AND NOT APPLE)
     install(FILES ${APP_DESKTOP_FILE}
                     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
 
-    # Install app icon where desktops expect it
-    # Prefer hicolor 256x256; fall back to pixmaps for broad compatibility
-    install(FILES ${APP_ICON_PNG}
-                    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps
-                    RENAME ${APP_ICON_NAME}.png)
+    # Install the standard app icon where desktops expect it: the hicolor
+    # theme at every size, and pixmaps at 256 for broad compatibility
+    foreach(_size IN LISTS OPENSCP_APP_ICON_SIZES)
+        install(FILES assets/icons/app/standard/openscp-${_size}.png
+                        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/${_size}x${_size}/apps
+                        RENAME ${APP_ICON_NAME}.png)
+    endforeach()
 
-    install(FILES ${APP_ICON_PNG}
+    install(FILES assets/icons/app/standard/openscp-256.png
                     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pixmaps
                     RENAME ${APP_ICON_NAME}.png)
 endif()

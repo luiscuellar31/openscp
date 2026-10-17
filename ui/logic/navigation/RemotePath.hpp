@@ -15,3 +15,5 @@
 [[nodiscard]] std::optional<QString>
 decodeRemoteEntryName(const std::string &rawName);
 [[nodiscard]] bool isRemoteSymlink(std::uint32_t mode);
+// A FIFO, socket or device. A mode without file type bits is none of them.
+[[nodiscard]] bool isRemoteSpecialFile(std::uint32_t mode);

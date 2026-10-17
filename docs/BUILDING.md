@@ -74,9 +74,16 @@ Install each format's own host tools before running its command:
 AppImage uses `build-appimage/` by default so its release-oriented Qt and
 CMake configuration cannot alter the development cache in `build/`. Set
 `BUILD_DIR=/path/to/build` only when a different isolated directory is needed.
+The build scripts configure a new build directory with Ninja when it is
+installed, and run as many compile jobs as there are CPUs; set `JOBS` to
+change that number.
 
-The packagers validate the required Qt SVG plugins. Official AppImages also
-audit the bundled ELF ABI; the check can be run directly against an AppDir:
+The AppImage packager checks that the bundled Qt SVG and platform plugins and
+their libraries resolve, and that the packaged executable keeps its ELF
+hardening (PIE, RELRO, immediate binding, non-executable stack). Snap and
+Flatpak take Qt from their runtime, so they have no Qt plugins of their own to
+check. Official AppImages also audit the bundled ELF ABI; the check can be run
+directly against an AppDir:
 
 ```bash
 ./scripts/verify/linux-abi.sh dist/OpenSCP.AppDir 2.34
@@ -147,7 +154,9 @@ Local unsigned artifacts are generated with:
 
 Outputs and their `.sha256` files are written under `dist/`. The packaging
 flow runs `macdeployqt`, bundles non-Qt dependencies, rewrites linkage, and
-verifies the completed bundle.
+verifies the completed bundle. It builds in `build-macos-package/`, without
+tests or demo mode, so the development cache in `build/` cannot change a
+package; set `BUILD_DIR` to use another isolated directory.
 
 Plugin scanning is disabled by default because the required macOS platform,
 SVG icon, and style plugins are staged explicitly. Set
@@ -170,11 +179,38 @@ variables, and the skip controls used for local unsigned packages.
 To inspect linkage manually:
 
 ```bash
-otool -L build/OpenSCP.app/Contents/MacOS/OpenSCP | \
+otool -L build-macos-package/OpenSCP.app/Contents/MacOS/OpenSCP | \
   grep -E 'libssh2|libcrypto|libssl|tinyxml2|@executable_path'
 ```
 
 Bundled references should resolve through `@executable_path/../Frameworks`.
+
+## Application icon
+
+The icon is drawn by
+[`scripts/icons/generate-icon.swift`](../scripts/icons/generate-icon.swift)
+from two public-domain Tango drawings, in three styles: `standard`, the
+free-standing drawing, and `macos-light` and `macos-dark`, the drawing on
+Apple's icon shape. It writes each style's 1024-pixel image to
+`assets/icons/app/<style>/openscp-1024.png`, in sRGB.
+
+The sizes derived from those images, from 16 to 512 pixels, are committed with
+them, as are the macOS bundle icon `assets/macos/OpenSCP.icns`, made from
+`macos-light`, and the snap icon `packaging/snap/icon.png`. Ordinary builds
+therefore need no image tools. After changing the artwork, regenerate them on
+macOS with Swift, Python 3, and the system `sips` and `iconutil` tools:
+
+```bash
+swift scripts/icons/generate-icon.swift
+python3 scripts/icons/generate-icon-sizes.py
+```
+
+The application embeds every style and shows the one chosen under
+**Settings → General → Application icon**: `macos-light` by default on macOS
+and `standard` elsewhere. Installed icons cannot change while the application
+runs, so Finder, the Dock while OpenSCP is closed, and Linux launchers keep the
+platform default; Linux packages install the `standard` sizes in the hicolor
+theme.
 
 ## Tests and quality checks
 

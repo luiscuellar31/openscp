@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/icons/app-openscp.png" alt="OpenSCP icon" width="128">
+  <img src="assets/icons/app/macos-light/openscp-256.png" alt="OpenSCP icon" width="128">
   <h1>OpenSCP</h1>
 
   <p><strong>A lightweight, cross-platform file transfer client with a dual-panel workflow, secure defaults, and support for SFTP, SCP, FTP, FTPS, and WebDAV.</strong></p>
@@ -32,6 +32,25 @@ next to the file you picked and check them together:
 shasum -a 256 -c SHA256SUMS.txt --ignore-missing  # macOS
 sha256sum -c SHA256SUMS.txt --ignore-missing      # Linux
 ```
+
+Checksums catch a damaged download, not a replaced one. To confirm that a file
+was built by this repository's release workflow, use the
+[GitHub CLI](https://cli.github.com/):
+
+```bash
+gh attestation verify OpenSCP-<version>-x86_64.AppImage --repo luiscuellar31/openscp
+```
+
+### Updates
+
+Use **OpenSCP → Check for updates…** to check for a newer stable release.
+**Automatically check for updates** enables a daily check; it is off by
+default. Installing always requires confirmation after pending file operations
+finish. Signed update-enabled builds can install AppImage and macOS updates;
+builds without signing configuration open the release page. Flatpak and Snap
+use their software manager. Standalone Flatpak bundles need a new bundle unless
+an update repository has been configured.
+See [Updating OpenSCP](docs/UPDATES.md) for details.
 
 ### Installing on macOS
 
@@ -110,19 +129,46 @@ troubleshooting, see [Building OpenSCP](docs/BUILDING.md).
   conflict policies, bandwidth limits, and resumable `.part` files.
 - Saved sites with Keychain on macOS and Secret Service/libsecret on Linux.
 - Strict, accept-new, or explicitly disabled SSH host-key verification.
+- FTPS and HTTPS WebDAV without certificate verification still check the
+  server's public key, which you trust on the first connection.
 - SOCKS5, HTTP CONNECT, and SSH jump-host support where the protocol allows it.
 - One-way synchronization with preview, filters, and optional checksum checks.
 - Spanish, English, Portuguese, French, and German interfaces.
+
+Canceling a connection or closing the window also cancels pending SSH
+authentication and fingerprint prompts. SSH TCP connection attempts share a
+20-second limit across resolved addresses. Name resolution uses the system
+resolver and may take longer independently of that TCP limit.
 
 Local downloads reject symbolic links in user-writable destination parent
 folders. Synchronization resolves a linked local root to its physical path and
 rejects linked folders below that root. Choose the physical destination folder
 when a download path contains a link.
 
-For a local move upload, OpenSCP waits for queued tasks that need the same
-source file, then checks that the source has not changed before removing it. If
-the source changed or the app restarted before cleanup, the task shows a warning
-and leaves cleanup for manual review.
+Synchronization never copies FIFOs, sockets, or devices, and leaves out names
+with a backslash or control characters, which uploads also refuse. A name that
+differs from one on the other side only in letter case or Unicode normalization
+appears as a conflict and is neither copied nor deleted.
+
+Downloads require regular `.part` files. If an existing `.part` entry is a
+FIFO (named pipe), the download reports a local I/O error without waiting for
+a reader or replacing that entry. Choose another destination or inspect the
+conflicting entry before retrying.
+
+Transfers sharing a destination or its `.part` path run sequentially. Local
+names differing only in case or Unicode normalization also run sequentially,
+even on case-sensitive volumes. Removing a task with its partial data keeps the
+`.part` file while another task in the queue can still resume from it, and
+removes nothing for finished tasks or for classic SCP uploads, which write the
+destination directly.
+
+For a local move upload, OpenSCP uploads the file and preserves the local
+source with a warning. Automatic removal cannot safely exclude another process
+replacing the source after verification. Review the completed upload and the
+local source before removing it manually, then retry the task to finish
+cleanup without uploading again. After a restart, cleanup requires manual
+review because the original file identity is no longer available. Remote
+source cleanup for move downloads is unchanged.
 
 Mirror proposes deletions only where the source scan verified that items are
 absent. Skipped links, unreadable folders, and depth limits keep destination

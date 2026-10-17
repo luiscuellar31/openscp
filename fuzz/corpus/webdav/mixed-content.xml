@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<!DOCTYPE multistatus>
+<d:multistatus xmlns:d="DAV:" note="&lt;tag&gt;= >" other='quoted > ='>
+<!-- <a><b attr="value"> ignored -->
+<![CDATA[<a><b>not an element</b></a>]]>
+<d:response><d:href>/file</d:href><d:propstat>
+<d:status>HTTP/1.1 200 OK</d:status>
+<d:prop><d:getcontentlength>7</d:getcontentlength></d:prop>
+</d:propstat></d:response>
+</d:multistatus>

@@ -1,7 +1,7 @@
 name: openscp
 title: OpenSCP
 base: core24
-version: "1.1.0"
+version: "1.2.0"
 summary: Lightweight two-panel client for remote file transfers
 description: |
   OpenSCP is a lightweight, two-panel client for remote file transfers.
@@ -53,9 +53,3 @@ parts:
       craftctl default
       install -Dm644 "${CRAFT_PROJECT_DIR}/openscp-snap.desktop" \
         "${CRAFT_PART_INSTALL}/usr/share/applications/openscp-snap.desktop"
-    override-prime: |
-      craftctl default
-      "${CRAFT_PROJECT_DIR}/../../scripts/verify/qt-svg-plugins.sh" \
-        --allow-runtime-provided \
-        --context snap \
-        "${CRAFT_PRIME}"

@@ -4,10 +4,13 @@
 
 #include "../common/RemoteListingLimits.hpp"
 #include "common/UniqueFile.hpp"
+#include "detail/KnownHostsFile.hpp"
 #include "detail/Libssh2CipherPreference.hpp"
 #include "detail/Libssh2ErrorClassifier.hpp"
 #include "detail/Libssh2InputSafety.hpp"
 #include "detail/Libssh2TransferIntegrity.hpp"
+#include "detail/Libssh2WritePacing.hpp"
+#include "detail/TcpConnect.hpp"
 #include "detail/UniqueSftpHandle.hpp"
 #include "openscp/RuntimeLogging.hpp"
 #include "openscp/SafeLocalFile.hpp"
@@ -138,11 +141,6 @@ CoreLogLevel core_log_level() {
     return level;
 }
 
-bool core_sensitive_debug_enabled() {
-    static const bool enabled = openscp::sensitiveLoggingEnabled();
-    return enabled;
-}
-
 bool core_log_enabled(CoreLogLevel level) {
     return static_cast<int>(core_log_level()) >= static_cast<int>(level);
 }
@@ -235,7 +233,9 @@ std::string posix_err(const char *where) {
     return std::string(where) + ": " + std::strerror(errno);
 }
 
-bool ensure_parent_dir_0700(const std::string &path, std::string *why) {
+// Creates the parent folder with mode 0700 when missing. An existing folder
+// keeps its permissions: it may be one the user chose and shares.
+bool ensure_parent_dir(const std::string &path, std::string *why) {
     std::string dir = path;
     std::size_t p = dir.find_last_of('/');
     if (p == std::string::npos)
@@ -243,15 +243,9 @@ bool ensure_parent_dir_0700(const std::string &path, std::string *why) {
     else
         dir.resize(p);
     struct ::stat st {};
-    if (::stat(dir.c_str(), &st) != 0) {
-        if (::mkdir(dir.c_str(), 0700) != 0) {
-            if (why)
-                *why = posix_err("mkdir");
-            return false;
-        }
-    } else if (::chmod(dir.c_str(), 0700) != 0) {
+    if (::stat(dir.c_str(), &st) != 0 && ::mkdir(dir.c_str(), 0700) != 0) {
         if (why)
-            *why = posix_err("chmod(dir)");
+            *why = posix_err("mkdir");
         return false;
     }
     return true;
@@ -792,23 +786,6 @@ bool verify_final_transfer_integrity(
     return true;
 }
 
-using DigestContext = std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)>;
-
-// Returns an initialized SHA-256 context, or null when streaming is disabled
-// or OpenSSL cannot provide one.
-DigestContext start_stream_digest(bool enabled) {
-    DigestContext ctx(enabled ? EVP_MD_CTX_new() : nullptr, &EVP_MD_CTX_free);
-    if (ctx && EVP_DigestInit_ex(ctx.get(), EVP_sha256(), nullptr) != 1)
-        ctx.reset();
-    return ctx;
-}
-
-void update_stream_digest(DigestContext &ctx, const char *data,
-                          std::size_t size) {
-    if (ctx && EVP_DigestUpdate(ctx.get(), data, size) != 1)
-        ctx.reset();
-}
-
 bool remote_file_changed(const LIBSSH2_SFTP_ATTRIBUTES &before,
                          const LIBSSH2_SFTP_ATTRIBUTES &after) {
     const auto reportedByBoth = [&](unsigned long flag) {
@@ -820,166 +797,6 @@ bool remote_file_changed(const LIBSSH2_SFTP_ATTRIBUTES &before,
             before.mtime != after.mtime);
 }
 
-// Optional policy for a transfer that streamed the whole file: compares the
-// streamed bytes with the local file instead of reading the remote file again,
-// because SSH already protects the bytes in transit. As with the full check,
-// a digest that cannot be computed does not fail an Optional transfer.
-bool verify_streamed_transfer_integrity(
-    DigestContext &streamDigest, const std::string &localPath,
-    std::uint64_t size, const char *transferKind, std::string &err,
-    const std::function<bool()> *shouldCancel) {
-    Sha256Digest streamed{};
-    unsigned int streamedLength = 0;
-    if (!streamDigest ||
-        EVP_DigestFinal_ex(streamDigest.get(), streamed.data(),
-                           &streamedLength) != 1 ||
-        streamedLength != SHA256_DIGEST_LENGTH) {
-        return true;
-    }
-    Sha256Digest localDigest{};
-    std::string hashErr;
-    const bool localOk = hash_local_range(localPath, 0, size, localDigest,
-                                          &hashErr, shouldCancel);
-    if (fail_if_transfer_canceled(shouldCancel, err))
-        return false;
-    if (localOk && localDigest != streamed) {
-        err = std::string("Final integrity check failed (") + transferKind +
-              "): transferred data and local file checksum mismatch";
-        return false;
-    }
-    return true;
-}
-
-bool persist_known_hosts_atomic(LIBSSH2_KNOWNHOSTS *nh,
-                                const std::string &khPath, std::string *why) {
-    if (!nh) {
-        if (why)
-            *why = "known_hosts not initialized";
-        return false;
-    }
-    if (khPath.empty()) {
-        if (why)
-            *why = "empty known_hosts path";
-        return false;
-    }
-
-#ifndef _WIN32
-    if (!ensure_parent_dir_0700(khPath, why))
-        return false;
-    std::string tmp = khPath + ".tmpXXXXXX";
-    std::vector<char> tmpl(tmp.begin(), tmp.end());
-    tmpl.push_back('\0');
-    int fd = ::mkstemp(tmpl.data());
-    if (fd < 0) {
-        if (why)
-            *why = posix_err("mkstemp");
-        return false;
-    }
-    const std::string tmpPath(tmpl.data());
-    if (::close(fd) != 0) {
-        if (why)
-            *why = posix_err("close(tmp)");
-        (void)::unlink(tmpPath.c_str());
-        return false;
-    }
-
-    if (libssh2_knownhost_writefile(nh, tmpPath.c_str(),
-                                    LIBSSH2_KNOWNHOST_FILE_OPENSSH) != 0) {
-        if (why)
-            *why = "libssh2_knownhost_writefile failed";
-        (void)::unlink(tmpPath.c_str());
-        return false;
-    }
-
-    if (::chmod(tmpPath.c_str(), 0600) != 0) {
-        if (why)
-            *why = posix_err("chmod(tmp)");
-        (void)::unlink(tmpPath.c_str());
-        return false;
-    }
-
-    int fdw = ::open(tmpPath.c_str(), O_WRONLY);
-    if (fdw < 0) {
-        if (why)
-            *why = posix_err("open(tmp)");
-        (void)::unlink(tmpPath.c_str());
-        return false;
-    }
-    if (::fchmod(fdw, 0600) != 0) {
-        if (why)
-            *why = posix_err("fchmod(tmp)");
-        ::close(fdw);
-        (void)::unlink(tmpPath.c_str());
-        return false;
-    }
-    if (::fsync(fdw) != 0) {
-        if (why)
-            *why = posix_err("fsync(tmp)");
-        ::close(fdw);
-        (void)::unlink(tmpPath.c_str());
-        return false;
-    }
-    if (::close(fdw) != 0) {
-        if (why)
-            *why = posix_err("close(tmp)");
-        (void)::unlink(tmpPath.c_str());
-        return false;
-    }
-
-    if (::rename(tmpPath.c_str(), khPath.c_str()) != 0) {
-        if (why)
-            *why = posix_err("rename(tmp->known_hosts)");
-        (void)::unlink(tmpPath.c_str());
-        return false;
-    }
-    if (!fsync_parent_dir(khPath, why))
-        return false;
-    return true;
-#else
-    std::string tmpPath = khPath + ".tmp";
-    if (libssh2_knownhost_writefile(nh, tmpPath.c_str(),
-                                    LIBSSH2_KNOWNHOST_FILE_OPENSSH) != 0) {
-        if (why)
-            *why = "libssh2_knownhost_writefile failed";
-        return false;
-    }
-    HANDLE h = CreateFileA(tmpPath.c_str(), GENERIC_READ | GENERIC_WRITE,
-                           FILE_SHARE_READ, NULL, OPEN_EXISTING,
-                           FILE_ATTRIBUTE_NORMAL, NULL);
-    if (h == INVALID_HANDLE_VALUE) {
-        DWORD ec = GetLastError();
-        (void)DeleteFileA(tmpPath.c_str());
-        if (why)
-            *why = win_err("CreateFile(tmp)", ec);
-        return false;
-    }
-    if (!FlushFileBuffers(h)) {
-        DWORD ec = GetLastError();
-        CloseHandle(h);
-        (void)DeleteFileA(tmpPath.c_str());
-        if (why)
-            *why = win_err("FlushFileBuffers(tmp)", ec);
-        return false;
-    }
-    if (!CloseHandle(h)) {
-        DWORD ec = GetLastError();
-        (void)DeleteFileA(tmpPath.c_str());
-        if (why)
-            *why = win_err("CloseHandle(tmp)", ec);
-        return false;
-    }
-    if (!MoveFileExA(tmpPath.c_str(), khPath.c_str(),
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) {
-        DWORD ec = GetLastError();
-        (void)DeleteFileA(tmpPath.c_str());
-        if (why)
-            *why = win_err("MoveFileEx(tmp->known_hosts)", ec);
-        return false;
-    }
-    return true;
-#endif
-}
-
 #ifndef _WIN32
 bool persist_text_atomic(const std::string &path, const std::string &content,
                          std::string *why) {
@@ -988,7 +805,7 @@ bool persist_text_atomic(const std::string &path, const std::string &content,
             *why = "empty destination path";
         return false;
     }
-    if (!ensure_parent_dir_0700(path, why))
+    if (!ensure_parent_dir(path, why))
         return false;
 
     std::string tmp = path + ".tmpXXXXXX";
@@ -1254,6 +1071,45 @@ bool line_matches_site_host(const std::string &line,
     return false;
 }
 
+// The names known_hosts gives `host` and `port`: "host" or "[host]:port".
+std::vector<std::string> known_hosts_tokens(const std::string &host,
+                                            std::uint16_t port) {
+    if (port == 22) {
+        // Support this uncommon notation if present in existing files.
+        return {host, "[" + host + "]:22"};
+    }
+    return {"[" + host + "]:" + std::to_string(port)};
+}
+
+// The key types known_hosts records for `host` and `port`, under plain or
+// hashed names. Lines with a marker, @cert-authority or @revoked, hold no key
+// of the host's own.
+std::vector<std::string>
+recorded_host_key_types(const std::vector<std::string> &lines,
+                        const std::string &host, std::uint16_t port) {
+    const std::vector<std::string> tokens = known_hosts_tokens(host, port);
+    std::vector<std::string> types;
+    for (const std::string &line : lines) {
+        const std::size_t first = line.find_first_not_of(" \t");
+        if (first == std::string::npos || line[first] == '@' ||
+            !line_matches_site_host(line, tokens)) {
+            continue;
+        }
+        std::size_t hostStart = 0;
+        std::size_t hostEnd = 0;
+        if (!parse_known_hosts_host_field(line, hostStart, hostEnd))
+            continue;
+        const std::size_t typeStart = line.find_first_not_of(" \t", hostEnd);
+        if (typeStart == std::string::npos)
+            continue;
+        const std::size_t typeEnd = line.find_first_of(" \t", typeStart);
+        types.push_back(line.substr(typeStart, typeEnd == std::string::npos
+                                                   ? std::string::npos
+                                                   : typeEnd - typeStart));
+    }
+    return types;
+}
+
 // Global libssh2 initialization (once per process).
 std::once_flag g_libssh2_init_once;
 int g_libssh2_init_result = LIBSSH2_ERROR_NONE;
@@ -1264,29 +1120,8 @@ int ensure_libssh2_initialized() {
     return g_libssh2_init_result;
 }
 
-#ifndef _WIN32
-// Compute OpenSSH hashed hostname token: |1|base64(salt)|base64(HMAC_SHA1(salt,
-// host))
-std::string openssh_hash_hostname(const std::string &host) {
-    unsigned char salt[20];
-    if (RAND_bytes(salt, sizeof(salt)) != 1) {
-        // fallback: pseudo-random
-        for (size_t i = 0; i < sizeof(salt); ++i)
-            salt[i] = static_cast<unsigned char>(rand() & 0xFF);
-    }
-    unsigned char mac[EVP_MAX_MD_SIZE];
-    unsigned int maclen = 0;
-    HMAC(EVP_sha1(), salt, static_cast<int>(sizeof(salt)),
-         reinterpret_cast<const unsigned char *>(host.data()), host.size(), mac,
-         &maclen);
-    std::string s_salt = b64encode(salt, sizeof(salt));
-    std::string s_mac = b64encode(mac, maclen);
-    return std::string("|1|") + s_salt + "|" + s_mac;
-}
-#endif
-
-// Context for keyboard-interactive: respond with username/password based on the
-// prompt
+// Context for keyboard-interactive: the saved credentials and the optional
+// UI callback that answers the rest.
 struct KbdIntCtx {
     const char *user;
     const char *pass;
@@ -1294,10 +1129,11 @@ struct KbdIntCtx {
     bool *cancelled;           // explicit user cancellation in UI callback
     bool *rejected;            // malformed, excessive or unallocatable input
     std::string *rejectionError;
+    int *rounds; // requests with prompts answered so far
 };
 
-// Keyboard-interactive callback: respond to prompts with username/password
-// based on the text
+// Keyboard-interactive callback: the saved username and password answer the
+// prompts that clearly ask for them, and the UI callback the others.
 void kbint_password_callback(const char *name, int name_len,
                              const char *instruction, int instruction_len,
                              int num_prompts,
@@ -1372,9 +1208,56 @@ void kbint_password_callback(const char *name, int name_len,
         return;
     }
 
-    // If a UI callback is provided, give it a chance to answer the prompts.
-    if (ctx->cb && *(ctx->cb) && num_prompts > 0) {
-        std::vector<std::string> answers;
+    if (num_prompts > 0 && ctx->rounds)
+        ++*ctx->rounds;
+    const int round = ctx->rounds ? *ctx->rounds : 1;
+
+    auto scrubAnswers = [](std::vector<std::string> &values) {
+        for (std::string &value : values) {
+            if (value.capacity() > 0) {
+                OPENSSL_cleanse(value.data(), value.capacity());
+                value.clear();
+            }
+        }
+    };
+
+    // The saved credentials answer what they clearly match; the user answers
+    // the rest, so a one-time code never receives the account password.
+    std::vector<std::string> answers;
+    std::vector<KbdIntPrompt> userPrompts;
+    std::vector<int> userPromptIndexes;
+    try {
+        answers.resize(static_cast<std::size_t>(num_prompts));
+        for (int i = 0; i < num_prompts; ++i) {
+            KbdIntPrompt prompt{std::move(promptTexts[static_cast<size_t>(i)]),
+                                prompts && prompts[i].echo != 0};
+            const auto saved = libssh2detail::savedKbdIntAnswer(prompt, round);
+            std::string &answer = answers[static_cast<size_t>(i)];
+            if (saved == libssh2detail::KbdIntSavedAnswer::Username &&
+                ulen > 0) {
+                answer.assign(user, ulen);
+            } else if (saved == libssh2detail::KbdIntSavedAnswer::Password &&
+                       plen > 0) {
+                answer.assign(pass, plen);
+            } else {
+                userPrompts.push_back(std::move(prompt));
+                userPromptIndexes.push_back(i);
+            }
+        }
+    } catch (...) {
+        scrubAnswers(answers);
+        rejectPrompts("Could not allocate keyboard-interactive answer data.");
+        return;
+    }
+
+    if (!userPrompts.empty()) {
+        if (!ctx->cb || !*(ctx->cb)) {
+            scrubAnswers(answers);
+            rejectPrompts("The server asked for a one-time code or other "
+                          "input that only the main connection can answer.");
+            return;
+        }
+        std::vector<std::string> userAnswers;
         KbdIntPromptResult result = KbdIntPromptResult::Unhandled;
         try {
             const std::size_t safeNameLength =
@@ -1386,68 +1269,17 @@ void kbint_password_callback(const char *name, int name_len,
             const std::string nm(name ? name : "", safeNameLength);
             const std::string ins(instruction ? instruction : "",
                                   safeInstructionLength);
-            result = (*(ctx->cb))(nm, ins, promptTexts, answers);
+            result = (*(ctx->cb))(nm, ins, userPrompts, userAnswers);
         } catch (...) {
+            scrubAnswers(answers);
+            scrubAnswers(userAnswers);
             rejectPrompts(
                 "Keyboard-interactive prompt handler failed unexpectedly.");
             return;
         }
-        auto scrubAnswers = [&answers]() {
-            for (std::string &answer : answers) {
-                if (answer.capacity() > 0) {
-                    OPENSSL_cleanse(answer.data(), answer.capacity());
-                    answer.clear();
-                }
-            }
-        };
-        if (result == KbdIntPromptResult::Handled &&
-            static_cast<int>(answers.size()) >= num_prompts) {
-            std::size_t totalAnswerBytes = 0;
-            for (int i = 0; i < num_prompts; ++i) {
-                const std::size_t answerSize =
-                    answers[static_cast<size_t>(i)].size();
-                if (answerSize >
-                        libssh2detail::kMaxKeyboardInteractiveAnswerBytes ||
-                    totalAnswerBytes >
-                        libssh2detail::kMaxKeyboardInteractiveAnswerBytes -
-                            answerSize) {
-                    rejectPrompts("Keyboard-interactive answer exceeds the "
-                                  "safety limit.");
-                    scrubAnswers();
-                    return;
-                }
-                totalAnswerBytes += answerSize;
-            }
-            for (int i = 0; i < num_prompts; ++i) {
-                const std::string &a = answers[static_cast<size_t>(i)];
-                if (a.empty()) {
-                    responses[i].text = nullptr;
-                    responses[i].length = 0;
-                    continue;
-                }
-                char *buf = static_cast<char *>(std::malloc(a.size() + 1));
-                if (!buf) {
-                    for (int j = 0; j < i; ++j) {
-                        std::free(responses[j].text);
-                        responses[j].text = nullptr;
-                        responses[j].length = 0;
-                    }
-                    rejectPrompts(
-                        "Could not allocate keyboard-interactive answer data.");
-                    scrubAnswers();
-                    return;
-                }
-                std::memcpy(buf, a.data(), a.size());
-                buf[a.size()] = '\0';
-                responses[i].text = buf;
-                responses[i].length = static_cast<unsigned int>(a.size());
-            }
-            // Best-effort: scrub answers after copying into libssh2 buffers
-            scrubAnswers();
-            return;
-        }
         if (result == KbdIntPromptResult::Cancelled) {
-            scrubAnswers();
+            scrubAnswers(answers);
+            scrubAnswers(userAnswers);
             if (ctx->cancelled)
                 *ctx->cancelled = true;
             for (int i = 0; i < num_prompts; ++i) {
@@ -1456,32 +1288,59 @@ void kbint_password_callback(const char *name, int name_len,
             }
             return;
         }
-        scrubAnswers();
-        // If the callback could not answer, fall back to the simple heuristic
+        if (result != KbdIntPromptResult::Handled ||
+            userAnswers.size() < userPrompts.size()) {
+            scrubAnswers(answers);
+            scrubAnswers(userAnswers);
+            rejectPrompts("Keyboard-interactive prompts were left unanswered.");
+            return;
+        }
+        for (std::size_t k = 0; k < userPrompts.size(); ++k) {
+            answers[static_cast<size_t>(userPromptIndexes[k])].swap(
+                userAnswers[k]);
+        }
+        scrubAnswers(userAnswers);
+    }
+
+    std::size_t totalAnswerBytes = 0;
+    for (const std::string &answer : answers) {
+        if (answer.size() > libssh2detail::kMaxKeyboardInteractiveAnswerBytes ||
+            totalAnswerBytes >
+                libssh2detail::kMaxKeyboardInteractiveAnswerBytes -
+                    answer.size()) {
+            scrubAnswers(answers);
+            rejectPrompts("Keyboard-interactive answer exceeds the safety "
+                          "limit.");
+            return;
+        }
+        totalAnswerBytes += answer.size();
     }
     for (int i = 0; i < num_prompts; ++i) {
-        // Simple heuristic: if the prompt mentions "user" or "name", send
-        // username; otherwise send password
-        const bool wantUser = libssh2detail::promptRequestsUsername(
-            promptTexts[static_cast<size_t>(i)]);
-        const char *ans = wantUser ? user : pass;
-        const size_t alen = wantUser ? ulen : plen;
-        if (!ans || alen == 0) {
+        const std::string &a = answers[static_cast<size_t>(i)];
+        if (a.empty()) {
             responses[i].text = nullptr;
             responses[i].length = 0;
             continue;
         }
-        char *buf = static_cast<char *>(std::malloc(alen + 1));
+        char *buf = static_cast<char *>(std::malloc(a.size() + 1));
         if (!buf) {
-            responses[i].text = nullptr;
-            responses[i].length = 0;
-            continue;
+            for (int j = 0; j < i; ++j) {
+                std::free(responses[j].text);
+                responses[j].text = nullptr;
+                responses[j].length = 0;
+            }
+            scrubAnswers(answers);
+            rejectPrompts(
+                "Could not allocate keyboard-interactive answer data.");
+            return;
         }
-        std::memcpy(buf, ans, alen);
-        buf[alen] = '\0';
+        std::memcpy(buf, a.data(), a.size());
+        buf[a.size()] = '\0';
         responses[i].text = buf;
-        responses[i].length = static_cast<unsigned int>(alen);
+        responses[i].length = static_cast<unsigned int>(a.size());
     }
+    // Best-effort: scrub answers after copying into libssh2 buffers
+    scrubAnswers(answers);
 }
 
 } // namespace
@@ -1571,11 +1430,19 @@ bool set_socket_timeout_ms(int sock, int timeoutMs) {
 
 bool socket_send_all(int sock, const unsigned char *data, std::size_t len,
                      const char *stage, std::string &err) {
+    // interrupt() shuts the socket down from another thread, and a send after
+    // that raises SIGPIPE, which ends the process unless it is suppressed.
+#ifdef MSG_NOSIGNAL
+    constexpr int kSendFlags = MSG_NOSIGNAL;
+#else
+    constexpr int kSendFlags = 0;
+#endif
     // send(2) may write partially; loop until the full buffer is sent.
     std::size_t off = 0;
     while (off < len) {
-        const ssize_t w = ::send(
-            sock, reinterpret_cast<const char *>(data + off), len - off, 0);
+        const ssize_t w =
+            ::send(sock, reinterpret_cast<const char *>(data + off), len - off,
+                   kSendFlags);
         if (w < 0) {
             if (errno == EINTR)
                 continue;
@@ -1613,6 +1480,9 @@ bool socket_recv_exact(int sock, unsigned char *buf, std::size_t len,
     return true;
 }
 
+// Reads up to the delimiter one byte at a time: what follows it belongs to the
+// tunneled protocol, such as the SSH server's banner, and must stay in the
+// socket.
 bool socket_recv_until(int sock, const std::string &delimiter,
                        std::size_t maxBytes, const char *stage,
                        std::string &out, std::string &err) {
@@ -1621,9 +1491,9 @@ bool socket_recv_until(int sock, const std::string &delimiter,
         err = std::string(stage) + " invalid delimiter";
         return false;
     }
-    std::array<char, 512> chunk{};
-    while (out.find(delimiter) == std::string::npos) {
-        const ssize_t r = ::recv(sock, chunk.data(), chunk.size(), 0);
+    while (!out.ends_with(delimiter)) {
+        char byte = 0;
+        const ssize_t r = ::recv(sock, &byte, 1, 0);
         if (r < 0) {
             if (errno == EINTR)
                 continue;
@@ -1634,7 +1504,7 @@ bool socket_recv_until(int sock, const std::string &delimiter,
             err = std::string(stage) + " recv failed: connection closed";
             return false;
         }
-        out.append(chunk.data(), static_cast<std::size_t>(r));
+        out.push_back(byte);
         if (out.size() > maxBytes) {
             err = std::string(stage) + " too large";
             return false;
@@ -1644,8 +1514,12 @@ bool socket_recv_until(int sock, const std::string &delimiter,
 }
 
 bool connect_tcp_endpoint(const std::string &host, uint16_t port, int &sockOut,
-                          std::string &err) {
+                          std::string &err, std::stop_token stopToken) {
     sockOut = -1;
+    if (stopToken.stop_requested()) {
+        err = "Connection canceled by user";
+        return false;
+    }
     struct addrinfo hints {};
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
@@ -1662,22 +1536,54 @@ bool connect_tcp_endpoint(const std::string &host, uint16_t port, int &sockOut,
     }
 
     std::string lastConnectErr;
+    // Resolution uses the platform resolver; the TCP budget starts afterward.
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(20);
     // Try all resolved addresses (IPv4/IPv6) until one succeeds.
     for (auto rp = res; rp != nullptr; rp = rp->ai_next) {
+        if (stopToken.stop_requested() ||
+            std::chrono::steady_clock::now() >= deadline)
+            break;
         int s = ::socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (s == -1)
             continue;
         configure_tcp_keepalive(s);
         disable_nagle(s);
-        if (::connect(s, rp->ai_addr, rp->ai_addrlen) == 0) {
+        const int flags = ::fcntl(s, F_GETFL, 0);
+        if (flags < 0 || ::fcntl(s, F_SETFL, flags | O_NONBLOCK) < 0 ||
+            ::fcntl(s, F_SETFD, FD_CLOEXEC) < 0) {
+            lastConnectErr = std::strerror(errno);
+            ::close(s);
+            continue;
+        }
+        const int result = ::connect(s, rp->ai_addr, rp->ai_addrlen);
+        bool connected = result == 0;
+        if (!connected && (errno == EINPROGRESS || errno == EINTR)) {
+            connected = libssh2detail::waitForTcpConnection(
+                s, deadline, stopToken, lastConnectErr);
+        } else if (!connected) {
+            lastConnectErr = std::strerror(errno);
+        }
+        if (connected && ::fcntl(s, F_SETFL, flags) < 0) {
+            connected = false;
+            lastConnectErr = std::strerror(errno);
+        }
+        if (connected && !stopToken.stop_requested()) {
             sockOut = s;
             freeaddrinfo(res);
             return true;
         }
-        lastConnectErr = std::strerror(errno);
         ::close(s);
     }
     freeaddrinfo(res);
+    if (stopToken.stop_requested()) {
+        err = "Connection canceled by user";
+        return false;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+        err = "TCP connection timed out";
+        return false;
+    }
     err = "Could not connect to host/port";
     if (!lastConnectErr.empty())
         err += ": " + lastConnectErr;
@@ -2177,8 +2083,13 @@ bool Libssh2SftpClient::tcpConnect(const SessionOptions &opt,
             std::lock_guard<std::mutex> lk(stateMutex_);
             jumpProxyPid_ = jumpPid;
             jumpProxyStderrFd_ = jumpStderrFd;
+            sock_ = jumpSock;
         }
-        sock_ = jumpSock;
+        if (opt.connection_stop_token.stop_requested()) {
+            interrupt();
+            err = "Connection canceled by user";
+            return false;
+        }
         return true;
 #endif
     }
@@ -2195,8 +2106,18 @@ bool Libssh2SftpClient::tcpConnect(const SessionOptions &opt,
     }
 
     int socketFd = -1;
-    if (!connect_tcp_endpoint(endpointHost, endpointPort, socketFd, err))
+    if (!connect_tcp_endpoint(endpointHost, endpointPort, socketFd, err,
+                              opt.connection_stop_token))
         return false;
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        sock_ = socketFd;
+    }
+    if (opt.connection_stop_token.stop_requested()) {
+        interrupt();
+        err = "Connection canceled by user";
+        return false;
+    }
 
     if (useProxy) {
         constexpr int kProxyHandshakeTimeoutMs = 20000;
@@ -2211,12 +2132,10 @@ bool Libssh2SftpClient::tcpConnect(const SessionOptions &opt,
         }
         (void)set_socket_timeout_ms(socketFd, 0);
         if (!ok) {
-            ::close(socketFd);
             return false;
         }
     }
 
-    sock_ = socketFd;
     return true;
 }
 
@@ -2229,15 +2148,36 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
         return false;
     }
 
+    // known_hosts is read before the handshake so that the host key types it
+    // already records for this host are asked for first.
+    std::string khPath;
+    std::vector<std::string> khLines;
+    auto khRead = libssh2detail::KnownHostsReadStatus::Missing;
+    if (opt.known_hosts_policy != openscp::KnownHostsPolicy::Off) {
+        if (opt.known_hosts_path.has_value()) {
+            khPath = *opt.known_hosts_path;
+        } else {
+#ifndef _WIN32
+            std::string home = resolve_posix_home();
+            if (!home.empty())
+                khPath = home + "/.ssh/known_hosts";
+#endif
+        }
+        if (!khPath.empty()) {
+            khRead = libssh2detail::readKnownHosts(khPath, khLines);
+        }
+    }
+
     // Prefer modern algorithms (host keys, ciphers, MACs) and avoid DSA where
     // possible
 #ifdef LIBSSH2_METHOD_HOSTKEY
     // Host keys: ensure no ssh-dss, avoid ssh-rsa(SHA-1); prefer modern with
-    // safe fallbacks
-    (void)libssh2_session_method_pref(
-        session_, LIBSSH2_METHOD_HOSTKEY,
-        "ssh-ed25519,ecdsa-sha2-nistp256,rsa-sha2-512,rsa-sha2-256,ecdsa-sha2-"
-        "nistp384,ecdsa-sha2-nistp521");
+    // safe fallbacks, after the types known_hosts records for this host.
+    const std::string hostKeyPreference =
+        libssh2detail::hostKeyAlgorithmPreference(
+            recorded_host_key_types(khLines, opt.host, opt.port));
+    (void)libssh2_session_method_pref(session_, LIBSSH2_METHOD_HOSTKEY,
+                                      hostKeyPreference.c_str());
 #endif
 #ifdef LIBSSH2_METHOD_KEX
     (void)libssh2_session_method_pref(
@@ -2267,9 +2207,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
 
     // Ensure blocking mode and bounded waits before handshake/auth.
     libssh2_session_set_blocking(session_, 1);
-#ifdef LIBSSH2_SESSION_TIMEOUT
     libssh2_session_set_timeout(session_, 20000); // 20s
-#endif
     if (libssh2_session_handshake(session_, sock_) != 0) {
 #ifndef _WIN32
         if (opt.jump_host.has_value() && !opt.jump_host->empty() &&
@@ -2296,28 +2234,37 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             return false;
         }
 
-        // Effective path
-        std::string khPath;
-        if (opt.known_hosts_path.has_value()) {
-            khPath = *opt.known_hosts_path;
-        } else {
-#ifndef _WIN32
-            std::string home = resolve_posix_home();
-            if (!home.empty())
-                khPath = home + "/.ssh/known_hosts";
-#endif
+        // Each line is loaded on its own: a line libssh2 cannot parse is
+        // skipped, as OpenSSH does, instead of ending the load.
+        int skippedLines = 0;
+        for (const std::string &line : khLines) {
+            // libssh2_knownhost_readfile() passes the newline too.
+            const std::string withNewline = line + "\n";
+            if (libssh2_knownhost_readline(nh, withNewline.data(),
+                                           withNewline.size(),
+                                           LIBSSH2_KNOWNHOST_FILE_OPENSSH) < 0)
+                ++skippedLines;
         }
-
-        bool khLoaded = false;
-        if (!khPath.empty()) {
-            khLoaded =
-                (libssh2_knownhost_readfile(
-                     nh, khPath.c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH) >= 0);
+        if (skippedLines > 0) {
+            core_logf(CoreLogLevel::Info,
+                      "known_hosts: skipped %d line(s) libssh2 cannot parse",
+                      skippedLines);
         }
-        if (!khLoaded &&
+        if (khRead != libssh2detail::KnownHostsReadStatus::Read &&
             opt.known_hosts_policy == openscp::KnownHostsPolicy::Strict) {
             libssh2_knownhost_free(nh);
             err = "known_hosts unavailable or unreadable (strict policy)";
+            return false;
+        }
+        // Without the whole file a changed key would look like a new host.
+        if (khRead == libssh2detail::KnownHostsReadStatus::Unreadable &&
+            opt.known_hosts_policy == openscp::KnownHostsPolicy::AcceptNew) {
+            libssh2_knownhost_free(nh);
+            err = "known_hosts exists but could not be read, so the host key "
+                  "cannot be verified";
+            if (opt.hostkey_status_cb) {
+                opt.hostkey_status_cb(err);
+            }
             return false;
         }
 
@@ -2344,41 +2291,29 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             err = "Host key DSA no permitido";
             return false;
         case LIBSSH2_HOSTKEY_TYPE_ECDSA_256:
+            algDisplay = "ecdsa-sha2-nistp256";
 #ifdef LIBSSH2_KNOWNHOST_KEY_ECDSA_256
             alg = LIBSSH2_KNOWNHOST_KEY_ECDSA_256;
-            algDisplay = "ecdsa-sha2-nistp256";
-            break;
-#else
-            alg = 0;
-            break;
 #endif
+            break;
         case LIBSSH2_HOSTKEY_TYPE_ECDSA_384:
+            algDisplay = "ecdsa-sha2-nistp384";
 #ifdef LIBSSH2_KNOWNHOST_KEY_ECDSA_384
             alg = LIBSSH2_KNOWNHOST_KEY_ECDSA_384;
-            algDisplay = "ecdsa-sha2-nistp384";
-            break;
-#else
-            alg = 0;
-            break;
 #endif
+            break;
         case LIBSSH2_HOSTKEY_TYPE_ECDSA_521:
+            algDisplay = "ecdsa-sha2-nistp521";
 #ifdef LIBSSH2_KNOWNHOST_KEY_ECDSA_521
             alg = LIBSSH2_KNOWNHOST_KEY_ECDSA_521;
-            algDisplay = "ecdsa-sha2-nistp521";
-            break;
-#else
-            alg = 0;
-            break;
 #endif
+            break;
         case LIBSSH2_HOSTKEY_TYPE_ED25519:
+            algDisplay = "ssh-ed25519";
 #ifdef LIBSSH2_KNOWNHOST_KEY_ED25519
             alg = LIBSSH2_KNOWNHOST_KEY_ED25519;
-            algDisplay = "ssh-ed25519";
-            break;
-#else
-            alg = 0;
-            break;
 #endif
+            break;
         default:
             alg = 0;
             break;
@@ -2386,21 +2321,18 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
 
         int typemask_plain =
             LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW | alg;
-        int typemask_hash =
-            LIBSSH2_KNOWNHOST_TYPE_SHA1 | LIBSSH2_KNOWNHOST_KEYENC_RAW | alg;
         core_logf(CoreLogLevel::Debug,
                   "HostKey map: keytype=%d algMask=%d display=%s", keytype, alg,
                   algDisplay.c_str());
 
+        // TYPE_PLAIN names the host being checked; libssh2 compares it with
+        // plain and hashed (|1|...) entries alike. A second check with
+        // TYPE_SHA1 would always report a mismatch, since libssh2 cannot take
+        // a SHA1 name as input, and hide the real "not found".
         struct libssh2_knownhost *host = nullptr;
         int check =
             libssh2_knownhost_checkp(nh, opt.host.c_str(), opt.port, hostkey,
                                      keylen, typemask_plain, &host);
-        if (check != LIBSSH2_KNOWNHOST_CHECK_MATCH) {
-            check =
-                libssh2_knownhost_checkp(nh, opt.host.c_str(), opt.port,
-                                         hostkey, keylen, typemask_hash, &host);
-        }
 
         if (check == LIBSSH2_KNOWNHOST_CHECK_MATCH) {
             libssh2_knownhost_free(nh);
@@ -2550,8 +2482,6 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                                 "skipped");
                 // Continue without persisting
             } else {
-                bool saved = false;
-                // Prepare add/typemask
                 bool preferHashed = opt.known_hosts_hash_names;
                 if (const char *ev = std::getenv("OPENSCP_KNOWNHOSTS_PLAIN")) {
                     if (*ev == '1')
@@ -2559,124 +2489,27 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                     else if (*ev == '0')
                         preferHashed = true;
                 }
-                int nameMask = preferHashed ? LIBSSH2_KNOWNHOST_TYPE_SHA1
-                                            : LIBSSH2_KNOWNHOST_TYPE_PLAIN;
-                int addMask = nameMask | LIBSSH2_KNOWNHOST_KEYENC_RAW | alg;
                 // host string with port when non-default
                 std::string hostForKnown = opt.host;
                 if (opt.port != 22)
                     hostForKnown = std::string("[") + opt.host +
                                    "]:" + std::to_string(opt.port);
 
-                // Add entry
-                if (alg != 0 &&
-                    libssh2_knownhost_addc(nh, hostForKnown.c_str(), nullptr,
-                                           hostkey, keylen, nullptr, 0, addMask,
-                                           nullptr) == 0) {
-                    std::string persistErr;
-                    saved = persist_known_hosts_atomic(nh, khPath, &persistErr);
-                    if (!saved && opt.hostkey_status_cb) {
-                        opt.hostkey_status_cb(
-                            std::string("Could not save known_hosts: ") +
-                            persistErr);
-                    }
+                // Only the new line is appended: the rest of the file keeps
+                // its comments, its lines and its permissions.
+                const std::string line = libssh2detail::knownHostsLine(
+                    hostForKnown, algDisplay,
+                    reinterpret_cast<const unsigned char *>(hostkey), keylen,
+                    preferHashed);
+                std::string persistErr = "could not hash the host name";
+                const bool saved =
+                    !line.empty() && libssh2detail::appendKnownHostsLine(
+                                         khPath, line, persistErr);
+                if (!saved && opt.hostkey_status_cb) {
+                    opt.hostkey_status_cb(
+                        std::string("Could not save known_hosts: ") +
+                        persistErr);
                 }
-                // Manual ED25519 fallback when libssh2 lacks knownhosts alg
-                // mask
-#ifdef LIBSSH2_HOSTKEY_TYPE_ED25519
-                if (!saved && keytype == LIBSSH2_HOSTKEY_TYPE_ED25519) {
-                    const auto *hostkeyBytes =
-                        reinterpret_cast<const unsigned char *>(hostkey);
-                    if (core_sensitive_debug_enabled()) {
-                        std::ostringstream preview;
-                        const std::size_t n = std::min<std::size_t>(
-                            static_cast<std::size_t>(keylen),
-                            static_cast<std::size_t>(8));
-                        for (std::size_t i = 0; i < n; ++i) {
-                            if (i)
-                                preview << ' ';
-                            char b[4];
-                            std::snprintf(
-                                b, sizeof(b), "%02X",
-                                static_cast<unsigned>(hostkeyBytes[i]));
-                            preview << b;
-                        }
-                        core_logf(CoreLogLevel::Debug,
-                                  "Manual known_hosts write for ssh-ed25519 "
-                                  "fallback; keylen=%zu key_head=%s",
-                                  keylen, preview.str().c_str());
-                    } else {
-                        core_logf(CoreLogLevel::Debug,
-                                  "Manual known_hosts write for ssh-ed25519 "
-                                  "fallback; key material redacted (set "
-                                  "OPENSCP_ENV=dev and "
-                                  "OPENSCP_LOG_SENSITIVE=1 to include)");
-                    }
-                    // Fallback: write OpenSSH line atomically (hashed or plain)
-#ifndef _WIN32
-                    // Read existing
-                    std::string existing;
-                    int rfd = ::open(khPath.c_str(), O_RDONLY);
-                    if (rfd >= 0) {
-                        char buf[4096];
-                        ssize_t n;
-                        while ((n = ::read(rfd, buf, sizeof(buf))) > 0)
-                            existing.append(buf, buf + n);
-                        ::close(rfd);
-                    }
-                    // Build lines
-                    std::vector<std::string> lines;
-                    {
-                        std::string tmp;
-                        for (char c : existing) {
-                            if (c == '\r')
-                                continue;
-                            if (c == '\n') {
-                                lines.push_back(tmp);
-                                tmp.clear();
-                            } else
-                                tmp.push_back(c);
-                        }
-                        if (!existing.empty() && existing.back() != '\n')
-                            lines.push_back(tmp);
-                    }
-                    std::string b64 = b64encode(hostkeyBytes, keylen);
-                    std::string hostToken;
-                    if (preferHashed) {
-                        hostToken = openssh_hash_hostname(hostForKnown);
-                        // note: hashed entries won't be deduplicated (new salt)
-                        lines.push_back(hostToken + " ssh-ed25519 " + b64);
-                    } else {
-                        hostToken = hostForKnown;
-                        std::string prefix = hostToken + " ssh-ed25519 ";
-                        auto it =
-                            std::find_if(lines.begin(), lines.end(),
-                                         [&prefix](const std::string &ln) {
-                                             return ln.rfind(prefix, 0) == 0;
-                                         });
-                        if (it != lines.end()) {
-                            *it = prefix + b64;
-                        } else {
-                            lines.push_back(prefix + b64);
-                        }
-                    }
-                    std::string content;
-                    content.reserve(lines.size() * 64);
-                    for (const std::string &ln : lines) {
-                        if (!ln.empty())
-                            content.append(ln);
-                        content.push_back('\n');
-                    }
-                    std::string persistErr;
-                    saved = persist_text_atomic(khPath, content, &persistErr);
-                    if (!saved && opt.hostkey_status_cb) {
-                        opt.hostkey_status_cb(
-                            std::string("Could not save known_hosts: ") +
-                            persistErr);
-                    }
-#endif
-                }
-#endif
 
                 libssh2_knownhost_free(nh);
                 if (saved) {
@@ -2826,12 +2659,14 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                 bool kbdCancelled = false;
                 bool kbdRejected = false;
                 std::string kbdRejectionError;
+                int kbdRounds = 0;
                 KbdIntCtx ctx{opt.username.c_str(),
                               opt.password->c_str(),
                               &opt.keyboard_interactive_cb,
                               &kbdCancelled,
                               &kbdRejected,
-                              &kbdRejectionError};
+                              &kbdRejectionError,
+                              &kbdRounds};
                 void **abs = libssh2_session_abstract(session_);
                 if (abs)
                     *abs = &ctx;
@@ -2970,6 +2805,11 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
 bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
                                         std::string &err,
                                         bool initializeSftpSubsystem) {
+    if (opt.connection_stop_token.stop_requested()) {
+        err = "Connection canceled by user";
+        setLastOperationError(RemoteErrorKind::Canceled, err);
+        return false;
+    }
     if (!isValidKnownHostsPolicy(opt.known_hosts_policy) ||
         !isValidTransferIntegrityPolicy(opt.transfer_integrity_policy) ||
         !isValidLocalFileDurability(opt.local_file_durability)) {
@@ -3003,6 +2843,9 @@ bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
     // Defensive: ensure no leftover state from any previous partial attempt.
     disconnect();
 
+    std::stop_callback interruptConnection(opt.connection_stop_token,
+                                           [this] { interrupt(); });
+
     if (!libssh2detail::validateEndpointHost(opt.host, "SSH host", err)) {
         setLastOperationError(RemoteErrorKind::InvalidRequest, err);
         return false;
@@ -3019,8 +2862,12 @@ bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
         return false;
     }
 
-    if (!tcpConnect(opt, err))
+    if (!tcpConnect(opt, err)) {
+        const RemoteError failure = classifyStructuredFailure(err, false);
+        disconnect();
+        setLastOperationError(failure);
         return false;
+    }
     if (!sshHandshakeAuth(opt, err, initializeSftpSubsystem)) {
         const RemoteError structuredFailure =
             classifyStructuredFailure(err, false);
@@ -3029,6 +2876,12 @@ bool Libssh2SftpClient::connectInternal(const SessionOptions &opt,
         return false;
     }
 
+    if (opt.connection_stop_token.stop_requested()) {
+        disconnect();
+        err = "Connection canceled by user";
+        setLastOperationError(RemoteErrorKind::Canceled, err);
+        return false;
+    }
     connected_ = true;
     return true;
 }
@@ -3044,6 +2897,25 @@ bool Libssh2SftpClient::connectTransportOnly(const SessionOptions &opt,
     return connectInternal(opt, err, false);
 }
 
+bool Libssh2SftpClient::ensureSftpSubsystem(std::string &err) {
+    auto ioLock = lockIo();
+    err.clear();
+    if (!connected_ || !session_) {
+        err = "Not connected";
+        return false;
+    }
+    if (sftp_)
+        return true;
+    _LIBSSH2_SFTP *sftp = libssh2_sftp_init(session_);
+    if (!sftp) {
+        err = "Could not initialize SFTP";
+        return false;
+    }
+    std::lock_guard<std::mutex> lk(stateMutex_);
+    sftp_ = sftp;
+    return true;
+}
+
 void Libssh2SftpClient::disconnect() {
     bool wasConnected = false;
     int sock = -1;
@@ -3051,17 +2923,16 @@ void Libssh2SftpClient::disconnect() {
         std::lock_guard<std::mutex> lk(stateMutex_);
         wasConnected = connected_;
         connected_ = false;
-        sock = sock_;
-    }
-
-    // Force the transport down first so libssh2 teardown calls fail fast
-    // and any in-flight operation on another thread unblocks immediately.
-    if (sock != -1) {
+        // Keep the descriptor attached until shutdown finishes, as interrupt()
+        // does. Another disconnect must not detach, close and reuse it first.
+        // Shut down before waiting for I/O so blocking operations can finish.
+        if (sock_ != -1) {
 #ifdef _WIN32
-        (void)::shutdown(sock, SD_BOTH);
+            (void)::shutdown(sock_, SD_BOTH);
 #else
-        (void)::shutdown(sock, SHUT_RDWR);
+            (void)::shutdown(sock_, SHUT_RDWR);
 #endif
+        }
     }
 
     // Wait for any in-flight I/O operation to finish using session_ and sftp_.
@@ -3089,21 +2960,13 @@ void Libssh2SftpClient::disconnect() {
 #endif
     }
 
-    if (sock != -1) {
-        ::close(sock);
-    }
-#ifndef _WIN32
-    if (jumpStderrFd != -1)
-        ::close(jumpStderrFd);
-    if (jumpPid > 0)
-        stop_ssh_jump_tunnel(jumpPid);
-#endif
-
+    // libssh2 keeps the socket's number and still reads, writes and changes
+    // its flags while shutting down, so the session goes before the socket:
+    // once closed, that number may already belong to another connection. The
+    // socket is shut down, so these calls fail at once.
     if (session) {
         libssh2_session_set_blocking(session, 0);
-#ifdef LIBSSH2_SESSION_TIMEOUT
         libssh2_session_set_timeout(session, 2000);
-#endif
     }
 
     if (sftp) {
@@ -3116,6 +2979,16 @@ void Libssh2SftpClient::disconnect() {
         }
         libssh2_session_free(session);
     }
+
+    if (sock != -1) {
+        ::close(sock);
+    }
+#ifndef _WIN32
+    if (jumpStderrFd != -1)
+        ::close(jumpStderrFd);
+    if (jumpPid > 0)
+        stop_ssh_jump_tunnel(jumpPid);
+#endif
 }
 
 #ifndef _WIN32
@@ -3167,20 +3040,18 @@ bool Libssh2SftpClient::describeJumpTunnelFailure(std::string &err) {
 #endif
 
 void Libssh2SftpClient::interrupt() {
-    int sock = -1;
-    {
-        std::lock_guard<std::mutex> lk(stateMutex_);
-        sock = sock_;
-    }
-    if (sock == -1)
+    // Keep the descriptor attached until shutdown finishes. Disconnect may
+    // otherwise close it and another thread may reuse that descriptor number.
+    std::lock_guard<std::mutex> lk(stateMutex_);
+    if (sock_ == -1)
         return;
     // libssh2 cannot abandon a blocking call, so the socket is shut down and
     // the session cannot be used again.
     connected_.store(false);
 #ifdef _WIN32
-    (void)::shutdown(sock, SD_BOTH);
+    (void)::shutdown(sock_, SD_BOTH);
 #else
-    (void)::shutdown(sock, SHUT_RDWR);
+    (void)::shutdown(sock_, SHUT_RDWR);
 #endif
 }
 
@@ -3335,6 +3206,7 @@ bool Libssh2SftpClient::get(
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
     auto structuredErrorScope = beginStructuredOperation(err);
+    setLastDownloadModifiedTime(std::nullopt);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
 
@@ -3438,9 +3310,11 @@ bool Libssh2SftpClient::get(
         hasTotal ? total - offset : std::numeric_limits<std::uint64_t>::max()));
     std::size_t done = offset;
 
-    // Optional integrity hashes a whole-file transfer while it streams. A
-    // resumed transfer also depends on earlier data, and a recently modified
-    // file may change without new metadata, so both keep the full check.
+    // Under Optional, SSH already protects the bytes in transit, so a
+    // whole-file download only checks that the remote file kept its size and
+    // time; reading back what was just written would add little. A resumed
+    // download also depends on earlier data, and a recently modified file may
+    // change without new metadata, so both keep the full check.
     const std::optional<std::uint64_t> remoteModified =
         (st.flags & LIBSSH2_SFTP_ATTR_ACMODTIME) != 0
             ? std::optional<std::uint64_t>(st.mtime)
@@ -3449,10 +3323,9 @@ bool Libssh2SftpClient::get(
         std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch())
             .count();
-    const bool streamIntegrity =
+    const bool metadataCheckSuffices =
         policy == TransferIntegrityPolicy::Optional && offset == 0 &&
         !libssh2detail::remoteFileMayBeChanging(remoteModified, nowSeconds);
-    DigestContext streamDigest = start_stream_digest(streamIntegrity);
 
     while (true) {
         if (shouldCancel && shouldCancel()) {
@@ -3472,8 +3345,6 @@ bool Libssh2SftpClient::get(
                                       nativeError);
                 return false;
             }
-            update_stream_digest(streamDigest, buf.data(),
-                                 static_cast<std::size_t>(n));
             done = done + static_cast<std::size_t>(n);
             if (progress && total)
                 progress(done, total);
@@ -3490,7 +3361,7 @@ bool Libssh2SftpClient::get(
         }
     }
 
-    if (streamIntegrity) {
+    if (metadataCheckSuffices) {
         LIBSSH2_SFTP_ATTRIBUTES after{};
         const bool remoteChanged =
             (hasTotal && done != total) ||
@@ -3524,14 +3395,11 @@ bool Libssh2SftpClient::get(
     if (fail_if_transfer_canceled(&shouldCancel, err))
         return false;
 
-    const bool integrityOk =
-        streamIntegrity
-            ? verify_streamed_transfer_integrity(streamDigest, localPart, done,
-                                                 "download", err, &shouldCancel)
-            : verify_final_transfer_integrity(sftp_, localPart, remote, policy,
-                                              "download", err, &shouldCancel);
-    if (!integrityOk)
+    if (!metadataCheckSuffices &&
+        !verify_final_transfer_integrity(sftp_, localPart, remote, policy,
+                                         "download", err, &shouldCancel)) {
         return false;
+    }
 
     if (fail_if_transfer_canceled(&shouldCancel, err))
         return false;
@@ -3542,6 +3410,8 @@ bool Libssh2SftpClient::get(
         err = std::string("Could not finalize atomic download: ") + replaceErr;
         return false;
     }
+    if ((st.flags & LIBSSH2_SFTP_ATTR_ACMODTIME) != 0)
+        setLastDownloadModifiedTime(st.mtime);
     return true;
 }
 
@@ -3636,11 +3506,15 @@ bool Libssh2SftpClient::put(
         }
     }
 
+    // The .part stays private while it is written; the local file's own
+    // permissions are applied just before it replaces the destination.
+    const std::uint32_t permissions =
+        localfiles::uploadPermissions(localFile.get());
     unsigned long flags = LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT |
                           ((startOffset > 0) ? 0 : LIBSSH2_FXF_TRUNC);
     libssh2detail::UniqueSftpHandle wh(libssh2_sftp_open_ex(
         sftp_, remotePart.c_str(), static_cast<unsigned>(remotePart.size()),
-        flags, 0644, LIBSSH2_SFTP_OPENFILE));
+        flags, 0600, LIBSSH2_SFTP_OPENFILE));
     if (!wh) {
         localFile.reset();
         err = "Could not open remote (.part) for writing";
@@ -3665,13 +3539,22 @@ bool Libssh2SftpClient::put(
     }
     std::vector<char> buf(sftp_transfer_buffer_size(total - done));
 
-    // Optional integrity hashes a whole-file transfer while it streams. A
-    // resumed transfer also depends on earlier data, so it keeps the full
-    // check.
-    const bool streamIntegrity =
+    // Under Optional, SSH already protects the bytes in transit, so a
+    // whole-file upload only checks that the source did not change while it
+    // was read, by its identity rather than by reading it again. A resumed
+    // upload also depends on earlier data, so it keeps the full check.
+    const bool identityCheckSuffices =
         policy == TransferIntegrityPolicy::Optional && done == 0;
-    DigestContext streamDigest = start_stream_digest(streamIntegrity);
+    localfiles::LocalFileIdentity sourceBefore{};
+    std::string identityError;
+    const bool sourceIdentified =
+        identityCheckSuffices &&
+        localfiles::localFileIdentity(local, sourceBefore, identityError);
 
+    std::size_t writeSize =
+        std::min(libssh2detail::kMinSftpWriteSize, buf.size());
+    const auto writeStart = std::chrono::steady_clock::now();
+    std::uint64_t writtenNow = 0;
     while (true) {
         size_t n = std::fread(buf.data(), 1, buf.size(), localFile.get());
         if (n > 0) {
@@ -3683,7 +3566,8 @@ bool Libssh2SftpClient::put(
                     localFile.reset();
                     return false;
                 }
-                ssize_t w = libssh2_sftp_write(wh.get(), p, remain);
+                ssize_t w = libssh2_sftp_write(wh.get(), p,
+                                               std::min(remain, writeSize));
                 if (w < 0) {
                     const bool canceledNow = (shouldCancel && shouldCancel());
                     err = canceledNow ? "Canceled by user"
@@ -3697,10 +3581,16 @@ bool Libssh2SftpClient::put(
                 remain = remain - static_cast<size_t>(w);
                 p = p + w;
                 done = done + static_cast<size_t>(w);
+                writtenNow += static_cast<std::uint64_t>(w);
+                writeSize = libssh2detail::nextSftpWriteSize(
+                    writeSize, writtenNow,
+                    std::chrono::duration<double>(
+                        std::chrono::steady_clock::now() - writeStart)
+                        .count(),
+                    buf.size());
                 if (progress && total)
                     progress(done, total);
             }
-            update_stream_digest(streamDigest, buf.data(), n);
         } else {
             if (std::ferror(localFile.get())) {
                 const int nativeError = errno;
@@ -3714,7 +3604,7 @@ bool Libssh2SftpClient::put(
         }
     }
 
-    if (streamIntegrity) {
+    if (identityCheckSuffices) {
         LIBSSH2_SFTP_ATTRIBUTES written{};
         const bool sizeChanged =
             done != total ||
@@ -3729,23 +3619,51 @@ bool Libssh2SftpClient::put(
         }
     }
 
-    wh.close();
+    // Some servers report a failed write only when the handle closes, as NFS
+    // or a quota can; the .part must not replace the destination then.
+    if (wh.close() != 0) {
+        const bool canceledNow = (shouldCancel && shouldCancel());
+        err = canceledNow ? "Canceled by user"
+                          : "Could not close remote (.part) after writing";
+        const RemoteError structuredFailure =
+            classifyStructuredFailure(err, false);
+        localFile.reset();
+        setLastOperationError(structuredFailure);
+        return false;
+    }
     localFile.reset();
 
     if (fail_if_transfer_canceled(&shouldCancel, err))
         return false;
 
-    const bool integrityOk =
-        streamIntegrity
-            ? verify_streamed_transfer_integrity(streamDigest, local, done,
-                                                 "upload", err, &shouldCancel)
-            : verify_final_transfer_integrity(sftp_, local, remotePart, policy,
-                                              "upload", err, &shouldCancel);
-    if (!integrityOk)
+    if (identityCheckSuffices) {
+        // A source that cannot be identified is not checked, as Optional
+        // does with a checksum it cannot compute.
+        localfiles::LocalFileIdentity sourceAfter{};
+        if (sourceIdentified &&
+            localfiles::localFileIdentity(local, sourceAfter, identityError) &&
+            sourceAfter != sourceBefore) {
+            err = "Final integrity check failed (upload): the local file "
+                  "changed during transfer";
+            return false;
+        }
+    } else if (!verify_final_transfer_integrity(sftp_, local, remotePart,
+                                                policy, "upload", err,
+                                                &shouldCancel)) {
         return false;
+    }
 
     if (fail_if_transfer_canceled(&shouldCancel, err))
         return false;
+
+    // A server that refuses this leaves the file private, which is safer
+    // than failing an upload that otherwise succeeded.
+    LIBSSH2_SFTP_ATTRIBUTES mode{};
+    mode.flags = LIBSSH2_SFTP_ATTR_PERMISSIONS;
+    mode.permissions = permissions;
+    (void)libssh2_sftp_stat_ex(sftp_, remotePart.c_str(),
+                               static_cast<unsigned>(remotePart.size()),
+                               LIBSSH2_SFTP_SETSTAT, &mode);
 
     std::string rnErr;
     if (!rename_remote(sftp_, remotePart, remote, true, &rnErr)) {
@@ -3888,21 +3806,32 @@ bool Libssh2SftpClient::chown(const std::string &remote_path, std::uint32_t uid,
     auto structuredErrorScope = beginStructuredOperation(err, true);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
-    LIBSSH2_SFTP_ATTRIBUTES a{};
-    a.flags = 0;
-    if (uid != static_cast<std::uint32_t>(-1)) {
-        a.flags |= LIBSSH2_SFTP_ATTR_UIDGID;
-        a.uid = uid;
-    }
-    if (gid != static_cast<std::uint32_t>(-1)) {
-        a.flags |= LIBSSH2_SFTP_ATTR_UIDGID;
-        a.gid = gid;
-    }
-    if (a.flags == 0) {
+    constexpr auto kUnchanged = static_cast<std::uint32_t>(-1);
+    if (uid == kUnchanged && gid == kUnchanged) {
         // Nothing requested to change.
         err.clear();
         return true;
     }
+    // SFTP v3 sets the owner and the group together, so the one that must
+    // not change is read first; sending 0 for it would give it to root.
+    if (uid == kUnchanged || gid == kUnchanged) {
+        LIBSSH2_SFTP_ATTRIBUTES current{};
+        if (libssh2_sftp_stat_ex(sftp_, remote_path.c_str(),
+                                 static_cast<unsigned>(remote_path.size()),
+                                 LIBSSH2_SFTP_STAT, &current) != 0 ||
+            (current.flags & LIBSSH2_SFTP_ATTR_UIDGID) == 0) {
+            err = "Could not read the current owner and group for remote chown";
+            return false;
+        }
+        if (uid == kUnchanged)
+            uid = static_cast<std::uint32_t>(current.uid);
+        if (gid == kUnchanged)
+            gid = static_cast<std::uint32_t>(current.gid);
+    }
+    LIBSSH2_SFTP_ATTRIBUTES a{};
+    a.flags = LIBSSH2_SFTP_ATTR_UIDGID;
+    a.uid = uid;
+    a.gid = gid;
     int rc = libssh2_sftp_stat_ex(sftp_, remote_path.c_str(),
                                   static_cast<unsigned>(remote_path.size()),
                                   LIBSSH2_SFTP_SETSTAT, &a);
@@ -3984,6 +3913,22 @@ bool Libssh2SftpClient::rename(const std::string &from, const std::string &to,
     return true;
 }
 
+bool HasKnownHostEntry(const std::string &khPath, const std::string &host,
+                       std::uint16_t port) {
+    if (khPath.empty() || host.empty())
+        return false;
+    std::vector<std::string> lines;
+    if (libssh2detail::readKnownHosts(khPath, lines) !=
+        libssh2detail::KnownHostsReadStatus::Read) {
+        return false;
+    }
+    const std::vector<std::string> hostTokens = known_hosts_tokens(host, port);
+    return std::any_of(lines.begin(), lines.end(),
+                       [&hostTokens](const std::string &line) {
+                           return line_matches_site_host(line, hostTokens);
+                       });
+}
+
 bool RemoveKnownHostEntry(const std::string &khPath, const std::string &host,
                           std::uint16_t port, std::string &err) {
     err.clear();
@@ -4009,14 +3954,7 @@ bool RemoveKnownHostEntry(const std::string &khPath, const std::string &host,
         return false;
     }
 
-    std::vector<std::string> hostTokens;
-    if (port == 22) {
-        hostTokens.push_back(host);
-        // Support this uncommon notation if present in existing files.
-        hostTokens.push_back("[" + host + "]:22");
-    } else {
-        hostTokens.push_back("[" + host + "]:" + std::to_string(port));
-    }
+    const std::vector<std::string> hostTokens = known_hosts_tokens(host, port);
 
     const bool hadTrailingLf = !content.empty() && content.back() == '\n';
     std::istringstream inLines(content);

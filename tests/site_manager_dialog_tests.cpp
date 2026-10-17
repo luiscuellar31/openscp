@@ -4,12 +4,16 @@
 #include "widgets/dialogs/SiteManagerDialog.hpp"
 
 #include <QApplication>
+#include <QFile>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSettings>
 #include <QStackedWidget>
 #include <QTableView>
+#include <QTemporaryDir>
+#include <QTimer>
 
 #include <iostream>
 #include <string>
@@ -157,6 +161,112 @@ OPENSCP_TEST(testReloadSwitchesBetweenEmptyStateAndTable, test) {
                "removing the final site should restore the empty state");
     test.check(search->isHidden(),
                "search should hide again after the final site is removed");
+}
+
+OPENSCP_TEST(testChangesKeepSitesSavedElsewhere, test) {
+    clearSavedSites();
+    const SiteEntry kept = savedSiteFixture();
+    SiteEntry removed = savedSiteFixture();
+    removed.siteId = QStringLiteral("site-manager-removed-id");
+    removed.name = QStringLiteral("Old server");
+    test.check(SavedSitesPersistence::saveSites({removed}).ok,
+               "the first saved site should persist");
+    SiteManagerDialog dialog;
+    // Saved while the dialog is open, as a quick connection does.
+    test.check(SavedSitesPersistence::saveSites({removed, kept}).ok,
+               "a site saved elsewhere should persist");
+
+    auto *table =
+        dialog.findChild<QTableView *>(QStringLiteral("savedSitesTable"));
+    auto *deleteButton = dialog.findChild<QPushButton *>(
+        QStringLiteral("siteManagerDeleteButton"));
+    test.check(table && table->model() && deleteButton &&
+                   table->model()->rowCount() == 1,
+               "the dialog should list the site it loaded");
+    if (!table || !table->model() || !deleteButton)
+        return;
+    table->selectRow(0);
+    deleteButton->click();
+
+    const auto stored = SavedSitesPersistence::loadSites().sites;
+    test.check(stored.size() == 1 && stored.front().siteId == kept.siteId,
+               "removing a site must keep the sites saved after the dialog "
+               "loaded them");
+    test.check(table->model()->rowCount() == 1,
+               "the dialog should list the stored sites after a change");
+}
+
+OPENSCP_TEST(testRemovingASiteOnlyRemovesItsHostKeyWhenAsked, test) {
+    clearSavedSites();
+    QTemporaryDir directory;
+    test.check(directory.isValid(), "the host key test needs a folder");
+    if (!directory.isValid())
+        return;
+    const QString knownHosts =
+        directory.filePath(QStringLiteral("known_hosts"));
+    const auto writeKnownHosts = [&knownHosts] {
+        QFile file(knownHosts);
+        return file.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
+               file.write("sftp.example ssh-ed25519 "
+                          "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/"
+                          "qwU9iIfMHkUqPnwGwGZRuQQ3v1d\n") > 0;
+    };
+    const auto keyKept = [&knownHosts] {
+        QFile file(knownHosts);
+        return file.open(QIODevice::ReadOnly) &&
+               file.readAll().contains("sftp.example");
+    };
+    const auto site = [&knownHosts](const char *id,
+                                    openscp::Protocol protocol) {
+        SiteEntry entry = savedSiteFixture();
+        entry.siteId = QString::fromLatin1(id);
+        entry.name = QString::fromLatin1(id);
+        entry.opt.protocol = protocol;
+        entry.opt.known_hosts_path = knownHosts.toStdString();
+        return entry;
+    };
+
+    // Removes the only listed site, answering any question with `answer`,
+    // and tells whether a question was asked.
+    const auto removeOnlySite = [&test](const QVector<SiteEntry> &sites,
+                                        QMessageBox::StandardButton answer) {
+        test.check(SavedSitesPersistence::saveSites(sites).ok,
+                   "the host key sites should be saved");
+        SiteManagerDialog dialog;
+        auto *table =
+            dialog.findChild<QTableView *>(QStringLiteral("savedSitesTable"));
+        auto *deleteButton = dialog.findChild<QPushButton *>(
+            QStringLiteral("siteManagerDeleteButton"));
+        if (!table || !deleteButton)
+            return false;
+        table->selectRow(0);
+        bool asked = false;
+        QTimer::singleShot(0, &dialog, [&asked, answer] {
+            if (auto *box = qobject_cast<QMessageBox *>(
+                    QApplication::activeModalWidget())) {
+                asked = true;
+                box->done(answer);
+            }
+        });
+        deleteButton->click();
+        return asked;
+    };
+
+    test.check(writeKnownHosts(), "the known_hosts fixture should be written");
+    const SiteEntry first = site("a-first", openscp::Protocol::Sftp);
+    const SiteEntry second = site("b-second", openscp::Protocol::Scp);
+    test.check(!removeOnlySite({first, second}, QMessageBox::Yes) && keyKept(),
+               "a key another saved site uses should stay without asking");
+    test.check(!removeOnlySite({site("a-ftp", openscp::Protocol::Ftp)},
+                               QMessageBox::Yes) &&
+                   keyKept(),
+               "removing an FTP site should not touch known_hosts");
+    test.check(removeOnlySite({second}, QMessageBox::No) && keyKept(),
+               "the key should stay when the user keeps it");
+    test.check(removeOnlySite({second}, QMessageBox::Yes) && !keyKept(),
+               "the key should go when the user asks for it");
+    test.check(!removeOnlySite({second}, QMessageBox::Yes),
+               "nothing should be asked once known_hosts lacks the key");
 }
 
 } // namespace

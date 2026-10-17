@@ -11,6 +11,10 @@ set -euo pipefail
 # - Notarizes with notarytool and staples the ticket
 #
 # Configuration via environment variables (local-only usage):
+#   BUILD_DIR              CMake build directory (default: build-macos-package/,
+#                          apart from the development build/), configured with
+#                          Ninja when it is new and ninja is installed
+#   JOBS                   Parallel compile jobs (default: the CPU count)
 #   APP_NAME               Default: "OpenSCP"
 #   BUNDLE_ID              Default: "io.github.luiscuellar31.openscp"
 #   PKG_IDENTIFIER         Default: "io.github.luiscuellar31.openscp.pkg"
@@ -62,7 +66,7 @@ set -euo pipefail
 #     where <ARCH> is arm64, x86_64, or arm64+x86_64
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BUILD_DIR="${REPO_DIR}/build"
+BUILD_DIR="${BUILD_DIR:-${REPO_DIR}/build-macos-package}"
 DIST_DIR="${REPO_DIR}/dist"
 
 APP_NAME="${APP_NAME:-OpenSCP}"
@@ -88,6 +92,8 @@ INFO_PLIST_OUT="${CONTENTS_DIR}/Info.plist"
 QTPREFIX=""
 MACDEPLOYQT_PATH=""
 QT_HOST_WRAP_DIR=""
+# Temporary files: the notarization key and the icon, PKG and DMG staging.
+WORK_DIR=""
 
 source "${REPO_DIR}/scripts/lib/macos/signing.sh"
 source "${REPO_DIR}/scripts/lib/macos/artifacts.sh"
@@ -110,6 +116,7 @@ EOF
 }
 
 source "${REPO_DIR}/scripts/lib/macos/qt-host-tools.sh"
+source "${REPO_DIR}/scripts/lib/cmake-build.sh"
 
 ensure_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required tool: $1"
@@ -266,7 +273,7 @@ generate_icns_from_png() {
   local src_png="$1"; local dst_icns="$2"
   ensure_cmd sips; ensure_cmd iconutil
   local tmp_iconset
-  tmp_iconset="$(mktemp -d)"/icon.iconset
+  tmp_iconset="$(mktemp -d "${WORK_DIR:?package work directory is not set}/iconset.XXXXXX")"/icon.iconset
   mkdir -p "$tmp_iconset"
   # Required sizes for macOS iconset
   local sizes=(16 32 64 128 256 512)
@@ -835,6 +842,7 @@ ensure_qt_plugin_subdir() {
 
 ensure_qt_support_plugins() {
   ensure_qt_plugin_subdir "platforms" "qcocoa" "Qt platform"
+  ensure_qt_plugin_subdir "tls" "qsecuretransportbackend" "Qt native TLS"
   ensure_qt_plugin_subdir "imageformats" "qsvg" "Qt imageformats" 0
   ensure_qt_plugin_subdir "iconengines" "qsvgicon" "Qt iconengines"
   ensure_qt_plugin_subdir "styles" "qmacstyle" "Qt macOS style" 0
@@ -865,7 +873,7 @@ prune_optional_qt_plugins() {
 is_required_qt_plugin_binary() {
   local plugin="$1"
   case "$plugin" in
-    */platforms/libqcocoa.dylib|*/platforms/qcocoa.dylib|*/iconengines/libqsvgicon.dylib|*/iconengines/qsvgicon.dylib)
+    */platforms/libqcocoa.dylib|*/platforms/qcocoa.dylib|*/iconengines/libqsvgicon.dylib|*/iconengines/qsvgicon.dylib|*/tls/libqsecuretransportbackend.dylib)
       return 0
       ;;
     *)
@@ -909,6 +917,8 @@ main() {
   [[ $# -eq 0 ]] || die "Unexpected argument: $1"
 
   mkdir -p "$BUILD_DIR" "$DIST_DIR"
+  WORK_DIR="$(mktemp -d -t openscp-package)"
+  trap 'rm -rf "$WORK_DIR"' EXIT
 
   # Auto-local defaults: if no Apple signing/notarization creds are present and
   # the caller didn't set SKIP_* explicitly, default to skipping them (local unsigned build).
@@ -951,6 +961,12 @@ main() {
   # Prefer explicit Qt env vars, then auto-detect under $HOME/Qt/<version>/macos
   local qt_cfg_dir="${Qt6_DIR:-${QT6_DIR:-}}"
   local -a dependency_cmake_args=()
+  dependency_cmake_args+=(
+    "-DOPENSCP_ENABLE_SPARKLE=${OPENSCP_ENABLE_SPARKLE:-OFF}"
+    "-DOPENSCP_SPARKLE_FRAMEWORK=${OPENSCP_SPARKLE_FRAMEWORK:-}"
+    "-DOPENSCP_SPARKLE_PUBLIC_KEY=${OPENSCP_SPARKLE_PUBLIC_KEY:-}"
+    "-DOPENSCP_SPARKLE_FEED_URL=${OPENSCP_SPARKLE_FEED_URL:-}"
+  )
   if [[ -n "${OPENSCP_DEPENDENCY_PREFIX:-}" ]]; then
     local dependency_prefix="${OPENSCP_DEPENDENCY_PREFIX}"
     local libssh2_link="${dependency_prefix}/lib/libssh2.dylib"
@@ -993,6 +1009,8 @@ main() {
       "-DCMAKE_OSX_ARCHITECTURES=${ARCHS}"
       "-DCMAKE_OSX_DEPLOYMENT_TARGET=${MINIMUM_SYSTEM_VERSION}"
       "-DOPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=${OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION:-OFF}"
+      -DOPENSCP_BUILD_TESTS=OFF
+      -DOPENSCP_ENABLE_DEMO_MODE=OFF
     )
     if [[ -n "$QT_HOST_WRAP_DIR" ]]; then
       cmake_args+=("-DCMAKE_AUTOUIC_EXECUTABLE=${QT_HOST_WRAP_DIR}/uic")
@@ -1002,6 +1020,9 @@ main() {
     fi
     if ((${#dependency_cmake_args[@]:-0})); then
       cmake_args+=("${dependency_cmake_args[@]}")
+    fi
+    if use_ninja_generator "$BUILD_DIR"; then
+      cmake_args+=(-G Ninja)
     fi
     cmake "${cmake_args[@]}"
   else
@@ -1018,16 +1039,21 @@ main() {
       "-DCMAKE_OSX_ARCHITECTURES=${ARCHS}"
       "-DCMAKE_OSX_DEPLOYMENT_TARGET=${MINIMUM_SYSTEM_VERSION}"
       "-DOPENSCP_ENFORCE_RECOMMENDED_QT_VERSION=${OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION:-OFF}"
+      -DOPENSCP_BUILD_TESTS=OFF
+      -DOPENSCP_ENABLE_DEMO_MODE=OFF
     )
     if ((${#dependency_cmake_args[@]:-0})); then
       fallback_cmake_args+=("${dependency_cmake_args[@]}")
     fi
+    if use_ninja_generator "$BUILD_DIR"; then
+      fallback_cmake_args+=(-G Ninja)
+    fi
     cmake "${fallback_cmake_args[@]}"
   fi
-  cmake --build "$BUILD_DIR" -j
+  cmake --build "$BUILD_DIR" --parallel "$(build_jobs)"
 
-  # Expect CMake to have produced build/OpenSCP.app already
-  [[ -d "$APP_DIR" ]] || die "App bundle not found at $APP_DIR. Build it first: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j"
+  # Expect CMake to have produced the app bundle already
+  [[ -d "$APP_DIR" ]] || die "App bundle not found at $APP_DIR after building $BUILD_DIR."
 
   # Use bundle version when available; fallback to CMake project version.
   version="$(detect_bundle_version "$INFO_PLIST_OUT")"
@@ -1051,9 +1077,9 @@ main() {
   if [[ ! -f "$ICON_ICNS_PATH" ]]; then
     if [[ -f "${REPO_DIR}/assets/macos/${ICON_BASENAME}.icns" ]]; then
       cp "${REPO_DIR}/assets/macos/${ICON_BASENAME}.icns" "$ICON_ICNS_PATH"
-    elif [[ -f "${REPO_DIR}/assets/icons/app-openscp.png" ]]; then
+    elif [[ -f "${REPO_DIR}/assets/icons/app/macos-light/openscp-1024.png" ]]; then
       log "Generating ${ICON_BASENAME}.icns from PNG"
-      generate_icns_from_png "${REPO_DIR}/assets/icons/app-openscp.png" "$ICON_ICNS_PATH"
+      generate_icns_from_png "${REPO_DIR}/assets/icons/app/macos-light/openscp-1024.png" "$ICON_ICNS_PATH"
     fi
   fi
 
@@ -1114,6 +1140,17 @@ main() {
   # macdeployqt owns deployed frameworks. Fill only missing direct dependencies
   # from known Qt prefixes, and copy runtime content rather than SDK headers.
   ensure_direct_qt_runtime_frameworks
+  if [[ "${OPENSCP_ENABLE_SPARKLE:-OFF}" == "ON" ]]; then
+    [[ -d "${OPENSCP_SPARKLE_FRAMEWORK:-}" ]] || die "Sparkle.framework is missing"
+    # Preserve version links and helper permissions; macdeployqt may only copy
+    # the directly linked framework binary. Replace that partial copy.
+    rm -rf "${FRAMEWORKS_DIR}/Sparkle.framework"
+    ditto "$OPENSCP_SPARKLE_FRAMEWORK" "${FRAMEWORKS_DIR}/Sparkle.framework"
+    rm -rf "${FRAMEWORKS_DIR}/Sparkle.framework/Versions/B/Headers" \
+           "${FRAMEWORKS_DIR}/Sparkle.framework/Versions/B/Modules" \
+           "${FRAMEWORKS_DIR}/Sparkle.framework/Headers" \
+           "${FRAMEWORKS_DIR}/Sparkle.framework/Modules"
+  fi
 
   # Ensure the specific plugin families we depend on are present in the bundle.
   ensure_qt_support_plugins
@@ -1146,6 +1183,9 @@ main() {
     # Ad‑hoc sign by default to avoid Code Signature Invalid on modified frameworks
     if [[ "${DO_ADHOC_SIGN:-1}" == "1" ]]; then
       adhoc_sign_bundle
+      # Without a valid ad-hoc signature the modified bundle does not start
+      # on Apple silicon.
+      codesign --verify --deep --strict --verbose=2 "$APP_DIR"
     else
       warn "SKIP_CODESIGN=1 and DO_ADHOC_SIGN=0: skipping all signing"
     fi

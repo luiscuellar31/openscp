@@ -15,6 +15,7 @@ warn() { printf "\033[1;33m[warn]\033[0m %s\n" "$*"; }
 die() { printf "\033[1;31m[err ]\033[0m %s\n" "$*"; exit 1; }
 
 source "${REPO_DIR}/scripts/lib/macos/qt-host-tools.sh"
+source "${REPO_DIR}/scripts/lib/cmake-build.sh"
 
 list_rpaths() {
   local bin="$1"
@@ -132,6 +133,7 @@ Optional env vars:
   Qt6_DIR=/path/to/Qt/<ver>/macos/lib/cmake/Qt6
   QT6_DIR=/path/to/Qt/<ver>/macos/lib/cmake/Qt6
   CMAKE_OSX_ARCHITECTURES=arm64|x86_64|arm64;x86_64
+  JOBS=<n>    Parallel compile jobs (default: the CPU count)
   BUNDLE_ID=io.github.example.OpenSCP
   SKIP_CODESIGN=1|0
   SKIP_NOTARIZATION=1|0
@@ -150,9 +152,9 @@ configure_release() {
     -B "$BUILD_DIR"
     -DCMAKE_BUILD_TYPE=Release
     "-DBUNDLE_ID=${BUNDLE_ID}"
-    # Packaging and development share build/. Release packaging can cache an
-    # ephemeral OPENSCP_DEPENDENCY_PREFIX there, so force local dependency
-    # discovery instead of reusing paths that may have been deleted.
+    # Packaging used to share build/ and could cache an ephemeral
+    # OPENSCP_DEPENDENCY_PREFIX there, so force local dependency discovery
+    # instead of reusing paths that may have been deleted.
     -U "LIBSSH2_*"
     -U "OPENSSL_CRYPTO_LIBRARY"
     -U "OPENSSL_INCLUDE_DIR"
@@ -176,13 +178,16 @@ configure_release() {
     args+=("-DCMAKE_AUTOMOC_EXECUTABLE=${QT_HOST_WRAP_DIR}/moc")
     args+=("-DOPENSCP_QT_HOST_TOOLS_DIR=${QT_HOST_WRAP_DIR}")
   fi
+  if use_ninja_generator "$BUILD_DIR"; then
+    args+=(-G Ninja)
+  fi
   log "Configuring Release build"
   cmake "${args[@]}"
 }
 
 build_release() {
   log "Building"
-  cmake --build "$BUILD_DIR" -j
+  cmake --build "$BUILD_DIR" --parallel "$(build_jobs)"
 }
 
 run_app() {

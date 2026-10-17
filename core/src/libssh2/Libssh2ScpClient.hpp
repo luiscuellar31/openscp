@@ -3,8 +3,6 @@
 #pragma once
 #include "Libssh2SftpClient.hpp"
 
-#include <optional>
-
 namespace openscp {
 
 class Libssh2ScpClient : public RemoteClient {
@@ -91,7 +89,11 @@ class Libssh2ScpClient : public RemoteClient {
     bool sftpFallbackEnabled() const;
 
     Libssh2SftpClient delegate_;
-    std::optional<SessionOptions> sessionOptions_;
+    // Only these session options outlive connect(): the fallback reuses the
+    // delegate's authenticated session, so no credentials are kept here.
+    ScpTransferMode transferMode_ = ScpTransferMode::Auto;
+    LocalFileDurability localFileDurability_ =
+        LocalFileDurability::FileAndDirectory;
 };
 
 } // namespace openscp

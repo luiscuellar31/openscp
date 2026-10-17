@@ -37,6 +37,8 @@ struct WebDavTextRequest {
     std::string remotePath;
     const std::string *body = nullptr;
     std::vector<std::string> headers;
+    // The target is a collection, so its URL ends in a slash.
+    bool collection = false;
 };
 
 SessionOptions defaultWebDavOptions() {
@@ -58,14 +60,20 @@ size_t captureWebDavHeader(char *ptr, size_t size, size_t nmemb,
     if (!userdata)
         return 0;
     const size_t total = size * nmemb;
-    std::string line(ptr, total);
-    const std::string lowered = toLowerAscii(line);
-    static constexpr std::string_view prefix = "retry-after:";
-    if (lowered.rfind(prefix, 0) == 0) {
-        const std::string value = trimAscii(line.substr(prefix.size()));
-        auto *retryAfter =
-            static_cast<std::optional<std::uint32_t> *>(userdata);
-        *retryAfter = curlcommon::parseRetryAfter(value);
+    // An exception must not cross libcurl's C frames; returning a short
+    // count aborts the transfer instead.
+    try {
+        std::string line(ptr, total);
+        const std::string lowered = toLowerAscii(line);
+        static constexpr std::string_view prefix = "retry-after:";
+        if (lowered.rfind(prefix, 0) == 0) {
+            const std::string value = trimAscii(line.substr(prefix.size()));
+            auto *retryAfter =
+                static_cast<std::optional<std::uint32_t> *>(userdata);
+            *retryAfter = curlcommon::parseRetryAfter(value);
+        }
+    } catch (...) {
+        return 0;
     }
     return total;
 }
@@ -78,10 +86,14 @@ std::string normalizeRemoteDirPath(std::string path) {
 }
 
 std::string buildWebDavUrl(const SessionOptions &opt,
-                           const std::string &remotePath) {
+                           const std::string &remotePath,
+                           bool collection = false) {
     const std::string host = curlcommon::normalizeHostAuthorityForUrl(opt.host);
-    const std::string path = curlcommon::encodeUrlPath(
-        curlcommon::webDavServerPath(opt.webdav_base_path, remotePath));
+    std::string serverPath =
+        curlcommon::webDavServerPath(opt.webdav_base_path, remotePath);
+    if (collection && serverPath.back() != '/')
+        serverPath.push_back('/');
+    const std::string path = curlcommon::encodeUrlPath(serverPath);
     return std::string(webDavSchemeStorageName(
                normalizeWebDavScheme(opt.webdav_scheme))) +
            "://" + host + ":" + std::to_string(opt.port) + path;
@@ -153,6 +165,7 @@ bool configureCommonCurlHandle(CURL *curl, const SessionOptions &opt,
     if (webDavScheme == WebDavScheme::Https) {
         if (!curlcommon::configureTlsPolicy(
                 curl, opt.webdav_verify_peer, opt.webdav_ca_cert_path,
+                opt.tls_pinned_public_key,
                 "Could not enforce the WebDAV TLS 1.2 minimum.",
                 "Could not configure WebDAV TLS verification policy.",
                 "Could not configure WebDAV TLS CA bundle.", err)) {
@@ -196,13 +209,17 @@ bool performTextRequestOnce(CURL *curl, const SessionOptions &opt,
         return false;
     }
 
-    const std::string url = buildWebDavUrl(opt, request.remotePath);
+    const std::string url =
+        buildWebDavUrl(opt, request.remotePath, request.collection);
     struct curl_slist *headerList = nullptr;
     for (const std::string &h : request.headers)
         headerList = curl_slist_append(headerList, h.c_str());
 
     curlcommon::TransferProgressContext cancelContext{
-        {}, {}, interrupted, false};
+        {},
+        [token = opt.connection_stop_token] { return token.stop_requested(); },
+        interrupted,
+        false};
     curlcommon::BoundedStringSink responseSink{&response.body};
     const bool configured =
         (curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK) &&
@@ -246,28 +263,42 @@ bool performTextRequestOnce(CURL *curl, const SessionOptions &opt,
         curl_slist_free_all(headerList);
         return false;
     }
-    const CURLcode rc = curl_easy_perform(curl);
-    if (curlCodeOut)
-        *curlCodeOut = rc;
+    std::string detail;
+    CURLcode rc = curlcommon::performWithErrorDetail(curl, detail);
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.statusCode);
     curl_slist_free_all(headerList);
 
-    if (responseSink.limitExceeded || responseSink.allocationFailed) {
-        if (curlCodeOut)
-            *curlCodeOut = CURLE_WRITE_ERROR;
-        err = responseSink.limitExceeded
-                  ? std::string("WebDAV ") + request.method +
-                        " response exceeded the 64 MiB safety limit."
-                  : std::string("WebDAV ") + request.method +
-                        " response could not be stored in memory.";
+    const bool refused = curlcommon::refusedResponse(
+        responseSink, std::string("WebDAV ") + request.method + " response", rc,
+        err);
+    if (curlCodeOut)
+        *curlCodeOut = rc;
+    if (refused)
         return false;
-    }
     if (rc != CURLE_OK) {
         err = std::string("WebDAV ") + request.method +
-              " failed: " + curl_easy_strerror(rc);
+              " failed: " + curlcommon::curlFailureText(rc, detail);
         return false;
     }
     return true;
+}
+
+// Apache's mod_dir, with its default DirectorySlash On, redirects a request
+// for a collection without the trailing slash to the same URL with it.
+bool redirectsToCollectionUrl(CURL *curl, const SessionOptions &opt,
+                              const WebDavTextRequest &request,
+                              long statusCode) {
+    if (request.collection || (statusCode != 301 && statusCode != 302 &&
+                               statusCode != 307 && statusCode != 308)) {
+        return false;
+    }
+    char *redirectUrl = nullptr;
+    return curl_easy_getinfo(curl, CURLINFO_REDIRECT_URL, &redirectUrl) ==
+               CURLE_OK &&
+           redirectUrl &&
+           curlcommon::isWebDavCollectionRedirect(
+               redirectUrl, curlcommon::webDavServerPath(opt.webdav_base_path,
+                                                         request.remotePath));
 }
 
 bool performTextRequest(CURL *curl, const SessionOptions &opt,
@@ -275,15 +306,22 @@ bool performTextRequest(CURL *curl, const SessionOptions &opt,
                         const std::atomic<bool> *interrupted,
                         WebDavResponse &response, std::string &err,
                         CURLcode *curlCodeOut = nullptr) {
-    const bool ok =
-        performTextRequestOnce(curl, opt, basicAuthPinned, request, interrupted,
-                               response, err, curlCodeOut);
-    if (!ok || !unpinBasicAuthAfterRejection(curl, basicAuthPinned,
-                                             response.statusCode)) {
-        return ok;
+    bool ok = performTextRequestOnce(curl, opt, basicAuthPinned, request,
+                                     interrupted, response, err, curlCodeOut);
+    if (ok && unpinBasicAuthAfterRejection(curl, basicAuthPinned,
+                                           response.statusCode)) {
+        ok = performTextRequestOnce(curl, opt, basicAuthPinned, request,
+                                    interrupted, response, err, curlCodeOut);
     }
-    return performTextRequestOnce(curl, opt, basicAuthPinned, request,
-                                  interrupted, response, err, curlCodeOut);
+    // Redirects are never followed; this one is repeated, once, with the
+    // collection URL on the same server.
+    if (!ok ||
+        !redirectsToCollectionUrl(curl, opt, request, response.statusCode))
+        return ok;
+    WebDavTextRequest collectionRequest = request;
+    collectionRequest.collection = true;
+    return performTextRequest(curl, opt, basicAuthPinned, collectionRequest,
+                              interrupted, response, err, curlCodeOut);
 }
 
 bool isDirectChildPath(const std::string &parentPath, const std::string &path,
@@ -327,17 +365,17 @@ bool performPropfind(CURL *curl, const SessionOptions &opt,
                      bool &basicAuthPinned, const std::string &remotePath,
                      int depth, const std::atomic<bool> *interrupted,
                      WebDavResponse &response, std::string &err,
-                     CURLcode *curlCodeOut = nullptr) {
+                     CURLcode *curlCodeOut = nullptr, bool collection = false) {
     // PROPFIND drives both stat(depth=0) and list(depth=1).
     const std::string &body = propfindBody();
     std::vector<std::string> headers = {
         "Depth: " + std::to_string(depth),
         "Content-Type: application/xml; charset=utf-8",
     };
-    return performTextRequest(
-        curl, opt, basicAuthPinned,
-        WebDavTextRequest{"PROPFIND", remotePath, &body, std::move(headers)},
-        interrupted, response, err, curlCodeOut);
+    return performTextRequest(curl, opt, basicAuthPinned,
+                              WebDavTextRequest{"PROPFIND", remotePath, &body,
+                                                std::move(headers), collection},
+                              interrupted, response, err, curlCodeOut);
 }
 
 bool unsupportedWebDavOperation(const char *what, std::string &err) {
@@ -345,7 +383,105 @@ bool unsupportedWebDavOperation(const char *what, std::string &err) {
     return false;
 }
 
+enum class WebDavResourceKind { Missing, File, Collection };
+
+struct WebDavResourceProbe {
+    WebDavResourceKind kind = WebDavResourceKind::Missing;
+    std::size_t childCount = 0;
+};
+
+// Describes the target of a mutation that the server would otherwise apply to
+// a whole collection; depth 1 also counts the collection's children. Returns
+// false, with failure set, when the target cannot be identified.
+bool probeWebDavResource(CURL *curl, const SessionOptions &opt,
+                         bool &basicAuthPinned, const std::string &remotePath,
+                         int depth, const std::atomic<bool> *interrupted,
+                         WebDavResourceProbe &probe, RemoteError &failure) {
+    probe = WebDavResourceProbe{};
+    WebDavResponse response;
+    CURLcode rc = CURLE_OK;
+    std::string err;
+    if (!performPropfind(curl, opt, basicAuthPinned, remotePath, depth,
+                         interrupted, response, err, &rc)) {
+        if (rc == CURLE_ABORTED_BY_CALLBACK && interrupted &&
+            interrupted->load())
+            err = "Interrupted";
+        failure = curlcommon::errorFromCurl(rc, err, response.statusCode);
+        return false;
+    }
+    if (isPathMissingStatus(response.statusCode))
+        return true;
+    if (!isSuccessStatus(response.statusCode)) {
+        failure = curlcommon::errorFromHttpStatus(
+            response.statusCode,
+            formatHttpFailure("WebDAV PROPFIND", response.statusCode), false,
+            response.retryAfterSeconds);
+        return false;
+    }
+
+    std::vector<curlparser::WebDavResource> resources;
+    if (curlparser::parseWebDavPropfindResponse(opt, response.body, resources,
+                                                err) !=
+        curlparser::ListingParseStatus::Success) {
+        failure.kind = RemoteErrorKind::Protocol;
+        failure.message = err;
+        return false;
+    }
+    const std::string target = normalizeRemotePath(remotePath);
+    auto it = std::find_if(resources.begin(), resources.end(),
+                           [&target](const curlparser::WebDavResource &r) {
+                               return r.path == target;
+                           });
+    // As in stat(), a single resource answers for the target.
+    if (it == resources.end() && depth == 0 && resources.size() == 1)
+        it = resources.begin();
+    if (it == resources.end()) {
+        failure.kind = RemoteErrorKind::Protocol;
+        failure.message = "WebDAV PROPFIND did not describe the target.";
+        return false;
+    }
+    probe.kind =
+        it->isDir ? WebDavResourceKind::Collection : WebDavResourceKind::File;
+    std::string childName;
+    for (const curlparser::WebDavResource &resource : resources) {
+        if (isDirectChildPath(target, resource.path, childName))
+            ++probe.childCount;
+    }
+    return true;
+}
+
 } // namespace
+
+bool fetchWebDavServerPublicKeyPin(const SessionOptions &opt, std::string &pin,
+                                   std::string &err) {
+    pin.clear();
+    err.clear();
+    if (opt.protocol != Protocol::WebDav ||
+        normalizeWebDavScheme(opt.webdav_scheme) != WebDavScheme::Https) {
+        err = "Only HTTPS WebDAV connections present a TLS certificate.";
+        return false;
+    }
+    if (!curlcommon::validateUrlHost(opt.host, "WebDAV host", err) ||
+        !ensureCurlInitialized(err))
+        return false;
+    SessionOptions probeOptions = opt;
+    probeOptions.username.clear();
+    probeOptions.password.reset();
+    probeOptions.webdav_scheme = WebDavScheme::Https;
+    probeOptions.webdav_base_path =
+        normalizeWebDavBasePath(probeOptions.webdav_base_path);
+    probeOptions.webdav_verify_peer = false;
+    probeOptions.tls_pinned_public_key.reset();
+    if (probeOptions.port == 0)
+        probeOptions.port = defaultPortForWebDavScheme(WebDavScheme::Https);
+    curlcommon::CurlEasySession session;
+    if (!session.initialize(err) ||
+        !configureCommonCurlHandle(session.get(), probeOptions, false, err))
+        return false;
+    return curlcommon::readServerPublicKeyPin(
+        session.get(), buildWebDavUrl(probeOptions, "/"),
+        opt.connection_stop_token, pin, err);
+}
 
 CurlWebDavClient::CurlWebDavClient()
     : state_(std::make_unique<curlcommon::CurlClientState>(
@@ -408,7 +544,8 @@ bool CurlWebDavClient::connect(const SessionOptions &opt, std::string &err) {
     CURLcode probeCode = CURLE_OK;
     bool probeBasicAuthPinned = false;
     if (!performPropfind(curl, normalized, probeBasicAuthPinned, "/", 0,
-                         operation.interrupted(), probe, err, &probeCode)) {
+                         operation.interrupted(), probe, err, &probeCode,
+                         true)) {
         setLastOperationError(
             curlcommon::errorFromCurl(probeCode, err, probe.statusCode));
         return false;
@@ -428,6 +565,7 @@ bool CurlWebDavClient::connect(const SessionOptions &opt, std::string &err) {
         curl_easy_getinfo(curl, CURLINFO_HTTPAUTH_AVAIL, &authAvailable) ==
             CURLE_OK &&
         static_cast<unsigned long>(authAvailable) == CURLAUTH_BASIC;
+    normalized.connection_stop_token = {};
     state_->commitConnection(
         std::make_shared<const SessionOptions>(std::move(normalized)),
         std::move(newEasySession));
@@ -464,7 +602,7 @@ bool CurlWebDavClient::list(const std::string &remote_path,
     CURLcode rc = CURLE_OK;
     if (!performPropfind(connection.session->get(), opt, basicAuthPinned_,
                          basePath, 1, operation.interrupted(), response, err,
-                         &rc)) {
+                         &rc, true)) {
         if (rc == CURLE_ABORTED_BY_CALLBACK && operation.interrupted()->load())
             err = "Interrupted";
         setLastOperationError(
@@ -533,6 +671,7 @@ bool CurlWebDavClient::get(
     std::function<void(std::size_t, std::size_t)> progress,
     std::function<bool()> shouldCancel, bool resume) {
     clearLastOperationError();
+    setLastDownloadModifiedTime(std::nullopt);
     if (resume) {
         err = "WebDAV backend does not support resume.";
         setLastOperationError(RemoteErrorKind::Unsupported, err);
@@ -571,6 +710,9 @@ bool CurlWebDavClient::get(
                            CURLE_OK &&
                        curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L) ==
                            CURLE_OK &&
+                       // The time comes from Last-Modified.
+                       curl_easy_setopt(curl, CURLOPT_FILETIME, 1L) ==
+                           CURLE_OK &&
                        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION,
                                         captureWebDavHeader) == CURLE_OK &&
                        curl_easy_setopt(curl, CURLOPT_HEADERDATA,
@@ -598,6 +740,12 @@ bool CurlWebDavClient::get(
     if (!downloaded) {
         setLastOperationError(failure);
         return false;
+    }
+    curl_off_t fileTime = -1;
+    if (curl_easy_getinfo(connection.session->get(), CURLINFO_FILETIME_T,
+                          &fileTime) == CURLE_OK &&
+        fileTime > 0) {
+        setLastDownloadModifiedTime(static_cast<std::uint64_t>(fileTime));
     }
     return true;
 }
@@ -694,10 +842,27 @@ bool CurlWebDavClient::put(
         return false;
     }
 
+    // MOVE with Overwrite: T first deletes whatever is at the destination, a
+    // whole collection included (RFC 4918 9.9.3). Replace only a file, and do
+    // not overwrite when nothing was there.
+    WebDavResourceProbe destinationProbe;
+    if (!probeWebDavResource(connection.session->get(), opt, basicAuthPinned_,
+                             remote, 0, operation.interrupted(),
+                             destinationProbe, failure)) {
+        err = failure.message;
+        setLastOperationError(failure);
+        return false;
+    }
+    if (destinationProbe.kind == WebDavResourceKind::Collection) {
+        err = "WebDAV upload cannot replace a collection.";
+        setLastOperationError(RemoteErrorKind::Conflict, err);
+        return false;
+    }
     const std::string destination = buildWebDavUrl(opt, remote);
     std::vector<std::string> headers = {
         "Destination: " + destination,
-        "Overwrite: T",
+        destinationProbe.kind == WebDavResourceKind::File ? "Overwrite: T"
+                                                          : "Overwrite: F",
     };
     WebDavResponse moveResponse;
     CURLcode moveCode = CURLE_OK;
@@ -916,6 +1081,16 @@ bool CurlWebDavClient::mkdir(const std::string &remote_dir, std::string &err,
 
 bool CurlWebDavClient::removeFile(const std::string &remote_path,
                                   std::string &err) {
+    return removeResource(remote_path, false, err);
+}
+
+bool CurlWebDavClient::removeDir(const std::string &remote_dir,
+                                 std::string &err) {
+    return removeResource(remote_dir, true, err);
+}
+
+bool CurlWebDavClient::removeResource(const std::string &remote_path,
+                                      bool collection, std::string &err) {
     clearLastOperationError();
     const bool targetsRoot = normalizeRemotePath(remote_path) == "/";
     auto operation = state_->beginConnectedOperation(
@@ -927,11 +1102,42 @@ bool CurlWebDavClient::removeFile(const std::string &remote_path,
     }
     const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
+
+    WebDavResourceProbe probe;
+    RemoteError failure;
+    if (!probeWebDavResource(connection.session->get(), opt, basicAuthPinned_,
+                             remote_path, collection ? 1 : 0,
+                             operation.interrupted(), probe, failure)) {
+        err = failure.message;
+        setLastOperationError(failure);
+        return false;
+    }
+    if (probe.kind == WebDavResourceKind::Missing) {
+        err = formatHttpFailure("WebDAV PROPFIND", 404);
+        setLastOperationError(curlcommon::errorFromHttpStatus(404, err, false));
+        return false;
+    }
+    if (!collection && probe.kind == WebDavResourceKind::Collection) {
+        err = "WebDAV path is a collection, not a file.";
+        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+        return false;
+    }
+    if (collection && probe.kind == WebDavResourceKind::File) {
+        err = "WebDAV path is a file, not a collection.";
+        setLastOperationError(RemoteErrorKind::InvalidRequest, err);
+        return false;
+    }
+    if (collection && probe.childCount > 0) {
+        err = "WebDAV collection is not empty.";
+        setLastOperationError(RemoteErrorKind::Conflict, err);
+        return false;
+    }
+
     WebDavResponse response;
     CURLcode rc = CURLE_OK;
     if (!performTextRequest(
             connection.session->get(), opt, basicAuthPinned_,
-            WebDavTextRequest{"DELETE", remote_path, nullptr, {}},
+            WebDavTextRequest{"DELETE", remote_path, nullptr, {}, collection},
             operation.interrupted(), response, err, &rc)) {
         setLastOperationError(
             curlcommon::errorFromCurl(rc, err, response.statusCode, true));
@@ -943,11 +1149,6 @@ bool CurlWebDavClient::removeFile(const std::string &remote_path,
     setLastOperationError(webDavMutationStatusError(
         response.statusCode, err, response.retryAfterSeconds));
     return false;
-}
-
-bool CurlWebDavClient::removeDir(const std::string &remote_dir,
-                                 std::string &err) {
-    return removeFile(remote_dir, err);
 }
 
 bool CurlWebDavClient::rename(const std::string &from, const std::string &to,
@@ -964,11 +1165,38 @@ bool CurlWebDavClient::rename(const std::string &from, const std::string &to,
     }
     const auto &connection = operation.connection();
     const SessionOptions &opt = *connection.options;
+
+    // Overwrite: T would let the server delete a whole collection at the
+    // destination, so only a file may be replaced, and only by a file.
+    bool replaceDestination = false;
+    if (overwrite) {
+        WebDavResourceProbe destinationProbe;
+        WebDavResourceProbe sourceProbe;
+        RemoteError failure;
+        if (!probeWebDavResource(
+                connection.session->get(), opt, basicAuthPinned_, to, 0,
+                operation.interrupted(), destinationProbe, failure) ||
+            (destinationProbe.kind == WebDavResourceKind::File &&
+             !probeWebDavResource(
+                 connection.session->get(), opt, basicAuthPinned_, from, 0,
+                 operation.interrupted(), sourceProbe, failure))) {
+            err = failure.message;
+            setLastOperationError(failure);
+            return false;
+        }
+        if (destinationProbe.kind == WebDavResourceKind::Collection ||
+            sourceProbe.kind == WebDavResourceKind::Collection) {
+            err = "WebDAV rename can only replace a file with a file.";
+            setLastOperationError(RemoteErrorKind::Conflict, err);
+            return false;
+        }
+        replaceDestination = destinationProbe.kind == WebDavResourceKind::File;
+    }
     const std::string destination = buildWebDavUrl(opt, to);
     // RFC 4918 MOVE requires absolute Destination URL.
     std::vector<std::string> headers = {
         "Destination: " + destination,
-        std::string("Overwrite: ") + (overwrite ? "T" : "F"),
+        std::string("Overwrite: ") + (replaceDestination ? "T" : "F"),
     };
     WebDavResponse response;
     CURLcode rc = CURLE_OK;

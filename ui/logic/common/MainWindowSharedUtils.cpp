@@ -5,10 +5,12 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QUuid>
 
 #include <filesystem>
 
@@ -20,6 +22,133 @@ std::filesystem::path localFilesystemPath(const QString &path) {
 #else
     return std::filesystem::path(QFile::encodeName(path).constData());
 #endif
+}
+
+bool localEntryExists(const QString &path) {
+    const QFileInfo info(path);
+    return info.exists() || info.isSymLink();
+}
+
+bool renameEntry(const QString &from, const QString &to) {
+    const QFileInfo info(from);
+    if (info.isDir() && !info.isSymLink())
+        return QDir().rename(from, to);
+    return QFile::rename(from, to);
+}
+
+// Recreates a link with its original target text, so a relative link stays
+// relative and the target is never copied.
+bool copyLink(const QString &srcPath, const QString &dstPath, QString &error) {
+    std::error_code nativeError;
+    std::filesystem::copy_symlink(localFilesystemPath(srcPath),
+                                  localFilesystemPath(dstPath), nativeError);
+    if (!nativeError)
+        return true;
+    error = QString(QCoreApplication::translate("MainWindow",
+                                                "Could not copy link: %1 (%2)"))
+                .arg(srcPath, QString::fromStdString(nativeError.message()));
+    return false;
+}
+
+// True when path is folder or lies inside it, once both are resolved.
+bool isSameOrInside(const QString &path, const QString &folder) {
+    const QString canonicalPath = QFileInfo(path).canonicalFilePath();
+    QString canonicalFolder = QFileInfo(folder).canonicalFilePath();
+    if (canonicalPath.isEmpty() || canonicalFolder.isEmpty())
+        return false;
+    if (!canonicalFolder.endsWith(QLatin1Char('/')))
+        canonicalFolder += QLatin1Char('/');
+    return (canonicalPath + QLatin1Char('/')).startsWith(canonicalFolder);
+}
+
+bool copyCanceled(const std::function<bool()> &shouldCancel, QString &error) {
+    if (!shouldCancel || !shouldCancel())
+        return false;
+    error = QCoreApplication::translate("MainWindow", "Canceled");
+    return true;
+}
+
+bool copyEntryToEmptyDestination(const QString &srcPath, const QString &dstPath,
+                                 QString &error,
+                                 const std::function<bool()> &shouldCancel) {
+    QFileInfo srcInfo(srcPath);
+
+    // isFile() and isDir() follow links, so check for a link first.
+    if (srcInfo.isSymLink())
+        return copyLink(srcPath, dstPath, error);
+
+    if (srcInfo.isFile()) {
+        QDir().mkpath(QFileInfo(dstPath).dir().absolutePath());
+        if (!QFile::copy(srcPath, dstPath)) {
+            error = QString(QCoreApplication::translate(
+                                "MainWindow", "Could not copy file: %1"))
+                        .arg(srcPath);
+            return false;
+        }
+        return true;
+    }
+
+    if (srcInfo.isDir()) {
+        // Create destination directory
+        if (!QDir().mkpath(dstPath)) {
+            error = QString(QCoreApplication::translate(
+                                "MainWindow",
+                                "Could not create destination folder: %1"))
+                        .arg(dstPath);
+            return false;
+        }
+        // Iterate recursively. Without Hidden and System, the iterator skips
+        // dotfiles and dangling links that removing the source would delete.
+        QDirIterator dirIterator(srcPath,
+                                 QDir::NoDotAndDotDot | QDir::AllEntries |
+                                     QDir::Hidden | QDir::System,
+                                 QDirIterator::Subdirectories);
+        while (dirIterator.hasNext()) {
+            if (copyCanceled(shouldCancel, error))
+                return false;
+            dirIterator.next();
+            const QFileInfo entryFileInfo = dirIterator.fileInfo();
+            const QString relativePath = QDir(srcPath).relativeFilePath(
+                entryFileInfo.absoluteFilePath());
+            const QString target = QDir(dstPath).filePath(relativePath);
+
+            if (entryFileInfo.isSymLink()) {
+                QDir().mkpath(QFileInfo(target).dir().absolutePath());
+                if (!copyLink(entryFileInfo.absoluteFilePath(), target, error))
+                    return false;
+            } else if (entryFileInfo.isDir()) {
+                if (!QDir().mkpath(target)) {
+                    error =
+                        QString(
+                            QCoreApplication::translate(
+                                "MainWindow",
+                                "Could not create destination subfolder: %1"))
+                            .arg(target);
+                    return false;
+                }
+            } else if (entryFileInfo.isFile()) {
+                QDir().mkpath(QFileInfo(target).dir().absolutePath());
+                if (!QFile::copy(entryFileInfo.absoluteFilePath(), target)) {
+                    error = QString(QCoreApplication::translate(
+                                        "MainWindow", "Failed to copy: %1"))
+                                .arg(entryFileInfo.absoluteFilePath());
+                    return false;
+                }
+            } else {
+                // Reading a FIFO or device would block or never end.
+                error =
+                    QString(QCoreApplication::translate(
+                                "MainWindow", "Cannot copy special file: %1"))
+                        .arg(entryFileInfo.absoluteFilePath());
+                return false;
+            }
+        }
+        return true;
+    }
+
+    error = QCoreApplication::translate(
+        "MainWindow", "Source entry is neither file nor folder.");
+    return false;
 }
 
 } // namespace
@@ -36,6 +165,154 @@ LocalRenameResult renameLocalEntry(const QString &sourcePath,
     if (error)
         *error = QString::fromStdString(nativeError.message());
     return LocalRenameResult::Failed;
+}
+
+bool removeLocalEntry(const QString &path) {
+    const QFileInfo info(path);
+    if (!info.exists() && !info.isSymLink())
+        return true;
+    // isDir() follows links, and removeRecursively() on a link to a folder
+    // would empty the target.
+    if (info.isDir() && !info.isSymLink())
+        return QDir(path).removeRecursively();
+    return QFile::remove(path);
+}
+
+bool copyLocalEntry(const QString &srcPath, const QString &dstPath,
+                    QString &error, const std::function<bool()> &shouldCancel) {
+    if (copyCanceled(shouldCancel, error))
+        return false;
+    const QString destinationParent = QFileInfo(dstPath).dir().absolutePath();
+    if (!QDir().mkpath(destinationParent)) {
+        error = QString(QCoreApplication::translate(
+                            "MainWindow",
+                            "Could not create destination folder: %1"))
+                    .arg(destinationParent);
+        return false;
+    }
+
+    // The staged copy would land inside the tree being copied and grow
+    // without end.
+    const QFileInfo srcInfo(srcPath);
+    if (srcInfo.isDir() && !srcInfo.isSymLink() &&
+        isSameOrInside(destinationParent, srcPath)) {
+        error =
+            QString(QCoreApplication::translate(
+                        "MainWindow", "Cannot copy a folder into itself: %1"))
+                .arg(srcPath);
+        return false;
+    }
+
+    const QString token = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString stagedPath =
+        QDir(destinationParent)
+            .filePath(QStringLiteral(".openscp-stage-") + token);
+    const QString backupPath =
+        QDir(destinationParent)
+            .filePath(QStringLiteral(".openscp-backup-") + token);
+
+    if (!copyEntryToEmptyDestination(srcPath, stagedPath, error,
+                                     shouldCancel) ||
+        copyCanceled(shouldCancel, error)) {
+        (void)removeLocalEntry(stagedPath);
+        return false;
+    }
+
+    const bool hadDestination = localEntryExists(dstPath);
+    if (hadDestination && !renameEntry(dstPath, backupPath)) {
+        (void)removeLocalEntry(stagedPath);
+        error = QString(QCoreApplication::translate(
+                            "MainWindow",
+                            "Could not preserve existing destination: %1"))
+                    .arg(dstPath);
+        return false;
+    }
+
+    if (!renameEntry(stagedPath, dstPath)) {
+        (void)removeLocalEntry(stagedPath);
+        const bool restored =
+            !hadDestination || renameEntry(backupPath, dstPath);
+        error =
+            restored
+                ? QString(
+                      QCoreApplication::translate(
+                          "MainWindow", "Could not publish completed copy: %1"))
+                      .arg(dstPath)
+                : QString(QCoreApplication::translate(
+                              "MainWindow",
+                              "Could not publish completed copy or restore the "
+                              "previous destination. Recovery copy: %1"))
+                      .arg(backupPath);
+        return false;
+    }
+
+    if (hadDestination)
+        (void)removeLocalEntry(backupPath);
+    return true;
+}
+
+bool moveLocalEntry(const QString &srcPath, const QString &dstPath,
+                    QString &error, const std::function<bool()> &shouldCancel) {
+    if (copyCanceled(shouldCancel, error))
+        return false;
+    if (QDir::cleanPath(QFileInfo(srcPath).absoluteFilePath()) ==
+        QDir::cleanPath(QFileInfo(dstPath).absoluteFilePath())) {
+        return true;
+    }
+
+    const bool hadDestination = localEntryExists(dstPath);
+    QString backupPath;
+    if (hadDestination) {
+        const QString token =
+            QUuid::createUuid().toString(QUuid::WithoutBraces);
+        backupPath = QDir(QFileInfo(dstPath).dir())
+                         .filePath(QStringLiteral(".openscp-backup-") + token);
+        QString backupError;
+        if (renameLocalEntry(dstPath, backupPath, &backupError) !=
+            LocalRenameResult::Moved) {
+            error = QString(QCoreApplication::translate(
+                                "MainWindow",
+                                "Could not preserve existing destination: %1 "
+                                "(%2)"))
+                        .arg(dstPath, backupError);
+            return false;
+        }
+    }
+
+    QString renameError;
+    const LocalRenameResult renameResult =
+        renameLocalEntry(srcPath, dstPath, &renameError);
+    if (renameResult == LocalRenameResult::Moved) {
+        if (hadDestination)
+            (void)removeLocalEntry(backupPath);
+        return true;
+    }
+
+    if (hadDestination &&
+        renameLocalEntry(backupPath, dstPath) != LocalRenameResult::Moved) {
+        error = QString(QCoreApplication::translate(
+                            "MainWindow",
+                            "Could not move the source or restore the previous "
+                            "destination. Recovery copy: %1"))
+                    .arg(backupPath);
+        return false;
+    }
+
+    if (renameResult != LocalRenameResult::CrossDevice) {
+        error = QString(QCoreApplication::translate(
+                            "MainWindow", "Could not move entry: %1 (%2)"))
+                    .arg(srcPath, renameError);
+        return false;
+    }
+
+    if (!copyLocalEntry(srcPath, dstPath, error, shouldCancel))
+        return false;
+    if (removeLocalEntry(srcPath))
+        return true;
+    error = QString(QCoreApplication::translate("MainWindow",
+                                                "Could not delete source: %1"))
+                .arg(srcPath);
+    return false;
 }
 
 bool PathDepthComparator::operator()(const QString &left,

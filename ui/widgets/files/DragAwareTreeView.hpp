@@ -29,6 +29,8 @@ class DragAwareTreeView : public QTreeView {
     // drag-out
     void setTransferManager(TransferManager *mgr);
     void setRemoteOperationController(RemoteOperationController *controller);
+    // Tells the user, with a link, that a staging batch was kept.
+    void showKeepMessage(const QString &batchDir);
 
     protected:
     void startDrag(Qt::DropActions supportedActions) override;
@@ -40,10 +42,8 @@ class DragAwareTreeView : public QTreeView {
     private:
     void showScrollBarsTemporarily();
     void hideScrollBars();
-    void showKeepMessage(const QString &batchDir);
     void showKeepMessageWithPrefix(const QString &prefix,
                                    const QString &batchDir);
-    void scheduleAutoCleanup(const QString &batchDir, int initialDelayMs = 500);
     // Remote -> system drag-out: prepare asynchronously using TransferManager
     void startRemoteDragAsync(class RemoteModel *remoteModel);
     using RemoteDragTarget = QPair<QString, QString>; // remote, local
@@ -79,6 +79,7 @@ class DragAwareTreeView : public QTreeView {
     void hidePrepOverlay();
     void updateOverlayGeometry();
     void cancelCurrentBatch(const QString &reason);
+    void stopWaitPrompt();
     void logBatchResult(const QString &batchId, int totalItems, int failedItems,
                         const QString &result);
 
@@ -97,6 +98,7 @@ class DragAwareTreeView : public QTreeView {
     class QShortcut *overlayEsc_ =
         nullptr;                  // ESC shortcut while overlay visible
     QTimer *waitTimer_ = nullptr; // Wait/Cancel timer
+    QPointer<class QMessageBox> waitPrompt_;
     QTimer *scrollBarHideTimer_ = nullptr;
     bool updatingScrollBarVisibility_ = false;
     bool scrollBarInteractionActive_ = false;

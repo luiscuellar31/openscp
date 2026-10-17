@@ -5,6 +5,7 @@
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/MainWindowSharedUtils.hpp"
 #include "logic/common/RowSelection.hpp"
+#include "logic/common/StagingStore.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "logic/connections/SessionController.hpp"
 #include "logic/navigation/NavigationScope.hpp"
@@ -13,7 +14,11 @@
 #include "logic/remote/RemoteActionController.hpp"
 #include "logic/remote/RemoteModel.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
+#include "logic/transfers/TransferAutoClear.hpp"
 #include "logic/transfers/TransferManager.hpp"
+#include "logic/updates/MacUpdater.hpp"
+#include "logic/updates/UpdateController.hpp"
+#include "widgets/common/AppIcon.hpp"
 #include "widgets/common/FocusTraversalController.hpp"
 #include "widgets/common/InputModalityTracker.hpp"
 #include "widgets/common/ToolbarKeyboardNavigation.hpp"
@@ -49,7 +54,6 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QRegularExpression>
 #include <QScreen>
 #include <QScrollBar>
 #include <QShortcut>
@@ -203,6 +207,12 @@ QString trimNavigationLabel(const QString &raw, int maxLen = 96) {
 } // namespace
 
 MainWindow::~MainWindow() {
+    // Stop updater callbacks while the window's state still exists. QObject
+    // children would otherwise be destroyed after the derived-class members.
+    delete macUpdater_;
+    macUpdater_ = nullptr;
+    delete updates_;
+    updates_ = nullptr;
     hostKeyPromptCoordinator_.cancel();
     sessionHealthMonitor_.stop();
     if (sessionController_)
@@ -214,12 +224,15 @@ MainWindow::~MainWindow() {
         transferMgr_->shutdown();
     if (transferCleanupFuture_.valid())
         transferCleanupFuture_.wait();
+    localFsCanceled_->store(true);
+    localFsPool_.waitForDone();
     QThreadPool::globalInstance()->waitForDone();
 }
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     Q_INIT_RESOURCE(app_icons);
     Q_INIT_RESOURCE(credits);
+    localFsPool_.setMaxThreadCount(2);
     focusTraversalController_ = new openscpui::FocusTraversalController(this);
     uploadSourcePicker_ = openscpui::createPlatformFilePicker();
     QPointer<MainWindow> self(this);
@@ -247,6 +260,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     initializeMenuBarActions();
     initializePanelInteractions();
     initializeRuntimeState();
+    initializeUpdates();
 }
 
 void MainWindow::initializePanels(const QString &home) {
@@ -686,8 +700,16 @@ void MainWindow::initializeMainToolbar() {
     setTextBesideIcon(actDisconnect_, tr("Disconnect"));
     mainToolbar->addSeparator();
     actSites_ = mainToolbar->addAction(tr("Saved sites"), [this] {
+        // Raise the open Site Manager: the main window refreshes only that one.
+        if (siteManager_) {
+            siteManager_->show();
+            siteManager_->raise();
+            siteManager_->activateWindow();
+            return;
+        }
         const QPointer<QWidget> previousFocus = QApplication::focusWidget();
         SiteManagerDialog dlg(this);
+        siteManager_ = &dlg;
         bool connectionStarted = false;
         if (dlg.exec() == QDialog::Accepted) {
             SiteEntry site;
@@ -1120,6 +1142,15 @@ void MainWindow::initializeRuntimeState() {
                 statusBar()->showMessage(warning, 8000);
                 UiAlerts::warning(this, tr("Transfer queue"), warning);
             });
+    connect(transferMgr_, &TransferManager::transfersWaitingForConnection, this,
+            [this](const QString &error) {
+                statusBar()->showMessage(
+                    tr("Transfers are waiting: no connection to the server "
+                       "could be opened (%1). Resume them once it is "
+                       "reachable.")
+                        .arg(shortRemoteError(error, tr("Transport error."))),
+                    0);
+            });
     (void)transferMgr_->enablePersistence();
     // A single cold snapshot seeds the delta-based UI observer at startup.
     transferUiController_.initialize(transferMgr_->tasksSnapshot());
@@ -1131,12 +1162,6 @@ void MainWindow::initializeRuntimeState() {
     connect(uploadRefreshTimer_, &QTimer::timeout, this, [this] {
         if (!rightIsRemote_ || !rightRemoteModel_)
             return;
-        // Canceling a listing in flight interrupts the control connection,
-        // so wait for it to finish instead.
-        if (activeRemoteListJob_ != 0) {
-            uploadRefreshTimer_->start();
-            return;
-        }
         requestRemoteListing(rightRemoteModel_->rootPath(), true);
     });
     connect(transferMgr_, &TransferManager::tasksAdded, this,
@@ -1172,31 +1197,17 @@ void MainWindow::initializeRuntimeState() {
         if (!autoClean)
             return;
         const QString root = openscpui::effectiveStagingRootPath(settings);
-        QDir stagingRootDir(root);
-        if (!stagingRootDir.exists())
-            return;
-        const QDateTime now = QDateTime::currentDateTimeUtc();
         const int retentionDays = qBound(
             1,
             settings.value(openscpui::settingskeys::kStagingRetentionDays, 7)
                 .toInt(),
             365);
-        const qint64 maxAgeMs = qint64(retentionDays) * 24 * 60 * 60 * 1000;
-        // Match timestamp batches: yyyyMMdd-HHmmss
-        QRegularExpression re("^\\d{8}-\\d{6}$");
-        const auto entries = stagingRootDir.entryInfoList(
-            QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks);
-        for (const QFileInfo &entryInfo : entries) {
-            if (entryInfo.isSymLink())
-                continue; // do not follow symlinks
-            if (!re.match(entryInfo.fileName()).hasMatch())
-                continue; // only batches
-            const QDateTime lastModifiedUtc = entryInfo.lastModified().toUTC();
-            if (lastModifiedUtc.isValid() &&
-                lastModifiedUtc.msecsTo(now) > maxAgeMs) {
-                QDir(entryInfo.absoluteFilePath()).removeRecursively();
-            }
-        }
+        const QDateTime cutoff =
+            QDateTime::currentDateTimeUtc().addDays(-retentionDays);
+        // Batches can hold whole downloads, so they go away off the UI thread.
+        QThreadPool::globalInstance()->start([root, cutoff] {
+            (void)openscpui::removeStagingBatchesOlderThan(root, cutoff);
+        });
     });
 
     // Warn if insecure storage is active (non‑Apple only when explicitly
@@ -1352,11 +1363,10 @@ void MainWindow::showAboutDialog() {
 void MainWindow::showSettingsDialog() {
     const QPointer<QWidget> previousFocus = QApplication::focusWidget();
     SettingsDialog dlg(this);
+    // Settings change only through Apply, which emits settingsApplied.
     connect(&dlg, &SettingsDialog::settingsApplied, this,
             &MainWindow::applyPreferences);
     dlg.exec();
-    // Reflect any applied changes in the running UI
-    applyPreferences();
     restoreFocusAfterDialog(previousFocus);
 }
 
@@ -1408,6 +1418,25 @@ void MainWindow::showEvent(QShowEvent *e) {
 }
 
 void MainWindow::closeEvent(QCloseEvent *e) {
+    if (updates_ && updates_->installing()) {
+        e->ignore();
+        return;
+    }
+    if (updates_)
+        updates_->cancel();
+    if (localFsJobsInFlight_.load() > 0) {
+        if (UiAlerts::question(
+                this, tr("Local copies running"),
+                tr("Local copies or moves are still running. Stop them and "
+                   "quit?\n\nWhat they did not finish stays as it was.")) !=
+            QMessageBox::Yes) {
+            e->ignore();
+            return;
+        }
+        // Each stops at its next entry; one large file still finishes.
+        localFsCanceled_->store(true);
+        localFsPool_.waitForDone();
+    }
     if (transferCleanupInProgress_) {
         pendingCloseAfterDisconnect_ = true;
         e->ignore();
@@ -1657,12 +1686,8 @@ void MainWindow::applyPreferences() {
     prefShowQueueOnEnqueue_ =
         settings.value(openscpui::settingskeys::kUiShowQueueOnEnqueue, true)
             .toBool();
-    prefNoHostVerificationTtlMin_ = qBound(
-        1,
-        settings
-            .value(openscpui::settingskeys::kNoHostVerificationTtlMinutes, 15)
-            .toInt(),
-        120);
+    prefNoHostVerificationTtlMin_ =
+        openscpui::effectiveNoHostVerificationTtlMinutes(settings);
     const int sessionHealthIntervalMs =
         qBound(
             60,
@@ -1675,6 +1700,9 @@ void MainWindow::applyPreferences() {
     sessionHealthMonitor_.setInterval(sessionHealthIntervalMs);
     downloadDir_ = defaultDownloadDirFromSettings(settings);
     QDir().mkpath(downloadDir_);
+    // The queue applies its cleanup even if its window never opens.
+    if (transferMgr_)
+        transferMgr_->setAutoClear(storedTransferAutoClearRule(settings));
     if (actShowQueue_) {
         const QString queueShortcutText =
             settings
@@ -1703,6 +1731,9 @@ void MainWindow::applyPreferences() {
             .value(openscpui::settingskeys::kUiOpenSiteManagerOnDisconnect,
                    true)
             .toBool();
+    // Windows, and the Dock on macOS, show the chosen icon while running.
+    QApplication::setWindowIcon(
+        openscpui::appIcon(openscpui::savedAppIconStyle(settings)));
     applyTransferPreferences();
 
     // Local: model filters (hidden on/off)
@@ -1718,11 +1749,13 @@ void MainWindow::applyPreferences() {
     applyLocalFilters(leftModel_);
     applyLocalFilters(rightLocalModel_);
 
-    // Remote: re-list with hidden filter
+    // Remote: re-list only when the hidden filter changed
+    const bool showHiddenChanged = prefShowHidden_ != showHidden;
     prefShowHidden_ = showHidden;
     if (rightRemoteModel_) {
         rightRemoteModel_->setShowHidden(showHidden);
-        requestRemoteListing(rightRemoteModel_->rootPath(), true);
+        if (showHiddenChanged)
+            requestRemoteListing(rightRemoteModel_->rootPath(), true);
     }
 
     // Single-click activation (connect/disconnect to clicked())

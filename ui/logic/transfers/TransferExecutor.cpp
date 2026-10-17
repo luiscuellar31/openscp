@@ -7,6 +7,7 @@
 #include <QDateTime>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <limits>
 #include <thread>
@@ -119,18 +120,22 @@ bool isFilesystemOperation(TransferTask::Type type) {
 void preserveDownloadModificationTime(
     const TransferTask &task,
     const std::shared_ptr<openscp::RemoteClient> &remoteClient) {
-    openscp::FileInfo remoteInfo{};
-    std::string statError;
-    (void)remoteClient->stat(task.src.toStdString(), remoteInfo, statError);
-    if (remoteInfo.mtime == 0)
-        return;
-
-    if (remoteInfo.mtime >
-        static_cast<quint64>(std::numeric_limits<std::int64_t>::max()))
+    // Backends that learned the time while downloading spare a round trip.
+    std::uint64_t modified =
+        remoteClient->lastDownloadModifiedTime().value_or(0);
+    if (modified == 0) {
+        openscp::FileInfo remoteInfo{};
+        std::string statError;
+        (void)remoteClient->stat(task.src.toStdString(), remoteInfo, statError);
+        modified = remoteInfo.mtime;
+    }
+    if (modified == 0 ||
+        modified >
+            static_cast<quint64>(std::numeric_limits<std::int64_t>::max()))
         return;
     std::string ignoredError;
     (void)openscp::localfiles::setLocalModificationTime(
-        task.dst.toStdString(), static_cast<std::int64_t>(remoteInfo.mtime),
+        task.dst.toStdString(), static_cast<std::int64_t>(modified),
         ignoredError);
 }
 
@@ -230,6 +235,14 @@ bool TransferExecutor::runPostAction(
     if (task.postAction != TransferPostAction::DeleteSource)
         return true;
     if (task.type == TransferTask::Type::Upload) {
+        // This helper never unlinks an existing entry. An absent source can
+        // finish manual cleanup even after its process-local identity is lost.
+        if (openscp::localfiles::removeLocalFileIfUnchanged(
+                task.src.toStdString(),
+                task.localSourceIdentity.value_or(
+                    openscp::localfiles::LocalFileIdentity{}),
+                error))
+            return true;
         if (!task.localSourceIdentity) {
             error = QCoreApplication::translate(
                         "TransferManager",
@@ -239,9 +252,17 @@ bool TransferExecutor::runPostAction(
                         .toStdString();
             return false;
         }
-        if (openscp::localfiles::removeLocalFileIfUnchanged(
-                task.src.toStdString(), *task.localSourceIdentity, error))
-            return true;
+        if (errno == ENOTSUP) {
+            error = QCoreApplication::translate(
+                        "TransferManager",
+                        "The upload completed, but automatic local source "
+                        "removal cannot be done safely. Review the source and "
+                        "remove it manually, then retry the task to finish "
+                        "cleanup.")
+                        .toUtf8()
+                        .toStdString();
+            return false;
+        }
         if (error ==
             "Local source changed after transfer; it was not removed.") {
             error = QCoreApplication::translate(

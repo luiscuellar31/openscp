@@ -17,8 +17,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <limits>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -36,8 +38,10 @@ QString joinedLocalPath(const QString &root, const QString &relativePath) {
                               : QDir(root).filePath(relative);
 }
 
-bool exceedsLargeTreeThreshold(quint64 itemCount, quint64 knownBytes) {
-    return itemCount > kLargeTreeItems || knownBytes > kLargeTreeKnownBytes;
+quint64 saturatingAdd(quint64 left, quint64 right) {
+    return right > std::numeric_limits<quint64>::max() - left
+               ? std::numeric_limits<quint64>::max()
+               : left + right;
 }
 
 QString parentRelativePath(const QString &relativePath) {
@@ -51,17 +55,40 @@ struct SyncCoordinator::PreparationState {
     quint64 generation = 0;
     QString localRoot;
     QString remoteRoot;
-    bool allowLargeTree = false;
+    quint64 largeTreeItems = 0;
+    quint64 largeTreeBytes = 0;
+    // Set once the user accepts a large tree; the local scan reads it.
+    std::atomic_bool allowLargeTree{false};
+    // A scan crossed the threshold, so both wait for the user's answer.
+    std::atomic_bool largeTreePending{false};
+    std::mutex largeTreeMutex;
+    std::condition_variable_any largeTreeAnswered;
+    bool largeTreeAsked = false;
     std::shared_ptr<std::atomic_bool> canceled =
         std::make_shared<std::atomic_bool>(false);
     RemoteOperationController::JobId remoteJobId = 0;
     bool localDone = false;
     bool remoteDone = false;
-    bool limitExceeded = false;
     bool userCanceled = false;
     bool emitted = false;
+    // What the local scan last reported before it finished.
+    quint64 localItemsSeen = 0;
+    quint64 localBytesSeen = 0;
     QString fatalError;
     SyncPreparationResult result;
+
+    [[nodiscard]] bool exceedsLargeTreeLimit(quint64 items,
+                                             quint64 bytes) const {
+        return !allowLargeTree.load() &&
+               (items > largeTreeItems || bytes > largeTreeBytes);
+    }
+    // Items and known bytes of both scans so far.
+    [[nodiscard]] std::pair<quint64, quint64> scannedSoFar() const {
+        if (localDone)
+            return {result.itemCount, result.knownBytes};
+        return {result.itemCount + localItemsSeen,
+                saturatingAdd(result.knownBytes, localBytesSeen)};
+    }
 };
 
 struct SyncCoordinator::ChecksumState {
@@ -81,7 +108,8 @@ struct SyncCoordinator::ChecksumState {
 SyncCoordinator::SyncCoordinator(RemoteOperationController *remoteOperations,
                                  TransferManager *transfers, QObject *parent)
     : QObject(parent), remoteOperations_(remoteOperations),
-      transfers_(transfers) {
+      transfers_(transfers), largeTreeItems_(kLargeTreeItems),
+      largeTreeBytes_(kLargeTreeKnownBytes) {
     Q_ASSERT(remoteOperations_);
     Q_ASSERT(transfers_);
 
@@ -106,11 +134,14 @@ SyncCoordinator::SyncCoordinator(RemoteOperationController *remoteOperations,
 
                 SyncSnapshotEntry snapshot;
                 snapshot.relativePath = relative;
-                snapshot.type =
-                    entry.isSymlink
-                        ? SyncEntryType::SymbolicLink
-                        : (entry.info.is_dir ? SyncEntryType::Directory
-                                             : SyncEntryType::File);
+                if (entry.isSymlink)
+                    snapshot.type = SyncEntryType::SymbolicLink;
+                else if (entry.info.is_dir)
+                    snapshot.type = SyncEntryType::Directory;
+                else if (isRemoteSpecialFile(entry.info.mode))
+                    snapshot.type = SyncEntryType::Other;
+                else
+                    snapshot.type = SyncEntryType::File;
                 if (!entry.info.is_dir) {
                     if (entry.info.has_size) {
                         snapshot.size = entry.info.size;
@@ -134,18 +165,11 @@ SyncCoordinator::SyncCoordinator(RemoteOperationController *remoteOperations,
                                             entry.info.mtime > 0;
                 state->result.remoteSnapshot.push_back(std::move(snapshot));
                 ++state->result.itemCount;
-
-                if (!state->allowLargeTree &&
-                    exceedsLargeTreeThreshold(state->result.itemCount,
-                                              state->result.knownBytes)) {
-                    state->limitExceeded = true;
-                    state->canceled->store(true);
-                    remoteOperations_->cancel(state->remoteJobId);
-                    break;
-                }
             }
-            emit progressChanged(state->result.itemCount,
-                                 state->result.knownBytes, state->remoteRoot);
+            const auto [items, bytes] = state->scannedSoFar();
+            emit progressChanged(items, bytes, state->remoteRoot);
+            if (state->exceedsLargeTreeLimit(items, bytes))
+                askLargeTreeConfirmation(state);
         });
 
     connect(remoteOperations_, &RemoteOperationController::jobProgress, this,
@@ -196,7 +220,7 @@ SyncCoordinator::SyncCoordinator(RemoteOperationController *remoteOperations,
             }
             if (completion.result.outcome ==
                     RemoteOperationController::Outcome::Failed &&
-                !completion.result.partial && !state->limitExceeded) {
+                !completion.result.partial) {
                 state->fatalError =
                     completion.result.error.isEmpty()
                         ? tr("Could not scan the remote folder.")
@@ -541,8 +565,8 @@ void SyncCoordinator::maybeFinishChecksums(
     emit checksumReady(state->result);
 }
 
-void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
-                            bool allowLargeTree) {
+void SyncCoordinator::start(const QString &localRoot,
+                            const QString &remoteRoot) {
     stopState(false);
 
     const QFileInfo localInfo(localRoot);
@@ -564,12 +588,11 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
     state->generation = generation_;
     state->localRoot = canonicalLocalRoot;
     state->remoteRoot = normalizeRemotePath(remoteRoot);
-    state->allowLargeTree = allowLargeTree;
+    state->largeTreeItems = largeTreeItems_;
+    state->largeTreeBytes = largeTreeBytes_;
     state->result.localRoot = state->localRoot;
     state->result.remoteRoot = state->remoteRoot;
     state_ = state;
-    retryLocalRoot_ = state->localRoot;
-    retryRemoteRoot_ = state->remoteRoot;
 
     RemoteOperationController::TraverseRequest request;
     request.rootPath = state->remoteRoot;
@@ -603,7 +626,6 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
         quint64 unknownSizes = 0;
         quint64 depthLimits = 0;
         QSet<QString> unscannedPaths;
-        bool limitExceeded = false;
 
         auto canceled = [&] {
             return stopToken.stop_requested() || state->canceled->load();
@@ -615,14 +637,26 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
                 safeThis,
                 [safeThis, state, itemCount, knownBytes, path] {
                     if (!safeThis || safeThis->state_ != state ||
-                        state->generation != safeThis->generation_) {
+                        state->generation != safeThis->generation_ ||
+                        state->localDone) {
                         return;
                     }
-                    emit safeThis->progressChanged(
-                        state->result.itemCount + itemCount,
-                        state->result.knownBytes + knownBytes, path);
+                    state->localItemsSeen = itemCount;
+                    state->localBytesSeen = knownBytes;
+                    const auto [items, bytes] = state->scannedSoFar();
+                    emit safeThis->progressChanged(items, bytes, path);
+                    if (state->exceedsLargeTreeLimit(items, bytes))
+                        safeThis->askLargeTreeConfirmation(state);
                 },
                 Qt::QueuedConnection);
+        };
+        // Until the user answers, the scan waits here instead of throwing
+        // away what it found.
+        auto waitForLargeTreeAnswer = [&] {
+            std::unique_lock lock(state->largeTreeMutex);
+            state->largeTreeAnswered.wait(lock, stopToken, [&] {
+                return state->allowLargeTree.load() || state->canceled->load();
+            });
         };
 
         while (!stack.empty() && !canceled()) {
@@ -686,11 +720,23 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
                     unscannedPaths.insert(normalized);
                     continue;
                 }
+                // Uploads refuse these names, and the remote scan drops them.
+                if (!isSafeRemoteEntryName(info.fileName())) {
+                    ++invalidNames;
+                    unscannedPaths.insert(node.relativePath);
+                    continue;
+                }
 
                 SyncSnapshotEntry entry;
                 entry.relativePath = normalized;
-                entry.type = info.isDir() ? SyncEntryType::Directory
-                                          : SyncEntryType::File;
+                // FIFOs, sockets and devices are neither, and are never
+                // copied: reading a FIFO would block the transfer.
+                if (info.isDir())
+                    entry.type = SyncEntryType::Directory;
+                else if (info.isFile())
+                    entry.type = SyncEntryType::File;
+                else
+                    entry.type = SyncEntryType::Other;
                 if (info.isFile()) {
                     const qint64 size = info.size();
                     if (size >= 0) {
@@ -720,14 +766,16 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
                                          node.depth + 1});
                     }
                 }
-                if (!state->allowLargeTree &&
-                    exceedsLargeTreeThreshold(itemCount, knownBytes)) {
-                    limitExceeded = true;
-                    state->canceled->store(true);
-                    break;
-                }
-                if ((itemCount % kBatchSize) == 0)
+                // The first entry past the threshold reports at once, so
+                // the question comes up; the others report in batches.
+                const bool reachedLimit =
+                    state->exceedsLargeTreeLimit(itemCount, knownBytes) &&
+                    !state->largeTreePending.exchange(true);
+                if (reachedLimit || (itemCount % kBatchSize) == 0)
                     postProgress(info.absoluteFilePath());
+                if (state->largeTreePending.load() &&
+                    !state->allowLargeTree.load())
+                    waitForLargeTreeAnswer();
             }
             if (listError) {
                 ++inaccessible;
@@ -742,8 +790,7 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
             [safeThis, state, snapshot = std::move(snapshot), itemCount,
              knownBytes, skippedSymlinks, inaccessible, invalidNames,
              unknownSizes, depthLimits,
-             unscannedPaths = std::move(unscannedPaths),
-             limitExceeded]() mutable {
+             unscannedPaths = std::move(unscannedPaths)]() mutable {
                 if (!safeThis || safeThis->state_ != state ||
                     state->generation != safeThis->generation_) {
                     return;
@@ -764,20 +811,37 @@ void SyncCoordinator::start(const QString &localRoot, const QString &remoteRoot,
                 state->result.depthLimits += depthLimits;
                 state->result.coverage.localUnscannedPaths =
                     std::move(unscannedPaths);
-                state->limitExceeded = state->limitExceeded || limitExceeded;
                 state->localDone = true;
-                if (state->limitExceeded && safeThis->remoteOperations_)
-                    safeThis->remoteOperations_->cancel(state->remoteJobId);
                 safeThis->maybeFinish(state);
             },
             Qt::QueuedConnection);
     });
 }
 
-void SyncCoordinator::continueLargeTree() {
-    if (retryLocalRoot_.isEmpty() || retryRemoteRoot_.isEmpty())
+void SyncCoordinator::askLargeTreeConfirmation(
+    const std::shared_ptr<PreparationState> &state) {
+    if (!state || state_ != state || state->emitted || state->largeTreeAsked)
         return;
-    start(retryLocalRoot_, retryRemoteRoot_, true);
+    state->largeTreeAsked = true;
+    state->largeTreePending.store(true);
+    if (!state->remoteDone && remoteOperations_)
+        remoteOperations_->setPaused(state->remoteJobId, true);
+    const auto [items, bytes] = state->scannedSoFar();
+    emit largeTreeConfirmationRequired(items, bytes);
+}
+
+void SyncCoordinator::continueLargeTree() {
+    const auto state = state_;
+    if (!state || state->emitted)
+        return;
+    {
+        std::lock_guard lock(state->largeTreeMutex);
+        state->allowLargeTree.store(true);
+    }
+    state->largeTreeAnswered.notify_all();
+    if (!state->remoteDone && remoteOperations_)
+        remoteOperations_->setPaused(state->remoteJobId, false);
+    maybeFinish(state);
 }
 
 void SyncCoordinator::maybeFinish(
@@ -786,19 +850,16 @@ void SyncCoordinator::maybeFinish(
         !state->remoteDone) {
         return;
     }
-    if (!state->allowLargeTree &&
-        exceedsLargeTreeThreshold(state->result.itemCount,
-                                  state->result.knownBytes)) {
-        state->limitExceeded = true;
+    if (!state->userCanceled &&
+        state->exceedsLargeTreeLimit(state->result.itemCount,
+                                     state->result.knownBytes)) {
+        // continueLargeTree() finishes once the user accepts.
+        askLargeTreeConfirmation(state);
+        return;
     }
     state->emitted = true;
     if (state->userCanceled) {
         emit preparationCanceled();
-        return;
-    }
-    if (state->limitExceeded && !state->allowLargeTree) {
-        emit largeTreeConfirmationRequired(state->result.itemCount,
-                                           state->result.knownBytes);
         return;
     }
     if (!state->fatalError.isEmpty()) {
@@ -849,20 +910,18 @@ quint64 SyncCoordinator::enqueuePlan(const SyncExecutionPlan &plan,
     options.operation = TransferOperation::Copy;
     options.batchId = transfers_->createBatch(options);
 
-    qsizetype taskCount = 0;
-    const auto record = [&](quint64 taskId) {
-        if (taskId != 0)
-            ++taskCount;
-        return taskId;
-    };
+    // The whole plan is queued in one call, so dependencies name requests.
+    QVector<TransferRequest> requests;
+    requests.reserve(plan.directoriesToCreate.size() + plan.copies.size() +
+                     plan.deletes.size());
+    const bool toRemote = plan.direction == SyncDirection::LocalToRemote;
 
     // Directories and copies wait only for the directory task that creates
     // their parent, so a sync runs as many of them at once as the queue
     // allows. SyncComparisonEngine orders directories parents-first.
-    QHash<QString, quint64> directoryTasks;
-    const auto dependOnParentDirectory = [&](const QString &relative) {
-        options.dependsOnTaskId =
-            directoryTasks.value(parentRelativePath(relative), 0);
+    QHash<QString, qsizetype> directoryRequests;
+    const auto parentDirectoryRequest = [&](const QString &relative) {
+        return directoryRequests.value(parentRelativePath(relative), -1);
     };
 
     for (const QString &rawRelative : plan.directoriesToCreate) {
@@ -870,15 +929,15 @@ quint64 SyncCoordinator::enqueuePlan(const SyncExecutionPlan &plan,
             SyncComparisonEngine::normalizeRelativePath(rawRelative);
         if (relative.isEmpty())
             continue;
-        dependOnParentDirectory(relative);
-        const quint64 taskId =
-            plan.direction == SyncDirection::LocalToRemote
-                ? record(transfers_->enqueueRemoteDirectory(
-                      joinRemotePath(remoteRoot, relative), options))
-                : record(transfers_->enqueueLocalDirectory(
-                      joinedLocalPath(localRoot, relative), options));
-        if (taskId != 0)
-            directoryTasks.insert(relative, taskId);
+        const qsizetype parent = parentDirectoryRequest(relative);
+        directoryRequests.insert(relative, requests.size());
+        requests.push_back({toRemote ? TransferTask::Type::CreateRemoteDirectory
+                                     : TransferTask::Type::CreateLocalDirectory,
+                            {},
+                            toRemote ? joinRemotePath(remoteRoot, relative)
+                                     : joinedLocalPath(localRoot, relative),
+                            options,
+                            parent});
     }
 
     for (const SyncCopyOperation &copy : plan.copies) {
@@ -886,15 +945,16 @@ quint64 SyncCoordinator::enqueuePlan(const SyncExecutionPlan &plan,
             SyncComparisonEngine::normalizeRelativePath(copy.relativePath);
         if (relative.isEmpty())
             continue;
-        dependOnParentDirectory(relative);
-        if (plan.direction == SyncDirection::LocalToRemote) {
-            record(transfers_->enqueueUpload(
-                joinedLocalPath(localRoot, relative),
-                joinRemotePath(remoteRoot, relative), options));
+        const QString localPath = joinedLocalPath(localRoot, relative);
+        const QString remotePath = joinRemotePath(remoteRoot, relative);
+        if (toRemote) {
+            requests.push_back({TransferTask::Type::Upload, localPath,
+                                remotePath, options,
+                                parentDirectoryRequest(relative)});
         } else {
-            record(transfers_->enqueueDownload(
-                joinRemotePath(remoteRoot, relative),
-                joinedLocalPath(localRoot, relative), options));
+            requests.push_back({TransferTask::Type::Download, remotePath,
+                                localPath, options,
+                                parentDirectoryRequest(relative)});
         }
     }
 
@@ -902,25 +962,31 @@ quint64 SyncCoordinator::enqueuePlan(const SyncExecutionPlan &plan,
     // leaves every destination extra in place. SyncComparisonEngine orders
     // them deepest-first, and chaining them keeps that order.
     options.waitForBatch = true;
-    quint64 previousDelete = 0;
+    qsizetype previousDelete = -1;
     for (const SyncDeleteOperation &deletion : plan.deletes) {
         const QString relative =
             SyncComparisonEngine::normalizeRelativePath(deletion.relativePath);
         if (relative.isEmpty())
             continue;
         const bool directory = deletion.type == SyncEntryType::Directory;
-        options.dependsOnTaskId = previousDelete;
-        const quint64 taskId =
-            plan.direction == SyncDirection::LocalToRemote
-                ? record(transfers_->enqueueRemoteDelete(
-                      joinRemotePath(remoteRoot, relative), directory, options))
-                : record(transfers_->enqueueLocalDelete(
-                      joinedLocalPath(localRoot, relative), directory,
-                      options));
-        if (taskId != 0)
-            previousDelete = taskId;
+        TransferTask::Type type = TransferTask::Type::DeleteLocalFile;
+        if (toRemote) {
+            type = directory ? TransferTask::Type::DeleteRemoteDirectory
+                             : TransferTask::Type::DeleteRemoteFile;
+        } else if (directory) {
+            type = TransferTask::Type::DeleteLocalDirectory;
+        }
+        const qsizetype request = requests.size();
+        requests.push_back({type,
+                            {},
+                            toRemote ? joinRemotePath(remoteRoot, relative)
+                                     : joinedLocalPath(localRoot, relative),
+                            options,
+                            previousDelete});
+        previousDelete = request;
     }
 
+    const qsizetype taskCount = transfers_->enqueueTasks(requests).size();
     if (taskCountOut)
         *taskCountOut = taskCount;
     return taskCount > 0 ? options.batchId : 0;
