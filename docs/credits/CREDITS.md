@@ -91,3 +91,16 @@ the pinned distribution is Sparkle 2.10.0.
 **Project:** [https://zlib.net](https://zlib.net)
 
 **License file:** [LICENSES/zlib-license.txt](LICENSES/zlib-license.txt)
+
+## Microsoft Visual C++ runtime (Windows)
+
+**License:** Microsoft Software License Terms for the Visual Studio
+redistributable files
+
+**Project:**
+[https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files](https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files)
+
+**Notes:** The Windows setup and MSI place the runtime DLLs that OpenSCP and Qt
+import, such as `msvcp140.dll` and `vcruntime140.dll`, next to the
+application, as those terms allow for the redistributable files. Windows itself
+provides the Universal C Runtime.

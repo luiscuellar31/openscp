@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  WiX v5 source for the OpenSCP MSI, an installation for all users meant for
+  deployment tools. scripts\package\windows.ps1 builds it with
+    wix build -arch x64 -d Version=<version> -d StageDir=<staged app>
+              -d IconFile=<ico> OpenSCP.wxs
+  An MSI installation updates through newer MSIs, not inside OpenSCP: each
+  one replaces any older version.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!-- The UpgradeCode ties all versions together and must never change. -->
+  <Package Name="OpenSCP"
+           Manufacturer="OpenSCP contributors"
+           Version="$(Version)"
+           UpgradeCode="FF30140B-7449-4FBC-A92C-EA5E5C79F69A"
+           Scope="perMachine">
+    <SummaryInformation Description="OpenSCP $(Version)" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of OpenSCP is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="OpenSCP.ico" SourceFile="$(IconFile)" />
+    <Property Id="ARPPRODUCTICON" Value="OpenSCP.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/luiscuellar31/openscp" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/luiscuellar31/openscp/issues" />
+    <Property Id="ARPURLUPDATEINFO" Value="https://github.com/luiscuellar31/openscp/releases" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="OpenSCP" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <!-- Windows Installer counts the Start menu as profile data, which needs
+           a key path under HKCU. -->
+      <Component Id="StartMenuShortcut">
+        <Shortcut Id="OpenSCPShortcut"
+                  Name="OpenSCP"
+                  Target="[INSTALLFOLDER]OpenSCP.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\OpenSCP\MSI"
+                       Name="StartMenuShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="OpenSCP">
+      <Files Directory="INSTALLFOLDER" Include="$(StageDir)\**" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Package>
+</Wix>

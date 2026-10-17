@@ -18,17 +18,8 @@ Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
 
 $RepoDir = Split-Path -Parent $PSScriptRoot
-$RecommendedQtVersion = '6.11.2'
-$QtCompilerDir = 'msvc2022_64'
-
-function Write-Log([string]$Message) {
-    Write-Host "[windows] $Message" -ForegroundColor Cyan
-}
-
-function Stop-WithError([string]$Message) {
-    Write-Host "[err ] $Message" -ForegroundColor Red
-    exit 1
-}
+$LogPrefix = '[windows]'
+. (Join-Path $PSScriptRoot 'lib\windows\build.ps1')
 
 function Show-Usage {
     @'
@@ -62,71 +53,6 @@ Examples:
 '@ | Write-Host
 }
 
-function Get-EnvValue([string]$Name, [string]$Default = '') {
-    $value = [Environment]::GetEnvironmentVariable($Name)
-    if ([string]::IsNullOrEmpty($value)) { return $Default }
-    return $value
-}
-
-function Invoke-Native([string]$FilePath, [string[]]$Arguments) {
-    & $FilePath @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        Stop-WithError "$FilePath exited with code $LASTEXITCODE."
-    }
-}
-
-# Captured before the developer shell starts, because Visual Studio's own
-# vcpkg sets VCPKG_ROOT inside that shell.
-$UserVcpkgRoot = Get-EnvValue 'VCPKG_ROOT'
-
-function Enter-MsvcEnvironment {
-    if (Get-Command cl.exe -ErrorAction SilentlyContinue) { return }
-
-    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-    if (-not (Test-Path $vswhere)) {
-        Stop-WithError 'Visual Studio was not found. Install Visual Studio 2022 or its Build Tools with the "Desktop development with C++" workload.'
-    }
-    $vsPath = & $vswhere -latest -products * `
-        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-        -property installationPath
-    if ([string]::IsNullOrEmpty($vsPath)) {
-        Stop-WithError 'No Visual Studio installation has the x64 C++ tools.'
-    }
-    Import-Module (Join-Path $vsPath 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
-    Enter-VsDevShell -VsInstallPath $vsPath -SkipAutomaticLocation `
-        -DevCmdArguments '-arch=x64 -host_arch=x64 -no_logo' | Out-Null
-}
-
-function Resolve-QtPrefix {
-    $prefix = Get-EnvValue 'QT_PREFIX'
-    if ($prefix) { return $prefix }
-
-    $qt6Dir = Get-EnvValue 'Qt6_DIR'
-    if ($qt6Dir) { return (Resolve-Path (Join-Path $qt6Dir '..\..\..')).Path }
-
-    $candidates = @(Get-ChildItem -Path 'C:\Qt' -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -match '^6(\.\d+)+$' -and
-            (Test-Path (Join-Path $_.FullName "$QtCompilerDir\lib\cmake\Qt6\Qt6Config.cmake")) } |
-        Sort-Object { [version]$_.Name } -Descending)
-    $recommended = $candidates | Where-Object { $_.Name -eq $RecommendedQtVersion }
-    if ($recommended) { return (Join-Path $recommended.FullName $QtCompilerDir) }
-    if ($candidates.Count -gt 0) {
-        return (Join-Path $candidates[0].FullName $QtCompilerDir)
-    }
-    return ''
-}
-
-function Resolve-VcpkgToolchain {
-    if (-not $UserVcpkgRoot) {
-        Stop-WithError 'Set VCPKG_ROOT to a vcpkg checkout; it builds libssh2, OpenSSL, libcurl and tinyxml2 from vcpkg.json.'
-    }
-    $toolchain = Join-Path $UserVcpkgRoot 'scripts\buildsystems\vcpkg.cmake'
-    if (-not (Test-Path $toolchain)) {
-        Stop-WithError "VCPKG_ROOT does not contain scripts\buildsystems\vcpkg.cmake: $UserVcpkgRoot"
-    }
-    return $toolchain
-}
-
 function Get-BuildSettings {
     $buildDir = Get-EnvValue 'BUILD_DIR' (Join-Path $RepoDir 'build')
     if (-not [IO.Path]::IsPathRooted($buildDir)) {
@@ -146,22 +72,7 @@ function Get-BuildSettings {
 }
 
 function Invoke-Configure($Settings, [bool]$WithTests) {
-    $qtPrefix = Resolve-QtPrefix
-    $arguments = @(
-        '-S', $RepoDir,
-        '-B', $Settings.BuildDir,
-        "-DCMAKE_BUILD_TYPE=$($Settings.BuildType)",
-        "-DCMAKE_TOOLCHAIN_FILE=$(Resolve-VcpkgToolchain)",
-        "-DVCPKG_TARGET_TRIPLET=$($Settings.Triplet)"
-    )
-    # CMake keeps the generator a cache was created with.
-    $cache = Join-Path $Settings.BuildDir 'CMakeCache.txt'
-    if (-not (Get-EnvValue 'CMAKE_GENERATOR') -and -not (Test-Path $cache)) {
-        $arguments += @('-G', 'Ninja')
-    }
-    if ($qtPrefix) {
-        $arguments += "-DCMAKE_PREFIX_PATH=$qtPrefix"
-    }
+    $arguments = Get-ConfigureArguments $Settings.BuildDir $Settings.BuildType $Settings.Triplet
     if ($WithTests) {
         $arguments += '-DOPENSCP_BUILD_TESTS=ON'
     }
@@ -176,19 +87,6 @@ function Invoke-Build($Settings, [string[]]$Targets) {
             '--target') + $Targets)
 }
 
-function Find-QtBinDirectory($Settings) {
-    $cache = Join-Path $Settings.BuildDir 'CMakeCache.txt'
-    if (Test-Path $cache) {
-        $line = Select-String -Path $cache -Pattern '^Qt6Core_DIR:PATH=(.+)$' |
-            Select-Object -First 1
-        if ($line) {
-            $bin = Join-Path $line.Matches[0].Groups[1].Value '..\..\..\bin'
-            if (Test-Path $bin) { return (Resolve-Path $bin).Path }
-        }
-    }
-    return ''
-}
-
 function Invoke-Run($Settings) {
     $exe = Join-Path $Settings.BuildDir 'OpenSCP.exe'
     if (-not (Test-Path $exe)) {
@@ -196,7 +94,7 @@ function Invoke-Run($Settings) {
     }
     # The build tree has no deployed Qt; the application loads it from the
     # Qt installation.
-    $qtBin = Find-QtBinDirectory $Settings
+    $qtBin = Find-QtBinDirectory $Settings.BuildDir
     if ($qtBin) { $env:PATH = "$qtBin;$env:PATH" }
 
     Write-Log "Running $exe"

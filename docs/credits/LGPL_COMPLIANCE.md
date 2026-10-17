@@ -6,9 +6,9 @@ Qt libraries. The license text remains the authoritative source.
 
 ## What OpenSCP provides
 
-Official self-contained macOS and AppImage packages use Qt 6.11.2 and link to Qt
-dynamically. Snap and Flatpak use the compatible Qt 6 libraries supplied by
-their external runtimes.
+Official self-contained macOS, AppImage and Windows packages use Qt 6.11.2 and
+link to Qt dynamically. Snap and Flatpak use the compatible Qt 6 libraries
+supplied by their external runtimes.
 
 OpenSCP packages provide:
 
@@ -17,9 +17,9 @@ OpenSCP packages provide:
 - access to the corresponding Qt source; and
 - a way to rebuild OpenSCP or replace compatible Qt libraries.
 
-OpenSCP currently uses Qt Core, Gui, Widgets, and SVG. We do not ship modified
-Qt libraries. If that changes, the corresponding source or patches will be
-provided with the affected release.
+OpenSCP currently uses Qt Core, Gui, Widgets, Network, and SVG. We do not ship
+modified Qt libraries. If that changes, the corresponding source or patches will
+be provided with the affected release.
 
 See [CREDITS.md](CREDITS.md) for the complete third-party component list and
 [Qt-LGPL-3.0.txt](LICENSES/Qt-LGPL-3.0.txt) for the license text.
@@ -76,6 +76,20 @@ existing code signature; an ad-hoc local signature can be applied afterward:
 ```bash
 codesign --force --deep --sign - OpenSCP.app
 ```
+
+On Windows, build with `scripts\windows.ps1`, pointing `QT_PREFIX` to the
+selected Qt:
+
+```powershell
+$env:QT_PREFIX = 'C:\path\to\Qt\6.x\msvc2022_64'
+.\scripts\windows.ps1 configure
+.\scripts\windows.ps1 build
+```
+
+An installed copy keeps its Qt libraries next to `OpenSCP.exe`, in
+`%LOCALAPPDATA%\Programs\OpenSCP` for one user or `%ProgramFiles%\OpenSCP` for
+all users, and its Qt plugins in the folders beside them. Compatible
+replacements can be copied over them; the packages are not code-signed.
 
 OpenSCP does not use technical measures to prevent these replacements. For the
 general LGPL requirements, see
