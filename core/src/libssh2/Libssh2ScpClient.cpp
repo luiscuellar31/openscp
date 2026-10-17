@@ -14,7 +14,6 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
-#include <filesystem>
 #include <limits>
 #include <thread>
 #include <utility>
@@ -430,22 +429,19 @@ bool Libssh2ScpClient::put(
             local, remote, err, std::move(progress), std::move(shouldCancel));
     }
 
-    std::uint64_t total = 0;
-    try {
-        total = std::filesystem::file_size(local);
-    } catch (...) {
-        err = "Could not determine local file size";
-        setLastOperationError(RemoteErrorKind::LocalIo, err);
-        return false;
-    }
-
-    std::FILE *localFile = std::fopen(local.c_str(), "rb");
+    std::FILE *localFile = openLocalFile(local, "rb");
     if (!localFile) {
         err = "Could not open local file for reading";
         setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
         return false;
     }
     UniqueFile localFileOwner(localFile);
+    std::uint64_t total = 0;
+    if (!localFileSize(localFile, total)) {
+        err = "Could not determine local file size";
+        setLastOperationError(RemoteErrorKind::LocalIo, err);
+        return false;
+    }
 
     LIBSSH2_CHANNEL *channel = libssh2_scp_send64(
         session, remote.c_str(),

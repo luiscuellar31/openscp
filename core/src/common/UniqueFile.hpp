@@ -1,10 +1,54 @@
 // Internal RAII owner for C FILE handles.
 #pragma once
 
+#include <cstdint>
 #include <cstdio>
+#include <string>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <utility>
 
+#ifdef _WIN32
+#include "common/Win32Text.hpp"
+
+#include <cerrno>
+#endif
+
 namespace openscp {
+
+// Opens a local file by its UTF-8 path, as std::fopen() does. Windows reads
+// narrow paths in the system code page, so there the path goes through the
+// UTF-16 API, and child processes do not inherit the handle ("N").
+inline std::FILE *openLocalFile(const std::string &path, const char *mode) {
+#ifdef _WIN32
+    std::wstring widePath;
+    if (!win32::toWidePath(path, widePath)) {
+        errno = EINVAL;
+        return nullptr;
+    }
+    std::wstring wideMode = win32::toWide(mode);
+    wideMode += L'N';
+    return ::_wfopen(widePath.c_str(), wideMode.c_str());
+#else
+    return std::fopen(path.c_str(), mode);
+#endif
+}
+
+// The size of an open local file. Unlike a size looked up by path, it belongs
+// to the file actually opened.
+inline bool localFileSize(std::FILE *file, std::uint64_t &size) {
+#ifdef _WIN32
+    struct _stat64 status {};
+    if (::_fstat64(::_fileno(file), &status) != 0)
+        return false;
+#else
+    struct ::stat status {};
+    if (::fstat(::fileno(file), &status) != 0)
+        return false;
+#endif
+    size = static_cast<std::uint64_t>(status.st_size);
+    return true;
+}
 
 class UniqueFile {
     public:

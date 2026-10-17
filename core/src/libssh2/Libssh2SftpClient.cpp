@@ -25,7 +25,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -180,7 +179,57 @@ std::string resolve_posix_home() {
         return std::string(pw->pw_dir);
     return std::string();
 }
+#else
+// The profile folder, where OpenSSH for Windows and Qt's QDir::homePath()
+// look for .ssh, as UTF-8.
+std::string resolve_windows_profile() {
+    const wchar_t *profile = ::_wgetenv(L"USERPROFILE");
+    if (profile && *profile)
+        return win32::toUtf8(profile);
+    return std::string();
+}
 #endif
+
+#ifdef _WIN32
+// Reads a private key file into `out`, sized once so no copy of the key is
+// left behind in reallocated memory. Keys take a few kilobytes; a file over
+// 1 MiB is not one.
+bool read_private_key_file(const std::string &path, std::string &out,
+                           std::string &why) {
+    out.clear();
+    UniqueFile file(openLocalFile(path, "rb"));
+    if (!file) {
+        why = std::string("could not open the private key file: ") +
+              std::strerror(errno);
+        return false;
+    }
+    constexpr std::uint64_t kMaximumKeyBytes = 1024 * 1024;
+    std::uint64_t size = 0;
+    if (!localFileSize(file.get(), size) || size > kMaximumKeyBytes) {
+        why = "the private key file is unreadable or too large";
+        return false;
+    }
+    out.resize(static_cast<std::size_t>(size));
+    const std::size_t read = std::fread(out.data(), 1, out.size(), file.get());
+    if (read != out.size() || std::ferror(file.get()) != 0) {
+        why = "could not read the private key file";
+        return false;
+    }
+    return true;
+}
+#endif
+
+// The known_hosts file OpenSSH uses for the current user, or an empty string
+// when the home folder is unknown.
+std::string default_known_hosts_path() {
+#ifndef _WIN32
+    const std::string home = resolve_posix_home();
+    return home.empty() ? std::string() : home + "/.ssh/known_hosts";
+#else
+    const std::string profile = resolve_windows_profile();
+    return profile.empty() ? std::string() : profile + "\\.ssh\\known_hosts";
+#endif
+}
 
 // Append host key audit log lines to ~/.openscp/openscp.auth (0600).
 #ifndef _WIN32
@@ -296,13 +345,6 @@ bool write_all(int fd, const char *data, std::size_t len, std::string *why) {
         off += static_cast<std::size_t>(w);
     }
     return true;
-}
-#else
-std::string win_err(const char *where, DWORD code) {
-    std::ostringstream oss;
-    oss << where << " (GetLastError=" << static_cast<unsigned long>(code)
-        << ")";
-    return oss.str();
 }
 #endif
 
@@ -537,7 +579,7 @@ std::size_t sftp_transfer_buffer_size(std::uint64_t bytesToTransfer) {
 bool hash_local_range(const std::string &path, std::uint64_t offset,
                       std::uint64_t length, Sha256Digest &out, std::string *why,
                       const std::function<bool()> *shouldCancel = nullptr) {
-    FILE *f = ::fopen(path.c_str(), "rb");
+    FILE *f = openLocalFile(path, "rb");
     if (!f) {
         if (why)
             *why = "Could not open local file for hashing";
@@ -861,6 +903,8 @@ bool persist_text_atomic(const std::string &path, const std::string &content,
     return true;
 }
 #else
+// The same steps as on POSIX, through SafeLocalFile: a new temporary file
+// beside known_hosts, flushed to disk, then renamed over it in one step.
 bool persist_text_atomic(const std::string &path, const std::string &content,
                          std::string *why) {
     if (path.empty()) {
@@ -868,56 +912,44 @@ bool persist_text_atomic(const std::string &path, const std::string &content,
             *why = "empty destination path";
         return false;
     }
-
+    std::string error;
+    const std::size_t separator = path.find_last_of("/\\");
+    if (separator != std::string::npos && separator > 0 &&
+        !localfiles::ensureLocalDirectories(path.substr(0, separator), error)) {
+        if (why)
+            *why = error;
+        return false;
+    }
+    std::array<unsigned char, 6> nonce{};
+    if (RAND_bytes(nonce.data(), static_cast<int>(nonce.size())) != 1) {
+        if (why)
+            *why = "Could not generate a temporary file name";
+        return false;
+    }
+    constexpr char hex[] = "0123456789abcdef";
     std::string tmpPath = path + ".tmp";
-    HANDLE h = CreateFileA(tmpPath.c_str(), GENERIC_WRITE, 0, NULL,
-                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (h == INVALID_HANDLE_VALUE) {
-        if (why)
-            *why = win_err("CreateFile(tmp)", GetLastError());
-        return false;
+    for (unsigned char byte : nonce) {
+        tmpPath.push_back(hex[byte >> 4]);
+        tmpPath.push_back(hex[byte & 0x0f]);
     }
-
-    const char *ptr = content.data();
-    std::size_t rem = content.size();
-    while (rem > 0) {
-        const DWORD chunk = rem > static_cast<std::size_t>(0xFFFFFFFFu)
-                                ? static_cast<DWORD>(0xFFFFFFFFu)
-                                : static_cast<DWORD>(rem);
-        DWORD written = 0;
-        if (!WriteFile(h, ptr, chunk, &written, NULL) || written != chunk) {
-            DWORD ec = GetLastError();
-            (void)CloseHandle(h);
-            (void)DeleteFileA(tmpPath.c_str());
-            if (why)
-                *why = win_err("WriteFile(tmp)", ec);
-            return false;
+    UniqueFile file(localfiles::openRegularFileForWrite(
+        tmpPath, localfiles::WriteMode::Truncate, error));
+    bool written = static_cast<bool>(file);
+    if (written) {
+        written = std::fwrite(content.data(), 1, content.size(), file.get()) ==
+                      content.size() &&
+                  localfiles::flushAndSync(file.get(), error);
+        if (written && file.close() != 0) {
+            written = false;
+            error = "Could not close temporary known_hosts file";
         }
-        ptr += written;
-        rem -= written;
     }
-
-    if (!FlushFileBuffers(h)) {
-        DWORD ec = GetLastError();
-        (void)CloseHandle(h);
-        (void)DeleteFileA(tmpPath.c_str());
+    if (!written || !localfiles::atomicReplace(tmpPath, path, error)) {
+        file.reset();
+        std::string cleanupError;
+        (void)localfiles::removeLocalPath(tmpPath, false, cleanupError);
         if (why)
-            *why = win_err("FlushFileBuffers(tmp)", ec);
-        return false;
-    }
-    if (!CloseHandle(h)) {
-        DWORD ec = GetLastError();
-        (void)DeleteFileA(tmpPath.c_str());
-        if (why)
-            *why = win_err("CloseHandle(tmp)", ec);
-        return false;
-    }
-    if (!MoveFileExA(tmpPath.c_str(), path.c_str(),
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) {
-        DWORD ec = GetLastError();
-        (void)DeleteFileA(tmpPath.c_str());
-        if (why)
-            *why = win_err("MoveFileEx(tmp->known_hosts)", ec);
+            *why = error;
         return false;
     }
     return true;
@@ -2184,11 +2216,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
         if (opt.known_hosts_path.has_value()) {
             khPath = *opt.known_hosts_path;
         } else {
-#ifndef _WIN32
-            std::string home = resolve_posix_home();
-            if (!home.empty())
-                khPath = home + "/.ssh/known_hosts";
-#endif
+            khPath = default_known_hosts_path();
         }
         if (!khPath.empty()) {
             khRead = libssh2detail::readKnownHosts(khPath, khLines);
@@ -2592,10 +2620,26 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
         const char *passphrase = opt.private_key_passphrase
                                      ? opt.private_key_passphrase->c_str()
                                      : nullptr;
+#ifdef _WIN32
+        // libssh2 opens key files with the narrow C API, which on Windows
+        // reads the path in the system code page, so a key under a profile
+        // such as C:\Users\José would not open. The key is read here instead.
+        std::string keyData;
+        CleanseOnScopeExit<std::string> keyCleanse(keyData);
+        std::string readError;
+        if (!read_private_key_file(*opt.private_key_path, keyData, readError)) {
+            err = "Key authentication failed — " + readError;
+            return false;
+        }
+        int rc = libssh2_userauth_publickey_frommemory(
+            session_, opt.username.c_str(), opt.username.size(), nullptr, 0,
+            keyData.data(), keyData.size(), passphrase);
+#else
         int rc = libssh2_userauth_publickey_fromfile(
             session_, opt.username.c_str(),
             NULL, // public key path (NULL: derived from the private key)
             opt.private_key_path->c_str(), passphrase);
+#endif
         if (rc != 0) {
             char *emsgPtr = nullptr;
             int emlen = 0;
@@ -3463,7 +3507,7 @@ bool Libssh2SftpClient::put(
     const std::string remotePart = remote + ".part";
 
     // Open local for reading
-    UniqueFile localFile(::fopen(local.c_str(), "rb"));
+    UniqueFile localFile(openLocalFile(local, "rb"));
     if (!localFile) {
         err = "Could not open local file for reading";
         setLastOperationError(RemoteErrorKind::LocalIo, err, errno);
@@ -3973,17 +4017,23 @@ bool RemoveKnownHostEntry(const std::string &khPath, const std::string &host,
         return false;
     }
 
-    std::ifstream in(khPath, std::ios::binary);
-    if (!in.is_open()) {
-        err = "Could not open known_hosts";
-        return false;
-    }
-
-    const std::string content((std::istreambuf_iterator<char>(in)),
-                              std::istreambuf_iterator<char>());
-    if (!in.good() && !in.eof()) {
-        err = "Could not read known_hosts";
-        return false;
+    // The file is closed again before it is replaced below, which Windows
+    // refuses while it is open.
+    std::string content;
+    {
+        UniqueFile in(openLocalFile(khPath, "rb"));
+        if (!in) {
+            err = "Could not open known_hosts";
+            return false;
+        }
+        char buffer[8192];
+        std::size_t count = 0;
+        while ((count = std::fread(buffer, 1, sizeof(buffer), in.get())) > 0)
+            content.append(buffer, count);
+        if (std::ferror(in.get()) != 0) {
+            err = "Could not read known_hosts";
+            return false;
+        }
     }
 
     const std::vector<std::string> hostTokens = known_hosts_tokens(host, port);

@@ -31,8 +31,9 @@ std::string
 hostKeyAlgorithmPreference(const std::vector<std::string> &recordedKeyTypes);
 
 /// Appends `line` to the known_hosts file at `path`, which is created with
-/// mode 0600, and its folder with 0700, when missing. The rest of the file,
-/// its permissions, an existing folder's permissions and a symbolic link at
+/// mode 0600, and its folder with 0700, when missing; on Windows both inherit
+/// the permissions of the folder they are made in. The rest of the file, its
+/// permissions, an existing folder's permissions and a symbolic link at
 /// `path` stay as they are.
 bool appendKnownHostsLine(const std::string &path, const std::string &line,
                           std::string &error);
