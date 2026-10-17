@@ -18,7 +18,8 @@ updates:
       include: "scope"
 
   # Moves vcpkg.json's builtin-baseline, which pins the Windows libraries;
-  # the Windows CI jobs fetch vcpkg at that commit.
+  # the Windows CI jobs fetch vcpkg at that commit. OpenSSL is pinned apart,
+  # in vcpkg-ports/openssl.
   - package-ecosystem: "vcpkg"
     directory: "/"
     target-branch: "dev"

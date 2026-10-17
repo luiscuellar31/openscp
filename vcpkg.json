@@ -20,5 +20,11 @@
     },
     "openssl",
     "tinyxml2"
-  ]
+  ],
+  "vcpkg-configuration": {
+    "$comment": "vcpkg-ports/openssl keeps OpenSSL on its 3.5 long-term support series, as the macOS release builds do; see vcpkg-ports/README.md.",
+    "overlay-ports": [
+      "./vcpkg-ports"
+    ]
+  }
 }

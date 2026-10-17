@@ -6,3 +6,8 @@
 # cmd.exe can misread batch files that use LF line endings.
 *.bat text eol=crlf
 *.cmd text eol=crlf
+
+# Patches in vcpkg ports may hold whitespace that belongs to the patched
+# content, as vcpkg itself declares.
+vcpkg-ports/**/*.patch -whitespace
+vcpkg-ports/**/*.diff -whitespace
