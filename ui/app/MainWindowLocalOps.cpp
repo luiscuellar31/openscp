@@ -19,6 +19,7 @@
 #include <QPushButton>
 #include <QStatusBar>
 #include <QThreadPool>
+#include <QToolBar>
 
 #include <algorithm>
 #include <functional>
@@ -422,8 +423,13 @@ void MainWindow::runLocalDelete(const QStringList &paths) {
 void MainWindow::goUpLeft() {
     QString currentPath = leftPath_->path();
     QDir currentDir(currentPath);
-    if (!currentDir.cdUp())
+    if (!currentDir.cdUp()) {
+        const QString drive = chooseLocalDrive(
+            leftPaneBar_->widgetForAction(actUpLeft_), currentPath);
+        if (!drive.isEmpty())
+            setLeftRoot(drive);
         return;
+    }
     setLeftRoot(currentDir.absolutePath());
     updateDeleteShortcutEnables();
 }
@@ -579,8 +585,8 @@ void MainWindow::showLeftContextMenu(const QPoint &pos) {
     if (auto selectionModel = leftView_->selectionModel()) {
         hasSel = !selectionModel->selectedRows(kNameColumn).isEmpty();
     }
-    QDir currentDir(leftPath_ ? leftPath_->path() : QString());
-    bool canGoUp = currentDir.cdUp();
+    const bool canGoUp =
+        canGoUpLocally(leftPath_ ? leftPath_->path() : QString());
 
     QAction *copyToRight = nullptr;
     QAction *moveToRight = nullptr;
