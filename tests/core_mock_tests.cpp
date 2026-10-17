@@ -511,6 +511,9 @@ OPENSCP_TEST(test_libssh2_input_safety, t) {
     error.clear();
     t.check(!validateEndpointHost("example.test:2222", "SSH host", error),
             "SSH hosts must keep ports in the dedicated field");
+    error.clear();
+    t.check(!validateEndpointHost("-oProxyCommand=true", "Jump host", error),
+            "a host must not look like an option of the ssh program");
 }
 
 OPENSCP_TEST(test_known_hosts_file_reads_every_line, t) {
