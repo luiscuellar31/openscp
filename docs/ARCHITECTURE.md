@@ -162,6 +162,13 @@ the I/O mutex, so shutdown can unblock an active operation without reversing
 the I/O-to-state lock order. Session and socket ownership are then detached
 under both locks; only the caller that detaches them performs cleanup.
 
+FTPS and HTTPS WebDAV connections that verify certificates without a chosen CA
+file trust the system's roots. OpenSSL has none of its own on Windows, so
+there `WindowsServerTrust_win` replaces its check of the server's chain with
+`CertGetCertificateChain` and the SSL policy of Windows, which fetch missing
+roots and honor the Disallowed store; libcurl still checks the host name. A
+chosen CA file is the only one trusted on every platform.
+
 FTPS and HTTPS WebDAV connections that skip certificate verification pin the
 server's TLS public key. Before the control connection, the connection worker
 reads the key through `FetchServerPublicKeyPin`, a handshake without
