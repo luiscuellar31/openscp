@@ -1,5 +1,6 @@
 #include "logic/sync/SyncCoordinator.hpp"
 
+#include "logic/common/LocalLinks.hpp"
 #include "logic/navigation/RemotePath.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
 #include "logic/transfers/TransferManager.hpp"
@@ -423,7 +424,7 @@ void SyncCoordinator::startChecksums(const QString &localRoot,
             const bool confined = !canonicalRoot.isEmpty() &&
                                   !canonicalFile.isEmpty() &&
                                   canonicalFile.startsWith(confinedPrefix);
-            if (!confined || fileInfo.isSymLink() || !fileInfo.isFile()) {
+            if (!confined || isLocalLink(fileInfo) || !fileInfo.isFile()) {
                 failures.push_back(
                     SyncCoordinator::tr(
                         "%1: the local file is unavailable or outside "
@@ -719,7 +720,7 @@ void SyncCoordinator::start(const QString &localRoot,
                     unscannedPaths.insert(node.relativePath);
                     continue;
                 }
-                if (info.isSymLink()) {
+                if (isLocalLink(info)) {
                     ++skippedSymlinks;
                     unscannedPaths.insert(normalized);
                     continue;

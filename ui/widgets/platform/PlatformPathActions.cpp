@@ -1,5 +1,6 @@
 #include "widgets/platform/PlatformPathActions.hpp"
 
+#include "logic/common/LocalLinks.hpp"
 #include "widgets/platform/PlatformPathActions_p.hpp"
 
 #include <QCoreApplication>
@@ -93,7 +94,7 @@ ResolvedPathTarget resolveRevealTarget(const QString &requestedPath) {
     target.path = requestedPath;
 
     const QFileInfo requested(requestedPath);
-    if (requested.exists() || requested.isSymLink()) {
+    if (requested.exists() || isLocalLink(requested)) {
         target.kind = requested.isDir() ? PathActionKind::OpenFolder
                                         : PathActionKind::Reveal;
         target.path = requested.absoluteFilePath();
@@ -248,7 +249,7 @@ PathActionResult PlatformPathActions::openFolder(const QString &folderPath) {
 PathActionResult PlatformPathActions::openFile(const QString &filePath) {
     const QFileInfo info(filePath);
     if (filePath.isEmpty() || info.isDir() ||
-        (!info.exists() && !info.isSymLink())) {
+        (!info.exists() && !isLocalLink(info))) {
         return failure(unavailableError(filePath));
     }
     return openLocalUrl(info.absoluteFilePath());

@@ -1,5 +1,6 @@
 #include "logic/remote/LocalTreeDiscovery.hpp"
 
+#include "logic/common/LocalLinks.hpp"
 #include "logic/navigation/RemotePath.hpp"
 
 #include <QDir>
@@ -262,7 +263,7 @@ void LocalTreeDiscovery::start(
                 QDir::cleanPath(requestedInfo.absoluteFilePath());
             const QFileInfo info(absolutePath);
 
-            if (info.isSymLink()) {
+            if (isLocalLink(info)) {
                 ++counters.skippedSymlinks;
                 continue;
             }
@@ -354,7 +355,7 @@ void LocalTreeDiscovery::start(
                 const QFileInfo child = node.entries->fileInfo();
                 if (cancellationRequested(stopToken))
                     break;
-                if (child.isSymLink()) {
+                if (isLocalLink(child)) {
                     ++counters.skippedSymlinks;
                     continue;
                 }

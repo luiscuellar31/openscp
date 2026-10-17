@@ -1,6 +1,8 @@
 #include "logic/common/StagingStore.hpp"
 
 #include "logic/common/AppSettings.hpp"
+#include "logic/common/LocalLinks.hpp"
+#include "logic/common/MainWindowSharedUtils.hpp"
 
 #include <QDir>
 #include <QFileInfo>
@@ -31,7 +33,7 @@ QString stagingBatchPathForCleanup(const QSettings &settings,
     QString canonical = batch.canonicalFilePath();
     const QString root =
         QFileInfo(effectiveStagingRootPath(settings)).canonicalFilePath();
-    if (batch.isSymLink() || canonical.isEmpty() || root.isEmpty() ||
+    if (isLocalLink(batch) || canonical.isEmpty() || root.isEmpty() ||
         !QFileInfo(canonical).isDir() ||
         QFileInfo(canonical).absolutePath() != root ||
         !isStagingBatchName(QFileInfo(canonical).fileName())) {
@@ -41,7 +43,9 @@ QString stagingBatchPathForCleanup(const QSettings &settings,
 }
 
 void removeStagingBatch(const QString &batchPath) {
-    (void)QDir(batchPath).removeRecursively();
+    // removeLocalEntry() never descends into a link, Windows junctions
+    // included.
+    (void)removeLocalEntry(batchPath);
     // QDir(root).rmdir(".") never removes the root on POSIX; its path does.
     const QString root = QFileInfo(batchPath).absolutePath();
     if (QDir(root).isEmpty(QDir::NoDotAndDotDot | QDir::AllEntries |
@@ -56,11 +60,11 @@ int removeStagingBatchesOlderThan(const QString &root,
     const auto entries = QDir(root).entryInfoList(
         QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks | QDir::Hidden);
     for (const QFileInfo &entry : entries) {
-        if (entry.isSymLink() || !isStagingBatchName(entry.fileName()))
+        if (isLocalLink(entry) || !isStagingBatchName(entry.fileName()))
             continue;
         const QDateTime modified = entry.lastModified();
         if (modified.isValid() && modified < cutoff &&
-            QDir(entry.absoluteFilePath()).removeRecursively()) {
+            removeLocalEntry(entry.absoluteFilePath())) {
             ++removed;
         }
     }
