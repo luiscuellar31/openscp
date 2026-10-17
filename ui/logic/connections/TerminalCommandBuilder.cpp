@@ -8,6 +8,7 @@
 #include <QStandardPaths>
 #include <QStringList>
 
+#include <algorithm>
 #include <optional>
 #include <string>
 
@@ -25,6 +26,23 @@ QString shellSingleQuote(const QString &value) {
     QString escaped = value;
     escaped.replace(QStringLiteral("'"), QStringLiteral("'\"'\"'"));
     return QStringLiteral("'") + escaped + QStringLiteral("'");
+}
+
+// Whether ssh can take `name` as a host or user name: one that starts with '-'
+// would be read as an option, and spaces or `forbidden` characters would
+// break out of the command line that ssh builds around it.
+bool isSafeSshName(const QString &name, QStringView forbidden) {
+    if (name.startsWith(QLatin1Char('-')))
+        return false;
+    return std::none_of(name.cbegin(), name.cend(), [forbidden](QChar ch) {
+        return ch.isSpace() || ch.category() == QChar::Other_Control ||
+               forbidden.contains(ch);
+    });
+}
+
+// ssh expands %-tokens in a ProxyCommand, so a literal % is written twice.
+QString proxyCommandLiteral(QString value) {
+    return value.replace(QStringLiteral("%"), QStringLiteral("%%"));
 }
 
 QString shellJoinQuoted(const QStringList &arguments) {
@@ -147,8 +165,9 @@ bool buildProxyCommand(const openscp::SessionOptions &session,
         }
 
         *command = shellJoinQuoted(
-            {netcatExecutable, QStringLiteral("-x"),
-             QStringLiteral("%1:%2").arg(proxyHost).arg(session.proxy_port),
+            {proxyCommandLiteral(netcatExecutable), QStringLiteral("-x"),
+             proxyCommandLiteral(QStringLiteral("%1:%2").arg(proxyHost).arg(
+                 session.proxy_port)),
              QStringLiteral("-X"), proxyProtocol, QStringLiteral("%h"),
              QStringLiteral("%p")});
         return true;
@@ -168,8 +187,9 @@ bool buildProxyCommand(const openscp::SessionOptions &session,
         }
 
         *command = shellJoinQuoted(
-            {ncatExecutable, QStringLiteral("--proxy"),
-             QStringLiteral("%1:%2").arg(proxyHost).arg(session.proxy_port),
+            {proxyCommandLiteral(ncatExecutable), QStringLiteral("--proxy"),
+             proxyCommandLiteral(QStringLiteral("%1:%2").arg(proxyHost).arg(
+                 session.proxy_port)),
              QStringLiteral("--proxy-type"), proxyProtocol,
              QStringLiteral("%h"), QStringLiteral("%p")});
         return true;
@@ -201,6 +221,17 @@ bool appendJumpOrProxyArguments(
             trimOptionalString(session.jump_private_key_path);
         const std::uint16_t jumpPort =
             session.jump_port == 0 ? 22 : session.jump_port;
+        // With -J, ssh puts the jump host and user unquoted into the shell
+        // command it runs to reach the jump host, and splits the value at
+        // commas, cuts it at '#' and expands %-tokens in it.
+        const QStringView jumpForbidden = u"'\"\\`$;&|<>(){}*?!#~,%";
+        if (!isSafeSshName(jumpHost, jumpForbidden) ||
+            !isSafeSshName(jumpUser, jumpForbidden)) {
+            *error = QCoreApplication::translate(
+                "MainWindow", "The SSH jump host or its user name contains "
+                              "characters that OpenSSH cannot take safely.");
+            return false;
+        }
 
         if (jumpPrivateKey.isEmpty()) {
             QString jumpSpecification = jumpHost;
@@ -224,10 +255,11 @@ bool appendJumpOrProxyArguments(
         if (!jumpUser.isEmpty())
             jumpCommand << QStringLiteral("-l") << jumpUser;
         jumpCommand << QStringLiteral("-i")
-                    << QDir::fromNativeSeparators(
-                           QDir::cleanPath(jumpPrivateKey))
+                    << proxyCommandLiteral(QDir::fromNativeSeparators(
+                           QDir::cleanPath(jumpPrivateKey)))
                     << QStringLiteral("-o")
-                    << QStringLiteral("IdentitiesOnly=yes") << jumpHost;
+                    << QStringLiteral("IdentitiesOnly=yes")
+                    << QStringLiteral("--") << jumpHost;
         arguments << QStringLiteral("-o")
                   << QStringLiteral("ProxyCommand=%1")
                          .arg(shellJoinQuoted(jumpCommand));
@@ -249,11 +281,20 @@ bool validateSession(const openscp::SessionOptions &session, QString *host,
                      QString *user, QString *error) {
     *host = QString::fromStdString(session.host).trimmed();
     *user = QString::fromStdString(session.username).trimmed();
-    if (!host->isEmpty() && !user->isEmpty())
-        return true;
-    *error = QCoreApplication::translate(
-        "MainWindow", "Session is missing host or username information.");
-    return false;
+    if (host->isEmpty() || user->isEmpty()) {
+        *error = QCoreApplication::translate(
+            "MainWindow", "Session is missing host or username information.");
+        return false;
+    }
+    // A proxy command gets the host inside single quotes, as '%h'.
+    if (!isSafeSshName(*host, u"'")) {
+        *error = QCoreApplication::translate(
+            "MainWindow",
+            "The host name contains characters that OpenSSH cannot take "
+            "safely.");
+        return false;
+    }
+    return true;
 }
 
 bool buildSshCommand(const openscp::SessionOptions &session,
@@ -279,7 +320,10 @@ bool buildSshCommand(const openscp::SessionOptions &session,
     if (!appendJumpOrProxyArguments(arguments, session, lookup, error))
         return false;
 
-    arguments << QStringLiteral("%1@%2").arg(user, host);
+    // "--" keeps a user name that starts with '-' from being read as an
+    // option.
+    arguments << QStringLiteral("--")
+              << QStringLiteral("%1@%2").arg(user, host);
     // The server's login shell, which may be fish or tcsh, only has to read
     // single quotes; POSIX sh changes directory and starts that shell.
     arguments << QStringLiteral("exec /bin/sh -c %1 sh %2")
@@ -314,7 +358,8 @@ bool buildSftpCommand(const openscp::SessionOptions &session,
     if (!appendJumpOrProxyArguments(arguments, session, lookup, error))
         return false;
 
-    arguments << QStringLiteral("%1@%2:%3")
+    arguments << QStringLiteral("--")
+              << QStringLiteral("%1@%2:%3")
                      .arg(user, host, normalizeRemotePath(remotePath));
     *command = shellJoinQuoted(arguments);
     return true;
