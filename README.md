@@ -24,6 +24,8 @@ Prebuilt binaries for every tagged release are on the
 | Linux, x86_64 | `OpenSCP-<version>-x86_64.AppImage` |
 | Linux, ARM64 | `OpenSCP-<version>-aarch64.AppImage` |
 | Linux, Flatpak bundle | `OpenSCP-x86_64.flatpak`, `OpenSCP-aarch64.flatpak` |
+| Windows 10 and 11, x64 | `OpenSCP-<version>-x64-setup.exe` |
+| Windows, x64, MSI for all users | `OpenSCP-<version>-x64.msi` |
 
 Every release ships a `SHA256SUMS.txt` covering all of the above. Download it
 next to the file you picked and check them together:
@@ -31,6 +33,13 @@ next to the file you picked and check them together:
 ```bash
 shasum -a 256 -c SHA256SUMS.txt --ignore-missing  # macOS
 sha256sum -c SHA256SUMS.txt --ignore-missing      # Linux
+```
+
+On Windows, PowerShell prints `True` when the file matches:
+
+```powershell
+$file = 'OpenSCP-<version>-x64-setup.exe'
+(Get-FileHash $file).Hash -eq (-split (Select-String -Path SHA256SUMS.txt -SimpleMatch "  $file").Line)[0]
 ```
 
 Checksums catch a damaged download, not a replaced one. To confirm that a file
@@ -46,8 +55,8 @@ gh attestation verify OpenSCP-<version>-x86_64.AppImage --repo luiscuellar31/ope
 Use **OpenSCP → Check for updates…** to check for a newer stable release.
 **Automatically check for updates** enables a daily check; it is off by
 default. Installing always requires confirmation after pending file operations
-finish. Signed update-enabled builds can install AppImage and macOS updates;
-builds without signing configuration open the release page. Flatpak and Snap
+finish. Signed update-enabled builds can install AppImage, macOS and Windows
+setup updates; builds without signing configuration open the release page. Flatpak and Snap
 use their software manager. Standalone Flatpak bundles need a new bundle unless
 an update repository has been configured.
 See [Updating OpenSCP](docs/UPDATES.md) for details.
@@ -98,11 +107,31 @@ flatpak run io.github.luiscuellar31.openscp
 
 The Flathub remote is needed because the bundle depends on the KDE runtime.
 
+### Installing on Windows
+
+OpenSCP needs Windows 10 version 1809 or later, or Windows 11, on x64. Run
+`OpenSCP-<version>-x64-setup.exe`: it installs OpenSCP for your user, without
+administrator rights, unless you choose to install it for all users. For
+deployment tools, the MSI installs it for all users, also silently:
+
+```powershell
+msiexec /i OpenSCP-<version>-x64.msi /qn
+```
+
+The installers are not code-signed, so SmartScreen shows **Windows protected
+your PC** the first time. Click **More info**, then **Run anyway**. As on
+macOS, the published checksum is what lets you verify the download.
+
+**Open in terminal** uses the OpenSSH client of Windows; if it is missing, add
+**OpenSSH Client** under **Optional features** in Windows Settings. SSH jump
+hosts are not available on Windows yet.
+
 ## Build from source
 
-OpenSCP currently supports Linux and macOS. A compatible Qt 6 installation,
+OpenSCP builds on Linux, macOS, and Windows. A compatible Qt 6 installation,
 CMake 3.22+, libssh2, and OpenSSL are required. libcurl enables optional FTP
-and FTPS support; WebDAV also requires tinyxml2.
+and FTPS support; WebDAV also requires tinyxml2. On Windows, Visual Studio 2022
+builds it against Qt for MSVC, and vcpkg builds the other libraries.
 
 ```bash
 git clone https://github.com/luiscuellar31/openscp.git
@@ -115,6 +144,12 @@ cd openscp
 ./scripts/macos.sh dev
 ```
 
+```powershell
+# Windows (PowerShell)
+$env:VCPKG_ROOT = 'C:\path\to\vcpkg'
+.\scripts\windows.ps1 dev
+```
+
 For distribution-specific dependencies, manual build steps, packaging, and
 troubleshooting, see [Building OpenSCP](docs/BUILDING.md).
 
@@ -125,11 +160,13 @@ troubleshooting, see [Building OpenSCP](docs/BUILDING.md).
 - SFTP and SCP through libssh2; optional FTP, FTPS, and WebDAV through libcurl.
 - A persistent transfer queue with parallel workers, pause, resume, retry,
   conflict policies, bandwidth limits, and resumable `.part` files.
-- Saved sites with Keychain on macOS and Secret Service/libsecret on Linux.
+- Saved sites with Keychain on macOS, Secret Service/libsecret on Linux, and
+  DPAPI encryption on Windows.
 - Strict, accept-new, or explicitly disabled SSH host-key verification.
 - FTPS and HTTPS WebDAV without certificate verification still check the
   server's public key, which you trust on the first connection.
-- SOCKS5, HTTP CONNECT, and SSH jump-host support where the protocol allows it.
+- SOCKS5, HTTP CONNECT, and SSH jump-host support where the protocol allows it;
+  jump hosts are not available on Windows yet.
 - One-way synchronization with preview, filters, and optional checksum checks.
 - Spanish, English, Portuguese, French, and German interfaces.
 
@@ -160,13 +197,15 @@ even on case-sensitive volumes. Removing a task with its partial data keeps the
 removes nothing for finished tasks or for classic SCP uploads, which write the
 destination directly.
 
-For a local move upload, OpenSCP uploads the file and preserves the local
-source with a warning. Automatic removal cannot safely exclude another process
-replacing the source after verification. Review the completed upload and the
+For a local move upload on macOS and Linux, OpenSCP uploads the file and
+preserves the local source with a warning. Automatic removal cannot safely
+exclude another process replacing the source after verification. Review the completed upload and the
 local source before removing it manually, then retry the task to finish
 cleanup without uploading again. After a restart, cleanup requires manual
-review because the original file identity is no longer available. Remote
-source cleanup for move downloads is unchanged.
+review because the original file identity is no longer available. On Windows,
+OpenSCP removes the local source after the upload if it is unchanged: it holds
+the file open against changes while it checks and deletes it. Remote source
+cleanup for move downloads is unchanged.
 
 Mirror proposes deletions only where the source scan verified that items are
 absent. Skipped links, unreadable folders, and depth limits keep destination
@@ -178,7 +217,7 @@ Each panel presents its current location as one conventional path field. Click
 any parent directory within the path to open it, or click the current directory
 to open the Open Directory dialog. You can also use `Ctrl+L` (`Cmd+L` is
 additionally supported on macOS) or the platform Open shortcut: `Ctrl+O` on
-Linux and `Cmd+O` on macOS.
+Linux and Windows and `Cmd+O` on macOS.
 
 The dialog accepts a path directly and provides recent paths and the favorites
 for the selected local panel or remote session. See
@@ -212,6 +251,14 @@ These optional environment variables are useful when diagnosing a problem:
   with `OPENSCP_ENV=dev`
 - `OPENSCP_ENABLE_INSECURE_FALLBACK=1` only when the build permits it
 
+Messages go to the standard error stream. On Windows, which shows no console
+for OpenSCP, start it from PowerShell with that stream saved to a file:
+
+```powershell
+$env:OPENSCP_LOG_LEVEL = 'debug'
+Start-Process OpenSCP.exe -RedirectStandardError openscp.log
+```
+
 Sensitive logging is disabled by default and should only be used temporarily in
 a controlled development environment.
 
@@ -238,8 +285,7 @@ a controlled development environment.
 
 ## Roadmap
 
-- Finish and validate Windows support; the current Windows code is still
-  experimental.
+- Support SSH jump hosts on Windows, and sign the Windows packages.
 - Test WebDAV with a wider range of servers.
 - Support interactive authentication and more enterprise proxy and SSH
   jump-host setups.

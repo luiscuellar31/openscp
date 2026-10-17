@@ -10,14 +10,14 @@ on the keyboard configuration.
 
 ## Global shortcuts
 
-| Action | Linux | macOS | Notes |
+| Action | Linux and Windows | macOS | Notes |
 | --- | --- | --- | --- |
 | Search in the current panel | `Ctrl+F` | `Cmd+F` | Searches the remote panel by default while connected; otherwise it searches the left panel. |
 | Enter or choose a directory | `Ctrl+L` or `Ctrl+O` | `Ctrl+L`, `Cmd+L`, or `Cmd+O` | Opens the directory dialog for the current panel. |
 | Show transfers | `F12` | `F12` | This default can be changed in Settings → Shortcuts. |
 | Show navigation history | `Ctrl+Shift+H` | `Ctrl+Shift+H` | This default can be changed in Settings → Shortcuts. |
 | Enter or leave full screen | `F11` | `Ctrl+Cmd+F` | Uses the standard shortcut for the platform. |
-| Open settings | `Ctrl+,` | `Cmd+,` | Uses the standard preferences shortcut. |
+| Open settings | `Ctrl+,` | `Cmd+,` | Uses the standard preferences shortcut: `Ctrl+Shift+,` under KDE Plasma. |
 | Show the current keyboard focus | `Shift+Esc` | `Shift+Esc` | Reveals the focus indicator without moving focus. |
 | Quit OpenSCP | `Ctrl+Q` | `Cmd+Q` | Uses the standard quit shortcut. |
 
