@@ -11,6 +11,7 @@
 #include <QFile>
 #include <QLibraryInfo>
 #include <QLocale>
+#include <QSettings>
 #include <QTranslator>
 
 int main(int argc, char *argv[]) {
@@ -21,6 +22,12 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setApplicationName("OpenSCP");
 #endif
     QCoreApplication::setOrganizationName("OpenSCP");
+#ifdef Q_OS_WIN
+    // Settings, and the DPAPI-encrypted secrets, go to INI files under
+    // %APPDATA%\OpenSCP, as Linux keeps them under ~/.config, instead of the
+    // registry: they can be backed up, moved and inspected like any file.
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+#endif
 
     QCoreApplication::setApplicationVersion(
         QStringLiteral(OPENSCP_APP_VERSION));

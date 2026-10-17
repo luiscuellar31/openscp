@@ -829,5 +829,9 @@ int main(int argc, char **argv) {
     openscp::test::TestHarness harness("MainWindow navigation");
     const int result = harness.run();
     openscp::testsupport::drainThreadPool();
+    // Test mode keeps its own data folder, which is the test's to remove.
+    (void)QDir(
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
+        .removeRecursively();
     return result;
 }

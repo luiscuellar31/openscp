@@ -1,3 +1,4 @@
+#include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "logic/persistence/SiteCredentialRepository.hpp"
 
@@ -220,6 +221,17 @@ OPENSCP_TEST(testWindowsDpapiSecretRoundTrip, test) {
 } // namespace
 
 int main(int argc, char **argv) {
+    QCoreApplication application(argc, argv);
+    QCoreApplication::setOrganizationName(QStringLiteral("OpenSCP-tests"));
+    QCoreApplication::setApplicationName(
+        QStringLiteral("site-credential-repository-tests"));
+    // The Windows DPAPI secrets live in settings, which must not be the
+    // user's own.
+    openscp::testsupport::IsolatedSettings settingsRoot;
+    if (!settingsRoot.isValid()) {
+        std::cerr << "[FAIL] could not create isolated settings directory\n";
+        return 1;
+    }
     openscp::test::TestHarness harness("site credential repository");
-    return harness.runWithApplication<QCoreApplication>(argc, argv);
+    return harness.run();
 }
