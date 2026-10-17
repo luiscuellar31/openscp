@@ -3836,7 +3836,6 @@ bool Libssh2SftpClient::chmod(const std::string &remote_path,
     auto structuredErrorScope = beginStructuredOperation(err, true);
     if (!ensure_sftp_ready(connected_, sftp_, err))
         return false;
-#ifdef LIBSSH2_SFTP
     // libssh2 exposes chmod through SETSTAT.
     LIBSSH2_SFTP_ATTRIBUTES a{};
     a.flags = LIBSSH2_SFTP_ATTR_PERMISSIONS;
@@ -3849,12 +3848,6 @@ bool Libssh2SftpClient::chmod(const std::string &remote_path,
         return false;
     }
     return true;
-#else
-    (void)remote_path;
-    (void)mode;
-    err = "chmod not supported";
-    return false;
-#endif
 }
 
 bool Libssh2SftpClient::setTimes(const std::string &remote_path,

@@ -583,6 +583,17 @@ int main() {
                     owned.gid == st.gid,
                 std::string("chown with an unchanged id should keep it: ") +
                     err);
+
+        const std::uint32_t originalMode =
+            (st.mode & 0777u) != 0 ? (st.mode & 0777u) : 0644u;
+        openscp::FileInfo changed{};
+        err.clear();
+        t.check(client.chmod(remoteSrc, 0640, err) &&
+                    client.stat(remoteSrc, changed, err) &&
+                    (changed.mode & 0777u) == 0640u &&
+                    client.chmod(remoteSrc, originalMode, err),
+                std::string("chmod should change the remote permissions: ") +
+                    err);
     }
 #ifndef _WIN32
     // Uploads keep the local file's permissions, so a private file is not
