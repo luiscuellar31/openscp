@@ -3200,6 +3200,11 @@ Continue scanning without this limit?</source>
         <source>The update could not be installed. Your current version is still available.</source>
         <translation>No se pudo instalar la actualización. Tu versión actual sigue disponible.</translation>
     </message>
+    <message>
+        <location filename="../ui/app/main.cpp" line="87"/>
+        <source>OpenSCP is already running, but it did not respond. Wait for it to finish starting or closing, then try again.</source>
+        <translation>OpenSCP ya está abierto, pero no respondió. Espera a que termine de iniciarse o de cerrarse y vuelve a intentarlo.</translation>
+    </message>
 </context>
 <context>
     <name>PermissionsDialog</name>

@@ -3200,6 +3200,11 @@ Aktualisiert: %2  |  Fehlgeschlagen: %3</translation>
         <source>The update could not be installed. Your current version is still available.</source>
         <translation>Das Update konnte nicht installiert werden. Ihre aktuelle Version ist weiterhin verfügbar.</translation>
     </message>
+    <message>
+        <location filename="../ui/app/main.cpp" line="87"/>
+        <source>OpenSCP is already running, but it did not respond. Wait for it to finish starting or closing, then try again.</source>
+        <translation>OpenSCP läuft bereits, hat aber nicht geantwortet. Warten Sie, bis es fertig gestartet oder beendet ist, und versuchen Sie es dann erneut.</translation>
+    </message>
 </context>
 <context>
     <name>PermissionsDialog</name>
