@@ -225,6 +225,16 @@ jobs:
       - name: Fetch pinned Sparkle tools
         run: bash ./scripts/ci/fetch_sparkle.sh "$RUNNER_TEMP/sparkle"
 
+      # The appcast check verifies Ed25519 signatures with OpenSSL 3. The
+      # system openssl is LibreSSL, which cannot, so use the runner's
+      # preinstalled Homebrew build; nothing is installed here.
+      - name: Use the runner's OpenSSL 3
+        run: |
+          set -euo pipefail
+          openssl_bin="$(brew --prefix openssl@3)/bin/openssl"
+          "$openssl_bin" version
+          echo "OPENSSL_BIN=$openssl_bin" >> "$GITHUB_ENV"
+
       - name: Download macOS archives
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
