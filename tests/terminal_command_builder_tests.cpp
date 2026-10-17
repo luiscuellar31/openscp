@@ -266,7 +266,7 @@ struct ProbeTools {
         ssh = QDir(tools).filePath(QStringLiteral("ssh.exe"));
         sftp = QDir(tools).filePath(QStringLiteral("sftp.exe"));
         log = QDir(root.path()).filePath(QStringLiteral("programs.log"));
-        const QString probe = QStringLiteral(OPENSCP_TERMINAL_ARGV_PROBE);
+        const QString probe = QStringLiteral(OPENSCP_ARGV_PROBE);
         return QDir().mkpath(tools) && QFile::copy(probe, ssh) &&
                QFile::copy(probe, sftp);
     }

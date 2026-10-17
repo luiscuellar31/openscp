@@ -112,6 +112,10 @@ void MainWindow::showAvailableUpdate(const openscpui::UpdateRelease &release) {
         text +=
             QLatin1Char('\n') +
             tr("Download and install the new version from the release page.");
+    else if (kind == UpdateInstallation::WindowsSetup)
+        text += QLatin1Char('\n') +
+                tr("OpenSCP closes while the update installs and opens again "
+                   "when it is done.");
     QMessageBox prompt(QMessageBox::Information, tr("Updates"), text,
                        QMessageBox::NoButton, this);
     prompt.setTextFormat(Qt::PlainText);
@@ -168,6 +172,14 @@ void MainWindow::showAvailableUpdate(const openscpui::UpdateRelease &release) {
     connect(updates_, &openscpui::UpdateController::installed, progress,
             [this, progress](bool success, const QString &error) {
                 progress->deleteLater();
+                if (success &&
+                    updates_->installation() ==
+                        openscpui::UpdateInstallation::WindowsSetup) {
+                    // The setup waits for this process to end before it
+                    // replaces its files, and then starts OpenSCP again.
+                    close();
+                    return;
+                }
                 if (success)
                     QMessageBox::information(
                         this, tr("Updates"),

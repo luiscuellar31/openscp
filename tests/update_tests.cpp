@@ -3,9 +3,12 @@
 #include "logic/updates/AppImageInstaller.hpp"
 #include "logic/updates/UpdateController.hpp"
 #include "logic/updates/UpdateMetadata.hpp"
+#include "logic/updates/WindowsSetupInstaller.hpp"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDeadlineTimer>
+#include <QDir>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
@@ -14,13 +17,21 @@
 #include <QJsonObject>
 #include <QList>
 #include <QNetworkReply>
+#include <QSettings>
 #include <QTemporaryDir>
+#include <QThread>
 #include <QTimer>
+#include <QUuid>
 
 #include <openssl/evp.h>
 
 #include <cstring>
 #include <memory>
+
+#ifdef Q_OS_WIN
+#include <string>
+#include <windows.h>
+#endif
 
 #ifdef Q_OS_LINUX
 #include <fcntl.h>
@@ -276,6 +287,172 @@ OPENSCP_TEST(testCheckOptInLimitsAndCancellation, test) {
     test.check(rejected && !controller.installing(),
                "unverified artifacts cannot reach installation");
 }
+
+QByteArray windowsManifest(const QJsonValue &minimumBuild = 17763,
+                           bool duplicate = false) {
+    const QJsonObject appImage{{"name", "OpenSCP-1.2.0-x86_64.AppImage"},
+                               {"size", 1024},
+                               {"sha256", QString(64, QLatin1Char('a'))},
+                               {"minimum_glibc", "2.34"}};
+    const QJsonObject setup{{"name", "OpenSCP-1.2.0-x64-setup.exe"},
+                            {"size", 2048},
+                            {"sha256", QString(64, QLatin1Char('b'))},
+                            {"minimum_windows_build", minimumBuild}};
+    QJsonArray artifacts{appImage, setup};
+    if (duplicate)
+        artifacts.append(setup);
+    return QJsonDocument(QJsonObject{{"schema", 1},
+                                     {"version", "1.2.0"},
+                                     {"artifacts", artifacts}})
+        .toJson(QJsonDocument::Compact);
+}
+
+OPENSCP_TEST(testWindowsManifestAuthenticationAndCompatibility, test) {
+    SigningFixture fixture;
+    const auto data = windowsManifest();
+    const auto signature = fixture.sign(data);
+    QString error;
+    auto verify = [&](const QByteArray &source, const QByteArray &sig,
+                      const QString &arch = "x86_64", int build = 17763) {
+        return verifyWindowsUpdateManifest(source, sig, fixture.publicKey(),
+                                           "1.2.0", arch, build, error);
+    };
+    auto artifact = verify(data, signature);
+    test.check(artifact && artifact->size == 2048 &&
+                   artifact->url.path().endsWith(
+                       "/v1.2.0/OpenSCP-1.2.0-x64-setup.exe"),
+               "accept the signed setup for this architecture");
+    auto altered = signature;
+    altered[0] = static_cast<char>(altered[0] ^ 1);
+    test.check(!verify(data, altered), "reject forged signatures");
+    test.check(!verify(data, signature, "aarch64"),
+               "offer the x64 setup only to x64 builds");
+    test.check(!verify(data, signature, "x86_64", 17762) &&
+                   error.contains(QStringLiteral("newer version of Windows")),
+               "explain that an older Windows cannot take the update");
+    for (const QJsonValue &malformed :
+         {QJsonValue(QStringLiteral("17763")), QJsonValue(17763.5),
+          QJsonValue(0), QJsonValue()}) {
+        const auto source = windowsManifest(malformed);
+        test.check(!verify(source, fixture.sign(source)),
+                   "reject a missing or malformed minimum Windows build");
+    }
+    const auto repeated = windowsManifest(17763, true);
+    test.check(!verify(repeated, fixture.sign(repeated)),
+               "reject ambiguous artifact duplicates");
+    test.check(verifyUpdateManifest(data, signature, fixture.publicKey(),
+                                    "1.2.0", "x86_64", "2.34", error)
+                   .has_value(),
+               "AppImage clients pass over the Windows entry");
+}
+
+#ifdef Q_OS_WIN
+QByteArray contentsOf(const QString &path) {
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
+
+OPENSCP_TEST(testWindowsSetupScopeFromUninstallKey, test) {
+    // A made-up AppId, so that no real installation is involved.
+    const QString appId = QStringLiteral("OpenSCP-test-") +
+                          QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString uninstallKeys = QStringLiteral(
+        "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion"
+        "\\Uninstall");
+    {
+        QSettings uninstall(uninstallKeys + QStringLiteral("\\") + appId +
+                                QStringLiteral("_is1"),
+                            QSettings::NativeFormat);
+        // Inno Setup writes the folder with a final backslash.
+        uninstall.setValue(QStringLiteral("InstallLocation"),
+                           QStringLiteral("C:\\Programs\\OpenSCP Test\\"));
+    }
+    test.check(windowsSetupScope(appId, "c:/programs/OpenSCP Test") ==
+                   WindowsSetupScope::CurrentUser,
+               "a per-user setup is found in the user's hive, whatever the "
+               "case of the folder");
+    test.check(!windowsSetupScope(appId, "C:/Elsewhere/OpenSCP Test"),
+               "a copy in another folder is not the installed one");
+    test.check(!windowsSetupScope(appId + QStringLiteral("x"),
+                                  "C:/Programs/OpenSCP Test"),
+               "another AppId is another program");
+
+    const std::wstring testKey =
+        (QStringLiteral("Software\\Microsoft\\Windows\\CurrentVersion"
+                        "\\Uninstall\\") +
+         appId + QStringLiteral("_is1"))
+            .toStdWString();
+    test.check(RegDeleteTreeW(HKEY_CURRENT_USER, testKey.c_str()) ==
+                   ERROR_SUCCESS,
+               "the test should remove its uninstall key");
+    test.check(!windowsSetupScope(appId, "C:/Programs/OpenSCP Test"),
+               "without its key, the setup is not found");
+    HKEY opened = nullptr;
+    test.check(RegOpenKeyExW(HKEY_CURRENT_USER, testKey.c_str(), 0, KEY_READ,
+                             &opened) == ERROR_FILE_NOT_FOUND,
+               "looking for a setup must not create its uninstall key");
+    if (opened)
+        RegCloseKey(opened);
+}
+
+OPENSCP_TEST(testWindowsSetupStartsOnlyTheCheckedFile, test) {
+    QTemporaryDir directory;
+    const QString setup = directory.filePath("openscp-setup-test.exe");
+    const QString log = directory.filePath("programs.log");
+    test.check(directory.isValid() &&
+                   QFile::copy(QStringLiteral(OPENSCP_ARGV_PROBE), setup),
+               "the test setup should be created");
+    const UpdateArtifact artifact{
+        "OpenSCP-1.2.0-x64-setup.exe", QUrl("https://github.com/setup"),
+        QFileInfo(setup).size(),
+        QCryptographicHash::hash(contentsOf(setup),
+                                 QCryptographicHash::Sha256)};
+    qputenv("OPENSCP_ARGV_PROBE_LOG",
+            QDir::toNativeSeparators(log).toLocal8Bit());
+    const QStringList arguments =
+        windowsSetupArguments(WindowsSetupScope::CurrentUser, 1234,
+                              directory.filePath("update log.txt"));
+
+    QString error;
+    auto altered = artifact;
+    altered.sha256[0] = static_cast<char>(altered.sha256[0] ^ 1);
+    test.check(!startWindowsSetup(setup, altered, arguments,
+                                  WindowsSetupScope::CurrentUser, error) &&
+                   !error.isEmpty(),
+               "a setup that differs from its signed digest must not run");
+    test.check(startWindowsSetup(setup, artifact, arguments,
+                                 WindowsSetupScope::CurrentUser, error),
+               "the checked setup should start: " + error.toStdString());
+
+    QDeadlineTimer deadline(10000);
+    QList<QStringList> runs;
+    while (runs.isEmpty() && !deadline.hasExpired()) {
+        QThread::msleep(50);
+        for (const QString &record :
+             QString::fromUtf8(contentsOf(log))
+                 .split(QChar(0x1e), Qt::SkipEmptyParts))
+            runs << record.split(QChar(0x1f));
+    }
+    const QStringList expected{
+        QStringLiteral("OPENSCP-SETUP-TEST"),
+        QStringLiteral("/VERYSILENT"),
+        QStringLiteral("/SUPPRESSMSGBOXES"),
+        QStringLiteral("/NORESTART"),
+        QStringLiteral("/CURRENTUSER"),
+        QStringLiteral("/WAITPID=1234"),
+        QStringLiteral("/RELAUNCH=1"),
+        QStringLiteral("/LOG=") +
+            QDir::toNativeSeparators(directory.filePath("update log.txt")),
+    };
+    test.check(runs.size() == 1 && runs.front() == expected,
+               "only the checked setup should run, with the silent update "
+               "arguments");
+    qunsetenv("OPENSCP_ARGV_PROBE_LOG");
+    // The temporary folder can go once the setup has exited.
+    while (!QFile::remove(setup) && !deadline.hasExpired())
+        QThread::msleep(50);
+}
+#endif
 
 #ifdef Q_OS_LINUX
 QByteArray image(const char *payload) {

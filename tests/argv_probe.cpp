@@ -1,8 +1,8 @@
-// Stands in for ssh.exe and sftp.exe when the terminal command tests run the
-// script that "Open in terminal" prepares on Windows. Each run appends its
-// name and the arguments that the C runtime split from its command line to
-// the file in OPENSCP_ARGV_PROBE_LOG, and exits with the code in
-// OPENSCP_ARGV_PROBE_EXIT_<NAME>, where NAME is its file name in capitals
+// Stands in for a program that OpenSCP starts on Windows, such as ssh.exe,
+// sftp.exe or an update setup, in tests that check how it is started. Each
+// run appends its name and the arguments that the C runtime split from its
+// command line to the file in OPENSCP_ARGV_PROBE_LOG, and exits with the code
+// in OPENSCP_ARGV_PROBE_EXIT_<NAME>, where NAME is its file name in capitals
 // without the extension, such as SSH.
 
 #include <cstdio>
