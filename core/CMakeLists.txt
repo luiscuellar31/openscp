@@ -25,7 +25,6 @@ set(OPENSCP_CORE_SRCS
     src/common/KeyboardInteractive.cpp
     src/common/RemoteListingLimits.hpp
     src/common/RemotePath.cpp
-    src/common/SafeLocalFile.cpp
     include/openscp/SafeLocalFile.hpp
     src/common/UniqueFile.hpp
     src/libssh2/detail/Libssh2CipherPreference.hpp
@@ -50,9 +49,12 @@ set(OPENSCP_CORE_SRCS
 
 if (WIN32)
     list(APPEND OPENSCP_CORE_SRCS
+        src/common/SafeLocalFile_win.cpp
         src/common/Win32Text.cpp
         src/common/Win32Text.hpp
     )
+else()
+    list(APPEND OPENSCP_CORE_SRCS src/common/SafeLocalFile.cpp)
 endif()
 
 set(OPENSCP_HAS_CURL_FTP 0)
@@ -249,6 +251,7 @@ else()
 endif()
 
 if (WIN32)
-    # Winsock, for the SSH backends' own sockets.
-    target_link_libraries(openscp_core PRIVATE ws2_32)
+    # Winsock for the SSH backends' own sockets, and the NT API through which
+    # SafeLocalFile opens each path component relative to its parent.
+    target_link_libraries(openscp_core PRIVATE ws2_32 ntdll)
 endif()
