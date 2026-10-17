@@ -383,7 +383,11 @@ void SyncCoordinator::startChecksums(const QString &localRoot,
         qsizetype completedChecksums = 0;
         const QString canonicalRoot =
             QFileInfo(state->localRoot).canonicalFilePath();
-        const QString confinedPrefix = canonicalRoot + QDir::separator();
+        // Canonical paths use '/' on every platform, and a root such as "/"
+        // or "C:/" already ends with one.
+        const QString confinedPrefix = canonicalRoot.endsWith(QLatin1Char('/'))
+                                           ? canonicalRoot
+                                           : canonicalRoot + QLatin1Char('/');
         auto canceled = [&] {
             return stopToken.stop_requested() || state->canceled->load();
         };
