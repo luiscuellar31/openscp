@@ -68,8 +68,7 @@ te permite validar la descarga.
 Para permitirla, abre **Ajustes del Sistema → Privacidad y seguridad**, baja
 hasta la sección Seguridad, pulsa **Abrir igualmente** junto al mensaje sobre
 OpenSCP y confirma. A partir de ahí OpenSCP se abre con normalidad, también
-después de reiniciar. En macOS 12 y 13 el mismo ajuste está en **Preferencias
-del Sistema → Seguridad y privacidad → General**.
+después de reiniciar.
 
 El equivalente desde la terminal:
 

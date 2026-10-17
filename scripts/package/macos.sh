@@ -1248,7 +1248,6 @@ Install:
 To open it anyway:
 - System Settings -> Privacy & Security -> Security section, then
   "Open Anyway" next to the message about OpenSCP, and confirm.
-  On macOS 12 and 13: System Preferences -> Security & Privacy -> General.
 - Or from the terminal:
   xattr -dr com.apple.quarantine /Applications/OpenSCP.app
 

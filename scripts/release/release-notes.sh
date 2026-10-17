@@ -413,7 +413,7 @@ gh attestation verify OpenSCP-${VERSION}-x86_64.AppImage --repo luiscuellar31/op
 
 Download \`OpenSCP-${VERSION}-arm64-UNSIGNED.dmg\` on Apple Silicon or \`OpenSCP-${VERSION}-x86_64-UNSIGNED.dmg\` on Intel, open it, and drag OpenSCP onto Applications.
 
-OpenSCP is not signed with an Apple Developer ID, so macOS blocks the first launch and reports that it cannot check the app for malicious software. To allow it, open **System Settings → Privacy & Security**, scroll down to the Security section, click **Open Anyway** next to the message about OpenSCP, and confirm. On macOS 12 and 13 the same setting lives in **System Preferences → Security & Privacy → General**. The DMG ships these steps as \`README.txt\`.
+OpenSCP is not signed with an Apple Developer ID, so macOS blocks the first launch and reports that it cannot check the app for malicious software. To allow it, open **System Settings → Privacy & Security**, scroll down to the Security section, click **Open Anyway** next to the message about OpenSCP, and confirm. The DMG ships these steps as \`README.txt\`.
 
 ### Linux
 

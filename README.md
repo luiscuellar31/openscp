@@ -65,9 +65,7 @@ is what lets you verify the download instead.
 
 To allow it, open **System Settings → Privacy & Security**, scroll down to the
 Security section, click **Open Anyway** next to the message about OpenSCP, and
-confirm. OpenSCP then starts normally, including after a restart. On macOS 12
-and 13 the same setting lives in **System Preferences → Security & Privacy →
-General**.
+confirm. OpenSCP then starts normally, including after a restart.
 
 The equivalent from a terminal:
 
