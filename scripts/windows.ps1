@@ -42,6 +42,7 @@ Optional environment variables:
   Qt6_DIR=<prefix>\lib\cmake\Qt6       Qt package directory
   VCPKG_ROOT=C:\path\to\vcpkg          vcpkg checkout that builds the libraries
   VCPKG_TARGET_TRIPLET=<triplet>       Default: x64-windows-static-md
+  OPENSCP_WERROR=ON                    Treat first-party warnings as errors, as CI does
 
 If no Qt path is provided, the script uses the newest Qt 6 under C:\Qt that
 has an msvc2022_64 build, preferring the release baseline.
@@ -75,6 +76,10 @@ function Invoke-Configure($Settings, [bool]$WithTests) {
     $arguments = Get-ConfigureArguments $Settings.BuildDir $Settings.BuildType $Settings.Triplet
     if ($WithTests) {
         $arguments += '-DOPENSCP_BUILD_TESTS=ON'
+    }
+    $werror = Get-EnvValue 'OPENSCP_WERROR'
+    if ($werror) {
+        $arguments += "-DOPENSCP_WERROR=$werror"
     }
 
     Write-Log "Configuring $($Settings.BuildType) build: $($Settings.BuildDir)"
