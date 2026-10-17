@@ -1,4 +1,5 @@
 // Transfer queue tests without an external test framework.
+#include "PlatformTestSupport.hpp"
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "common/UniqueFile.hpp"
@@ -3596,7 +3597,6 @@ OPENSCP_TEST(testBatchCancellationAndDirectoryTasks, test) {
 }
 
 OPENSCP_TEST(testLocalDirectoryTaskRejectsSymlinkParent, test) {
-#ifndef _WIN32
     auto probe = std::make_shared<ConcurrencyProbe>();
     ConcurrentMockClient baseClient(probe);
     TransferManager manager;
@@ -3606,7 +3606,7 @@ OPENSCP_TEST(testLocalDirectoryTaskRejectsSymlinkParent, test) {
     test.check(selected.isValid() && outside.isValid(),
                "local directory fixtures should initialize");
     const QString linked = selected.filePath("linked");
-    test.check(QFile::link(outside.path(), linked),
+    test.check(openscp::testsupport::createLocalLink(outside.path(), linked),
                "a parent directory symlink should be created");
 
     TransferBatchOptions batch;
@@ -3616,7 +3616,6 @@ OPENSCP_TEST(testLocalDirectoryTaskRejectsSymlinkParent, test) {
                    !QFileInfo(outside.filePath("created")).exists(),
                "a local directory task must not create outside its chosen "
                "folder through a symlink");
-#endif
 }
 
 OPENSCP_TEST(testPersistentDeletionTasks, test) {

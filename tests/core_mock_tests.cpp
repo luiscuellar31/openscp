@@ -286,6 +286,21 @@ fs::path makeTempFilePath(const std::string &tag) {
     return dir / (tag + ".txt");
 }
 
+// Makes `link` a link to the folder `target` that local operations must
+// refuse: a symbolic link on POSIX, and on Windows a junction, which needs no
+// privilege, unlike a symbolic link.
+bool createDirectoryLink(const fs::path &target, const fs::path &link) {
+#ifdef _WIN32
+    const std::wstring command = L"mklink /J \"" + link.wstring() + L"\" \"" +
+                                 target.wstring() + L"\" >NUL";
+    return _wsystem(command.c_str()) == 0;
+#else
+    std::error_code ec;
+    fs::create_directory_symlink(target, link, ec);
+    return !ec;
+#endif
+}
+
 bool readTextFile(const fs::path &path, std::string &out) {
     std::ifstream in(path, std::ios::binary);
     if (!in.is_open())
@@ -755,7 +770,9 @@ OPENSCP_TEST(test_safe_local_partial_files, t) {
 }
 
 OPENSCP_TEST(test_safe_local_partial_fifos, t) {
-#ifndef _WIN32
+#ifdef _WIN32
+    t.skip("Windows has no FIFOs among its files.");
+#else
     const fs::path partial = makeTempFilePath("fifo").string() + ".part";
     t.check(::mkfifo(partial.c_str(), 0600) == 0,
             "partial FIFO fixture should be created");
@@ -839,7 +856,6 @@ OPENSCP_TEST(test_safe_local_regular_write_modes, t) {
 }
 
 OPENSCP_TEST(test_safe_local_source_cleanup_preserves_data, t) {
-#ifndef _WIN32
     const fs::path source = makeTempFilePath("move-source");
     std::ofstream(source, std::ios::binary) << "uploaded-original";
     openscp::localfiles::LocalFileIdentity identity;
@@ -847,6 +863,24 @@ OPENSCP_TEST(test_safe_local_source_cleanup_preserves_data, t) {
     t.check(openscp::localfiles::localFileIdentity(source.string(), identity,
                                                    error),
             "move cleanup should capture the uploaded source identity");
+#ifdef _WIN32
+    // Windows holds the source open against changes while it compares and
+    // deletes it, so an unchanged source goes.
+    t.check(openscp::localfiles::removeLocalFileIfUnchanged(source.string(),
+                                                            identity, error) &&
+                error.empty() && !fs::exists(source),
+            "an unchanged source should be removed");
+    std::error_code ec;
+    std::ofstream(source, std::ios::binary) << "replacement";
+    t.check(!openscp::localfiles::removeLocalFileIfUnchanged(source.string(),
+                                                             identity, error) &&
+                errno == EAGAIN && !error.empty(),
+            "a replacement source must not be accepted for cleanup");
+    std::string contents;
+    t.check(readTextFile(source, contents) && contents == "replacement",
+            "a replacement entry must remain intact");
+    fs::remove(source, ec);
+#else
     for (int attempt = 0; attempt < 2; ++attempt) {
         t.check(
             !openscp::localfiles::removeLocalFileIfUnchanged(source.string(),
@@ -869,24 +903,23 @@ OPENSCP_TEST(test_safe_local_source_cleanup_preserves_data, t) {
     t.check(readTextFile(source, contents) && contents == "replacement",
             "a replacement entry must remain intact");
     fs::remove(source, ec);
+#endif
     t.check(openscp::localfiles::removeLocalFileIfUnchanged(source.string(),
                                                             identity, error) &&
                 error.empty(),
             "cleanup should finish once the source has been removed manually");
     fs::remove_all(source.parent_path(), ec);
-#endif
 }
 
 OPENSCP_TEST(test_safe_local_parent_symlinks, t) {
-#ifndef _WIN32
     const fs::path base = makeTempFilePath("parent-symlink").parent_path();
     const fs::path selected = base / "selected";
     const fs::path outside = base / "outside";
     std::error_code ec;
     fs::create_directories(selected, ec);
     fs::create_directories(outside, ec);
-    fs::create_directory_symlink(outside, selected / "linked", ec);
-    t.check(!ec, "parent symlink fixture should be created");
+    t.check(createDirectoryLink(outside, selected / "linked"),
+            "parent symlink fixture should be created");
 
     std::string error;
     openscp::UniqueFile escaped(openscp::localfiles::openRegularFileForWrite(
@@ -929,8 +962,8 @@ OPENSCP_TEST(test_safe_local_parent_symlinks, t) {
         outsidePartial << "outside";
     }
     fs::rename(selected / "real", selected / "moved", ec);
-    fs::create_directory_symlink(outside, selected / "real", ec);
-    t.check(!ec, "swapped parent symlink fixture should be created");
+    t.check(!ec && createDirectoryLink(outside, selected / "real"),
+            "swapped parent symlink fixture should be created");
     error.clear();
     t.check(!openscp::localfiles::atomicReplace(
                 (selected / "real" / "item.part").string(),
@@ -939,7 +972,6 @@ OPENSCP_TEST(test_safe_local_parent_symlinks, t) {
                 fs::exists(outside / "item.part"),
             "publishing a partial file must reject a swapped parent symlink");
     fs::remove_all(base, ec);
-#endif
 }
 
 OPENSCP_TEST(test_protocol_helpers, t) {
