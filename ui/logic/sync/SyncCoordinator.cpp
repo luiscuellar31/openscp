@@ -1,6 +1,7 @@
 #include "logic/sync/SyncCoordinator.hpp"
 
 #include "logic/common/LocalLinks.hpp"
+#include "logic/common/MainWindowSharedUtils.hpp"
 #include "logic/navigation/RemotePath.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
 #include "logic/transfers/TransferManager.hpp"
@@ -26,6 +27,15 @@
 #include <vector>
 
 namespace {
+
+// Whether every name in a remote relative path can also name a local entry.
+bool isLocalRelativePath(const QString &relativePath) {
+    const QStringList names =
+        relativePath.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    return std::all_of(names.cbegin(), names.cend(), [](const QString &name) {
+        return isValidLocalEntryName(name);
+    });
+}
 
 constexpr quint64 kLargeTreeItems = 100'000;
 constexpr quint64 kLargeTreeKnownBytes = 100ULL * 1024ULL * 1024ULL * 1024ULL;
@@ -130,6 +140,15 @@ SyncCoordinator::SyncCoordinator(RemoteOperationController *remoteOperations,
                 if (relative.isEmpty()) {
                     ++state->result.invalidNames;
                     state->result.coverage.remoteUnscannedPaths.insert({});
+                    continue;
+                }
+                // A name this computer cannot hold, such as "a:b" on Windows,
+                // is left out: it is neither downloaded nor, absent from the
+                // scan, deleted by a mirror.
+                if (!isLocalRelativePath(relative)) {
+                    ++state->result.invalidNames;
+                    state->result.coverage.remoteUnscannedPaths.insert(
+                        relative);
                     continue;
                 }
 

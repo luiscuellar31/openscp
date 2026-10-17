@@ -462,6 +462,27 @@ OPENSCP_TEST(testOnlyStagingBatchesAreCleanedAfterADrop, test) {
         "a link named like a batch should not be followed");
 }
 
+OPENSCP_TEST(testLocalEntryNamesFollowThisComputer, test) {
+    test.check(isValidLocalEntryName(QStringLiteral("report.txt")),
+               "an ordinary name should be a valid local name");
+    test.check(!isValidLocalEntryName(QStringLiteral("..")),
+               "a relative reference is never a local name");
+#ifdef Q_OS_WIN
+    for (const char *name : {"a:b", "CON", "nul.txt", "COM1.log", "trailing.",
+                             "trailing ", "what?", "pipe|name"}) {
+        QString why;
+        test.check(!isValidLocalEntryName(QString::fromUtf8(name), &why) &&
+                       !why.isEmpty(),
+                   std::string("Windows should refuse the local name ") + name);
+    }
+#else
+    test.check(isValidLocalEntryName(QStringLiteral("a:b")) &&
+                   isValidLocalEntryName(QStringLiteral("CON")) &&
+                   isValidLocalEntryName(QStringLiteral("trailing.")),
+               "POSIX should accept the names only Windows refuses");
+#endif
+}
+
 OPENSCP_TEST(testTerminalTransferStatuses, test) {
     using Status = TransferTask::Status;
     for (const Status status : {Status::Done, Status::Error, Status::Canceled,

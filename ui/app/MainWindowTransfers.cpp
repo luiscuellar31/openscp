@@ -428,7 +428,7 @@ void MainWindow::runRemoteDownloadPrescan(
                     QLatin1Char('/'), Qt::SkipEmptyParts);
                 for (const QString &part : parts) {
                     QString why;
-                    if (!isValidEntryName(part, &why)) {
+                    if (!isValidLocalEntryName(part, &why)) {
                         valid = false;
                         break;
                     }
@@ -1208,7 +1208,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                     const QString name = rightRemoteModel_->nameAt(idx);
                     {
                         QString why;
-                        if (!isValidEntryName(name, &why)) {
+                        if (!isValidLocalEntryName(name, &why)) {
                             ++bad;
                             continue;
                         }

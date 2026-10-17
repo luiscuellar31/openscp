@@ -1066,7 +1066,7 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *remoteModel) {
                     normalizedParts.reserve(parts.size());
                     for (const QString &part : parts) {
                         QString why;
-                        if (!isValidEntryName(part, &why)) {
+                        if (!isValidLocalEntryName(part, &why)) {
                             valid = false;
                             break;
                         }
@@ -1088,7 +1088,7 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *remoteModel) {
                 normalizedParts.reserve(parts.size());
                 for (const QString &part : parts) {
                     QString why;
-                    if (!isValidEntryName(part, &why)) {
+                    if (!isValidLocalEntryName(part, &why)) {
                         valid = false;
                         break;
                     }
@@ -1157,7 +1157,7 @@ void DragAwareTreeView::startRemoteDragAsync(RemoteModel *remoteModel) {
             continue;
         const QString name = remoteModel->nameAt(index);
         QString why;
-        if (!isValidEntryName(name, &why)) {
+        if (!isValidLocalEntryName(name, &why)) {
             ++enumInvalidNames_;
             continue;
         }
