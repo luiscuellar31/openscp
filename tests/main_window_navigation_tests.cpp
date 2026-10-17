@@ -157,6 +157,19 @@ OPENSCP_TEST(testUpdateMenuIsManualByDefault, test) {
         "turning off checks persists without requiring a network request");
 }
 
+OPENSCP_TEST(testSettingsAndQuitHaveShortcutsOnEveryPlatform, test) {
+    // Qt has no standard shortcut for either on Windows.
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    auto *settings =
+        window.findChild<QAction *>(QStringLiteral("settingsAction"));
+    auto *quit = window.findChild<QAction *>(QStringLiteral("quitAction"));
+    test.check(settings && !settings->shortcut().isEmpty(),
+               "Settings should have a keyboard shortcut");
+    test.check(quit && !quit->shortcut().isEmpty(),
+               "Quit should have a keyboard shortcut");
+}
+
 OPENSCP_TEST(testCloseCancelsAuthenticationBeforeUiDispatch, test) {
     auto window = std::make_unique<MainWindow>();
     openscpui::SessionController *session = nullptr;
