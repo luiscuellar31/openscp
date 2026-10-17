@@ -42,6 +42,17 @@ QString defaultKnownHostsPath() {
     return QDir(home).filePath(QStringLiteral(".ssh/known_hosts"));
 }
 
+// ssh parses a -o value like a line of its config file, where spaces separate
+// values unless they are inside double quotes. OpenSSH 8.4 and later also
+// expand %-tokens in known-hosts file names.
+QString sshConfigFileName(const QString &path) {
+    QString escaped = path;
+    escaped.replace(QStringLiteral("%"), QStringLiteral("%%"));
+    escaped.replace(QStringLiteral("\\"), QStringLiteral("\\\\"));
+    escaped.replace(QStringLiteral("\""), QStringLiteral("\\\""));
+    return QStringLiteral("\"") + escaped + QStringLiteral("\"");
+}
+
 void appendHostKeyArguments(QStringList &arguments,
                             const openscp::SessionOptions &session) {
     const openscp::KnownHostsPolicy policy =
@@ -66,8 +77,8 @@ void appendHostKeyArguments(QStringList &arguments,
     if (!knownHostsPath.isEmpty()) {
         arguments << QStringLiteral("-o")
                   << QStringLiteral("UserKnownHostsFile=%1")
-                         .arg(QDir::fromNativeSeparators(
-                             QDir::cleanPath(knownHostsPath)));
+                         .arg(sshConfigFileName(QDir::fromNativeSeparators(
+                             QDir::cleanPath(knownHostsPath))));
     }
 }
 

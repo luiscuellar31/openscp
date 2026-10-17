@@ -39,13 +39,27 @@ OPENSCP_TEST(testBuildsSshAndFallbackWithoutSecrets, test) {
                "the optional SFTP fallback should be included when available");
     test.check(result.command.contains(QStringLiteral("'2222'")),
                "the selected port should be passed to OpenSSH");
-    test.check(result.command.contains(QStringLiteral("known hosts")),
+    test.check(result.command.contains(
+                   QStringLiteral("UserKnownHostsFile=\"/tmp/known hosts\"")),
                "the known-hosts file should be preserved");
     test.check(result.command.contains(QStringLiteral("Quarter")),
                "the remote working directory should be preserved");
     test.check(
         !result.command.contains(QStringLiteral("never-place-this-in-command")),
         "stored passwords must never be copied to terminal arguments");
+}
+
+OPENSCP_TEST(testKnownHostsFileReachesSshAsOneName, test) {
+    // ssh reads the value of -o like a config line: unquoted spaces would
+    // split it into several files, and % starts a token in OpenSSH 8.4+.
+    auto options = session();
+    options.known_hosts_path = "/tmp/known hosts/100%\"x";
+    const auto result =
+        builder().prepare(options, QStringLiteral("/"), false, false);
+    test.check(result.isValid(), "valid sessions should produce a command");
+    test.check(result.command.contains(QStringLiteral(
+                   "UserKnownHostsFile=\"/tmp/known hosts/100%%\\\"x\"")),
+               "the known-hosts file should be quoted and escaped for ssh");
 }
 
 OPENSCP_TEST(testRejectsCredentialedProxy, test) {
