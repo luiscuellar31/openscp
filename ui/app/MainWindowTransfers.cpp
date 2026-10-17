@@ -37,6 +37,20 @@
 
 namespace {
 
+// What is dropped on a panel is copied, uploaded or downloaded afterwards,
+// never moved, so the drop reports a copy. Accepting a proposed move would
+// let the source, such as Explorer or Finder with Shift held, delete the
+// originals while OpenSCP still reads them. A drag that offers no copy is
+// refused.
+void acceptDropAsCopy(QDropEvent *event) {
+    if (!event->possibleActions().testFlag(Qt::CopyAction)) {
+        event->ignore();
+        return;
+    }
+    event->setDropAction(Qt::CopyAction);
+    event->accept();
+}
+
 constexpr char kStagingBatchMime[] = "application/x-openscp-staging-batch";
 
 QRect centeredQueueRect(QWidget *dialog, QWidget *mainWindow) {
@@ -1016,7 +1030,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                 dragEnterEvent->ignore();
                 return true;
             }
-            dragEnterEvent->acceptProposedAction();
+            acceptDropAsCopy(dragEnterEvent);
             return true;
         } else if (event->type() == QEvent::DragMove) {
             auto *dragMoveEvent = static_cast<QDragMoveEvent *>(event);
@@ -1024,7 +1038,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                 dragMoveEvent->ignore();
                 return true;
             }
-            dragMoveEvent->acceptProposedAction();
+            acceptDropAsCopy(dragMoveEvent);
             return true;
         } else if (event->type() == QEvent::Drop) {
             auto *dropEvent = static_cast<QDropEvent *>(event);
@@ -1034,7 +1048,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                                   ? dropEvent->mimeData()->urls()
                                   : QList<QUrl>{};
             if (urls.isEmpty()) {
-                dropEvent->acceptProposedAction();
+                acceptDropAsCopy(dropEvent);
                 return true;
             }
             if (rightIsRemote_) {
@@ -1056,7 +1070,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                 }
                 // Upload to remote
                 if (!sessionController_->hasSession() || !rightRemoteModel_) {
-                    dropEvent->acceptProposedAction();
+                    acceptDropAsCopy(dropEvent);
                     return true;
                 }
                 const QString remoteBase = rightRemoteModel_->rootPath();
@@ -1076,13 +1090,13 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                 }
                 if (!roots.isEmpty())
                     startLocalUploadDiscovery(roots, false, true);
-                dropEvent->acceptProposedAction();
+                acceptDropAsCopy(dropEvent);
                 return true;
             } else {
                 // Local copy to the right panel directory
                 QDir dst(rightPath_->path());
                 if (!dst.exists()) {
-                    dropEvent->acceptProposedAction();
+                    acceptDropAsCopy(dropEvent);
                     return true;
                 }
                 QVector<LocalFsPair> pairs;
@@ -1100,7 +1114,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                     pairs.push_back({localFileInfo.absoluteFilePath(), target});
                 }
                 runLocalFsOperation(pairs, false, 0);
-                dropEvent->acceptProposedAction();
+                acceptDropAsCopy(dropEvent);
                 return true;
             }
         }
@@ -1111,11 +1125,11 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
     if (eventSource == leftViewport) {
         if (event->type() == QEvent::DragEnter) {
             auto *dragEnterEvent = static_cast<QDragEnterEvent *>(event);
-            dragEnterEvent->acceptProposedAction();
+            acceptDropAsCopy(dragEnterEvent);
             return true;
         } else if (event->type() == QEvent::DragMove) {
             auto *dragMoveEvent = static_cast<QDragMoveEvent *>(event);
-            dragMoveEvent->acceptProposedAction();
+            acceptDropAsCopy(dragMoveEvent);
             return true;
         } else if (event->type() == QEvent::Drop) {
             auto *dropEvent = static_cast<QDropEvent *>(event);
@@ -1137,7 +1151,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                 // Local copy towards the left panel
                 QDir dst(leftPath_->path());
                 if (!dst.exists()) {
-                    dropEvent->acceptProposedAction();
+                    acceptDropAsCopy(dropEvent);
                     return true;
                 }
                 QVector<LocalFsPair> pairs;
@@ -1172,7 +1186,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                     };
                 }
                 runLocalFsOperation(pairs, false, 0, removeBatch);
-                dropEvent->acceptProposedAction();
+                acceptDropAsCopy(dropEvent);
                 updateDeleteShortcutEnables();
                 return true;
             }
@@ -1181,7 +1195,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                 auto selectionModel = rightView_->selectionModel();
                 if (!selectionModel ||
                     selectionModel->selectedRows(kNameColumn).isEmpty()) {
-                    dropEvent->acceptProposedAction();
+                    acceptDropAsCopy(dropEvent);
                     return true;
                 }
                 const auto rows = selectionModel->selectedRows(kNameColumn);
@@ -1205,7 +1219,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                         {rpath, lpath, rightRemoteModel_->isDir(idx)});
                 }
                 runRemoteDownloadPrescan(seeds, bad, true);
-                dropEvent->acceptProposedAction();
+                acceptDropAsCopy(dropEvent);
                 updateDeleteShortcutEnables();
                 return true;
             }
