@@ -51,7 +51,7 @@ struct FakeSecretBackend {
                     return {deleteStatus,
                             QStringLiteral("simulated delete failure")};
                 }
-                const bool existed = values.remove(key) > 0;
+                const bool existed = values.remove(key);
                 return {existed ? SecretStore::DeleteStatus::Removed
                                 : SecretStore::DeleteStatus::Missing,
                         {}};

@@ -1,3 +1,4 @@
+#include "PlatformTestSupport.hpp"
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
@@ -148,7 +149,10 @@ OPENSCP_TEST(testCoordinatorIsDestroyedAfterItsControllers, test) {
 }
 
 OPENSCP_TEST(testScanMarksSpecialEntriesAndRefusesUnsafeNames, test) {
-#ifndef _WIN32
+#ifdef _WIN32
+    test.skip("Windows has no FIFOs, and its names cannot hold a backslash or "
+              "a line break.");
+#else
     QTemporaryDir localRoot;
     test.check(
         localRoot.isValid() &&
@@ -285,12 +289,12 @@ OPENSCP_TEST(testAsynchronousSnapshots, test) {
 }
 
 OPENSCP_TEST(testMirrorDoesNotDeleteSkippedSourceLink, test) {
-#ifndef _WIN32
     QTemporaryDir localRoot;
     QTemporaryDir outside;
     test.check(localRoot.isValid() && outside.isValid(),
                "mirror scan fixtures should initialize");
-    test.check(QFile::link(outside.path(), localRoot.filePath("readme.txt")),
+    test.check(openscp::testsupport::createLocalLink(
+                   outside.path(), localRoot.filePath("readme.txt")),
                "source link should be created");
 
     RemoteOperationController remote;
@@ -345,7 +349,6 @@ OPENSCP_TEST(testMirrorDoesNotDeleteSkippedSourceLink, test) {
                                        QStringLiteral("readme.txt");
                             }),
                "the execution plan must also reject a stale unsafe deletion");
-#endif
 }
 
 OPENSCP_TEST(testMirrorDoesNotDeleteUnlistedRemoteSubtree, test) {
@@ -404,7 +407,10 @@ OPENSCP_TEST(testMirrorDoesNotDeleteUnlistedRemoteSubtree, test) {
 }
 
 OPENSCP_TEST(testMirrorDoesNotDeleteUnreadableLocalSubtree, test) {
-#ifndef _WIN32
+#ifdef _WIN32
+    test.skip("Windows cannot make a folder unreadable through its "
+              "permission bits.");
+#else
     QTemporaryDir localRoot;
     test.check(localRoot.isValid(), "local mirror fixture should initialize");
     const QString locked = localRoot.filePath("home");

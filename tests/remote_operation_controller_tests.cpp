@@ -168,8 +168,7 @@ class ControllerFakeClient final : public openscp::RemoteClient {
                 {".", true, 0, false, 0, 0040755u, 1, 1},
                 {"..", true, 0, false, 0, 0040755u, 1, 1},
                 {"nested/escape.txt", false, 1, true, 0, 0100644u, 1, 1},
-                {std::string("bad-") + char(0xff), false, 1, true, 0, 0100644u,
-                 1, 1},
+                {std::string("bad-\xff"), false, 1, true, 0, 0100644u, 1, 1},
             };
         } else {
             out.clear();
