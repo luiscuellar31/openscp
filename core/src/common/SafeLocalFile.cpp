@@ -1,22 +1,17 @@
+// POSIX implementation of SafeLocalFile.hpp; Windows uses
+// SafeLocalFile_win.cpp.
 #include "openscp/SafeLocalFile.hpp"
 
 #include <array>
 #include <cerrno>
 #include <cstring>
 #include <deque>
+#include <fcntl.h>
 #include <filesystem>
-#include <vector>
-
-#ifdef _WIN32
-#include <fcntl.h>
-#include <io.h>
-#include <windows.h>
-#else
-#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#endif
+#include <vector>
 
 namespace openscp::localfiles {
 namespace {
@@ -25,7 +20,6 @@ std::string ioError(const char *operation) {
     return std::string(operation) + ": " + std::strerror(errno);
 }
 
-#ifndef _WIN32
 constexpr int kDirectoryFlags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW;
 constexpr int kMaximumTrustedSymlinks = 8;
 
@@ -167,35 +161,30 @@ bool readRegularFileIdentity(int parent, const std::filesystem::path &name,
                 static_cast<std::int64_t>(changed.tv_nsec)};
     return true;
 }
-#endif
 
 } // namespace
 
+std::string localNameProblem(const std::string &name) {
+    if (name.empty() || name == "." || name == "..")
+        return "A name cannot be empty, '.' or '..'.";
+    if (name.find('/') != std::string::npos ||
+        name.find('\0') != std::string::npos)
+        return "A name cannot contain '/' or a NUL character.";
+    return std::string();
+}
+
 bool ensureLocalDirectories(const std::string &path, std::string &error) {
     error.clear();
-#ifdef _WIN32
-    errno = EINVAL;
-    error = "Safe local directory creation is unavailable on Windows.";
-    return false;
-#else
     const int descriptor = openSafeDirectory(path, true, error);
     if (descriptor < 0)
         return false;
     ::close(descriptor);
     return true;
-#endif
 }
 
 bool removeLocalPath(const std::string &path, bool directory,
                      std::string &error) {
     error.clear();
-#ifdef _WIN32
-    (void)path;
-    (void)directory;
-    errno = EINVAL;
-    error = "Safe local removal is unavailable on Windows.";
-    return false;
-#else
     const std::filesystem::path requested(path);
     const std::filesystem::path name = requested.filename();
     if (name.empty() || name == "." || name == "..") {
@@ -220,18 +209,11 @@ bool removeLocalPath(const std::string &path, bool directory,
     errno = savedError;
     error = ioError("Could not safely remove local path");
     return false;
-#endif
 }
 
 bool localFileIdentity(const std::string &path, LocalFileIdentity &identity,
                        std::string &error) {
     error.clear();
-#ifdef _WIN32
-    (void)path;
-    (void)identity;
-    error = "Safe local source inspection is unavailable on Windows.";
-    return false;
-#else
     const std::filesystem::path requested(path);
     const auto name = requested.filename();
     if (name.empty() || name == "." || name == "..") {
@@ -244,20 +226,12 @@ bool localFileIdentity(const std::string &path, LocalFileIdentity &identity,
     const bool result = readRegularFileIdentity(parent, name, identity, error);
     ::close(parent);
     return result;
-#endif
 }
 
 bool removeLocalFileIfUnchanged(const std::string &path,
                                 const LocalFileIdentity &identity,
                                 std::string &error) {
     error.clear();
-#ifdef _WIN32
-    (void)path;
-    (void)identity;
-    errno = ENOTSUP;
-    error = "Safe local source removal is unavailable on Windows.";
-    return false;
-#else
     const std::filesystem::path requested(path);
     const auto name = requested.filename();
     if (name.empty() || name == "." || name == "..") {
@@ -295,20 +269,12 @@ bool removeLocalFileIfUnchanged(const std::string &path,
     errno = ENOTSUP;
     error = "Automatic local source removal requires manual review.";
     return false;
-#endif
 }
 
 bool setLocalModificationTime(const std::string &path,
                               std::int64_t modifiedSeconds,
                               std::string &error) {
     error.clear();
-#ifdef _WIN32
-    (void)path;
-    (void)modifiedSeconds;
-    errno = EINVAL;
-    error = "Safe local timestamp update is unavailable on Windows.";
-    return false;
-#else
     const std::filesystem::path requested(path);
     const std::filesystem::path name = requested.filename();
     if (name.empty() || name == "." || name == "..") {
@@ -348,63 +314,11 @@ bool setLocalModificationTime(const std::string &path,
         return false;
     }
     return true;
-#endif
 }
 
 std::FILE *openRegularFileForWrite(const std::string &path, WriteMode mode,
                                    std::string &error) {
     error.clear();
-#ifdef _WIN32
-    HANDLE handle = CreateFileA(
-        path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-    if (handle == INVALID_HANDLE_VALUE) {
-        error = "Could not safely open local file for writing.";
-        return nullptr;
-    }
-    FILE_ATTRIBUTE_TAG_INFO tagInfo{};
-    if (!GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &tagInfo,
-                                      sizeof(tagInfo)) ||
-        (tagInfo.FileAttributes &
-         (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
-        CloseHandle(handle);
-        error = "Local partial path is not a regular non-reparse-point file.";
-        errno = EINVAL;
-        return nullptr;
-    }
-    LARGE_INTEGER position{};
-    if (mode == WriteMode::Append) {
-        if (!SetFilePointerEx(handle, position, nullptr, FILE_END)) {
-            CloseHandle(handle);
-            error = "Could not seek local partial file.";
-            return nullptr;
-        }
-    } else if (!SetFilePointerEx(handle, position, nullptr, FILE_BEGIN) ||
-               !SetEndOfFile(handle)) {
-        CloseHandle(handle);
-        error = "Could not truncate local partial file.";
-        return nullptr;
-    }
-
-    const int descriptor = _open_osfhandle(
-        reinterpret_cast<intptr_t>(handle),
-        _O_BINARY | _O_WRONLY | (mode == WriteMode::Append ? _O_APPEND : 0));
-    if (descriptor < 0) {
-        CloseHandle(handle);
-        error = ioError("Could not create local file descriptor");
-        return nullptr;
-    }
-    std::FILE *file =
-        _fdopen(descriptor, mode == WriteMode::Append ? "ab" : "wb");
-    if (!file) {
-        const int savedError = errno;
-        _close(descriptor);
-        errno = savedError;
-        error = ioError("Could not create local file stream");
-        return nullptr;
-    }
-    return file;
-#else
     // A FIFO must not wait for a reader before fstat can reject its type.
     int flags = O_WRONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK;
     if (mode == WriteMode::Append)
@@ -481,20 +395,14 @@ std::FILE *openRegularFileForWrite(const std::string &path, WriteMode mode,
         return nullptr;
     }
     return file;
-#endif
 }
 
 std::uint32_t uploadPermissions(std::FILE *file) {
     constexpr std::uint32_t kDefault = 0644;
-#ifdef _WIN32
-    (void)file;
-    return kDefault;
-#else
     struct ::stat st {};
     if (!file || ::fstat(::fileno(file), &st) != 0)
         return kDefault;
     return static_cast<std::uint32_t>(st.st_mode) & 0777u;
-#endif
 }
 
 bool flushAndSync(std::FILE *file, std::string &error,
@@ -511,11 +419,7 @@ bool flushAndSync(std::FILE *file, std::string &error,
     durability = normalizeLocalFileDurability(durability);
     if (durability == LocalFileDurability::Buffered)
         return true;
-#ifdef _WIN32
-    if (_commit(_fileno(file)) != 0) {
-#else
     if (::fsync(::fileno(file)) != 0) {
-#endif
         error = ioError("Could not synchronize local file");
         return false;
     }
@@ -525,16 +429,6 @@ bool flushAndSync(std::FILE *file, std::string &error,
 bool atomicReplace(const std::string &temporary, const std::string &destination,
                    std::string &error, LocalFileDurability durability) {
     durability = normalizeLocalFileDurability(durability);
-#ifdef _WIN32
-    DWORD flags = MOVEFILE_REPLACE_EXISTING;
-    if (durability == LocalFileDurability::FileAndDirectory)
-        flags |= MOVEFILE_WRITE_THROUGH;
-    if (!MoveFileExA(temporary.c_str(), destination.c_str(), flags)) {
-        error = "Could not atomically finalize local file.";
-        return false;
-    }
-    return true;
-#else
     const std::filesystem::path temporaryPath(temporary);
     const std::filesystem::path destinationPath(destination);
     const std::filesystem::path temporaryName = temporaryPath.filename();
@@ -568,7 +462,6 @@ bool atomicReplace(const std::string &temporary, const std::string &destination,
     if (!synced)
         errno = syncError;
     return synced;
-#endif
 }
 
 } // namespace openscp::localfiles
