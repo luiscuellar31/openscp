@@ -52,7 +52,13 @@ extern char **environ;
 #define openscp_environ (environ)
 #endif
 #else
+// clang-format off
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
+// clang-format on
+
+#include "common/Win32Text.hpp"
 #endif
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
@@ -322,8 +328,8 @@ integrity_policy_from_env(TransferIntegrityPolicy fallback) {
 
 // Protect transfer workers from indefinite kernel-level socket blocking when
 // the peer/network disappears without a clean TCP close.
-void apply_transfer_socket_timeouts(int sock) {
-    if (sock < 0)
+void apply_transfer_socket_timeouts(libssh2detail::SocketHandle sock) {
+    if (sock == libssh2detail::kInvalidSocket)
         return;
 #ifdef _WIN32
     DWORD tvMs = 15000;
@@ -1379,33 +1385,37 @@ Libssh2SftpClient::~Libssh2SftpClient() {
 
 namespace {
 
-void configure_tcp_keepalive(int s) {
+using libssh2detail::kInvalidSocket;
+using libssh2detail::SocketHandle;
+
+// Winsock declares the option value as const char *.
+void set_int_socket_option(SocketHandle s, int level, int name, int value) {
+    (void)::setsockopt(s, level, name, reinterpret_cast<const char *>(&value),
+                       sizeof(value));
+}
+
+void configure_tcp_keepalive(SocketHandle s) {
     // Enable TCP keepalive
-    int opt = 1;
-    (void)::setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt));
+    set_int_socket_option(s, SOL_SOCKET, SO_KEEPALIVE, 1);
 #ifdef __APPLE__
-    int idle = 60;
-    (void)::setsockopt(s, IPPROTO_TCP, TCP_KEEPALIVE, &idle, sizeof(idle));
-#elif defined(__linux__)
-    int idle = 60;
-    int intvl = 10;
-    int cnt = 3;
-    (void)::setsockopt(s, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
-    (void)::setsockopt(s, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl));
-    (void)::setsockopt(s, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt));
+    set_int_socket_option(s, IPPROTO_TCP, TCP_KEEPALIVE, 60);
+#elif defined(__linux__) || defined(_WIN32)
+    // Windows accepts these options since Windows 10 1709.
+    set_int_socket_option(s, IPPROTO_TCP, TCP_KEEPIDLE, 60);
+    set_int_socket_option(s, IPPROTO_TCP, TCP_KEEPINTVL, 10);
+    set_int_socket_option(s, IPPROTO_TCP, TCP_KEEPCNT, 3);
 #endif
 }
 
 // libssh2 sends each SSH packet with its own send() and queues SFTP read
 // requests back to back, so with Nagle's algorithm every request after the
 // first would wait for the server to acknowledge the one before it.
-void disable_nagle(int s) {
-    int opt = 1;
-    (void)::setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+void disable_nagle(SocketHandle s) {
+    set_int_socket_option(s, IPPROTO_TCP, TCP_NODELAY, 1);
 }
 
-bool set_socket_timeout_ms(int sock, int timeoutMs) {
-    if (sock < 0)
+bool set_socket_timeout_ms(SocketHandle sock, int timeoutMs) {
+    if (sock == kInvalidSocket)
         return false;
     if (timeoutMs < 0)
         timeoutMs = 0;
@@ -1428,25 +1438,22 @@ bool set_socket_timeout_ms(int sock, int timeoutMs) {
 #endif
 }
 
-bool socket_send_all(int sock, const unsigned char *data, std::size_t len,
-                     const char *stage, std::string &err) {
+bool socket_send_all(SocketHandle sock, const unsigned char *data,
+                     std::size_t len, const char *stage, std::string &err) {
     // interrupt() shuts the socket down from another thread, and a send after
-    // that raises SIGPIPE, which ends the process unless it is suppressed.
-#ifdef MSG_NOSIGNAL
-    constexpr int kSendFlags = MSG_NOSIGNAL;
-#else
-    constexpr int kSendFlags = 0;
-#endif
+    // that raises SIGPIPE, which ends the process unless it is suppressed;
+    // sendOnce() suppresses it.
     // send(2) may write partially; loop until the full buffer is sent.
     std::size_t off = 0;
     while (off < len) {
-        const ssize_t w =
-            ::send(sock, reinterpret_cast<const char *>(data + off), len - off,
-                   kSendFlags);
+        const std::ptrdiff_t w =
+            libssh2detail::sendOnce(sock, data + off, len - off);
         if (w < 0) {
-            if (errno == EINTR)
+            const int sendError = libssh2detail::lastSocketError();
+            if (libssh2detail::isInterruptedSocketError(sendError))
                 continue;
-            err = std::string(stage) + " send failed: " + std::strerror(errno);
+            err = std::string(stage) + " send failed: " +
+                  libssh2detail::socketErrorMessage(sendError);
             return false;
         }
         if (w == 0) {
@@ -1458,17 +1465,19 @@ bool socket_send_all(int sock, const unsigned char *data, std::size_t len,
     return true;
 }
 
-bool socket_recv_exact(int sock, unsigned char *buf, std::size_t len,
+bool socket_recv_exact(SocketHandle sock, unsigned char *buf, std::size_t len,
                        const char *stage, std::string &err) {
     // recv(2) may return partial data; loop until we fill the requested bytes.
     std::size_t off = 0;
     while (off < len) {
-        const ssize_t r =
-            ::recv(sock, reinterpret_cast<char *>(buf + off), len - off, 0);
+        const std::ptrdiff_t r =
+            libssh2detail::receiveOnce(sock, buf + off, len - off);
         if (r < 0) {
-            if (errno == EINTR)
+            const int receiveError = libssh2detail::lastSocketError();
+            if (libssh2detail::isInterruptedSocketError(receiveError))
                 continue;
-            err = std::string(stage) + " recv failed: " + std::strerror(errno);
+            err = std::string(stage) + " recv failed: " +
+                  libssh2detail::socketErrorMessage(receiveError);
             return false;
         }
         if (r == 0) {
@@ -1483,7 +1492,7 @@ bool socket_recv_exact(int sock, unsigned char *buf, std::size_t len,
 // Reads up to the delimiter one byte at a time: what follows it belongs to the
 // tunneled protocol, such as the SSH server's banner, and must stay in the
 // socket.
-bool socket_recv_until(int sock, const std::string &delimiter,
+bool socket_recv_until(SocketHandle sock, const std::string &delimiter,
                        std::size_t maxBytes, const char *stage,
                        std::string &out, std::string &err) {
     out.clear();
@@ -1493,11 +1502,13 @@ bool socket_recv_until(int sock, const std::string &delimiter,
     }
     while (!out.ends_with(delimiter)) {
         char byte = 0;
-        const ssize_t r = ::recv(sock, &byte, 1, 0);
+        const std::ptrdiff_t r = libssh2detail::receiveOnce(sock, &byte, 1);
         if (r < 0) {
-            if (errno == EINTR)
+            const int receiveError = libssh2detail::lastSocketError();
+            if (libssh2detail::isInterruptedSocketError(receiveError))
                 continue;
-            err = std::string(stage) + " recv failed: " + std::strerror(errno);
+            err = std::string(stage) + " recv failed: " +
+                  libssh2detail::socketErrorMessage(receiveError);
             return false;
         }
         if (r == 0) {
@@ -1513,13 +1524,16 @@ bool socket_recv_until(int sock, const std::string &delimiter,
     return true;
 }
 
-bool connect_tcp_endpoint(const std::string &host, uint16_t port, int &sockOut,
-                          std::string &err, std::stop_token stopToken) {
-    sockOut = -1;
+bool connect_tcp_endpoint(const std::string &host, uint16_t port,
+                          SocketHandle &sockOut, std::string &err,
+                          std::stop_token stopToken) {
+    sockOut = kInvalidSocket;
     if (stopToken.stop_requested()) {
         err = "Connection canceled by user";
         return false;
     }
+    if (!libssh2detail::initializeSockets(err))
+        return false;
     struct addrinfo hints {};
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
@@ -1531,7 +1545,12 @@ bool connect_tcp_endpoint(const std::string &host, uint16_t port, int &sockOut,
     struct addrinfo *res = nullptr;
     int gai = getaddrinfo(host.c_str(), portStr, &hints, &res);
     if (gai != 0) {
+#ifdef _WIN32
+        // Windows returns a Winsock error code, which has a system message.
+        err = "getaddrinfo: " + libssh2detail::socketErrorMessage(gai);
+#else
         err = std::string("getaddrinfo: ") + gai_strerror(gai);
+#endif
         return false;
     }
 
@@ -1544,36 +1563,44 @@ bool connect_tcp_endpoint(const std::string &host, uint16_t port, int &sockOut,
         if (stopToken.stop_requested() ||
             std::chrono::steady_clock::now() >= deadline)
             break;
-        int s = ::socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-        if (s == -1)
-            continue;
-        configure_tcp_keepalive(s);
-        disable_nagle(s);
-        const int flags = ::fcntl(s, F_GETFL, 0);
-        if (flags < 0 || ::fcntl(s, F_SETFL, flags | O_NONBLOCK) < 0 ||
-            ::fcntl(s, F_SETFD, FD_CLOEXEC) < 0) {
-            lastConnectErr = std::strerror(errno);
-            ::close(s);
+        const SocketHandle s = libssh2detail::openSocket(
+            rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (s == kInvalidSocket) {
+            lastConnectErr = libssh2detail::socketErrorMessage(
+                libssh2detail::lastSocketError());
             continue;
         }
-        const int result = ::connect(s, rp->ai_addr, rp->ai_addrlen);
+        configure_tcp_keepalive(s);
+        disable_nagle(s);
+        if (!libssh2detail::setSocketNonBlocking(s, true)) {
+            lastConnectErr = libssh2detail::socketErrorMessage(
+                libssh2detail::lastSocketError());
+            libssh2detail::closeSocket(s);
+            continue;
+        }
+        const int result =
+            ::connect(s, rp->ai_addr, static_cast<socklen_t>(rp->ai_addrlen));
+        const int connectError =
+            result == 0 ? 0 : libssh2detail::lastSocketError();
         bool connected = result == 0;
-        if (!connected && (errno == EINPROGRESS || errno == EINTR)) {
+        if (!connected &&
+            libssh2detail::isConnectInProgressError(connectError)) {
             connected = libssh2detail::waitForTcpConnection(
                 s, deadline, stopToken, lastConnectErr);
         } else if (!connected) {
-            lastConnectErr = std::strerror(errno);
+            lastConnectErr = libssh2detail::socketErrorMessage(connectError);
         }
-        if (connected && ::fcntl(s, F_SETFL, flags) < 0) {
+        if (connected && !libssh2detail::setSocketNonBlocking(s, false)) {
             connected = false;
-            lastConnectErr = std::strerror(errno);
+            lastConnectErr = libssh2detail::socketErrorMessage(
+                libssh2detail::lastSocketError());
         }
         if (connected && !stopToken.stop_requested()) {
             sockOut = s;
             freeaddrinfo(res);
             return true;
         }
-        ::close(s);
+        libssh2detail::closeSocket(s);
     }
     freeaddrinfo(res);
     if (stopToken.stop_requested()) {
@@ -1836,7 +1863,7 @@ void stop_ssh_jump_tunnel(int pid) {
 }
 #endif
 
-bool establish_socks5_tunnel(int sock, const SessionOptions &opt,
+bool establish_socks5_tunnel(SocketHandle sock, const SessionOptions &opt,
                              std::string &err) {
     const bool haveProxyUser =
         opt.proxy_username.has_value() && !opt.proxy_username->empty();
@@ -1975,7 +2002,7 @@ bool establish_socks5_tunnel(int sock, const SessionOptions &opt,
     return true;
 }
 
-bool establish_http_connect_tunnel(int sock, const SessionOptions &opt,
+bool establish_http_connect_tunnel(SocketHandle sock, const SessionOptions &opt,
                                    std::string &err) {
     if (opt.host.empty()) {
         err = "HTTP CONNECT target host is empty.";
@@ -2105,7 +2132,7 @@ bool Libssh2SftpClient::tcpConnect(const SessionOptions &opt,
         return false;
     }
 
-    int socketFd = -1;
+    SocketHandle socketFd = kInvalidSocket;
     if (!connect_tcp_endpoint(endpointHost, endpointPort, socketFd, err,
                               opt.connection_stop_token))
         return false;
@@ -2918,7 +2945,7 @@ bool Libssh2SftpClient::ensureSftpSubsystem(std::string &err) {
 
 void Libssh2SftpClient::disconnect() {
     bool wasConnected = false;
-    int sock = -1;
+    SocketHandle sock = kInvalidSocket;
     {
         std::lock_guard<std::mutex> lk(stateMutex_);
         wasConnected = connected_;
@@ -2926,17 +2953,26 @@ void Libssh2SftpClient::disconnect() {
         // Keep the descriptor attached until shutdown finishes, as interrupt()
         // does. Another disconnect must not detach, close and reuse it first.
         // Shut down before waiting for I/O so blocking operations can finish.
-        if (sock_ != -1) {
-#ifdef _WIN32
-            (void)::shutdown(sock_, SD_BOTH);
-#else
-            (void)::shutdown(sock_, SHUT_RDWR);
-#endif
-        }
+        if (sock_ != kInvalidSocket)
+            libssh2detail::shutdownSocket(sock_);
     }
 
     // Wait for any in-flight I/O operation to finish using session_ and sftp_.
-    std::lock_guard<std::recursive_mutex> ioLock(ioMutex_);
+    std::unique_lock<std::recursive_mutex> ioLock(ioMutex_, std::defer_lock);
+#ifdef _WIN32
+    // libssh2 may enter select() after the shutdown, which on Windows only a
+    // new cancellation ends, so cancel again until the operation lets go.
+    while (!ioLock.try_lock()) {
+        {
+            std::lock_guard<std::mutex> lk(stateMutex_);
+            if (sock_ != kInvalidSocket)
+                libssh2detail::cancelSocketIo(sock_);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+#else
+    ioLock.lock();
+#endif
 
     _LIBSSH2_SFTP *sftp = nullptr;
     _LIBSSH2_SESSION *session = nullptr;
@@ -2951,7 +2987,7 @@ void Libssh2SftpClient::disconnect() {
         sock = sock_;
         sftp_ = nullptr;
         session_ = nullptr;
-        sock_ = -1;
+        sock_ = kInvalidSocket;
 #ifndef _WIN32
         jumpPid = jumpProxyPid_;
         jumpProxyPid_ = -1;
@@ -2980,8 +3016,8 @@ void Libssh2SftpClient::disconnect() {
         libssh2_session_free(session);
     }
 
-    if (sock != -1) {
-        ::close(sock);
+    if (sock != kInvalidSocket) {
+        libssh2detail::closeSocket(sock);
     }
 #ifndef _WIN32
     if (jumpStderrFd != -1)
@@ -3043,16 +3079,12 @@ void Libssh2SftpClient::interrupt() {
     // Keep the descriptor attached until shutdown finishes. Disconnect may
     // otherwise close it and another thread may reuse that descriptor number.
     std::lock_guard<std::mutex> lk(stateMutex_);
-    if (sock_ == -1)
+    if (sock_ == kInvalidSocket)
         return;
     // libssh2 cannot abandon a blocking call, so the socket is shut down and
     // the session cannot be used again.
     connected_.store(false);
-#ifdef _WIN32
-    (void)::shutdown(sock_, SD_BOTH);
-#else
-    (void)::shutdown(sock_, SHUT_RDWR);
-#endif
+    libssh2detail::shutdownSocket(sock_);
 }
 
 bool Libssh2SftpClient::list(const std::string &remote_path,

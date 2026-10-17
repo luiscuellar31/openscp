@@ -38,6 +38,8 @@ set(OPENSCP_CORE_SRCS
     src/libssh2/detail/KnownHostsFile.hpp
     src/libssh2/detail/UniqueSftpHandle.cpp
     src/libssh2/detail/UniqueSftpHandle.hpp
+    src/libssh2/detail/PlatformSocket.hpp
+    src/libssh2/detail/PlatformSocket.cpp
     src/libssh2/detail/TcpConnect.hpp
     src/libssh2/detail/TcpConnect.cpp
     src/libssh2/Libssh2ScpClient.cpp   # SCP backend module
@@ -45,6 +47,13 @@ set(OPENSCP_CORE_SRCS
     src/libssh2/Libssh2SftpClient.cpp   # real implementation
     src/libssh2/Libssh2SftpClient.hpp
 )
+
+if (WIN32)
+    list(APPEND OPENSCP_CORE_SRCS
+        src/common/Win32Text.cpp
+        src/common/Win32Text.hpp
+    )
+endif()
 
 set(OPENSCP_HAS_CURL_FTP 0)
 set(OPENSCP_HAS_CURL_WEBDAV 0)
@@ -237,4 +246,9 @@ else()
             "libssh2 was not found. Install its development package "
             "(for example, 'brew install libssh2').")
     endif()
+endif()
+
+if (WIN32)
+    # Winsock, for the SSH backends' own sockets.
+    target_link_libraries(openscp_core PRIVATE ws2_32)
 endif()

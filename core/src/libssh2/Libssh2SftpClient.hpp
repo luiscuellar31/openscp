@@ -1,6 +1,7 @@
 // Internal RemoteClient implementation using libssh2 for SSH/SFTP.
 // Encapsulates the SSH session, SFTP channel, and TCP socket.
 #pragma once
+#include "libssh2/detail/PlatformSocket.hpp"
 #include "openscp/KnownHostsUtils.hpp"
 #include "openscp/RemoteClient.hpp"
 
@@ -114,7 +115,7 @@ class Libssh2SftpClient : public RemoteClient {
 
     // Atomic because interrupt() clears it from another thread.
     std::atomic_bool connected_{false};
-    int sock_ = -1;
+    libssh2detail::SocketHandle sock_ = libssh2detail::kInvalidSocket;
     _LIBSSH2_SESSION *session_ = nullptr; // <- uses internal libssh2 types
     _LIBSSH2_SFTP *sftp_ = nullptr;       // <- same
     TransferIntegrityPolicy transferIntegrityPolicy_ =
