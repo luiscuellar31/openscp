@@ -8,6 +8,8 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
+#include <functional>
+
 namespace {
 
 openscp::SessionOptions session() {
@@ -60,6 +62,100 @@ OPENSCP_TEST(testKnownHostsFileReachesSshAsOneName, test) {
     test.check(result.command.contains(QStringLiteral(
                    "UserKnownHostsFile=\"/tmp/known hosts/100%%\\\"x\"")),
                "the known-hosts file should be quoted and escaped for ssh");
+}
+
+OPENSCP_TEST(testSeparatesDestinationsFromOptions, test) {
+    // Without "--", ssh and sftp would read this user name as the option
+    // -oProxyCommand=... and run its command.
+    auto options = session();
+    options.username = "-oProxyCommand=touch pwned";
+    const auto result =
+        builder().prepare(options, QStringLiteral("/"), false, true);
+    test.check(result.isValid() && result.hasSftpFallback,
+               "an unusual user name should still produce both commands");
+    test.check(result.command.contains(QStringLiteral(
+                   "'--' '-oProxyCommand=touch pwned@files.example' 'exec ")),
+               "ssh should get its destination after --");
+    test.check(result.command.contains(QStringLiteral(
+                   "'--' '-oProxyCommand=touch pwned@files.example:/'")),
+               "sftp should get its destination after --");
+}
+
+OPENSCP_TEST(testRejectsNamesThatOpenSshWouldMisread, test) {
+    const auto prepareWith =
+        [](const std::function<void(openscp::SessionOptions &)> &edit) {
+            auto options = session();
+            edit(options);
+            return builder().prepare(options, QStringLiteral("/"), false,
+                                     false);
+        };
+    test.check(!prepareWith([](auto &options) {
+                    options.host = "-oProxyCommand=x";
+                }).isValid(),
+               "a host that starts with '-' should be refused");
+    test.check(!prepareWith([](auto &options) {
+                    options.host = "files.example';touch pwned;'";
+                }).isValid(),
+               "a host that would leave the quotes around %h should be "
+               "refused");
+    test.check(!prepareWith([](auto &options) {
+                    options.jump_host = "jump.example;touch pwned";
+                }).isValid(),
+               "ssh puts the jump host unquoted into a shell command");
+    test.check(!prepareWith([](auto &options) {
+                    options.jump_host = "-oProxyCommand=x";
+                }).isValid(),
+               "a jump host that starts with '-' should be refused");
+    test.check(!prepareWith([](auto &options) {
+                    options.jump_host = "jump.example";
+                    options.jump_username = "ops admin";
+                }).isValid(),
+               "a jump user with a space would split the jump command");
+    test.check(!prepareWith([](auto &options) {
+                    options.jump_host = "jump.example";
+                    options.jump_username = "ops,other";
+                }).isValid(),
+               "ssh splits a jump specification at commas");
+
+    const auto plainJump = prepareWith([](auto &options) {
+        options.jump_host = "jump.example";
+        options.jump_username = "ops";
+    });
+    test.check(plainJump.isValid() && plainJump.command.contains(QStringLiteral(
+                                          "'-J' 'ops@jump.example'")),
+               "ordinary jump hosts should still be accepted");
+}
+
+OPENSCP_TEST(testProxyCommandsKeepPercentSignsLiteral, test) {
+    // ssh expands %-tokens in a ProxyCommand, which then sits inside one
+    // more pair of single quotes in the terminal command.
+    const auto nested = [](QString text) {
+        return text.replace(QStringLiteral("'"), QStringLiteral("'\"'\"'"));
+    };
+
+    auto jump = session();
+    jump.jump_host = "jump.example";
+    jump.jump_username = "ops";
+    jump.jump_private_key_path = "/keys/100%";
+    const auto jumpResult =
+        builder().prepare(jump, QStringLiteral("/"), false, false);
+    test.check(jumpResult.isValid() &&
+                   jumpResult.command.contains(nested(QStringLiteral(
+                       "'-i' '/keys/100%%' '-o' 'IdentitiesOnly=yes' '--' "
+                       "'jump.example'"))),
+               "the jump command should double % and end its options "
+               "before the jump host");
+
+    auto proxy = session();
+    proxy.proxy_type = openscp::ProxyType::Socks5;
+    proxy.proxy_host = "fe80::1%eth0";
+    proxy.proxy_port = 1080;
+    const auto proxyResult =
+        builder().prepare(proxy, QStringLiteral("/"), false, false);
+    test.check(proxyResult.isValid() &&
+                   proxyResult.command.contains(
+                       nested(QStringLiteral("'fe80::1%%eth0:1080'"))),
+               "a proxy address with a zone index should keep its %");
 }
 
 OPENSCP_TEST(testRejectsCredentialedProxy, test) {
