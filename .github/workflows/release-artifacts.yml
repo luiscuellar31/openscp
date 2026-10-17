@@ -469,6 +469,149 @@ jobs:
           path: out/*
           if-no-files-found: error
 
+  build-windows:
+    name: Build Windows (x64)
+    needs:
+      - verify-source
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # aqtinstall 3.3.0 does not find Qt 6.11 for Windows in the current
+      # repository layout; this commit of its main branch does.
+      - name: Install pinned Qt release SDK
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
+        with:
+          version: ${{ env.OPENSCP_QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+          aqtsource: "git+https://github.com/miurahr/aqtinstall.git@076e1659807d0b362a3ed684d54c2e9c775eb9c7"
+          py7zrversion: "==1.1.0"
+
+      - name: Fetch vcpkg at the manifest baseline
+        id: vcpkg
+        shell: pwsh
+        run: |
+          $baseline = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
+          $root = Join-Path $env:RUNNER_TEMP 'vcpkg'
+          git init --quiet $root
+          # Some vcpkg test ports go past the 260-character path limit.
+          git -C $root config core.longpaths true
+          git -C $root fetch --quiet --depth 1 https://github.com/microsoft/vcpkg.git $baseline
+          git -C $root checkout --quiet FETCH_HEAD
+          & (Join-Path $root 'bootstrap-vcpkg.bat') -disableMetrics
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $archives = Join-Path $env:RUNNER_TEMP 'vcpkg-archives'
+          New-Item -ItemType Directory -Force $archives | Out-Null
+          "VCPKG_ROOT=$root" >> $env:GITHUB_ENV
+          "VCPKG_DEFAULT_BINARY_CACHE=$archives" >> $env:GITHUB_ENV
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $msvc = & $vswhere -latest -products * -property installationVersion
+          "msvc=$msvc" >> $env:GITHUB_OUTPUT
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\vcpkg-archives
+          key: vcpkg-x64-windows-static-md-${{ hashFiles('vcpkg.json') }}-${{ steps.vcpkg.outputs.msvc }}
+          restore-keys: |
+            vcpkg-x64-windows-static-md-${{ hashFiles('vcpkg.json') }}-
+            vcpkg-x64-windows-static-md-
+
+      - name: Install pinned Inno Setup and WiX
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          curl.exe --fail --location --proto '=https' --silent --show-error `
+            --output $installer `
+            https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $expected = '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732'
+          if ((Get-FileHash -Algorithm SHA256 $installer).Hash.ToLowerInvariant() -ne $expected) {
+            throw 'The Inno Setup installer does not match its pinned SHA-256.'
+          }
+          $innoDir = Join-Path $env:RUNNER_TEMP 'InnoSetup'
+          $install = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList @(
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/CURRENTUSER',
+            "/DIR=`"$innoDir`"")
+          if ($install.ExitCode -ne 0) { throw "Inno Setup did not install: $($install.ExitCode)" }
+          "ISCC=$(Join-Path $innoDir 'ISCC.exe')" >> $env:GITHUB_ENV
+          dotnet tool install --global wix --version 5.0.2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Join-Path $env:USERPROFILE '.dotnet\tools' >> $env:GITHUB_PATH
+
+      - name: Build the setup and the MSI
+        shell: pwsh
+        env:
+          QT_PREFIX: ${{ env.QT_ROOT_DIR }}
+          OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION: "ON"
+        run: .\scripts\package\windows.ps1
+
+      # OpenSCP closes at once when a DLL or plugin is missing, so it must
+      # still run after a few seconds; then the uninstaller must clean up.
+      - name: Smoke-test the setup
+        shell: pwsh
+        run: |
+          $version = '${{ needs.verify-source.outputs.version }}'
+          $log = Join-Path $env:RUNNER_TEMP 'setup.log'
+          $installer = (Resolve-Path "dist\OpenSCP-$version-x64-setup.exe").Path
+          $setup = Start-Process -FilePath $installer -Wait -PassThru `
+            -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/LOG=`"$log`""
+          if ($setup.ExitCode -ne 0) { Get-Content $log; throw "The setup exited with $($setup.ExitCode)." }
+          $folder = Join-Path $env:LOCALAPPDATA 'Programs\OpenSCP'
+          $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{2C03B5C3-87DD-4DAB-B609-F89E831909E6}_is1'
+          if ((Get-ItemProperty $key).InstallLocation.TrimEnd('\') -ne $folder) {
+            throw 'The setup did not record the installation where OpenSCP looks for it.'
+          }
+          $app = Start-Process -FilePath (Join-Path $folder 'OpenSCP.exe') -PassThru
+          Start-Sleep -Seconds 10
+          if ($app.HasExited) { throw "OpenSCP exited at start with $($app.ExitCode)." }
+          Stop-Process -Id $app.Id -Force
+          Start-Process -FilePath (Join-Path $folder 'unins000.exe') -Wait `
+            -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+          $deadline = (Get-Date).AddSeconds(60)
+          while (((Test-Path $folder) -or (Test-Path $key)) -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 1
+          }
+          if ((Test-Path $folder) -or (Test-Path $key)) { throw 'The uninstaller left OpenSCP behind.' }
+
+      - name: Smoke-test the MSI
+        shell: pwsh
+        run: |
+          $version = '${{ needs.verify-source.outputs.version }}'
+          $msi = (Resolve-Path "dist\OpenSCP-$version-x64.msi").Path
+          $log = Join-Path $env:RUNNER_TEMP 'msi.log'
+          $install = Start-Process -FilePath msiexec.exe -Wait -PassThru `
+            -ArgumentList '/i', "`"$msi`"", '/qn', '/norestart', '/l*v', "`"$log`""
+          if ($install.ExitCode -ne 0) { Get-Content $log -Tail 60; throw "The MSI exited with $($install.ExitCode)." }
+          $exe = Join-Path $env:ProgramFiles 'OpenSCP\OpenSCP.exe'
+          $app = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 10
+          if ($app.HasExited) { throw "OpenSCP exited at start with $($app.ExitCode)." }
+          Stop-Process -Id $app.Id -Force
+          $remove = Start-Process -FilePath msiexec.exe -Wait -PassThru `
+            -ArgumentList '/x', "`"$msi`"", '/qn', '/norestart'
+          if ($remove.ExitCode -ne 0) { throw "Removing the MSI exited with $($remove.ExitCode)." }
+          if (Test-Path $exe) { throw 'Removing the MSI left OpenSCP behind.' }
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-x64
+          path: |
+            dist/OpenSCP-*-x64-setup.exe
+            dist/OpenSCP-*-x64-setup.exe.sha256
+            dist/OpenSCP-*-x64.msi
+            dist/OpenSCP-*-x64.msi.sha256
+          if-no-files-found: error
+
   publish-assets:
     name: Upload assets to release
     # sign-macos-updates is skipped when Sparkle signing is not configured.
@@ -478,12 +621,14 @@ jobs:
       needs.verify-source.result == 'success' &&
       needs.build-macos.result == 'success' &&
       needs.build-linux.result == 'success' &&
+      needs.build-windows.result == 'success' &&
       contains(fromJSON('["success", "skipped"]'), needs.sign-macos-updates.result)
     needs:
       - verify-source
       - build-macos
       - sign-macos-updates
       - build-linux
+      - build-windows
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -508,16 +653,16 @@ jobs:
         run: |
           find release-assets -type f | sort
 
-      - name: Sign AppImage update manifest when configured
+      - name: Sign the AppImage and Windows update manifest when configured
         env:
           OPENSCP_UPDATE_PRIVATE_KEY: ${{ secrets.OPENSCP_UPDATE_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           if [[ -z "$OPENSCP_UPDATE_PUBLIC_KEY" && -z "$OPENSCP_UPDATE_PRIVATE_KEY" ]]; then
-            echo "AppImage update signing is not configured; updates remain manual."
+            echo "Update signing is not configured; AppImage and Windows updates remain manual."
           else
             [[ -n "$OPENSCP_UPDATE_PUBLIC_KEY" && -n "$OPENSCP_UPDATE_PRIVATE_KEY" ]] || {
-              echo "Both AppImage signing keys must be configured."
+              echo "Both update signing keys must be configured."
               exit 1
             }
             python3 scripts/release/update-manifest.py \
@@ -534,6 +679,12 @@ jobs:
             appimage="release-assets/linux-${arch}/OpenSCP-${version}-${arch}.AppImage"
             [[ -s "$appimage" && -s "${appimage}.zsync" ]] || {
               echo "Missing AppImage or zsync file for ${arch}"
+              exit 1
+            }
+          done
+          for package in "OpenSCP-${version}-x64-setup.exe" "OpenSCP-${version}-x64.msi"; do
+            [[ -s "release-assets/windows-x64/${package}" ]] || {
+              echo "Missing Windows package ${package}"
               exit 1
             }
           done

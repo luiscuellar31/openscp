@@ -98,6 +98,79 @@ jobs:
           ctest --test-dir build-no-backends --output-on-failure \
             -R '^openscp_core_tests$'
 
+  windows:
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
+    name: Windows (MSVC, x64)
+    runs-on: windows-2022
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # aqtinstall 3.3.0 does not find Qt 6.11 for Windows in the current
+      # repository layout; this commit of its main branch does.
+      - name: Install pinned Qt
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
+        with:
+          version: "6.11.2"
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+          aqtsource: "git+https://github.com/miurahr/aqtinstall.git@076e1659807d0b362a3ed684d54c2e9c775eb9c7"
+          py7zrversion: "==1.1.0"
+
+      - name: Fetch vcpkg at the manifest baseline
+        id: vcpkg
+        shell: pwsh
+        run: |
+          $baseline = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
+          $root = Join-Path $env:RUNNER_TEMP 'vcpkg'
+          git init --quiet $root
+          # Some vcpkg test ports go past the 260-character path limit.
+          git -C $root config core.longpaths true
+          git -C $root fetch --quiet --depth 1 https://github.com/microsoft/vcpkg.git $baseline
+          git -C $root checkout --quiet FETCH_HEAD
+          & (Join-Path $root 'bootstrap-vcpkg.bat') -disableMetrics
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $archives = Join-Path $env:RUNNER_TEMP 'vcpkg-archives'
+          New-Item -ItemType Directory -Force $archives | Out-Null
+          "VCPKG_ROOT=$root" >> $env:GITHUB_ENV
+          "VCPKG_DEFAULT_BINARY_CACHE=$archives" >> $env:GITHUB_ENV
+          # vcpkg rebuilds what another compiler built, so the cache follows
+          # the Visual Studio version as well as the manifest.
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $msvc = & $vswhere -latest -products * -property installationVersion
+          "msvc=$msvc" >> $env:GITHUB_OUTPUT
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\vcpkg-archives
+          key: vcpkg-x64-windows-static-md-${{ hashFiles('vcpkg.json') }}-${{ steps.vcpkg.outputs.msvc }}
+          restore-keys: |
+            vcpkg-x64-windows-static-md-${{ hashFiles('vcpkg.json') }}-
+            vcpkg-x64-windows-static-md-
+
+      - name: Configure, build and test with warnings as errors
+        shell: pwsh
+        env:
+          QT_PREFIX: ${{ env.QT_ROOT_DIR }}
+        run: |
+          $RepoDir = $PWD.Path
+          $LogPrefix = '[ci]'
+          . .\scripts\lib\windows\build.ps1
+          Enter-MsvcEnvironment
+          $configure = Get-ConfigureArguments (Join-Path $RepoDir 'build') 'Release' 'x64-windows-static-md'
+          Invoke-Native 'cmake' ($configure + @('-DOPENSCP_BUILD_TESTS=ON', '-DOPENSCP_WERROR=ON'))
+          Invoke-Native 'cmake' @('--build', 'build', '--parallel')
+          Invoke-Native 'ctest' @('--test-dir', 'build', '--output-on-failure', '-LE', 'integration')
+
   quick-dev:
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
