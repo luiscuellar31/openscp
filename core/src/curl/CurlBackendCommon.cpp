@@ -869,6 +869,17 @@ bool configureTlsPolicy(CURL *curl, bool verifyPeer,
             return false;
         }
     }
+#ifdef _WIN32
+    // OpenSSL has no trust store of its own on Windows; the system's is the
+    // one users manage. A chosen CA file stays the only one trusted.
+    else if (verifyPeer &&
+             curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS,
+                              static_cast<long>(CURLSSLOPT_NATIVE_CA)) !=
+                 CURLE_OK) {
+        err = verificationError;
+        return false;
+    }
+#endif
     if (pinnedPublicKey && !pinnedPublicKey->empty()) {
         if (curl_easy_setopt(curl, CURLOPT_PINNEDPUBLICKEY,
                              pinnedPublicKey->c_str()) != CURLE_OK) {
