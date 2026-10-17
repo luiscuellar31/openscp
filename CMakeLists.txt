@@ -404,6 +404,7 @@ add_library(openscp_ui_logic STATIC
     ui/logic/updates/MacUpdater.hpp
     ui/logic/common/AppSettings.hpp
     ui/logic/common/AppSettings.cpp
+    ui/logic/common/LocalLinks.hpp
     ui/logic/common/StagingStore.hpp
     ui/logic/common/StagingStore.cpp
     ui/logic/common/MainWindowSharedUtils.hpp

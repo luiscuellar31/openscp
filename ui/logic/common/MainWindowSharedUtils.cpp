@@ -1,6 +1,7 @@
 // Shared helper utilities for MainWindow split implementation files.
 #include "logic/common/MainWindowSharedUtils.hpp"
 
+#include "logic/common/LocalLinks.hpp"
 #include "logic/common/UiAlerts.hpp"
 
 #include <QCoreApplication>
@@ -26,12 +27,12 @@ std::filesystem::path localFilesystemPath(const QString &path) {
 
 bool localEntryExists(const QString &path) {
     const QFileInfo info(path);
-    return info.exists() || info.isSymLink();
+    return info.exists() || isLocalLink(info);
 }
 
 bool renameEntry(const QString &from, const QString &to) {
     const QFileInfo info(from);
-    if (info.isDir() && !info.isSymLink())
+    if (info.isDir() && !isLocalLink(info))
         return QDir().rename(from, to);
     return QFile::rename(from, to);
 }
@@ -74,7 +75,7 @@ bool copyEntryToEmptyDestination(const QString &srcPath, const QString &dstPath,
     QFileInfo srcInfo(srcPath);
 
     // isFile() and isDir() follow links, so check for a link first.
-    if (srcInfo.isSymLink())
+    if (isLocalLink(srcInfo))
         return copyLink(srcPath, dstPath, error);
 
     if (srcInfo.isFile()) {
@@ -112,7 +113,7 @@ bool copyEntryToEmptyDestination(const QString &srcPath, const QString &dstPath,
                 entryFileInfo.absoluteFilePath());
             const QString target = QDir(dstPath).filePath(relativePath);
 
-            if (entryFileInfo.isSymLink()) {
+            if (isLocalLink(entryFileInfo)) {
                 QDir().mkpath(QFileInfo(target).dir().absolutePath());
                 if (!copyLink(entryFileInfo.absoluteFilePath(), target, error))
                     return false;
@@ -167,7 +168,40 @@ LocalRenameResult renameLocalEntry(const QString &sourcePath,
     return LocalRenameResult::Failed;
 }
 
+#ifdef Q_OS_WIN
+namespace {
+
+// Removes a tree one level at a time. symlink_status() reports a junction as
+// a junction, not a directory, and remove() deletes a link or junction
+// itself, and a read-only file too, so nothing outside the tree is touched.
+bool removeNativeTree(const std::filesystem::path &path) {
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status(path, error);
+    if (status.type() == std::filesystem::file_type::not_found)
+        return true;
+    if (error)
+        return false;
+    bool removed = true;
+    if (status.type() == std::filesystem::file_type::directory) {
+        std::filesystem::directory_iterator entry(path, error);
+        for (; !error && entry != std::filesystem::directory_iterator();
+             entry.increment(error))
+            removed = removeNativeTree(entry->path()) && removed;
+        if (error)
+            return false;
+    }
+    std::filesystem::remove(path, error);
+    return removed && !error;
+}
+
+} // namespace
+#endif
+
 bool removeLocalEntry(const QString &path) {
+#ifdef Q_OS_WIN
+    // QDir::removeRecursively() descends into junctions.
+    return removeNativeTree(localFilesystemPath(path));
+#else
     const QFileInfo info(path);
     if (!info.exists() && !info.isSymLink())
         return true;
@@ -176,6 +210,7 @@ bool removeLocalEntry(const QString &path) {
     if (info.isDir() && !info.isSymLink())
         return QDir(path).removeRecursively();
     return QFile::remove(path);
+#endif
 }
 
 bool copyLocalEntry(const QString &srcPath, const QString &dstPath,
@@ -194,7 +229,7 @@ bool copyLocalEntry(const QString &srcPath, const QString &dstPath,
     // The staged copy would land inside the tree being copied and grow
     // without end.
     const QFileInfo srcInfo(srcPath);
-    if (srcInfo.isDir() && !srcInfo.isSymLink() &&
+    if (srcInfo.isDir() && !isLocalLink(srcInfo) &&
         isSameOrInside(destinationParent, srcPath)) {
         error =
             QString(QCoreApplication::translate(
