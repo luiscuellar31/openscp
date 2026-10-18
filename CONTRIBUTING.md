@@ -267,6 +267,29 @@ change is needed, what changed, and which checks you actually ran.
 - List the relevant local checks and platform builds actually run, and explain
   any relevant checks not run.
 
+## Dependency updates
+
+Dependabot proposes updates of the GitHub Actions and of vcpkg's
+`builtin-baseline`, which pins the Windows libraries. Release builds pin the
+rest by hand: OpenSSL, libssh2, and tinyxml2 in
+`scripts/ci/build_macos_release_deps.sh` for macOS, and OpenSSL in the vcpkg
+overlay port `vcpkg-ports/openssl` for Windows.
+
+Every Monday the **Pinned Dependency Updates** workflow runs
+`scripts/release/update-pinned-deps.py`, which looks for the newest release
+within OpenSSL's 3.5 long-term support series and within libssh2's and
+tinyxml2's major versions, and checks its sources. When the dependencies then
+build on macOS and Windows as release builds do, the workflow opens a pull
+request against `dev` and assigns it to the repository owner, so GitHub emails
+them. A newer series or major version is mentioned there but never taken. When
+a build fails, GitHub instead emails the failed run to whoever last changed the
+workflow's schedule.
+
+The workflow needs **Allow GitHub Actions to create and approve pull requests**
+in the repository's Actions settings. GitHub starts no workflows for pull
+requests that GitHub Actions opens, so close and reopen such a pull request to
+run CI on it.
+
 ## Releases
 
 After merging to `main`, wait for the Linux, macOS and Windows build jobs in

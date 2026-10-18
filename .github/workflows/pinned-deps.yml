@@ -1,0 +1,228 @@
+name: Pinned Dependency Updates
+
+# Release builds pin OpenSSL, libssh2 and tinyxml2 by hand: macOS in
+# scripts/ci/build_macos_release_deps.sh, Windows (OpenSSL only) in the vcpkg
+# overlay port vcpkg-ports/openssl. Each week this proposes the newest release
+# within OpenSSL's 3.5 long-term support series and within libssh2's and
+# tinyxml2's major versions, once the release builds of the dependencies pass.
+# The pull request is assigned to the repository owner, so GitHub emails them.
+
+on:
+  schedule:
+    # Mondays at 06:00 in Mexico City, with Dependabot's weekly run.
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pinned-deps
+  cancel-in-progress: false
+
+jobs:
+  find-updates:
+    name: Find newer releases
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      base: ${{ steps.update.outputs.base }}
+      propose: ${{ steps.proposed.outputs.propose }}
+      macos: ${{ steps.update.outputs.macos }}
+      windows: ${{ steps.update.outputs.windows }}
+      title: ${{ steps.update.outputs.title }}
+      branch: ${{ steps.update.outputs.branch }}
+
+    steps:
+      # Scheduled runs start on the default branch; changes go to dev.
+      - name: Checkout dev
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dev
+          persist-credentials: false
+
+      - name: Move the pins to the newest allowed releases
+        id: update
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pinned-deps"
+          echo "base=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          python3 scripts/release/update-pinned-deps.py \
+            --summary "$RUNNER_TEMP/pinned-deps/summary.md" --github-output
+          git diff > "$RUNNER_TEMP/pinned-deps/pins.patch"
+
+      # A closed pull request means that the maintainer declined the update.
+      - name: Skip an update that already has a pull request
+        id: proposed
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.update.outputs.branch }}
+        run: |
+          set -euo pipefail
+          existing="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" \
+            --state all --json number --jq length)"
+          if [[ "$existing" == 0 ]]; then
+            echo "propose=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$BRANCH already has a pull request."
+          fi
+
+      - name: Keep the update for the next jobs
+        if: steps.proposed.outputs.propose == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pinned-deps
+          path: ${{ runner.temp }}/pinned-deps/
+          if-no-files-found: error
+          retention-days: 7
+
+  build-macos-dependencies:
+    name: Build macOS dependencies (${{ matrix.arch }})
+    needs:
+      - find-updates
+    if: >-
+      needs.find-updates.outputs.propose == 'true' &&
+      needs.find-updates.outputs.macos == 'true'
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+
+    steps:
+      - name: Checkout the base of the update
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.find-updates.outputs.base }}
+          persist-credentials: false
+
+      - name: Download the update
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pinned-deps
+          path: ${{ runner.temp }}/pinned-deps
+
+      - name: Build the dependencies as release builds do
+        env:
+          CMAKE_OSX_ARCHITECTURES: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          git apply "$RUNNER_TEMP/pinned-deps/pins.patch"
+          ./scripts/ci/build_macos_release_deps.sh "$RUNNER_TEMP/openscp-release-deps"
+
+  build-windows-dependencies:
+    name: Build Windows dependencies
+    needs:
+      - find-updates
+    if: >-
+      needs.find-updates.outputs.propose == 'true' &&
+      needs.find-updates.outputs.windows == 'true'
+    runs-on: windows-2022
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout the base of the update
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.find-updates.outputs.base }}
+          persist-credentials: false
+
+      - name: Download the update
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pinned-deps
+          path: ${{ runner.temp }}/pinned-deps
+
+      - name: Apply the update
+        shell: pwsh
+        run: git apply "$env:RUNNER_TEMP\pinned-deps\pins.patch"
+
+      - name: Fetch vcpkg at the manifest baseline
+        id: vcpkg
+        shell: pwsh
+        run: .\scripts\ci\fetch_vcpkg.ps1
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\vcpkg-archives
+          key: vcpkg-x64-windows-static-md-${{ hashFiles('vcpkg.json', 'vcpkg-ports/**') }}-${{ steps.vcpkg.outputs.msvc }}
+          restore-keys: |
+            vcpkg-x64-windows-static-md-${{ hashFiles('vcpkg.json', 'vcpkg-ports/**') }}-
+            vcpkg-x64-windows-static-md-
+
+      - name: Build the vcpkg.json dependencies as release builds do
+        shell: pwsh
+        run: |
+          & (Join-Path $env:VCPKG_ROOT 'vcpkg.exe') install --triplet x64-windows-static-md
+
+  open-pull-request:
+    name: Open the pull request
+    needs:
+      - find-updates
+      - build-macos-dependencies
+      - build-windows-dependencies
+    # A build is skipped when the update leaves its platform alone.
+    if: >-
+      needs.find-updates.outputs.propose == 'true' && !cancelled() &&
+      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout the base of the update
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.find-updates.outputs.base }}
+          # The push below uses the job's token.
+          persist-credentials: true
+
+      - name: Download the update
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pinned-deps
+          path: ${{ runner.temp }}/pinned-deps
+
+      - name: Push the update and open its pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ needs.find-updates.outputs.branch }}
+          TITLE: ${{ needs.find-updates.outputs.title }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          update="$RUNNER_TEMP/pinned-deps"
+          git apply "$update/pins.patch"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          printf '%s\n\n' "$TITLE" | cat - "$update/summary.md" | git commit --all --file -
+          # Only a run that stopped before opening its pull request leaves
+          # this branch behind, so it can be replaced.
+          git push --force origin "HEAD:refs/heads/$BRANCH"
+          {
+            cat "$update/summary.md"
+            echo
+            echo "The release builds of the updated dependencies passed in [this run]($RUN_URL)."
+            echo "GitHub starts no CI for pull requests that GitHub Actions opens;" \
+              "close and reopen this one to run it."
+          } > "$update/body.md"
+          # Assigning the owner makes GitHub email them about the update.
+          gh pr create --base dev --head "$BRANCH" --title "$TITLE" \
+            --body-file "$update/body.md" \
+            --assignee "$GITHUB_REPOSITORY_OWNER" --label dependencies
