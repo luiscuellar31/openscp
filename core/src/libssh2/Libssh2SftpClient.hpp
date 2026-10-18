@@ -85,8 +85,8 @@ class Libssh2SftpClient : public RemoteClient {
     // Exposed for protocol adapters that share the authenticated SSH transport
     // (for example, SCP channel operations).
     _LIBSSH2_SESSION *sessionHandle() const { return session_; }
-    [[nodiscard]] std::unique_lock<std::recursive_mutex> lockIo() {
-        return std::unique_lock<std::recursive_mutex>(ioMutex_);
+    [[nodiscard]] std::unique_lock<std::recursive_timed_mutex> lockIo() {
+        return std::unique_lock<std::recursive_timed_mutex>(ioMutex_);
     }
 
     private:
@@ -104,7 +104,7 @@ class Libssh2SftpClient : public RemoteClient {
         Libssh2SftpClient &owner_;
         std::string &error_;
         bool mutation_ = false;
-        std::unique_lock<std::recursive_mutex> ioLock_;
+        std::unique_lock<std::recursive_timed_mutex> ioLock_;
     };
 
     StructuredErrorScope beginStructuredOperation(std::string &err,
@@ -123,7 +123,8 @@ class Libssh2SftpClient : public RemoteClient {
     LocalFileDurability localFileDurability_ =
         LocalFileDurability::FileAndDirectory;
     mutable std::mutex stateMutex_;
-    mutable std::recursive_mutex ioMutex_;
+    // Timed, so that disconnect() can wait for it between cancellations.
+    mutable std::recursive_timed_mutex ioMutex_;
 #ifndef _WIN32
     int jumpProxyPid_ = -1;
     int jumpProxyStderrFd_ = -1;
