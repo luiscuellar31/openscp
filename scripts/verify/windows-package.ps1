@@ -69,9 +69,10 @@ foreach ($binary in $binaries) {
         $lower = $import.ToLowerInvariant()
         if ($lower -match '^(ucrtbased|vcruntime140(_1)?d|msvcp140(_\w+)?d|concrt140d)\.dll$') {
             $problems.Add("$name needs the debug runtime $import")
-        } elseif ($lower -match '^(vcruntime|msvcp|concrt|vccorlib)\d') {
+        } elseif ($lower -match '^((vcruntime|msvcp|msvcr|concrt|vccorlib|vcomp|vcamp)\d|(mfcm?|atl)1\d\d)') {
             # A Visual C++ redistributable on this computer puts these in
-            # System32, but a clean Windows does not have them.
+            # System32, but a clean Windows does not have them: the C and C++
+            # runtimes of every version, OpenMP, C++ AMP, MFC and ATL.
             if (-not $staged.ContainsKey($lower)) {
                 $problems.Add("$name needs $import, which the package must include")
             }
@@ -88,3 +89,6 @@ if ($problems.Count -gt 0) {
     exit 1
 }
 Write-Host "[ok  ] $($binaries.Count) binaries in $root passed the package checks." -ForegroundColor Green
+# The caller reads $LASTEXITCODE, which a script that ends without exit leaves
+# as the last native command set it.
+exit 0
