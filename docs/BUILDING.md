@@ -255,7 +255,9 @@ help` lists the other variables.
 
 The setup installs for the current user by default and can install for all
 users; it is the one that updates itself from the signed update manifest. The
-MSI installs for all users, for deployment tools. Neither is code-signed.
+MSI installs for all users, for deployment tools. For all users, both install
+into the same folder, so neither installs there while the other is installed.
+Neither is code-signed.
 
 ## Application icon
 
