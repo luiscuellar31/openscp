@@ -36,4 +36,19 @@ bool FocusTraversalController::contains(QObject *target) const {
     return widget && (widget == scope_ || scope_->isAncestorOf(widget));
 }
 
+bool disableWithoutPassingFocus(QWidget *widget) {
+    // A widget without the focus has none to pass on when disabled.
+    const bool hadFocus = widget->hasFocus();
+    if (hadFocus)
+        widget->clearFocus();
+    widget->setEnabled(false);
+    return hadFocus;
+}
+
+void enableRestoringFocus(QWidget *widget, bool hadFocus) {
+    widget->setEnabled(true);
+    if (hadFocus && !widget->window()->focusWidget())
+        widget->setFocus(Qt::OtherFocusReason);
+}
+
 } // namespace openscpui

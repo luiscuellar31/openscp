@@ -14,6 +14,7 @@
 #include "logic/transfers/TransferManager.hpp"
 #include "openscp/ClientFactory.hpp"
 #include "openscp/RuntimeLogging.hpp"
+#include "widgets/common/FocusTraversalController.hpp"
 #include "widgets/dialogs/AuthenticationInput.hpp"
 #include "widgets/dialogs/ConnectionDialog.hpp"
 #include "widgets/dialogs/SiteManagerDialog.hpp"
@@ -448,7 +449,8 @@ void MainWindow::applyDisconnectLocalUiState() {
         actChooseRight_->setToolTip(actChooseRight_->text());
     }
     if (rightView_)
-        rightView_->setEnabled(true);
+        openscpui::enableRestoringFocus(
+            rightView_, std::exchange(remoteViewHadFocus_, false));
     setWindowTitle(tr("OpenSCP — local/local"));
     updateDeleteShortcutEnables();
 }

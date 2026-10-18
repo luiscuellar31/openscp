@@ -22,4 +22,13 @@ class FocusTraversalController final : public QObject {
     bool initialNavigationPending_ = true;
 };
 
+// Disables `widget` without passing its keyboard focus to the next widget, as
+// setEnabled(false) does, so that no other widget has the focus meanwhile.
+// Returns whether `widget` had it, for enableRestoringFocus().
+bool disableWithoutPassingFocus(QWidget *widget);
+
+// Enables `widget` and, if it had the focus and no widget of its window took
+// the focus since, gives it back.
+void enableRestoringFocus(QWidget *widget, bool hadFocus);
+
 } // namespace openscpui

@@ -78,6 +78,7 @@
 #include <memory>
 #include <optional>
 #include <thread>
+#include <utility>
 
 namespace {
 
@@ -1077,7 +1078,8 @@ void MainWindow::initializeRuntimeState() {
                     return;
                 }
                 rightRemoteModel_->clearLoading();
-                rightView_->setEnabled(true);
+                openscpui::enableRestoringFocus(
+                    rightView_, std::exchange(remoteViewHadFocus_, false));
                 statusBar()->showMessage(
                     tr("Remote folder unavailable. The session remains "
                        "connected; use Refresh to retry."),
@@ -1093,7 +1095,8 @@ void MainWindow::initializeRuntimeState() {
             for (const auto &entry : result.entries)
                 entries.push_back(entry.info);
             rightRemoteModel_->setEntries(result.path, entries);
-            rightView_->setEnabled(true);
+            openscpui::enableRestoringFocus(
+                rightView_, std::exchange(remoteViewHadFocus_, false));
             sessionHealthMonitor_.recordActivity();
 
             if (activeRemoteListIsRefresh_ && rightView_->selectionModel()) {

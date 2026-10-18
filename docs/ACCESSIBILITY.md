@@ -40,6 +40,9 @@ Disconnect pointing devices while checking these paths:
    `Shift+F10` and invoke an action without using the pointer.
 5. Trigger the drag-preparation overlay. Focus must move to **Cancel**, `Esc`
    must cancel it, and focus must return to the file view when it closes.
+6. Connected to a server, open a remote folder with `Enter` and refresh with
+   the keyboard. No other control, such as **Disconnect**, may take the focus
+   while the folder lists, and the remote panel must have it again afterwards.
 
 ## Screen-reader matrix
 
