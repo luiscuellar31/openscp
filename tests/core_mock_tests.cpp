@@ -25,6 +25,9 @@
 #if OPENSCP_HAS_CURL_FTP || OPENSCP_HAS_CURL_WEBDAV
 #include "curl/CurlBackendCommon.hpp"
 #endif
+#ifdef _WIN32
+#include "libssh2/detail/SshJumpTunnel_win.hpp"
+#endif
 
 #include <array>
 #include <atomic>
@@ -54,6 +57,7 @@
 // clang-format off
 #include <windows.h>
 #include <winioctl.h>
+#include <shellapi.h>
 // clang-format on
 #include <io.h>
 #endif
@@ -2072,21 +2076,7 @@ OPENSCP_TEST(test_libssh2_recent_remote_modification, t) {
         "an out-of-range modification time should use the full check");
 }
 
-#ifdef _WIN32
-OPENSCP_TEST(test_libssh2_rejects_jump_on_windows, t) {
-    openscp::Libssh2SftpClient c;
-    openscp::SessionOptions opt = validOptions();
-    opt.jump_host = std::string("bastion.example.test");
-    opt.jump_port = 22;
-
-    std::string err;
-    const bool ok = c.connect(opt, err);
-    t.check(!ok, "connect should fail when jump is configured on Windows");
-    t.checkContains(err, "not supported on this platform",
-                    "connect should explain jump is unsupported on Windows");
-}
-#else
-OPENSCP_TEST(test_libssh2_jump_host_spawn_posix, t) {
+OPENSCP_TEST(test_libssh2_jump_host_spawn, t) {
     openscp::Libssh2SftpClient c;
     openscp::SessionOptions opt = validOptions();
     opt.jump_host = std::string("127.0.0.1");
@@ -2099,6 +2089,38 @@ OPENSCP_TEST(test_libssh2_jump_host_spawn_posix, t) {
     t.check(!ok, "connect should fail when jump bastion cannot connect");
     t.check(!err.empty(), "connect error should not be empty");
     t.check(!c.isConnected(), "client should remain disconnected");
+}
+
+#ifdef _WIN32
+OPENSCP_TEST(test_windows_jump_command_line_round_trips, t) {
+    const std::vector<std::wstring> arguments = {
+        L"-l",
+        L"jos\u00e9 luis",
+        L"-i",
+        L"C:\\Users\\Jos\u00e9 Luis\\.ssh\\id_ed25519",
+        L"-W",
+        L"[2001:db8::1]:22",
+        L"--",
+        L"bastion.example.test",
+        L"",
+        L"ends with a backslash\\",
+        L"quote\"inside",
+        L"backslashes\\\\ before a quote\\\"",
+        L"*?[]{}'~"};
+    const std::wstring program = L"C:\\Windows\\System32\\OpenSSH\\ssh.exe";
+    const std::wstring commandLine =
+        openscp::libssh2detail::windowsCommandLine(program, arguments);
+    int count = 0;
+    LPWSTR *parsed = ::CommandLineToArgvW(commandLine.c_str(), &count);
+    const bool programKept = parsed && count > 0 && program == parsed[0];
+    std::vector<std::wstring> readBack;
+    for (int index = 1; parsed && index < count; ++index)
+        readBack.emplace_back(parsed[index]);
+    if (parsed)
+        ::LocalFree(parsed);
+    t.check(programKept, "the program should stay the first argument");
+    t.check(readBack == arguments,
+            "the C runtime should read every argument back as given");
 }
 #endif
 

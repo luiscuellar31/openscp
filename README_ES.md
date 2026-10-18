@@ -129,9 +129,9 @@ Los instaladores no tienen firma de código, así que SmartScreen muestra
 **Ejecutar de todas formas**. Igual que en macOS, la suma de verificación
 publicada es lo que te permite validar la descarga.
 
-**Abrir en terminal** usa el cliente OpenSSH de Windows; si falta, agrega
-**Cliente OpenSSH** en **Características opcionales** de la Configuración de
-Windows. Los servidores de salto SSH todavía no están disponibles en Windows.
+**Abrir en terminal** y los servidores de salto SSH usan el cliente OpenSSH de
+Windows; si falta, agrega **Cliente OpenSSH** en **Características opcionales**
+de la Configuración de Windows.
 
 ## Compilar desde el código fuente
 
@@ -176,8 +176,7 @@ pasos manuales, empaquetado y solución de problemas.
 - FTPS y WebDAV por HTTPS sin verificación del certificado siguen comprobando
   la clave pública del servidor, en la que confías en la primera conexión.
 - Proxies SOCKS5 y HTTP CONNECT, además de servidores de salto SSH cuando el
-  protocolo lo permite; los servidores de salto todavía no están disponibles en
-  Windows.
+  protocolo lo permite.
 - Sincronización unidireccional con vista previa, filtros y sumas de
   comprobación opcionales.
 - Interfaces en español, inglés, portugués, francés y alemán.
@@ -295,7 +294,7 @@ activarse temporalmente en un entorno de desarrollo controlado.
 
 ## Roadmap
 
-- Admitir servidores de salto SSH en Windows y firmar los paquetes de Windows.
+- Firmar los paquetes de Windows.
 - Probar WebDAV con una mayor variedad de servidores.
 - Ampliar la autenticación interactiva y las configuraciones empresariales de
   proxies y servidores de salto SSH.

@@ -166,6 +166,17 @@ a Windows socket down does not wake a thread blocked in `select()` or `recv()`
 on it, so interruption also cancels the socket's pending I/O with `CancelIoEx`,
 and disconnect repeats that until the I/O mutex is free.
 
+An SSH jump host runs `ssh -W host:port` with the arguments that
+`ssh_jump_command()` builds for both platforms. On POSIX, ssh gets one end of a
+`socketpair()` as its standard input and output and libssh2 the other. On
+Windows, `SshJumpTunnel` starts ssh.exe, found in `PATH` but never in the
+current directory, or else the OpenSSH client that Windows installs, through
+`CreateProcessW` with only its three pipes inheritable; two threads copy between
+those pipes and one end of a checked pair of loopback sockets, whose other end
+goes to libssh2, and a third keeps the end of ssh.exe's stderr for the error
+message. Disconnect closes libssh2's socket, so ssh.exe's input ends and it
+exits, or is stopped after half a second.
+
 "Open in terminal" belongs to `TerminalCommandBuilder`, which builds the ssh
 and sftp arguments once and then quotes them for the platform: as a POSIX
 shell command for Terminal.app or a Linux terminal, and on Windows as a

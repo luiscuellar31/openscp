@@ -338,17 +338,6 @@ void MainWindow::openConnectDialogWithPreset(
             tr("Connection canceled: invalid transport configuration"), 5000);
         return;
     }
-#ifdef Q_OS_WIN
-    if (hasConfiguredJumpHost(sessionOptions)) {
-        UiAlerts::warning(
-            this, tr("Unsupported transport"),
-            tr("SSH jump host is currently unavailable on Windows."));
-        statusBar()->showMessage(
-            tr("Connection canceled: SSH jump host is unsupported on Windows"),
-            5000);
-        return;
-    }
-#endif
     if (saveRequest.has_value()) {
         maybePersistQuickConnectSite(sessionOptions, *saveRequest, false);
         // Already persisted on request; connection lifecycle no longer needs to
@@ -1019,17 +1008,6 @@ bool MainWindow::validateConnectionStart(const openscp::SessionOptions &opt) {
             tr("Connection canceled: invalid transport configuration"), 5000);
         return false;
     }
-#ifdef Q_OS_WIN
-    if (hasConfiguredJumpHost(opt)) {
-        UiAlerts::warning(
-            this, tr("Unsupported transport"),
-            tr("SSH jump host is currently unavailable on Windows."));
-        statusBar()->showMessage(
-            tr("Connection canceled: SSH jump host is unsupported on Windows"),
-            5000);
-        return false;
-    }
-#endif
     if (!confirmInsecureHostPolicyForSession(opt)) {
         statusBar()->showMessage(
             tr("Connection canceled: security exception not confirmed"), 5000);
