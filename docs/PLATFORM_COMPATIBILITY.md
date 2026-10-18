@@ -60,6 +60,9 @@ warns before their first run. Compared with macOS and Linux:
 - WebDAV servers and HTTP proxies that ask for Windows authentication get the
   user name and password entered in OpenSCP through Negotiate, with Kerberos
   or NTLM; one that offers NTLM alone, without Negotiate, cannot be used.
+- FTPS and HTTPS WebDAV servers are verified with the trust of Windows, as
+  for Edge: roots Windows downloads when first needed count, and certificates
+  it distrusts do not. Revocation is not checked.
 - Settings, with saved passwords encrypted for the Windows user by DPAPI, are
   INI files under `%APPDATA%\OpenSCP`; the transfer queue stays in
   `%LOCALAPPDATA%`, which roaming profiles do not copy.

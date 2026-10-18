@@ -25,6 +25,7 @@
 
 #ifdef _WIN32
 #include "common/Win32Text.hpp"
+#include "curl/WindowsServerTrust_win.hpp"
 
 #include <windows.h>
 #else
@@ -873,20 +874,20 @@ bool configureTlsPolicy(CURL *curl, bool verifyPeer,
         err = verificationError;
         return false;
     }
-    if (caCertPath && !caCertPath->empty()) {
-        if (curl_easy_setopt(curl, CURLOPT_CAINFO, caCertPath->c_str()) !=
-            CURLE_OK) {
-            err = caPathError;
-            return false;
-        }
+    const bool chosenCa = caCertPath && !caCertPath->empty();
+    if (chosenCa && curl_easy_setopt(curl, CURLOPT_CAINFO,
+                                     caCertPath->c_str()) != CURLE_OK) {
+        err = caPathError;
+        return false;
     }
 #ifdef _WIN32
-    // OpenSSL has no trust store of its own on Windows; the system's is the
-    // one users manage. A chosen CA file stays the only one trusted.
-    else if (verifyPeer &&
-             curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS,
-                              static_cast<long>(CURLSSLOPT_NATIVE_CA)) !=
-                 CURLE_OK) {
+    // OpenSSL has no trust store of its own on Windows, so Windows itself
+    // checks the server, as it does for its own connections. A chosen CA file
+    // stays the only one trusted.
+    const curl_ssl_ctx_callback windowsTrust =
+        verifyPeer && !chosenCa ? &useWindowsServerTrust : nullptr;
+    if (curl_easy_setopt(curl, CURLOPT_SSL_CTX_FUNCTION, windowsTrust) !=
+        CURLE_OK) {
         err = verificationError;
         return false;
     }

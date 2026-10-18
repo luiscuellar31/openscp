@@ -187,6 +187,13 @@ host with its own key goes through a `ProxyCommand`, which ssh runs through a
 shell on POSIX and through `CreateProcessW` on Windows, so there it is a
 command line for the C runtime that names ssh.exe by its full path.
 
+FTPS and HTTPS WebDAV connections that verify certificates without a chosen CA
+file trust the system's roots. OpenSSL has none of its own on Windows, so
+there `WindowsServerTrust_win` replaces its check of the server's chain with
+`CertGetCertificateChain` and the SSL policy of Windows, which fetch missing
+roots and honor the Disallowed store; libcurl still checks the host name. A
+chosen CA file is the only one trusted on every platform.
+
 FTPS and HTTPS WebDAV connections that skip certificate verification pin the
 server's TLS public key. Before the control connection, the connection worker
 reads the key through `FetchServerPublicKeyPin`, a handshake without

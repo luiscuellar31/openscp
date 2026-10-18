@@ -10,7 +10,16 @@
 #include "curl/CurlWebDavClient.hpp"
 #endif
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include "curl/WindowsServerTrust_win.hpp"
+
+// wincrypt.h comes before OpenSSL, whose headers undefine the names the two
+// share, such as X509_NAME.
+// clang-format off
+#include <windows.h>
+#include <wincrypt.h>
+// clang-format on
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -23,6 +32,7 @@
 #include <openssl/pem.h>
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>
 
 #include <algorithm>
 #include <csignal>
@@ -656,6 +666,157 @@ OPENSCP_TEST(testWindowsLibcurlNegotiatesThroughSspi, test) {
                    (info->features & CURL_VERSION_SPNEGO) != 0 &&
                    (info->features & CURL_VERSION_KERBEROS5) != 0,
                "Windows builds should link a libcurl with SSPI Negotiate");
+}
+
+// A certificate made for the test: an authority, self-signed unless it has
+// an issuer, or a server certificate for `usage`, such as serverAuth.
+struct TestCertificate {
+    std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key{nullptr,
+                                                            &EVP_PKEY_free};
+    std::unique_ptr<X509, decltype(&X509_free)> certificate{nullptr,
+                                                            &X509_free};
+    std::vector<unsigned char> der;
+};
+
+TestCertificate makeTestCertificate(const char *commonName,
+                                    const TestCertificate *issuer,
+                                    bool authority, long validFromSeconds,
+                                    long validUntilSeconds,
+                                    const char *usage = "serverAuth") {
+    static long serial = 1;
+    TestCertificate made;
+    std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)> keyContext(
+        EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr), &EVP_PKEY_CTX_free);
+    EVP_PKEY *key = nullptr;
+    if (!keyContext || EVP_PKEY_keygen_init(keyContext.get()) != 1 ||
+        EVP_PKEY_CTX_set_ec_paramgen_curve_nid(keyContext.get(),
+                                               NID_X9_62_prime256v1) != 1 ||
+        EVP_PKEY_keygen(keyContext.get(), &key) != 1)
+        return made;
+    made.key.reset(key);
+    made.certificate.reset(X509_new());
+    X509 *certificate = made.certificate.get();
+    X509_NAME *name =
+        certificate ? X509_get_subject_name(certificate) : nullptr;
+    X509 *signer = issuer ? issuer->certificate.get() : certificate;
+    if (!name || X509_set_version(certificate, 2) != 1 ||
+        ASN1_INTEGER_set(X509_get_serialNumber(certificate), serial++) != 1 ||
+        X509_NAME_add_entry_by_txt(
+            name, "CN", MBSTRING_ASC,
+            reinterpret_cast<const unsigned char *>(commonName), -1, -1,
+            0) != 1 ||
+        X509_set_issuer_name(certificate, X509_get_subject_name(signer)) != 1 ||
+        !X509_gmtime_adj(X509_getm_notBefore(certificate), validFromSeconds) ||
+        !X509_gmtime_adj(X509_getm_notAfter(certificate), validUntilSeconds) ||
+        X509_set_pubkey(certificate, key) != 1)
+        return made;
+    X509V3_CTX extensions;
+    X509V3_set_ctx(&extensions, signer, certificate, nullptr, nullptr, 0);
+    const auto add = [&](int nid, const char *value) {
+        X509_EXTENSION *extension =
+            X509V3_EXT_conf_nid(nullptr, &extensions, nid, value);
+        const bool added =
+            extension && X509_add_ext(certificate, extension, -1) == 1;
+        X509_EXTENSION_free(extension);
+        return added;
+    };
+    const bool extended =
+        add(NID_subject_key_identifier, "hash") &&
+        (!issuer || add(NID_authority_key_identifier, "keyid:always")) &&
+        (authority ? add(NID_basic_constraints, "critical,CA:TRUE") &&
+                         add(NID_key_usage, "critical,keyCertSign,cRLSign")
+                   : add(NID_basic_constraints, "critical,CA:FALSE") &&
+                         add(NID_key_usage, "critical,digitalSignature") &&
+                         add(NID_ext_key_usage, usage) &&
+                         add(NID_subject_alt_name, "DNS:server.test"));
+    EVP_PKEY *signingKey = issuer ? issuer->key.get() : key;
+    if (!extended || X509_sign(certificate, signingKey, EVP_sha256()) <= 0)
+        return made;
+    const int length = i2d_X509(certificate, nullptr);
+    if (length > 0) {
+        made.der.resize(static_cast<std::size_t>(length));
+        unsigned char *end = made.der.data();
+        if (i2d_X509(certificate, &end) != length)
+            made.der.clear();
+    }
+    return made;
+}
+
+// A chain engine that trusts the root `der` alone, so a test needs no change
+// to the user's trusted roots.
+class TestChainEngine {
+    public:
+    explicit TestChainEngine(const std::vector<unsigned char> &der) {
+        roots_ = ::CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0,
+                                 CERT_STORE_CREATE_NEW_FLAG, nullptr);
+        if (!roots_ ||
+            !::CertAddEncodedCertificateToStore(
+                roots_, X509_ASN_ENCODING, der.data(),
+                static_cast<DWORD>(der.size()), CERT_STORE_ADD_ALWAYS, nullptr))
+            return;
+        CERT_CHAIN_ENGINE_CONFIG config{};
+        config.cbSize = sizeof(config);
+        config.hExclusiveRoot = roots_;
+        (void)::CertCreateCertificateChainEngine(&config, &engine_);
+    }
+    ~TestChainEngine() {
+        if (engine_)
+            ::CertFreeCertificateChainEngine(engine_);
+        if (roots_)
+            ::CertCloseStore(roots_, 0);
+    }
+    TestChainEngine(const TestChainEngine &) = delete;
+    TestChainEngine &operator=(const TestChainEngine &) = delete;
+
+    [[nodiscard]] void *get() const { return engine_; }
+
+    private:
+    HCERTSTORE roots_ = nullptr;
+    HCERTCHAINENGINE engine_ = nullptr;
+};
+
+OPENSCP_TEST(testWindowsTrustChecksTheServerChain, test) {
+    using openscp::curlcommon::windowsServerChainError;
+    constexpr long kHour = 3600;
+    const TestCertificate root =
+        makeTestCertificate("OpenSCP Test Root", nullptr, true, -kHour, kHour);
+    const TestCertificate other =
+        makeTestCertificate("Other Test Root", nullptr, true, -kHour, kHour);
+    const TestCertificate intermediate = makeTestCertificate(
+        "OpenSCP Test Intermediate", &root, true, -kHour, kHour);
+    const TestCertificate server =
+        makeTestCertificate("server.test", &intermediate, false, -kHour, kHour);
+    const TestCertificate expired = makeTestCertificate(
+        "server.test", &intermediate, false, -2 * kHour, -kHour);
+    const TestCertificate client = makeTestCertificate(
+        "server.test", &intermediate, false, -kHour, kHour, "clientAuth");
+    test.check(!root.der.empty() && !other.der.empty() &&
+                   !intermediate.der.empty() && !server.der.empty() &&
+                   !expired.der.empty() && !client.der.empty(),
+               "the test certificates should be made");
+    const TestChainEngine trusting(root.der);
+    const TestChainEngine stranger(other.der);
+    test.check(trusting.get() && stranger.get(),
+               "the test chain engines should be made");
+
+    test.check(windowsServerChainError({server.der, intermediate.der},
+                                       trusting.get()) == 0,
+               "a server under a trusted root should be trusted");
+    test.check(windowsServerChainError({server.der}, trusting.get()) != 0,
+               "a server that leaves out its intermediate should be refused");
+    test.check(windowsServerChainError({server.der, intermediate.der},
+                                       stranger.get()) != 0,
+               "a server under another root should be refused");
+    test.check(windowsServerChainError({server.der, intermediate.der}) != 0,
+               "the user's own trust should not include the test root");
+    test.check(windowsServerChainError({expired.der, intermediate.der},
+                                       trusting.get()) ==
+                   static_cast<unsigned long>(CERT_E_EXPIRED),
+               "an expired server certificate should be refused as expired");
+    test.check(windowsServerChainError({client.der, intermediate.der},
+                                       trusting.get()) ==
+                   static_cast<unsigned long>(CERT_E_WRONG_USAGE),
+               "a certificate for clients should not serve a server");
 }
 #endif
 

@@ -75,6 +75,12 @@ if (_openscp_need_curl)
             src/curl/CurlBackendCommon.hpp
             src/curl/CurlListingParser.hpp
         )
+        if (WIN32)
+            list(APPEND OPENSCP_CORE_SRCS
+                src/curl/WindowsServerTrust_win.cpp
+                src/curl/WindowsServerTrust_win.hpp
+            )
+        endif()
     endif()
 endif()
 
@@ -253,7 +259,8 @@ else()
 endif()
 
 if (WIN32)
-    # Winsock for the SSH backends' own sockets, and the NT API through which
-    # SafeLocalFile opens each path component relative to its parent.
-    target_link_libraries(openscp_core PRIVATE ws2_32 ntdll)
+    # Winsock for the SSH backends' own sockets, the NT API through which
+    # SafeLocalFile opens each path component relative to its parent, and the
+    # certificate chain API that checks the libcurl backends' TLS servers.
+    target_link_libraries(openscp_core PRIVATE ws2_32 ntdll crypt32)
 endif()
