@@ -1582,25 +1582,48 @@ bool connect_tcp_endpoint(const std::string &host, uint16_t port,
     }
     if (!libssh2detail::initializeSockets(err))
         return false;
-    struct addrinfo hints {};
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
 
     char portStr[16];
     snprintf(portStr, sizeof(portStr), "%u", static_cast<unsigned>(port));
 
-    struct addrinfo *res = nullptr;
-    int gai = getaddrinfo(host.c_str(), portStr, &hints, &res);
-    if (gai != 0) {
 #ifdef _WIN32
-        // Windows returns a Winsock error code, which has a system message.
-        err = "getaddrinfo: " + libssh2detail::socketErrorMessage(gai);
-#else
-        err = std::string("getaddrinfo: ") + gai_strerror(gai);
-#endif
+    // getaddrinfo() reads the name in the system code page, which is UTF-8
+    // only from Windows 10 1903 on. GetAddrInfoW takes UTF-16, and encodes an
+    // internationalized name itself.
+    std::wstring wideHost;
+    if (!win32::toWidePath(host, wideHost)) {
+        err = "Host name is not valid UTF-8.";
         return false;
     }
+    ADDRINFOW hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    ADDRINFOW *res = nullptr;
+    const int gai = ::GetAddrInfoW(
+        wideHost.c_str(), win32::toWide(portStr).c_str(), &hints, &res);
+    if (gai != 0) {
+        // Windows returns a Winsock error code, which has a system message.
+        err = "getaddrinfo: " + libssh2detail::socketErrorMessage(gai);
+        return false;
+    }
+    const auto freeAddresses = [](ADDRINFOW *addresses) {
+        ::FreeAddrInfoW(addresses);
+    };
+#else
+    struct addrinfo hints {};
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo *res = nullptr;
+    const int gai = getaddrinfo(host.c_str(), portStr, &hints, &res);
+    if (gai != 0) {
+        err = std::string("getaddrinfo: ") + gai_strerror(gai);
+        return false;
+    }
+    const auto freeAddresses = [](addrinfo *addresses) {
+        freeaddrinfo(addresses);
+    };
+#endif
 
     std::string lastConnectErr;
     // Resolution uses the platform resolver; the TCP budget starts afterward.
@@ -1645,12 +1668,12 @@ bool connect_tcp_endpoint(const std::string &host, uint16_t port,
         }
         if (connected && !stopToken.stop_requested()) {
             sockOut = s;
-            freeaddrinfo(res);
+            freeAddresses(res);
             return true;
         }
         libssh2detail::closeSocket(s);
     }
-    freeaddrinfo(res);
+    freeAddresses(res);
     if (stopToken.stop_requested()) {
         err = "Connection canceled by user";
         return false;
