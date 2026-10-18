@@ -176,9 +176,11 @@ troubleshooting, see [Building OpenSCP](docs/BUILDING.md).
 - Spanish, English, Portuguese, French, and German interfaces.
 
 Canceling a connection or closing the window also cancels pending SSH
-authentication and fingerprint prompts. SSH TCP connection attempts share a
-20-second limit across resolved addresses. Name resolution uses the system
-resolver and may take longer independently of that TCP limit.
+authentication and fingerprint prompts. SSH tries the resolved addresses as
+Happy Eyeballs does: when one has not answered within 250 ms, or refuses, the
+next one starts, alternating IPv6 and IPv4, and all attempts share a 20-second
+limit. Name resolution uses the system resolver and may take longer
+independently of that TCP limit.
 
 Local downloads reject symbolic links in user-writable destination parent
 folders. Synchronization resolves a linked local root to its physical path and

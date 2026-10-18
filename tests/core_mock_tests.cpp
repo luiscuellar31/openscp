@@ -55,6 +55,7 @@
 #include <unistd.h>
 #else
 // clang-format off
+#include <winsock2.h>
 #include <windows.h>
 #include <winioctl.h>
 #include <shellapi.h>
@@ -193,17 +194,19 @@ OPENSCP_TEST(test_tcp_wait_deadline_and_cancellation, t) {
     }
     t.check(errno == EAGAIN || errno == EWOULDBLOCK,
             "filled send buffer should withhold write readiness");
-    std::string error;
+    using Kind = openscp::libssh2detail::TcpWaitOutcome::Kind;
     const auto started = std::chrono::steady_clock::now();
-    t.check(!openscp::libssh2detail::waitForTcpConnection(
-                pair[0], started + std::chrono::milliseconds(40), {}, error) &&
+    t.check(openscp::libssh2detail::waitForTcpConnections(
+                {pair[0]}, started + std::chrono::milliseconds(40), {})
+                        .kind == Kind::TimedOut &&
                 errno == ETIMEDOUT,
             "a non-ready socket must respect the shared TCP deadline");
     std::stop_source cancellation;
     auto waiting = std::async(std::launch::async, [&] {
-        return openscp::libssh2detail::waitForTcpConnection(
-            pair[0], std::chrono::steady_clock::now() + std::chrono::seconds(2),
-            cancellation.get_token(), error);
+        return openscp::libssh2detail::waitForTcpConnections(
+            {pair[0]},
+            std::chrono::steady_clock::now() + std::chrono::seconds(2),
+            cancellation.get_token());
     });
     t.check(waiting.wait_for(std::chrono::milliseconds(20)) ==
                 std::future_status::timeout,
@@ -211,7 +214,7 @@ OPENSCP_TEST(test_tcp_wait_deadline_and_cancellation, t) {
     cancellation.request_stop();
     t.check(waiting.wait_for(std::chrono::milliseconds(500)) ==
                     std::future_status::ready &&
-                !waiting.get() && error == "Connection canceled by user",
+                waiting.get().error == "Connection canceled by user",
             "pending TCP cancellation must finish without waiting for timeout");
     ::close(pair[0]);
     ::close(pair[1]);
@@ -278,6 +281,134 @@ OPENSCP_TEST(test_connection_cancel_while_peer_is_silent, t) {
     }
 }
 #endif
+
+#ifdef _WIN32
+using SocketLength = int;
+#else
+using SocketLength = socklen_t;
+#endif
+
+// 192.0.2.1, of TEST-NET-1, reaches no host: its packets are dropped, as
+// those of a broken IPv6 route are, unless the system has no route at all.
+constexpr std::uint32_t kUnreachableAddress = 0xC0000201;
+
+// The TCP endpoint of an IPv4 `address`, in host byte order, and `port`.
+openscp::libssh2detail::TcpEndpoint ipv4Endpoint(std::uint32_t address,
+                                                 std::uint16_t port) {
+    sockaddr_in socketAddress{};
+    socketAddress.sin_family = AF_INET;
+    socketAddress.sin_addr.s_addr = htonl(address);
+    socketAddress.sin_port = htons(port);
+    const auto *bytes = reinterpret_cast<const unsigned char *>(&socketAddress);
+    return {AF_INET, SOCK_STREAM, IPPROTO_TCP,
+            std::vector<unsigned char>(bytes, bytes + sizeof(socketAddress))};
+}
+
+// A loopback port the system picks, which accepts connections when listening
+// and refuses them otherwise.
+struct LoopbackPort {
+    openscp::libssh2detail::SocketHandle socket =
+        openscp::libssh2detail::kInvalidSocket;
+    std::uint16_t port = 0;
+
+    explicit LoopbackPort(bool listening) {
+        socket = openscp::libssh2detail::openSocket(AF_INET, SOCK_STREAM,
+                                                    IPPROTO_TCP);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        SocketLength length = sizeof(address);
+        if (socket != openscp::libssh2detail::kInvalidSocket &&
+            ::bind(socket, reinterpret_cast<sockaddr *>(&address),
+                   sizeof(address)) == 0 &&
+            ::getsockname(socket, reinterpret_cast<sockaddr *>(&address),
+                          &length) == 0 &&
+            (!listening || ::listen(socket, 4) == 0)) {
+            port = ntohs(address.sin_port);
+        }
+    }
+    ~LoopbackPort() {
+        if (socket != openscp::libssh2detail::kInvalidSocket)
+            openscp::libssh2detail::closeSocket(socket);
+    }
+    LoopbackPort(const LoopbackPort &) = delete;
+    LoopbackPort &operator=(const LoopbackPort &) = delete;
+};
+
+OPENSCP_TEST(test_tcp_connect_goes_on_past_an_address_that_refuses, t) {
+    // Windows retries a refused connect for about 2 seconds, as happens with
+    // "localhost" when a server listens on 127.0.0.1 but not on ::1.
+    std::string error;
+    t.check(openscp::libssh2detail::initializeSockets(error),
+            "sockets should start: " + error);
+    const LoopbackPort refusing(false);
+    const LoopbackPort listening(true);
+    t.check(refusing.port != 0 && listening.port != 0,
+            "the loopback ports should open");
+    const auto started = std::chrono::steady_clock::now();
+    const auto socket = openscp::libssh2detail::connectToFirstEndpoint(
+        {ipv4Endpoint(INADDR_LOOPBACK, refusing.port),
+         ipv4Endpoint(INADDR_LOOPBACK, listening.port)},
+        started + std::chrono::seconds(20), {}, {}, error);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    t.check(socket != openscp::libssh2detail::kInvalidSocket &&
+                elapsed < std::chrono::seconds(1),
+            "an address that refuses should not hold back the next one: " +
+                error);
+    if (socket != openscp::libssh2detail::kInvalidSocket)
+        openscp::libssh2detail::closeSocket(socket);
+}
+
+OPENSCP_TEST(test_tcp_connect_goes_on_past_an_address_that_never_answers, t) {
+    std::string error;
+    t.check(openscp::libssh2detail::initializeSockets(error),
+            "sockets should start: " + error);
+    const LoopbackPort listening(true);
+    t.check(listening.port != 0, "the loopback port should listen");
+    const auto started = std::chrono::steady_clock::now();
+    const auto socket = openscp::libssh2detail::connectToFirstEndpoint(
+        {ipv4Endpoint(kUnreachableAddress, listening.port),
+         ipv4Endpoint(INADDR_LOOPBACK, listening.port)},
+        started + std::chrono::seconds(20), {}, {}, error);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    t.check(socket != openscp::libssh2detail::kInvalidSocket &&
+                elapsed < std::chrono::seconds(2),
+            "an address that never answers should not hold back the next "
+            "one: " +
+                error);
+    if (socket != openscp::libssh2detail::kInvalidSocket)
+        openscp::libssh2detail::closeSocket(socket);
+}
+
+OPENSCP_TEST(test_tcp_connect_keeps_its_deadline_and_stops_when_asked, t) {
+    std::string error;
+    t.check(openscp::libssh2detail::initializeSockets(error),
+            "sockets should start: " + error);
+    const auto started = std::chrono::steady_clock::now();
+    const auto timedOut = openscp::libssh2detail::connectToFirstEndpoint(
+        {ipv4Endpoint(kUnreachableAddress, 9)},
+        started + std::chrono::milliseconds(300), {}, {}, error);
+    t.check(timedOut == openscp::libssh2detail::kInvalidSocket &&
+                std::chrono::steady_clock::now() - started <
+                    std::chrono::seconds(1),
+            "connecting should end by its deadline: " + error);
+
+    std::stop_source cancellation;
+    std::string cancelError;
+    auto connecting = std::async(std::launch::async, [&] {
+        return openscp::libssh2detail::connectToFirstEndpoint(
+            {ipv4Endpoint(kUnreachableAddress, 9)},
+            std::chrono::steady_clock::now() + std::chrono::seconds(10),
+            cancellation.get_token(), {}, cancelError);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    cancellation.request_stop();
+    const bool stopped = connecting.wait_for(std::chrono::seconds(1)) ==
+                         std::future_status::ready;
+    t.check(stopped &&
+                connecting.get() == openscp::libssh2detail::kInvalidSocket,
+            "connecting should stop soon after a cancellation");
+}
 
 fs::path makeTempFilePath(const std::string &tag) {
     const auto now =

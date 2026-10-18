@@ -149,9 +149,12 @@ Each initial connection has a runtime-only stop token owned by
 `SessionController`. `ClientFactory` interrupts the pending client when it is
 stopped and unregisters that callback before releasing the client. SSH also
 registers interruption for direct backend connections, publishes its socket
-under the state mutex before proxy negotiation, and uses nonblocking TCP
-connects with a shared 20-second deadline across resolved addresses. The
-platform's synchronous DNS resolver remains outside that TCP deadline.
+under the state mutex before proxy negotiation, and connects over TCP as
+Happy Eyeballs (RFC 8305) does: `connectToFirstEndpoint` starts the next
+resolved address when an attempt has not connected after 250 ms or fails,
+alternating families, keeps the earlier attempts going, and gives all of them
+a shared 20-second deadline. The platform's synchronous DNS resolver remains
+outside that TCP deadline.
 libssh2's blocking handshake/authentication timeout is set explicitly. That
 20-second timeout also covers each blocking SFTP write, so an upload passes
 about two seconds of data per write at the rate it has reached, from 32 KiB up
