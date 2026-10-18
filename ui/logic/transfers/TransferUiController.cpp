@@ -35,16 +35,13 @@ TransferUiUpdate TransferUiController::observe(
     QString firstCompletionMessage;
 
     for (const TransferTask &task : upserts) {
-        auto pendingOpen = downloadsToOpen_.find(task.taskId);
-        if (pendingOpen != downloadsToOpen_.end() &&
+        if (downloadsToOpen_.contains(task.taskId) &&
             isTerminalTransferStatus(task.status)) {
             if (task.status == TransferTask::Status::Done &&
-                !update.completedDownloadPathsToOpen.contains(
-                    pendingOpen.value())) {
-                update.completedDownloadPathsToOpen.push_back(
-                    pendingOpen.value());
+                !update.completedDownloadPathsToOpen.contains(task.dst)) {
+                update.completedDownloadPathsToOpen.push_back(task.dst);
             }
-            downloadsToOpen_.erase(pendingOpen);
+            downloadsToOpen_.remove(task.taskId);
         }
 
         if (task.status != TransferTask::Status::Done)
@@ -91,11 +88,9 @@ TransferUiUpdate TransferUiController::observe(
     return update;
 }
 
-void TransferUiController::openDownloadWhenCompleted(quint64 taskId,
-                                                     const QString &localPath) {
-    if (taskId == 0 || localPath.isEmpty())
-        return;
-    downloadsToOpen_.insert(taskId, localPath);
+void TransferUiController::openDownloadWhenCompleted(quint64 taskId) {
+    if (taskId != 0)
+        downloadsToOpen_.insert(taskId);
 }
 
 void TransferUiController::reset() {

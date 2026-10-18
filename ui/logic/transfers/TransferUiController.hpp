@@ -2,7 +2,6 @@
 
 #include "logic/transfers/TransferTypes.hpp"
 
-#include <QHash>
 #include <QSet>
 #include <QString>
 #include <QStringList>
@@ -22,7 +21,9 @@ class TransferUiController {
     TransferUiUpdate observe(const QVector<TransferTask> &upserts,
                              const QVector<quint64> &removedIds,
                              bool remotePanelActive, const QString &remoteRoot);
-    void openDownloadWhenCompleted(quint64 taskId, const QString &localPath);
+    // Opens the download where it was saved, which "Rename" on a conflict
+    // makes another path than the one requested.
+    void openDownloadWhenCompleted(quint64 taskId);
     void reset();
 
     private:
@@ -31,7 +32,7 @@ class TransferUiController {
 
     QSet<quint64> completedUploadIds_;
     QSet<quint64> notifiedTaskIds_;
-    QHash<quint64, QString> downloadsToOpen_;
+    QSet<quint64> downloadsToOpen_;
 };
 
 } // namespace openscpui
