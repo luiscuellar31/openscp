@@ -31,6 +31,20 @@
     <Launch Condition="Installed OR NOT SETUPFORALLUSERS"
             Message="OpenSCP is already installed for all users by its setup, in the folder this package uses. Uninstall it first." />
 
+    <!-- Windows 10 1809, the oldest Windows that Qt 6 supports, as the setup's
+         MinVersion. VersionNT and WindowsBuild report Windows 8.1 to an
+         msiexec that does not declare later versions, so the build number
+         comes from the registry. -->
+    <Property Id="WINDOWSBUILD">
+      <RegistrySearch Root="HKLM"
+                      Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+                      Name="CurrentBuildNumber"
+                      Type="raw"
+                      Bitness="always64" />
+    </Property>
+    <Launch Condition="Installed OR WINDOWSBUILD &gt;= 17763"
+            Message="OpenSCP needs Windows 10 version 1809 or later." />
+
     <Icon Id="OpenSCP.ico" SourceFile="$(IconFile)" />
     <Property Id="ARPPRODUCTICON" Value="OpenSCP.ico" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/luiscuellar31/openscp" />
