@@ -18,6 +18,19 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of OpenSCP is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
+    <!-- The setup (packaging\windows\OpenSCP.iss) installs for all users into
+         the same folder, where each would overwrite, or on removal delete,
+         what the other installed. Its uninstall key names that installation. -->
+    <Property Id="SETUPFORALLUSERS">
+      <RegistrySearch Root="HKLM"
+                      Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\{2C03B5C3-87DD-4DAB-B609-F89E831909E6}_is1"
+                      Name="InstallLocation"
+                      Type="raw"
+                      Bitness="always64" />
+    </Property>
+    <Launch Condition="Installed OR NOT SETUPFORALLUSERS"
+            Message="OpenSCP is already installed for all users by its setup, in the folder this package uses. Uninstall it first." />
+
     <Icon Id="OpenSCP.ico" SourceFile="$(IconFile)" />
     <Property Id="ARPPRODUCTICON" Value="OpenSCP.ico" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/luiscuellar31/openscp" />

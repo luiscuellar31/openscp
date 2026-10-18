@@ -62,6 +62,13 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 Name: "french"; MessagesFile: "compiler:Languages\French.isl"
 Name: "portuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
 
+[CustomMessages]
+english.MsiInstalled=The OpenSCP MSI is already installed for all users, in the folder this setup would use. Uninstall it first, or install OpenSCP for the current user only.
+german.MsiInstalled=Das OpenSCP-MSI ist bereits für alle Benutzer in dem Ordner installiert, den dieses Setup verwenden würde. Deinstallieren Sie es zuerst, oder installieren Sie OpenSCP nur für den aktuellen Benutzer.
+spanish.MsiInstalled=El MSI de OpenSCP ya está instalado para todos los usuarios en la carpeta que usaría este instalador. Desinstálalo primero o instala OpenSCP solo para el usuario actual.
+french.MsiInstalled=Le MSI d’OpenSCP est déjà installé pour tous les utilisateurs, dans le dossier qu’utiliserait ce programme d’installation. Désinstallez-le d’abord, ou installez OpenSCP pour l’utilisateur actuel seulement.
+portuguese.MsiInstalled=O MSI do OpenSCP já está instalado para todos os usuários, na pasta que este instalador usaria. Desinstale-o primeiro ou instale o OpenSCP apenas para o usuário atual.
+
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
@@ -86,6 +93,9 @@ const
   WAIT_TIMEOUT = $00000102;
   // How long an update waits for OpenSCP to close.
   WAIT_FOR_OPENSCP_MS = 120000;
+  // The UpgradeCode of OpenSCP.wxs, the MSI.
+  MSI_UPGRADE_CODE = '{FF30140B-7449-4FBC-A92C-EA5E5C79F69A}';
+  ERROR_SUCCESS = 0;
 
 function OpenProcess(DesiredAccess: Cardinal; InheritHandle: Boolean;
   ProcessId: Cardinal): THandle;
@@ -94,6 +104,21 @@ function WaitForSingleObject(Handle: THandle; Milliseconds: Cardinal): Cardinal;
   external 'WaitForSingleObject@kernel32.dll stdcall';
 function CloseHandle(Handle: THandle): Boolean;
   external 'CloseHandle@kernel32.dll stdcall';
+function MsiEnumRelatedProducts(UpgradeCode: String; Reserved: Cardinal;
+  ProductIndex: Cardinal; ProductCode: String): Cardinal;
+  external 'MsiEnumRelatedProductsW@msi.dll stdcall';
+
+// Whether the MSI is installed. It installs for all users into the folder
+// that this setup uses for them, where each would overwrite, or on removal
+// delete, what the other installed.
+function MsiInstalled(): Boolean;
+var
+  ProductCode: String;
+begin
+  // A product code and its terminating null.
+  ProductCode := StringOfChar(' ', 39);
+  Result := MsiEnumRelatedProducts(MSI_UPGRADE_CODE, 0, 0, ProductCode) = ERROR_SUCCESS;
+end;
 
 // An update starts this setup and then closes OpenSCP, which must end
 // before its files are replaced.
@@ -103,6 +128,13 @@ var
   Process: THandle;
 begin
   Result := True;
+  if IsAdminInstallMode() and MsiInstalled() then
+  begin
+    Log('The OpenSCP MSI is installed in the same folder; nothing was installed.');
+    SuppressibleMsgBox(CustomMessage('MsiInstalled'), mbCriticalError, MB_OK, IDOK);
+    Result := False;
+    Exit;
+  end;
   ProcessId := StrToIntDef(ExpandConstant('{param:WAITPID|0}'), 0);
   if ProcessId <= 0 then
     Exit;
