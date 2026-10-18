@@ -7,9 +7,20 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
+#include <QHash>
 #include <QProcess>
 #include <QSet>
 #include <QUrl>
+
+#ifdef Q_OS_WIN
+// clang-format off
+#include <windows.h>
+#include <objbase.h>
+#include <shlobj.h>
+// clang-format on
+
+#include <vector>
+#endif
 
 namespace openscpui {
 
@@ -81,6 +92,45 @@ QStringList targetsOfKind(const QVector<detail::ResolvedPathTarget> &targets,
 QString parentDirectoryOf(const QString &path) {
     return QFileInfo(path).absolutePath();
 }
+
+#ifdef Q_OS_WIN
+PIDLIST_ABSOLUTE shellItem(const QString &path) {
+    const QString native = QDir::toNativeSeparators(path);
+    PIDLIST_ABSOLUTE item = nullptr;
+    if (FAILED(::SHParseDisplayName(
+            reinterpret_cast<const wchar_t *>(native.utf16()), nullptr, &item,
+            0, nullptr)))
+        return nullptr;
+    return item;
+}
+
+// Selects the files in one Explorer window for their folder, which reuses a
+// window that already shows it, instead of an explorer.exe process per file.
+bool selectInExplorer(const QString &folder, const QStringList &files) {
+    const HRESULT com = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED |
+                                                      COINIT_DISABLE_OLE1DDE);
+    const PIDLIST_ABSOLUTE folderItem = shellItem(folder);
+    std::vector<PIDLIST_ABSOLUTE> items;
+    std::vector<PCUITEMID_CHILD> children;
+    for (const QString &file : files) {
+        if (const PIDLIST_ABSOLUTE item = shellItem(file)) {
+            items.push_back(item);
+            children.push_back(::ILFindLastID(item));
+        }
+    }
+    const bool shown = folderItem && !children.empty() &&
+                       SUCCEEDED(::SHOpenFolderAndSelectItems(
+                           folderItem, static_cast<UINT>(children.size()),
+                           children.data(), 0));
+    for (const PIDLIST_ABSOLUTE item : items)
+        ::ILFree(item);
+    if (folderItem)
+        ::ILFree(folderItem);
+    if (SUCCEEDED(com))
+        ::CoUninitialize();
+    return shown;
+}
+#endif
 
 } // namespace
 
@@ -175,6 +225,24 @@ collapseTargetsToDirectories(const QVector<ResolvedPathTarget> &targets) {
     return directories;
 }
 
+QVector<RevealGroup>
+groupRevealedFilesByFolder(const QVector<ResolvedPathTarget> &targets) {
+    QVector<RevealGroup> groups;
+    QHash<QString, qsizetype> groupOfFolder;
+    for (const ResolvedPathTarget &target : targets) {
+        if (target.kind != PathActionKind::Reveal)
+            continue;
+        const QString folder = parentDirectoryOf(target.path);
+        auto known = groupOfFolder.constFind(folder);
+        if (known == groupOfFolder.cend()) {
+            known = groupOfFolder.insert(folder, groups.size());
+            groups.push_back({folder, {}});
+        }
+        groups[*known].files.push_back(target.path);
+    }
+    return groups;
+}
+
 } // namespace detail
 
 PathActionResult PlatformPathActions::revealPath(const QString &path) {
@@ -211,15 +279,10 @@ PathActionResult PlatformPathActions::revealPaths(const QStringList &paths) {
             errors.push_back(opened.error);
     }
 #elif defined(Q_OS_WIN)
-    for (const QString &file :
-         targetsOfKind(targets, detail::PathActionKind::Reveal)) {
-        QProcess explorer;
-        explorer.setProgram(QStringLiteral("explorer.exe"));
-        explorer.setNativeArguments(QStringLiteral("/select,\"") +
-                                    QDir::toNativeSeparators(file) +
-                                    QStringLiteral("\""));
-        if (!explorer.startDetached())
-            errors.push_back(fileManagerError(file));
+    for (const detail::RevealGroup &group :
+         detail::groupRevealedFilesByFolder(targets)) {
+        if (!selectInExplorer(group.folder, group.files))
+            errors.push_back(fileManagerError(group.files.first()));
     }
     for (const QString &folder :
          targetsOfKind(targets, detail::PathActionKind::OpenFolder)) {
