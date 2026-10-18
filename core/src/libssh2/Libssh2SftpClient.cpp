@@ -248,6 +248,23 @@ std::string default_known_hosts_path() {
 #endif
 }
 
+// `path` with a leading "~" read as the home folder, as OpenSSH reads the key
+// and known_hosts paths, and as the connection dialog suggests them. Other
+// paths stay as they are, and so does this one when the home is unknown.
+std::string expand_home_prefix(const std::string &path) {
+#ifndef _WIN32
+    const std::string separators = "/";
+    const std::string home = resolve_posix_home();
+#else
+    const std::string separators = "/\\";
+    const std::string home = resolve_windows_profile();
+#endif
+    const bool fromHome =
+        !path.empty() && path[0] == '~' &&
+        (path.size() == 1 || separators.find(path[1]) != std::string::npos);
+    return fromHome && !home.empty() ? home + path.substr(1) : path;
+}
+
 // Append host key audit log lines to ~/.openscp/openscp.auth (0600).
 #ifndef _WIN32
 void write_best_effort(int fd, const char *data, std::size_t len) {
@@ -1768,7 +1785,7 @@ bool ssh_jump_command(const SessionOptions &opt, std::vector<std::string> &args,
     }
     if (opt.jump_private_key_path && !opt.jump_private_key_path->empty()) {
         args.emplace_back("-i");
-        args.emplace_back(*opt.jump_private_key_path);
+        args.emplace_back(expand_home_prefix(*opt.jump_private_key_path));
     }
     args.emplace_back("-p");
     args.emplace_back(std::to_string(opt.jump_port));
@@ -2274,7 +2291,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
     auto khRead = libssh2detail::KnownHostsReadStatus::Missing;
     if (opt.known_hosts_policy != openscp::KnownHostsPolicy::Off) {
         if (opt.known_hosts_path.has_value()) {
-            khPath = *opt.known_hosts_path;
+            khPath = expand_home_prefix(*opt.known_hosts_path);
         } else {
             khPath = default_known_hosts_path();
         }
@@ -2701,6 +2718,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
         const char *passphrase = opt.private_key_passphrase
                                      ? opt.private_key_passphrase->c_str()
                                      : nullptr;
+        const std::string privateKeyPath =
+            expand_home_prefix(*opt.private_key_path);
 #ifdef _WIN32
         // libssh2 opens key files with the narrow C API, which on Windows
         // reads the path in the system code page, so a key under a profile
@@ -2708,7 +2727,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
         std::string keyData;
         CleanseOnScopeExit<std::string> keyCleanse(keyData);
         std::string readError;
-        if (!read_private_key_file(*opt.private_key_path, keyData, readError)) {
+        if (!read_private_key_file(privateKeyPath, keyData, readError)) {
             err = "Key authentication failed — " + readError;
             return false;
         }
@@ -2719,7 +2738,7 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
         int rc = libssh2_userauth_publickey_fromfile(
             session_, opt.username.c_str(),
             NULL, // public key path (NULL: derived from the private key)
-            opt.private_key_path->c_str(), passphrase);
+            privateKeyPath.c_str(), passphrase);
 #endif
         if (rc != 0) {
             char *emsgPtr = nullptr;
@@ -4105,7 +4124,7 @@ bool HasKnownHostEntry(const std::string &khPath, const std::string &host,
     if (khPath.empty() || host.empty())
         return false;
     std::vector<std::string> lines;
-    if (libssh2detail::readKnownHosts(khPath, lines) !=
+    if (libssh2detail::readKnownHosts(expand_home_prefix(khPath), lines) !=
         libssh2detail::KnownHostsReadStatus::Read) {
         return false;
     }
@@ -4127,12 +4146,13 @@ bool RemoveKnownHostEntry(const std::string &khPath, const std::string &host,
         err = "host is empty";
         return false;
     }
+    const std::string path = expand_home_prefix(khPath);
 
     // The file is closed again before it is replaced below, which Windows
     // refuses while it is open.
     std::string content;
     {
-        UniqueFile in(openLocalFile(khPath, "rb"));
+        UniqueFile in(openLocalFile(path, "rb"));
         if (!in) {
             err = "Could not open known_hosts";
             return false;
@@ -4178,7 +4198,7 @@ bool RemoveKnownHostEntry(const std::string &khPath, const std::string &host,
         rewritten.push_back('\n');
 
     std::string persistErr;
-    if (!persist_text_atomic(khPath, rewritten, &persistErr)) {
+    if (!persist_text_atomic(path, rewritten, &persistErr)) {
         err = std::string("Could not write known_hosts: ") + persistErr;
         return false;
     }
