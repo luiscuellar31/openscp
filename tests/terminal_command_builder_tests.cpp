@@ -410,10 +410,12 @@ OPENSCP_TEST(testWindowsUsesTheNulDeviceAndNoNetworkHelpers, test) {
 
     auto jump = session();
     jump.jump_host = "jump.example";
+    jump.jump_username = "ops";
     const auto jumpResult =
         builder().prepare(jump, QStringLiteral("/"), false, false);
-    test.check(!jumpResult.isValid() && !jumpResult.error.isEmpty(),
-               "jump hosts should be refused with a reason on Windows");
+    test.check(jumpResult.isValid() && jumpResult.command.contains(
+                                           QStringLiteral("ops@jump.example")),
+               "a jump host without its own key should go through -J");
 
     auto proxy = session();
     proxy.proxy_type = openscp::ProxyType::Socks5;
@@ -423,6 +425,35 @@ OPENSCP_TEST(testWindowsUsesTheNulDeviceAndNoNetworkHelpers, test) {
         builder().prepare(proxy, QStringLiteral("/"), false, false);
     test.check(!proxyResult.isValid() && !proxyResult.error.isEmpty(),
                "proxies should be refused with a reason on Windows");
+}
+
+OPENSCP_TEST(testWindowsJumpKeyGoesThroughAQuotedProxyCommand, test) {
+    ProbeTools tools;
+    test.check(tools.create(), "the probe tools should be created");
+
+    auto options = session();
+    options.jump_host = "jump.example";
+    options.jump_username = "ops";
+    options.jump_private_key_path = "C:\\keys\\100%";
+    const auto result =
+        tools.builder().prepare(options, QStringLiteral("/"), false, false);
+    test.check(result.isValid(), "the script with a jump host should be built");
+
+    const ScriptRun run = tools.run(result.command, {});
+    test.check(run.finished,
+               "the script should finish: " + run.output.toStdString());
+    // OpenSSH for Windows starts the proxy command with CreateProcessW, so it
+    // is a command line for the C runtime, not for a shell.
+    const QString proxyCommand =
+        QStringLiteral("ProxyCommand=\"") +
+        QDir::toNativeSeparators(tools.ssh) +
+        QStringLiteral("\" -W %h:%p -p 22 -l ops -i C:/keys/100%% -o "
+                       "IdentitiesOnly=yes -- jump.example");
+    const QStringList ssh = run.programs.value(0);
+    test.check(ssh.value(0) == QStringLiteral("SSH") &&
+                   ssh.contains(proxyCommand),
+               "ssh should get the jump command quoted for the C runtime: " +
+                   describe(run.programs).toStdString());
 }
 #endif
 

@@ -181,7 +181,10 @@ exits, or is stopped after half a second.
 and sftp arguments once and then quotes them for the platform: as a POSIX
 shell command for Terminal.app or a Linux terminal, and on Windows as a
 PowerShell script that a new console runs, starting each program through
-`Start-Process` with a command line quoted for the Microsoft C runtime.
+`Start-Process` with a command line quoted for the Microsoft C runtime. A jump
+host with its own key goes through a `ProxyCommand`, which ssh runs through a
+shell on POSIX and through `CreateProcessW` on Windows, so there it is a
+command line for the C runtime that names ssh.exe by its full path.
 
 FTPS and HTTPS WebDAV connections that skip certificate verification pin the
 server's TLS public key. Before the control connection, the connection worker
