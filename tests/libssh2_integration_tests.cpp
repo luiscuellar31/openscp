@@ -844,6 +844,18 @@ int main() {
                 if (!changed) {
                     changed = writeFile(localChanging,
                                         std::string(payload.size(), 'x'));
+                    // Written within one tick of the file system clock,
+                    // about 15 ms on Windows, the edit would keep the
+                    // original times and so the file's identity. A real
+                    // edit comes later, as this one is made to look.
+                    std::error_code timeError;
+                    const auto written =
+                        fs::last_write_time(localChanging, timeError);
+                    if (!timeError)
+                        fs::last_write_time(localChanging,
+                                            written + std::chrono::seconds(2),
+                                            timeError);
+                    changed = changed && !timeError;
                 }
             },
             {}, false);
