@@ -88,13 +88,15 @@ function Invoke-Configure($Settings, [bool]$WithTests) {
 
 function Invoke-Build($Settings, [string[]]$Targets) {
     Write-Log "Building $($Targets -join ', ')"
-    Invoke-Native 'cmake' (@('--build', $Settings.BuildDir, '--parallel', $Settings.Jobs,
-            '--target') + $Targets)
+    # --config picks the configuration of a multi-configuration generator,
+    # which ignores CMAKE_BUILD_TYPE; the others ignore it.
+    Invoke-Native 'cmake' (@('--build', $Settings.BuildDir, '--config', $Settings.BuildType,
+            '--parallel', $Settings.Jobs, '--target') + $Targets)
 }
 
 function Invoke-Run($Settings) {
-    $exe = Join-Path $Settings.BuildDir 'OpenSCP.exe'
-    if (-not (Test-Path $exe)) {
+    $exe = Find-BuiltApplication $Settings.BuildDir $Settings.BuildType
+    if (-not $exe) {
         Stop-WithError "Application not found in $($Settings.BuildDir). Run '.\scripts\windows.ps1 build' first."
     }
     # The build tree has no deployed Qt; the application loads it from the
@@ -110,8 +112,8 @@ function Invoke-Tests($Settings) {
     Invoke-Configure $Settings $true
     Invoke-Build $Settings @('openscp', 'openscp_test_binaries')
     Write-Log 'Running CTest'
-    Invoke-Native 'ctest' @('--test-dir', $Settings.BuildDir, '--output-on-failure',
-        '--parallel', $Settings.Jobs)
+    Invoke-Native 'ctest' @('--test-dir', $Settings.BuildDir, '-C', $Settings.BuildType,
+        '--output-on-failure', '--parallel', $Settings.Jobs)
 }
 
 switch ($Command) {

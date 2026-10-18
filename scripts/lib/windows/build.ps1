@@ -101,6 +101,18 @@ function Get-ConfigureArguments([string]$BuildDir, [string]$BuildType, [string]$
     return $arguments
 }
 
+# The OpenSCP.exe that a build directory holds: at its top for a
+# single-configuration generator such as Ninja, or in the folder of the
+# configuration for Visual Studio and Ninja Multi-Config. Empty if neither.
+function Find-BuiltApplication([string]$BuildDir, [string]$BuildType) {
+    foreach ($candidate in @(
+            (Join-Path $BuildDir 'OpenSCP.exe'),
+            (Join-Path $BuildDir "$BuildType\OpenSCP.exe"))) {
+        if (Test-Path $candidate -PathType Leaf) { return $candidate }
+    }
+    return ''
+}
+
 # The bin folder of the Qt that a configured build directory uses.
 function Find-QtBinDirectory([string]$BuildDir) {
     $cache = Join-Path $BuildDir 'CMakeCache.txt'
