@@ -59,6 +59,14 @@ bool canRetry(const TransferTask &task) {
            task.status == Status::Warning || skippedAfterFailure(task);
 }
 
+// A transfer that already wrote part of its destination, which its next run
+// continues; the precheck drops the resume where the backend cannot.
+bool keepsPartialData(const TransferTask &task) {
+    return task.phase == TransferPhase::Transfer && task.bytesDone > 0 &&
+           (task.type == TransferTask::Type::Download ||
+            task.type == TransferTask::Type::Upload);
+}
+
 const char *statusName(Status status) {
     switch (status) {
     case Status::Queued:
@@ -280,6 +288,7 @@ void TransferManager::wakeCurrentSessionLocked(QVector<quint64> &changed) {
             setTaskStatusLocked(task, Status::Paused);
         } else {
             taskControls_.resume(task.taskId);
+            task.resumeHint = task.resumeHint || keepsPartialData(task);
             setTaskStatusLocked(task, Status::Queued);
         }
         changed.push_back(task.taskId);
@@ -1266,20 +1275,24 @@ void TransferManager::handleWorkerConnectionFailure(WorkerSlot &slot,
         if (!storedTask)
             return;
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        // An automatic retry reconnects after an earlier attempt of this run
+        // wrote part of the file.
+        const bool resume =
+            storedTask->resumeHint || keepsPartialData(*storedTask);
         changed.push_back(taskId);
         if (generation != sessionGeneration_) {
             // A session change while connecting already decided the state
             // of the task unless it left it running.
             if (storedTask->status == Status::Running)
-                transitionToQueued(*storedTask, now, storedTask->resumeHint);
+                transitionToQueued(*storedTask, now, resume);
         } else if (otherWorkerConnected && !connectionSuspended_) {
             // The server takes fewer connections than there are workers. Keep
             // this slot idle for the session; a connected one takes the task.
             slot.parkedGeneration = generation;
-            transitionToQueued(*storedTask, now, storedTask->resumeHint);
+            transitionToQueued(*storedTask, now, resume);
         } else if (!connectionSuspended_ &&
                    ++consecutiveConnectionFailures_ < kConnectionFailureLimit) {
-            transitionToQueued(*storedTask, now, storedTask->resumeHint);
+            transitionToQueued(*storedTask, now, resume);
         } else {
             suspended = !connectionSuspended_;
             connectionSuspended_ = true;
@@ -2284,7 +2297,11 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
                         return PrecheckOutcome::Error;
                     publishUpdated({task.taskId});
                 }
-                resume = decision.policy == Policy::Resume;
+                // Overwriting the destination still continues the partial
+                // file that an earlier run of this task wrote.
+                resume =
+                    decision.policy == Policy::Resume ||
+                    (decision.policy == Policy::Overwrite && task.resumeHint);
             }
 
             const QString parent = QFileInfo(task.dst).path();
@@ -2401,7 +2418,8 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
                     return PrecheckOutcome::Error;
                 publishUpdated({task.taskId});
             }
-            resume = decision.policy == Policy::Resume;
+            resume = decision.policy == Policy::Resume ||
+                     (decision.policy == Policy::Overwrite && task.resumeHint);
         }
         std::string directoryError;
         if (!openscp::localfiles::ensureLocalDirectories(
@@ -2537,12 +2555,16 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
         else if (storedTask->status != Status::WaitingForConnection)
             transitionToPaused(*storedTask);
     };
-    auto markError = [&](const std::string &error) {
+    // A retry continues the partial data of the run, unless the data is what
+    // failed.
+    auto markError = [&](const std::string &error, bool resumable) {
         std::lock_guard<std::mutex> lock(mtx_);
         TransferTask *storedTask = taskForIdLocked(task.taskId);
-        if (storedTask)
+        if (storedTask) {
             transitionToError(*storedTask, error,
                               QDateTime::currentMSecsSinceEpoch());
+            storedTask->resumeHint = resumable && keepsPartialData(*storedTask);
+        }
     };
 
     std::shared_ptr<openscp::RemoteClient> client;
@@ -2822,7 +2844,8 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
                                     .toUtf8()
                                     .toStdString()
                               : error;
-            markError(finalError);
+            markError(finalError, operationError.kind !=
+                                      openscp::RemoteErrorKind::Integrity);
             publishUpdated({task.taskId});
             finish();
             return;
@@ -2870,7 +2893,8 @@ void TransferManager::executeTask(WorkerSlot &slot, TransferTask task,
     markError(QCoreApplication::translate(
                   "TransferManager", "Transfer failed after all retry attempts")
                   .toUtf8()
-                  .toStdString());
+                  .toStdString(),
+              true);
     publishUpdated({task.taskId});
     finish();
 }
