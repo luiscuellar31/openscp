@@ -2468,10 +2468,21 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
         // plain and hashed (|1|...) entries alike. A second check with
         // TYPE_SHA1 would always report a mismatch, since libssh2 cannot take
         // a SHA1 name as input, and hide the real "not found".
-        struct libssh2_knownhost *host = nullptr;
-        int check =
-            libssh2_knownhost_checkp(nh, opt.host.c_str(), opt.port, hostkey,
-                                     keylen, typemask_plain, &host);
+        // libssh2_knownhost_checkp() also falls back to the plain host, the
+        // entry for port 22, on any other port, where OpenSSH reads only
+        // "[host]:port": each name for this port is checked on its own.
+        int check = LIBSSH2_KNOWNHOST_CHECK_NOTFOUND;
+        for (const std::string &token :
+             known_hosts_tokens(opt.host, opt.port)) {
+            const int tokenCheck = libssh2_knownhost_check(
+                nh, token.c_str(), hostkey, keylen, typemask_plain, nullptr);
+            if (tokenCheck == LIBSSH2_KNOWNHOST_CHECK_MATCH) {
+                check = tokenCheck;
+                break;
+            }
+            if (tokenCheck != LIBSSH2_KNOWNHOST_CHECK_NOTFOUND)
+                check = tokenCheck;
+        }
 
         if (check == LIBSSH2_KNOWNHOST_CHECK_MATCH) {
             libssh2_knownhost_free(nh);

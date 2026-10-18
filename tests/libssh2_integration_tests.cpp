@@ -81,6 +81,26 @@ std::vector<std::string> scanHostKeys(const std::string &host,
     return keys;
 }
 
+// The lines of `scanned`, from scanHostKeys(), under the name `token`, and
+// with each key changed when `changeKeys`, as another server holds them.
+std::string knownHostsLinesFor(const std::string &token,
+                               const std::vector<std::string> &scanned,
+                               bool changeKeys) {
+    std::string lines;
+    for (const std::string &line : scanned) {
+        std::string typeAndKey = line.substr(line.find(' '));
+        if (changeKeys) {
+            // Another base64 character in the middle of the key.
+            const std::size_t keyStart = typeAndKey.rfind(' ') + 1;
+            char &middle =
+                typeAndKey[keyStart + (typeAndKey.size() - keyStart) / 2];
+            middle = middle == 'A' ? 'B' : 'A';
+        }
+        lines += token + typeAndKey + "\n";
+    }
+    return lines;
+}
+
 bool parseProxyType(const std::optional<std::string> &raw,
                     openscp::ProxyType &out) {
     if (!raw.has_value() || raw->empty()) {
@@ -561,6 +581,60 @@ int main() {
                              " should refuse a revoked host key: ",
                          revokedErr);
         revokedClient.disconnect();
+    }
+
+    // On a port other than 22, OpenSSH reads only the entry for
+    // "[host]:port". The host's plain entry is for port 22, which may be
+    // another server, such as the machine that runs this one in a container.
+    const fs::path otherPortKnownHosts = localTmpRoot / "known_hosts_port_22";
+    if (t.failures == 0 && port != 22 && !scannedKeys.empty()) {
+        openscp::SessionOptions strictOpt = opt;
+        strictOpt.known_hosts_policy = openscp::KnownHostsPolicy::Strict;
+        strictOpt.known_hosts_path = otherPortKnownHosts.string();
+        openscp::SessionOptions tofuOpt = strictOpt;
+        tofuOpt.known_hosts_policy = openscp::KnownHostsPolicy::AcceptNew;
+        bool asked = false;
+        tofuOpt.hostkey_confirm_cb =
+            [&asked](const std::string &, std::uint16_t, const std::string &,
+                     const std::string &, bool) {
+                asked = true;
+                return false;
+            };
+        std::string otherPortErr;
+
+        t.check(writeFile(otherPortKnownHosts,
+                          knownHostsLinesFor(*host, scannedKeys, true)),
+                "known_hosts with other keys for port 22 should be written");
+        if (t.failures == 0) {
+            openscp::Libssh2SftpClient strictClient;
+            t.checkWithError(
+                !strictClient.connect(strictOpt, otherPortErr) &&
+                    otherPortErr == "Unknown host in known_hosts",
+                "other keys for port 22 should leave this port unknown: ",
+                otherPortErr);
+            strictClient.disconnect();
+            openscp::Libssh2SftpClient tofuClient;
+            t.checkWithError(!tofuClient.connect(tofuOpt, otherPortErr) &&
+                                 asked,
+                             "TOFU should ask about this port: ", otherPortErr);
+            tofuClient.disconnect();
+        }
+
+        t.check(
+            writeFile(otherPortKnownHosts,
+                      knownHostsLinesFor(*host, scannedKeys, false) +
+                          knownHostsLinesFor(knownHostsHostToken(*host, port),
+                                             scannedKeys, true)),
+            "known_hosts with other keys for this port should be written");
+        if (t.failures == 0) {
+            openscp::Libssh2SftpClient strictClient;
+            t.checkWithError(
+                !strictClient.connect(strictOpt, otherPortErr) &&
+                    otherPortErr == "Host key does not match known_hosts",
+                "the keys for port 22 should not stand for this port's: ",
+                otherPortErr);
+            strictClient.disconnect();
+        }
     }
 
     openscp::Libssh2SftpClient client;
