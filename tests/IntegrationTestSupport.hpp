@@ -432,6 +432,47 @@ inline void checkFtpEntryLookups(openscp::RemoteClient &client,
                    error);
 }
 
+// Some servers, such as IIS by default, refuse RNTO over an existing file. An
+// upload or a rename that replaces one must succeed anyway, and leave neither
+// its partial file nor its source behind. The file keeps its content.
+inline void checkFtpReplacesExistingFiles(openscp::RemoteClient &client,
+                                          const std::string &remotePath,
+                                          TestContext &test) {
+    IntegrationTempDir localDirectory;
+    const std::string copy = (localDirectory.path() / "copy").string();
+    std::string error;
+    test.checkWithError(localDirectory.isValid() &&
+                            client.get(remotePath, copy, error, {}, {}, false),
+                        "FTP: the uploaded file should download: ", error);
+    error.clear();
+    test.checkWithError(
+        client.put(copy, remotePath, error, {}, {}, false),
+        "FTP: an upload should replace an existing file: ", error);
+    bool isDirectory = false;
+    error.clear();
+    test.check(!client.exists(remotePath + ".part", isDirectory, error) &&
+                   error.empty(),
+               "FTP: an upload that replaces a file should leave no partial "
+               "file");
+    const std::string source = remotePath + ".source";
+    error.clear();
+    test.checkWithError(
+        client.put(copy, source, error, {}, {}, false) &&
+            client.rename(source, remotePath, error, true),
+        "FTP: a rename should replace an existing file: ", error);
+    error.clear();
+    test.check(!client.exists(source, isDirectory, error) && error.empty(),
+               "FTP: a rename that replaces a file should move its source");
+}
+
+// The FTP and FTPS checks that need an uploaded file.
+inline void checkFtpUploadedFile(openscp::RemoteClient &client,
+                                 const std::string &remotePath,
+                                 TestContext &test) {
+    checkFtpEntryLookups(client, remotePath, test);
+    checkFtpReplacesExistingFiles(client, remotePath, test);
+}
+
 // With certificate verification off, a connection accepts the public key the
 // probe read and refuses any other one.
 inline void checkTlsKeyPinning(openscp::SessionOptions options,

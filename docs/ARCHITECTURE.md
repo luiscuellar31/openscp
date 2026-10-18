@@ -111,7 +111,11 @@ is repeated once with that collection URL.
 The transfer queue treats NotFound from a delete as done, so a backend must
 report a missing path as NotFound. FTP answers 550 both for a missing path and
 for refused access, so after a failed DELE, RMD or RNFR the FTP backend looks
-the path up before reporting PermissionDenied.
+the path up before reporting PermissionDenied. When a server refuses RNTO over
+an existing file, as IIS does by default, the FTP backend moves that file aside
+under a free name and renames again, then deletes it, or moves it back if the
+rename still fails; publishing an upload and a rename that replaces a file
+both do this.
 
 SFTP and SCP uploads give the remote file the local file's permission bits,
 as OpenSSH's sftp and scp do. SFTP writes the `.part` with mode 0600 and

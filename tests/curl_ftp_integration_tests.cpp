@@ -63,7 +63,7 @@ int main() {
     t.check(!client->removeFile("/safe\r\nDELE /important", err),
             "FTP: connected operations must reject command-injection paths");
     openscp::testsupport::ManagedFilesContractHooks hooks;
-    hooks.afterUpload = openscp::testsupport::checkFtpEntryLookups;
+    hooks.afterUpload = openscp::testsupport::checkFtpUploadedFile;
     openscp::testsupport::runManagedFilesContract(
         *client, openscp::Protocol::Ftp, "FTP", *remoteBase, t, hooks);
     return openscp::testsupport::finishIntegration(

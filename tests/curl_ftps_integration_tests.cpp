@@ -67,7 +67,7 @@ int main() {
 
     TestContext t;
     openscp::testsupport::ManagedFilesContractHooks hooks;
-    hooks.afterUpload = openscp::testsupport::checkFtpEntryLookups;
+    hooks.afterUpload = openscp::testsupport::checkFtpUploadedFile;
     openscp::testsupport::runManagedFilesContract(
         *client, openscp::Protocol::Ftps, "FTPS", *remoteBase, t, hooks);
     openscp::testsupport::checkTlsKeyPinning(opt, "FTPS", t);

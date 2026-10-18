@@ -16,6 +16,7 @@
 #include <limits>
 #include <mutex>
 #include <optional>
+#include <random>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -721,6 +722,78 @@ RemoteError ftpPathErrorFromResult(CURL *curl, const SessionOptions &opt,
     return error;
 }
 
+std::vector<std::string> ftpRenameCommands(const std::string &commandRoot,
+                                           const std::string &from,
+                                           const std::string &to) {
+    return {"RNFR " + curlcommon::ftpCommandPath(commandRoot, from),
+            "RNTO " + curlcommon::ftpCommandPath(commandRoot, to)};
+}
+
+// Renames `from` to `to`, replacing a file there. A server that refuses RNTO
+// over an existing file, as IIS does by default, gets that file moved aside
+// under a free name first, and moved back if the rename still fails, so it is
+// never lost; once the rename succeeds, the file aside is deleted.
+bool renameReplacingFile(CURL *curl, const SessionOptions &opt,
+                         const std::string &commandRoot,
+                         const std::string &from, const std::string &to,
+                         const std::atomic<bool> *interrupted,
+                         bool &mlstRejected, bool &mlsdRejected,
+                         std::string &err, CURLcode &code, long &response) {
+    if (runFtpCommands(curl, opt, ftpRenameCommands(commandRoot, from, to),
+                       interrupted, err, code, response)) {
+        return true;
+    }
+    if (from == to || response < 500 || response >= 600)
+        return false;
+
+    const std::string refusal = err;
+    const CURLcode refusalCode = code;
+    const long refusalResponse = response;
+    const auto keepRefusal = [&] {
+        err = refusal;
+        code = refusalCode;
+        response = refusalResponse;
+        return false;
+    };
+    std::string stepError;
+    CURLcode stepCode = CURLE_OK;
+    long stepResponse = 0;
+    FileInfo existing;
+    if (lookupFtpEntry(curl, opt, commandRoot, to, interrupted, mlstRejected,
+                       mlsdRejected, existing, stepError, stepCode,
+                       stepResponse) != FtpLookupResult::Found ||
+        existing.is_dir) {
+        return keepRefusal();
+    }
+    std::random_device random;
+    std::ostringstream asideName;
+    asideName << to << ".openscp-backup-" << std::hex << random() << random();
+    const std::string aside = asideName.str();
+    FileInfo taken;
+    if (lookupFtpEntry(curl, opt, commandRoot, aside, interrupted, mlstRejected,
+                       mlsdRejected, taken, stepError, stepCode,
+                       stepResponse) != FtpLookupResult::NotFound ||
+        !runFtpCommands(curl, opt, ftpRenameCommands(commandRoot, to, aside),
+                        interrupted, stepError, stepCode, stepResponse)) {
+        return keepRefusal();
+    }
+
+    if (runFtpCommands(curl, opt, ftpRenameCommands(commandRoot, from, to),
+                       interrupted, err, code, response)) {
+        // A file left aside is all that a failed DELE costs.
+        (void)runFtpCommands(
+            curl, opt,
+            {"DELE " + curlcommon::ftpCommandPath(commandRoot, aside)},
+            interrupted, stepError, stepCode, stepResponse);
+        return true;
+    }
+    err += runFtpCommands(curl, opt, ftpRenameCommands(commandRoot, aside, to),
+                          interrupted, stepError, stepCode, stepResponse)
+               ? " [old destination restored]"
+               : " [old destination remains at " + aside + "]";
+    return false;
+}
+
 } // namespace
 
 bool fetchFtpsServerPublicKeyPin(const SessionOptions &opt, std::string &pin,
@@ -1085,12 +1158,10 @@ bool CurlFtpClient::put(const std::string &local, const std::string &remote,
 
     CURLcode renameCode = CURLE_OK;
     long renameResponse = 0;
-    const std::vector<std::string> renameCommands = {
-        "RNFR " + curlcommon::ftpCommandPath(commandRoot, remotePartial),
-        "RNTO " + curlcommon::ftpCommandPath(commandRoot, remote),
-    };
-    if (!runFtpCommands(curl, opt, renameCommands, operation.interrupted(), err,
-                        renameCode, renameResponse)) {
+    if (!renameReplacingFile(curl, opt, commandRoot, remotePartial,
+                             normalizeRemotePath(remote),
+                             operation.interrupted(), mlstRejected_,
+                             mlsdRejected_, err, renameCode, renameResponse)) {
         setLastOperationError(
             ftpErrorFromResult(renameCode, renameResponse, err, true));
         return false;
@@ -1310,11 +1381,15 @@ bool CurlFtpClient::rename(const std::string &from, const std::string &to,
 
     CURLcode rc = CURLE_OK;
     long responseCode = 0;
-    const bool ok = runFtpCommands(
-        connection.session->get(), opt,
-        {"RNFR " + curlcommon::ftpCommandPath(commandRoot, source),
-         "RNTO " + curlcommon::ftpCommandPath(commandRoot, destination)},
-        operation.interrupted(), err, rc, responseCode);
+    const bool ok =
+        overwrite ? renameReplacingFile(connection.session->get(), opt,
+                                        commandRoot, source, destination,
+                                        operation.interrupted(), mlstRejected_,
+                                        mlsdRejected_, err, rc, responseCode)
+                  : runFtpCommands(
+                        connection.session->get(), opt,
+                        ftpRenameCommands(commandRoot, source, destination),
+                        operation.interrupted(), err, rc, responseCode);
     if (!ok) {
         setLastOperationError(ftpPathErrorFromResult(
             connection.session->get(), opt, commandRoot, source,
