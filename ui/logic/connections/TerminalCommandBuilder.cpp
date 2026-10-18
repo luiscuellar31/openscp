@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <optional>
 #include <string>
+#include <utility>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -211,6 +212,10 @@ bool buildProxyCommand(const openscp::SessionOptions &session,
     return false;
 }
 
+#ifdef Q_OS_WIN
+QString windowsCommandLineArgument(const QString &argument);
+#endif
+
 bool appendJumpOrProxyArguments(
     QStringList &arguments, const openscp::SessionOptions &session,
     const TerminalCommandBuilder::ExecutableLookup &lookup, QString *error) {
@@ -218,12 +223,11 @@ bool appendJumpOrProxyArguments(
     const bool usesJumpHost = !jumpHost.isEmpty();
     const bool usesProxy = session.proxy_type != openscp::ProxyType::None;
 #ifdef Q_OS_WIN
-    // OpenSCP does not connect through jump hosts on Windows yet, and Windows
-    // has no nc or ncat to run as a proxy command.
-    if (usesJumpHost || usesProxy) {
+    // Windows has no nc or ncat to run as a proxy command.
+    if (usesProxy) {
         *error = QCoreApplication::translate(
-            "MainWindow", "On Windows, Open in terminal cannot use an SSH "
-                          "jump host or a proxy yet.");
+            "MainWindow",
+            "On Windows, Open in terminal cannot use a proxy yet.");
         return false;
     }
 #endif
@@ -280,9 +284,23 @@ bool appendJumpOrProxyArguments(
                     << QStringLiteral("-o")
                     << QStringLiteral("IdentitiesOnly=yes")
                     << QStringLiteral("--") << jumpHost;
+#ifdef Q_OS_WIN
+        // OpenSSH for Windows starts a proxy command with CreateProcessW, not
+        // through a shell: the command is quoted for the C runtime and names
+        // ssh.exe by its full path.
+        jumpCommand.front() = proxyCommandLiteral(
+            QDir::toNativeSeparators(lookup(QStringLiteral("ssh"))));
+        QStringList quoted;
+        for (const QString &argument : std::as_const(jumpCommand))
+            quoted << windowsCommandLineArgument(argument);
+        arguments << QStringLiteral("-o")
+                  << QStringLiteral("ProxyCommand=%1")
+                         .arg(quoted.join(QLatin1Char(' ')));
+#else
         arguments << QStringLiteral("-o")
                   << QStringLiteral("ProxyCommand=%1")
                          .arg(shellJoinQuoted(jumpCommand));
+#endif
         return true;
     }
 

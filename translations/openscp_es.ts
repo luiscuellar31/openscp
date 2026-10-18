@@ -720,7 +720,7 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
 <context>
     <name>MainWindow</name>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="156"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="157"/>
         <source>Open in terminal is unavailable for authenticated proxies because terminal command arguments could expose the proxy password.</source>
         <translation>Abrir en terminal no está disponible con proxies autenticados porque los argumentos del comando podrían exponer la contraseña del proxy.</translation>
     </message>
@@ -841,52 +841,57 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
         <translation>Autenticación fallida.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="333"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="351"/>
         <source>OpenSSH client was not found in PATH.</source>
         <translation>No se encontró el cliente OpenSSH en PATH.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="305"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="323"/>
         <source>Session is missing host or username information.</source>
         <translation>Faltan datos de host o usuario en la sesión.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="489"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="228"/>
+        <source>On Windows, Open in terminal cannot use a proxy yet.</source>
+        <translation>En Windows, Abrir en terminal todavía no puede usar un proxy.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="507"/>
         <source>OpenSCP: the session ended with exit code %1.</source>
         <translation>OpenSCP: La sesión terminó con el código de salida %1.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="492"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="510"/>
         <source>Press Enter to close this window</source>
         <translation>Pulsa Intro para cerrar esta ventana</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="599"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="617"/>
         <source>Could not locate osascript.</source>
         <translation>No se pudo encontrar osascript.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="611"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="629"/>
         <source>Could not launch Terminal.app.</source>
         <translation>No se pudo abrir Terminal.app.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="648"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="666"/>
         <source>No compatible terminal emulator was found.</source>
         <translation>No se encontró un emulador de terminal compatible.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="658"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="676"/>
         <source>Could not locate Windows PowerShell.</source>
         <translation>No se encontró Windows PowerShell.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="687"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="705"/>
         <source>Could not open a Windows PowerShell window.</source>
         <translation>No se pudo abrir una ventana de Windows PowerShell.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="695"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="713"/>
         <source>Open in terminal action is not supported on this platform.</source>
         <translation>La acción de abrir en terminal no es compatible en esta plataforma.</translation>
     </message>
@@ -1019,7 +1024,7 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
         <translation> (cambio automático a la CLI de SFTP habilitado)</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="397"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="415"/>
         <source>OpenSCP: SSH shell was not available. Falling back to SFTP CLI.</source>
         <translation>OpenSCP: El shell SSH no estaba disponible. Se cambiará a la CLI de SFTP.</translation>
     </message>
@@ -2358,53 +2363,52 @@ OpenSCP se desconectará para evitar operaciones inconsistentes.
         <translation>Error de transporte.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="139"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="140"/>
         <source>Proxy command requested without proxy settings.</source>
         <translation>Se solicitó un comando de proxy sin configuración de proxy.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="147"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="148"/>
         <source>Proxy host/port is missing for terminal command.</source>
         <translation>Falta el host/puerto del proxy para el comando de terminal.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="172"/>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="194"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="173"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="195"/>
         <source>Unsupported proxy type for terminal command.</source>
         <translation>Tipo de proxy no compatible para el comando de terminal.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="208"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="209"/>
         <source>Could not find a proxy helper for terminal mode (tried: nc, ncat).</source>
         <translation>No se encontró un programa auxiliar de proxy para el modo terminal (se intentó: nc, ncat).</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="224"/>
         <source>On Windows, Open in terminal cannot use an SSH jump host or a proxy yet.</source>
-        <translation>En Windows, Abrir en terminal todavía no puede usar un host de salto SSH ni un proxy.</translation>
+        <translation type="vanished">En Windows, Abrir en terminal todavía no puede usar un host de salto SSH ni un proxy.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="231"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="235"/>
         <source>Proxy and SSH jump host cannot be used together in the same terminal command.</source>
         <translation>El proxy y el host de salto SSH no se pueden usar juntos en el mismo comando de terminal.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="250"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="254"/>
         <source>The SSH jump host or its user name contains characters that OpenSSH cannot take safely.</source>
         <translation>El host de salto SSH o su nombre de usuario contiene caracteres que OpenSSH no puede recibir de forma segura.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="311"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="329"/>
         <source>The host name contains characters that OpenSSH cannot take safely.</source>
         <translation>El nombre del host contiene caracteres que OpenSSH no puede recibir de forma segura.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="328"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="346"/>
         <source>The OpenSSH client was not found. Add the &quot;OpenSSH Client&quot; optional feature in Windows Settings.</source>
         <translation>No se encontró el cliente OpenSSH. Agrega la característica opcional «Cliente OpenSSH» en Configuración de Windows.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="372"/>
+        <location filename="../ui/logic/connections/TerminalCommandBuilder.cpp" line="390"/>
         <source>OpenSSH sftp client was not found in PATH.</source>
         <translation>No se encontró el cliente sftp de OpenSSH en PATH.</translation>
     </message>
