@@ -413,7 +413,9 @@ from the directory listing rather than with one more file system call per
 entry; an error while listing a folder still leaves it unscanned.
 An entry present on one side only whose name matches the other side except for
 letter case or Unicode normalization is a conflict, because many destinations
-treat both names as one entry.
+treat both names as one entry. So are source entries missing from the
+destination whose names match each other that way, which would be copied to
+one entry.
 
 ## Application updates
 

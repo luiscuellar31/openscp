@@ -217,6 +217,24 @@ QSet<QString> aliasKeys(const EntryIndex &index, std::stop_token stopToken) {
     return keys;
 }
 
+// The alias keys that more than one entry of `index` shares.
+QSet<QString> repeatedAliasKeys(const EntryIndex &index,
+                                std::stop_token stopToken) {
+    QSet<QString> seen;
+    QSet<QString> repeated;
+    seen.reserve(index.size());
+    for (auto iterator = index.cbegin(); iterator != index.cend(); ++iterator) {
+        if (stopToken.stop_requested())
+            return {};
+        const QString key = aliasKey(iterator.key());
+        if (seen.contains(key))
+            repeated.insert(key);
+        else
+            seen.insert(key);
+    }
+    return repeated;
+}
+
 std::optional<bool> equalComparableChecksums(const SyncSnapshotEntry &source,
                                              const SyncSnapshotEntry &dest) {
     if (source.checksumAlgorithm.isEmpty() ||
@@ -233,7 +251,8 @@ SyncComparisonItem classifyItem(const QString &relativePath,
                                 std::optional<SyncSnapshotEntry> source,
                                 std::optional<SyncSnapshotEntry> destination,
                                 const SyncComparisonOptions &options,
-                                bool sourceUnscanned, bool aliasOnOtherSide) {
+                                bool sourceUnscanned, bool aliasOnOtherSide,
+                                bool aliasInSource) {
     SyncComparisonItem item;
     item.relativePath = relativePath;
     item.source = std::move(source);
@@ -245,6 +264,15 @@ SyncComparisonItem classifyItem(const QString &relativePath,
         item.action = SyncAction::Conflict;
         item.reason = QCoreApplication::translate(
             "SyncDialog", "The other side has this name with different letter "
+                          "case or Unicode form");
+        return item;
+    }
+    // Copying both spellings could leave one entry, the second copy
+    // replacing the first.
+    if (aliasInSource) {
+        item.action = SyncAction::Conflict;
+        item.reason = QCoreApplication::translate(
+            "SyncDialog", "The source also has this name with different letter "
                           "case or Unicode form");
         return item;
     }
@@ -436,6 +464,9 @@ SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
         return {};
     const QSet<QString> localAliases = aliasKeys(local, stopToken);
     const QSet<QString> remoteAliases = aliasKeys(remote, stopToken);
+    const QSet<QString> sourceRepeatedAliases = repeatedAliasKeys(
+        options.direction == SyncDirection::LocalToRemote ? local : remote,
+        stopToken);
     if (stopToken.stop_requested())
         return {};
     const QSet<QString> &unscannedPaths =
@@ -533,9 +564,12 @@ SyncComparisonEngine::compare(const QVector<SyncSnapshotEntry> &localSnapshot,
         const bool aliasOnOtherSide =
             (onlyRemote && localAliases.contains(aliasKey(path))) ||
             (onlyLocal && remoteAliases.contains(aliasKey(path)));
-        result.push_back(classifyItem(path, std::move(source),
-                                      std::move(destination), options,
-                                      sourceUnscanned, aliasOnOtherSide));
+        const bool aliasInSource =
+            source && !destination &&
+            sourceRepeatedAliases.contains(aliasKey(path));
+        result.push_back(classifyItem(
+            path, std::move(source), std::move(destination), options,
+            sourceUnscanned, aliasOnOtherSide, aliasInSource));
     }
     if (stopToken.stop_requested())
         return {};
