@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -937,6 +938,42 @@ int main() {
         err.clear();
         t.check(client.removeDir(remoteSuiteDir, err),
                 std::string("removeDir should succeed: ") + err);
+    }
+
+    if (t.failures == 0) {
+        // Transfer workers connect and disconnect at the same time: one
+        // client's teardown must not touch another's socket, whose number it
+        // may have just freed. Through a jump host each client has its own
+        // ssh process.
+        constexpr int kClients = 4;
+        constexpr int kRounds = 3;
+        std::mutex errorsMutex;
+        std::vector<std::string> concurrentErrors;
+        std::vector<std::thread> workers;
+        for (int index = 0; index < kClients; ++index) {
+            workers.emplace_back([&] {
+                for (int round = 0; round < kRounds; ++round) {
+                    openscp::Libssh2SftpClient concurrent;
+                    std::string concurrentErr;
+                    std::vector<openscp::FileInfo> entries;
+                    const bool listed =
+                        concurrent.connect(opt, concurrentErr) &&
+                        concurrent.list(remoteBase, entries, concurrentErr);
+                    concurrent.disconnect();
+                    if (!listed) {
+                        std::lock_guard<std::mutex> lock(errorsMutex);
+                        concurrentErrors.push_back(concurrentErr);
+                    }
+                }
+            });
+        }
+        for (std::thread &worker : workers)
+            worker.join();
+        t.check(concurrentErrors.empty(),
+                "clients that connect and disconnect at once should all "
+                "succeed: " +
+                    (concurrentErrors.empty() ? std::string()
+                                              : concurrentErrors.front()));
     }
 
     // Best-effort cleanup regardless of test result.
