@@ -361,7 +361,11 @@ left empty, run outside the UI thread.
 Copies, moves and deletions between local folders run on a pool of two
 threads that `MainWindow` owns, apart from the global pool the connection and
 the disconnect cleanup use. They stop at the next entry when canceled,
-removing what they staged; closing the window while one runs asks first.
+removing what they staged; closing the window while one runs asks first. A
+drop on a local panel asks before replacing an entry, as F5 and F6 do, once
+the drop is over, since a dialog during it would hold the application the
+files come from; replacing a folder replaces it whole, which the question
+says.
 
 Synchronization has three steps:
 

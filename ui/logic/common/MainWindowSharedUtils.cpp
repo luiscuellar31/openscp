@@ -549,15 +549,27 @@ QVector<QPair<QString, QString>> buildLocalDestinationPairsWithOverwritePrompt(
     for (const QFileInfo &sourceInfo : sources) {
         const QString targetPath =
             destinationDir.filePath(sourceInfo.fileName());
-        if (QFileInfo::exists(targetPath)) {
+        const QFileInfo targetInfo(targetPath);
+        if (targetInfo.exists()) {
             if (policy == OverwritePolicy::Ask) {
+                // The copy replaces a folder whole, so its own files go.
+                const bool folder =
+                    !isLocalLink(targetInfo) && isLocalFolder(targetInfo);
+                const QString text =
+                    folder ? QCoreApplication::translate(
+                                 "MainWindow",
+                                 "The folder “%1” already exists at "
+                                 "destination. Overwriting replaces it, and "
+                                 "deletes the files that only it holds.\n"
+                                 "Overwrite?")
+                           : QCoreApplication::translate(
+                                 "MainWindow",
+                                 "“%1” already exists at destination.\n"
+                                 "Overwrite?");
                 const auto decision = UiAlerts::question(
                     parent,
                     QCoreApplication::translate("MainWindow", "Conflict"),
-                    QCoreApplication::translate(
-                        "MainWindow",
-                        "“%1” already exists at destination.\nOverwrite?")
-                        .arg(sourceInfo.fileName()),
+                    text.arg(sourceInfo.fileName()),
                     QMessageBox::Yes | QMessageBox::No | QMessageBox::YesToAll |
                         QMessageBox::NoToAll);
                 if (decision == QMessageBox::YesToAll)

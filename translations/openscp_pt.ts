@@ -725,22 +725,22 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
         <translation>A abertura no terminal não está disponível com proxies autenticados, pois os argumentos do comando poderiam expor a senha do proxy.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="263"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="264"/>
         <source>Could not preserve existing destination: %1</source>
         <translation>Não foi possível preservar o destino existente: %1</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="277"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="278"/>
         <source>Could not publish completed copy: %1</source>
         <translation>Não foi possível publicar a cópia concluída: %1</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="280"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="281"/>
         <source>Could not publish completed copy or restore the previous destination. Recovery copy: %1</source>
         <translation>Não foi possível publicar a cópia concluída nem restaurar o destino anterior. Cópia de recuperação: %1</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="88"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="89"/>
         <source>Could not copy file: %1</source>
         <translation>Não foi possível copiar arquivo: %1</translation>
     </message>
@@ -750,97 +750,104 @@ Use um pacote oficial para ver as informações completas de licenças.</transla
         <translation>Não foi possível copiar o link simbólico: %1 (%2)</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="99"/>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="226"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="100"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="227"/>
         <source>Could not create destination folder: %1</source>
         <translation>Não foi possível criar pasta de destino: %1</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="128"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="129"/>
         <source>Could not create destination subfolder: %1</source>
         <translation>Não foi possível criar subpasta de destino: %1</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="137"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="138"/>
         <source>Failed to copy: %1</source>
         <translation>Falha ao copiar: %1</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="145"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="146"/>
         <source>Cannot copy special file: %1</source>
         <translation>Não é possível copiar o arquivo especial: %1</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="154"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="155"/>
         <source>Source entry is neither file nor folder.</source>
         <translation>A entrada de origem não é arquivo nem pasta.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="239"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="240"/>
         <source>Cannot copy a folder into itself: %1</source>
         <translation>Não é possível copiar uma pasta para dentro dela mesma: %1</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="411"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="412"/>
         <source>Invalid name: cannot be &apos;.&apos; or &apos;..&apos;.</source>
         <translation>Nome inválido: não pode ser &apos;.&apos; nem &apos;..&apos;.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="418"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="419"/>
         <source>Invalid name: cannot contain separators (&apos;/&apos; or &apos;\\&apos;).</source>
         <translation>Nome inválido: não pode conter separadores (&apos;/&apos; ou &apos;\\&apos;).</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="428"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="429"/>
         <source>Invalid name: cannot contain control characters.</source>
         <translation>Nome inválido: não pode conter caracteres de controle.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="447"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="448"/>
         <source>Invalid name for this computer: Windows does not allow the characters &lt; &gt; : &quot; | ? *, a final dot or space, or device names such as CON, NUL or COM1, and can read a name such as REPORT~1.TXT as another file&apos;s short name.</source>
         <translation>Nome inválido para este computador: o Windows não permite os caracteres &lt; &gt; : &quot; | ? *, um ponto ou espaço no final, nem nomes de dispositivo como CON, NUL ou COM1, e pode ler um nome como REPORT~1.TXT como o nome curto de outro arquivo.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="559"/>
+        <source>The folder “%1” already exists at destination. Overwriting replaces it, and deletes the files that only it holds.
+Overwrite?</source>
+        <translation>A pasta «%1» já existe no destino. Sobrescrevê-la a substitui e apaga os arquivos que só ela contém.
+Sobrescrever?</translation>
     </message>
     <message>
         <source>Invalid name for this computer: Windows does not allow the characters &lt; &gt; : &quot; | ? *, a final dot or space, or device names such as CON, NUL or COM1.</source>
         <translation type="vanished">Nome inválido para este computador: o Windows não permite os caracteres &lt; &gt; : &quot; | ? *, um ponto ou espaço no final, nem nomes de dispositivo como CON, NUL ou COM1.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="492"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="493"/>
         <source>Permission denied.</source>
         <translation>Permissão negada.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="495"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="496"/>
         <source>Location is read-only.</source>
         <translation>Local em modo somente leitura.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="499"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="500"/>
         <source>File or folder does not exist.</source>
         <translation>O arquivo ou pasta não existe.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="503"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="504"/>
         <source>Connection timed out.</source>
         <translation>Tempo limite de conexão atingido.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="509"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="510"/>
         <source>Could not resolve the server hostname.</source>
         <translation>Não foi possível resolver o nome do servidor.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="513"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="514"/>
         <source>Connection refused by the server.</source>
         <translation>Conexão recusada pelo servidor.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="518"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="519"/>
         <source>Network unavailable or host unreachable.</source>
         <translation>Rede indisponível ou host inacessível.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="523"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="524"/>
         <source>Authentication failed.</source>
         <translation>Falha na autenticação.</translation>
     </message>
@@ -1538,12 +1545,12 @@ O que não terminou fica como estava.</translation>
         <translation>A pasta de destino não existe.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="555"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="571"/>
         <source>Conflict</source>
         <translation>Conflito</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="556"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="565"/>
         <source>“%1” already exists at destination.
 Overwrite?</source>
         <translation>«%1» já existe no destino.
@@ -1682,7 +1689,7 @@ Deseja continuar?</translation>
     <message>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="250"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="612"/>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="476"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="477"/>
         <source>Invalid name</source>
         <translation>Nome inválido</translation>
     </message>
@@ -1833,17 +1840,17 @@ Sobrescrever?</translation>
         <translation>Não foi possível criar arquivo.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="312"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="313"/>
         <source>Could not preserve existing destination: %1 (%2)</source>
         <translation>Não foi possível preservar o destino existente: %1 (%2)</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="332"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="333"/>
         <source>Could not move the source or restore the previous destination. Recovery copy: %1</source>
         <translation>Não foi possível mover a origem nem restaurar o destino anterior. Cópia de recuperação: %1</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="341"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="342"/>
         <source>Could not move entry: %1 (%2)</source>
         <translation>Não foi possível mover o item: %1 (%2)</translation>
     </message>
@@ -2181,7 +2188,7 @@ Não foi possível salvar a impressão digital. Conexão permitida somente desta
         <translation>Copiando itens selecionados...</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="351"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="352"/>
         <source>Could not delete source: %1</source>
         <translation>Não foi possível excluir a origem: %1</translation>
     </message>

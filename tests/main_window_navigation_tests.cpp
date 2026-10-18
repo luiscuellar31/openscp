@@ -436,6 +436,114 @@ OPENSCP_TEST(testForeignStagingDropCopiesWithoutDeleting, test) {
                "a staging folder from a foreign drag should not be deleted");
 }
 
+OPENSCP_TEST(testLocalDropsAskBeforeReplacingWhatIsThere, test) {
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(), "the local drop needs a folder");
+    if (!temporary.isValid())
+        return;
+    configureMainWindowSettings(settingsRootPath);
+    const QDir root(temporary.path());
+    const auto write = [](const QString &path, const QByteArray &data) {
+        QFile file(path);
+        return QDir().mkpath(QFileInfo(path).absolutePath()) &&
+               file.open(QIODevice::WriteOnly) &&
+               file.write(data) == data.size();
+    };
+    const auto read = [](const QString &path) {
+        QFile file(path);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    };
+    const QString leftReport = root.filePath(QStringLiteral("left/report.txt"));
+    const QString leftOnly =
+        root.filePath(QStringLiteral("left/src/local-only.txt"));
+    const QString rightReport =
+        root.filePath(QStringLiteral("right/report.txt"));
+    test.check(
+        write(root.filePath(QStringLiteral("source/report.txt")), "dropped") &&
+            write(root.filePath(QStringLiteral("source/src/other.txt")),
+                  "other") &&
+            write(leftReport, "left edit") && write(leftOnly, "kept") &&
+            write(rightReport, "right edit"),
+        "the local drop fixture should be created");
+
+    MainWindow window;
+    window.show();
+    flushUiEvents();
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftPath && parts.rightPath && parts.leftView &&
+                   parts.rightView,
+               "the local drop needs both local panels");
+    if (!parts.leftPath || !parts.rightPath || !parts.leftView ||
+        !parts.rightView)
+        return;
+    parts.leftPath->pathRequested(root.filePath(QStringLiteral("left")));
+    parts.rightPath->pathRequested(root.filePath(QStringLiteral("right")));
+    flushUiEvents();
+
+    // Answers every prompt with `answer` and keeps its text.
+    QStringList prompts;
+    QMessageBox::StandardButton answer = QMessageBox::No;
+    QTimer answerer;
+    answerer.setInterval(10);
+    QObject::connect(&answerer, &QTimer::timeout, &window, [&] {
+        if (auto *box = qobject_cast<QMessageBox *>(
+                QApplication::activeModalWidget())) {
+            prompts.push_back(box->text());
+            box->done(answer);
+        }
+    });
+    answerer.start();
+    const auto drop = [&](DragAwareTreeView *view, const QStringList &paths) {
+        QList<QUrl> urls;
+        for (const QString &path : paths)
+            urls.push_back(QUrl::fromLocalFile(path));
+        QMimeData mime;
+        mime.setUrls(urls);
+        QDropEvent event(QPointF(10, 10), Qt::CopyAction, &mime, Qt::LeftButton,
+                         Qt::NoModifier);
+        static_cast<QObject &>(window).eventFilter(view->viewport(), &event);
+    };
+    const QStringList dropped{
+        root.filePath(QStringLiteral("source/report.txt")),
+        root.filePath(QStringLiteral("source/src"))};
+
+    drop(parts.leftView, dropped);
+    test.check(
+        openscp::testsupport::waitUntil([&] { return prompts.size() == 2; },
+                                        std::chrono::milliseconds(3000)),
+        "a drop on the left panel should ask about each entry there");
+    test.check(prompts.size() == 2 &&
+                   !prompts[0].contains(QStringLiteral("deletes")) &&
+                   prompts[1].contains(QStringLiteral("deletes")),
+               "the prompt for a folder should say that replacing it "
+               "deletes what only it holds");
+    test.check(read(leftReport) == "left edit" && QFileInfo::exists(leftOnly),
+               "declining should leave the left panel's entries alone");
+
+    prompts.clear();
+    drop(parts.rightView, {root.filePath(QStringLiteral("source/report.txt"))});
+    test.check(
+        openscp::testsupport::waitUntil([&] { return prompts.size() == 1; },
+                                        std::chrono::milliseconds(3000)) &&
+            read(rightReport) == "right edit",
+        "a drop on the local right panel should ask too");
+
+    prompts.clear();
+    answer = QMessageBox::YesToAll;
+    drop(parts.leftView, dropped);
+    test.check(
+        openscp::testsupport::waitUntil(
+            [&] {
+                return read(leftReport) == "dropped" &&
+                       QFileInfo::exists(
+                           root.filePath(QStringLiteral("left/src/other.txt")));
+            },
+            std::chrono::milliseconds(5000)) &&
+            prompts.size() == 1 && !QFileInfo::exists(leftOnly),
+        "accepting for all should replace the file and the folder, as F5 "
+        "does");
+}
+
 OPENSCP_TEST(testLocalDeleteRunsOffTheUiThread, test) {
     QTemporaryDir temporary;
     test.check(temporary.isValid(), "the delete test needs a folder");
