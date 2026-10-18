@@ -500,14 +500,31 @@ jobs:
         shell: pwsh
         run: .\scripts\ci\fetch_vcpkg.ps1
 
+      # Exact matches only: vcpkg adds the archives of new ABIs beside the
+      # old ones, so a cache restored from another key would carry them all
+      # into the next one. A new key builds the libraries from scratch.
       - name: Restore vcpkg binary cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: vcpkg-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}\vcpkg-archives
           key: vcpkg-x64-windows-static-md-${{ hashFiles('vcpkg.json', 'vcpkg-ports/**') }}-${{ steps.vcpkg.outputs.msvc }}
-          restore-keys: |
-            vcpkg-x64-windows-static-md-${{ hashFiles('vcpkg.json', 'vcpkg-ports/**') }}-
-            vcpkg-x64-windows-static-md-
+
+      # In a step of their own, so that the cache keeps them even when the
+      # build, the packages or their smoke tests fail; CMake's vcpkg run then
+      # restores them from the archives.
+      - name: Build the vcpkg.json dependencies
+        shell: pwsh
+        run: |
+          & (Join-Path $env:VCPKG_ROOT 'vcpkg.exe') install --triplet x64-windows-static-md `
+            "--x-install-root=$env:RUNNER_TEMP\vcpkg_installed"
+
+      - name: Save vcpkg binary cache
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\vcpkg-archives
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
       - name: Install pinned Inno Setup and WiX
         shell: pwsh
