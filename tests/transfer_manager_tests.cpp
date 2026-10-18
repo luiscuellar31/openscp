@@ -1102,9 +1102,12 @@ OPENSCP_TEST(testDownloadOriginsNameTheServerOnly, test) {
 }
 
 #ifdef Q_OS_WIN
+// Reads the mark through the \\?\ form, which also reaches paths past
+// MAX_PATH; path is absolute, as QTemporaryDir gives it.
 std::string zoneIdentifierOf(const QString &path) {
     std::ifstream stream(
-        std::filesystem::path(QDir::toNativeSeparators(path).toStdWString() +
+        std::filesystem::path(L"\\\\?\\" +
+                              QDir::toNativeSeparators(path).toStdWString() +
                               L":Zone.Identifier"),
         std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(stream),
@@ -1191,6 +1194,32 @@ OPENSCP_TEST(testWindowsDownloadsCarryTheMarkOfTheWeb, test) {
                "and origin: " +
                    mark);
     manager.shutdown();
+}
+
+OPENSCP_TEST(testWindowsMarkOfTheWebReachesPathsPastMaxPath, test) {
+    QTemporaryDir destination;
+    const QString origin = QStringLiteral("sftp://files.example:2222/");
+    const std::string unavailable =
+        markOfTheWebUnavailable(destination.path(), origin);
+    if (!unavailable.empty()) {
+        test.skip("Mark of the Web: " + unavailable);
+        return;
+    }
+    // Qt reaches paths past MAX_PATH by itself; the mark's stream, named
+    // after the file, must reach them too.
+    QString folder = destination.path();
+    while (folder.size() <= MAX_PATH)
+        folder += QLatin1Char('/') + QString(40, QLatin1Char('d'));
+    const QString file = folder + QStringLiteral("/marked.txt");
+    QFile written(file);
+    test.check(QDir().mkpath(folder) && written.open(QIODevice::WriteOnly) &&
+                   written.write("data") == 4,
+               "the long file should be written");
+    written.close();
+    openscpui::markDownloadedFile(file, origin);
+    const std::string mark = zoneIdentifierOf(file);
+    test.check(mark.find("ZoneId=3") != std::string::npos,
+               "a file past MAX_PATH should carry the mark: " + mark);
 }
 #endif
 

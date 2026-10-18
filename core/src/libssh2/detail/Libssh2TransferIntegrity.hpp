@@ -49,7 +49,7 @@ inline bool getLocalFileSize(const std::string &path, std::uint64_t &out,
     return true;
 #else
     std::wstring widePath;
-    if (!win32::toWidePath(path, widePath)) {
+    if (!win32::toExtendedLengthPath(path, widePath)) {
         if (why)
             *why = "local path is not valid UTF-8";
         return false;
