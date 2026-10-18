@@ -498,23 +498,7 @@ jobs:
       - name: Fetch vcpkg at the manifest baseline
         id: vcpkg
         shell: pwsh
-        run: |
-          $baseline = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
-          $root = Join-Path $env:RUNNER_TEMP 'vcpkg'
-          git init --quiet $root
-          # Some vcpkg test ports go past the 260-character path limit.
-          git -C $root config core.longpaths true
-          git -C $root fetch --quiet --depth 1 https://github.com/microsoft/vcpkg.git $baseline
-          git -C $root checkout --quiet FETCH_HEAD
-          & (Join-Path $root 'bootstrap-vcpkg.bat') -disableMetrics
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $archives = Join-Path $env:RUNNER_TEMP 'vcpkg-archives'
-          New-Item -ItemType Directory -Force $archives | Out-Null
-          "VCPKG_ROOT=$root" >> $env:GITHUB_ENV
-          "VCPKG_DEFAULT_BINARY_CACHE=$archives" >> $env:GITHUB_ENV
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $msvc = & $vswhere -latest -products * -property installationVersion
-          "msvc=$msvc" >> $env:GITHUB_OUTPUT
+        run: .\scripts\ci\fetch_vcpkg.ps1
 
       - name: Restore vcpkg binary cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
