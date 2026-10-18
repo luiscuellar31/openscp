@@ -756,3 +756,18 @@ jobs:
           fi
 
           gh release upload "$tag" "${files[@]}" --repo "${{ github.repository }}"
+
+      # After the upload, so that a problem here never holds the release back.
+      - name: Write the winget manifests
+        run: |
+          python3 scripts/release/winget-manifests.py \
+            --assets release-assets \
+            --version "${{ needs.verify-source.outputs.version }}" \
+            --output winget-manifests
+
+      - name: Keep the winget manifests for submission
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: winget-manifests
+          path: winget-manifests/
+          if-no-files-found: error

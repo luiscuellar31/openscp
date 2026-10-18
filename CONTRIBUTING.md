@@ -300,6 +300,13 @@ release only if every build passes. The draft's notes come from
 `scripts/release/release-notes.sh`; write the release name and a short
 introduction at the top before publishing it.
 
+The tag's run also keeps a `winget-manifests` artifact, which
+`scripts/release/winget-manifests.py` writes. Once the release is published,
+submit its version folder to
+[microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) as
+`manifests/l/luiscuellar31/OpenSCP/<version>`, for instance with
+`wingetcreate submit`; the first submission creates the package.
+
 ## Licensing
 
 Contributions follow the dual-licensing terms in
