@@ -1,4 +1,5 @@
 // Focused unit tests for security-sensitive libcurl backend helpers.
+#include "IntegrationTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "common/UniqueFile.hpp"
 #include "curl/CurlBackendCommon.hpp"
@@ -654,6 +655,19 @@ OPENSCP_TEST(testProxyThatRefusesTheCredentialsIsAnAuthenticationError, test) {
                    !error.transient,
                "a proxy that refuses the credentials should be an "
                "authentication error: " +
+                   run.detail);
+}
+
+OPENSCP_TEST(testEnvironmentNoProxyKeepsTheSiteProxy, test) {
+    // Unless told otherwise, libcurl reads no_proxy and NO_PROXY and connects
+    // directly to the hosts they name, even with an explicit proxy, which
+    // would expose the address that a site's proxy is there to hide.
+    openscp::testsupport::ScopedEnvironment environment;
+    environment.set("NO_PROXY", "*");
+    environment.set("no_proxy", "*");
+    const RefusingProxyRun run = runThroughRefusingProxy(test, "Basic");
+    test.check(!run.authorizations.empty(),
+               "the site's proxy should carry the request despite NO_PROXY: " +
                    run.detail);
 }
 

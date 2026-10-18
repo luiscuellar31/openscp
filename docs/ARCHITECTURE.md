@@ -82,7 +82,8 @@ A backend is responsible for validating remote paths, reporting the operations
 it supports, protecting secrets with `SecureString`, and making cancellation
 unblock network waits promptly. The libcurl backends share their connection,
 proxy, TLS, and transfer plumbing; each protocol file keeps only its own request
-and response rules.
+and response rules. The site's proxy setting alone decides how they connect:
+the proxy variables of the environment, `NO_PROXY` included, never apply.
 
 The WebDAV listing parser checks XML resource budgets before building
 TinyXML2 documents. An allocation-free linear scan bounds payload bytes,

@@ -787,6 +787,14 @@ bool configureProxy(CURL *curl, const SessionOptions &opt,
               " proxy endpoint.";
         return false;
     }
+    // Without a list of its own, libcurl reads no_proxy and NO_PROXY and
+    // connects directly to the hosts they name, even with the proxy above.
+    // An empty list sends every host through the proxy, as SFTP does.
+    if (curl_easy_setopt(curl, CURLOPT_NOPROXY, "") != CURLE_OK) {
+        err = std::string("Could not configure ") + backendLabel +
+              " proxy for every host.";
+        return false;
+    }
 
     const ProxyType normalizedProxyType = normalizeProxyType(opt.proxy_type);
     // Map app-level proxy enum to libcurl proxy transport.
