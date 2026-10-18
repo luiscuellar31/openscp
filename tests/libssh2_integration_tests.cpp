@@ -521,6 +521,44 @@ int main() {
                      "ssh-keygen -H\n";
     }
 
+    // Keys marked @revoked are refused, as OpenSSH refuses them: under
+    // Strict even where another line records them for the host, and under
+    // AcceptNew without offering to trust the host.
+    std::string recordedAndRevoked;
+    std::string onlyRevoked;
+    for (const std::string &key : scannedKeys) {
+        const std::string revoked = "@revoked *" + key.substr(key.find(' '));
+        recordedAndRevoked += key + "\n" + revoked + "\n";
+        onlyRevoked += revoked + "\n";
+    }
+    const fs::path revokedKnownHosts = localTmpRoot / "known_hosts_revoked";
+    for (const auto policy : {openscp::KnownHostsPolicy::Strict,
+                              openscp::KnownHostsPolicy::AcceptNew}) {
+        const bool strict = policy == openscp::KnownHostsPolicy::Strict;
+        if (t.failures != 0 || scannedKeys.empty() ||
+            !writeFile(revokedKnownHosts,
+                       strict ? recordedAndRevoked : onlyRevoked)) {
+            break;
+        }
+        openscp::SessionOptions revokedOpt = opt;
+        revokedOpt.known_hosts_policy = policy;
+        revokedOpt.known_hosts_path = revokedKnownHosts.string();
+        bool asked = false;
+        revokedOpt.hostkey_confirm_cb =
+            [&asked](const std::string &, std::uint16_t, const std::string &,
+                     const std::string &, bool) {
+                asked = true;
+                return true;
+            };
+        openscp::Libssh2SftpClient revokedClient;
+        std::string revokedErr;
+        t.check(!revokedClient.connect(revokedOpt, revokedErr) && !asked &&
+                    revokedErr.find("revoked") != std::string::npos,
+                std::string(strict ? "Strict" : "AcceptNew") +
+                    " should refuse a revoked host key: " + revokedErr);
+        revokedClient.disconnect();
+    }
+
     openscp::Libssh2SftpClient client;
     std::string err;
 

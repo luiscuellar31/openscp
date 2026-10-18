@@ -167,7 +167,8 @@ troubleshooting, see [Building OpenSCP](docs/BUILDING.md).
   conflict policies, bandwidth limits, and resumable `.part` files.
 - Saved sites with Keychain on macOS, Secret Service/libsecret on Linux, and
   DPAPI encryption on Windows.
-- Strict, accept-new, or explicitly disabled SSH host-key verification.
+- Strict, accept-new, or explicitly disabled SSH host-key verification. Keys
+  that `known_hosts` marks `@revoked` are refused, as OpenSSH does.
 - FTPS and HTTPS WebDAV without certificate verification still check the
   server's public key, which you trust on the first connection.
 - SOCKS5, HTTP CONNECT, and SSH jump-host support where the protocol allows it.

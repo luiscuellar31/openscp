@@ -10,6 +10,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <sstream>
 
 #ifndef _WIN32
 #include <fcntl.h>
@@ -126,6 +127,24 @@ hostKeyAlgorithmPreference(const std::vector<std::string> &recordedKeyTypes) {
         }
     }
     return preference;
+}
+
+bool hostKeyRevoked(const std::vector<std::string> &lines,
+                    const unsigned char *key, std::size_t keyLength) {
+    const std::string encodedKey = base64(key, keyLength);
+    for (const std::string &line : lines) {
+        // @revoked hosts key-type base64-key [comment]
+        std::istringstream fields(line);
+        std::string marker;
+        std::string hosts;
+        std::string keyType;
+        std::string encoded;
+        if (fields >> marker >> hosts >> keyType >> encoded &&
+            marker == "@revoked" && encoded == encodedKey) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool appendKnownHostsLine(const std::string &path, const std::string &line,

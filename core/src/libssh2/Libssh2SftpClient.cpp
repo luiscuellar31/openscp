@@ -2404,6 +2404,18 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
             err = "Could not get host key";
             return false;
         }
+        // libssh2 reads a @revoked line as a host named "@revoked", so the
+        // key would still match the host's own line or be offered as new.
+        if (libssh2detail::hostKeyRevoked(
+                khLines, reinterpret_cast<const unsigned char *>(hostkey),
+                keylen)) {
+            libssh2_knownhost_free(nh);
+            err = "Host key is marked as revoked in known_hosts";
+            if (opt.hostkey_status_cb) {
+                opt.hostkey_status_cb(err);
+            }
+            return false;
+        }
 
         int alg = 0;
         std::string algDisplay = "unknown";
