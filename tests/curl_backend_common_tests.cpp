@@ -142,6 +142,27 @@ OPENSCP_TEST(testHostValidation, test) {
         "control characters must be rejected in hosts");
 }
 
+#ifdef _WIN32
+OPENSCP_TEST(testWindowsLibcurlEncodesInternationalizedHosts, test) {
+    // vcpkg.json builds libcurl with WinIDN. Without it, a host such as
+    // münchen.de reaches the resolver and the certificate check unencoded.
+    const curl_version_info_data *info = curl_version_info(CURLVERSION_NOW);
+    test.check(info && (info->features & CURL_VERSION_IDN) != 0,
+               "Windows builds should link a libcurl with IDN support");
+    CURLU *url = curl_url();
+    char *host = nullptr;
+    const bool encoded =
+        url &&
+        curl_url_set(url, CURLUPART_URL, "ftp://m\xc3\xbcnchen.example/", 0) ==
+            CURLUE_OK &&
+        curl_url_get(url, CURLUPART_HOST, &host, CURLU_PUNYCODE) == CURLUE_OK &&
+        host && std::string(host) == "xn--mnchen-3ya.example";
+    test.check(encoded, "libcurl should encode an internationalized host name");
+    curl_free(host);
+    curl_url_cleanup(url);
+}
+#endif
+
 OPENSCP_TEST(testClientsRejectAuthorityInjection, test) {
 #if OPENSCP_HAS_CURL_FTP
     {
