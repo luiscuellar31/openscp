@@ -11,6 +11,11 @@ direct-tcpip channels, as a jump host does for "ssh -W".
 --keys holds an Ed25519 host key and the client key the server accepts,
 client_ed25519 with its .pub; both are made when missing. Each connection
 offers the host key and an RSA key made at start, as sshd offers several.
+
+--two-factor USER:PASSWORD:CODE adds an account that keyboard-interactive
+opens with the password and then the one-time code. A wrong or empty code is
+asked again, twice at most, and three failed attempts lock the account until
+the server stops, as pam_faillock does by default.
 """
 
 import argparse
@@ -42,6 +47,29 @@ def ensure_key(path: Path) -> None:
     public = key.public_key().public_bytes(serialization.Encoding.OpenSSH,
                                            serialization.PublicFormat.OpenSSH)
     path.with_name(path.name + ".pub").write_bytes(public + b" openscp-it\n")
+
+
+class TwoFactor:
+    """The --two-factor account and the failed attempts that lock it."""
+
+    MAX_FAILURES = 3
+    CODE_PROMPTS = 3
+
+    def __init__(self, spec: str):
+        self.user, self.password, self.code = spec.split(":", 2)
+        self.lock = threading.Lock()
+        self.failures = 0
+
+    def locked(self) -> bool:
+        with self.lock:
+            return self.failures >= self.MAX_FAILURES
+
+    def fail(self) -> bool:
+        """Counts a failed attempt and tells whether the account is locked."""
+        with self.lock:
+            self.failures += 1
+            log(f"{self.user}: failed attempt {self.failures}")
+            return self.failures >= self.MAX_FAILURES
 
 
 class Modes:
@@ -258,7 +286,9 @@ def main() -> int:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--keys", type=Path, required=True)
     parser.add_argument("--forward", action="store_true")
+    parser.add_argument("--two-factor", type=TwoFactor, metavar="USER:PASSWORD:CODE")
     args = parser.parse_args()
+    two_factor = args.two_factor
 
     args.root.mkdir(parents=True, exist_ok=True)
     args.keys.mkdir(parents=True, exist_ok=True)
@@ -273,14 +303,36 @@ def main() -> int:
     class Server(paramiko.ServerInterface):
         def __init__(self):
             self.forwards = {}
+            self.codes_asked = 0
 
         def get_allowed_auths(self, username):
+            if two_factor and username == two_factor.user:
+                return "keyboard-interactive"
             return "publickey"
 
         def check_auth_publickey(self, username, key):
             if [key.get_name(), key.get_base64()] == accepted:
                 return paramiko.AUTH_SUCCESSFUL
             return paramiko.AUTH_FAILED
+
+        def check_auth_interactive(self, username, submethods):
+            if not two_factor or username != two_factor.user or two_factor.locked():
+                return paramiko.AUTH_FAILED
+            self.codes_asked = 0
+            return paramiko.InteractiveQuery("", "", ("Password: ", False))
+
+        def check_auth_interactive_response(self, responses):
+            answer = responses[0] if len(responses) == 1 else None
+            if self.codes_asked == 0:
+                if answer != two_factor.password:
+                    two_factor.fail()
+                    return paramiko.AUTH_FAILED
+            elif answer == two_factor.code:
+                return paramiko.AUTH_SUCCESSFUL
+            elif two_factor.fail() or self.codes_asked == TwoFactor.CODE_PROMPTS:
+                return paramiko.AUTH_FAILED
+            self.codes_asked += 1
+            return paramiko.InteractiveQuery("", "", ("Verification code: ", False))
 
         def check_channel_request(self, kind, chanid):
             if kind == "session":

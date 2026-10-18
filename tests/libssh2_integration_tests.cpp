@@ -227,6 +227,11 @@ int main() {
     const auto jumpHost = envValue("OPENSCP_IT_JUMP_HOST");
     const auto jumpUser = envValue("OPENSCP_IT_JUMP_USER");
     const auto jumpKey = envValue("OPENSCP_IT_JUMP_KEY");
+    // Optional: an account that asks for a password and then a one-time code,
+    // for the two-factor checks below.
+    const auto twoFactorUser = envValue("OPENSCP_IT_2FA_USER");
+    const auto twoFactorPass = envValue("OPENSCP_IT_2FA_PASS");
+    const auto twoFactorCode = envValue("OPENSCP_IT_2FA_CODE");
     const std::string remoteBase =
         envValue("OPENSCP_IT_REMOTE_BASE").value_or("/tmp");
 
@@ -634,6 +639,63 @@ int main() {
                 "the keys for port 22 should not stand for this port's: ",
                 otherPortErr);
             strictClient.disconnect();
+        }
+    }
+
+    // A server that asks for a one-time code after the password asks again
+    // after a wrong or empty code, and locks the account after three, as
+    // pam_faillock does. A connection that cannot ask for the code, as the
+    // queue's cannot, or whose user cancels must end without an answer, or
+    // the connections alone lock the account.
+    if (t.failures == 0 && twoFactorUser.has_value() &&
+        twoFactorPass.has_value() && twoFactorCode.has_value()) {
+        openscp::SessionOptions twoFactorOpt = opt;
+        twoFactorOpt.username = *twoFactorUser;
+        twoFactorOpt.password = *twoFactorPass;
+        twoFactorOpt.private_key_path.reset();
+        twoFactorOpt.private_key_passphrase.reset();
+        std::string twoFactorErr;
+        {
+            openscp::Libssh2SftpClient client;
+            t.checkWithError(!client.connect(twoFactorOpt, twoFactorErr) &&
+                                 twoFactorErr.find("one-time code") !=
+                                     std::string::npos,
+                             "a connection that cannot ask for the code "
+                             "should not answer it: ",
+                             twoFactorErr);
+            client.disconnect();
+        }
+        int asked = 0;
+        twoFactorOpt.keyboard_interactive_cb =
+            [&asked](const std::string &, const std::string &,
+                     const std::vector<openscp::KbdIntPrompt> &,
+                     std::vector<std::string> &) {
+                ++asked;
+                return openscp::KbdIntPromptResult::Cancelled;
+            };
+        {
+            openscp::Libssh2SftpClient client;
+            t.checkWithError(
+                !client.connect(twoFactorOpt, twoFactorErr) && asked == 1 &&
+                    twoFactorErr ==
+                        "Keyboard-interactive authentication canceled by user",
+                "canceling the code should end the connection: ", twoFactorErr);
+            client.disconnect();
+        }
+        twoFactorOpt.keyboard_interactive_cb =
+            [&twoFactorCode](const std::string &, const std::string &,
+                             const std::vector<openscp::KbdIntPrompt> &prompts,
+                             std::vector<std::string> &responses) {
+                responses.assign(prompts.size(), *twoFactorCode);
+                return openscp::KbdIntPromptResult::Handled;
+            };
+        {
+            openscp::Libssh2SftpClient client;
+            t.checkWithError(client.connect(twoFactorOpt, twoFactorErr),
+                             "the code should log in, as no connection before "
+                             "locked the account: ",
+                             twoFactorErr);
+            client.disconnect();
         }
     }
 
