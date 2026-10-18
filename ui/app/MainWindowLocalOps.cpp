@@ -193,6 +193,14 @@ void MainWindow::runLocalFsOperation(
                 if (onFinished)
                     onFinished(failureCount == 0);
 
+                // Refreshing the panels shows their paths, so the result,
+                // with its errors, comes after.
+                self->setLeftRoot(self->leftPath_->path());
+                if (!self->rightIsRemote_) {
+                    self->setRightRoot(self->rightPath_->path());
+                }
+                self->updateDeleteShortcutEnables();
+
                 QString statusMessage = buildLocalFsSummaryMessage(
                     deleteSource, successCount, failureCount, skippedCount);
                 if (failureCount > 0 && !lastError.isEmpty()) {
@@ -202,12 +210,6 @@ void MainWindow::runLocalFsOperation(
                                      lastError;
                 }
                 self->statusBar()->showMessage(statusMessage, 6000);
-
-                self->setLeftRoot(self->leftPath_->path());
-                if (!self->rightIsRemote_) {
-                    self->setRightRoot(self->rightPath_->path());
-                }
-                self->updateDeleteShortcutEnables();
             },
             Qt::QueuedConnection);
     });
@@ -407,14 +409,15 @@ void MainWindow::runLocalDelete(const QStringList &paths) {
                 if (!self)
                     return;
                 --self->localFsJobsInFlight_;
-                self->statusBar()->showMessage(tr("Deleted: %1  |  Failed: %2")
-                                                   .arg(deletedCount)
-                                                   .arg(failedCount),
-                                               5000);
+                // As after a copy, the result comes after the refresh.
                 self->setLeftRoot(self->leftPath_->path());
                 if (!self->rightIsRemote_)
                     self->setRightRoot(self->rightPath_->path());
                 self->updateDeleteShortcutEnables();
+                self->statusBar()->showMessage(tr("Deleted: %1  |  Failed: %2")
+                                                   .arg(deletedCount)
+                                                   .arg(failedCount),
+                                               5000);
             },
             Qt::QueuedConnection);
     });

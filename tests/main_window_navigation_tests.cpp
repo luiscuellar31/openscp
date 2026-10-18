@@ -606,6 +606,57 @@ OPENSCP_TEST(testPanelsRefuseDragsWithoutLocalFiles, test) {
                "a dragged attachment should say why it cannot be dropped");
 }
 
+OPENSCP_TEST(testLocalCopyResultStaysInTheStatusBar, test) {
+    // Refreshing the panels after a copy, move or deletion showed "Left: …"
+    // and "Right: …" over its result, failures included.
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(), "the local copy needs a folder");
+    if (!temporary.isValid())
+        return;
+    configureMainWindowSettings(settingsRootPath);
+    const QDir root(temporary.path());
+    test.check(QDir().mkpath(root.filePath(QStringLiteral("left"))) &&
+                   QDir().mkpath(root.filePath(QStringLiteral("right"))),
+               "the panels need their folders");
+    const QString source = root.filePath(QStringLiteral("report.txt"));
+    {
+        QFile file(source);
+        test.check(file.open(QIODevice::WriteOnly) && file.write("data") == 4,
+                   "the copy needs a file");
+    }
+
+    MainWindow window;
+    window.show();
+    flushUiEvents();
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftPath && parts.rightPath && parts.rightView,
+               "the copy needs both local panels");
+    if (!parts.leftPath || !parts.rightPath || !parts.rightView)
+        return;
+    parts.leftPath->pathRequested(root.filePath(QStringLiteral("left")));
+    parts.rightPath->pathRequested(root.filePath(QStringLiteral("right")));
+    flushUiEvents();
+
+    QMimeData mime;
+    mime.setUrls({QUrl::fromLocalFile(source)});
+    QDropEvent drop(QPointF(10, 10), Qt::CopyAction, &mime, Qt::LeftButton,
+                    Qt::NoModifier);
+    static_cast<QObject &>(window).eventFilter(parts.rightView->viewport(),
+                                               &drop);
+    const auto message = [&] { return window.statusBar()->currentMessage(); };
+    test.check(openscp::testsupport::waitUntil(
+                   [&] {
+                       return message().startsWith(QStringLiteral("Copied")) ||
+                              message().startsWith(QStringLiteral("Right: "));
+                   },
+                   std::chrono::milliseconds(5000)),
+               "the copy should finish");
+    flushUiEvents();
+    test.check(message().startsWith(QStringLiteral("Copied: 1")),
+               "the copy's result should stay in the status bar: " +
+                   message().toStdString());
+}
+
 // Exposes the drag that a mouse gesture would start.
 class DraggableView final : public DragAwareTreeView {
     public:
