@@ -69,6 +69,9 @@ class DragAwareTreeView : public QTreeView {
         const QVector<quint64> &taskIds, bool removed);
     void finishRemoteDragStaging(
         const std::shared_ptr<RemoteDragStagingState> &state);
+    // What the drag left out, as the Download button reports it, or an empty
+    // string when it left nothing out.
+    QString skippedDragEntriesSummary() const;
     QString formatRemoteDragMetrics(const QString &result,
                                     const RemoteDragBatchStats &stats,
                                     qint64 stagingMs) const;

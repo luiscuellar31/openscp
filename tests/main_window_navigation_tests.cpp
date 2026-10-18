@@ -5,6 +5,10 @@
 #include "logic/common/AppSettings.hpp"
 #include "logic/common/StagingStore.hpp"
 #include "logic/connections/SessionController.hpp"
+#include "logic/remote/RemoteModel.hpp"
+#include "logic/remote/RemoteOperationController.hpp"
+#include "logic/transfers/TransferManager.hpp"
+#include "mock/MockSftpClient.hpp"
 #include "widgets/common/ToolbarKeyboardNavigation.hpp"
 #include "widgets/dialogs/AuthenticationInput.hpp"
 #include "widgets/dialogs/TransferQueueDialog.hpp"
@@ -600,6 +604,57 @@ OPENSCP_TEST(testPanelsRefuseDragsWithoutLocalFiles, test) {
     test.check(window.statusBar()->currentMessage().contains(
                    QStringLiteral("e-mail attachments")),
                "a dragged attachment should say why it cannot be dropped");
+}
+
+// Exposes the drag that a mouse gesture would start.
+class DraggableView final : public DragAwareTreeView {
+    public:
+    using DragAwareTreeView::startDrag;
+};
+
+OPENSCP_TEST(testDragOutSaysWhatItLeftOut, test) {
+#ifndef _WIN32
+    test.skip("only Windows refuses remote names such as CON and a:b");
+#else
+    // Dragging a remote CON or a:b to Explorer showed "Preparing files…" for
+    // an instant and then nothing, and from a folder it left them out
+    // without a word.
+    configureMainWindowSettings(settingsRootPath);
+    QMainWindow window;
+    auto *view = new DraggableView;
+    window.setCentralWidget(view);
+    RemoteModel model;
+    openscp::FileInfo reserved;
+    reserved.name = "CON";
+    openscp::FileInfo colon;
+    colon.name = "a:b.txt";
+    model.setEntries(QStringLiteral("/"), {reserved, colon});
+    auto client = std::make_unique<openscp::MockSftpClient>();
+    openscp::SessionOptions options;
+    options.host = "localhost";
+    options.username = "tester";
+    std::string error;
+    test.check(client->connect(options, error), "the mock should connect");
+    RemoteOperationController operations;
+    operations.installSession(std::move(client));
+    TransferManager transfers;
+    view->setModel(&model);
+    view->setTransferManager(&transfers);
+    view->setRemoteOperationController(&operations);
+    view->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    view->setSelectionBehavior(QAbstractItemView::SelectRows);
+    window.show();
+    flushUiEvents();
+
+    view->selectAll();
+    view->startDrag(Qt::CopyAction);
+    flushUiEvents();
+    const QString message = window.statusBar()->currentMessage();
+    test.check(message.contains(QStringLiteral("Nothing to drag")) &&
+                   message.contains(QStringLiteral("Skipped invalid: 2")),
+               "a drag that leaves out every name should say so: " +
+                   message.toStdString());
+#endif
 }
 
 OPENSCP_TEST(testLocalDeleteRunsOffTheUiThread, test) {

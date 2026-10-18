@@ -366,7 +366,9 @@ applies the rule from `TransferAutoClear` every minute; the transfer queue
 window only edits that rule, so the cleanup also runs while it stays closed.
 
 Dragging remote items out of the window first downloads them into a batch
-folder under the staging root. `StagingStore` names the batches, checks one
+folder under the staging root; names the local system refuses, symbolic links,
+folders past the depth limit and unreadable ones are left out, and the status
+bar says so, as after the Download button. `StagingStore` names the batches, checks one
 before it is deleted, and deletes them. Only a drop of that drag on the local
 panel deletes its batch, once its copy finishes without errors and only if
 `stagingBatchPathForCleanup()` confirms it is a batch folder in the staging

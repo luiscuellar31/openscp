@@ -186,6 +186,8 @@ openscp_add_test(openscp_main_window_navigation_tests
     SOURCES main_window_navigation_tests.cpp
     LINK_LIBRARIES openscp_main_window
 )
+target_include_directories(openscp_main_window_navigation_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src)
 set_tests_properties(openscp_main_window_navigation_tests PROPERTIES TIMEOUT 60)
 if(CMAKE_SYSTEM_NAME MATCHES "^(Linux|Windows)$")
     set(OPENSCP_OFFSCREEN_ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
