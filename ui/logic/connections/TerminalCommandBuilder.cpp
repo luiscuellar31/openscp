@@ -177,8 +177,8 @@ bool buildProxyCommand(const openscp::SessionOptions &session,
 
         *command = shellJoinQuoted(
             {proxyCommandLiteral(netcatExecutable), QStringLiteral("-x"),
-             proxyCommandLiteral(QStringLiteral("%1:%2").arg(proxyHost).arg(
-                 session.proxy_port)),
+             proxyCommandLiteral(QStringLiteral("%1:%2").arg(
+                 proxyHost, QString::number(session.proxy_port))),
              QStringLiteral("-X"), proxyProtocol, QStringLiteral("%h"),
              QStringLiteral("%p")});
         return true;
@@ -199,8 +199,8 @@ bool buildProxyCommand(const openscp::SessionOptions &session,
 
         *command = shellJoinQuoted(
             {proxyCommandLiteral(ncatExecutable), QStringLiteral("--proxy"),
-             proxyCommandLiteral(QStringLiteral("%1:%2").arg(proxyHost).arg(
-                 session.proxy_port)),
+             proxyCommandLiteral(QStringLiteral("%1:%2").arg(
+                 proxyHost, QString::number(session.proxy_port))),
              QStringLiteral("--proxy-type"), proxyProtocol,
              QStringLiteral("%h"), QStringLiteral("%p")});
         return true;

@@ -39,6 +39,11 @@ namespace openscp {
 class RemoteClient;
 }
 
+// The name a transfer takes to keep an existing entry, "name (N).ext", split
+// at the last dot. A name whose only dot starts it, such as ".bashrc", has no
+// extension.
+QString numberedFileName(const QString &filename, int suffix);
+
 class TransferManager : public QObject {
     Q_OBJECT
 

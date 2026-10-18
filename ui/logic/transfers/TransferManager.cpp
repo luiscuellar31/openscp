@@ -128,18 +128,6 @@ QString errorForUi(const std::string &rawError) {
     return message;
 }
 
-// "name (N).ext", split at the last dot for uploads and downloads alike. A
-// name whose only dot starts it, such as ".bashrc", has no extension. The
-// single arg() call keeps a "%1" in the name from being replaced.
-QString numberedFileName(const QString &filename, int suffix) {
-    const qsizetype dot = filename.lastIndexOf(QLatin1Char('.'));
-    const bool hasExtension = dot > 0;
-    const QString base = hasExtension ? filename.left(dot) : filename;
-    const QString extension = hasExtension ? filename.mid(dot) : QString();
-    return QStringLiteral("%1 (%2)%3")
-        .arg(base, QString::number(suffix), extension);
-}
-
 QString numberedPath(const QString &path, int suffix) {
     const QFileInfo info(path);
     const QString directory = info.path();
@@ -172,6 +160,16 @@ bool existsUnderAnotherName(const QFileInfo &info) {
 }
 
 } // namespace
+
+// The single arg() call keeps a "%1" in the name from being replaced.
+QString numberedFileName(const QString &filename, int suffix) {
+    const qsizetype dot = filename.lastIndexOf(QLatin1Char('.'));
+    const bool hasExtension = dot > 0;
+    const QString base = hasExtension ? filename.left(dot) : filename;
+    const QString extension = hasExtension ? filename.mid(dot) : QString();
+    return QStringLiteral("%1 (%2)%3")
+        .arg(base, QString::number(suffix), extension);
+}
 
 struct TransferManager::WorkerSlot {
     explicit WorkerSlot(std::size_t slotIndex) : index(slotIndex) {}

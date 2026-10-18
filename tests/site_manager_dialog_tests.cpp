@@ -196,6 +196,44 @@ OPENSCP_TEST(testChangesKeepSitesSavedElsewhere, test) {
                "the dialog should list the stored sites after a change");
 }
 
+OPENSCP_TEST(testDuplicateKeepsPercentSignsInTheName, test) {
+    // The number went in with a second arg(), which replaced the "%1" of the
+    // name first: a second copy of "a%1b" was named "a2b copy %2".
+    clearSavedSites();
+    SiteEntry original = savedSiteFixture();
+    original.name = QStringLiteral("a%1b");
+    SiteEntry firstCopy = savedSiteFixture();
+    firstCopy.siteId = QStringLiteral("site-manager-first-copy-id");
+    firstCopy.name = QStringLiteral("a%1b copy");
+    test.check(SavedSitesPersistence::saveSites({original, firstCopy}).ok,
+               "the sites to duplicate should be saved");
+    SiteManagerDialog dialog;
+    auto *table =
+        dialog.findChild<QTableView *>(QStringLiteral("savedSitesTable"));
+    auto *duplicateButton = dialog.findChild<QPushButton *>(
+        QStringLiteral("siteManagerDuplicateButton"));
+    test.check(table && duplicateButton,
+               "the duplicate test needs the table and its button");
+    if (!table || !duplicateButton)
+        return;
+    // Sorted by name, the original comes first.
+    table->selectRow(0);
+    // Duplicating asks whether to copy the credentials.
+    QTimer::singleShot(0, &dialog, [] {
+        if (auto *box =
+                qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+            box->done(QMessageBox::No);
+    });
+    duplicateButton->click();
+
+    QStringList names;
+    for (const SiteEntry &site : SavedSitesPersistence::loadSites().sites)
+        names << site.name;
+    test.check(names.contains(QStringLiteral("a%1b copy 2")),
+               "the second copy should be numbered after the whole name: " +
+                   names.join(QStringLiteral(", ")).toStdString());
+}
+
 OPENSCP_TEST(testRemovingASiteOnlyRemovesItsHostKeyWhenAsked, test) {
     clearSavedSites();
     QTemporaryDir directory;

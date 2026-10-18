@@ -293,9 +293,9 @@ void RemoteActionController::remove(const QString &basePath,
             state->progress->setLabelText(
                 QCoreApplication::translate(
                     "MainWindow", "Deleting %1\nRemoved: %2  |  Failed: %3")
-                    .arg(progress.currentPath)
-                    .arg(progress.affectedEntries)
-                    .arg(progress.failedEntries));
+                    .arg(progress.currentPath,
+                         QString::number(progress.affectedEntries),
+                         QString::number(progress.failedEntries)));
         });
     connect(state->progress, &QProgressDialog::canceled, this, [this, state] {
         state->canceled = true;
@@ -398,9 +398,9 @@ void RemoteActionController::changePermissions(const QString &basePath,
                             "MainWindow",
                             "Changing permissions for %1\nUpdated: %2  |  "
                             "Failed: %3")
-                            .arg(update.currentPath)
-                            .arg(update.affectedEntries)
-                            .arg(update.failedEntries));
+                            .arg(update.currentPath,
+                                 QString::number(update.affectedEntries),
+                                 QString::number(update.failedEntries)));
                 });
             *mutationConnection = connect(
                 context_.operations,
