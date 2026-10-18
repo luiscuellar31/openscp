@@ -4,7 +4,8 @@
 ; The setup installs for the current user by default, without administrator
 ; rights, and offers an installation for all users. OpenSCP updates itself by
 ; running this setup silently with /CURRENTUSER or /ALLUSERS, /WAITPID=<its
-; process id> and /RELAUNCH=1 (see ui/logic/updates/WindowsSetupInstaller.cpp).
+; process id> and, for the current user, /RELAUNCH=1 (see
+; ui/logic/updates/WindowsSetupInstaller.cpp).
 
 #ifndef AppVersion
   #error Define AppVersion, for example /DAppVersion=1.2.0
@@ -73,8 +74,10 @@ Name: "{autodesktop}\OpenSCP"; Filename: "{app}\OpenSCP.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\OpenSCP.exe"; Description: "{cm:LaunchProgram,OpenSCP}"; Flags: nowait postinstall skipifsilent
-; After an update, OpenSCP starts again as the user who ran it, even when the
-; setup ran elevated for all users.
+; After an update of the current user's installation, OpenSCP starts again.
+; An update for all users does not ask for it: OpenSCP starts that setup
+; elevated, and runasoriginaluser has no effect in a setup started elevated,
+; so OpenSCP would run with administrator rights.
 Filename: "{app}\OpenSCP.exe"; Flags: nowait runasoriginaluser; Check: RelaunchRequested
 
 [Code]

@@ -7,7 +7,8 @@
 namespace openscpui {
 // The arguments that make the setup update an installation of `scope`
 // silently: it waits for process `pid` to end, writes its log to `logPath`,
-// and starts OpenSCP again when it is done.
+// and, for the current user's installation, starts OpenSCP again when it is
+// done.
 QStringList windowsSetupArguments(WindowsSetupScope scope, qint64 pid,
                                   const QString &logPath);
 

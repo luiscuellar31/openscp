@@ -19,16 +19,21 @@ namespace openscpui {
 QStringList windowsSetupArguments(WindowsSetupScope scope, qint64 pid,
                                   const QString &logPath) {
     // /WAITPID and /RELAUNCH are read by packaging/windows/OpenSCP.iss.
-    return {
+    QStringList arguments{
         QStringLiteral("/VERYSILENT"),
         QStringLiteral("/SUPPRESSMSGBOXES"),
         QStringLiteral("/NORESTART"),
         scope == WindowsSetupScope::AllUsers ? QStringLiteral("/ALLUSERS")
                                              : QStringLiteral("/CURRENTUSER"),
         QStringLiteral("/WAITPID=%1").arg(pid),
-        QStringLiteral("/RELAUNCH=1"),
-        QStringLiteral("/LOG=") + QDir::toNativeSeparators(logPath),
     };
+    // The setup for all users starts elevated, and Inno Setup cannot start a
+    // program from it as the original user, so OpenSCP would open with
+    // administrator rights, perhaps of another account.
+    if (scope == WindowsSetupScope::CurrentUser)
+        arguments << QStringLiteral("/RELAUNCH=1");
+    arguments << QStringLiteral("/LOG=") + QDir::toNativeSeparators(logPath);
+    return arguments;
 }
 
 #ifdef Q_OS_WIN

@@ -29,6 +29,10 @@ class UpdateController : public QObject {
     bool busy() const { return busy_; }
     bool installing() const { return installing_; }
     UpdateInstallation installation() const { return installation_; }
+    // Which installation a Windows setup updates, if this is one.
+    std::optional<WindowsSetupScope> setupScope() const {
+        return windowsSetupScope_;
+    }
 
     signals:
     void available(const openscpui::UpdateRelease &release);

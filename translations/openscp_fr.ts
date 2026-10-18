@@ -2003,7 +2003,7 @@ L’empreinte ne peut pas être enregistrée. Connexion autorisée cette fois un
         <location filename="../ui/app/MainWindowSync.cpp" line="140"/>
         <location filename="../ui/app/MainWindowTransfers.cpp" line="201"/>
         <location filename="../ui/app/MainWindowTransfers.cpp" line="663"/>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="162"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="167"/>
         <location filename="../ui/logic/navigation/PaneController.cpp" line="362"/>
         <location filename="../ui/logic/navigation/PaneController.cpp" line="480"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="224"/>
@@ -3119,10 +3119,10 @@ Poursuivre l’analyse sans cette limite ?</translation>
     <message>
         <location filename="../ui/app/MainWindowUpdates.cpp" line="83"/>
         <location filename="../ui/app/MainWindowUpdates.cpp" line="86"/>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="125"/>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="148"/>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="191"/>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="199"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="130"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="153"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="197"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="205"/>
         <source>Updates</source>
         <translation>Mises à jour</translation>
     </message>
@@ -3157,52 +3157,57 @@ Poursuivre l’analyse sans cette limite ?</translation>
         <translation>Téléchargez et installez la nouvelle version depuis sa page.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="123"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="124"/>
+        <source>OpenSCP closes while the update installs for all users. Open it again when it is done.</source>
+        <translation>OpenSCP se ferme pendant l’installation de la mise à jour pour tous les utilisateurs. Rouvrez-le une fois celle-ci terminée.</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="128"/>
         <source>OpenSCP closes while the update installs and opens again when it is done.</source>
         <translation>OpenSCP se ferme pendant l’installation de la mise à jour et se rouvre une fois celle-ci terminée.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="128"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="133"/>
         <source>Download and install…</source>
         <translation>Télécharger et installer…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="129"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="134"/>
         <source>Open release page</source>
         <translation>Ouvrir la page de la version</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="132"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="137"/>
         <source>Skip this version</source>
         <translation>Ignorer cette version</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="133"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="138"/>
         <source>Later</source>
         <translation>Plus tard</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="149"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="154"/>
         <source>Finish or cancel pending transfers and file operations before installing an update.</source>
         <translation>Terminez ou annulez les transferts et opérations de fichiers en attente avant d’installer une mise à jour.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="161"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="166"/>
         <source>Downloading update…</source>
         <translation>Téléchargement de la mise à jour…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="174"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="179"/>
         <source>Verifying and installing update…</source>
         <translation>Vérification et installation de la mise à jour…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="192"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="198"/>
         <source>Update installed. Close OpenSCP and launch it again to use the new version. The previous AppImage is saved with the .previous suffix.</source>
         <translation>Mise à jour installée. Fermez OpenSCP et relancez-le pour utiliser la nouvelle version. L’ancienne AppImage est conservée avec le suffixe .previous.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowUpdates.cpp" line="200"/>
+        <location filename="../ui/app/MainWindowUpdates.cpp" line="206"/>
         <source>The update could not be installed. Your current version is still available.</source>
         <translation>Impossible d’installer la mise à jour. Votre version actuelle reste disponible.</translation>
     </message>
