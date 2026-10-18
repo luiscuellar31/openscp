@@ -73,6 +73,9 @@ warns before their first run. Compared with macOS and Linux:
   macOS and Linux leave to the user.
 - Junctions are links, like symbolic links: transfers do not follow them below
   user-writable folders, and synchronization skips them.
+- Shortcuts (`.lnk` files) are ordinary files, as in Explorer: copies, uploads
+  and synchronization take the shortcut itself, and opening a shortcut to a
+  folder shows that folder.
 
 ## Release gates
 

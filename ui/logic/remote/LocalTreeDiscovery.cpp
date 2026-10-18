@@ -275,9 +275,9 @@ void LocalTreeDiscovery::start(
                 ++counters.invalidNames;
                 continue;
             }
-            const QString canonical = info.canonicalFilePath().isEmpty()
-                                          ? absolutePath
-                                          : info.canonicalFilePath();
+            const QString canonicalPath = localCanonicalPath(info);
+            const QString canonical =
+                canonicalPath.isEmpty() ? absolutePath : canonicalPath;
             // A root inside an accepted one is already covered. Looking up
             // its ancestors costs its depth, where comparing it with every
             // accepted root cost their number. Qt paths use '/' on every
@@ -293,8 +293,8 @@ void LocalTreeDiscovery::start(
                 continue;
             acceptedRoots.insert(canonical);
 
-            if (info.isFile()) {
-                const qint64 fileSize = info.size();
+            if (isLocalFile(info)) {
+                const qint64 fileSize = localFileSize(info);
                 LocalTreeDiscoveryEntry entry;
                 entry.rootIndex = rootIndex;
                 entry.localPath = absolutePath;
@@ -376,11 +376,11 @@ void LocalTreeDiscovery::start(
                 entry.rootIndex = rootIndex;
                 entry.localPath = child.absoluteFilePath();
                 entry.relativePath = relative;
-                if (child.isDir()) {
+                if (isLocalFolder(child)) {
                     entry.type = LocalTreeDiscoveryEntry::Type::Directory;
-                } else if (child.isFile()) {
+                } else if (isLocalFile(child)) {
                     entry.type = LocalTreeDiscoveryEntry::Type::File;
-                    const qint64 fileSize = child.size();
+                    const qint64 fileSize = localFileSize(child);
                     if (fileSize >= 0) {
                         entry.size = quint64(fileSize);
                         addKnownBytes(counters, entry.size);
@@ -394,7 +394,7 @@ void LocalTreeDiscovery::start(
                 if (!appendEntry(std::move(entry), child.absoluteFilePath())) {
                     break;
                 }
-                if (child.isDir()) {
+                if (isLocalFolder(child)) {
                     const int childDepth = node.depth + 1;
                     stack.push_back({child.absoluteFilePath(), relative,
                                      childDepth, nullptr});

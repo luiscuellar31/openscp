@@ -629,6 +629,54 @@ OPENSCP_TEST(testLocalRenameValidatesNamesInBothPanes, test) {
     checkPane(parts.rightPath, parts.rightView, "renameRightSelected", "right");
 }
 
+#ifdef Q_OS_WIN
+OPENSCP_TEST(testWindowsShortcutsShowAsThemselvesAndOpenTheirFolder, test) {
+    QTemporaryDir temporary;
+    const QDir root(temporary.path());
+    const QString panel = root.filePath(QStringLiteral("panel"));
+    const QString target = root.filePath(QStringLiteral("target"));
+    const QString shortcut = panel + QStringLiteral("/target.lnk");
+    test.check(root.mkpath(QStringLiteral("panel")) &&
+                   root.mkpath(QStringLiteral("target")) &&
+                   QFile::link(target, shortcut),
+               "the shortcut fixture should be created");
+
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    window.show();
+    flushUiEvents();
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftPath && parts.leftView,
+               "the left panel should have its path bar and view");
+    if (!parts.leftPath || !parts.leftView)
+        return;
+    parts.leftPath->pathRequested(panel);
+    auto *model = qobject_cast<QFileSystemModel *>(parts.leftView->model());
+    const bool visible =
+        model && openscp::testsupport::waitUntil(
+                     [&] { return model->index(shortcut).isValid(); },
+                     std::chrono::milliseconds(3000));
+    test.check(visible, "the shortcut should appear in the panel");
+    if (!visible)
+        return;
+
+    // Resolved, a shortcut took the name of the entry it leads to, and one
+    // to a folder was dragged as that folder.
+    const QModelIndex index = model->index(shortcut);
+    test.check(!model->resolveSymlinks() &&
+                   index.data().toString() == QStringLiteral("target.lnk") &&
+                   model->filePath(index) == shortcut,
+               "a shortcut should show and drag as itself");
+    // As in Explorer, opening a shortcut to a folder shows that folder.
+    emit parts.leftView->activated(index);
+    flushUiEvents();
+    test.check(QDir::cleanPath(parts.leftPath->path()) ==
+                   QDir::cleanPath(target),
+               "opening a folder shortcut should show its folder: " +
+                   parts.leftPath->path().toStdString());
+}
+#endif
+
 OPENSCP_TEST(testPointerInteractionCancelsInitialConnectOverride, test) {
     configureMainWindowSettings(settingsRootPath);
     MainWindow window;

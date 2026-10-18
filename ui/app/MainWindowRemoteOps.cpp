@@ -227,7 +227,10 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
             return;
         const QFileInfo localFileInfo = rightLocalModel_->fileInfo(idx);
         if (localFileInfo.isDir()) {
-            setRightRoot(localFileInfo.absoluteFilePath());
+            // See leftItemActivated().
+            setRightRoot(localFileInfo.isShortcut()
+                             ? localFileInfo.symLinkTarget()
+                             : localFileInfo.absoluteFilePath());
         } else if (localFileInfo.isFile()) {
             openLocalPathWithPreference(localFileInfo.absoluteFilePath());
         }

@@ -319,7 +319,10 @@ server, also refuses names with the form of Windows short names, such as
 `REPORT~1.TXT`, which would open another entry; whole paths, which may reach a
 folder by its short name, are not checked for them. The UI takes
 junctions, like symbolic links, as links through `isLocalLink()`, and shortcut
-files as plain files.
+files as plain files: Qt's `QFileInfo` describes the entry a shortcut leads
+to, so copies, upload discovery and synchronization ask `isLocalFolder()`,
+`isLocalFile()` and the other helpers of `LocalLinks.hpp`, and the file panels
+do not resolve shortcuts.
 `SyncCoordinator` resolves the selected local root before scanning and queuing
 paths, so a root reached through a system link keeps one physical location.
 

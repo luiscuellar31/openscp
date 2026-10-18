@@ -262,6 +262,50 @@ OPENSCP_TEST(testLocalCopyKeepsHiddenEntriesAndLinks, test) {
                "copying a selected link should copy the link itself");
 }
 
+#ifdef Q_OS_WIN
+OPENSCP_TEST(testWindowsLocalCopyKeepsShortcutsAsFiles, test) {
+    // Qt's isDir() and isFile() describe the entry a shortcut leads to, but
+    // the shortcut is an ordinary file, which Explorer copies as it is.
+    QTemporaryDir temporary;
+    const QDir root(temporary.path());
+    const QString source = root.filePath(QStringLiteral("source"));
+    const QString target = root.filePath(QStringLiteral("target"));
+    test.check(
+        root.mkpath(QStringLiteral("source")) &&
+            root.mkpath(QStringLiteral("target")) &&
+            writeLocalFile(target + QStringLiteral("/inside.txt"), "inside") &&
+            QFile::link(target, source + QStringLiteral("/folder.lnk")) &&
+            QFile::link(target + QStringLiteral("/inside.txt"),
+                        source + QStringLiteral("/file.lnk")) &&
+            QFile::link(target + QStringLiteral("/missing.txt"),
+                        source + QStringLiteral("/broken.lnk")),
+        "the shortcut fixture should be created");
+
+    const QString copy = root.filePath(QStringLiteral("copy"));
+    QString error;
+    const bool copied = copyLocalEntry(source, copy, error);
+    test.check(copied, "a folder with shortcuts should be copied: " +
+                           error.toStdString());
+    for (const char *name : {"folder.lnk", "file.lnk", "broken.lnk"}) {
+        const QString shortcut = QStringLiteral("/") + QLatin1String(name);
+        test.check(QFileInfo(copy + shortcut).isShortcut() &&
+                       readLocalFile(copy + shortcut) ==
+                           readLocalFile(source + shortcut),
+                   std::string("a shortcut should be copied as itself: ") +
+                       name);
+    }
+
+    // Not a copy of the folder it leads to, so not one into itself either.
+    const QString back = target + QStringLiteral("/back.lnk");
+    error.clear();
+    const bool copiedBack =
+        copyLocalEntry(source + QStringLiteral("/folder.lnk"), back, error);
+    test.check(copiedBack && QFileInfo(back).isShortcut(),
+               "a folder shortcut should be copied into its own folder: " +
+                   error.toStdString());
+}
+#endif
+
 OPENSCP_TEST(testLocalCopyStopsWhenCanceled, test) {
     QTemporaryDir root;
     const QString source = root.filePath(QStringLiteral("source"));

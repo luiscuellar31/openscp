@@ -485,7 +485,10 @@ void MainWindow::leftItemActivated(const QModelIndex &idx) {
         return;
     const QFileInfo selectedFileInfo = leftModel_->fileInfo(idx);
     if (selectedFileInfo.isDir()) {
-        setLeftRoot(selectedFileInfo.absoluteFilePath());
+        // As in Explorer, a shortcut to a folder opens that folder.
+        setLeftRoot(selectedFileInfo.isShortcut()
+                        ? selectedFileInfo.symLinkTarget()
+                        : selectedFileInfo.absoluteFilePath());
     } else if (selectedFileInfo.isFile()) {
         openLocalPathWithPreference(selectedFileInfo.absoluteFilePath());
     }

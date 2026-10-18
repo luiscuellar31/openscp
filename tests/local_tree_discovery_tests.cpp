@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <chrono>
 #include <functional>
+#include <utility>
 
 namespace {
 
@@ -390,6 +391,63 @@ OPENSCP_TEST(testHiddenEntriesSymlinkDirectoryAndByteLimit, test) {
         test.check(finalCounters.skippedSymlinks == 1,
                    "directory symlinks must be skipped rather than descended");
 }
+
+#ifdef Q_OS_WIN
+OPENSCP_TEST(testWindowsShortcutsAreDiscoveredAsFiles, test) {
+    // Qt's isDir(), size() and canonicalFilePath() describe the entry a
+    // shortcut leads to; uploads take the shortcut as the file it is.
+    QTemporaryDir root;
+    QTemporaryDir outside;
+    const QString folderShortcut = root.filePath("folder.lnk");
+    const QString fileShortcut = root.filePath("file.lnk");
+    test.check(
+        root.isValid() && outside.isValid() &&
+            writeFile(outside.filePath("big.txt"), QByteArray(5000, 'x')) &&
+            QFile::link(outside.path(), folderShortcut) &&
+            QFile::link(outside.filePath("big.txt"), fileShortcut),
+        "shortcut fixtures should initialize");
+    const auto ownSize = [](const QString &path) {
+        QFile file(path);
+        return file.open(QIODevice::ReadOnly) ? quint64(file.size()) : 0;
+    };
+
+    // A shortcut root is not the folder it leads to, which is a root of its
+    // own here.
+    LocalTreeDiscovery discovery;
+    LocalTreeDiscoveryOptions options;
+    options.roots = {{outside.path()}, {folderShortcut}, {root.path()}};
+    bool finished = false;
+    QVector<LocalTreeDiscoveryEntry> entries;
+    QObject::connect(&discovery, &LocalTreeDiscovery::batchReady, &discovery,
+                     [&](const LocalTreeDiscoveryBatch &batch) {
+                         entries += batch.entries;
+                     });
+    QObject::connect(
+        &discovery, &LocalTreeDiscovery::finished, &discovery,
+        [&](const LocalTreeDiscoveryCounters &) { finished = true; });
+    discovery.start(options);
+    test.check(spinUntil([&] { return finished; }),
+               "shortcut discovery should finish");
+    const auto typeAndSize = [&](int rootIndex, const QString &path) {
+        for (const LocalTreeDiscoveryEntry &entry : entries) {
+            if (entry.rootIndex == rootIndex && entry.localPath == path)
+                return std::make_pair(int(entry.type), entry.size);
+        }
+        return std::make_pair(-1, quint64(0));
+    };
+    const auto file = int(LocalTreeDiscoveryEntry::Type::File);
+    test.check(typeAndSize(0, outside.filePath("big.txt")).first == file &&
+                   typeAndSize(1, folderShortcut) ==
+                       std::make_pair(file, ownSize(folderShortcut)),
+               "a shortcut root and the folder it leads to should both be "
+               "uploaded");
+    test.check(typeAndSize(2, folderShortcut) ==
+                       std::make_pair(file, ownSize(folderShortcut)) &&
+                   typeAndSize(2, fileShortcut) ==
+                       std::make_pair(file, ownSize(fileShortcut)),
+               "shortcuts in a folder should be files of their own size");
+}
+#endif
 
 } // namespace
 
