@@ -644,18 +644,19 @@ OPENSCP_TEST(test_known_hosts_lines_name_their_host, t) {
     fs::remove_all(path.parent_path(), ec);
 }
 
-#ifndef _WIN32
 OPENSCP_TEST(test_known_hosts_append_keeps_the_rest_of_the_file, t) {
     namespace detail = openscp::libssh2detail;
     const fs::path folder =
         makeTempFilePath("known-hosts-append").parent_path() / "append-folder";
     std::error_code ec;
     fs::create_directories(folder, ec);
+#ifndef _WIN32
     fs::permissions(folder,
                     fs::perms::owner_all | fs::perms::group_read |
                         fs::perms::group_exec | fs::perms::others_read |
                         fs::perms::others_exec,
                     ec);
+#endif
     const fs::path path = folder / "known_hosts";
     const std::string original =
         "# keep me\n\nmulti.example,10.0.0.9 ssh-ed25519 AQID";
@@ -663,10 +664,12 @@ OPENSCP_TEST(test_known_hosts_append_keeps_the_rest_of_the_file, t) {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         out << original;
     }
+#ifndef _WIN32
     fs::permissions(path,
                     fs::perms::owner_read | fs::perms::owner_write |
                         fs::perms::group_read | fs::perms::others_read,
                     ec);
+#endif
     std::string error;
     t.checkWithError(detail::appendKnownHostsLine(path.string(),
                                                   "new.example k AQID", error),
@@ -675,6 +678,7 @@ OPENSCP_TEST(test_known_hosts_append_keeps_the_rest_of_the_file, t) {
     t.check(readTextFile(path, content) &&
                 content == original + "\nnew.example k AQID\n",
             "the file should keep its lines and gain the new one: " + content);
+#ifndef _WIN32
     struct ::stat fileStat {};
     struct ::stat folderStat {};
     t.check(::stat(path.c_str(), &fileStat) == 0 &&
@@ -682,29 +686,44 @@ OPENSCP_TEST(test_known_hosts_append_keeps_the_rest_of_the_file, t) {
                 ::stat(folder.c_str(), &folderStat) == 0 &&
                 (folderStat.st_mode & 0777) == 0755,
             "appending should keep the file's and the folder's permissions");
+#endif
 
     const fs::path link = folder / "linked_known_hosts";
     fs::create_symlink(path, link, ec);
-    t.check(!ec &&
-                detail::appendKnownHostsLine(link.string(), "via.link k AQID",
-                                             error) &&
-                fs::is_symlink(link) && readTextFile(path, content) &&
-                content.size() >= 16 &&
-                content.compare(content.size() - 16, 16, "via.link k AQID\n") ==
-                    0,
-            "a symbolic link should stay a link and its target gain the line");
+#ifdef _WIN32
+    // Only administrators, or Developer Mode, may make symbolic links.
+    const bool linked = !ec;
+    if (!linked)
+        t.skip("appending through a link needs symbolic links");
+#else
+    const bool linked = true;
+#endif
+    if (linked) {
+        t.check(!ec &&
+                    detail::appendKnownHostsLine(link.string(),
+                                                 "via.link k AQID", error) &&
+                    fs::is_symlink(link) && readTextFile(path, content) &&
+                    content.size() >= 16 &&
+                    content.compare(content.size() - 16, 16,
+                                    "via.link k AQID\n") == 0,
+                "a symbolic link should stay a link and its target gain the "
+                "line");
+    }
 
     const fs::path created = folder / "new-ssh" / "known_hosts";
     t.checkWithError(
         detail::appendKnownHostsLine(created.string(), "first k AQID", error) &&
-            readTextFile(created, content) && content == "first k AQID\n" &&
-            ::stat(created.c_str(), &fileStat) == 0 &&
-            (fileStat.st_mode & 0777) == 0600 &&
-            ::stat(created.parent_path().c_str(), &folderStat) == 0 &&
-            (folderStat.st_mode & 0777) == 0700,
-        "a missing file and folder should be created private: ", error);
-}
+            readTextFile(created, content) && content == "first k AQID\n",
+        "a missing file and folder should be created: ", error);
+#ifndef _WIN32
+    t.check(::stat(created.c_str(), &fileStat) == 0 &&
+                (fileStat.st_mode & 0777) == 0600 &&
+                ::stat(created.parent_path().c_str(), &folderStat) == 0 &&
+                (folderStat.st_mode & 0777) == 0700,
+            "a missing file and folder should be created private");
 #endif
+    fs::remove_all(folder.parent_path(), ec);
+}
 
 OPENSCP_TEST(test_safe_local_partial_files, t) {
     const fs::path target = makeTempFilePath("safe-target");
@@ -716,21 +735,32 @@ OPENSCP_TEST(test_safe_local_partial_files, t) {
         output << "preserve-me";
     }
 
-#ifndef _WIN32
     fs::create_symlink(target, partial, ec);
+#ifdef _WIN32
+    // Only administrators, or Developer Mode, may make symbolic links.
+    const bool symlinked = !ec;
+    if (!symlinked)
+        t.skip("refusing a partial symbolic link needs symbolic links");
+#else
+    const bool symlinked = true;
     t.check(!ec, "symlink fixture should be created");
+#endif
     std::string symlinkError;
-    openscp::UniqueFile unsafe(openscp::localfiles::openRegularFileForWrite(
-        partial.string(), openscp::localfiles::WriteMode::Truncate,
-        symlinkError));
-    t.check(!unsafe,
-            "local partial files must reject final-component symlinks");
+    openscp::UniqueFile unsafe;
     std::string preservedContents;
-    t.check(readTextFile(target, preservedContents) &&
-                preservedContents == "preserve-me",
-            "rejecting a partial symlink must preserve its target");
-    fs::remove(partial, ec);
+    if (symlinked) {
+        unsafe.reset(openscp::localfiles::openRegularFileForWrite(
+            partial.string(), openscp::localfiles::WriteMode::Truncate,
+            symlinkError));
+        t.check(!unsafe,
+                "local partial files must reject final-component symlinks");
+        t.check(readTextFile(target, preservedContents) &&
+                    preservedContents == "preserve-me",
+                "rejecting a partial symlink must preserve its target");
+        fs::remove(partial, ec);
+    }
 
+    // A hard link needs no privilege on Windows either.
     fs::create_hard_link(target, partial, ec);
     t.check(!ec, "hard-link fixture should be created");
     symlinkError.clear();
@@ -743,7 +773,6 @@ OPENSCP_TEST(test_safe_local_partial_files, t) {
                 preservedContents == "preserve-me",
             "rejecting a partial hard link must preserve its target");
     fs::remove(partial, ec);
-#endif
 
     std::string error;
     openscp::UniqueFile file(openscp::localfiles::openRegularFileForWrite(
@@ -2263,6 +2292,60 @@ OPENSCP_TEST(test_windows_jump_ssh_comes_from_absolute_path_folders, t) {
     t.check(detail::findSshExecutable(empty.wstring(), missing).empty(),
             "a missing fallback should give no program");
     fs::remove_all(base, ec);
+}
+
+OPENSCP_TEST(test_windows_jump_relay_carries_both_directions, t) {
+    namespace detail = openscp::libssh2detail;
+    // The argument probe stands in for ssh.exe, first in PATH, and echoes
+    // what it reads, as ssh -W relays a connection.
+    const fs::path folder =
+        makeTempFilePath("jump-relay").parent_path() / "probe";
+    std::error_code ec;
+    fs::create_directories(folder, ec);
+    fs::copy_file(OPENSCP_ARGV_PROBE, folder / "ssh.exe", ec);
+    t.check(!ec, "the probe should stand in for ssh.exe");
+    std::wstring previousPath(32767, L'\0');
+    previousPath.resize(::GetEnvironmentVariableW(
+        L"PATH", previousPath.data(), static_cast<DWORD>(previousPath.size())));
+    ::SetEnvironmentVariableW(L"PATH",
+                              (folder.wstring() + L";" + previousPath).c_str());
+    ::SetEnvironmentVariableW(L"OPENSCP_ARGV_PROBE_ECHO", L"relay ended");
+    {
+        detail::SshJumpTunnel tunnel;
+        detail::SocketHandle socket = detail::kInvalidSocket;
+        std::string error;
+        const bool started = tunnel.start(
+            {"-W", "target.example:22", "jump.example"}, socket, error);
+        t.checkWithError(started, "the relay should start: ", error);
+        if (started) {
+            const std::string sent = "SSH-2.0-relay\r\n";
+            t.check(detail::sendOnce(socket, sent.data(), sent.size()) ==
+                        static_cast<std::ptrdiff_t>(sent.size()),
+                    "libssh2's bytes should reach ssh.exe");
+            std::string received;
+            char buffer[64];
+            while (received.size() < sent.size()) {
+                const std::ptrdiff_t count =
+                    detail::receiveOnce(socket, buffer, sizeof(buffer));
+                if (count <= 0)
+                    break;
+                received.append(buffer, static_cast<std::size_t>(count));
+            }
+            t.check(received == sent,
+                    "ssh.exe's output should come back through the relay");
+            // As when libssh2 closes its end, ssh.exe's input ends.
+            detail::shutdownSocket(socket);
+            t.check(tunnel.exited(5000),
+                    "ssh.exe should exit once its input ends");
+            t.check(tunnel.errorOutput().find("relay ended") !=
+                        std::string::npos,
+                    "ssh.exe's error output should be kept");
+            detail::closeSocket(socket);
+        }
+    }
+    ::SetEnvironmentVariableW(L"PATH", previousPath.c_str());
+    ::SetEnvironmentVariableW(L"OPENSCP_ARGV_PROBE_ECHO", nullptr);
+    fs::remove_all(folder.parent_path(), ec);
 }
 
 OPENSCP_TEST(test_windows_jump_command_line_round_trips, t) {

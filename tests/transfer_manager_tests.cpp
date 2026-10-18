@@ -2700,7 +2700,18 @@ OPENSCP_TEST(testLocalMoveCleanupExcludesRemotePathsAndFollowsAncestors, test) {
                "a missing prerequisite must not exempt an independent reader");
 }
 
-#ifndef _WIN32
+// Windows removes a move's source once it is unchanged and nothing else reads
+// it. POSIX cannot remove a file only while it is unchanged, so a move there
+// leaves its source to the user, with a warning.
+#ifdef _WIN32
+constexpr TransferTask::Status kCleanedMoveStatus = TransferTask::Status::Done;
+constexpr bool kMovedSourceRemains = false;
+#else
+constexpr TransferTask::Status kCleanedMoveStatus =
+    TransferTask::Status::Warning;
+constexpr bool kMovedSourceRemains = true;
+#endif
+
 struct SourceUploadProbe {
     std::atomic_int uploads{0};
     std::mutex mutex;
@@ -2870,15 +2881,15 @@ OPENSCP_TEST(testMoveCleanupWaitsForQueuedSourceReader, test) {
     }
     probe->changed.notify_all();
     test.check(waitForStatus(manager, copy, TransferTask::Status::Done) &&
-                   waitForStatus(manager, move, TransferTask::Status::Warning),
-               "copy should read the shared source before manual move cleanup");
+                   waitForStatus(manager, move, kCleanedMoveStatus),
+               "copy should read the shared source before move cleanup");
     {
         std::lock_guard<std::mutex> lock(probe->mutex);
         test.check(probe->uploaded["/home/demo/copy"] == "original",
                    "queued copy should upload the original source bytes");
     }
-    test.check(QFileInfo::exists(source),
-               "move must preserve its source after the queued copy finishes");
+    test.check(QFileInfo::exists(source) == kMovedSourceRemains,
+               "move should finish its cleanup after the queued copy");
 }
 
 OPENSCP_TEST(testMoveCleanupWaitsForRunningSourceReader, test) {
@@ -2919,11 +2930,10 @@ OPENSCP_TEST(testMoveCleanupWaitsForRunningSourceReader, test) {
         probe->releaseCopy = true;
     }
     probe->changed.notify_all();
-    test.check(
-        waitForStatus(manager, copy, TransferTask::Status::Done) &&
-            waitForStatus(manager, move, TransferTask::Status::Warning) &&
-            QFileInfo::exists(source),
-        "move should require manual cleanup after the active copy completes");
+    test.check(waitForStatus(manager, copy, TransferTask::Status::Done) &&
+                   waitForStatus(manager, move, kCleanedMoveStatus) &&
+                   QFileInfo::exists(source) == kMovedSourceRemains,
+               "move should finish its cleanup after the active copy");
 }
 
 OPENSCP_TEST(testMoveCleanupDoesNotWaitForItsDependentTask, test) {
@@ -2949,14 +2959,69 @@ OPENSCP_TEST(testMoveCleanupDoesNotWaitForItsDependentTask, test) {
         source, QStringLiteral("/home/demo/copy"), dependent);
     configureManager(manager, baseClient, testOptions());
 
-    test.check(waitForStatus(manager, move, TransferTask::Status::Warning),
+    test.check(waitForStatus(manager, move, kCleanedMoveStatus),
                "move cleanup must not wait for a task depending on that move");
+#ifdef _WIN32
+    // The dependent copy runs once the move has removed the source.
+    test.check(waitForStatus(manager, copy, TransferTask::Status::Error) &&
+                   !QFileInfo::exists(source),
+               "dependent work should run after the move's cleanup");
+#else
     test.check(waitForStatus(manager, copy, TransferTask::Status::Skipped) &&
                    QFileInfo::exists(source),
                "dependent work must wait for successful cleanup without "
                "deleting the source");
+#endif
 }
 
+#ifdef _WIN32
+OPENSCP_TEST(testMoveUploadManualCleanupDoesNotRetransfer, test) {
+    QTemporaryDir root;
+    const QString source = root.filePath("source.txt");
+    QFile initial(source);
+    test.check(initial.open(QIODevice::WriteOnly) &&
+                   initial.write("original") == 8,
+               "manual cleanup fixture should create the local source");
+    initial.close();
+    // Another program holds the source open without sharing deletion, so
+    // the move cannot remove it.
+    const std::wstring nativeSource =
+        QDir::toNativeSeparators(source).toStdWString();
+    const HANDLE holder =
+        ::CreateFileW(nativeSource.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    test.check(holder != INVALID_HANDLE_VALUE,
+               "the fixture should hold the source open");
+    auto probe = std::make_shared<SourceUploadProbe>();
+    SourceUploadClient baseClient(probe);
+    TransferManager manager;
+    manager.setMaxConcurrent(1);
+    configureManager(manager, baseClient, testOptions());
+    auto batch = testBatchOptions();
+    batch.operation = TransferOperation::Move;
+    const quint64 move =
+        manager.enqueueUpload(source, QStringLiteral("/home/demo/move"), batch);
+    test.check(waitForStatus(manager, move, TransferTask::Status::Warning) &&
+                   QFileInfo::exists(source),
+               "a move should keep a source it cannot remove, with a warning");
+    const auto pending = manager.taskSnapshot(move);
+    test.check(pending && pending->phase == TransferPhase::DeleteSource &&
+                   pending->error.contains(QStringLiteral("could not be "
+                                                          "removed")),
+               "the warning should keep the copy result and explain itself");
+    if (holder != INVALID_HANDLE_VALUE)
+        ::CloseHandle(holder);
+    manager.retryTask(move);
+    test.check(waitForStatus(manager, move, TransferTask::Status::Done) &&
+                   !QFileInfo::exists(source),
+               "retry should finish the cleanup once the source is free");
+    std::lock_guard lock(probe->mutex);
+    test.check(
+        probe->uploaded["/home/demo/move"] == "original" &&
+            probe->uploads.load() == 1,
+        "cleanup retry must preserve the upload without transferring again");
+}
+#else
 OPENSCP_TEST(testMoveUploadManualCleanupDoesNotRetransfer, test) {
     QTemporaryDir root;
     const QString source = root.filePath("source.txt");
