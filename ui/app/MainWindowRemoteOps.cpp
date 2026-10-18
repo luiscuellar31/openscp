@@ -280,7 +280,7 @@ void MainWindow::rightItemActivated(const QModelIndex &idx) {
         statusBar()->showMessage(tr("Download already queued"), 2000);
     }
     if (taskId != 0) {
-        transferUiController_.openDownloadWhenCompleted(taskId, localPath);
+        transferUiController_.openDownloadWhenCompleted(taskId);
         // The task can complete very quickly, including before enqueueDownload
         // returns. Reconcile its current snapshot after registering intent.
         handleTransferUiUpdate({taskId}, {});

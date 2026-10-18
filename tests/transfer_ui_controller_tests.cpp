@@ -140,7 +140,7 @@ OPENSCP_TEST(testFrequentDeltasStayIncremental, test) {
 OPENSCP_TEST(testDownloadOpenIntentFollowsTaskLifecycle, test) {
     openscpui::TransferUiController controller;
     const QString localPath = QStringLiteral("/local/report.txt");
-    controller.openDownloadWhenCompleted(20, localPath);
+    controller.openDownloadWhenCompleted(20);
 
     const auto running = controller.observe(
         {downloadWithStatus(20, localPath, TransferTask::Status::Running)}, {},
@@ -161,18 +161,31 @@ OPENSCP_TEST(testDownloadOpenIntentFollowsTaskLifecycle, test) {
                "a completed task must not request opening twice");
 }
 
+OPENSCP_TEST(testDownloadOpenIntentOpensTheFinalDestination, test) {
+    // "Rename" on a conflict downloads to "report (1).txt"; the requested
+    // path still holds the old copy.
+    openscpui::TransferUiController controller;
+    controller.openDownloadWhenCompleted(24);
+    const QString renamed = QStringLiteral("/local/report (1).txt");
+    const auto completed = controller.observe(
+        {downloadWithStatus(24, renamed, TransferTask::Status::Done)}, {},
+        false, {});
+    test.check(completed.completedDownloadPathsToOpen == QStringList{renamed},
+               "a renamed download should open where it was saved");
+}
+
 OPENSCP_TEST(testDownloadOpenIntentClearsOnFailureRemovalAndReset, test) {
     openscpui::TransferUiController controller;
     const QString localPath = QStringLiteral("/local/report.txt");
 
-    controller.openDownloadWhenCompleted(21, localPath);
+    controller.openDownloadWhenCompleted(21);
     const auto failed = controller.observe(
         {downloadWithStatus(21, localPath, TransferTask::Status::Error)}, {},
         false, {});
     test.check(failed.completedDownloadPathsToOpen.isEmpty(),
                "failed downloads must clear intent without opening");
 
-    controller.openDownloadWhenCompleted(22, localPath);
+    controller.openDownloadWhenCompleted(22);
     (void)controller.observe({}, {22}, false, {});
     const auto removedThenCompleted = controller.observe(
         {downloadWithStatus(22, localPath, TransferTask::Status::Done)}, {},
@@ -180,7 +193,7 @@ OPENSCP_TEST(testDownloadOpenIntentClearsOnFailureRemovalAndReset, test) {
     test.check(removedThenCompleted.completedDownloadPathsToOpen.isEmpty(),
                "removed tasks must release their pending open intent");
 
-    controller.openDownloadWhenCompleted(23, localPath);
+    controller.openDownloadWhenCompleted(23);
     controller.reset();
     const auto resetThenCompleted = controller.observe(
         {downloadWithStatus(23, localPath, TransferTask::Status::Done)}, {},
