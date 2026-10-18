@@ -375,6 +375,9 @@ keeps destination-only entries under unscanned source paths, and plan creation
 checks that coverage again before accepting mirror deletions. Both scans mark
 FIFOs, sockets and devices as entries that are never copied or deleted, and the
 local scan leaves out the names that uploads refuse, as the remote scan does.
+On Windows the local scan takes each entry's type, size and modification time
+from the directory listing rather than with one more file system call per
+entry; an error while listing a folder still leaves it unscanned.
 An entry present on one side only whose name matches the other side except for
 letter case or Unicode normalization is a conflict, because many destinations
 treat both names as one entry.

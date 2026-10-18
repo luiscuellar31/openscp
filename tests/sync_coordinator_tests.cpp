@@ -9,10 +9,12 @@
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
+#include <QTimeZone>
 #include <QTimer>
 
 #include <algorithm>
@@ -288,6 +290,55 @@ OPENSCP_TEST(testWindowsShortcutsSyncAsFiles, test) {
     }
 }
 #endif
+
+OPENSCP_TEST(testScanRecordsTheSizesAndTimesQFileInfoReads, test) {
+    // Windows scans read them from the listing instead, which must agree
+    // with QFileInfo to the millisecond, or files would compare as changed.
+    QTemporaryDir localRoot;
+    const QString folder = localRoot.filePath(QStringLiteral("folder"));
+    const QString path = folder + QStringLiteral("/file.txt");
+    const QDateTime modified =
+        QDateTime::fromMSecsSinceEpoch(1'614'834'367'891, QTimeZone::utc());
+    QFile file(path);
+    test.check(QDir().mkpath(folder) && file.open(QIODevice::WriteOnly) &&
+                   file.write("12345") == 5,
+               "the scanned file should be written");
+    file.close();
+    test.check(
+        file.open(QIODevice::WriteOnly | QIODevice::Append) &&
+            file.setFileTime(modified, QFileDevice::FileModificationTime),
+        "the scanned file should get its time");
+    file.close();
+
+    RemoteOperationController remote;
+    test.check(remote.installSession(
+                   connectedClient<openscp::MockSftpClient>("sync.test")) > 0,
+               "remote controller should accept a connected session");
+    TransferManager transfers;
+    SyncCoordinator coordinator(&remote, &transfers);
+    bool ready = false;
+    SyncPreparationResult prepared;
+    QObject::connect(&coordinator, &SyncCoordinator::preparationReady,
+                     &coordinator, [&](const SyncPreparationResult &result) {
+                         prepared = result;
+                         ready = true;
+                     });
+    coordinator.start(localRoot.path(), QStringLiteral("/"));
+    test.check(waitUntil([&] { return ready; }), "the scan should complete");
+
+    const auto entry = std::find_if(
+        prepared.localSnapshot.cbegin(), prepared.localSnapshot.cend(),
+        [](const SyncSnapshotEntry &value) {
+            return value.relativePath == QStringLiteral("folder/file.txt");
+        });
+    const qint64 expected = QFileInfo(path).lastModified().toMSecsSinceEpoch();
+    test.check(entry != prepared.localSnapshot.cend() &&
+                   entry->type == SyncEntryType::File && entry->size == 5u &&
+                   entry->modifiedMs == expected &&
+                   expected == modified.toMSecsSinceEpoch(),
+               "the scan should record the file's size and time as QFileInfo "
+               "reads them");
+}
 
 OPENSCP_TEST(testAsynchronousSnapshots, test) {
     QTemporaryDir localRoot;
