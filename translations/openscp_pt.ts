@@ -5198,19 +5198,49 @@ Destino: %3</translation>
         <translation>Ignorado porque uma tarefa prévia não foi concluída corretamente.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="247"/>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="67"/>
+        <source>Could not create local directory</source>
+        <translation>Não foi possível criar o diretório local</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="85"/>
+        <source>Remote path exists and is not a directory</source>
+        <translation>O caminho remoto existe e não é um diretório</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="96"/>
+        <source>Could not delete local file</source>
+        <translation>Não foi possível excluir o arquivo local</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="105"/>
+        <source>Could not delete local directory (it may not be empty)</source>
+        <translation>Não foi possível excluir o diretório local (talvez não esteja vazio)</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="268"/>
         <source>The completed upload cannot safely remove its local source after a restart. Review the source manually.</source>
         <translation>O envio foi concluído, mas o arquivo de origem local não pode ser removido com segurança após uma reinicialização. Verifique o arquivo manualmente.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="256"/>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="277"/>
         <source>The upload completed, but automatic local source removal cannot be done safely. Review the source and remove it manually, then retry the task to finish cleanup.</source>
         <translation>O envio foi concluído, mas o arquivo de origem local não pode ser removido automaticamente com segurança. Verifique a origem e remova-a manualmente; depois, tente a tarefa novamente para concluir a limpeza.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="268"/>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="289"/>
         <source>The local source changed after upload and was not removed. Review it manually.</source>
         <translation>O arquivo de origem local mudou após o envio e não foi removido. Verifique o arquivo manualmente.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="297"/>
+        <source>Transfer completed, but the local source could not be removed</source>
+        <translation>A transferência foi concluída, mas não foi possível remover a origem local</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="314"/>
+        <source>Transfer completed, but the remote source could not be removed</source>
+        <translation>A transferência foi concluída, mas não foi possível remover a origem remota</translation>
     </message>
     <message>
         <location filename="../ui/logic/transfers/TransferQueuePersistence.cpp" line="256"/>

@@ -5198,19 +5198,49 @@ Destination : %3</translation>
         <translation>Ignoré, car une tâche préalable ne s’est pas terminée correctement.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="247"/>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="67"/>
+        <source>Could not create local directory</source>
+        <translation>Impossible de créer le dossier local</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="85"/>
+        <source>Remote path exists and is not a directory</source>
+        <translation>Le chemin distant existe et n’est pas un dossier</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="96"/>
+        <source>Could not delete local file</source>
+        <translation>Impossible de supprimer le fichier local</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="105"/>
+        <source>Could not delete local directory (it may not be empty)</source>
+        <translation>Impossible de supprimer le dossier local (il n’est peut-être pas vide)</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="268"/>
         <source>The completed upload cannot safely remove its local source after a restart. Review the source manually.</source>
         <translation>Le téléversement est terminé, mais le fichier source local ne peut pas être supprimé en toute sécurité après un redémarrage. Vérifiez-le manuellement.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="256"/>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="277"/>
         <source>The upload completed, but automatic local source removal cannot be done safely. Review the source and remove it manually, then retry the task to finish cleanup.</source>
         <translation>Le téléversement est terminé, mais le fichier source local ne peut pas être supprimé automatiquement en toute sécurité. Vérifiez-le et supprimez-le manuellement, puis relancez la tâche pour terminer le nettoyage.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="268"/>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="289"/>
         <source>The local source changed after upload and was not removed. Review it manually.</source>
         <translation>Le fichier source local a changé après le téléversement et n’a pas été supprimé. Vérifiez-le manuellement.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="297"/>
+        <source>Transfer completed, but the local source could not be removed</source>
+        <translation>Le transfert est terminé, mais la source locale n’a pas pu être supprimée</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/transfers/TransferExecutor.cpp" line="314"/>
+        <source>Transfer completed, but the remote source could not be removed</source>
+        <translation>Le transfert est terminé, mais la source distante n’a pas pu être supprimée</translation>
     </message>
     <message>
         <location filename="../ui/logic/transfers/TransferQueuePersistence.cpp" line="256"/>

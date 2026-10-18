@@ -18,6 +18,8 @@ using Clock = std::chrono::steady_clock;
 constexpr double kBytesPerKiB = 1024.0;
 constexpr qint64 kUiProgressIntervalMs = 100;
 
+// lupdate cannot see through this helper, so each message is marked with
+// QT_TRANSLATE_NOOP where it is written.
 std::string translatedError(const char *message) {
     return QCoreApplication::translate("TransferManager", message)
         .toUtf8()
@@ -61,8 +63,10 @@ bool runFilesystemOperation(
         std::string localError;
         if (!openscp::localfiles::ensureLocalDirectories(task.dst.toStdString(),
                                                          localError)) {
-            error = translatedError("Could not create local directory") + ": " +
-                    localError;
+            error =
+                translatedError(QT_TRANSLATE_NOOP(
+                    "TransferManager", "Could not create local directory")) +
+                ": " + localError;
             return false;
         }
         return true;
@@ -77,8 +81,9 @@ bool runFilesystemOperation(
             return false;
         }
         if (exists && !isDirectory) {
-            error =
-                translatedError("Remote path exists and is not a directory");
+            error = translatedError(
+                QT_TRANSLATE_NOOP("TransferManager",
+                                  "Remote path exists and is not a directory"));
             return false;
         }
         return exists ||
@@ -88,15 +93,18 @@ bool runFilesystemOperation(
         if (openscp::localfiles::removeLocalPath(task.dst.toStdString(), false,
                                                  error))
             return true;
-        error = translatedError("Could not delete local file") + ": " + error;
+        error = translatedError(QT_TRANSLATE_NOOP(
+                    "TransferManager", "Could not delete local file")) +
+                ": " + error;
         return false;
     }
     if (task.type == TransferTask::Type::DeleteLocalDirectory) {
         if (openscp::localfiles::removeLocalPath(task.dst.toStdString(), true,
                                                  error))
             return true;
-        error = translatedError(
-                    "Could not delete local directory (it may not be empty)") +
+        error = translatedError(QT_TRANSLATE_NOOP(
+                    "TransferManager",
+                    "Could not delete local directory (it may not be empty)")) +
                 ": " + error;
         return false;
     }
@@ -286,9 +294,10 @@ bool TransferExecutor::runPostAction(
                         .toStdString();
             return false;
         }
-        error = translatedError(
+        error = translatedError(QT_TRANSLATE_NOOP(
+                    "TransferManager",
                     "Transfer completed, but the local source could not be "
-                    "removed") +
+                    "removed")) +
                 ": " + error;
         return false;
     }
@@ -302,8 +311,9 @@ bool TransferExecutor::runPostAction(
         return true;
     }
     if (error.empty()) {
-        error = translatedError(
-            "Transfer completed, but the remote source could not be removed");
+        error = translatedError(QT_TRANSLATE_NOOP(
+            "TransferManager",
+            "Transfer completed, but the remote source could not be removed"));
     }
     return false;
 }
