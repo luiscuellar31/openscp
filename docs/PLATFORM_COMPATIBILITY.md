@@ -57,6 +57,9 @@ warns before their first run. Compared with macOS and Linux:
 
 - SSH jump hosts and **Open in terminal** need the OpenSSH Client feature of
   Windows. **Open in terminal** cannot use a proxy yet.
+- WebDAV servers and HTTP proxies that ask for Windows authentication get the
+  user name and password entered in OpenSCP through Negotiate, with Kerberos
+  or NTLM; one that offers NTLM alone, without Negotiate, cannot be used.
 - FTPS and HTTPS WebDAV servers are verified with the trust of Windows, as
   for Edge: roots Windows downloads when first needed count, and certificates
   it distrusts do not. Revocation is not checked.
