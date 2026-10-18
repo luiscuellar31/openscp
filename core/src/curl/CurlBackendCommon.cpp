@@ -622,10 +622,19 @@ RemoteError errorFromCurl(CURLcode code, std::string message, long responseCode,
 CURLcode performWithErrorDetail(CURL *curl, std::string &detail) {
     char buffer[CURL_ERROR_SIZE] = {};
     (void)curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, buffer);
-    const CURLcode code = curl_easy_perform(curl);
+    CURLcode code = curl_easy_perform(curl);
     // The handle outlives this buffer.
     (void)curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, nullptr);
     detail = buffer;
+    // libcurl reports a proxy that refused the tunnel as a connection that
+    // failed, which would be retried as a network outage. A 407 asks for
+    // other proxy credentials, which no retry brings.
+    long proxyResponse = 0;
+    if (code == CURLE_COULDNT_CONNECT &&
+        curl_easy_getinfo(curl, CURLINFO_HTTP_CONNECTCODE, &proxyResponse) ==
+            CURLE_OK &&
+        proxyResponse == 407)
+        code = CURLE_LOGIN_DENIED;
     return code;
 }
 
@@ -816,7 +825,9 @@ bool configureProxy(CURL *curl, const SessionOptions &opt,
         }
         // libcurl would send the password in Basic, in clear, to any HTTP
         // proxy. ANY asks the proxy first and picks the safest method it
-        // offers, so NTLM, Negotiate and Digest proxies work too.
+        // offers among libcurl's: Digest, and Negotiate (Kerberos, or NTLM
+        // within it) where libcurl has it, as the Windows builds do through
+        // SSPI. libcurl leaves NTLM on its own out by default.
         if (normalizedProxyType == ProxyType::HttpConnect &&
             curl_easy_setopt(curl, CURLOPT_PROXYAUTH, CURLAUTH_ANY) !=
                 CURLE_OK) {

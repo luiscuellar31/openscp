@@ -502,46 +502,75 @@ OPENSCP_TEST(testCurlConnectionsUseTcpKeepalive, test) {
                "control connection survives NAT timeouts");
 }
 
-#ifndef _WIN32
+// Closes a socket of the fake proxy below.
+void closeTestSocket(curl_socket_t socket) {
+#ifdef _WIN32
+    (void)::closesocket(socket);
+#else
+    (void)::close(socket);
+#endif
+}
+
+// What a request through the fake proxy below led to: the scheme of the
+// credentials the proxy received on each connection ("" for none), and the
+// request's result.
+struct RefusingProxyRun {
+    std::vector<std::string> authorizations;
+    CURLcode code = CURLE_OK;
+    std::string detail;
+};
+
 // Runs one request through a fake HTTP proxy that answers each CONNECT with
-// 407 and a `scheme` challenge, and returns the scheme of the credentials it
-// received on each connection ("" for none).
-std::vector<std::string> proxyAuthorizations(openscp::test::TestContext &test,
-                                             const std::string &scheme) {
-    const int listener = ::socket(AF_INET, SOCK_STREAM, 0);
+// 407 and a `scheme` challenge.
+RefusingProxyRun runThroughRefusingProxy(openscp::test::TestContext &test,
+                                         const std::string &scheme) {
+    // On Windows libcurl starts Winsock, which the fake proxy needs too.
+    openscp::curlcommon::CurlEasySession session;
+    std::string error;
+    const bool initialized = session.initialize(error);
+    const curl_socket_t listener = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+#ifdef _WIN32
+    int addressLength = sizeof(address);
+#else
     socklen_t addressLength = sizeof(address);
+#endif
     const bool listening =
-        listener >= 0 &&
+        initialized && listener != CURL_SOCKET_BAD &&
         ::bind(listener, reinterpret_cast<sockaddr *>(&address),
                sizeof(address)) == 0 &&
         ::listen(listener, 4) == 0 &&
         ::getsockname(listener, reinterpret_cast<sockaddr *>(&address),
                       &addressLength) == 0;
-    test.check(listening, "the fake proxy should listen");
+    test.check(listening, "the fake proxy should listen: " + error);
+    RefusingProxyRun run;
     if (!listening) {
-        if (listener >= 0)
-            ::close(listener);
-        return {};
+        if (listener != CURL_SOCKET_BAD)
+            closeTestSocket(listener);
+        return run;
     }
-    std::vector<std::string> authorizations;
-    std::thread proxy([listener, &authorizations, &scheme] {
+    std::thread proxy([listener, &run, &scheme] {
         for (int request = 0; request < 2; ++request) {
-            const int client = ::accept(listener, nullptr, nullptr);
-            if (client < 0)
+            const curl_socket_t client = ::accept(listener, nullptr, nullptr);
+            if (client == CURL_SOCKET_BAD)
                 return;
             std::string headers;
             char buffer[1024];
             while (headers.find("\r\n\r\n") == std::string::npos) {
+#ifdef _WIN32
+                const int n =
+                    ::recv(client, buffer, static_cast<int>(sizeof(buffer)), 0);
+#else
                 const ssize_t n = ::recv(client, buffer, sizeof(buffer), 0);
+#endif
                 if (n <= 0)
                     break;
                 headers.append(buffer, static_cast<std::size_t>(n));
             }
             const std::size_t start = headers.find("Proxy-Authorization: ");
-            authorizations.push_back(
+            run.authorizations.push_back(
                 start == std::string::npos
                     ? std::string()
                     : headers.substr(start + 21, headers.find(' ', start + 21) -
@@ -555,13 +584,16 @@ std::vector<std::string> proxyAuthorizations(openscp::test::TestContext &test,
                 "Proxy-Authenticate: " +
                 challenge +
                 "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+#ifdef _WIN32
+            (void)::send(client, reply.data(), static_cast<int>(reply.size()),
+                         0);
+#else
             (void)::send(client, reply.data(), reply.size(), 0);
-            ::close(client);
+#endif
+            closeTestSocket(client);
         }
     });
 
-    openscp::curlcommon::CurlEasySession session;
-    std::string error;
     openscp::SessionOptions options;
     options.proxy_type = openscp::ProxyType::HttpConnect;
     options.proxy_host = "127.0.0.1";
@@ -569,24 +601,30 @@ std::vector<std::string> proxyAuthorizations(openscp::test::TestContext &test,
     options.proxy_username = "proxy-user";
     options.proxy_password = "proxy-secret";
     const bool configured =
-        session.initialize(error) &&
         openscp::curlcommon::configureProxy(session.get(), options, "test",
                                             "test", error) &&
         curl_easy_setopt(session.get(), CURLOPT_URL,
                          "http://example.invalid:80/") == CURLE_OK &&
         curl_easy_setopt(session.get(), CURLOPT_TIMEOUT, 10L) == CURLE_OK;
     test.check(configured, "the proxied request should configure: " + error);
-    if (configured)
-        (void)curl_easy_perform(session.get());
-    ::shutdown(listener, SHUT_RDWR);
-    ::close(listener);
+    if (configured) {
+        run.code = openscp::curlcommon::performWithErrorDetail(session.get(),
+                                                               run.detail);
+    }
+#ifdef _WIN32
+    (void)::shutdown(listener, SD_BOTH);
+#else
+    (void)::shutdown(listener, SHUT_RDWR);
+#endif
+    closeTestSocket(listener);
     proxy.join();
-    return authorizations;
+    return run;
 }
 
 OPENSCP_TEST(testHttpProxyAuthenticationIsNegotiated, test) {
     for (const std::string scheme : {"Digest", "Basic"}) {
-        const auto authorizations = proxyAuthorizations(test, scheme);
+        const auto authorizations =
+            runThroughRefusingProxy(test, scheme).authorizations;
         test.check(!authorizations.empty() && authorizations.front().empty(),
                    "the proxy password must not be sent before the proxy "
                    "asks for it (" +
@@ -594,6 +632,30 @@ OPENSCP_TEST(testHttpProxyAuthenticationIsNegotiated, test) {
         test.check(authorizations.size() == 2 && authorizations[1] == scheme,
                    "curl should answer the proxy's " + scheme + " challenge");
     }
+}
+
+OPENSCP_TEST(testProxyThatRefusesTheCredentialsIsAnAuthenticationError, test) {
+    // libcurl reports a refused tunnel as a connection that failed, which
+    // would be retried as a network outage.
+    const RefusingProxyRun run = runThroughRefusingProxy(test, "Basic");
+    const openscp::RemoteError error =
+        openscp::curlcommon::errorFromCurl(run.code, run.detail);
+    test.check(error.kind == openscp::RemoteErrorKind::Authentication &&
+                   !error.transient,
+               "a proxy that refuses the credentials should be an "
+               "authentication error: " +
+                   run.detail);
+}
+
+#ifdef _WIN32
+OPENSCP_TEST(testWindowsLibcurlNegotiatesThroughSspi, test) {
+    // vcpkg.json builds libcurl with SSPI, through which Negotiate reaches
+    // servers and proxies that ask for Windows authentication.
+    const curl_version_info_data *info = curl_version_info(CURLVERSION_NOW);
+    test.check(info && (info->features & CURL_VERSION_SSPI) != 0 &&
+                   (info->features & CURL_VERSION_SPNEGO) != 0 &&
+                   (info->features & CURL_VERSION_KERBEROS5) != 0,
+               "Windows builds should link a libcurl with SSPI Negotiate");
 }
 #endif
 

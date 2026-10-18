@@ -168,7 +168,9 @@ std::FILE *openFileForUpload(const std::string &path, std::uint64_t &fileSize,
 RemoteError errorFromCurl(CURLcode code, std::string message,
                           long responseCode = 0, bool commitUncertain = false);
 // Runs curl_easy_perform with an error buffer, so a failure can name its cause,
-// such as the TLS alert or the refused address.
+// such as the TLS alert or the refused address. A proxy that refuses the
+// credentials (407) gives CURLE_LOGIN_DENIED rather than libcurl's
+// CURLE_COULDNT_CONNECT.
 CURLcode performWithErrorDetail(CURL *curl, std::string &detail);
 // The curl_easy_strerror text, followed by the error-buffer detail when it adds
 // something.
