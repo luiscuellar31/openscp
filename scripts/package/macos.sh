@@ -840,6 +840,32 @@ ensure_qt_plugin_subdir() {
   fi
 }
 
+# main.cpp loads qtbase_<language>.qm from the bundle's translations folder
+# (Translations in qt.conf) for the languages OpenSCP has; without it, Qt's
+# own texts, such as those of standard buttons, stay in English. OpenSCP's
+# catalogs are compiled in, and macdeployqt copies no translations.
+copy_qt_translations() {
+  local qt_bin="$1"
+  local source=""
+  local candidate
+  for candidate in \
+    "$("${qt_bin}/qtpaths" --query QT_INSTALL_TRANSLATIONS 2>/dev/null || true)" \
+    "${qt_bin}/../translations"; do
+    if [[ -n "$candidate" && -f "${candidate}/qtbase_es.qm" ]]; then
+      source="$candidate"
+      break
+    fi
+  done
+  [[ -n "$source" ]] || die "Qt's translation catalogs were not found next to ${qt_bin}"
+  mkdir -p "${RESOURCES_DIR}/translations"
+  local catalog
+  for catalog in qtbase_de.qm qtbase_es.qm qtbase_fr.qm qtbase_pt_BR.qm; do
+    [[ -f "${source}/${catalog}" ]] || die "Missing Qt translation catalog: ${source}/${catalog}"
+    cp "${source}/${catalog}" "${RESOURCES_DIR}/translations/"
+  done
+  log "Copied Qt's translation catalogs from: ${source}"
+}
+
 ensure_qt_support_plugins() {
   ensure_qt_plugin_subdir "platforms" "qcocoa" "Qt platform"
   ensure_qt_plugin_subdir "tls" "qsecuretransportbackend" "Qt native TLS"
@@ -1136,6 +1162,7 @@ main() {
     fi
     "${cmd_x86[@]}" || die "macdeployqt failed (native and Rosetta fallback)"
   fi
+  copy_qt_translations "$(dirname "$mqt")"
 
   # macdeployqt owns deployed frameworks. Fill only missing direct dependencies
   # from known Qt prefixes, and copy runtime content rather than SDK headers.
