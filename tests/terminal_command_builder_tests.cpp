@@ -170,6 +170,14 @@ OPENSCP_TEST(testProxyCommandsKeepPercentSignsLiteral, test) {
                    proxyResult.command.contains(
                        nested(QStringLiteral("'fe80::1%%eth0:1080'"))),
                "a proxy address with a zone index should keep its %");
+
+    proxy.proxy_host = "fe80::1%1";
+    const auto numberedZoneResult =
+        builder().prepare(proxy, QStringLiteral("/"), false, false);
+    test.check(numberedZoneResult.isValid() &&
+                   numberedZoneResult.command.contains(
+                       nested(QStringLiteral("'fe80::1%%1:1080'"))),
+               "a numbered zone index should not take the port");
 }
 #endif
 

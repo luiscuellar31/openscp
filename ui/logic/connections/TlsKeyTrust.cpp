@@ -21,8 +21,8 @@ QString pinKey(const openscp::SessionOptions &options) {
     return QStringLiteral("%1/%2/%3:%4")
         .arg(QLatin1String(settingskeys::kTlsKeyPins),
              ftps ? QStringLiteral("ftps") : QStringLiteral("webdav"),
-             QString::fromStdString(options.host).trimmed().toLower())
-        .arg(port);
+             QString::fromStdString(options.host).trimmed().toLower(),
+             QString::number(port));
 }
 
 } // namespace

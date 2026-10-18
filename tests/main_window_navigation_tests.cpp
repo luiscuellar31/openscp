@@ -22,6 +22,7 @@
 #include <QDir>
 #include <QDropEvent>
 #include <QFile>
+#include <QFileInfo>
 #include <QFileSystemModel>
 #include <QInputDialog>
 #include <QItemSelectionModel>
@@ -708,6 +709,61 @@ OPENSCP_TEST(testDragOutSaysWhatItLeftOut, test) {
                    message.contains(QStringLiteral("Skipped invalid: 2")),
                "a drag that leaves out every name should say so: " +
                    message.toStdString());
+#endif
+}
+
+OPENSCP_TEST(testDragOutNumbersNamesWithPercentSigns, test) {
+#ifndef _WIN32
+    test.skip("here only Windows makes names that differ in case meet");
+#else
+    // The staged copy of a second a%1b.pdf was named "A1B (.pdf)%3": each
+    // arg() replaced the lowest marker left, also one inside the name.
+    configureMainWindowSettings(settingsRootPath);
+    QMainWindow window;
+    auto *view = new DraggableView;
+    window.setCentralWidget(view);
+    RemoteModel model;
+    openscp::FileInfo lower;
+    lower.name = "a%1b.pdf";
+    openscp::FileInfo upper;
+    upper.name = "A%1B.pdf";
+    model.setEntries(QStringLiteral("/"), {lower, upper});
+    auto client = std::make_unique<openscp::MockSftpClient>();
+    openscp::SessionOptions options;
+    options.host = "localhost";
+    options.username = "tester";
+    std::string error;
+    test.check(client->connect(options, error), "the mock should connect");
+    RemoteOperationController operations;
+    operations.installSession(std::move(client));
+    QStringList stagedNames;
+    TransferManager transfers;
+    QObject::connect(&transfers, &TransferManager::tasksAdded, &transfers,
+                     [&transfers, &stagedNames](const QVector<quint64> &ids) {
+                         for (const TransferTask &task :
+                              transfers.tasksSnapshot(ids)) {
+                             stagedNames << QFileInfo(task.dst).fileName();
+                         }
+                     });
+    view->setModel(&model);
+    view->setTransferManager(&transfers);
+    view->setRemoteOperationController(&operations);
+    view->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    view->setSelectionBehavior(QAbstractItemView::SelectRows);
+    window.show();
+    flushUiEvents();
+
+    view->selectAll();
+    view->startDrag(Qt::CopyAction);
+    test.check(openscp::testsupport::waitUntil(
+                   [&stagedNames] { return stagedNames.size() == 2; }),
+               "both files should be staged");
+    test.check(
+        stagedNames.contains(QStringLiteral("a%1b.pdf"), Qt::CaseInsensitive) &&
+            stagedNames.contains(QStringLiteral("a%1b (1).pdf"),
+                                 Qt::CaseInsensitive),
+        "the second file should be numbered as it is named: " +
+            stagedNames.join(QStringLiteral(", ")).toStdString());
 #endif
 }
 

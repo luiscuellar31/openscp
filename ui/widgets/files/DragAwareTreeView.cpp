@@ -68,13 +68,6 @@ QString normalizeStagingName(const QString &value) {
 #endif
 }
 
-QPair<QString, QString> splitNameMultiExt(const QString &fileName) {
-    const qsizetype firstDot = fileName.indexOf('.', 1);
-    if (firstDot <= 0)
-        return qMakePair(fileName, QString());
-    return qMakePair(fileName.left(firstDot), fileName.mid(firstDot));
-}
-
 QPair<int, quint64> loadStagingConfirmThresholds() {
     using namespace openscpui::settingskeys;
     openscpui::AppSettings settings;
@@ -702,17 +695,13 @@ void DragAwareTreeView::pumpRemoteDragStaging(
         const QString dirPath = fileInfo.dir().absolutePath();
         const QString normalizedName =
             normalizeStagingName(fileInfo.fileName());
-        const auto parts = splitNameMultiExt(normalizedName);
-        const QString baseName = parts.first;
-        const QString extension = parts.second;
         const QString originalKey = pathKey(fullPath);
         int suffix = state->nextCollisionSuffix.value(originalKey, 0);
         while (true) {
-            const QString name = suffix == 0 ? normalizedName
-                                             : QStringLiteral("%1 (%2)%3")
-                                                   .arg(baseName)
-                                                   .arg(suffix)
-                                                   .arg(extension);
+            // Named as a download renamed to keep an existing file.
+            const QString name = suffix == 0
+                                     ? normalizedName
+                                     : numberedFileName(normalizedName, suffix);
             const QString candidate = QDir(dirPath).filePath(name);
             const QString key = pathKey(candidate);
             if (!state->reservedPaths.contains(key) &&

@@ -504,7 +504,8 @@ void SiteManagerDialog::onDuplicate() {
     for (int suffix = 2;
          hasDuplicateSiteName(sites, duplicate.name) && suffix < 10000;
          ++suffix) {
-        duplicate.name = tr("%1 copy %2").arg(sourceName).arg(suffix);
+        duplicate.name =
+            tr("%1 copy %2").arg(sourceName, QString::number(suffix));
     }
     if (hasDuplicateSiteName(sites, duplicate.name)) {
         duplicate.name =
@@ -591,7 +592,8 @@ void SiteManagerDialog::offerHostKeyRemoval(
     }
 
     const QString server =
-        port == 22 ? host : QStringLiteral("%1:%2").arg(host).arg(port);
+        port == 22 ? host
+                   : QStringLiteral("%1:%2").arg(host, QString::number(port));
     if (UiAlerts::question(
             this, tr("Remove host key"),
             tr("Also remove the saved host key of %1 from %2?\n\nOther "

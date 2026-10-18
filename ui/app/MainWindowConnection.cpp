@@ -212,7 +212,7 @@ QString ensureUniqueQuickSiteName(const QVector<SiteEntry> &sites,
         return base;
     for (int suffixNumber = 2; suffixNumber < 10000; ++suffixNumber) {
         const QString candidate =
-            QString("%1 (%2)").arg(base).arg(suffixNumber);
+            QString("%1 (%2)").arg(base, QString::number(suffixNumber));
         if (!exists(candidate))
             return candidate;
     }
@@ -738,8 +738,7 @@ bool MainWindow::confirmInsecureHostPolicyForSession(
                                     : QStringLiteral("ssh-unverified")));
     const QString allowKey =
         QString("Security/insecureTransportConfirmedUntilUtc/%1/%2:%3")
-            .arg(riskKey, hostKey)
-            .arg(static_cast<int>(opt.port));
+            .arg(riskKey, hostKey, QString::number(static_cast<int>(opt.port)));
     const qint64 now = QDateTime::currentSecsSinceEpoch();
     openscpui::AppSettings settings;
     const qint64 allowedUntil = settings.value(allowKey, 0).toLongLong();
@@ -886,15 +885,11 @@ void MainWindow::showHostKeyPrompt(
         text = (tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
                    "%3\n\nFingerprint cannot be saved. Connection "
                    "allowed only this time."))
-                   .arg(prompt.host)
-                   .arg(prompt.algorithm)
-                   .arg(prompt.fingerprint);
+                   .arg(prompt.host, prompt.algorithm, prompt.fingerprint);
     } else {
         text = (tr("Connect to %1\nAlgorithm: %2\nFingerprint: "
                    "%3\n\nTrust and save to known_hosts?"))
-                   .arg(prompt.host)
-                   .arg(prompt.algorithm)
-                   .arg(prompt.fingerprint);
+                   .arg(prompt.host, prompt.algorithm, prompt.fingerprint);
     }
     box->setText(text);
     box->addButton(prompt.canSave ? tr("Trust") : tr("Connect without saving"),

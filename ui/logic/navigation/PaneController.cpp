@@ -400,9 +400,9 @@ void PaneController::search(const SearchContext &context) {
                     QCoreApplication::translate(
                         "MainWindow",
                         "Scanning %1\nVisited: %2  |  Matches: %3")
-                        .arg(progress.currentPath)
-                        .arg(progress.visitedEntries)
-                        .arg(state->matches.size()));
+                        .arg(progress.currentPath,
+                             QString::number(progress.visitedEntries),
+                             QString::number(state->matches.size())));
             });
         state->completionConnection = connect(
             context.remoteOperations, &RemoteOperationController::jobFinished,
@@ -515,9 +515,9 @@ void PaneController::search(const SearchContext &context) {
             state->progress->setLabelText(
                 QCoreApplication::translate(
                     "MainWindow", "Scanning %1\nVisited: %2  |  Matches: %3")
-                    .arg(QDir::fromNativeSeparators(currentPath))
-                    .arg(counters.itemCount)
-                    .arg(state->matches.size()));
+                    .arg(QDir::fromNativeSeparators(currentPath),
+                         QString::number(counters.itemCount),
+                         QString::number(state->matches.size())));
         });
 
     const auto finalize = [this,
