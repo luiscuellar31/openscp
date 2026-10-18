@@ -125,7 +125,8 @@ std::optional<UpdateRelease> parseUpdateRelease(const QByteArray &json,
                                                 QString &error) {
     error.clear();
     if (json.size() > 1024 * 1024) {
-        error = QStringLiteral("Release response is too large.");
+        error = QCoreApplication::translate("UpdateController",
+                                            "Release response is too large.");
         return std::nullopt;
     }
     const auto document = QJsonDocument::fromJson(json);
@@ -133,14 +134,16 @@ std::optional<UpdateRelease> parseUpdateRelease(const QByteArray &json,
     if (!document.isObject() || !object.value("draft").isBool() ||
         !object.value("prerelease").isBool() ||
         !object.value("assets").isArray()) {
-        error = QStringLiteral("Invalid release response.");
+        error = QCoreApplication::translate("UpdateController",
+                                            "Invalid release response.");
         return std::nullopt;
     }
     if (object.value("draft").toBool() || object.value("prerelease").toBool())
         return std::nullopt;
     const QString tag = object.value("tag_name").toString();
     if (!tag.startsWith(QLatin1Char('v')) || !validVersion(tag.mid(1))) {
-        error = QStringLiteral("Invalid release version.");
+        error = QCoreApplication::translate("UpdateController",
+                                            "Invalid release version.");
         return std::nullopt;
     }
     if (!isUpdateVersion(tag.mid(1), current))

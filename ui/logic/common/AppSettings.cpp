@@ -29,11 +29,14 @@ QString statusError(QSettings::Status status) {
     case QSettings::NoError:
         return {};
     case QSettings::AccessError:
-        return QStringLiteral("The settings file could not be accessed.");
+        return QCoreApplication::translate(
+            "AppSettings", "The settings file could not be accessed.");
     case QSettings::FormatError:
-        return QStringLiteral("The settings file has an invalid format.");
+        return QCoreApplication::translate(
+            "AppSettings", "The settings file has an invalid format.");
     }
-    return QStringLiteral("The settings file could not be synchronized.");
+    return QCoreApplication::translate(
+        "AppSettings", "The settings file could not be synchronized.");
 }
 
 } // namespace
@@ -113,9 +116,10 @@ SettingsSyncResult AppSettings::ensureOwnerOnly() const {
     constexpr QFileDevice::Permissions ownerOnly =
         QFileDevice::ReadOwner | QFileDevice::WriteOwner;
     if (!QFile::setPermissions(path, ownerOnly)) {
-        return {false,
-                QStringLiteral("Could not restrict settings permissions for %1")
-                    .arg(path)};
+        return {false, QCoreApplication::translate(
+                           "AppSettings",
+                           "Could not restrict settings permissions for %1")
+                           .arg(path)};
     }
 
     constexpr QFileDevice::Permissions nonOwnerPermissions =
@@ -123,9 +127,10 @@ SettingsSyncResult AppSettings::ensureOwnerOnly() const {
         QFileDevice::ExeGroup | QFileDevice::ReadOther |
         QFileDevice::WriteOther | QFileDevice::ExeOther;
     if ((QFileInfo(path).permissions() & nonOwnerPermissions) != 0) {
-        return {false,
-                QStringLiteral("Settings permissions are not owner-only: %1")
-                    .arg(path)};
+        return {false, QCoreApplication::translate(
+                           "AppSettings",
+                           "Settings permissions are not owner-only: %1")
+                           .arg(path)};
     }
 #endif
     return {true, {}};

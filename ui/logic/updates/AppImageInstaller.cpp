@@ -1,5 +1,6 @@
 #include "logic/updates/AppImageInstaller.hpp"
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -44,8 +45,10 @@ bool sameContents(const struct stat &a, const struct stat &b) {
 
 bool installAppImageUpdate(const QString &original, const QString &download,
                            const UpdateArtifact &artifact, QString &error) {
-    error = QStringLiteral("Could not safely replace the AppImage. The current "
-                           "image has been preserved.");
+    error = QCoreApplication::translate(
+        "UpdateController",
+        "Could not safely replace the AppImage. The current "
+        "image has been preserved.");
 #ifdef Q_OS_LINUX
     if (!QFileInfo(original).isAbsolute() || artifact.size <= 0 ||
         artifact.size > kMaximumUpdateSize || artifact.sha256.size() != 32)
@@ -172,7 +175,8 @@ bool installAppImageUpdate(const QString &original, const QString &download,
                    name.constData()) != 0)
         return false;
     if (::fsync(directory.value) != 0) {
-        error = QStringLiteral(
+        error = QCoreApplication::translate(
+            "UpdateController",
             "The update was installed, but syncing its folder failed. The "
             "previous image is available as .previous.");
         return true;

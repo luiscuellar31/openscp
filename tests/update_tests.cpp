@@ -21,6 +21,7 @@
 #include <QTemporaryDir>
 #include <QThread>
 #include <QTimer>
+#include <QTranslator>
 #include <QUuid>
 
 #include <openssl/evp.h>
@@ -127,6 +128,49 @@ OPENSCP_TEST(testReleaseAndUrlValidation, test) {
         !parseUpdateRelease(QByteArray(1024 * 1024 + 1, 'x'), "1.1.0", error) &&
             !error.isEmpty(),
         "bound untrusted metadata");
+}
+
+// Marks each text with its context, which tells a message that went through
+// translation from one that did not.
+class MarkingTranslator final : public QTranslator {
+    public:
+    bool isEmpty() const override { return false; }
+    QString translate(const char *context, const char *sourceText, const char *,
+                      int) const override {
+        return QStringLiteral("[%1] %2").arg(QString::fromUtf8(context),
+                                             QString::fromUtf8(sourceText));
+    }
+};
+
+OPENSCP_TEST(testUpdateAndSettingsErrorsAreTranslated, test) {
+    // They were English literals, so a translated dialog went on in English.
+    QTemporaryDir directory;
+    const QString blocker = directory.filePath(QStringLiteral("blocker"));
+    {
+        QFile file(blocker);
+        test.check(file.open(QIODevice::WriteOnly),
+                   "a file should take the settings folder's place");
+    }
+    MarkingTranslator translator;
+    QCoreApplication::installTranslator(&translator);
+    QString updateError;
+    parseUpdateRelease(QByteArray(1024 * 1024 + 1, 'x'), "1.1.0", updateError);
+    QString settingsError;
+    {
+        AppSettings settings(QDir(blocker).filePath(QStringLiteral("a.ini")),
+                             QSettings::IniFormat);
+        settings.setValue(QStringLiteral("key"), 1);
+        settingsError = settings.syncSecure().error;
+    }
+    QCoreApplication::removeTranslator(&translator);
+
+    test.check(
+        updateError == QStringLiteral("[UpdateController] Release response is "
+                                      "too large."),
+        "an update error should be translated: " + updateError.toStdString());
+    test.check(settingsError.startsWith(QStringLiteral("[AppSettings] ")),
+               "a settings error should be translated: " +
+                   settingsError.toStdString());
 }
 
 OPENSCP_TEST(testManifestAuthenticationAndCompatibility, test) {

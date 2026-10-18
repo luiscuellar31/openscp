@@ -115,13 +115,15 @@ void UpdateController::request(
          completion = std::move(completion)] {
             QString error;
             if (*tooLarge || reply->bytesAvailable() > limit - buffer->size())
-                error =
-                    QStringLiteral("Update response exceeds its size limit.");
+                error = QCoreApplication::translate(
+                    "UpdateController",
+                    "Update response exceeds its size limit.");
             else if (reply->error() != QNetworkReply::NoError)
                 error = reply->errorString();
             else if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute)
                          .toInt() != 200)
-                error = QStringLiteral("Unexpected update server response.");
+                error = QCoreApplication::translate(
+                    "UpdateController", "Unexpected update server response.");
             else
                 buffer->append(reply->readAll());
             reply_ = nullptr;
@@ -133,16 +135,18 @@ void UpdateController::request(
 void UpdateController::check(bool manual) {
     if (restartRequired_) {
         if (manual)
-            emit checked(true,
-                         QStringLiteral("An update has been installed. Restart "
-                                        "OpenSCP before checking again."));
+            emit checked(true, QCoreApplication::translate(
+                                   "UpdateController",
+                                   "An update has been installed. Restart "
+                                   "OpenSCP before checking again."));
         return;
     }
     if (busy_) {
         if (manual)
-            emit checked(
-                true,
-                QStringLiteral("An update operation is already in progress."));
+            emit checked(true, QCoreApplication::translate(
+                                   "UpdateController",
+                                   "An update operation is already in "
+                                   "progress."));
         return;
     }
     AppSettings settings;
@@ -243,9 +247,10 @@ void UpdateController::install(const UpdateArtifact &artifact) {
         !canInstall_() || !isTrustedUpdateUrl(artifact.url) ||
         artifact.size <= 0 || artifact.size > kMaximumUpdateSize ||
         artifact.sha256.size() != 32) {
-        emit installed(false,
-                       QStringLiteral("No verified update is ready to install, "
-                                      "or file operations are pending."));
+        emit installed(false, QCoreApplication::translate(
+                                  "UpdateController",
+                                  "No verified update is ready to install, "
+                                  "or file operations are pending."));
         return;
     }
     if (installation_ == UpdateInstallation::WindowsSetup) {
@@ -288,13 +293,15 @@ void UpdateController::install(const UpdateArtifact &artifact) {
             drain();
             QString error;
             if (*writeError || *written != artifact.size || !download_->flush())
-                error = QStringLiteral(
+                error = QCoreApplication::translate(
+                    "UpdateController",
                     "The update download is incomplete or could not be saved.");
             else if (reply->error() != QNetworkReply::NoError)
                 error = reply->errorString();
             else if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute)
                          .toInt() != 200)
-                error = QStringLiteral("Unexpected update server response.");
+                error = QCoreApplication::translate(
+                    "UpdateController", "Unexpected update server response.");
             reply_ = nullptr;
             reply->deleteLater();
             if (!error.isEmpty()) {
@@ -312,8 +319,9 @@ void UpdateController::publishDownloaded(const UpdateArtifact &artifact) {
     if (!canInstall_ || !canInstall_()) {
         busy_ = false;
         download_.reset();
-        emit installed(false,
-                       QStringLiteral("File operations are still pending."));
+        emit installed(false, QCoreApplication::translate(
+                                  "UpdateController",
+                                  "File operations are still pending."));
         return;
     }
     installing_ = true;
