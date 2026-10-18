@@ -439,15 +439,17 @@ bool isValidLocalEntryName(const QString &name, QString *why) {
     if (!isValidEntryName(name, why))
         return false;
     // A name a server accepts can still be impossible here. On Windows ':'
-    // opens an alternate data stream, CON or NUL a device, and a final dot or
-    // space is dropped, so the file would land elsewhere.
+    // opens an alternate data stream, CON or NUL a device, a final dot or
+    // space is dropped, and REPORT~1.TXT can be another file's short name, so
+    // the file would land elsewhere.
     if (!openscp::localfiles::localNameProblem(name.toStdString()).empty()) {
         if (why) {
             *why = QCoreApplication::translate(
                 "MainWindow",
                 "Invalid name for this computer: Windows does not allow the "
                 "characters < > : \" | ? *, a final dot or space, or device "
-                "names such as CON, NUL or COM1.");
+                "names such as CON, NUL or COM1, and can read a name such as "
+                "REPORT~1.TXT as another file's short name.");
         }
         return false;
     }

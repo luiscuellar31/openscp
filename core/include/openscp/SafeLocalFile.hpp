@@ -52,7 +52,9 @@ bool setLocalModificationTime(const std::string &path,
 // when it can. POSIX refuses only "", ".", "..", "/" and NUL. Windows also
 // refuses the characters <>:"\|?* and control characters, a final dot or
 // space, reserved device names such as CON, NUL or COM1 (with or without an
-// extension), and names longer than 255 UTF-16 units.
+// extension), names longer than 255 UTF-16 units, and names with the form of
+// the short names it makes for long ones, such as REPORT~1.TXT, which can
+// open another entry. Local paths may still pass through short names.
 std::string localNameProblem(const std::string &name);
 
 // Opens a user-owned regular file without following a final-component symlink.

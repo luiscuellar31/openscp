@@ -2163,6 +2163,36 @@ OPENSCP_TEST(test_windows_local_files_open_past_max_path, t) {
     fs::remove_all(L"\\\\?\\" + base.wstring(), ec);
 }
 
+OPENSCP_TEST(test_windows_short_names_are_refused_only_as_names, t) {
+    const fs::path base = makeTempFilePath("short-names").parent_path();
+    const fs::path archive = base / "Documents Archive";
+    std::error_code ec;
+    fs::create_directories(archive, ec);
+    wchar_t shortPath[MAX_PATH];
+    const DWORD length =
+        ::GetShortPathNameW(archive.c_str(), shortPath, MAX_PATH);
+    const fs::path alias =
+        length > 0 && length < MAX_PATH ? fs::path(shortPath) : fs::path();
+    if (alias.empty() || alias.filename() == archive.filename()) {
+        t.skip("the temporary folder's volume makes no short names");
+        fs::remove_all(base, ec);
+        return;
+    }
+    // A remote entry with that name would land in "Documents Archive".
+    t.check(!openscp::localfiles::localNameProblem(alias.filename().string())
+                 .empty(),
+            "a name equal to another entry's short name should be refused");
+    // A path the user gives may still reach a folder by its short name.
+    std::string error;
+    const bool followed = openscp::localfiles::ensureLocalDirectories(
+        (alias / "inside").string(), error);
+    t.checkWithError(
+        followed, "a short name in a whole path should be followed: ", error);
+    t.check(fs::is_directory(archive / "inside", ec),
+            "the short name should reach the long-named folder");
+    fs::remove_all(base, ec);
+}
+
 OPENSCP_TEST(test_windows_links_are_trusted_where_users_cannot_add, t) {
     // ProgramData belongs to the system, but any user may add entries to it,
     // so a link there may come from another account. A link in C:\Users,

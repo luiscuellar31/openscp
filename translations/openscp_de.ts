@@ -1826,6 +1826,11 @@ Bearbeiten Sie die Verbindung und behalten Sie nur eine Transportmethode bei.</t
         <translation>Der Eintrag konnte nicht verschoben werden: %1 (%2)</translation>
     </message>
     <message>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="447"/>
+        <source>Invalid name for this computer: Windows does not allow the characters &lt; &gt; : &quot; | ? *, a final dot or space, or device names such as CON, NUL or COM1, and can read a name such as REPORT~1.TXT as another file&apos;s short name.</source>
+        <translation>Ungültiger Name für diesen Computer: Windows lässt die Zeichen &lt; &gt; : &quot; | ? *, einen Punkt oder ein Leerzeichen am Ende sowie Gerätenamen wie CON, NUL oder COM1 nicht zu und kann einen Namen wie REPORT~1.TXT als Kurznamen einer anderen Datei lesen.</translation>
+    </message>
+    <message>
         <location filename="../ui/app/MainWindowLocalOps.cpp" line="33"/>
         <source>Moved OK: %1  |  Failed: %2  |  Skipped: %3</source>
         <translation>Erfolgreich verschoben: %1  |  Fehlgeschlagen: %2  |  Übersprungen: %3</translation>
@@ -2166,7 +2171,7 @@ Overwrite?</source>
     <message>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="250"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="612"/>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="474"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="476"/>
         <source>Invalid name</source>
         <translation>Ungültiger Name</translation>
     </message>
@@ -2650,57 +2655,56 @@ Mit der Vorbereitung fortfahren?</translation>
         <translation>Ungültiger Name: Darf keine Steuerzeichen enthalten.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="446"/>
         <source>Invalid name for this computer: Windows does not allow the characters &lt; &gt; : &quot; | ? *, a final dot or space, or device names such as CON, NUL or COM1.</source>
-        <translation>Ungültiger Name für diesen Computer: Windows lässt die Zeichen &lt; &gt; : &quot; | ? *, einen Punkt oder ein Leerzeichen am Ende sowie Gerätenamen wie CON, NUL oder COM1 nicht zu.</translation>
+        <translation type="vanished">Ungültiger Name für diesen Computer: Windows lässt die Zeichen &lt; &gt; : &quot; | ? *, einen Punkt oder ein Leerzeichen am Ende sowie Gerätenamen wie CON, NUL oder COM1 nicht zu.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="490"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="492"/>
         <source>Permission denied.</source>
         <translation>Zugriff verweigert.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="493"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="495"/>
         <source>Location is read-only.</source>
         <translation>Speicherort ist schreibgeschützt.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="497"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="499"/>
         <source>File or folder does not exist.</source>
         <translation>Datei oder Ordner ist nicht vorhanden.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="501"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="503"/>
         <source>Connection timed out.</source>
         <translation>Zeitüberschreitung der Verbindung.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="507"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="509"/>
         <source>Could not resolve the server hostname.</source>
         <translation>Der Hostname des Servers konnte nicht aufgelöst werden.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="511"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="513"/>
         <source>Connection refused by the server.</source>
         <translation>Der Server hat die Verbindung abgelehnt.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="516"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="518"/>
         <source>Network unavailable or host unreachable.</source>
         <translation>Netzwerk nicht verfügbar oder Host nicht erreichbar.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="521"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="523"/>
         <source>Authentication failed.</source>
         <translation>Authentifizierung fehlgeschlagen.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="553"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="555"/>
         <source>Conflict</source>
         <translation>Konflikt</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="554"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="556"/>
         <source>“%1” already exists at destination.
 Overwrite?</source>
         <translation>„%1“ ist am Ziel bereits vorhanden.
