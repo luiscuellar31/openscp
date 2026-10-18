@@ -153,19 +153,35 @@ bool core_log_enabled(CoreLogLevel level) {
 void core_logf(CoreLogLevel level, const char *fmt, ...) {
     if (!core_log_enabled(level) || !fmt)
         return;
-    std::fprintf(stderr, "[OpenSCP] ");
+    std::string line = "[OpenSCP] ";
     va_list ap;
     va_start(ap, fmt);
+    va_list measure;
+    va_copy(measure, ap);
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wformat-nonliteral"
 #endif
-    std::vfprintf(stderr, fmt, ap);
+    const int length = std::vsnprintf(nullptr, 0, fmt, measure);
+    if (length > 0) {
+        const std::size_t prefix = line.size();
+        line.resize(prefix + static_cast<std::size_t>(length));
+        std::vsnprintf(line.data() + prefix,
+                       static_cast<std::size_t>(length) + 1, fmt, ap);
+    }
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
+    va_end(measure);
     va_end(ap);
-    std::fprintf(stderr, "\n");
+    line += '\n';
+    std::fputs(line.c_str(), stderr);
+#ifdef _WIN32
+    // OpenSCP has no console on Windows, so stderr shows nothing unless it is
+    // redirected; debuggers and DebugView show this, as they show Qt's
+    // messages.
+    ::OutputDebugStringW(win32::toWide(line).c_str());
+#endif
 }
 
 // Resolve POSIX home directory robustly (prefer $HOME, fallback to getpwuid)

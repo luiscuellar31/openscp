@@ -253,7 +253,10 @@ These optional environment variables are useful when diagnosing a problem:
 - `OPENSCP_ENABLE_INSECURE_FALLBACK=1` only when the build permits it
 
 Messages go to the standard error stream. On Windows, which shows no console
-for OpenSCP, start it from PowerShell with that stream saved to a file:
+for OpenSCP, they also go to the debugger output, which
+[DebugView](https://learn.microsoft.com/sysinternals/downloads/debugview)
+shows as they come. To keep them in a file instead, start OpenSCP from
+PowerShell with the error stream saved to one:
 
 ```powershell
 $env:OPENSCP_LOG_LEVEL = 'debug'
