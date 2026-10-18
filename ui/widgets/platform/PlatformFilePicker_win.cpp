@@ -12,6 +12,7 @@
 // clang-format on
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QWidget>
 
 #include <cstdint>
@@ -89,9 +90,11 @@ HRESULT createShellItem(const QString &path, ComPtr<IShellItem> &item) {
     if (path.isEmpty()) {
         return E_INVALIDARG;
     }
-    return SHCreateItemFromParsingName(reinterpret_cast<PCWSTR>(path.utf16()),
-                                       nullptr, IID_IShellItem,
-                                       reinterpret_cast<void **>(item.put()));
+    // The Shell parses only backslashes: "C:/Users" fails with E_INVALIDARG.
+    const QString nativePath = QDir::toNativeSeparators(path);
+    return SHCreateItemFromParsingName(
+        reinterpret_cast<PCWSTR>(nativePath.utf16()), nullptr, IID_IShellItem,
+        reinterpret_cast<void **>(item.put()));
 }
 
 HWND ownerWindow(QWidget *parent) {
