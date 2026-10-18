@@ -23,6 +23,10 @@
 #include <filesystem>
 #include <limits>
 #include <mutex>
+#include <optional>
+#include <ratio>
+#include <system_error>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -54,6 +58,71 @@ quint64 saturatingAdd(quint64 left, quint64 right) {
                ? std::numeric_limits<quint64>::max()
                : left + right;
 }
+
+// What the local scan records of one listed entry besides its name.
+struct ListedEntryFacts {
+    bool link = false;
+    SyncEntryType type = SyncEntryType::Other;
+    // Of a file, or -1 when unknown.
+    qint64 size = -1;
+    std::optional<qint64> modifiedMs;
+};
+
+#ifdef _WIN32
+// The listing already holds each entry's attributes, size and time, which a
+// QFileInfo would read again with one more file system call per entry. It
+// also takes a shortcut as the file it is, as LocalLinks.hpp wants.
+ListedEntryFacts
+listedEntryFacts(const std::filesystem::directory_entry &listed) {
+    ListedEntryFacts facts;
+    std::error_code error;
+    const std::filesystem::file_type kind = listed.symlink_status(error).type();
+    // MSVC gives junctions and other mount points a file type of their own.
+    facts.link = kind == std::filesystem::file_type::symlink ||
+                 kind == std::filesystem::file_type::junction;
+    // Links are skipped, and their size and time would be the target's.
+    if (facts.link)
+        return facts;
+    if (kind == std::filesystem::file_type::directory) {
+        facts.type = SyncEntryType::Directory;
+    } else if (kind == std::filesystem::file_type::regular) {
+        facts.type = SyncEntryType::File;
+        const std::uintmax_t size = listed.file_size(error);
+        if (!error)
+            facts.size = static_cast<qint64>(size);
+    }
+    // MSVC counts file times as FILETIME does, in 100-nanosecond units since
+    // 1601, and QFileInfo would give the same milliseconds since 1970.
+    static_assert(std::is_same_v<std::filesystem::file_time_type::period,
+                                 std::ratio<1, 10'000'000>>);
+    constexpr qint64 kUnixEpochInFileTimeMilliseconds = 11'644'473'600'000;
+    const std::filesystem::file_time_type modified =
+        listed.last_write_time(error);
+    if (!error) {
+        facts.modifiedMs = modified.time_since_epoch().count() / 10'000 -
+                           kUnixEpochInFileTimeMilliseconds;
+    }
+    return facts;
+}
+#else
+// POSIX listings carry at most the type, so QFileInfo reads the rest.
+ListedEntryFacts listedEntryFacts(const QFileInfo &info) {
+    ListedEntryFacts facts;
+    facts.link = isLocalLink(info);
+    if (facts.link)
+        return facts;
+    if (isLocalFolder(info)) {
+        facts.type = SyncEntryType::Directory;
+    } else if (isLocalFile(info)) {
+        facts.type = SyncEntryType::File;
+        facts.size = localFileSize(info);
+    }
+    const QDateTime modified = localModificationTime(info);
+    if (modified.isValid())
+        facts.modifiedMs = modified.toMSecsSinceEpoch();
+    return facts;
+}
+#endif
 
 QString parentRelativePath(const QString &relativePath) {
     const qsizetype separator = relativePath.lastIndexOf(QLatin1Char('/'));
@@ -740,7 +809,13 @@ void SyncCoordinator::start(const QString &localRoot,
                     unscannedPaths.insert(node.relativePath);
                     continue;
                 }
-                if (isLocalLink(info)) {
+#ifdef _WIN32
+                const ListedEntryFacts facts =
+                    listedEntryFacts(*directoryEntry);
+#else
+                const ListedEntryFacts facts = listedEntryFacts(info);
+#endif
+                if (facts.link) {
                     ++skippedSymlinks;
                     unscannedPaths.insert(normalized);
                     continue;
@@ -756,33 +831,20 @@ void SyncCoordinator::start(const QString &localRoot,
                 entry.relativePath = normalized;
                 // FIFOs, sockets and devices are neither, and are never
                 // copied: reading a FIFO would block the transfer.
-                if (isLocalFolder(info))
-                    entry.type = SyncEntryType::Directory;
-                else if (isLocalFile(info))
-                    entry.type = SyncEntryType::File;
-                else
-                    entry.type = SyncEntryType::Other;
-                if (isLocalFile(info)) {
-                    const qint64 size = localFileSize(info);
-                    if (size >= 0) {
-                        entry.size = quint64(size);
-                        if (quint64(size) >
-                            std::numeric_limits<quint64>::max() - knownBytes) {
-                            knownBytes = std::numeric_limits<quint64>::max();
-                        } else {
-                            knownBytes += quint64(size);
-                        }
+                entry.type = facts.type;
+                if (facts.type == SyncEntryType::File) {
+                    if (facts.size >= 0) {
+                        entry.size = quint64(facts.size);
+                        knownBytes = saturatingAdd(knownBytes, *entry.size);
                     } else {
                         ++unknownSizes;
                     }
                 }
-                const QDateTime modified = localModificationTime(info);
-                if (modified.isValid())
-                    entry.modifiedMs = modified.toMSecsSinceEpoch();
+                entry.modifiedMs = facts.modifiedMs;
                 snapshot.push_back(std::move(entry));
                 ++itemCount;
 
-                if (isLocalFolder(info)) {
+                if (facts.type == SyncEntryType::Directory) {
                     if (node.depth + 1 >= kMaximumDepth) {
                         ++depthLimits;
                         unscannedPaths.insert(normalized);
