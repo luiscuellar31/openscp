@@ -17,6 +17,12 @@ void TransferQueueWriter::setWarningHandler(WarningHandler onWarning) {
     onWarning_ = std::move(onWarning);
 }
 
+void TransferQueueWriter::setFailureHandler(
+    std::function<void(int failuresInARow)> onFailure) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    onFailure_ = std::move(onFailure);
+}
+
 void TransferQueueWriter::setPath(QString path) {
     std::lock_guard<std::mutex> lock(mutex_);
     path_ = std::move(path);
@@ -49,6 +55,7 @@ void TransferQueueWriter::shutdown() {
         stopped_ = true;
         // A warning raised while the owner is going away has nowhere to go.
         onWarning_ = {};
+        onFailure_ = {};
     }
     thread_.request_stop();
     wake_.notify_all();
@@ -60,10 +67,12 @@ void TransferQueueWriter::run(std::stop_token stopToken) {
     // A failure is reported once, not again until a save succeeds, so a queue
     // that keeps failing does not raise a warning on every change.
     bool failureReported = false;
+    int failuresInARow = 0;
     while (true) {
         QVector<TransferTask> tasks;
         QString path;
         WarningHandler onWarning;
+        std::function<void(int)> onFailure;
         {
             std::unique_lock<std::mutex> lock(mutex_);
             wake_.wait(lock, [this, &stopToken] {
@@ -77,6 +86,7 @@ void TransferQueueWriter::run(std::stop_token stopToken) {
             pending_.reset();
             path = path_;
             onWarning = onWarning_;
+            onFailure = onFailure_;
             writing_ = true;
         }
 
@@ -93,7 +103,13 @@ void TransferQueueWriter::run(std::stop_token stopToken) {
         idle_.notify_all();
         if (result.succeeded) {
             failureReported = false;
-        } else if (!failureReported && !result.warning.isEmpty() && onWarning) {
+            failuresInARow = 0;
+            continue;
+        }
+        ++failuresInARow;
+        if (onFailure)
+            onFailure(failuresInARow);
+        if (!failureReported && !result.warning.isEmpty() && onWarning) {
             failureReported = true;
             onWarning(result.warning);
         }

@@ -202,6 +202,32 @@ TransferManager::TransferManager(QObject *parent) : QObject(parent) {
     persistenceTimer_->setInterval(kPersistenceDelayMs);
     connect(persistenceTimer_, &QTimer::timeout, this,
             &TransferManager::writeQueueSnapshot);
+    persistenceRetryTimer_ = new QTimer(this);
+    persistenceRetryTimer_->setSingleShot(true);
+    connect(persistenceRetryTimer_, &QTimer::timeout, this,
+            &TransferManager::schedulePersistence);
+    // A snapshot that was not saved, as when an antivirus holds the file on
+    // Windows, is not the saved state: its fingerprint is forgotten and the
+    // save is tried again later, in case the queue stays as it is. One retry
+    // waits at a time, longer after each failure in a row, so that a queue
+    // that cannot be saved, on a full or read-only volume, is not copied and
+    // written every few seconds for as long as OpenSCP runs.
+    persistenceWriter_.setFailureHandler([this](int failuresInARow) {
+        QMetaObject::invokeMethod(
+            this,
+            [this, failuresInARow] {
+                {
+                    std::lock_guard<std::mutex> lock(mtx_);
+                    lastPersistedFingerprint_.reset();
+                }
+                if (!persistenceRetryTimer_->isActive()) {
+                    persistenceRetryTimer_->start(std::min(
+                        kPersistenceRetryMs << std::min(failuresInARow - 1, 6),
+                        kPersistenceMaxRetryMs));
+                }
+            },
+            Qt::QueuedConnection);
+    });
     workerSlots_.reserve(kWorkerSlots);
     for (int index = 0; index < kWorkerSlots; ++index)
         workerSlots_.push_back(std::make_unique<WorkerSlot>(index));

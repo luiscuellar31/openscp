@@ -170,6 +170,10 @@ class TransferManager : public QObject {
     // deadline, so a busy queue is still saved regularly.
     static constexpr int kPersistenceDelayMs = 250;
     static constexpr int kPersistenceDeadlineMs = 2000;
+    // A failed save is tried again after kPersistenceRetryMs, twice as long
+    // after each failure in a row, up to kPersistenceMaxRetryMs.
+    static constexpr int kPersistenceRetryMs = 5000;
+    static constexpr int kPersistenceMaxRetryMs = 5 * 60 * 1000;
 
     struct WorkerSlot;
     enum class PrecheckOutcome { Continue, Skipped, Canceled, Error };
@@ -246,6 +250,7 @@ class TransferManager : public QObject {
     TransferAutoClearRule autoClearRule_;
 
     QTimer *persistenceTimer_ = nullptr;
+    QTimer *persistenceRetryTimer_ = nullptr;
     TransferQueueWriter persistenceWriter_;
     QString persistencePath_;
     qint64 persistencePendingSinceMs_ = 0;

@@ -306,7 +306,10 @@ have narrower jobs:
 - `BandwidthLimiter` applies speed limits.
 - `TransferQueuePersistence` saves unfinished tasks safely. A queue too large
   to save removes the previous file, so a stale queue is never restored, and
-  `TransferQueueWriter` reports a failed save once until a save succeeds.
+  `TransferQueueWriter` reports a failed save once until a save succeeds. The
+  manager tries a failed save again five seconds later, even when the queue
+  has not changed since, with one retry waiting at a time and twice as long
+  after each failure in a row, up to five minutes.
 
 The transfer queue dialog keeps a separate table model indexed by task ID.
 Contiguous removals use Qt row-removal notifications. Discontinuous removals

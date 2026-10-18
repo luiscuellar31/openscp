@@ -1342,6 +1342,42 @@ OPENSCP_TEST(testLeavingASessionStopsWorkersStillConnecting, test) {
     }
 }
 
+OPENSCP_TEST(testFailedQueueSaveIsRetriedWithoutAChange, test) {
+    // The snapshot counted as saved once handed to the writer, so after a
+    // failed save, as when an antivirus holds the file on Windows, the queue
+    // was not written again until it changed.
+    QTemporaryDir directory;
+    const QString blocker = directory.filePath(QStringLiteral("blocker"));
+    {
+        QFile file(blocker);
+        test.check(file.open(QIODevice::WriteOnly),
+                   "a file should take the folder's place");
+    }
+    const QString path = QDir(blocker).filePath(QStringLiteral("queue.json"));
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    test.check(manager.enablePersistence(path),
+               "persistence should be enabled");
+    int warnings = 0;
+    QObject::connect(&manager, &TransferManager::persistenceWarning, &manager,
+                     [&warnings] { ++warnings; });
+    manager.enqueueDownload(QStringLiteral("/remote/file"),
+                            directory.filePath(QStringLiteral("file")));
+    test.check(waitUntil([&] { return warnings > 0; }),
+               "the save should fail while a file takes the folder's place");
+
+    test.check(QFile::remove(blocker) && QDir().mkpath(blocker),
+               "the folder should become writable");
+    test.check(waitUntil(
+                   [&] {
+                       return TransferQueuePersistence::load(
+                                  path, QStringLiteral("test-session"))
+                                  .tasks.size() == 1;
+                   },
+                   std::chrono::milliseconds(10000)),
+               "the queue should be saved again without changing");
+}
+
 OPENSCP_TEST(testStatusChangesAloneDoNotRewriteTheQueue, test) {
     QTemporaryDir directory;
     const QString path = directory.filePath(QStringLiteral("queue.json"));
@@ -4969,6 +5005,36 @@ OPENSCP_TEST(testQueueWriterReportsAFailureOnce, test) {
     writer.saveAndWait(queueOverTheTaskLimit());
     test.check(warnings.load() == 2,
                "a failure after a successful save should be reported again");
+}
+
+OPENSCP_TEST(testQueueWriterCountsFailuresInARow, test) {
+    // The manager waits longer before each retry of a save that keeps
+    // failing, and as before once a save has worked.
+    QTemporaryDir root;
+    const QString path = root.filePath("failing.json");
+    std::mutex failuresMutex;
+    QVector<int> failures;
+    const auto reported = [&] {
+        std::lock_guard<std::mutex> lock(failuresMutex);
+        return failures;
+    };
+    TransferQueueWriter writer;
+    writer.setFailureHandler([&](int failuresInARow) {
+        std::lock_guard<std::mutex> lock(failuresMutex);
+        failures.push_back(failuresInARow);
+    });
+    writer.setPath(path);
+
+    writer.saveAndWait(queueOverTheTaskLimit());
+    writer.saveAndWait(queueOverTheTaskLimit());
+    test.check(waitUntil([&] { return reported().size() == 2; }) &&
+                   reported() == QVector<int>{1, 2},
+               "each failure in a row should be counted");
+    writer.saveAndWait({persistableTask(1, QStringLiteral("/saved"))});
+    writer.saveAndWait(queueOverTheTaskLimit());
+    test.check(waitUntil([&] { return reported().size() == 3; }) &&
+                   reported() == QVector<int>{1, 2, 1},
+               "a save that works should start the count over");
 }
 
 OPENSCP_TEST(testPausedQueuePersistence, test) {
