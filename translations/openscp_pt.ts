@@ -4596,8 +4596,8 @@ Copiar suas credenciais salvas para a duplicata?</translation>
 <context>
     <name>SyncDialog</name>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="277"/>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="612"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="305"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="646"/>
         <source>Source scan did not verify this path; mirror deletion was omitted</source>
         <translation>A análise da origem não verificou este caminho; a exclusão pelo espelhamento foi ignorada</translation>
     </message>
@@ -4885,108 +4885,113 @@ Copiar suas credenciais salvas para a duplicata?</translation>
         <translation>soma de verificação disponível</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="246"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="265"/>
         <source>The other side has this name with different letter case or Unicode form</source>
         <translation>O outro lado tem este nome com outras maiúsculas/minúsculas ou outra forma Unicode</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="255"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="274"/>
+        <source>The source also has this name with different letter case or Unicode form</source>
+        <translation>A origem também tem este nome com outras maiúsculas/minúsculas ou outra forma Unicode</translation>
+    </message>
+    <message>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="283"/>
         <source>Folder exists only in the source</source>
         <translation>A pasta existe apenas na origem</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="259"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="287"/>
         <source>File exists only in the source</source>
         <translation>O arquivo existe apenas na origem</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="263"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="291"/>
         <source>This source entry type cannot be copied safely</source>
         <translation>Este tipo de item de origem não pode ser copiado com segurança</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="273"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="301"/>
         <source>Only in the destination; mirror is disabled</source>
         <translation>Existe apenas no destino; o espelhamento está desativado</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="283"/>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="288"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="311"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="316"/>
         <source>Only in the destination; mirror will delete it</source>
         <translation>Existe apenas no destino; o espelhamento o excluirá</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="292"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="320"/>
         <source>This destination entry type cannot be deleted safely</source>
         <translation>Este tipo de item de destino não pode ser excluído com segurança</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="302"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="330"/>
         <source>Snapshot entry is incomplete</source>
         <translation>A entrada do snapshot está incompleta</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="311"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="339"/>
         <source>Source and destination types are different</source>
         <translation>Os tipos da origem e do destino são diferentes</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="317"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="345"/>
         <source>Metadata is not reliable enough to compare</source>
         <translation>Os metadados não são confiáveis o suficiente para a comparação</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="323"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="351"/>
         <source>Folder exists on both sides</source>
         <translation>A pasta existe nos dois lados</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="329"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="357"/>
         <source>This entry type is not synchronized automatically</source>
         <translation>Este tipo de item não é sincronizado automaticamente</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="339"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="367"/>
         <source>Checksums match</source>
         <translation>As somas de verificação correspondem</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="345"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="373"/>
         <source>Size or modification date is unknown</source>
         <translation>O tamanho ou a data de modificação é desconhecido</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="354"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="382"/>
         <source>Destination is newer than the source</source>
         <translation>O destino é mais recente que a origem</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="360"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="388"/>
         <source>File sizes are different</source>
         <translation>Os tamanhos dos arquivos são diferentes</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="368"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="396"/>
         <source>Source is newer than the destination</source>
         <translation>A origem é mais recente que o destino</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="375"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="403"/>
         <source>Checksums differ but timestamps do not identify a newer source</source>
         <translation>As somas de verificação são diferentes, mas os horários não identificam uma origem mais recente</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="382"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="410"/>
         <source>Size and modification date match</source>
         <translation>O tamanho e a data de modificação correspondem</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="575"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="609"/>
         <source>An unsafe relative path was omitted from the plan</source>
         <translation>Um caminho relativo inseguro foi omitido do plano</translation>
     </message>
     <message>
-        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="658"/>
+        <location filename="../ui/sync/SyncComparisonEngine.cpp" line="692"/>
         <source>A mirror deletion that contains incoming items was omitted: </source>
         <translation>Uma exclusão por espelhamento que contém itens recebidos foi omitida: </translation>
     </message>

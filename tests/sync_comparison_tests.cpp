@@ -457,6 +457,36 @@ OPENSCP_TEST(testCaseAndUnicodeAliasesAreConflicts, test) {
                "the mirror should delete only the unrelated stale file");
 }
 
+OPENSCP_TEST(testSourceNamesThatMeetInOneDestinationAreConflicts, test) {
+    // Copied to a destination that ignores case and Unicode form, as on
+    // Windows and macOS, each pair would become one entry, the second copy
+    // replacing the first.
+    SyncComparisonOptions options;
+    const QString composed = QStringLiteral("café.txt");
+    const QString decomposed = QStringLiteral("café.txt");
+    const auto items = SyncComparisonEngine::compare(
+        {file(QStringLiteral("Makefile"), 1, 1000),
+         file(QStringLiteral("makefile"), 2, 2000), file(composed, 1, 1000),
+         file(decomposed, 2, 2000), file(QStringLiteral("other.txt"), 1, 1000)},
+        {}, options);
+
+    for (const QString &path :
+         {QStringLiteral("Makefile"), QStringLiteral("makefile"), composed,
+          decomposed}) {
+        const SyncComparisonItem *item = findItem(items, path);
+        test.check(item && item->action == SyncAction::Conflict &&
+                       !item->selected,
+                   "source names that meet in one destination should be a "
+                   "conflict: " +
+                       path.toStdString());
+    }
+    const SyncExecutionPlan plan =
+        SyncComparisonEngine::makeExecutionPlan(items, options);
+    test.check(plan.copies.size() == 1 && plan.copies.front().relativePath ==
+                                              QStringLiteral("other.txt"),
+               "only the unrelated file should be copied");
+}
+
 OPENSCP_TEST(testChecksumComparison, test) {
     SyncSnapshotEntry local = file(QStringLiteral("verified.bin"), 10, 20'000);
     local.checksumAlgorithm = QStringLiteral("SHA-256");
