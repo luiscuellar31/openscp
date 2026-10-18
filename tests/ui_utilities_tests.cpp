@@ -462,6 +462,60 @@ OPENSCP_TEST(testOnlyStagingBatchesAreCleanedAfterADrop, test) {
         "a link named like a batch should not be followed");
 }
 
+// The default QSettings folders of this binary, set once in main(): a test
+// that pointed them at folders of its own would leave every later test on
+// folders that no longer exist.
+struct SettingsFolders {
+    QTemporaryDir user;
+    QTemporaryDir machine;
+};
+
+SettingsFolders &settingsFolders() {
+    static SettingsFolders folders;
+    return folders;
+}
+
+OPENSCP_TEST(testSettingsReadOnlyTheUsersOwnFile, test) {
+    // With IniFormat, QSettings would read a key missing from the user's file
+    // from the organization-wide file and from the machine-wide one, which on
+    // Windows sits under C:\ProgramData, where any user may write.
+    const SettingsFolders &folders = settingsFolders();
+    test.check(folders.user.isValid() && folders.machine.isValid(),
+               "the settings folders should be created");
+    if (!folders.user.isValid() || !folders.machine.isValid())
+        return;
+
+    QString organization;
+    QString application;
+    {
+        const openscpui::AppSettings store;
+        organization = store.organizationName();
+        application = store.applicationName();
+    }
+    const QString planted = QStringLiteral("/planted/by/another/account");
+    {
+        QSettings machineWide(QSettings::IniFormat, QSettings::SystemScope,
+                              organization, application);
+        machineWide.setValue(openscpui::settingskeys::kStagingRoot, planted);
+        QSettings organizationWide(QSettings::IniFormat, QSettings::UserScope,
+                                   organization);
+        organizationWide.setValue(
+            openscpui::settingskeys::kDefaultKnownHostsPolicy,
+            QStringLiteral("off"));
+    }
+
+    const openscpui::AppSettings store;
+    test.check(!store.contains(openscpui::settingskeys::kStagingRoot) &&
+                   openscpui::effectiveStagingRootPath(store) != planted,
+               "a machine-wide file must not supply the user's settings");
+    test.check(
+        !store.contains(openscpui::settingskeys::kDefaultKnownHostsPolicy),
+        "an organization-wide file must not supply the user's settings");
+    const openscpui::AppSettings named(organization, application);
+    test.check(!named.contains(openscpui::settingskeys::kStagingRoot),
+               "settings opened by name should read only the user's file");
+}
+
 OPENSCP_TEST(testLocalEntryNamesFollowThisComputer, test) {
     test.check(isValidLocalEntryName(QStringLiteral("report.txt")),
                "an ordinary name should be a valid local name");
@@ -551,6 +605,12 @@ OPENSCP_TEST(testRowSelectionIgnoresRowsOutsideTheModel, test) {
 } // namespace
 
 int main(int argc, char **argv) {
+    const SettingsFolders &folders = settingsFolders();
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                       folders.user.path());
+    QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope,
+                       folders.machine.path());
     openscp::test::TestHarness harness("UI utility");
     return harness.runWithApplication<QCoreApplication>(argc, argv);
 }
