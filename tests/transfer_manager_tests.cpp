@@ -38,6 +38,13 @@
 #include <utility>
 #include <vector>
 
+#ifdef Q_OS_WIN
+// clang-format off
+#include <windows.h>
+#include <urlmon.h>
+// clang-format on
+#endif
+
 struct TransferManagerTestAccess {
     // A task whose worker is still finishing it after a failed connection
     // suspended the queue.
@@ -1104,6 +1111,49 @@ std::string zoneIdentifierOf(const QString &path) {
                        std::istreambuf_iterator<char>());
 }
 
+// Why this machine shows no Mark of the Web with zone 3 for files from
+// originUrl saved in folder, or an empty string. markDownloadedFile() rightly
+// writes none under a policy that keeps Windows from saving zone information,
+// on a volume without alternate streams, or for a server that Internet
+// Options map below the Internet zone, and another zone changes the ZoneId.
+std::string markOfTheWebUnavailable(const QString &folder,
+                                    const QString &originUrl) {
+    for (HKEY root : {HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER}) {
+        DWORD value = 0;
+        DWORD size = sizeof(value);
+        if (::RegGetValueW(root,
+                           L"Software\\Microsoft\\Windows\\CurrentVersion\\"
+                           L"Policies\\Attachments",
+                           L"SaveZoneInformation", RRF_RT_REG_DWORD, nullptr,
+                           &value, &size) == ERROR_SUCCESS &&
+            value == 1)
+            return "a policy keeps Windows from saving zone information";
+    }
+    const std::wstring volume =
+        std::filesystem::path(QDir::toNativeSeparators(folder).toStdWString())
+            .root_path()
+            .wstring();
+    DWORD volumeFlags = 0;
+    if (!::GetVolumeInformationW(volume.c_str(), nullptr, 0, nullptr, nullptr,
+                                 &volumeFlags, nullptr, 0) ||
+        (volumeFlags & FILE_NAMED_STREAMS) == 0)
+        return "the temporary folder's volume keeps no alternate streams";
+    const HRESULT com = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    DWORD zone = URLZONE_INTERNET;
+    IInternetSecurityManager *manager = nullptr;
+    if (SUCCEEDED(::CoInternetCreateSecurityManager(nullptr, &manager, 0))) {
+        (void)manager->MapUrlToZone(
+            reinterpret_cast<const wchar_t *>(originUrl.utf16()), &zone, 0);
+        manager->Release();
+    }
+    if (SUCCEEDED(com))
+        ::CoUninitialize();
+    if (zone != URLZONE_INTERNET)
+        return "Internet Options map the test server to zone " +
+               std::to_string(zone);
+    return {};
+}
+
 OPENSCP_TEST(testWindowsDownloadsCarryTheMarkOfTheWeb, test) {
     auto stats = std::make_shared<std::atomic<int>>(0);
     TimedDownloadClient baseClient(stats);
@@ -1119,7 +1169,15 @@ OPENSCP_TEST(testWindowsDownloadsCarryTheMarkOfTheWeb, test) {
     test.check(zoneIdentifierOf(unmarked).empty(),
                "a download without an origin should stay unmarked");
 
-    manager.setDownloadOrigin(QStringLiteral("sftp://files.example:2222/"));
+    const QString origin = QStringLiteral("sftp://files.example:2222/");
+    const std::string unavailable =
+        markOfTheWebUnavailable(destination.path(), origin);
+    if (!unavailable.empty()) {
+        test.skip("Mark of the Web: " + unavailable);
+        manager.shutdown();
+        return;
+    }
+    manager.setDownloadOrigin(origin);
     const QString marked = destination.filePath(QStringLiteral("marked.txt"));
     const quint64 second =
         manager.enqueueDownload(QStringLiteral("/remote/marked.txt"), marked);
