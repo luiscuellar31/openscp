@@ -84,7 +84,11 @@ git diff --check
 `check_ci_local.sh` configures, builds, and runs the tests in the ignored
 `build-ci-local/` directory by default. Its `--build-dir` option changes that
 path. On Windows, where these scripts need a POSIX shell, the counterpart of the
-first one is `.\scripts\windows.ps1 test` with `OPENSCP_WERROR=ON`.
+first one is `.\scripts\windows.ps1 test` with `OPENSCP_WERROR=ON`, which the
+Windows CI job runs. Changes to PowerShell scripts also need
+`.\scripts\checks\powershell-quality.ps1`, and changes to Windows code
+`scripts/ci/windows_clang_tidy.sh` from Git Bash, which runs the clang-tidy
+checks on the files with Windows code.
 
 For documentation-only changes, check the links and run `git diff --check`;
 compiling the application is not needed to validate Markdown.

@@ -529,7 +529,8 @@ int main() {
     std::string onlyRevoked;
     for (const std::string &key : scannedKeys) {
         const std::string revoked = "@revoked *" + key.substr(key.find(' '));
-        recordedAndRevoked += key + "\n" + revoked + "\n";
+        recordedAndRevoked.append(key).append("\n");
+        recordedAndRevoked.append(revoked).append("\n");
         onlyRevoked += revoked + "\n";
     }
     const fs::path revokedKnownHosts = localTmpRoot / "known_hosts_revoked";
@@ -1051,6 +1052,7 @@ int main() {
         std::mutex errorsMutex;
         std::vector<std::string> concurrentErrors;
         std::vector<std::thread> workers;
+        workers.reserve(kClients);
         for (int index = 0; index < kClients; ++index) {
             workers.emplace_back([&] {
                 for (int round = 0; round < kRounds; ++round) {

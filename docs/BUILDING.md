@@ -251,7 +251,8 @@ Guard and CET, and every imported DLL must be staged or part of Windows. It
 then writes `dist\OpenSCP-<version>-x64-setup.exe` and
 `dist\OpenSCP-<version>-x64.msi` with their `.sha256` files. Set
 `PACKAGE_FORMATS=setup` or `msi` to build one; `.\scripts\package\windows.ps1
-help` lists the other variables.
+help` lists the other variables. Pull requests that change a PowerShell script
+or the Windows packaging run it in the **Windows Packaging** workflow.
 
 The setup installs for the current user by default and can install for all
 users; it is the one that updates itself from the signed update manifest. The
@@ -298,7 +299,16 @@ them, and runs CTest:
 
 On Windows, `.\scripts\windows.ps1 test` configures the tests, builds them,
 and runs CTest; with `OPENSCP_WERROR=ON` it treats warnings as errors, as the
-Windows CI job does.
+Windows CI job does. That job also runs
+`.\scripts\checks\powershell-quality.ps1`, which parses the PowerShell
+scripts, tries the help of the user-facing ones, and reports PSScriptAnalyzer's
+errors when PSScriptAnalyzer is installed;
+`.\scripts\ci\windows_sftp_integration.ps1`, which runs the SFTP integration
+test against a local paramiko server, directly and through a jump host; and
+`scripts/ci/windows_clang_tidy.sh`, which runs `cpp-quality.sh --tidy` from
+Git Bash on the files that have Windows code, with the build's MSVC
+compilation database. The SFTP script adds the jump host to `known_hosts`
+only on a GitHub runner, or in the file given with `-KnownHosts`.
 
 Individual checks remain available when diagnosing a failure:
 
