@@ -638,21 +638,21 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
     <message>
         <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="280"/>
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="477"/>
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="623"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="505"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="651"/>
         <source>Cancel</source>
         <translation>Cancelar</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="619"/>
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="768"/>
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="1045"/>
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="1123"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="647"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="796"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="1073"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="1151"/>
         <source>Preparing files…</source>
         <translation>Preparando archivos…</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="458"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="486"/>
         <source>Confirm staging</source>
         <translation>Confirmar preparación</translation>
     </message>
@@ -672,47 +672,78 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
         <translation>Cancelar la preparación de archivos para arrastrar y soltar</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="464"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="386"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="387"/>
+        <source>Nothing to drag</source>
+        <translation>Nada que arrastrar</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="443"/>
+        <source>Some items will not be dragged</source>
+        <translation>Algunos elementos no se arrastrarán</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="461"/>
+        <source>Skipped invalid: %1</source>
+        <translation>Omitidos inválidos: %1</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="463"/>
+        <source>Symbolic links skipped: %1</source>
+        <translation>Enlaces simbólicos omitidos: %1</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="465"/>
+        <source>Depth limits reached: %1</source>
+        <translation>Límites de profundidad alcanzados: %1</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="467"/>
+        <source>Folders not listed: %1</source>
+        <translation>Carpetas no listadas: %1</translation>
+    </message>
+    <message>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="492"/>
         <source>~%1 (some unknown)</source>
         <translation>~%1 (algunos desconocidos)</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="472"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="500"/>
         <source>You are about to prepare %1 items%2. Continue?</source>
         <translation>Vas a preparar %1 elementos%2. ¿Continuar?</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="476"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="504"/>
         <source>Continue</source>
         <translation>Continuar</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="620"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="648"/>
         <source>Still preparing files for drag-out. Wait or cancel?</source>
         <translation>Aún preparando archivos para el arrastre. ¿Esperar o cancelar?</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="621"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="649"/>
         <source>Wait</source>
         <translation>Esperar</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="766"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="794"/>
         <source>Queue backpressure: waiting for pending tasks to drop below 1,000…</source>
         <translation>Cola saturada: esperando a que las tareas pendientes bajen de 1.000…</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="943"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="971"/>
         <source>%1 of %2 staging operations failed. Files kept at:</source>
         <translation>Fallaron %1 de %2 operaciones de preparación. Los archivos se conservaron en:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="963"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="991"/>
         <source>No staged drag roots were available. Files kept at:</source>
         <translation>No había elementos preparados disponibles para arrastrar. Los archivos se conservaron en:</translation>
     </message>
     <message>
-        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="1041"/>
+        <location filename="../ui/widgets/files/DragAwareTreeView.cpp" line="1069"/>
         <source>Could not create the drag staging directory.</source>
         <translation>No se pudo crear el directorio temporal para el arrastre.</translation>
     </message>

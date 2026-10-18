@@ -376,8 +376,17 @@ void DragAwareTreeView::finishRemoteDragEnumeration() {
     currentBatchTotal_ = static_cast<int>(std::min<quint64>(
         enumeratedItems,
         static_cast<quint64>(std::numeric_limits<int>::max())));
+    const QString skipped = skippedDragEntriesSummary();
+    auto *mainWindow = qobject_cast<QMainWindow *>(window());
     if (enumTargets_.isEmpty() && enumDirectories_.isEmpty()) {
         hidePrepOverlay();
+        if (mainWindow) {
+            mainWindow->statusBar()->showMessage(
+                skipped.isEmpty()
+                    ? tr("Nothing to drag")
+                    : tr("Nothing to drag") + QStringLiteral("  |  ") + skipped,
+                8000);
+        }
         QDir(currentBatchDir_).removeRecursively();
         logBatchResult(
             currentBatchId_, 0, 0,
@@ -429,6 +438,12 @@ void DragAwareTreeView::finishRemoteDragEnumeration() {
         cancelCurrentBatch(QStringLiteral("threshold"));
         return;
     }
+    if (mainWindow && !skipped.isEmpty()) {
+        mainWindow->statusBar()->showMessage(
+            tr("Some items will not be dragged") + QStringLiteral("  |  ") +
+                skipped,
+            8000);
+    }
     QVector<RemoteDragTarget> targets = std::move(enumTargets_);
     QStringList directories = std::move(enumDirectories_);
     QStringList dragRoots = std::move(enumDragRoots_);
@@ -438,6 +453,19 @@ void DragAwareTreeView::finishRemoteDragEnumeration() {
     enumDragRoots_.clear();
     startRemoteDragStaging(std::move(targets), std::move(directories),
                            std::move(dragRoots), stats);
+}
+
+QString DragAwareTreeView::skippedDragEntriesSummary() const {
+    QStringList parts;
+    if (enumInvalidNames_ > 0)
+        parts << tr("Skipped invalid: %1").arg(enumInvalidNames_);
+    if (enumSymlinksSkipped_ > 0)
+        parts << tr("Symbolic links skipped: %1").arg(enumSymlinksSkipped_);
+    if (enumDepthLimits_ > 0)
+        parts << tr("Depth limits reached: %1").arg(enumDepthLimits_);
+    if (enumInaccessible_ > 0)
+        parts << tr("Folders not listed: %1").arg(enumInaccessible_);
+    return parts.join(QStringLiteral("  |  "));
 }
 
 bool DragAwareTreeView::confirmRemoteDragThreshold(
