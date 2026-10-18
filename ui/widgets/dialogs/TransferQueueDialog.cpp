@@ -211,6 +211,22 @@ SelectedActionsState buildSelectedActionsState(const QVector<quint64> &ids,
     return out;
 }
 
+// The columns that fit their content are measured again after each change of
+// a row, several times a second while transfers run. Hidden, Qt would measure
+// every row each time, so those columns keep their widths until the window is
+// shown.
+class TransferTaskTableView final : public QTableView {
+    public:
+    using QTableView::QTableView;
+
+    protected:
+    int sizeHintForColumn(int column) const override {
+        if (!isVisible())
+            return columnWidth(column);
+        return QTableView::sizeHintForColumn(column);
+    }
+};
+
 } // namespace
 
 class TransferTaskTableModel final : public QAbstractTableModel {
@@ -726,7 +742,7 @@ TransferQueueDialog::TransferQueueDialog(TransferManager *mgr, QWidget *parent)
     proxy_ = new TransferTaskFilterProxyModel(this);
     proxy_->setSourceModel(model_);
 
-    table_ = new QTableView(this);
+    table_ = new TransferTaskTableView(this);
     table_->setObjectName(QStringLiteral("transferQueueTable"));
     table_->setAccessibleName(tr("Transfers"));
     table_->setAccessibleDescription(
@@ -1578,6 +1594,10 @@ void TransferQueueDialog::loadUiState() {
                 .toByteArray();
         if (!header.isEmpty())
             table_->horizontalHeader()->restoreState(header);
+        // Fitting only the rows on screen keeps each change of a row cheap
+        // with a long history. The saved state also restores this setting,
+        // which earlier versions left at Qt's 1000 rows.
+        table_->horizontalHeader()->setResizeContentsPrecision(0);
         table_->horizontalHeader()->setSectionResizeMode(
             TransferTaskTableModel::ColProgress, QHeaderView::Fixed);
         table_->setColumnWidth(TransferTaskTableModel::ColProgress,
