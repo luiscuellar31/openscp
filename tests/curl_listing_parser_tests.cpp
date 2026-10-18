@@ -477,13 +477,13 @@ OPENSCP_TEST(testWebDavParsesListingsOfManyThousandEntries, test) {
     std::vector<openscp::curlparser::WebDavResource> resources;
     std::string error;
 
-    test.check(openscp::curlparser::parseWebDavPropfindResponse(
-                   webDavOptions(), xml, resources, error) ==
-                       ListingParseStatus::Success &&
-                   resources.size() == kEntries,
-               "default limits should accept listings far above a few "
-               "thousand entries: " +
-                   error);
+    test.checkWithError(openscp::curlparser::parseWebDavPropfindResponse(
+                            webDavOptions(), xml, resources, error) ==
+                                ListingParseStatus::Success &&
+                            resources.size() == kEntries,
+                        "default limits should accept listings far above a few "
+                        "thousand entries: ",
+                        error);
     test.check(!resources.empty() && resources.front().isDir &&
                    !resources.back().isDir && resources.back().hasSize &&
                    resources.back().size == 1234 && resources.back().hasMtime,

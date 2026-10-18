@@ -635,10 +635,11 @@ OPENSCP_TEST(test_known_hosts_lines_name_their_host, t) {
     }
     std::string error;
     std::string content;
-    t.check(openscp::RemoveKnownHostEntry(path.string(), "h.example", 2222,
-                                          error) &&
-                readTextFile(path, content) && content == "kept k AQID\n",
-            "the hashed name should match its host: " + error);
+    t.checkWithError(openscp::RemoveKnownHostEntry(path.string(), "h.example",
+                                                   2222, error) &&
+                         readTextFile(path, content) &&
+                         content == "kept k AQID\n",
+                     "the hashed name should match its host: ", error);
     std::error_code ec;
     fs::remove_all(path.parent_path(), ec);
 }
@@ -667,9 +668,9 @@ OPENSCP_TEST(test_known_hosts_append_keeps_the_rest_of_the_file, t) {
                         fs::perms::group_read | fs::perms::others_read,
                     ec);
     std::string error;
-    t.check(detail::appendKnownHostsLine(path.string(), "new.example k AQID",
-                                         error),
-            "a line should be appended: " + error);
+    t.checkWithError(detail::appendKnownHostsLine(path.string(),
+                                                  "new.example k AQID", error),
+                     "a line should be appended: ", error);
     std::string content;
     t.check(readTextFile(path, content) &&
                 content == original + "\nnew.example k AQID\n",
@@ -694,14 +695,14 @@ OPENSCP_TEST(test_known_hosts_append_keeps_the_rest_of_the_file, t) {
             "a symbolic link should stay a link and its target gain the line");
 
     const fs::path created = folder / "new-ssh" / "known_hosts";
-    t.check(
+    t.checkWithError(
         detail::appendKnownHostsLine(created.string(), "first k AQID", error) &&
             readTextFile(created, content) && content == "first k AQID\n" &&
             ::stat(created.c_str(), &fileStat) == 0 &&
             (fileStat.st_mode & 0777) == 0600 &&
             ::stat(created.parent_path().c_str(), &folderStat) == 0 &&
             (folderStat.st_mode & 0777) == 0700,
-        "a missing file and folder should be created private: " + error);
+        "a missing file and folder should be created private: ", error);
 }
 #endif
 
@@ -754,13 +755,13 @@ OPENSCP_TEST(test_safe_local_partial_files, t) {
         t.check(std::fwrite(payload, 1, sizeof(payload) - 1, file.get()) ==
                     sizeof(payload) - 1,
                 "safe partial file should be writable");
-        t.check(openscp::localfiles::flushAndSync(file.get(), error),
-                std::string("safe partial file should sync: ") + error);
+        t.checkWithError(openscp::localfiles::flushAndSync(file.get(), error),
+                         "safe partial file should sync: ", error);
         file.reset();
-        t.check(openscp::localfiles::atomicReplace(partial.string(),
-                                                   target.string(), error),
-                std::string("safe partial file should publish atomically: ") +
-                    error);
+        t.checkWithError(
+            openscp::localfiles::atomicReplace(partial.string(),
+                                               target.string(), error),
+            "safe partial file should publish atomically: ", error);
     }
     std::string targetContents;
     t.check(readTextFile(target, targetContents) &&

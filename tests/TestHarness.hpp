@@ -24,6 +24,16 @@ class TestContext {
         check(haystack.find(needle) != std::string_view::npos, message);
     }
 
+    // Checks an operation that reports its failure through `error`, which is
+    // read only here, once the operation has run. In
+    // check(op(error), "...: " + error) the order in which C++ evaluates the
+    // two arguments is unspecified, and MSVC and GCC build the message first.
+    void checkWithError(bool condition, std::string_view message,
+                        const std::string &error) {
+        if (!condition)
+            check(false, std::string(message) + error);
+    }
+
     // Notes a case this system cannot run, such as one that needs symbolic
     // links where only administrators may make them. It is not a failure.
     void skip(std::string_view message) {

@@ -420,8 +420,9 @@ OPENSCP_TEST(testWindowsSetupStartsOnlyTheCheckedFile, test) {
                                   WindowsSetupScope::CurrentUser, error) &&
                    !error.isEmpty(),
                "a setup that differs from its signed digest must not run");
-    test.check(startWindowsSetup(setup, artifact, arguments,
-                                 WindowsSetupScope::CurrentUser, error),
+    const bool started = startWindowsSetup(
+        setup, artifact, arguments, WindowsSetupScope::CurrentUser, error);
+    test.check(started,
                "the checked setup should start: " + error.toStdString());
 
     QDeadlineTimer deadline(10000);

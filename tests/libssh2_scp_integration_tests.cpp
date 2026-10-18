@@ -113,11 +113,12 @@ int main() {
 
     bool uploadProgressCalled = false;
     err.clear();
-    t.check(client.put(
-                localUpload.string(), remotePath, err,
-                [&](std::size_t, std::size_t) { uploadProgressCalled = true; },
-                {}, false),
-            std::string("SCP upload should succeed: ") + err);
+    t.checkWithError(
+        client.put(
+            localUpload.string(), remotePath, err,
+            [&](std::size_t, std::size_t) { uploadProgressCalled = true; }, {},
+            false),
+        "SCP upload should succeed: ", err);
     t.check(uploadProgressCalled, "upload progress callback should be called");
 
     // Waiting for the channel to close instead of acknowledging SCP's final
@@ -126,12 +127,12 @@ int main() {
     bool downloadProgressCalled = false;
     err.clear();
     auto started = std::chrono::steady_clock::now();
-    t.check(
+    t.checkWithError(
         client.get(
             remotePath, localDownload.string(), err,
             [&](std::size_t, std::size_t) { downloadProgressCalled = true; },
             {}, false),
-        std::string("SCP download should succeed: ") + err);
+        "SCP download should succeed: ", err);
     t.check(std::chrono::steady_clock::now() - started < kTimeoutStall,
             "SCP download should not wait for the session timeout");
     t.check(downloadProgressCalled,
@@ -147,18 +148,18 @@ int main() {
     scpOnlyOptions.scp_transfer_mode = openscp::ScpTransferMode::ScpOnly;
     openscp::Libssh2ScpClient scpOnlyClient;
     err.clear();
-    t.check(scpOnlyClient.connect(scpOnlyOptions, err),
-            std::string("SCP-only connect should succeed: ") + err);
+    t.checkWithError(scpOnlyClient.connect(scpOnlyOptions, err),
+                     "SCP-only connect should succeed: ", err);
     const fs::path scpOnlyDownload = tempDir / "scp_only_download.txt";
     for (int attempt = 0; attempt < 2; ++attempt) {
         err.clear();
         downloaded.clear();
         started = std::chrono::steady_clock::now();
-        t.check(scpOnlyClient.get(remotePath, scpOnlyDownload.string(), err, {},
-                                  {}, false),
-                std::string("SCP-only download should succeed on a reused "
-                            "session: ") +
-                    err);
+        t.checkWithError(scpOnlyClient.get(remotePath, scpOnlyDownload.string(),
+                                           err, {}, {}, false),
+                         "SCP-only download should succeed on a reused "
+                         "session: ",
+                         err);
         t.check(std::chrono::steady_clock::now() - started < kTimeoutStall,
                 "SCP-only download should not wait for the session timeout");
         t.check(readFile(scpOnlyDownload, downloaded) && downloaded == payload,
@@ -172,15 +173,16 @@ int main() {
     const std::string scpOnlyRemotePath =
         joinRemotePath(remoteBase, "openscp_scp_only_it_" + token + ".txt");
     err.clear();
-    t.check(scpOnlyClient.put(localUpload.string(), scpOnlyRemotePath, err, {},
-                              {}, false),
-            std::string("SCP-only upload should succeed: ") + err);
+    t.checkWithError(scpOnlyClient.put(localUpload.string(), scpOnlyRemotePath,
+                                       err, {}, {}, false),
+                     "SCP-only upload should succeed: ", err);
     err.clear();
     downloaded.clear();
-    t.check(scpOnlyClient.get(scpOnlyRemotePath, scpOnlyDownload.string(), err,
-                              {}, {}, false) &&
-                readFile(scpOnlyDownload, downloaded) && downloaded == payload,
-            std::string("SCP-only upload should round-trip: ") + err);
+    t.checkWithError(
+        scpOnlyClient.get(scpOnlyRemotePath, scpOnlyDownload.string(), err, {},
+                          {}, false) &&
+            readFile(scpOnlyDownload, downloaded) && downloaded == payload,
+        "SCP-only upload should round-trip: ", err);
     t.check(scpOnlyClient.lastDownloadModifiedTime().value_or(0) > 0,
             "an SCP download should report the file's modification time");
 #ifndef _WIN32
@@ -199,15 +201,16 @@ int main() {
         inspectorOptions.protocol = openscp::Protocol::Sftp;
         openscp::FileInfo uploaded{};
         err.clear();
-        t.check(written && !permissionsError &&
-                    scpOnlyClient.put(localPrivate.string(), remotePrivate, err,
-                                      {}, {}, false) &&
-                    inspector.connect(inspectorOptions, err) &&
-                    inspector.stat(remotePrivate, uploaded, err) &&
-                    (uploaded.mode & 0777u) == 0600u,
-                std::string("an SCP upload should keep the local "
-                            "permissions: ") +
-                    err);
+        t.checkWithError(written && !permissionsError &&
+                             scpOnlyClient.put(localPrivate.string(),
+                                               remotePrivate, err, {}, {},
+                                               false) &&
+                             inspector.connect(inspectorOptions, err) &&
+                             inspector.stat(remotePrivate, uploaded, err) &&
+                             (uploaded.mode & 0777u) == 0600u,
+                         "an SCP upload should keep the local "
+                         "permissions: ",
+                         err);
         (void)inspector.removeFile(remotePrivate, err);
         inspector.disconnect();
     }
