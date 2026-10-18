@@ -130,6 +130,12 @@ jobs:
         shell: pwsh
         run: .\scripts\ci\fetch_vcpkg.ps1
 
+      # A warning, not a failure: copying the port again after a baseline
+      # update from Dependabot is a maintainer's task.
+      - name: Compare the OpenSSL overlay port with vcpkg's
+        shell: pwsh
+        run: .\scripts\ci\check_vcpkg_overlay.ps1
+
       # Exact matches only: vcpkg adds the archives of new ABIs beside the
       # old ones, so a cache restored from another key would carry them all
       # into the next one. A new key builds the libraries from scratch.
