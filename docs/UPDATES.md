@@ -1,6 +1,7 @@
 # Updating OpenSCP
 
-Use **OpenSCP → Check for updates…** to check for a newer stable release.
+Use **OpenSCP → Check for updates…** (**Help → Check for updates…** on Windows)
+to check for a newer stable release.
 **Automatically check for updates** enables a daily check and is off by default.
 Checks use HTTPS and do not send saved-site information or credentials.
 Installing an update requires your confirmation and waits for pending file

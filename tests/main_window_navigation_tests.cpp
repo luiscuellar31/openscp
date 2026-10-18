@@ -22,6 +22,8 @@
 #include <QInputDialog>
 #include <QItemSelectionModel>
 #include <QKeyEvent>
+#include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
 #include <QMouseEvent>
@@ -156,6 +158,33 @@ OPENSCP_TEST(testUpdateMenuIsManualByDefault, test) {
              .toBool(),
         "turning off checks persists without requiring a network request");
 }
+
+#ifdef Q_OS_WIN
+OPENSCP_TEST(testWindowsMenuBarHasNoApplicationMenu, test) {
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    auto *check =
+        window.findChild<QAction *>(QStringLiteral("checkForUpdatesAction"));
+    auto *automatic =
+        window.findChild<QAction *>(QStringLiteral("automaticUpdatesAction"));
+    QStringList visibleMenus;
+    QMenu *updatesMenu = nullptr;
+    for (QAction *menuAction : window.menuBar()->actions()) {
+        QMenu *menu = menuAction->menu();
+        if (!menu || !menuAction->isVisible())
+            continue;
+        visibleMenus.push_back(menu->title());
+        if (menu->actions().contains(check) &&
+            menu->actions().contains(automatic))
+            updatesMenu = menu;
+    }
+    test.check(visibleMenus ==
+                   QStringList{QStringLiteral("File"), QStringLiteral("Help")},
+               "Windows should show File and Help, without an OpenSCP menu");
+    test.check(updatesMenu && updatesMenu->title() == QStringLiteral("Help"),
+               "the update actions should move to Help on Windows");
+}
+#endif
 
 OPENSCP_TEST(testSettingsAndQuitHaveShortcutsOnEveryPlatform, test) {
     // Qt has no standard shortcut for either on Windows.

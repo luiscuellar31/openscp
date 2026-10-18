@@ -238,6 +238,7 @@ class MainWindow : public QMainWindow {
     // Top menu
     QMenu *appMenu_ = nullptr;  // OpenSCP
     QMenu *fileMenu_ = nullptr; // File
+    QMenu *helpMenu_ = nullptr; // Help
     QAction *actAbout_ = nullptr;
     QAction *actPrefs_ = nullptr;
     QAction *actQuit_ = nullptr;

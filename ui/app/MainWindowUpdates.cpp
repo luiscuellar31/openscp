@@ -50,13 +50,19 @@ void MainWindow::initializeUpdates() {
         this);
     connect(macUpdater_, &openscpui::MacUpdater::finished, this,
             [this] { setEnabled(true); });
-    auto *check = appMenu_->addAction(tr("Check for updates…"));
+#ifdef Q_OS_WIN
+    QMenu *updatesMenu = helpMenu_;
+    updatesMenu->addSeparator();
+#else
+    QMenu *updatesMenu = appMenu_;
+#endif
+    auto *check = updatesMenu->addAction(tr("Check for updates…"));
     check->setObjectName(QStringLiteral("checkForUpdatesAction"));
     check->setMenuRole(QAction::NoRole);
     connect(check, &QAction::triggered, updates_,
             [this] { updates_->check(true); });
     auto *automatic =
-        appMenu_->addAction(tr("Automatically check for updates"));
+        updatesMenu->addAction(tr("Automatically check for updates"));
     automatic->setObjectName(QStringLiteral("automaticUpdatesAction"));
     automatic->setMenuRole(QAction::NoRole);
     automatic->setCheckable(true);
