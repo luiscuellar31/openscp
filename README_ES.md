@@ -188,10 +188,11 @@ pasos manuales, empaquetado y solución de problemas.
 - Interfaces en español, inglés, portugués, francés y alemán.
 
 Cancelar una conexión o cerrar la ventana también cancela las solicitudes
-pendientes de autenticación SSH y confirmación de huella. Los intentos de
-conexión TCP de SSH comparten un límite de 20 segundos entre las direcciones
-resueltas. La resolución de nombres usa el sistema y puede tardar más,
-independientemente de ese límite TCP.
+pendientes de autenticación SSH y confirmación de huella. SSH prueba las
+direcciones resueltas como hace Happy Eyeballs: si una no ha respondido en
+250 ms, o rechaza la conexión, empieza la siguiente, alternando IPv6 e IPv4, y
+todos los intentos comparten un límite de 20 segundos. La resolución de nombres
+usa el sistema y puede tardar más, independientemente de ese límite TCP.
 
 La sincronización nunca copia FIFOs, sockets ni dispositivos, y deja fuera los
 nombres con barra invertida o caracteres de control, que las subidas también

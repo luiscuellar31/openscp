@@ -1633,55 +1633,34 @@ bool connect_tcp_endpoint(const std::string &host, uint16_t port,
     };
 #endif
 
+    std::vector<libssh2detail::TcpEndpoint> endpoints;
+    for (auto rp = res; rp != nullptr; rp = rp->ai_next) {
+        const auto *address =
+            reinterpret_cast<const unsigned char *>(rp->ai_addr);
+        endpoints.push_back(
+            {rp->ai_family, rp->ai_socktype, rp->ai_protocol,
+             std::vector<unsigned char>(address, address + rp->ai_addrlen)});
+    }
+    freeAddresses(res);
+
     std::string lastConnectErr;
     // Resolution uses the platform resolver; the TCP budget starts afterward.
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(20);
-    // Try all resolved addresses (IPv4/IPv6) until one succeeds.
-    for (auto rp = res; rp != nullptr; rp = rp->ai_next) {
-        if (stopToken.stop_requested() ||
-            std::chrono::steady_clock::now() >= deadline)
-            break;
-        const SocketHandle s = libssh2detail::openSocket(
-            rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-        if (s == kInvalidSocket) {
-            lastConnectErr = libssh2detail::socketErrorMessage(
-                libssh2detail::lastSocketError());
-            continue;
-        }
-        configure_tcp_keepalive(s);
-        disable_nagle(s);
-        if (!libssh2detail::setSocketNonBlocking(s, true)) {
-            lastConnectErr = libssh2detail::socketErrorMessage(
-                libssh2detail::lastSocketError());
-            libssh2detail::closeSocket(s);
-            continue;
-        }
-        const int result =
-            ::connect(s, rp->ai_addr, static_cast<socklen_t>(rp->ai_addrlen));
-        const int connectError =
-            result == 0 ? 0 : libssh2detail::lastSocketError();
-        bool connected = result == 0;
-        if (!connected &&
-            libssh2detail::isConnectInProgressError(connectError)) {
-            connected = libssh2detail::waitForTcpConnection(
-                s, deadline, stopToken, lastConnectErr);
-        } else if (!connected) {
-            lastConnectErr = libssh2detail::socketErrorMessage(connectError);
-        }
-        if (connected && !libssh2detail::setSocketNonBlocking(s, false)) {
-            connected = false;
-            lastConnectErr = libssh2detail::socketErrorMessage(
-                libssh2detail::lastSocketError());
-        }
-        if (connected && !stopToken.stop_requested()) {
+    const SocketHandle s = libssh2detail::connectToFirstEndpoint(
+        endpoints, deadline, stopToken,
+        [](SocketHandle socket) {
+            configure_tcp_keepalive(socket);
+            disable_nagle(socket);
+        },
+        lastConnectErr);
+    if (s != kInvalidSocket) {
+        if (!stopToken.stop_requested()) {
             sockOut = s;
-            freeAddresses(res);
             return true;
         }
         libssh2detail::closeSocket(s);
     }
-    freeAddresses(res);
     if (stopToken.stop_requested()) {
         err = "Connection canceled by user";
         return false;
