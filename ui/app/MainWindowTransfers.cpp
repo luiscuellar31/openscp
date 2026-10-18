@@ -1099,7 +1099,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                     acceptDropAsCopy(dropEvent);
                     return true;
                 }
-                QVector<LocalFsPair> pairs;
+                QVector<QFileInfo> sources;
                 for (const QUrl &url : urls) {
                     const QString localPath = url.toLocalFile();
                     if (localPath.isEmpty())
@@ -1111,9 +1111,18 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                     if (localFileInfo.absoluteFilePath() == target) {
                         continue;
                     }
-                    pairs.push_back({localFileInfo.absoluteFilePath(), target});
+                    sources.push_back(localFileInfo);
                 }
-                runLocalFsOperation(pairs, false, 0);
+                // As F5 does, ask before replacing an entry, once the drop is
+                // over: a dialog during it would hold the application the
+                // files come from.
+                QTimer::singleShot(0, this, [this, sources, dst] {
+                    int skipped = 0;
+                    const auto pairs =
+                        buildLocalDestinationPairsWithOverwritePrompt(
+                            this, sources, dst, &skipped);
+                    runLocalFsOperation(toLocalFsPairs(pairs), false, skipped);
+                });
                 acceptDropAsCopy(dropEvent);
                 return true;
             }
@@ -1154,7 +1163,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                     acceptDropAsCopy(dropEvent);
                     return true;
                 }
-                QVector<LocalFsPair> pairs;
+                QVector<QFileInfo> sources;
                 for (const QUrl &url : urls) {
                     const QString localPath = url.toLocalFile();
                     if (localPath.isEmpty())
@@ -1166,7 +1175,7 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                     if (localFileInfo.absoluteFilePath() == target) {
                         continue;
                     }
-                    pairs.push_back({localFileInfo.absoluteFilePath(), target});
+                    sources.push_back(localFileInfo);
                 }
                 std::function<void(bool)> removeBatch;
                 if (!stagingBatchDir.isEmpty()) {
@@ -1185,7 +1194,15 @@ bool MainWindow::eventFilter(QObject *eventSource, QEvent *event) {
                         });
                     };
                 }
-                runLocalFsOperation(pairs, false, 0, removeBatch);
+                // As on the right panel, ask once the drop is over.
+                QTimer::singleShot(0, this, [this, sources, dst, removeBatch] {
+                    int skipped = 0;
+                    const auto pairs =
+                        buildLocalDestinationPairsWithOverwritePrompt(
+                            this, sources, dst, &skipped);
+                    runLocalFsOperation(toLocalFsPairs(pairs), false, skipped,
+                                        removeBatch);
+                });
                 acceptDropAsCopy(dropEvent);
                 updateDeleteShortcutEnables();
                 return true;
