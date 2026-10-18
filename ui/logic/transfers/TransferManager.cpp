@@ -156,6 +156,21 @@ QString numberedRemotePath(const QString &path, int suffix) {
     return directory + numberedFileName(filename, suffix);
 }
 
+// Whether the local entry `info` names exists only under another name, as
+// "Makefile" for "makefile" on a volume that ignores case, as Windows and
+// macOS volumes do: it is then another file, not the destination as spelled.
+// Names that differ only in Unicode normalization count as the same name.
+bool existsUnderAnotherName(const QFileInfo &info) {
+    if (!info.exists())
+        return false;
+    const QString actual =
+        QString::fromStdString(openscp::localfiles::localEntryName(
+            info.absoluteFilePath().toStdString()));
+    return !actual.isEmpty() &&
+           actual.normalized(QString::NormalizationForm_C) !=
+               info.fileName().normalized(QString::NormalizationForm_C);
+}
+
 } // namespace
 
 struct TransferManager::WorkerSlot {
@@ -2382,7 +2397,15 @@ TransferManager::PrecheckOutcome TransferManager::precheckTask(
         }
     } else {
         const QFileInfo localInfo(task.dst);
-        if (localInfo.exists()) {
+        if (existsUnderAnotherName(localInfo)) {
+            // Two remote names that differ only in case meet in one local
+            // file on Windows and macOS. Whatever the policy, the download
+            // takes a free name, so that neither file replaces the other.
+            if (!chooseRenamedDestination(task, workerClient, err))
+                return PrecheckOutcome::Error;
+            publishUpdated({task.taskId});
+            resume = false;
+        } else if (localInfo.exists()) {
             openscp::FileInfo remoteInfo{};
             std::string statError;
             const bool hasRemoteInfo =

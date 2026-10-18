@@ -57,6 +57,12 @@ bool setLocalModificationTime(const std::string &path,
 // open another entry. Local paths may still pass through short names.
 std::string localNameProblem(const std::string &name);
 
+// The name the existing entry at `path` has on disk, or an empty string when
+// nothing is there. Windows and macOS volumes usually ignore case, so
+// "makefile" finds an entry stored as "Makefile"; this returns "Makefile".
+// Linux volumes distinguish case, so there the name is the one in `path`.
+std::string localEntryName(const std::string &path);
+
 // Opens a user-owned regular file without following a final-component symlink.
 // The descriptor is opened with close-on-exec and restricted permissions.
 // On POSIX, opening does not wait for a FIFO reader. The opened descriptor is
