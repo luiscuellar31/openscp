@@ -100,6 +100,34 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
     </message>
 </context>
 <context>
+    <name>AppSettings</name>
+    <message>
+        <location filename="../ui/logic/common/AppSettings.cpp" line="32"/>
+        <source>The settings file could not be accessed.</source>
+        <translation>No se pudo acceder al archivo de ajustes.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/common/AppSettings.cpp" line="35"/>
+        <source>The settings file has an invalid format.</source>
+        <translation>El archivo de ajustes tiene un formato no válido.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/common/AppSettings.cpp" line="38"/>
+        <source>The settings file could not be synchronized.</source>
+        <translation>No se pudo sincronizar el archivo de ajustes.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/common/AppSettings.cpp" line="119"/>
+        <source>Could not restrict settings permissions for %1</source>
+        <translation>No se pudieron restringir los permisos del archivo de ajustes %1</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/common/AppSettings.cpp" line="130"/>
+        <source>Settings permissions are not owner-only: %1</source>
+        <translation>Los permisos del archivo de ajustes no son exclusivos de su propietario: %1</translation>
+    </message>
+</context>
+<context>
     <name>ConnectionDialog</name>
     <message>
         <location filename="../ui/widgets/dialogs/ConnectionDialog.cpp" line="560"/>
@@ -5863,6 +5891,85 @@ Las transferencias aparecerán aquí cuando se inicien.</translation>
         <location filename="../ui/widgets/dialogs/TransferQueueDialog.cpp" line="1525"/>
         <source>Remove tasks and partial data</source>
         <translation>Quitar las tareas y los datos parciales</translation>
+    </message>
+</context>
+<context>
+    <name>UpdateController</name>
+    <message>
+        <location filename="../ui/logic/updates/AppImageInstaller.cpp" line="48"/>
+        <source>Could not safely replace the AppImage. The current image has been preserved.</source>
+        <translation>No se pudo reemplazar la AppImage de forma segura. Se conservó la imagen actual.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/updates/AppImageInstaller.cpp" line="178"/>
+        <source>The update was installed, but syncing its folder failed. The previous image is available as .previous.</source>
+        <translation>La actualización se instaló, pero no se pudo sincronizar su carpeta. La imagen anterior está disponible como .previous.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/updates/UpdateController.cpp" line="118"/>
+        <source>Update response exceeds its size limit.</source>
+        <translation>La respuesta de la actualización supera su límite de tamaño.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/updates/UpdateController.cpp" line="125"/>
+        <location filename="../ui/logic/updates/UpdateController.cpp" line="303"/>
+        <source>Unexpected update server response.</source>
+        <translation>Respuesta inesperada del servidor de actualizaciones.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/updates/UpdateController.cpp" line="138"/>
+        <source>An update has been installed. Restart OpenSCP before checking again.</source>
+        <translation>Se instaló una actualización. Reinicia OpenSCP antes de volver a buscar.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/updates/UpdateController.cpp" line="146"/>
+        <source>An update operation is already in progress.</source>
+        <translation>Ya hay una operación de actualización en curso.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/updates/UpdateController.cpp" line="250"/>
+        <source>No verified update is ready to install, or file operations are pending.</source>
+        <translation>No hay ninguna actualización verificada lista para instalar, o hay operaciones de archivos pendientes.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/updates/UpdateController.cpp" line="296"/>
+        <source>The update download is incomplete or could not be saved.</source>
+        <translation>La descarga de la actualización está incompleta o no se pudo guardar.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/updates/UpdateController.cpp" line="322"/>
+        <source>File operations are still pending.</source>
+        <translation>Todavía hay operaciones de archivos pendientes.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/updates/UpdateMetadata.cpp" line="128"/>
+        <source>Release response is too large.</source>
+        <translation>La respuesta con los datos de la versión es demasiado grande.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/updates/UpdateMetadata.cpp" line="137"/>
+        <source>Invalid release response.</source>
+        <translation>La respuesta con los datos de la versión no es válida.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/updates/UpdateMetadata.cpp" line="145"/>
+        <source>Invalid release version.</source>
+        <translation>El número de versión no es válido.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/updates/WindowsSetupInstaller.cpp" line="64"/>
+        <source>Could not start the update installer. The current version is still installed.</source>
+        <translation>No se pudo iniciar el instalador de la actualización. La versión actual sigue instalada.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/updates/WindowsSetupInstaller.cpp" line="99"/>
+        <source>The downloaded update does not match its signed description. It was not installed.</source>
+        <translation>La actualización descargada no coincide con su descripción firmada. No se instaló.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/updates/WindowsSetupInstaller.cpp" line="125"/>
+        <source>The update was not installed because administrator approval was declined.</source>
+        <translation>La actualización no se instaló porque se rechazó la aprobación de administrador.</translation>
     </message>
 </context>
 <context>

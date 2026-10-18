@@ -1,5 +1,6 @@
 #include "logic/updates/WindowsSetupInstaller.hpp"
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 
@@ -60,8 +61,9 @@ struct HandleCloser {
 bool startWindowsSetup(const QString &setup, const UpdateArtifact &artifact,
                        const QStringList &arguments, WindowsSetupScope scope,
                        QString &error) {
-    error = QStringLiteral("Could not start the update installer. The current "
-                           "version is still installed.");
+    error = QCoreApplication::translate(
+        "UpdateController", "Could not start the update installer. The current "
+                            "version is still installed.");
 #ifdef Q_OS_WIN
     if (artifact.size <= 0 || artifact.size > kMaximumUpdateSize ||
         artifact.sha256.size() != 32)
@@ -94,8 +96,9 @@ bool startWindowsSetup(const QString &setup, const UpdateArtifact &artifact,
         hash.addData(QByteArrayView(buffer.constData(), count));
     }
     if (total != artifact.size || hash.result() != artifact.sha256) {
-        error = QStringLiteral("The downloaded update does not match its "
-                               "signed description. It was not installed.");
+        error = QCoreApplication::translate(
+            "UpdateController", "The downloaded update does not match its "
+                                "signed description. It was not installed.");
         return false;
     }
 
@@ -119,8 +122,10 @@ bool startWindowsSetup(const QString &setup, const UpdateArtifact &artifact,
             CoUninitialize();
         if (!started) {
             if (failure == ERROR_CANCELLED)
-                error = QStringLiteral("The update was not installed because "
-                                       "administrator approval was declined.");
+                error = QCoreApplication::translate(
+                    "UpdateController",
+                    "The update was not installed because administrator "
+                    "approval was declined.");
             return false;
         }
         if (info.hProcess)
