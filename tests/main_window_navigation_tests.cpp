@@ -260,6 +260,8 @@ OPENSCP_TEST(testMainWindowSplitterPreservesAnEvenPanelResize, test) {
     test.check(qAbs(initialSizes[0] - initialSizes[1]) <= 2,
                "the default file panels should start with an even split");
 
+#ifdef Q_OS_MACOS
+    // Only macOS hides idle scroll bars.
     const MainWindowFocusParts parts = focusParts(window);
     test.check(parts.leftView && parts.rightView,
                "the splitter regression should use both file panels");
@@ -281,6 +283,7 @@ OPENSCP_TEST(testMainWindowSplitterPreservesAnEvenPanelResize, test) {
     test.check(
         qAbs(sizesAfterScrollBarsHide[0] - sizesAfterScrollBarsHide[1]) <= 2,
         "auto-hiding scrollbars should not change the panel split");
+#endif
 
     QSplitterHandle *handle = splitter->handle(1);
     test.check(handle && handle->width() >= 8 &&

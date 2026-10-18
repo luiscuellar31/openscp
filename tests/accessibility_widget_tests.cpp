@@ -554,7 +554,7 @@ OPENSCP_TEST(testFilePanelShowsKeyboardOnlyFocusOutline, test) {
                "Shift+Esc should reveal the panel focus outline");
 }
 
-OPENSCP_TEST(testFilePanelScrollBarsFollowScrollActivity, test) {
+OPENSCP_TEST(testFilePanelScrollBarsHideWhenIdleOnlyOnMacos, test) {
     QStandardItemModel model(80, 1);
     for (int row = 0; row < model.rowCount(); ++row) {
         model.setData(model.index(row, 0),
@@ -581,8 +581,14 @@ OPENSCP_TEST(testFilePanelScrollBarsFollowScrollActivity, test) {
         return panel.verticalScrollBarPolicy() == Qt::ScrollBarAlwaysOff &&
                panel.horizontalScrollBarPolicy() == Qt::ScrollBarAlwaysOff;
     };
+#ifdef Q_OS_MACOS
     test.check(waitUntil(scrollBarsAreHidden, std::chrono::milliseconds(3000)),
                "file-panel scrollbars should hide after inactivity");
+#else
+    // Elsewhere a hidden bar could not be dragged with the mouse.
+    test.check(!waitUntil(scrollBarsAreHidden, std::chrono::milliseconds(3000)),
+               "file-panel scrollbars should stay visible outside macOS");
+#endif
 
     const int initialScrollPosition = panel.verticalScrollBar()->value();
     const QPoint localPosition = panel.viewport()->rect().center();
@@ -595,12 +601,14 @@ OPENSCP_TEST(testFilePanelScrollBarsFollowScrollActivity, test) {
     flushUiEvents();
 
     test.check(panel.verticalScrollBar()->value() > initialScrollPosition,
-               "hiding the scrollbars should not disable file-panel scrolling");
+               "the wheel should scroll the file panel");
     test.check(panel.verticalScrollBarPolicy() == Qt::ScrollBarAsNeeded &&
                    panel.horizontalScrollBarPolicy() == Qt::ScrollBarAsNeeded,
-               "scrolling should reveal both file-panel scrollbars");
+               "scrolling should show both file-panel scrollbars");
+#ifdef Q_OS_MACOS
     test.check(waitUntil(scrollBarsAreHidden, std::chrono::milliseconds(3000)),
                "file-panel scrollbars should hide again after scrolling");
+#endif
 }
 
 OPENSCP_TEST(testPointerDialogCloseDoesNotCreateKeyboardFocus, test) {

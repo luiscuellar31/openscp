@@ -47,6 +47,13 @@ Q_LOGGING_CATEGORY(ocDrag, "openscp.drag")
 namespace {
 
 constexpr int kScrollBarHideDelayMs = 1500;
+// The panels hide idle scroll bars as macOS does. Elsewhere a hidden bar
+// cannot be dragged with the mouse, and its return shifts the columns.
+#ifdef Q_OS_MACOS
+constexpr bool kAutoHideScrollBars = true;
+#else
+constexpr bool kAutoHideScrollBars = false;
+#endif
 
 QString stagingRootFromSettings() {
     openscpui::AppSettings settings;
@@ -116,27 +123,29 @@ struct DragAwareTreeView::RemoteDragStagingState {
 DragAwareTreeView::DragAwareTreeView(QWidget *parent) : QTreeView(parent) {
     new openscpui::KeyboardFocusIndicator(this);
 
-    scrollBarHideTimer_ = new QTimer(this);
-    scrollBarHideTimer_->setInterval(kScrollBarHideDelayMs);
-    scrollBarHideTimer_->setSingleShot(true);
-    connect(scrollBarHideTimer_, &QTimer::timeout, this,
-            &DragAwareTreeView::hideScrollBars);
+    if constexpr (kAutoHideScrollBars) {
+        scrollBarHideTimer_ = new QTimer(this);
+        scrollBarHideTimer_->setInterval(kScrollBarHideDelayMs);
+        scrollBarHideTimer_->setSingleShot(true);
+        connect(scrollBarHideTimer_, &QTimer::timeout, this,
+                &DragAwareTreeView::hideScrollBars);
 
-    const auto observeScrollBar = [this](QScrollBar *scrollBar) {
-        connect(scrollBar, &QScrollBar::valueChanged, this,
-                [this] { showScrollBarsTemporarily(); });
-        connect(scrollBar, &QScrollBar::sliderPressed, this, [this] {
-            scrollBarInteractionActive_ = true;
-            scrollBarHideTimer_->stop();
-        });
-        connect(scrollBar, &QScrollBar::sliderReleased, this, [this] {
-            scrollBarInteractionActive_ = false;
-            showScrollBarsTemporarily();
-        });
-    };
-    observeScrollBar(verticalScrollBar());
-    observeScrollBar(horizontalScrollBar());
-    showScrollBarsTemporarily();
+        const auto observeScrollBar = [this](QScrollBar *scrollBar) {
+            connect(scrollBar, &QScrollBar::valueChanged, this,
+                    [this] { showScrollBarsTemporarily(); });
+            connect(scrollBar, &QScrollBar::sliderPressed, this, [this] {
+                scrollBarInteractionActive_ = true;
+                scrollBarHideTimer_->stop();
+            });
+            connect(scrollBar, &QScrollBar::sliderReleased, this, [this] {
+                scrollBarInteractionActive_ = false;
+                showScrollBarsTemporarily();
+            });
+        };
+        observeScrollBar(verticalScrollBar());
+        observeScrollBar(horizontalScrollBar());
+        showScrollBarsTemporarily();
+    }
 }
 
 void DragAwareTreeView::setTransferManager(TransferManager *mgr) {
@@ -170,7 +179,7 @@ void DragAwareTreeView::wheelEvent(QWheelEvent *event) {
 }
 
 void DragAwareTreeView::showScrollBarsTemporarily() {
-    if (updatingScrollBarVisibility_)
+    if (!scrollBarHideTimer_ || updatingScrollBarVisibility_)
         return;
 
     updatingScrollBarVisibility_ = true;
