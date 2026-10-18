@@ -307,6 +307,23 @@ QByteArray windowsManifest(const QJsonValue &minimumBuild = 17763,
         .toJson(QJsonDocument::Compact);
 }
 
+OPENSCP_TEST(testWindowsSetupReopensOnlyAPerUserInstallation, test) {
+    // The setup for all users runs elevated, and OpenSCP started from it
+    // would run with administrator rights.
+    const QString log = QStringLiteral("C:/Temp/update.log");
+    const QStringList currentUser =
+        windowsSetupArguments(WindowsSetupScope::CurrentUser, 1234, log);
+    const QStringList allUsers =
+        windowsSetupArguments(WindowsSetupScope::AllUsers, 1234, log);
+    test.check(currentUser.contains(QStringLiteral("/CURRENTUSER")) &&
+                   currentUser.contains(QStringLiteral("/RELAUNCH=1")),
+               "an update for the current user should reopen OpenSCP");
+    test.check(allUsers.contains(QStringLiteral("/ALLUSERS")) &&
+                   allUsers.contains(QStringLiteral("/WAITPID=1234")) &&
+                   !allUsers.contains(QStringLiteral("/RELAUNCH=1")),
+               "an update for all users should leave reopening to the user");
+}
+
 OPENSCP_TEST(testWindowsManifestAuthenticationAndCompatibility, test) {
     SigningFixture fixture;
     const auto data = windowsManifest();

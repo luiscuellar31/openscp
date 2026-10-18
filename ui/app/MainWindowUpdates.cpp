@@ -118,6 +118,11 @@ void MainWindow::showAvailableUpdate(const openscpui::UpdateRelease &release) {
         text +=
             QLatin1Char('\n') +
             tr("Download and install the new version from the release page.");
+    else if (kind == UpdateInstallation::WindowsSetup &&
+             updates_->setupScope() == openscpui::WindowsSetupScope::AllUsers)
+        text += QLatin1Char('\n') +
+                tr("OpenSCP closes while the update installs for all users. "
+                   "Open it again when it is done.");
     else if (kind == UpdateInstallation::WindowsSetup)
         text += QLatin1Char('\n') +
                 tr("OpenSCP closes while the update installs and opens again "
@@ -182,7 +187,8 @@ void MainWindow::showAvailableUpdate(const openscpui::UpdateRelease &release) {
                     updates_->installation() ==
                         openscpui::UpdateInstallation::WindowsSetup) {
                     // The setup waits for this process to end before it
-                    // replaces its files, and then starts OpenSCP again.
+                    // replaces its files, and then, for the current user's
+                    // installation, starts OpenSCP again.
                     close();
                     return;
                 }

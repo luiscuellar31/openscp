@@ -413,7 +413,9 @@ a handle that refuses writers, renames and deletion, and starts it before
 closing that handle: directly for a per-user installation, elevated through
 UAC for one for all users. The silent setup waits for OpenSCP's process to end,
 which `MainWindowUpdates` then closes, and starts OpenSCP again when it is
-done. The next start deletes the downloaded setup.
+done, for a per-user installation only: from a setup started elevated, Inno
+Setup cannot start it as the original user. The next start deletes the
+downloaded setup.
 
 `MacUpdater` is the optional Objective-C++ bridge to Sparkle. Sparkle owns signed
 feeds, archive verification, replacement and relaunch. `MainWindowUpdates`
