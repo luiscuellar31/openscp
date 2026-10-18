@@ -10,5 +10,6 @@ Local files	local
 Sites, settings and credentials	sites settings security secrets secret-store
 Updates	updates
 Interface	ui navigation accessibility i18n icons about
+Windows, macOS and Linux	windows macos linux
 # Work that users do not see. Its commits go to Maintenance whatever their type.
-internal	ci build release tests test checks scripts demo quality integration nightly packaging macos linux windows snap flatpak appimage
+internal	ci build release tests test checks scripts demo quality integration nightly packaging snap flatpak appimage
