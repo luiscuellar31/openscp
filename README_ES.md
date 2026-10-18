@@ -259,7 +259,10 @@ Estas variables opcionales ayudan a diagnosticar problemas:
 - `OPENSCP_ENABLE_INSECURE_FALLBACK=1` solo cuando la compilación lo permite
 
 Los mensajes van a la salida de error estándar. En Windows, donde OpenSCP no
-muestra consola, ábrelo desde PowerShell guardando esa salida en un archivo:
+muestra consola, van también a la salida del depurador, que
+[DebugView](https://learn.microsoft.com/sysinternals/downloads/debugview)
+muestra al momento. Para guardarlos en un archivo, ábrelo desde PowerShell
+guardando la salida de error en uno:
 
 ```powershell
 $env:OPENSCP_LOG_LEVEL = 'debug'
