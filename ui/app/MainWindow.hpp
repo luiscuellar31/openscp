@@ -411,6 +411,8 @@ class MainWindow : public QMainWindow {
     std::atomic<bool> remoteScanInProgress_{false};
     QTimer *uploadRefreshTimer_ = nullptr;
     quint64 activeRemoteListJob_ = 0;
+    // The remote view had the keyboard focus when a listing disabled it.
+    bool remoteViewHadFocus_ = false;
     QString requestedRemotePath_;
     QSet<QString> remoteRefreshSelectionNames_;
     int remoteRefreshScrollValue_ = 0;

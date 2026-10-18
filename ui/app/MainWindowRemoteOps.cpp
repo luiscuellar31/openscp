@@ -9,6 +9,7 @@
 #include "logic/remote/RemoteModel.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
 #include "logic/transfers/TransferManager.hpp"
+#include "widgets/common/FocusTraversalController.hpp"
 #include "widgets/dialogs/PermissionsDialog.hpp"
 #include "widgets/navigation/PathNavigationBar.hpp"
 #include "widgets/platform/PlatformFilePicker.hpp"
@@ -209,7 +210,10 @@ void MainWindow::requestRemoteListing(const QString &path, bool refresh,
         rightRemoteModel_->setLoading(normalized);
     rightPath_->setPath(normalized);
     refreshRightPathNavigation();
-    rightView_->setEnabled(false);
+    // Disabling the focused view would pass the focus to "Disconnect", where
+    // the next Enter disconnects; the view gets it back after the listing.
+    remoteViewHadFocus_ = openscpui::disableWithoutPassingFocus(rightView_) ||
+                          remoteViewHadFocus_;
     statusBar()->showMessage(refresh ? tr("Refreshing remote folder…")
                                      : tr("Opening remote folder…"),
                              0);

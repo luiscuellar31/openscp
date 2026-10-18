@@ -2,6 +2,7 @@
 #include "TestHarness.hpp"
 #include "logic/common/AppSettings.hpp"
 #include "logic/transfers/TransferManager.hpp"
+#include "widgets/common/FocusTraversalController.hpp"
 #include "widgets/common/InputModalityTracker.hpp"
 #include "widgets/common/ToolbarKeyboardNavigation.hpp"
 #include "widgets/dialogs/AboutDialog.hpp"
@@ -215,6 +216,50 @@ OPENSCP_TEST(testPathFieldPreservesAppearanceAndKeyboardNavigation, test) {
     flushUiEvents();
     test.check(display->fontMetrics().height() > initialFontHeight,
                "path navigation should inherit larger accessibility fonts");
+}
+
+OPENSCP_TEST(testDisablingTheFocusedViewDoesNotPassTheFocusOn, test) {
+    // The remote panel while it lists a folder, with the main toolbar's
+    // "Disconnect" next in the window's order.
+    OrderedFocusWindow window;
+    auto *layout = new QVBoxLayout(&window);
+    auto *panel = new DragAwareTreeView(&window);
+    auto *disconnect = new QPushButton(QStringLiteral("Disconnect"), &window);
+    auto *path = new QLineEdit(&window);
+    layout->addWidget(panel);
+    layout->addWidget(disconnect);
+    layout->addWidget(path);
+    window.order = {panel, disconnect, path};
+    window.show();
+    flushUiEvents();
+
+    panel->setFocus(Qt::OtherFocusReason);
+    panel->setEnabled(false);
+    flushUiEvents();
+    test.check(QApplication::focusWidget() == disconnect,
+               "disabling the focused view passes the focus to the next "
+               "widget, which a listing must not do");
+    panel->setEnabled(true);
+    panel->setFocus(Qt::OtherFocusReason);
+    flushUiEvents();
+
+    const bool held = openscpui::disableWithoutPassingFocus(panel);
+    flushUiEvents();
+    test.check(held && !panel->isEnabled() &&
+                   QApplication::focusWidget() == nullptr,
+               "while the view is disabled, no other widget should get the "
+               "focus, so Enter cannot press Disconnect");
+    openscpui::enableRestoringFocus(panel, held);
+    flushUiEvents();
+    test.check(panel->isEnabled() && QApplication::focusWidget() == panel,
+               "the view should get the focus back once enabled");
+
+    const bool heldAgain = openscpui::disableWithoutPassingFocus(panel);
+    path->setFocus(Qt::MouseFocusReason);
+    openscpui::enableRestoringFocus(panel, heldAgain);
+    flushUiEvents();
+    test.check(QApplication::focusWidget() == path,
+               "focus the user moved meanwhile should stay where it went");
 }
 
 OPENSCP_TEST(testPathFieldKeyboardCanReachTheRoot, test) {
