@@ -52,7 +52,8 @@ gh attestation verify OpenSCP-<version>-x86_64.AppImage --repo luiscuellar31/ope
 
 ### Updates
 
-Use **OpenSCP → Check for updates…** to check for a newer stable release.
+Use **OpenSCP → Check for updates…** (**Help → Check for updates…** on Windows)
+to check for a newer stable release.
 **Automatically check for updates** enables a daily check; it is off by
 default. Installing always requires confirmation after pending file operations
 finish. Signed update-enabled builds can install AppImage, macOS and Windows

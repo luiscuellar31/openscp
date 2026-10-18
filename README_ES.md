@@ -53,8 +53,9 @@ gh attestation verify OpenSCP-<versión>-x86_64.AppImage --repo luiscuellar31/op
 
 ### Actualizaciones
 
-Usa **OpenSCP → Buscar actualizaciones…** para consultar la última versión
-estable. **Buscar actualizaciones automáticamente** activa una consulta diaria;
+Usa **OpenSCP → Buscar actualizaciones…** (**Ayuda → Buscar actualizaciones…**
+en Windows) para consultar la última versión estable.
+**Buscar actualizaciones automáticamente** activa una consulta diaria;
 está desactivada por defecto. La instalación requiere confirmación y que hayan
 terminado las operaciones de archivos pendientes. Los builds configurados con
 firmas pueden instalar actualizaciones de AppImage, macOS y el instalador de

@@ -879,8 +879,8 @@ void MainWindow::initializeMenuBarActions() {
     fileMenu_->addAction(actShowHistory_);
     fileMenu_->addAction(actShowFavorites_);
     // On non‑macOS platforms, also show Preferences and Quit under "File"
-    // to provide a familiar UX on Linux/Windows while keeping the "OpenSCP" app
-    // menu.
+    // to provide a familiar UX on Linux/Windows; Linux keeps the "OpenSCP" app
+    // menu as well.
 #ifndef Q_OS_MAC
     fileMenu_->addSeparator();
     fileMenu_->addAction(actPrefs_);
@@ -888,28 +888,28 @@ void MainWindow::initializeMenuBarActions() {
 #endif
 
     // Help (avoid native help menu to skip the search box)
-    auto *helpMenu = menuBar()->addMenu(tr("Help"));
+    helpMenu_ = menuBar()->addMenu(tr("Help"));
     // On macOS, a menu titled exactly "Help" triggers the native search bar.
     // Keep visible label "Help" but avoid detection by inserting a zero‑width
     // space.
 #ifdef Q_OS_MAC
     {
-        const QString helpMenuTitle = helpMenu->title();
+        const QString helpMenuTitle = helpMenu_->title();
         if (helpMenuTitle.compare(QStringLiteral("Help"),
                                   Qt::CaseInsensitive) == 0) {
-            helpMenu->setTitle(QStringLiteral("Hel") + QChar(0x200B) +
-                               QStringLiteral("p"));
+            helpMenu_->setTitle(QStringLiteral("Hel") + QChar(0x200B) +
+                                QStringLiteral("p"));
         }
     }
 #endif
-    helpMenu->menuAction()->setMenuRole(QAction::NoRole);
+    helpMenu_->menuAction()->setMenuRole(QAction::NoRole);
     // Prevent macOS from moving actions to the app menu: force NoRole
     {
         QAction *helpAboutAct = new QAction(tr("About OpenSCP"), this);
         helpAboutAct->setMenuRole(QAction::NoRole);
         connect(helpAboutAct, &QAction::triggered, this,
                 &MainWindow::showAboutDialog);
-        helpMenu->addAction(helpAboutAct);
+        helpMenu_->addAction(helpAboutAct);
     }
     {
         QAction *reportAct = new QAction(tr("Report a bug"), this);
@@ -918,8 +918,14 @@ void MainWindow::initializeMenuBarActions() {
             QDesktopServices::openUrl(
                 QUrl("https://github.com/luiscuellar31/openscp/issues"));
         });
-        helpMenu->addAction(reportAct);
+        helpMenu_->addAction(reportAct);
     }
+#ifdef Q_OS_WIN
+    // Windows programs have no menu named after themselves: Settings and Quit
+    // are under File, About under Help, and initializeUpdates() puts the
+    // update actions there too.
+    appMenu_->menuAction()->setVisible(false);
+#endif
 }
 
 void MainWindow::initializePanelInteractions() {
