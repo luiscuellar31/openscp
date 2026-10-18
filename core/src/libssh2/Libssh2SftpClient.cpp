@@ -3043,17 +3043,22 @@ void Libssh2SftpClient::disconnect() {
     }
 
     // Wait for any in-flight I/O operation to finish using session_ and sftp_.
-    std::unique_lock<std::recursive_mutex> ioLock(ioMutex_, std::defer_lock);
+    std::unique_lock<std::recursive_timed_mutex> ioLock(ioMutex_,
+                                                        std::defer_lock);
 #ifdef _WIN32
     // libssh2 may enter select() after the shutdown, which on Windows only a
     // new cancellation ends, so cancel again until the operation lets go.
+    // Waiting on the lock between cancellations takes it as soon as an
+    // operation ends; sleeping and then trying it missed that moment while
+    // another thread started one operation after another.
     while (!ioLock.try_lock()) {
         {
             std::lock_guard<std::mutex> lk(stateMutex_);
             if (sock_ != kInvalidSocket)
                 libssh2detail::cancelSocketIo(sock_);
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        if (ioLock.try_lock_for(std::chrono::milliseconds(20)))
+            break;
     }
 #else
     ioLock.lock();
