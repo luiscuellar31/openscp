@@ -1631,6 +1631,227 @@ OPENSCP_TEST(testReconnectingResumesWorkThatWaitedForTheConnection, test) {
                "the download the disconnect stopped");
 }
 
+struct ResumeProbe {
+    // How the first run ends after writing part of the file: None waits
+    // until it is stopped.
+    openscp::RemoteErrorKind failure = openscp::RemoteErrorKind::None;
+    bool transient = false;
+    // Runs after the first that fail with laterFailure before they report
+    // any progress.
+    std::atomic<int> runsThatMoveNothing{0};
+    openscp::RemoteErrorKind laterFailure = openscp::RemoteErrorKind::LocalIo;
+    std::atomic<int> gets{0};
+    std::atomic<bool> firstRunEnded{false};
+    std::atomic<int> resumedRuns{0};
+    std::atomic<int> freshRuns{0};
+};
+
+// Writes part of a download on its first run, which then stops or fails, and
+// counts whether the later runs resume it or start over.
+class ResumeProbeClient final : public DownloadMockClient {
+    public:
+    explicit ResumeProbeClient(std::shared_ptr<ResumeProbe> probe)
+        : probe_(std::move(probe)) {}
+
+    openscp::ProtocolCapabilities capabilities() const override {
+        openscp::ProtocolCapabilities result =
+            DownloadMockClient::capabilities();
+        result.can_resume_download = true;
+        return result;
+    }
+
+    bool get(const std::string &, const std::string &, std::string &err,
+             std::function<void(std::size_t, std::size_t)> progress,
+             std::function<bool()> shouldCancel, bool resume) override {
+        if (probe_->gets.fetch_add(1) == 0) {
+            progress(4096, 65536);
+            if (probe_->failure == openscp::RemoteErrorKind::None) {
+                while (!shouldCancel())
+                    std::this_thread::sleep_for(2ms);
+                err = "Canceled";
+                setLastOperationError(openscp::RemoteErrorKind::Canceled, err);
+            } else {
+                err = "The transfer failed";
+                setLastOperationError(probe_->failure, err, 0,
+                                      probe_->transient);
+            }
+            probe_->firstRunEnded = true;
+            return false;
+        }
+        if (probe_->runsThatMoveNothing.fetch_sub(1) > 0) {
+            err = "The transfer failed";
+            setLastOperationError(probe_->laterFailure, err);
+            return false;
+        }
+        ++(resume ? probe_->resumedRuns : probe_->freshRuns);
+        clearLastOperationError();
+        progress(65536, 65536);
+        err.clear();
+        return true;
+    }
+
+    std::unique_ptr<openscp::RemoteClient>
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
+        return makeConnectedWorker<ResumeProbeClient>(options, err, probe_);
+    }
+
+    private:
+    std::shared_ptr<ResumeProbe> probe_;
+};
+
+// A task shows its final status a moment before its worker lets go of it,
+// and a retry in between is refused: retries until the next run starts. A
+// retry while that run is queued or running is refused too, and changes
+// nothing.
+bool retryUntilTheNextRunStarts(TransferManager &manager, quint64 taskId,
+                                const ResumeProbe &probe) {
+    const int runsBefore = probe.gets.load();
+    return waitUntil([&] {
+        if (probe.gets.load() == runsBefore)
+            manager.retryTask(taskId);
+        return probe.gets.load() > runsBefore;
+    });
+}
+
+OPENSCP_TEST(testReconnectingResumesTheDownloadTheDisconnectStopped, test) {
+    auto probe = std::make_shared<ResumeProbe>();
+    ResumeProbeClient baseClient(probe);
+    TransferManager manager;
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+    const quint64 taskId = manager.enqueueDownload(
+        QStringLiteral("/remote/file"), destination.filePath("file"),
+        testBatchOptions());
+    test.check(waitUntil([&] {
+                   const auto task = manager.taskSnapshot(taskId);
+                   return task && task->bytesDone > 0;
+               }),
+               "the download should write part of the file");
+
+    manager.clearSession();
+    test.check(waitUntil([&] { return probe->firstRunEnded.load(); }) &&
+                   waitForStatus(manager, taskId,
+                                 TransferTask::Status::WaitingForConnection),
+               "disconnecting should stop the download and keep it waiting");
+    configureManager(manager, baseClient, testOptions());
+    test.check(waitForStatus(manager, taskId, TransferTask::Status::Done),
+               "reconnecting should finish the download");
+    test.check(probe->resumedRuns.load() == 1 && probe->freshRuns.load() == 0,
+               "the download should continue its partial file, as the "
+               "disconnect dialog promises, instead of starting over");
+}
+
+OPENSCP_TEST(testRetryResumesAPartialDownloadUnlessItFailedItsCheck, test) {
+    for (const auto failure : {openscp::RemoteErrorKind::LocalIo,
+                               openscp::RemoteErrorKind::Integrity}) {
+        auto probe = std::make_shared<ResumeProbe>();
+        probe->failure = failure;
+        ResumeProbeClient baseClient(probe);
+        TransferManager manager;
+        configureManager(manager, baseClient, testOptions());
+        QTemporaryDir destination;
+        // An older copy is there, which the batch overwrites: overwriting
+        // still continues the task's own partial file.
+        QFile existing(destination.filePath("file"));
+        test.check(existing.open(QIODevice::WriteOnly) &&
+                       existing.write("older copy") == 10,
+                   "the older copy should be written");
+        existing.close();
+        const quint64 taskId = manager.enqueueDownload(
+            QStringLiteral("/remote/file"), destination.filePath("file"),
+            testBatchOptions());
+        test.check(waitForStatus(manager, taskId, TransferTask::Status::Error),
+                   "the partial download should fail");
+
+        test.check(
+            retryUntilTheNextRunStarts(manager, taskId, *probe) &&
+                waitForStatus(manager, taskId, TransferTask::Status::Done),
+            "the retried download should finish");
+        const bool integrity = failure == openscp::RemoteErrorKind::Integrity;
+        test.check(probe->resumedRuns.load() == (integrity ? 0 : 1) &&
+                       probe->freshRuns.load() == (integrity ? 1 : 0),
+                   integrity ? "a download that failed its integrity check "
+                               "should start over when retried"
+                             : "a retried download should continue its "
+                               "partial file");
+    }
+}
+
+OPENSCP_TEST(testRetryAfterARunThatMovedNothing, test) {
+    // The second run fails before it reports any progress. Lost on the
+    // connection, it says nothing about the partial file, which the third run
+    // must continue instead of truncating it. Refused otherwise, as when the
+    // .part is larger than the file it continues, resuming may be what
+    // failed, and the third run must start over instead of failing again.
+    for (const auto laterFailure : {openscp::RemoteErrorKind::Connection,
+                                    openscp::RemoteErrorKind::InvalidRequest}) {
+        const bool connection =
+            laterFailure == openscp::RemoteErrorKind::Connection;
+        auto probe = std::make_shared<ResumeProbe>();
+        probe->failure = openscp::RemoteErrorKind::LocalIo;
+        probe->runsThatMoveNothing = 1;
+        probe->laterFailure = laterFailure;
+        ResumeProbeClient baseClient(probe);
+        TransferManager manager;
+        configureManager(manager, baseClient, testOptions());
+        QTemporaryDir destination;
+        const quint64 taskId = manager.enqueueDownload(
+            QStringLiteral("/remote/file"), destination.filePath("file"),
+            testBatchOptions());
+        test.check(waitForStatus(manager, taskId, TransferTask::Status::Error),
+                   "the partial download should fail");
+        test.check(
+            retryUntilTheNextRunStarts(manager, taskId, *probe) &&
+                waitForStatus(manager, taskId, TransferTask::Status::Error),
+            "the retried download should fail at once");
+
+        test.check(
+            retryUntilTheNextRunStarts(manager, taskId, *probe) &&
+                waitForStatus(manager, taskId, TransferTask::Status::Done),
+            "the second retry should finish the download");
+        test.check(probe->resumedRuns.load() == (connection ? 1 : 0) &&
+                       probe->freshRuns.load() == (connection ? 0 : 1),
+                   connection ? "a retry should continue the partial file "
+                                "after a run the connection stopped"
+                              : "a retry should start over after a run that "
+                                "failed for another reason");
+    }
+}
+
+OPENSCP_TEST(testWorkerConnectionFailureKeepsThePartialDownload, test) {
+    auto probe = std::make_shared<ResumeProbe>();
+    probe->failure = openscp::RemoteErrorKind::Connection;
+    probe->transient = true;
+    ResumeProbeClient baseClient(probe);
+    const auto options = testOptions();
+    std::string connectError;
+    (void)baseClient.connect(options, connectError);
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    std::atomic<int> connections{0};
+    // The worker reconnects for the automatic retry, and that connection
+    // fails; the next one works.
+    manager.setConnectionFactory(
+        [&](std::stop_token,
+            std::string &error) -> std::unique_ptr<openscp::RemoteClient> {
+            if (connections.fetch_add(1) == 1) {
+                error = "Connection refused";
+                return nullptr;
+            }
+            return baseClient.openConnection(options, error);
+        });
+    QTemporaryDir destination;
+    const quint64 taskId = manager.enqueueDownload(
+        QStringLiteral("/remote/file"), destination.filePath("file"),
+        testBatchOptions());
+    test.check(waitForStatus(manager, taskId, TransferTask::Status::Done),
+               "the download should finish once the worker reconnects");
+    test.check(connections.load() >= 3 && probe->resumedRuns.load() == 1 &&
+                   probe->freshRuns.load() == 0,
+               "a failed reconnection should keep the partial download for "
+               "the next run");
+}
+
 OPENSCP_TEST(testSessionChangesKeepPausesAndShowWaiting, test) {
     TransferManager manager;
     manager.setSessionIdentity(QStringLiteral("first-session"));
