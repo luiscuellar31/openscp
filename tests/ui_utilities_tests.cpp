@@ -514,17 +514,28 @@ OPENSCP_TEST(testLocalEntryNamesFollowThisComputer, test) {
     test.check(!isValidLocalEntryName(QStringLiteral("..")),
                "a relative reference is never a local name");
 #ifdef Q_OS_WIN
-    for (const char *name : {"a:b", "CON", "nul.txt", "COM1.log", "trailing.",
-                             "trailing ", "what?", "pipe|name"}) {
+    // REPORT~1.TXT and DOCUME~1 have the form of the short names Windows
+    // makes for long ones, which open the long-named entry instead.
+    for (const char *name :
+         {"a:b", "CON", "nul.txt", "COM1.log", "trailing.", "trailing ",
+          "what?", "pipe|name", "REPORT~1.TXT", "docume~1", "RE3A5F~1.TXT"}) {
         QString why;
         test.check(!isValidLocalEntryName(QString::fromUtf8(name), &why) &&
                        !why.isEmpty(),
                    std::string("Windows should refuse the local name ") + name);
     }
+    // No short name Windows makes has a space, a longer base or extension,
+    // or no number after the tilde.
+    for (const char *name : {"README.TXT", "a b~1.txt", "FILE~1.HTML",
+                             "notes~2026.txt", "draft.txt~", "~$draft.docx"}) {
+        test.check(isValidLocalEntryName(QString::fromUtf8(name)),
+                   std::string("Windows should accept the local name ") + name);
+    }
 #else
     test.check(isValidLocalEntryName(QStringLiteral("a:b")) &&
                    isValidLocalEntryName(QStringLiteral("CON")) &&
-                   isValidLocalEntryName(QStringLiteral("trailing.")),
+                   isValidLocalEntryName(QStringLiteral("trailing.")) &&
+                   isValidLocalEntryName(QStringLiteral("REPORT~1.TXT")),
                "POSIX should accept the names only Windows refuses");
 #endif
 }

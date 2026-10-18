@@ -660,13 +660,42 @@ std::wstring nameProblem(std::wstring_view name) {
     return std::wstring();
 }
 
+// Whether `name` has the form of the short names Windows makes for long ones,
+// such as REPORT~1.TXT for "Report for 2026.txt" or DOCUME~1: NTFS and FAT
+// open the long-named entry by its short name, so a file or folder given
+// that name would replace or fill another.
+bool looksLikeShortName(std::wstring_view name) {
+    const std::wstring_view base = name.substr(0, name.find(L'.'));
+    const std::size_t tilde = base.rfind(L'~');
+    if (tilde == std::wstring_view::npos || tilde + 1 == base.size())
+        return false;
+    for (const wchar_t character : base.substr(tilde + 1)) {
+        if (character < L'0' || character > L'9')
+            return false;
+    }
+    // A legal 8.3 name in the system's OEM code page, without the spaces no
+    // generated short name has.
+    UNICODE_STRING unicodeName;
+    unicodeName.Buffer = const_cast<PWSTR>(name.data());
+    unicodeName.Length = static_cast<USHORT>(name.size() * sizeof(wchar_t));
+    unicodeName.MaximumLength = unicodeName.Length;
+    BOOLEAN spaces = FALSE;
+    return ::RtlIsNameLegalDOS8Dot3(&unicodeName, nullptr, &spaces) && !spaces;
+}
+
 } // namespace
 
 std::string localNameProblem(const std::string &name) {
     std::wstring wide;
     if (!win32::toWidePath(name, wide))
         return "A name must be valid UTF-8.";
-    return win32::toUtf8(nameProblem(wide));
+    std::wstring problem = nameProblem(wide);
+    // Checked for a single name, such as one from a server, and not for each
+    // name of a whole path, which may reach a folder by its short name.
+    if (problem.empty() && looksLikeShortName(wide))
+        problem = L"A name cannot have the form of a Windows short name, such "
+                  L"as REPORT~1.TXT, which can stand for another entry.";
+    return win32::toUtf8(problem);
 }
 
 bool ensureLocalDirectories(const std::string &path, std::string &error) {

@@ -313,7 +313,11 @@ only system folders that the user cannot write may be links. It renames
 through the parent handle, deletes with POSIX semantics, and refuses names that
 Windows cannot store. Its move cleanup removes an unchanged source: it holds
 the file open, sharing only reads, while it compares the identity and deletes
-it, so no other program can change the file in between. The UI takes
+it, so no other program can change the file in between. `localNameProblem`,
+which the UI applies to each name that becomes local, such as one from a
+server, also refuses names with the form of Windows short names, such as
+`REPORT~1.TXT`, which would open another entry; whole paths, which may reach a
+folder by its short name, are not checked for them. The UI takes
 junctions, like symbolic links, as links through `isLocalLink()`, and shortcut
 files as plain files.
 `SyncCoordinator` resolves the selected local root before scanning and queuing

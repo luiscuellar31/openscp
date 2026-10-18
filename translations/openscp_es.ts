@@ -796,47 +796,51 @@ Usa un paquete oficial para ver la información completa de licencias.</translat
         <translation>Nombre inválido: no puede tener caracteres de control.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="446"/>
-        <source>Invalid name for this computer: Windows does not allow the characters &lt; &gt; : &quot; | ? *, a final dot or space, or device names such as CON, NUL or COM1.</source>
-        <translation>Nombre inválido para este equipo: Windows no admite los caracteres &lt; &gt; : &quot; | ? *, un punto o un espacio al final, ni nombres de dispositivo como CON, NUL o COM1.</translation>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="447"/>
+        <source>Invalid name for this computer: Windows does not allow the characters &lt; &gt; : &quot; | ? *, a final dot or space, or device names such as CON, NUL or COM1, and can read a name such as REPORT~1.TXT as another file&apos;s short name.</source>
+        <translation>Nombre inválido para este equipo: Windows no admite los caracteres &lt; &gt; : &quot; | ? *, un punto o un espacio al final, ni nombres de dispositivo como CON, NUL o COM1, y puede leer un nombre como REPORT~1.TXT como el nombre corto de otro archivo.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="490"/>
+        <source>Invalid name for this computer: Windows does not allow the characters &lt; &gt; : &quot; | ? *, a final dot or space, or device names such as CON, NUL or COM1.</source>
+        <translation type="vanished">Nombre inválido para este equipo: Windows no admite los caracteres &lt; &gt; : &quot; | ? *, un punto o un espacio al final, ni nombres de dispositivo como CON, NUL o COM1.</translation>
+    </message>
+    <message>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="492"/>
         <source>Permission denied.</source>
         <translation>Permiso denegado.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="493"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="495"/>
         <source>Location is read-only.</source>
         <translation>Ubicación en modo solo lectura.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="497"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="499"/>
         <source>File or folder does not exist.</source>
         <translation>No existe el archivo o carpeta.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="501"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="503"/>
         <source>Connection timed out.</source>
         <translation>Tiempo de espera agotado.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="507"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="509"/>
         <source>Could not resolve the server hostname.</source>
         <translation>No se pudo resolver el nombre del servidor.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="511"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="513"/>
         <source>Connection refused by the server.</source>
         <translation>Conexión rechazada por el servidor.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="516"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="518"/>
         <source>Network unavailable or host unreachable.</source>
         <translation>Red no disponible o host inalcanzable.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="521"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="523"/>
         <source>Authentication failed.</source>
         <translation>Autenticación fallida.</translation>
     </message>
@@ -1534,12 +1538,12 @@ Lo que no hayan terminado queda como estaba.</translation>
         <translation>La carpeta de destino no existe.</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="553"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="555"/>
         <source>Conflict</source>
         <translation>Conflicto</translation>
     </message>
     <message>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="554"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="556"/>
         <source>“%1” already exists at destination.
 Overwrite?</source>
         <translation>«%1» ya existe en destino.
@@ -1678,7 +1682,7 @@ Continue?</source>
     <message>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="250"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="612"/>
-        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="474"/>
+        <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="476"/>
         <source>Invalid name</source>
         <translation>Nombre inválido</translation>
     </message>

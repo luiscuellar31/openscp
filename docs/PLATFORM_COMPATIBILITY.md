@@ -62,6 +62,8 @@ warns before their first run. Compared with macOS and Linux:
   `%LOCALAPPDATA%`, which roaming profiles do not copy.
 - Downloads and synchronization skip remote names that Windows cannot store,
   such as `CON` or names with `:` or a final dot, and count them as skipped.
+  So do names with the form of a Windows short name, such as `REPORT~1.TXT`,
+  which can stand for another local file, such as `Report for 2026.txt`.
 - Downloaded files carry the Mark of the Web, as browser downloads do, so
   SmartScreen and Office's Protected View check them before they open. A
   server listed under Local intranet or Trusted sites in Internet Options is
