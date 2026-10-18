@@ -11,7 +11,7 @@ builds. Community builds may use different baselines.
 | Native Linux source build | Ubuntu 22.04 toolchain and newer | CMake configure, hardening, build, and unit tests run on Ubuntu 22.04 in CI. Other distributions are community-supported. |
 | Snap (built in CI, not published yet) | `core24` plus the declared content runtime | Runtime-managed; it does not inherit the host's Qt or glibc in the same way as a native build. |
 | Flatpak | Manifest's KDE runtime branch | Runtime-managed and independent of most host libraries. |
-| Windows setup and MSI (x64) | Windows 10 1809+ and Windows 11 | Built with MSVC against Qt 6.11.2 and the libraries vcpkg builds at a pinned baseline. Every staged binary is checked for ASLR, DEP, Control Flow Guard and CET, and the release job installs both packages and starts OpenSCP before upload. |
+| Windows setup and MSI (x64) | Windows 10 1809+ and Windows 11 | Built with MSVC against Qt 6.11.2 and the libraries vcpkg builds at a pinned baseline. Every staged binary is checked for ASLR and DEP, and `OpenSCP.exe` for Control Flow Guard and CET too; the release job installs both packages and starts OpenSCP, without the Qt SDK in reach, before upload. |
 
 ## Protocol availability by build
 
@@ -93,7 +93,8 @@ warns before their first run. Compared with macOS and Linux:
 - `scripts/verify/windows-package.ps1` rejects a staged Windows binary without
   ASLR, high-entropy ASLR or DEP, an `OpenSCP.exe` without Control Flow Guard
   or CET, a debug C runtime, and a DLL that is neither staged nor part of
-  Windows.
+  Windows, counting any Visual C++ redistributable as not part of it even
+  when the packaging computer has one installed.
 - `OPENSCP_FORTIFY_SOURCE_LEVEL=AUTO` selects level 3 when the libc and compiler
   fully support it and safely falls back to level 2 otherwise.
 - Release workflows enforce Qt 6.11.2 for the self-contained macOS, AppImage

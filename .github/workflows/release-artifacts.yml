@@ -540,6 +540,19 @@ jobs:
           OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION: "ON"
         run: .\scripts\package\windows.ps1
 
+      # The Qt SDK that built OpenSCP is on PATH and in QT_PLUGIN_PATH, where
+      # it would stand in for a DLL or plugin that the packages lack.
+      - name: Hide the Qt SDK from the smoke tests
+        shell: pwsh
+        run: |
+          $qt = $env:QT_ROOT_DIR.Replace('/', '\').TrimEnd('\')
+          $path = ($env:PATH -split ';' | Where-Object {
+              $_ -and -not $_.Replace('/', '\').StartsWith($qt, [StringComparison]::OrdinalIgnoreCase)
+            }) -join ';'
+          "PATH=$path" >> $env:GITHUB_ENV
+          'QT_PLUGIN_PATH=' >> $env:GITHUB_ENV
+          'QML2_IMPORT_PATH=' >> $env:GITHUB_ENV
+
       # OpenSCP closes at once when a DLL or plugin is missing, so it must
       # still run after a few seconds; then the uninstaller must clean up.
       - name: Smoke-test the setup
