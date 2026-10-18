@@ -2112,6 +2112,48 @@ OPENSCP_TEST(test_libssh2_jump_host_spawn, t) {
 }
 
 #ifdef _WIN32
+OPENSCP_TEST(test_windows_jump_ssh_comes_from_absolute_path_folders, t) {
+    namespace detail = openscp::libssh2detail;
+    const fs::path base = makeTempFilePath("ssh-search").parent_path();
+    const fs::path current = base / "current";
+    const fs::path tools = base / "tools";
+    const fs::path empty = base / "empty";
+    std::error_code ec;
+    for (const fs::path &folder : {current, tools, empty})
+        fs::create_directories(folder, ec);
+    for (const fs::path &folder : {current, tools})
+        std::ofstream(folder / "ssh.exe", std::ios::binary) << "MZ";
+    const std::wstring missing = (base / "missing" / "ssh.exe").wstring();
+
+    // SearchPathW resolved "", "." and other relative entries against the
+    // current directory, where an ssh.exe would then run.
+    wchar_t previous[MAX_PATH];
+    const DWORD previousLength = ::GetCurrentDirectoryW(MAX_PATH, previous);
+    t.check(::SetCurrentDirectoryW(current.c_str()) != 0,
+            "the test should enter the folder that holds the decoy");
+    t.check(detail::findSshExecutable(L";.;relative;;C:relative;\\relative;" +
+                                          empty.wstring(),
+                                      missing)
+                .empty(),
+            "empty and relative PATH entries must not reach the current "
+            "directory");
+    t.check(detail::findSshExecutable(empty.wstring() + L";\"" +
+                                          tools.wstring() + L"\";" +
+                                          current.wstring(),
+                                      missing) == (tools / "ssh.exe").wstring(),
+            "the first absolute folder with ssh.exe should win, quoted or "
+            "not");
+    if (previousLength > 0 && previousLength < MAX_PATH)
+        ::SetCurrentDirectoryW(previous);
+
+    const std::wstring fallback = (tools / "ssh.exe").wstring();
+    t.check(detail::findSshExecutable(empty.wstring(), fallback) == fallback,
+            "without one in PATH, the fallback should be used");
+    t.check(detail::findSshExecutable(empty.wstring(), missing).empty(),
+            "a missing fallback should give no program");
+    fs::remove_all(base, ec);
+}
+
 OPENSCP_TEST(test_windows_jump_command_line_round_trips, t) {
     const std::vector<std::wstring> arguments = {
         L"-l",

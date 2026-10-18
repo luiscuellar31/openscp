@@ -169,8 +169,9 @@ and disconnect repeats that until the I/O mutex is free.
 An SSH jump host runs `ssh -W host:port` with the arguments that
 `ssh_jump_command()` builds for both platforms. On POSIX, ssh gets one end of a
 `socketpair()` as its standard input and output and libssh2 the other. On
-Windows, `SshJumpTunnel` starts ssh.exe, found in `PATH` but never in the
-current directory, or else the OpenSSH client that Windows installs, through
+Windows, `SshJumpTunnel` starts ssh.exe, found in an absolute folder of `PATH`
+but never through the current directory or a relative entry, or else the
+OpenSSH client that Windows installs, through
 `CreateProcessW` with only its three pipes inheritable; two threads copy between
 those pipes and one end of a checked pair of loopback sockets, whose other end
 goes to libssh2, and a third keeps the end of ssh.exe's stderr for the error

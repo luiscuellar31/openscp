@@ -34,35 +34,38 @@ std::string windowsFailure(const char *operation, DWORD code) {
     return std::string(operation) + ": " + win32::errorMessage(code);
 }
 
-// ssh.exe from PATH, as posix_spawnp() takes "ssh" from it elsewhere, but not
-// from the current directory, which CreateProcessW would search first; then
-// the OpenSSH client that Windows installs. Only an .exe: Windows would run a
-// .cmd or .bat through cmd.exe, which reads arguments with other rules.
-std::wstring findSshExecutable() {
-    const DWORD pathLength = ::GetEnvironmentVariableW(L"PATH", nullptr, 0);
-    if (pathLength > 0) {
-        std::wstring path(pathLength, L'\0');
-        path.resize(
-            ::GetEnvironmentVariableW(L"PATH", path.data(), pathLength));
-        std::wstring found(32768, L'\0');
-        const DWORD length = ::SearchPathW(path.c_str(), L"ssh.exe", nullptr,
-                                           static_cast<DWORD>(found.size()),
-                                           found.data(), nullptr);
-        if (length > 0 && length < found.size()) {
-            found.resize(length);
-            return found;
-        }
-    }
+bool isFile(const std::wstring &path) {
+    const DWORD attributes = ::GetFileAttributesW(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES &&
+           (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+
+// "C:\tools" or "\\server\share\tools"; not "", ".", "bin", "\bin" or
+// "C:bin", which depend on the current directory or drive.
+bool isAbsoluteFolder(std::wstring_view folder) {
+    const auto separator = [](wchar_t ch) { return ch == L'\\' || ch == L'/'; };
+    if (folder.size() >= 3 && folder[1] == L':' && separator(folder[2]))
+        return (folder[0] >= L'A' && folder[0] <= L'Z') ||
+               (folder[0] >= L'a' && folder[0] <= L'z');
+    return folder.size() >= 2 && separator(folder[0]) && separator(folder[1]);
+}
+
+std::wstring environmentPath() {
+    const DWORD length = ::GetEnvironmentVariableW(L"PATH", nullptr, 0);
+    if (length == 0)
+        return {};
+    std::wstring path(length, L'\0');
+    path.resize(::GetEnvironmentVariableW(L"PATH", path.data(), length));
+    return path;
+}
+
+// The OpenSSH client that Windows installs as an optional feature.
+std::wstring systemOpenSsh() {
     wchar_t system[MAX_PATH];
     const UINT length = ::GetSystemDirectoryW(system, MAX_PATH);
     if (length == 0 || length >= MAX_PATH)
         return {};
-    std::wstring bundled = std::wstring(system, length) + L"\\OpenSSH\\ssh.exe";
-    const DWORD attributes = ::GetFileAttributesW(bundled.c_str());
-    if (attributes == INVALID_FILE_ATTRIBUTES ||
-        (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
-        return {};
-    return bundled;
+    return std::wstring(system, length) + L"\\OpenSSH\\ssh.exe";
 }
 
 void appendArgument(std::wstring &commandLine, const std::wstring &argument) {
@@ -261,6 +264,31 @@ bool sendAll(SocketHandle socket, const char *data, std::size_t length) {
 
 } // namespace
 
+std::wstring findSshExecutable(const std::wstring &pathValue,
+                               const std::wstring &fallback) {
+    std::size_t start = 0;
+    while (start <= pathValue.size()) {
+        std::size_t end = pathValue.find(L';', start);
+        if (end == std::wstring::npos)
+            end = pathValue.size();
+        std::wstring_view folder(pathValue.data() + start, end - start);
+        // cmd.exe accepts quoted entries, as "C:\Program Files\Git\usr\bin".
+        if (folder.size() >= 2 && folder.front() == L'"' &&
+            folder.back() == L'"')
+            folder = folder.substr(1, folder.size() - 2);
+        if (isAbsoluteFolder(folder)) {
+            std::wstring candidate(folder);
+            if (candidate.back() != L'\\' && candidate.back() != L'/')
+                candidate += L'\\';
+            candidate += L"ssh.exe";
+            if (isFile(candidate))
+                return candidate;
+        }
+        start = end + 1;
+    }
+    return !fallback.empty() && isFile(fallback) ? fallback : std::wstring();
+}
+
 std::wstring windowsCommandLine(const std::wstring &program,
                                 const std::vector<std::wstring> &arguments) {
     std::wstring commandLine;
@@ -291,7 +319,8 @@ bool SshJumpTunnel::start(const std::vector<std::string> &arguments,
         }
         wideArguments.push_back(std::move(wide));
     }
-    const std::wstring program = findSshExecutable();
+    const std::wstring program =
+        findSshExecutable(environmentPath(), systemOpenSsh());
     if (program.empty()) {
         error = "The OpenSSH client was not found. Add the \"OpenSSH Client\" "
                 "optional feature of Windows, or put ssh.exe in PATH.";

@@ -20,6 +20,15 @@ namespace openscp::libssh2detail {
 std::wstring windowsCommandLine(const std::wstring &program,
                                 const std::vector<std::wstring> &arguments);
 
+// The ssh.exe in the first absolute folder of pathValue, a PATH value, or else
+// fallback if it exists; empty when there is none. Empty, "." and other
+// relative entries are skipped: SearchPathW resolves them against the current
+// directory, so an ssh.exe left there would run with the jump host's user and
+// key. Only an .exe: Windows would run a .cmd or .bat through cmd.exe, which
+// reads arguments with other rules.
+std::wstring findSshExecutable(const std::wstring &pathValue,
+                               const std::wstring &fallback);
+
 class SshJumpTunnel {
     public:
     SshJumpTunnel() = default;
