@@ -31,6 +31,7 @@
 #include <QSplitter>
 #include <QSplitterHandle>
 #include <QStandardPaths>
+#include <QStatusBar>
 #include <QTemporaryDir>
 #include <QThreadPool>
 #include <QTimer>
@@ -542,6 +543,63 @@ OPENSCP_TEST(testLocalDropsAskBeforeReplacingWhatIsThere, test) {
             prompts.size() == 1 && !QFileInfo::exists(leftOnly),
         "accepting for all should replace the file and the folder, as F5 "
         "does");
+}
+
+OPENSCP_TEST(testPanelsRefuseDragsWithoutLocalFiles, test) {
+    // Text, a web link or an Outlook attachment has no path to copy; dropped
+    // on the left panel, it downloaded what the remote panel had selected.
+    QTemporaryDir temporary;
+    test.check(temporary.isValid(), "the drag needs a folder");
+    if (!temporary.isValid())
+        return;
+    configureMainWindowSettings(settingsRootPath);
+    MainWindow window;
+    window.show();
+    flushUiEvents();
+    const MainWindowFocusParts parts = focusParts(window);
+    test.check(parts.leftView && parts.rightView, "the drag needs both panels");
+    if (!parts.leftView || !parts.rightView)
+        return;
+
+    const auto accepted = [&](DragAwareTreeView *view, const QMimeData &mime,
+                              QEvent::Type type) {
+        if (type == QEvent::DragEnter) {
+            QDragEnterEvent event(QPoint(10, 10), Qt::CopyAction, &mime,
+                                  Qt::LeftButton, Qt::NoModifier);
+            static_cast<QObject &>(window).eventFilter(view->viewport(),
+                                                       &event);
+            return event.isAccepted();
+        }
+        QDropEvent event(QPointF(10, 10), Qt::CopyAction, &mime, Qt::LeftButton,
+                         Qt::NoModifier, type);
+        static_cast<QObject &>(window).eventFilter(view->viewport(), &event);
+        return event.isAccepted();
+    };
+    QMimeData text;
+    text.setText(QStringLiteral("selected words"));
+    QMimeData link;
+    link.setUrls({QUrl(QStringLiteral("https://example.com/report.pdf"))});
+    QMimeData attachment;
+    attachment.setData(
+        QStringLiteral(
+            "application/x-qt-windows-mime;value=\"FileGroupDescriptorW\""),
+        QByteArray(4, '\0'));
+    QMimeData files;
+    files.setUrls({QUrl::fromLocalFile(temporary.path())});
+
+    for (DragAwareTreeView *view : {parts.leftView, parts.rightView}) {
+        for (const QMimeData *mime : {&text, &link, &attachment}) {
+            test.check(!accepted(view, *mime, QEvent::DragEnter) &&
+                           !accepted(view, *mime, QEvent::Drop),
+                       "a panel should refuse a drag without local files");
+        }
+        test.check(accepted(view, files, QEvent::DragEnter),
+                   "a panel should take local files");
+    }
+    accepted(parts.leftView, attachment, QEvent::DragEnter);
+    test.check(window.statusBar()->currentMessage().contains(
+                   QStringLiteral("e-mail attachments")),
+               "a dragged attachment should say why it cannot be dropped");
 }
 
 OPENSCP_TEST(testLocalDeleteRunsOffTheUiThread, test) {

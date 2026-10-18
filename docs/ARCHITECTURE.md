@@ -373,7 +373,9 @@ panel deletes its batch, once its copy finishes without errors and only if
 root. Any other target, such as another application, may read the files long
 after the drop, so its batch stays; the startup cleanup removes batches older
 than the retention setting. Both deletions, and the removal of a staging root
-left empty, run outside the UI thread.
+left empty, run outside the UI thread. The panels take only drags that carry
+local files; text, web links and files that exist only inside another
+application, such as e-mail attachments, are refused.
 
 Copies, moves and deletions between local folders run on a pool of two
 threads that `MainWindow` owns, apart from the global pool the connection and

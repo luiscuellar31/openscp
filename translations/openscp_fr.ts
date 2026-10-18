@@ -1563,7 +1563,7 @@ Overwrite?</source>
     </message>
     <message>
         <location filename="../ui/app/MainWindowLocalOps.cpp" line="200"/>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="273"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="288"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="278"/>
         <source>Last error: </source>
         <translation>Dernière erreur : </translation>
@@ -1696,8 +1696,8 @@ Continuer ?</translation>
     <message>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="267"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="330"/>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="144"/>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="236"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="165"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="251"/>
         <source>Queued: %1 downloads</source>
         <translation>En attente : %1 téléchargements</translation>
     </message>
@@ -1727,8 +1727,8 @@ Continuer ?</translation>
         <translation>Rien à télécharger.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="148"/>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="245"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="168"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="260"/>
         <source>Skipped invalid: %1</source>
         <translation>Ignorés (invalides) : %1</translation>
     </message>
@@ -1751,7 +1751,7 @@ Continuer ?</translation>
         <translation>Rien de sélectionné.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="233"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="250"/>
         <source>Queued: %1 downloads (move)</source>
         <translation>En attente : %1 téléchargements (déplacement)</translation>
     </message>
@@ -1774,7 +1774,7 @@ Continuer ?</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="541"/>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="611"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="626"/>
         <source>Nothing to upload.</source>
         <translation>Rien à téléverser.</translation>
     </message>
@@ -2008,8 +2008,8 @@ L’empreinte ne peut pas être enregistrée. Connexion autorisée cette fois un
         <location filename="../ui/app/MainWindowConnection.cpp" line="1030"/>
         <location filename="../ui/app/MainWindowSync.cpp" line="38"/>
         <location filename="../ui/app/MainWindowSync.cpp" line="140"/>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="201"/>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="663"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="219"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="678"/>
         <location filename="../ui/app/MainWindowUpdates.cpp" line="167"/>
         <location filename="../ui/logic/navigation/PaneController.cpp" line="362"/>
         <location filename="../ui/logic/navigation/PaneController.cpp" line="480"/>
@@ -2029,7 +2029,7 @@ L’empreinte ne peut pas être enregistrée. Connexion autorisée cette fois un
         <translation>Connexion annulée : empreinte non acceptée</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="1066"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="1094"/>
         <source>Remote directory is read-only; cannot upload here</source>
         <translation>Le répertoire distant est en lecture seule ; téléversement impossible ici</translation>
     </message>
@@ -2039,10 +2039,8 @@ L’empreinte ne peut pas être enregistrée. Connexion autorisée cette fois un
         <translation>Copiés : %1  |  Échecs : %2</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="143"/>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="235"/>
         <source>Queued: %1 downloads (DND)</source>
-        <translation>En attente : %1 téléchargements (glisser-déposer)</translation>
+        <translation type="vanished">En attente : %1 téléchargements (glisser-déposer)</translation>
     </message>
     <message>
         <location filename="../ui/app/MainWindowConnection.cpp" line="963"/>
@@ -2193,37 +2191,37 @@ L’empreinte ne peut pas être enregistrée. Connexion autorisée cette fois un
         <translation>Impossible de supprimer la source : %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="111"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="133"/>
         <source>A remote scan is already in progress</source>
         <translation>Une analyse distante est déjà en cours</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="119"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="141"/>
         <source>Nothing queued. Skipped invalid: %1</source>
         <translation>Rien en attente. Ignorés (invalides) : %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="201"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="219"/>
         <source>Preparing remote download queue...</source>
         <translation>Préparation de la file d’attente de téléchargement distante...</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="202"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="220"/>
         <source>Preparing queue</source>
         <translation>Préparation de la file d’attente</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="529"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="544"/>
         <source>Scanning remote folders... %1 folders, %2 files found</source>
         <translation>Analyse des dossiers distants... %1 dossiers, %2 fichiers trouvés</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="229"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="247"/>
         <source>Remote scan canceled</source>
         <translation>Analyse distante annulée</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="250"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="265"/>
         <source>Folders not listed: %1</source>
         <translation>Dossiers non listés : %1</translation>
     </message>
@@ -2334,7 +2332,7 @@ Edit the site and keep only one transport.</source>
 Modifiez le site et conservez un seul transport.</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="1057"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="1085"/>
         <source>Drop ignored: remote-origin drag cannot be dropped back into the same remote panel</source>
         <translation>Dépôt ignoré : un glisser depuis le panneau distant ne peut pas être redéposé dans ce même panneau distant</translation>
     </message>
@@ -2439,8 +2437,8 @@ OpenSCP va se déconnecter pour éviter des opérations incohérentes.
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="407"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="454"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="484"/>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="107"/>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="607"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="129"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="622"/>
         <location filename="../ui/logic/navigation/PaneController.cpp" line="346"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="74"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="144"/>
@@ -2457,8 +2455,8 @@ OpenSCP va se déconnecter pour éviter des opérations incohérentes.
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="407"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="454"/>
         <location filename="../ui/app/MainWindowRemoteOps.cpp" line="484"/>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="107"/>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="607"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="129"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="622"/>
         <location filename="../ui/logic/navigation/PaneController.cpp" line="347"/>
         <source>No active remote session.</source>
         <translation>Aucune session distante active.</translation>
@@ -2761,19 +2759,19 @@ Faire confiance à cette clé ? Les connexions suivantes refuseront toute autre 
         <translation>Ouverture du dossier distant…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="240"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="255"/>
         <source>Folders queued: %1</source>
         <translation>Dossiers mis en file : %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="269"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="284"/>
         <location filename="../ui/logic/common/MainWindowSharedUtils.cpp" line="72"/>
         <location filename="../ui/logic/remote/RemoteActionController.cpp" line="274"/>
         <source>Canceled</source>
         <translation>Annulé</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="665"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="680"/>
         <source>Preparing upload</source>
         <translation>Préparation du téléversement</translation>
     </message>
@@ -2849,12 +2847,12 @@ Mis à jour : %2  |  Échecs : %3</translation>
         <translation>Lecture des autorisations distantes…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="467"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="482"/>
         <source>Very large transfer</source>
         <translation>Transfert très volumineux</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="468"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="483"/>
         <source>The scan has found more than the safe review threshold:
 
 %1 items
@@ -2869,74 +2867,74 @@ Continue preparing this batch?</source>
 Continuer à préparer ce lot ?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="256"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="271"/>
         <source>Unknown sizes: %1</source>
         <translation>Tailles inconnues : %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="260"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="275"/>
         <source>Symbolic links skipped: %1</source>
         <translation>Liens symboliques ignorés : %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="265"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="280"/>
         <source>Depth limits reached: %1</source>
         <translation>Limites de profondeur atteintes : %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="350"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="365"/>
         <source>Scanning remote folders...</source>
         <translation>Analyse des dossiers distants…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="662"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="677"/>
         <source>Preparing local upload queue…</source>
         <translation>Préparation de la file d’attente des téléversements locaux…</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="664"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="679"/>
         <source>Preparing move</source>
         <translation>Préparation du déplacement</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="688"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="703"/>
         <source>symlinks skipped: %1</source>
         <translation>liens symboliques ignorés : %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="691"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="706"/>
         <source>depth limits: %1</source>
         <translation>limites de profondeur : %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="695"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="710"/>
         <source>inaccessible: %1</source>
         <translation>inaccessibles : %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="698"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="713"/>
         <source>invalid names: %1</source>
         <translation>noms non valides : %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="701"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="716"/>
         <source>unknown sizes: %1</source>
         <translation>tailles inconnues : %1</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="891"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="906"/>
         <source>Scanning local items: %1
 %2</source>
         <translation>Analyse des éléments locaux : %1
 %2</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="906"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="921"/>
         <source>Large upload</source>
         <translation>Téléversement volumineux</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="907"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="922"/>
         <source>This upload contains more than 100,000 items or 100 GiB of known data.
 
 Discovered so far: %1 items, %2.
@@ -2947,24 +2945,29 @@ Continue preparing it?</source>
 Poursuivre sa préparation ?</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="942"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="957"/>
         <source>Queued: %1 uploads, %2 folders (DND)</source>
         <translation>Mis en file d’attente : %1 téléversements, %2 dossiers (glisser-déposer)</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="946"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="961"/>
         <source>Queued: %1 uploads, %2 folders (move)</source>
         <translation>Mis en file d’attente : %1 téléversements, %2 dossiers (déplacement)</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="949"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="964"/>
         <source>Queued: %1 uploads, %2 folders</source>
         <translation>Mis en file d’attente : %1 téléversements, %2 dossiers</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="975"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="990"/>
         <source>Upload preparation canceled.</source>
         <translation>Préparation du téléversement annulée.</translation>
+    </message>
+    <message>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="1049"/>
+        <source>Files that exist only inside another application, such as e-mail attachments, cannot be dropped here. Save them to a folder first.</source>
+        <translation>Les fichiers qui n’existent que dans une autre application, comme les pièces jointes d’un e-mail, ne peuvent pas être déposés ici. Enregistrez-les d’abord dans un dossier.</translation>
     </message>
     <message>
         <location filename="../ui/logic/navigation/PaneController.cpp" line="400"/>
@@ -2975,7 +2978,7 @@ Visited: %2  |  Matches: %3</source>
 Visités : %2  |  Correspondances : %3</translation>
     </message>
     <message>
-        <location filename="../ui/app/MainWindowTransfers.cpp" line="516"/>
+        <location filename="../ui/app/MainWindowTransfers.cpp" line="531"/>
         <source>Queue backpressure: waiting for pending tasks to drop below 1,000…</source>
         <translation>File saturée : attente que le nombre de tâches en attente passe sous 1 000…</translation>
     </message>

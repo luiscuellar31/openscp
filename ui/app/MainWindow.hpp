@@ -332,8 +332,7 @@ class MainWindow : public QMainWindow {
         bool isDir = false;
     };
     void runRemoteDownloadPrescan(const QVector<RemoteDownloadSeed> &seeds,
-                                  int initialSkipped, bool dragAndDrop,
-                                  bool moveSources = false);
+                                  int initialSkipped, bool moveSources = false);
     void startLocalUploadDiscovery(
         const QVector<QPair<QString, QString>> &localRemoteRoots,
         bool moveSources, bool dragAndDrop = false);
