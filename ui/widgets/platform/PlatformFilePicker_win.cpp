@@ -101,6 +101,7 @@ HWND ownerWindow(QWidget *parent) {
     if (parent == nullptr) {
         return GetActiveWindow();
     }
+    // NOLINTNEXTLINE(performance-no-int-to-ptr): WId holds the HWND.
     return reinterpret_cast<HWND>(parent->window()->winId());
 }
 

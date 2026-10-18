@@ -169,6 +169,7 @@ bool openRelayPair(SocketHandle &first, SocketHandle &second,
         return false;
     }
     // accept() gives a socket that child processes would inherit.
+    // NOLINTNEXTLINE(performance-no-int-to-ptr): a SOCKET is a kernel handle.
     (void)::SetHandleInformation(reinterpret_cast<HANDLE>(accepted),
                                  HANDLE_FLAG_INHERIT, 0);
     disableNagle(client);

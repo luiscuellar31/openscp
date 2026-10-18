@@ -119,7 +119,8 @@ find_llvm17_tool() {
 require_llvm17() {
     local tool_path="$1"
     local version_line=""
-    version_line="$($tool_path --version | sed -n '1p')"
+    # Some builds print the version on a later line, after "LLVM (http://llvm.org/):".
+    version_line="$($tool_path --version | grep -m1 'version' || true)"
     if [[ ! "$version_line" =~ (^|[^0-9])17\.[0-9] ]]; then
         printf 'Expected LLVM 17 for %s, got: %s\n' "$tool_path" "$version_line" >&2
         exit 1
@@ -213,15 +214,40 @@ if [[ "$RUN_TIDY" -eq 1 ]]; then
         fi
         rm -rf "$tidy_probe_dir"
     fi
+    run_tidy_command=("$run_tidy_bin")
+    header_filter='(^|/)(core|ui|tests)/'
     source_root_regex="$(printf '%s\n' "$REPO_DIR" | sed 's#[.[\*^$()+?{|\\/]#\\&#g')"
-    "$run_tidy_bin" \
+    tidy_files=("^${source_root_regex}/(core/src|ui|tests)/.*\\.(cpp|cc|cxx)$")
+    case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        # An MSVC compilation database, with Windows paths. Only the files with
+        # Windows code are analyzed; the Linux and macOS runs cover the rest.
+        # MSVC's standard library asks for a newer Clang than 17, which still
+        # parses it.
+        [[ "$run_tidy_bin" != *.py ]] || run_tidy_command=(python "$run_tidy_bin")
+        header_filter='(^|[\\/])(core|ui|tests)[\\/]'
+        tidy_extra_args+=("-extra-arg=-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH")
+        windows_root="$(cygpath -m "$REPO_DIR")"
+        tidy_files=()
+        while IFS= read -r source_file; do
+            tidy_files+=("^$(printf '%s\n' "${windows_root}/${source_file}" |
+                sed -e 's#[.[\*^$()+?{|\\]#\\&#g' -e 's#/#[\\\\/]#g')\$")
+        done < <(
+            {
+                find core/src ui tests -type f -name '*_win.cpp'
+                grep -rlE '_WIN32|Q_OS_WIN|<windows\.h>' core/src ui tests --include='*.cpp'
+            } | LC_ALL=C sort -u
+        )
+        ;;
+    esac
+    "${run_tidy_command[@]}" \
         -clang-tidy-binary "$tidy_bin" \
         -p "$BUILD_DIR" \
         -j "${TIDY_JOBS:-2}" \
         -quiet \
-        -header-filter='(^|/)(core|ui|tests)/' \
+        -header-filter="$header_filter" \
         "${tidy_extra_args[@]}" \
-        "^${source_root_regex}/(core/src|ui|tests)/.*\\.(cpp|cc|cxx)$"
+        "${tidy_files[@]}"
 fi
 
 if [[ "$RUN_CPPCHECK" -eq 1 ]]; then

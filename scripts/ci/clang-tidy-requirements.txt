@@ -1,0 +1,4 @@
+# clang-tidy 17, the version scripts/checks/cpp-quality.sh asks for, as the
+# Windows CI job installs it: the x64 Windows wheel, pinned by its SHA-256.
+clang-tidy==17.0.1 \
+    --hash=sha256:90488cde4ee65e846b90c4f3308a2a4db720b93d3d7f80b126a1e25ef552dbb2

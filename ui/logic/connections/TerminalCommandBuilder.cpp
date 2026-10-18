@@ -541,7 +541,7 @@ TerminalCommandBuilder::TerminalCommandBuilder(
 #ifdef Q_OS_WIN
             // Only an .exe: Windows would run ssh.cmd or ssh.bat through
             // cmd.exe, which reads the arguments with other quoting rules.
-            const QString executable =
+            QString executable =
                 QStandardPaths::findExecutable(name + QStringLiteral(".exe"));
             if (!executable.isEmpty())
                 return executable;

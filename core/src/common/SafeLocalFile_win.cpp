@@ -16,6 +16,7 @@
 // clang-format on
 
 #include <array>
+#include <bit>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
@@ -574,9 +575,10 @@ bool isTransientSharingError(DWORD code) {
 // moment, so sharing errors are retried briefly.
 DWORD renameOpenedFile(HANDLE file, HANDLE directory, std::wstring_view name) {
     // FILE_RENAME_INFORMATION in ntifs.h has the layout of FILE_RENAME_INFO.
-    constexpr auto kRenameInformation = static_cast<FILE_INFORMATION_CLASS>(10);
-    constexpr auto kRenameInformationEx =
-        static_cast<FILE_INFORMATION_CLASS>(65);
+    // winternl.h declares no rename class, and its enumeration of a single
+    // value cannot take these by a cast, so they go in by their bits.
+    const auto kRenameInformation = std::bit_cast<FILE_INFORMATION_CLASS>(10);
+    const auto kRenameInformationEx = std::bit_cast<FILE_INFORMATION_CLASS>(65);
     const std::size_t nameBytes = name.size() * sizeof(wchar_t);
     std::vector<std::byte> buffer(sizeof(FILE_RENAME_INFO) + nameBytes);
     auto *info = reinterpret_cast<FILE_RENAME_INFO *>(buffer.data());
@@ -948,8 +950,9 @@ bool flushAndSync(std::FILE *file, std::string &error,
     durability = normalizeLocalFileDurability(durability);
     if (durability == LocalFileDurability::Buffered)
         return true;
-    const auto handle =
-        reinterpret_cast<HANDLE>(::_get_osfhandle(::_fileno(file)));
+    const intptr_t osHandle = ::_get_osfhandle(::_fileno(file));
+    // NOLINTNEXTLINE(performance-no-int-to-ptr): the CRT gives an integer.
+    const auto handle = reinterpret_cast<HANDLE>(osHandle);
     if (handle == INVALID_HANDLE_VALUE || !::FlushFileBuffers(handle)) {
         error =
             win32Failure("Could not synchronize local file",

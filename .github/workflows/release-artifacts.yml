@@ -528,27 +528,7 @@ jobs:
 
       - name: Install pinned Inno Setup and WiX
         shell: pwsh
-        run: |
-          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
-          curl.exe --fail --location --proto '=https' --silent --show-error `
-            --output $installer `
-            https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $expected = '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732'
-          if ((Get-FileHash -Algorithm SHA256 $installer).Hash.ToLowerInvariant() -ne $expected) {
-            throw 'The Inno Setup installer does not match its pinned SHA-256.'
-          }
-          $innoDir = Join-Path $env:RUNNER_TEMP 'InnoSetup'
-          $install = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList @(
-            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/CURRENTUSER',
-            "/DIR=`"$innoDir`"")
-          if ($install.ExitCode -ne 0) { throw "Inno Setup did not install: $($install.ExitCode)" }
-          "ISCC=$(Join-Path $innoDir 'ISCC.exe')" >> $env:GITHUB_ENV
-          dotnet tool install --global wix --version 5.0.2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Join-Path $env:USERPROFILE '.dotnet\tools' >> $env:GITHUB_PATH
-          # By its path: the runner's WiX v3 sets WIX to its own folder.
-          "OPENSCP_WIX=$(Join-Path $env:USERPROFILE '.dotnet\tools\wix.exe')" >> $env:GITHUB_ENV
+        run: .\scripts\ci\install_windows_packagers.ps1
 
       - name: Build the setup and the MSI
         shell: pwsh

@@ -1,0 +1,76 @@
+name: Windows Packaging
+
+# Release Artifacts packages Windows only for main and for tags. Pull requests
+# that change the packaging or a PowerShell script build the setup and the MSI
+# here, with the checks that scripts/package/windows.ps1 runs on them.
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+    paths:
+      - "**.ps1"
+      - "packaging/windows/**"
+      - "assets/windows/**"
+      - ".github/workflows/windows-packaging.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-packaging-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    if: github.event.pull_request.draft == false
+    name: Package for Windows (x64)
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # aqtinstall 3.3.0 does not find Qt 6.11 for Windows in the current
+      # repository layout; this commit of its main branch does.
+      - name: Install pinned Qt
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
+        with:
+          version: "6.11.2"
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+          aqtsource: "git+https://github.com/miurahr/aqtinstall.git@076e1659807d0b362a3ed684d54c2e9c775eb9c7"
+          py7zrversion: "==1.1.0"
+
+      - name: Fetch vcpkg at the manifest baseline
+        id: vcpkg
+        shell: pwsh
+        run: .\scripts\ci\fetch_vcpkg.ps1
+
+      # The cache that the CI job saves; this job only reads it.
+      - name: Restore vcpkg binary cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\vcpkg-archives
+          key: vcpkg-x64-windows-static-md-${{ hashFiles('vcpkg.json', 'vcpkg-ports/**') }}-${{ steps.vcpkg.outputs.msvc }}
+
+      - name: Install pinned Inno Setup and WiX
+        shell: pwsh
+        run: .\scripts\ci\install_windows_packagers.ps1
+
+      - name: Build the setup and the MSI
+        shell: pwsh
+        env:
+          QT_PREFIX: ${{ env.QT_ROOT_DIR }}
+          OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION: "ON"
+        run: .\scripts\package\windows.ps1

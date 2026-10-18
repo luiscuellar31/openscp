@@ -2457,6 +2457,7 @@ OPENSCP_TEST(test_local_file_64bit_seek_and_size_large_offsets, t) {
 #ifdef _WIN32
     // NTFS writes zeros up to the offset unless the file is sparse.
     DWORD returned = 0;
+    // NOLINTNEXTLINE(performance-no-int-to-ptr): the CRT gives an integer.
     (void)DeviceIoControl(reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(f))),
                           FSCTL_SET_SPARSE, nullptr, 0, nullptr, 0, &returned,
                           nullptr);

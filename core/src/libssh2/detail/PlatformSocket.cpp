@@ -61,6 +61,7 @@ void shutdownSocket(SocketHandle socket) noexcept {
 }
 
 void cancelSocketIo(SocketHandle socket) noexcept {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr): a SOCKET is a kernel handle.
     (void)::CancelIoEx(reinterpret_cast<HANDLE>(socket), nullptr);
 }
 
