@@ -127,6 +127,10 @@ macOS, the published checksum is what lets you verify the download.
 it is missing, add **OpenSSH Client** under **Optional features** in Windows
 Settings.
 
+Like a browser, OpenSCP marks the files it downloads as coming from the
+internet, so Windows checks them before they open. Servers that you add to
+**Local intranet** or **Trusted sites** in Internet Options are not marked.
+
 ## Build from source
 
 OpenSCP builds on Linux, macOS, and Windows. A compatible Qt 6 installation,

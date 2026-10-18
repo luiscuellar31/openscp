@@ -4,6 +4,7 @@
 #include "logic/common/TimeUtils.hpp"
 #include "logic/common/UiAlerts.hpp"
 #include "logic/navigation/RemotePath.hpp"
+#include "logic/transfers/MarkOfTheWeb.hpp"
 #include "openscp/RemoteClient.hpp"
 #include "openscp/RuntimeLogging.hpp"
 #include "openscp/SafeLocalFile.hpp"
@@ -288,6 +289,11 @@ void TransferManager::wakeCurrentSessionLocked(QVector<quint64> &changed) {
 QString TransferManager::sessionIdentity() const {
     std::lock_guard<std::mutex> lock(mtx_);
     return currentSessionKey_;
+}
+
+void TransferManager::setDownloadOrigin(const QString &originUrl) {
+    std::lock_guard<std::mutex> lock(mtx_);
+    downloadOrigin_ = originUrl;
 }
 
 void TransferManager::setConnectionFactory(ConnectionFactory openConnection,
@@ -2480,12 +2486,18 @@ bool TransferManager::runTransferAttempt(
         updateProgress(taskId, done, total, latest.measuredKBps, etaSeconds);
         publishProgress({taskId});
     };
+    const QString origin = [this] {
+        std::lock_guard<std::mutex> lock(mtx_);
+        return downloadOrigin_;
+    }();
     const bool succeeded =
         TransferExecutor::run(task, workerClient, resume, err, callbacks);
     if (latest.unstored) {
         updateProgress(task.taskId, latest.done, latest.total,
                        latest.measuredKBps, latest.etaSeconds);
     }
+    if (succeeded && task.type == TransferTask::Type::Download)
+        openscpui::markDownloadedFile(task.dst, origin);
     return succeeded;
 }
 

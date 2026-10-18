@@ -133,6 +133,11 @@ publicada es lo que te permite validar la descarga.
 Windows; si falta, agrega **Cliente OpenSSH** en **Características opcionales**
 de la Configuración de Windows.
 
+Como un navegador, OpenSCP marca los archivos que descarga como procedentes de
+Internet, así que Windows los revisa antes de abrirlos. Los servidores que
+agregues a **Intranet local** o **Sitios de confianza** en Opciones de Internet
+no se marcan.
+
 ## Compilar desde el código fuente
 
 OpenSCP se compila en Linux, macOS y Windows. Requiere Qt 6, CMake 3.22+,

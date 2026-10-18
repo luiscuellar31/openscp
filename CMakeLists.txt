@@ -449,6 +449,8 @@ add_library(openscp_ui_logic STATIC
     ui/logic/transfers/BandwidthLimiter.hpp
     ui/logic/transfers/BandwidthLimiter.cpp
     ui/logic/transfers/ConflictCoordinator.hpp
+    ui/logic/transfers/MarkOfTheWeb.hpp
+    ui/logic/transfers/MarkOfTheWeb.cpp
     ui/logic/transfers/TransferExecutor.hpp
     ui/logic/transfers/TransferExecutor.cpp
     ui/logic/transfers/TransferManager.hpp
@@ -486,8 +488,8 @@ target_link_libraries(openscp_ui_logic
 
 if(WIN32)
     # ShellExecuteExW starts the update setup elevated for all-users
-    # installations.
-    target_link_libraries(openscp_ui_logic PRIVATE Shell32 Ole32)
+    # installations; Urlmon maps a download's source to its security zone.
+    target_link_libraries(openscp_ui_logic PRIVATE Shell32 Ole32 Urlmon)
 endif()
 
 if(OPENSCP_ENABLE_SPARKLE)

@@ -62,6 +62,11 @@ warns before their first run. Compared with macOS and Linux:
   `%LOCALAPPDATA%`, which roaming profiles do not copy.
 - Downloads and synchronization skip remote names that Windows cannot store,
   such as `CON` or names with `:` or a final dot, and count them as skipped.
+- Downloaded files carry the Mark of the Web, as browser downloads do, so
+  SmartScreen and Office's Protected View check them before they open. A
+  server listed under Local intranet or Trusted sites in Internet Options is
+  exempt, as is every server when policy keeps Windows from saving zone
+  information.
 - A local move upload removes the source once it is verified unchanged, which
   macOS and Linux leave to the user.
 - Junctions are links, like symbolic links: transfers do not follow them below

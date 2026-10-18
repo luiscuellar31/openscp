@@ -5,6 +5,7 @@
 #include "common/UniqueFile.hpp"
 #include "logic/transfers/BandwidthLimiter.hpp"
 #include "logic/transfers/ConflictCoordinator.hpp"
+#include "logic/transfers/MarkOfTheWeb.hpp"
 #include "logic/transfers/TransferManager.hpp"
 #include "logic/transfers/TransferQueuePersistence.hpp"
 #include "logic/transfers/TransferQueueWriter.hpp"
@@ -14,6 +15,7 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileDevice>
 #include <QFileInfo>
@@ -27,6 +29,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -1062,6 +1065,76 @@ OPENSCP_TEST(testDownloadTimeComesFromTheTransfer, test) {
                "the download's own time should be kept without a stat");
     manager.shutdown();
 }
+
+OPENSCP_TEST(testDownloadOriginsNameTheServerOnly, test) {
+    openscp::SessionOptions options;
+    options.protocol = openscp::Protocol::Sftp;
+    options.host = "files.example";
+    options.port = 2222;
+    options.username = "alice";
+    options.password = "never-in-an-origin";
+    test.check(openscpui::downloadOriginUrl(options) ==
+                   QStringLiteral("sftp://files.example:2222/"),
+               "an origin should hold the scheme, host and port, and no "
+               "credentials");
+
+    options.protocol = openscp::Protocol::WebDav;
+    options.webdav_scheme = openscp::WebDavScheme::Http;
+    options.host = "m\xc3\xbcnchen.example";
+    options.port = 8080;
+    test.check(openscpui::downloadOriginUrl(options) ==
+                   QStringLiteral("http://xn--mnchen-3ya.example:8080/"),
+               "an internationalized host should take its ASCII form");
+
+    options.protocol = openscp::Protocol::Ftps;
+    options.host = "2001:db8::1";
+    options.port = 990;
+    test.check(openscpui::downloadOriginUrl(options) ==
+                   QStringLiteral("ftps://[2001:db8::1]:990/"),
+               "an IPv6 address should be bracketed");
+}
+
+#ifdef Q_OS_WIN
+std::string zoneIdentifierOf(const QString &path) {
+    std::ifstream stream(
+        std::filesystem::path(QDir::toNativeSeparators(path).toStdWString() +
+                              L":Zone.Identifier"),
+        std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(stream),
+                       std::istreambuf_iterator<char>());
+}
+
+OPENSCP_TEST(testWindowsDownloadsCarryTheMarkOfTheWeb, test) {
+    auto stats = std::make_shared<std::atomic<int>>(0);
+    TimedDownloadClient baseClient(stats);
+    TransferManager manager;
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+
+    const QString unmarked = destination.filePath(QStringLiteral("plain.txt"));
+    const quint64 first =
+        manager.enqueueDownload(QStringLiteral("/remote/plain.txt"), unmarked);
+    test.check(waitForStatus(manager, first, TransferTask::Status::Done),
+               "the first download should complete");
+    test.check(zoneIdentifierOf(unmarked).empty(),
+               "a download without an origin should stay unmarked");
+
+    manager.setDownloadOrigin(QStringLiteral("sftp://files.example:2222/"));
+    const QString marked = destination.filePath(QStringLiteral("marked.txt"));
+    const quint64 second =
+        manager.enqueueDownload(QStringLiteral("/remote/marked.txt"), marked);
+    test.check(waitForStatus(manager, second, TransferTask::Status::Done),
+               "the second download should complete");
+    const std::string mark = zoneIdentifierOf(marked);
+    test.check(mark.find("ZoneId=3") != std::string::npos &&
+                   mark.find("HostUrl=sftp://files.example:2222/") !=
+                       std::string::npos,
+               "a download from an internet server should carry its zone "
+               "and origin: " +
+                   mark);
+    manager.shutdown();
+}
+#endif
 
 OPENSCP_TEST(testIdleWorkersCloseTheirConnections, test) {
     auto probe = std::make_shared<IdleConnectionProbe>();

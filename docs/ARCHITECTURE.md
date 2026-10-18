@@ -216,7 +216,10 @@ establishing a session.
 
 `TransferManager` is the entry point for the transfer queue. It coordinates
 worker connections, task state, retries, conflicts, path reservations,
-persistence, and notifications. `enqueueTasks` adds many tasks under one lock
+persistence, and notifications. On Windows it marks each completed download
+with the Mark of the Web through `markDownloadedFile`, recording the session's
+server, from `downloadOriginUrl`, and the security zone that Internet Options
+give it. `enqueueTasks` adds many tasks under one lock
 with one `tasksAdded` signal and one worker wake-up; a request can depend on an
 earlier request of the same call. Synchronization plans, local discovery
 batches and remote prescan batches enter the queue through it. Before dispatching a download or upload, it
