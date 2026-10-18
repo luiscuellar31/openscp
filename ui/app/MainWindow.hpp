@@ -92,7 +92,7 @@ class MainWindow : public QMainWindow {
     void showFavoritesDialog();     // Browse and manage saved paths
 
     void connectRemote();
-    void disconnectRemote();
+    bool disconnectRemote(); // false when the user chooses to stay connected
     void completeDisconnectRemote(quint64 disconnectSeq, bool forced);
     void rightItemActivated(const QModelIndex &idx); // double click on remote
     void

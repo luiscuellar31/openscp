@@ -1447,8 +1447,26 @@ void MainWindow::closeEvent(QCloseEvent *e) {
         e->ignore();
         return;
     }
-    if (updates_)
-        updates_->cancel();
+    // Nothing is stopped before the window is sure to close: the user may
+    // still stay connected, or let the local copies finish. A disconnect
+    // closes the window when it ends, which asks about the local copies then.
+    if (transferCleanupInProgress_) {
+        pendingCloseAfterDisconnect_ = true;
+        e->ignore();
+        return;
+    }
+    if (sessionController_->isDisconnecting()) {
+        pendingCloseAfterDisconnect_ = true;
+        e->ignore();
+        return;
+    }
+    if (rightIsRemote_) {
+        pendingCloseAfterDisconnect_ = true;
+        if (!disconnectRemote())
+            pendingCloseAfterDisconnect_ = false;
+        e->ignore();
+        return;
+    }
     if (localFsJobsInFlight_.load() > 0) {
         if (UiAlerts::question(
                 this, tr("Local copies running"),
@@ -1462,25 +1480,11 @@ void MainWindow::closeEvent(QCloseEvent *e) {
         localFsCanceled_->store(true);
         localFsPool_.waitForDone();
     }
-    if (transferCleanupInProgress_) {
-        pendingCloseAfterDisconnect_ = true;
-        e->ignore();
-        return;
-    }
-    if (sessionController_->isDisconnecting()) {
-        pendingCloseAfterDisconnect_ = true;
-        e->ignore();
-        return;
-    }
     if (sessionController_->isConnecting()) {
         sessionController_->requestConnectionCancellation();
     }
-    if (rightIsRemote_) {
-        pendingCloseAfterDisconnect_ = true;
-        disconnectRemote();
-        e->ignore();
-        return;
-    }
+    if (updates_)
+        updates_->cancel();
     saveMainWindowUiState();
     QMainWindow::closeEvent(e);
 }
