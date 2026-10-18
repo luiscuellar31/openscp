@@ -72,6 +72,12 @@ AppSettings::AppSettings(Store store)
     : QSettings(QSettings::defaultFormat(), QSettings::UserScope,
                 runningName(QCoreApplication::organizationName()),
                 storeApplicationName(store)) {
+    // Otherwise a key missing from the user's file is read from the
+    // organization-wide file and the machine-wide one. With IniFormat, that
+    // one is C:\ProgramData\OpenSCP\OpenSCP.ini on Windows, which any user
+    // may create: another account could plant sites or weaker security
+    // defaults there. OpenSCP keeps every setting in the user's own file.
+    setFallbacksEnabled(false);
 }
 
 AppSettings::AppSettings(const QString &organization,
@@ -80,6 +86,7 @@ AppSettings::AppSettings(const QString &organization,
     // use NativeFormat, the registry on Windows.
     : QSettings(QSettings::defaultFormat(), QSettings::UserScope, organization,
                 application) {
+    setFallbacksEnabled(false);
 }
 
 AppSettings::AppSettings(const QString &fileName, Format format)

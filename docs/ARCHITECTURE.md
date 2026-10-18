@@ -433,6 +433,9 @@ On Windows, `main.cpp` makes INI the default settings format, so settings,
 with the secrets that DPAPI encrypts for the user, are files under
 `%APPDATA%\OpenSCP` rather than registry keys. The transfer queue lives in
 `%LOCALAPPDATA%`, which roaming profiles do not copy to other computers.
+`AppSettings` reads only the user's own file, without QSettings' fallback
+to organization-wide and machine-wide files: the machine-wide INI file
+would be under `C:\ProgramData`, which any user may write.
 
 Use these classes instead of reading or writing their settings directly.
 `SettingsDialog` writes only the values the user changed, so every other
