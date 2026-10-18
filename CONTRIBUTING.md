@@ -273,7 +273,9 @@ Dependabot proposes updates of the GitHub Actions and of vcpkg's
 `builtin-baseline`, which pins the Windows libraries. Release builds pin the
 rest by hand: OpenSSL, libssh2, and tinyxml2 in
 `scripts/ci/build_macos_release_deps.sh` for macOS, and OpenSSL in the vcpkg
-overlay port `vcpkg-ports/openssl` for Windows.
+overlay port `vcpkg-ports/openssl` for Windows. When a new baseline changes
+vcpkg's own OpenSSL port, the Windows CI job warns, and
+`vcpkg-ports/README.md` explains how to copy the port again.
 
 Every Monday the **Pinned Dependency Updates** workflow runs
 `scripts/release/update-pinned-deps.py`, which looks for the newest release
