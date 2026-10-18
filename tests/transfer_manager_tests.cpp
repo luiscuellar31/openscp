@@ -1342,6 +1342,42 @@ OPENSCP_TEST(testLeavingASessionStopsWorkersStillConnecting, test) {
     }
 }
 
+OPENSCP_TEST(testFailedQueueSaveIsRetriedWithoutAChange, test) {
+    // The snapshot counted as saved once handed to the writer, so after a
+    // failed save, as when an antivirus holds the file on Windows, the queue
+    // was not written again until it changed.
+    QTemporaryDir directory;
+    const QString blocker = directory.filePath(QStringLiteral("blocker"));
+    {
+        QFile file(blocker);
+        test.check(file.open(QIODevice::WriteOnly),
+                   "a file should take the folder's place");
+    }
+    const QString path = QDir(blocker).filePath(QStringLiteral("queue.json"));
+    TransferManager manager;
+    manager.setSessionIdentity(QStringLiteral("test-session"));
+    test.check(manager.enablePersistence(path),
+               "persistence should be enabled");
+    int warnings = 0;
+    QObject::connect(&manager, &TransferManager::persistenceWarning, &manager,
+                     [&warnings] { ++warnings; });
+    manager.enqueueDownload(QStringLiteral("/remote/file"),
+                            directory.filePath(QStringLiteral("file")));
+    test.check(waitUntil([&] { return warnings > 0; }),
+               "the save should fail while a file takes the folder's place");
+
+    test.check(QFile::remove(blocker) && QDir().mkpath(blocker),
+               "the folder should become writable");
+    test.check(waitUntil(
+                   [&] {
+                       return TransferQueuePersistence::load(
+                                  path, QStringLiteral("test-session"))
+                                  .tasks.size() == 1;
+                   },
+                   std::chrono::milliseconds(10000)),
+               "the queue should be saved again without changing");
+}
+
 OPENSCP_TEST(testStatusChangesAloneDoNotRewriteTheQueue, test) {
     QTemporaryDir directory;
     const QString path = directory.filePath(QStringLiteral("queue.json"));

@@ -170,6 +170,7 @@ class TransferManager : public QObject {
     // deadline, so a busy queue is still saved regularly.
     static constexpr int kPersistenceDelayMs = 250;
     static constexpr int kPersistenceDeadlineMs = 2000;
+    static constexpr int kPersistenceRetryMs = 5000;
 
     struct WorkerSlot;
     enum class PrecheckOutcome { Continue, Skipped, Canceled, Error };

@@ -197,6 +197,22 @@ TransferManager::TransferManager(QObject *parent) : QObject(parent) {
             this, [this, warning] { emit persistenceWarning(warning); },
             Qt::QueuedConnection);
     });
+    // A snapshot that was not saved, as when an antivirus holds the file on
+    // Windows, is not the saved state: its fingerprint is forgotten and the
+    // save is tried again later, in case the queue stays as it is.
+    persistenceWriter_.setFailureHandler([this] {
+        QMetaObject::invokeMethod(
+            this,
+            [this] {
+                {
+                    std::lock_guard<std::mutex> lock(mtx_);
+                    lastPersistedFingerprint_.reset();
+                }
+                QTimer::singleShot(kPersistenceRetryMs, this,
+                                   [this] { schedulePersistence(); });
+            },
+            Qt::QueuedConnection);
+    });
     persistenceTimer_ = new QTimer(this);
     persistenceTimer_->setSingleShot(true);
     persistenceTimer_->setInterval(kPersistenceDelayMs);
