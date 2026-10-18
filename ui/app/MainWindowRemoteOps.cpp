@@ -379,7 +379,7 @@ void MainWindow::downloadRightToLeft() {
         const QString localPath = dst.filePath(name);
         seeds.push_back({remotePath, localPath, rightRemoteModel_->isDir(idx)});
     }
-    runRemoteDownloadPrescan(seeds, skippedInvalidCount, false);
+    runRemoteDownloadPrescan(seeds, skippedInvalidCount);
 }
 
 // Copy the selection from the right panel to the left.
@@ -431,7 +431,7 @@ void MainWindow::copyRightToLeft() {
         const QString localPath = dst.filePath(name);
         seeds.push_back({remotePath, localPath, rightRemoteModel_->isDir(idx)});
     }
-    runRemoteDownloadPrescan(seeds, skippedInvalidCount, false);
+    runRemoteDownloadPrescan(seeds, skippedInvalidCount);
 }
 
 // Move the selection from the right panel to the left.
@@ -476,7 +476,7 @@ void MainWindow::moveRightToLeft() {
         seeds.push_back({joinRemotePath(remoteBase, name), dst.filePath(name),
                          rightRemoteModel_->isDir(index)});
     }
-    runRemoteDownloadPrescan(seeds, skippedInvalidCount, false, true);
+    runRemoteDownloadPrescan(seeds, skippedInvalidCount, true);
 }
 
 void MainWindow::uploadViaDialog() {
