@@ -532,9 +532,9 @@ bool MainWindow::runDisconnectTransferCleanupAsync(quint64 disconnectSeq) {
     return true;
 }
 
-void MainWindow::disconnectRemote() {
+bool MainWindow::disconnectRemote() {
     if (sessionController_->isDisconnecting())
-        return;
+        return true;
 
     if (transferMgr_) {
         const QString sessionKey = transferMgr_->sessionIdentity();
@@ -561,13 +561,13 @@ void MainWindow::disconnectRemote() {
             choice.exec();
             if (choice.clickedButton() == stayButton ||
                 !choice.clickedButton()) {
-                return;
+                return false;
             }
             if (choice.clickedButton() == cancelButton) {
                 for (quint64 taskId : activeTaskIds)
                     transferMgr_->cancelTask(taskId);
             } else if (choice.clickedButton() != pauseButton) {
-                return;
+                return false;
             }
         }
     }
@@ -577,11 +577,12 @@ void MainWindow::disconnectRemote() {
     scheduleDisconnectWatchdog(disconnectSeq);
 
     if (runDisconnectTransferCleanupAsync(disconnectSeq))
-        return;
+        return true;
 
     transferCleanupInProgress_ = false;
     transferCleanupStartedAtMs_ = 0;
     completeDisconnectRemote(disconnectSeq, false);
+    return true;
 }
 
 void MainWindow::persistActiveSitePaths() {

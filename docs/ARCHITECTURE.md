@@ -368,7 +368,10 @@ left empty, run outside the UI thread.
 Copies, moves and deletions between local folders run on a pool of two
 threads that `MainWindow` owns, apart from the global pool the connection and
 the disconnect cleanup use. They stop at the next entry when canceled,
-removing what they staged; closing the window while one runs asks first. A
+removing what they staged; closing the window while one runs asks first.
+Closing stops nothing before the window is sure to close: connected, it
+disconnects first, where the user may still choose to stay connected, and asks
+about the local copies once the disconnect ends. A
 drop on a local panel asks before replacing an entry, as F5 and F6 do, once
 the drop is over, since a dialog during it would hold the application the
 files come from; replacing a folder replaces it whole, which the question
