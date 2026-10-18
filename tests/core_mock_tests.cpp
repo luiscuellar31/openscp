@@ -588,6 +588,25 @@ OPENSCP_TEST(test_host_key_preference_starts_with_recorded_types, t) {
             "recorded types should keep the usual order among themselves");
 }
 
+OPENSCP_TEST(test_revoked_host_keys_are_found_whatever_hosts_they_name, t) {
+    namespace detail = openscp::libssh2detail;
+    const unsigned char raw[] = {1, 2, 3};   // AQID
+    const unsigned char other[] = {1, 2, 4}; // AQIE
+    t.check(detail::hostKeyRevoked({"  @revoked\t*.example k AQID comment"},
+                                   raw, sizeof(raw)),
+            "a @revoked line should revoke its key whatever hosts it names");
+    t.check(!detail::hostKeyRevoked({"h.example k AQID", "# @revoked * k AQID",
+                                     "@cert-authority * k AQID"},
+                                    raw, sizeof(raw)),
+            "only @revoked lines should revoke a key");
+    t.check(
+        !detail::hostKeyRevoked({"@revoked * k AQID"}, other, sizeof(other)),
+        "a @revoked line should revoke only its own key");
+    t.check(!detail::hostKeyRevoked({"@revokedx * k AQID", "@revoked * AQID"},
+                                    raw, sizeof(raw)),
+            "malformed @revoked lines should revoke nothing");
+}
+
 OPENSCP_TEST(test_known_hosts_lines_name_their_host, t) {
     namespace detail = openscp::libssh2detail;
     const unsigned char raw[] = {1, 2, 3};

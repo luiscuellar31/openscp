@@ -177,7 +177,8 @@ pasos manuales, empaquetado y solución de problemas.
 - Sitios guardados con Keychain en macOS, Secret Service/libsecret en Linux y
   cifrado DPAPI en Windows.
 - Verificación estricta de claves SSH, con aceptación de claves nuevas o
-  deshabilitada explícitamente.
+  deshabilitada explícitamente. Las claves que `known_hosts` marca como
+  `@revoked` se rechazan, como hace OpenSSH.
 - FTPS y WebDAV por HTTPS sin verificación del certificado siguen comprobando
   la clave pública del servidor, en la que confías en la primera conexión.
 - Proxies SOCKS5 y HTTP CONNECT, además de servidores de salto SSH cuando el
