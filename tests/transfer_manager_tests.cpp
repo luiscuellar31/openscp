@@ -1906,6 +1906,88 @@ OPENSCP_TEST(testSpeedLimitReachesRunningTask, test) {
                "a new speed limit should slow the running transfer");
 }
 
+// Reports a download in equal chunks, counted as the SFTP backend counts
+// them: from the size of the partial file when it resumes.
+class ChunkedDownloadClient final : public DownloadMockClient {
+    public:
+    ChunkedDownloadClient(std::size_t partialBytes, std::size_t chunkBytes,
+                          std::size_t chunks)
+        : partialBytes_(partialBytes), chunkBytes_(chunkBytes),
+          chunks_(chunks) {}
+
+    bool get(const std::string &, const std::string &, std::string &err,
+             std::function<void(std::size_t, std::size_t)> progress,
+             std::function<bool()>, bool resume) override {
+        const std::size_t offset = resume ? partialBytes_ : 0;
+        for (std::size_t chunk = 1; chunk <= chunks_; ++chunk)
+            progress(offset + chunk * chunkBytes_,
+                     offset + chunks_ * chunkBytes_);
+        err.clear();
+        return true;
+    }
+
+    private:
+    std::size_t partialBytes_;
+    std::size_t chunkBytes_;
+    std::size_t chunks_;
+};
+
+TransferTask chunkedDownloadTask(const QTemporaryDir &destination) {
+    TransferTask task;
+    task.type = TransferTask::Type::Download;
+    task.src = QStringLiteral("/remote/chunked");
+    task.dst = destination.filePath("chunked");
+    return task;
+}
+
+OPENSCP_TEST(testResumedTransferChargesOnlyNewBytesToSpeedLimits, test) {
+    // The speed limits hold a task until they allow every byte charged to
+    // them: at 1024 KiB/s, the 64 MiB of the partial file would stop it for
+    // about a minute.
+    constexpr std::size_t kChunkBytes = 64 * 1024;
+    constexpr std::size_t kChunks = 4;
+    const auto client = std::make_shared<ChunkedDownloadClient>(
+        64 * 1024 * 1024, kChunkBytes, kChunks);
+    QTemporaryDir destination;
+    TransferTask task = chunkedDownloadTask(destination);
+    quint64 charged = 0;
+    TransferExecutor::Callbacks callbacks;
+    callbacks.acquireGlobalBandwidth = [&charged](quint64 bytes) {
+        charged += bytes;
+        return true;
+    };
+    std::string error;
+    const bool succeeded =
+        TransferExecutor::run(task, client, true, error, callbacks);
+    test.check(succeeded && charged <= kChunks * kChunkBytes,
+               "a resumed transfer should charge only the bytes it moves, not "
+               "its partial file: " +
+                   std::to_string(charged));
+}
+
+OPENSCP_TEST(testRemovingTheSpeedLimitEndsTheWaitUnderWay, test) {
+    // One chunk of 512 KiB holds the task 8 seconds at 64 KiB/s.
+    const auto client =
+        std::make_shared<ChunkedDownloadClient>(0, 512 * 1024, 1);
+    QTemporaryDir destination;
+    TransferTask task = chunkedDownloadTask(destination);
+    std::atomic<int> limitKBps{64};
+    TransferExecutor::Callbacks callbacks;
+    callbacks.taskSpeedLimitKBps = [&limitKBps] { return limitKBps.load(); };
+    std::thread remover([&limitKBps] {
+        std::this_thread::sleep_for(200ms);
+        limitKBps = 0;
+    });
+    const auto started = std::chrono::steady_clock::now();
+    std::string error;
+    const bool succeeded =
+        TransferExecutor::run(task, client, false, error, callbacks);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    remover.join();
+    test.check(succeeded && elapsed < 3s,
+               "removing the limit should let the waiting task go on");
+}
+
 class PartialProgressFailureClient final : public DownloadMockClient {
     public:
     bool get(const std::string &, const std::string &, std::string &err,
