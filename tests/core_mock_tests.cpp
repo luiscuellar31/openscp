@@ -2112,6 +2112,57 @@ OPENSCP_TEST(test_libssh2_jump_host_spawn, t) {
 }
 
 #ifdef _WIN32
+OPENSCP_TEST(test_windows_local_files_open_past_max_path, t) {
+    // Downloads make folders and files relative to their parents, so they
+    // reach paths past MAX_PATH even where the system does not enable long
+    // paths; uploads and integrity checks then open them by the whole path.
+    const fs::path base = makeTempFilePath("long-path").parent_path();
+    fs::path folder = base;
+    while (folder.native().size() <= MAX_PATH)
+        folder /= std::string(40, 'd');
+    const fs::path file = folder / "file.txt";
+    std::string error;
+    t.checkWithError(
+        openscp::localfiles::ensureLocalDirectories(folder.string(), error),
+        "the long folders should be made: ", error);
+    openscp::UniqueFile written(openscp::localfiles::openRegularFileForWrite(
+        file.string(), openscp::localfiles::WriteMode::Truncate, error));
+    t.checkWithError(written && std::fputs("long", written.get()) >= 0 &&
+                         written.close() == 0,
+                     "the long file should be written: ", error);
+
+    const auto opens = [](const std::string &path) {
+        return static_cast<bool>(
+            openscp::UniqueFile(openscp::openLocalFile(path, "rb")));
+    };
+    t.check(opens(file.string()),
+            "a file past MAX_PATH should open for reading");
+    // Windows turns "/" into "\" and drops "." names, but not in the form
+    // with the \\?\ prefix that reaches past MAX_PATH.
+    t.check(opens((folder / "." / "file.txt").generic_string()),
+            "a path past MAX_PATH with \"/\" and \".\" should open too");
+    std::uint64_t size = 0;
+    std::string why;
+    const bool sized =
+        openscp::libssh2detail::getLocalFileSize(file.string(), size, &why);
+    t.checkWithError(sized && size == 4,
+                     "a file past MAX_PATH should have its size: ", why);
+
+    // A relative path still starts at the current directory.
+    wchar_t previous[MAX_PATH];
+    const DWORD previousLength = ::GetCurrentDirectoryW(MAX_PATH, previous);
+    t.check(::SetCurrentDirectoryW(base.c_str()) != 0,
+            "the test should enter its folder");
+    t.check(opens(file.lexically_relative(base).string()),
+            "a relative path past MAX_PATH should open from the current "
+            "directory");
+    if (previousLength > 0 && previousLength < MAX_PATH)
+        ::SetCurrentDirectoryW(previous);
+
+    std::error_code ec;
+    fs::remove_all(L"\\\\?\\" + base.wstring(), ec);
+}
+
 OPENSCP_TEST(test_windows_links_are_trusted_where_users_cannot_add, t) {
     // ProgramData belongs to the system, but any user may add entries to it,
     // so a link there may come from another account. A link in C:\Users,

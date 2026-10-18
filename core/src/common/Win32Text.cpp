@@ -2,6 +2,7 @@
 
 #include <climits>
 #include <cstddef>
+#include <utility>
 #include <windows.h>
 
 namespace openscp::win32 {
@@ -12,6 +13,16 @@ int checkedLength(std::size_t length) {
     return length > static_cast<std::size_t>(INT_MAX)
                ? -1
                : static_cast<int>(length);
+}
+
+bool startsWith(std::wstring_view text, std::wstring_view prefix) {
+    return text.substr(0, prefix.size()) == prefix;
+}
+
+// Paths in the \\?\ form, or naming a device (\\.\), go to the file system
+// as they are written.
+bool isVerbatim(std::wstring_view path) {
+    return startsWith(path, L"\\\\?\\") || startsWith(path, L"\\\\.\\");
 }
 
 } // namespace
@@ -44,6 +55,33 @@ bool toWidePath(std::string_view utf8, std::wstring &wide) {
     wide.resize(static_cast<std::size_t>(required));
     return ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(),
                                  length, wide.data(), required) == required;
+}
+
+bool toExtendedLengthPath(std::string_view utf8, std::wstring &wide) {
+    if (!toWidePath(utf8, wide))
+        return false;
+    // Resolving a verbatim path could change which file it names.
+    if (wide.empty() || isVerbatim(wide))
+        return true;
+    // When the path cannot be resolved, it is left for the file function to
+    // refuse.
+    const DWORD required =
+        ::GetFullPathNameW(wide.c_str(), 0, nullptr, nullptr);
+    if (required == 0)
+        return true;
+    std::wstring full(required, L'\0');
+    const DWORD length =
+        ::GetFullPathNameW(wide.c_str(), required, full.data(), nullptr);
+    if (length == 0 || length >= required)
+        return true;
+    full.resize(length);
+    if (isVerbatim(full)) // A device name such as NUL becomes \\.\NUL.
+        wide = std::move(full);
+    else if (startsWith(full, L"\\\\"))
+        wide = L"\\\\?\\UNC\\" + full.substr(2);
+    else
+        wide = L"\\\\?\\" + full;
+    return true;
 }
 
 std::string toUtf8(std::wstring_view wide) {

@@ -9,9 +9,11 @@
 // clang-format on
 
 #include <QDir>
+#include <QFileInfo>
 #include <QHash>
 
 #include <mutex>
+#include <string>
 #endif
 
 namespace openscpui {
@@ -89,6 +91,22 @@ DWORD zoneToRecord(const QString &originUrl) {
     zones.insert(originUrl, recorded);
     return recorded;
 }
+
+// The path of the file's Zone.Identifier stream, in the \\?\ form that
+// CreateFileW opens past MAX_PATH even where the system does not enable long
+// paths, as Qt does for its own file access. That form skips the
+// normalization Windows gives other paths, so the path is made absolute and
+// clean first.
+std::wstring zoneIdentifierPath(const QString &localPath) {
+    const QString file = QDir::toNativeSeparators(
+        QDir::cleanPath(QFileInfo(localPath).absoluteFilePath()));
+    const QString stream = file + QStringLiteral(":Zone.Identifier");
+    if (stream.startsWith(QStringLiteral("\\\\?\\")))
+        return stream.toStdWString();
+    if (stream.startsWith(QStringLiteral("\\\\")))
+        return L"\\\\?\\UNC\\" + stream.mid(2).toStdWString();
+    return L"\\\\?\\" + stream.toStdWString();
+}
 #endif
 
 } // namespace
@@ -115,12 +133,10 @@ void markDownloadedFile(const QString &localPath, const QString &originUrl) {
                             QByteArray::number(static_cast<quint32>(zone)) +
                             QByteArrayLiteral("\r\nHostUrl=") +
                             originUrl.toLatin1() + QByteArrayLiteral("\r\n");
-    const QString stream = QDir::toNativeSeparators(localPath) +
-                           QStringLiteral(":Zone.Identifier");
     // A file system without alternate streams, such as FAT, keeps no mark.
-    const HANDLE file = ::CreateFileW(
-        reinterpret_cast<const wchar_t *>(stream.utf16()), GENERIC_WRITE, 0,
-        nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    const HANDLE file =
+        ::CreateFileW(zoneIdentifierPath(localPath).c_str(), GENERIC_WRITE, 0,
+                      nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE)
         return;
     DWORD written = 0;

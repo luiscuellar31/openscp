@@ -18,11 +18,12 @@ namespace openscp {
 
 // Opens a local file by its UTF-8 path, as std::fopen() does. Windows reads
 // narrow paths in the system code page, so there the path goes through the
-// UTF-16 API, and child processes do not inherit the handle ("N").
+// UTF-16 API, in the \\?\ form that also reaches past MAX_PATH, and child
+// processes do not inherit the handle ("N").
 inline std::FILE *openLocalFile(const std::string &path, const char *mode) {
 #ifdef _WIN32
     std::wstring widePath;
-    if (!win32::toWidePath(path, widePath)) {
+    if (!win32::toExtendedLengthPath(path, widePath)) {
         errno = EINVAL;
         return nullptr;
     }
