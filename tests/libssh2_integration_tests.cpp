@@ -32,10 +32,53 @@ using openscp::testsupport::readFile;
 using openscp::testsupport::uniqueToken;
 using openscp::testsupport::writeFile;
 
+// An ED25519 key that no test server holds.
+constexpr const char *kFakeEd25519Key =
+    "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/"
+    "qwU9iIfMHkUqPnwGwGZRuQQ3v1d";
+
+// Appended to a shell command, to drop the messages it writes to standard
+// error, or everything it writes.
+#ifdef _WIN32
+constexpr const char *kDiscardErrors = " 2>NUL";
+constexpr const char *kDiscardOutput = " >NUL 2>&1";
+#else
+constexpr const char *kDiscardErrors = " 2>/dev/null";
+constexpr const char *kDiscardOutput = " >/dev/null 2>&1";
+#endif
+
 std::string knownHostsHostToken(const std::string &host, std::uint16_t port) {
     if (port == 22)
         return host;
     return "[" + host + "]:" + std::to_string(port);
+}
+
+// The known_hosts lines ssh-keyscan prints for the server, one per host key,
+// or only for keys of `keyType` when given. None when it cannot run.
+std::vector<std::string> scanHostKeys(const std::string &host,
+                                      std::uint16_t port,
+                                      const std::string &keyType = {}) {
+    std::string command = "ssh-keyscan -T 5";
+    if (!keyType.empty())
+        command += " -t " + keyType;
+    command += " -p " + std::to_string(port) + " " + host + kDiscardErrors;
+#ifdef _WIN32
+    openscp::UniqueFile scan(::_popen(command.c_str(), "r"), &::_pclose);
+#else
+    openscp::UniqueFile scan(::popen(command.c_str(), "r"), &::pclose);
+#endif
+    std::vector<std::string> keys;
+    if (!scan)
+        return keys;
+    char buffer[4096];
+    while (std::fgets(buffer, sizeof(buffer), scan.get())) {
+        std::string line(buffer);
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+            line.pop_back();
+        if (!line.empty() && line[0] != '#')
+            keys.push_back(line);
+    }
+    return keys;
 }
 
 bool parseProxyType(const std::optional<std::string> &raw,
@@ -312,9 +355,6 @@ int main() {
     const fs::path tofuMismatchKnownHosts =
         localTmpRoot / "known_hosts_tofu_mismatch";
     {
-        static constexpr const char *kFakeEd25519Key =
-            "AAAAC3NzaC1lZDI1NTE5AAAAILZlz+tnMZZGpyX4/"
-            "qwU9iIfMHkUqPnwGwGZRuQQ3v1d";
         std::ofstream khOut(tofuMismatchKnownHosts,
                             std::ios::binary | std::ios::trunc);
         if (!khOut.is_open()) {
@@ -419,26 +459,13 @@ int main() {
         strictClient.disconnect();
     }
 
-#ifndef _WIN32
     // A host known_hosts records only by its RSA key is asked for that key
     // first, so it matches instead of looking new because it also offers
     // ED25519. ssh-keyscan reads the RSA key, when the server has one.
     std::string rsaLine;
-    {
-        const std::string command = "ssh-keyscan -T 5 -t rsa -p " +
-                                    std::to_string(port) + " " + *host +
-                                    " 2>/dev/null";
-        if (std::FILE *scan = ::popen(command.c_str(), "r")) {
-            char buffer[4096];
-            while (std::fgets(buffer, sizeof(buffer), scan)) {
-                const std::string line(buffer);
-                if (line.find(" ssh-rsa ") != std::string::npos &&
-                    line[0] != '#') {
-                    rsaLine = line;
-                }
-            }
-            ::pclose(scan);
-        }
+    for (const std::string &line : scanHostKeys(*host, port, "rsa")) {
+        if (line.find(" ssh-rsa ") != std::string::npos)
+            rsaLine = line + "\n";
     }
     const fs::path rsaOnlyKnownHosts = localTmpRoot / "known_hosts_rsa_only";
     if (t.failures == 0 && !rsaLine.empty() &&
@@ -457,7 +484,42 @@ int main() {
     } else if (rsaLine.empty()) {
         std::cout << "[SKIP] no RSA host key from ssh-keyscan\n";
     }
-#endif
+
+    // known_hosts as OpenSSH leaves it: a comment, another host, a
+    // certificate authority for this one, which is no key of its own, and
+    // every key ssh-keyscan reads from the server, all names hashed by
+    // ssh-keygen -H.
+    const std::vector<std::string> scannedKeys = scanHostKeys(*host, port);
+    const fs::path opensshKnownHosts = localTmpRoot / "known_hosts_openssh";
+    std::string opensshLines =
+        std::string("# kept by OpenSSH\nother.example ssh-ed25519 ") +
+        kFakeEd25519Key + "\n@cert-authority " +
+        knownHostsHostToken(*host, port) + " ssh-ed25519 " + kFakeEd25519Key +
+        "\n";
+    for (const std::string &key : scannedKeys)
+        opensshLines += key + "\n";
+    const std::string hashCommand = "ssh-keygen -H -f \"" +
+                                    opensshKnownHosts.string() + "\"" +
+                                    kDiscardOutput;
+    std::string hashedLines;
+    if (t.failures == 0 && !scannedKeys.empty() &&
+        writeFile(opensshKnownHosts, opensshLines) &&
+        std::system(hashCommand.c_str()) == 0 &&
+        readFile(opensshKnownHosts, hashedLines) &&
+        hashedLines.find("other.example") == std::string::npos) {
+        openscp::SessionOptions strictOpt = opt;
+        strictOpt.known_hosts_policy = openscp::KnownHostsPolicy::Strict;
+        strictOpt.known_hosts_path = opensshKnownHosts.string();
+        openscp::Libssh2SftpClient strictClient;
+        std::string strictErr;
+        t.check(strictClient.connect(strictOpt, strictErr),
+                "known_hosts as OpenSSH writes it should match the host: " +
+                    strictErr);
+        strictClient.disconnect();
+    } else if (t.failures == 0) {
+        std::cout << "[SKIP] no known_hosts from ssh-keyscan and "
+                     "ssh-keygen -H\n";
+    }
 
     openscp::Libssh2SftpClient client;
     std::string err;
