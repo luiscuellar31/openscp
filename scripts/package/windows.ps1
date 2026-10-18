@@ -100,7 +100,9 @@ function New-Stage([string]$BuildDir, [string]$QtBin) {
     $stage = Join-Path $BuildDir 'stage\OpenSCP'
     if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
     New-Item -ItemType Directory -Force $stage | Out-Null
-    Copy-Item -Path (Join-Path $BuildDir 'OpenSCP.exe') -Destination $stage
+    $exe = Find-BuiltApplication $BuildDir 'Release'
+    if (-not $exe) { Stop-WithError "OpenSCP.exe was not built in $BuildDir." }
+    Copy-Item -Path $exe -Destination $stage
 
     Write-Log 'Deploying Qt'
     # OpenSCP needs no OpenSSL for Qt: Qt's HTTPS uses Schannel, and its own
@@ -163,7 +165,8 @@ $configure += @(
 Write-Log "Configuring Release build: $buildDir"
 Invoke-Native 'cmake' $configure
 Write-Log 'Building OpenSCP'
-Invoke-Native 'cmake' @('--build', $buildDir, '--parallel', $jobs, '--target', 'openscp')
+Invoke-Native 'cmake' @('--build', $buildDir, '--config', 'Release', '--parallel', $jobs,
+    '--target', 'openscp')
 
 $qtBin = Find-QtBinDirectory $buildDir
 if (-not $qtBin) { Stop-WithError "Qt's bin folder was not found from $buildDir." }
