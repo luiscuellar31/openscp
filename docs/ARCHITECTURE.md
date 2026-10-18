@@ -247,7 +247,10 @@ the queue mutex; both remain reserved through publication and are released
 together. Conflict renaming checks and reserves the same pair. Local reservation
 keys conservatively normalize Unicode and fold case on every volume, including
 for upload sources; this may serialize case-distinct local names on a
-case-sensitive volume. Remote keys retain case. Partial-file cleanup applies
+case-sensitive volume. Remote keys retain case. A download whose destination
+exists only under another spelling (`localEntryName`), as when two remote names
+that differ in case meet in one file on Windows and macOS, takes a free name
+whatever the conflict policy. Partial-file cleanup applies
 only to uploads and downloads that have not finished their transfer. For a
 removed download it acquires the same reservations and leaves the file intact
 while another task, queued or running, can still use it. A removed upload

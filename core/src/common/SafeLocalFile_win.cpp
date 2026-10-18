@@ -700,6 +700,21 @@ std::string localNameProblem(const std::string &name) {
     return win32::toUtf8(problem);
 }
 
+std::string localEntryName(const std::string &path) {
+    std::wstring wide;
+    if (!win32::toExtendedLengthPath(path, wide) || wide.empty())
+        return {};
+    // A name has no wildcard: localNameProblem() refuses * and ?.
+    WIN32_FIND_DATAW entry;
+    const HANDLE search =
+        ::FindFirstFileExW(wide.c_str(), FindExInfoBasic, &entry,
+                           FindExSearchNameMatch, nullptr, 0);
+    if (search == INVALID_HANDLE_VALUE)
+        return {};
+    ::FindClose(search);
+    return win32::toUtf8(entry.cFileName);
+}
+
 bool ensureLocalDirectories(const std::string &path, std::string &error) {
     error.clear();
     LocalPath parsed;

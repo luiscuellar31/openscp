@@ -4,6 +4,8 @@
 
 #include <array>
 #include <cerrno>
+#include <climits>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <fcntl.h>
@@ -171,6 +173,20 @@ std::string localNameProblem(const std::string &name) {
         name.find('\0') != std::string::npos)
         return "A name cannot contain '/' or a NUL character.";
     return std::string();
+}
+
+std::string localEntryName(const std::string &path) {
+    struct ::stat status {};
+    if (::lstat(path.c_str(), &status) != 0)
+        return std::string();
+#ifdef __APPLE__
+    // realpath() returns the names as macOS stores them. A link keeps its own
+    // name, which realpath() would replace with its target's.
+    char resolved[PATH_MAX];
+    if (!S_ISLNK(status.st_mode) && ::realpath(path.c_str(), resolved))
+        return std::filesystem::path(resolved).filename().string();
+#endif
+    return std::filesystem::path(path).filename().string();
 }
 
 bool ensureLocalDirectories(const std::string &path, std::string &error) {

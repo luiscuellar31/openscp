@@ -776,6 +776,33 @@ OPENSCP_TEST(test_known_hosts_lines_name_their_host, t) {
     fs::remove_all(path.parent_path(), ec);
 }
 
+OPENSCP_TEST(test_local_entry_name_is_the_name_stored_on_disk, t) {
+    const fs::path stored = makeTempFilePath("Mixed-Case");
+    {
+        std::ofstream out(stored, std::ios::binary | std::ios::trunc);
+        out << "content";
+    }
+    const fs::path other = stored.parent_path() / "mixed-case.txt";
+    const std::string name =
+        openscp::localfiles::localEntryName(other.string());
+#if defined(_WIN32) || defined(__APPLE__)
+    // Their volumes ignore case, so the other spelling finds the file.
+    t.check(name == "Mixed-Case.txt",
+            "another spelling should give the stored name: " + name);
+#else
+    t.check(name.empty(), "a Linux volume should not find another spelling");
+#endif
+    t.check(openscp::localfiles::localEntryName(stored.string()) ==
+                    "Mixed-Case.txt" &&
+                openscp::localfiles::localEntryName(
+                    (stored.parent_path() / "missing.txt").string())
+                    .empty(),
+            "a stored name should come back as it is, and nothing for a "
+            "missing entry");
+    std::error_code ec;
+    fs::remove_all(stored.parent_path(), ec);
+}
+
 OPENSCP_TEST(test_known_hosts_path_reads_a_tilde_as_the_home_folder, t) {
     // The connection dialog suggests ~/.ssh/known_hosts, which OpenSSH reads
     // in the home folder; as it stands, the path names a folder called "~".

@@ -1906,6 +1906,70 @@ OPENSCP_TEST(testSpeedLimitReachesRunningTask, test) {
                "a new speed limit should slow the running transfer");
 }
 
+// Writes each download, with its remote path as the content.
+class WritingDownloadClient final : public DownloadMockClient {
+    public:
+    bool get(const std::string &remote, const std::string &local,
+             std::string &err,
+             std::function<void(std::size_t, std::size_t)> progress,
+             std::function<bool()>, bool) override {
+        QFile file(QString::fromStdString(local));
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
+            file.write(remote.data(), static_cast<qint64>(remote.size())) !=
+                static_cast<qint64>(remote.size())) {
+            err = "Could not write the download";
+            return false;
+        }
+        file.close();
+        progress(remote.size(), remote.size());
+        err.clear();
+        return true;
+    }
+
+    std::unique_ptr<openscp::RemoteClient>
+    openConnection(const openscp::SessionOptions &options, std::string &err) {
+        return makeConnectedWorker<WritingDownloadClient>(options, err);
+    }
+};
+
+OPENSCP_TEST(testDownloadsWhoseNamesDifferOnlyInCaseKeepBothFiles, test) {
+    // On Windows and macOS, "Makefile" and "makefile" are one local file, so
+    // the second download replaced the first; with Move, the first remote file
+    // was already gone.
+    WritingDownloadClient baseClient;
+    TransferManager manager;
+    configureManager(manager, baseClient, testOptions());
+    QTemporaryDir destination;
+    const QString upper = QStringLiteral("/remote/Makefile");
+    const QString lower = QStringLiteral("/remote/makefile");
+    manager.enqueueDownloads({{upper, destination.filePath("Makefile")},
+                              {lower, destination.filePath("makefile")}},
+                             testBatchOptions());
+    test.check(waitUntil([&] {
+                   const auto tasks = manager.tasksSnapshot();
+                   return tasks.size() == 2 &&
+                          std::all_of(tasks.cbegin(), tasks.cend(),
+                                      [](const TransferTask &task) {
+                                          return task.status ==
+                                                 TransferTask::Status::Done;
+                                      });
+               }),
+               "both downloads should finish");
+    QStringList contents;
+    for (const QFileInfo &entry :
+         QDir(destination.path())
+             .entryInfoList(QDir::Files | QDir::Hidden |
+                            QDir::NoDotAndDotDot)) {
+        QFile file(entry.filePath());
+        if (file.open(QIODevice::ReadOnly))
+            contents.push_back(QString::fromUtf8(file.readAll()));
+    }
+    contents.sort();
+    test.check(contents == QStringList{upper, lower},
+               "each download should keep its own file: " +
+                   contents.join(QStringLiteral(", ")).toStdString());
+}
+
 // Reports a download in equal chunks, counted as the SFTP backend counts
 // them: from the size of the partial file when it resumes.
 class ChunkedDownloadClient final : public DownloadMockClient {
