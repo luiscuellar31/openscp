@@ -116,9 +116,10 @@ target_link_libraries(openscp_update_tests PRIVATE OpenSSL::Crypto)
 
 if(WIN32)
     # Stands in for ssh.exe, sftp.exe and the update setup in the tests that
-    # check how OpenSCP starts them.
+    # check how OpenSCP starts them, and for the ssh.exe of a jump tunnel.
     add_executable(openscp_argv_probe argv_probe.cpp)
     foreach(PROBE_USER IN ITEMS
+            openscp_core_tests
             openscp_terminal_command_builder_tests
             openscp_update_tests)
         add_dependencies(${PROBE_USER} openscp_argv_probe)

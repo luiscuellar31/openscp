@@ -3,7 +3,9 @@
 // run appends its name and the arguments that the C runtime split from its
 // command line to the file in OPENSCP_ARGV_PROBE_LOG, and exits with the code
 // in OPENSCP_ARGV_PROBE_EXIT_<NAME>, where NAME is its file name in capitals
-// without the extension, such as SSH.
+// without the extension, such as SSH. With OPENSCP_ARGV_PROBE_ECHO set, it
+// first copies its input to its output until the input ends, as ssh -W
+// relays a connection, and then writes that variable's value to stderr.
 
 #include <cstdio>
 #include <cstdlib>
@@ -52,6 +54,21 @@ int wmain(int argc, wchar_t **argv) {
             std::fwrite(record.data(), 1, record.size(), log);
             std::fclose(log);
         }
+    }
+    if (const wchar_t *echo = _wgetenv(L"OPENSCP_ARGV_PROBE_ECHO")) {
+        // ReadFile returns what a pipe holds without waiting for more.
+        char buffer[4096];
+        DWORD read = 0;
+        DWORD written = 0;
+        while (ReadFile(GetStdHandle(STD_INPUT_HANDLE), buffer, sizeof(buffer),
+                        &read, nullptr) &&
+               read > 0 &&
+               WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buffer, read,
+                         &written, nullptr)) {
+        }
+        const std::string reason = toUtf8(echo);
+        WriteFile(GetStdHandle(STD_ERROR_HANDLE), reason.data(),
+                  static_cast<DWORD>(reason.size()), &written, nullptr);
     }
     const std::wstring exitVariable = L"OPENSCP_ARGV_PROBE_EXIT_" + name;
     const wchar_t *exitCode = _wgetenv(exitVariable.c_str());

@@ -24,7 +24,14 @@
 #include <thread>
 #include <utility>
 
-#ifndef _WIN32
+#ifdef _WIN32
+// clang-format off
+#include <windows.h>
+#include <aclapi.h>
+// clang-format on
+// Here DeleteFile is a SyncAction, not the Win32 function's macro.
+#undef DeleteFile
+#else
 #include <sys/stat.h>
 #endif
 
@@ -528,17 +535,89 @@ OPENSCP_TEST(testMirrorDoesNotDeleteUnlistedRemoteSubtree, test) {
                "mirror can still delete verified destination extras");
 }
 
-OPENSCP_TEST(testMirrorDoesNotDeleteUnreadableLocalSubtree, test) {
 #ifdef _WIN32
-    test.skip("Windows cannot make a folder unreadable through its "
-              "permission bits.");
-#else
+// Denies the current user listing a folder, as icacls /deny does, since
+// Windows has no permission bits for it, until restore() or destruction.
+class FolderListingDenied {
+    public:
+    explicit FolderListingDenied(const QString &folder)
+        : path_(QDir::toNativeSeparators(folder).toStdWString()) {
+        PACL current = nullptr;
+        if (::GetNamedSecurityInfoW(path_.c_str(), SE_FILE_OBJECT,
+                                    DACL_SECURITY_INFORMATION, nullptr, nullptr,
+                                    &current, nullptr,
+                                    &original_) != ERROR_SUCCESS)
+            return;
+        HANDLE token = nullptr;
+        if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token))
+            return;
+        DWORD size = 0;
+        (void)::GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+        std::vector<BYTE> user(size);
+        const bool known = ::GetTokenInformation(token, TokenUser, user.data(),
+                                                 size, &size) != 0;
+        ::CloseHandle(token);
+        if (!known)
+            return;
+        EXPLICIT_ACCESSW deny{};
+        deny.grfAccessPermissions = FILE_LIST_DIRECTORY;
+        deny.grfAccessMode = DENY_ACCESS;
+        deny.grfInheritance = NO_INHERITANCE;
+        deny.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+        deny.Trustee.TrusteeType = TRUSTEE_IS_USER;
+        deny.Trustee.ptstrName = static_cast<LPWSTR>(
+            reinterpret_cast<TOKEN_USER *>(user.data())->User.Sid);
+        PACL denying = nullptr;
+        if (::SetEntriesInAclW(1, &deny, current, &denying) != ERROR_SUCCESS)
+            return;
+        originalDacl_ = current;
+        applied_ = ::SetNamedSecurityInfoW(
+                       path_.data(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
+                       nullptr, nullptr, denying, nullptr) == ERROR_SUCCESS;
+        ::LocalFree(denying);
+    }
+
+    ~FolderListingDenied() {
+        restore();
+        if (original_)
+            ::LocalFree(original_);
+    }
+
+    FolderListingDenied(const FolderListingDenied &) = delete;
+    FolderListingDenied &operator=(const FolderListingDenied &) = delete;
+
+    bool applied() const { return applied_; }
+
+    void restore() {
+        if (applied_) {
+            (void)::SetNamedSecurityInfoW(path_.data(), SE_FILE_OBJECT,
+                                          DACL_SECURITY_INFORMATION, nullptr,
+                                          nullptr, originalDacl_, nullptr);
+        }
+        applied_ = false;
+    }
+
+    private:
+    std::wstring path_;
+    PSECURITY_DESCRIPTOR original_ = nullptr;
+    PACL originalDacl_ = nullptr;
+    bool applied_ = false;
+};
+#endif
+
+OPENSCP_TEST(testMirrorDoesNotDeleteUnreadableLocalSubtree, test) {
     QTemporaryDir localRoot;
     test.check(localRoot.isValid(), "local mirror fixture should initialize");
     const QString locked = localRoot.filePath("home");
     test.check(QDir().mkpath(locked), "local source folder should be created");
+#ifdef _WIN32
+    FolderListingDenied denied(locked);
+    test.check(denied.applied(),
+               "local source folder should become unreadable");
+#else
     test.check(QFile::setPermissions(locked, QFileDevice::Permissions{}),
                "local source folder should become unreadable");
+#endif
 
     RemoteOperationController remote;
     test.check(remote.installSession(
@@ -555,9 +634,13 @@ OPENSCP_TEST(testMirrorDoesNotDeleteUnreadableLocalSubtree, test) {
                      });
     coordinator.start(localRoot.path(), QStringLiteral("/"));
     const bool completed = waitUntil([&] { return ready; });
+#ifdef _WIN32
+    denied.restore();
+#else
     QFile::setPermissions(locked, QFileDevice::ReadOwner |
                                       QFileDevice::WriteOwner |
                                       QFileDevice::ExeOwner);
+#endif
     test.check(completed, "scan with an unreadable local folder should finish");
     test.check(
         prepared.coverage.localUnscannedPaths.contains(QStringLiteral("home")),
@@ -581,7 +664,6 @@ OPENSCP_TEST(testMirrorDoesNotDeleteUnreadableLocalSubtree, test) {
     test.check(actionFor(QStringLiteral("readme.txt")) ==
                    SyncAction::DeleteFile,
                "unrelated verified destination extras can still be deleted");
-#endif
 }
 
 // Local files, and the mock server's tree with extra remote folders.
