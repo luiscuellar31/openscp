@@ -2112,6 +2112,36 @@ OPENSCP_TEST(test_libssh2_jump_host_spawn, t) {
 }
 
 #ifdef _WIN32
+OPENSCP_TEST(test_windows_links_are_trusted_where_users_cannot_add, t) {
+    // ProgramData belongs to the system, but any user may add entries to it,
+    // so a link there may come from another account. A link in C:\Users,
+    // which users cannot change, is still followed; making one there needs an
+    // administrator, so this test cannot.
+    std::error_code ec;
+    const char *programData = std::getenv("ProgramData");
+    if (!programData) {
+        t.skip("no ProgramData folder");
+        return;
+    }
+    const fs::path target = makeTempFilePath("trust-target").parent_path();
+    const fs::path link =
+        fs::path(programData) /
+        ("openscp-trust-test-" + std::to_string(::GetCurrentProcessId()));
+    if (!createDirectoryLink(target, link)) {
+        t.skip("a junction could not be made in ProgramData");
+        fs::remove_all(target, ec);
+        return;
+    }
+    std::string error;
+    const bool followed = openscp::localfiles::ensureLocalDirectories(
+        (link / "inside").string(), error);
+    ::RemoveDirectoryW(link.c_str());
+    fs::remove_all(target, ec);
+    t.check(!followed && error.find("untrusted") != std::string::npos,
+            "a link where any user may add entries should be refused: " +
+                error);
+}
+
 OPENSCP_TEST(test_windows_jump_ssh_comes_from_absolute_path_folders, t) {
     namespace detail = openscp::libssh2detail;
     const fs::path base = makeTempFilePath("ssh-search").parent_path();

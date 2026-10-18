@@ -356,21 +356,32 @@ bool isRemote(HANDLE handle) {
                                           &protocol, sizeof(protocol)) != 0;
 }
 
+// Whether the current user may add or remove entries in directory, and so
+// make or replace a link there: any one of these rights is enough, as making
+// a folder is all a junction needs. ReOpenFile refuses directory handles
+// whatever the access, so the directory is opened again relative to itself.
+bool canChangeEntries(HANDLE directory) {
+    for (const ACCESS_MASK right :
+         {FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY, FILE_DELETE_CHILD}) {
+        UniqueHandle reopened;
+        const NTSTATUS status =
+            openRelative(directory, {}, right, kShareAll, FILE_OPEN,
+                         FILE_DIRECTORY_FILE, reopened);
+        if (succeeded(status) ||
+            ::RtlNtStatusToDosError(status) != ERROR_ACCESS_DENIED)
+            return true;
+    }
+    return false;
+}
+
 // A directory the current user can neither change nor owns, such as C:\Users:
 // a link in it was put there by the system, like the links POSIX trusts in
-// root-owned directories.
+// root-owned directories. C:\ and C:\ProgramData are not: any user may make
+// folders in them.
 bool isTrustedSystemDirectory(HANDLE directory) {
-    HANDLE writable = ::ReOpenFile(
-        directory, FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_DELETE_CHILD,
-        kShareAll, FILE_FLAG_BACKUP_SEMANTICS);
-    if (writable != INVALID_HANDLE_VALUE) {
-        ::CloseHandle(writable);
-        return false;
-    }
-    if (::GetLastError() != ERROR_ACCESS_DENIED)
-        return false;
     // An owner can always grant itself more access.
-    return ownership(directory) == Ownership::OtherAccount;
+    return !canChangeEntries(directory) &&
+           ownership(directory) == Ownership::OtherAccount;
 }
 
 UniqueHandle openRoot(const std::wstring &root, std::string &error) {
