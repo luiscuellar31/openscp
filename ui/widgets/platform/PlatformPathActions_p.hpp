@@ -26,4 +26,14 @@ planRevealBatch(const QStringList &requestedPaths);
 [[nodiscard]] QStringList
 collapseTargetsToDirectories(const QVector<ResolvedPathTarget> &targets);
 
+struct RevealGroup {
+    QString folder;
+    QStringList files;
+};
+
+// The files to reveal, grouped by folder in the order each folder first
+// appears.
+[[nodiscard]] QVector<RevealGroup>
+groupRevealedFilesByFolder(const QVector<ResolvedPathTarget> &targets);
+
 } // namespace openscpui::detail
