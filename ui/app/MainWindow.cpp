@@ -272,6 +272,10 @@ void MainWindow::initializePanels(const QString &home) {
                           QDir::AllDirs);
     rightLocalModel_->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot |
                                 QDir::AllDirs);
+    // On Windows a shortcut would otherwise show the name of the entry it
+    // leads to, and one to a folder would be dragged as that folder.
+    leftModel_->setResolveSymlinks(false);
+    rightLocalModel_->setResolveSymlinks(false);
 
     // Initial paths: local home (fallback to root if HOME is unavailable)
     leftModel_->setRootPath(home);

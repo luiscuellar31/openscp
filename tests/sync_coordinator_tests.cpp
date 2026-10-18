@@ -218,6 +218,77 @@ OPENSCP_TEST(testScanMarksSpecialEntriesAndRefusesUnsafeNames, test) {
 #endif
 }
 
+#ifdef Q_OS_WIN
+OPENSCP_TEST(testWindowsShortcutsSyncAsFiles, test) {
+    // Qt describes the entry a shortcut leads to; synchronization compares
+    // and hashes the shortcut itself, the file that uploads copy.
+    QTemporaryDir localRoot;
+    QTemporaryDir outside;
+    QFile big(outside.filePath(QStringLiteral("big.txt")));
+    test.check(localRoot.isValid() && outside.isValid() &&
+                   big.open(QIODevice::WriteOnly) &&
+                   big.write(QByteArray(5000, 'x')) == 5000,
+               "the shortcut targets should be created");
+    big.close();
+    const QStringList names{QStringLiteral("folder.lnk"),
+                            QStringLiteral("file.lnk")};
+    test.check(QFile::link(outside.path(), localRoot.filePath(names[0])) &&
+                   QFile::link(big.fileName(), localRoot.filePath(names[1])),
+               "the shortcuts should be created");
+
+    RemoteOperationController remote;
+    test.check(remote.installSession(
+                   connectedClient<ChecksumMockClient>("sync.test")) > 0,
+               "remote controller should accept a connected session");
+    TransferManager transfers;
+    SyncCoordinator coordinator(&remote, &transfers);
+    bool ready = false;
+    SyncPreparationResult prepared;
+    QObject::connect(&coordinator, &SyncCoordinator::preparationReady,
+                     &coordinator, [&](const SyncPreparationResult &result) {
+                         prepared = result;
+                         ready = true;
+                     });
+    coordinator.start(localRoot.path(), QStringLiteral("/"));
+    test.check(waitUntil([&] { return ready; }),
+               "a scan with shortcuts should complete");
+
+    bool checked = false;
+    SyncChecksumResult checksums;
+    QObject::connect(&coordinator, &SyncCoordinator::checksumReady,
+                     &coordinator, [&](const SyncChecksumResult &value) {
+                         checksums = value;
+                         checked = true;
+                     });
+    QObject::connect(&coordinator, &SyncCoordinator::checksumFailed,
+                     &coordinator, [&](const QString &) { checked = true; });
+    coordinator.startChecksums(localRoot.path(), QStringLiteral("/"), names);
+    test.check(waitUntil([&] { return checked; }),
+               "shortcut checksums should complete");
+
+    for (const QString &name : names) {
+        QFile shortcut(localRoot.filePath(name));
+        const QByteArray contents = shortcut.open(QIODevice::ReadOnly)
+                                        ? shortcut.readAll()
+                                        : QByteArray();
+        const auto entry = std::find_if(prepared.localSnapshot.cbegin(),
+                                        prepared.localSnapshot.cend(),
+                                        [&](const SyncSnapshotEntry &value) {
+                                            return value.relativePath == name;
+                                        });
+        test.check(entry != prepared.localSnapshot.cend() &&
+                       entry->type == SyncEntryType::File &&
+                       entry->size == quint64(contents.size()),
+                   "a shortcut should be scanned as a file of its own size: " +
+                       name.toStdString());
+        test.check(
+            checksums.localChecksums.value(name) ==
+                QCryptographicHash::hash(contents, QCryptographicHash::Sha256),
+            "a shortcut's checksum should be its own: " + name.toStdString());
+    }
+}
+#endif
+
 OPENSCP_TEST(testAsynchronousSnapshots, test) {
     QTemporaryDir localRoot;
     test.check(localRoot.isValid(), "local snapshot fixture should initialize");

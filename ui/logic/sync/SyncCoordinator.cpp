@@ -439,11 +439,11 @@ void SyncCoordinator::startChecksums(const QString &localRoot,
             const QString localPath =
                 joinedLocalPath(state->localRoot, relativePath);
             const QFileInfo fileInfo(localPath);
-            const QString canonicalFile = fileInfo.canonicalFilePath();
+            const QString canonicalFile = localCanonicalPath(fileInfo);
             const bool confined = !canonicalRoot.isEmpty() &&
                                   !canonicalFile.isEmpty() &&
                                   canonicalFile.startsWith(confinedPrefix);
-            if (!confined || isLocalLink(fileInfo) || !fileInfo.isFile()) {
+            if (!confined || isLocalLink(fileInfo) || !isLocalFile(fileInfo)) {
                 failures.push_back(
                     SyncCoordinator::tr(
                         "%1: the local file is unavailable or outside "
@@ -468,8 +468,9 @@ void SyncCoordinator::startChecksums(const QString &localRoot,
             }
 
             QCryptographicHash hash(QCryptographicHash::Sha256);
+            const qint64 fileSize = localFileSize(fileInfo);
             const quint64 totalBytes =
-                fileInfo.size() > 0 ? static_cast<quint64>(fileInfo.size()) : 0;
+                fileSize > 0 ? static_cast<quint64>(fileSize) : 0;
             quint64 processedBytes = 0;
             auto lastProgress =
                 std::chrono::steady_clock::now() - std::chrono::seconds(1);
@@ -755,14 +756,14 @@ void SyncCoordinator::start(const QString &localRoot,
                 entry.relativePath = normalized;
                 // FIFOs, sockets and devices are neither, and are never
                 // copied: reading a FIFO would block the transfer.
-                if (info.isDir())
+                if (isLocalFolder(info))
                     entry.type = SyncEntryType::Directory;
-                else if (info.isFile())
+                else if (isLocalFile(info))
                     entry.type = SyncEntryType::File;
                 else
                     entry.type = SyncEntryType::Other;
-                if (info.isFile()) {
-                    const qint64 size = info.size();
+                if (isLocalFile(info)) {
+                    const qint64 size = localFileSize(info);
                     if (size >= 0) {
                         entry.size = quint64(size);
                         if (quint64(size) >
@@ -775,13 +776,13 @@ void SyncCoordinator::start(const QString &localRoot,
                         ++unknownSizes;
                     }
                 }
-                const QDateTime modified = info.lastModified();
+                const QDateTime modified = localModificationTime(info);
                 if (modified.isValid())
                     entry.modifiedMs = modified.toMSecsSinceEpoch();
                 snapshot.push_back(std::move(entry));
                 ++itemCount;
 
-                if (info.isDir()) {
+                if (isLocalFolder(info)) {
                     if (node.depth + 1 >= kMaximumDepth) {
                         ++depthLimits;
                         unscannedPaths.insert(normalized);

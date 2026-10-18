@@ -82,7 +82,8 @@ bool copyEntryToEmptyDestination(const QString &srcPath, const QString &dstPath,
     if (isLocalLink(srcInfo))
         return copyLink(srcPath, dstPath, error);
 
-    if (srcInfo.isFile()) {
+    // QFile::copy() copies a shortcut itself.
+    if (isLocalFile(srcInfo)) {
         QDir().mkpath(QFileInfo(dstPath).dir().absolutePath());
         if (!QFile::copy(srcPath, dstPath)) {
             error = QString(QCoreApplication::translate(
@@ -93,7 +94,7 @@ bool copyEntryToEmptyDestination(const QString &srcPath, const QString &dstPath,
         return true;
     }
 
-    if (srcInfo.isDir()) {
+    if (isLocalFolder(srcInfo)) {
         // Create destination directory
         if (!QDir().mkpath(dstPath)) {
             error = QString(QCoreApplication::translate(
@@ -121,7 +122,7 @@ bool copyEntryToEmptyDestination(const QString &srcPath, const QString &dstPath,
                 QDir().mkpath(QFileInfo(target).dir().absolutePath());
                 if (!copyLink(entryFileInfo.absoluteFilePath(), target, error))
                     return false;
-            } else if (entryFileInfo.isDir()) {
+            } else if (isLocalFolder(entryFileInfo)) {
                 if (!QDir().mkpath(target)) {
                     error =
                         QString(
@@ -131,7 +132,7 @@ bool copyEntryToEmptyDestination(const QString &srcPath, const QString &dstPath,
                             .arg(target);
                     return false;
                 }
-            } else if (entryFileInfo.isFile()) {
+            } else if (isLocalFile(entryFileInfo)) {
                 QDir().mkpath(QFileInfo(target).dir().absolutePath());
                 if (!QFile::copy(entryFileInfo.absoluteFilePath(), target)) {
                     error = QString(QCoreApplication::translate(
@@ -233,7 +234,7 @@ bool copyLocalEntry(const QString &srcPath, const QString &dstPath,
     // The staged copy would land inside the tree being copied and grow
     // without end.
     const QFileInfo srcInfo(srcPath);
-    if (srcInfo.isDir() && !isLocalLink(srcInfo) &&
+    if (isLocalFolder(srcInfo) && !isLocalLink(srcInfo) &&
         isSameOrInside(destinationParent, srcPath)) {
         error =
             QString(QCoreApplication::translate(
