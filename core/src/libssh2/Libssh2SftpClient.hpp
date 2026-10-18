@@ -6,6 +6,7 @@
 #include "openscp/RemoteClient.hpp"
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -16,6 +17,12 @@ struct _LIBSSH2_SFTP;
 struct _LIBSSH2_SFTP_HANDLE;
 
 namespace openscp {
+
+#ifdef _WIN32
+namespace libssh2detail {
+class SshJumpTunnel;
+}
+#endif
 
 class Libssh2SftpClient : public RemoteClient {
     public:
@@ -125,7 +132,9 @@ class Libssh2SftpClient : public RemoteClient {
     mutable std::mutex stateMutex_;
     // Timed, so that disconnect() can wait for it between cancellations.
     mutable std::recursive_timed_mutex ioMutex_;
-#ifndef _WIN32
+#ifdef _WIN32
+    std::unique_ptr<libssh2detail::SshJumpTunnel> jumpTunnel_;
+#else
     int jumpProxyPid_ = -1;
     int jumpProxyStderrFd_ = -1;
 #endif
@@ -136,9 +145,7 @@ class Libssh2SftpClient : public RemoteClient {
                           bool initializeSftpSubsystem);
     bool connectInternal(const SessionOptions &opt, std::string &err,
                          bool initializeSftpSubsystem);
-#ifndef _WIN32
     bool describeJumpTunnelFailure(std::string &err);
-#endif
 };
 
 } // namespace openscp

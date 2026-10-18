@@ -123,9 +123,9 @@ The installers are not code-signed, so SmartScreen shows **Windows protected
 your PC** the first time. Click **More info**, then **Run anyway**. As on
 macOS, the published checksum is what lets you verify the download.
 
-**Open in terminal** uses the OpenSSH client of Windows; if it is missing, add
-**OpenSSH Client** under **Optional features** in Windows Settings. SSH jump
-hosts are not available on Windows yet.
+**Open in terminal** and SSH jump hosts use the OpenSSH client of Windows; if
+it is missing, add **OpenSSH Client** under **Optional features** in Windows
+Settings.
 
 ## Build from source
 
@@ -166,8 +166,7 @@ troubleshooting, see [Building OpenSCP](docs/BUILDING.md).
 - Strict, accept-new, or explicitly disabled SSH host-key verification.
 - FTPS and HTTPS WebDAV without certificate verification still check the
   server's public key, which you trust on the first connection.
-- SOCKS5, HTTP CONNECT, and SSH jump-host support where the protocol allows it;
-  jump hosts are not available on Windows yet.
+- SOCKS5, HTTP CONNECT, and SSH jump-host support where the protocol allows it.
 - One-way synchronization with preview, filters, and optional checksum checks.
 - Spanish, English, Portuguese, French, and German interfaces.
 
@@ -289,7 +288,7 @@ a controlled development environment.
 
 ## Roadmap
 
-- Support SSH jump hosts on Windows, and sign the Windows packages.
+- Sign the Windows packages.
 - Test WebDAV with a wider range of servers.
 - Support interactive authentication and more enterprise proxy and SSH
   jump-host setups.

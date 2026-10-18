@@ -52,6 +52,8 @@ if (WIN32)
         src/common/SafeLocalFile_win.cpp
         src/common/Win32Text.cpp
         src/common/Win32Text.hpp
+        src/libssh2/detail/SshJumpTunnel_win.cpp
+        src/libssh2/detail/SshJumpTunnel_win.hpp
     )
 else()
     list(APPEND OPENSCP_CORE_SRCS src/common/SafeLocalFile.cpp)

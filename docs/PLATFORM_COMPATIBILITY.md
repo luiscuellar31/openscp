@@ -55,8 +55,8 @@ be treated as a substitute for a maintained OS.
 The Windows packages are for x64 only and are not code-signed, so SmartScreen
 warns before their first run. Compared with macOS and Linux:
 
-- SSH jump hosts are not available yet. **Open in terminal** needs the OpenSSH
-  Client feature of Windows and cannot use a jump host or a proxy.
+- SSH jump hosts and **Open in terminal** need the OpenSSH Client feature of
+  Windows. **Open in terminal** cannot use a jump host or a proxy yet.
 - FTPS and HTTPS WebDAV servers are verified with the trust of Windows, as
   for Edge: roots Windows downloads when first needed count, and certificates
   it distrusts do not. Revocation is not checked.

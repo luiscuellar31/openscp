@@ -72,6 +72,10 @@ openscp_add_test(openscp_core_tests
     INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/core/src
     LINK_LIBRARIES openscp_core
 )
+if(WIN32)
+    # CommandLineToArgvW reads back the jump tunnel's command line.
+    target_link_libraries(openscp_core_tests PRIVATE Shell32)
+endif()
 
 get_target_property(OPENSCP_CORE_HAS_CURL_FTP
     openscp_core OPENSCP_HAS_CURL_FTP)
