@@ -68,6 +68,10 @@ class TransferManager : public QObject {
     bool isShuttingDown() const { return shuttingDown_.load(); }
     void setSessionIdentity(const QString &sessionKey);
     QString sessionIdentity() const;
+    // The address of the current session's server, from downloadOriginUrl(),
+    // which Windows records on each file downloaded from it (the Mark of the
+    // Web).
+    void setDownloadOrigin(const QString &originUrl);
 
     void setMaxConcurrent(int maxConcurrent);
     int maxConcurrent() const { return maxConcurrent_.load(); }
@@ -175,6 +179,9 @@ class TransferManager : public QObject {
     // with each new one. Read and written under mtx_.
     std::stop_source connectionStop_;
     QString currentSessionKey_;
+    // The current session's server, recorded on Windows as the source of
+    // each downloaded file. Read and written under mtx_.
+    QString downloadOrigin_;
     // Sessions of this run whose uploads write the destination directly, so
     // a "<destination>.part" on their server is not an upload's.
     QSet<QString> sessionsWithoutUploadPartials_;

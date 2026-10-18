@@ -10,6 +10,7 @@
 #include "logic/remote/RemoteModel.hpp"
 #include "logic/remote/RemoteOperationController.hpp"
 #include "logic/sync/SyncCoordinator.hpp"
+#include "logic/transfers/MarkOfTheWeb.hpp"
 #include "logic/transfers/TransferManager.hpp"
 #include "openscp/ClientFactory.hpp"
 #include "openscp/RuntimeLogging.hpp"
@@ -1561,6 +1562,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
         transferUiController_.reset();
         if (transferMgr_) {
             transferMgr_->setSessionIdentity(remoteNavigationScope());
+            transferMgr_->setDownloadOrigin(openscpui::downloadOriginUrl(opt));
             transferMgr_->setConnectionFactory(
                 sessionConnectionFactory(opt),
                 openscp::uploadsUsePartialFile(opt.protocol,
@@ -1585,6 +1587,7 @@ void MainWindow::applyRemoteConnectedUI(const openscp::SessionOptions &opt) {
     rightRemoteMutationsSupported_ = false;
     if (transferMgr_) {
         transferMgr_->setSessionIdentity(remoteNavigationScope());
+        transferMgr_->setDownloadOrigin(openscpui::downloadOriginUrl(opt));
         transferMgr_->setConnectionFactory(
             sessionConnectionFactory(opt),
             openscp::uploadsUsePartialFile(opt.protocol,
