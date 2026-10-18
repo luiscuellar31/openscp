@@ -1,4 +1,5 @@
 // Core unit tests without external framework (run via CTest).
+#include "IntegrationTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "common/RemoteListingLimits.hpp"
 #include "common/UniqueFile.hpp"
@@ -773,6 +774,40 @@ OPENSCP_TEST(test_known_hosts_lines_name_their_host, t) {
                      "the hashed name should match its host: ", error);
     std::error_code ec;
     fs::remove_all(path.parent_path(), ec);
+}
+
+OPENSCP_TEST(test_known_hosts_path_reads_a_tilde_as_the_home_folder, t) {
+    // The connection dialog suggests ~/.ssh/known_hosts, which OpenSSH reads
+    // in the home folder; as it stands, the path names a folder called "~".
+    const fs::path home = makeTempFilePath("home").parent_path();
+    std::error_code ec;
+    fs::create_directories(home / ".ssh", ec);
+    {
+        std::ofstream out(home / ".ssh" / "known_hosts",
+                          std::ios::binary | std::ios::trunc);
+        out << "home.example ssh-ed25519 AQID\nkept k AQID\n";
+    }
+    {
+        openscp::testsupport::ScopedEnvironment environment;
+#ifdef _WIN32
+        environment.set("USERPROFILE", home.string());
+#else
+        environment.set("HOME", home.string());
+#endif
+        t.check(openscp::HasKnownHostEntry("~/.ssh/known_hosts", "home.example",
+                                           22),
+                "a path from ~ should find the entry in the home folder");
+        std::string error;
+        std::string content;
+        t.checkWithError(
+            openscp::RemoveKnownHostEntry("~/.ssh/known_hosts", "home.example",
+                                          22, error) &&
+                readTextFile(home / ".ssh" / "known_hosts", content) &&
+                content == "kept k AQID\n",
+            "a path from ~ should remove the entry from the home folder: ",
+            error);
+    }
+    fs::remove_all(home, ec);
 }
 
 OPENSCP_TEST(test_known_hosts_append_keeps_the_rest_of_the_file, t) {

@@ -642,6 +642,27 @@ int main() {
         }
     }
 
+    // The connection dialog suggests ~/.ssh/id_ed25519, which OpenSSH reads in
+    // the home folder, here the key's own folder for the time of the check.
+    if (t.failures == 0 && keyPath.has_value()) {
+        const fs::path key(*keyPath);
+        openscp::testsupport::ScopedEnvironment environment;
+#ifdef _WIN32
+        environment.set("USERPROFILE", key.parent_path().string());
+#else
+        environment.set("HOME", key.parent_path().string());
+#endif
+        openscp::SessionOptions homeKeyOpt = opt;
+        homeKeyOpt.private_key_path = "~/" + key.filename().string();
+        openscp::Libssh2SftpClient homeKeyClient;
+        std::string homeKeyErr;
+        t.checkWithError(homeKeyClient.connect(homeKeyOpt, homeKeyErr),
+                         "a key path from ~ should open the key in the home "
+                         "folder: ",
+                         homeKeyErr);
+        homeKeyClient.disconnect();
+    }
+
     // A server that asks for a one-time code after the password asks again
     // after a wrong or empty code, and locks the account after three, as
     // pam_faillock does. A connection that cannot ask for the code, as the
