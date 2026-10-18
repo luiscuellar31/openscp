@@ -1,6 +1,7 @@
 // Transfer queue dialog tests: what the table shows as the queue changes.
 #include "QtTestSupport.hpp"
 #include "TestHarness.hpp"
+#include "logic/common/AppSettings.hpp"
 #include "logic/transfers/TransferManager.hpp"
 #include "widgets/dialogs/TransferQueueDialog.hpp"
 
@@ -344,6 +345,98 @@ OPENSCP_TEST(benchmarkDiscontinuousRemoval, test) {
                    "benchmark removal should invoke the dialog update");
         std::cout << "BENCH discontinuous_model_" << size
                   << "_us=" << timer.nsecsElapsed() / 1000 << '\n';
+    }
+}
+
+OPENSCP_TEST(testColumnsFitOnlyTheRowsOnScreen, test) {
+    // The columns that fit their content are measured after each change of a
+    // row. Measuring rows off screen, or a hidden window, costs about 20 ms
+    // per change once the history holds 1000 tasks.
+    constexpr int kNameColumn = 1;
+    constexpr int kLongRow = 150;
+    const QString longName(160, QLatin1Char('n'));
+    openscpui::AppSettings().remove(
+        openscpui::settingskeys::kTransferQueueHeaderState);
+    {
+        // Earlier versions saved Qt's default precision with the header.
+        TransferManager manager;
+        TransferQueueDialog dialog(&manager);
+        auto *header = dialog.findChild<QTableView *>()->horizontalHeader();
+        header->setResizeContentsPrecision(1000);
+        openscpui::AppSettings().setValue(
+            openscpui::settingskeys::kTransferQueueHeaderState,
+            header->saveState());
+    }
+
+    TransferManager manager;
+    TransferBatchOptions batch;
+    QVector<quint64> ids;
+    for (int row = 0; row < 200; ++row) {
+        const QString name =
+            row == kLongRow ? longName : QStringLiteral("row-%1").arg(row);
+        ids.push_back(
+            manager.enqueueRemoteDelete(QLatin1Char('/') + name, false, batch));
+    }
+    TransferQueueDialog dialog(&manager);
+    QMetaObject::invokeMethod(&dialog, "onFilterChanged", Q_ARG(int, 0));
+    auto *table = dialog.findChild<QTableView *>();
+    const int longWidth = table->fontMetrics().horizontalAdvance(longName);
+    flushUiEvents();
+    test.check(table->columnWidth(kNameColumn) < longWidth,
+               "a hidden queue should not measure its rows");
+
+    dialog.show();
+    flushUiEvents();
+    test.check(table->columnWidth(kNameColumn) < longWidth,
+               "a column should not fit a row off screen");
+
+    table->scrollTo(table->model()->index(kLongRow, kNameColumn),
+                    QAbstractItemView::PositionAtCenter);
+    manager.pauseTask(ids[kLongRow]);
+    flushUiEvents();
+    test.check(table->columnWidth(kNameColumn) >= longWidth,
+               "a column should fit the rows on screen");
+
+    dialog.hide();
+    table->scrollToTop();
+    dialog.show();
+    flushUiEvents();
+    test.check(table->columnWidth(kNameColumn) < longWidth,
+               "showing the queue again should fit the rows then on screen");
+
+    openscpui::AppSettings().remove(
+        openscpui::settingskeys::kTransferQueueHeaderState);
+}
+
+OPENSCP_TEST(benchmarkRowUpdates, test) {
+    if (!qEnvironmentVariableIsSet("OPENSCP_BENCH_QUEUE_MODEL"))
+        return;
+    TransferManager manager;
+    TransferBatchOptions batch;
+    QVector<quint64> ids;
+    for (int row = 0; row < 3000; ++row) {
+        ids.push_back(manager.enqueueRemoteDelete(
+            QStringLiteral("/benchmark-%1").arg(row), false, batch));
+    }
+    TransferQueueDialog dialog(&manager);
+    const auto *table = dialog.findChild<QTableView *>();
+    test.check(table && table->model()->rowCount() == 3000,
+               "the benchmark table should show every task");
+    for (const bool visible : {true, false}) {
+        dialog.setVisible(visible);
+        flushUiEvents();
+        constexpr int kUpdates = 100;
+        QElapsedTimer timer;
+        timer.start();
+        for (int update = 0; update < kUpdates; ++update) {
+            if (update % 2 == 0)
+                manager.pauseTask(ids.front());
+            else
+                manager.resumeTask(ids.front());
+            flushUiEvents();
+        }
+        std::cout << "BENCH row_update_3000_" << (visible ? "shown" : "hidden")
+                  << "_us=" << timer.nsecsElapsed() / 1000 / kUpdates << '\n';
     }
 }
 

@@ -300,7 +300,10 @@ remapped by task ID, invalidating removed tasks while preserving surviving
 selection and current-task identity through the filter proxy. For R requested
 task IDs, N tasks and P persistent indexes, model work is expected
 O(R log R + N + P), with O(R + P) temporary storage; Qt proxy/view work is
-additional. No model reset is needed for either removal path.
+additional. No model reset is needed for either removal path. After each row
+change, the columns that fit their content measure only the rows on screen,
+and none while the dialog is hidden: closing it only hides it, and the queue
+keeps updating it.
 
 `SafeLocalFile` in the core owns local download publication and descriptor-based
 path operations for transfer tasks. The queue uses it to create or remove local
