@@ -308,8 +308,8 @@ OPENSCP_TEST(testCurlClientState, test) {
 
         auto session = std::make_unique<openscp::curlcommon::CurlEasySession>();
         std::string error;
-        test.check(session->initialize(error),
-                   std::string("curl session should initialize: ") + error);
+        test.checkWithError(session->initialize(error),
+                            "curl session should initialize: ", error);
         auto mutableOptions =
             std::make_shared<openscp::SessionOptions>(defaults);
         mutableOptions->host = "ftp.example.test";
@@ -451,8 +451,8 @@ OPENSCP_TEST(testProgressCallbackContainsExceptions, test) {
 OPENSCP_TEST(testCurlFailuresNameTheirCause, test) {
     openscp::curlcommon::CurlEasySession session;
     std::string error;
-    test.check(session.initialize(error),
-               std::string("curl session should initialize: ") + error);
+    test.checkWithError(session.initialize(error),
+                        "curl session should initialize: ", error);
     if (!session.get())
         return;
 
@@ -478,8 +478,8 @@ OPENSCP_TEST(testCurlFailuresNameTheirCause, test) {
 OPENSCP_TEST(testCurlConnectionsUseTcpKeepalive, test) {
     openscp::curlcommon::CurlEasySession session;
     std::string error;
-    test.check(session.initialize(error),
-               std::string("curl session should initialize: ") + error);
+    test.checkWithError(session.initialize(error),
+                        "curl session should initialize: ", error);
     if (!session.get())
         return;
 
@@ -940,8 +940,8 @@ OPENSCP_TEST(testCurlTransportPolicy, test) {
 
     openscp::curlcommon::CurlEasySession session;
     std::string error;
-    test.check(session.initialize(error),
-               std::string("curl session should initialize: ") + error);
+    test.checkWithError(session.initialize(error),
+                        "curl session should initialize: ", error);
     if (!session.get())
         return;
 
@@ -1030,8 +1030,8 @@ OPENSCP_TEST(testCurlTransferLifecycle, test) {
 
     openscp::curlcommon::CurlEasySession session;
     std::string error;
-    test.check(session.initialize(error),
-               std::string("curl session should initialize: ") + error);
+    test.checkWithError(session.initialize(error),
+                        "curl session should initialize: ", error);
     if (!session.get())
         return;
 
