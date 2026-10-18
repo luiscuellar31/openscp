@@ -9,15 +9,13 @@ long-term support series, at the release that the macOS release builds use
 (`OPENSSL_VERSION` in `scripts/ci/build_macos_release_deps.sh`), while vcpkg
 itself has moved on to a series with shorter support.
 
-To move to another 3.5 release:
+`scripts/release/update-pinned-deps.py` moves both pins to the newest 3.5
+release once the new sources pass the checks that its description lists. The
+**Pinned Dependency Updates** workflow runs it every Monday and opens a pull
+request against `dev` when the dependencies then build on macOS and Windows as
+release builds do. To move to another series, change `OPENSSL_SERIES` in the
+script.
 
-1. Check the release tarball against its published SHA-256 and update
-   `OPENSSL_VERSION` and `OPENSSL_SHA256` in the macOS script.
-2. Set `version` in `openssl/vcpkg.json`, and in `openssl/portfile.cmake` the
-   SHA-512 of `https://github.com/openssl/openssl/archive/openssl-<version>.tar.gz`,
-   the tag archive that the port downloads. Its files should be identical to
-   those of the release tarball.
-3. Build on Windows, where vcpkg applies the port's patches to the new sources.
-
-When vcpkg changes its own port, copy it again from the new baseline and redo
-step 2.
+When vcpkg changes its own port, copy it again from the new baseline and run
+the script, which sets `version` and `SHA512` back to the newest 3.5 release.
+Then build on Windows, where vcpkg applies the port's patches to those sources.

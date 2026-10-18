@@ -19,7 +19,7 @@ updates:
 
   # Moves vcpkg.json's builtin-baseline, which pins the Windows libraries;
   # the Windows CI jobs fetch vcpkg at that commit. OpenSSL is pinned apart,
-  # in vcpkg-ports/openssl.
+  # in vcpkg-ports/openssl, and pinned-deps.yml proposes its updates.
   - package-ecosystem: "vcpkg"
     directory: "/"
     target-branch: "dev"
