@@ -5,7 +5,8 @@
 .DESCRIPTION
     Installs the pinned paramiko (scripts\ci\sftp-test-server-requirements.txt)
     into a virtual environment and starts scripts\ci\sftp_test_server.py twice
-    on 127.0.0.1: an SFTP server and, in front of it, a jump host. The test
+    on 127.0.0.1: an SFTP server, which also holds an account that asks for a
+    one-time code after the password, and in front of it a jump host. The test
     then runs once directly and once through the jump host, which OpenSCP
     reaches with Windows' ssh.exe. A skipped test counts as a failure here,
     since the servers are meant to be there.
@@ -88,8 +89,11 @@ function Start-TestServer([int]$Port, [string[]]$Extra) {
 
 $servers = @()
 try {
-    # The first server makes the keys, which the jump host then shares.
-    $servers += Start-TestServer 2222 @()
+    # The first server makes the keys, which the jump host then shares. It
+    # also holds an account that asks for a one-time code after the password.
+    $twoFactor = @{ User = 'openscp_2fa'; Password = 'two-factor-it'; Code = '135790' }
+    $servers += Start-TestServer 2222 @('--two-factor',
+        "$($twoFactor.User):$($twoFactor.Password):$($twoFactor.Code)")
     $servers += Start-TestServer 2223 @('--forward')
 
     # Windows' ssh.exe refuses a private key that other users can read.
@@ -103,6 +107,9 @@ try {
     $env:OPENSCP_IT_SFTP_USER = 'openscp_it'
     $env:OPENSCP_IT_SFTP_KEY = $clientKey
     $env:OPENSCP_IT_REMOTE_BASE = '/upload'
+    $env:OPENSCP_IT_2FA_USER = $twoFactor.User
+    $env:OPENSCP_IT_2FA_PASS = $twoFactor.Password
+    $env:OPENSCP_IT_2FA_CODE = $twoFactor.Code
 
     Write-Log 'Testing SFTP directly'
     Invoke-Native $test @()

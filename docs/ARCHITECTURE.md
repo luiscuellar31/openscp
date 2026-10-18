@@ -208,7 +208,10 @@ uses whole words and the prompt's echo flag. The SSH backend answers the account
 name and, in the first round only, the account password; every other prompt,
 one-time codes included, goes to the connection's prompt callback, which asks
 the user with the server's echo setting. Connections without that callback,
-such as transfer workers, fail on those prompts instead of guessing.
+such as transfer workers, fail on those prompts instead of guessing, and a
+prompt the user cancels fails too. Either way the connection ends before any
+answer: libssh2 would send empty ones, which servers count as failed attempts
+that can lock the account.
 
 `AuthenticationInput` opens a window-modal input dialog without a nested event loop and
 waits on shared reply state with the connection stop token. Pending and visible

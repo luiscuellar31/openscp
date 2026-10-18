@@ -1184,7 +1184,8 @@ struct KbdIntCtx {
     bool *cancelled;           // explicit user cancellation in UI callback
     bool *rejected;            // malformed, excessive or unallocatable input
     std::string *rejectionError;
-    int *rounds; // requests with prompts answered so far
+    int *rounds;                        // requests with prompts answered so far
+    libssh2detail::SocketHandle socket; // the session's, to end the exchange
 };
 
 // Keyboard-interactive callback: the saved username and password answer the
@@ -1203,11 +1204,12 @@ void kbint_password_callback(const char *name, int name_len,
     const size_t ulen = user ? std::strlen(user) : 0;
     const size_t plen = pass ? std::strlen(pass) : 0;
 
-    auto rejectPrompts = [&](const std::string &message) {
-        if (ctx->rejected)
-            *ctx->rejected = true;
-        if (ctx->rejectionError)
-            *ctx->rejectionError = message;
+    // libssh2 sends whatever the responses hold once this returns, and calls
+    // this again when the server repeats the question, as servers do after an
+    // empty one-time code. Each empty answer counts there as a failed attempt,
+    // and a few of them lock the account, so an exchange left unanswered ends
+    // here, with its connection, before anything is sent.
+    auto endExchange = [&] {
         if (responses && num_prompts > 0) {
             const int safeCount = std::min(
                 num_prompts, libssh2detail::kMaxKeyboardInteractivePrompts);
@@ -1216,6 +1218,14 @@ void kbint_password_callback(const char *name, int name_len,
                 responses[i].length = 0;
             }
         }
+        libssh2detail::shutdownSocket(ctx->socket);
+    };
+    auto rejectPrompts = [&](const std::string &message) {
+        if (ctx->rejected)
+            *ctx->rejected = true;
+        if (ctx->rejectionError)
+            *ctx->rejectionError = message;
+        endExchange();
     };
     if (!responses || num_prompts < 0) {
         rejectPrompts("Keyboard-interactive response storage is invalid.");
@@ -1337,10 +1347,7 @@ void kbint_password_callback(const char *name, int name_len,
             scrubAnswers(userAnswers);
             if (ctx->cancelled)
                 *ctx->cancelled = true;
-            for (int i = 0; i < num_prompts; ++i) {
-                responses[i].text = nullptr;
-                responses[i].length = 0;
-            }
+            endExchange();
             return;
         }
         if (result != KbdIntPromptResult::Handled ||
@@ -2832,7 +2839,8 @@ bool Libssh2SftpClient::sshHandshakeAuth(const SessionOptions &opt,
                               &kbdCancelled,
                               &kbdRejected,
                               &kbdRejectionError,
-                              &kbdRounds};
+                              &kbdRounds,
+                              sock_};
                 void **abs = libssh2_session_abstract(session_);
                 if (abs)
                     *abs = &ctx;
