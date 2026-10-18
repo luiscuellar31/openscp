@@ -18,7 +18,8 @@
       BUILD_DIR          Default: build-windows-package
       PACKAGE_FORMATS    Comma-separated: setup,msi (default: both)
       ISCC               Inno Setup compiler (default: the installed ISCC.exe)
-      WIX                WiX v5 command (default: wix)
+      OPENSCP_WIX        WiX v5 command (default: wix). WIX is not read: the
+                         WiX v3 installer sets it to its own folder.
       OPENSCP_UPDATE_PUBLIC_KEY
                          Base64 Ed25519 key that enables in-app updates
       OPENSCP_ENFORCE_RECOMMENDED_QT_VERSION
@@ -184,7 +185,7 @@ if ('setup' -in $formats) {
 if ('msi' -in $formats) {
     Write-Log 'Building the MSI'
     $msi = Join-Path $distDir "OpenSCP-$version-x64.msi"
-    Invoke-Native (Get-EnvValue 'WIX' 'wix') @('build', '-arch', 'x64', '-nologo',
+    Invoke-Native (Get-EnvValue 'OPENSCP_WIX' 'wix') @('build', '-arch', 'x64', '-nologo',
         '-d', "Version=$version", '-d', "StageDir=$stage",
         '-d', "IconFile=$(Join-Path $RepoDir 'assets\windows\OpenSCP.ico')",
         '-o', $msi, (Join-Path $packaging 'OpenSCP.wxs'))

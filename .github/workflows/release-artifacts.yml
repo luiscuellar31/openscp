@@ -530,6 +530,8 @@ jobs:
           dotnet tool install --global wix --version 5.0.2
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Join-Path $env:USERPROFILE '.dotnet\tools' >> $env:GITHUB_PATH
+          # By its path: the runner's WiX v3 sets WIX to its own folder.
+          "OPENSCP_WIX=$(Join-Path $env:USERPROFILE '.dotnet\tools\wix.exe')" >> $env:GITHUB_ENV
 
       - name: Build the setup and the MSI
         shell: pwsh

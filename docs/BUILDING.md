@@ -239,6 +239,9 @@ dotnet tool install --global wix --version 5.0.2
 .\scripts\package\windows.ps1
 ```
 
+The script runs `wix` from `PATH`, or the command in `OPENSCP_WIX`. It does not
+read `WIX`, which the WiX v3 installer sets to its own folder.
+
 It builds in `build-windows-package\`, stages the application in
 `build-windows-package\stage\OpenSCP` with `windeployqt`, the Qt translations,
 the Visual C++ runtime DLLs it imports, and the licenses, and checks that
