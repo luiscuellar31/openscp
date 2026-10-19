@@ -22,6 +22,14 @@ std::string ioError(const char *operation) {
     return std::string(operation) + ": " + std::strerror(errno);
 }
 
+// Reading the umask means changing it, which would race with the files other
+// threads create, so it is read once, before main() starts any thread.
+const mode_t kProcessUmask = [] {
+    const mode_t mask = ::umask(0);
+    ::umask(mask);
+    return mask;
+}();
+
 constexpr int kDirectoryFlags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW;
 constexpr int kMaximumTrustedSymlinks = 8;
 
@@ -419,6 +427,40 @@ std::uint32_t uploadPermissions(std::FILE *file) {
     if (!file || ::fstat(::fileno(file), &st) != 0)
         return kDefault;
     return static_cast<std::uint32_t>(st.st_mode) & 0777u;
+}
+
+void applyDownloadPermissions(const std::string &partial,
+                              const std::string &destination,
+                              std::optional<std::uint32_t> remoteMode) {
+    const std::filesystem::path partialPath(partial);
+    const std::filesystem::path destinationPath(destination);
+    if (partialPath.parent_path().lexically_normal() !=
+        destinationPath.parent_path().lexically_normal())
+        return;
+    std::string error;
+    const int parent =
+        openSafeDirectory(destinationPath.parent_path(), false, error);
+    if (parent < 0)
+        return;
+    mode_t mode = remoteMode ? (static_cast<mode_t>(*remoteMode & 0777u) |
+                                static_cast<mode_t>(S_IWUSR))
+                             : static_cast<mode_t>(0666);
+    mode &= static_cast<mode_t>(~kProcessUmask);
+    struct stat replaced {};
+    if (::fstatat(parent, destinationPath.filename().c_str(), &replaced,
+                  AT_SYMLINK_NOFOLLOW) == 0 &&
+        S_ISREG(replaced.st_mode))
+        mode = replaced.st_mode & static_cast<mode_t>(0777);
+    const int file = ::openat(parent, partialPath.filename().c_str(),
+                              O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    ::close(parent);
+    if (file < 0)
+        return;
+    struct stat metadata {};
+    if (::fstat(file, &metadata) == 0 && S_ISREG(metadata.st_mode) &&
+        metadata.st_uid == ::geteuid())
+        (void)::fchmod(file, mode);
+    ::close(file);
 }
 
 bool flushAndSync(std::FILE *file, std::string &error,

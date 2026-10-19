@@ -1319,6 +1319,7 @@ bool downloadToLocalFile(CURL *curl, const std::string &destination,
             static_cast<std::int64_t>(CURLE_ABORTED_BY_CALLBACK));
         return false;
     }
+    localfiles::applyDownloadPermissions(partial, destination, std::nullopt);
     if (!localfiles::atomicReplace(partial, destination, err, durability)) {
         failure = makeRemoteError(RemoteErrorKind::LocalIo, err, errno);
         return false;

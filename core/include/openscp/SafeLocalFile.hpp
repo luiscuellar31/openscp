@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <string>
 
 namespace openscp::localfiles {
@@ -76,6 +77,15 @@ std::FILE *openRegularFileForWrite(const std::string &path, WriteMode mode,
 // the remote copy as OpenSSH's sftp and scp do. Windows has no such bits, so
 // it, and a file that cannot be inspected, get 0644.
 std::uint32_t uploadPermissions(std::FILE *file);
+
+// Before a download publishes its sibling `partial` as `destination`, gives it
+// the mode of the file it replaces or, for a new file, `remoteMode` (0666 when
+// unknown) less the umask and writable by its owner, as OpenSSH's sftp does.
+// A partial left at 0600 is still a good download, so failures are ignored.
+// Windows has no permission bits.
+void applyDownloadPermissions(const std::string &partial,
+                              const std::string &destination,
+                              std::optional<std::uint32_t> remoteMode);
 
 // Buffered always flushes userspace buffers. File also syncs file data and
 // metadata; FileAndDirectory additionally makes the published directory entry

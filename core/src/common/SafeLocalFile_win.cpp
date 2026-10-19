@@ -952,6 +952,10 @@ std::uint32_t uploadPermissions(std::FILE *) {
     return 0644;
 }
 
+void applyDownloadPermissions(const std::string &, const std::string &,
+                              std::optional<std::uint32_t>) {
+}
+
 bool flushAndSync(std::FILE *file, std::string &error,
                   LocalFileDurability durability) {
     if (!file) {

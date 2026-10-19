@@ -3617,6 +3617,12 @@ bool Libssh2SftpClient::get(
     if (fail_if_transfer_canceled(&shouldCancel, err))
         return false;
 
+    localfiles::applyDownloadPermissions(
+        localPart, local,
+        (st.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS) != 0
+            ? std::optional<std::uint32_t>(
+                  static_cast<std::uint32_t>(st.permissions))
+            : std::nullopt);
     std::string replaceErr;
     if (!localfiles::atomicReplace(localPart, local, replaceErr,
                                    localFileDurability_)) {
